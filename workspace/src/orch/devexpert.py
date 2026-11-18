@@ -12,7 +12,9 @@ Each pass
      in the last 24 hours (open-to-merge time), runs that passed only on a re-run, open tickets with
      nearly the
      same title, tickets that wait on each other.
-  2. RED (a failed nightly, a failed push run on the default branch): one top ticket per red workflow,
+  2. RED (a failed nightly, a failed push run on the default branch) and MISSED (a nightly that did not run in
+     26 hours, was cancelled, or started 2 or more hours after its usual time, ORCH-454): one top ticket per
+     red or missed workflow,
      under the
      role ticket, and a helper starts on it at once with high priority. Never a second ticket for one
      problem
@@ -20,7 +22,7 @@ Each pass
      ticket
      (`--known <problem>=<ticket>`).
   3. JUDGEMENT (old or overlapping pull requests, re-runs, duplicates, a long cancelled streak, slow
-     merges): at
+     merges, 20 or more jobs waiting for a machine on GitHub in the last 24 hours): at
      most one review ticket a day, only when the findings changed; it starts on the small model.
   4. a dated note on the role ticket and a dated report in its files. While no helper works and nothing
      changed,
@@ -41,7 +43,7 @@ import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from orch import brake, config, ghmerge, runs, tickets
+from orch import brake, cibusy, config, ghmerge, runs, tickets
 from orch import text as textmod
 from orch.errors import Refused
 
@@ -49,12 +51,15 @@ BY = "agent:dev-expert"
 ROLE_SETTING = "github.dev_expert"
 REPO_SETTING = "github.dev_expert_repo"
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
-PROBLEM_RE = re.compile(r"^(nightly|branch)-[A-Za-z0-9 _.()/-]{1,100}$")
+PROBLEM_RE = re.compile(r"^(nightly|branch|missed)-[A-Za-z0-9 _.()/-]{1,100}$")
 
 PR_STALE_H = 24  # a pull request open this long is a finding
 CANCEL_STREAK = 5  # this many cancelled push runs of one workflow in a row ...
 UNTESTED_H = 6  # ... and no finished one for this long
 MERGE_SLOW_H = 6  # a median open-to-merge time over this is a finding
+NIGHTLY_DUE_H = 26  # no scheduled run of a workflow for this long: the nightly did not run
+NIGHTLY_LATE_MIN = 120  # a nightly that started this much after its usual time of day ran late
+NIGHTLY_STUCK_H = 6  # a nightly still not finished this long after it was made
 QUIET_NOTE_H = 23  # a quiet pass writes its note this often
 FLAKY_H = 24
 DUP_SIM = 0.6
@@ -201,6 +206,14 @@ class GitHub:
                     out.append(r)
         return out
 
+    def ci_waiting(self) -> dict:
+        """Jobs waiting for a machine now and the highest count of the last day (orch.cibusy)."""
+        now = cibusy.waiting(self.repo)
+        p = cibusy.peaks(self.repo)
+        days = sorted(p)[-2:]  # today and yesterday (UTC)
+        peak = max((p[d] for d in days), key=lambda v: v["n"], default=None)
+        return {"now": now, "peak": peak}
+
     def failed_jobs(self, run_id) -> list[str]:
         d = self._json(["run", "view", str(run_id), "--json", "jobs"])
         jobs = (d or {}).get("jobs") if isinstance(d, dict) else None
@@ -277,6 +290,55 @@ def nightlies(runs_: list[dict], branch: str) -> dict[str, str]:
     ]
     for r in sorted(sched, key=lambda r: r.get("createdAt") or "", reverse=True):
         out.setdefault(str(r.get("workflowName") or "?"), str(r.get("conclusion") or "?"))
+    return out
+
+
+def _minute(d: datetime) -> int:
+    return d.hour * 60 + d.minute
+
+
+def missed_nightlies(runs_: list[dict], branch: str, t: datetime) -> list[dict]:
+    """A nightly that did not really run (ORCH-454; the night of 17/18 Nov the 01:00 run started 7 hours late
+    and was cancelled, and the 03:17 e2e did not run at all). Per workflow that had a scheduled run on the
+    branch: no scheduled run for NIGHTLY_DUE_H hours, the newest one cancelled or skipped, still not finished
+    NIGHTLY_STUCK_H hours after it was made, or made NIGHTLY_LATE_MIN or more after its usual time of day (the
+    earliest time of day among its runs: GitHub delays a schedule, it never runs one early)."""
+    sched = [r for r in runs_ if r.get("headBranch") == branch and r.get("event") == "schedule"]
+    out: list[dict] = []
+    for wf in sorted({str(r.get("workflowName") or "?") for r in sched}):
+        mine = [r for r in sched if str(r.get("workflowName") or "?") == wf and ts(r.get("createdAt"))]
+        if not mine:
+            continue
+        mine.sort(key=lambda r: r.get("createdAt") or "", reverse=True)
+        newest, when = mine[0], ts(mine[0].get("createdAt"))
+        assert when is not None
+        slot = min(_minute(ts(r.get("createdAt"))) for r in mine)  # type: ignore[arg-type]
+        late = (_minute(when) - slot) % 1440
+        run_key, why = newest.get("databaseId"), None
+        if hours(t - when) >= NIGHTLY_DUE_H:
+            run_key = f"missing-{t.strftime('%Y-%m-%d')}"
+            why = f"no nightly run since {when.strftime('%d %b %H:%M')} UTC ({hours(t - when):.0f} h)"
+        elif newest.get("status") == "completed" and newest.get("conclusion") in ("cancelled", "skipped"):
+            why = f"the nightly run of {when.strftime('%d %b %H:%M')} UTC was {newest.get('conclusion')}"
+        elif newest.get("status") != "completed" and hours(t - when) >= NIGHTLY_STUCK_H:
+            why = f"the nightly run of {when.strftime('%d %b %H:%M')} UTC is still not finished"
+        elif len(mine) > 1 and late >= NIGHTLY_LATE_MIN:
+            why = (
+                f"the nightly run started {late // 60} h {late % 60:02d} min after its usual time "
+                f"({slot // 60:02d}:{slot % 60:02d} UTC)"
+            )
+        if why:
+            out.append(
+                {
+                    "key": f"missed-{wf}",
+                    "kind": "missed",
+                    "workflow": wf,
+                    "run": run_key,
+                    "url": (newest.get("url") or None) if run_key == newest.get("databaseId") else None,
+                    "at": newest.get("createdAt"),
+                    "why": why,
+                }
+            )
     return out
 
 
@@ -428,6 +490,13 @@ def survey(gh, rows: list[dict], live: int, t: datetime) -> dict:
         except Refused:
             r["jobs"] = []
     s["nightly"] = {safe(w, 60): safe(c, 20) for w, c in nightlies(runs_, branch).items()}
+    s["missed"] = _clean_out(missed_nightlies(runs_, branch, t))
+    ci_waiting = getattr(gh, "ci_waiting", None)
+    try:
+        s["ci_waiting"] = ci_waiting() if callable(ci_waiting) else None
+    except (Refused, OSError, ValueError) as e:
+        s["ci_waiting"] = None
+        s["errors"].append(f"jobs waiting for a machine could not be counted: {e}")
     s["cancel_streaks"] = _clean_out(cancel_streaks(runs_, branch, t))
     s["reruns"] = _clean_out(reruns(runs_, t))
     try:
@@ -484,6 +553,12 @@ def judgement(s: dict) -> list[str]:
         out.append(
             f"{s['branch']}: {c['cancelled']} {c['workflow']} runs cancelled in a row, "
             f"no finished run for {gap} h (merges in a burst cancel each other)"
+        )
+    peak = (s.get("ci_waiting") or {}).get("peak")
+    if peak and peak.get("n", 0) >= cibusy.LIMIT:
+        out.append(
+            f"{peak['n']} jobs waited for a machine on GitHub at {safe(peak.get('at'), 30)} (limit "
+            f"{cibusy.LIMIT}): find what started so many runs at once and stop it (no restarts in a burst)"
         )
     m = s["merge"]
     if m and m["median_h"] > MERGE_SLOW_H:
@@ -561,7 +636,9 @@ def handle_red(root: Path, role_id: str, red: list[dict], st: dict, dry: bool) -
                     with contextlib.suppress(Refused, OSError):
                         tid = tickets.resolve(root, cur["ticket"])
                         line = (
-                            f"New red {r['workflow']} {r['kind']} run {r['run']} (failed: {jobs}): {r['url']}"
+                            f"Again: {r['why']}. {r.get('url') or ''}".strip()
+                            if r["kind"] == "missed"
+                            else f"New red {r['workflow']} {r['kind']} run {r['run']} (failed: {jobs}): {r['url']}"
                         )
                         tickets.log(root, tid, line, BY)
                     cur["run"] = r["run"]
@@ -569,19 +646,30 @@ def handle_red(root: Path, role_id: str, red: list[dict], st: dict, dry: bool) -
             continue
         if cur and not new_jobs and cur.get("run") == r["run"]:
             continue  # its ticket was closed for this very run: a person decided
-        what = "Nightly" if r["kind"] == "nightly" else "Branch"
-        title = f"{what} {r['workflow']} run is red on {st.get('branch') or 'the main branch'}"[:200]
-        note = (
-            f"Found by the Development expert. Run {r['run']} of workflow {r['workflow']} "
-            f"({r['kind']}, started {r['at']}) failed in: {jobs}. {r['url']} . Top priority: find the "
-            "cause, fix it through a pull request (or a re-run when it is a flake, and name it), and "
-            "write the failed job's reason here."
-        )
+        where = st.get("branch") or "the main branch"
+        if r["kind"] == "missed":
+            title = f"Nightly {r['workflow']} run did not run on {where}"[:200]
+            note = (
+                f"Found by the Development expert: {r['why']}. {r.get('url') or ''} . Find out why (a burst of "
+                "runs that left no machine, GitHub dropping the schedule, a cancel), start the run by hand "
+                f"once fewer than {cibusy.LIMIT} jobs wait for a machine (orch github ci-waiting), and "
+                "write the reason here."
+            )
+            done_when = f"The {r['workflow']} nightly ran to the end on time"
+        else:
+            what = "Nightly" if r["kind"] == "nightly" else "Branch"
+            title = f"{what} {r['workflow']} run is red on {where}"[:200]
+            note = (
+                f"Found by the Development expert. Run {r['run']} of workflow {r['workflow']} "
+                f"({r['kind']}, started {r['at']}) failed in: {jobs}. {r['url']} . Top priority: find the "
+                "cause, fix it through a pull request (or a re-run when it is a flake, and name it), and "
+                "write the failed job's reason here."
+            )
+            done_when = f"The next {r['workflow']} {r['kind']} run is green"
         if dry:
             done.append(f"would open and start a top ticket: {title}")
             continue
         try:
-            done_when = f"The next {r['workflow']} {r['kind']} run is green"
             t = tickets.create(
                 root, title, BY, parent=role_id, fields={"note": note[:2000], "done_when": done_when}
             )
@@ -663,6 +751,12 @@ def note_text(s: dict, changed: list[str], lines: list[str], t: datetime) -> str
     ]
     if s["nightly"]:
         saw.append("nightlies " + ", ".join(f"{w} {c}" for w, c in sorted(s["nightly"].items())))
+    for m in s.get("missed") or []:
+        saw.append(f"nightly {m['workflow']}: {m['why']}")
+    cw = s.get("ci_waiting") or {}
+    if cw.get("now") is not None or cw.get("peak"):
+        pk = cw.get("peak") or {}
+        saw.append(f"jobs waiting for a machine: {cw.get('now', '?')} now, {pk.get('n', '?')} at most in 24 h")
     saw.append(f"{s['open_prs']} open PR(s)")
     if s["merge"]:
         saw.append(f"{s['merge']['count']} merged in 24 h, median {s['merge']['median_h']} h open to merge")
@@ -725,9 +819,9 @@ def run(
     s = survey(gh or GitHub(name), _rows(root), _live(root), t)
     st["branch"] = s["branch"]
     lines = judgement(s)
-    changed = handle_red(root, role_id, s["red"], st, dry_run)
+    changed = handle_red(root, role_id, s["red"] + s["missed"], st, dry_run)
     changed += handle_review(root, role_key, lines, st, t, dry_run)
-    fp = stable_fp([f"{r['key']}{r['run']}" for r in s["red"]] + lines)
+    fp = stable_fp([f"{r['key']}{r['run']}" for r in s["red"] + s["missed"]] + lines)
     last = ts(st.get("last_note"))
     quiet = not changed and s["live"] == 0 and st.get("last_fp") == fp
     res = {

@@ -664,3 +664,13 @@ def test_a_missing_required_check_is_waited_for_while_a_run_is_still_open():
             "runs": [{"name": "ci", "status": "queued"}]}  # fmt: skip
     v = prwait.wait(prwait.Replay({"required": ["needed"], "polls": [runs]}), timeout=1800)
     assert not v.green and "still waiting" in v.why and "unfinished workflow runs: ci" in v.why
+
+
+def test_overlap_while_ci_is_jammed_does_not_take_develop_in(fake_gh):
+    """ORCH-454: taking develop in starts every check again; never while 20 or more jobs wait for a machine."""
+    pulls, merges = fake_gh
+    case = {**_case("pr978-second-run"), "ciWaiting": 37}
+    pull = FakePull(PR, case, landed=[["workspace/src/orch/prwait.py"]])
+    o = prwait.run_one(PR, True, src=pull)
+    assert o.status == "behind" and not o.ok and pull.updates == [] and merges == []
+    assert "37 jobs wait for a machine" in o.line and "Run it again later" in o.line

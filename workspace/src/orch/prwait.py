@@ -33,7 +33,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 
-from orch import checkretry, ghlimit
+from orch import checkretry, cibusy, ghlimit
 from orch.errors import Refused
 from orch.ghmerge import is_pr_url  # noqa: F401  (orch ref wait checks addresses with it)
 
@@ -130,6 +130,10 @@ class Replay:
     def rerun(self, names: list[str]) -> bool:
         self.reran = list(names)
         return True
+
+    def ci_room(self) -> tuple[bool, int | None]:
+        busy = self.data.get("ciWaiting")  # jobs waiting for a machine in the recorded case
+        return (not isinstance(busy, int) or busy < cibusy.LIMIT), busy
 
     def say(self, text: str) -> None:
         self.said = [*getattr(self, "said", []), (self.t, text)]  # a recorded case keeps its lines
@@ -356,6 +360,10 @@ class Live:
 
     def elapsed(self) -> float:
         return time.monotonic() - self.start
+
+    def ci_room(self) -> tuple[bool, int | None]:
+        """Wait (up to cibusy.WAIT_SECS) until fewer than cibusy.LIMIT jobs wait for a machine (ORCH-454)."""
+        return cibusy.wait_room(self.repo, say=self.say)
 
     def say(self, text: str) -> None:
         """One progress line while it waits (at most one a minute), so a helper or person watching sees what
@@ -623,6 +631,11 @@ def run_one(
                 f"{base} keeps changing files of {url} ({shown}); not merged. Take {base} in, push, "
                 "then run this again."
             )
+            return Outcome(url, False, "behind", line, verdict)
+        room = getattr(src, "ci_room", None)
+        ok, n = room() if callable(room) else (True, None)
+        if not ok:  # taking the base branch in starts every check again: never into a jammed CI (ORCH-454)
+            line = f"{base} changed files of {url} ({shown}); not taken in now: {cibusy.busy_line(n)}. Run it again later."
             return Outcome(url, False, "behind", line, verdict)
         rounds += 1
         note = f"{base} changed files of this pull request since it took {base} in ({shown}): "
