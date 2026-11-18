@@ -731,9 +731,9 @@ test('Settings: the kinds accepted for me are checkboxes under the switch; Draft
   c.state.settings = {reviewer_on:false, reviewer_kinds:['bug', 'small_bug']};
   const boxes = nodes(c.reviewerCard(c.state.settings), n => n.attrs?.type === 'checkbox');
   assert.equal(boxes.length, 6);
-  assert.deepEqual(boxes.filter(b => b.attrs.checked).map(b => b.attrs['data-kind']), ['bug', 'small_bug']);
-  const draft = boxes[5]; assert.equal(draft.attrs.disabled, true); assert.equal(draft.attrs.checked, false);
-  await c.reviewerKindToggle({checked:true, dataset:{kind:'small_feature'}});
+  assert.deepEqual(boxes.filter(b => b.attrs.checked != null).map(b => b.attrs['data-kind']), ['bug', 'small_bug']);  // h() ticks any value but null
+  const draft = boxes[5]; assert.equal(draft.attrs.disabled, true); assert.equal(draft.attrs.checked, undefined);
+  await c.reviewerKindToggle({dataset:{kind:'small_feature'}});
   assert.deepEqual(calls, [JSON.stringify(['reviewer.kinds', {kinds:['bug', 'small_bug', 'small_feature']}])]);
 });
 

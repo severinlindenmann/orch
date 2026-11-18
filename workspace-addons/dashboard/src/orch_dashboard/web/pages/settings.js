@@ -192,16 +192,16 @@ function reviewerKindsRow(settings) {
     h('div', {className:'grow stack'}, settingsText('p', {}, 'Which kinds of tickets'),
       h('div', {className:'grid-2', role:'group', 'aria-label':'Kinds accepted for me'},
         REVIEWER_KINDS.map(([k, label]) => h('label', {className:'check-label'},
-          h('input', {type:'checkbox', value:k, checked:on.has(k), disabled:busy, 'data-action':'reviewer-kind', 'data-kind':k}), label)),
-        h('label', {className:'check-label'}, h('input', {type:'checkbox', disabled:true, checked:false}), 'Draft or design')),
+          h('input', {type:'checkbox', value:k, checked:on.has(k) || null, disabled:busy, 'data-action':'reviewer-kind', 'data-kind':k}), label)),
+        h('label', {className:'check-label'}, h('input', {type:'checkbox', disabled:true}), 'Draft or design')),
       settingsText('p', {className:'meta'}, 'Drafts, mockups and designs always wait for you.')));
 }
+// h() writes every value but null as an attribute, so an unticked box gets no checked at all.
+// From the saved list, never from the box: the click handler reads the box after the browser may have put it back.
 async function reviewerKindToggle(box) {
-  const now = new Set(state.settings?.reviewer_kinds || []);
-  if (box.checked) now.add(box.dataset.kind); else now.delete(box.dataset.kind);
-  const kinds = REVIEWER_KINDS.map(([k]) => k).filter(k => now.has(k));
-  const result = await settingsSend('reviewer.kinds', {kinds}, 'reviewer_kinds');
-  if (!result.ok) box.checked = !box.checked;
+  const now = new Set(state.settings?.reviewer_kinds || []), k = box.dataset.kind;
+  if (now.has(k)) now.delete(k); else now.add(k);
+  await settingsSend('reviewer.kinds', {kinds:REVIEWER_KINDS.map(([x]) => x).filter(x => now.has(x))}, 'reviewer_kinds');
 }
 async function reviewerSwitch() {
   await settingsSend('reviewer.set', {on:state.settings?.reviewer_on !== true}, 'reviewer');
