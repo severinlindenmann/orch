@@ -197,7 +197,7 @@ def test_screen_returns_the_last_lines_read_only(proj, new_ticket, run, monkeypa
         ("ended", [], None, None),
         ("working", [], None, ("working", "Working", "")),
         ("working", [{"kind": "command", "label": "pytest", "what": "pytest (running 1 min)"}], None,
-         ("working", "Working", "Running pytest")),
+         ("working", "Working", "Running tests")),
         ("starting", [], None, ("starting", "Starting", "")),
         ("waiting", [{"kind": "person", "what": "an answer from the person", "ref": "q1"}], 60,
          ("you", "Waits for you", "Your answer")),
@@ -206,7 +206,9 @@ def test_screen_returns_the_last_lines_read_only(proj, new_ticket, run, monkeypa
         ("waiting", [{"kind": "person", "what": "x", "ref": "q1"}, {"kind": "person", "what": "y"}], None,
          ("you", "Waits for you", "Your answer and your OK on the screen")),
         ("waiting", [{"kind": "command", "label": "pr-green.sh", "seconds": 360, "what": "x"}], 60,
-         ("waiting", "On hold", "Waiting for pr-green.sh · 6 min")),
+         ("waiting", "On hold", "Running a script · 6 min")),
+        ("waiting", [{"kind": "command", "label": "sleep", "seconds": 240, "what": "x"}], 60,
+         ("waiting", "On hold", "Waiting · 4 min")),
         ("waiting", [{"kind": "command", "label": "the pull request checks", "seconds": 1080, "what": "x"}],
          60,
          ("waiting", "On hold", "Waiting for the pull request checks · 18 min")),
@@ -218,6 +220,39 @@ def test_screen_returns_the_last_lines_read_only(proj, new_ticket, run, monkeypa
 def test_helper_state_is_one_word_per_signal(sig, waits, idle, want):
     got = runwatch.helper_state(sig, waits, idle)
     assert (got if got is None else (got["state"], got["word"], got["detail"])) == want
+
+
+@pytest.mark.parametrize(
+    "cmd, want",
+    [
+        ("orch check done t_1 c1 --note x", "Updating the ticket"),
+        ("orch pull-requests queue add https://x/pull/1 --wait", "Waiting for the pull request checks"),
+        ("orch ref wait t_1 --merge", "Waiting for the pull request checks"),
+        ("sleep 240", "Waiting"),
+        ("node /tmp/release/walk.cjs --port 8790", "Running a script"),
+        ("bash ~/x/pr-green.sh 12 repo", "Running a script"),
+        ("env -i HOME=/tmp/t uv run python -m pytest -q -n 2 tests/test_x.py", "Running tests"),
+        ("node --test tests/home.test.js", "Running tests"),
+        ("cargo test", "Running tests"),
+        ("cargo build --release", "Building"),
+        ("git push -u origin fix/x", "Working on the code"),
+        ("ls -la", "Running a command"),
+        ("pytest", "Running tests"),
+        ("the GitHub merge limit", "Waiting for the GitHub merge limit"),
+        ("helper: read the logs", "Working with its own helper"),
+        ("", "Running a command"),
+    ],
+)  # fmt: skip
+def test_doing_says_plain_words_never_a_program_name(cmd, want):
+    """Report r-1118-0544 (ORCH-407): Home said 'Running orch', 'Running sleep', 'Running walk.cjs'."""
+    assert runwatch.doing(cmd) == want
+
+
+def test_working_helper_with_several_commands_says_each_activity_once():
+    waits = [{"kind": "command", "label": "orch", "doing": "Updating the ticket"},
+             {"kind": "command", "label": "orch", "doing": "Updating the ticket"},
+             {"kind": "command", "label": "pytest", "doing": "Running tests"}]  # fmt: skip
+    assert runwatch.helper_state("working", waits, None)["detail"] == "Updating the ticket, Running tests"
 
 
 def test_status_carries_the_helper_state_and_last_activity(proj, new_ticket, run, monkeypatch, child):
