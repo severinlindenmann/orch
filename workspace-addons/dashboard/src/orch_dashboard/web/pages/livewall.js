@@ -36,8 +36,11 @@ function liveWallCounts(sessions) {
   return c;
 }
 // The parts of the summary line, in draft D's words: "3 need you", "1 needs you", "4 working", "9 in line", "8 idle".
-function liveWallSummary(sessions) {
+// `total` is the one number of things waiting on the person (the Review badge, as the live bar reads it, ORCH-464);
+// the wall never says less than it or than the sessions that ask (ORCH-674).
+function liveWallSummary(sessions, total) {
   const c = liveWallCounts(sessions), out = [];
+  c['needs-you'] = Math.max(Number(total) || 0, c['needs-you']);
   out.push(c['needs-you'] ? {s:'needs-you', text:c['needs-you'] + (c['needs-you'] === 1 ? ' needs you' : ' need you')} : {s:'', text:'Nobody needs you'});
   if (c.working) out.push({s:'working', text:c.working + ' working'});
   if (c['in-line']) out.push({s:'in-line', text:c['in-line'] + ' in line'});
@@ -157,7 +160,7 @@ function liveWallBody() {
   const ui = liveWallState(), list = window.LiveSessions?.list || [], ready = !!window.LiveSessions?.ready;
   const b = liveWallBands(list, liveWallPins(), ui.f), many = b.total >= LIVE_WALL_MANY;
   const summary = h('div', {className:'wall-sum', 'data-key':'wall-sum'},
-    h('p', {className:'wall-hero', 'data-key':'wall-hero', role:'status'}, liveWallSummary(list).map(p => h('span', {className:'wall-st', 'data-s':p.s || null},
+    h('p', {className:'wall-hero', 'data-key':'wall-hero', role:'status'}, liveWallSummary(list, typeof needsYouTotal === 'function' ? needsYouTotal() : 0).map(p => h('span', {className:'wall-st', 'data-s':p.s || null},
       p.s ? h('span', {className:'wall-sym', 'aria-hidden':'true'}, LIVE_WALL_SYM[p.s]) : null, p.text))),
     h('p', {className:'meta', 'data-key':'wall-total'}, liveWallSessions(b.total)));
   let bands;
