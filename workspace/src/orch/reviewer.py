@@ -271,8 +271,8 @@ def kind_block(root: Path, ticket: dict) -> str | None:
 
 
 def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
-    """The verdict below, marked kind_block when the ticket's kind keeps every automation away (the second look
-    then leaves it too, whatever the verdict's reason)."""
+    """The verdict below, marked kind_block when the ticket's kind keeps every automation away (the second
+    look then leaves it too, whatever the verdict's reason)."""
     res = _decide(root, ticket, facts, sent_back)
     if res.get("verdict") == "leave" and kind_block(root, ticket):
         res["kind_block"] = True
