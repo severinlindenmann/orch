@@ -119,6 +119,7 @@ test('the caret opens the Start choice: fresh start with tool and model, sends t
 test('a tool without models says so instead of the model picker', () => {
   const m = mount();
   m.q(n => n.tag === 'summary').click();
+  assert.equal(m.q(n => n.dataset.startPick === 'tool').dataset.prefix, 'Tool', 'the tool picker says Tool on its face (owner, ORCH-488)');
   pick(m, 'tool', 'codex');
   assert.equal(m.q(n => n.dataset.startPick === 'model'), null);
   assert.ok(m.q(n => n.textContent === 'This tool uses its own model.'));

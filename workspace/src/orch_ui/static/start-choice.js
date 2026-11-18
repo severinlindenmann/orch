@@ -84,6 +84,7 @@
     function sel(label, list, cur, what, onPick) {
       const s = attr(el('select'), {'aria-label': label});
       s.dataset.startPick = what;
+      if (what === 'tool') s.dataset.prefix = label; /* owner, ORCH-488: the tool picker says Tool on its face */
       list.forEach(([v, text]) => { const op = el('option', '', text); op.value = v; if (cur === v) op.selected = true; s.append(op); });
       s.value = cur;
       s.addEventListener('change', () => {
@@ -104,7 +105,7 @@
       };
       const p = pickOf(), tool = p.tools.tools.find(x => x.name === p.tool);
       if (p.tools.tools.length > 1) run.append(sel('Tool', p.tools.tools.map(x => [x.name, x.label]), p.tool, 'tool', modelPart));
-      else if (tool) run.append(el('span', 'chip', tool.label));
+      else if (tool) run.append(el('span', 'chip', 'Tool: ' + tool.label));
       modelPart();
       run.append(modelBox);
       return run;
