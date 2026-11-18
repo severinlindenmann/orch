@@ -5,9 +5,13 @@
         waits for room: `orch ref wait --merge` counts it when it really merges); exit 0 = write now,
         exit 2 = no room in time (do not write)
     orch github writes      the writes of the last hour per kind, the limit and when the next one fits
+    orch github retries [--days N]
+        checks orch ran once more after a timeout or network error (orch ref wait), most retried first
     orch github expert [--dry-run] [--known <problem>=<ticket>]
         the Development expert's read-only pass over CI, pull requests and tickets (devexpert.py); off until
         `orch config set github.dev_expert <role ticket>` and `github.dev_expert_repo <owner/name>`
+    orch github develop-green
+        the last develop commit whose own checks all finished green, and how far develop is ahead (ORCH-314)
     orch github release [--dry-run] [--known-red "<job>=<ticket>"]
         one pass of the release keeper (releasekeeper.py): green develop -> release pull request -> Merge card
         -> merged by the switch or the owner's click -> orch update here -> deploy prepared, production
@@ -44,6 +48,10 @@ def add_parsers(sub, common) -> None:
         help="minutes to wait for room (default 60)",
     )
     g.add_parser("writes", parents=[common], help="GitHub writes of the last hour and the limits")
+    rt = g.add_parser(
+        "retries", parents=[common], help="checks orch ran once more after a timeout or network error"
+    )
+    rt.add_argument("--days", type=int, default=30, help="how many days back (default 30)")
     e = g.add_parser(
         "expert", parents=[common], help="the Development expert's pass over CI and pull requests"
     )
@@ -65,6 +73,7 @@ def add_parsers(sub, common) -> None:
     )
     hd = g.add_parser("release-hold", parents=[common], help="stop cutting releases (off lifts it)")
     hd.add_argument("why", help='why, in a few words, or "off"')
+    g.add_parser("develop-green", parents=[common], help="the last develop commit whose checks all passed")
     dp = g.add_parser("release-deployed", parents=[common], help="write down what production runs")
     dp.add_argument("spec", metavar="SERVER=COMMIT", help="e.g. relay=58e00713 or relay,publish=<commit>")
 
@@ -74,7 +83,10 @@ def _release(args, root: Path | None) -> None:
 
     if root is None:
         raise Refused("Run this inside an orch workspace.")
-    if args.sub == "release":
+    if args.sub == "develop-green":
+        res = rk.green_status(root)
+        print(json.dumps(res) if args.json else rk.green_text(res))
+    elif args.sub == "release":
         res = rk.run(root, dry_run=args.dry_run, known=rk.parse_known(args.known_red))
         print(json.dumps(res, indent=2, default=str) if args.json else rk.text(res, args.dry_run))
     elif args.sub == "release-hold":
@@ -102,7 +114,7 @@ def _when(secs) -> str:
 def dispatch(args, root: Path | None) -> bool:
     if getattr(args, "cmd", None) != "github":
         return False
-    if args.sub in ("release", "release-hold", "release-deployed"):
+    if args.sub in ("release", "release-hold", "release-deployed", "develop-green"):
         _release(args, root)
         return True
     if args.sub == "expert":
@@ -110,6 +122,20 @@ def dispatch(args, root: Path | None) -> bool:
 
         res = devexpert.run(root, dry_run=args.dry_run, known=devexpert.parse_known(args.known))
         print(json.dumps(res, indent=2, default=str) if args.json else devexpert.text(res, args.dry_run))
+        return True
+    if args.sub == "retries":
+        from orch import checkretry
+
+        if not 1 <= args.days <= 365:
+            raise Refused("--days is a number from 1 to 365.")
+        data = checkretry.summary(args.days)
+        text = (
+            f"{data['total']} check retries in the last {args.days} days."
+            + "".join(f"\n{r['check']}: {r['count']}x ({r['repo']})" for r in data["checks"][:10])
+            if data["total"]
+            else f"No check was run again in the last {args.days} days."
+        )
+        print(json.dumps(data) if args.json else text)
         return True
     if args.sub == "wait":
         if args.max_wait < 0:

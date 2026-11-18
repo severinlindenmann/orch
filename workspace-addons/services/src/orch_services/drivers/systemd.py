@@ -159,6 +159,12 @@ class Systemd(Driver):
         since = _utc(v.get("ActiveEnterTimestamp" if running else "InactiveEnterTimestamp", ""))
         return Status(running=running, pid=pid if running else None, since=since)
 
+    def runs(self, spec: Spec) -> int | None:
+        """`NRestarts` of `systemctl --user show` (restarts by Restart=on-failure since the last start)."""
+        cp = self._run("show", unit_name(spec), "--property=NRestarts")
+        v = cp.stdout.strip().partition("=")[2] if cp.returncode == 0 else ""
+        return int(v) if v.isdigit() else None
+
     def uninstall(self, spec: Spec) -> None:
         if (
             spec.external

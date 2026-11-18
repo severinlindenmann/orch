@@ -191,6 +191,15 @@ focus-preview.html
 ../settings/addon-detail-focus.html
 - New row Preview: "Try the new Focus", off by default.
 
+## The layer, built (ORCH-338, 17 Nov)
+
+focus-v4d.html stays the source of truth for the layer; nothing in the draft changed. The dashboard now has it behind
+the Preview switch: one dock under every page (outside the page content, so it stays open when the page changes) with
+a panel at the bottom, on the right or full screen, minimise to the bar, close to the side. Place and size are kept per
+browser; the top edge of the bottom panel and the left edge of the right one resize it (drag or arrow keys). Esc goes
+one step back: an open menu, full screen, then the panel to the bar. One session for now; the pane says where the chat
+and terminal come. Master: `.live-*` in widgets.css (style guide: Live layer), icons dock-bottom, dock-right,
+dock-side, full-screen, full-exit.
 ## The bar is built (ORCH-337, 17 Nov)
 
 - The bar of draft D is in the dashboard behind the Preview switch (`pages/livebar.js`), with its look in the kit
@@ -198,3 +207,46 @@ focus-preview.html
 - Two changes from this draft: an open list scrolls inside its box (here it runs past it), and when even symbols and
   numbers do not fit, needs you stays and the rest becomes one More count (fold 4), so nothing is cut at 320 wide.
 - New, Open and Where Focus sits come with the layer; the bar keeps an empty `.lbar-end` slot for them.
+
+## The split, built (ORCH-339, 17 Nov)
+
+focus-v4d.html stays the source of truth; nothing in the draft changed. Behind the Preview switch the layer now holds
+1, 2 or 3 sessions side by side (stacked in the right panel), in the order of the bar's chips. One pane is selected
+(brand line on top); the title of another selects it. Every pane has pin, add beside (the next live session; off at
+three), place, full screen, minimise and close; closing a pane gives its room to the others and selects its neighbour.
+Narrow panes (three at 1280, more than one on the right, a phone) fold pin and place into More, as in the draft. A
+phone shows only the selected session and has no add beside. The split and the selection are kept per browser and
+stay while the page changes. Pins are kept in this browser (the bar's key) until the wall stores them in orch.
+Master: `.live-*` in widgets.css (style guide: Live layer); click-through step 12.
+
+## The Focus button and Open ticket, built (ORCH-365, 17 Nov)
+
+focus-v4d.html stays the source of truth; nothing in the draft changed. Behind the Preview switch every ticket page and
+every ticket row (table and phone) has one button with the draft's words: Watch, Answer, Open, In line or Start, from
+the same session states as the bar. It opens the ticket's session in the layer and moves the keyboard into it; on the
+ticket page it says "… in Focus" and sits in the header with the other actions (the draft has it under the steps),
+where it takes the place of Watch live while a helper runs. A row's own Answer gives way to it, so no row shows two.
+Every pane has Open ticket (also in More when the pane is narrow, as in the draft); from full screen it steps back so
+the ticket page shows. Finished tickets without a helper get no button. Wall tiles come with the wall task. No new
+master rules (kit buttons only); click-through step 6.
+
+## Live data for every session, built (ORCH-359, 17 Nov)
+
+focus-v4d.html stays the source of truth; nothing in the draft changed. The bar and the panes read one list of
+sessions (GET /api/sessions, pages/livesessions.js) instead of the tickets and runs: status (needs you, working, in
+line, idle, closed), what it waits on, the open question, the last lines of its screen, tool and model, open time and
+when it closes for being idle. A pane shows what the session does now, its last lines and draft D's meta line
+("Helper · Opus · open 38 min · stays warm while it works"), updated in place every 3 s. The wall builds on the same
+list and the same words (liveNow, liveMeta). Master: `.live-now`, `.live-lines`, `.live-meta` in widgets.css (style
+guide: Live layer); click-through step 16.
+
+## Earlier sessions, built (ORCH-363, 17 Nov)
+
+orch keeps the last 10 sessions per ticket on this computer (the ones in use included; only the ids are forgotten,
+never the tool's own files). Behind the Preview switch each pane has a History button (in More when the pane is
+narrow) that shows the draft's "Earlier sessions" list instead of the session: time, first message, number of
+messages and the tool, newest first; the one in use says In use, one whose conversation is not on this computer has no
+Reopen. Reopen starts the helper on that conversation (`orch run start <ticket> --session <id>`); while a helper works
+the buttons are off with one line why. The draft's Start choice above the list (continue, fresh start, tool and model)
+is the Start task; this draft lost only its "To build" chip and note. Master: `.live-hist*` in widgets.css (style guide:
+Live layer); click-through step 26.

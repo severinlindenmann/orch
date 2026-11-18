@@ -35,6 +35,7 @@ KEYS = (
     "workspace.name",
     "workspace.description",
     "workspace.tags",
+    "workspace.protected_machines",
     "workspace.permissions",
     "workspace.live_idle_minutes",
     "workspace.live_max",
@@ -287,6 +288,7 @@ def _config(args, root: Path) -> None:
             "workspace.name": lambda: config.workspace_name(root),
             "workspace.description": lambda: config.workspace_description(root),
             "workspace.tags": lambda: config.workspace_tags(root),
+            "workspace.protected_machines": lambda: config.protected_machines(root),
             "workspace.permissions": lambda: config.permissions(root),
             "workspace.live_idle_minutes": lambda: config.live_idle_minutes(root),
             "workspace.live_max": lambda: config.live_max(root) or "none",
@@ -486,6 +488,17 @@ def _config(args, root: Path) -> None:
             text = f"Saved: the workspace tags are {', '.join(v)}." if v else "Saved: no tags."
         else:
             text = f"Saved: the workspace {what} is {v!r}." if v else f"Saved: no {what}."
+        _out(args, {args.key: v}, text)
+    elif args.sub == "set" and args.key == "workspace.protected_machines":
+        if _actor(args).startswith("agent:"):
+            raise Refused("Only a person changes the list of protected machines.")
+        v = config.set_protected_machines(root, args.value)
+        text = (
+            f"Saved: protected machines are {', '.join(v)}. "
+            "Helpers cannot connect to them outside a release or deploy step."
+            if v
+            else "Saved: no protected machines."
+        )
         _out(args, {args.key: v}, text)
     elif args.sub == "set" and args.key == "workspace.code":
         code = config.set_code(root, args.value)

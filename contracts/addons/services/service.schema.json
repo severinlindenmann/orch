@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://orch.severin.io/contracts/addons/services/service.schema.json",
   "title": "orch services record v1 (.orch/addons/services/services/<id>.json)",
-  "description": "One background service the Services add-on keeps running with the computer's own service tool (launchd on macOS, systemd user units on Linux). One plain JSON file per service, written atomically (new file + rename). Fields this version does not know are kept when the file is rewritten. See addons/services/README.md.",
+  "description": "One background service the Services add-on keeps running with the computer's own service tool (launchd on macOS, systemd user units on Linux, a Task Scheduler task on Windows). One plain JSON file per service, written atomically (new file + rename). Fields this version does not know are kept when the file is rewritten. See addons/services/README.md.",
   "type": "object",
   "required": ["schema", "id", "name", "command", "cwd", "auto", "created_at"],
   "properties": {

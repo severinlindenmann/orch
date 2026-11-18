@@ -17,7 +17,7 @@ const FileViewer = {kindOf:name => EXT[String(name).split('.').pop()] || 'other'
   renderMd:src => h('article', {className:'fv-md'}, h('h2', {}, src.split('\n')[0].replace(/^#+\s*/, '')))};
 function ctx() {
   const c = {addEventListener(){}, document:{addEventListener(){}}, h, array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:String, window:{DashHelpers:helpers, UI:kit.UI, FileViewer, orch:{}}, snapshot:false,
-    route:() => ({kind:'ticket'}), render(){}, ticketTabs:new Map(), fetch:() => new Promise(() => {}), URL, TextDecoder, locks:new Set(),
+    route:() => ({kind:'ticket'}), state:{}, render(){}, ticketTabs:new Map(), fetch:() => new Promise(() => {}), URL, TextDecoder, locks:new Set(),
     ticketButton:(label, cls, click) => { const b = h('button', {className:'btn ' + cls}, label); b.onclick = click; return b; }, previewFile(){}};
   vm.createContext(c); vm.runInContext(source, c); return c;
 }

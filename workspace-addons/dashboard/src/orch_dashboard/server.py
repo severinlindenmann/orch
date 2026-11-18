@@ -17,7 +17,7 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, unquote_plus
 
-from . import actions, copychanges, diagapi, framepass, reffiles, selfupdate, ticketfiles
+from . import actions, copychanges, diagapi, framepass, reffiles, selfupdate, sessionlist, ticketfiles
 from .data import (
     forget_static,
     load_addons,
@@ -240,6 +240,21 @@ def _arm_resume(root: Path, session) -> None:
 
         pagelaunch.write_resume_cookie(root, session.server, session.cookie, session.secret)
         pagelaunch.arm_restart(root)  # the other page server hands its tabs over too (#705)
+
+
+def _client_gone(sock) -> bool:
+    """True when the page of an event stream has closed. The page sends nothing after its request, so a socket that
+    can be read now holds only the end of the connection."""
+    if sock is None:
+        return False
+    try:
+        import select
+        import socket
+
+        ready, _, _ = select.select([sock], [], [], 0)
+        return bool(ready) and sock.recv(1, socket.MSG_PEEK) == b""
+    except (OSError, ValueError):
+        return True
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -742,6 +757,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps(snap).encode(), "application/json", {"Cache-Control": "no-store"}
             )
+        if path == "/api/sessions":  # every session for the live page (ORCH-359): built from the cached state
+            if not (self._frame or self._same_origin()):
+                return self._send(403, b"forbidden", "text/plain")
+            from . import sessions
+
+            try:
+                n = int((parse_qs(query).get("lines") or [sessions.LINES])[0])
+            except ValueError:
+                n = sessions.LINES
+            state, age = self.server.state_cache.get()
+            body = sessions.answer(self.root, self.orch_bin, state, age, n)
+            return self._send(
+                200, json.dumps(body).encode(), "application/json", {"Cache-Control": "no-store"}
+            )
         if path == "/api/events":
             return self._events()
         if path == "/api/ref-file":
@@ -800,6 +829,13 @@ class Handler(BaseHTTPRequestHandler):
             if d is None:
                 return self._send(404, b"not found", "text/plain")
             return self._send(200, json.dumps(d).encode(), "application/json")
+        m = re.fullmatch(r"/api/sessions/(t_[a-z0-9]{6,16})", path)
+        if m:  # the ticket's earlier sessions for a History tab (orch lists them); no conversation text here
+            return self._send(
+                200,
+                json.dumps(sessionlist.listing(self.root, self.orch_bin, m.group(1))).encode(),
+                "application/json",
+            )
         m = re.fullmatch(r"/api/artifacts/(t_[a-z0-9]{6,16})", path)
         if m:  # the file list of one ticket (orch lists them); no file content here
             return self._send(
@@ -885,7 +921,7 @@ class Handler(BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|live|soft|livebar)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|live|soft|live-layer|live-history|livebar|livesessions)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
@@ -929,8 +965,10 @@ class Handler(BaseHTTPRequestHandler):
                 with revisions.condition:
                     rev = revisions.rev
                     if rev == last:
-                        revisions.condition.wait(timeout=max(0, 15 - (time.monotonic() - ping)))
+                        revisions.condition.wait(timeout=min(1, max(0, 15 - (time.monotonic() - ping))))
                         rev = revisions.rev
+                if rev == last and _client_gone(getattr(self, "connection", None)):
+                    break  # a closed or reloaded page gives its place back within a second, not at the next ping
                 if rev != last:
                     self.wfile.write(f"event: rev\ndata: {rev}\n\n".encode())
                     self.wfile.flush()

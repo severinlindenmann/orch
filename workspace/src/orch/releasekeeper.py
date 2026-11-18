@@ -23,6 +23,9 @@ One pass moves the release one phase on (state: .orch/run/release-keeper.json):
            settings and data changes listed) and a deploy card asked (production: the owner's go; on "Deploy
            now" a helper ticket gets the prepared program), the highlights as a short note on the role ticket,
            the release worktree removed -> idle.
+Every pass also runs the security check (secreview.py, ORCH-317): pull requests touching the servers, sign-in,
+secrets or what leaves this computer get a security review helper by themselves, and the idle phase cuts
+nothing until each of them in the release has an OK.
 A release pull request the keeper did not cut is only watched. `orch github release-hold "<why>"` stops
 cutting (a running release goes on); `orch github release-hold off` lifts it.
 
@@ -47,7 +50,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import brake, config, runs, tickets
+from orch import brake, config, runs, secreview, tickets
 from orch.errors import Refused
 
 BY = "agent:release-keeper"
@@ -72,6 +75,7 @@ DONE = {"done", "dropped", "wontdo", "archived"}
 STATE_MAX = 512 * 1024
 NOTE_MAX = 1900
 TITLE_MAX = 90
+MERGE_LINE = re.compile(r"^Merge pull request #(\d+) from \S")  # GitHub's own merge commit subject
 RELEASE_MERGE = re.compile(r"Release \d+: merge main")
 DEPLOY_ASK = "changed the"  # words of the deploy card, found again in the answer
 
@@ -89,6 +93,8 @@ SETTINGS = {
     "github.release_deploy_host": "user@host of production, read only over ssh (program checksum)",
     "github.release_deploy_key": "the ssh key for that read",
     "github.release_deploy_script": "the install command the deploy helper runs after the owner's go",
+    "github.release_security_paths": "files whose change needs a security review before a release "
+    "(default: servers, sign-in, secrets, what leaves this computer, CI)",
 }
 SETTING_KEYS = tuple(SETTINGS)
 
@@ -151,6 +157,8 @@ def set_setting(root: Path, key: str, value: str) -> str | None:
         v = ",".join(parts)
     elif name == "release_deploy_script":
         v = _path_ok(v)
+    elif name == "release_security_paths":
+        v = secreview.check_patterns(v)
     config.set_key(root, "github", name, v)
     return v
 
@@ -187,6 +195,7 @@ class Cfg:
         self.deploy_host = g("deploy_host")
         self.deploy_key = Path(g("deploy_key")) if g("deploy_key") else None
         self.deploy_script = g("deploy_script")
+        self.security_paths = g("security_paths")
         self.run_dir = runs.run_dir(root) if root is not None else Path(over.get("run_dir") or ".")
 
     @property
@@ -221,10 +230,22 @@ def ts(s) -> datetime | None:
     return d if d is None or d.tzinfo else d.replace(tzinfo=UTC)
 
 
+def known_name(name: str, names) -> str | None:
+    """The entry of `names` that covers job `name`: the same name, or the job without its part. A job split
+    into parts (ORCH-315, "workspace / test (windows-latest, 3/6)") is covered by "workspace / test
+    (windows-latest)", so a known-red entry keeps working when CI splits the job."""
+    if name in names:
+        return name
+    for n in names:
+        if n.endswith(")") and name.startswith(n[:-1] + ", "):
+            return n
+    return None
+
+
 def checks_green(rollup, ignore=frozenset()) -> str:
     """green, red or pending for a pull request's statusCheckRollup (newest run of each check counts); checks
     named in `ignore` (known red, roll-ups) do not count."""
-    rollup = [c for c in rollup or [] if (c.get("name") or c.get("context")) not in ignore]
+    rollup = [c for c in rollup or [] if known_name(c.get("name") or c.get("context") or "", ignore) is None]
     if not rollup:
         return "pending"
     last: dict = {}
@@ -275,7 +296,7 @@ def not_reported(rollup, names) -> list[str]:
 def failed_checks(rollup, ignore=frozenset()) -> list[str]:
     out = []
     for c in rollup or []:
-        if (c.get("name") or c.get("context")) in ignore:
+        if known_name(c.get("name") or c.get("context") or "", ignore) is not None:
             continue
         word = c.get("conclusion") if "status" in c else c.get("state")
         if (c.get("status") in (None, "COMPLETED")) and word not in PASSED and word not in (None, "PENDING"):
@@ -370,28 +391,53 @@ class World:
         )
 
     # ---- reads
+    def green_develop(self) -> str | None:
+        """The newest develop commit whose own push run finished green (ORCH-314), judged job by job like any
+        other run (known-red jobs and the roll-up do not count). develop's push runs are never cancelled, so
+        every commit has an answer. None when none of the last ten push runs is green."""
+        wf = self.cfg.workflows[0][0] if self.cfg.workflows else "ci.yml"
+        known = self.known_red()
+        seen: set[str] = set()
+        for r in sorted(self.runs(wf, "push"), key=lambda x: str(x.get("createdAt")), reverse=True):
+            sha = r.get("headSha")
+            if not sha or sha in seen:
+                continue
+            seen.add(sha)
+            if run_state(self, wf, sha, None, ("push",), known)[0] == "green":
+                return sha
+        return None
+
     def heads(self) -> dict:
-        """{"develop": sha, "main": sha, "unreleased": [{sha, at, subject, title}]} after a fetch. title is
-        the pull request's own title: GitHub writes it as the first line of the merge commit's body."""
+        """{"develop": sha, "green": sha|None, "main": sha, "unreleased": [{sha, at, subject, title}]} after a
+        fetch. green = the last fully green develop commit; unreleased = the merges main does not have, up to
+        green (a release is cut from green only). title is the pull request's own title: GitHub writes it as
+        the first line of the merge commit's body."""
         if self.sim is not None:
-            return self.sim["heads"]
+            return {"green": self.sim["heads"]["develop"], **self.sim["heads"]}
         self._git("fetch", "-q", "origin", timeout=180)
         dev = self._git("rev-parse", "origin/develop").stdout.strip()
         main = self._git("rev-parse", "origin/main").stdout.strip()
-        lg = self._git(
-            "log",
-            "--first-parent",
-            "--merges",
-            "--format=%H%x1f%cI%x1f%s%x1f%b%x1e",
-            "origin/main..origin/develop",
-        ).stdout
+        green = self.green_develop()
+        if green and self._git("merge-base", "--is-ancestor", green, dev).returncode != 0:
+            green = None  # not on develop's history any more
+        lg = (
+            self._git(
+                "log",
+                "--first-parent",
+                "--merges",
+                "--format=%H%x1f%cI%x1f%s%x1f%b%x1e",
+                f"origin/main..{green}",
+            ).stdout
+            if green
+            else ""
+        )
         rows = []
         for rec in lg.split("\x1e"):
             p = rec.strip("\n").split("\x1f")
             if len(p) == 4:
                 title = next((ln.strip() for ln in p[3].splitlines() if ln.strip()), "")
                 rows.append({"sha": p[0], "at": p[1], "subject": p[2], "title": title})
-        return {"develop": dev, "main": main, "unreleased": rows}
+        return {"develop": dev, "green": green, "main": main, "unreleased": rows}
 
     def open_release(self) -> dict | None:
         if self.sim is not None:
@@ -426,6 +472,69 @@ class World:
                 "number,url,state,isDraft,headRefOid,statusCheckRollup,mergedAt,body,title",
             ]
         )
+
+    _PR_FIELDS = "number,title,url,headRefOid,isDraft,files"  # open pull requests (security check)
+
+    def changes(self) -> list[dict]:
+        """Every first-parent change on develop since main (after heads() fetched): {sha, files, pr, head,
+        title, url}. files is git's full list with renames as both names; pr and head come from GitHub's merge
+        line ("Merge pull request #N from ...", head = the second parent), else None. Only a hint: the
+        security check confirms them with GitHub (pr_for_commit)."""
+        if self.sim is not None:
+            return list(self.sim.get("changes") or [])
+        lg = self._git("log", "--first-parent", "--format=%H%x1f%P%x1f%s", "origin/main..origin/develop")
+        if lg.returncode != 0:
+            raise Refused("git log could not read what develop has since main")
+        out = []
+        for ln in lg.stdout.splitlines():
+            p = ln.split("\x1f", 2)
+            if len(p) != 3 or not re.fullmatch(r"[0-9a-f]{40}", p[0]) or not p[1].split():
+                raise Refused("git log gave a change it could not read: the release waits")
+            sha, parents, subject = p[0], p[1].split(), p[2]
+            d = self._git("diff", "--no-renames", "--name-only", "-z", parents[0], sha)
+            if d.returncode != 0:
+                raise Refused(f"git diff could not read the change {sha[:8]}")
+            m = MERGE_LINE.match(subject)
+            pr = int(m[1]) if m and len(parents) == 2 else None
+            out.append(
+                {
+                    "sha": sha,
+                    "files": [x for x in d.stdout.split("\0") if x],
+                    "pr": pr,
+                    "head": parents[1] if pr else None,
+                    "title": subject[:120],
+                    "url": f"https://github.com/{self.cfg.repo}/pull/{pr}" if pr else None,
+                }
+            )
+        return out
+
+    def pr_for_commit(self, sha: str) -> dict:
+        """The pull request GitHub merged as this very commit (a squash or rebase merge): {pr, head, title,
+        url}, or {} when there is none."""
+        if self.sim is not None:
+            return dict((self.sim.get("pr_for_commit") or {}).get(sha) or {})
+        rows = self._gh_json(["api", f"repos/{self.cfg.repo}/commits/{sha}/pulls"]) or []
+        for r in rows if isinstance(rows, list) else []:
+            if isinstance(r, dict) and r.get("merge_commit_sha") == sha and r.get("number"):
+                return {
+                    "pr": int(r["number"]),
+                    "head": ((r.get("head") or {}).get("sha")),
+                    "title": str(r.get("title") or "")[:120],
+                    "url": r.get("html_url"),
+                }
+        return {}
+
+    def open_prs(self) -> list[dict]:
+        """The open pull requests into develop, with their files (security check)."""
+        if self.sim is not None:
+            return list(self.sim.get("open_prs") or [])
+        args = ["pr", "list", "--repo", self.cfg.repo, "--state", "open", "--base", "develop"]
+        return self._gh_json([*args, "--limit", "60", "--json", self._PR_FIELDS]) or []
+
+    def security_verdicts(self) -> dict:
+        if self.sim is not None:
+            return dict(self.sim.get("security_verdicts") or {})
+        return secreview.read_verdicts(self.root)
 
     def required(self, branch: str) -> list[str] | None:
         """The required checks of `branch`'s rules ([] when it has none), None when GitHub did not say."""
@@ -1053,9 +1162,10 @@ def run_state(
         name = j.get("name") or ""
         if name in ROLLUP_JOBS:
             continue
-        if name in known:
+        entry = known_name(name, known)
+        if entry is not None:
             if j.get("status") == "completed" and j.get("conclusion") not in ("success", "skipped"):
-                noted.append(f"{name} ({known[name]})")
+                noted.append(f"{name} ({known[entry]})")
             continue  # neither waited for nor a blocker
         if j.get("status") != "completed":
             state = "pending" if state == "green" else state
@@ -1090,10 +1200,15 @@ def red(w: World, st: dict, role: str, title: str, words: str, note: str, done_w
 def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
     out: list[str] = []
     h = w.heads()
+    try:  # every pass, so a review starts while a pull request is still open
+        sec_lines, sec_holds = secreview.tend(w, st, role)
+    except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
+        sec_lines, sec_holds = [f"security check could not run: {e}"], ["the security check could not run"]
+    out += sec_lines
     rel = st.get("release")
     foreign = w.open_release()
     if foreign and not (rel and rel.get("pr") == foreign.get("number")):
-        return [f"release PR {foreign['number']} is open and was not cut by the keeper: watching only"]
+        return out + [f"release PR {foreign['number']} is open and was not cut by the keeper: watching only"]
 
     if rel and rel.get("phase") in ("gate", "card"):
         p = w.pr(rel["pr"])
@@ -1120,7 +1235,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
                 return out + [f"release {rel['n']}: release checks still running"]
             if g == "red":
                 bad = ", ".join(failed_checks(p.get("statusCheckRollup"), ignore)) or "see the pull request"
-                if h["develop"] != rel["sha"] and not open_red_ticket(
+                if h.get("green") != rel["sha"] and not open_red_ticket(
                     w.tickets(), f"Release {rel['n']} checks"
                 ):
                     w.close_release(rel)
@@ -1227,10 +1342,14 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         return out
     # idle
     un = h["unreleased"]
+    if not h.get("green"):
+        return out + ["no develop commit is fully green yet: nothing is cut"]
     if not un:
-        return out + ["develop has nothing main does not have"]
+        return out + ["green develop has nothing main does not have"]
     if hold:
         return out + [f"on hold: {hold}"]
+    if sec_holds:
+        return out + ["waits for every security OK: " + ", ".join(sec_holds)]
     nums = {int(m[1]) for u in un if (m := re.search(r"#(\d+)", u["subject"]))}
     urgent = sorted(nums & w.urgent())
     last = max([x for x in (w.last_release_at(), ts(st.get("last_cut_at"))) if x], default=None)
@@ -1240,7 +1359,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
             f"{len(un)} unreleased pull request(s); last release {gap_h:.1f} h ago, next after "
             f"{MIN_GAP_H} h (or at once for an {URGENT_LABEL} one)"
         ]
-    sha = h["develop"]
+    sha = h["green"]  # never develop's head: only a commit whose own push run finished green (ORCH-314)
     if st.get("skip_sha") == sha:
         return out + [f"develop {sha[:8]} was red; waiting for develop to move"]
     n = w.last_release() + 1
@@ -1578,6 +1697,36 @@ def record_deployed(root: Path, spec: str, by: str) -> dict:
     sha = r.stdout.strip()
     w.record_deployed(parts, sha, by)
     return {"parts": parts, "sha": sha}
+
+
+def green_status(root: Path) -> dict:
+    """`orch github develop-green`: the last fully green develop commit and how far develop is ahead of it."""
+    cfg = Cfg(root)
+    if cfg.clone is None:
+        raise Refused("Set the local clone first: orch config set github.release_clone <folder>")
+    w = World(root, cfg)
+    h = w.heads()
+    ahead = 0
+    if h.get("green"):
+        r = w._git("rev-list", "--count", f"{h['green']}..{h['develop']}")
+        ahead = int(r.stdout.strip() or 0) if r.returncode == 0 else 0
+    return {
+        "green": h.get("green"),
+        "develop": h["develop"],
+        "ahead": ahead,
+        "unreleased": len(h["unreleased"]),
+    }
+
+
+def green_text(res: dict) -> str:
+    if not res.get("green"):
+        return f"No develop commit is fully green yet (develop is at {res['develop'][:8]})."
+    if res["green"] == res["develop"]:
+        return f"Develop is green: {res['green'][:8]} is the newest commit and its checks all passed."
+    return (
+        f"Last green develop commit: {res['green'][:8]}; develop is {res['ahead']} commit(s) ahead, "
+        "still being checked. Releases are cut from the green one."
+    )
 
 
 def text(res: dict, dry_run: bool = False) -> str:

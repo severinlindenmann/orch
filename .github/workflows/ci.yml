@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       windows:
-        description: "also run the Windows jobs (off by default: Windows is tested locally on the winvm VMs)"
+        description: "also run the Windows jobs (merge queue groups and pull requests that change file, process or path code run them by themselves)"
         type: boolean
         default: false
   push:
@@ -14,16 +14,17 @@ on:
   # Nightly on develop (the default branch): the mobile suite with UI tests, even when no push ran it to the end.
   schedule:
     - cron: "0 1 * * *"
-# one run per PR: a new push cancels the PR's older run. Pushes to develop/main: one group per branch, a newer push
-# cancels the older run, so only the newest commit is tested and the queue stays short (15 Nov: 24 queued runs). A
-# cancelled push run may have been the one that would have run the mobile UI tests; the nightly schedule run covers
-# that (it runs mobile in full). Schedule and manual runs keep their own group and are never cancelled.
+# one run per PR: a new push cancels the PR's older run. A push to develop is NEVER cancelled (ORCH-314): every
+# develop commit gets a group of its own (its sha) and runs to the end, so "last green develop commit" is a fact the
+# release keeper can read (before, the next merge cancelled the running macOS suite and no develop commit was known
+# green). A group with a cancel-free run still lets a newer PENDING run replace a waiting one, hence one group per sha.
+# Pushes to main keep one group per branch and cancel the older run. Schedule and manual runs keep their own group.
 # A re-run (run_attempt > 1) replays its ORIGINAL event, so it is not news about the PR: it gets a group of its own
 # and cancels nothing. Before, re-running the red job of a draft-time run joined the PR's group and cancelled the real
 # run that marking the PR ready had started (16 Nov, ORCH-7).
 concurrency:
-  group: ci-${{ (github.run_attempt > 1 && format('rerun-{0}', github.run_id)) || github.event.pull_request.number || (github.event_name == 'push' && format('push-{0}', github.ref)) || format('{0}-{1}', github.event_name, github.run_id) }}
-  cancel-in-progress: ${{ github.run_attempt == 1 && (github.event_name == 'pull_request' || github.event_name == 'push') }}
+  group: ci-${{ (github.run_attempt > 1 && format('rerun-{0}', github.run_id)) || github.event.pull_request.number || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && format('develop-{0}', github.sha)) || (github.event_name == 'push' && format('push-{0}', github.ref)) || format('{0}-{1}', github.event_name, github.run_id) }}
+  cancel-in-progress: ${{ github.run_attempt == 1 && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/develop')) }}
 permissions:
   contents: read
 jobs:
@@ -35,13 +36,18 @@ jobs:
       contracts: ${{ steps.f.outputs.contracts }}
       workspace: ${{ steps.f.outputs.workspace }}
       smoke: ${{ steps.f.outputs.smoke }}
+      e2e: ${{ steps.f.outputs.e2e }}
       addons: ${{ steps.f.outputs.addons }}
       publish: ${{ steps.f.outputs.publish }}
       relay: ${{ steps.f.outputs.relay }}
       mobile: ${{ steps.f.outputs.mobile }}
       brand: ${{ steps.f.outputs.brand }}
+      clock: ${{ steps.f.outputs.clock }}
+      oscode: ${{ steps.os.outputs.oscode }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the Windows check below reads the diff against the base branch
       - id: f
         if: github.event_name != 'schedule'
         uses: dorny/paths-filter@v3
@@ -50,12 +56,21 @@ jobs:
             contracts: ['contracts/**', '.github/workflows/contracts.yml']
             workspace: ['workspace/**', 'workspace-addons/*/src/**', 'contracts/**', 'install.ps1', 'install.sh', 'e2e/windows/**', '.github/workflows/workspace.yml']
             smoke: ['workspace/**', 'workspace-addons/**', 'install.ps1', 'install.sh', 'e2e/ci/**', '.github/workflows/cli-smoke.yml']
+            e2e: ['workspace/**', 'workspace-addons/**', 'e2e/**', 'install.sh', '.github/workflows/e2e-smoke.yml']
             addons: ['workspace-addons/**', 'workspace/**', 'contracts/**', 'e2e/focus_insights*', '.github/workflows/addons.yml']
             publish: ['publish/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', 'workspace/src/orch/templates/**', '.github/workflows/publish.yml']
             relay: ['relay/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', '.github/workflows/relay.yml']
             # only the contracts the phone tests read (blocks, crypto, look, relay-api, message, chat-groups, vectors, examples, review)
             mobile: ['mobile/**', 'contracts/blocks*', 'contracts/crypto.md', 'contracts/look*/**', 'contracts/look*', 'contracts/relay-api*', 'contracts/message.schema.json', 'contracts/chat-groups*', 'contracts/vectors/**', 'contracts/examples/**', 'contracts/review/**', '.github/workflows/mobile.yml']
-            brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py']
+            # the suites at a fake hour (ORCH-390): anything that can change what a page or a test does with the time
+            clock: ['workspace/**', 'workspace-addons/**', 'scripts/at-clock.sh', '.github/workflows/clock.yml']
+            brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py', 'scripts/touches_os_code.py']
+      # A pull request that changes file, process or path code also runs the Windows tests (ORCH-315).
+      - id: os
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: origin/${{ github.base_ref }}
+        run: echo "oscode=$(python3 scripts/touches_os_code.py --base "$BASE" --why)" >> "$GITHUB_OUTPUT"
   contracts:
     needs: changes
     if: needs.changes.outputs.contracts == 'true'
@@ -65,18 +80,24 @@ jobs:
     if: needs.changes.outputs.workspace == 'true' || github.event_name == 'schedule'
     uses: ./.github/workflows/workspace.yml
     with:
-      # PRs into develop: Linux only (+ the CLI smoke on Windows/macOS above). Everything else (push to develop/main,
-      # PRs into main, manual, nightly): + macOS.
-      full: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
-      # Windows (unit tests + standard-user install) only on a manual run with windows=true (owner, 7 Nov);
-      # Windows changes are tested locally on a winvm clone (e2e/windows/run-as-standard-user.ps1).
-      # The nightly run (schedule) tests Windows too: the full suite on Windows, macOS and Linux (R3.4).
-      windows: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.windows) }}
+      # PRs into develop: Linux only (+ the CLI smoke on Windows/macOS below). Everything else (push to develop/main,
+      # PRs into main, merge queue groups, manual, nightly): + macOS.
+      # A merge queue group is the pull request from an orch-queue/... branch (the pull-requests add-on): it is what
+      # lands on develop, so it runs on all three systems, each split into parts under 15 minutes (ORCH-315).
+      full: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' || startsWith(github.head_ref, 'orch-queue/') }}
+      # Windows: merge queue groups, pull requests that change file, process or path code
+      # (scripts/touches_os_code.py), the nightly run and a manual run with windows=true.
+      windows: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.windows) || startsWith(github.head_ref, 'orch-queue/') || needs.changes.outputs.oscode == 'true' }}
   # Fast CLI smoke on Windows + macOS for PRs that touch the CLI or an add-on (R1.6, R3.4); the full suite is nightly.
   cli-smoke:
     needs: changes
     if: needs.changes.outputs.smoke == 'true' && github.event_name == 'pull_request'
     uses: ./.github/workflows/cli-smoke.yml
+  # The 5-minute e2e smoke set on every pull request that can change what it tests (R3.4); the full suite is nightly.
+  e2e-smoke:
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true' && github.event_name == 'pull_request'
+    uses: ./.github/workflows/e2e-smoke.yml
   addons:
     needs: changes
     if: needs.changes.outputs.addons == 'true'
@@ -93,6 +114,12 @@ jobs:
     needs: changes
     if: needs.changes.outputs.mobile == 'true' || github.event_name == 'schedule'
     uses: ./.github/workflows/mobile.yml
+  # The add-on suites, the page tests and the workspace tests that name a day at 22:30 and 23:59:40 UTC: a test that
+  # only passes by day goes red here, on its pull request, not on develop at night (ORCH-390, #1371, #1421).
+  clock:
+    needs: changes
+    if: needs.changes.outputs.clock == 'true' || github.event_name == 'schedule'
+    uses: ./.github/workflows/clock.yml
   brand:
     # words from docs/wording.md (R7.5), design tokens and a time limit on every CI job; pure text checks, a few seconds
     needs: changes
@@ -109,7 +136,7 @@ jobs:
       - run: python scripts/check_style.py
   gate:
     if: always()
-    needs: [changes, contracts, workspace, cli-smoke, addons, publish, relay, mobile, brand]
+    needs: [changes, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, mobile, clock, brand]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

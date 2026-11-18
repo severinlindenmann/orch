@@ -321,6 +321,26 @@ def test_overlap_with_red_checks_after_taking_develop_in_is_not_merged(proj, tk,
     assert code == 1 and merges == [] and "after taking develop in: NOT green" in out
 
 
+def test_queue_mode_never_takes_develop_in_it_says_behind(fake_gh):
+    pulls, merges = fake_gh
+    pull = FakePull(PR, _case("pr978-second-run"), landed=[["workspace/src/orch/prwait.py"]])
+    o = prwait.run_one(PR, True, src=pull, queue=True)
+    assert o.status == "behind" and not o.ok and pull.updates == [] and merges == []
+    assert "develop changed files of" in o.line and "prwait.py" in o.line
+
+
+def test_queue_mode_merges_without_waiting_for_the_hourly_merge_count_but_counts_it(fake_gh):
+    pulls, merges = fake_gh
+    pull = FakePull(PR, _case("pr978-second-run"))
+    pull.take = lambda kind, what: False  # no room in the hour: ref wait --merge would stop here
+    assert prwait.run_one(PR, True, src=pull).status == "checks passed" and merges == []
+    pull = FakePull(PR, _case("pr978-second-run"))
+    pull.take = lambda kind, what: False
+    o = prwait.run_one(PR, True, src=pull, queue=True)
+    assert o.ok and o.status == "merged" and len(merges) == 1
+    assert pull.counted == [("merge", PR)]
+
+
 def test_overlap_that_github_cannot_take_in_is_left_to_the_helper(proj, tk, run, fake_gh):
     pulls, merges = fake_gh
     pulls[PR] = FakePull(
@@ -529,3 +549,65 @@ def test_without_a_workflow_file_the_merge_goes_on(proj, tk, run, fake_gh, monke
     monkeypatch.setattr(ghmerge, "workflow_check", lambda url, head: None)
     code, _, _ = run("ref", "wait", tk, "--merge")
     assert code == 0 and len(merges) == 1
+
+
+def _timed_out(retry_state):
+    bad = {"name": "lint", "state": "TIMED_OUT", "bucket": "fail"}
+    ok = {"name": "build", "state": "SUCCESS", "bucket": "pass"}
+    again = {"name": "lint", "state": retry_state, "bucket": "pass" if retry_state == "SUCCESS" else "fail"}
+    return {"repo": "acme/app", "isDraft": False, "required": [], "polls": [[ok, bad], [ok, again]]}
+
+
+def test_a_timed_out_check_is_run_once_more_and_counted():
+    src = prwait.Replay(_timed_out("SUCCESS"))
+    v = prwait.wait(src)
+    assert v.green and v.retried == ["lint"] and src.reran == ["lint"]
+    from orch import checkretry
+
+    s = checkretry.summary()
+    assert s["total"] == 1 and s["checks"][0]["check"] == "lint" and s["checks"][0]["timeout"] == 1
+
+
+def test_a_check_that_times_out_again_is_red_after_one_retry():
+    src = prwait.Replay(_timed_out("TIMED_OUT"))
+    v = prwait.wait(src)
+    assert not v.green and "lint TIMED_OUT" in v.why and "once more" in v.why
+    from orch import checkretry
+
+    assert checkretry.summary()["total"] == 1  # one retry, never a second
+
+
+def test_a_real_failure_is_never_retried():
+    src = prwait.Replay(_timed_out("SUCCESS"))
+    src.polls[0][1]["state"] = "FAILURE"
+    v = prwait.wait(src)
+    assert not v.green and not v.retried and not hasattr(src, "reran")
+
+
+def test_a_network_failure_named_by_the_source_is_retried():
+    case = _timed_out("SUCCESS")
+    case["polls"][0][1]["state"] = "FAILURE"
+    case["networkFailed"] = ["lint"]
+    v = prwait.wait(prwait.Replay(case))
+    assert v.green and v.retried == ["lint"]
+    from orch import checkretry
+
+    assert checkretry.summary()["checks"][0]["network"] == 1
+
+
+def test_a_timeout_and_a_real_failure_together_are_not_retried():
+    case = _timed_out("SUCCESS")
+    case["polls"][0].append({"name": "unit", "state": "FAILURE", "bucket": "fail"})
+    v = prwait.wait(prwait.Replay(case))
+    assert not v.green and not v.retried
+
+
+def test_retry_summary_keeps_only_the_window_and_orders_by_count():
+    from orch import checkretry
+
+    checkretry.record("a/b", "1", "old", "timeout", now=10_000_000.0 - 40 * 86400)
+    for _ in range(2):
+        checkretry.record("a/b", "2", "flaky", "network", now=10_000_000.0)
+    checkretry.record("a/b", "3", "other", "timeout", now=10_000_000.0)
+    s = checkretry.summary(30, now=10_000_100.0)
+    assert [c["check"] for c in s["checks"]] == ["flaky", "other"] and s["total"] == 3

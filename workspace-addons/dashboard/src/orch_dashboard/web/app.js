@@ -101,7 +101,7 @@ const dueText = t => window.DashHelpers.dueWords(t.due, t.status, now()) || (t.d
 const newer = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
 const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
 // A ticket that only waits (a date, another ticket, the outside) says Waiting, not Needs you; Superseded says so.
-const statusWord = t => { const lane = window.DashHelpers.laneOf(t, t.status, questions(t).length > 0); return lane === 'blocked' ? 'Waiting' : lane === 'superseded' ? 'Superseded' : window.DashHelpers.statusWord(t.status, t.started); };
+const statusWord = t => { const lane = window.DashHelpers.laneOf(t, t.status, questions(t).length > 0); return lane === 'blocked' ? 'Waiting' : lane === 'superseded' ? 'Superseded' : window.DashHelpers.changesAsked(t) ? 'Changes asked' : window.DashHelpers.statusWord(t.status, t.started); };
 const chip = (text, cls = '') => h('span', {className:'chip ' + cls}, text);
 const shown = t => snapshot ? t : {...t, status: window.DashHelpers.shownStatus(t, state.runs?.[t.id])};
 const statusChip = t => { const s = shown(t); return chip(statusWord(s), s.status === 'active' ? 'active' : ''); };
@@ -424,6 +424,7 @@ function render(arrived = new Set()) {
     throw err;
   }
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
+  if (typeof liveDockSync === 'function') liveDockSync();  // the layer of the new live page (Preview), outside main
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'ticket') mountTicketTalk(main);
   main.querySelectorAll('[data-question]').forEach(host => {
@@ -788,6 +789,11 @@ main.addEventListener('click', async event => {
   if (menu && event.target.closest('button,a')) menu.open = false;
   const sendControl = event.target.closest('[data-send-to]');
   if (sendControl) { messageSend(sendControl); return; }
+  // List and panel (split block): choosing an item and Open log stay on the page (no request).
+  const pick = event.target.closest('[data-split-pick]');
+  if (pick) { event.preventDefault(); OrchBlocks.splitPick(pick.closest('.blk-split'), pick.dataset.splitPick); return; }
+  const showLog = event.target.closest('[data-split-log]');
+  if (showLog) { OrchBlocks.splitLogShow(showLog.closest('.blk-split'), showLog.dataset.splitLog); return; }
   const row = event.target.closest('[data-addon-act]');
   if (row) { if (!snapshot) addonAct(row); return; }
   const allow = event.target.closest('[data-sync-allow]');
@@ -977,6 +983,7 @@ window.addEventListener('hashchange', async () => {
   soft?.hold(true);
   for (const d of soft ? soft.dialogsToClose() : document.querySelectorAll('dialog[open]')) await window.orch.close(d);
   render();
+  soft?.hold(false);  // render() returns early before the state arrives: scrolls must not stay unremembered (ORCH-340)
 });
 document.getElementById('side-nav')?.addEventListener('toggle', event => {
   if (!event.target.matches?.('details.nav-group')) return;

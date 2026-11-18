@@ -27,6 +27,9 @@ from Chat for a Factory run (you are working on it), turn that ticket into the o
 
     orch factory idea --ticket <id> [--file draft.md]            # its Chat note becomes draft v1 without --file
 
+The idea came out of another ticket (a lessons list, a bug hunt)? Add `--from <that ticket>`: the order and that ticket
+then refer to each other, so nobody has to ask where it came from.
+
 The owner may also file it with one click on the Factory page (the idea box): you are started on that order and draft v1
 is the owner's own words; its note says it is a Factory order. Then write the real first draft as v2 with `orch factory
 draft`, ask your open questions and stop: do NOT build it, however small it sounds. The owner presses Plan the run.
@@ -56,6 +59,9 @@ Write the proposal (contract: `orch factory schema proposal`, schema `orch.facto
 autopilot|change|stop` shows the others; `--help` of each command lists the fields) and send it:
 
     orch factory propose <order> --file proposal.json
+
+Every line the owner reads on the card (title, goal, done-means, ship, assumptions, task titles) has at most 120
+characters; reasons may have 240. A refusal names every problem at once: fix them all before you send it again.
 
 Fill it completely, with a short reason for every choice:
 - **line**: the stages for THIS project; a stop only where the owner's judgement matters (taste, can't undo); the last item
@@ -159,3 +165,4 @@ or failed you are woken: file a change with `takes_back` set to that task ("Do i
 - Bundle questions: one stop or proposal at a time, never several pings for one thing.
 - The order waits when the owner does not answer; other orders go on. Never ship without the owner's Ship it.
 - Stay inside the budget; at 80 % make a change proposal (+time / narrow / stop).
+- Never offer a protected machine (`orch config get workspace.protected_machines`) as a place to test or run something: offer CI or a throwaway server. `orch ask` refuses such a question.
