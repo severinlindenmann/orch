@@ -28,6 +28,18 @@ test('the main button says Continue when an earlier session can be reopened, els
   assert.equal(S.main(S.sessions(null)).what, 'start', 'while the list loads the button says Start');
 });
 
+test('ORCH-667: a stopped helper keeps its conversation as the one in use; Continue offers it', () => {
+  // the real /api/sessions row after a stop: current true, reopenable false (the server continues it on a plain start)
+  const kept = {id: 's1', title: 'Ship it', current: true, reopenable: false, readable: true, turns: 3, last_used: '2026-11-18T20:30:00Z'};
+  const v = S.sessions({available: true, sessions: [kept]}, new Date());
+  assert.deepEqual(S.main(v), {what: 'continue', label: 'Continue'});
+  assert.equal(S.last(v.rows).id, 's1');
+  const gone = S.sessions({sessions: [{...kept, readable: false}]}, new Date());
+  assert.equal(S.main(gone).what, 'start', 'a kept conversation whose file is gone cannot be continued');
+  const both = S.sessions({sessions: [kept, {id: 's0', title: 'Old', reopenable: true, readable: true, turns: 2, last_used: '2026-11-17T10:00:00Z'}]}, new Date());
+  assert.equal(S.last(both.rows).id, 's1', 'the one in use is what a plain start continues');
+});
+
 test('a fresh start sends the tool only when it is not the usual one, the model only when it changed', () => {
   const cur = S.model({model: {name: 'opus', by: 'orch'}});
   assert.deepEqual(S.freshOps('t_1', {tool: 'claude', model: 'opus'}, 'claude', cur), [['run.start', {ticket: 't_1', fresh: true}]]);
