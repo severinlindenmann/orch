@@ -328,7 +328,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   /* o.attach (composer options, ORCH-422): the text field is the shared box, so a screenshot pastes, files drop or pick and
      a voice note records into the same tray; Send back and Add note carry them (note.changes.files). */
   let box=null,ta;if(o.attach&&UI.composer){box=el('div');box.id='swipe-box-'+String(it.id).replace(/[^A-Za-z0-9_-]/g,'_');
-   const comp=UI.composer(box,{hint:'',...o.attach,send:false,interrupt:false,label:'What should change',placeholder:o.attach.placeholder||'Type, paste a screenshot, drop a file or record',draft:dr.text,dropTarget:sh,onFiles:f=>{dr.files=f.slice();sync&&sync()}});
+   const comp=UI.composer(box,{hint:'',...o.attach,send:false,interrupt:false,label:'What should change',placeholder:o.attach.placeholder||'Write, paste a picture or record',draft:dr.text,dropTarget:sh,onFiles:f=>{dr.files=f.slice();sync&&sync()}});
    box.comp=comp;ta=comp.field;if(dr.files&&dr.files.length)comp.restore({text:dr.text,files:dr.files})}
   else{ta=el('textarea');ta.placeholder=o.voice?'Type, or hold the mic and talk':'Type what should change';ta.setAttribute('aria-label','What should change');ta.value=dr.text}
   const voice=el('div','swipe-voice'),mic=btn('swipe-mic',[ic('mic',18),el('span','','Hold or tap to talk')]),wave=el('div','swipe-wave');for(let i=0;i<18;i++){const b=el('i');b.style.animationDelay=(i%6)*0.09+'s';wave.append(b)}

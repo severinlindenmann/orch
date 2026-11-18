@@ -1,5 +1,5 @@
 // ORCH-422: richer feedback. On a ticket in Check the person presses Send back, writes a line, pastes a screenshot and
-// records a voice note (a fake microphone), and sends: both files are on the ticket and the ticket is back with the
+// drops a picture, tries a file kind that is refused, records a voice note (a fake microphone), and sends: the files are on the ticket and the ticket is back with the
 // helper after a reload. Then on Review, Send back on another ticket's card opens the Comment sheet, it takes a voice note and "Add note" keeps
 // it on that ticket while the card stays.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
@@ -51,6 +51,26 @@ module.exports = {
       ta.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
     }, PNG.toString('base64'));
     await box.locator('.attachment-tile', { hasText: 'flyer-shot.png' }).waitFor();
+    await shoot(page, 'ticket-pasted-screenshot');
+    // a file of a kind tickets do not take: refused in the box with plain words, nothing added
+    await box.locator('input[type=file]').setInputFiles({ name: 'setup.exe', mimeType: 'application/octet-stream', buffer: Buffer.from('MZ') });
+    must(/only text files, pictures and voice recordings/i.test(await box.locator('.attachment-error').textContent()), 'a refused file does not say why');
+    must(!(await box.locator('.attachment-tile', { hasText: 'setup.exe' }).count()), 'a refused file was added');
+    await shoot(page, 'ticket-refused-file');
+    // drag a picture over the ticket: the drop label shows; dropping adds it to the box
+    const drag = await page.evaluateHandle(b64 => {
+      const bin = atob(b64), bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const dt = new DataTransfer();
+      dt.items.add(new File([bytes], 'menu-photo.png', { type: 'image/png' }));
+      return dt;
+    }, PNG.toString('base64'));
+    const zone = page.locator('[data-key^=ticket-changes-]').first();
+    await zone.dispatchEvent('dragenter', { dataTransfer: drag });
+    await page.getByText('Drop to send back with this').waitFor();
+    await shoot(page, 'ticket-drag-over');
+    await zone.dispatchEvent('drop', { dataTransfer: drag });
+    await box.locator('.attachment-tile', { hasText: 'menu-photo.png' }).waitFor();
     await record(page, box);
     await shoot(page, 'ticket-send-back-box');
     await act('ticket.attach', () => box.getByRole('button', { name: 'Send back', exact: true }).click());
@@ -60,6 +80,7 @@ module.exports = {
     await shoot(page, 'ticket-after-send-back');
     let t = await text();
     must(t.includes('flyer-shot.png'), 'the pasted screenshot is not on the ticket after a reload');
+    must(t.includes('menu-photo.png'), 'the dropped picture is not on the ticket after a reload');
     must(/voice-note-\d{4}\.webm/.test(t), 'the voice note is not on the ticket after a reload');
     must(t.includes('Bigger date line'), 'the words that were sent back are not on the ticket after a reload');
     must(!(await page.getByRole('button', { name: 'Looks good' }).count()), 'the ticket is still in Check after it was sent back');

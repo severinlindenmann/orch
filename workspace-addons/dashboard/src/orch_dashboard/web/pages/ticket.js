@@ -1290,7 +1290,7 @@ function ticketChangesEditor(t) {
     const cancel = ticketButton('Cancel', 'ghost sm', close, {'data-key':'ticket-ask-cancel'});
     host.replaceChildren(h('div', {className:'stack-sm'}, h('p', {className:'ticket-ask-label'}, 'What should change?'), box, h('div', {className:'row'}, cancel)));
     if (!window.UI?.composer) return;
-    comp = window.UI.composer(box, {...FEEDBACK_BOX, label:'What should change?', placeholder:'Type, paste a screenshot, drop a file or record', sendLabel:'Send back',
+    comp = window.UI.composer(box, {...FEEDBACK_BOX, label:'What should change?', placeholder:'Write, paste a picture or record', sendLabel:'Send back',
       interrupt:false, maxLength:TALK_TYPED_MAX, hint:'', emptyError:'Write what should change, or add a file or a voice note.', dropTarget:host, dropLabel:'Drop to send back with this', sendingText:'Sending…',
       onSend:async message => {
         sending = true;
