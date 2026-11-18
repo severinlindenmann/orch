@@ -15,8 +15,8 @@ lib="$(ls /usr/lib/*/faketime/libfaketime.so.1 /usr/lib/faketime/libfaketime.so.
 now=$(date -u +%s)
 want=$(date -u -d "$(date -u +%Y-%m-%d) $target" +%s)
 offset=$((want - now))
-sign="+"; [ "$offset" -lt 0 ] && sign=""
-echo "at-clock: wall clock set to $(date -u -d "@$want" '+%Y-%m-%d %H:%M:%S') UTC (offset ${sign}${offset}s)" >&2
-export FAKETIME="${sign}${offset}" FAKETIME_DONT_FAKE_MONOTONIC=1 FAKETIME_DONT_RESET=1 TZ=UTC
+plus="+"; [ "$offset" -lt 0 ] && plus=""
+echo "at-clock: wall clock set to $(date -u -d "@$want" '+%Y-%m-%d %H:%M:%S') UTC (offset ${plus}${offset}s)" >&2
+export FAKETIME="${plus}${offset}" FAKETIME_DONT_FAKE_MONOTONIC=1 FAKETIME_DONT_RESET=1 TZ=UTC
 export LD_PRELOAD="$lib${LD_PRELOAD:+:$LD_PRELOAD}"
 exec "$@"
