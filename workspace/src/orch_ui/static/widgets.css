@@ -1156,3 +1156,6 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 }
 @media(prefers-reduced-motion:reduce){.lbar-chip,.lbar-cnt{transition:none}}
 .lbar-pop.lbar-sample{position:relative;left:auto;bottom:auto;z-index:auto;box-shadow:none}
+
+/* a toast never covers the comment sheet's buttons: while a sheet is open it shows at the top (ORCH-422 look check) */
+body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:auto}
