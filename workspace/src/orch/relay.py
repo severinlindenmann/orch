@@ -2837,6 +2837,10 @@ def sync_phone_views(root: Path) -> None:
         from orch import phone_alerts
 
         phone_alerts.sync(root)  # tool logins, connections and keys that run out or stopped (ORCH-47)
+    with contextlib.suppress(Refused, OSError, ValueError, TimeoutError):
+        from orch import phone_stuck
+
+        phone_stuck.sync(root)  # stuck tickets, as at the top of dashboard Home (ORCH-426)
 
 
 def _hint_applied(root: Path, m: dict) -> bool:
