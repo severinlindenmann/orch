@@ -163,7 +163,7 @@
               }
               ,{
                 "type": "object", "required": ["args"], "additionalProperties": false,
-                "description": "Flags kept narrower by the person's own tool config. unless_config names that TOML file (a relative name under the tool's home folder): when it sets `key` to `value`, or cannot be read safely (not a regular file, over 1 MiB, malformed), no flags are added and the run start says `say`; when it sets `approval_key` to anything but `approval_value`, approval_args are left out. A start whose flags include workspace-write is refused when the orch home is inside the start folder or a temporary folder.",
+                "description": "Flags kept narrower by the person's own tool config. unless_config names that TOML file (a relative name under the tool's home folder): when it sets `key` to `value`, or cannot be read safely (not a regular file, over 1 MiB, malformed), no flags are added and the run start says `say` (otherwise it says `note` when set: what the tool cannot reach at this mode); when it sets `approval_key` to anything but `approval_value`, approval_args are left out. A start whose flags include workspace-write is refused when the orch home is inside the start folder or a temporary folder.",
                 "properties": {
                   "args": { "type": "array", "items": { "$ref": "#/$defs/arg" } },
                   "approval_args": { "type": "array", "items": { "$ref": "#/$defs/arg" } },
@@ -178,7 +178,8 @@
                       "profile_key": { "type": "string", "maxLength": 100 }, "profiles": { "type": "string", "maxLength": 100 }
                     }
                   },
-                  "say": { "type": "string", "minLength": 1, "maxLength": 200 }
+                  "say": { "type": "string", "minLength": 1, "maxLength": 200 },
+                  "note": { "type": "string", "minLength": 1, "maxLength": 200 }
                 }
               }
             ]
