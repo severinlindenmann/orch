@@ -65,5 +65,6 @@ module.exports = {
     await act('group.share', () => share.click());
     await page.getByText('Shared with the group.').first().waitFor({ timeout: 20000 });
     orchAsPerson('addon', 'remove', 'relay');   // off again
+    await until(s => !(s.addons || []).some(a => a.name === 'relay'), 'relay off again');
   },
 };

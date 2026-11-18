@@ -65,5 +65,7 @@ module.exports = {
     // the toast with it on a slow machine, so the answer's words are what is checked
     orchAsPerson('stop');
     orchAsPerson('addon', 'remove', 'focus');   // off again for the next click-through
+    await until(s => !(s.addons || []).some(a => a.name === 'focus'), 'focus off again');
+    await until(s => !(s.addons || []).some(a => a.name === 'lessons'), 'lessons off again');
   },
 };

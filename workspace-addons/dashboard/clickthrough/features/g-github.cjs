@@ -46,5 +46,6 @@ module.exports = {
     must((await field.innerText()).trim() === 'On', 'Merge when green is not On after a reload');
     must(JSON.parse(orch('ticket', 'show', tid, '--json')).ext?.['pull-requests']?.merge_when_green === 'on', 'the ticket file does not say on');
     orchAsPerson('addon', 'remove', 'pull-requests');   // off again for the next click-through
+    await until(s => !(s.addons || []).some(a => a.name === 'pull-requests'), 'pull-requests off again');
   },
 };

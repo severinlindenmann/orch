@@ -48,6 +48,7 @@ module.exports = {
     try { orchAsPerson('run', 'stop', tid); } catch (e) { /* the stand-in already ended */ }
     orchAsPerson('config', 'set', 'focus.preview', 'off');
     orchAsPerson('addon', 'remove', 'focus');
+    await until(s => !(s.addons || []).some(a => a.name === 'focus'), 'focus off again');
     await page.evaluate(() => localStorage.removeItem('orch.live.layer'));
   },
 };
