@@ -343,6 +343,25 @@ def test_a_warning_gone_ten_minutes_starts_anew_even_without_a_look_between():
     assert d["all-at-limit"] == {"since": a["all-at-limit"]["since"]}  # back in time: the same warning
 
 
+def test_a_failure_that_moves_to_another_account_is_the_same_warning():
+    a = switching._episodes({}, {"switch-failed": {"to": "a_111111", "label": "A"}}, T0)
+    b = switching._episodes(
+        a, {"switch-failed": {"to": "a_222222", "label": "B"}}, T0 + timedelta(minutes=11)
+    )
+    assert b["switch-failed"] == {"to": "a_222222", "label": "B", "since": a["switch-failed"]["since"]}
+
+
+def test_a_failed_switch_alone_is_not_every_account_at_its_limit(cli, switcher, ws):
+    """The accounts a switch failed to are left out of the choice, but they still have room under their limits."""
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switcher.failing()
+    switching.look(ws, at(0))
+    kinds = [r["kind"] for r in switching.needs_rows(ws, at(0))]
+    assert kinds == ["usage:switch-failed"]
+    assert not any("Every account" in w for w in jrun(cli, "list")[1]["warnings"])
+
+
 def test_got_it_hides_a_warning_until_it_comes_back(cli, switcher, ws):
     seed(cli)
     jrun(cli, "switching", "on", "--by", "human:owner")

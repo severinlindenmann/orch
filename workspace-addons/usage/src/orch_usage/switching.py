@@ -168,9 +168,8 @@ def _episodes(old, now: dict, at: datetime) -> dict:
         gone = prev and isinstance(prev.get("cleared"), str) and at - store.to_time(prev["cleared"])
         if gone and gone >= timedelta(minutes=CLEAR_MINUTES):
             prev = None  # gone long enough (also when no look came between): it starts anew
-        if k in now:
-            same = prev and prev.get("to") == now[k].get("to")
-            out[k] = {**now[k], "since": prev["since"] if same else _iso(at)}
+        if k in now:  # the same warning while it lasts, also when another account is the one that fails now
+            out[k] = {**now[k], "since": prev["since"] if prev else _iso(at)}
         elif prev:
             cleared = prev.get("cleared") or _iso(at)
             if at - store.to_time(cleared) < timedelta(minutes=CLEAR_MINUTES):
@@ -552,8 +551,10 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
             did = "waiting to try again"  # the accounts to go to just failed; tried again after RETRY_MINUTES
 
     # the warnings `orch usage needs` tells the person about, once each (ORCH-644)
+    # at a limit = by the limits alone: an account left out only because a switch to it failed still has room
+    limits = choose(accounts, found, pace, ahead) if failed else ch
     warn_now: dict = {}
-    if ch.all_at_limit:
+    if limits.all_at_limit:
         warn_now["all-at-limit"] = {}
     if failed:
         first = min(failed, key=lambda k: failed[k])  # the account that failed first names the warning
@@ -561,7 +562,7 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
         warn_now["switch-failed"] = {"to": first, "label": label}
     memory["warnings"] = _episodes(memory.get("warnings"), warn_now, at)
 
-    memory["alerts"] = alerts(accounts, ch, failed)
+    memory["alerts"] = alerts(accounts, limits, failed)
     memory["last"] = {
         "at": _iso(at),
         "did": did,
