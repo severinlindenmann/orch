@@ -38,7 +38,7 @@ jobs:
           if os.environ["FULL"] == "true":
               parts["macos-latest"] = 5
           if os.environ["WINDOWS"] == "true":
-              parts["windows-latest"] = 10
+              parts["windows-latest"] = 16
           rows = [
               {"os": o, "part": k, "parts": n, "known_red": o in KNOWN_RED}
               for o, n in parts.items()

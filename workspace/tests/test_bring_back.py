@@ -2210,7 +2210,7 @@ def test_b13f_saving_is_never_cut_by_the_sweep_budget(done_copy, monkeypatch):
     try:
         worktrees._ctx.deadline = time.monotonic() + 2
         assert worktrees._save_leftovers(copy, tid) == (False, BRING_TIME)
-        worktrees._ctx.deadline = time.monotonic() + 8
+        worktrees._ctx.deadline = time.monotonic() + 40  # slow runners (Windows) need more than 8 s here
         assert worktrees._save_leftovers(copy, tid)[0]
     finally:
         worktrees._ctx.deadline = before
