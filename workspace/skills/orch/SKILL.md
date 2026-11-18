@@ -84,9 +84,11 @@ A step that shows a part of Done when in other words than its title: add `--prov
 
 Only the person marks a step "Won't do"; you cannot. Ask instead, with the step on the question:
 
-    orch ask <id> "Mark step c2 as won't do?" --option yes --option no --check c2
+    orch ask <id> "Mark step c2 as won't do?" --option yes --option "No, run it in CI" --check c2
 
-Wait for the answer. If it is yes, the person marks it; do not try to tick or reopen it yourself.
+Say in the no option where the step would run; a bare yes and no is refused. Never offer a protected machine (a
+production machine the owner listed, `orch config get workspace.protected_machines`) for a test: offer CI or a
+throwaway server. Wait for the answer. A yes marks the step won't do by itself; never tick or reopen it yourself.
 
 **Files you make**
 
@@ -147,6 +149,7 @@ switches when its turn ends.
     orch ask <id> "<question>" --option A --option B --recommend A
     orch ask <id> "<question>" --check <c>        # tie it to a step
     orch ask <id> --take-back <q> "<why>"          # the question no longer matters: take it back (it leaves the person's list)
+    orch ask <id> --in-conversation <q> "<their words>"  # the person answered you in your window, not on the card: write their words on it, it closes
 
 Write the question for a person who has not seen your work, in plain words:
 - Say what you need to know and why it matters. Use names (the task, the document), never internal ids like `c1` or `q1`, and never folder or file paths such as `docs/` or `.orch/...` (a path is fine only inside a quoted error message).

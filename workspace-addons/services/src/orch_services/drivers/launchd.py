@@ -141,6 +141,12 @@ class Launchd(Driver):
         n = int(pid.group(1))
         return Status(running=True, pid=n, since=_started(n))
 
+    def runs(self, spec: Spec) -> int | None:
+        """`runs = N` of `launchctl print` (KeepAlive starts it again after every stop)."""
+        cp = self._print(spec)
+        m = re.search(r"^\s*runs = (\d+)", cp.stdout, re.MULTILINE) if cp.returncode == 0 else None
+        return int(m.group(1)) if m else None
+
     def uninstall(self, spec: Spec) -> None:
         if (
             spec.external

@@ -772,6 +772,13 @@ async function chatDmSend(text, retryId) {
 
 // The page heading (the one frame every page uses): "Chat" and, under it, who the helper is and what it is doing.
 function chatHeading() {
+  // The same count as Home's helper list (one source: the helper rows), not the raw number of live runs.
+  let counts = '';
+  try {
+    const rows = window.DashHelpers?.helperRows?.(tickets(), state?.runs);
+    if (rows && window.UI?.helperSummary) counts = window.UI.helperSummary(rows);
+  } catch { counts = ''; }
+  if (counts) return heading('Chat', CHAT_HELPER + ' · ' + counts);
   const running = chatCount(state?.chat?.activity?.running);
   return heading('Chat', CHAT_HELPER + (running ? ' · working on ' + running + (running === 1 ? ' ticket' : ' tickets') : ''));
 }

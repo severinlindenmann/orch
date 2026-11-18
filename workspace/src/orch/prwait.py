@@ -40,6 +40,7 @@ from orch.ghmerge import is_pr_url  # noqa: F401  (orch ref wait checks addresse
 NO_CHECKS_SECS = 900  # a fresh push reports no checks for a while; after this long that is an answer
 TIMEOUT_SECS = 3600
 POLL_SECS = 60
+SAY_SECS = 60  # at most one progress line a minute while it waits
 FIRST_NAP = 30
 NET_TRIES = 7
 NET_SLEEP = 20
@@ -110,6 +111,9 @@ class Replay:
     def take(self, kind: str, what: str) -> bool:
         return True  # a recorded case writes nothing to GitHub
 
+    def count(self, kind: str, what: str) -> None:
+        self.counted = [*getattr(self, "counted", []), (kind, what)]  # a recorded case writes nothing
+
     def retryable(self, names: list[str]) -> str:
         """Why these failed checks may run again ('timeout', 'network'), or '' when one is a real failure."""
         states = {c.get("name"): c.get("state") for c in self.polls_last()}
@@ -126,6 +130,9 @@ class Replay:
     def rerun(self, names: list[str]) -> bool:
         self.reran = list(names)
         return True
+
+    def say(self, text: str) -> None:
+        self.said = [*getattr(self, "said", []), (self.t, text)]  # a recorded case keeps its lines
 
 
 def _run(argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
@@ -164,7 +171,18 @@ class Live:
 
     def take(self, kind: str, what: str) -> bool:
         """Wait for room in this computer's hourly GitHub write limit (orch github writes), then count it."""
-        return ghlimit.take(kind, what)
+        said = [0.0]
+
+        def on_wait(left: float, waited: float) -> None:
+            if waited - said[0] >= SAY_SECS or waited == 0:
+                said[0] = waited
+                self.say(_room_line(self.url, kind, left, waited))
+
+        return ghlimit.take(kind, what, on_wait=on_wait)
+
+    def count(self, kind: str, what: str) -> None:
+        """Count a write that did not wait for room (the merge queue's merges: one per run of the checks)."""
+        ghlimit.count(kind, what)
 
     def gh_json(self, *args: str):
         got = _run([self.gh, *args])
@@ -263,7 +281,10 @@ class Live:
         )  # fmt: skip
         if got.returncode != 0:
             return None
-        for _ in range(20):  # GitHub makes the merge commit a moment later
+        for i in range(20):  # GitHub makes the merge commit a moment later
+            if i and i % 4 == 0:
+                base = self.base or "the base branch"
+                self.say(f"{i // 4} min: waiting for GitHub to take {base} into {self.url}.")
             time.sleep(15)
             v = self.view()
             if v and v.get("headRefOid") != head:
@@ -336,6 +357,53 @@ class Live:
     def elapsed(self) -> float:
         return time.monotonic() - self.start
 
+    def say(self, text: str) -> None:
+        """One progress line while it waits (at most one a minute), so a helper or person watching sees what
+        it waits for (17 Nov: a silent wait for the hourly merge limit looked like a hang for 50 minutes)."""
+        print(f"{time.strftime('%H:%M')} {text}", file=sys.stderr, flush=True)
+
+
+def _say(src, text: str) -> None:
+    say = getattr(src, "say", None)
+    if callable(say):
+        say(text)
+
+
+def _mins(secs: float) -> str:
+    return f"{int(secs // 60)} min"
+
+
+def _waiting_line(src, el, checks, pending, required, names, open_runs) -> str:
+    """What the wait waits for right now, in one line."""
+    url = getattr(src, "url", "") or "the pull request"
+    if not checks:
+        return f"{_mins(el)}: waiting for the checks of {url} to start (none reported yet)."
+    running = [str(c.get("name")) for c in checks if c.get("bucket") == "pending"]
+    parts = []
+    if pending:
+        parts.append(f"{pending} of {len(checks)} still running (" + ", ".join(running[:3])
+                     + (" ..." if len(running) > 3 else "") + ")")  # fmt: skip
+    missing = [r for r in required if r not in names]
+    if missing:
+        parts.append("required not reported yet: " + ", ".join(missing))
+    if open_runs:
+        parts.append(f"workflow runs not finished: {open_runs}")
+    return f"{_mins(el)}: waiting for the checks of {url}: " + "; ".join(parts or ["reading them"]) + "."
+
+
+def _room_line(url: str, kind: str, left: float, waited: float) -> str:
+    """The wait for room in this computer's hourly GitHub write limit, in one line."""
+    try:
+        row = next((r for r in ghlimit.status() if r["kind"] == kind), None)
+    except (OSError, Refused):
+        row = None
+    used = f"{row['used']} of {row['per_hour']} this hour, " if row else ""
+    what = f"checks of {url} passed" if kind == "merge" else url
+    return (
+        f"{_mins(waited)}: {what}; waiting for room in this computer's GitHub limit for "
+        f"{ghlimit.WHAT[kind]} ({used}next fits in about {max(1, round(left / 60))} min; orch github writes)."
+    )
+
 
 def _sorted(checks: list) -> list[tuple[str, str]]:
     rank = {"SUCCESS": 0, "SKIPPED": 1}
@@ -377,6 +445,7 @@ def _wait_once(src, no_checks: float, timeout: float) -> Verdict:
     except Refused as e:
         return Verdict(False, str(e), unknown=True)
     src.sleep(FIRST_NAP)  # a fresh push reports "no checks" for a moment
+    idle_since = None  # since when nothing runs any more although a required check is missing
     while True:
         raw, open_runs = src.look()
         checks = [
@@ -390,6 +459,17 @@ def _wait_once(src, no_checks: float, timeout: float) -> Verdict:
         if checks and not pending and have_required and not open_runs:
             break
         el = src.elapsed()
+        if checks and not pending and not open_runs and not have_required:
+            idle_since = el if idle_since is None else idle_since
+            if el - idle_since >= no_checks:  # every run finished without it (18 Nov: a cancelled group run)
+                gone = ", ".join(r for r in required if r not in names)
+                why = (
+                    f"required check(s) never reported: {gone}; every check and workflow run finished "
+                    f"without it for {int(el - idle_since)}s (a cancelled run? run it again)"
+                )
+                return Verdict(False, why, _sorted(checks), unknown=True)
+        else:
+            idle_since = None
         if not checks and el >= no_checks:
             return Verdict(False, f"no checks after {int(el)}s", unknown=True)
         if el >= timeout:
@@ -399,6 +479,7 @@ def _wait_once(src, no_checks: float, timeout: float) -> Verdict:
             if open_runs:
                 why += f"; unfinished workflow runs: {open_runs}"
             return Verdict(False, why + ")", _sorted(checks), unknown=True)
+        _say(src, _waiting_line(src, el, checks, pending, required, names, open_runs))
         src.sleep(POLL_SECS)
     rows = _sorted(checks)
     bad = [f"{n} {s}" for n, s in rows if s != "SUCCESS"]
@@ -482,14 +563,23 @@ def _no_room(url: str, kind: str) -> str:
 
 
 def run_one(
-    url: str, merge: bool, timeout: float = TIMEOUT_SECS, src: Live | None = None, before_merge=None
+    url: str,
+    merge: bool,
+    timeout: float = TIMEOUT_SECS,
+    src: Live | None = None,
+    before_merge=None,
+    queue: bool = False,
 ) -> Outcome:
     """Wait for one pull request's checks; with merge, merge it on green as GitHub's branch rules allow, only
     its checked commit. When the base branch got commits since the branch last took it in, and they touch a
     file the pull request changes (or a test file of the same module), the base branch is taken in first and
     the checks are waited for once more: two green pull requests on the same code must not break it
     together. before_merge(head) is asked right before the merge: a reason (text) stops it, status
-    "held"; None lets it go on."""
+    "held"; None lets it go on.
+
+    queue=True is the merge queue's call: the base branch is never taken into the branch (status "behind"
+    instead; the queue checks it once on top of the base branch itself), and the merge does not wait for the
+    hourly merge count (the queue merges one group per run of the checks); it is still counted."""
     src = src or Live(url)
     v = src.view()
     if v is None:
@@ -525,6 +615,9 @@ def run_one(
             case = f"{base} moved ({len(landed)} files changed there), none of them touch this pull request"
             break
         shown = ", ".join(hits[:3]) + (" ..." if len(hits) > 3 else "")
+        if queue:  # the queue checks it on top of the base branch itself: no take-in, no second run here
+            line = f"{base} changed files of {url} since it took {base} in ({shown}); not merged alone."
+            return Outcome(url, False, "behind", line, verdict)
         if rounds >= UPDATE_ROUNDS:
             line = (
                 f"{base} keeps changing files of {url} ({shown}); not merged. Take {base} in, push, "
@@ -548,21 +641,25 @@ def run_one(
         if not verdict.green:
             line = f"Checks of {url} after taking {base} in: {verdict.line()}"
             return Outcome(url, False, "checks failed", line, verdict)
-    if not src.take("merge", url):
+    if not queue and not src.take("merge", url):
         return Outcome(url, False, "checks passed", _no_room(url, "merge"), verdict)
     try:  # after the wait for room, not before
         held = before_merge(head) if before_merge is not None else None
     except Exception as e:  # noqa: BLE001 - a check that broke never lets the merge through
         held = f"the last check before the merge failed ({e.__class__.__name__})"
     if held:
-        ghlimit.give_back("merge", url)  # no merge happened: the place goes back
+        if not queue:
+            ghlimit.give_back("merge", url)  # no merge happened: the place goes back
         return Outcome(url, False, "held", f"Checks of {url} passed; not merged: {held}", verdict)
     done = _run([src.gh, "pr", "merge", url, "--merge", "--match-head-commit", head], 60)
     if done.returncode != 0:
         why = next((x.strip() for x in (done.stderr or done.stdout).splitlines() if x.strip()), "no reason")
-        ghlimit.give_back("merge", url)  # no merge happened: the place goes back
+        if not queue:
+            ghlimit.give_back("merge", url)  # no merge happened: the place goes back
         line = f"Checks of {url} passed but GitHub did not merge it ({case}): {why[:200]}"
         return Outcome(url, False, "checks passed", line, verdict)
+    if queue:
+        src.count("merge", url)  # shown in orch github writes; it never waited for room
     took = f"; {base} taken in {rounds}x first" if rounds else ""
     return Outcome(
         url, True, "merged", f"Merged {url} on green checks ({verdict.why}); {case}{took}.", verdict

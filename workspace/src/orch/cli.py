@@ -678,6 +678,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         metavar="QID",
         help='take back your question; the text is the reason: --take-back q3 "why"',
     )
+    x.add_argument(
+        "--in-conversation",
+        metavar="QID",
+        help="the person answered in your window, not on the card: write their words on it and close it: "
+        '--in-conversation q3 "their words"',
+    )
     x.add_argument("--phone", action="store_true", help="also send the question to the phones via relay")
     x.add_argument(
         "--preview",
@@ -1316,6 +1322,23 @@ def run(args: argparse.Namespace) -> None:
         t = tickets.log(root, args.id, args.text, by())
         h = history.lines(root, t)[-1]
         _out(args, h, f"{h['at']} {h['by']}: {tickets.history_line(h['text'], t['checklist'])}")
+    elif cmd == "ask" and args.in_conversation:
+        if (
+            args.take_back
+            or args.phone
+            or args.option
+            or args.recommend
+            or args.kind
+            or args.action
+            or args.check
+            or (cli_review.has_card_flags(args))
+        ):
+            raise Refused(
+                "--in-conversation goes with the person's words only: "
+                "orch ask <ticket> --in-conversation q3 '<their words>'."
+            )
+        q = tickets.answered_in_conversation(root, args.id, args.in_conversation, args.text, by())
+        _out(args, q, f"Closed {q['id']}: answered in the conversation.")
     elif cmd == "ask" and args.take_back:
         if (
             args.phone
@@ -1723,6 +1746,10 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
     for s_ in (sys.stdout, sys.stderr):
         if hasattr(s_, "reconfigure"):
             s_.reconfigure(encoding="utf-8")
+    if argv[:1] == ["protected-check"] and "--hook" in argv:  # a tool's before-tool hook: always exit 0
+        from orch import protected
+
+        return protected.hook_main(argv, watchdog)
     if argv[:1] == ["work-check"] and "--hook" in argv:  # a tool's hook: no parser, no error may reach it
         return workcheck.hook_main(argv, watchdog)
     show_all = "--help-all" in argv
