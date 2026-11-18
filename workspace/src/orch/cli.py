@@ -14,6 +14,7 @@ from orch import (
     addons,
     cli_addons,
     cli_chat,
+    cli_checks,
     cli_clients,
     cli_config,
     cli_conn,
@@ -362,6 +363,7 @@ ADVANCED_TOP = {
     "manager",
     "session",
     "triage",
+    "checks",  # ORCH-529: --help-all only
 }
 ADVANCED_SUB = {"relay": {"allow"}}
 
@@ -481,6 +483,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_report.add_parsers(sub, common)
     cli_leave.add_parsers(sub, common)
     cli_health.add_parsers(sub, common)
+    cli_checks.add_parsers(sub, common)
 
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
     x = t.add_parser("new", parents=[common])
@@ -1049,6 +1052,7 @@ def run(args: argparse.Namespace) -> None:
         or cli_report.dispatch(args, root)
         or cli_leave.dispatch(args, root)
         or cli_health.dispatch(args, root)
+        or cli_checks.dispatch(args, root)
     ):
         pass
     elif (

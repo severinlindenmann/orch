@@ -3,6 +3,7 @@ entries and never the line."""
 
 import copy
 import json
+import os
 from pathlib import Path
 
 import jsonschema
@@ -15,8 +16,8 @@ from orch.record_files import file_ok, workspace_file, workspace_files
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS = ROOT / "contracts"
-VECTORS = json.loads((CONTRACTS / "vectors/activity-v1.json").read_text())
-SCHEMA = json.loads((CONTRACTS / "activity.schema.json").read_text())
+VECTORS = json.loads((CONTRACTS / "vectors/activity-v1.json").read_text(encoding="utf-8"))
+SCHEMA = json.loads((CONTRACTS / "activity.schema.json").read_text(encoding="utf-8"))
 VALIDATOR = jsonschema.Draft202012Validator(SCHEMA, format_checker=jsonschema.FormatChecker())
 SECRET = "KEYVALUE-abc123XYZ-secret"
 RUN = "r_8k2m01"
@@ -30,7 +31,7 @@ def store(tmp_path):
 
 
 def example(name="valid-step-started", **changes):
-    value = json.loads((CONTRACTS / f"examples/activity/{name}.json").read_text())
+    value = json.loads((CONTRACTS / f"examples/activity/{name}.json").read_text(encoding="utf-8"))
     value.update(changes)
     return value
 
@@ -113,7 +114,7 @@ def test_a_path_with_a_key_value_is_dropped_not_stored_hidden(store):
     ws, writer = store
     stored = writer.append(example(files=[f"keys/{SECRET}.txt", "src/app.py", f"{SECRET}"]))
     assert stored["files"] == ["src/app.py"]
-    raw = runfile(ws).read_text()
+    raw = runfile(ws).read_text(encoding="utf-8")
     assert SECRET not in raw and "[hidden" not in raw.split('"files"')[1]
 
 
@@ -135,7 +136,7 @@ def test_all_dropped_keeps_an_empty_list_and_the_line(store):
     ws, writer = store
     stored = writer.append(example(files=["/a", "../b", SECRET]))
     assert stored["files"] == [] and stored["text"] == "Read report-2025-11.pdf"
-    assert len(runfile(ws).read_text().splitlines()) == 1
+    assert len(runfile(ws).read_text(encoding="utf-8").splitlines()) == 1
 
 
 @pytest.mark.parametrize("files", ["src/app.py", {"a": 1}, 7, None])
@@ -211,6 +212,10 @@ def test_normalise_list_order_repeats_limit():
     assert workspace_files("a", root) == [] and workspace_files(None, root) == []
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="workspace file names come from /-style absolute paths only, not Windows paths yet",
+)
 def test_normalise_against_the_real_root(tmp_path):
     real = tmp_path / "real"
     (real / "src").mkdir(parents=True)

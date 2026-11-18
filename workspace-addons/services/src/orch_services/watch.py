@@ -103,18 +103,18 @@ def row_extra(root: Path, rec: dict, st: drivers.Status | None) -> dict:
     wanted = state.get("running") if isinstance(state.get("running"), bool) else bool(st and st.running)
     h = health(rec, st, wanted)
     failing = w["failing"] and wanted
-    if failing and not h["ok"]:
-        n = len([t for t in w["events"] if t > clock() - WINDOW])
-        if n:
-            h["text"] += f": it failed {_times(n)} in the last 10 minutes"
+    n = len([t for t in w["events"] if t > clock() - WINDOW]) if failing else 0
+    if n and not h["ok"]:
+        h["text"] += f": it failed {_times(n)} in the last 10 minutes"
     out: dict = {"health": h, "failing": failing, "question": None}
     q = w["question"]
     if failing and q and q.get("open"):
+        ask = "Restart, Stop or Look into it?"
         out["question"] = {
             "ticket": q.get("ticket"),
             "id": q["id"],
             "title": _title(rec["name"]),
-            "text": "Restart, Stop or Look into it?",
+            "text": f"It failed {_times(n)} in the last 10 minutes. {ask}" if n else ask,
         }
     return out
 
@@ -297,9 +297,9 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
     runs = _runs(drv, spec)
     last = w.get("runs")
     if isinstance(runs, int) and isinstance(last, int) and runs > last:
-        new += min(runs - last, MAX_EVENTS)  # the computer started it again by itself
+        new = min(runs - last, MAX_EVENTS)  # the computer started it again by itself
     if not h["ok"]:
-        new += 1
+        new = max(new, 1)  # one stop seen twice (not alive now, and started again) is still one failure
     w["runs"] = runs
     w["events"] = (events + [now] * new)[-MAX_EVENTS:]
 

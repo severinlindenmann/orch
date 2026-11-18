@@ -3,6 +3,7 @@ server is the sign-in (cookie + page secret, or the dashboard's word for an add-
 checks where the browser is, and no code tells a person to come to "this computer"."""
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -56,7 +57,8 @@ def test_the_session_is_kept_across_a_restart_and_a_used_link_ends_it(tws):
     c = pagesession.PageSession(tws, "dashboard", 8421)  # another port: its own session (like its cookie)
     assert c.cookie != a.cookie
     f = home_mod.key_dir(tws) / "session-dashboard-8420.key"
-    assert oct(f.stat().st_mode & 0o777) == "0o600"
+    if sys.platform != "win32":  # Windows has no file modes (the folder rights are tested in test_winacl)
+        assert oct(f.stat().st_mode & 0o777) == "0o600"
     from orch import pagelaunch
 
     tok = pagelaunch.write_launch_token(tws, "dashboard")

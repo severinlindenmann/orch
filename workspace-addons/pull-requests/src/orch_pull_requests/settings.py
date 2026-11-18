@@ -5,6 +5,8 @@
 - `login`: the GitHub login the queue merges with. When set, a pull request is queued only from that login and
   a runner signed in as anyone else does not run. When not set, each entry remembers the login that added it
   and only a runner with that same login merges it.
+- `max_group`: how many pull requests go into one queue group at most. Default 5, from 1 to 20; any other value
+  means the default. Read at the start of every round, so a change counts without restarting the runner.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from pathlib import Path
 
 DEFAULT_BASES = ("develop",)
 NEVER = ("main", "master")
+DEFAULT_MAX_GROUP, MOST_GROUP = 5, 20
 
 
 def _table(root: Path) -> dict:
@@ -40,3 +43,10 @@ def login(root: Path) -> str | None:
 def same_login(a: str | None, b: str | None) -> bool:
     """GitHub logins do not care about case; an unknown login never matches."""
     return bool(a) and bool(b) and a.lower() == b.lower()
+
+
+def max_group(root: Path) -> int:
+    got = _table(root).get("max_group")
+    if isinstance(got, bool) or not isinstance(got, int) or not 1 <= got <= MOST_GROUP:
+        return DEFAULT_MAX_GROUP
+    return got

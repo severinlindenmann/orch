@@ -98,20 +98,29 @@ _KV_VAL = re.compile(
 )  # a quote (\" escapes inside) to its closing quote, an unclosed one to the end of the line, else one token
 _TO_EOL = re.compile(r"(?i)cookie")
 # A count right before a bare `pass:` with words after it is a test result ("23 pass: upload then answer",
-# node --test and other runners), not a password label (ORCH-447). Only `:`, only the bare word, the count not
-# itself a value (port: 5432 pass: x) and at least two words after it: `pass: 12`, `db pass: x`, `v2 pass: x`,
-# `5432 pass: x` and `23 pass=x` stay secret. Reads at most 32 characters before the name (linear).
-_TEST_COUNT = re.compile(r"(?<![\w.-])\d++[ \t]++\Z")
-_TWO_WORDS = re.compile(r"\S++[ \t]++\S")  # possessive: a skipped head never rescans its line
+# node --test and other runners), not a password label (ORCH-447). Tight, because the same scan guards relay
+# sends and publish (security review ORCH-493): only `:`, only the bare word, the count in ASCII digits and
+# only at the start of a line or right after `(`, `,` or `;`; a space after the colon and at least two words
+# on the label's own line. `pass: 12`, `db pass: x`, `user 42 pass: x y`, `5432 pass: x`, `3 pass:x y`,
+# a value on the next line and `23 pass=x` stay secret. Reads at most 32 characters before the name (linear).
+_COUNT_ALONE = re.compile(r"[ \t]*+[0-9]++[ \t]++")  # fullmatch: the count is all the line holds before
+_COUNT_AFTER = re.compile(r"[(,;][ \t]*+[0-9]++[ \t]++\Z")  # (23 pass: ... / a, 5 pass: ... / x; 2 pass: ...
+_COLON_SPACE = re.compile(r":[ \t]++\Z")  # the head's separator part: a space after the colon, no line break
+_TWO_WORDS = re.compile(r"[^\s]++[ \t]++[^\s]")  # possessive: a skipped head never rescans its line
 
 
 def _test_count(text: str, head) -> bool:
-    """Is this `pass:` head a test count (see _TEST_COUNT)?"""
+    """Is this `pass:` head a test count (see _COUNT_ALONE, _COUNT_AFTER)?"""
     if head.group("sep") != ":" or head.group(1).casefold() != "pass":
         return False
-    before = text[max(0, head.start() - 32) : head.start()]
-    m = _TEST_COUNT.search(before)
-    if m is None or before[: m.start()].rstrip(" \t")[-1:] in (":", "="):
+    if "\n" in head.group(2) or _COLON_SPACE.search(head.group(2)) is None:
+        return False
+    start = max(0, head.start() - 32)
+    before = text[start : head.start()]
+    nl = before.rfind("\n")
+    at_line_start = nl != -1 or start == 0  # the whole rest of the line is inside the window
+    before = before[nl + 1 :]
+    if not ((at_line_start and _COUNT_ALONE.fullmatch(before)) or _COUNT_AFTER.search(before)):
         return False
     return _TWO_WORDS.match(text, head.end()) is not None
 
