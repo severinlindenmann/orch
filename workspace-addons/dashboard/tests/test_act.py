@@ -140,6 +140,9 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("session.reopen", {"ticket": "t_abcdef", "session": "../x"}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "-rf"}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "s-1", "fresh": True}),
+        ("session.new", {"kind": "ticket"}),
+        ("session.new", {"kind": "empty", "ticket": "t_abcdef"}),
+        ("session.new", {}),
         ("addon.start", {"name": "x"}),
         (
             "pull.merge",
@@ -314,6 +317,8 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             ["run", "start", "t_abcdef", "--session", "s-1", *common],
         ),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
+        ({"op": "session.new", "args": {"kind": "empty"}}, ["session", "new", "empty", *common]),
+        ({"op": "session.new", "args": {"kind": "terminal"}}, ["session", "new", "terminal", *common]),
         (
             {
                 "op": "pull.merge",
@@ -1594,6 +1599,27 @@ def test_attach_files_to_an_existing_ticket():
     with pytest.raises(actions.BadRequest):  # a program file is refused before orch is asked
         actions.attachments(
             "ticket.attach", {"ticket": "t_abcdef12", "files": [{"name": "x.exe", "text": "x"}]}
+        )
+
+
+def test_a_voice_note_is_a_ticket_file_like_a_picture():
+    """ORCH-422: Send back and Add note bring a voice note recorded in the browser; the mirror of orch's list takes it."""
+    import base64
+
+    from orch import tickets
+
+    rec = b"\x1a\x45\xdf\xa3voice"
+    args = {
+        "ticket": "t_abcdef12",
+        "files": [{"name": "voice-note-0931.webm", "data": base64.b64encode(rec).decode()}],
+    }
+    assert actions.attachments("ticket.attach", args) == [("voice-note-0931.webm", rec)]
+    # the dashboard's early check names exactly what orch itself accepts
+    core = set(tickets.ATTACH_TEXT) | set(tickets.ATTACH_IMAGES) | set(tickets.ATTACH_AUDIO)
+    assert set(actions.ATTACH_EXT) == core
+    with pytest.raises(actions.BadRequest, match="voice recordings"):
+        actions.attachments(
+            "ticket.attach", {"ticket": "t_abcdef12", "files": [{"name": "clip.mov", "text": "x"}]}
         )
 
 

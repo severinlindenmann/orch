@@ -165,7 +165,7 @@ def seed() -> dict:
     # and off again, so the other click-throughs see the workspace as before.
     from orch import addons
 
-    names = ["focus", "lessons", "pull-requests"]
+    names = ["focus", "lessons", "pull-requests", "sync"]
     addons.registry_path().write_text(
         json.dumps([{"name": n, "source": "built-in", "version": "0.1.0"} for n in names])
     )

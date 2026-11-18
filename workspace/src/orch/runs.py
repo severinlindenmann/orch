@@ -647,12 +647,12 @@ def claim_routed(root: Path, tid: str, by: str, agent: str, mode: str, **kw) -> 
 
     with worktrees.start_lock(root):
         try:
-            if tickets.is_manager(root, tid):
+            if tickets.is_manager(root, tid) or tickets.is_session(root, tid):
                 folder, notes, after = (
                     root,
                     [],
                     [],
-                )  # the Manager looks after the workspace itself, never a copy
+                )  # the Manager and a session without a ticket work in the workspace itself, never a copy
             else:
                 folder, notes, after = worktrees.route(root, tid)
         except Exception:  # noqa: BLE001 - copies are an extra; a start never fails because of them
@@ -734,7 +734,7 @@ def settle(
 ) -> bool:
     """A run ended (or never came): a ticket still Working is Ready again, so every surface that shows the
     ticket status (dashboard, Focus, phone) says what is true. Never touches a ticket a run holds now."""
-    if tickets.is_general(root, tid) or tickets.is_manager(root, tid):
+    if tickets.is_general(root, tid) or tickets.is_manager(root, tid) or tickets.is_session(root, tid):
         return False
 
     def busy() -> bool:
@@ -1307,6 +1307,10 @@ def plan(
                 from orch import manager
 
                 text = manager.prompt(root, ticket, _items_text(items) if items else "")
+            elif tickets.hidden_kind(ticket) == "empty":
+                from orch import sessions
+
+                text = sessions.empty_prompt(ticket, _items_text(items) if items else "")
             else:
                 text = fresh_prompt(ticket, items, root)
             if not (a.get("files") or {}).get("instructions_link"):  # this agent does not read the local file

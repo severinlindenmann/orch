@@ -91,6 +91,12 @@ def test_reruns_stale_overlap_merge():
     assert [p["number"] for p in de.stale_prs(prs, T)] == [1]
     ov = de.overlaps({1: ["a.py", "b.py"], 2: ["b.py"], 3: ["c.py"]})
     assert ov == [{"prs": [1, 2], "files": ["b.py"], "count": 1}]
+    assert (
+        de.overlaps(
+            {1: ["e2e/focus_d/CLICKTHROUGH.md", "NOTES.md"], 2: ["e2e/focus_d/CLICKTHROUGH.md", "NOTES.md"]}
+        )
+        == []
+    )
     m = de.merge_times(
         [
             {"createdAt": "2026-11-17T06:00:00Z", "mergedAt": "2026-11-17T08:00:00Z"},
@@ -433,3 +439,27 @@ def test_twenty_jobs_waiting_is_a_finding_and_the_count_is_in_the_note(proj, rol
     assert "jobs waiting for a machine: 3 now, 281 at most in 24 h" in res["note"]
     gh.ci_waiting = lambda: {"now": 0, "peak": {"n": 12, "at": "2026-11-17T08:00:00+00:00"}}
     assert not any("waited for a machine" in x for x in _pass(proj, gh, "2026-11-17T12:00:00Z")["findings"])
+
+
+def test_overlap_skips_queue_group_branches():
+    class GH:
+        repo = "x/y"
+
+        def branch(self):
+            return "develop"
+
+        def runs(self, b):
+            return []
+
+        def prs(self):
+            mk = lambda n, b: {"number": n, "headRefName": b, "createdAt": "2026-11-18T00:00:00Z"}  # noqa: E731
+            return [mk(1, "feat/a"), mk(2, "feat/b"), mk(3, "orch-queue/g1")]
+
+        def pr_files(self, n):
+            return ["src/x.py"] if n != 2 else ["src/y.py"]
+
+        def merged(self):
+            return []
+
+    s = de.survey(GH(), [], 0, T)
+    assert s["overlaps"] == []
