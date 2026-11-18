@@ -32,9 +32,21 @@ def test_a_release_fix_goes_first_and_alone(ws):
     gh = FakeGitHub({n: {} for n in (1, 2, 3, 4)})
     r, calls = make(ws, gh, FakeGit())
     r.run()
-    assert calls[0] == url(4)  # alone, to the core waiter, before the rest
-    assert all(4 not in members for members in gh.groups.values())
+    # develop changed its files: checked first, in a queue group of its own on top of develop
+    assert gh.groups[calls[0]] == [4]
+    assert all(members == [4] for members in gh.groups.values() if 4 in members)
     assert states(ws) == {1: "merged", 2: "merged", 3: "merged", 4: "merged"}
+
+
+def test_a_fresh_release_fix_merges_directly_before_the_rest(ws):
+    for n in (1, 2):
+        add(ws, n)
+    add(ws, 3, fix_release=33)
+    gh = FakeGitHub({1: {}, 2: {}, 3: {"fresh": True}})  # develop changed none of its files
+    make(ws, gh, FakeGit())[0].run()
+    assert gh.direct[0] == url(3)
+    assert all(3 not in members for members in gh.groups.values())
+    assert states(ws) == {1: "merged", 2: "merged", 3: "merged"}
 
 
 def test_without_a_fix_the_line_still_groups(ws):
