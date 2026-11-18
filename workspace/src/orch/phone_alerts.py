@@ -103,27 +103,30 @@ def known(root: Path, items: list) -> list[dict]:
     for item in items:
         r = by_name.get(item.get("name")) if isinstance(item, dict) else None
         if r and isinstance(r.get("label"), str) and r.get("kind") in KINDS:
-            out.append({**item, "label": r["label"], "kind": r["kind"]})
+            sign_in = r.get("sign_in") if health.sign_in_ok(r.get("sign_in")) and not r.get("renew") else None
+            out.append({**item, "label": r["label"], "kind": r["kind"], "sign_in": sign_in})
     return out
 
 
-def text(a: dict, tz: tzinfo | None = None) -> str:
-    """The warning in the words of dashboard Home (contracts/tool-alert.md, The words)."""
+def text(a: dict, tz: tzinfo | None = None, sign_in: str | None = None) -> str:
+    """The warning in the words of dashboard Home (contracts/tool-alert.md, The words). With the check's
+    sign-in command (ORCH-218) the last sentence names it instead of a plain 'Renew it'."""
     lab, keys, state = a["label"], a["stops"], a["state"]
+    renew = f" Sign in again on your computer: {sign_in}" if sign_in else " Renew it on your computer."
     if state == "works":
         return _line(f"The {lab} works again.", TEXT_MAX)
     if state == "soon":
         out = f"The {lab} ends on {_when(a['ends_at'], tz)}." if a["ends_at"] else f"The {lab} runs out soon."
         if keys:
             out += f" After that helpers stop on {_tickets(len(keys))}: {', '.join(keys)}."
-        return _line(out + " Renew it on your computer.", TEXT_MAX)
+        return _line(out + renew, TEXT_MAX)
     out = f"The {lab} " + ("cannot be reached." if state == "unreachable" else "stopped working.")
     if keys:
         more = " and start no new work" if a["no_new_work"] else ""
         out += f" Helpers stopped on {_tickets(len(keys))}{more}: {', '.join(keys)}."
     elif a["no_new_work"]:
         out += " Helpers start no new work."
-    out += " Check it on your computer." if state == "unreachable" else " Renew it on your computer."
+    out += " Check it on your computer." if state == "unreachable" else renew
     return _line(out, TEXT_MAX)
 
 
@@ -140,7 +143,7 @@ def due(items: list, sent: dict, tz: tzinfo | None = None) -> list[dict]:
             continue
         if a["state"] == "works" and not (before and before.get("state") in WARN):
             continue
-        out.append({"text": text(a, tz), "tool_alert": a})
+        out.append({"text": text(a, tz, item.get("sign_in")), "tool_alert": a})
     return out
 
 

@@ -149,8 +149,30 @@ def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float =
     return _run_orch(orch_bin, args, root, timeout)
 
 
+# Reads the core allows a person only (workspace Chat). The page reads them for the person who is signed in, so they
+# run without an agent tool's variables: a dashboard started from a helper's shell (a test install, a click-through)
+# would otherwise read them as that helper, be refused and answer 404 (ORCH-383). Clicks do the same (actions).
+_PERSON_READS = (("chat", "sync"), ("chat", "contacts"), ("chat", "thread"))
+
+
+def _person_environ(environ) -> dict | None:
+    """environ without the agent tools' variables (orch.adapters.human_environ); None when that list can not be read
+    (fail closed: the read is not made rather than made as the agent)."""
+    try:
+        from orch.adapters import human_environ
+
+        return human_environ(environ)
+    except Exception:  # noqa: BLE001 - an old orch or a bad adapter file
+        return None
+
+
 def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
     READS["process"] += 1
+    env = {**os.environ, "ORCH_ROOT": str(root)}
+    if tuple(args[:2]) in _PERSON_READS:
+        env = _person_environ(env)
+        if env is None:
+            return None
     try:
         r = _run(
             [*_argv0(orch_bin), *args],
@@ -159,7 +181,7 @@ def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
             capture_output=True,
             text=True,
             timeout=timeout,
-            env=_child_env({**os.environ, "ORCH_ROOT": str(root)}, orch_bin),
+            env=_child_env(env, orch_bin),
         )
         return json.loads(r.stdout) if r.returncode == 0 else None
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -595,6 +617,58 @@ def load_general(root: Path) -> dict | None:
     return None
 
 
+# Sessions without a ticket (ORCH-364, core sessions.py): the hidden tickets that hold one, in the New menu's order.
+SESSION_TITLES = {
+    "empty": "Empty helper",
+    "chat": "Chat helper",
+    "terminal": "Plain terminal",
+    "manager": "Manager",
+}
+
+
+def _session_kind(t: dict) -> str | None:
+    if t.get("general") is True:
+        return "chat"
+    if t.get("manager") is True:
+        return "manager"
+    return t["session"] if t.get("session") in ("empty", "terminal") else None
+
+
+def load_sessions(root: Path) -> list[dict]:
+    """[{id, kind, title, closed}]: every session without a ticket this workspace made (read from the ticket
+    files, no orch call). Whether a helper's is on comes from its run; the plain terminal is open until closed."""
+    found: dict[str, dict] = {}
+    for f in _json_files(root / ".orch" / "tickets"):
+        t = _load(f)
+        if not (isinstance(t, dict) and isinstance(t.get("id"), str) and t["id"] == f.stem):
+            continue
+        kind = _session_kind(t)
+        if kind and kind not in found:
+            found[kind] = {
+                "id": t["id"],
+                "kind": kind,
+                "title": SESSION_TITLES[kind],
+                "closed": bool(t.get("closed_at")),
+            }
+    return [found[k] for k in SESSION_TITLES if k in found]
+
+
+def shape_sessions(sessions: list[dict], runs: dict) -> list[dict]:
+    """[{id, kind, title, open}] for the bar and the wall: a helper is open while its session runs."""
+    out = []
+    for s in sessions:
+        on = (runs.get(s["id"]) or {}).get("running") is True
+        out.append(
+            {
+                "id": s["id"],
+                "kind": s["kind"],
+                "title": s["title"],
+                "open": not s["closed"] if s["kind"] == "terminal" else on,
+            }
+        )
+    return out
+
+
 def load_chat(root: Path, orch_bin: str | None) -> dict | None:
     """`orch chat status --json`: {helper, ticket, day, messages, activity, days, running}. None = not readable."""
     d = run_orch(orch_bin, ["chat", "status", "--json"], root)
@@ -972,7 +1046,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
             and re.fullmatch(r"[0-9a-f]{64}", str(x.get("key")))
         ],
     }
-    keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")
+    keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen", "models")
     perm = f_perm.result()
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
     from orch.config import (
@@ -1033,6 +1107,12 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
                 "consent": _consent(r),
                 "detail": _addon_detail(root, r["name"]),
                 "removable": r["name"] not in _core_addons(),  # core says: part of orch, only turned off
+                # the add-on page of a live-session add-on carries the Typing and Preview switches
+                **(
+                    {"page": {"live_session": True}}
+                    if isinstance(r.get("page"), dict) and r["page"].get("live_session") is True
+                    else {}
+                ),
             }
             for r in _addon_rows(rows)
             if r.get("installed") is not False
@@ -1095,7 +1175,12 @@ RUNS_MAX = 30
 
 
 def load_runs(
-    root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool = False, some: bool = False
+    root: Path,
+    orch_bin: str | None,
+    tickets: list[dict],
+    fresh: bool = False,
+    some: bool = False,
+    extra: list[str] | None = None,
 ) -> dict[str, dict]:
     """Run status for tickets that can have a run (not done or dropped, or with a claim file), from `orch run status <id> --json`.
     Cached for a few seconds so the 3 s page poll costs nothing; an action's reply passes fresh=True.
@@ -1111,11 +1196,9 @@ def load_runs(
             _RUN_SIGNATURES[str(root)] = signature
     claims = root / ".orch" / "run" / "tickets"  # a done ticket can still have its live session open
     ids = [t["id"] for t in tickets if t["status"] not in ("done", "dropped")][:RUNS_MAX]
-    ids += [
-        t["id"]
-        for t in tickets
-        if t["status"] in ("done", "dropped") and (claims / f"{t['id']}.json").exists()
-    ]
+    first = set(ids)  # every ticket with a run claim too: a live session past the first RUNS_MAX (ORCH-359)
+    ids += [t["id"] for t in tickets if t["id"] not in first and (claims / f"{t['id']}.json").exists()]
+    ids += [i for i in extra or [] if i not in ids]  # sessions without a ticket (their tickets are hidden)
     now = time.monotonic()
     todo = [
         i for i in ids if fresh or (str(root), i) not in _RUNS or now - _RUNS[(str(root), i)][0] > RUNS_TTL
@@ -1297,6 +1380,7 @@ def load_state(
         # the cards and decisions are for the live page only (a snapshot is shared and carries none)
         f_review = pool.submit(load_review, root, orch_bin) if with_settings else None
         f_general = pool.submit(load_general, root) if with_addons else None
+        f_sessions = pool.submit(load_sessions, root) if with_settings else None
         f_chat = pool.submit(load_chat, root, orch_bin) if with_addons else None
         f_services = pool.submit(load_services, root, orch_bin) if with_addons else None
         f_groups = pool.submit(mobile.load_groups, root, orch_bin) if with_addons else None
@@ -1320,7 +1404,8 @@ def load_state(
     general = f_general.result() if f_general else None
     chat = f_chat.result() if f_chat else None
     services = f_services.result() if f_services else []
-    runs = load_runs(root, orch_bin, tickets, fresh) if with_addons else {}
+    sessions = f_sessions.result() if f_sessions else []
+    runs = load_runs(root, orch_bin, tickets, fresh, extra=[x["id"] for x in sessions]) if with_addons else {}
     groups = f_groups.result() if f_groups else None
     mobile_mode = f_mobile.result() if f_mobile else None
     look_ = f_look.result() if f_look else None
@@ -1344,6 +1429,8 @@ def load_state(
         "review": f_review.result() if f_review else {"cards": [], "answered": [], "accepted": []},
         "services": services,  # snapshots name no add-on
         "runs": runs,
+        # Sessions without a ticket (ORCH-364): empty helper, chat helper, plain terminal, Manager; live page only
+        "sessions": shape_sessions(sessions, runs),
         "groups": groups,  # group chats; snapshots carry none
         "mobile_mode": mobile_mode,  # the live page only, never a snapshot
         "look": look_,  # the live page only, never a snapshot
@@ -1390,6 +1477,10 @@ def load_logins(root: Path) -> dict | None:
         # ORCH-48: what the person does to renew when orch cannot start the sign-in (plain text, one line)
         if isinstance(r.get("how"), str) and re.fullmatch(r"[^\x00-\x1f\x7f<>]{1,160}", r["how"]):
             row["how"] = r["how"]
+        # ORCH-218: the terminal command that signs in again, shown with a Copy button (never run)
+        sign_in = r.get("sign_in")
+        if isinstance(sign_in, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._:=/@,'\"+-]{0,119}", sign_in):
+            row["sign_in"] = sign_in
         row["stops"] = [
             {"id": t.get("id"), "key": t.get("key"), "title": t.get("title")}
             for t in (r.get("stops") or [])

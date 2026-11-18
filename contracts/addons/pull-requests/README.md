@@ -13,8 +13,8 @@ empty), `[dashboard]` "Pull requests" (`orch pull-requests view`), `[[ticket_lin
 merges, so sync holds a changed block until a person allows it.
 
 ## Commands
-- `orch pull-requests queue add <url> [--ticket ID] [--wait] [--max-wait MIN] [--json]`: put it at the end of the
-  line (never twice; owner and name are kept in lower case, so one pull request has one entry). Refused when a
+- `orch pull-requests queue add <url> [--ticket ID] [--first] [--wait] [--max-wait MIN] [--json]`: put it at the end of the
+  line (`--first`: it fixes the red base branch, so it goes ahead of every waiting entry not marked first, see Red base branch) (never twice; owner and name are kept in lower case, so one pull request has one entry). Refused when a
   person merges it with a Merge card on that ticket, when it is closed, merged or a draft, when its base branch
   is not allowed, when changes were requested or a required review is missing, when GitHub does not say which
   login gh uses, or when that login is not the set `login`. `--wait`: exit 0 = merged, 1 = left the queue (the
@@ -24,6 +24,8 @@ merges, so sync holds a changed block until a person allows it.
 - `orch pull-requests queue run`: the runner (one per workspace, lock folder `runner.lock`).
 - `orch pull-requests failed-checks on|off|status|tend [--json]`: the failed-checks part (below). `on`/`off` write
   the setting `act_on_failed_checks`; `tend` runs one pass now (nothing when off).
+- `orch pull-requests helper-stopped on|off|status [--json]`: `on`/`off` write the setting
+  `queue_when_helper_stops` (below).
 
 ## Settings (`.orch/config.toml`, section `[pull_requests]`)
 - `bases` (list, default `["develop"]`): the base branches the queue merges into. `main` and `master` are dropped
@@ -33,6 +35,10 @@ merges, so sync holds a changed block until a person allows it.
   it, and only a runner with that same login takes it (logins compare without case).
 
 - `act_on_failed_checks` (true/false, default false): act on failed checks (below). Any other value is off.
+- `queue_when_helper_stops` (true/false, default false, ORCH-433): the Merge when green pass also puts in the
+  queue each pull request a ticket records as `ready to merge` when the ticket has no switch, no helper works on
+  it (none, or idle at its prompt), no question is open and it is not in Backlog, Done or Dropped. Entries are
+  added `by` `agent:helper-stopped`; turning the setting off takes nothing out. Any other value is off.
 
 ## Queue file `.orch/addons/pull-requests/queue.json`
 `{"entries": [{url, repo, number, ticket, by, added, state, why, base, login, [head, title, closes, group, tries,
@@ -84,7 +90,7 @@ runner puts them back first. Every group branch is written in the group file bef
 after an error and at every start the runner closes the group pull requests that are no longer used and deletes
 their branches. A close or delete that gets no room in the write limit or no answer stays in the file for the
 next round; a branch that could not be deleted 5 times is left to a person with a log line. The runner never
-deletes `orch-queue/*` branches it did not write down: two workspaces on one repository each keep their own. Group titles are
+deletes `orch-queue/*` branches it did not write down: two workspaces on one repository each keep their own. Red base branch (ORCH-391): before each round the runner reads the failed jobs of the base branch's last finished push run of each workflow (`gh run list --event push`, cancelled runs skipped; one look per minute). While that is red it builds no groups: one entry at a time, fixes first (added with `--first`, or its ticket is a red-run ticket of the release keeper: a child of the `github.release_keeper` role ticket whose done-when line says a run is green). A pull request or group whose failed checks are all among the base branch's failed jobs is not blamed: not split, no try used, it waits 5 minutes for the fix (a fix that is still red in them uses a counted try). One that fell behind waits until the base is green instead of its check on top of the base. Group titles are
 written as code text, so words in a title never close issues; only GitHub's own closing references are repeated. Each verdict goes on the entry's ticket (history line and reference state). When an entry with a ticket leaves
 the queue unmerged, the ticket's helper is woken with the reason and the `queue add` line to run again (the same
 wake as failed checks: a live helper gets it as input, otherwise one is started; a history line says which), since

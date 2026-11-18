@@ -87,8 +87,19 @@ def test_an_urgent_label_on_older_work_does_not_count(tmp_path, capsys):
     assert out["did"] == []
 
 
-def test_the_pace_counts_from_the_last_try(tmp_path, capsys):
+def test_a_blocked_try_does_not_move_the_pace(tmp_path, capsys):
     out = go(tmp_path, capsys, state={"last_cut_at": rk.now().isoformat()})
+    assert out["did"] == ["dispatch:ci.yml", "dispatch:e2e.yml"]
+    assert out["state"]["release"]["phase"] == "testing"
+
+
+def test_a_started_try_does_not_write_the_pace(tmp_path, capsys):
+    out = go(tmp_path, capsys)
+    assert "last_cut_at" not in out["state"]
+
+
+def test_the_pace_counts_from_the_last_merged_release(tmp_path, capsys):
+    out = go(tmp_path, capsys, last_release_at=rk.now().isoformat())
     assert out["did"] == []
 
 
@@ -653,6 +664,7 @@ def test_heads_reads_the_pr_title_from_the_merge_body(monkeypatch, tmp_path):
         "_run",
         lambda argv, **k: subprocess.CompletedProcess(argv, 0, log_out if "log" in argv else "s\n", ""),
     )
+    monkeypatch.setattr(w, "green_develop", lambda: "s")  # the green commit; its runs are tested above
     rows = w.heads()["unreleased"]
     assert [r["title"] for r in rows] == ["Relay admin: Copy Doc", ""]
 
@@ -944,3 +956,137 @@ def test_a_helper_cannot_point_the_keeper_elsewhere(proj, run_cli, monkeypatch):
     code, _, err = run_cli("config", "set", "github.release_env", "/tmp/x.sh")
     assert code == 2 and "Only a person" in err
     assert run_cli("config", "set", "github.release_env", "off")[0] == 0
+
+
+def test_a_known_red_job_covers_its_parts():
+    # CI splits a test job into parts (ORCH-315): the known-red entry for the whole job covers every part
+    known = {"workspace / test (windows-latest)": "ORCH-32"}
+    assert (
+        rk.known_name("workspace / test (windows-latest, 3/6)", known) == "workspace / test (windows-latest)"
+    )
+    assert rk.known_name("workspace / test (windows-latest)", known) == "workspace / test (windows-latest)"
+    assert rk.known_name("workspace / test (macos-latest, 1/5)", known) is None
+    assert rk.known_name("workspace / test (windows-latest-arm, 1/2)", known) is None
+    red = {"name": "workspace / test (windows-latest, 2/6)", "status": "COMPLETED", "conclusion": "FAILURE"}
+    green = {"name": "workspace / test (ubuntu-latest, 1/2)", "status": "COMPLETED", "conclusion": "SUCCESS"}
+    assert rk.checks_green([red, green], frozenset(known)) == "green"
+    assert rk.failed_checks([red, green], frozenset(known)) == []
+    assert rk.checks_green([red, green]) == "red"
+
+
+# ---- ORCH-314: develop's push runs are never cancelled; releases are cut only from the last green commit
+G1, G2 = "a" * 40, "b" * 40
+
+
+def world(tmp_path, **sim):
+    sim.setdefault("heads", {"develop": DEV, "main": MAIN, "unreleased": UN3})
+    return rk.World(None, cfg(tmp_path), json.loads(json.dumps(sim)), known=KNOWN)
+
+
+def test_green_develop_skips_a_newer_red_or_running_commit(tmp_path):
+    runs = [
+        run(DEV, "push", status="in_progress", conclusion=None, at="2026-11-17T03:00:00Z", rid=3),
+        run(G2, "push", conclusion="failure", at="2026-11-17T02:00:00Z", rid=2),
+        run(G1, "push", at="2026-11-17T01:00:00Z", rid=1),
+    ]
+    jobs = {
+        "3": [job("workspace / test (macos-latest)", None, "in_progress")],
+        "2": [job("workspace / test (macos-latest)", "failure")],
+        "1": CI_JOBS,
+    }
+    assert world(tmp_path, runs={"ci.yml": runs}, jobs=jobs).green_develop() == G1
+
+
+def test_green_develop_is_none_when_nothing_finished_green(tmp_path):
+    runs = [run(G1, "push", conclusion="cancelled", rid=1)]
+    assert (
+        world(
+            tmp_path, runs={"ci.yml": runs}, jobs={"1": [job("mobile / test", "cancelled")]}
+        ).green_develop()
+        is None
+    )
+
+
+def test_green_develop_ignores_known_red_and_the_rollup(tmp_path):
+    runs = [run(G1, "push", conclusion="failure", rid=1)]
+    jobs = {"1": [job(WIN_FULL, "failure"), job("gate", "failure"), job("mobile / test")]}
+    assert world(tmp_path, runs={"ci.yml": runs}, jobs=jobs).green_develop() == G1
+
+
+def test_nothing_is_cut_while_no_develop_commit_is_green(tmp_path):
+    out = go(tmp_path, heads={"develop": DEV, "green": None, "main": MAIN, "unreleased": []})
+    assert out["did"] == [] and "no develop commit is fully green" in out["lines"][0]
+
+
+def test_a_release_is_cut_from_the_green_commit_not_the_head(tmp_path):
+    heads = {"develop": DEV, "green": G1, "main": MAIN, "unreleased": UN3}
+    out = go(tmp_path, heads=heads, runs={"ci.yml": [run(G1, "schedule")], "e2e.yml": [run(G1, "schedule")]})
+    assert out["state"]["release"]["sha"] == G1 and out["state"]["release"]["phase"] == "gate"
+    assert not any(r["sha"] == DEV for r in [out["state"]["release"]])
+
+
+def test_the_full_signal_is_started_on_the_green_commit(tmp_path):
+    out = go(tmp_path, heads={"develop": DEV, "green": G1, "main": MAIN, "unreleased": UN3})
+    assert out["state"]["release"]["sha"] == G1 and out["state"]["release"]["phase"] == "testing"
+
+
+def test_ci_never_cancels_a_develop_push_run():
+    import re
+    from pathlib import Path
+
+    ci = (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
+    cancel = re.search(r"cancel-in-progress: (.+)", ci).group(1)
+    group = re.search(r"group: (ci-.+)", ci).group(1)
+    assert "github.ref != 'refs/heads/develop'" in cancel  # develop pushes are never cancelled ...
+    assert "format('develop-{0}', github.sha)" in group  # ... and never replaced by a newer pending run
+
+
+# macOS and Windows run only on develop, not in the merge queue (ORCH-315): a red develop run opens the
+# red-develop ticket by itself, once per commit.
+def test_red_develop_push_run_opens_the_red_develop_ticket_once(tmp_path, capsys):
+    runs = {"ci.yml": [run(DEV, "push", "failure", rid=7)], "e2e.yml": []}
+    jobs = {
+        "7": [
+            job("workspace / test (macos-latest, 2/5)", "failure"),
+            job("workspace / test (ubuntu-latest, 1/2)"),
+        ]
+    }
+    out = go(tmp_path, capsys, runs=runs, jobs=jobs)
+    assert "ticket:ci run is red on develop (dddddddd)" in out["did"]
+    assert out["state"]["develop_red_sha"] == DEV
+    again = go(tmp_path, capsys, state=out["state"], runs=runs, jobs=jobs)
+    assert not any(d.startswith("ticket:") for d in again["did"])
+
+
+def test_red_develop_with_an_open_ticket_makes_no_second(tmp_path, capsys):
+    runs = {"ci.yml": [run(DEV, "schedule", "failure")], "e2e.yml": []}
+    open_t = [
+        {
+            "id": "t_1",
+            "key": "ORCH-393",
+            "status": "open",
+            "title": "ci run is red on develop (release 34 blocked)",
+        }
+    ]
+    out = go(tmp_path, capsys, runs=runs, tickets=open_t)
+    assert not any(d.startswith("ticket:") for d in out["did"])
+
+
+def test_a_running_newer_develop_run_is_skipped_and_green_opens_nothing(tmp_path, capsys):
+    newer = run("n" * 40, "push", "", status="in_progress", at="2026-11-17T02:00:00Z")
+    runs = {"ci.yml": [newer, run(DEV, "push")], "e2e.yml": []}
+    out = go(tmp_path, capsys, runs=runs)
+    assert not any(d.startswith("ticket:") for d in out["did"])
+    assert "develop_red_sha" not in out["state"]
+
+
+def test_known_red_windows_on_develop_opens_nothing(tmp_path, capsys):
+    runs = {"ci.yml": [run(DEV, "push", "failure", rid=8)], "e2e.yml": []}
+    jobs = {
+        "8": [
+            job("workspace / test (windows-latest, 3/10)", "failure"),
+            job("workspace / test (macos-latest, 1/5)"),
+        ]
+    }
+    out = go(tmp_path, capsys, runs=runs, jobs=jobs)
+    assert not any(d.startswith("ticket:") for d in out["did"])

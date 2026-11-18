@@ -12,7 +12,7 @@ module.exports = {
     const ws = await page.evaluate(() => state.settings?.folder || null) || await (async () => { await open('#settings/general'); return page.evaluate(() => state.settings.folder); })();
     must(/\.orch-test[\\/]clickthrough-/.test(ws), 'not the throw-away workspace: ' + ws);
     const home = path.dirname(ws), repo = path.resolve(__dirname, '..', '..', '..', '..');
-    const orch = (...a) => execFileSync('env', ['-i', 'PATH=' + process.env.PATH, 'HOME=' + home, 'USERPROFILE=' + home, 'ORCH_HOME=' + home + '/orch', 'ORCH_HOME_STRICT=1',
+    const orch = (...a) => execFileSync('env', ['-i', 'PATH=' + path.join(home, 'bin') + path.delimiter + process.env.PATH, 'HOME=' + home, 'USERPROFILE=' + home, 'ORCH_HOME=' + home + '/orch', 'ORCH_HOME_STRICT=1',
       'UV_CACHE_DIR=' + (process.env.UV_CACHE_DIR || path.join(require('node:os').homedir(), '.cache', 'uv')), 'uv', 'run', '-q', '--project', repo + '/workspace', 'python', '-I', '-m', 'orch', ...a], { cwd: ws, encoding: 'utf8' });
     orch('logins', 'add', 'portal', '--command', 'false', '--label', 'Team portal', '--how', 'Log in to the team portal in your browser.');
     orch('logins');   // keeps the result the page shows

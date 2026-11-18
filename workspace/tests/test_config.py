@@ -97,6 +97,8 @@ def test_orch_agents_lists_found_and_chosen(proj, run, fake_path):
     code, out, _ = run("agents", "--json")
     rows = {r["name"]: r for r in json.loads(out)}
     assert rows["my-agent"]["chosen"] and rows["claude"]["found"] and not rows["claude"]["chosen"]
+    # ORCH-362: the Start choice offers a model only for a tool orch passes the ticket's model to
+    assert rows["claude"]["models"] is True and rows["my-agent"]["models"] is False
 
 
 def test_orch_agents_nothing_found_nothing_chosen(proj, run, fake_path):

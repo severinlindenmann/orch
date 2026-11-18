@@ -184,6 +184,7 @@ def test_overview_names_the_tickets_that_stop_and_leaks_nothing(proj, run, new_t
         "renew",
         "key",
         "how",
+        "sign_in",
     }
     assert r["renew"] is True and r["key"] is None  # orch can start the Claude Code sign-in (ORCH-46)
     assert HIDDEN not in json.dumps(rows)
@@ -377,12 +378,23 @@ def test_a_path_reads_every_item_and_the_earliest_end(monkeypatch):
 def test_codex_is_checked_by_its_exit_code_and_says_what_to_do():
     rec = {r["name"]: r for r in health.helper_recipes()}["codex"]
     assert rec["command"][1:] == ["login", "status"] and rec["works"] is None
-    assert "codex login" in rec["how"]
+    assert rec["sign_in"] == "codex login" and not rec["how"]
 
 
 def test_known_tools_only_when_installed_and_set_up(proj, monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
-    for k in ("XDG_CONFIG_HOME", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "DATABRICKS_CONFIG_FILE"):
+    for k in (
+        "XDG_CONFIG_HOME",
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_CONFIG_DIR",
+        "DATABRICKS_CONFIG_FILE",
+        "AZURE_CONFIG_DIR",
+        "CLOUDSDK_CONFIG",
+        "AWS_CONFIG_FILE",
+        "AWS_SHARED_CREDENTIALS_FILE",
+        "AWS_PROFILE",
+    ):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setattr(health.shutil, "which", lambda b: f"/bin/{b}")
     assert health.known_recipes() == []  # installed, but never set up here
@@ -390,7 +402,7 @@ def test_known_tools_only_when_installed_and_set_up(proj, monkeypatch, tmp_path)
     (tmp_path / ".config" / "gh" / "hosts.yml").write_text("x")
     (tmp_path / ".databrickscfg").write_text("x")
     got = {r["name"]: r for r in health.known_recipes()}
-    assert set(got) == {"github", "databricks"} and "gh auth login" in got["github"]["how"]
+    assert set(got) == {"github", "databricks"} and got["github"]["sign_in"] == "gh auth login"
     monkeypatch.setattr(health.shutil, "which", lambda b: None)
     assert health.known_recipes() == []  # set up, but the tool is gone
 
@@ -435,3 +447,65 @@ def test_logins_add_and_remove_command(proj, run):
     assert code == 2
     code, out, _ = run("logins", "remove", "wiki")
     assert code == 0 and "no longer checks wiki" in out
+
+
+# ------------------------------------------------------------------------------------------------ ORCH-218
+
+
+def test_every_known_tool_names_its_sign_in_command(proj, monkeypatch, tmp_path):
+    """Azure CLI, gcloud, aws, databricks and GitHub each name the terminal command that signs in again."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
+    monkeypatch.setattr(health.shutil, "which", lambda b: f"/bin/{b}")
+    for f in (
+        ".azure/azureProfile.json",
+        ".config/gcloud/credentials.db",
+        ".aws/config",
+        ".databrickscfg",
+        ".config/gh/hosts.yml",
+    ):
+        (tmp_path / f).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / f).write_text("x")
+    got = {r["name"]: r["sign_in"] for r in health.known_recipes()}
+    assert got == {
+        "github": "gh auth login",
+        "databricks": "databricks auth login",
+        "azure": "az login",
+        "gcloud": "gcloud auth login",
+        "aws": "aws sso login",
+    }
+    # the exit code answers for the new ones: what they print (a token for gcloud) is never read
+    by = {r["name"]: r for r in health.known_recipes()}
+    assert all(by[n]["works"] is None for n in ("azure", "gcloud", "aws"))
+
+
+def test_an_own_check_can_say_how_to_sign_in(proj, run):
+    r = health.add_recipe(
+        proj,
+        "sf",
+        {
+            "label": "Salesforce",
+            "command": ["sf", "org", "display"],
+            "sign_in": "sf org login web --alias prod",
+        },
+    )
+    assert r["sign_in"] == "sf org login web --alias prod"
+    for bad in ("sf login; rm -rf ~", "sf $(x)", "sf `x`", "a\nb", "x" * 121, "  "):
+        with pytest.raises(Refused):
+            health.add_recipe(proj, "bad", {"command": ["sf", "x"], "sign_in": bad})
+    code, out, _ = run(
+        "logins", "add", "vault", "--command", "vault token lookup", "--sign-in", "vault login -method=oidc"
+    )
+    assert code == 0
+    assert {x["name"]: x["sign_in"] for x in health.workspace_recipes(proj)}[
+        "vault"
+    ] == "vault login -method=oidc"
+
+
+def test_the_line_names_the_sign_in_command():
+    row = {"label": "Azure CLI", "state": "renew", "ends_at": None, "stops": [], "chosen": False}
+    assert cli_health.line({**row, "sign_in": "az login"}).endswith(
+        "no longer works. Open a terminal on this computer and run: az login"
+    )
+    assert cli_health.line({**row, "sign_in": "az login", "how": "Ask IT."}).endswith("Ask IT.")
+    assert health.how_words({"sign_in": "az login"}) == "Open a terminal on this computer and run: az login"
