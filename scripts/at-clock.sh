@@ -9,7 +9,6 @@
 # timeouts and sleeps behave. Every child process (pytest-xdist workers, node, orch subprocesses) sees the same time.
 # The clock goes BACK to the last time it read HH:MM:SS (at most a day): files the kernel stamps with the real time
 # then look new, not old, so code that sweeps old files does not take a file made a moment ago.
-# tmux is left on the real clock (its server hangs under libfaketime); it only draws the screen.
 set -euo pipefail
 target="${1:?usage: at-clock.sh HH:MM:SS command...}"
 shift
@@ -20,6 +19,6 @@ want=$(date -u -d "$(date -u +%Y-%m-%d) $target" +%s)
 [ "$want" -le "$now" ] || want=$((want - 86400))
 offset=$((want - now)); [ "$offset" -ne 0 ] || offset="+0"
 echo "at-clock: wall clock set to $(date -u -d "@$want" '+%Y-%m-%d %H:%M:%S') UTC (offset ${offset}s)" >&2
-export FAKETIME="${offset}" FAKETIME_DONT_FAKE_MONOTONIC=1 FAKETIME_DONT_RESET=1 FAKETIME_SKIP_CMDS=tmux TZ=UTC
+export FAKETIME="${offset}" FAKETIME_DONT_FAKE_MONOTONIC=1 FAKETIME_DONT_RESET=1 TZ=UTC
 export LD_PRELOAD="$lib${LD_PRELOAD:+:$LD_PRELOAD}"
 exec "$@"
