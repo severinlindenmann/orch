@@ -42,6 +42,7 @@ jobs:
           done
           [ -z "$failed" ] || { echo "red at ${{ matrix.at }} UTC:$failed"; exit 1; }
       - name: Workspace tests that name a day
+        if: ${{ !cancelled() }}
         working-directory: workspace
         run: |
           files=$(grep -lE "[Tt]oday|[Yy]esterday|[Tt]omorrow|\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b" tests/test_*.py)
