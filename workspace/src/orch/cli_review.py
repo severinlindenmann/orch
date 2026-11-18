@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from orch import ghmerge, history, nextstep, review, review_server, runs_live, safefile, tickets
+from orch import dashshots, ghmerge, history, nextstep, review, review_server, runs_live, safefile, tickets
 from orch.errors import Refused
 
 SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict", "security")
@@ -355,6 +355,16 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
     """`orch ask TICKET TEXT --draft|--link|--plan|--choose TITLE ...`: the question with a card on it."""
     if not args.then:
         raise Refused("A card needs --then: what happens after the answer.")
+    if getattr(args, "ci_shots", None):  # ORCH-312: the pictures CI took, never the helper's own
+        if args.file or args.before or args.after or getattr(args, "choose", None) is not None:
+            raise Refused(
+                "--ci-shots shows the pictures by itself: leave out --file, --before, --after and --choose."
+            )
+        if getattr(args, "merge", False):
+            raise Refused("--ci-shots goes on its own card, not on a Merge card.")
+        args.file = _guard(dashshots.card_file, root, tid, args.ci_shots)
+        if not args.open:
+            args.open = args.ci_shots
     card, options, suggest, _title = _guard(build_card, root, args)
     links = _guard(links_of, getattr(args, "ref", None) or [])
     if getattr(args, "merge_workflow", None) and len(links or []) < LINKS_MAX:  # ORCH-305: the diff itself

@@ -48,6 +48,12 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--out", default=".", metavar="FOLDER", help="folder for the pictures")
     x.add_argument("--name", default="shot", help="start of each file name")
     x.add_argument("--wait", type=int, default=8, metavar="SEC", help="longest wait for the page to settle")
+    x.add_argument(
+        "--page",
+        metavar="NAME[=PART][,...]",
+        help="several pages of one site in one run, after the address's # (e.g. home,tickets,"
+        "ticket=ticket/DM1-2); files are named <name>-<page>-<width>.png",
+    )
 
 
 def find_browser() -> str:
@@ -162,6 +168,42 @@ class _Pipe:
                 last = time.monotonic()
 
 
+PAGE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,40}")
+PAGE_PART = re.compile(r"[A-Za-z0-9/_.~-]{1,120}")
+
+
+def parse_pages(text: str | None) -> list[tuple[str, str]]:
+    """--page home,ticket=ticket/DM1-2 -> [(home, home), (ticket, ticket/DM1-2)]: a file name part and what
+    goes after the address's #."""
+    if not text:
+        return []
+    pages = []
+    for item in (p.strip() for p in text.split(",")):
+        if not item:
+            continue
+        name, _, part = item.partition("=")
+        part = part or name
+        if not PAGE_NAME.fullmatch(name) or not PAGE_PART.fullmatch(part):
+            raise Refused(f"'{item[:60]}' is not a page like home or ticket=ticket/DM1-2.")
+        if any(n == name for n, _ in pages):
+            raise Refused(f"The page name '{name}' is given twice.")
+        pages.append((name, part))
+    return pages
+
+
+def page_url(url: str, part: str) -> str:
+    """The site's address with the page after its #; a sign-in link (#launch=...) is spent by then."""
+    return url.split("#", 1)[0] + "#" + part
+
+
+BUSY_JS = "!!document.querySelector('[aria-busy=\"true\"]')"
+
+
+def _busy(pipe, session: str) -> bool:
+    r = pipe.call("Runtime.evaluate", {"expression": BUSY_JS, "returnByValue": True}, session=session)
+    return bool((r.get("result") or {}).get("value"))
+
+
 def capture(pipe: _Pipe, url: str, width: int, height: int, wait: int) -> bytes:
     """One picture in a fresh tab. The viewport is set through the protocol, not the window: new
     headless Chrome never makes a window narrower than 500, so a 390 window was laid out 500 wide
@@ -182,6 +224,13 @@ def capture(pipe: _Pipe, url: str, width: int, height: int, wait: int) -> bytes:
         deadline = time.monotonic() + wait
         pipe.wait_event("Page.loadEventFired", s, wait)
         pipe.settle(s, QUIET_SEC, deadline)
+        # A page that says it is still loading (aria-busy) is waited for; still busy at the end of --wait:
+        # no picture, never one of a loading shape (CI pictures on a slow runner, ORCH-312).
+        while _busy(pipe, s):
+            if time.monotonic() >= deadline:
+                raise TimeoutError("the page was still loading")
+            time.sleep(0.2)
+            pipe.settle(s, QUIET_SEC, min(deadline, time.monotonic() + QUIET_SEC))
         shot = pipe.call("Page.captureScreenshot", {"format": "png"}, session=s, timeout=60)
         return base64.b64decode(shot["data"])
     finally:
@@ -221,9 +270,17 @@ def _launch(cmd: list[str]) -> tuple[subprocess.Popen, _Pipe]:
 
 
 def shoot(
-    target: str, widths: list[int], out_dir: Path, name: str, height: int | None, wait: int
+    target: str,
+    widths: list[int],
+    out_dir: Path,
+    name: str,
+    height: int | None,
+    wait: int,
+    pages: list[tuple[str, str]] | None = None,
 ) -> list[Path]:
     url = target_url(target)
+    if pages and not url.startswith(("http://", "https://")):
+        raise Refused("--page goes with an address (http://...), not a file.")
     browser = find_browser()
     out_dir.mkdir(parents=True, exist_ok=True)
     # One profile and one browser for the whole run (a sign-in link in the address is spent once; the
@@ -234,17 +291,29 @@ def shoot(
     pipe = None
     try:
         proc, pipe = _launch(command(browser, profile, max(widths), _height(max(widths), height)))
-        for w in widths:
-            out = (out_dir / f"{name}-{w}.png").resolve()
-            page = url if not done else re.sub(r"#launch=.*$", "", url)
+        if pages and "#launch=" in url:  # sign in once; the cookie carries every page after it
             try:
-                data = capture(pipe, page, w, _height(w, height), wait)
+                capture(pipe, url, widths[0], _height(widths[0], height), wait)
             except (TimeoutError, EOFError, RuntimeError, KeyError, ValueError) as e:
-                raise Refused(f"No picture was made for {url} at {w} wide ({e}).") from None
-            if not data:
-                raise Refused(f"No picture was made for {url} at {w} wide.")
-            out.write_bytes(data)
-            done.append(out)
+                raise Refused(f"The sign-in link did not open ({e}).") from None
+        shown = re.sub(r"#launch=.*$", "", url)  # never print a sign-in token
+        for pname, part in pages or [("", "")]:
+            for w in widths:
+                stem = f"{name}-{pname}-{w}" if pname else f"{name}-{w}"
+                out = (out_dir / f"{stem}.png").resolve()
+                if pname:
+                    page = page_url(url, part)
+                else:
+                    page = url if not done else shown
+                where = page_url(shown, part) if pname else shown
+                try:
+                    data = capture(pipe, page, w, _height(w, height), wait)
+                except (TimeoutError, EOFError, RuntimeError, KeyError, ValueError) as e:
+                    raise Refused(f"No picture was made for {where} at {w} wide ({e}).") from None
+                if not data:
+                    raise Refused(f"No picture was made for {where} at {w} wide.")
+                out.write_bytes(data)
+                done.append(out)
     finally:
         if pipe is not None:
             try:
@@ -269,7 +338,15 @@ def shoot(
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "shot":
         return False
-    files = shoot(args.target, parse_widths(args.width), Path(args.out), args.name, args.height, args.wait)
+    files = shoot(
+        args.target,
+        parse_widths(args.width),
+        Path(args.out),
+        args.name,
+        args.height,
+        args.wait,
+        parse_pages(getattr(args, "page", None)),
+    )
     if getattr(args, "json", False):
         print(json.dumps({"files": [str(f) for f in files]}))
     else:
