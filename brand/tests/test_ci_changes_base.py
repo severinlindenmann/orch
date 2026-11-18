@@ -92,4 +92,4 @@ def test_ci_main_uses_the_base():
     text = CI.read_text(encoding="utf-8")
     assert "scripts/ci_changes_base.sh" in text
     assert "base: ${{ steps.base.outputs.sha }}" in text
-    assert "github.ref == 'refs/heads/main' && 0 || 1" in text
+    assert "fetch-depth: 0" in text  # the base commit must be in the clone

@@ -310,20 +310,22 @@ def check_workflows(files: list) -> dict | None:
     return {"files": shown, "findings": found[:MAX_FINDINGS], "more": max(0, len(found) - MAX_FINDINGS)}
 
 
-def workflow_check(url: str, head: str) -> dict | None:
+def workflow_check(url: str, head: str, own: bool = False) -> dict | None:
     """check_workflows() for exactly the commit `head` of the pull request at `url` (GitHub's compare of its
-    base branch with that commit), read-only with whatever login this process has. None when it changes no
-    CI workflow or GitHub cannot be read."""
+    base branch with that commit), read-only with whatever login this process has (own: the person's own gh
+    login, with no helper token, as on a Merge click). None when it changes no CI workflow or GitHub cannot be
+    read."""
     gh = shutil.which("gh")
     if gh is None or not is_pr_url(url) or not SHA.fullmatch(str(head or "")):
         return None
     repo, _ = _parts(url)
     try:
-        v = _gh_plain(gh, ["pr", "view", url, "--json", "baseRefName"], 15)
+        read = _gh if own else _gh_plain
+        v = read(gh, ["pr", "view", url, "--json", "baseRefName"], 15)
         base = (json.loads(v.stdout) if v.returncode == 0 else {}).get("baseRefName")
         if not isinstance(base, str) or not base:
             return None
-        c = _gh_plain(gh, ["api", f"repos/{repo}/compare/{base}...{head}", "--jq", ".files"], 30)
+        c = read(gh, ["api", f"repos/{repo}/compare/{base}...{head}", "--jq", ".files"], 30)
         files = json.loads(c.stdout) if c.returncode == 0 else None
     except (Refused, ValueError, AttributeError):
         return None
@@ -434,9 +436,13 @@ def merge(url: str, head: str, add_review: bool = True) -> dict:
             f"Its checks have not all passed yet ({unfinished}), so nothing was merged. "
             "The card stays: click Merge again when they are green."
         )
-    if (
-        add_review and review == "REVIEW_REQUIRED"
-    ):  # the branch rules want a review: the click is the person's, on THIS commit
+    # The branch rules want a review: the click is the person's, on THIS commit. A rule set (not the classic
+    # branch protection) asks for the code owner's review without GitHub saying REVIEW_REQUIRED: the decision
+    # comes back empty, so a CI workflow change (ORCH-305: always the code owner's) is approved as well
+    # (ORCH-314: the owner's click on #1343 failed with "the base branch policy prohibits the merge").
+    if add_review and (
+        review == "REVIEW_REQUIRED" or (review == "" and workflow_check(url, head, own=True) is not None)
+    ):
         _gh(  # the person's own pull request: GitHub says no, and the merge below tells what is missing
             gh,
             ["api", "-X", "POST", f"repos/{repo}/pulls/{num}/reviews", "-f", f"commit_id={head}",

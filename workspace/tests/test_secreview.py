@@ -207,7 +207,7 @@ def test_an_open_pull_request_gets_its_review_before_the_merge(tmp_path):
         open_prs=[pr(9, ["publish/src/a.rs"]), pr(10, ["relay/x.rs"], draft=True)],
     )
     assert out["did"] == ["security-review:#9"]  # a draft waits until it is ready
-    assert out["lines"][-1] == "develop has nothing main does not have"
+    assert out["lines"][-1] == "green develop has nothing main does not have"
 
 
 def test_a_squash_merge_is_tied_to_its_pull_request_by_github(tmp_path):

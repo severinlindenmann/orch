@@ -37,6 +37,25 @@ itself.
     orch services restart <id>
     orch services auto <id> on      # or off
 
+**Health check and a service that keeps stopping** (one pass, then it ends)
+
+    orch services check
+
+Each service is checked: its process is alive and, when it has a port, it answers on 127.0.0.1. When a service failed
+3 times in 10 minutes (a failed check, or the computer started it again by itself) it is Failing, and orch asks ONE
+question on the ticket that made it (a service without a ticket gets its own ticket "Services: <name> keeps
+stopping"): Restart, Stop or Look into it, Restart recommended. Never a second question while that one is open; when
+the service runs fine again for 10 minutes, orch takes the question back.
+The person answers the question on the ticket. The next `check` reads the answer and acts on it once: Restart restarts
+the service, Stop stops it, Look into it changes nothing and only notes it on the ticket (no new question until the
+service runs fine again for 10 minutes and then fails again). `list --json` shows `health`, `failing` and the open
+`question` on each service.
+
+To check regularly, the person sets up a repeat once (do not set it up yourself; tell them these two lines):
+
+    orch automation script add services-check -- orch services check
+    orch automation repeat <ticket> "every 5 minutes" --script services-check
+
 **Read the log** (the last 20 lines; secrets are shown as ••••••)
 
     orch services log <id> --lines 50

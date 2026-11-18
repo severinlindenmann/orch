@@ -218,3 +218,53 @@ Narrow panes (three at 1280, more than one on the right, a phone) fold pin and p
 phone shows only the selected session and has no add beside. The split and the selection are kept per browser and
 stay while the page changes. Pins are kept in this browser (the bar's key) until the wall stores them in orch.
 Master: `.live-*` in widgets.css (style guide: Live layer); click-through step 12.
+
+## The Focus button and Open ticket, built (ORCH-365, 17 Nov)
+
+focus-v4d.html stays the source of truth; nothing in the draft changed. Behind the Preview switch every ticket page and
+every ticket row (table and phone) has one button with the draft's words: Watch, Answer, Open, In line or Start, from
+the same session states as the bar. It opens the ticket's session in the layer and moves the keyboard into it; on the
+ticket page it says "… in Focus" and sits in the header with the other actions (the draft has it under the steps),
+where it takes the place of Watch live while a helper runs. A row's own Answer gives way to it, so no row shows two.
+Every pane has Open ticket (also in More when the pane is narrow, as in the draft); from full screen it steps back so
+the ticket page shows. Finished tickets without a helper get no button. Wall tiles come with the wall task. No new
+master rules (kit buttons only); click-through step 6.
+
+## Live data for every session, built (ORCH-359, 17 Nov)
+
+focus-v4d.html stays the source of truth; nothing in the draft changed. The bar and the panes read one list of
+sessions (GET /api/sessions, pages/livesessions.js) instead of the tickets and runs: status (needs you, working, in
+line, idle, closed), what it waits on, the open question, the last lines of its screen, tool and model, open time and
+when it closes for being idle. A pane shows what the session does now, its last lines and draft D's meta line
+("Helper · Opus · open 38 min · stays warm while it works"), updated in place every 3 s. The wall builds on the same
+list and the same words (liveNow, liveMeta). Master: `.live-now`, `.live-lines`, `.live-meta` in widgets.css (style
+guide: Live layer); click-through step 16.
+
+## Earlier sessions, built (ORCH-363, 17 Nov)
+
+orch keeps the last 10 sessions per ticket on this computer (the ones in use included; only the ids are forgotten,
+never the tool's own files). Behind the Preview switch each pane has a History button (in More when the pane is
+narrow) that shows the draft's "Earlier sessions" list instead of the session: time, first message, number of
+messages and the tool, newest first; the one in use says In use, one whose conversation is not on this computer has no
+Reopen. Reopen starts the helper on that conversation (`orch run start <ticket> --session <id>`); while a helper works
+the buttons are off with one line why. The draft's Start choice above the list (continue, fresh start, tool and model)
+is the Start task; this draft lost only its "To build" chip and note. Master: `.live-hist*` in widgets.css (style guide:
+Live layer); click-through step 26.
+
+## Start choice and tool and model, built (ORCH-362, 18 Nov)
+
+Behind the Preview switch the pane of a ticket with no helper shows the draft's Start choice: Continue where it stopped
+(with the time of the last conversation; only when there is one), Fresh start with "Runs on" tool and model (the
+workspace's tool and the ticket's model preselected, so one click starts it), and the earlier sessions with Reopen
+(the History list). Above it one line says how many helper places are in use; when every place is taken it says how
+many tickets wait in line, a start then waits in line (a plain message, no error), and a ticket in line shows where it
+stands. Only tools found on this computer are offered; a tool orch passes no model to says it uses its own model. It
+uses the existing start: `orch run start` (`--fresh`, `--agent`), `orch ticket model`, `orch run start --session`.
+
+A working session's pane has one line at its top: tool · model, how long it is open and when it closes for being idle
+(the draft's words). Tool · model opens the model choice. One change from the draft: orch already switches a working
+helper's model when it finishes its current step (ORCH-49), so the menu says "applies when the helper finishes its
+current step (or at its next start)" instead of "takes effect with a fresh start". Wall tiles get the same line with
+the wall task; with the live data of every session (ORCH-359) the line reads tool, model and times from it. Master:
+`.live-start`, `.live-choice*`, `.live-pick*`, `.live-places`, `.live-prow`, `.live-pop[data-down]` in widgets.css
+(style guide: Live layer); click-through steps 14 and 16.

@@ -64,6 +64,11 @@ def record_hook_argv() -> list[str]:
     return orch_argv("record", "hook")
 
 
+def guard_hook_command(tool: str) -> str:
+    """The protected-machines guard (`orch protected-check --hook <tool>`, before each Bash command)."""
+    return command_line(orch_argv("protected-check", "--hook", tool))
+
+
 def record_hook_command() -> str:
     return command_line(record_hook_argv())
 
