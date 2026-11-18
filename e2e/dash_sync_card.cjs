@@ -93,6 +93,9 @@ async function open(browser, width, start, mutate = s => s) {
   const state = mutate(fixture()), fake = fakeSync(start);
   await serve(context, state, fake);
   const page = await context.newPage();
+  // A fixed clock (issue 1421, like 4deb7848): the fixture's syncs are on 11 Nov, so the page sees noon that day and
+  // "Last synced today 10:15" holds whatever day CI runs. Timers keep running.
+  await page.clock.setFixedTime(new Date('2026-11-11T12:00:00Z'));
   const errors = [];
   page.on('pageerror', e => errors.push(String(e)));
   await page.goto(BASE + '/#settings');
@@ -130,7 +133,7 @@ test('Sync card: open Settings, pick On this computer only, review, Save, status
         const {context, page, errors} = await open(browser, width, {mode: 'remote', remote: 'https://files.example.org/mia/month-end', shown: 'synced',
           last_ok: '2026-11-11T10:15:00', not_synced: [{name: 'scans-march.zip', why: 'too big, stays on this computer'}, {name: 'payroll-access.txt', why: 'may contain a password or access key'}]});
         const card = page.locator('#sync-card');
-        await page.locator('[data-key="sync-status"]').filter({hasText: /Last synced .*10:15/}).waitFor();
+        await page.locator('[data-key="sync-status"]').filter({hasText: 'Last synced today 10:15'}).waitFor();
         await page.locator('[data-key="sync-skipped"]').waitFor();   // "2 files not synced"; the list under it is always shown
         await page.locator('#sync-details').getByText('Not synced: scans-march.zip').waitFor();
         await page.locator('[data-key="sync-check"]').click();
