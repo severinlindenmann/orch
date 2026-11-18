@@ -8,17 +8,17 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from _orch_test_guard import check_real_home, isolated_orch_home  # noqa: F401
 
-
-def _just_now():
-    """A start time a moment ago, so "Running since today ..." holds on any day (a fixed date broke the next day)."""
-    from datetime import datetime, timezone
-
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE.parents[2] / "workspace" / "src"))
 CONTRACTS = HERE.parents[2] / "contracts"
 WID = "0123456789abcdef0123456789abcdef"
+
+
+def _just_now():
+    """A start time a moment ago, so "Running since today ..." holds on any day (a fixed date broke the next day)."""
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def pytest_sessionfinish(session, exitstatus):
