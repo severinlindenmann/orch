@@ -595,12 +595,11 @@ const movePending = new Map();
 function offerStart(id) {
   const toast = window.orch.toast('No helper is working on it yet.', 'ok');
   if (!toast?.querySelector) return;
-  const start = h('button', {type:'button', className:'btn ghost sm', 'data-action':'offer-start'}, 'Start helper');
-  start.addEventListener('click', async () => {
-    toast.remove();
-    const result = await act('run.start', {ticket:id});
-    if (!result.ok) window.orch.toast(changeError(result), 'error');
-  });
+  // the one Start button (ORCH-475): one click starts, the caret opens the Start choice, Starting… until it runs
+  const start = h('span', {className:'start-host', 'data-action':'offer-start'});
+  const look = {align:'start'};
+  look.style = 'ghost';  // a quiet button in a notice
+  if (!startButtonIn(start, ticketOf(id), look)) return;
   toast.querySelector('button[aria-label="Dismiss notification"]')?.before(start);
 }
 /* ORCH-235: Done on a ticket whose sub-tickets are not all finished asks once (no typed word): "Mark Done anyway"
