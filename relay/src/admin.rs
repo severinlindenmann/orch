@@ -857,13 +857,17 @@ async fn assign(
     h: HeaderMap,
     Path(ws): Path<String>,
     body: Bytes,
-) -> Res<StatusCode> {
+) -> Res<Json<Value>> {
     guard(&app, &h)?;
     let v = parse_body(&body)?;
     let c = app.db.lock().unwrap();
     if !store::ws_exists(&c, &ws) {
         return Err(not_found("No such workspace."));
     }
+    let had: std::collections::HashSet<String> = c
+        .prepare("SELECT name FROM assign WHERE ws=?1 AND kind='skills'")?
+        .query_map([&ws], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
     let mut want = vec![];
     for kind in shared::KINDS {
         for n in v[kind].as_array().cloned().unwrap_or_default() {
@@ -882,6 +886,7 @@ async fn assign(
             want.push((kind, n));
         }
     }
+    let (added, missing) = needed_skills(&c, &app.key, &had, &mut want)?;
     c.execute("DELETE FROM assign WHERE ws=?1", [&ws])?;
     for (k, n) in want {
         c.execute(
@@ -892,7 +897,47 @@ async fn assign(
     store::bump_and_hint(&c, &app.key, &[ws])?;
     drop(c);
     app.notify.notify_waiters();
-    Ok(StatusCode::OK)
+    Ok(Json(json!({"added": added, "missing": missing})))
+}
+
+/// A skill newly given to a workspace brings the skills it needs (`metadata.requires-skills`, also what those
+/// need, a few levels deep). Only new skills do: a needed skill the admin takes away again stays away. Returns
+/// (added, missing): needed skills given now, and needed skills the relay does not have (shown to the admin).
+fn needed_skills(
+    c: &Connection,
+    key: &crate::crypto::Key,
+    had: &std::collections::HashSet<String>,
+    want: &mut Vec<(&'static str, String)>,
+) -> Res<(Vec<String>, Vec<String>)> {
+    let mut queue: Vec<(String, usize)> = want
+        .iter()
+        .filter(|(k, n)| *k == "skills" && !had.contains(n))
+        .map(|(_, n)| (n.clone(), 0))
+        .collect();
+    let (mut added, mut missing) = (vec![], vec![]);
+    while let Some((name, depth)) = queue.pop() {
+        if depth >= 4 {
+            continue;
+        }
+        for need in shared::requires_skills(c, key, &name) {
+            if want.iter().any(|(k, n)| *k == "skills" && *n == need) || missing.contains(&need) {
+                continue;
+            }
+            let exists: bool = c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM skills WHERE name=?1)",
+                [&need],
+                |r| r.get(0),
+            )?;
+            if exists {
+                want.push(("skills", need.clone()));
+                added.push(need.clone());
+                queue.push((need, depth + 1));
+            } else {
+                missing.push(need);
+            }
+        }
+    }
+    Ok((added, missing))
 }
 
 // ---------- webhooks ----------
