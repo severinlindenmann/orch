@@ -361,6 +361,14 @@ def test_the_idle_close_never_kills_a_wait_for_checks(proj, new_ticket, monkeypa
             p.wait()
 
 
+@pytest.fixture
+def has_tmux(monkeypatch):
+    """GitHub's macOS machines have no tmux: tails() returns early without it, so a faked tmux needs a faked
+    which too (issue 1440)."""
+    real = runwatch.shutil.which
+    monkeypatch.setattr(runwatch.shutil, "which", lambda name, *a, **k: "/usr/bin/tmux" if name == "tmux" else real(name, *a, **k))
+
+
 def _fake_chain(gone=()):
     """A tmux that runs a chain of display-message / capture-pane like the real one: it stops at the first
     session that is gone (ORCH-359)."""
@@ -396,7 +404,7 @@ def _fake_chain(gone=()):
     return fake, calls
 
 
-def test_tails_reads_every_session_in_one_tmux_call(proj, new_ticket, monkeypatch, child):
+def test_tails_reads_every_session_in_one_tmux_call(proj, new_ticket, monkeypatch, child, has_tmux):
     from orch import runs_live
 
     ids = [new_ticket() for _ in range(3)]
@@ -409,7 +417,7 @@ def test_tails_reads_every_session_in_one_tmux_call(proj, new_ticket, monkeypatc
     assert got == {t: {"lines": [f"last of {t}"]} for t in ids}
 
 
-def test_tails_leaves_out_a_gone_session_and_reads_the_rest(proj, new_ticket, monkeypatch, child):
+def test_tails_leaves_out_a_gone_session_and_reads_the_rest(proj, new_ticket, monkeypatch, child, has_tmux):
     from orch import runs_live
 
     a, b, c = (new_ticket() for _ in range(3))
@@ -423,7 +431,7 @@ def test_tails_leaves_out_a_gone_session_and_reads_the_rest(proj, new_ticket, mo
     assert len(calls) == 2 and none not in " ".join(calls[0])
 
 
-def test_run_screen_several_tickets_cli_and_in_process(proj, new_ticket, run, monkeypatch, child):
+def test_run_screen_several_tickets_cli_and_in_process(proj, new_ticket, run, monkeypatch, child, has_tmux):
     from orch import reads, runs_live
 
     a, b = new_ticket(), new_ticket()
