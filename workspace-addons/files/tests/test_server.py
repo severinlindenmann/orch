@@ -21,7 +21,8 @@ def srv(built):
 def get(s, path, headers=None):
     port = s.server_address[1]
     req = urllib.request.Request(
-        f"http://127.0.0.1:{port}{path}", headers={"Host": f"127.0.0.1:{port}", **(headers or {})}
+        f"http://127.0.0.1:{port}{path}",
+        headers={"Host": f"127.0.0.1:{port}", **(headers or {})},
     )
     try:
         with urllib.request.urlopen(req, timeout=5) as r:
@@ -82,6 +83,7 @@ def test_previews_per_kind(srv):
     )
     word = pv("Sales/offer.docx")
     assert word["type"] == "md" and "Hotel Seeblick" in word["text"]
+    assert word["name"] == "Offer for Hotel Seeblick"  # a Word file's first line is its title
     pic = pv("Marketing/photo.png")
     assert pic["type"] == "picture" and pic["src"].startswith("api/file?p=")
     page = pv("Sales/page.html")
@@ -153,3 +155,31 @@ def test_other_methods_refused(srv):
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(req, timeout=5)
     assert e.value.code in (403, 405)
+
+
+def test_a_text_the_secret_check_flags_is_never_shown(srv, built, monkeypatch):
+    from conftest import write
+
+    from orch_files import index
+
+    write(built, "Finance/notes-for-later.txt", "aws AKIAIOSFODNN7EXAMPLE\n")
+    with monkeypatch.context() as m:
+        m.setattr(index, "_read_texts", lambda *a, **k: None)
+        index.refresh(built)  # listed by name, text not read yet
+    pv = json.loads(get(srv, "/api/preview?p=Finance%2Fnotes-for-later.txt")[2])  # not read by the index yet
+    assert pv.get("private") and "text" not in pv
+    index.refresh(built)
+    assert get(srv, "/api/file?p=Finance%2Fnotes-for-later.txt")[0] == 404
+    row = index.one(built, "Finance/notes-for-later.txt")
+    assert row["private"]
+
+
+def test_a_file_over_the_limit_offers_no_download(srv, built):
+    from orch_files import index
+
+    with open(built / "Marketing" / "tour.mp4", "wb") as f:
+        f.truncate(preview.SERVE_LIMIT + 1)
+    index.refresh(built)
+    pv = json.loads(get(srv, "/api/preview?p=Marketing%2Ftour.mp4")[2])
+    assert pv["too_big"] and pv["download"] is None and "src" not in pv
+    assert get(srv, "/api/file?p=Marketing%2Ftour.mp4")[0] == 413

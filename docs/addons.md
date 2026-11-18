@@ -109,6 +109,29 @@ $ orch lessons rm <id>
 A secret in the text is refused. When the lessons are over 3 KB, helpers see only the newest; the helper merges or
 removes old ones itself. Files: `.orch/addons/lessons/` (gitignored).
 
+## Files (preview)
+
+One page for every file in the workspace. Left: **Your folders** (the folders as they are on disk, a list and a live
+preview) and **From tickets** (one automatic folder per ticket that has files, under Working, In review, Done and
+Earlier; versions such as `-v2`, `-v3` stack into one card). One search box finds files by name and by what is
+written in them; any part of a word matches and accents do not matter ("muller" finds Müller). Previews: notes,
+text, code, data, tables and Excel sheets, Word and PowerPoint text, PDFs, pictures, sound, video, web pages (in a
+sandbox) and the names inside a zip file. Opt-in, marked Preview until it is finished.
+
+```sh
+$ orch addon add files --yes
+$ orch files search "price check" --json    # helpers find files the same way, no AI call
+$ orch files index                          # bring the index up to date now
+```
+
+The index is one SQLite file in `.orch/cache/files/` (full-text, trigram): names first, then the text; after that
+only files whose size or changed time differ are read again (every 30 seconds while the page is open, and before
+each `orch files search`). Text is read from the first 2 MB; files over 50 MB are found by name only. Left out:
+`.git`, `node_modules`, build and cache folders, everything a `.gitignore` names, and orch's own files except the
+tickets' files. Private files (`.env`, key files, `.ssh`, or a text the secret check flags) show by name only; their
+content is never indexed, shown or served. Stars and "New for you": `.orch/addons/files/` (gitignored). The index
+and the preview cache (capped at 500 MB) can be deleted at any time.
+
 ## Pull requests (merge queue)
 
 When many pull requests are ready at once, merging them one by one makes each later one take the base branch in and

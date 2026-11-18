@@ -16,6 +16,8 @@ from xml.etree import ElementTree as ET
 TEXT_LIMIT = 2 * 1024 * 1024  # text is read from the first 2 MB only
 NAME_ONLY = 50 * 1024 * 1024  # bigger files are listed by name only
 ZIP_MEMBER = 8 * 1024 * 1024  # never inflate more than this from one part of a zip file
+MAX_COLS = 200  # columns read from one sheet row
+MAX_CELLS = 200_000  # cells read from one sheet
 
 EXT = {
     "md": ("md", "markdown", "mdx"),
@@ -261,6 +263,7 @@ def xlsx_rows(data: bytes, max_rows: int = 500, sheet: int = 1) -> tuple[list[li
         if not part:
             return [], names
         rows: list[list[str]] = []
+        cells = 0
         try:
             root = _parse(part)
         except ET.ParseError:
@@ -273,6 +276,8 @@ def xlsx_rows(data: bytes, max_rows: int = 500, sheet: int = 1) -> tuple[list[li
                 if not c.tag.endswith("}c"):
                     continue
                 col = _col(c.get("r") or "")
+                if col is not None and col >= MAX_COLS:
+                    continue  # far-right cells: never padded out to (a crafted sheet could ask for millions)
                 while col is not None and len(row) < col:
                     row.append("")
                 v = next((x for x in c if x.tag.endswith("}v")), None)
@@ -285,7 +290,8 @@ def xlsx_rows(data: bytes, max_rows: int = 500, sheet: int = 1) -> tuple[list[li
                 else:
                     row.append(v.text or "" if v is not None else "")
             rows.append(row)
-            if len(rows) >= max_rows:
+            cells += len(row)
+            if len(rows) >= max_rows or cells >= MAX_CELLS:
                 break
         return rows, names
 
@@ -348,7 +354,9 @@ def text_of(name: str, kind: str, data: bytes) -> tuple[str, str, str | None]:
         t, title = html_text(decode(data[:TEXT_LIMIT]))
         return kind, t, title
     if kind == "doc":
-        return kind, office_text(data, e)[:TEXT_LIMIT], None
+        t = office_text(data, e)[:TEXT_LIMIT]
+        first = next((x.strip() for x in t.splitlines() if x.strip() and not x.startswith("Slide ")), "")
+        return kind, t, first if 0 < len(first) <= 120 else None
     if e == "xlsx":
         rows, _ = xlsx_rows(data, max_rows=5000)
         return kind, "\n".join("\t".join(r) for r in rows)[:TEXT_LIMIT], None

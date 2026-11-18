@@ -90,9 +90,11 @@ def build(root: Path, path: str) -> dict | None:
         "type": _widget_type(kind, ext),
         "name": row["title"],
         "size": row["size"],
-        "download": None if row["private"] else file_url(path, dl=True),
+        "download": None if row["private"] or row["size"] > SERVE_LIMIT else file_url(path, dl=True),
         "href": None if row["private"] or row["size"] > SERVE_LIMIT else file_url(path),
     }
+    if row["size"] > SERVE_LIMIT:
+        item["too_big"] = True  # the dashboard passes on at most 4 MB: such a file opens from its folder only
     if row["private"]:
         return {**item, "type": "file", "state": "ready", "private": True}
     if row["size"] == 0:
@@ -116,10 +118,19 @@ def build(root: Path, path: str) -> dict | None:
     if not extract.looks_text(data):
         return {**item, "type": "file"}
     text = extract.decode(data[:TEXT_SHOWN])
+    if index.secret_in(text, root):  # the same check as the index: such a file shows by name only
+        return {**item, "type": "file", "state": "ready", "private": True, "download": None, "href": None}
     out = {**item, "text": text}
     if len(data) > TEXT_SHOWN or row["size"] > TEXT_SHOWN:
         out.update(state="large", shown=text.count("\n") or 1)
     return out
+
+
+def secret_text(root: Path, row: dict, data: bytes) -> bool:
+    """True when a text file holds what the orch secret check flags (it is then never served)."""
+    if row["kind"] in ("picture", "video", "audio", "pdf", "archive") or not extract.looks_text(data):
+        return False
+    return index.secret_in(extract.decode(data[: extract.TEXT_LIMIT]), root)
 
 
 def _widget_type(kind: str, ext: str) -> str:
@@ -144,6 +155,8 @@ def _zip_based(root: Path, path: str, row: dict, ext: str, kind: str) -> dict | 
         return out
     if kind == "doc":
         text = extract.office_text(data, ext)
+        if index.secret_in(text, root):
+            return {"type": "file", "private": True}
         return {"type": "text" if ext == "pptx" else "md", "text": _as_plain_md(text)}
     if ext == "zip":
         names = extract.zip_names(data)

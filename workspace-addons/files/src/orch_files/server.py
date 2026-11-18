@@ -156,6 +156,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(data).encode(), "application/json")
 
     def _fence(self, method: str, api: bool) -> str | None:
+        """The same rule as the dashboard's own data: this computer's address only (the dashboard in front passes
+        a request from another computer on only after its sign-in), same site for API calls and every POST."""
         try:
             from orch_ui.origin import check_request
         except ImportError:
@@ -261,6 +263,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, b"not found")
         if len(data) > preview.SERVE_LIMIT:
             return self._send(413, b"This file is too large to open here.")
+        if preview.secret_text(self.root, row, data):
+            return self._send(404, b"not found")
         extra = {}
         ctype = _ctype(row)
         if download:
@@ -311,6 +315,7 @@ class Handler(BaseHTTPRequestHandler):
 
 class FilesServer(ThreadingHTTPServer):
     daemon_threads = True
+    request_queue_size = 64  # the page loads many previews at once; the default backlog of 5 drops some
 
 
 def make_server(root: Path, port: int = DEFAULT_PORT, background: bool = True) -> FilesServer:

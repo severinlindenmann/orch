@@ -1296,6 +1296,7 @@ body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:
    ticket gallery with stacked versions. Phone: one pane at a time with Back. Used by the Files add-on page and mockup/files. */
 /* The page fills the window; each pane scrolls by itself */
 .files-page{height:100dvh;gap:var(--s4)}
+.shell-body .files-page{height:calc(100dvh - var(--topbar-height))}
 .files-page .page-heading h1{display:flex;align-items:center;gap:var(--s3)}
 .files-notice{align-items:center}
 .files-notice .progress{flex:1 1 100%}
@@ -1312,7 +1313,7 @@ body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:
 .files-noderow{display:flex;align-items:center;min-width:0}
 .files-noderow[data-depth="1"]{padding-left:var(--s4)}
 .files-noderow[data-depth="2"]{padding-left:var(--s6)}
-.files-twist{display:grid;place-items:center;flex:none;width:var(--s4);height:var(--s6);padding:0;border:0;background:none;color:var(--text-faint);cursor:pointer;border-radius:var(--s1)}
+.files-twist{display:grid;place-items:center;flex:none;width:var(--s5);height:var(--s6);padding:0;border:0;background:none;color:var(--text-faint);cursor:pointer;border-radius:var(--s1)}
 .files-twist:hover{color:var(--text)}
 .files-twist .chev{transition:transform var(--dur-fast) var(--ease-move)}
 .files-twist[aria-expanded=false] .chev{transform:rotate(-90deg)}
@@ -1429,7 +1430,7 @@ body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:
 
 /* Phone: one pane at a time (folders, files, preview) with Back */
 @media(max-width:720px){
-  .files-page{height:auto}
+  .files-page,.shell-body .files-page{height:auto}
   .files{display:block;flex:none}
   .files>*+*{border-left:0}
   .files[data-pane=folders]>:not(.files-tree),

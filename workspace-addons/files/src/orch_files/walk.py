@@ -3,8 +3,9 @@
 Listed: every plain file under the workspace folder (your folders) and the files helpers made for tickets
 (`.orch/tickets/<id>/artifacts|evidence/`). Never followed: links (to files or folders). Left out: orch's own
 machinery (the rest of `.orch/`), program folders and leftovers (NOISE), everything a `.gitignore` on the way
-names, and the person's own leave-out folders. Private files (secret-looking names, dot files, the secrets
-folder) are listed by name only: their content is never read, indexed or served.
+names, and the person's own leave-out folders. Private files (secret-looking names such as .env, *.pem or
+id_rsa, key folders such as .ssh, and files whose text the orch secret check flags) are listed by name only:
+their content is never indexed, shown or served.
 """
 
 from __future__ import annotations

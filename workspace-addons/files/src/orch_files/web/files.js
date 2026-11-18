@@ -30,7 +30,8 @@
   const STATUS = {working: ['Working', 'working'], review: ['In review', 'review'], done: ['Done', 'done']};
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const PLACES = {recent: 'Recent', starred: 'Starred', new: 'New for you'};
-  const fold = s => String(s).normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  // Folds accents one character at a time, so the folded text keeps its length (marks land on the right letters)
+  const fold = s => { let o = ''; for (const ch of String(s)) { const b = ch.normalize('NFD')[0].toLowerCase(); o += ch.length === 1 && b.length === 1 ? b : ch; } return o; };
   const leaf = path => path === '' ? (S.status.workspace || 'Your folders') : path.split('/').pop();
   const fileUrl = u => Frame.url(P + '/' + u);
   const VERSION = /^(.+?)[-_ .]?v(?:ersion)?[-_ ]?(\d{1,3})$/i;
@@ -318,7 +319,8 @@
       const h = el('h2', 'files-sectitle');
       if (one) h.textContent = sec.title; else { const b = btn('', sec.title); b.setAttribute('aria-label', 'Open the folder ' + sec.title); b.onclick = () => { S.node = 't:' + sec.id; draw(); $('#files-gallery').scrollTop = 0; }; h.append(b); }
       const link = el('a', 'btn ghost sm', 'Open ticket'); link.href = '/#ticket/' + encodeURIComponent(sec.id); link.target = '_blank'; link.rel = 'noopener';
-      head.append(svg(IC.folder), h, el('span', 'files-key', sec.key), el('span', 'badge ' + st[1], st[0]), el('span', 'meta', plural(sec.files.length, 'file')), el('span', 'grow'), link);
+      const older = sec.files.length - units.length;
+      head.append(svg(IC.folder), h, el('span', 'files-key', sec.key), el('span', 'badge ' + st[1], st[0]), el('span', 'meta', plural(units.length, 'file') + (older ? ' · ' + plural(older, 'older version') : '')), el('span', 'grow'), link);
       const grid = el('div', 'result-grid'), order = [];
       units.forEach(u => {
         u.files.sort((a, b) => (b._v || 0) - (a._v || 0) || b.changed - a.changed);
@@ -369,6 +371,7 @@
     const acts = el('div', 'files-acts');
     const open = btn('btn outline sm', 'Open'); open.onclick = openBig; acts.append(open);
     if (item.download) { const dl = el('a', 'btn ghost sm'); dl.href = item.download; dl.setAttribute('download', ''); dl.append(kitIcon('download'), el('span', '', 'Download')); acts.append(dl); }
+    if (got.too_big) acts.append(el('p', 'meta', 'Over 4 MB: open it from its folder on your computer.'));
     if (f.ticket) { const a = el('a', 'btn ghost sm', 'Open ticket'); a.href = '/#ticket/' + encodeURIComponent(f.ticket); a.target = '_blank'; a.rel = 'noopener'; acts.append(a); }
     const star = btn('btn ghost icon sm files-star'), on = S.stars.has(f.path); star.append(svg(IC.star));
     star.setAttribute('aria-pressed', String(on)); star.setAttribute('aria-label', (on ? 'Remove the star from ' : 'Star ') + f.title); star.title = on ? 'Starred' : 'Star';
@@ -428,7 +431,7 @@
     document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === S.view)));
   }
   function pane(p) { $('#files').dataset.pane = p; }
-  function openFolder(path) { S.place = 'folder'; S.path = path; path.split('/').forEach((p, i, all) => S.closed.delete(all.slice(0, i + 1).join('/'))); S.closed.delete(''); S.q = ''; $('#files-q').value = ''; S.sort = null; S.dir = 1; S.sel = null; pane('files'); draw().then(() => $('#files-list').focus({preventScroll: true})); }
+  function openFolder(path, quiet) { S.place = 'folder'; S.path = path; path.split('/').forEach((p, i, all) => S.closed.delete(all.slice(0, i + 1).join('/'))); S.closed.delete(''); S.q = ''; $('#files-q').value = ''; S.sort = null; S.dir = 1; S.sel = null; pane('files'); return draw().then(() => { if (!quiet) $('#files-list').focus({preventScroll: true}); }); }
   function openTicket(f) { S.place = 'tickets'; S.node = 't:' + f.ticket; const n = nodeOf(S.node); if (n) S.closed.delete(n.g.id); S.q = ''; $('#files-q').value = ''; S.sel = null; pane('files'); draw(); }
   function clearSearch() { S.q = ''; $('#files-q').value = ''; S.sel = null; draw(); $('#files-q').focus(); }
   function select(key, opts) {
@@ -498,7 +501,15 @@
   let lastChecked = null;
   async function poll() {
     let st;
-    try { st = await api('/api/status'); } catch (e) { setTimeout(poll, 10000); return; }
+    try { st = await api('/api/status'); } catch (e) {
+      if (e.status === 401 || e.status === 403) {  // another computer without the sign-in: nothing of the workspace shows
+        $('#files').hidden = true;
+        $('#files-notice').replaceChildren(UI.state({title: 'Sign in to see your files', text: 'Open Files from the orch dashboard with your sign-in link.'}));
+        $('#files-notice').hidden = false;
+        return;
+      }
+      setTimeout(poll, 10000); return;
+    }
     const changed = st.checked_at !== lastChecked || st.total !== S.status.total || !S.loaded;
     S.status = Object.assign(S.status, st);
     drawNotice();
@@ -514,7 +525,7 @@
   }
   async function applyParams() {
     const params = new URLSearchParams(location.search);
-    if (params.get('open') != null) openFolder(params.get('open'));
+    if (params.get('open') != null) { await openFolder(params.get('open'), true); }
     else if (PLACES[params.get('place')]) S.place = params.get('place');
     else if (params.get('place') === 'tickets' || params.get('ticket')) {
       S.place = 'tickets'; S.node = S.groups[0] ? S.groups[0].id : null;

@@ -351,7 +351,7 @@ def _rename_ticket_files(con, tickets, changed, folds) -> None:
             _put(con, r["id"], ntext, None, folds)
 
 
-def _secret_in(text: str, root: Path) -> bool:
+def secret_in(text: str, root: Path) -> bool:
     """The orch secret check (patterns and stored keys); a text it flags never enters the index."""
     try:
         from orch import secretscan
@@ -376,18 +376,20 @@ def _read_texts(con, root: Path, folds: bool, seconds, pr: Progress, on_progress
             kind, path = r["kind"], r["path"]
             want = extract.needs_bytes(kind, path)
             data = walk.read_head(str(root), path, want) if want else b""
-            body, title, state = "", r["title"], 2
+            body, title, state, secret = "", r["title"], 2, False
             if data:
                 kind2, body, found_title = extract.text_of(path, kind, data)
-                if body and _secret_in(body, root):
-                    body = ""
+                if body and secret_in(body, root):
+                    body, secret = "", True
                 if body:
                     state = 1
                 kind = kind2
                 if found_title and not title:
                     title = found_title
+            # a file whose text the secret check flags is private from now on: name only, never shown or served
             con.execute(
-                "UPDATE files SET text_state=?, kind=?, title=? WHERE id=?", (state, kind, title, r["id"])
+                "UPDATE files SET text_state=?, kind=?, title=?, private=max(private, ?) WHERE id=?",
+                (state, kind, title, int(secret), r["id"]),
             )
             if body or title != r["title"]:
                 tk = con.execute("SELECT key, title FROM tickets WHERE id=?", (r["ticket"],)).fetchone()
