@@ -383,9 +383,7 @@ def get(url: str) -> bytes:
     opener = urllib.request.build_opener(
         _SameHosts, *([urllib.request.HTTPSHandler(context=net._tls())] if net._tls() else [])
     )
-    req = urllib.request.Request(
-        url, headers={"Accept": "application/json, text/plain", "User-Agent": "orch-tool-updates"}
-    )
+    req = urllib.request.Request(url, headers={"Accept": "application/json, text/plain"})
     with opener.open(req, timeout=HTTP_TIMEOUT) as resp:
         raw = resp.read(HTTP_LIMIT + 1)
     if len(raw) > HTTP_LIMIT:

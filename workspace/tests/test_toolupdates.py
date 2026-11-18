@@ -383,7 +383,7 @@ def test_a_workspace_brings_its_own_tool_only_once_approved(proj, monkeypatch):
     }
     (folder / "googleads.json").write_text(json.dumps(doc))
     names = [t["binary"] for t in toolupdates.tools_for(proj)]
-    assert names == ["databricks"]  # the library knows Databricks; the new file waits for approval
+    assert names == ["databricks"]  # the library knows Databricks; the new file waits for the person
     checkfiles._remember(proj, "googleads", checkfiles.digest(proj, "googleads"))
     got = {t["binary"]: t for t in toolupdates.tools_for(proj)}
     assert list(got) == ["databricks", "googleads"]
