@@ -122,8 +122,8 @@ def helper(run: dict | None) -> str | None:
 
 def stuck(ticket: dict, run: dict | None = None, now: datetime | None = None) -> str | None:
     """One reason: "helper" (its helper is stuck) or the ticket rule's "question" | "quiet" | "overdue"."""
-    if not _counts(ticket) or ticket.get("status") in OPEN_DONE:
-        return None
+    if not _counts(ticket) or ticket.get("status") in (*OPEN_DONE, "review"):
+        return None  # a ticket in Review waits for the person's check, never stuck (as tickets.stuck_why)
     if helper(run) == "stuck":
         return "helper"
     from orch import tickets as core
@@ -164,6 +164,8 @@ def summary(tickets: list[dict], runs: dict | None = None, now: datetime | None 
             continue
         run = runs.get(t["id"])
         h = helper(run)
+        if h in ("idle", "stuck") and t.get("status") == "review":
+            h = None  # a left-over session of a ticket in Review: its "Check result" row (ORCH-407)
         if h:
             helpers[h] += 1
         why = stuck(t, run, now)
