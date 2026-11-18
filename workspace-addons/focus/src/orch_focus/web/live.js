@@ -4,7 +4,7 @@
   const S = window.FocusStore;
   const {h, TID, toast, els, act, STATUS_WORD, plainNames, keyOf, hhmm, evText} = S;
   /* the core's "The helper stopped … Continue goes on where it left off" line repeats at every stop: not shown here */
-  const NOISE = /Continue goes on where it left off|^(?:The )?helper started\b|^Updated .+ settings$/i;
+  const NOISE = /Continue goes on where it left off|^(?:The )?helper started\b|^Updated .+ settings$|^(?:Set|Removed) ext\.[a-z][a-z0-9-]*(?:\.[\w-]+)?$/i;
 
   const FIELD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary', status: 'the status', done_when: 'the Done when line'};
   // The ticket lines orch writes itself, in the same plain words as the CLI and the dashboard.

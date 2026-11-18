@@ -325,12 +325,18 @@ def helper_state(sig: str, waits: list[dict], idle_seconds: int | None) -> dict 
     return {"state": key, "word": HELPER_WORDS[key], "detail": detail}
 
 
+_SETTINGS_WRITE = re.compile(r"(Set|Removed) ext\.[a-z][a-z0-9-]*(\.[\w-]+)?")
+
+
 def last_activity(root: Path, ticket: dict | None) -> dict | None:
-    """When a helper last wrote to the ticket and what (its newest history line, as shown), or None."""
+    """When a helper last wrote to the ticket and what (its newest history line, as shown), or None.
+    An add-on settings write (`Set ext.focus`) is bookkeeping, not work: it is skipped."""
     from orch import history
 
     for h in reversed(history.lines(root, ticket)):
         if isinstance(h, dict) and str(h.get("by") or "").startswith("agent:") and h.get("at"):
+            if _SETTINGS_WRITE.fullmatch(str(h.get("text") or "").strip()):
+                continue
             text = " ".join(str(h.get("text") or "").split())[:200]
             return {"at": h["at"], "text": text, "seconds": _age(h["at"])}
     return None
