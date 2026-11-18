@@ -33,6 +33,7 @@ let ANSWER_UNDO_MS = 5200, enterRowId = '';
 // `same`: rows on other tickets asking the identical question with the same choices; one answer goes to all of them.
 function needRow(row, newest, questionCount = 1, same = []) {
   const key = 'need-' + row.id;
+  if (isFactoryDraftRow(row)) return factoryDraftRow(row, key);
   if (isHelperRow(row)) return helperRow(row, key);
   if (needActs(row).length) return needActionsRow(row, key);
   if (!row.ticket && array(row.answer?.options).length) return needNoticeRow(row, key);
@@ -109,10 +110,7 @@ function factoryStartOf(row) {
   const q = array(ticketOf(row.ticket)?.questions).find(x => x.id === row.answer?.question);
   return q && q.kind === 'factory:start' ? window.DashHelpers.factoryStart(q.text) : null;
 }
-function factoryProposalHref(t) {
-  const page = typeof addons === 'function' && addons().some(a => a.name === 'factory' && a.page);
-  return page && /^t_[a-z0-9]{6,16}$/.test(t.id) ? '#addon/factory/#/order/' + t.id + '/proposal' : href(t.id);
-}
+function factoryProposalHref(t) { return factoryOrderHref(t.id, 'proposal'); }
 function factoryStartRow(row, key, t, p, buttons) {
   const when = typeof age === 'function' ? age(row.since) : '';
   return h('div', {className:'card-row home-need' + (row.id === enterRowId ? ' row-new' : ''), 'data-key':key, 'data-need-row':row.id, 'data-factory-start':''},
@@ -121,8 +119,55 @@ function factoryStartRow(row, key, t, p, buttons) {
     h('p', {className:'muted'}, clean(p.goal)),
     h('p', {className:'meta'}, p.meta),
     h('p', {className:'meta question-context'}, whoAsked(t) + ' asked' + (when ? ' ' + when : '') + ' · ',
-      h('a', {href:factoryProposalHref(t), 'data-key':key + '-proposal'}, 'Read the whole proposal')),
+      h('a', {href:factoryProposalHref(t), 'data-key':key + '-proposal'}, 'Read proposal')),
     buttons.length ? h('div', {className:'actions'}, buttons) : null);
+}
+// A Factory draft ready for Plan the run (ORCH-479): the card of the Factory page, with its verbs. Read draft opens it
+// on the Factory page; Plan the run and Ask for changes send the person's words to the agent on the order, as there.
+function factoryOrderHref(id, part) {
+  const page = typeof addons === 'function' && addons().some(a => a.name === 'factory' && a.page);
+  return page && /^t_[a-z0-9]{6,16}$/.test(id) ? '#addon/factory/#/order/' + id + '/' + part : href(id);
+}
+const isFactoryDraftRow = row => !!window.DashHelpers.isFactoryDraft?.(row);
+const draftSent = new Map();  // row id -> what Home said after a click (the row goes once the agent works on it)
+function factoryDraftRow(row, key) {
+  const t = ticketOf(row.ticket), when = typeof age === 'function' ? age(row.since) : '';
+  const tag = t && typeof t.key === 'string' ? [' · ', h('span', {className:'key'}, t.key)] : null;
+  return h('div', {className:'card-row home-need' + (row.id === enterRowId ? ' row-new' : ''), 'data-key':key, 'data-need-row':row.id, 'data-factory-draft':''},
+    h('p', {className:'meta'}, 'Factory draft', tag),
+    h('h2', {className:'question-title'}, clean(row.title)),
+    h('p', {className:'muted'}, 'Read the draft, then plan the run or ask for changes.'),
+    h('p', {className:'meta question-context'}, (t ? whoAsked(t) : 'Helper') + ' wrote it' + (when ? ' ' + when : '') + ' · ',
+      h('a', {href:factoryOrderHref(row.ticket, 'draft'), 'data-key':key + '-draft'}, 'Read draft')),
+    snapshot ? null : factoryDraftActions(row, key));
+}
+function factoryDraftActions(row, key) {
+  const said = draftSent.get(row.id);
+  const status = h('p', {className:'meta', role:'status', 'data-key':key + '-status'}, said || '');
+  status.hidden = !said;
+  if (said) return status;
+  const words = window.DashHelpers.FACTORY_DRAFT_WORDS;
+  const plan = button('Plan the run', 'outline sm', () => go(words.plan, 'Sent. Your helper is planning the run; the proposal shows up here.'));
+  const change = button('Ask for changes', 'outline sm', () => writing(true));
+  const note = h('textarea', {className:'text-input', rows:'3', maxLength:'2000', 'aria-label':'What should change', placeholder:'For example: shorter, and add a map', 'data-key':key + '-note'});
+  const send = button('Send', 'primary sm', () => { const w = note.value.trim(); if (w) go(words.change(w), 'Sent. Your helper is changing the draft.'); });
+  const cancel = button('Cancel', 'ghost sm', () => writing(false));
+  plan.dataset.key = key + '-plan'; change.dataset.key = key + '-change'; send.dataset.key = key + '-send'; cancel.dataset.key = key + '-cancel';
+  const pick = h('div', {className:'actions'}, plan, change), write = h('div', {className:'actions'}, send, cancel);
+  note.hidden = write.hidden = true; send.disabled = true;
+  note.addEventListener('input', () => { send.disabled = !note.value.trim(); });
+  function writing(on) { note.hidden = write.hidden = !on; pick.hidden = on; status.hidden = true; if (on) note.focus(); }
+  async function go(text, sent) {
+    if (changeUnavailable() || locks.has(key)) return;
+    locks.add(key);
+    for (const b of [plan, change, send, cancel]) b.disabled = true;
+    try {
+      const r = await sendAndStart(row.ticket, text);
+      if (r.ok) { draftSent.set(row.id, r.delivered || r.started ? sent : 'Saved. Your helper gets it as soon as it is free.'); window.orch.toast(draftSent.get(row.id), 'ok'); return; }
+      window.orch.toast((r.error ? r.error + ' ' : "That didn't work. ") + 'Nothing was sent.', 'error');
+    } finally { locks.delete(key); render(); }
+  }
+  return h('div', {className:'stack'}, pick, note, write, status);
 }
 // A row that offers choices but belongs to no ticket cannot be answered as a ticket question (the answer needs a
 // ticket). It shows as a plain notice and can always be put off for the day.
@@ -345,6 +390,8 @@ function needListRow(row, count, same) {
   const source = !t && row.source ? addonName(row.source) : '', when = typeof age === 'function' ? age(row.since) : '';
   const meta = [t ? [window.DashHelpers.ticketKey(t), clean(t.title)].filter(Boolean).join(' ') : source, count > 1 ? count + ' questions' : '', same.length ? 'Asked on ' + (same.length + 1) + ' tickets' : '', when].filter(Boolean).join(' · ');
   // a Factory start question below the first one opens the proposal, never the whole text with Start in a dialog
+  if (isFactoryDraftRow(row)) return listRow(key, clean(row.title), ['Factory draft', when].filter(Boolean).join(' · '),
+    h('a', {className:'btn outline sm', href:factoryOrderHref(row.ticket, 'draft'), 'data-key':key + '-draft'}, 'Read draft'), {'data-need-row':row.id});
   const factory = t && factoryStartOf(row);
   if (factory) return listRow(key, 'Start “' + clean(factory.title) + '”?', [factory.meta, when].filter(Boolean).join(' · '),
     h('a', {className:'btn outline sm', href:factoryProposalHref(t), 'data-key':key + '-proposal'}, 'Read proposal'), {'data-need-row':row.id});
@@ -420,9 +467,11 @@ function attentionSummary(groups, failed, results, changes) {
   // the parts before "also" add up to the number in the title (questions + results); what is listed but not counted
   // (failed starts, notes without a question, changes to add) follows "also", so title, subtitle and rows agree (ORCH-184)
   // questions = the one number minus the results (every open question counts, also a same-worded one on two tickets)
-  const questionsAsked = Math.max(0, needsYouTotal() - results), other = groups.filter(g => !g.row.answer?.question).length + failed.length;
+  // a Factory draft ready for Plan the run counts too, as its own part (ORCH-479)
+  const drafts = groups.filter(g => isFactoryDraftRow(g.row)).length;
+  const questionsAsked = Math.max(0, needsYouTotal() - results - drafts), other = groups.filter(g => !g.row.answer?.question && !isFactoryDraftRow(g.row)).length + failed.length;
   const part = (n, one, many) => n ? n + ' ' + (n === 1 ? one : many) : null;
-  const counted = [part(questionsAsked, 'question', 'questions'), part(results, 'result to check', 'results to check')].filter(Boolean).join(' · ');
+  const counted = [part(questionsAsked, 'question', 'questions'), part(drafts, 'draft to read', 'drafts to read'), part(results, 'result to check', 'results to check')].filter(Boolean).join(' · ');
   const extra = [part(other, 'thing to look at', 'things to look at'), part(changes, 'change to add', 'changes to add')].filter(Boolean).join(' · ');
   return counted && extra ? counted + ' · also ' + extra : counted || extra;
 }
@@ -635,7 +684,7 @@ function home() {
   }
   const first = groupedNeeds.slice().sort((a, b) => (Date.parse(a.row.since) || Infinity) - (Date.parse(b.row.since) || Infinity))
     .find(g => g.row.answer?.question && array(g.row.answer.options).length && !needActs(g.row).length && !needCardQuestion(g.row));
-  const further = groupedNeeds.filter(g => g !== first).map(({row, count, same}) => needCardQuestion(row) ? cardSetRow(row) : needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same));
+  const further = groupedNeeds.filter(g => g !== first).map(({row, count, same}) => needCardQuestion(row) ? cardSetRow(row) : needActs(row).length || isHelperRow(row) || isFactoryDraftRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same));
   const list = [first ? needRow(first.row, newest, first.count, first.same) : null, ...logins.soon.map(loginSoonRow), ...further, ...failed.map(([t, sf]) => startFailedRow(t, sf)),
     ...results.map(resultRow), ...changes.map(changeRow), ...notes];
   return fragment(head, banner,

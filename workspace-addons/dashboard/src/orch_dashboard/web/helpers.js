@@ -285,8 +285,24 @@
   function needsYouCount(rows, results = 0) {
     const asked = new Set(arr(rows).filter(r => r && r.ticket && r.answer && r.answer.question && !isNotice(r) && !isBringBack(r))
       .map(r => r.ticket + ':' + r.answer.question)).size;
-    return asked + (Array.isArray(results) ? results.length : Number(results) || 0);
+    return asked + factoryDrafts(rows).length + (Array.isArray(results) ? results.length : Number(results) || 0);
   }
+  /* A Factory draft that is ready for Plan the run (Factory's own row, kind factory:draft, ORCH-479): it waits for the
+     person like a question, so it is listed and counted on Home and Review the same as on the Factory page. */
+  function isFactoryDraft(row) {
+    return !!row && row.source === 'factory' && row.kind === 'factory:draft' && typeof row.ticket === 'string' && /^t_[a-z0-9]{6,16}$/.test(row.ticket);
+  }
+  /* One per order (the newest version's row). */
+  function factoryDrafts(rows) {
+    const seen = new Set();
+    return arr(rows).filter(r => isFactoryDraft(r) && !seen.has(r.ticket) && seen.add(r.ticket));
+  }
+  /* The words Plan the run and Ask for changes send to the agent on the order, as the person's message: the same as the
+     Factory page sends (workspace-addons/factory/src/orch_factory/web/factory.js, PLAN_TEXT), so the agent gets one wording. */
+  const FACTORY_DRAFT_WORDS = {
+    plan: 'Now plan the run: propose the whole run for this order (orch factory propose).',
+    change: words => 'Change the draft: ' + String(words || '').trim(),
+  };
 
   /* True when "Needs you" already lists a question of this ticket (the question text is shown there only). */
   function inNeeds(rows, ticketId) {
@@ -827,5 +843,5 @@
     const due = /T/.test(t.due) ? new Date(t.due).getTime() : new Date(t.due + 'T00:00').getTime();
     return Number.isFinite(due) && due < end;
   }
-  return {historyChange, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
+  return {historyChange, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, isFactoryDraft, factoryDrafts, FACTORY_DRAFT_WORDS, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
 });

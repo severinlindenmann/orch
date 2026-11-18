@@ -19,10 +19,12 @@
 
    api (what the page needs; the dashboard passes its own):
      stack()    -> Promise<[card]>      card = one row of `orch review list --json`:
-                  {id, ticket, key, card:{kind,title,why,need,then,ok_label,open,preview}, digest, since,
+                  {id, ticket, key, card:{kind,title,why,need,then,ok_label,no_label,no_words,open,preview}, digest, since,
                    text (the question, shown on the card), group (cards that belong together), recommended}
                   card.files: [{name, type:'img'|'page'|'file', ref}] the result's own files (a Check card); api.fileUrl gives their URL
                   answers: [{label, picked}] the card's own answer buttons (the dashboard sets them for a Factory start)
+                  card.no_label: the word of the "no" button; card.no_words: true = "no" opens the Comment sheet and needs
+                  words, as a Check's Send back (the dashboard's Factory draft card: Ask for changes, ORCH-479)
                   preview refs are "reviewed/<sha12>/<name>" files; the page asks api.fileUrl for them
      answered() -> Promise<[entry]>     entry = {id, ticket, ticket_key, ticket_title, text, key, card, shown:{digest,copy,files}, at, by, via,
                   decision:{action:approve|use|use_with_changes|send_back|dont|none_of_these, picked, allows,
@@ -60,7 +62,7 @@ const mapFiles=(fs,c,api)=>(Array.isArray(fs)?fs:[]).filter(f=>f&&typeof f.ref==
 const safeOpen=u=>typeof u==='string'&&/^https?:\/\//i.test(u)?u:undefined;
 const mapCard=(c,api,now)=>{const k=c.card||{},kd=KIND[k.kind]||[k.kind||'Review','file'];
  return {id:c.id,kind:k.kind,kindLabel:kd[0],icon:kd[1],ticket:c.ticket_key||(/^(q[0-9]+|review)$/.test(c.key||'')?c.ticket:c.key)||c.ticket,ticketId:c.ticket,ticketTitle:c.ticket_title,about:c.about,task:c.task,when:fmtTime(c.since,now),need:k.need,title:k.title||'Review',
-  why:k.why,okLabel:k.ok_label,then:k.then,open:safeOpen(k.open),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,
+  why:k.why,okLabel:k.ok_label,noLabel:typeof k.no_label==='string'&&k.no_label?k.no_label.slice(0,40):undefined,noWords:k.no_words===true,then:k.then,open:safeOpen(k.open),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,
   text:typeof c.text==='string'?c.text:'',links:(Array.isArray(c.links)?c.links:[]).map(l=>l&&{label:String(l.label||'').slice(0,60),url:safeOpen(l.url)}).filter(l=>l&&l.label&&l.url).slice(0,5),group:typeof c.group==='string'?c.group:'',files:mapFiles(k.files,c,api),answers:(Array.isArray(c.answers)?c.answers:[]).filter(x=>x&&typeof x.label==='string'&&typeof x.picked==='string'&&x.label&&x.picked).slice(0,4).map(x=>({label:x.label.slice(0,40),picked:x.picked})),suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined}};
 
 /* ---------- Answers: words, pill, record ---------- */

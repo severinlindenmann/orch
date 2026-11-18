@@ -523,6 +523,45 @@ def home(root):
     }
 
 
+DRAFT_TEXT = "Your draft is ready. Read it, then plan the run or ask for changes."
+
+
+def needs(root):
+    """Rows for `orch needs` (contracts/needs.schema.json): every draft that waits for you, by the page's own rule
+    (draftWaiting: phase draft, the agent's own version, its turn ended), so Home and Review list and count what the
+    Factory page lists (ORCH-479). Proposals and stops are questions: core lists those already. Only orders that can be
+    a waiting draft are derived (open, with an agent's draft), so the pull stays well inside its 2 s."""
+    store = Store(root)
+    tickets = orchcli.tickets(root)
+    rows = []
+    for t in _order_tickets(tickets):
+        if t.get("status") in ("done", "dropped") or not _agent_draft(t):
+            continue
+        try:
+            o = _summary(t, flow.derive(root, store, t, tickets) | {"store": store}, root)
+        except Refused:
+            continue
+        if o["phase"] != "draft" or o["working"]:
+            continue
+        drafts = _drafts(store, t["id"])
+        v = o["draft_v"] or (drafts[-1]["v"] if drafts else 1)
+        since = drafts[-1]["at"] if drafts else (t.get("updated_at") or _iso(clock()))
+        rows.append(
+            {
+                "id": f"factory:draft:{t['id']}:v{v}",
+                "source": "factory",
+                "kind": "factory:draft",
+                "ticket": t["id"],
+                "title": _text(o["title"], 200) or "Untitled",
+                "text": DRAFT_TEXT,
+                "tone": "needs-you",
+                "since": since,
+                "draft": v,
+            }
+        )
+    return rows
+
+
 def autopilot_view(root):
     _, ok, store, tickets, journal = _all(root)
     return {"grants": _grants(store, tickets, journal), "decisions": _decisions(journal, ok)}

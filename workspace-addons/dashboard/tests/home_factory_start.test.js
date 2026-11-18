@@ -1,6 +1,6 @@
 'use strict';
 // ORCH-60 (owner accepted the draft on 16 Nov): a Factory start question on Home is a few lines (title, goal, time and
-// cost, "Read the whole proposal") with Not now, Change it, Start of the same weight, Start last; never the whole text.
+// cost, "Read proposal") with Not now, Change it, Start of the same weight, Start last; never the whole text.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -53,7 +53,7 @@ test('the Home card is a few lines and links to the whole proposal on the Factor
   assert.match(text, /Start “Services: see and manage background jobs”\?/);
   assert.match(text, /Runs about 10 h · needs you for about 15 min/);
   assert.doesNotMatch(text, /Done means|Crew|Steps|Ship/, 'never the whole proposal');
-  const link = nodes(row).find(n => n.tag === 'a' && n.children.includes('Read the whole proposal'));
+  const link = nodes(row).find(n => n.tag === 'a' && n.children.includes('Read proposal'));
   assert.equal(link.attrs.href, '#addon/factory/#/order/t_abc1234/proposal');
 });
 
@@ -70,7 +70,7 @@ test('the buttons are Not now, Change it, Start, all the same weight; Change it 
 
 test('without the Factory page the link opens the ticket; a snapshot shows no buttons', () => {
   const c = ctx(factoryQ, {addons:() => []});
-  const link = nodes(c.needRow(c.row, 'n1')).find(n => n.tag === 'a' && n.children.includes('Read the whole proposal'));
+  const link = nodes(c.needRow(c.row, 'n1')).find(n => n.tag === 'a' && n.children.includes('Read proposal'));
   assert.equal(link.attrs.href, '#ticket/t_abc1234');
   const s = ctx(factoryQ); vm.runInContext('snapshot = true', s);
   assert.equal(nodes(s.needRow(s.row, 'n1')).filter(n => n.tag === 'button').length, 0);
