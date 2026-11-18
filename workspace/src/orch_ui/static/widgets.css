@@ -618,6 +618,15 @@ dialog.report-dialog .actions{margin-top:12px}
 .blk-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
 .blk-head .blk-title{padding-left:0;padding-right:0;font-size:14px;line-height:20px}
 .card>.blk-head{padding:0 16px 0 0}
+/* One left edge in a block card (ORCH-432, SX-3 16 px rows): its heading, list rows and table cells all start 16 px
+   in. The tone dot of a list row is never drawn (it has no look), so it only speaks to screen readers and takes no
+   room: the row's words line up with the heading. Compact and paired blocks keep their own heading padding. */
+.card:not(.blk-compact):not(.blk-pair>.blk)>.blk-head{padding:0 16px}
+.card:not(.blk-compact):not(.blk-pair>.blk)>.blk-title{padding-left:16px;padding-right:16px}
+.blk.card .li-row{padding-left:16px;padding-right:16px}
+.blk.card .li-row>.tdot{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+@media(min-width:721px){.blk.card .blk-table th:first-child,.blk.card .blk-table td:first-child{padding-left:16px}
+.blk.card .blk-table th:last-child,.blk.card .blk-table td:last-child{padding-right:16px}}
 .blk-above>.blk-head{padding:0 4px 8px}.blk-above>.blk-head .blk-title,.blk-above>.blk-title{padding:0;font-size:14px;line-height:20px}
 .blk-above{display:block;margin-top:8px}
 .blk-above .blk-list{padding:0}
