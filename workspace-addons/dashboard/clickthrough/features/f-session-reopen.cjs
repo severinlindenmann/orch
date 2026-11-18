@@ -1,7 +1,7 @@
 // The History tab of a session pane (draft D, ORCH-363): open a ticket's session in the layer, open History, press
-// Reopen on an earlier session. The seeded home has no live-session add-on and no Preview switch (not-yet.json:
-// add-ons are not installed here), so the page's state is told both are on, and the earlier sessions are a fixed
-// list (the stand-in helper keeps no conversation on disk). The Reopen goes to the real server: orch refuses it
+// Reopen on an earlier session. Here the page's state is told the live-session add-on and the Preview switch are on,
+// and the earlier sessions are a fixed list (n-session-history.cjs does the same with the real add-on and a real
+// earlier conversation, and reopens it). The Reopen goes to the real server: orch refuses it
 // because that session is not this ticket's, and the page must show orch's plain refusal and keep the list.
 module.exports = {
   name: 'Session pane: History and Reopen',
