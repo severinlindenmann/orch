@@ -1775,6 +1775,9 @@ def orch_bin() -> str:
 
 def dispatch(root: Path, name: str, argv: list[str]) -> int:
     """`orch <name> <args>`: refused unless active here, then `python -m <run> <args>` in a subprocess."""
+    from orch import service_guard
+
+    service_guard.command(root, name, argv[0] if argv else None)
     if name not in active(root):
         raise Refused(not_on_message(root, name))
     m = discover().get(name)
