@@ -58,6 +58,7 @@
     whyLine.hidden = true;
     host.replaceChildren(wrap, whyLine);
     let isOpen = false;
+    let menuNow = null; /* the drawn caret menu: a redraw reads its open state, as its toggle event comes later */
     const toast = (text, kind) => (o.toast || (UI.toast ? t => UI.toast(t) : () => {}))(text, kind);
 
     const view = () => S.sessions(o.sessions, new Date(), UI.stamp ? (at, now) => UI.stamp(at.toISOString(), {now: now.toISOString()}) : null);
@@ -242,7 +243,7 @@
           go(S.freshOps(o.ticket, pk, pk.tools.usual, pk.cur), 'fresh');
         });
       }
-      const menu = el('details', 'menu');
+      const menu = menuNow = el('details', 'menu');
       if (isOpen && !busyNow) menu.open = true;
       const sum = attr(el('summary', 'btn ' + o.style + ' sm'), {'aria-label': 'Other ways to start'});
       sum.append(attr(el('span', 'chev'), {'aria-hidden': 'true'}));
@@ -292,6 +293,8 @@
         const sig = JSON.stringify([o.sessions, !!o.running, S.places(o.runs, o.settings, o.line), o.agents, o.model, o.hasSessions, o.label, o.continueLabel, o.style, !!o.caretHidden, !!o.fresh, starter.starting(o.ticket)]);
         if (sig === lastSig) return;
         lastSig = sig;
+        /* a click opens the menu now, its toggle event (isOpen) comes a moment later: a refresh in between kept it shut */
+        if (menuNow && !o.inline) isOpen = !!menuNow.open;
         render();
       },
       open() { isOpen = true; render('summary'); },

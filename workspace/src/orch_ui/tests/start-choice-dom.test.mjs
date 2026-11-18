@@ -221,3 +221,14 @@ test('start() is the main click from elsewhere; start("fresh") starts fresh; nei
   await tick();
   assert.deepEqual(m.sent, [['run.start', {ticket: 't_1'}]]);
 });
+
+test('a refresh right after the caret opened the choice keeps it open (its toggle event comes later)', () => {
+  const m = mount({sessions: null});
+  const menu = m.q(n => n.tag === 'details');
+  menu.open = true; /* the browser opened it; the toggle event has not fired yet */
+  m.btn.update({sessions: {sessions: []}});
+  const now = m.q(n => n.tag === 'details');
+  assert.notEqual(now, menu, 'the refresh drew the button again');
+  assert.equal(now.open, true, 'the refresh closed the Start choice');
+  assert.ok(m.q(n => n.textContent === 'Fresh start'), 'the open choice shows its rows');
+});
