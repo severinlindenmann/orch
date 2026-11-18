@@ -58,86 +58,93 @@
       box.append(w);
       return btn;
     }
-    function seg(label, list, cur, what) {
-      const s = attr(el('span', 'segmented'), {role: 'group', 'aria-label': label});
-      list.forEach(([v, text]) => {
-        const b = attr(el('button', 'btn sm', text), {type: 'button', 'aria-pressed': String(cur === v)});
-        b.dataset.startPick = what;
-        b.dataset.v = v;
-        b.addEventListener('click', e => {
-          e.preventDefault();
-          const p = pickOf(), next = {tool: p.tool, model: p.model};
-          next[what] = v;
-          picks.set(o.ticket, next);
-          render(`[data-start-pick="${what}"][aria-pressed="true"]`);
-        });
-        s.append(b);
+    /* A small picker (owner, ORCH-484: tool and model as two small selects; the kit's select.js dresses them). */
+    function sel(label, list, cur, what, onPick) {
+      const s = attr(el('select'), {'aria-label': label});
+      s.dataset.startPick = what;
+      list.forEach(([v, text]) => { const op = el('option', '', text); op.value = v; if (cur === v) op.selected = true; s.append(op); });
+      s.value = cur;
+      s.addEventListener('change', () => {
+        const p = pickOf(), next = {tool: p.tool, model: p.model};
+        next[what] = s.value;
+        picks.set(o.ticket, next);
+        if (onPick) onPick();
       });
       return s;
     }
-    function pickRow(box) {
+    /* Runs on: the tool (a picker only when there are two or more) and the model (or why the tool takes none). */
+    function runRow() {
+      const run = attr(el('span', 'start-run'), {role: 'group', 'aria-label': 'Runs on'});
+      const modelBox = el('span');
+      const modelPart = () => {
+        const p = pickOf(), tool = p.tools.tools.find(x => x.name === p.tool), noModel = S.why('model', {tool});
+        modelBox.replaceChildren(noModel ? el('span', 'meta', noModel) : sel('Model', S.MODELS, p.model, 'model'));
+      };
       const p = pickOf(), tool = p.tools.tools.find(x => x.name === p.tool);
-      const row = attr(el('div', 'live-pick'), {role: 'group', 'aria-label': 'Runs on'});
-      row.append(el('span', 'live-pick-l', 'Runs on'));
-      if (p.tools.tools.length > 1) row.append(seg('Tool', p.tools.tools.map(x => [x.name, x.label]), p.tool, 'tool'));
-      else if (tool) row.append(el('span', 'chip', tool.label));
-      const noModel = S.why('model', {tool});
-      if (noModel) row.append(el('span', 'meta', noModel));
-      else row.append(seg('Model', S.MODELS, p.model, 'model'));
-      box.append(row);
+      if (p.tools.tools.length > 1) run.append(sel('Tool', p.tools.tools.map(x => [x.name, x.label]), p.tool, 'tool', modelPart));
+      else if (tool) run.append(el('span', 'chip', tool.label));
+      modelPart();
+      run.append(modelBox);
+      return run;
     }
-    function choice(key, title, text) {
-      const c = el('div', 'live-choice');
-      c.dataset.key = key;
-      c.append(el('h4', '', title), el('p', 'meta', text));
-      return c;
+    /* One way to start: title, one line, (extra), the button on the right; a greyed button says why under the line. */
+    function opt(key, title, text, btn, reason, extra) {
+      const li = el('li', 'start-opt');
+      li.dataset.key = key;
+      const t = el('div', 'start-opt-t');
+      t.append(el('b', '', title), el('span', 'meta', text));
+      if (extra) t.append(extra);
+      li.append(t, greyable(btn, reason, t));
+      return li;
     }
     function body() {
       const v = view(), lastRow = S.last(v.rows), hasLast = !!lastRow || v.state === 'loading', name = o.name || 'this ticket';
       const p = S.places(o.runs, o.settings, o.line), at = S.inLine(p, o.ticket);
       const box = el('div', 'live-start');
       if (starter.starting(o.ticket)) box.setAttribute('aria-busy', 'true');
-      box.append(el('h3', 'live-start-h', 'Start a helper on this ticket'));
-      const pl = el('p', 'meta live-places', S.placesText(p));
+      const head = el('div', 'start-pop-h');
+      head.append(el('h3', 'live-start-h', 'Start a helper'));
+      const pl = el('span', 'meta live-places', S.placesShort(p));
       if (p.full) pl.dataset.full = '';
-      box.append(pl);
+      if (pl.textContent) head.append(pl);
+      box.append(head);
       if (at) {
-        box.append(el('p', '', name + ' is number ' + at.at + ' of ' + at.of + ' in line. It starts by itself when a place is free.'));
+        box.append(el('p', 'meta', name + ' is number ' + at.at + ' of ' + at.of + ' in line. It starts by itself when a place is free.'));
         return box;
       }
-      const list = el('div', 'live-choices');
+      const list = el('ul', 'start-opts');
       if (hasLast) {
-        const c = choice('start-continue', 'Continue where it stopped', 'Keeps the last conversation' + (lastRow ? ' from ' + lastRow.day : '') + '. Best when the work is half done.');
         const b = attr(el('button', 'btn outline sm', 'Continue'), {type: 'button', 'aria-label': 'Continue the last conversation on ' + name});
         b.dataset.start = 'continue';
         b.addEventListener('click', () => go([['run.start', {ticket: o.ticket}]], 'continue'));
-        c.append(greyable(b, S.why('continue', ctx()), c));
-        list.append(c);
+        list.append(opt('start-continue', 'Continue where it stopped', lastRow ? 'Keeps the talk from ' + lastRow.day : 'Keeps the last talk', b, S.why('continue', ctx())));
       }
-      const f = choice('start-fresh', 'Fresh start', hasLast ? 'The helper reads the ticket again. The earlier talk is not used. Best when it went off track.' : 'The helper reads the ticket and starts on the first step.');
-      pickRow(f);
       const fb = attr(el('button', 'btn outline sm', hasLast ? 'Start again' : 'Start'), {type: 'button', 'aria-label': 'Fresh start on ' + name});
       fb.dataset.start = 'fresh';
       fb.addEventListener('click', () => { const pk = pickOf(); go(S.freshOps(o.ticket, pk, pk.tools.usual, pk.cur), 'fresh'); });
-      f.append(greyable(fb, S.why('fresh', ctx()), f));
-      list.append(f);
+      list.append(opt('start-fresh', 'Fresh start', hasLast ? 'Starts over without the earlier talk' : 'Reads the ticket and starts on the first step', fb, S.why('fresh', ctx()), runRow()));
       box.append(list);
-      box.append(earlier(v));
+      const e = earlier(v);
+      if (e) box.append(e);
       return box;
     }
+    let more = false; /* the earlier sessions folded out (owner, ORCH-484: the newest one shows, the rest behind Show more) */
     function earlier(v) {
+      if (v.state === 'empty') return null;
       const w = el('div', 'live-hist');
       w.dataset.key = 'start-earlier';
       const hid = me + '-earlier';
-      const head = el('h4', 'live-hist-h', 'Or reopen an earlier session');
+      const head = el('h4', 'live-hist-h', 'Earlier sessions');
       head.id = hid;
       w.append(head);
       if (v.state === 'loading') { w.append(el('p', 'meta', 'Loading the earlier sessions…')); return w; }
       if (v.state === 'error') { w.append(el('p', 'meta', 'The earlier sessions could not be loaded.')); return w; }
-      if (v.state === 'empty') { w.append(el('p', 'meta', 'No earlier sessions yet.')); return w; }
       const ul = attr(el('ul', 'live-hist-list'), {'aria-labelledby': hid});
+      const rows = [];
       v.rows.forEach((r, i) => {
         const li = el('li', 'live-hist-row');
+        li.hidden = i > 0 && !more;
+        rows.push(li);
         if (r.current) li.dataset.current = '';
         const t = el('span', 'live-hist-t', r.title);
         t.title = r.title;
@@ -160,7 +167,15 @@
         li.append(b);
         ul.append(li);
       });
-      w.append(ul, el('p', 'meta', 'orch keeps the last ' + S.KEEP + ' sessions of this ticket on this computer.'));
+      w.append(ul);
+      if (rows.length > 1) {
+        const tog = attr(el('button', 'btn ghost xs start-more'), {type: 'button', 'aria-expanded': String(more)});
+        tog.dataset.startMore = '';
+        const say = () => { tog.textContent = more ? 'Show less' : 'Show ' + (rows.length - 1) + ' more'; tog.setAttribute('aria-expanded', String(more)); };
+        say();
+        tog.addEventListener('click', () => { more = !more; rows.forEach((li, i) => { if (i) li.hidden = !more; }); say(); });
+        w.append(tog);
+      }
       return w;
     }
     async function go(ops, how) {

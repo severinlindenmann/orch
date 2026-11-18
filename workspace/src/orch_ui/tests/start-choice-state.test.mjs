@@ -125,3 +125,13 @@ test('a send that throws ends Starting as a failure', async () => {
   assert.deepEqual(ev, ['starting', 'failed']);
   assert.equal(st.starting('t_1'), false);
 });
+
+test('the short places line: N of M in use, the full sentence when every place is taken, nothing with no limit and no helper', () => {
+  const S = require('../static/start-choice-state.js');
+  const p = (used, max, waiting = []) => ({used, max, waiting, full: max !== null && used >= max});
+  assert.equal(S.placesShort(p(4, 6)), '4 of 6 places in use');
+  assert.equal(S.placesShort(p(2, 6, ['t_a'])), '2 of 6 places in use · 1 ticket waits');
+  assert.equal(S.placesShort(p(0, null)), '');
+  assert.equal(S.placesShort(p(1, null)), '1 helper working');
+  assert.match(S.placesShort(p(6, 6)), /^All 6 helper places are in use\..*waits in line/);
+});

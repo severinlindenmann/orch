@@ -37,6 +37,14 @@
     return ['A start uses 1 of ' + plural(p.max, 'helper place', 'helper places') + '. Now ' + p.used + ' of ' + p.max + ' ' +
       (p.used === 1 ? 'is' : 'are') + ' in use.', wait].filter(Boolean).join(' ');
   }
+  /* The short places line in the Start choice's header (owner, ORCH-484): "4 of 6 places in use"; the full sentence
+     when every place is taken (a start then waits in line); '' when there is no limit and no helper works. */
+  function placesShort(p) {
+    if (p.full) return placesText(p);
+    const wait = p.waiting.length ? ' · ' + plural(p.waiting.length, 'ticket waits', 'tickets wait') : '';
+    if (p.max === null) return p.used ? plural(p.used, 'helper', 'helpers') + ' working' + wait : '';
+    return p.used + ' of ' + p.max + ' places in use' + wait;
+  }
   /* Where this ticket stands in the line ({at:2, of:3}), or null when it does not wait. */
   function inLine(p, id) {
     const at = p.waiting.indexOf(id);
@@ -167,6 +175,6 @@
     };
   }
 
-  return {MODELS, KEEP, STARTING_MS, places, placesText, inLine, tools, model, freshOps, sessionRow, sessions, last, main, why,
+  return {MODELS, KEEP, STARTING_MS, places, placesText, placesShort, inLine, tools, model, freshOps, sessionRow, sessions, last, main, why,
     queued, busy, starter};
 });

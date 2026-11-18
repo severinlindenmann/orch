@@ -32,6 +32,8 @@ Object.defineProperty(N.prototype, 'disabledAttr', {get() { return this.disabled
 const setA = N.prototype.setAttribute;
 N.prototype.setAttribute = function (k, v) { setA.call(this, k, v); if (k === 'disabled') this.disabled = true; };
 
+// Pick a value in one of the Start choice's small selects, as select.js does: set the value, send change.
+function pick(m, what, v) { const s = m.q(n => n.dataset.startPick === what); s.value = v; s.dispatch('change'); }
 const tick = () => new Promise(r => setImmediate(r));
 function mount(o = {}) {
   globalThis.document = doc;
@@ -103,23 +105,43 @@ test('a busy refusal to a second start is quiet; a real refusal shows its words 
 });
 
 test('the caret opens the Start choice: fresh start with tool and model, sends the picked tool and model', async () => {
-  const m = mount({model: {name: 'opus', by: 'orch'}});
+  const m = mount({model: {name: 'opus', by: 'orch'}, runs: {t_9: {running: true}}});
   m.q(n => n.tag === 'summary').click();
-  assert.ok(m.q(n => n.className === 'live-start-h' && n.textContent === 'Start a helper on this ticket'));
-  assert.ok(m.q(n => /A start uses 1 of 6 helper places/.test(n.textContent) && n.className.includes('live-places')));
+  assert.ok(m.q(n => n.className === 'live-start-h' && n.textContent === 'Start a helper'));
+  assert.ok(m.q(n => n.textContent === '1 of 6 places in use' && n.className.includes('live-places')));
   assert.equal(m.q(n => n.dataset.start === 'continue'), null, 'no Continue without an earlier session');
-  m.q(n => n.dataset.startPick === 'model' && n.dataset.v === 'sonnet').click();
+  pick(m, 'model', 'sonnet');
   m.q(n => n.dataset.start === 'fresh').click();
   await tick();
   assert.deepEqual(m.sent, [['ticket.model', {ticket: 't_1', model: 'sonnet'}], ['run.start', {ticket: 't_1', fresh: true}]]);
 });
 
-test('a tool without models says so instead of the model row', () => {
+test('a tool without models says so instead of the model picker', () => {
   const m = mount();
   m.q(n => n.tag === 'summary').click();
-  m.q(n => n.dataset.startPick === 'tool' && n.dataset.v === 'codex').click();
+  pick(m, 'tool', 'codex');
   assert.equal(m.q(n => n.dataset.startPick === 'model'), null);
   assert.ok(m.q(n => n.textContent === 'This tool uses its own model.'));
+});
+
+test('earlier sessions: the newest shows, the rest fold out behind Show more', () => {
+  const s = i => ({id: 's' + i, title: 'T' + i, reopenable: true, turns: 2, last_used: '2026-11-1' + (8 - i) + 'T10:00:00Z'});
+  const m = mount({sessions: {sessions: [s(1), s(2), s(3)]}});
+  m.btn.open();
+  const rows = m.host.all(n => n.className === 'live-hist-row');
+  assert.deepEqual(rows.map(r => r.hidden), [false, true, true]);
+  const tog = m.q(n => 'startMore' in n.dataset);
+  assert.equal(tog.textContent, 'Show 2 more');
+  tog.click();
+  assert.deepEqual(rows.map(r => r.hidden), [false, false, false]);
+  assert.equal(tog.textContent, 'Show less');
+  assert.equal(tog.getAttribute('aria-expanded'), 'true');
+});
+
+test('no earlier sessions: no Earlier sessions part', () => {
+  const m = mount();
+  m.btn.open();
+  assert.equal(m.q(n => n.dataset.key === 'start-earlier'), null);
 });
 
 test('a greyed Reopen says why, tied to the button', () => {
