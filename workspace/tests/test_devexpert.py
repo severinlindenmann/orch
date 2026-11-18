@@ -91,6 +91,7 @@ def test_reruns_stale_overlap_merge():
     assert [p["number"] for p in de.stale_prs(prs, T)] == [1]
     ov = de.overlaps({1: ["a.py", "b.py"], 2: ["b.py"], 3: ["c.py"]})
     assert ov == [{"prs": [1, 2], "files": ["b.py"], "count": 1}]
+    assert de.overlaps({1: ["e2e/focus_d/CLICKTHROUGH.md", "NOTES.md"], 2: ["e2e/focus_d/CLICKTHROUGH.md", "NOTES.md"]}) == []
     m = de.merge_times(
         [
             {"createdAt": "2026-11-17T06:00:00Z", "mergedAt": "2026-11-17T08:00:00Z"},
@@ -374,3 +375,27 @@ def test_a_branch_that_only_looks_like_the_default_branch_after_cleaning_is_not_
     ]
     res = _pass(proj, gh)
     assert res["survey"]["red"] == [] and _made(proj) == []
+
+
+def test_overlap_skips_queue_group_branches():
+    class GH:
+        repo = "x/y"
+
+        def branch(self):
+            return "develop"
+
+        def runs(self, b):
+            return []
+
+        def prs(self):
+            mk = lambda n, b: {"number": n, "headRefName": b, "createdAt": "2026-11-18T00:00:00Z"}  # noqa: E731
+            return [mk(1, "feat/a"), mk(2, "feat/b"), mk(3, "orch-queue/g1")]
+
+        def pr_files(self, n):
+            return ["src/x.py"] if n != 2 else ["src/y.py"]
+
+        def merged(self):
+            return []
+
+    s = de.survey(GH(), [], 0, T)
+    assert s["overlaps"] == []
