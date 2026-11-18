@@ -1276,11 +1276,23 @@ GENERAL_REFUSED = (
 )  # finish, reopen, Working; waiting and ready stay
 
 
-def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str, str]:
+DRAFT_TO_CHECK = "a ticket with a draft, mockup or design waits for the owner's Check"
+
+
+def _finish_status(root: Path, ticket: dict, status: str, by: str, person: bool = False) -> tuple[str, str]:
+    """person: a signed-in person (the dashboard's one-time grant); only then does a ticket that carries a
+    draft become Done (ORCH-582). An agent's Done goes to Review instead, also with agents may finish on."""
     if hidden_kind(ticket) and status in GENERAL_REFUSED:  # the ONE status guard (agent, person, wrapper)
         raise Refused(_hidden_refusal(ticket))
     if agent_tool():  # an agent in the environment counts as an agent whatever --by says
         by = "agent:" + str(agent_tool())
+    if status == "done" and ticket["status"] != "done" and ownerpick.carries_draft(ticket):
+        if by.startswith("agent:"):
+            _check_not_too_early(root, ticket)
+            _check_can_finish(ticket)
+            add_history(ticket, by, f"{by} finished the work and sent it to Check: {DRAFT_TO_CHECK}")
+            return "review", by
+        ownerpick.refuse_ticket(ticket, person)
     if status in ("done", "review") and by.startswith("agent:") and ticket["status"] != status:
         _check_not_too_early(root, ticket)
     if status == "done" and by.startswith("agent:"):
@@ -1645,7 +1657,9 @@ def _keep_superseded(ticket: dict, status: str, other: str | None, given: bool) 
             ticket.pop("superseded_by", None)
 
 
-def set_status(root: Path, tid: str, status: str, by: str, superseded_by: str | None = None) -> dict:
+def set_status(
+    root: Path, tid: str, status: str, by: str, superseded_by: str | None = None, *, person: bool = False
+) -> dict:
     if status not in STATUSES:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
     if superseded_by is not None and status != "dropped":
@@ -1653,7 +1667,7 @@ def set_status(root: Path, tid: str, status: str, by: str, superseded_by: str | 
     other = superseded_value(root, tid, superseded_by) if superseded_by is not None else None
 
     def op(ticket):
-        target, actor = _finish_status(root, ticket, status, by)
+        target, actor = _finish_status(root, ticket, status, by, person)
         _keep_superseded(ticket, target, other, superseded_by is not None)
         if other and target == "dropped":
             add_history(ticket, actor, f"Superseded by {other}")
@@ -3760,7 +3774,7 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
     return apply_op(root, tid, op2, by=by)[0]
 
 
-def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
+def patch(root: Path, tid: str, if_revision: int, data: str, by: str, *, person: bool = False) -> dict:
     """Atomic change of several fields; refused (exit 2 + current values) when `revision` changed."""
     try:
         obj = json.loads(data)
@@ -3804,7 +3818,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
             raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
         actor = by
         if "status" in obj:
-            status, actor = _finish_status(root, ticket, status, by)
+            status, actor = _finish_status(root, ticket, status, by, person)
             if status in ("open", "ready") and not actor.startswith("agent:"):
                 ticket.pop("started", None)
         for k in ("owner", "due", "note", "done_when", "summary"):

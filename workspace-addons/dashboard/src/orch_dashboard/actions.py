@@ -1742,7 +1742,8 @@ def _logins_cancel(a):
 PERSON_GRANT_OPS = frozenset(
     {"logins.renew", "logins.status", "logins.cancel", "logins.code", "logins.replace"}
 )
-DRAFT_GRANT_OPS = frozenset({"answer", "review.answer"})  # a signed-in answer may pick a draft (ORCH-582)
+# a signed-in answer may pick a draft, and a signed-in Done may finish a ticket that carries one (ORCH-582)
+DRAFT_GRANT_OPS = frozenset({"answer", "review.answer", "ticket.patch"})
 
 
 def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> tuple[dict, tuple[int, ...]]:

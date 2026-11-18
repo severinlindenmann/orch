@@ -387,3 +387,48 @@ def test_human_review_needed_blocks_only_the_auto_reviewer_and_away_mode(proj, r
     rows = {a["ticket"]: a["verdict"] for a in reviewer.run(proj)["actions"]}
     assert rows[fix] == "accept" and tickets.load(proj, fix)["status"] == "done"
     assert q["id"]
+
+
+# ------------------------------------------------------------------ Done through the status commands
+
+
+def test_a_script_cannot_finish_a_ticket_with_a_draft_through_status(proj, run, new_ticket, person_grant):
+    tid = _finished(proj, run, new_ticket)
+    q = _draft(run, tid)
+    _picked(proj, tid, q["id"])
+    tickets.set_status(proj, tid, "review", "human:tester")
+    code, out, err = run("ticket", "status", tid, "done", "--by", ME)
+    assert code == 2 and "This ticket carries a draft" in out + err
+    rev = tickets.load(proj, tid)["revision"]
+    code, out, err = run(
+        "ticket", "patch", tid, json.dumps({"status": "done"}), f"--if-revision={rev}", "--by", ME
+    )
+    assert code == 2 and "This ticket carries a draft" in out + err
+    assert tickets.load(proj, tid)["status"] == "review"
+    person_grant(proj)  # the signed-in dashboard's Done
+    code, out, err = run(
+        "ticket", "patch", tid, json.dumps({"status": "done"}), f"--if-revision={rev}", "--by", ME
+    )
+    assert code == 0, out + err
+    assert tickets.load(proj, tid)["status"] == "done"
+
+
+def test_an_agent_done_on_a_ticket_with_a_draft_goes_to_check_even_when_agents_may_finish(
+    proj, run, new_ticket, monkeypatch
+):
+    _on(run, "agents_may_finish")
+    tid = _finished(proj, run, new_ticket)
+    q = _draft(run, tid)
+    _picked(proj, tid, q["id"])
+    t = tickets.set_status(proj, tid, "done", "agent:claude")
+    assert t["status"] == "review"
+    assert tickets.DRAFT_TO_CHECK in t["history"][-1]["text"]
+    plain = _finished(proj, run, new_ticket, "Fix the stale run record")
+    assert tickets.set_status(proj, plain, "done", "agent:claude")["status"] == "done"  # no draft: as before
+
+
+def test_a_person_finishes_a_plain_ticket_from_the_terminal_as_before(proj, run, new_ticket):
+    tid = _finished(proj, run, new_ticket, "Fix the stale run record")
+    code, out, err = run("ticket", "status", tid, "done", "--by", ME)
+    assert code == 0, out + err
+    assert tickets.load(proj, tid)["status"] == "done"
