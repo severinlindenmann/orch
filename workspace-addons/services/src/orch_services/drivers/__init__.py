@@ -46,6 +46,7 @@ class Status:
     running: bool
     pid: int | None = None
     since: str | None = None  # RFC 3339 UTC, when the platform says it
+    starting: bool = False  # not running yet, but the platform is still launching it (slow start under load)
 
 
 class Driver:
