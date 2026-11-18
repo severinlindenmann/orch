@@ -387,6 +387,11 @@ actor MockRelay: RelayAPI {
             guard let q = all.first(where: { $0.id == r.questionMessageId }), q.message.body.digest == v.digest, v.isValid else {
                 throw Self.invalid("This answer does not fit the question.")
             }
+            // ...and every added file is an upload of this phone with that size (ORCH-444).
+            for f in v.note?.files ?? [] {
+                guard let d = uploads[f.blobId] else { throw RelayError.api(status: 404, code: "not_found", message: "Upload the file first (POST /v1/phone/blobs).") }
+                guard d.count == f.size else { throw Self.invalid("An attachment's size does not match the uploaded file.") }
+            }
             verdicts.append((r.questionMessageId, v, r.answer))
         }
         answered[r.questionMessageId] = r.answer

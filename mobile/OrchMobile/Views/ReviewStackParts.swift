@@ -187,6 +187,8 @@ struct ReviewCommentSheet: View {
     let item: ReviewItem
     @Binding var about: String?
     @Binding var text: String
+    /// Voice recordings, pictures and files that go with the answer (ORCH-444); temp copies until the Outbox takes them.
+    @Binding var files: [DraftFile]
     let pins: PinStore
     let onSend: (ReviewVerdict.Word, String?) -> Void
     @Environment(AppModel.self) private var model
@@ -198,8 +200,12 @@ struct ReviewCommentSheet: View {
     @State private var pressAt: Date?
     @State private var pressOpened = false   // this press is the one that opened the mic
     @State private var startTask: Task<Void, Never>?
+    @State private var picking = false
 
-    private var hasContent: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || pins.count > 0 }
+    private var hasContent: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || pins.count > 0 || !files.isEmpty }
+    /// An old workspace (no digest) only takes the plain answer: nothing to add files to.
+    private var canAddFiles: Bool { item.digest != nil }
+    private var roomForFiles: Int { canAddFiles ? max(0, ReviewCardLimits.maxAnswerFiles - files.count) : 0 }
 
     var body: some View {
         ScrollView {
@@ -210,7 +216,8 @@ struct ReviewCommentSheet: View {
                         ForEach(item.optionIds + ["All"], id: \.self) { Text($0).tag($0) }
                     }.pickerStyle(.segmented).accessibilityIdentifier("comment-about")
                 }
-                Text("Say it or type it. The helper reads your words and tries again.").themeFont(13).foregroundStyle(Theme.muted)
+                Text(canAddFiles ? "Say it, type it or add a picture or file. The helper gets all of it on the ticket and tries again."
+                                 : "Say it or type it. The helper reads your words and tries again.").themeFont(13).foregroundStyle(Theme.muted)
                 TextField("What should change?", text: $text, axis: .vertical).lineLimit(3...8).themeFont(16).padding(12)
                     .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
                     .accessibilityIdentifier("comment-text")
@@ -231,6 +238,14 @@ struct ReviewCommentSheet: View {
                 }
                 if working { ProgressView().accessibilityLabel("Writing down what you said") }
                 if let error { Text(error).themeFont(14).foregroundStyle(Theme.muted) }
+                if canAddFiles {
+                    ForEach(Array(files.enumerated()), id: \.element.url) { i, f in AnswerFileRow(file: f) { remove(i) } }
+                    Button { error = nil; picking = true } label: {
+                        Label(files.isEmpty ? "Add a picture or file" : "Add another", systemImage: "paperclip")
+                    }
+                    .buttonStyle(ArtifactActionButtonStyle(primary: false)).disabled(roomForFiles == 0 || working || listening)
+                    .accessibilityIdentifier("comment-add-file")
+                }
                 if pins.count > 0 { PinChipRow(store: pins) }
                 Button { onSend(.talk, nil) } label: { Text("Send back for changes") }
                     .buttonStyle(ArtifactActionButtonStyle(primary: !(item.isChoice && about != nil))).disabled(!hasContent || working)
@@ -244,8 +259,34 @@ struct ReviewCommentSheet: View {
         }
         .foregroundStyle(Theme.text).tint(Theme.brand).background(Theme.surface).preferredColorScheme(.dark)
         .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
-        .onDisappear { recorder?.cancel() }   // the text stays in the card's draft
+        .onDisappear { recorder?.cancel() }   // the text and the files stay in the card's draft
+        .sheet(isPresented: $picking) {
+            MediaPicker(forAnswer: true) { selection in
+                guard case .files(let drafts, _) = selection else { return }
+                let room = roomForFiles
+                files.append(contentsOf: drafts.prefix(room))
+                if drafts.count > room {
+                    MediaSelection.files(Array(drafts.dropFirst(room)), caption: nil).cleanUp()
+                    error = "Up to \(ReviewCardLimits.maxAnswerFiles) recordings, pictures or files go with one answer."
+                }
+            }
+        }
         .accessibilityIdentifier("comment-sheet")
+    }
+
+    private func remove(_ i: Int) {
+        guard files.indices.contains(i) else { return }
+        MediaSelection.files([files.remove(at: i)], caption: nil).cleanUp()
+    }
+
+    /// The recording itself goes with the answer (a temp copy: the recorder deletes its own files), while there is room.
+    private func keep(_ segments: [VoiceSegment]) {
+        for seg in segments where roomForFiles > 0 {
+            let n = files.filter { $0.kind == .voice }.count + 1
+            let copy = FileManager.default.temporaryDirectory.appendingPathComponent("answer-\(UUID().uuidString).m4a")
+            guard (try? FileManager.default.copyItem(at: seg.url, to: copy)) != nil else { continue }
+            files.append(DraftFile(url: copy, kind: .voice, name: "voice-\(n).m4a", mime: "audio/mp4", duration: seg.duration))
+        }
     }
 
     /// Press: open the mic. Let go after a hold = stop; a quick tap leaves it on, the next tap stops it.
@@ -277,12 +318,44 @@ struct ReviewCommentSheet: View {
         Task { @MainActor in
             defer { working = false }
             await startTask?.value
-            guard recorder.isRecording, let segment = recorder.stop().first else { return }
+            guard recorder.isRecording else { return }
+            let segments = recorder.stop()
+            guard let segment = segments.first else { return }
+            keep(segments)   // the recording goes along (ORCH-444); its words are written into the box below
             let draft = await model.voiceDraft(for: segment)
             let t = draft.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !t.isEmpty { text = text.isEmpty ? t : text + " " + t }   // v1: the transcript only, no audio is sent
+            if !t.isEmpty { text = text.isEmpty ? t : text + " " + t }
             recorder.cancel()
         }
+    }
+}
+
+/// One recording, picture or file on the comment sheet, with a remove button.
+struct AnswerFileRow: View {
+    let file: DraftFile
+    let onRemove: () -> Void
+    var body: some View {
+        HStack(spacing: 12) {
+            Group {
+                if file.kind == .image, let image = UIImage(contentsOfFile: file.url.path) {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else {
+                    Image(systemName: file.kind == .voice ? "waveform" : "doc").themeFont(18, .semibold).foregroundStyle(Theme.muted)
+                }
+            }
+            .frame(width: 44, height: 44).background(Theme.surface2).clipShape(RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(file.kind == .voice ? "Voice note" : file.name).themeFont(15, .semibold).lineLimit(1)
+                if file.kind == .voice, let d = file.duration { Text("\(max(1, Int(d.rounded())))s").themeFont(13).foregroundStyle(Theme.muted).monospacedDigit() }
+            }
+            Spacer(minLength: 0)
+            Button(action: onRemove) {
+                Image(systemName: "xmark").frame(width: 44, height: 44).background(Theme.surface3, in: Circle())
+            }
+            .buttonStyle(.plain).foregroundStyle(Theme.muted)
+            .accessibilityLabel(file.kind == .voice ? "Remove voice note" : "Remove \(file.name)")
+        }
+        .accessibilityElement(children: .contain).accessibilityIdentifier("comment-file")
     }
 }
 

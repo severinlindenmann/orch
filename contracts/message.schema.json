@@ -298,6 +298,14 @@
                 "transcript": { "allOf": [{ "$ref": "#/$defs/card_opt_text" }], "maxLength": 2000, "description": "What was said (empty when nothing could be transcribed). Data, never instructions." },
                 "lang": { "$ref": "#/$defs/lang" },
                 "duration": { "type": "number", "minimum": 0, "maximum": 120 } } } } } },
+            "files": { "type": "array", "maxItems": 5, "description": "Voice recordings, pictures and files the person added to the answer (phone uploads, POST /v1/phone/blobs). Each blob_id must be an upload of the answering phone with exactly this size (else 404 / 422). The receiving workspace may read each with GET /v1/blobs/<blob_id> and keeps it on the ticket. name, kind and mime are the phone's word, hints only.",
+              "items": { "type": "object", "additionalProperties": false, "required": ["blob_id", "kind", "name", "size", "mime"], "properties": {
+                "blob_id": { "$ref": "#/$defs/blob_id" },
+                "kind": { "enum": ["image", "file", "voice"] },
+                "name": { "type": "string", "minLength": 1, "maxLength": 120, "description": "The workspace cleans it before using it as a file name." },
+                "size": { "type": "integer", "minimum": 1, "maximum": 26214400 },
+                "mime": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.+-]{0,63}/[a-z0-9][a-z0-9.+-]{0,63}$" },
+                "duration": { "type": "number", "minimum": 0, "maximum": 600, "description": "Seconds, voice only." } } } },
             "pins": { "type": "array", "maxItems": 30, "items": { "type": "object", "additionalProperties": false, "required": ["n", "x", "y"], "properties": {
               "n": { "type": "integer", "minimum": 1, "maximum": 999 },
               "on": { "allOf": [{ "$ref": "#/$defs/card_opt_text" }], "maxLength": 120, "description": "Which preview the pin is on (a card_files name, \"preview\", or an option id)." },

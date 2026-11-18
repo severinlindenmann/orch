@@ -35,6 +35,8 @@ enum ReviewCardLimits {
     static let maxFiles = 20
     static let maxCardBytes = 65_536
     static let maxVerdictBytes = 8_192
+    /// Voice recordings, pictures and files one answer may carry (verdict note.files, ORCH-444).
+    static let maxAnswerFiles = 5
     /// A card's files together (phone budget, M3).
     static let maxFileBytes = 20 * 1024 * 1024
 }
@@ -162,7 +164,9 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
     struct Voice: Codable, Equatable, Sendable { let blobId: String; var transcript: String; var lang: String; var duration: Double }
     struct Words: Codable, Equatable, Sendable { var text: String? = nil; var voice: [Voice]? = nil }
     struct Pin: Codable, Equatable, Sendable { var n: Int; var on: String? = nil; var x: Double; var y: Double; var text: String? = nil }
-    struct Note: Codable, Equatable, Sendable { var changes: [String]? = nil; var words: Words? = nil; var pins: [Pin]? = nil }
+    /// A voice recording, picture or file the person added (a phone upload; ORCH-444). Filled in from the Outbox item when it is sent.
+    struct File: Codable, Equatable, Sendable { let blobId: String; let kind: MessageAttachment.Kind; let name: String; let size: Int; let mime: String; var duration: Double? = nil }
+    struct Note: Codable, Equatable, Sendable { var changes: [String]? = nil; var words: Words? = nil; var files: [File]? = nil; var pins: [Pin]? = nil }
     var verdict: Word
     var picked: String? = nil
     var digest: String
@@ -179,11 +183,14 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
             // talk needs words, changes or pins
             let n = note
             let has = !(n?.changes ?? []).isEmpty || !(n?.words?.text ?? "").isEmpty || !(n?.words?.voice ?? []).isEmpty || !(n?.pins ?? []).isEmpty
+                || !(n?.files ?? []).isEmpty
             if !has { return false }
         }
         if let n = note {
             if (n.changes ?? []).count > 20 || (n.changes ?? []).contains(where: { $0.count > 500 }) { return false }
             if (n.words?.text?.count ?? 0) > 2000 || (n.words?.voice?.count ?? 0) > 3 { return false }
+            if (n.files ?? []).count > ReviewCardLimits.maxAnswerFiles
+                || (n.files ?? []).contains(where: { $0.name.isEmpty || $0.name.count > 120 || $0.size < 1 || $0.size > SendRequest.maxBlobBytes || ($0.duration ?? 0) > 600 }) { return false }
             if (n.pins ?? []).count > 30 || (n.pins ?? []).contains(where: { !(0...1).contains($0.x) || !(0...1).contains($0.y) || ($0.text?.count ?? 0) > 500 || ($0.on?.count ?? 0) > 120 }) { return false }
         }
         return true

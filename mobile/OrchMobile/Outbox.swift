@@ -262,13 +262,7 @@ final class Outbox {
             var n = 0
             func copy(_ url: URL, kind: MessageAttachment.Kind, name: String, mime: String, duration: Double?) throws -> PendingFile {
                 n += 1
-                let local = "\(n)-" + Self.safeFileName(name)
-                let dest = folder(clientId).appendingPathComponent(local)
-                try fm.copyItem(at: url, to: dest)
-                try? fm.setAttributes([.protectionKey: Self.protection], ofItemAtPath: dest.path)    // same protection as the index
-                let size = (try fm.attributesOfItem(atPath: dest.path)[.size] as? Int) ?? 0
-                guard size > 0, size <= SendRequest.maxBlobBytes else { throw SendRequest.Problem.attachmentTooBig }
-                return PendingFile(file: local, kind: kind, name: name, mime: mime, size: size, duration: duration)
+                return try copyIn(url, clientId: clientId, n: n, kind: kind, name: name, mime: mime, duration: duration)
             }
             item.files = try draft.files.map { try copy($0.url, kind: $0.kind, name: $0.name, mime: $0.mime, duration: $0.duration) }
             if let v = draft.voice {
@@ -285,6 +279,41 @@ final class Outbox {
         } catch { removeFolder(clientId); throw error }
         items.append(item); save()
         return item
+    }
+
+    /// Copies one picked or recorded file into the item's folder as file number `n`. Throws for an empty file or one over 25 MB.
+    private func copyIn(_ url: URL, clientId: String, n: Int, kind: MessageAttachment.Kind, name: String, mime: String, duration: Double?) throws -> PendingFile {
+        let local = "\(n)-" + Self.safeFileName(name)
+        let dest = folder(clientId).appendingPathComponent(local)
+        try fm.copyItem(at: url, to: dest)
+        try? fm.setAttributes([.protectionKey: Self.protection], ofItemAtPath: dest.path)    // same protection as the index
+        let size = (try fm.attributesOfItem(atPath: dest.path)[.size] as? Int) ?? 0
+        guard size > 0, size <= SendRequest.maxBlobBytes else { throw SendRequest.Problem.attachmentTooBig }
+        return PendingFile(file: local, kind: kind, name: name, mime: mime, size: size, duration: duration)
+    }
+
+    /// Copies the files of a review answer into a fresh folder of the item (old copies go). Throws `VerdictProblem.invalid`.
+    private func answerFiles(_ files: [DraftFile], clientId: String) throws -> [PendingFile] {
+        removeFolder(clientId)
+        guard !files.isEmpty else { return [] }
+        guard files.count <= ReviewCardLimits.maxAnswerFiles else { throw VerdictProblem.invalid }
+        do {
+            try fm.createDirectory(at: folder(clientId), withIntermediateDirectories: true, attributes: [.protectionKey: Self.protection])
+            return try files.enumerated().map { i, f in try copyIn(f.url, clientId: clientId, n: i + 1, kind: f.kind, name: f.name, mime: f.mime, duration: f.duration) }
+        } catch { removeFolder(clientId); throw VerdictProblem.invalid }
+    }
+
+    /// The verdict as the relay gets it: the item's files (uploaded, or `dummy` ids for the size check) in `note.files`.
+    nonisolated static func wireVerdict(_ verdict: PendingVerdict, files: [PendingFile], dummy: Bool = false) -> PendingVerdict {
+        guard !files.isEmpty else { return verdict }
+        var v = verdict
+        var note = v.note ?? ReviewVerdict.Note()
+        note.files = files.map { f in
+            ReviewVerdict.File(blobId: f.blobId ?? (dummy ? "b_" + String(repeating: "0", count: 16) : ""), kind: f.kind,
+                               name: String(f.name.prefix(120)), size: f.size, mime: f.mime, duration: f.duration)
+        }
+        v.note = note
+        return v
     }
 
     /// Queue an answer to a question. The same `client_id` is used on every retry; one answer per question is queued.
@@ -306,23 +335,30 @@ final class Outbox {
     }
 
     /// Queue a review card swipe. The same `client_id` is used on every retry; one answer per question is queued.
-    /// `answer` is the plain summary line for old readers (contract). Throws `VerdictProblem`; nothing is queued then.
+    /// `answer` is the plain summary line for old readers (contract). `files`: voice recordings, pictures and files added to the answer
+    /// (copied; uploaded before the answer is sent). Throws `VerdictProblem`; nothing is queued then.
     @discardableResult
-    func enqueueAnswer(question: Question, answer: String, verdict: PendingVerdict, now: Date = Date()) throws -> OutboxItem {
+    func enqueueAnswer(question: Question, answer: String, verdict: PendingVerdict, files: [DraftFile] = [], now: Date = Date()) throws -> OutboxItem {
         if let existing = items.first(where: { $0.kind == .answer && $0.questionMessageId == question.id }) { return existing }
-        try Self.checkVerdict(verdict, for: question)
-        let item = OutboxItem(clientId: UUID().uuidString.lowercased(), phone: phone, kind: .answer, workspace: question.message.from,
+        let clientId = UUID().uuidString.lowercased()
+        let pending = try answerFiles(files, clientId: clientId)
+        do { try Self.checkVerdict(Self.wireVerdict(verdict, files: pending, dummy: true), for: question) } catch { removeFolder(clientId); throw error }
+        var item = OutboxItem(clientId: clientId, phone: phone, kind: .answer, workspace: question.message.from,
                               createdAt: ISO8601DateFormatter().string(from: now), questionMessageId: question.id, answer: answer, verdict: verdict)
+        item.files = pending
         items.append(item); save()
         return item
     }
 
     /// Change a swipe that has not left the Outbox yet (M4). After the relay stored it the answer is final: `.alreadySent`.
+    /// The new answer's `files` replace the old ones (none for a plain right or left swipe).
     @discardableResult
-    func changeVerdict(question: Question, answer: String, verdict: PendingVerdict) throws -> OutboxItem {
+    func changeVerdict(question: Question, answer: String, verdict: PendingVerdict, files: [DraftFile] = []) throws -> OutboxItem {
         guard let i = items.firstIndex(where: { $0.kind == .answer && $0.questionMessageId == question.id && $0.verdict != nil }) else { throw VerdictProblem.invalid }
         guard items[i].canChangeVerdict else { throw VerdictProblem.alreadySent }
-        try Self.checkVerdict(verdict, for: question)
+        let dummies = files.enumerated().map { n, f in PendingFile(file: "\(n)", kind: f.kind, name: f.name, mime: f.mime, size: 1, duration: f.duration) }
+        try Self.checkVerdict(Self.wireVerdict(verdict, files: dummies, dummy: true), for: question)
+        items[i].files = try answerFiles(files, clientId: items[i].clientId)
         items[i].answer = answer; items[i].verdict = verdict; items[i].failure = nil; items[i].failureStatus = nil
         items[i].retryAfter = nil; items[i].throttleCount = nil
         save()
@@ -379,7 +415,8 @@ final class Outbox {
 
     /// Wire request of an answer item: `answer` (plain summary) plus the optional `verdict`.
     nonisolated static func answerRequest(for item: OutboxItem) -> AnswerRequest {
-        AnswerRequest(questionMessageId: item.questionMessageId ?? "", answer: item.answer ?? "", clientId: item.clientId, verdict: item.verdict)
+        AnswerRequest(questionMessageId: item.questionMessageId ?? "", answer: item.answer ?? "", clientId: item.clientId,
+                      verdict: item.verdict.map { wireVerdict($0, files: item.files) })
     }
 
     /// Wire request of an item. Needs every blob id (`dummy` = placeholder ids, for validation only).
@@ -480,6 +517,8 @@ final class Outbox {
     private func deliver(_ item: OutboxItem, _ client: any RelayAPI) async throws -> Event {
         mark(item.clientId) { $0.attempts += 1 }
         if item.kind == .answer {
+            try await uploadMissing(item.clientId, client)     // the answer's recordings, pictures and files first (ORCH-444)
+            guard let item = self.item(clientId: item.clientId) else { throw RelayError.network("gone") }
             let r = try await client.answer(Self.answerRequest(for: item))
             if item.verdict != nil { mark(item.clientId) { $0.sentMessageId = r.id; $0.retryAfter = nil; $0.throttleCount = nil } }   // stays until the result
             else { discard(item.clientId) }

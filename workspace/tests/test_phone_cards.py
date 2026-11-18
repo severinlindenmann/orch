@@ -89,6 +89,9 @@ def question(proj, tid, qid):
 
 
 def test_workspace_vector_cases(proj, run, new_ticket, conn):
+    for bid, b in VEC["relay"]["blobs"].items():  # the phones' uploads the relay serves to this workspace
+        if b["uploader"].startswith("ph_"):
+            conn.blobs[bid] = b"\0" * b["size"]
     for i, case in enumerate(VEC["workspace"]):
         tid = new_ticket(case["name"])
         install(proj, tid)
@@ -106,7 +109,8 @@ def test_workspace_vector_cases(proj, run, new_ticket, conn):
         before = len(results(conn))
         put_answer(conn, qmsg, case, i)
         run("relay", "inbox")
-        q = question(proj, tid, case["question"])
+        # a saved file's path names this ticket; the vector writes <ticket>
+        q = json.loads(json.dumps(question(proj, tid, case["question"])).replace(tid, "<ticket>"))
         want = case["expect"]
         label = case["name"]
         if want["do"] == "decide":
