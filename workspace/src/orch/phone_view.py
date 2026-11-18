@@ -97,6 +97,10 @@ _KV_VAL = re.compile(
     re.I,
 )  # a quote (\" escapes inside) to its closing quote, an unclosed one to the end of the line, else one token
 _TO_EOL = re.compile(r"(?i)cookie")
+# A count right before a bare `pass:` is a test result ("23 pass: upload then answer", node --test and other
+# runners), not a password label (ORCH-447). Only `:` and only the bare word: `pass: 12`, `db pass: x`,
+# `v2 pass: x` and `23 pass=x` stay secret. Read on at most 32 characters before the name (linear).
+_TEST_COUNT = re.compile(r"(?<![\w.-])\d++[ \t]++\Z")
 
 
 # A value that is exactly the placeholder (also in matching quotes) is already hidden, not a secret: the ONE
@@ -132,6 +136,12 @@ class _KV:
         while (head := _KV_HEAD.search(text, pos)) is not None:
             pos = head.end()
             if not secret_name(head.group(1)):
+                continue
+            if (
+                head.group("sep") == ":"
+                and head.group(1).casefold() == "pass"
+                and _TEST_COUNT.search(text[max(0, head.start() - 32) : head.start()])
+            ):
                 continue
             if head.group("sep") == ":" or _TO_EOL.search(head.group(1)):
                 end = _line_end(text, pos)  # the rest of the line, scanned once: the scan goes on after it

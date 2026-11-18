@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from test_ticket_view import assert_valid, conn, views  # noqa: F401 (fixture)
 
-from orch import hider, keystore, phone_results, phone_view, relay, tickets
+from orch import hider, keystore, phone_results, phone_view, relay, secretscan, tickets
 from orch.errors import Refused
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
@@ -507,6 +507,30 @@ def test_plain_pairs_stay():
         "Fail: 0, pass rate: 100%, pass_count=5, passed: 12"
     )
     assert phone_view.redact("pass: 12") == "pass: [hidden]"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "node --test review_page.test.js (23 pass: upload then answer, delete)",
+        "23 pass: upload then answer",
+        "pytest: 5 pass: all green, 0 fail",
+        "2 PASS: login works",
+        "12\tPass: ok",
+    ],
+)
+def test_a_test_count_before_pass_is_no_password_label(text):
+    """A count right before a bare pass is a test result (ORCH-447), not a password label."""
+    assert phone_view.redact(text) == text
+    assert secretscan.find(text) == []
+
+
+@pytest.mark.parametrize(
+    "text", ["pass: 1234", "db pass: hunter2", "v2 pass: hunter2", "1.5 pass: hunter2", "23 pass=hunter2"]
+)
+def test_pass_without_a_test_count_stays_a_password_label(text):
+    assert "[hidden]" in phone_view.redact(text)
+    assert secretscan.find(text)
 
 
 @pytest.mark.parametrize("unit", ["a=", "x: ", "Config: ", "a=1,", "user=bob&"])
