@@ -32,3 +32,10 @@
   outlined, in place of the three answers; the arrow keys do not answer it.
 - 17 Nov (ORCH-294): picture tiles of a card (Home row, ticket page, Answered) fill the row: Before and After, or A and B, side by side, each at least 320 px wide and 216-360 px tall (kit `.decision-shown` / `.decision-shot`, no page CSS). A card alone on Home shows all its pictures; a set shows the proposal of each card. A long "why" line on the ticket page folds to three lines with Show more / Show less (kit `UI.moreText`). Click or Enter still opens a picture large; every row names its ticket key. UX checklist at 1280, 1920 and 390 run in the PR.
 - 18 Nov (ORCH-295, owner choice A): after Send back the ticket says "Changes asked" (in place of Ready) until the task made from the person's words is done or set aside; Undo never leaves it behind. The Comment sheet has a second button, "Add note", between Cancel and Send back: it saves the words on the ticket (queued to its helper), answers nothing, keeps the card on top and the work running; Send back stays the one that asks for changes. Shown only when the page can save notes (`api.note`).
+- 18 Nov (ORCH-420, walk with ten example cards at 1280x800, 1920x1080 and 390x844): toasts sit top right while the
+  answer buttons are on screen (before: the "Later" and answer toasts covered Looks good / Send it); a toast names the
+  card in at most 60 characters with one end mark ("Later: Which restaurant? It stays at the end."); on a screen up
+  to 900 px tall the file tiles are 112x64 so the words box keeps its room; a words box with more below ends in a soft
+  edge (it scrolls) instead of a half-cut line; "All cards" puts no heading over a set of one card of its own ticket;
+  the subtitle counts the cards when the needs-you number is 0 (a card put off on Home), so it never says "Nothing
+  waits" above a Waiting tab with cards. `orch check done` keeps every `--file` (before: only the last).

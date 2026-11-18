@@ -1149,3 +1149,11 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 }
 @media(prefers-reduced-motion:reduce){.lbar-chip,.lbar-cnt{transition:none}}
 .lbar-pop.lbar-sample{position:relative;left:auto;bottom:auto;z-index:auto;box-shadow:none}
+
+/* Review on a short screen (ORCH-420, owner's picture at 1144x755 and the 1280x800 walk): toasts sit top right while the
+   answer buttons are on screen, so they never cover them; file tiles get smaller so the words box keeps its room; and a
+   words box with more below shows a soft edge at the bottom (it scrolls), never a line cut in half. */
+body:has(.swipe-actions:not([hidden])) .ui-toasts{top:calc(var(--s4) + 56px);bottom:auto}
+@media(max-width:720px){body:has(>.tabbar):has(.swipe-actions:not([hidden])) .ui-toasts{top:var(--s4);bottom:auto}}
+@media(max-height:900px){.swipe-file{width:112px}.swipe-file-thumb{height:64px}.swipe-files{padding-top:var(--s2)}}
+.swipe-preview:has(>.doc):not(:has(.doc-rows)){background:linear-gradient(transparent,var(--ink) 70%) 0 100%/100% 32px no-repeat local,linear-gradient(transparent,color-mix(in srgb,var(--text) 22%,transparent)) 0 100%/100% 16px no-repeat scroll,var(--ink)}

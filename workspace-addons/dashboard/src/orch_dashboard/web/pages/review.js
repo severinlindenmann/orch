@@ -21,7 +21,9 @@ function reviewCount() { return reviewCards().length; }
 // The subtitle shows THE needs-you number (needsYouTotal: open questions plus results to check, exactly what this page
 // shows as cards; the Review menu entry and the top bar show the same one, ORCH-63).
 function reviewSubtitle() {
-  const n = typeof needsYouTotal === 'function' ? needsYouTotal() : reviewCount();
+  // A card put off on Home ("Later today") is not in the one number, but it is still a card here: the subtitle never
+  // says "Nothing waits" above a Waiting tab with cards in it (ORCH-420, owner's picture 18 Nov).
+  const n = (typeof needsYouTotal === 'function' ? needsYouTotal() : 0) || reviewCount();
   return n ? n + (n === 1 ? ' thing waits' : ' things wait') + ' on you, most urgent first.' : 'Nothing waits for you.';
 }
 // The words the "All cards" list shows for an answered card (the same as the deck's own summary).
@@ -99,7 +101,9 @@ function reviewDrawSide(queue, deck) {
     const sec = el('div', 'review-group');
     sec.setAttribute('role', 'list');
     sec.setAttribute('aria-label', name || 'Cards');
-    if (!one || name) {
+    // a set of one card under a heading of its own ticket says the same thing twice (ORCH-420): no heading then,
+    // unless the helper grouped it on purpose
+    if ((!one || name) && (rows.length > 1 || deck.items[rows[0]]?.group)) {
       const left = rows.filter(i => !deck.answers[deck.items[i].id]).length;
       const head = el('h3', 'review-group-head');
       head.append(el('span', '', name || 'Cards'), el('span', 'meta', left ? left + ' of ' + rows.length + ' waiting' : 'All ' + rows.length + ' answered'));

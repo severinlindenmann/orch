@@ -279,6 +279,8 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
     if(start&&start.closest&&start.closest('.swipe-preview:not(.plain)')){const pn=start.closest('.cmp-pane');openViewer(pn?pn.dataset.on:null)}return}
    reset(c)};
   c.addEventListener('pointerup',end);c.addEventListener('pointercancel',e=>{pts.delete(e.pointerId);if(e.pointerId===id){id=null;c.classList.remove('dragging');reset(c)}})};
+ /* a card's name in a toast: at most 60 characters, and one end mark ("Which restaurant?" never gets a second ".") */
+ const toastName=t=>{t=String(t||'').trim();if(t.length>60)t=t.slice(0,59).trimEnd()+'…';return /[.!?…]$/.test(t)?t:t+'.'};
  const nudge=(c,msg)=>{reset(c);c.classList.remove('nudge');void c.offsetWidth;c.classList.add('nudge');live.textContent=msg;if(UI.toast&&!o.quiet)UI.toast(msg)};
  const fly=(verdict,dx,dy)=>{if(!cur||overlay||busy)return;const c=cur,it=items[idx],w=stage.clientWidth,h=stage.clientHeight;
   if(ownAnswers(it)&&verdict!=='later')return;/* its own buttons answer it */
@@ -287,11 +289,11 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   busy=true;c.classList.add('leaving');/* a short fade, no swipe */
   setTimeout(()=>{busy=false;verdict==='later'?defer(it):commit(verdict,isOpt(it)&&verdict==='ok'?{picked:picked[it.id]}:null)},120)};
  const defer=it=>{later.add(it.id);done.push({item:it,verdict:'later',idx,laterOnly:true});const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length;
-  live.textContent='Later: '+it.title;render();if(UI.toast&&!o.quiet)UI.toast('Later: '+it.title+'. It stays at the end.',()=>undo())};
+  live.textContent='Later: '+it.title;render();if(UI.toast&&!o.quiet)UI.toast('Later: '+toastName(it.title)+' It stays at the end.',()=>undo())};
  const commit=(verdict,note)=>{const it=items[idx];done.push({item:it,verdict,note,idx,prev:ans[it.id],prevPick:ans[it.id]&&ans[it.id].note?ans[it.id].note.picked:undefined});ans[it.id]={verdict,note,item:it};later.delete(it.id);
   const from=idx;idx=nextIdx(from)===from?items.length:nextIdx(from);if(idx===from)idx=items.length;
   const word=ansWord(ans[it.id]);live.textContent=word+': '+it.title;o.onDecide&&o.onDecide(it,verdict,note);render();
-  if(UI.toast&&!o.quiet)UI.toast(word+': '+it.title,()=>{if(undoable())undo();else UI.toast('Already saved. You can answer it again on its ticket.')})};
+  if(UI.toast&&!o.quiet)UI.toast(word+': '+toastName(it.title).replace(/\.$/,''),()=>{if(undoable())undo();else UI.toast('Already saved. You can answer it again on its ticket.')})};
  const undo=()=>{if(!undoable())return;const last=done.pop();if(last.laterOnly)later.delete(last.item.id);else if(last.prev){ans[last.item.id]=last.prev;if(last.prevPick)picked[last.item.id]=last.prevPick}else delete ans[last.item.id];
   idx=last.idx;closeOverlay();render();live.textContent='Back: '+last.item.title;o.onUndo&&o.onUndo(last.item);host.focus()};
  const jump=i=>{if(i<0||i>=items.length)return;closeOverlay();idx=i;render();host.focus()};
