@@ -229,6 +229,16 @@ REVIEW_VERDICTS = ("ok", "no", "talk")
 MAX_REVIEW_NOTE = 8 * 1024  # the same cap as `orch review answer --note`
 
 
+def _review_undo(a):
+    """`orch review undo <ticket> <q> --via dashboard`: the person takes back an answer someone gave for them
+    (ORCH-547). The core refuses an answer that was not given for them."""
+    _only(a, ("ticket", "key"))
+    key = a.get("key")
+    if not (isinstance(key, str) and QID.fullmatch(key)):
+        raise BadRequest("That is not a question.")
+    return ["review", "undo", _tid(a.get("ticket")), key], ["--via", "dashboard"], []
+
+
 def _review_answer(a):
     """`orch review answer <ticket> <key> --verdict v [--picked ID] [--note JSON] --digest D --via dashboard`.
     The core re-checks the digest and the size of the note; this only keeps the argv plain."""
@@ -1136,6 +1146,7 @@ OPS = {
     "link.stop": _link,
     "answer": _answer,
     "review.answer": _review_answer,
+    "review.undo": _review_undo,
     "ticket.new": _ticket_new,
     "ticket.paste": _ticket_paste,
     "ticket.attach": _ticket_attach,

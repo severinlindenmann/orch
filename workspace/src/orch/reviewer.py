@@ -579,8 +579,9 @@ def _at(iso) -> float | None:
 
 
 def accepted(root: Path, since: str) -> list[dict]:
-    """Tickets the Reviewer accepted for the owner since `since` (ISO), newest first: {ticket, key, title, at,
-    why, sent_back} (sent_back: the owner sent it back since)."""
+    """The morning list: tickets the Reviewer accepted for the owner and every answer given for them (by Away
+    mode, the manager or a script) since `since` (ISO), newest first: {ticket, key, title, at, why, sent_back}
+    (sent_back: the owner sent it back since); an answer also has answer, who and question."""
     start = _at(since)
     out = []
     for t in tickets.list_all(root):
@@ -591,19 +592,7 @@ def accepted(root: Path, since: str) -> list[dict]:
             at = _at(h.get("at"))
             if at is None or (start is not None and at < start):
                 continue
-            if txt.startswith(tickets.ANSWERED_LINE):
-                out.append(
-                    {
-                        "ticket": t["id"],
-                        "key": t.get("key") or t["id"],
-                        "title": t.get("title") or "",
-                        "at": h.get("at"),
-                        "why": "answered " + txt[len(tickets.ANSWERED_LINE) :],
-                        "sent_back": False,
-                        "answer": True,
-                    }
-                )
-            elif txt.startswith(tickets.ACCEPTED_LINE):
+            if txt.startswith(tickets.ACCEPTED_LINE):
                 out.append(
                     {
                         "ticket": t["id"],
@@ -614,7 +603,35 @@ def accepted(root: Path, since: str) -> list[dict]:
                         "sent_back": not tickets.accepted_by_reviewer(root, t),
                     }
                 )
+        out += _answered_for(root, t, start)
     out.sort(key=lambda r: str(r["at"]), reverse=True)
+    return out
+
+
+def _answered_for(root: Path, ticket: dict, start) -> list[dict]:
+    """The answers someone gave FOR the person (Away mode, the manager, a script; ORCH-547) since `start`,
+    as SHOWN here: each says who gave it, so the morning list never shows a stand-in as the person."""
+    shown = history.shown_ticket(root, ticket)
+    out = []
+    for q in shown.get("questions") or []:
+        who = tickets.answered_for_person(q)
+        at = _at(q.get("answered_at") or q.get("at"))
+        if not who or q.get("answer") is None or at is None or (start is not None and at < start):
+            continue
+        out.append(
+            {
+                "ticket": shown["id"],
+                "key": shown.get("key") or shown["id"],
+                "title": shown.get("title") or "",
+                "at": q.get("answered_at") or q.get("at"),
+                "why": f"{q['id']} = {q['answer']} ({history.answered_words(q.get('answered_by'), who)})"
+                + (" (you undid it)" if q.get("undone") else ""),
+                "who": history.answered_words(q.get("answered_by"), who),
+                "question": q["id"],
+                "sent_back": False,
+                "answer": True,
+            }
+        )
     return out
 
 

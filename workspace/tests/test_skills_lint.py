@@ -21,6 +21,7 @@ HUMAN_ONLY = {
     *(f"relay mobile {x}" for x in ("on", "off", "status", "hours", "ack", "keeper")),  # a person's switch
     "look shared-pages",  # a person's switch in the dashboard (agents are refused)
     "review answer",  # a person decides a card (agents are refused: needs_person)
+    "review undo",  # a person takes back an answer given for them (agents are refused)
     "ticket changes",  # a person sends a Review ticket back (agents are refused)
     "run history",  # a person reads or continues an earlier chat (Focus; agents are refused to continue)
     "run take-back",  # a person takes back a waiting message (agents are refused)

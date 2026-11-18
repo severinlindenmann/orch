@@ -198,13 +198,26 @@
   }
 
   /* ORCH-417: who a helper's history line is by. A helper that worked for a person (the line's "for": who started
-     its run) reads "Helper - <person>"; one that ran on its own (automation, factory, reviewer, older lines) "Helper".
+     its run) reads "Helper - <person>"; one that ran on its own (a timed run, factory, reviewer, older lines) "Helper".
      null for a line that is not a helper's. `nameOf` turns a person's name into the shown name. */
   function agentWho(entry, nameOf) {
     const by = String((entry && entry.by) || '');
     if (!/^agent:/.test(by)) return null;
     const who = entry && typeof entry.for === 'string' && entry.for ? (nameOf ? nameOf(entry.for) : entry.for) : '';
+    const role = STAND_IN_WORDS[by.slice(6).toLowerCase()];
+    if (role) return who ? role + ' for ' + who : role;  // ORCH-547: a role standing in names itself
     return who ? 'Helper - ' + who : 'Helper';
+  }
+  /* ORCH-547: who gave an answer when someone answered FOR the person (questions[].answered_for): "Manager for Severin",
+     "Away mode for Severin", "Script for Severin", "Helper for Severin". null for the person's own answer. */
+  const STAND_IN_WORDS = {manager:'Manager', reviewer:'Away mode', script:'Script'};
+  function answeredWho(q, nameOf) {
+    const f = String((q && q.answered_for) || '');
+    if (!/^human:./.test(f)) return null;
+    const by = String((q && q.answered_by) || '');
+    const role = (/^agent:/.test(by) && STAND_IN_WORDS[by.slice(6).toLowerCase()]) || 'Helper';
+    const person = f.slice(6);
+    return role + ' for ' + (nameOf ? nameOf(f) || person : person);
   }
 
   function historyWho(by, me) {
@@ -864,5 +877,5 @@
     next.tickets = order.map(id => byId.get(id));
     return next;
   }
-  return {historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, agentWho, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
+  return {historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, agentWho, answeredWho, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
 });

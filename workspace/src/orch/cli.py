@@ -785,6 +785,10 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("answer")
     x.add_argument("--via", default="cli", metavar="WORD", help="where the answer comes from (default cli)")
     x.add_argument(
+        "--for", dest="for_", metavar="NAME",
+        help="answer FOR this person (the manager, a script): recorded as given for them; they can undo it",
+    )  # fmt: skip
+    x.add_argument(
         "--question-digest", metavar="D", help=argparse.SUPPRESS
     )  # the question as the page showed it (bound into the person's proof)
 
@@ -1454,12 +1458,19 @@ def run(args: argparse.Namespace) -> None:
             raise Refused(
                 f"{args.question} changed after it was shown. Look at the question again, then answer."
             )
-        who = tickets.acting_by(args)
+        who, for_ = tickets.answer_actor(args)  # who really answers, and for whom (ORCH-547)
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
-        t, q = tickets.answer(
-            root, args.id, args.question, args.answer, who, args.via, expected_question_digest=shown_digest
-        )
+        with tickets.standing_in(for_):
+            t, q = tickets.answer(
+                root,
+                args.id,
+                args.question,
+                args.answer,
+                who,
+                args.via,
+                expected_question_digest=shown_digest,
+            )
         with contextlib.suppress(
             Refused
         ):  # the answer is saved; a busy run only delays it reaching the agent

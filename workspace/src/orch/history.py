@@ -114,7 +114,7 @@ def _digest(kind: str, obj) -> str | None:
             orig, obj = obj, {k: obj.get(k) for k in _ANSWER_MARK}
             # Review stack (RULE A): bound only when present, so an answer without them keeps its digest;
             # decision.replaced_by changes later (a newer answer) and is never part of the binding
-            for k in ("decision", "card", "shown"):
+            for k in ("decision", "card", "shown", "answered_for"):
                 v = orig.get(k)
                 if k == "decision" and isinstance(v, dict):
                     v = {a: b for a, b in v.items() if a != "replaced_by"} or None
@@ -170,8 +170,31 @@ def created_lines(ticket: dict) -> list[dict]:
         return out
 
 
+# Who answered for the person (ORCH-547): a role standing in carries the person in `for` (a history line) or
+# `answered_for` (an answer). The shown word names the role, so a script never reads as the person.
+STAND_IN_WORDS = {"manager": "Manager", "reviewer": "Away mode", "script": "Script"}
+
+
+def stand_in_word(by) -> str:
+    """The word for an agent label that answered for a person: Manager, Away mode, Script, else Helper."""
+    role = by[len("agent:") :] if isinstance(by, str) and by.startswith("agent:") else ""
+    return STAND_IN_WORDS.get(role.casefold(), "Helper")
+
+
+def _plain(who) -> str:
+    return str(who)[len("human:") :] if str(who).startswith("human:") else str(who)
+
+
+def answered_words(by, for_=None) -> str:
+    """Who gave an answer, in plain words: "Severin", "Manager for Severin", "Away mode for Severin",
+    "Script for Severin". `for_` is the person stood in for (human:<name> or a plain name)."""
+    if isinstance(for_, str) and for_ and _plain(for_):
+        return f"{stand_in_word(by)} for {_plain(for_)}"
+    return _plain(by or "someone") or "someone"
+
+
 def author(h) -> str:
-    """Who a SHOWN history line is by, for plain text: `agent:claude for Severin` when a helper worked for a
+    """Who a SHOWN history line is by, for plain text: `agent:<tool> for Severin` when a helper worked for a
     person (`for`, orch.people), else its `by` as written."""
     by = str(h.get("by", "?")) if isinstance(h, dict) else "?"
     who = h.get("for") if isinstance(h, dict) else None
@@ -626,6 +649,8 @@ def _shown(proof: _Proof, t: dict) -> dict:
                 )
             ):
                 q = {**q, "answered_by": SYNC_BY}
+            if isinstance(q, dict) and q.get("answered_for") is not None and not has("answers", q):
+                q = {k: v for k, v in q.items() if k != "answered_for"}  # whom it was for is a person field
             new_q.append(q)
         if any(a is not b for a, b in zip(new_q, questions, strict=True)):
             out["questions"], changed = new_q, True
@@ -724,6 +749,11 @@ def _all_demoted(t: dict) -> dict:
                 else x
                 for x in t[field]
             ]
+    if isinstance(out.get("questions"), list):  # whom an answer was for is a person field too
+        out["questions"] = [
+            {k: v for k, v in x.items() if k != "answered_for"} if isinstance(x, dict) else x
+            for x in out["questions"]
+        ]
     if "description_by" in t:
         out["description_by"] = SYNC_BY if needs_proof(t.get("description_by")) else t["description_by"]
     if isinstance(t.get("plan"), dict) and "by" in t["plan"] and needs_proof(t["plan"].get("by")):

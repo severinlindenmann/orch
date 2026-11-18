@@ -68,6 +68,13 @@ function reviewApi() {
       const r = await act('run.send', {ticket, text:ticketTalkText(text, kept.names)});
       return r.ok ? {ok:true} : {ok:false, error:{code:'error', message:String(r.text || 'Could not save the note.').slice(0, 300)}};
     },
+    // ORCH-547: take back an answer someone gave for the person (the Answered list's "Answered for me"); the card waits again.
+    undo: async ({id}) => {
+      const m = REVIEW_ID.exec(String(id || ''));
+      if (snapshot || !m || !m[2]) return {ok:false, error:{code:'not_found', message:'That answer is not here any more.'}};
+      const r = await act('review.undo', {ticket:m[1], key:m[2]});
+      return r.ok ? {ok:true} : {ok:false, error:{code:r.status === 403 ? 'needs_person' : 'error', message:String(r.text || 'Could not undo it.').slice(0, 300)}};
+    },
     answer: async ({id, digest, verdict, picked, note}) => {
       const m = REVIEW_ID.exec(String(id || ''));
       if (!m) return {ok:false, error:{code:'not_found', message:'That card is not here any more.'}};
