@@ -67,3 +67,26 @@ def test_the_command_prints_true_or_false(capsys, monkeypatch):
     monkeypatch.setattr(t, "changed", lambda base: [])
     t.main(["--base", "origin/develop"])
     assert capsys.readouterr().out == "false\n"
+
+
+def test_a_pull_request_runs_no_windows_parts_while_windows_is_known_red(monkeypatch, capsys):
+    # ORCH-453: 841 Windows minutes on pull requests in one night, all known red; they run on queue groups instead
+    monkeypatch.setattr(t, "changed", lambda base: [("workspace/src/orch/procs.py", "")])
+    monkeypatch.setattr(t, "windows_known_red", lambda: True)
+    assert t.main(["--base", "x", "--pr"]) == 0
+    assert capsys.readouterr().out.strip() == "false"
+    assert t.main(["--base", "x"]) == 0  # without --pr (a manual question) the diff still decides
+    assert capsys.readouterr().out.strip() == "true"
+
+
+def test_a_pull_request_runs_windows_again_once_it_is_green(monkeypatch, capsys):
+    monkeypatch.setattr(t, "changed", lambda base: [("workspace/src/orch/procs.py", "")])
+    monkeypatch.setattr(t, "windows_known_red", lambda: False)
+    assert t.main(["--base", "x", "--pr"]) == 0
+    assert capsys.readouterr().out.strip() == "true"
+
+
+def test_windows_known_red_reads_the_workflow():
+    import ci_known_red
+
+    assert t.windows_known_red() == ("windows-latest" in ci_known_red.known_red())
