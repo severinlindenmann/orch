@@ -22,8 +22,10 @@ argument and never in a file. The script runs from a private copy of exactly the
 
 Security (R5.2 and the cloned-project rule of health.py): a check file from the project folder never runs on
 its own. It runs only after the person approved it (`orch checks approve <name>`); whenever its content (the
-file and its script) changes, the person approves it again first. What was approved is kept as content
-hashes in the guarded orch home (key folder record `checks`, field `approved`), never in `.orch/`.
+file and its script) changes, the person approves it again first. What they approve is bound to the content
+they were shown: `orch checks approve <name> --hash <short hash>` (the hash is printed next to what the
+check runs); when the file or its script changed since, approve is refused. What was approved is kept
+as content hashes in the guarded orch home (key folder record `checks`, field `approved`), never in `.orch/`.
 An agent cannot approve. What a check prints is handled as before: only works / ends are kept, nothing is
 stored or shown.
 """
@@ -94,7 +96,8 @@ def _names(root: Path) -> list[str]:
         files = sorted(folder(root).glob("*.json"))
     except OSError:
         return []
-    return [f.stem for f in files if not f.name.startswith("_") and f.is_file()]
+    # only well-formed names: a cloned project's file name never reaches the terminal or health.json raw
+    return [f.stem for f in files if health._NAME.fullmatch(f.stem) and f.is_file()]
 
 
 def _bytes(path: Path) -> bytes | None:
@@ -122,17 +125,21 @@ def _load(root: Path, name: str) -> tuple[object, str | None, bytes | None]:
     raw = _bytes(folder(root) / f"{name}.json")
     if raw is None:
         return None, None, None
-    h = hashlib.sha256(raw)
     try:
         doc = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
         doc = None
     script = doc.get("script") if isinstance(doc, dict) else None
-    body = None
-    if isinstance(script, str) and _SCRIPT.fullmatch(script):
-        body = _bytes(folder(root) / script)
+    named = isinstance(script, str) and bool(_SCRIPT.fullmatch(script))
+    body = _bytes(folder(root) / script) if named else None
+    return doc, _hash(raw, body, named), body
+
+
+def _hash(raw: bytes, body: bytes | None = None, script: bool = False) -> str:
+    h = hashlib.sha256(raw)
+    if script:
         h.update(b"\0script\0" + (body if body is not None else b"\0missing\0"))
-    return doc, h.hexdigest(), body
+    return h.hexdigest()
 
 
 def digest(root: Path, name: str) -> str | None:
@@ -200,11 +207,32 @@ def recipes(root: Path) -> list[dict]:
     return [e["recipe"] for e in entries(root) if e["recipe"] and e["status"] == "approved"]
 
 
-def _how_to_approve(name: str, status: str) -> str:
-    what = "changed" if status == "changed" else "new"
+SHORT = 32  # hex characters of the content hash the person approves: 128 bits, so a helper that writes
+# both the file shown and the swapped one cannot find two contents with the same prefix (birthday search)
+
+
+def short(dg: str | None) -> str:
+    return (dg or "")[:SHORT]
+
+
+def runs(r: dict) -> str:
+    """What an approved check would run, in one line, for the person to look at before approving."""
+    if r.get("script"):
+        text = f"the script .orch/checks/{r['script']}"
+    else:
+        text = " ".join(r.get("command") or [])
+    return text + (f", given the key {r['key']}" if r.get("key") else "")
+
+
+def approve_command(name: str, dg: str | None) -> str:
+    return f"orch checks approve {name} --hash {short(dg)}"
+
+
+def _how_to_approve(e: dict) -> str:
+    what = "changed" if e["status"] == "changed" else "new"
     return (
-        f"This check is {what} and runs only after you approve it. "
-        f"Look at .orch/checks/{name}.json, then run:"
+        f"This check is {what} and runs only after you approve it. It runs {runs(e['recipe'])} "
+        f"(content {short(e['digest'])}). Look at .orch/checks/{e['name']}.json, then run:"
     )
 
 
@@ -221,7 +249,7 @@ def waiting_rows(root: Path) -> list[dict]:
         if not health._LABEL.fullmatch(label or ""):
             label = e["name"]
         if r:
-            how, sign_in = _how_to_approve(e["name"], e["status"]), f"orch checks approve {e['name']}"
+            how, sign_in = _how_to_approve(e), approve_command(e["name"], e["digest"])
         else:
             how, sign_in = (
                 f"The check file .orch/checks/{e['name']}.json cannot be read. Fix it with the template.",
@@ -344,8 +372,10 @@ def _remember(root: Path, name: str, dg: str | None) -> None:
     keystore.record_write(Path(root), "checks", {**have, "approved": ok})
 
 
-def approve(root: Path, name: str, by: str | None = None) -> dict:
-    """The person approves one check file as it is now; refused for an agent and for a broken file."""
+def approve(root: Path, name: str, by: str | None = None, seen: str | None = None) -> dict:
+    """The person approves one check file with the content they were shown: `seen` is the short hash printed
+    next to what it runs. Refused for an agent, a broken file, and when the file or its script is not the
+    content with that hash any more (changed after the person looked)."""
     _person(by)
     e = next((x for x in entries(root) if x["name"] == name), None)
     if not e:
@@ -354,17 +384,30 @@ def approve(root: Path, name: str, by: str | None = None) -> dict:
         raise Refused(
             f"The check {name} cannot be read, so it cannot be approved. Fix it with {TEMPLATE_FILE}."
         )
-    _remember(root, name, e["digest"])
+    seen = (seen or "").strip().lower()
+    if len(seen) < SHORT or not e["digest"].startswith(seen):
+        head = (
+            f"The check {name} changed since you looked at it. "
+            if seen
+            else f"Approve the check {name} with the content you looked at. "
+        )
+        raise Refused(
+            head + f"It now runs {runs(e['recipe'])} (content {short(e['digest'])}). "
+            f"Look at .orch/checks/{name}.json, then run: {approve_command(name, e['digest'])}"
+        )
+    _remember(root, name, e["digest"])  # the digest of the bytes just read, which matched what was seen
     return e["recipe"]
 
 
-def _write(root: Path, name: str, doc: dict) -> Path:
+def _write(root: Path, name: str, doc: dict) -> bytes:
+    """Write one check file; returns the exact bytes orch wrote (what approving orch's own content
+    must hash, never a re-read of the file, which a helper could swap in between)."""
     from orch import net
 
     folder(root).mkdir(parents=True, exist_ok=True)
-    path = folder(root) / f"{name}.json"
-    net.write_json(path, doc)
-    return path
+    raw = (json.dumps(doc, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    net.write_atomic(folder(root) / f"{name}.json", raw, False)
+    return raw
 
 
 def remove(root: Path, name: str) -> bool:
@@ -440,9 +483,9 @@ def add_from_template(root: Path, tname: str, profile: str | None = None, name: 
         raise Refused(f"orch already checks {name} by itself; pick another name with --name.")
     if (folder(root) / f"{name}.json").exists():
         raise Refused(f"There is already a check called {name}. Remove it first: orch checks remove {name}")
-    _write(root, name, doc)
-    _remember(root, name, digest(root, name))
-    return parse(name, doc) | {"v": (digest(root, name) or "")[:16]}
+    dg = _hash(_write(root, name, doc))  # orch's own bytes; a file swapped after the write stays "changed"
+    _remember(root, name, dg)
+    return parse(name, doc) | {"v": dg[:16]}
 
 
 TEMPLATE = {
