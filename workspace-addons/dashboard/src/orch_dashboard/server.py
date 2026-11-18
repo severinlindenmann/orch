@@ -1464,11 +1464,17 @@ class _RemoteServer(ThreadingHTTPServer):
     request_queue_size = 128
 
 
-def _warm(cache) -> None:
-    try:
-        cache.get()
-    except Exception:  # noqa: BLE001, S110 - the first page builds it again and says what went wrong
-        pass
+def warm(srv) -> None:
+    """Build the first state in a thread of its own before a page asks (ORCH-522: seconds with thousands of
+    tickets; the first page would wait for all of it). Only the started server (cli.main) calls it."""
+
+    def build():
+        try:
+            srv.state_cache.get()
+        except Exception:  # noqa: BLE001, S110 - the first page builds it again and says what went wrong
+            pass
+
+    threading.Thread(target=build, daemon=True, name="state-warm").start()
 
 
 def make_server(
@@ -1510,9 +1516,6 @@ def make_server(
             other.frame_passes = srv.frame_passes
             other.revisions, other.state_cache = srv.revisions, srv.state_cache
             srv.remote_server = other
-    if orch_bin == actions.SELF:  # the real server: the first state is built before a page asks (ORCH-522:
-        # seconds with thousands of tickets; the first page would wait for all of it)
-        threading.Thread(target=_warm, args=(srv.state_cache,), daemon=True, name="state-warm").start()
     if orch_bin == actions.SELF:  # the real server: the automatic update looks once a minute (off by default)
         from . import update
 
