@@ -680,3 +680,11 @@ test('Answer in the header opens the answer window like the ticket list; without
   assert.equal(focused.length, 1);
   assert.equal(context({needsList:() => [], main:{querySelector:() => null}}).focusTicketAnswer('t_one'), '');
 });
+test('a sent-back ticket says it was sent back, not "Not started" (ORCH-460)', () => {
+  const start = source.indexOf('function ticketStripModel'), end = source.indexOf('\nfunction ', start + 10);
+  const ctx = {questions:() => [], time:x => x, clean:x => x, window:{UI:{ticketState:() => ({pill:'todo', word:'To do'})}, DashHelpers:helpers}};
+  vm.createContext(ctx); vm.runInContext(source.slice(start, end), ctx);
+  const asked = {status:'ready', checklist:[{id:'c1', text:'Add shipping', origin:'change_request', done:false}], history:[]};
+  assert.match(ctx.ticketStripModel(asked, null, true).sentence, /^Sent back\./);
+  assert.match(ctx.ticketStripModel({...asked, checklist:[]}, null, true).sentence, /^Not started\./);
+});

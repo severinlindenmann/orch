@@ -1403,6 +1403,8 @@ def applies_now_block(ticket: dict, root: Path | None = None) -> str:
             "none_of_these": "None of the options.",
         }.get(d.get("action"), d.get("summary", ""))
         then = card.get("then")
+        if d.get("action") == "send_back" and card.get("kind") == "check":
+            then = "The helper makes a new version."  # not the card's "The ticket is done."
         lines.append(
             f"{head}{' ' + then if then and d.get('action') not in ('dont', 'none_of_these') else ''}"
         )
