@@ -206,7 +206,7 @@ def make(ws: Path, w: World, take=None, waiter=None, logs=None):
         t[0] += secs
 
     def real_waiter(u, before_merge):
-        return prwait.run_one(u, True, src=Src(w, u), before_merge=before_merge)
+        return prwait.run_one(u, True, src=Src(w, u), before_merge=before_merge, queue=True)
 
     return runner.Runner(
         ws, w, lambda repo: Git(store.folder(ws), REPO, url=str(w.bare)), waiter=waiter or real_waiter,
@@ -280,8 +280,7 @@ def test_the_reviewers_probe_a_member_closed_during_a_red_group_never_lands(ws, 
     assert world.landed(2) and world.landed(4)
     assert states(ws) == {1: "out", 2: "merged", 3: "out", 4: "merged"}
     assert "closed" in why(ws, 1)
-    # #1 is looked at again before [1,2] is built, so #2 runs in its group of one; [3,4] splits into ones
-    assert [g["members"] for g in world.groups.values()] == [[1, 2, 3, 4], [2], [3, 4], [3], [4]]
+    assert len(world.groups) == 2  # [1,2,3,4] and [3,4]: #1 is looked at again before [1,2] is built
     nothing_left_behind(ws, world)
 
 
@@ -495,19 +494,14 @@ def test_a_group_moved_to_another_base_is_never_merged_there(ws, world):
     nothing_left_behind(ws, world)
 
 
-def _has(world, u: str, n: int) -> bool:
-    """u is the queue group of #n (every merge runs in a queue group, a group of one for a single one)."""
-    return n in (world.groups.get(u) or {}).get("members", [])
-
-
 def test_an_outage_after_the_first_round_keeps_the_runner_and_the_tries(ws, world):
     add(ws, 1)
-    world.on_wait = lambda u: add(ws, 2) if _has(world, u, 1) else None  # queued while #1 runs
+    world.on_wait = lambda u: add(ws, 2) if u == url(1) else None  # queued while #1 runs
     real = world.merge
 
     def merge(u, head):
         done = real(u, head)
-        if done and _has(world, u, 1):  # then GitHub goes away for a while: nothing answers
+        if done and u == url(1):  # then GitHub goes away for a while: nothing answers
             world.down = 12  # the next 12 calls to GitHub (views and logins) get no answer
         return done
 
@@ -534,20 +528,19 @@ def test_an_entry_without_a_login_leaves_with_the_reason(ws, world):
 
 def test_a_login_that_never_answers_again_stops_the_runner_with_a_line(ws, world):
     add(ws, 1)
-    world.on_wait = lambda u: add(ws, 2) if _has(world, u, 1) else None
+    world.on_wait = lambda u: add(ws, 2) if u == url(1) else None
     real = world.merge
 
     def merge(u, head):
         done = real(u, head)
-        if done and _has(world, u, 1):
+        if done and u == url(1):
             world.down = 10**6  # gh is signed out for good
         return done
 
     world.merge = merge
     logs: list[str] = []
     make(ws, world, logs=logs).run()
-    # #1 landed with its group; GitHub never said so, so the next runner looks at it again (and finds it merged)
-    assert world.landed(1) and states(ws)[2] == "waiting"
+    assert states(ws) == {1: "merged", 2: "waiting"}
     assert any("for 30 minutes" in x for x in logs)
 
 

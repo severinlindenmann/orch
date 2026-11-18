@@ -4,12 +4,16 @@ One runner per workspace (lock folder `runner.lock`). It first checks which GitH
 setting `[pull_requests] login` it runs only as that login, and it only takes entries added by its own login.
 While pull requests wait, it takes up to MAX_GROUP of one repository and base branch, in line order:
 
-- every merge is checked in a queue group (ORCH-450): one group commit (group.py) on top of the base branch on a
-  branch `orch-queue/<base>-<time>`, one pull request for it, the core waiter merges that on green with a merge
-  commit. GitHub then marks every included pull request merged. One pull request alone is a group of one; the
-  queue never takes the base into a helper's branch.
-- the queue sets its mark (commit status `orch/merge-queue`) on every group commit it built, so a develop rule
-  that requires the mark lets nothing else in: no merge by hand, no merge ahead of the queue.
+- several: one group commit (group.py) on top of the base branch on a branch `orch-queue/<base>-<time>`, one
+  pull request for it, the core waiter merges that on green with a merge commit. GitHub then marks every
+  included pull request merged.
+- one alone (owner, ORCH-432 q2): its own checks green and the base branch changed none of its files since it
+  took the base in: its checked head gets the mark and the core waiter merges it, with no second run. The base
+  changed its files: checked once on top of the base as a group of one. The queue never takes the base into a
+  helper's branch.
+- the queue sets its mark (commit status `orch/merge-queue`) on every group commit it built and on every head it
+  merges alone, so a develop rule that requires the mark lets nothing else in: no merge by hand, no merge ahead
+  of the queue.
 - a red group is closed and split in halves; each half runs again (a half of one in a group of one). So a bad
   pull request costs about log2(n) extra runs and the good ones still merge. A red group of one leaves the queue.
 - a change to CI or to the queue itself (settings.alone_paths) runs alone in its own group: its green run is the
@@ -426,15 +430,57 @@ class Runner:
 
     # -- one pull request --------------------------------------------------------------------------------
     def alone(self, e: dict, why: str = "") -> None:
-        """One pull request in a queue group of its own, built on top of the base branch: every merge is checked
-        in a queue group, and a helper's branch never takes the base in. A fork is never put on a branch of the
-        repository (its code would land there unchecked): it leaves the queue and a person merges it. A
-        conflict with the base branch or a red run leaves the queue with what to do."""
+        """One pull request on its own (owner, ORCH-432 q2). Its own checks green and the base branch changed
+        none of its files since it took the base in: the queue sets its mark on the checked head right before
+        the merge and merges it, with no second run. The base changed its files ("behind"), or it changes CI or
+        the queue, or a person merges it: checked in a queue group of its own on top of the base branch, and a
+        helper's branch never takes the base in. A fork is never put on a branch of the repository: merged
+        directly when it may be, else it leaves the queue and a person merges it."""
+        base = e.get("base") or ""
+        if e.get("lone") or e.get("proof"):
+            self.on_base(e, why)
+            return
+        o = self.waiter(e["url"], lambda head: self.before_direct(e, base, head))
+        line = o.line + (f" ({why})" if why else "")
+        unknown = bool(getattr(getattr(o, "verdict", None), "unknown", False))
+        if o.ok and o.status == "merged":
+            self.finish(e, MERGED, line, o.status)
+        elif o.status == "behind":  # the base changed its files: checked once on top of it, never taken in
+            self.on_base(e, why)  # on a red base: the repair lane, nobody blamed for the base's failures
+        elif o.status == "held":
+            if self.check_members([dict(e, head=None)], base):  # held for another reason: a counted try
+                self.retry([e], o.line)
+        elif o.status == "changed":
+            store.back_to_front(
+                self.root, [e["url"]], "it got a new commit while its checks ran; waits again"
+            )
+        elif unknown or o.status in ("", "checks passed"):  # GitHub did not answer, or no room: not red
+            self.retry([e], o.line)
+        elif o.status == "checks failed" and self.base_to_blame(e["repo"], base, e["url"], [e]):
+            return
+        else:
+            self.finish(e, OUT, line, o.status)
+
+    def before_direct(self, e: dict, base: str, head: str) -> str | None:
+        """Right before a direct merge: the pull request is still mergeable, then its checked head gets the
+        queue's mark (the develop rule lets only marked commits in). A reason stops the merge."""
+        why = self.why_not([dict(e, head=head)], base)
+        if why:
+            return why
+        text = f"Its own checks were green and {base} changed none of its files"
+        if not self.mark(e["repo"], head, text):
+            return "the queue's mark could not be set on it"
+        return None
+
+    def on_base(self, e: dict, why: str = "") -> None:
+        """One pull request in a queue group of its own, built on top of the base branch. A fork leaves the
+        queue (its code would land on a branch of the repository unchecked). A conflict with the base branch
+        or a red run leaves the queue with what to do."""
         base = e.get("base") or ""
         if e.get("fork"):
             line = (
-                f"{e['url']} comes from a fork: the merge queue never puts its code on a branch of the "
-                "repository, so a person merges it."
+                f"{e['url']} comes from a fork and must be checked on top of {base}: the merge queue never puts "
+                "its code on a branch of the repository, so a person merges it."
             )
             self.finish(e, OUT, line, "fork")
             return

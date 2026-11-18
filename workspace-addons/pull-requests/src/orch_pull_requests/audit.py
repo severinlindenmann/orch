@@ -1,8 +1,9 @@
 """`orch pull-requests queue audit`: how a stretch of time went for the merge queue (ORCH-450). No AI call.
 
 - merges into each base branch the queue serves (from GitHub): checked in a queue group (a group pull request on
-  an `orch-queue/` branch, or a member listed in its title), checked alone and merged by a person (its head
-  carries the queue's mark), or past the queue (neither);
+  an `orch-queue/` branch, or a member listed in its title), merged alone by the queue (its own checks green and
+  the base changed none of its files; the queue's file says it merged it), checked alone and merged by a person
+  (its head carries the queue's mark), or past the queue (none of these);
 - times the queue stood still (from the queue's own file): a stretch of at least STILL_MINUTES with a pull
   request in line and no merge, with the reasons the entries of that stretch gave.
 
@@ -30,9 +31,10 @@ def _t(s: str | None) -> datetime | None:
         return None
 
 
-def merges(gh, repo: str, base: str, since: datetime) -> dict | None:
-    """{groups, through, by_person, past, unsure} for one base branch: lists of {number, url, mergedAt} (unsure:
-    GitHub did not say whether its head carries the mark). None when GitHub did not answer."""
+def merges(gh, repo: str, base: str, since: datetime, queued: frozenset[str] = frozenset()) -> dict | None:
+    """{groups, through, alone, by_person, past, unsure} for one base branch: lists of {number, url, mergedAt}
+    (alone: merged by the queue on its own, url in queued; unsure: GitHub did not say whether its head carries the
+    mark). None when GitHub did not answer."""
     rows = gh.merged_prs(repo, base, since.strftime("%Y-%m-%dT%H:%M:%SZ"))
     if rows is None:
         return None
@@ -42,16 +44,21 @@ def merges(gh, repo: str, base: str, since: datetime) -> dict | None:
         title = str(g.get("title") or "")
         if title.startswith("Merge queue:"):
             inside |= {int(n) for n in _NUM.findall(title.split(":", 1)[1])}
-    through, by_person, past, unsure = [], [], [], []
+    through, alone, by_person, past, unsure = [], [], [], [], []
     for r in rows:
         if r in groups:
             continue
         if r.get("number") in inside:
             through.append(r)
             continue
+        if str(r.get("url") or "") in queued:
+            alone.append(r)
+            continue
         marked = gh.has_mark(repo, str(r.get("headRefOid") or "")) if r.get("headRefOid") else False
         (unsure if marked is None else by_person if marked else past).append(r)
-    return {"groups": groups, "through": through, "by_person": by_person, "past": past, "unsure": unsure}
+    return {
+        "groups": groups, "through": through, "alone": alone, "by_person": by_person, "past": past, "unsure": unsure,
+    }  # fmt: skip
 
 
 def stood_still(rows: list[dict], merged_at: list[datetime], since: datetime, until: datetime) -> list[dict]:
@@ -98,15 +105,16 @@ def run(root: Path, gh, hours: float, now: datetime | None = None) -> dict:
     rows = store.read(root)
     repos = sorted({str(r.get("repo")) for r in rows if r.get("repo")})
     bases = settings.bases(root)
+    queued = frozenset(str(r.get("url")) for r in rows if r.get("state") == store.MERGED)
     report = {"since": since, "until": until, "bases": [], "still": [], "unknown": []}
     merged_at = [t for r in rows if r.get("state") == store.MERGED and (t := _t(r.get("ended")))]
     for repo in repos:
         for base in bases:
-            got = merges(gh, repo, base, since)
+            got = merges(gh, repo, base, since, queued)
             if got is None:
                 report["unknown"].append(f"{repo} {base}")
                 continue
-            every = got["groups"] + got["by_person"] + got["past"] + got["unsure"]
+            every = got["groups"] + got["alone"] + got["by_person"] + got["past"] + got["unsure"]
             merged_at += [t for g in every if (t := _iso(g.get("mergedAt")))]
             report["bases"].append({"repo": repo, "base": base, **got})
     report["still"] = stood_still(rows, merged_at, since, until)
@@ -127,9 +135,10 @@ def text(report: dict) -> str:
     lines = [f"Merge queue from {hm(report['since'])} to {hm(report['until'])}:"]
     for b in report["bases"]:
         n_in = len(b["through"])
-        total = n_in + len(b["by_person"]) + len(b["past"]) + len(b["unsure"])
+        total = n_in + len(b["alone"]) + len(b["by_person"]) + len(b["past"]) + len(b["unsure"])
         lines.append(
             f"- {b['repo']} {b['base']}: {total} merges; {n_in} checked in {len(b['groups'])} queue groups, "
+            f"{len(b['alone'])} merged alone by the queue, "
             f"{len(b['by_person'])} checked alone and merged by a person, {len(b['past'])} past the queue"
             + (f", {len(b['unsure'])} not known (GitHub did not say)." if b["unsure"] else ".")
         )
@@ -160,6 +169,7 @@ def as_json(report: dict) -> dict:
                 "base": b["base"],
                 "groups": len(b["groups"]),
                 "through": [pr(r) for r in b["through"]],
+                "alone": [pr(r) for r in b["alone"]],
                 "by_person": [pr(r) for r in b["by_person"]],
                 "past": [pr(r) for r in b["past"]],
                 "unsure": [pr(r) for r in b["unsure"]],

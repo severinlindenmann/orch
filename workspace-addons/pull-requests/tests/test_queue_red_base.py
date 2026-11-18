@@ -15,7 +15,8 @@ RED = frozenset({"lint", "addons / page-smoke"})
 
 
 class RedGitHub(FakeGitHub):
-    """prs[n]['jobs']: the checks that fail when n is red (its own checks with 'failed', or a group with n)."""
+    """prs[n]['jobs']: the checks that fail when n is red (its own checks with 'failed' or once the waiter ran
+    them, or a group with n)."""
 
     def __init__(self, prs, red=(RED,)):
         super().__init__(prs)
@@ -31,7 +32,9 @@ class RedGitHub(FakeGitHub):
         out = set()
         for m in members:
             p = self.prs[m]
-            if p.get("failed") or p.get("ran_red") or u in self.groups:
+            if (
+                p.get("failed") or p.get("ran_red") or u in self.groups or u in self.direct
+            ):  # it ran: its jobs
                 out |= set(p.get("jobs", {"own"}))
         return frozenset(out)
 
@@ -107,8 +110,8 @@ def test_a_fix_still_red_in_the_same_checks_uses_a_try(ws):
     add(ws, 1, first=True)
     gh = RedGitHub({1: {"jobs": {"lint"}}})
     r, calls = make(ws, gh, FakeGit(), bad={1})
-    r.process(r.next_batch())  # its group of one failed where develop fails
-    assert [gh.groups[c] for c in calls] == [[1]]
+    r.process(r.next_batch())  # its own checks failed where develop fails: no group run needed to see that
+    assert calls == [] and gh.direct == [url(1)]
     assert row(ws, 1)["state"] == "waiting" and row(ws, 1)["tries"] == 1
 
 

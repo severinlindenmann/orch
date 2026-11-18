@@ -128,6 +128,7 @@ class FakeGitHub:
         self.gstate: dict[str, str] = {}  # group pull request -> state
         self.closed, self.deleted = [], []
         self.marks: list[tuple[str, str]] = []  # (commit, text) the queue's mark was set on
+        self.direct: list[str] = []  # pull requests the waiter looked at on their own (no group)
         self.me = login
 
     def login(self):
@@ -200,12 +201,14 @@ def make(ws, gh, git, bad=(), log=None, red_on_base=(), ask=None):
         t[0] += secs
 
     def waiter(u, before_merge=None, merge=True):
-        calls.append(u)
+        (calls if u in gh.groups else gh.direct).append(u)  # calls: group runs; direct: a member's own look
         members = gh.groups.get(u) or [int(u.rsplit("/", 1)[1])]
         if any(m in bad for m in members) or (u in gh.groups and any(m in red_on_base for m in members)):
             return Outcome(u, False, "checks failed", f"Checks of {u}: NOT green")
         if not merge:
             return Outcome(u, True, "checks passed", f"Checks of {u}: green")
+        if u not in gh.groups and not gh.prs[members[0]].get("fresh"):  # develop changed its files
+            return Outcome(u, False, "behind", f"{u}: develop changed files it changes")
         held = before_merge and before_merge(gh.pr(u)["headRefOid"])
         if held:
             return Outcome(u, False, "held", f"not merged: {held}")
@@ -224,7 +227,30 @@ def states(ws):
     return {r["number"]: r["state"] for r in store.read(ws)}
 
 
+def test_a_lone_green_pull_request_develop_did_not_touch_is_marked_and_merged_without_a_group(ws):
+    """Owner, ORCH-432 q2: its own checks green and develop changed none of its files: no second run."""
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh, git = FakeGitHub({1: {"fresh": True}}), FakeGit()
+    r, calls = make(ws, gh, git)
+    r.run()
+    assert calls == [] and gh.direct == [url(1)] and states(ws) == {1: "merged"}
+    assert git.pushed == [] and gh.groups == {}
+    assert gh.marks == [(f"{1:040d}", "Its own checks were green and develop changed none of its files")]
+
+
+def test_a_lone_pull_request_is_not_merged_when_its_mark_could_not_be_set(ws):
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh = FakeGitHub({1: {"fresh": True}})
+    gh.set_status = lambda repo, sha, text, target="": False
+    r, _ = make(ws, gh, FakeGit())
+    r.process(r.next_batch())
+    row = store.find(store.read(ws), url(1))
+    assert gh.prs[1].get("state", "OPEN") == "OPEN" and row["state"] == "waiting"
+    assert "mark could not be set" in row["why"]
+
+
 def test_one_pull_request_alone_is_checked_in_a_group_of_one_on_top_of_the_base(ws):
+    """develop changed files it changes since it took develop in (the fake waiter's default): a group of one."""
     store.add(ws, url(1), None, "agent:t", login="bot")
     gh, git = FakeGitHub({1: {}}), FakeGit()
     r, calls = make(ws, gh, git)
@@ -255,8 +281,9 @@ def test_a_red_group_is_split_and_the_good_ones_still_merge(ws):
     r, calls = make(ws, gh, FakeGit(), bad={3})
     r.run()
     assert states(ws) == {1: "merged", 2: "merged", 3: "out", 4: "merged"}
-    assert len(gh.closed) == 3  # [1,2,3,4], [3,4] and [3] were red
-    assert [gh.groups[c] for c in calls[-2:]] == [[3], [4]]  # the last half of two: a group of one each
+    assert len(gh.closed) == 2  # [1,2,3,4] and [3,4] were red; #3 alone is red in its own checks: no group
+    assert url(3) in gh.direct  # #3 alone: red in its own checks
+    assert gh.groups[calls[-1]] == [4]  # #4: develop changed its files, a group of one
 
 
 def test_entries_that_cannot_be_merged_leave_with_a_reason(ws):
