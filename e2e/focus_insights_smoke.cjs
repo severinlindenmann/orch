@@ -9,8 +9,9 @@
 // Then it runs the UX checks of the master gallery (workspace/src/orch_ui/tests/ux_checks.cjs: self-test first, then
 // sideways scroll, target size, focus mark, reduced motion, text contrast), and the click-through of the new Focus
 // (e2e/focus_d/clickthrough.cjs: its ready steps at three widths), and the six dashboard browser tests (e2e/dash_*.cjs:
-// Lessons, Run now, Allow script, Sync card, page health at 1280/1920/390/320, same numbers on every page). They run here because the CI job
-// `page-smoke` is the one that has Chromium and the bot cannot add a workflow file.
+// Lessons, Run now, Allow script, Sync card, page health at 1280/1920/390/320, same numbers on every page). They run here
+// because the CI job `page-smoke` is the one that has Chromium. The dashboard click-throughs (every dashboard feature)
+// have their own job, `dashboard-clickthroughs` (they no longer fit in this job's 10 minutes).
 //
 //   node e2e/focus_insights_smoke.cjs        (exit 0 = all screens clean)
 'use strict';

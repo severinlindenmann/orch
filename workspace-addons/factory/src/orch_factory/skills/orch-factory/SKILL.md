@@ -165,3 +165,4 @@ or failed you are woken: file a change with `takes_back` set to that task ("Do i
 - Bundle questions: one stop or proposal at a time, never several pings for one thing.
 - The order waits when the owner does not answer; other orders go on. Never ship without the owner's Ship it.
 - Stay inside the budget; at 80 % make a change proposal (+time / narrow / stop).
+- Never offer a protected machine (`orch config get workspace.protected_machines`) as a place to test or run something: offer CI or a throwaway server. `orch ask` refuses such a question.

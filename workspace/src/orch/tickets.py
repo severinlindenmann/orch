@@ -2505,9 +2505,60 @@ def check_done(
 
 
 WONT_DO_AGENT = (
-    "Only a person marks a step as won't do. Ask them: orch ask {tid} \"Mark step {cid} as won't do?\" "
-    "--option yes --option no --check {cid}"
+    "Only a person marks a step as won't do. Ask them, and say where the step would run if they say no: "
+    'orch ask {tid} "Mark step {cid} as won\'t do?" --option yes '
+    '--option "No, run it in CI" --check {cid}'
 )
+
+_WONT_DO_Q_RE = re.compile(r"\bwon'?t do\b|\bskip\b", re.IGNORECASE)
+_TEST_WORD_RE = re.compile(
+    r"\b(test|tests|tested|testing|pytest|try[- ]?out|trial|experiment)\b", re.IGNORECASE
+)
+
+
+def _guard_question(
+    root: Path, text: str, options: list[str], recommended: str | None, check: str | None
+) -> None:
+    """Two plain refusals (ORCH-332). A question never offers a protected (production) machine for a test.
+    A question that asks whether to skip a step must name where it would run if the answer is no (a bare
+    yes/no was once read as "run it now, on production")."""
+    parts = [text, *options, *([recommended] if recommended else [])]
+    machines = config.protected_machines(root)
+    if machines:
+        from orch import protected
+
+        names = protected.expand(machines)
+
+        def find(blob: str) -> str | None:
+            blob = blob.lower()
+            return next(
+                (
+                    n
+                    for n in sorted(names)
+                    if re.search(rf"(?<![a-z0-9.-]){re.escape(n)}(?![a-z0-9.-])", blob)
+                ),
+                None,
+            )
+
+        offered = find(" ".join(parts[1:]))  # an option or the recommended answer
+        mentioned = find(text) if _TEST_WORD_RE.search(text) else None
+        deploy = re.search(r"\b(release|deploy|deployment|ship)\b", text, re.IGNORECASE)
+        hit = mentioned or (offered if not deploy else None)
+        if hit:
+            raise Refused(
+                f"{hit} is a protected machine (production): a question never offers it for a test or as a "
+                "place to run something. Offer the CI job or a throwaway server, or skip the step."
+            )
+    if (
+        check is not None
+        and _WONT_DO_Q_RE.search(text)
+        and options
+        and all(o.strip().lower() in {"yes", "no", "y", "n"} for o in options)
+    ):
+        raise Refused(
+            "A question about skipping a step must say where it would run if the answer is no. "
+            'Use options such as yes and "No, run it in CI", not a bare yes and no.'
+        )
 
 
 def _refuse_if_wont_do(item: dict, tid: str, cid: str) -> None:
@@ -3202,6 +3253,7 @@ def ask(
                 "A merge goes with a link card: orch ask --link TITLE --open <pull request> --merge."
             )
 
+    _guard_question(root, text, options, recommended, check)
     for part in (text, *options, *([recommended] if recommended else []), *_labels(act)):
         if _asks_for_secret(part):
             with contextlib.suppress(Exception):  # the attempt stays visible in the history
@@ -3737,6 +3789,30 @@ def _record_own_session(root: Path, tid: str, agent: str, sid: str, host: str) -
         net.write_json(root / ".orch" / "run" / "own-sessions.json", entries[-OWN_SESSIONS_MAX:])
 
 
+SESSIONS_KEPT = 10  # sessions remembered per ticket, the ones in use included (owner's choice, ORCH-363)
+
+
+def _keep_last_sessions(sessions: list) -> None:
+    """Forget the oldest replaced sessions so a ticket remembers at most SESSIONS_KEPT (the ones in use always
+    stay; only the ids are forgotten here: the tool's own conversation file is never touched)."""
+    earlier = [
+        (e.get("last_used") or "", -j, i)  # same time: the earlier place in a list is the newer one
+        for i, s in enumerate(sessions)
+        if isinstance(s, dict)
+        for j, e in enumerate(s.get("earlier") or [])
+        if isinstance(e, dict)
+    ]
+    room = max(0, SESSIONS_KEPT - len(sessions))
+    if len(earlier) <= room:
+        return
+    drop = {(i, -nj) for _, nj, i in sorted(earlier, reverse=True)[room:]}
+    for i, s in enumerate(sessions):
+        if isinstance(s, dict) and s.get("earlier"):
+            s["earlier"] = [e for j, e in enumerate(s["earlier"]) if (i, j) not in drop]
+            if not s["earlier"]:
+                del s["earlier"]
+
+
 def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dict:
     """Remember the agent session for this agent and machine (updates last_used when it is known)."""
     if not valid_session_id(sid):
@@ -3753,7 +3829,7 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
                     # keep the replaced conversation so a person can read or continue it later
                     old = [e for e in s.get("earlier") or [] if isinstance(e, dict) and e.get("id") != sid]
                     old.insert(0, {"id": s["id"], "last_used": s.get("last_used")})
-                    s["earlier"] = old[:20]
+                    s["earlier"] = old
                 elif s.get("earlier"):
                     s["earlier"] = [e for e in s["earlier"] if e.get("id") != sid]
                 s["id"], s["last_used"] = sid, now()
@@ -3763,6 +3839,7 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
             if len(sessions) > 32:
                 sessions.sort(key=lambda s: s.get("last_used", ""))
                 del sessions[0 : len(sessions) - 32]
+        _keep_last_sessions(sessions)
 
     ticket = apply_op(root, tid, op, by=SYSTEM)[0]
     _record_own_session(root, tid, agent, sid, host)

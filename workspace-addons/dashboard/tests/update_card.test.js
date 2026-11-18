@@ -48,6 +48,9 @@ test('up to date: no button; unknown newest says so plainly', async () => {
   ({c} = context({installed:{label:'orch 15'}, newest:null, update_available:false, changes:[]}));
   c.aboutPanel(); await new Promise(r => setImmediate(r));
   assert.match(text(c.aboutPanel()), /Could not check for a newer version/);
+  // the error has a next step: Check again reads the install source once more
+  const again = all(c.aboutPanel(), n => n.tag === 'button' && text(n) === 'Check again');
+  assert.equal(again.length, 1); assert.equal(again[0].dataset['key'] ?? again[0].dataset.key, 'update-check-again');
   // a build from a branch: say what it is, no error wording
   ({c} = context({installed:{label:'orch main f093f5c5', sha:'f093f5c5'.padEnd(40, '0'), release:null}, newest:null, update_available:false, changes:[], ref:'main'}));
   c.aboutPanel(); await new Promise(r => setImmediate(r));

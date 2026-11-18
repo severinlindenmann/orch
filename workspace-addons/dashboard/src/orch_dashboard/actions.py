@@ -788,11 +788,28 @@ def _chat_make_ticket(a):
 
 
 def _run_start(a):
-    _only(a, ("ticket", "fresh", "take_over"))
+    """Start a helper on the ticket: continue its last conversation, or fresh; the Start choice (ORCH-362) can
+    name the tool (`--agent`, a name from `orch agents`); orch refuses a tool it does not know."""
+    _only(a, ("ticket", "fresh", "take_over", "agent"))
     flags = (["--fresh"] if _flag(a.get("fresh")) else []) + (
         ["--take-over"] if _flag(a.get("take_over")) else []
     )
+    agent = a.get("agent")
+    if agent is not None:
+        if not isinstance(agent, str) or not AGENT.fullmatch(agent):
+            raise BadRequest("That is not a tool name.")
+        flags += ["--agent", agent]
     return ["run", "start", _tid(a.get("ticket"))], flags, []
+
+
+def _session_reopen(a):
+    """Reopen an earlier session of the ticket: the helper starts and continues that conversation (a person only;
+    orch refuses while a helper works on the ticket, or when the conversation is not on this computer)."""
+    _only(a, ("ticket", "session"))
+    sid = a.get("session")
+    if not isinstance(sid, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", sid):
+        raise BadRequest("That is not a session id.")
+    return ["run", "start", _tid(a.get("ticket"))], ["--session", sid], []
 
 
 def _run_send(a):
@@ -1119,6 +1136,7 @@ OPS = {
     "check.remove": _check_remove,
     "check.move": _check_move,
     "run.start": _run_start,
+    "session.reopen": _session_reopen,
     "run.stop": _run_stop,
     "run.send": _run_send,
     "run.take_back": _run_take_back,

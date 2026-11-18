@@ -1184,3 +1184,15 @@ def test_the_line_also_says_what_moves_the_order_on():
         "starting it again did not help",
     ):
         assert words in js
+
+
+def test_budget_health_is_measured_when_the_page_reads_it(ws, run, srv):
+    """ORCH-411: with no watcher and no `next`, a started order still shows the active minutes really used."""
+    from test_flow import record
+
+    order, _ = started(ws, run)
+    pageapi._measured.clear()
+    record(ws, order, minutes=12, gap=4)
+    code, home, _ = get(srv, "/api/home")
+    by = {o["id"]: o for o in home["orders"]}
+    assert code == 200 and by[order]["budget"]["used"] == 12
