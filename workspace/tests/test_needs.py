@@ -1,13 +1,16 @@
 """orch needs: core rows from tickets and services, add-on pulls with cache."""
 
 import json
+import os
 import time
+from types import SimpleNamespace
 
 import pytest
 from jsonschema import Draft202012Validator
 from test_addons import install, make_addon, uv_calls  # noqa: F401  (fixture)
 
 from orch import addons, tickets
+from orch import needs as needs_mod
 from orch.needs import _option_labels
 from orch.needs import needs as compute
 
@@ -25,6 +28,8 @@ if sys.argv[1:2] == ["needs"]:
     mode = (root / "mode.txt").read_text().strip() if (root / "mode.txt").exists() else "ok"
     if mode == "slow":
         time.sleep(5)
+    if mode == "late":  # later than FAST_BUDGET, within PULL_TIMEOUT
+        time.sleep(1.2)
     if mode == "broken":
         print("not json")
         sys.exit(1)
@@ -131,7 +136,9 @@ def na(proj, run, tmp_path, monkeypatch, request):
     assert run("init")[0] == 0
     install(run, folder)
     (proj / "rows.json").write_text(json.dumps([_row()]), encoding="utf-8")
-    return folder
+    spawned = []
+    monkeypatch.setattr(needs_mod, "_spawn_refresh", lambda root, name: spawned.append(name) or True)
+    return SimpleNamespace(folder=folder, spawned=spawned)
 
 
 def test_addon_rows_are_added_and_cached(na, proj, run):
@@ -140,13 +147,73 @@ def test_addon_rows_are_added_and_cached(na, proj, run):
     assert (proj / ".orch/run/needs-cache/hello.json").is_file()
 
 
-def test_slow_addon_gives_cached_rows_stale_within_time(na, proj, run):
+def test_slow_addon_with_an_old_saved_answer_gives_it_stale_fast(na, proj, run):
     _rows(run)
+    cache = proj / ".orch/run/needs-cache/hello.json"
+    old = time.time() - needs_mod.STALE_AFTER - 60
+    os.utime(cache, (old, old))
     (proj / "mode.txt").write_text("slow")
     t0 = time.monotonic()
-    rows = _rows(run)
-    assert time.monotonic() - t0 < 3.5
+    rows = compute(proj)
+    assert time.monotonic() - t0 < needs_mod.FAST_BUDGET + 0.8
     assert [(r["id"], r["stale"]) for r in rows] == [("hello:x", True)]
+    assert na.spawned == ["hello"]  # a fresh answer is fetched in the background
+
+
+def test_late_addon_answers_from_its_fresh_saved_answer_and_refreshes(na, proj, run):
+    """ORCH-603: an add-on later than FAST_BUDGET does not hold needs up; its saved answer (fresh) is shown as
+    up to date, and one background refresh saves the new answer for the next call."""
+    _rows(run)
+    (proj / "rows.json").write_text(json.dumps([_row(key="new")]), encoding="utf-8")
+    (proj / "mode.txt").write_text("late")
+    t0 = time.monotonic()
+    rows = compute(proj)
+    assert time.monotonic() - t0 < needs_mod.FAST_BUDGET + 0.5
+    assert [(r["id"], r["stale"]) for r in rows] == [("hello:x", False)]
+    assert na.spawned == ["hello"]
+    assert needs_mod.refresh(proj, "hello") is True  # what the detached `orch needs --refresh-addon` does
+    saved = json.loads((proj / ".orch/run/needs-cache/hello.json").read_text(encoding="utf-8"))
+    assert [r["id"] for r in saved] == ["hello:new"]
+    assert not (proj / ".orch/run/needs-cache/hello.refreshing").exists()
+
+
+def test_first_answer_is_waited_for_without_a_saved_one(na, proj, run):
+    (proj / "mode.txt").write_text("late")
+    rows = compute(proj)
+    assert [(r["id"], r["stale"]) for r in rows] == [("hello:x", False)] and na.spawned == []
+
+
+def test_addons_are_asked_while_the_core_rows_are_made(na, proj, run, monkeypatch):
+    (proj / "mode.txt").write_text("late")  # 1.2 s in the add-on; no saved answer, so it is waited for
+    real = needs_mod.core_rows
+
+    def slow_core(root):
+        time.sleep(1.2)
+        return real(root)
+
+    monkeypatch.setattr(needs_mod, "core_rows", slow_core)
+    t0 = time.monotonic()
+    rows = compute(proj)
+    took = time.monotonic() - t0
+    assert took < 2.0, took  # one after another would be 2.4 s and more
+    assert [(r["id"], r["stale"]) for r in rows] == [("hello:x", False)] and na.spawned == []
+
+
+def test_refresh_command_saves_the_answer_and_prints_nothing(na, proj, run):
+    code, out, _ = run("needs", "--refresh-addon", "hello")
+    assert code == 0 and "Needs you" not in out and "Nothing needs you" not in out
+    saved = json.loads((proj / ".orch/run/needs-cache/hello.json").read_text(encoding="utf-8"))
+    assert [r["id"] for r in saved] == ["hello:x"]
+    assert run("needs", "--refresh-addon", "nope")[0] == 0  # not an add-on with needs: nothing
+
+
+def test_refresh_is_started_once_while_one_runs(proj, monkeypatch):
+    started = []
+    monkeypatch.delenv("ORCH_NO_NEEDS_REFRESH", raising=False)
+    monkeypatch.setattr(needs_mod.subprocess, "Popen", lambda *a, **k: started.append(a[0]))
+    assert needs_mod._spawn_refresh(proj, "hello") is True
+    assert needs_mod._spawn_refresh(proj, "hello") is False  # the mark says one is under way
+    assert len(started) == 1 and started[0][-2:] == ["--refresh-addon", "hello"]
 
 
 def test_broken_addon_without_cache_is_one_warn_row(na, proj, run):
@@ -214,3 +281,21 @@ def test_option_labels_name_card_options_by_title():
         },
     }
     assert _option_labels(q) == ["A Big button", "B"]
+
+
+# ---- an add-on's own tickets (ORCH-603) -------------------------------------------------------------
+
+
+def test_ticket_list_ext_gives_only_tickets_with_that_addon_data(proj, run):
+    run("init")
+    a, b, c = _ticket(run, "Order"), _ticket(run, "Plain"), _ticket(run, "Says relay in words")
+    assert run("ext", "set", a, "relay", json.dumps({"role": "order"}))[0] == 0
+    run("ticket", "status", a, "done")
+    code, out, err = run("ticket", "list", "--all", "--ext", "relay", "--json")
+    assert code == 0, err
+    rows = json.loads(out)
+    assert [r["id"] for r in rows] == [a] and rows[0]["ext"]["relay"] == {"role": "order"}
+    assert "children" not in rows[0]  # those need every ticket
+    assert json.loads(run("ticket", "list", "--ext", "relay", "--json")[1]) == []  # done: only with --all
+    assert {b, c} <= {r["id"] for r in json.loads(run("ticket", "list", "--json")[1])}
+    assert tickets.list_all(proj, ext="relay")[0]["id"] == a

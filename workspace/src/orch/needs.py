@@ -27,7 +27,7 @@ from pathlib import Path
 from orch import addons, history, services, tickets
 
 PULL_TIMEOUT = 2  # the longest an add-on is waited for: first answer, background refresh
-FAST_BUDGET = 0.8  # seconds from the start of needs: a later add-on with a saved answer answers from it
+FAST_BUDGET = 0.6  # seconds from the start of needs: a later add-on with a saved answer answers from it
 STALE_AFTER = 120  # a saved answer older than this is shown as not up to date
 TONES = ("needs-you", "bad", "warn")
 ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,31}:[A-Za-z0-9_.:-]{1,200}$")
