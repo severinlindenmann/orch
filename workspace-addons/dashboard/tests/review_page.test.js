@@ -247,3 +247,10 @@ test('ORCH-422: Add note and Send back on Review carry screenshots, files and vo
   // empty: no words and no files is refused before anything is sent
   assert.equal((await api.note({ticket:'t_abcdef', text:' ', files:[]})).ok, false);
 });
+test('ORCH-420 follow-up: files of an answer go in the ticket\'s feedback folder, so the Check card does not change under the answer', async () => {
+  const calls = [];
+  const c = ctx({review:{cards:[CARD]}}, {FEEDBACK_BOX:{accept:['png'], voice:true, maxBytes:1}, ticketTalkText:t => t,
+    ticketAttachFiles:async (tid, files, feedback) => { calls.push([tid, feedback === true]); return {ok:true, names:files.map(f => f.name)}; }});
+  await c.reviewApi().attach({ticket:'t_abcdef', files:[{name:'shot.png', url:'data:image/png;base64,iVBO'}]});
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [['t_abcdef', true]]);
+});

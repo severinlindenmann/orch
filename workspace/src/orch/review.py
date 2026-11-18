@@ -912,6 +912,8 @@ def _check_files(ticket: dict, root: Path | None) -> list[dict]:
         except (Refused, OSError, ValueError):
             rows = []
         for a in rows:
+            if a["name"].startswith(tickets.FEEDBACK_DIR + "/"):
+                continue  # the person's feedback files are not the result: the card stays the same
             add("artifacts", a["name"], a["name"].rsplit("/", 1)[-1], f"{a['size']} {a['mtime']}")
     return out
 

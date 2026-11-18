@@ -128,6 +128,7 @@ test('Send back on the ticket page opens the feedback box: words, screenshots, f
   await opts.onSend({text:'', files:[{name:'shot.png', url:'data:image/png;base64,iVBO'}, {name:'voice-note-0931.webm', url:'data:audio/webm;base64,GkXf'}]});
   assert.equal(acts[0][0], 'ticket.attach');
   assert.deepEqual(plain(acts[0][1].files), [{name:'shot.png', data:'iVBO'}, {name:'voice-note-0931.webm', data:'GkXf'}]);
+  assert.equal(acts[0][1].feedback, undefined, 'the ticket page keeps files where they always were (only Review answers use the feedback folder)');
   assert.equal(acts[1][0], 'ticket.changes');
   assert.match(acts[1][1].text, /I added 2 files to this ticket: shot \(2\)\.png, voice-note-0931\.webm\./);
   assert.match(acts[1][1].text, /voice note came without written words/);
