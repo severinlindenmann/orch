@@ -1,0 +1,222 @@
+'use strict';
+// The wall of the new live page (draft D, ORCH-360), behind the Preview switch (pages/live.js). Every session of the
+// workspace in bands: Pinned, Needs you and working (orange needs-you tiles first), In line, Idle and no session. A
+// working tile shows what its helper does in one sentence and a peek of its last lines, kept current by the live
+// sessions API (pages/livesessions.js, ORCH-359). A filter keeps the matching tiles; a band folds away and stays
+// folded (per workspace, in this browser). Clicking a tile zooms into it: it opens in the layer (pages/live-layer.js);
+// full screen and Esc are the layer's. Pins and own names are kept by orch for the workspace (window.LiveSessions, ORCH-361).
+// Look: the kit's .wall-* rules (widgets.css).
+const LIVE_WALL_KEY = 'orch.live.wall';
+const LIVE_WALL_MANY = 12;  // from this many sessions the long bands scroll inside themselves (draft D, 24 and more)
+const LIVE_WALL_PEEK = 3;  // last lines in a tile's peek
+const LIVE_WALL_SYM = {'needs-you':'◆', working:'●', 'in-line':'◷', idle:'◐', closed:'○'};
+const LIVE_WALL_WORD = {'needs-you':'Needs you', working:'Working', 'in-line':'In line', idle:'Idle', closed:'No session'};
+
+// --- the model: plain data, no page (tested in tests/live_wall.test.js) ---
+// The bands of the wall from the sessions (the API's order), the pinned ids and the filter text.
+// Pinned sessions sit in their own band; a pinned one that needs you is still orange there.
+function liveWallBands(sessions, pins, filter) {
+  const pinned = new Set(Array.isArray(pins) ? pins.map(String) : []);
+  const f = String(filter || '').trim().toLowerCase();
+  const all = (Array.isArray(sessions) ? sessions : []).filter(s => s && typeof s.id === 'string' && LIVE_WALL_WORD[s.status]);
+  const shown = f ? all.filter(s => [s.key, s.name, s.title, s.word, LIVE_WALL_WORD[s.status]].filter(x => typeof x === 'string' && x).join(' ').toLowerCase().includes(f)) : all;
+  const rank = {'needs-you':0, working:1, idle:2, 'in-line':3, closed:4};
+  const sorted = shown.map((s, i) => [s, i]).sort((a, b) => rank[a[0].status] - rank[b[0].status] || a[1] - b[1]).map(x => x[0]);
+  const pin = sorted.filter(s => pinned.has(s.id)), rest = sorted.filter(s => !pinned.has(s.id));
+  return {
+    pin, need:rest.filter(s => s.status === 'needs-you' || s.status === 'working'),
+    queue:rest.filter(s => s.status === 'in-line'), idle:rest.filter(s => s.status === 'idle' || s.status === 'closed'),
+    total:all.length, shown:shown.length,
+  };
+}
+// The summary line: counts of every session, whatever the filter says.
+function liveWallCounts(sessions) {
+  const c = {'needs-you':0, working:0, 'in-line':0, idle:0, closed:0};
+  for (const s of Array.isArray(sessions) ? sessions : []) if (s && c[s.status] != null) c[s.status]++;
+  return c;
+}
+// The parts of the summary line, in draft D's words: "3 need you", "1 needs you", "4 working", "9 in line", "8 idle".
+function liveWallSummary(sessions) {
+  const c = liveWallCounts(sessions), out = [];
+  out.push(c['needs-you'] ? {s:'needs-you', text:c['needs-you'] + (c['needs-you'] === 1 ? ' needs you' : ' need you')} : {s:'', text:'Nobody needs you'});
+  if (c.working) out.push({s:'working', text:c.working + ' working'});
+  if (c['in-line']) out.push({s:'in-line', text:c['in-line'] + ' in line'});
+  if (c.idle) out.push({s:'idle', text:c.idle + ' idle'});
+  return out;
+}
+// "1 session", "2 sessions"
+function liveWallSessions(n) { return n + (n === 1 ? ' session' : ' sessions'); }
+// The peek: the last few lines that say something; none while a question waits (the tile shows the question).
+function liveWallPeek(s, n = LIVE_WALL_PEEK) {
+  if (!s || s.status === 'needs-you' || !Array.isArray(s.lines)) return '';
+  return s.lines.map(x => String(x == null ? '' : x).replace(/\s+$/, '')).filter(x => x.trim()).slice(-n).join('\n');
+}
+// What is kept per workspace in this browser: the folded bands. The filter is not kept (a fresh visit shows all).
+function liveWallRead(store, ws) {
+  try {
+    const all = JSON.parse(store?.getItem(LIVE_WALL_KEY) || 'null');
+    const mine = all && typeof all === 'object' ? all[String(ws || '')] : null;
+    const col = mine && typeof mine.col === 'object' ? mine.col : {};
+    return {col:Object.fromEntries(['pin', 'need', 'queue', 'idle'].filter(k => col[k] === true).map(k => [k, true]))};
+  } catch { return {col:{}}; }
+}
+function liveWallWrite(store, ws, ui) {
+  try {
+    let all = JSON.parse(store?.getItem(LIVE_WALL_KEY) || 'null');
+    if (!all || typeof all !== 'object' || Array.isArray(all)) all = {};
+    all[String(ws || '')] = {col:ui.col};
+    store?.setItem(LIVE_WALL_KEY, JSON.stringify(all));
+  } catch { /* private window: nothing kept */ }
+}
+
+if (typeof module === 'object' && module.exports) {
+  module.exports = {liveWallBands, liveWallCounts, liveWallSummary, liveWallSessions, liveWallPeek, liveWallRead, liveWallWrite, LIVE_WALL_MANY};
+}
+
+// --- the page ---
+let liveWallUi = null;
+let liveWallWs = null;
+function liveWallStore() { try { return window.localStorage; } catch { return null; } }
+function liveWallState() {
+  const ws = typeof state === 'object' && state ? String(state.workspace || state.settings?.ws_name || '') : '';
+  if (!liveWallUi || liveWallWs !== ws) { liveWallUi = {...liveWallRead(liveWallStore(), ws), f:liveWallUi?.f || ''}; liveWallWs = ws; }
+  return liveWallUi;
+}
+function liveWallPins() {
+  return Array.isArray(window.LiveSessions?.pins) ? window.LiveSessions.pins : [];
+}
+function liveWallStat(s) {
+  return h('span', {className:'wall-st', 'data-s':s.status},
+    h('span', {className:'wall-sym', 'aria-hidden':'true'}, LIVE_WALL_SYM[s.status]), s.status === 'needs-you' ? 'Needs you' : s.word || LIVE_WALL_WORD[s.status]);
+}
+function liveWallLabel(s) { return s.key || liveName(s) || 'this session'; }
+function liveWallOpen(s, cls, ...children) {
+  return h('button', {type:'button', className:cls, 'data-wall-open':s.id, 'data-key':'wall-open-' + s.id,
+    'aria-label':'Open ' + liveWallLabel(s) + ', ' + liveName(s) + ', ' + (s.status === 'needs-you' ? 'Needs you' : s.word || LIVE_WALL_WORD[s.status])}, ...children);
+}
+function liveWallTicketLink(s) {
+  const t = typeof ticketOf === 'function' ? ticketOf(s.id) : null;
+  return t ? h('a', {className:'wall-tk', href:'#ticket/' + encodeURIComponent(t.id), 'data-key':'wall-ticket-' + s.id, 'aria-label':'Open ticket ' + liveWallLabel(s)}, 'Open ticket') : null;
+}
+function liveWallSteps(s) {
+  const t = typeof ticketOf === 'function' ? ticketOf(s.id) : null, tasks = Array.isArray(t?.checklist) ? t.checklist : [];
+  if (!tasks.length || !window.DashHelpers) return null;
+  const done = tasks.filter(window.DashHelpers.resolved).length, bar = h('span', {});
+  bar.style.width = Math.round(done / tasks.length * 100) + '%';
+  return h('span', {className:'wall-steps'},
+    h('span', {className:'progress', role:'progressbar', 'aria-label':'Tasks done', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done}, bar),
+    h('span', {className:'meta'}, window.DashHelpers.stepsText(done, tasks.length)));
+}
+function liveWallBeside(s) {
+  return h('button', {type:'button', className:'btn icon sm ghost wall-beside', 'data-wall-beside':s.id, 'data-key':'wall-beside-' + s.id,
+    'aria-label':'Open ' + liveWallLabel(s) + ' beside what is open', title:'Open beside'}, iconEl('plus'));
+}
+// Pin or unpin from the wall (draft D: on every tile and line); kept by orch for the workspace (ORCH-361).
+function liveWallPin(s, pinned) {
+  return h('button', {type:'button', className:'btn icon sm ghost', 'data-wall-pin':s.id, 'data-key':'wall-pin-' + s.id,
+    'aria-pressed':String(pinned), 'aria-label':(pinned ? 'Unpin ' : 'Pin ') + liveWallLabel(s), title:pinned ? 'Unpin' : 'Pin'}, iconEl('pinned'));
+}
+function liveWallTile(s, pinned) {
+  const peek = liveWallPeek(s), meta = liveMeta(s);
+  return h('article', {className:'wall-tile', 'data-s':s.status, 'data-key':'wall-tile-' + s.id, 'data-tile':s.id, 'data-pinned':pinned ? '1' : null},
+    liveWallOpen(s, 'wall-open',
+      h('span', {className:'wall-th'}, liveWallStat(s), h('span', {className:'wall-key'}, s.key || '')),
+      h('span', {className:'wall-tt'}, liveName(s)),
+      h('span', {className:'wall-now', 'data-wall-now':s.id}, liveNow(s)),
+      peek ? h('span', {className:'wall-peek', 'data-wall-peek':s.id, 'aria-hidden':'true'}, peek) : null),
+    meta.length ? h('span', {className:'wall-meta meta'}, meta.map(x => h('span', {}, x))) : null,
+    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), liveWallTicketLink(s), liveWallPin(s, pinned), liveWallBeside(s)));
+}
+function liveWallLine(s, pinned) {
+  const meta = [liveTool(s), liveWarm(s)].filter(Boolean), now = liveNow(s);
+  const said = now && ![s.word, LIVE_WALL_WORD[s.status]].includes(now) ? now : '';  // "Idle" once, not twice
+  return h('div', {className:'wall-line', 'data-s':s.status, 'data-key':'wall-tile-' + s.id, 'data-tile':s.id},
+    liveWallOpen(s, 'wall-lopen', liveWallStat(s), h('span', {className:'wall-key'}, s.key || ''), h('span', {className:'wall-tt'}, liveName(s)),
+      h('span', {className:'wall-lnow', 'data-wall-now':s.id, 'aria-hidden':said ? null : 'true'}, said || '\u00a0')),
+    meta.length ? h('span', {className:'wall-lmeta meta'}, meta.map(x => h('span', {}, x))) : null,
+    liveWallTicketLink(s), liveWallPin(s, pinned));
+}
+const LIVE_WALL_BANDS = [
+  ['pin', 'Pinned', 'Nothing is pinned. Pin a session to keep it here.'],
+  ['need', 'Needs you and working', 'No helper is working right now.'],
+  ['queue', 'In line', ''],
+  ['idle', 'Idle and no session', 'Every ticket has a working helper.'],
+];
+function liveWallBand(id, title, empty, list, ui, many) {
+  const col = !!ui.col[id], tiles = id === 'pin' || id === 'need';
+  return h('section', {className:'wall-band', 'data-band':id, 'data-key':'wall-band-' + id, 'aria-label':title},
+    h('h2', {className:'wall-bh'}, h('button', {type:'button', className:'wall-bt', 'data-wall-fold':id, 'data-key':'wall-fold-' + id, 'aria-expanded':String(!col)},
+      h('span', {className:'wall-chev', 'aria-hidden':'true'}, col ? '▸' : '▾'), title + ' (' + list.length + ')')),
+    col ? null : list.length
+      ? h('div', {className:tiles ? 'wall-tiles' : 'wall-lines', 'data-key':'wall-list-' + id, 'data-many':many && list.length > 4 ? '1' : null},
+        list.map(s => tiles ? liveWallTile(s, id === 'pin') : liveWallLine(s, false)))
+      : h('p', {className:'meta wall-none'}, empty));
+}
+// The bands and the summary (repainted in place on every answer of the sessions API).
+function liveWallBody() {
+  const ui = liveWallState(), list = window.LiveSessions?.list || [], ready = !!window.LiveSessions?.ready;
+  const b = liveWallBands(list, liveWallPins(), ui.f), many = b.total >= LIVE_WALL_MANY;
+  const summary = h('div', {className:'wall-sum', 'data-key':'wall-sum'},
+    h('p', {className:'wall-hero', 'data-key':'wall-hero', role:'status'}, liveWallSummary(list).map(p => h('span', {className:'wall-st', 'data-s':p.s || null},
+      p.s ? h('span', {className:'wall-sym', 'aria-hidden':'true'}, LIVE_WALL_SYM[p.s]) : null, p.text))),
+    h('p', {className:'meta', 'data-key':'wall-total'}, liveWallSessions(b.total)));
+  let bands;
+  if (!ready) bands = h('p', {className:'meta wall-none', 'data-key':'wall-wait'}, 'Reading the sessions…');
+  else if (!b.total) bands = h('p', {className:'meta wall-none', 'data-key':'wall-empty'}, 'No sessions yet. A ticket’s session shows here when a helper works on it.');
+  else if (!b.shown) bands = h('p', {className:'meta wall-none', 'data-key':'wall-nomatch'}, 'No session matches “' + ui.f.trim() + '”.');
+  else bands = h('div', {className:'wall-bands', 'data-key':'wall-bands', 'data-many':many ? '1' : null},
+    LIVE_WALL_BANDS.filter(([id]) => id !== 'queue' || b.queue.length).filter(([id]) => id !== 'pin' || b.pin.length || !ui.f.trim())
+      .map(([id, title, empty]) => liveWallBand(id, title, empty, b[id], ui, many)));
+  return [summary, bands];
+}
+function liveWall() {
+  const ui = liveWallState();
+  return h('div', {className:'wall', 'data-key':'live-wall'},
+    h('div', {className:'wall-body', 'data-key':'wall-body'}, ...liveWallBody()),
+    h('div', {className:'wall-tools', 'data-key':'wall-tools'},
+      h('label', {className:'sr-only', for:'wall-filter'}, 'Filter sessions'),
+      h('input', {className:'input', id:'wall-filter', type:'search', placeholder:'Filter by name, ticket or status', autocomplete:'off', value:ui.f, 'data-wall-filter':'1'})));
+}
+function liveWallRepaint() {
+  const host = document.querySelector('main [data-key="wall-body"]');
+  if (!host || typeof reconcile !== 'function') return;
+  const next = h('div', {}, ...liveWallBody());
+  reconcile(host, next);
+}
+if (typeof window === 'object' && typeof document === 'object' && !(typeof module === 'object' && module.exports)) {
+  window.addEventListener('orch:live-sessions', liveWallRepaint);
+  window.addEventListener('orch:live-pins', liveWallRepaint);
+  document.addEventListener('input', e => {
+    if (!e.target.matches?.('[data-wall-filter]')) return;
+    liveWallState().f = e.target.value;
+    liveWallRepaint();
+  });
+  document.addEventListener('click', e => {
+    const fold = e.target.closest?.('[data-wall-fold]');
+    if (fold) {
+      const ui = liveWallState(), id = fold.dataset.wallFold;
+      if (ui.col[id]) delete ui.col[id]; else ui.col[id] = true;
+      liveWallWrite(liveWallStore(), liveWallWs, ui);
+      liveWallRepaint();
+      document.querySelector('main [data-wall-fold="' + id + '"]')?.focus({preventScroll:true});
+      return;
+    }
+    const pin = e.target.closest?.('[data-wall-pin]');
+    if (pin && window.LiveSessions) {
+      const id = pin.dataset.wallPin;
+      // the tile moves band, and the page is drawn again when orch answers: keep the keyboard on its pin button
+      const keep = () => {
+        const a = document.activeElement;
+        if (!a || a === document.body || !a.isConnected || a.dataset?.wallPin === id) document.querySelector('main [data-wall-pin="' + id + '"]')?.focus({preventScroll:true});
+      };
+      const saved = window.LiveSessions.pin(id, pin.getAttribute('aria-pressed') !== 'true');
+      keep();
+      Promise.resolve(saved).then(() => requestAnimationFrame(keep));
+      return;
+    }
+    const beside = e.target.closest?.('[data-wall-beside]');
+    if (beside && window.LiveLayer) { window.LiveLayer.beside(beside.dataset.wallBeside); return; }
+    const open = e.target.closest?.('[data-wall-open]');
+    if (open && window.LiveLayer) window.LiveLayer.open(open.dataset.wallOpen, true);  // zoom: the session in the layer, the keyboard in its pane
+  });
+}
