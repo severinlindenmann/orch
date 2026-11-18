@@ -198,6 +198,19 @@ def _link(args, root: Path, out) -> int:
 
 
 def _service(args, root: Path) -> int:
+    if args.cmd == "stop":
+        # Check the resolved --dir target too, including direct add-on invocations.
+        from orch import service_guard
+        from orch.errors import Refused
+
+        try:
+            service_guard.require_change(root)
+        except Refused as e:
+            print(f"Refused: {e}", file=sys.stderr)
+            if args.json:
+                print(json.dumps({"error": str(e)}))
+            return 2
+
     def out(data: dict, text: str) -> None:
         print(json.dumps(data) if args.json else text)
 
