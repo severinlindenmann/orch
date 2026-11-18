@@ -365,6 +365,7 @@ ADVANCED_TOP = {
     "session",
     "triage",
     "checks",  # ORCH-529: --help-all only
+    "skill",  # ORCH-532: for helpers and scripts
 }
 ADVANCED_SUB = {"relay": {"allow"}}
 

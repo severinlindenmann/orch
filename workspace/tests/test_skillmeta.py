@@ -86,6 +86,7 @@ def test_crlf_header_reads_the_same(tmp_path):
         ("name: a\nname: b\ndescription: x\n", "twice"),
         ("name: a\ndescription: x\n  stray: y\n", "indented"),
         ('name: a\ndescription: "open\n', "end"),
+        ("name: a\ndescription: Use it: when asked\n", "colon"),
     ],
 )
 def test_refuses_what_it_does_not_read(tmp_path, header, says):
@@ -263,3 +264,17 @@ def test_skill_check_path_and_show(proj, capsys):
     res = json.loads(out)
     assert code == 0 and res["source"] == "addon:hello" and res["findings"][0]["field"] == "description"
     assert run(capsys, "show", "nope")[0] == 2
+
+
+def test_a_linked_agents_skills_folder_is_read(proj, capsys):
+    skill(proj / "elsewhere", "github", GOOD)
+    (proj / ".agents").mkdir()
+    (proj / ".agents/skills").symlink_to(proj / "elsewhere")
+    code, out = run(capsys, "list", "--json")
+    assert code == 0 and [(e["name"], e["source"]) for e in json.loads(out)] == [("github", "workspace")]
+
+
+def test_text_answers_end_with_a_next_line(proj, capsys):
+    workspace(proj)
+    code, out = run(capsys, "check", "orch")
+    assert code == 0 and out.strip().splitlines()[-1].startswith("Next: ")

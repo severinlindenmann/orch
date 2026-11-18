@@ -78,7 +78,12 @@ def _scalar(raw: str, where: str) -> tuple[str, bool]:
         )
     if v.startswith("- "):
         raise HeaderError(f'{where}: a list is not read here. Write one line with commas, like "gh, git".')
-    return re.split(r"\s+#", v, maxsplit=1)[0].rstrip(), False
+    v = re.split(r"\s+#", v, maxsplit=1)[0].rstrip()
+    if ": " in v or v.endswith(":"):
+        raise HeaderError(
+            f"{where}: a value with a colon must be in quotes, or YAML reads it as a map. Put it in quotes."
+        )
+    return v, False
 
 
 def parse_header(text: str) -> tuple[dict, list[str]]:
@@ -337,7 +342,7 @@ def list_skills(root: Path) -> list[dict]:
                 out.append(_entry(p.name, p, src))
                 seen.add(p.name)
     base = root / ".agents" / "skills"
-    if base.is_dir() and not harness.is_link(base):
+    if base.is_dir():  # read-only, so a linked .agents/skills (harness.link_skill) is read too
         hs_real = hs.resolve() if hs.is_dir() else None
         for p in sorted(base.iterdir()):
             if p.name in seen or not p.is_dir() or not harness.safe_skill_name(p.name):
