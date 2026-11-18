@@ -737,7 +737,7 @@ def dispatcher_helpers(root: Path | None) -> int:
 
 def set_dispatcher_helpers(root: Path, value: str) -> int:
     v = value.strip()
-    if not v.isdigit() or int(v) not in DISPATCHER_HELPERS_CHOICES:
+    if not (v.isascii() and v.isdigit()) or int(v) not in DISPATCHER_HELPERS_CHOICES:
         raise Refused("Give a number of helpers from 1 to 10.")
     set_key(root, "workflow", "dispatcher_helpers", int(v))
     return int(v)

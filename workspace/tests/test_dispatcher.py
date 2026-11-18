@@ -278,6 +278,7 @@ def test_config_keys(proj, run):
     assert config.dispatcher_on(proj)
     code, _, err = run("config", "set", "workflow.dispatcher_helpers", "12")
     assert code == 2
+    assert run("config", "set", "workflow.dispatcher_helpers", "\u0664", "--by", "agent:helper")[0] == 2
     code, _, err = run("config", "set", "workflow.dispatcher_helpers", "4", "--by", "agent:helper")
     assert code == 2 and "Only the owner raises" in err
     assert run("config", "set", "workflow.dispatcher_helpers", "4", "--by", "human:owner")[0] == 0

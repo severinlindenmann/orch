@@ -423,12 +423,14 @@ def _config(args, root: Path) -> None:
         )
     elif args.sub == "set" and args.key == "workflow.dispatcher_helpers":
         v = args.value.strip()
-        higher = v.isdigit() and int(v) > config.dispatcher_helpers(root)
-        if higher and not _actor(args).startswith("human:"):  # more helpers spend more: the owner's choice
+        if not (v.isascii() and v.isdigit()):
+            raise Refused("Give a number of helpers from 1 to 10.")
+        # more helpers spend more: raising is the owner's choice
+        if int(v) > config.dispatcher_helpers(root) and not _actor(args).startswith("human:"):
             raise Refused(
                 "Only the owner raises this: orch config set in their own terminal. Lowering is fine."
             )
-        n = config.set_dispatcher_helpers(root, args.value)
+        n = config.set_dispatcher_helpers(root, v)
         _out(
             args,
             {"workflow.dispatcher_helpers": n},
