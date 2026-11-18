@@ -86,7 +86,7 @@ function helperNeedsCard() {
     return h('div', {className:'setting-row', 'data-key':key, 'data-state':item.state},
       h('div', {className:'row-label'}, settingsText('span', {}, D.needListName(item)), settingsText('p', {className:'meta'}, D.needKindWord(item))),
       h('div', {className:'row-value'}, h('span', {className:'badge ' + st.tone}, st.word), stops ? settingsText('p', {className:'meta'}, stops) : null,
-        (typeof loginHowText === 'function' ? loginHowText(item) : '') ? settingsText('p', {className:'meta', 'data-key':key + '-how'}, (typeof loginHowText === 'function' ? loginHowText(item) : '')) : null),
+        typeof loginHow === 'function' ? loginHow(item, key + '-how') : D.needHow(item) ? settingsText('p', {className:'meta', 'data-key':key + '-how'}, D.needHow(item)) : null),
       h('div', {className:'row-action'}, action));
   });
   return h('section', {className:'card', id:'needs', 'data-key':'settings-needs'},
@@ -308,6 +308,15 @@ async function syncAct(verb, target, extra = {}) {
   const answer = result.ok && result.state?.act_answer?.addon === SYNC ? result.state.act_answer.answer : null;
   return {...result, answer};
 }
+// The card's status is a read, not a click (ORCH-413): GET with the rights of /api/state, so a page opened without a
+// signed-in session shows the setting and sends no click that is refused (no 'Sign in to do this' banner).
+async function syncRead() {
+  try {
+    const res = await fetch('/api/addon-read?addon=' + SYNC + '&verb=status', {cache:'no-store'});
+    const answer = res.ok ? await res.json() : null;
+    return {ok:res.ok, answer:answer && typeof answer === 'object' && !Array.isArray(answer) ? answer : null};
+  } catch (_) { return {ok:false, answer:null}; }
+}
 // The Sync card lives in Settings › General and on the Sync page itself (#addon/sync): both change settings in place.
 const syncPageOpen = () => { const r = route(); return r.kind === 'settings' || (r.kind === 'addon' && r.id === SYNC); };
 async function syncLoad() {
@@ -317,7 +326,7 @@ async function syncLoad() {
   if (!syncPageOpen()) return;  // the page was left: it loads again when Settings or the Sync page opens
   syncUi.loading = true;
   try {
-    const result = await syncAct('status', SYNC);
+    const result = await syncRead();
     if (result.answer && typeof result.answer.shown === 'string') {
       syncUi.card = result.answer;
       // just turned on here: "On this computer only" is offered, the person saves it in the review line

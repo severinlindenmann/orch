@@ -139,6 +139,10 @@ def tools(tmp_path, monkeypatch, ws):
 
 
 def _platform(monkeypatch, name):
+    # The secret scan imports urllib.request (phone_view -> net) on first use; imported under a faked darwin on
+    # Linux it fails on _scproxy and the scan fails closed (every name masked). Import it on the real platform.
+    import orch.phone_view  # noqa: F401
+
     from orch_services import drivers
     from orch_services.drivers.launchd import Launchd
     from orch_services.drivers.systemd import Systemd
