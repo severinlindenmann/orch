@@ -35,6 +35,7 @@ PICTURES = ("png", "jpg", "jpeg", "webp")
 RESULT_TYPES = {**IMAGE_TYPES, "mp4": "video/mp4", "webm": "video/webm"}
 MAX_DEMO = 25 * 1024 * 1024
 PULL = re.compile(r"https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/pull/[0-9]+")
+TIME_Z = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z")
 CHANGE_STATES = {"Accept": "accepted", "Edit": "edit", "Save for later": "later"}
 ACTIVITY_MAX = 50
 DECISIONS_MAX = 100
@@ -144,7 +145,8 @@ def _tests(t):
 
 def _code(t):
     """The task's pull requests: how many are merged and how many are not (yet). Core keeps each one's state on
-    the ticket's links; a pull request named only in the evidence counts as not merged."""
+    the ticket's links; a pull request named only in the evidence counts as not merged. One closed without merging
+    (replaced by another) waits for nothing and is not counted (ORCH-419)."""
     state = {}
     for r in t.get("refs") or []:
         url = r.get("url") if isinstance(r, dict) else None
@@ -155,7 +157,7 @@ def _code(t):
         if isinstance(url, str) and PULL.fullmatch(url):
             state.setdefault(url, None)
     merged = sum(1 for s in state.values() if s == "merged")
-    return merged, len(state) - merged
+    return merged, sum(1 for s in state.values() if s not in ("merged", "closed"))
 
 
 def _reviews(d):
@@ -533,6 +535,49 @@ def home(root):
         "day_limit": _day_limit(root, store, tickets, journal),
         "watcher": _watcher_on(root),
     }
+
+
+def needs(root):
+    """`orch factory needs`: one row per stage review that waits for the person's Looks good (contracts/needs.schema.json),
+    the same review the Factory page shows (ORCH-419). In a terminal the person answers it with core's own commands:
+    Looks good = each built task to done (`cli`), a change = words to the helper on the order."""
+    summaries, _ok, _store, tickets, _journal = _all(root)
+    changed = {t["id"]: t.get("updated_at") for t in tickets}
+    now = _iso(clock())
+    out = []
+    for o in summaries:
+        for r in o.get("reviews") or []:
+            ids = [t for t in r.get("tickets") or [] if ORDER_ID.fullmatch(t)]
+            if not ids or not ORDER_ID.fullmatch(o["id"]):
+                continue
+            item = next((x for x in o.get("line") or [] if x.get("stage") == r["stage"]), {})
+            stage = _text(item.get("label"), 60) or (r["stage"][:1].upper() + r["stage"][1:])
+            n = len(ids)
+            text = (
+                f"{stage}: what your crew built. {n} {'task waits' if n == 1 else 'tasks wait'} for your Looks good. "
+                f'For a change: orch run send {o["id"]} "Change at {stage}: <what should change>"'
+            )
+            since = min(
+                (w for t in ids if isinstance(w := changed.get(t), str) and TIME_Z.fullmatch(w)), default=now
+            )
+            row = {
+                "id": f"factory:review:{o['id']}:{r['stage']}",
+                "source": "factory",
+                "kind": "factory:review",
+                "ticket": o["id"],
+                "title": _text(o["title"], 200) or "Untitled",
+                "text": text[:500],
+                "tone": "needs-you",
+                "since": since,
+                "order": o["id"],
+                "stage": r["stage"],
+                "tickets": ids,
+            }
+            cli = " && ".join(f"orch ticket status {t} done" for t in ids)
+            if len(cli) <= 300:
+                row["cli"] = cli
+            out.append(row)
+    return out
 
 
 def autopilot_view(root):
