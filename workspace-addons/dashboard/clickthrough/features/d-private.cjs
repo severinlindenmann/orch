@@ -12,7 +12,7 @@ module.exports = {
     await open('#settings/general');
     const ws = await page.evaluate(() => state.settings.folder);
     must(/\.orch-test[\\/]clickthrough-/.test(ws), 'not the throw-away workspace: ' + ws);
-    const env = { PATH: process.env.PATH, HOME: path.dirname(ws), GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
+    const env = { PATH: path.join(path.dirname(ws), 'bin') + path.delimiter + process.env.PATH, HOME: path.dirname(ws), GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
     // a teammate's helper command arrives with the team files: not allowed on this computer yet (harmless command)
     fs.appendFileSync(path.join(ws, '.orch', 'config.toml'), '\n[agents.teamtool]\nadapter = "generic"\ncommand = "sh -c true"\n');
     for (const a of [['init', '-q'], ['add', '-A', '-f', '.orch']]) execFileSync('git', a, { cwd: ws, env });
