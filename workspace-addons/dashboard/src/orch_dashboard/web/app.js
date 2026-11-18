@@ -286,6 +286,7 @@ function reconcile(target, source) {
 }
 const seenNeeds = new Set();
 function accept(next) {
+  if (typeof acceptOverlay === 'function') next = acceptOverlay(next);  // a Looks good still being saved (ORCH-548)
   const first = !state;
   const arrived = new Set(array(next.needs).filter(n => !seenNeeds.has(n.id)).map(n => n.id));
   array(next.needs).forEach(n => seenNeeds.add(n.id));
