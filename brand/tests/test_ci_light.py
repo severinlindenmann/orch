@@ -151,7 +151,7 @@ def test_a_proven_develop_push_runs_no_suite():
         assert "outputs.proven != 'true'" in _job_if(job), job
 
 
-def test_the_light_job_runs_only_on_light_pull_requests_and_the_gate_waits_for_it():
+def test_the_light_job_runs_only_on_light_pull_requests_and_the_final_check_waits_for_it():
     assert _job_if("light") == "needs.changes.outputs.light == 'true'"
     assert re.search(r"needs: \[changes, light,", CI)
     assert "scripts/ci_light.py" in CI and "scripts/ci_proven.py" in CI
