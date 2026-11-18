@@ -240,7 +240,14 @@ def decide(root: Path, req: dict, at: datetime | None = None, switch=switching._
         store.expire(accounts, rows, at)
     doc = store.load(root)
     accounts = doc["accounts"]
-    allowed = [a for a in accounts if a["on"] and (not a["rule"].get("for") or kind in a["rule"]["for"])]
+    allowed = [
+        a
+        for a in accounts
+        if a["on"]
+        and not a.get("removed")
+        and not (a.get("credit_ends") and store.to_time(a["credit_ends"]) <= at)  # the credit itself ended
+        and (not a["rule"].get("for") or kind in a["rule"]["for"])
+    ]
     usable = []
     for a in allowed:
         tool = a.get("tool")

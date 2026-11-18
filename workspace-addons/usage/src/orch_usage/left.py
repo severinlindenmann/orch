@@ -36,9 +36,10 @@ def _when(text) -> datetime | None:
         return None
 
 
-def _rows(root: Path) -> list[dict]:
-    """Every readable line of the spend log, read line by line (no size cap: a skipped log would give credit back)."""
-    out = []
+def _rows(root: Path) -> tuple[list[dict], bool]:
+    """(every readable line of the spend log, whether the whole file could be read). Read line by line with no size
+    cap: a skipped log would give credit back. A missing file is an empty log."""
+    out: list[dict] = []
     try:
         with open(log_path(root), encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -52,9 +53,11 @@ def _rows(root: Path) -> list[dict]:
                 if not isinstance(usd, (int, float)) or isinstance(usd, bool) or not usd >= 0 or t is None:
                     continue
                 out.append({"t": t, "account": r["account"], "usd": float(usd)})
+    except FileNotFoundError:
+        return out, True
     except OSError:
-        return []
-    return out
+        return out, False  # what was read still counts; the caller says the number may be short
+    return out, True
 
 
 def record(root: Path, a: dict, amount: float, who: str, at: str | None = None) -> dict:
@@ -84,10 +87,12 @@ def record(root: Path, a: dict, amount: float, who: str, at: str | None = None) 
 
 def reported(
     root: Path, account_id: str, since: datetime | None, until: datetime | None = None
-) -> tuple[float, bool]:
-    """(dollars reported for the account from `since` up to `until`, whether it ever reported anything)."""
+) -> tuple[float, bool, bool]:
+    """(dollars reported for the account from `since` up to `until`, whether it ever reported anything, whether the
+    whole log could be read)."""
     total, ever = 0.0, False
-    for r in _rows(root):
+    rows, ok = _rows(root)
+    for r in rows:
         if r["account"] != account_id:
             continue
         ever = True
@@ -96,7 +101,7 @@ def reported(
         if until and r["t"] >= until:
             continue
         total += r["usd"]
-    return round(total, 6), ever
+    return round(total, 6), ever, ok
 
 
 def credit_use(root: Path | None, a: dict, since: str | None) -> CreditUse:
@@ -107,10 +112,18 @@ def credit_use(root: Path | None, a: dict, since: str | None) -> CreditUse:
     c = reader(src, since)
     if root is None:
         return c
-    extra, ever = reported(root, a["id"], _when(since) if since else None)
-    if not ever:
+    extra, ever, ok = reported(root, a["id"], _when(since) if since else None)
+    if not ever and ok:
         return c
     spent = round((c.spent or 0.0) + extra, 4)
+    if not ok:
+        return CreditUse(
+            spent=spent,
+            since=since,
+            as_of=c.as_of,
+            estimated=True,
+            note="The Usage spend log could not be read fully; the spend may be more.",
+        )
     return CreditUse(spent=spent, since=since, as_of=c.as_of, estimated=c.estimated, note=None)
 
 
@@ -136,15 +149,18 @@ def view(root: Path, a: dict, at: datetime | None = None) -> dict:
     lv = a.get("left")
     if isinstance(lv, dict):
         # a spend in the same second as the figure counts: rather a cent too little left than too much
-        since = credit_use(root, a, lv["at"]).spent
+        c = credit_use(root, a, lv["at"])
+        since = c.spent
         spent = round(since or 0.0, 4)
+        if c.note and since is not None:
+            out["note"] = c.note  # the spend log could not be read fully: the amount left may be less
         out.update(
             set=lv["value"],
             set_at=lv["at"],
             spent_since=spent,
             left=round(max(0.0, lv["value"] - spent), 4),
             over=round(max(0.0, spent - lv["value"]), 4),
-            measured=since is not None,
+            measured=since is not None and not c.note,
         )
     return out
 
@@ -168,6 +184,8 @@ def text(v: dict) -> str:
         s = f"left: {money(v['left'])} (set on {day}, minus {money(v['spent_since'])} spent since)"
         if v.get("over"):
             s += f", {money(v['over'])} over"
+        if v.get("note"):
+            s += " (may be less: the spend log could not be read fully)"
         bits.append(s)
     if v.get("spent_today") is not None or v.get("spent_month") is not None:
         bits.append(f"spent today {money(v['spent_today'] or 0)}, this month {money(v['spent_month'] or 0)}")

@@ -1,4 +1,4 @@
-"""orch usage list|history|limit|period|order|on|off|end|left|spent|for|model|together|add|remove|ask|switching|act|run|start|
+"""orch usage list|history|limit|period|order|on|off|end|left|spent|for|model|together|add|remove|restore|ask|switching|act|run|start|
 stop|status
 (store: store.py; readers: readers/; early switching: switching.py; background process: service.py)."""
 
@@ -313,10 +313,16 @@ def run(args) -> int:
             print(json.dumps(data, ensure_ascii=False))
             return 0
         lines = []
+        gone = [r["label"] for r in data["accounts"] if r.get("removed")]
         for r in data["accounts"]:
+            if r.get("removed"):
+                continue
             state = "on" if r["on"] else "off"
             if r.get("active"):
                 state += ", in use"
+            if r.get("credit_ends"):
+                ended = store.to_time(r["credit_ends"]) <= datetime.now(UTC)
+                state += f", {'ended' if ended else 'ends'} {_local(r['credit_ends'])}"
             lines.append(f"{r['order']}. {r['label']} ({state}): {_rule_text(r['rule'])}")
             credit = left.text(r["credit"]) if r.get("credit") else ""
             use = (
@@ -328,6 +334,8 @@ def run(args) -> int:
                 lines.append(f"   {credit}")
         if not lines:
             lines = ["No accounts yet."]
+        if gone:
+            lines.append(f"Removed: {', '.join(gone)} (bring one back: orch usage restore <name>)")
         for t in data["together"]:
             lim = t["limit"]
             spent = f"${t['spent']:g} spent, " if t["spent"] is not None else ""
@@ -462,16 +470,24 @@ def run(args) -> int:
             store.set_left(a, rows, who, parse_money(args.amount))
         elif cmd == "end":
             when = None if args.when.strip().lower() in ("none", "never", "no") else parse_time(args.when)
-            store.set_end(a, rows, who, when)
+            if (
+                a["type"] in store.MONEY_TYPES
+            ):  # an API credit or helper tool itself ends (asking refuses it then)
+                store.set_credit_end(a, rows, who, when)
+            else:
+                store.set_end(a, rows, who, when)
+        elif cmd == "restore":
+            store.restore_account(a, rows, who)
         else:
             raise Refused(f"Unknown command {cmd}.")
         changed = bool(rows)
         result = {k: v for k, v in a.items() if k != "source"}
     if cmd == "remove":
+        back = f'Bring it back: orch usage restore "{result["label"]}"'
         return _emit(
             args,
-            {"removed": result["label"], "changed": True, "next": SAVED},
-            f"{result['label']} is no longer listed. Its history stays.\n{SAVED}",
+            {"removed": result["label"], "changed": changed, "next": f"{SAVED} {back}"},
+            f"{result['label']} is removed and not used. Its history stays.\n{back}\n{SAVED}",
         )
     if cmd == "left":
         a = store.find(store.load(root)["accounts"], result["id"])
@@ -481,12 +497,17 @@ def run(args) -> int:
             args, {"account": result, "credit": v, "changed": changed, "next": SAVED}, f"{line}\n{SAVED}"
         )
     nxt = SAVED if changed else "Already like that. Nothing changed."
-    if changed and cmd in ("limit", "period", "end", "for", "model", "order") and result["rule"].get("ends"):
+    credit_end = cmd == "end" and result["type"] in store.MONEY_TYPES
+    rule_cmd = cmd in ("limit", "period", "end", "for", "model", "order")
+    if changed and rule_cmd and not credit_end and result["rule"].get("ends"):
         nxt = SAVED + " The rule falls back to the one before it when it ends."
+    ends = f", ends {_local(result['credit_ends'])}" if result.get("credit_ends") else ""
+    if credit_end and changed:
+        nxt = SAVED + (" From then on it is not used." if ends else "")
     return _emit(
         args,
         {"account": result, "changed": changed, "next": nxt},
-        f"{result['label']}: {_rule_text(result['rule'])}, {'on' if result['on'] else 'off'}, "
+        f"{result['label']}: {_rule_text(result['rule'])}, {'on' if result['on'] else 'off'}{ends}, "
         f"place {result['order']}.\n{nxt}",
     )
 
@@ -735,6 +756,9 @@ def main(argv=None) -> int:
     s.add_argument("--by")
     s = p("remove")
     s.add_argument("account")
+    s.add_argument("--by")
+    s = p("restore")
+    s.add_argument("account", help="a removed API credit or helper tool")
     s.add_argument("--by")
     for name in ("on", "off"):
         s = p(name)

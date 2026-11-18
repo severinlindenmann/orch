@@ -154,6 +154,10 @@ def _check_account(a) -> bool:
         return False
     if a.get("left") is not None and not _check_left(a["left"]):
         return False
+    if a.get("credit_ends") is not None and not _TIME.fullmatch(str(a["credit_ends"])):
+        return False
+    if a.get("removed") is not None and not isinstance(a["removed"], bool):
+        return False
     return _check_rule(a.get("rule")) and (a.get("prev") is None or _check_rule(a["prev"]))
 
 
@@ -386,7 +390,9 @@ def sync_found(accounts: list[dict], rows: list[dict], found, provider: str, rea
 
 PROVIDERS = ("anthropic", "openai")  # API credits Usage can count for skills (Anthropic API, OpenAI)
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,31}")
-_SECRETISH = re.compile(r"@|sk-|key-[A-Za-z0-9_]{8,}|[A-Za-z0-9_\-]{32,}")  # a key, not a name like key-1
+_SECRETISH = re.compile(
+    r"@|sk-|key-[A-Za-z0-9_-]{8,}|[A-Za-z0-9_\-]{32,}"
+)  # a key; a name like key-1 is fine
 
 
 def check_known(k) -> dict:
@@ -680,6 +686,30 @@ def set_left(a: dict, rows: list[dict], who: str, value: float | None, at: str |
     )
 
 
+def set_credit_end(a: dict, rows: list[dict], who: str, end: str | None) -> None:
+    """The time an API credit or helper tool stops being used (UTC text), or None: no end. Unlike a rule's end
+    (which falls back to the rule before), the credit itself ends: a call on it is refused from then on."""
+    if a["type"] not in MONEY_TYPES:
+        raise Refused(f"{a['label']} is a subscription; give its rule an end instead.")
+    old = a.get("credit_ends")
+    if old == end:
+        return
+    if end is None:
+        a.pop("credit_ends", None)
+        rows.append(_line(who, "credit end taken away", a, old, None))
+        return
+    a["credit_ends"] = end
+    rows.append(_line(who, f"credit ends {end[:16].replace('T', ' ')} UTC", a, old, end))
+
+
+def restore_account(a: dict, rows: list[dict], who: str) -> None:
+    """Bring a removed API credit or helper tool back, with the rule and amount left it had."""
+    if not a.get("removed"):
+        return
+    a.pop("removed", None)
+    rows.append(_line(who, "account brought back", a, True, None))
+
+
 def set_on(a: dict, rows: list[dict], who: str, on: bool) -> None:
     if a["on"] == on:
         return
@@ -829,6 +859,11 @@ def add_account(
         raise Refused("Say the provider, like openai or anthropic.")
     if not isinstance(name, str) or not _NAME.fullmatch(name) or _SECRETISH.search(name):
         raise Refused("Give the name the credit skill uses for it, like main. Never the key itself.")
+    gone = next((a for a in accounts if a.get("removed") and a["label"].lower() == label.lower()), None)
+    if gone:
+        raise Refused(
+            f"'{gone['label']}' was removed. Bring it back: orch usage restore \"{gone['label']}\"."
+        )
     if any(a["label"].lower() == label.lower() for a in accounts):
         raise Refused(f"An account called '{label}' is already listed.")
     if any(a.get("provider") == provider and a.get("source", {}).get("name") == name for a in accounts):
@@ -863,13 +898,18 @@ def add_account(
 
 
 def remove_account(accounts: list[dict], a: dict, rows: list[dict], who: str) -> None:
-    """Take an API credit or helper tool off the list (its history stays). A subscription is turned off instead:
-    the account switcher would find it again."""
+    """Take an API credit or helper tool off the list (its history stays): it is kept marked removed, never used,
+    and comes back with restore_account(). A subscription is turned off instead: the account switcher would find it
+    again."""
     if a["type"] not in MONEY_TYPES:
         raise Refused(
             f"{a['label']} is a subscription Usage finds by itself. Turn it off instead: orch usage off."
         )
-    accounts.remove(a)
+    if a.get("removed"):
+        return
+    a["removed"] = (
+        True  # kept, so a credit skill listing it again does not add it back on; restore brings it back
+    )
     rows.append(_line(who, "account removed", a, {"label": a["label"], "order": a["order"]}, None))
 
 

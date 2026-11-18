@@ -40,7 +40,9 @@ The person sees and changes the same on the Usage page of the dashboard; its cli
 skill already uses to find it):
 
     orch usage add "OpenAI credit" --provider openai --name openai --for reviews --limit '$100' --resets 2026-11-17 --first
-    orch usage remove "OpenAI credit"              # its history stays; a subscription is turned off instead
+    orch usage remove "OpenAI credit"              # kept as removed, never used; its history stays
+    orch usage restore "OpenAI credit"             # bring it back with its rule and amount left
+                                                   # (a subscription is turned off instead)
 
 **What is left on an API credit** (in dollars; the person reads it at the provider and tells you; never a key).
 Write amounts without $ or in single quotes: in a shell an unquoted $74 turns into 4.
@@ -52,6 +54,11 @@ Write amounts without $ or in single quotes: in a shell an unquoted $74 turns in
 
 `orch usage list` then shows `left: $70.50 (set on 2026-11-18, minus $3.50 spent since); spent today $1.20, this
 month $3.50`. Setting it again starts the count from the new figure. Every change lands in the history.
+
+**An end for an API credit** (the credit itself stops being used then; not a temporary rule)
+
+    orch usage end "Claude API key 1" 2026-12-01T08:00
+    orch usage end "Claude API key 1" none
 
 **After you spent** (a credit skill, after each call; the credit's label or the name the skill uses for it)
 
