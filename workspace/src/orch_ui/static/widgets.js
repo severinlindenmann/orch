@@ -150,7 +150,11 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const undoBtn=btn('btn ghost sm',[ic('undo',16),'Undo']);undoBtn.onclick=()=>undo();
  /* Undo only while the last move can still be taken back (a Later always; an answer while o.canUndo says so) */
  const undoable=()=>{const l=done[done.length-1];return !!l&&(l.laterOnly||!o.canUndo||!!o.canUndo(l.item))};
- top.append(count,bar,allBtn,undoBtn);
+ /* what just happened ("Later", "Looks good") shows here, next to its Undo, for a few seconds: no floating box over the
+    card, the answers or the page header (ORCH-421, owner review 18 Nov) */
+ const note=el('span','swipe-note');note.hidden=true;note.setAttribute('aria-hidden','true');let noteT=0;
+ const say=msg=>{note.textContent=msg;note.hidden=false;clearTimeout(noteT);noteT=setTimeout(()=>{note.hidden=true},6000)};
+ top.append(count,note,bar,allBtn,undoBtn);
  const stage=el('div','swipe-stage'),live=el('div','sr-only');live.setAttribute('aria-live','polite');
  /* bottom: the three answers + Later */
  const acts=el('div','swipe-actions');
@@ -222,11 +226,11 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   const st=cur&&cur.querySelector('.swipe-stamp.right');if(st)st.textContent=okWord(it)==='Pick one'?'Pick one first':okWord(it)};
  /* card */
  const pinEl=(pn,i)=>{const p=el('span','swipe-pin');p.style.left=pn.x+'%';p.style.top=pn.y+'%';p.append(el('span','',String(i+1)));p.title=pn.text;return p};
- const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:''));c.setAttribute('aria-label',it.title);
+ const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:'')+(!hasPreview(it)||plainOpts(it)?' short':''));/* no picture: as tall as its words (ORCH-421) */c.setAttribute('aria-label',it.title);
   const h=el('header','swipe-head'),m=el('div','swipe-meta'),k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),it.kindLabel||it.kind);m.append(k);if(it.need)m.append(el('span','swipe-need',it.need));if(it.group)m.append(el('span','swipe-group',it.group));if(it.ticket)m.append(el('span','',it.ticket));if(it.when)m.append(el('span','',it.when));
   const sw=it.suggest==='ok'?okWord(it):it.suggest==='no'?noWord(it):isOpt(it)?(((it.preview.options||[]).find(x=>x.suggested)||{}).id):null;if(sw&&sw!=='Pick one')m.append(el('span','swipe-sug','Suggested: '+sw));
   h.append(m);if(it.about)h.append(el('p','swipe-about','About: '+it.about));const t0=String(it.title||'').replace(/[\s….]+$/,''),cut=!!(it.text&&t0&&it.text.startsWith(t0));/* the title is only a cut copy of the question: show the question once */
-  if(!cut)h.append(el('h3','',it.title));
+  if(!cut){const t3=el('h3','',it.title);t3.title=it.title;h.append(t3)}
   if(it.text&&(cut||it.text!==it.title))h.append(el('p','swipe-text',it.text));/* the whole question; a long one scrolls inside the head */
   if(it.why)h.append(el('p','swipe-why',it.why));
   const pv=hasPreview(it)?el('div','swipe-preview'+(plainOpts(it)?' plain':'')):null;/* nothing to preview: no empty box */
@@ -245,9 +249,14 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  /* The result's own files (a picture, a page, a PDF): tiles that open the file in a new tab */
  const filesRow=it=>{const fs=(Array.isArray(it.files)?it.files:[]).filter(f=>f&&f.src&&f.label);if(!fs.length)return null;
   const r=el('div','swipe-files');r.setAttribute('role','list');r.setAttribute('aria-label','Files');
-  fs.forEach(f=>{const a=el('a','swipe-file');a.href=f.src;a.target='_blank';a.rel='noopener';a.setAttribute('role','listitem');a.setAttribute('aria-label','Open '+f.label);a.addEventListener('pointerdown',e=>e.stopPropagation());
+  const one=f=>{const a=el('a','swipe-file');a.href=f.src;a.target='_blank';a.rel='noopener';a.setAttribute('role','listitem');a.setAttribute('aria-label','Open '+f.label);a.addEventListener('pointerdown',e=>e.stopPropagation());
    const th=el('span','swipe-file-thumb');if(f.type==='img'){const i=el('img');i.src=f.src;i.alt='';i.draggable=false;i.loading='lazy';th.append(i)}else if(f.type==='page')th.append(frame(f.src,f.label));else th.append(ic('file',24));
-   a.append(th,el('span','swipe-file-name',f.label));r.append(a)});return r};
+   a.append(th,el('span','swipe-file-name',f.label));return a};
+  /* more than 6 files: 5 tiles and one "+N more" tile that shows the rest in place, never a silent cut (ORCH-421) */
+  const tile=fs.length>6?fs.slice(0,5):fs;tile.forEach(f=>r.append(one(f)));
+  if(fs.length>6){const m=btn('swipe-file swipe-file-more',[el('span','swipe-file-thumb','+'+(fs.length-5)),el('span','swipe-file-name',(fs.length-5)+' more files')]);m.setAttribute('role','listitem');
+   m.addEventListener('pointerdown',e=>e.stopPropagation());m.onclick=e=>{e.stopPropagation();m.remove();fs.slice(5).forEach(f=>r.append(one(f)));r.classList.add('all')};r.append(m)}
+  return r};
  /* order: waiting cards first (Later ones at the end), then answered */
  const waiting=()=>{const w=items.map((_,i)=>i).filter(i=>!ans[items[i].id]);return w.filter(i=>!later.has(items[i].id)).concat(w.filter(i=>later.has(items[i].id)))};
  const nextIdx=from=>{const w=waiting();const pos=w.indexOf(from);return w.length?(pos>=0?w[pos]:w.find(i=>i>from&&!later.has(items[i].id))??w[0]):items.length};
@@ -279,9 +288,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
     if(start&&start.closest&&start.closest('.swipe-preview:not(.plain)')){const pn=start.closest('.cmp-pane');openViewer(pn?pn.dataset.on:null)}return}
    reset(c)};
   c.addEventListener('pointerup',end);c.addEventListener('pointercancel',e=>{pts.delete(e.pointerId);if(e.pointerId===id){id=null;c.classList.remove('dragging');reset(c)}})};
- /* a card's name in a toast: at most 60 characters, and one end mark ("Which restaurant?" never gets a second ".") */
- const toastName=t=>{t=String(t||'').trim();if(t.length>60)t=t.slice(0,59).trimEnd()+'…';return /[.!?…]$/.test(t)?t:t+'.'};
- const nudge=(c,msg)=>{reset(c);c.classList.remove('nudge');void c.offsetWidth;c.classList.add('nudge');live.textContent=msg;if(UI.toast&&!o.quiet)UI.toast(msg)};
+ /* a card's name in that line: its whole title when short; a long one goes by its ticket (PIL-8), never cut mid-word */
+ const shortName=it=>{const t=String(it.title||'').trim();if(t.length<=48)return t;if(it.ticket)return it.ticket;const c=t.slice(0,48),sp=c.lastIndexOf(' ');return (sp>20?c.slice(0,sp):c).replace(/[\s,;:.-]+$/,'')+'…'};
+ const nudge=(c,msg)=>{reset(c);c.classList.remove('nudge');void c.offsetWidth;c.classList.add('nudge');live.textContent=msg;if(!o.quiet)say(msg)};
  const fly=(verdict,dx,dy)=>{if(!cur||overlay||busy)return;const c=cur,it=items[idx],w=stage.clientWidth,h=stage.clientHeight;
   if(ownAnswers(it)&&verdict!=='later')return;/* its own buttons answer it */
   if(verdict==='talk'||(verdict==='no'&&sendsBack(it)))return openComment();/* a Check sent back always says what should change */
@@ -289,13 +298,13 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   busy=true;c.classList.add('leaving');/* a short fade, no swipe */
   setTimeout(()=>{busy=false;verdict==='later'?defer(it):commit(verdict,isOpt(it)&&verdict==='ok'?{picked:picked[it.id]}:null)},120)};
  const defer=it=>{later.add(it.id);done.push({item:it,verdict:'later',idx,laterOnly:true});const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length;
-  live.textContent='Later: '+it.title;render();if(UI.toast&&!o.quiet)UI.toast('Later: '+toastName(it.title)+' It stays at the end.',()=>undo())};
+  live.textContent='Later: '+it.title;render();if(!o.quiet)say('Moved to the end: '+shortName(it))};
  const commit=(verdict,note)=>{const it=items[idx];done.push({item:it,verdict,note,idx,prev:ans[it.id],prevPick:ans[it.id]&&ans[it.id].note?ans[it.id].note.picked:undefined});ans[it.id]={verdict,note,item:it};later.delete(it.id);
   const from=idx;idx=nextIdx(from)===from?items.length:nextIdx(from);if(idx===from)idx=items.length;
   const word=ansWord(ans[it.id]);live.textContent=word+': '+it.title;o.onDecide&&o.onDecide(it,verdict,note);render();
-  if(UI.toast&&!o.quiet)UI.toast(word+': '+toastName(it.title).replace(/\.$/,''),()=>{if(undoable())undo();else UI.toast('Already saved. You can answer it again on its ticket.')})};
+  if(!o.quiet)say(word+': '+shortName(it))};
  const undo=()=>{if(!undoable())return;const last=done.pop();if(last.laterOnly)later.delete(last.item.id);else if(last.prev){ans[last.item.id]=last.prev;if(last.prevPick)picked[last.item.id]=last.prevPick}else delete ans[last.item.id];
-  idx=last.idx;closeOverlay();render();live.textContent='Back: '+last.item.title;o.onUndo&&o.onUndo(last.item);host.focus()};
+  idx=last.idx;closeOverlay();render();live.textContent='Back: '+last.item.title;if(!o.quiet)say('Back: '+shortName(last.item));o.onUndo&&o.onUndo(last.item);host.focus()};
  const jump=i=>{if(i<0||i>=items.length)return;closeOverlay();idx=i;render();host.focus()};
  /* overlays: inside the deck (a phone frame keeps them); the rest of the deck is inert; Tab stays inside; Esc closes */
  const openOverlay=(node,focusEl)=>{overlay=node;[top,stage,acts,laterRow].forEach(n=>n.inert=true);host.append(node);(focusEl||node.querySelector('button,[href],input,textarea'))?.focus()};
@@ -373,7 +382,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   use.onclick=()=>{picked[it.id]=about.v;leave('ok',{picked:about.v,changes:words()})};
   if(note)note.onclick=async()=>{const text=ta.value.trim(),files=dr.files.slice();if((!text&&!files.length)||note.disabled)return;note.disabled=back.disabled=use.disabled=true;
    let r;try{r=await o.onNote(it,text,files)}catch(e){r={ok:false}}
-   if(r&&r.ok){delete drafts[it.id];closeOverlay();reset(cur);if(UI.toast&&!o.quiet)UI.toast('Note added. The card stays; the work goes on.')}
+   if(r&&r.ok){delete drafts[it.id];closeOverlay();reset(cur);if(!o.quiet)say('Note added. The card stays; the work goes on.')}
    else{hint.textContent=(r&&r.error&&r.error.message)||'Could not save the note. Your words are kept.';sync()}};
   foot.append(cancel,...(note?[note]:[]),back,use);
   /* pull the handle down to close (the words stay) */

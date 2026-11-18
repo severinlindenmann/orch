@@ -876,7 +876,7 @@ _CHECK_FILE_TYPES = {
     ".html": "page", ".htm": "page", ".pdf": "file",
 }  # fmt: skip
 _CHECK_FILE_NAME = re.compile(r"[^/\\\x00-\x1f\x7f]{1,200}(/[^/\\\x00-\x1f\x7f]{1,200}){0,3}")
-MAX_CHECK_FILES = 6
+MAX_CHECK_FILES = 24  # the card shows 5 tiles and a "+N more" tile (ORCH-421)
 
 
 def _check_files(ticket: dict, root: Path | None) -> list[dict]:

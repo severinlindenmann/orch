@@ -46,8 +46,8 @@ function deck(items, o = {}) {
   vm.runInNewContext(readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8'), {window, document: doc, setTimeout, clearTimeout, performance, console, Promise});
   const host = new N('section'), decided = [];
   const d = UI.swipeDeck(host, items, {mode: 'desk', voice: false, onDecide: (it, v, note) => decided.push({id: it.id, v, note}), ...o});
-  const [top, , acts] = host.children, [noBtn, talkBtn, okBtn] = acts.children, undoBtn = top.children[3];
-  return {d, host, decided, toasts, noBtn, talkBtn, okBtn, undoBtn};
+  const [top, , acts] = host.children, [noBtn, talkBtn, okBtn] = acts.children, undoBtn = top.children[4], note = top.children[1];
+  return {d, host, decided, toasts, noBtn, talkBtn, okBtn, undoBtn, note};
 }
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const check = (id, extra = {}) => ({id, kind: 'check', kindLabel: 'Check', title: 'Spring catalogue ' + id, okLabel: 'Looks good', preview: {type: 'doc', heading: 'What was done', paras: ['In short: done.']}, ...extra});
@@ -90,8 +90,7 @@ test('Undo is offered only while canUndo says the answer can still be taken back
   assert.equal(undoBtn.disabled, true, 'saved: Undo is off');
   d.undo();
   assert.deepEqual(undone, [], 'a saved answer is not taken back on screen only');
-  toasts.at(-1).undo();
-  assert.match(toasts.at(-1).m, /Already saved/, 'the toast says so instead of pretending');
+  assert.equal(toasts.length, 0, 'no floating box: what happened shows in the deck top row');
   open = true; d.syncUndo(); undoBtn.click();
   assert.deepEqual(undone, ['a']);
   assert.equal(d.index, 0, 'back on the card');
@@ -212,4 +211,26 @@ test('ORCH-420: without attach the box has no Add file button (the plain review 
   const {host, noBtn} = deck([check('a')]);
   noBtn.click();
   assert.equal(host.querySelector('.swipe-sheet').querySelectorAll('button').some(b => b.textContent === 'Add file or picture'), false);
+});
+
+test('what just happened is one line in the top row, a long title goes by its ticket, never cut mid-word (ORCH-421)', async () => {
+  const long = {...check('a'), title: 'Move every summer and autumn product photo to the new picture service and check each page', ticket: 'PIL-8'};
+  const {okBtn, note, toasts} = deck([long, check('b')]);
+  assert.equal(note.hidden, true, 'nothing to say yet');
+  okBtn.click(); await wait(160);
+  assert.equal(note.hidden, false);
+  assert.equal(note.textContent, 'Looks good: PIL-8');
+  assert.equal(toasts.length, 0, 'no floating box over the card or the header');
+});
+
+test('more than six files: five tiles and a "+N more" tile that shows the rest, none dropped (ORCH-421)', () => {
+  const files = Array.from({length: 8}, (_, i) => ({label: 'photo-' + i + '.png', type: 'img', src: '/f/' + i}));
+  const {host} = deck([check('a', {files})]);
+  const more = host.querySelector('.swipe-file-more');
+  assert.equal(host.querySelectorAll('.swipe-file').length, 6, '5 tiles and the more tile');
+  assert.match(more.children[1].textContent, /3 more files/);
+  more.click();
+  const tiles = host.querySelectorAll('.swipe-file');
+  assert.deepEqual(tiles.map(t => t.href), files.map(f => f.src), 'all eight, in order');
+  assert.equal(host.querySelector('.swipe-file-more'), null);
 });

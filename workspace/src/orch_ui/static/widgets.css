@@ -1155,6 +1155,23 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
    words box with more below shows a soft edge at the bottom (it scrolls), never a line cut in half. */
 body:has(.swipe-actions:not([hidden])) .ui-toasts{top:calc(var(--s4) + 56px);bottom:auto}
 @media(max-width:720px){body:has(>.tabbar):has(.swipe-actions:not([hidden])) .ui-toasts{top:var(--s4);bottom:auto}}
+/* ORCH-421 (owner review 18 Nov). What just happened ("Moved to the end: …", "Looks good: …") is one line in the deck's
+   top row next to its Undo, never a box over the card or the page header; on a narrow deck it takes the progress bar's
+   place for those seconds. A card with no picture (plain answers, a short question) is as tall as its words, up to the
+   usual card height, so two short options never sit above a big empty block. */
+.swipe-note{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-weight:500}
+.swipe-note[hidden]{display:none}
+@container (max-width:560px){.swipe-top:has(>.swipe-note:not([hidden])) .progress{display:none}.swipe-note{order:5;flex-basis:100%}}
+/* a narrow deck (phone): a long card title keeps to three lines and the summary line is smaller, so the words box
+   below still shows whole lines instead of one half-cut line (ORCH-421, the 390 px walk) */
+@container (max-width:560px){.swipe-head h3{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}.swipe-preview .doc .doc-headline{font-size:16px;line-height:24px;margin-bottom:var(--s2)}}
+.swipe-stage:has(>.swipe-card.short:not(.under):not(.under2)){flex:none;min-height:0}
+.swipe-stage>.swipe-card.short:not(.under):not(.under2){position:relative;inset:auto;max-height:var(--swipe-card-h)}
+.device-phone .swipe-stage>.swipe-card{max-height:none}
+.swipe-file-more{padding:0;border:0;background:none;font:inherit;text-align:left;cursor:pointer}
+.swipe-file-more .swipe-file-thumb{display:grid;place-items:center;font-size:16px;line-height:24px;font-weight:600;color:var(--text-muted)}
+.swipe-file-more:hover .swipe-file-thumb{background:var(--surface-2)}.swipe-file-more:focus-visible{outline:none;box-shadow:var(--focus-ring);border-radius:var(--radius)}
+.swipe-files.all{flex-wrap:wrap;overflow:visible}
 @media(max-height:900px){.swipe-file{width:112px}.swipe-file-thumb{height:64px}.swipe-files{padding-top:var(--s2)}}
 .swipe-preview:has(>.doc):not(:has(.doc-rows)){background:linear-gradient(transparent,var(--ink) 70%) 0 100%/100% 32px no-repeat local,linear-gradient(transparent,color-mix(in srgb,var(--text) 22%,transparent)) 0 100%/100% 16px no-repeat scroll,var(--ink)}
 /* Feedback with pictures, files and voice (ORCH-420): the mic and "Add file or picture" share one row that wraps on a

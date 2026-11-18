@@ -45,3 +45,12 @@
   x to remove it; a picture or file alone is enough to send back. They are kept in the ticket's feedback folder (the
   Files tab lists them; the Check card keeps showing only the helper's result) and the words name them, with what
   each voice note said. Types: pictures, text, PDF, voice notes; 25 MB each, 10 per answer.
+- 18 Nov (ORCH-421, owner review of the ORCH-420 walk): what just happened ("Moved to the end: Spring sale email",
+  "Looks good: PIL-8", "Back: …") is one line in the deck's top row next to its Undo for six seconds, never a floating
+  box (before: the toast cut the title mid-word, took four lines and sat in the header corner); a title over 48
+  characters goes by its ticket key, never cut mid-word; on a narrow deck the line takes the progress bar's place. A
+  card with no picture (plain answers, a short question) is as tall as its words, so the answers sit right under two
+  short options (before: about 650 px with an empty block at 1920). A result with more than 6 files shows 5 tiles and
+  a "+N more files" tile that shows the rest in place (before: the 7th and later were dropped without a word; the card
+  now carries up to 24). On a narrow deck a long card title keeps to three lines (full title on hover and in All cards)
+  and the summary line is 16 px, so the words box shows whole lines at 390.
