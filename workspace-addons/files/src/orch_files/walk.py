@@ -96,6 +96,18 @@ class Entry:
 _SECRET_RX = re.compile("|".join(f"(?:{fnmatch.translate(g)})" for g in SECRETISH), re.DOTALL)
 
 
+def _reparse(st: os.stat_result) -> bool:
+    """A Windows junction or other reparse point (never followed: it can lead outside the workspace)."""
+    return bool(getattr(st, "st_file_attributes", 0) & 0x400)  # FILE_ATTRIBUTE_REPARSE_POINT
+
+
+def _junction(e: os.DirEntry) -> bool:
+    try:
+        return bool(getattr(e, "is_junction", lambda: False)()) or _reparse(e.stat(follow_symlinks=False))
+    except OSError:
+        return True
+
+
 def private_part(part: str) -> bool:
     low = part.lower()
     return low in PRIVATE_DIRS or _SECRET_RX.match(low) is not None
@@ -228,7 +240,7 @@ def walk(root: str, leave_out: tuple[str, ...] = ()) -> Iterator[Entry]:
                     continue
                 r = f"{rel}/{name}" if rel else name
                 try:
-                    if e.is_symlink():
+                    if e.is_symlink() or _junction(e):
                         continue
                     if e.is_dir(follow_symlinks=False):
                         if not rel and name == ".orch":
@@ -274,7 +286,7 @@ def _ticket_files(root: str) -> Iterator[Entry]:
                 with it:
                     for e in it:
                         try:
-                            if e.is_symlink() or e.name in NOISE:
+                            if e.is_symlink() or e.name in NOISE or _junction(e):
                                 continue
                             r = f"{rel}/{e.name}"
                             if e.is_dir(follow_symlinks=False):
@@ -299,7 +311,8 @@ def read_head(root: str, rel: str, limit: int) -> bytes | None:
     for p in parts[:-1]:
         cur = os.path.join(cur, p)
         try:
-            if not stat.S_ISDIR(os.lstat(cur).st_mode):
+            st = os.lstat(cur)
+            if not stat.S_ISDIR(st.st_mode) or _reparse(st):
                 return None
         except OSError:
             return None
@@ -312,7 +325,8 @@ def read_head(root: str, rel: str, limit: int) -> bytes | None:
     )
     full = os.path.join(cur, parts[-1])
     try:
-        if stat.S_ISLNK(os.lstat(full).st_mode):
+        st = os.lstat(full)
+        if stat.S_ISLNK(st.st_mode) or _reparse(st):
             return None
         fd = os.open(full, flags)
     except OSError:

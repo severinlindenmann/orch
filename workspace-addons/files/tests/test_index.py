@@ -190,3 +190,29 @@ def test_index_rebuilds_after_delete(built):
     assert index.search(built, "muller")["ready"] is False
     index.refresh(built)
     assert index.search(built, "muller")["items"]
+
+
+def test_a_secret_in_a_heading_leaves_no_title_behind(ws):
+    write(ws, "keys.md", "# AKIAIOSFODNN7EXAMPLE\nnothing else\n")
+    index.refresh(ws)
+    row = index.one(ws, "keys.md")
+    assert row["private"] and "AKIA" not in row["title"]
+    assert not index.search(ws, "AKIAIOSFODNN7")["items"]
+
+
+def test_a_secret_far_into_the_text_is_seen(ws):
+    write(ws, "long.txt", "x " * 700_000 + "AKIAIOSFODNN7EXAMPLE\n")
+    index.refresh(ws)
+    assert index.one(ws, "long.txt")["private"]
+
+
+def test_a_file_that_cannot_be_read_now_is_tried_again(ws, monkeypatch):
+    real = walk.read_head
+    monkeypatch.setattr(
+        walk, "read_head", lambda root, rel, n: None if rel == "notes.md" else real(root, rel, n)
+    )
+    index.refresh(ws)
+    assert not index.search(ws, "december")["items"]
+    monkeypatch.setattr(walk, "read_head", real)
+    index.refresh(ws)
+    assert index.search(ws, "december")["items"][0]["path"] == "notes.md"

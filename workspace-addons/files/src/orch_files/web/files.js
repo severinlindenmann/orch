@@ -518,7 +518,8 @@
       const first = !S.loaded;
       await loadAll().catch(() => null);
       previews.clear();
-      if (first) { S.loaded = true; await applyParams(); } else if (!S.q.trim() && !document.querySelector('dialog[open]')) await draw();
+      // redraw what is shown, a search too (its hits may have changed); never under an open big view
+      if (first) { S.loaded = true; await applyParams(); } else if (!document.querySelector('dialog[open]')) await draw();
       else drawTree();
     }
     setTimeout(poll, !st.ready || st.unread || st.building ? 2500 : 30000);

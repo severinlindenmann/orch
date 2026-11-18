@@ -104,7 +104,7 @@ def build(root: Path, path: str) -> dict | None:
             return {**item, "state": "large", "too_big": True}
         return {**item, "src": file_url(path)}
     if ext == "xlsx" or kind in ("doc", "archive"):
-        key = _cache_key(row)
+        key = _cache_key(row, _mtime_ns(root, path))
         got = _cache_get(root, key)
         if got is not None:
             return {**item, **got}
@@ -119,7 +119,7 @@ def build(root: Path, path: str) -> dict | None:
         return {**item, "type": "file"}
     text = extract.decode(data[:TEXT_SHOWN])
     if index.secret_in(text, root):  # the same check as the index: such a file shows by name only
-        return {**item, "type": "file", "state": "ready", "private": True, "download": None, "href": None}
+        return {**item, **PRIVATE_ITEM}
     out = {**item, "text": text}
     if len(data) > TEXT_SHOWN or row["size"] > TEXT_SHOWN:
         out.update(state="large", shown=text.count("\n") or 1)
@@ -127,10 +127,26 @@ def build(root: Path, path: str) -> dict | None:
 
 
 def secret_text(root: Path, row: dict, data: bytes) -> bool:
-    """True when a text file holds what the orch secret check flags (it is then never served)."""
-    if row["kind"] in ("picture", "video", "audio", "pdf", "archive") or not extract.looks_text(data):
+    """True when a file's text holds what the orch secret check flags (it is then never served): plain text over
+    everything that would be sent, Office files and PDFs over the text inside them."""
+    if row["kind"] in ("picture", "video", "audio", "archive"):
         return False
-    return index.secret_in(extract.decode(data[: extract.TEXT_LIMIT]), root)
+    if row["kind"] in ("doc", "pdf") or extract.ext_of(row["name"]) == "xlsx":
+        _, text, title = extract.text_of(row["name"], row["kind"], data)
+        return bool(text or title) and index.secret_in(text + "\n" + (title or ""), root)
+    if not extract.looks_text(data):
+        return False
+    return index.secret_in(extract.decode(data), root)
+
+
+def _mtime_ns(root: Path, path: str) -> int | None:
+    try:
+        return os.lstat(os.path.join(root, *path.split("/"))).st_mtime_ns
+    except OSError:
+        return None
+
+
+PRIVATE_ITEM = {"type": "file", "state": "ready", "private": True, "download": None, "href": None}
 
 
 def _widget_type(kind: str, ext: str) -> str:
@@ -149,6 +165,8 @@ def _zip_based(root: Path, path: str, row: dict, ext: str, kind: str) -> dict | 
         return {"state": "error"}
     if ext == "xlsx":
         rows, sheets = extract.xlsx_rows(data, max_rows=TABLE_ROWS + 1)
+        if index.secret_in("\n".join("\t".join(r) for r in rows) + "\n" + "\n".join(sheets), root):
+            return dict(PRIVATE_ITEM)
         out: dict = {"type": "table", "rows": rows[: TABLE_ROWS + 1], "sheets": sheets}
         if len(rows) > TABLE_ROWS:
             out.update(state="large", shown=TABLE_ROWS)
@@ -156,7 +174,7 @@ def _zip_based(root: Path, path: str, row: dict, ext: str, kind: str) -> dict | 
     if kind == "doc":
         text = extract.office_text(data, ext)
         if index.secret_in(text, root):
-            return {"type": "file", "private": True}
+            return dict(PRIVATE_ITEM)
         return {"type": "text" if ext == "pptx" else "md", "text": _as_plain_md(text)}
     if ext == "zip":
         names = extract.zip_names(data)

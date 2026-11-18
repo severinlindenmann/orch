@@ -314,6 +314,7 @@ def refresh(root: Path, text_seconds: float | None = None, on_progress=None) -> 
                 _rename_ticket_files(con, tickets, changed_tickets, folds)
             con.execute("INSERT OR REPLACE INTO meta VALUES('names_at', ?)", (str(time.time()),))
             con.commit()
+            con.execute("UPDATE files SET text_state=0 WHERE text_state=3")  # last pass could not read them
             _read_texts(con, root, folds, text_seconds, pr, on_progress)
             pr.total = con.execute("SELECT count(*) FROM files").fetchone()[0]
             pr.unread = con.execute("SELECT count(*) FROM files WHERE text_state=0").fetchone()[0]
@@ -352,13 +353,20 @@ def _rename_ticket_files(con, tickets, changed, folds) -> None:
 
 
 def secret_in(text: str, root: Path) -> bool:
-    """The orch secret check (patterns and stored keys); a text it flags never enters the index."""
+    """The orch secret check on the whole text, in windows of the check's size that overlap (a key on a border
+    is still seen): secrets by their shape (keys, tokens) and the workspace's stored key values. Its line rule for
+    key=value lines is left out on purpose: it would flag nearly every config and code file. A text it flags never
+    enters the index and is never shown or served."""
     try:
         from orch import secretscan
     except ImportError:
         return False
+    step = max(1024, secretscan.MAX_BYTES - 4096)
     try:
-        return bool(secretscan.find(text[: secretscan.MAX_BYTES], root, strict=False, labels=False))
+        for at in range(0, max(1, len(text)), step):
+            if secretscan.find(text[at : at + secretscan.MAX_BYTES], root, strict=False, labels=False):
+                return True
+        return False
     except Exception:  # noqa: BLE001 - a check that cannot run keeps the text out (fail closed)
         return True
 
@@ -377,10 +385,12 @@ def _read_texts(con, root: Path, folds: bool, seconds, pr: Progress, on_progress
             want = extract.needs_bytes(kind, path)
             data = walk.read_head(str(root), path, want) if want else b""
             body, title, state, secret = "", r["title"], 2, False
-            if data:
+            if data is None:
+                state = 3  # could not be read now (locked, being synced): tried again on the next pass
+            elif data:
                 kind2, body, found_title = extract.text_of(path, kind, data)
-                if body and secret_in(body, root):
-                    body, secret = "", True
+                if (body or found_title) and secret_in(body + "\n" + (found_title or ""), root):
+                    body, secret, found_title = "", True, None  # nothing of it is kept, not even a title
                 if body:
                     state = 1
                 kind = kind2

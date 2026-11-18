@@ -183,3 +183,19 @@ def test_a_file_over_the_limit_offers_no_download(srv, built):
     pv = json.loads(get(srv, "/api/preview?p=Marketing%2Ftour.mp4")[2])
     assert pv["too_big"] and pv["download"] is None and "src" not in pv
     assert get(srv, "/api/file?p=Marketing%2Ftour.mp4")[0] == 413
+
+
+def test_office_files_with_a_secret_are_neither_shown_nor_served(srv, built, monkeypatch):
+    from conftest import docx, write, xlsx
+
+    from orch_files import index
+
+    write(built, "Sales/keys.docx", docx(["Access", "AKIAIOSFODNN7EXAMPLE"]))
+    write(built, "Sales/keys.xlsx", xlsx([["key"], ["AKIAIOSFODNN7EXAMPLE"]]))
+    with monkeypatch.context() as m:
+        m.setattr(index, "_read_texts", lambda *a, **k: None)
+        index.refresh(built)  # listed, text not read yet: the request-time check must hold on its own
+    for p in ("Sales%2Fkeys.docx", "Sales%2Fkeys.xlsx"):
+        pv = json.loads(get(srv, "/api/preview?p=" + p)[2])
+        assert pv.get("private") and pv["download"] is None and "rows" not in pv and "text" not in pv
+        assert get(srv, "/api/file?p=" + p)[0] == 404
