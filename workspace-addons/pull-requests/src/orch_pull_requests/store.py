@@ -184,8 +184,10 @@ def change(root: Path, fn):
 
 
 def find(rows: list[dict], url: str) -> dict | None:
-    """The newest entry for this pull request."""
-    return next((r for r in reversed(rows) if r.get("url") == url), None)
+    """The entry of this pull request that is not finished (there is at most one), else the newest one. Not by
+    place alone: an entry moved to the front (back_to_front, --first) can stand before an older finished one."""
+    mine = [r for r in rows if r.get("url") == url]
+    return next((r for r in mine if r.get("state") not in FINISHED), mine[-1] if mine else None)
 
 
 def _to_front(rows: list[dict], row: dict) -> None:

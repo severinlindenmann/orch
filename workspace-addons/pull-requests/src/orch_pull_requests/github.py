@@ -74,11 +74,15 @@ class GitHub:
         )  # fmt: skip
         if not isinstance(runs, list):
             return None
+        skip = ("cancelled", "skipped", "stale", None, "")
+        done = [r for r in runs if isinstance(r, dict) and r.get("status") == "completed"]
+        if len(runs) >= 20 and all(r.get("conclusion") in skip for r in done):
+            return None  # 20 runs going or cancelled, none finished: not known, never "green"
         seen, bad = set(), set()
         for r in runs:  # newest first, as gh lists them
             if not isinstance(r, dict) or r.get("status") != "completed":
                 continue
-            if r.get("conclusion") in ("cancelled", "skipped", "stale", None, ""):
+            if r.get("conclusion") in skip:
                 continue
             wf = r.get("workflowName")
             if wf in seen:

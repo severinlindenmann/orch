@@ -174,6 +174,34 @@ def test_github_reads_the_failed_jobs_of_the_last_finished_push_run(monkeypatch)
     assert gh.base_failed("acme/app", "develop") is None
 
 
+def test_github_never_reads_twenty_unfinished_runs_as_green(monkeypatch):
+    gh = GitHub.__new__(GitHub)
+    going = [{"databaseId": n, "workflowName": "ci", "status": "in_progress"} for n in range(20)]
+    monkeypatch.setattr(gh, "_json", lambda *a: going)
+    assert gh.base_failed("acme/app", "develop") is None
+    monkeypatch.setattr(gh, "_json", lambda *a: going[:3])  # only three runs at all, none finished: green
+    assert gh.base_failed("acme/app", "develop") == frozenset()
+
+
+def test_a_finished_entry_added_again_first_is_the_one_found(ws):
+    add(ws, 1)
+    add(ws, 2)
+    store.set_state(ws, url(2), store.OUT, "checks failed")
+    again, new = store.add(ws, url(2), None, "agent:t", first=True, login="bot", base="develop")
+    assert new and store.find(store.read(ws), url(2))["state"] == "waiting"
+    assert [r["number"] for r in store.claim(ws, [again])] == [2]
+
+
+def test_a_pull_request_moved_to_a_red_base_is_checked_there(ws, monkeypatch):
+    monkeypatch.setattr(runner.settings, "bases", lambda root: ["develop", "next"])
+    for n in (1, 2):
+        add(ws, n)
+    gh = RedGitHub({1: {"base": "next"}, 2: {"base": "next"}})
+    gh.base_failed = lambda repo, base: RED if base == "next" else frozenset()
+    r, _ = make(ws, gh, FakeGit())
+    assert [e["number"] for e in r.next_batch()] == [1]  # one at a time: no group on top of red 'next'
+
+
 def test_github_failed_check_names(monkeypatch):
     gh = GitHub.__new__(GitHub)
 

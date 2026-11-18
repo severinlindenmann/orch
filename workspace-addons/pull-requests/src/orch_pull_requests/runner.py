@@ -233,10 +233,10 @@ class Runner:
             return []
         bases = settings.bases(self.root)
         repo, base, batch, unseen, answered = rows[0]["repo"], None, [], [], False
-        red = self.red_base(repo, str(rows[0].get("base") or ""))
-        most = MAX_GROUP
-        if red:  # the base branch itself is red: no groups, one at a time, its fixes first
-            most = 1
+        guess = str(rows[0].get("base") or "")  # the base seen at add time; checked again below
+        red = self.red_base(repo, guess)
+        most = 1 if red else MAX_GROUP  # the base branch itself is red: no groups, one at a time
+        if red:  # its fixes first
             rows = sorted(rows, key=lambda r: not self.is_fix(r))
         for r in rows:
             if r["repo"] != repo or len(batch) >= most:
@@ -259,6 +259,8 @@ class Runner:
                 line = f"Checks of {r['url']} failed: fix them, push, then add it to the merge queue again."
                 self.finish(r, OUT, line, "checks failed")
                 continue
+            if not base and b != guess:  # moved to another base branch since it was added: that one counts
+                most = 1 if self.red_base(repo, b) else MAX_GROUP
             base = base or b
             r.update(
                 base=b, head=v["headRefOid"], fork=bool(v.get("isCrossRepository")),
