@@ -898,7 +898,12 @@ async function focusButton(page, dash, width) {
   await page.waitForSelector(pane, { timeout: 5000 });
   if (!await page.$eval(`${pane} .key`, el => el.textContent.trim() === 'ORCH-189')) throw new Error('the pane does not show the ticket key');
   // from full screen too: Open ticket steps out of it so the ticket page shows
-  await page.click(`${pane} [data-key="live-full"]`);
+  // a compact pane (narrower than 1200 px, a phone) keeps Full screen in More (ORCH-463)
+  if (await page.$(`${pane} [data-key="live-full"]`)) await page.click(`${pane} [data-key="live-full"]`);
+  else {
+    await page.click(`${pane} [data-key="live-pane-more"]`);
+    await page.click('[data-key="live-more-menu"] [data-key="live-more-full"]');
+  }
   await page.waitForSelector('#live-dock[data-mode="full"]', { timeout: 5000 });
   await page.evaluate(() => { location.hash = '#home'; });
   await mainHasText(page);
