@@ -10,6 +10,15 @@ const ST={
  needs:'<circle cx="12" cy="12" r="8" fill="currentColor"/><path d="M12 8v5" stroke="#101216" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16" r="1.2" fill="#101216"/>',
  check:'<circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/>',
  done:'<circle cx="12" cy="12" r="8" fill="currentColor"/><path d="m8.5 12 2.5 2.5 4.5-5" fill="none" stroke="#101216" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'};
+/* A terminal command to copy (ORCH-218): the exact step a person runs when orch cannot do it (a tool's sign-in such as
+   'az login'). UI.commandCopy(command, o) -> <div class="cmd-copy"> with an optional lead line (o.lead), the command as
+   <code> and one Copy button (UI.copyText; falls back to selecting the text). o.dataKey keys the box. Text only. */
+UI.commandCopy=(command,o)=>{o=o||{};command=String(command||'');const box=el('div','cmd-copy');if(o.dataKey)box.dataset.key=o.dataKey;
+ if(o.lead)box.append(el('p','meta',o.lead));const row=el('div','cmd-copy-row');const code=el('code','cmd-copy-text',command);
+ const b=el('button','btn outline sm','Copy');b.type='button';b.setAttribute('aria-label','Copy '+command);if(o.dataKey)b.dataset.key=o.dataKey+'-copy';
+ b.onclick=async()=>{const ok=UI.copyText?await UI.copyText(command):false;if(ok){b.textContent='Copied';if(UI.toast)UI.toast('Copied');setTimeout(()=>{b.textContent='Copy'},2000)}
+  else{const r=document.createRange&&document.createRange();const sel=window.getSelection&&window.getSelection();if(r&&sel){r.selectNodeContents(code);sel.removeAllRanges();sel.addRange(r)}if(UI.toast)UI.toast('Could not copy. The command is selected: press Ctrl+C (Cmd+C on a Mac).',null,'error')}};
+ row.append(code,b);box.append(row);return box};
 /* Helpers list (ORCH-61): one row per live helper, the same on dashboard Home and in Focus. The state comes from the core
    (orch run status "helper": working | starting | you | waiting | idle | stuck); the page never words it itself.
    UI.helperPill(state, word) -> the worded pill; UI.helperSummary(rows) -> "4 working · 1 waits for you · 1 idle";
