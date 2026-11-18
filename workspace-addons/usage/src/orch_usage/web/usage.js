@@ -115,7 +115,7 @@
     const untilField = h('div', {className: 'field meta', hidden: period !== 'until'}, 'Until', until.node);
     const select = h('select', {'aria-label': 'Counts for ' + a.label}, a.periods.map(p => h('option', {value: p, selected: p === period, disabled: p !== period && a.limits.some(l => l.period === p), text: PERIOD[p]})));
     const askRemove = go => {
-      const box = h('span', {className: 'row', role: 'group', 'aria-label': 'Remove the limit of ' + a.label},
+      const box = h('span', {className: 'row', role: 'group', 'data-confirm': '', 'aria-label': 'Remove the limit of ' + a.label},
         h('span', {className: 'meta', text: 'Remove this limit?'}),
         h('button', {type: 'button', className: 'btn danger sm', onclick: go}, 'Remove'),
         h('button', {type: 'button', className: 'btn ghost sm', onclick: () => { value.value = lim ? num(lim.value) : ''; box.replaceWith(row); }}, 'Keep it'));
@@ -272,5 +272,6 @@
   $('auto').addEventListener('change', e => act('switching', e.currentTarget.checked ? 'on' : 'off', e.currentTarget));
   $('retry').addEventListener('click', () => { show('loading'); load(true); });
   load(false);
-  setInterval(() => { if (!busy && !document.hidden && !document.activeElement?.matches?.('input,select')) load(false); }, 30000);
+  // an open 'Remove this limit?' question stays until it is answered
+  setInterval(() => { if (!busy && !document.hidden && !document.activeElement?.matches?.('input,select') && !document.querySelector('[data-confirm]')) load(false); }, 30000);
 })();
