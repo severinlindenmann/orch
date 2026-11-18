@@ -134,6 +134,7 @@ PROXY = re.compile(r"/addon/([a-z][a-z0-9-]{1,31})(/(?:[A-Za-z0-9_./-]|%20)*)?")
 # that, and only when the add-on answers with its own sandbox Content-Security-Policy, which is then kept, not
 # replaced; any other answer to such a request is a 403.
 PAGE_PATH = re.compile(r"/page/t_[a-z0-9]{6,16}/[0-9a-f]{16}/.+")  # ticket, key (unguessable), file
+VIEW_KEYED = re.compile(r"/view/(t_[a-z0-9]{6,16})/k/([0-9a-f]{16})/(artifacts|evidence|files)/(.+)")
 LOCAL = re.compile(r"http://(?:127\.0\.0\.1|localhost):(\d{1,5})/?")
 PROXY_CSP = "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; frame-ancestors 'self'; base-uri 'none'"
 # The page of an add-on orch ships runs sandboxed too (ORCH-186): its own origin is opaque, so it can never read the
@@ -357,13 +358,10 @@ class Handler(BaseHTTPRequestHandler):
         px = PROXY.fullmatch(path)
         if px and PAGE_PATH.fullmatch(px.group(2) or ""):  # an unguessable key in the address
             return True
-        if (
-            not self._remote()  # browser headers anyone can forge prove nothing on the port for other computers
-            and path.startswith("/view/")
-            and self.headers.get("Sec-Fetch-Site") in ("same-site", "cross-site")
-            and self.headers.get("Sec-Fetch-Dest") in ticketfiles.PAGE_SUBRESOURCE_DEST
-            and not path.lower().endswith((".html", ".htm"))
-        ):
+        kv = VIEW_KEYED.fullmatch(path)
+        if kv and ticketfiles.view_key_ok(kv.group(1), kv.group(2)):
+            # a ticket page's own files by the unguessable key only a signed-in page was given (browser headers
+            # anyone can forge prove nothing, also on this computer: ORCH-481)
             return True
         return path == "/" or (
             not path.startswith(_PRIVATE_PREFIXES) and path.lower().endswith((*STATIC_EXT, ".html"))
@@ -705,23 +703,34 @@ class Handler(BaseHTTPRequestHandler):
             if cross and not PAGE_PATH.fullmatch(px.group(2) or ""):
                 return self._send(403, b"forbidden", "text/plain")
             return self._proxy("GET", px.group(1), px.group(2) or "/", query, cross)
+        kv = VIEW_KEYED.fullmatch(path)
         pv = re.fullmatch(r"/view/(t_[a-z0-9]{6,16})/(artifacts|evidence|files)/(.+)", path)
         if (
-            pv
+            kv or pv
         ):  # a ticket's web page and its own assets, only ever inside a sandboxed frame (no cookie, no /api)
+            tid, kind, rest = (kv.group(1), kv.group(3), kv.group(4)) if kv else pv.groups()
+            if kv and not ticketfiles.view_key_ok(tid, kv.group(2)):
+                return self._send(404, b"not found", "text/plain")
             site = self.headers.get("Sec-Fetch-Site")
             if site not in (None, "same-origin", "none"):
                 # The page itself and anything a script fetches must come from this app. Only a sandboxed page's own
                 # stylesheet, script, picture, font or media arrives as cross-site (its origin is opaque).
-                last = pv.group(3).rsplit(".", 1)[-1].lower()
+                last = rest.rsplit(".", 1)[-1].lower()
                 if self.headers.get("Sec-Fetch-Dest") not in ticketfiles.PAGE_SUBRESOURCE_DEST or last in (
                     "html",
                     "htm",
                 ):
                     return self._send(403, b"forbidden", "text/plain")
-            code, body, ctype, extra = ticketfiles.read_page(
-                self.root, pv.group(1), pv.group(2), unquote(pv.group(3))
-            )
+            if (
+                not kv
+            ):  # signed in (checked above): on to the address with the key, so the page's own files load
+                where = f"/view/{tid}/k/{ticketfiles.view_key(tid)}/{kind}/{rest}" + (
+                    f"?{query}" if query else ""
+                )
+                return self._send(
+                    302, b"", "text/plain", {"Location": where, "Referrer-Policy": "no-referrer"}
+                )
+            code, body, ctype, extra = ticketfiles.read_page(self.root, tid, kind, unquote(rest))
             return self._send(code, body, ctype, extra, csp=ticketfiles.PAGE_CSP)
         if path.startswith("/api/") and not (
             self._frame or self._same_origin()

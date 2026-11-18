@@ -148,3 +148,31 @@ def test_the_start_check_still_answers_on_this_computer(live, monkeypatch):
     assert (
         call(port, "GET", f"/ready?c={c}", {"Host": f"127.0.0.1:{port}"})[0] == 401
     )  # no start secret: closed
+
+
+def test_a_ticket_page_needs_the_sign_in_or_its_key_never_forged_headers(live):
+    """A sandboxed ticket page loads its own files without a cookie (opaque origin): by the unguessable key in the
+    address a signed-in request was sent on to. Browser headers a local script can forge are no proof."""
+    root, port = live
+    d = root / ".orch" / "tickets" / "t_abcdef" / "artifacts" / "site"
+    d.mkdir(parents=True)
+    (d / "index.html").write_text('<link rel="stylesheet" href="style.css">')
+    (d / "style.css").write_text("body{color:red}")
+    h = {"Host": f"127.0.0.1:{port}"}
+    forged = {**h, "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "style"}
+    assert call(port, "GET", "/view/t_abcdef/artifacts/site/style.css", forged)[0] == 401
+    assert call(port, "GET", "/view/t_abcdef/artifacts/site/index.html", h)[0] == 401
+    ck = sign_in(root, port)
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request("GET", "/view/t_abcdef/artifacts/site/index.html", headers={**h, "Cookie": ck})
+    r = c.getresponse()
+    r.read()
+    where = r.getheader("Location")
+    assert r.status == 302 and re.fullmatch(
+        r"/view/t_abcdef/k/[0-9a-f]{16}/artifacts/site/index\.html", where
+    )
+    keyed = where.rsplit("/", 1)[0]
+    st, _, body = call(port, "GET", keyed + "/style.css", forged)  # the page's own stylesheet, no cookie
+    assert st == 200 and body == b"body{color:red}"
+    assert call(port, "GET", keyed.replace(keyed.split("/")[4], "0" * 16) + "/style.css", forged)[0] == 401
+    assert call(port, "GET", keyed.replace("t_abcdef", "t_abcdeg") + "/style.css", forged)[0] == 401
