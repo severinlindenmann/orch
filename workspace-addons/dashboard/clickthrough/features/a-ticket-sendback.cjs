@@ -19,8 +19,9 @@ module.exports = {
 
     await page.locator('input[type=file]').first().setInputFiles({ name: 'allergies.txt', mimeType: 'text/plain', buffer: Buffer.from('Nuts: Jonas\nGluten: Mira\n') });
     await page.getByLabel('Add to this ticket').last().fill('Please add the new names from the file.');
-    await act('ticket.attach', () => page.getByRole('button', { name: 'Send back with this' }).click());
-    await page.waitForTimeout(1500);
+    // the page sends ticket.attach, then ticket.changes: wait for the second one, not a fixed time (on a slow runner the
+    // reload below cut its answer off and the run said ticket.changes never happened)
+    await act('ticket.changes', () => act('ticket.attach', () => page.getByRole('button', { name: 'Send back with this' }).click()));
 
     await reload();
     const t = await text();

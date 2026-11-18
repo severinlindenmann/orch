@@ -506,3 +506,17 @@ def test_talk_answer_with_text_only_note_is_recorded(srv, ws, card):
     assert st == 200 and json.loads(out) == {"ok": True}, out
     q = tickets.load(ws, tid)["questions"][0]
     assert q["answer"] is not None and "Move the title up." in q["answer"]
+
+
+def test_a_refused_post_reads_its_body_first():
+    # Windows resets a socket closed with unread bytes: the caller then saw an aborted connection, not the 403
+    sent = []
+    h = review_server.Handler.__new__(review_server.Handler)
+    h.headers = {"Content-Length": "11"}
+    h.rfile = io.BytesIO(b'{"token":1}rest')
+    h._text = lambda code, text: sent.append((code, h.rfile.tell()))
+    h._refuse(403, "no")
+    assert sent == [(403, 11)]
+    h.headers, h.rfile = {"Content-Length": str(review_server.MAX_BODY + 1)}, io.BytesIO(b"x")
+    h._refuse(403, "no")  # a body over the limit is not read
+    assert sent[-1] == (403, 0)
