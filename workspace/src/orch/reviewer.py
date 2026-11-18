@@ -323,7 +323,7 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
         "verdict": "accept",
         "why": (
             f"{what}{'Pull request' if len(facts) == 1 else 'Pull requests'} {prs} "
-            f"merged with all checks green, every task has proof and the change is small "
+            f"merged with all checks green, every task has evidence and the change is small "
             f"({_n('file', all_files)}, {_n('line', all_lines)} changed)."
         ),
     }
