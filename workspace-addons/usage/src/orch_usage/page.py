@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import store, switching
+from . import routing, store, switching
 from .store import PERIOD_WORDS
 
 HISTORY_DAYS = 30
@@ -61,6 +61,8 @@ def _bars(row: dict) -> list[dict]:
             bar.update(unit="$", used=u.get("spent"), estimated=bool(u.get("estimated")), note=u.get("note"))
             if lim and lim["period"] == "until":
                 bar["until"] = lim.get("until")
+            elif lim and lim["period"] == "month":  # when the month's credit starts again (its reset day)
+                bar["resets_at"] = store.utc_text(store.month_window(lim, datetime.now(UTC))[1])
         if lim:
             bar["limit"] = lim["value"]
             bar["limit_unit"] = lim["unit"]
@@ -79,6 +81,32 @@ def _state(row: dict) -> str:
     return "ready"
 
 
+def _together(data: dict, accounts: list[dict]) -> list[dict]:
+    have = {t["provider"]: t for t in data.get("together") or []}
+    providers = []
+    for a in accounts:
+        if a["type"] in store.MONEY_TYPES and a["provider"] and a["provider"] not in providers:
+            providers.append(a["provider"])
+    out = []
+    for p in providers:
+        t = have.get(p)
+        row = {
+            "provider": p,
+            "label": store.together_label(p),
+            "limit": None,
+            "spent": None,
+            "resets_at": None,
+        }
+        if t:
+            row.update(limit=t["limit"]["value"], period=t["limit"]["period"], spent=t["spent"])
+            row["resets_at"] = t.get("resets_at")
+        row["accounts"] = [
+            a["label"] for a in accounts if a["type"] in store.MONEY_TYPES and a["provider"] == p
+        ]
+        out.append(row)
+    return out
+
+
 def build(data: dict, root: Path) -> dict:
     """The page model from `cli.gather()` (accounts with use) plus switching, the warning and the history."""
     memory = switching._read(switching.memory_path(root))
@@ -93,11 +121,16 @@ def build(data: dict, root: Path) -> dict:
                 "on": row["on"],
                 "order": row["order"],
                 "state": _state(row),
+                "missing": bool(row.get("missing")),  # gone from the switcher, also while it is off
                 "bars": _bars(row),
                 "limits": [dict(lim) for lim in rule["limits"]],
                 "periods": list(store.allowed_periods(row)),
                 "unit": store.default_unit(row),
                 "ends": rule.get("ends"),
+                "for": list(rule.get("for") or []),
+                "model": rule.get("model"),
+                "provider": row.get("provider") or "",
+                "removable": row["type"] in store.MONEY_TYPES,
                 "falls_back": bool(row.get("prev")),
                 "fetched_at": row.get("fetched_at"),
             }
@@ -113,6 +146,14 @@ def build(data: dict, root: Path) -> dict:
         "all_at_limit": bool(memory.get("all_at_limit")) and len(on_subs) > 0,
         "one_account": len(subs) <= 1,
         "warnings": list(data["warnings"]),
+        # kinds of work whose starts wait now (routing): one line each, in the kinds' order
+        "waiting": [
+            {"kind": store.KIND_WORDS[k], "why": h.get("why") or "", "tickets": len(h.get("tickets") or [])}
+            for k, h in sorted(routing.held(root).items(), key=lambda kv: store.KINDS.index(kv[0]))
+        ],
         "accounts": accounts,
+        # one money limit over every account of a provider (one row per provider with a money account)
+        "together": _together(data, accounts),
+        "providers": [{"id": p, "label": store.provider_words(p)} for p in store.PROVIDERS],
         "history": history_rows(root),
     }

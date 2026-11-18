@@ -3,6 +3,7 @@
   "acts": {},
   "agents_block": "skills/orch-automation/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "dashboard": {
    "icon": "clock",
    "label": "Automation",
@@ -47,6 +48,7 @@
   "acts": {},
   "agents_block": "skills/orch-dashboard/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "description": "Shows your tickets in a web page, with a tab for each add-on that is turned on.",
   "gitignore": [],
   "name": "dashboard",
@@ -68,6 +70,7 @@
   "acts": {},
   "agents_block": "skills/orch-dashboard-tester/AGENTS-block.md",
   "background": false,
+  "before_start": false,
   "description": "Looks at every dashboard page once a day and reports what is broken, without clicking anything.",
   "gitignore": [
    ".orch/addons/dashboard-tester/"
@@ -116,6 +119,7 @@
   },
   "agents_block": "skills/orch-factory/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "dashboard": {
    "icon": "hammer",
    "label": "Factory",
@@ -158,6 +162,7 @@
   "acts": {},
   "agents_block": "skills/orch-focus/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "dashboard": {
    "icon": "target",
    "label": "Focus",
@@ -196,6 +201,7 @@
   "acts": {},
   "agents_block": "skills/orch-insights/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "dashboard": {
    "icon": "chart",
    "label": "Insights",
@@ -226,6 +232,7 @@
   "acts": {},
   "agents_block": "skills/orch-lessons/AGENTS-block.md",
   "background": false,
+  "before_start": false,
   "dashboard": {
    "icon": "book",
    "label": "Lessons",
@@ -264,6 +271,7 @@
   },
   "agents_block": "skills/orch-pull-requests/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "dashboard": {
    "icon": "check",
    "label": "Pull requests",
@@ -419,6 +427,7 @@
   "acts": {},
   "agents_block": "skills/orch-services/AGENTS-block.md",
   "background": false,
+  "before_start": false,
   "dashboard": {
    "icon": "box",
    "label": "Services",
@@ -448,6 +457,7 @@
   "acts": {},
   "agents_block": "skills/orch-sync/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "dashboard": {
    "icon": "cloud",
    "label": "Sync",
@@ -474,13 +484,28 @@
  },
  "usage": {
   "acts": {
+   "add": {
+    "summary": "Add an API credit or helper tool",
+    "who": "people",
+    "writes": []
+   },
    "end": {
     "summary": "End an account's rule on a date, then go back to the rule before it",
     "who": "people",
     "writes": []
    },
+   "for": {
+    "summary": "Say which kinds of work may use an account",
+    "who": "people",
+    "writes": []
+   },
    "limit": {
     "summary": "Set or remove one limit of an account",
+    "who": "people",
+    "writes": []
+   },
+   "model": {
+    "summary": "Say which model the kinds of work on an account may use",
     "who": "people",
     "writes": []
    },
@@ -504,14 +529,25 @@
     "who": "people",
     "writes": []
    },
+   "remove": {
+    "summary": "Take an API credit or helper tool off the list",
+    "who": "people",
+    "writes": []
+   },
    "switching": {
     "summary": "Switch accounts by itself, or only show and warn",
+    "who": "people",
+    "writes": []
+   },
+   "together": {
+    "summary": "Set one money limit over every account of a provider",
     "who": "people",
     "writes": []
    }
   },
   "agents_block": "skills/orch-usage/AGENTS-block.md",
   "background": true,
+  "before_start": true,
   "dashboard": {
    "icon": "bolt",
    "label": "Usage",
@@ -522,7 +558,7 @@
    ".orch/addons/usage/"
   ],
   "name": "usage",
-  "needs": false,
+  "needs": true,
   "orch_api": 1,
   "page": {
    "label": "Open Usage",

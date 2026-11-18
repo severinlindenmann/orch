@@ -5,6 +5,7 @@ import re
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 from conftest import jrun, switcher_data
@@ -149,6 +150,21 @@ def test_all_at_limit_and_one_account(cli, fake_switcher, ws):
     m = page.build(usage_cli.gather(ws), ws)
     # the two others stay known (missing), so a second account is still there
     assert m["one_account"] is False and {a["state"] for a in m["accounts"][1:]} == {"missing"}
+
+
+def test_gone_from_the_switcher_says_so_while_off(cli, fake_switcher, ws):
+    """The owner's case (ORCH-343): a subscription removed from the switcher and turned off shows Off and still says
+    it is gone, not "No use read yet"."""
+    _seed(cli)
+    data = switcher_data()
+    data["accounts"] = data["accounts"][:1]
+    fake_switcher.answer(data)
+    gone = page.build(usage_cli.gather(ws), ws)["accounts"][1]
+    assert _act(cli, "off", gone["id"])[0] == 0
+    row = next(a for a in page.build(usage_cli.gather(ws), ws)["accounts"] if a["id"] == gone["id"])
+    assert row["state"] == "off" and row["missing"] is True
+    shown = next(a for a in page.build(usage_cli.gather(ws), ws)["accounts"] if a["state"] == "in-use")
+    assert shown["missing"] is False
 
 
 def test_one_account_only(cli, fake_switcher, ws):

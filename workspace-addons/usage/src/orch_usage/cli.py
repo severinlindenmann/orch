@@ -1,4 +1,5 @@
-"""orch usage list|history|limit|period|order|on|off|end|switching|act|run|start|stop|status
+"""orch usage list|history|limit|period|order|on|off|end|for|model|together|add|remove|ask|switching|act|run|start|
+stop|status
 (store: store.py; readers: readers/; early switching: switching.py; background process: service.py)."""
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import store
+from . import routing, store
 from .readers import credit_reader, cswap
 from .store import PERIOD_WORDS, Refused
 
@@ -124,17 +125,24 @@ def parse_time(text: str, now: datetime | None = None) -> str:
     return when.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def parse_day(text: str) -> str:
+    """YYYY-MM-DD, past or future: the start of that day, this computer's time, as UTC."""
+    t = (text or "").strip()
+    if not re.fullmatch(r"\d{4}-\d\d-\d\d", t):
+        raise Refused(f"'{text}' is not a day. Write it like 2026-11-17.")
+    try:
+        d = datetime.strptime(t, "%Y-%m-%d").astimezone()
+    except ValueError:
+        raise Refused(f"'{text}' is not a day. Write it like 2026-11-17.") from None
+    return d.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 # ---------------------------------------------------------------- reading use
 
 
 def _period_start(period: str, lim: dict, at: datetime) -> str | None:
     if period == "month":
-        local = at.astimezone()
-        return (
-            local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            .astimezone(UTC)
-            .strftime("%Y-%m-%dT%H:%M:%SZ")
-        )
+        return store.utc_text(store.month_window(lim, at)[0])
     if period == "week":
         return (at - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
     return lim.get("since")
@@ -183,7 +191,21 @@ def gather(root: Path) -> dict:
         warnings.append(
             f"{d['unreadable']} account(s) in .orch/addons/usage could not be read and are skipped."
         )
-    return {"accounts": out, "switcher": found is not None, "warnings": warnings}
+    together = []
+    for t in d["together"]:
+        lim = t["limit"]
+        spent = routing.together_spent(d["accounts"], t, at)
+        row = {
+            "provider": t["provider"],
+            "label": store.together_label(t["provider"]),
+            "limit": lim,
+            "spent": spent,
+        }
+        if lim["period"] == "month":
+            row["resets_at"] = store.utc_text(store.month_window(lim, at)[1])
+        row["accounts"] = [a["label"] for a in store.money_accounts(d["accounts"], t["provider"])]
+        together.append(row)
+    return {"accounts": out, "together": together, "switcher": found is not None, "warnings": warnings}
 
 
 # ---------------------------------------------------------------- output
@@ -209,6 +231,9 @@ def _rule_text(rule: dict) -> str:
             else f"{store.fmt_value(lim['value'], lim['unit'])} {p}"
         )
     text = ", ".join(parts) or "no limit"
+    text += f", for {store.kinds_text(rule.get('for') or [])}"
+    if rule.get("model"):
+        text += f", {store.MODEL_WORDS[rule['model']]}"
     if rule.get("ends"):
         text += f" (ends {rule['ends'][:16].replace('T', ' ')} UTC)"
     return text
@@ -263,8 +288,15 @@ def run(args) -> int:
                 lines.append(f"   {use}")
         if not lines:
             lines = ["No accounts yet."]
+        for t in data["together"]:
+            lim = t["limit"]
+            spent = f"${t['spent']:g} spent, " if t["spent"] is not None else ""
+            lines.append(
+                f"{t['label']} ({', '.join(t['accounts']) or 'none listed'}): {spent}limit "
+                f"{store.fmt_value(lim['value'], '$')} per {PERIOD_WORDS[lim['period']]}"
+            )
         lines += [f"Warning: {w}" for w in data["warnings"]]
-        lines.append("Next: orch usage limit <account> <number>  (or period / order / on / off / end)")
+        lines.append("Next: orch usage limit <account> <number>  (or for / period / order / on / off / end)")
         print("\n".join(lines))
         return 0
     if cmd == "history":
@@ -286,9 +318,57 @@ def run(args) -> int:
 
     if cmd in ("run", "start", "stop", "status", "switching"):
         return _loop_cmd(args, root)
+    if cmd == "before-start":  # the core's start question (contracts/before-start.schema.json)
+        from . import routing
+
+        try:
+            req = json.loads(sys.stdin.read() or "{}")
+        except ValueError:
+            raise Refused("The start question was not JSON.") from None
+        if not isinstance(req, dict):
+            raise Refused("The start question was not a JSON object.")
+        print(json.dumps(routing.decide(root, req), ensure_ascii=False))
+        return 0
+    if cmd == "ask":  # a credit skill or a helper's own subagent, before it spends (asking.py)
+        from . import asking
+
+        known = None
+        if args.known is not None:
+            if args.known != "-":
+                raise Refused("Give the known credits on stdin: --known -")
+            if not args.provider:
+                raise Refused("Known credits need --provider anthropic or openai.")
+            try:
+                raw = json.loads(sys.stdin.read() or "[]")
+            except ValueError:
+                raise Refused("The known credits were not JSON.") from None
+            if not isinstance(raw, list) or len(raw) > 10:
+                raise Refused("The known credits must be a list of at most 10.")
+            known = [store.check_known(k) for k in raw]
+        kind = store.parse_kinds([args.kind])
+        if not kind or len(kind) != 1:
+            raise Refused("Ask for one kind of work: " + ", ".join(store.KIND_WORDS.values()) + ".")
+        ans = asking.ask(root, kind[0], args.provider, args.name, known)
+        if args.json:
+            print(json.dumps(ans, ensure_ascii=False))
+        elif ans["go"] and ans.get("account"):
+            left = f" (${ans['left']:g} left)" if ans.get("left") is not None else ""
+            print(f"Use {ans['account']}{left}.")
+        elif ans["go"]:
+            print("Nothing is set for this kind of work in Usage: go ahead as usual.")
+        else:
+            print(ans["why"])
+        return 0 if ans["go"] else 3
+    if cmd == "needs":
+        from . import routing
+
+        print(json.dumps(routing.needs_rows(root), ensure_ascii=False))
+        return 0
 
     who = _actor(args.by)
     end = parse_time(args.end) if getattr(args, "end", None) else None
+    if cmd in ("add", "together"):
+        return _whole_file_cmd(args, root, who)
     try:
         store.find(store.load(root)["accounts"], args.account)
     except Refused:
@@ -300,6 +380,8 @@ def run(args) -> int:
             value, unit = parse_value(args.value)
             until = parse_time(args.until) if args.until else None
             store.set_limit(a, rows, who, value, unit, parse_period(args.period), until, end)
+            if args.resets:
+                store.set_resets(a, rows, who, parse_day(args.resets))
             if until:
                 for lim in a["rule"]["limits"]:
                     if lim["period"] == "until" and "since" not in lim:
@@ -310,8 +392,15 @@ def run(args) -> int:
             for lim in a["rule"]["limits"]:
                 if lim["period"] == "until" and "since" not in lim:
                     lim["since"] = store.now()
+        elif cmd == "for":
+            store.set_for(a, rows, who, store.parse_kinds(args.kinds), end)
         elif cmd == "order":
-            store.set_order(accounts, a, rows, who, args.place)
+            store.set_order(accounts, a, rows, who, args.place, end)
+        elif cmd == "model":
+            word = args.model.strip().lower()
+            store.set_model(a, rows, who, None if word in store.ANY else word, end)
+        elif cmd == "remove":
+            store.remove_account(accounts, a, rows, who)
         elif cmd in ("on", "off"):
             store.set_on(a, rows, who, cmd == "on")
         elif cmd == "end":
@@ -321,8 +410,14 @@ def run(args) -> int:
             raise Refused(f"Unknown command {cmd}.")
         changed = bool(rows)
         result = {k: v for k, v in a.items() if k != "source"}
+    if cmd == "remove":
+        return _emit(
+            args,
+            {"removed": result["label"], "changed": True, "next": SAVED},
+            f"{result['label']} is no longer listed. Its history stays.\n{SAVED}",
+        )
     nxt = SAVED if changed else "Already like that. Nothing changed."
-    if changed and cmd in ("limit", "period", "end") and result["rule"].get("ends"):
+    if changed and cmd in ("limit", "period", "end", "for", "model", "order") and result["rule"].get("ends"):
         nxt = SAVED + " The rule falls back to the one before it when it ends."
     return _emit(
         args,
@@ -330,6 +425,51 @@ def run(args) -> int:
         f"{result['label']}: {_rule_text(result['rule'])}, {'on' if result['on'] else 'off'}, "
         f"place {result['order']}.\n{nxt}",
     )
+
+
+def _whole_file_cmd(args, root: Path, who: str) -> int:
+    """`add` (an API credit or helper tool, by a person) and `together` (one money limit over all accounts of a
+    provider)."""
+    with store.change_all(root) as (doc, rows):
+        store.expire(doc["accounts"], rows)
+        if args.cmd == "add":
+            value, unit = parse_value(args.limit) if args.limit else (None, None)
+            if unit == "%":
+                raise Refused("The limit of an API credit or helper tool is in dollars, like $100.")
+            a = store.add_account(
+                doc["accounts"],
+                rows,
+                who,
+                label=args.label,
+                provider=args.provider,
+                type_=args.type,
+                name=args.name,
+                kinds=store.parse_kinds(args.kinds) if args.kinds else [],
+                limit=value,
+                period=parse_period(args.period) or "month",
+                since=parse_day(args.resets) if args.resets else None,
+                tool=args.tool,
+                first=args.first,
+            )
+            result = {k: v for k, v in a.items() if k != "source"}
+            text = f"{a['label']} added: {_rule_text(a['rule'])}, place {a['order']}."
+            data: dict = {"account": result}
+        else:
+            value, unit = parse_value(args.value)
+            if unit == "%":
+                raise Refused("A limit over several accounts is in dollars, like $100.")
+            period = parse_period(args.period) or "month"
+            store.set_together(
+                doc, rows, who, args.provider, value, period, parse_day(args.resets) if args.resets else None
+            )
+            label = store.together_label(args.provider.strip().lower())
+            text = f"{label}: " + (
+                f"limit {store.fmt_value(value, '$')} per {PERIOD_WORDS[period]}." if value else "no limit."
+            )
+            data = {"together": doc["together"]}
+        changed = bool(rows)
+    nxt = SAVED if changed else "Already like that. Nothing changed."
+    return _emit(args, {**data, "changed": changed, "next": nxt}, f"{text}\n{nxt}")
 
 
 def _loop_cmd(args, root: Path) -> int:
@@ -452,6 +592,13 @@ def main(argv=None) -> int:
         return s
 
     p("list")
+    p("before-start")
+    p("needs")
+    s = p("ask")
+    s.add_argument("kind")
+    s.add_argument("--provider")
+    s.add_argument("--name")
+    s.add_argument("--known")
     s = p("history")
     s.add_argument("--account")
     s = p("limit")
@@ -459,6 +606,7 @@ def main(argv=None) -> int:
     s.add_argument("value")
     s.add_argument("--period")
     s.add_argument("--until")
+    s.add_argument("--resets", help="the day a monthly credit starts again, e.g. 2026-11-17")
     s.add_argument("--end")
     s.add_argument("--by")
     s = p("period")
@@ -468,9 +616,47 @@ def main(argv=None) -> int:
     s.add_argument("--until")
     s.add_argument("--end")
     s.add_argument("--by")
+    s = p("for")
+    s.add_argument("account")
+    s.add_argument("kinds", nargs="+")
+    s.add_argument("--end")
+    s.add_argument("--by")
     s = p("order")
     s.add_argument("account")
     s.add_argument("place", type=int)
+    s.add_argument("--end", help="the place holds until then, then the account goes back to its place before")
+    s.add_argument("--by")
+    s = p("model")
+    s.add_argument("account")
+    s.add_argument(
+        "model", help="small (the small model only), first (small first, the big one when needed), any"
+    )
+    s.add_argument("--end")
+    s.add_argument("--by")
+    s = p("together")
+    s.add_argument(
+        "provider", help="every API credit and helper tool of this provider, e.g. anthropic or openai"
+    )
+    s.add_argument("value", help="$100, or none")
+    s.add_argument("--period", help="month (default) or week")
+    s.add_argument("--resets", help="the day the month starts again, e.g. 2026-11-17")
+    s.add_argument("--by")
+    s = p("add")
+    s.add_argument("label")
+    s.add_argument("--provider", required=True)
+    s.add_argument("--type", choices=store.MONEY_TYPES, default="api-key")
+    s.add_argument(
+        "--name", required=True, help="the name the credit skill uses to find its key (never the key)"
+    )
+    s.add_argument("--for", dest="kinds", nargs="+")
+    s.add_argument("--limit", help="$100")
+    s.add_argument("--period", help="month (default) or week")
+    s.add_argument("--resets", help="the day the month starts again, e.g. 2026-11-17")
+    s.add_argument("--tool", help="the helper tool it runs, as named in Settings")
+    s.add_argument("--first", action="store_true", help="use it first")
+    s.add_argument("--by")
+    s = p("remove")
+    s.add_argument("account")
     s.add_argument("--by")
     for name in ("on", "off"):
         s = p(name)
