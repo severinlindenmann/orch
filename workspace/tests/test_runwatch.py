@@ -226,7 +226,7 @@ def test_helper_state_is_one_word_per_signal(sig, waits, idle, want):
     "cmd, want",
     [
         ("orch check done t_1 c1 --note x", "Updating the ticket"),
-        ("orch pull-requests queue add https://x/pull/1 --wait", "Waiting for the pull request checks"),
+        ("orch pull-requests queue add https://x/pull/1 --wait", "Waiting"),
         ("orch ref wait t_1 --merge", "Waiting for the pull request checks"),
         ("sleep 240", "Waiting"),
         ("node /tmp/release/walk.cjs --port 8790", "Running a script"),

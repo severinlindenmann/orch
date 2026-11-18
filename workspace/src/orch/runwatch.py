@@ -137,10 +137,11 @@ def doing(cmd: str) -> str:
     bases = [_base(w).lower() for w in words if not w.startswith("-")]
     if not bases:
         return "Running a command"
-    if is_check_wait(text) or (bases[0] in ("orch", "orch.exe") and bases[1:3] == ["pull-requests", "queue"]):
+    if is_check_wait(text):
         return "Waiting for the pull request checks"
     first = next((b for b in bases if b not in _INTERPRETERS and b not in ("run", "exec")), bases[0])
-    if first in _WAIT_PROGRAMS:
+    orch_waits = first in ("orch", "orch.exe") and "--wait" in words  # any orch command that waits
+    if first in _WAIT_PROGRAMS or orch_waits:
         return "Waiting"
     tests = first in _TEST_PROGRAMS or "test" in bases or "--test" in words
     if tests or any(b.startswith("test_") or ".test." in b or ".spec." in b for b in bases):
