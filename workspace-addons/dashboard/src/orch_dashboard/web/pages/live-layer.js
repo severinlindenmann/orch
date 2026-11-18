@@ -140,6 +140,14 @@ function liveLayerStep(s, act, phone = false) {
   }
 }
 
+// The question a ticket's helper waits on, as the pane shows it (ORCH-675): the first unanswered one, its options when
+// it is a plain question (kind unset), else only a link to the ticket where its card (plan, draft, choice) lives.
+function liveAskModel(t) {
+  const q = Array.isArray(t?.questions) ? t.questions.find(x => x && x.answer == null) : null;
+  if (!q) return null;
+  const options = Array.isArray(q.options) ? q.options.filter(o => typeof o === 'string' && o.trim()).slice(0, 6) : [];
+  return {id:q.id, digest:q.digest, text:String(q.text || ''), options, plain:q.kind == null};
+}
 // --- the page ---
 let liveLayer = null;
 let liveLayerPainted = '';
@@ -324,11 +332,40 @@ function livePaneBody(key, sess, label) {
       : sess && !sess.kind && !sess.running && typeof window.liveStartBody === 'function' ? h('div', {className:'live-pb live-pb-start'}, window.liveStartBody(sess))
       : sess ? h('div', {className:'live-pb', 'data-live-body':key, 'data-live-kind':sess.kind || null},
       h('p', {className:'live-now', 'data-live-now':''}),
+      sess.kind ? null : h('div', {className:'live-ask', 'data-live-ask':'', hidden:true}),
       h('pre', {className:'live-lines', 'data-live-lines':'', 'aria-label':'Last lines of ' + label, tabindex:'0', hidden:true}),
       h('p', {className:'meta live-meta', 'data-live-meta':''}),
       sess.kind ? null : h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket', 'data-live-ticket':'', 'aria-label':'Open ticket ' + label}, 'Open ticket'),
       typeof liveMsgBox === 'function' ? liveMsgBox(sess) : null)
       : h('div', {className:'live-pb'}, h('p', {}, 'This session is no longer in the list.'));
+}
+// The waiting question of a ticket's pane: its words, one button per option and a field for an own answer, so it is
+// answered where it is shown (ORCH-675). Written only when the question changes, so a typed answer stays.
+const liveAskDrafts = new Map();
+function liveAskFill(box, id) {
+  const q = snapshot ? null : liveAskModel(ticketOf(id)), sig = q ? [q.id, q.digest, q.text, q.options.join('|')].join('\u0001') : '';
+  if (box.dataset.sig === sig) return;
+  box.dataset.sig = sig; box.textContent = ''; box.hidden = !q;
+  if (!q) return;
+  const send = async answer => {
+    const text = String(answer || '').trim(); if (!text || box.dataset.busy) return;
+    box.dataset.busy = '1'; box.querySelectorAll('button,input').forEach(c => { c.disabled = true; });
+    const r = await act('answer', {ticket:id, question:q.id, digest:q.digest, answer:text});
+    delete box.dataset.busy;
+    window.orch?.toast?.(r.ok ? 'Answered: ' + text : r.text || 'Could not send your answer.', r.ok ? 'ok' : 'error');
+    if (r.ok) { liveAskDrafts.delete(id + '/' + q.id); box.dataset.sig = ''; liveAskFill(box, id); }
+    else box.querySelectorAll('button,input').forEach(c => { c.disabled = false; });  // the typed words stay
+  };
+  box.append(h('p', {className:'live-ask-q'}, q.text));
+  if (!q.plain) { box.append(h('a', {className:'btn primary sm', href:'#ticket/' + encodeURIComponent(id), 'data-key':'live-ask-open'}, 'Answer on the ticket')); return; }
+  const row = h('div', {className:'live-ask-opts'});
+  q.options.forEach((o, i) => { const b = h('button', {type:'button', className:'btn outline sm', 'data-key':'live-ask-option-' + i}, o); b.addEventListener('click', () => send(o)); row.append(b); });
+  const input = h('input', {type:'text', className:'input', 'data-key':'live-ask-text', placeholder:q.options.length ? 'Or write an answer' : 'Write an answer', 'aria-label':'Your answer', value:liveAskDrafts.get(id + '/' + q.id) || ''});
+  input.addEventListener('input', () => liveAskDrafts.set(id + '/' + q.id, input.value));  // a redraw of the pane keeps it
+  const go = h('button', {type:'button', className:'btn primary sm', 'data-key':'live-ask-send'}, 'Send');
+  go.addEventListener('click', () => send(input.value)); input.addEventListener('keydown', e => { if (e.key === 'Enter') send(input.value); });
+  if (q.options.length) box.append(row);
+  box.append(h('div', {className:'live-ask-line'}, input, go));
 }
 // The live part of a pane, written in place on every answer of the sessions API: no repaint, so the keyboard place,
 // an open menu and the scroll of the lines stay.
@@ -340,6 +377,8 @@ function liveLayerFill() {
     const text = kind === 'terminal' ? 'A plain terminal in this workspace, no helper. The terminal itself comes here next.'
       : !window.LiveSessions?.ready ? 'Loading…' : live ? liveNow(live) : kind ? 'This helper is not on right now.' : 'No helper is working on this ticket right now.';
     if (now.textContent !== text) now.textContent = text;
+    const askBox = body.querySelector('[data-live-ask]');
+    if (askBox) liveAskFill(askBox, body.dataset.liveBody);
     const lines = live && Array.isArray(live.lines) ? live.lines.join('\n') : '';
     if (pre.textContent !== lines) {
       const end = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 8;  // following the end: keep following it
