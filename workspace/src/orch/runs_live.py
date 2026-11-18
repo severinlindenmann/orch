@@ -1545,6 +1545,8 @@ def stop_hidden(root: Path) -> list[str]:
             ids.append(g)
         if (m := tickets.manager_id(root)) is not None:
             ids.append(m)
+        if (e := tickets.session_id(root, "empty")) is not None:
+            ids.append(e)  # the empty helper (ORCH-364): hidden from the ticket list like the Manager
     d = runs.run_dir(root) / "pending"
     with contextlib.suppress(OSError):
         ids += [f.stem for f in sorted(d.glob("t_*.jsonl")) if f.is_file() and not f.is_symlink()]

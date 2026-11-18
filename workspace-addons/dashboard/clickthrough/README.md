@@ -52,6 +52,8 @@ No real agent can run: the workspace helper is a stand-in script, and programs n
 tools (read from orch's adapter list) are stand-ins first on PATH, so a Start, a Test or a ticket pinned to a
 built-in tool runs a stand-in. `server.py` refuses to
 start otherwise. A click-through that needs a helper's own move (a chat reply, a proposal) uses `orch(...)`.
+Sync is one of the add-ons installed (off) in the demo home, so the Sync page runs against the real server with one
+sign-in (`features/f-sync-page.cjs`).
 
 ## Write one
 
@@ -79,6 +81,7 @@ module.exports = {
   `orchAsPerson(...)` is the same as the person at the computer, `orchIn(dir, ...)` in another folder of the home,
   `git(dir, ...)` git with no settings of this computer, `python(code, ...args)` a short snippet with orch importable.
 - `until(check, what)`: after a change made outside the page, wait until the page's state passes `check(state)`.
+- `addonOff(name)`: turn an add-on off again at the end (as the person) and wait until the state no longer lists it; the one 404 the page may still get for that add-on's view (its own state lags a poll) is not an error.
 - `home` is the throw-away home, `standins` where the stand-ins listen.
 - `open(hash)` goes to a dashboard address and waits until it is drawn; `reload()` reloads and waits.
 - `act(op, fn)` runs `fn` (your click) and waits for the page to send `op`; it fails when the server refuses it.

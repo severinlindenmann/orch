@@ -14,7 +14,7 @@ const clickConfirm = async page => {
 module.exports = {
   name: 'Add-ons: start Focus, its switches, a Lessons button, uninstall refused',
   covers: ['addon.start', 'typing.set', 'focus_preview.set', 'addon.act', 'addon.uninstall'],
-  async run({ page, open, reload, act, must, text, orchAsPerson, addonOn, until, shot }) {
+  async run({ page, open, reload, act, must, text, orchAsPerson, addonOn, until, addonOff, shot }) {
     addonOn('focus');
     addonOn('lessons');
     orchAsPerson('lessons', 'add', 'Check the oven is off before you leave');
@@ -64,8 +64,7 @@ module.exports = {
     // the page shows that answer as a toast; turning the add-on off first restarts the add-on pages, which can take
     // the toast with it on a slow machine, so the answer's words are what is checked
     orchAsPerson('stop');
-    orchAsPerson('addon', 'remove', 'focus');   // off again for the next click-through
-    await until(s => !(s.addons || []).some(a => a.name === 'focus'), 'focus off again');
+    await addonOff('focus');   // off again for the next click-through
     await until(s => !(s.addons || []).some(a => a.name === 'lessons'), 'lessons off again');
   },
 };
