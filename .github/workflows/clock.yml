@@ -32,6 +32,7 @@ jobs:
         working-directory: workspace-addons/dashboard
         run: ../../scripts/at-clock.sh "${{ matrix.at }}" node --test tests/*.test.js ../../workspace/src/orch_ui/tests/*.test.mjs
       - name: Add-on suites
+        if: ${{ !cancelled() }}
         run: |
           failed=""
           for d in workspace-addons/*/; do
@@ -39,7 +40,7 @@ jobs:
             echo "::group::$d"
             # the same number of workers as the add-on's own job in addons.yml (test order stays as there)
             case "$d" in */dashboard/|*/automation/|*/sync/|*/focus/|*/insights/) n=auto ;; *) n=2 ;; esac
-            (cd "$d" && ../../scripts/at-clock.sh "${{ matrix.at }}" .venv/bin/python -m pytest -q -n $n -p no:cacheprovider -rfE --timeout 120) || failed="$failed $d"
+            (cd "$d" && PATH="$PWD/.venv/bin:$PATH" ../../scripts/at-clock.sh "${{ matrix.at }}" .venv/bin/python -m pytest -q -n $n -p no:cacheprovider -rfE --timeout 120) || failed="$failed $d"
             echo "::endgroup::"
           done
           [ -z "$failed" ] || { echo "red at ${{ matrix.at }} UTC:$failed"; exit 1; }
@@ -48,4 +49,4 @@ jobs:
         working-directory: workspace
         run: |
           files=$(grep -lE "[Tt]oday|[Yy]esterday|[Tt]omorrow|\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b" tests/test_*.py)
-          ../scripts/at-clock.sh "${{ matrix.at }}" .venv/bin/python -m pytest -q -n auto -p no:cacheprovider -rfE --timeout 120 $files
+          PATH="$PWD/.venv/bin:$PATH" ../scripts/at-clock.sh "${{ matrix.at }}" .venv/bin/python -m pytest -q -n auto -p no:cacheprovider -rfE --timeout 120 $files
