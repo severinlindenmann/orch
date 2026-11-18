@@ -34,8 +34,11 @@ because the page never sends it.
   one head commit `standins.head`) and "merges" by writing a line;
 - the built-in agent programs (from orch's adapter list): their login check says signed out until their sign-in
   got a code;
-- the add-ons Focus, Lessons and Pull requests of this checkout (`run.cjs` layers them into every orch of the
-  run): installed and allowed but off; a click-through turns one on with `orch addon add <name> --project-only`;
+- the add-ons Focus, Lessons, Pull requests and Factory of this checkout (`run.cjs` layers them into every orch of
+  the run): installed and allowed but off; a click-through turns one on with `orch addon add <name> --project-only`.
+  Start an add-on's page server from the page (its Start button), not with `orch(...)`: a server started by a
+  short-lived orch would call an orch that is already gone;
+- an `orch` program first on PATH that is this checkout's orch (an add-on page such as Factory's calls orch by name);
 - `ORCH_REPO` is this checkout, so "the newest orch" is read from here. An update or an uninstall then stops with
   a plain reason (this demo runs orch from its source folder, not from an installed tool folder).
 

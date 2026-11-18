@@ -2292,11 +2292,12 @@ let embedLooksGoodBusy = false;  // one batch at a time
 async function looksGoodAll(req) {
   const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
   if (!req.clicked) return reply({type:'orch.looksgood.failed', error:NO_CLICK});
-  if (embedLooksGoodBusy) return;
+  // never a silent drop (ORCH-419): the page waits for an answer and says so
+  if (embedLooksGoodBusy) return reply({type:'orch.looksgood.failed', error:'Still saving the last Looks good. Try again in a moment.'});
   embedLooksGoodBusy = true;
   try {
-    try {
-      const res = await fetch('/api/state?fresh=1', {cache:'no-store'});
+    try {  // a read that hangs must not hold every later Looks good (ORCH-419)
+      const res = await fetch('/api/state?fresh=1', {cache:'no-store', signal:AbortSignal.timeout(10000)});
       if (res.ok) { mutation++; accept(await res.json()); }
     } catch (_) { /* Fall back to what the page already has. */ }
     // only results of this add-on (tickets that carry its data), as with sending: never another page's tickets
