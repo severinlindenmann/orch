@@ -972,7 +972,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
             and re.fullmatch(r"[0-9a-f]{64}", str(x.get("key")))
         ],
     }
-    keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")
+    keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen", "models")
     perm = f_perm.result()
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
     from orch.config import (

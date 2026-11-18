@@ -394,11 +394,164 @@ async function history(page, dash) {
   if (seen[2].f.indexOf('1 message ') !== 0) throw new Error(`the plural is wrong: ${seen[2].f}`);
   await noSideways(page);
   await page.click(pane + ' .live-hist-row:nth-child(2) [data-live-hist="reopen"]');
-  await page.waitForFunction(() => !document.querySelector('#live-dock .live-hist'), null, { timeout: 5000 });
+  await page.waitForFunction(() => !document.querySelector('#live-dock .live-pb-hist'), null, { timeout: 5000 });
   if (!asked || asked.session !== 's-mon' || asked.ticket !== tid) throw new Error('Reopen did not ask orch for that session: ' + JSON.stringify(asked));
   // open it again for the picture (the "continues that conversation" toast may sit over the pane's corner)
   await toggle(true);
   await page.waitForSelector(pane + ' .live-hist-row', { timeout: 5000 });
+}
+
+// Step 14 (ORCH-362): the Start choice of a ticket with no helper. Continue the last conversation, a fresh start on a
+// tool and model (the usual ones preselected), or reopen an earlier session; the helper places in use and the line.
+// The tools, places and earlier sessions are fake data; run.start and ticket.model are caught before orch, so
+// nothing starts. Then every place is taken: the line shows and a start answers that it waits in line.
+async function startChoice(page, dash) {
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  let tid = '', st0 = null, full = false;
+  const others = n => Object.fromEntries(Array.from({ length: n }, (_, i) => ['t_other' + i, { running: true, claim: { mode: 'live' } }]));
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    // always the full state (never "unchanged since"), so the fake places below reach the page
+    const res = await route.fetch({ url: route.request().url().replace(/\?.*$/, '') });
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    st.rev = 'fake-' + (full ? 'full' : 'free');
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true, live_max: full ? 4 : 6,
+      agents: [{ name: 'claude', label: 'Claude Code', found: true, chosen: true, models: true },
+        { name: 'codex', label: 'Codex', found: true, chosen: false, models: false }] };
+    const first = (st.tickets || [])[0];
+    if (first) { tid = first.id; if (!first.key) first.key = 'ORCH-189'; first.model = { name: 'sonnet', by: 'orch' }; }
+    st.runs = { ...Object.fromEntries(Object.entries(st.runs || {}).filter(([k]) => k !== tid)), ...others(4) };
+    st.start_line = full ? { waiting: ['t_other8', 't_other9'], why: '4 helpers are working at once, the most you allowed', limit: 4 } : null;
+    st0 = st;
+    route.fulfill({ response: res, json: st });
+  });
+  await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
+    body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
+  const at = h => new Date(Date.now() - h * 3600e3).toISOString();
+  const rows = [
+    { id: 's-mon', label: 'Claude Code', last_used: at(30), title: 'Read the survey answers and group them', turns: 12, current: false, reopenable: true },
+    { id: 's-old', label: 'Claude Code', last_used: at(200), title: 'First draft of the newsletter', turns: 1, current: false, reopenable: true },
+  ];
+  await page.route(/\/api\/sessions\/t_[a-z0-9]+$/, route => route.fulfill({ json: { available: true, sessions: rows } }));
+  const asked = [];
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (!['run.start', 'ticket.model', 'session.reopen'].includes(body.op)) return route.continue();
+    asked.push(body);
+    if (full && body.op === 'run.start') return route.fulfill({ status: 422, contentType: 'text/plain',
+      body: '4 helpers are working at once, the most you allowed. ORCH-189 waits in line and starts when one is finished.' });
+    route.fulfill({ json: st0 });
+  });
+  await page.addInitScript(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.waitForFunction(() => window.LiveLayer && document.getElementById('live-dock'), null, { timeout: 10000 });
+  await page.evaluate(id => window.LiveLayer.open(id), tid);
+  const pane = '#live-dock .live-pane [data-key="live-start"]';
+  await page.waitForSelector(pane + ' [data-key="live-start-earlier"] .live-hist-row', { timeout: 8000 });
+  const seen = await page.$eval(pane, el => ({
+    places: el.querySelector('[data-key="live-start-places"]').textContent,
+    cont: el.querySelector('[data-key="live-start-continue"]')?.textContent || '',
+    tools: [...el.querySelectorAll('[data-what="tool"]')].map(b => [b.textContent, b.getAttribute('aria-pressed')]),
+    models: [...el.querySelectorAll('[data-what="model"]')].map(b => [b.textContent, b.getAttribute('aria-pressed')]),
+    earlier: el.querySelectorAll('[data-key="live-start-earlier"] .live-hist-row [data-live-hist="reopen"]').length }));
+  if (seen.places !== 'A start uses 1 of 6 helper places. Now 4 of 6 are in use.') throw new Error('places: ' + seen.places);
+  if (!/Continue where it stopped/.test(seen.cont) || !/from /.test(seen.cont)) throw new Error('no Continue with the last conversation: ' + seen.cont);
+  if (JSON.stringify(seen.tools) !== JSON.stringify([['Claude Code', 'true'], ['Codex', 'false']])) throw new Error('tools: ' + JSON.stringify(seen.tools));
+  if (!seen.models.some(m => m[0] === 'Sonnet' && m[1] === 'true')) throw new Error('the usual model is not preselected: ' + JSON.stringify(seen.models));
+  if (seen.earlier !== 2) throw new Error(`${seen.earlier} earlier sessions offer Reopen, not 2`);
+  await noSideways(page);
+  // one click starts fresh with the usual tool and model: only run.start --fresh goes to orch
+  await page.click(pane + ' [data-live-start="fresh"]');
+  await page.waitForFunction(() => !document.querySelector('#live-dock [data-key="live-start"][aria-busy]'), null, { timeout: 5000 });
+  if (asked.length !== 1 || asked[0].op !== 'run.start' || !asked[0].args.fresh || asked[0].args.agent) throw new Error('one-click fresh start: ' + JSON.stringify(asked));
+  // continue the last conversation
+  await page.click(pane + ' [data-live-start="continue"]');
+  await page.waitForFunction(() => !document.querySelector('#live-dock [data-key="live-start"][aria-busy]'), null, { timeout: 5000 });
+  const c = asked[asked.length - 1];
+  if (c.op !== 'run.start' || c.args.fresh || c.args.ticket !== tid) throw new Error('Continue did not continue: ' + JSON.stringify(c));
+  // pick Opus, then another tool (it uses its own model), and start again: the model first, then the start on that tool
+  await page.click(pane + ' [data-what="model"][data-v="opus"]');
+  await page.click(pane + ' [data-what="tool"][data-v="codex"]');
+  await page.waitForSelector(pane + ' [data-key="live-start-pick"] .meta', { timeout: 3000 });
+  asked.length = 0;
+  await page.click(pane + ' [data-live-start="fresh"]');
+  await page.waitForFunction(() => !document.querySelector('#live-dock [data-key="live-start"][aria-busy]'), null, { timeout: 5000 });
+  if (asked.map(a => a.op).join() !== 'ticket.model,run.start' || asked[0].args.model !== 'opus' || asked[1].args.agent !== 'codex')
+    throw new Error('fresh start on the picked tool and model: ' + JSON.stringify(asked));
+  // every place taken: the places line says so with the line, and a start says it waits in line (no error)
+  full = true;
+  await page.evaluate(() => refresh());  // the next state read (the page polls every few seconds)
+  await page.waitForFunction(() => /All 4 helper places are in use\. 2 tickets wait in line\./.test(document.querySelector('#live-dock [data-key="live-start-places"]')?.textContent || ''), null, { timeout: 15000 });
+  await page.click(pane + ' [data-live-start="continue"]');
+  await page.waitForFunction(() => [...document.querySelectorAll('.toast, [role="status"], [role="alert"]')].some(el => /waits in line for a free helper place/.test(el.textContent)), null, { timeout: 5000 });
+  if ([...await page.$$eval('.toast', els => els.map(e => e.textContent))].some(t => /Could not start/.test(t))) throw new Error('a start in line shows as a failure');
+  await noSideways(page);
+}
+
+// Step 16 (ORCH-362): tool, model and open time of a working session, on the line at the top of its pane; tool ·
+// model opens the model choice. The running helper is fake data and ticket.model is caught before orch. The wall's
+// tiles get the same line with the wall task.
+async function toolModel(page, dash) {
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  let tid = '', st0 = null;
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch({ url: route.request().url().replace(/\?.*$/, '') });
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    st.rev = 'fake-tool-model';
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true,
+      agents: [{ name: 'claude', label: 'Claude Code', found: true, chosen: true, models: true }] };
+    const first = (st.tickets || [])[0];
+    if (first) {
+      tid = first.id; if (!first.key) first.key = 'ORCH-247';
+      first.model = { name: 'opus', by: 'orch' };
+      first.warmth = { seconds_left: 42 * 60 };
+      st.runs = { ...(st.runs || {}), [tid]: { ticket: tid, running: true, state: 'alive', pending: [],
+        claim: { agent: 'claude', mode: 'live', run: 'r-fake', started_at: new Date(Date.now() - 96 * 60e3).toISOString(),
+          live: { state: 'idle', since: new Date(Date.now() - 18 * 60e3).toISOString() } } } };
+    }
+    st0 = st;
+    route.fulfill({ response: res, json: st });
+  });
+  await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
+    body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
+  const asked = [];
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (body.op !== 'ticket.model') return route.continue();
+    asked.push(body);
+    route.fulfill({ json: st0 });
+  });
+  await page.addInitScript(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.waitForFunction(() => window.LiveLayer && document.getElementById('live-dock'), null, { timeout: 10000 });
+  await page.evaluate(id => window.LiveLayer.open(id), tid);
+  const row = '#live-dock .live-pane [data-key="live-model-row"]';
+  await page.waitForSelector(row, { timeout: 8000 });
+  const text = await page.$eval(row, el => el.textContent);
+  if (!/Claude Code · Opus/.test(text)) throw new Error('tool and model are not shown: ' + text);
+  if (!/open 1 h 36 min/.test(text)) throw new Error('the open time is not shown: ' + text);
+  if (!/closes in 42 min if left idle/.test(text)) throw new Error('when it closes for being idle is not shown: ' + text);
+  if (await page.$('#live-dock [data-key="live-start"]')) throw new Error('a working session offers the Start choice');
+  await noSideways(page);
+  await page.click(row + ' [data-key="live-model"]');
+  await page.waitForSelector('#live-dock [data-key="live-model-menu"]', { timeout: 3000 });
+  const menu = await page.$eval('#live-dock [data-key="live-model-menu"]', el => el.textContent);
+  if (!/Opus \(now\)/.test(menu) || !/applies when the helper finishes its current step/.test(menu)) throw new Error('model menu: ' + menu);
+  await page.click('#live-dock [data-live-model="haiku"]');
+  await page.waitForFunction(() => !document.querySelector('#live-dock [data-key="live-model-menu"]'), null, { timeout: 3000 });
+  if (asked.length !== 1 || asked[0].args.model !== 'haiku' || asked[0].args.ticket !== tid) throw new Error('the new model did not go to orch: ' + JSON.stringify(asked));
+  // open the menu again for the picture
+  await page.click(row + ' [data-key="live-model"]');
+  await page.waitForSelector('#live-dock [data-key="live-model-menu"]', { timeout: 3000 });
 }
 
 async function split(page, dash, width) {
@@ -758,11 +911,15 @@ const STEPS = [
   },
   {
     n: 14, pic: 'fd-14-start', area: 'sessions', title: 'Start: continue, fresh start or an earlier session', feature: [4, 12],
-    waits: T.sessions,
     do: ['Open a ticket that has no session and press Start.', 'Look at the three choices and the earlier sessions list.',
       'Pick tool and model and start fresh.'],
     see: ['One question: continue the last conversation, fresh start, or reopen an earlier session.',
-      'Up to 10 earlier sessions with date and step.', 'The usual tool and model are preselected: one click starts it.'],
+      'Up to 10 earlier sessions with date and step.', 'The usual tool and model are preselected: one click starts it.',
+      'How many helper places are in use; when all are taken, how many wait in line, and a start waits in line.'],
+    async run({ page, dash }) {
+      await startChoice(page, dash);
+    },
+    okConsole: /status of 422 \(Unprocessable/i,  // the start that waits in line: orch refuses it and puts it in line
     draft: { q: '?page=focus&cur=ORCH-189&view=zoom&ask=1' },
   },
   {
@@ -774,10 +931,13 @@ const STEPS = [
   },
   {
     n: 16, pic: 'fd-16-tool-model', area: 'sessions', title: 'Tool, model and open time on every session', feature: [12],
-    waits: T.data,
-    do: ['Look at a tile and at a pane header.', 'Open the model choice of a running session.'],
-    see: ['Tool and model are shown (for example "Claude CLI · Opus").', 'How long it is open and when it closes for being idle.',
-      'A new model applies from the next fresh start and says so.'],
+    do: ['Open a working session in the layer and look at the line at the top of its pane.', 'Open the model choice of that session and pick another model.'],
+    see: ['Tool and model are shown (for example "Claude Code · Opus").', 'How long it is open and when it closes for being idle.',
+      'A new model applies when the helper finishes its current step (or at its next start) and says so.',
+      'The wall\'s tiles show the same line once the wall is built.'],
+    async run({ page, dash }) {
+      await toolModel(page, dash);
+    },
     draft: { q: '?page=focus&cur=ORCH-247&view=zoom&pm=ORCH-247:model' },
   },
   {
