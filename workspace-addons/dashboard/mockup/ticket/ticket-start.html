@@ -27,7 +27,7 @@ state(new URLSearchParams(location.search).get('state')||'loaded',false);
 (function(){
 const q=new URLSearchParams(location.search).get('start')||'fresh';
 const hasLast=q!=='fresh'&&q!=='full', open=q==='open'||q==='more'||q==='full', starting=q==='starting', full=q==='full', more=q==='more';
-const sel=(label,list)=>'<select aria-label="'+label+'">'+list.map((v,i)=>'<option'+(i?'':' selected')+'>'+v+'</option>').join('')+'</select>';
+const sel=(label,list)=>'<select aria-label="'+label+'"'+(label==='Tool'?' data-prefix="Tool"':'')+'>'+list.map((v,i)=>'<option'+(i?'':' selected')+'>'+v+'</option>').join('')+'</select>';
 const places=full?'<span class="meta live-places" data-full>All 6 helper places are in use. It waits in line and starts by itself when one is free.</span>':'<span class="meta live-places">4 of 6 places in use</span>';
 const opt=(t,m,btn,extra)=>'<li class="start-opt"><div class="start-opt-t"><b>'+t+'</b><span class="meta">'+m+'</span>'+(extra||'')+'</div><button type="button" class="btn outline sm">'+btn+'</button></li>';
 const cont=hasLast?opt('Continue where it stopped','Keeps the talk from today 12:35','Continue'):'';
