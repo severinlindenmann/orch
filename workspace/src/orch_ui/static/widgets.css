@@ -1427,14 +1427,15 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
 @container (max-width:560px){.swipe-actions{display:grid;grid-auto-flow:row;grid-auto-columns:auto;grid-template-columns:minmax(0,1fr);gap:var(--s2)}.swipe-actions .swipe-act{flex:1 1 auto;min-width:fit-content;padding:0 var(--s3)}}
 @media (prefers-reduced-motion:reduce){.review-row,.swipe-files .swipe-file-thumb{transition:none}}
 .review-side-keys{margin:0 var(--s4) var(--s4)}
-/* lone cards without a header sit close together; a group with a header gets 24 px above it */
-.review-list-groups{gap:var(--s1)}
-.review-group.has-head:not(:first-child),.review-group.has-head+.review-group{margin-top:var(--s5)}
-/* a wide screen: the reading column and its tabs stand in the middle of the room right of the list */
-@media (min-width:721px){
- .review-main .swipe:not(.pairing){width:100%;max-width:var(--review-card-w);margin-inline:auto}
- .review-main:has(>#deck:not([hidden]):not(.pairing))>.segmented{margin-left:max(0px,(100% - var(--review-card-w)) / 2)}
-}
+/* one even rhythm between groups: 24 px from the last row's words to the next header; a group without a header
+   (a lone card named like its ticket) starts 12 px lower, since its row's own 12 px padding makes up the rest */
+.review-list-groups{gap:0}
+.review-group+.review-group.has-head{margin-top:var(--s5)}
+.review-group+.review-group:not(.has-head){margin-top:var(--s3)}
+/* a narrow Compare side keeps Later on the answers' row: smaller gaps and no icons in its buttons */
+.swipe-pair-pane{container-type:inline-size}
+.swipe-pair-acts{flex-wrap:wrap}
+@container (max-width:420px){.swipe-pair-acts,.swipe-pair-answers{gap:var(--s2)}.swipe-pair-acts .btn{padding-inline:var(--s3)}.swipe-pair-acts .btn>svg{display:none}}
 .review-list-title{flex:1 0 auto;white-space:nowrap}
 .review-list-acts{margin-left:auto}
 .swipe-actions>.swipe-acts-row{flex-wrap:wrap-reverse}/* tight room: the answers keep their row, Later goes under them on the left (as on each Compare side) */
@@ -1445,3 +1446,4 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
 /* the list stays in sight while a long card scrolls: the column it sits in is as tall as the page */
 @media (min-width:721px){.review-layout>.review-rail{align-self:stretch;align-content:start}.review-side{z-index:2}}
 @media (max-width:720px){.swipe-acts-row>.swipe-later kbd{display:none}}/* a phone has no keys: Later keeps the answers' row */
+@media (max-width:720px){.swipe-pair-answers{flex:1 1 auto;margin-left:0}.swipe-pair-acts{flex-wrap:wrap-reverse}}/* a phone side: Later beside the answers, under them only when there is no room */
