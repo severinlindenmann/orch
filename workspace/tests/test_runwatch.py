@@ -1,6 +1,7 @@
 """orch run list, screen and status: spot a stuck helper through orch alone (ORCH-25)."""
 
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -360,3 +361,89 @@ def test_the_idle_close_never_kills_a_wait_for_checks(proj, new_ticket, monkeypa
         for p in procs_:
             p.kill()
             p.wait()
+
+
+def _fake_chain(gone=()):
+    """A tmux that runs a chain of display-message / capture-pane like the real one: it stops at the first
+    session that is gone (ORCH-359)."""
+    calls = []
+
+    def fake(root, *args, **kw):
+        calls.append(args)
+        out, rc, cmds, cur = [], 0, [], []
+        for a in args:
+            if a == ";":
+                cmds.append(cur)
+                cur = []
+            else:
+                cur.append(a)
+        cmds.append(cur)
+        for c in cmds:
+            if c[0] == "display-message":
+                out.append(c[-1])
+            elif c[0] == "capture-pane":
+                tid = c[c.index("-t") + 1].strip("=:")
+                if tid in gone:
+                    rc = 1
+                    break
+                out.append(f"\x1b[32m{tid} first\nlast of {tid}  \n\n")
+            else:
+                raise AssertionError(f"not read-only: {c}")
+
+        class R:
+            returncode, stdout, stderr = rc, "\n".join(out) + "\n", ""
+
+        return R()
+
+    return fake, calls
+
+
+def _use_fake_tmux(monkeypatch, fake):
+    """Stand in for tmux, also where tails() looks for it: CI's macOS machines have no tmux at all."""
+    from orch import runs_live
+
+    which = shutil.which
+
+    def fake_which(name, *a, **kw):
+        return "/usr/bin/tmux" if name == "tmux" else which(name, *a, **kw)
+
+    monkeypatch.setattr(runwatch.shutil, "which", fake_which)
+    monkeypatch.setattr(runs_live, "tmux", fake)
+
+
+def test_tails_reads_every_session_in_one_tmux_call(proj, new_ticket, monkeypatch, child):
+    ids = [new_ticket() for _ in range(3)]
+    for t in ids:
+        _live(proj, t, "working", child)
+    fake, calls = _fake_chain()
+    _use_fake_tmux(monkeypatch, fake)
+    got = runwatch.tails(proj, ids, 1)
+    assert len(calls) == 1
+    assert got == {t: {"lines": [f"last of {t}"]} for t in ids}
+
+
+def test_tails_leaves_out_a_gone_session_and_reads_the_rest(proj, new_ticket, monkeypatch, child):
+    a, b, c = (new_ticket() for _ in range(3))
+    for t in (a, b, c):
+        _live(proj, t, "working", child)
+    none = new_ticket()  # no run: never asked
+    fake, calls = _fake_chain(gone={b})
+    _use_fake_tmux(monkeypatch, fake)
+    got = runwatch.tails(proj, [a, b, none, c], 5)
+    assert set(got) == {a, c} and got[c]["lines"] == [f"{c} first", f"last of {c}"]
+    assert len(calls) == 2 and none not in " ".join(calls[0])
+
+
+def test_run_screen_several_tickets_cli_and_in_process(proj, new_ticket, run, monkeypatch, child):
+    from orch import reads
+
+    a, b = new_ticket(), new_ticket()
+    for t in (a, b):
+        _live(proj, t, "working", child)
+    fake, _ = _fake_chain()
+    _use_fake_tmux(monkeypatch, fake)
+    code, out, err = run("run", "screen", _key(proj, a), b, "--lines", "1", "--json")
+    assert code == 0, err
+    want = {"screens": {a: {"lines": [f"last of {a}"]}, b: {"lines": [f"last of {b}"]}}}
+    assert json.loads(out) == want
+    assert reads.answer(proj, ["run", "screen", a, b, "--lines", "1", "--json"]) == want

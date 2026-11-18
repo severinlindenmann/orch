@@ -180,9 +180,13 @@ def _try(kind: str, what: str, force: bool, clock) -> float:
         _unlock()
 
 
-def take(kind: str, what: str = "", wait: float = WAIT_SECS, sleep=time.sleep, clock=time.time) -> bool:
+def take(
+    kind: str, what: str = "", wait: float = WAIT_SECS, sleep=time.sleep, clock=time.time, on_wait=None
+) -> bool:
     """Wait until one GitHub write of `kind` fits this computer's hourly limit, then count it. False when no
-    room came within `wait` seconds (nothing is counted then: the caller must not write)."""
+    room came within `wait` seconds (nothing is counted then: the caller must not write). on_wait(left,
+    waited) is called before each nap (left: seconds until roughly the next room), so a caller can say what
+    it waits for."""
     kind = kind_of(kind)
     waited = 0.0
     while True:
@@ -191,6 +195,8 @@ def take(kind: str, what: str = "", wait: float = WAIT_SECS, sleep=time.sleep, c
             return True
         if waited >= wait:
             return False
+        if on_wait is not None:
+            on_wait(left, waited)
         nap = max(1.0, min(left, POLL_SECS, wait - waited))
         sleep(nap)
         waited += nap

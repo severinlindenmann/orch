@@ -6,7 +6,7 @@ with the real dashboard server and this checkout's orch (`server.py`), so a clic
 reload shows what really happened.
 
 **Rule: a new dashboard feature brings its click-through in the same pull request.** The `dashboard` CI job
-(`tests/clickthrough_catalogue.test.js`) fails and names the feature when nothing claims it; the `page-smoke` job
+(`tests/clickthrough_catalogue.test.js`) fails and names the feature when nothing claims it; the `dashboard-clickthroughs` job
 runs every click-through and fails when one breaks, or claims a feature it never really did.
 
 ## What counts as a feature
@@ -18,9 +18,26 @@ Read from the code by `catalogue.cjs`, never typed by hand:
 
 `node clickthrough/catalogue.cjs` prints the list and what has no click-through yet.
 
-`not-yet.json` holds the features that have no click-through yet because the demo cannot do them (they need a
-relay, publish, GitHub, an installed add-on, an update source, an agent login or a stuck copy), each with why. The
-list only shrinks: the check fails for a listed feature that has a click-through now. A new feature never goes on it.
+Every feature has a click-through; there is no list to park one on. An op the page only compares
+(`x.action.op === 'message.send'`: it recognises an add-on view's button and does something else) is not counted,
+because the page never sends it.
+
+## Stand-ins for what lives outside this computer
+
+`server.py` starts these in the throw-away home; nothing reaches the internet or the computer's own orch:
+
+- a relay and a publish server on 127.0.0.1 (the fakes of `workspace/tests/fakes.py`: one paired phone, one
+  workspace "Kitchen"). They stay unused until a click-through turns the relay or publish on and connects it
+  (`orch addon add relay --yes`, `orch relay connect <url> --workspace <id> --token <token>`, addresses in
+  `standins`), and it turns them off again at its end;
+- a `gh` program that answers only for pull requests of the made-up repository `standin/lunch` (open, green,
+  one head commit `standins.head`) and "merges" by writing a line;
+- the built-in agent programs (from orch's adapter list): their login check says signed out until their sign-in
+  got a code;
+- the add-ons Focus, Lessons and Pull requests of this checkout (`run.cjs` layers them into every orch of the
+  run): installed and allowed but off; a click-through turns one on with `orch addon add <name> --project-only`;
+- `ORCH_REPO` is this checkout, so "the newest orch" is read from here. An update or an uninstall then stops with
+  a plain reason (this demo runs orch from its source folder, not from an installed tool folder).
 
 ## Run them
 
@@ -59,6 +76,10 @@ module.exports = {
 ```
 
 - `orch(...words)` runs this checkout's orch in the demo workspace as the stand-in helper; `workspace` is its folder.
+  `orchAsPerson(...)` is the same as the person at the computer, `orchIn(dir, ...)` in another folder of the home,
+  `git(dir, ...)` git with no settings of this computer, `python(code, ...args)` a short snippet with orch importable.
+- `until(check, what)`: after a change made outside the page, wait until the page's state passes `check(state)`.
+- `home` is the throw-away home, `standins` where the stand-ins listen.
 - `open(hash)` goes to a dashboard address and waits until it is drawn; `reload()` reloads and waits.
 - `act(op, fn)` runs `fn` (your click) and waits for the page to send `op`; it fails when the server refuses it.
   `act(op, fn, {refused: true})` is for an action that is meant to be refused here (it needs an outside service

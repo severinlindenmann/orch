@@ -10,6 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+import ci_parts
 import pytest
 
 from orch import addons, cli, winfinish
@@ -182,7 +183,22 @@ def _ours(line: dict) -> bool:
     return line.get("pid") in pids or line.get("ppid") in pids
 
 
+def pytest_addoption(parser):
+    ci_parts.addoption(parser)
+
+
+def pytest_collection_modifyitems(config, items):
+    ci_parts.select_part(config, items)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    ci_parts.judge(item, outcome.get_result())
+
+
 def pytest_configure(config):
+    ci_parts.configure(config)
     reg = os.environ.get("ORCH_TEST_SESSION_PIDS")
     if not reg:  # the controller (or a plain run) makes the registry; xdist workers inherit the variable
         fd, reg = tempfile.mkstemp(prefix="orch-test-pids-")
