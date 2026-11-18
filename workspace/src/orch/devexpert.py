@@ -638,7 +638,8 @@ def handle_red(root: Path, role_id: str, red: list[dict], st: dict, dry: bool) -
                         line = (
                             f"Again: {r['why']}. {r.get('url') or ''}".strip()
                             if r["kind"] == "missed"
-                            else f"New red {r['workflow']} {r['kind']} run {r['run']} (failed: {jobs}): {r['url']}"
+                            else f"New red {r['workflow']} {r['kind']} run {r['run']} (failed: {jobs}): "
+                            f"{r['url']}"
                         )
                         tickets.log(root, tid, line, BY)
                     cur["run"] = r["run"]
@@ -650,10 +651,10 @@ def handle_red(root: Path, role_id: str, red: list[dict], st: dict, dry: bool) -
         if r["kind"] == "missed":
             title = f"Nightly {r['workflow']} run did not run on {where}"[:200]
             note = (
-                f"Found by the Development expert: {r['why']}. {r.get('url') or ''} . Find out why (a burst of "
-                "runs that left no machine, GitHub dropping the schedule, a cancel), start the run by hand "
-                f"once fewer than {cibusy.LIMIT} jobs wait for a machine (orch github ci-waiting), and "
-                "write the reason here."
+                f"Found by the Development expert: {r['why']}. {r.get('url') or ''} . Find out why "
+                "(a burst of runs that left no machine, GitHub dropping the schedule, a cancel), start the "
+                f"run by hand once fewer than {cibusy.LIMIT} jobs wait for a machine (orch github "
+                "ci-waiting), and write the reason here."
             )
             done_when = f"The {r['workflow']} nightly ran to the end on time"
         else:
@@ -756,7 +757,9 @@ def note_text(s: dict, changed: list[str], lines: list[str], t: datetime) -> str
     cw = s.get("ci_waiting") or {}
     if cw.get("now") is not None or cw.get("peak"):
         pk = cw.get("peak") or {}
-        saw.append(f"jobs waiting for a machine: {cw.get('now', '?')} now, {pk.get('n', '?')} at most in 24 h")
+        saw.append(
+            f"jobs waiting for a machine: {cw.get('now', '?')} now, {pk.get('n', '?')} at most in 24 h"
+        )
     saw.append(f"{s['open_prs']} open PR(s)")
     if s["merge"]:
         saw.append(f"{s['merge']['count']} merged in 24 h, median {s['merge']['median_h']} h open to merge")

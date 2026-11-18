@@ -376,7 +376,7 @@ def test_a_branch_that_only_looks_like_the_default_branch_after_cleaning_is_not_
     assert res["survey"]["red"] == [] and _made(proj) == []
 
 
-# ---------------------------------------------------------------- the nightly watch and the waiting peak (ORCH-454)
+# ---------------------------------------------------------------- nightly watch, waiting peak (ORCH-454)
 
 
 def _night(at, rid, wf="ci", concl="success", status="completed"):
@@ -399,7 +399,9 @@ def test_nightly_cancelled_late_or_stuck_is_missed_and_an_on_time_one_is_not():
     got = de.missed_nightlies(cancelled, B, now)
     assert got[0]["run"] == 9 and "was cancelled" in got[0]["why"] and got[0]["url"] == "https://x/9"
     late = [_night("2026-11-18T08:10:00Z", 9), *past]  # 01:00 cron, made at 08:10: 7 hours late
-    assert "started 7 h 06 min after its usual time (01:04 UTC)" in de.missed_nightlies(late, B, now)[0]["why"]
+    assert (
+        "started 7 h 06 min after its usual time (01:04 UTC)" in de.missed_nightlies(late, B, now)[0]["why"]
+    )
     stuck = [_night("2026-11-18T01:05:00Z", 9, concl=None, status="in_progress"), *past]
     assert "still not finished" in de.missed_nightlies(stuck, B, now)[0]["why"]
     on_time = [_night("2026-11-18T01:40:00Z", 9), *past]
@@ -418,7 +420,9 @@ def test_a_missed_nightly_opens_one_top_ticket_and_each_new_night_is_a_line(proj
     _pass(proj, gh, "2026-11-17T12:00:00Z")  # the same night 3 h later: nothing new
     assert len(_made(proj)) == 1 and len(starts) == 1
     _pass(proj, gh, "2026-11-18T09:00:00Z")  # the next night missing too: a line on the open ticket
-    assert len(_made(proj)) == 1 and any(x.startswith("Again: no nightly run") for x in _notes(proj, made[0]["id"]))
+    assert len(_made(proj)) == 1 and any(
+        x.startswith("Again: no nightly run") for x in _notes(proj, made[0]["id"])
+    )
 
 
 def test_twenty_jobs_waiting_is_a_finding_and_the_count_is_in_the_note(proj, role, starts):

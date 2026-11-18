@@ -1,14 +1,14 @@
 """How many GitHub Actions jobs wait for a machine right now, and the day's peak (ORCH-454). No AI call.
 
-The night of 17/18 Nov 2026: about 22 pull request runs restarted at once on top of eleven develop runs, 281 jobs
-waited for a machine, the 01:00 nightly started 7 hours late and the nightly e2e did not run. So orch counts the
-waiting jobs before it starts CI work itself (a rerun, taking the base branch in) and holds that work while
-LIMIT or more jobs wait; the Development expert reads the day's peak and says so on a ticket.
+The night of 17/18 Nov 2026: about 22 pull request runs restarted at once on top of eleven develop runs,
+281 jobs waited for a machine, the 01:00 nightly started 7 hours late and the nightly e2e did not run. So orch
+counts the waiting jobs before it starts CI work itself (a rerun, taking the base branch in) and holds that
+work while LIMIT or more jobs wait; the Development expert reads the day's peak and says so on a ticket.
 
-One count is a few GitHub reads (the queued and running runs, then the jobs of each run that are still waiting
-for a machine), at most MAX_RUNS runs; the answer is kept CACHE_SECS for the whole computer, per repository, in
-`ci-waiting.json` in the orch folder, with the highest count of each of the last DAYS days. A read that fails
-gives None: it never blocks work and never counts as a peak.
+One count is a few GitHub reads (the queued and running runs, then the jobs of each run that are still
+waiting for a machine), at most MAX_RUNS runs; the answer is kept CACHE_SECS for the whole computer, per
+repository, in `ci-waiting.json` in the orch folder, with the highest count of each of the last DAYS days.
+A read that fails gives None: it never blocks work and never counts as a peak.
 """
 
 from __future__ import annotations

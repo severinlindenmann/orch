@@ -83,11 +83,17 @@ Exit 0: write now. Exit 2: no room within an hour; do not write, say so in the t
 
 `orch ref wait` runs a check once more by itself when it failed only by timeout or network error, before it says red, and counts it (that rerun takes an "other" write slot). A real failure is never retried. See which checks were run again, most often first: `orch github retries [--days 30]`. A check retried 3 times or more keeps failing: a ticket for its test, not another rerun by hand.
 
+**No bursts of CI runs**
+
+    orch github ci-waiting [--repo <owner/name>] [--wait <minutes>]
+
+Says how many jobs wait for a machine on GitHub now and the day's peak. orch starts no rerun and takes no base branch in while 20 or more wait. Never push or take the base branch in only to restart checks, and never ask several helpers to push at once. When a push really must start checks, run it with `--wait 30` first: exit 2 means GitHub is still jammed, so push later.
+
 **The Development expert (a repeating automation, no AI call)**
 
     orch github expert [--dry-run] [--known nightly-ci=<ticket>]
 
-One read-only pass over the repository's CI, pull requests and this workspace's tickets. A red nightly or red run on the default branch opens one top ticket and starts it at high priority; other findings go into at most one review ticket a day; a dated note goes on the role ticket. Off until a person sets `orch config set github.dev_expert <role ticket>` and `orch config set github.dev_expert_repo <owner/name>`. `--dry-run` only says what it would do.
+One read-only pass over the repository's CI, pull requests and this workspace's tickets. A red nightly or red run on the default branch, or a nightly that did not run (none in 26 hours, cancelled, stuck, or 2 hours or more late), opens one top ticket and starts it at high priority; 20 or more jobs waiting for a machine in the last day is a finding; other findings go into at most one review ticket a day; a dated note goes on the role ticket. Off until a person sets `orch config set github.dev_expert <role ticket>` and `orch config set github.dev_expert_repo <owner/name>`. `--dry-run` only says what it would do.
 
 **The release keeper (a repeating automation, no AI call)**
 

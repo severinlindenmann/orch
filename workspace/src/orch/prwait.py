@@ -635,7 +635,8 @@ def run_one(
         room = getattr(src, "ci_room", None)
         ok, n = room() if callable(room) else (True, None)
         if not ok:  # taking the base branch in starts every check again: never into a jammed CI (ORCH-454)
-            line = f"{base} changed files of {url} ({shown}); not taken in now: {cibusy.busy_line(n)}. Run it again later."
+            busy = cibusy.busy_line(n)
+            line = f"{base} changed files of {url} ({shown}); not taken in now: {busy}. Run it again later."
             return Outcome(url, False, "behind", line, verdict)
         rounds += 1
         note = f"{base} changed files of this pull request since it took {base} in ({shown}): "

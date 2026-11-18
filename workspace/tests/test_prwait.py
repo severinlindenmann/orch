@@ -667,7 +667,7 @@ def test_a_missing_required_check_is_waited_for_while_a_run_is_still_open():
 
 
 def test_overlap_while_ci_is_jammed_does_not_take_develop_in(fake_gh):
-    """ORCH-454: taking develop in starts every check again; never while 20 or more jobs wait for a machine."""
+    """ORCH-454: taking develop in starts every check again; never while 20 or more jobs wait."""
     pulls, merges = fake_gh
     case = {**_case("pr978-second-run"), "ciWaiting": 37}
     pull = FakePull(PR, case, landed=[["workspace/src/orch/prwait.py"]])
