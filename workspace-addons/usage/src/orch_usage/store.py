@@ -126,6 +126,19 @@ def _check_together(t) -> bool:
     return _check_limit(lim) and lim["unit"] == "$" and lim["period"] in ("week", "month")
 
 
+LEFT_MAX = 10_000_000  # dollars: a bigger number is a typo, not a credit
+
+
+def _check_left(x) -> bool:
+    """What the person typed as left now: {"value": dollars >= 0, "at": when they set it (UTC)}."""
+    if not isinstance(x, dict):
+        return False
+    v = x.get("value")
+    if not isinstance(v, (int, float)) or isinstance(v, bool) or not 0 <= v <= LEFT_MAX:
+        return False
+    return bool(_TIME.fullmatch(str(x.get("at", ""))))
+
+
 def _check_account(a) -> bool:
     if not isinstance(a, dict) or not _ID.fullmatch(str(a.get("id", ""))):
         return False
@@ -138,6 +151,8 @@ def _check_account(a) -> bool:
     ):
         return False
     if not isinstance(a.get("source", {}), dict):
+        return False
+    if a.get("left") is not None and not _check_left(a["left"]):
         return False
     return _check_rule(a.get("rule")) and (a.get("prev") is None or _check_rule(a["prev"]))
 
@@ -371,7 +386,7 @@ def sync_found(accounts: list[dict], rows: list[dict], found, provider: str, rea
 
 PROVIDERS = ("anthropic", "openai")  # API credits Usage can count for skills (Anthropic API, OpenAI)
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,31}")
-_SECRETISH = re.compile(r"@|sk-|key-|[A-Za-z0-9_\-]{32,}")
+_SECRETISH = re.compile(r"@|sk-|key-[A-Za-z0-9_]{8,}|[A-Za-z0-9_\-]{32,}")  # a key, not a name like key-1
 
 
 def check_known(k) -> dict:
@@ -642,6 +657,27 @@ def set_end(a: dict, rows: list[dict], who: str, end: str | None) -> None:
     a["rule"]["ends"] = end
     if a["rule"] != old:
         rows.append(_line(who, "rule ends", a, old, copy.deepcopy(a["rule"])))
+
+
+def set_left(a: dict, rows: list[dict], who: str, value: float | None, at: str | None = None) -> None:
+    """What is left on an API credit now, as the person read it at the provider. orch counts down from it with the
+    spend reported since (left.py). None takes it away. Setting it again, even to the same amount, starts the count
+    again from now: the person read a new figure."""
+    if a["type"] not in MONEY_TYPES:
+        raise Refused(f"{a['label']} is a subscription; it has limits in %, not an amount left.")
+    old = copy.deepcopy(a.get("left"))
+    if value is None:
+        if old is None:
+            return
+        a.pop("left", None)
+        rows.append(_line(who, "amount left taken away", a, old, None))
+        return
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value <= LEFT_MAX:
+        raise Refused("Say what is left as an amount of dollars, like $74 or 0.")
+    a["left"] = {"value": round(float(value), 4), "at": at or now()}
+    rows.append(
+        _line(who, f"left set to {fmt_value(a['left']['value'], '$')}", a, old, copy.deepcopy(a["left"]))
+    )
 
 
 def set_on(a: dict, rows: list[dict], who: str, on: bool) -> None:

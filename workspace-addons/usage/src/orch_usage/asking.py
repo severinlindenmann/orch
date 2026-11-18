@@ -24,20 +24,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import routing, store, switching
-from .readers import credit_reader, cswap
+from .left import credit_use
+from .readers import cswap
 
 
-def _left(a: dict, at: datetime) -> float | None:
+def _left(a: dict, at: datetime, root: Path | None = None) -> float | None:
     """Dollars left under the tightest $ limit, when the spend can be read."""
     from .cli import _period_start
 
-    src = a.get("source", {})
-    reader = credit_reader(src.get("reader", "none")) or credit_reader("none")
     left = None
     for lim in a["rule"]["limits"]:
         if lim.get("unit") != "$":
             continue
-        c = reader(src, _period_start(lim["period"], lim, at))
+        c = credit_use(root, a, _period_start(lim["period"], lim, at))
         if c.spent is None:
             continue
         x = round(max(0.0, lim["value"] - c.spent), 4)
@@ -101,7 +100,7 @@ def ask(
             if r:
                 wakes.append(r)
         elif a["type"] == "api-key":
-            room, why, nxt = routing._credit_room(a, at, accounts, doc["together"])
+            room, why, nxt = routing._credit_room(a, at, accounts, doc["together"], root)
             if room:
                 return _go(root, kind, a, provider, at, accounts, doc["together"])
             reasons.append(why)
@@ -139,10 +138,10 @@ def _go(
         nm = a.get("source", {}).get("name")
         if isinstance(nm, str):
             out["name"] = nm
-        left = _left(a, at)
+        left = _left(a, at, root)
         for t in together or []:  # a limit over every account of the provider leaves less
             if t["provider"] == a.get("provider"):
-                spent = routing.together_spent(accounts or [a], t, at)
+                spent = routing.together_spent(accounts or [a], t, at, root)
                 if spent is not None:
                     x = round(max(0.0, t["limit"]["value"] - spent), 4)
                     left = x if left is None else min(left, x)
