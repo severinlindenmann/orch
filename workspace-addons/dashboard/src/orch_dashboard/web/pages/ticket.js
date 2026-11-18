@@ -1137,8 +1137,13 @@ function ticketPhone(q) {
 // screen (the dashboard's read-only /api/term) sits above the box, so the person sees the conversation it goes into.
 const TALK_SEND_MAX = 2000;  // run.send's limit (actions.MAX_TEXT)
 const TALK_TYPED_MAX = 1500;  // what the box takes; the rest is the line that names the files
-const TALK_TYPES = ['txt', 'md', 'csv', 'tsv', 'json', 'log', 'yml', 'yaml', 'toml', 'ini', 'png', 'jpg', 'jpeg', 'gif', 'webp'];  // orch ticket attach
+const TALK_TYPES = ['txt', 'md', 'csv', 'tsv', 'json', 'log', 'yml', 'yaml', 'toml', 'ini', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'webm', 'ogg', 'm4a', 'mp3', 'wav'];  // orch ticket attach
+const TALK_AUDIO = /\.(webm|ogg|m4a|mp3|wav)$/i;
 const TALK_FILE_MAX = 25 * 1024 * 1024, TALK_FILES = 10, TALK_POLL = 2000;
+// The one feedback box (ORCH-422): words, a pasted screenshot, a dropped or picked file and a voice note, on Send back,
+// Add note and Add to this ticket alike. Same limits as every ticket file (orch ticket attach decides).
+const FEEDBACK_BOX = {accept:TALK_TYPES, maxFiles:TALK_FILES, maxBytes:TALK_FILE_MAX, voice:true,
+  acceptError:'Only text files, pictures and voice recordings can be added.', attachLabel:'Add file'};
 function ticketTalkCard(t) {
   if (snapshot || !t || t.status === 'done') return null;
   return h('section', {className:'card ticket-talk', 'data-key':'ticket-talk-' + t.id}, h('h2', {}, 'Add to this ticket'),
@@ -1148,22 +1153,33 @@ function ticketTalkCard(t) {
 function ticketTalkText(typed, names) {
   const said = String(typed || '').trim();
   const count = names.length === 1 ? 'a file' : names.length + ' files';
-  let files = names.length ? 'I added ' + count + ' to this ticket: ' + names.join(', ') + '.' : '';
-  if (files && said.length + files.length + 40 > TALK_SEND_MAX) files = 'I added ' + count + ' to this ticket.';
+  // a voice note without its words (the browser could not turn it into text on this computer): say so plainly
+  const mute = names.some(n => TALK_AUDIO.test(n)) && !/(^|\n)Voice note: /.test(said) ? ' The voice note came without written words.' : '';
+  let files = names.length ? 'I added ' + count + ' to this ticket: ' + names.join(', ') + '.' + mute : '';
+  if (files && said.length + files.length + 40 > TALK_SEND_MAX) files = 'I added ' + count + ' to this ticket.' + mute;
   if (!said) return files + ' Read ' + (names.length === 1 ? 'it' : 'them') + ' and carry on.';
   return files ? said + '\n\n' + files + ' Read ' + (names.length === 1 ? 'it' : 'them') + ' first.' : said;
 }
 const talkFailed = result => result.status === 0 ? "Can't reach orch. Nothing was sent." : window.DashHelpers.scrubText(String(result.text || '')).slice(0, 300) || 'That did not work. Try again.';
+// The box's files onto the ticket in one ticket.attach call; the names orch kept come back (it may rename "x (2).png").
+async function ticketAttachFiles(tid, files) {
+  const list = array(files);
+  if (!list.length) return {ok:true, names:[]};
+  const added = await act('ticket.attach', {ticket:tid, files:list.map(f => ({name:f.name, data:String(f.url || '').slice(String(f.url || '').indexOf(',') + 1)}))});
+  if (!added.ok) return {ok:false, text:talkFailed(added)};
+  if (typeof artifactData !== 'undefined') artifactData.delete(tid);  // the Files tab counts the new files on the next draw
+  const saved = array(added.state?.attached?.saved).filter(n => typeof n === 'string');
+  const failed = array(added.state?.attached?.failed).filter(n => typeof n === 'string');
+  if (failed.length && !saved.length) return {ok:false, text:'These files could not be added: ' + failed.join(', ') + '.'};
+  return {ok:true, names:saved.length ? saved : list.map(f => f.name)};
+}
 async function ticketTalkSend(tid, message) {
   const t = ticketOf(tid);
   if (!t) return {ok:false, text:'This ticket is no longer here.'};
   const files = array(message.files);
-  if (files.length) {
-    const added = await act('ticket.attach', {ticket:tid, files:files.map(f => ({name:f.name, data:String(f.url || '').slice(String(f.url || '').indexOf(',') + 1)}))});
-    if (!added.ok) return {ok:false, text:talkFailed(added)};
-    artifactData.delete(tid);  // the Files tab counts the new files on the next draw
-  }
-  const text = ticketTalkText(message.text, files.map(f => f.name));
+  const kept = await ticketAttachFiles(tid, files);
+  if (!kept.ok) return kept;
+  const text = ticketTalkText(message.text, kept.names);
   const partial = r => ({ok:false, dropFiles:files.length > 0, text:(files.length ? 'The files are on the ticket, but the helper was not told: ' : '') + talkFailed(r)});
   if (t.status === 'review') {  // the same call as Send back: Ready, the note queued, a helper starts from it
     const back = await act('ticket.changes', {ticket:tid, text});
@@ -1194,10 +1210,10 @@ function ticketTalk(host, tid) {
   const dock = el('div', 'session-dock in-card'); dock.dataset.key = 'ticket-talk-dock'; dock.append(head, body, quiet);
   const box = el('div'); box.id = 'ticket-composer-' + tid;
   host.append(dock, box);
-  const composer = window.UI.composer(box, {label:'Add to this ticket', placeholder:'Write what is new, paste a screenshot or drop files…',
-    sendLabel:ticketTalkLabel(ticketOf(tid), state.runs?.[tid]), interrupt:false, accept:TALK_TYPES, maxFiles:TALK_FILES, maxBytes:TALK_FILE_MAX, maxLength:TALK_TYPED_MAX,
-    hint:'Text files and pictures · Cmd/Ctrl+V pastes a screenshot · Cmd/Ctrl+Enter sends', sendStyle:'outline',  // the page keeps its one filled button (Start, Watch live)
-    acceptError:'Only text files and pictures can be added.', emptyError:'Write something or add a file.',
+  const composer = window.UI.composer(box, {...FEEDBACK_BOX, label:'Add to this ticket', placeholder:'Write what is new, paste a screenshot, drop files or record…',
+    sendLabel:ticketTalkLabel(ticketOf(tid), state.runs?.[tid]), interrupt:false, maxFiles:TALK_FILES, maxBytes:TALK_FILE_MAX, maxLength:TALK_TYPED_MAX,
+    hint:'Text files, pictures and voice notes · Cmd/Ctrl+V pastes a screenshot · Cmd/Ctrl+Enter sends', sendStyle:'outline',  // the page keeps its one filled button (Start, Watch live)
+    emptyError:'Write something or add a file.',
     dropTarget:host, dropLabel:'Drop to add to this ticket', sendingText:'Sending…',
     onSend:async message => { const result = await ticketTalkSend(tid, message); render(); return result; }});
   let timer = null, last = null, busy = false;
@@ -1267,27 +1283,27 @@ function ticketChangesEditor(t) {
   const shown = tip ? h('span', {className:'meta', 'data-key':'ticket-review-tip'}, 'Changes up to ', h('code', {}, tip.slice(0, 12))) : null;
   const open = ticketButton('Send back', 'outline sm', () => {
     locks.add(key);
-    let sending = false;
-    // A real text box (ORCH-183): a few lines, its label above it (not repeated inside), Ctrl/Cmd+Enter sends.
-    const fid = 'ticket-changes-text-' + t.id;
-    const input = h('textarea', {className:'input', id:fid, rows:3});
-    const close = () => { if (sending) return; locks.delete(key); host.replaceChildren(row); open.focus(); };
-    const send = ticketButton('Send back', 'primary sm', async () => {
-      if (!input.value.trim() || sending) return;
-      sending = true; send.disabled = true; input.disabled = true; cancel.disabled = true;
-      let sent = false;
-      try { sent = await ticketSendChanges(t, input.value); }
-      finally { sending = false; input.disabled = false; cancel.disabled = false; send.disabled = !input.value.trim(); }
-      if (sent) { close(); render(); }
-    });
-    const cancel = ticketButton(iconEl('x'), 'ghost icon', close, {'aria-label':'Cancel', 'data-key':'ticket-ask-cancel'});
-    send.disabled = true;
-    input.oninput = () => { send.disabled = sending || !input.value.trim(); };
-    input.onkeydown = e => {
-      if (e.key === 'Escape') { e.preventDefault(); close(); }
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.isComposing) { e.preventDefault(); send.click(); }
-    };
-    host.replaceChildren(h('div', {className:'stack-sm'}, h('label', {className:'ticket-ask-label', for:fid}, 'What should change?'), input, h('div', {className:'row'}, send, cancel))); input.focus();
+    // The feedback box (ORCH-422): words, a pasted screenshot, a file or a voice note; Ctrl/Cmd+Enter sends.
+    const box = h('div', {id:'ticket-changes-box-' + t.id});
+    let comp = null, sending = false;
+    const close = () => { if (sending) return; comp?.destroy?.(); locks.delete(key); host.replaceChildren(row); open.focus(); };
+    const cancel = ticketButton('Cancel', 'ghost sm', close, {'data-key':'ticket-ask-cancel'});
+    host.replaceChildren(h('div', {className:'stack-sm'}, h('p', {className:'ticket-ask-label'}, 'What should change?'), box, h('div', {className:'row'}, cancel)));
+    if (!window.UI?.composer) return;
+    comp = window.UI.composer(box, {...FEEDBACK_BOX, label:'What should change?', placeholder:'Type, paste a screenshot, drop a file or record', sendLabel:'Send back',
+      interrupt:false, maxLength:TALK_TYPED_MAX, hint:'', emptyError:'Write what should change, or add a file or a voice note.', dropTarget:host, dropLabel:'Drop to send back with this', sendingText:'Sending…',
+      onSend:async message => {
+        sending = true;
+        try {
+          const kept = await ticketAttachFiles(t.id, message.files);
+          if (!kept.ok) return kept;
+          const ok = await ticketSendChanges(t, ticketTalkText(message.text, kept.names));
+          if (ok) { sending = false; close(); render(); return {ok:true, text:''}; }
+          return {ok:false, dropFiles:kept.names.length > 0, text:kept.names.length ? 'The files are on the ticket, but it was not sent back. Try again.' : 'It was not sent back. Try again.'};
+        } finally { sending = false; }
+      }});
+    box.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); close(); } });
+    comp.field.focus();
   });
   row.append(...[done, open, uncovered, shown].filter(Boolean)); host.append(row); return host;
 }
@@ -1795,7 +1811,8 @@ function detail(t) {
     ticketTalkCard(t),
     t.description ? h('section', {className:'card asked', 'data-key':'description'}, h('h2', {}, 'What was asked'), h('p', {className:'preserve-lines'}, linkRefs(t, t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
     t.summary && t.status !== 'review' ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, 'In short: ', linkRefs(t, t.summary)) : null,
-    note ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note, inputFiles(t).map(f => ticketFileRow(t, 'artifacts', f))) : null,
+    // also without a note: the screenshots, files and voice notes a person sent with Send back or Add note (ORCH-422)
+    note || inputFiles(t).length ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note, inputFiles(t).map(f => ticketFileRow(t, 'artifacts', f))) : null,
     working && helperLive ? sharedFolderLine(t) : null,
     t.status !== 'review' ? ticketResultsCard(t) : null,
     ticketHelperDid(t),

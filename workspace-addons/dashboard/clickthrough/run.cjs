@@ -297,7 +297,8 @@ async function main() {
   if (o.out) fs.mkdirSync(o.out, { recursive: true });
   const srv = await serve();
   const { chromium } = playwright();
-  const browser = await chromium.launch({ args: ['--use-mock-keychain', '--password-store=basic'] });
+  // a fake microphone that is always allowed (ORCH-422: the voice note click-through records with it)
+  const browser = await chromium.launch({ args: ['--use-mock-keychain', '--password-store=basic', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
   const done = new Set(), results = [];
   try {
     const ctx = await signIn(browser, srv);

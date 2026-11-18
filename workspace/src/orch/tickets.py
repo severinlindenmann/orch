@@ -4095,7 +4095,7 @@ def _artifacts_dir_raw(root: Path, tid: str) -> Path:
     return d
 
 
-# What a person may attach to a ticket from the dashboard or the phone: plain text and pictures.
+# What a person may attach to a ticket from the dashboard or the phone: text, pictures and voice recordings.
 # Never a page or a program that runs: html, xml, svg and scripts are not accepted.
 # (The dashboard's actions.py mirrors these limits to refuse early; orch here is the one that decides.)
 ATTACH_TEXT = frozenset({"txt", "md", "csv", "tsv", "json", "log", "yml", "yaml", "toml", "ini"})
@@ -4105,6 +4105,16 @@ ATTACH_IMAGES = {
     "jpeg": (b"\xff\xd8\xff",),
     "gif": (b"GIF87a", b"GIF89a"),
     "webp": (b"RIFF",),
+}
+# A voice note recorded in the browser (ORCH-422): Chrome and Edge record webm, Firefox ogg,
+# Safari mp4 (kept as m4a).
+# Each is checked by its first bytes like a picture; nothing in it runs.
+ATTACH_AUDIO = {
+    "webm": (b"\x1a\x45\xdf\xa3",),
+    "ogg": (b"OggS",),
+    "m4a": (),  # an mp4 box: "ftyp" at byte 4 (checked below)
+    "mp3": (b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"),
+    "wav": (b"RIFF",),
 }
 ATTACH_MAX = 25 * 1024 * 1024  # one attached file: the one limit (dashboard and Focus use it too)
 LONG_TEXT = 1500  # a text longer than this is kept as a file (note.md); the Note stays short
@@ -4120,8 +4130,9 @@ def attach_name(hint) -> str:
     stem, dot, ext = base.rpartition(".")
     ext = ext.lower()
     stem = stem.strip()[:80].strip(". ")
-    if not dot or not stem.strip("._ -") or (ext not in ATTACH_TEXT and ext not in ATTACH_IMAGES):
-        raise Refused("That kind of file cannot be attached. Text files and pictures can.")
+    allowed = ext in ATTACH_TEXT or ext in ATTACH_IMAGES or ext in ATTACH_AUDIO
+    if not dot or not stem.strip("._ -") or not allowed:
+        raise Refused("That kind of file cannot be attached. Text files, pictures and voice recordings can.")
     if stem.split(".")[0].lower() in _WIN_RESERVED:
         stem = "_" + stem
     return stem + "." + ext
@@ -4136,6 +4147,14 @@ def _check_attach(name: str, data) -> str:
     if ext in ATTACH_IMAGES:
         if not data.startswith(ATTACH_IMAGES[ext]) or (ext == "webp" and data[8:12] != b"WEBP"):
             raise Refused("That picture is not what its name says.")
+    elif ext in ATTACH_AUDIO:
+        ok = (
+            data[4:8] == b"ftyp"
+            if ext == "m4a"
+            else data.startswith(ATTACH_AUDIO[ext]) and (ext != "wav" or data[8:12] == b"WAVE")
+        )
+        if not ok:
+            raise Refused("That recording is not what its name says.")
     else:
         if b"\x00" in data:
             raise Refused("That file is not plain text.")
