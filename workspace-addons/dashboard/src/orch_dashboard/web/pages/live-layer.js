@@ -371,6 +371,7 @@ function liveLayerPaint() {
     liveLayerWasPanes = where === 'bar' || where === 'side' ? [] : [...s.panes];
   }
   liveLayerFill();
+  window.liveStartMount?.();  // the Start choice of a pane with no helper (pages/live-start.js)
   document.body.dataset.liveLayer = where;
   liveLayerInert(where === 'full');
   liveLayerPad();
