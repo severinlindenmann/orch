@@ -425,13 +425,14 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
         nxt = f"Removed {rec['name']}. Its log stays in .orch/addons/services/logs/{sid}.log."
         return _emit(args, {"removed": sid, "next": nxt}, nxt)
     spec = _spec(root, rec, wid, strict=verb != "stop")
+    was_stopped = verb == "stop" and _state(root, drv, rec, wid)["state"] == "stopped"
     getattr(drv, verb)(spec)
     store.mark(root, sid, verb != "stop")
     if verb != "stop":
         watch.note_own_start(root, drv, spec)
     row = _state(root, drv, rec, wid)
     words = {"start": "Started", "stop": "Stopped", "restart": "Restarted"}[verb]
-    nxt = f"{words} {rec['name']}."
+    nxt = f"{rec['name']} is already stopped." if was_stopped else f"{words} {rec['name']}."
     if verb != "stop" and row["state"] != "running":
         nxt = f"{rec['name']} did not stay running. Read its log: orch services log {sid}"
     return _emit(args, {"service": row, "next": nxt}, nxt)
@@ -446,8 +447,24 @@ def cmd_log(args, root: Path) -> int:
     if args.json:
         print(json.dumps({"id": rec["id"], "lines": lines}, ensure_ascii=False))
         return 0
-    print("\n".join(lines) if lines else f"{rec['name']} has not written anything yet.")
+    print("\n".join(lines) if lines else no_log_text(rec))
     return 0
+
+
+def no_log_text(rec: dict) -> str:
+    """What to say when there is nothing to show: an adopted job whose own log orch cannot find keeps none here."""
+    a = _adopted(rec)
+    if a and not _has_own_log(a):
+        return "orch keeps no log for this job."
+    return f"{rec['name']} has not written anything yet."
+
+
+def _has_own_log(a: dict) -> bool:
+    if a["kind"] == "launchd":
+        from .found import launchd_log
+
+        return bool(a.get("path")) and launchd_log(Path(a["path"])) is not None
+    return shutil.which("journalctl") is not None
 
 
 def _log_lines(root: Path, rec: dict, n: int) -> list[str]:

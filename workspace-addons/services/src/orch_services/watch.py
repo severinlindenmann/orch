@@ -27,6 +27,7 @@ from .store import Refused
 
 WINDOW = 600  # seconds: failures counted in the last 10 minutes; healthy this long takes the question back
 LIMIT = 3  # failures in the window that make a service failing
+MANY = 5  # this many failures in the window: restarting again is not the answer, a person should look into it
 PORT_TIMEOUT = 0.5
 OPTIONS = ("Restart", "Stop", "Look into it")
 BY = "agent:services"
@@ -326,7 +327,7 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
             question_text(rec["name"], max(n, LIMIT)),
             *(x for o in OPTIONS for x in ("--option", o)),
             "--recommend",
-            "Restart",
+            "Look into it" if n >= MANY else "Restart",
             write=True,
         )
         q = q.get("question", q) if isinstance(q, dict) else {}

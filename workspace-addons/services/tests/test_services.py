@@ -283,3 +283,21 @@ def test_add_says_why_when_the_stored_keys_cannot_be_read(cli, monkeypatch):
     assert out["error"] == (
         "Could not compare the command with this workspace's stored keys: This is a test install outside the test folder."
     )
+
+
+def test_stop_on_a_stopped_service_says_it_is_already_stopped(cli, fake):
+    _add(cli)
+    code, out = jrun(cli, "stop", "web")
+    assert code == 0 and out["next"] == "web is already stopped." and out["service"]["state"] == "stopped"
+    jrun(cli, "start", "web")
+    code, out = jrun(cli, "stop", "web")
+    assert out["next"] == "Stopped web."
+
+
+def test_the_log_of_an_adopted_job_without_a_log_file_says_orch_keeps_none(ws):
+    from orch_services import store
+    from orch_services.cli import no_log_text
+
+    rec = {"id": "j", "name": "Job", "adopted": {"kind": "launchd", "entry": "com.x.job", "path": None}}
+    assert no_log_text(rec) == "orch keeps no log for this job."
+    assert no_log_text({"id": "w", "name": "Web", "adopted": None}) == "Web has not written anything yet."
