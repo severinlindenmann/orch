@@ -43,7 +43,7 @@ test('an add-on has the same display name on or off (never the lower-case packag
 // ORCH-141: the Settings list says the menu name (Shared links, Contacts), the same as the sidebar
 test('the Settings list row uses the menu name that the sidebar shows', () => {
   const c = load(settingsCtx(), head);
-  assert.equal(c.rowLabel({name: 'publish', label: 'Shared with others'}), 'Shared with others');
+  assert.equal(c.rowLabel({name: 'publish', label: 'Shared'}), 'Shared');
   assert.equal(c.rowLabel({name: 'relay', label: 'Contacts'}), 'Contacts');
   assert.equal(c.rowLabel({name: 'relay', dashboard: {label: 'Contacts'}}), 'Contacts');
   assert.equal(c.rowLabel({name: 'sync'}), 'Sync');
@@ -162,7 +162,7 @@ test('the live-session add-on page shows the Preview switch, off by default, onl
   assert.equal(find(mk({focus_preview_on: false}).page({...focus, active: false}), byKey('addon-detail-live-preview')), null);
   assert.equal(find(mk({focus_preview_on: false}).page({name: 'sync', active: true, description: 'd'}), byKey('addon-detail-live-preview')), null);
   assert.equal(find(mk({}).page(focus), byKey('addon-detail-live-preview')), null, 'no setting in the state (an old server): no switch');
-  // ORCH-300 item 14: Preview is technical, so it sits in the "More settings" fold
+  // ORCH-300 item 14: Preview is technical, so it sits in the "More" fold
   assert.ok(find(find(mk({focus_preview_on: false}).page(focus), byKey('settings-more-addon-focus')), byKey('addon-detail-live-preview')));
 });
 

@@ -109,11 +109,11 @@ function helpersAtOnceCard(settings) {
       settingsText('p', {className:'meta'}, 'Pick a number if your computer gets slow with many helpers.')),
     pick)));
 }
-// "More settings": the technical switches in one native fold at the end of a tab, closed until the person opens it.
+// "More": the technical switches in one native fold at the end of a tab, closed until the person opens it.
 // It stays open across re-renders (a switch click inside it re-renders the page).
 const moreOpen = new Set();
 function moreSettings(tab, ...cards) {
-  const fold = h('details', {className:'disclosure stack', 'data-key':'settings-more-' + tab}, h('summary', {}, 'More settings'), ...cards.filter(Boolean));
+  const fold = h('details', {className:'disclosure stack', 'data-key':'settings-more-' + tab}, h('summary', {}, 'More'), ...cards.filter(Boolean));
   fold.open = moreOpen.has(tab);
   fold.ontoggle = () => { if (fold.open) moreOpen.add(tab); else moreOpen.delete(tab); };
   return fold;
@@ -156,10 +156,10 @@ function diagCard(settings) {
   const off = snapshot || settingsBusy.has('diag');
   const n = Number(reports.count) || 0;
   return h('div', {className:'stack', 'data-key':'settings-diag'}, h('h2', {className:'set-sub'}, 'Report a problem'), h('div', {className:'card'},
-    h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Notes for problem reports'),
+    h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Problem log'),
       settingsText('p', {}, 'orch notes steps, errors and timings in the background, so a helper can find out what went wrong. It stays on this computer.'),
       settingsText('p', {className:'meta'}, 'On by default. Keeps the last 7 days. Off stops new notes.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Notes for problem reports', 'aria-checked':on, 'data-key':'settings-switch-diag', 'data-action':'diag-set', disabled:off})),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Problem log', 'aria-checked':on, 'data-key':'settings-switch-diag', 'data-action':'diag-set', disabled:off})),
     h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Saved reports'),
       h('p', {className:'grow set-ctl', 'data-key':'settings-diag-reports'}, n === 1 ? '1 report' : n + ' reports', reports.last ? h('span', {className:'meta'}, ' · last ' + time(reports.last)) : null),
       snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'diag-delete-reports', 'data-key':'settings-diag-delete-reports', disabled:off || !n}, 'Delete all')),
@@ -168,7 +168,7 @@ function diagCard(settings) {
 async function diagSwitch() {
   const on = state.settings?.diag_enabled === false;
   const result = await settingsSend('diag.set', {on}, 'diag');
-  if (result.ok) window.orch.toast(on ? 'Notes for problem reports are on.' : 'Notes for problem reports are off.', 'ok');
+  if (result.ok) window.orch.toast(on ? 'Problem log is on.' : 'Problem log is off.', 'ok');
 }
 async function diagDelete() {
   const result = await settingsSend('diag.delete_reports', {}, 'diag');
@@ -625,7 +625,7 @@ function addonDetailPage(addon) {
     links && shown !== null ? row('Shared pages', settingsText('p', {}, 'Show workspace name and icon'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on shared pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
   ];
-  // Typing and Preview are technical: behind "More settings" (ORCH-300 item 14).
+  // Typing and Preview are technical: behind "More" (ORCH-300 item 14).
   const technical = settingsRows.splice(1, 2).filter(Boolean);
   if (technical.length) settingsRows.push(moreSettings('addon-' + addon.name, ...technical));
   const where = live && (live.dashboard || live.page)

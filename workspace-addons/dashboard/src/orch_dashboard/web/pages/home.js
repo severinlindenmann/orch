@@ -371,7 +371,7 @@ function reviewAllButton() {
   const cards = typeof reviewCount === 'function' ? reviewCount() : 0, n = cards ? (typeof needsYouTotal === 'function' && needsYouTotal()) || cards : 0;
   return n && !snapshot ? h('a', {className:'btn primary sm', href:'#review', 'data-key':'review-all'}, 'Review all', h('span', {className:'count'}, String(n))) : null;
 }
-// "Hide old questions": the questions that have waited more than a week go in one click. Same path as a one-click answer:
+// "Hide old": the questions that have waited more than a week go in one click. Same path as a one-click answer:
 // the rows leave at once, the toast offers Undo, and only when the Undo window ends is each one answered.
 const OLD_QUESTION_MS = 7 * 24 * 3600 * 1000, OLD_QUESTION_ANSWER = 'Dismissed: older than a week';
 function oldQuestions() {
@@ -382,7 +382,7 @@ function clearOldButton() {
   const old = snapshot ? [] : oldQuestions();
   if (!old.length) return null;
   const label = 'Dismiss the ' + old.length + (old.length === 1 ? ' question' : ' questions') + ' older than a week';
-  const b = h('button', {type:'button', className:'btn quiet sm', title:label, 'aria-label':label, 'data-key':'clear-old'}, 'Hide old questions');
+  const b = h('button', {type:'button', className:'btn quiet sm', title:label, 'aria-label':label, 'data-key':'clear-old'}, 'Hide old');
   b.onclick = () => {
     if (changeUnavailable()) return;
     const rows = oldQuestions();

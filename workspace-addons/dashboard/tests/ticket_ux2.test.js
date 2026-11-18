@@ -94,7 +94,7 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   assert.ok(/Start helper/.test(fresh) && !/Resume/.test(fresh), 'tasks typed before any helper ran: Start helper, not Resume');
 });
 
-test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch decide, and a change sends ticket.model', async () => {
+test('ORCH-49: Properties shows the Model with Sonnet / Opus / Auto, and a change sends ticket.model', async () => {
   const sent = [];
   const ctx = {window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h, array:v => Array.isArray(v) ? v : [],
     clean:v => String(v ?? ''), el:(tag, cls, txt) => h(tag, {className:cls}, txt), act:async (op, a) => { sent.push([op, a]); return {ok:true}; }};
@@ -105,7 +105,7 @@ test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch decide, 
   assert.equal(picked.tag, 'select');
   assert.deepEqual(picked.children.map(o => o.attrs.value), ['auto', 'haiku', 'sonnet', 'opus', 'fable']);
   // ORCH-300 item 31: plain choices, the model names only behind More
-  assert.deepEqual(picked.children.map(text), ['Let orch decide', 'Fastest', 'Faster', 'Stronger', 'Drafts to pick from']);
+  assert.deepEqual(picked.children.map(text), ['Auto', 'Fastest', 'Faster', 'Stronger', 'Drafts to pick from']);
   assert.equal(picked.value, 'auto');
   const more = field.children[1];
   assert.equal(more.tag, 'details');

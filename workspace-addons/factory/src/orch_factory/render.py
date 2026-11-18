@@ -44,11 +44,11 @@ def join(segments, suffix, tail=""):
 # question asked under earlier words must still match: changing a label here, add the old set to
 # EARLIER_START_LABELS (never edit an old set). tests/test_wording.py pins every card's words.
 START_LABELS = {
-    "stops": "I will pause at",
+    "stops": "Pauses",
     "steps": "Tasks",
-    "crew": "Who works on it",
+    "crew": "Team",
     "cap": "Time limit",
-    "ship": "What goes live",
+    "ship": "Goes live",
 }
 EARLIER_START_LABELS = (
     {"stops": "Stops", "steps": "Steps", "crew": "Crew", "cap": "Cap", "ship": "Ship"},  # up to release 32

@@ -417,7 +417,7 @@ test('settings: the folder is shown plainly with Copy path and the quiet full pa
       assert.ok(row.textContent.length <= 48 && row.textContent.includes('…'));
       assert.ok(row.textContent.startsWith('/Users/someone') && row.textContent.endsWith('pilatus-workspace'));
     } else assert.equal(row.textContent, folder);
-    // The only fold is "More settings" (owner's word list, ORCH-300 item 14); no Details toggles.
+    // The only fold is "More" (owner's word list, ORCH-300 item 14); no Details toggles.
     assert.equal(nodes(page, n => n.tag === 'details' && !String(n.attrs?.['data-key'] || '').startsWith('settings-more-')).length, 0, 'Settings has no Details toggles');
   }
 });

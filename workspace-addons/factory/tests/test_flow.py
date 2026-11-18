@@ -631,10 +631,10 @@ def test_start_text_shows_what_matters(ws, run):
     order, _ = started(ws, run, data=json.dumps(p).encode())
     text = core(ws, "ticket", "show", order)["questions"][0]["text"]
     for part in (
-        "I will pause at: build, ship",
-        "Who works on it: manager claude, builder codex, reviewer claude",
+        "Pauses: build, ship",
+        "Team: manager claude, builder codex, reviewer claude",
         "Time limit: 2 h 30 min active",
-        "What goes live: Merges the reviewed page into develop. (undo: A revert task.)",
+        "Goes live: Merges the reviewed page into develop. (undo: A revert task.)",
         "Handover: photos → ws_design0001",
         "Unsure: Bookings go to Anna's calendar",
     ):

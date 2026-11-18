@@ -131,7 +131,7 @@ test('dashboard UX shots: Chat (Today, Earlier, a past day) and Settings at 1280
       await shot('chat-day');
       report[`chat-day-${w}`].banner = await page.textContent('.chat-archive-banner');
       await page.goto(BASE + '/#settings');
-      // Several helpers at once sits in the closed "More settings" fold: open it first.
+      // Several helpers at once sits in the closed "More" fold: open it first.
       await page.waitForSelector('[data-key="settings-more-general"]');
       if (!(await page.$eval('[data-key="settings-more-general"]', d => d.open))) await page.click('[data-key="settings-more-general"] > summary');
       await page.waitForSelector('[data-key="settings-copies"]');

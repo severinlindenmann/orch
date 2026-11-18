@@ -79,7 +79,7 @@ async function previewSwitch(page, dash) {
   await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
     body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
   const sw = '[data-key="addon-detail-live-preview"]';
-  // The Preview switch sits in the closed "More settings" fold of the add-on's settings: open it first.
+  // The Preview switch sits in the closed "More" fold of the add-on's settings: open it first.
   const fold = '[data-key="settings-more-addon-focus"]';
   const openFold = async () => {
     await page.waitForSelector(fold, { timeout: 20000 });

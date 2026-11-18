@@ -566,11 +566,11 @@
     if (time.owner_min != null) summary.push("you're needed ~" + time.owner_min + ' min');
     if (time.eta_from || time.eta_to) summary.push('ETA ' + whenRange(time.eta_from, time.eta_to));
     view.append(node('p', summary.join(' · '), 'f-summary'));
-    view.append(group('f-three', card('The stages', line(data.line)),
+    view.append(group('f-three', card('Stages', line(data.line)),
       card('Time + budget', p('~' + duration(time.active_min) + ' active · API target $' + text(b.api_usd_target)),
         p('ETA ' + whenRange(time.eta_from, time.eta_to)), meta('Budget preset · ' + capital(b.preset)),
         meta('Time limit (active time): ' + duration(b.active_min_cap) + '. AI cost is a target, not a limit.'), meta('Your time: about ' + text(time.owner_min) + ' min.')),
-      card('Who works on it + what it needs', crewPlan(data.crew), list(array(data.needs).map(n => (n.ready ? '✓ Ready · ' : 'Needs you · ') + text(n.what) + (!n.ready && n.fix ? ' — ' + n.fix : '')), 'No additional needs recorded.'))));
+      card('Team + what it needs', crewPlan(data.crew), list(array(data.needs).map(n => (n.ready ? '✓ Ready · ' : 'Needs you · ') + text(n.what) + (!n.ready && n.fix ? ' — ' + n.fix : '')), 'No additional needs recorded.'))));
     for (const h of array(order.handover)) {
       const tiles = group('actions', ...array(h.files).map(f => badge(f.split('/').pop())));
       view.append(card(text(h.name) + ' does this', p(text(h.name) + ' makes ' + text(h.title) + (h.minutes ? ' · about ' + h.minutes + ' min' : '')), meta(h.why),
@@ -584,7 +584,7 @@
     assumptions.append(meta('Resolve unsure assumptions on the ticket before Start.'));
     view.append(assumptions, answer(order));
     const details = node('details', null, 'f-details');
-    details.append(node('summary', 'Details · all stages, who works on it, plan & tasks'), group('stack', line(data.line), node('h3','Who works on it'), crewPlan(data.crew),
+    details.append(node('summary', 'Details · all stages, who works on it, plan & tasks'), group('stack', line(data.line), node('h3','Team'), crewPlan(data.crew),
       node('h3','Tasks'), list(array(data.tasks).map(t => text(t.title) + ' · ' + text(t.slug) + ' · ' + roleName(t.role) + ' · ' + capital(t.stage) + (array(t.proves).length ? ' · proves: ' + t.proves.map(i => array(data.done_means)[i] || i).join('; ') : ''))),
       node('h3','Skipped stages'), list(array(data.skipped).map(s => capital(s.stage) + ' — ' + text(s.why))),
       node('h3','Handovers'), list(array(data.handovers).map(h => text(h.task) + ' → ' + text(h.workspace) + ' — ' + text(h.why)))));
@@ -613,10 +613,10 @@
       view.append(card('Autopilot order', p('Routine pauses answered by your agent · Putting it live still asks you'),
         group('actions', link('What it decided', '#/autopilot'), ticket(order.id, 'Open order ticket', false))));
     }
-    const lineCard = card('The stages', stages(order), ...waitNote(order), ...startingNote(order), ...(order.kind === 'run' && order.phase === 'started' ? [nextStop(order)].filter(Boolean) : []));
+    const lineCard = card('Stages', stages(order), ...waitNote(order), ...startingNote(order), ...(order.kind === 'run' && order.phase === 'started' ? [nextStop(order)].filter(Boolean) : []));
     // the stage review sits right under the line (ORCH-335): on a phone it comes before the long lists, not after them
     const main = group('stack', lineCard, ...reviews(order).map(r => reviewCard(order, r, false)), card('Time + budget', budget(order), ...(order.due ? [meta('Due ' + when(order.due))] : [])));
-    const crew = card('Who works on it now');
+    const crew = card('Team now');
     for (const c of array(order.crew)) {
       const label = c.with ? [roleName(c.role), c.with.name, c.with.words].filter(Boolean).join(' · ') : [roleName(c.role), c.agent, statusWord[c.status] || c.status].filter(Boolean).join(' · ');
       const row = group('f-record f-crew');

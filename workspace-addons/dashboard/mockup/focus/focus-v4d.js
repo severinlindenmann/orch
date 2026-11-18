@@ -377,7 +377,7 @@
     var c = { wait: 0, run: 0, queue: 0, idle: 0 };
     S.forEach(function (s) { c[s.s === 'wait' ? 'wait' : grp(s)]++; });
     var part = function (n, g, w) { return n ? '<span class="mw-st" data-s="' + g + '"><span class="mw-sym" aria-hidden="true">' + ST[g][0] + '</span>' + n + ' ' + w + '</span>' : ''; };
-    var h = '<div class="mw-wall"><header class="mw-wh"><div><div class="mw-h1"><h1>Watch work live</h1>' + mk(1) + '</div><p class="mw-hero" role="status">' + (c.wait ? part(c.wait, 'wait', c.wait === 1 ? 'needs you' : 'need you') : '<span class="mw-st">Nobody needs you</span>') + part(c.run, 'run', 'working') + part(c.queue, 'queue', 'in line') + part(c.idle, 'idle', 'idle') + '</p><p class="meta">' + S.length + ' sessions · ' + used() + ' of ' + max() + ' helper places in use</p></div>';
+    var h = '<div class="mw-wall"><header class="mw-wh"><div><div class="mw-h1"><h1>Live</h1>' + mk(1) + '</div><p class="mw-hero" role="status">' + (c.wait ? part(c.wait, 'wait', c.wait === 1 ? 'needs you' : 'need you') : '<span class="mw-st">Nobody needs you</span>') + part(c.run, 'run', 'working') + part(c.queue, 'queue', 'in line') + part(c.idle, 'idle', 'idle') + '</p><p class="meta">' + S.length + ' sessions · ' + used() + ' of ' + max() + ' helper places in use</p></div>';
     h += '<div class="mw-new" role="group" aria-label="New session without a ticket">' + mk(6) + NEW.map(function (o) { return btn('btn outline sm', 'new', (has(o[0]) ? '' : '<span aria-hidden="true">+</span> ') + o[0], { 'data-k': o[0], title: has(o[0]) ? 'Already open: go to it' : o[1] }); }).join('') + '</div></header>';
     h += pickHTML();
     h += '<div class="mw-tools"><label class="sr-only" for="mw-filter">Filter sessions</label><input class="input" id="mw-filter" type="search" placeholder="Filter by name, ticket or status" value="' + esc(st.f) + '" autocomplete="off">' + mk(11) + '</div>';
@@ -466,18 +466,18 @@
   }
   function barHTML(mode) {
     var full = mode === 'full', tiny = BL >= 3;
-    var h = '<div class="mw-bar" role="group" aria-label="Focus bar" data-fold="' + BL + '">' + btn('mw-home', 'home', '<b>Watch work live</b>', { title: 'Focus start page' }) + (full ? '' : mk(7));
+    var h = '<div class="mw-bar" role="group" aria-label="Focus bar" data-fold="' + BL + '">' + btn('mw-home', 'home', '<b>Live</b>', { title: 'Focus start page' }) + (full ? '' : mk(7));
     h += '<nav class="mw-sw" aria-label="Sessions">' + chipsHTML() + '</nav>';
     if (full) return h + popHTML(mode) + '<span class="meta mw-hint">Esc to leave</span>' + btn('btn icon sm ghost', 'full', I.exit, { 'aria-label': 'Leave full screen' }) + '</div>';
     h += btn('btn sm ghost', 'menu', I.plus + (tiny ? '' : '<span>New</span>'), { 'data-m': 'new', 'aria-expanded': String(st.menu === 'new'), 'aria-label': tiny ? 'New' : null, title: 'New session without a ticket' });
     if (zoomed()) return h + popHTML(mode) + '</div>';
-    if (mode === 'bar') h += btn('btn sm ghost', 'mode', I.up + (tiny ? '' : '<span>Open</span>'), { 'data-m': phone() ? 'bottom' : st.last, 'aria-label': tiny ? 'Open' : null, title: 'Open Watch work live where it was last' }) + btn('btn icon sm ghost mw-pos', 'menu', I[st.last === 'right' ? 'right' : 'bottom'], { 'data-m': 'pos', 'aria-expanded': String(st.menu === 'pos'), 'aria-label': 'Place' , title: 'Where Focus sits' });
+    if (mode === 'bar') h += btn('btn sm ghost', 'mode', I.up + (tiny ? '' : '<span>Open</span>'), { 'data-m': phone() ? 'bottom' : st.last, 'aria-label': tiny ? 'Open' : null, title: 'Open Live where it was last' }) + btn('btn icon sm ghost mw-pos', 'menu', I[st.last === 'right' ? 'right' : 'bottom'], { 'data-m': 'pos', 'aria-expanded': String(st.menu === 'pos'), 'aria-label': 'Place' , title: 'Where Focus sits' });
     else { var pl = mode === 'right' ? 'Right' : 'Bottom'; h += btn('btn sm ghost mw-pos', 'menu', I[mode === 'right' ? 'right' : 'bottom'] + (tiny ? '' : '<span>' + pl + '</span>') + I.up, { 'data-m': 'pos', 'aria-expanded': String(st.menu === 'pos'), 'aria-label': tiny ? pl : null, title: 'Where Focus sits' }); }
     return h + popHTML(mode) + '</div>';
   }
   function layerHTML() {
     var mode = eff(), w = S.filter(function (x) { return x.s === 'wait'; }).length;
-    if (mode === 'side') return btn('mw-edge', 'mode', '<span class="mw-edget">Watch work live</span>' + (w ? '<span class="mw-cnt" data-s="wait"><span aria-hidden="true">◆</span> ' + w + '</span>' : ''), { 'data-m': st.last, 'aria-label': 'Open Watch work live again. ' + (w ? w + ' waiting for you' : 'Nothing is waiting') });
+    if (mode === 'side') return btn('mw-edge', 'mode', '<span class="mw-edget">Live</span>' + (w ? '<span class="mw-cnt" data-s="wait"><span aria-hidden="true">◆</span> ' + w + '</span>' : ''), { 'data-m': st.last, 'aria-label': 'Open Live again. ' + (w ? w + ' waiting for you' : 'Nothing is waiting') });
     var panel = '', full = mode === 'full', n = st.panes.length;
     if (mode !== 'bar') panel = '<div class="mw-panel" data-mode="' + mode + '" data-n="' + n + '">' + st.panes.map(function (k, i) {
       var s = by(k), on = i === st.act, narrow = n > 1 && (mode === 'right' || phone() || (window.innerWidth - 240) / n < 480);

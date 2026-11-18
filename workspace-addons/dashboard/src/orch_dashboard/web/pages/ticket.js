@@ -1342,7 +1342,7 @@ function ticketParts(t, children) {
   if (!children.length) return add && !window.DashHelpers.parentOf(tickets(), t) ? h('div', {className:'row', 'data-key':'parts-add'}, add) : null;
   // ORCH-37: in a release, an epic's row says how far its own tickets are ("Epic · 2 of 4 done").
   const epicLine = child => { if (!t.release || !child.epic) return null; const kids = window.DashHelpers.childrenOf(tickets(), child); return h('span', {className:'meta'}, kids.filter(k => k.status === 'done').length + ' of ' + kids.length + ' parts done'); };
-  return card('parts', t.release ? 'Tickets in this release' : t.epic ? 'Parts of this ticket' : 'Sub-tickets', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, window.DashHelpers.keyTag(child, h), clean(child.title)), epicLine(child), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
+  return card('parts', t.release ? 'Tickets in this release' : t.epic ? 'Parts' : 'Sub-tickets', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, window.DashHelpers.keyTag(child, h), clean(child.title)), epicLine(child), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
 }
 const ticketPlanEditing = new Set();
 function ticketRenameStep(child) {
@@ -1828,7 +1828,7 @@ const FIELD_LABEL = {title:'title', owner:'owner', due:'due date', note:'what yo
 const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note', done_when:'Say what should be true when it is done'};
 // A value on the ticket page: a plain click turns it into a field; Enter or leaving it saves, Esc cancels.
 // The model this ticket's helper runs on (ORCH-49): orch picks Sonnet or Opus before each start until a person
-// chooses one here; "Let orch decide" hands it back. Haiku (fast) and Fable (drafts) only a person picks (owner
+// chooses one here; "Auto" hands it back. Haiku (fast) and Fable (drafts) only a person picks (owner
 // 17 Nov, ORCH-257). A running helper switches when its turn ends, else it applies from the next start.
 const MODEL_NAMES = {haiku:'Haiku', sonnet:'Sonnet', opus:'Opus', fable:'Fable'};
 function modelChoice(t) {
@@ -1870,7 +1870,7 @@ function modelField(t) {
   if (snapshot) return el('span', 'ed-ro', said);
   // Plain choices; the model names sit behind "More" (ORCH-300, owner's word list item 31).
   const select = h('select', {'aria-label':'Helper strength', 'data-key':'model-' + t.id},
-    h('option', {value:'auto'}, 'Let orch decide'),
+    h('option', {value:'auto'}, 'Auto'),
     h('option', {value:'haiku'}, 'Fastest'), h('option', {value:'sonnet'}, 'Faster'),
     h('option', {value:'opus'}, 'Stronger'),
     h('option', {value:'fable'}, 'Drafts to pick from'));
