@@ -161,7 +161,9 @@ def run_start(
         if isinstance(data, dict) and data.get("error")
         else (p.stderr.strip() or "unknown")
     )
-    if "No agent found" in reason:  # never a command for a person (report r-1118-0907): what is missing, where to fix it
+    if (
+        "No agent found" in reason
+    ):  # never a command for a person (report r-1118-0907): what is missing, where to fix it
         reason = "no helper is chosen yet. Choose one in Settings > Helper, then press Try again"
     return {"result": "failed", "reason": reason[:300]}
 

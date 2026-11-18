@@ -530,8 +530,8 @@
   }
   const roles = {manager: 'Manager', builder: 'Builder', reviewer: 'Reviewer'};
   const roleName = role => roles[role] || capital(role);
-  // the tool by its name as people write it ("Claude", not the command "claude"; report r-1118-0907)
-  const toolName = agent => ({claude: 'Claude', codex: 'Codex', gemini: 'Gemini'})[agent] || capital(text(agent));
+  // the tool by its name as people write it, capitalised, not the lower-case command (report r-1118-0907)
+  const toolName = agent => capital(text(agent));
   function crewPlan(crew) {
     return list(array(crew).map(c => roleName(c.role) + ' · ' + toolName(c.agent) + ' — ' + text(c.why)));
   }

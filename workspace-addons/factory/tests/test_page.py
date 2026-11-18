@@ -1203,4 +1203,4 @@ def test_proposal_names_tools_and_putting_live_in_plain_words(srv):
     js = get(srv, "/web/factory.js")[1].decode()
     assert "What Ship does" not in js and "node('h3','What putting it live does')" in js
     assert "roleName(c.role) + ' · ' + toolName(c.agent)" in js
-    assert "({claude: 'Claude', codex: 'Codex', gemini: 'Gemini'})[agent] || capital(text(agent))" in js
+    assert "const toolName = agent => capital(text(agent));" in js  # "claude" shows as "Claude"
