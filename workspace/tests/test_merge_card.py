@@ -523,6 +523,27 @@ def test_the_click_on_a_workflow_card_approves_that_commit_then_merges(tk, run, 
     assert posts and f"commit_id={HEAD}" in posts[0] and gh.merges
 
 
+def test_a_rule_set_asks_for_the_review_without_saying_so_and_the_click_still_approves(tk, run, gh):
+    root, tid = tk
+    gh.files = [_wf_file("    timeout-minutes: 10")]
+    gh.review = ""  # a rule set's code-owner review: GitHub gives no review decision at all
+    _ask(run, tid)
+    code, _, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, err
+    posts = [c for c in gh.calls if c[:3] == ["api", "-X", "POST"]]
+    assert posts and f"commit_id={HEAD}" in posts[0] and gh.merges
+
+
+def test_no_review_is_added_when_nothing_asks_for_one(tk, run, gh):
+    root, tid = tk
+    gh.files = [{"filename": "README.md", "additions": 1, "deletions": 0, "patch": "+x"}]
+    gh.review = ""
+    _ask(run, tid)
+    code, _, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, err
+    assert not [c for c in gh.calls if c[:3] == ["api", "-X", "POST"]] and gh.merges
+
+
 def test_a_card_without_a_workflow_file_is_as_before(tk, run, gh):
     root, tid = tk
     gh.files = [{"filename": "README.md", "additions": 1, "deletions": 0, "patch": "+x"}]
