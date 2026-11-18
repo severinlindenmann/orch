@@ -21,7 +21,7 @@ async fn add(t: &T, w: &Ws) -> (String, String) {
     let code = v["code"].as_str().unwrap().to_string();
     assert_eq!(
         v["line"],
-        format!("orch-notebook connect https://relay.test {code}")
+        format!("orch notebook connect https://relay.test {code}")
     );
     (v["notebook_id"].as_str().unwrap().into(), code)
 }

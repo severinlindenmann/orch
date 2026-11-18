@@ -517,7 +517,7 @@ pub fn admin_add(c: &Connection, public_url: &str, v: &Value) -> Res<Value> {
         params![token_hash(&code), nid, now() + CODE_SECS],
     )?;
     Ok(json!({"notebook_id": nid, "code": code,
-        "line": format!("orch-notebook connect {public_url} {code}")}))
+        "line": format!("orch notebook connect {public_url} {code}")}))
 }
 
 /// Removes a notebook: its token stops working at once, its codes and waiting asks go with it.

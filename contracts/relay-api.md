@@ -405,7 +405,7 @@ Phone onboarding link (from the admin portal, also as QR code, valid 24 h, one u
 ## Notebook (the small orch app on the person's notebook)
 
 One notebook belongs to exactly one workspace; a workspace has at most one. The admin adds it on the relay admin page
-(Notebooks: name + workspace) and runs the shown line on the notebook (`orch-notebook connect <relay url> <code>`, code
+(Notebooks: name + workspace) and runs the shown line on the notebook (`orch notebook connect <relay url> <code>`, code
 `nc_<22 chars>`, one use, 24 h). Nothing else pairs a notebook. Messages are type `notebook` (message.schema.json
 `$defs.notebook`), text only (no blob on any notebook route), stored encrypted at rest like every message. Every
 notebook route takes the notebook and its workspace from the token, never from the body.
