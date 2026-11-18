@@ -149,8 +149,30 @@ def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float =
     return _run_orch(orch_bin, args, root, timeout)
 
 
+# Reads the core allows a person only (workspace Chat). The page reads them for the person who is signed in, so they
+# run without an agent tool's variables: a dashboard started from a helper's shell (a test install, a click-through)
+# would otherwise read them as that helper, be refused and answer 404 (ORCH-383). Clicks do the same (actions).
+_PERSON_READS = (("chat", "sync"), ("chat", "contacts"), ("chat", "thread"))
+
+
+def _person_environ(environ) -> dict | None:
+    """environ without the agent tools' variables (orch.adapters.human_environ); None when that list can not be read
+    (fail closed: the read is not made rather than made as the agent)."""
+    try:
+        from orch.adapters import human_environ
+
+        return human_environ(environ)
+    except Exception:  # noqa: BLE001 - an old orch or a bad adapter file
+        return None
+
+
 def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
     READS["process"] += 1
+    env = {**os.environ, "ORCH_ROOT": str(root)}
+    if tuple(args[:2]) in _PERSON_READS:
+        env = _person_environ(env)
+        if env is None:
+            return None
     try:
         r = _run(
             [*_argv0(orch_bin), *args],
@@ -159,7 +181,7 @@ def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
             capture_output=True,
             text=True,
             timeout=timeout,
-            env=_child_env({**os.environ, "ORCH_ROOT": str(root)}, orch_bin),
+            env=_child_env(env, orch_bin),
         )
         return json.loads(r.stdout) if r.returncode == 0 else None
     except (OSError, ValueError, subprocess.SubprocessError):
