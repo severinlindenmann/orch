@@ -131,6 +131,7 @@ def _test_browser_signed_in(request, monkeypatch):
 def pytest_configure(config):
     config.addinivalue_line("markers", "real_signin: the real sign-in rule for reads, also on a test server")
 
+
 # --- No server outlives its test (0909 leak fix) ------------------------------------------------
 # Every `python -m orch_focus` process the tests start is recorded through its Popen handle and killed
 # at teardown by its exact PID (it is our own child, never a pid read from a file). At the end of the

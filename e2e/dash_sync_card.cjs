@@ -1,7 +1,7 @@
 // Sync card (Settings › General) and the sync rows on Home › Needs you, in Chromium with the real dashboard web files
 // (mockup: draft sync-card.html, Variant A). No server: every request is answered from the screenshot fixture
 // (workspace-addons/dashboard/tests/fixtures/state-chat-settings.json), and /api/act plays the sync add-on's answers
-// (`orch sync act status|set|now|check|use-public -- <target>`) from a small in-memory state.
+// (`orch sync act set|now|check|use-public -- <target>`) and GET /api/addon-read the status, from a small in-memory state.
 // Flow: open Settings, see the card, pick "On this computer only", the review line, Save, the status line. Then
 // screenshots of the card (synced, paused + public warning, add-on off), the Needs rows and the sign step at 1440 and
 // 390 px, with no sideways scroll.
@@ -44,7 +44,7 @@ function fakeSync(start) {
   const answer = (op, args, state) => {
     calls.push({op, args});
     if (op === 'addon.set') { state.settings.addons.find(a => a.name === args.name).active = args.on; return null; }
-    if (op !== 'addon.act' || args.addon !== 'sync') return null;
+    if ((op !== 'addon.act' && op !== 'addon.read') || args.addon !== 'sync') return null;
     // the review phase of a signed click: the add-on's {target, review}; nothing changes
     if (args.review) return REVIEWS[args.verb] ? REVIEWS[args.verb](sync, args) : null;
     if (args.verb === 'status') return {...sync};
@@ -72,6 +72,10 @@ async function serve(context, state, fake) {
     const json = body => route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(body)});
     if (url.origin !== BASE) return route.abort();
     if (url.pathname === '/api/state') return json(state);
+    if (url.pathname === '/api/addon-read') {  // the card's status: a GET read, never a click (ORCH-413)
+      const a = fake.answer('addon.read', {addon: url.searchParams.get('addon'), verb: url.searchParams.get('verb')}, state);
+      return a ? json(a) : route.fulfill({status: 400, contentType: 'text/plain', body: 'That cannot be read here.'});
+    }
     if (url.pathname === '/api/act') {
       const body = route.request().postDataJSON();
       const a = fake.answer(body.op, body.args || {}, state);
@@ -123,6 +127,8 @@ test('Sync card: open Settings, pick On this computer only, review, Save, status
       await page.locator('[data-key="sync-status"]').filter({hasText: 'Not synced yet'}).waitFor();
       assert.equal(await review.count(), 0, 'the review line is gone after Save');
       assert.deepEqual(fake.calls.filter(c => c.args.verb === 'set').map(c => c.args), [{addon: 'sync', verb: 'set', target: 'local'}]);
+      assert.ok(fake.calls.some(c => c.op === 'addon.read') && !fake.calls.some(c => c.op === 'addon.act' && c.args.verb === 'status'), 'the status is only ever read, never clicked');
+      assert.equal(await page.locator('#orch-signin').count(), 0, 'no sign-in banner');
       await shot(page, card, 'flow-saved-1440');
       assert.deepEqual(errors, []);
       await context.close();
