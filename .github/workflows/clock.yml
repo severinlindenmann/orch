@@ -1,0 +1,48 @@
+name: clock
+# The quick suites at a fake wall clock (ORCH-390). Three times in one night (17/18 Nov) tests went red only because of
+# the hour: the phone chip test in the evening (#1371), the Services view and Sync card tests after midnight UTC
+# (#1421); each time develop stayed red for an hour and the merge queue dropped about ten pull requests.
+# 22:30 catches "now + a few hours" that crosses midnight; 23:59:40 ticks over midnight in the first seconds, so a
+# fixture made "a few minutes ago" lands on yesterday. scripts/at-clock.sh moves only the wall clock (libfaketime).
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  suites:
+    strategy:
+      fail-fast: false
+      matrix:
+        at: ["22:30:00", "23:59:40"]
+    name: at ${{ matrix.at }} UTC
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: sudo apt-get install -y -qq faketime
+      - name: Install every add-on and the workspace (real clock)
+        run: |
+          for d in workspace workspace-addons/*/; do
+            [ -f "$d/pyproject.toml" ] && (cd "$d" && uv sync -q)
+          done
+      - name: Dashboard and master library page tests
+        working-directory: workspace-addons/dashboard
+        run: ../../scripts/at-clock.sh "${{ matrix.at }}" node --test tests/*.test.js ../../workspace/src/orch_ui/tests/*.test.mjs
+      - name: Add-on suites
+        run: |
+          failed=""
+          for d in workspace-addons/*/; do
+            [ -d "$d/tests" ] && [ -x "$d/.venv/bin/python" ] || continue
+            echo "::group::$d"
+            (cd "$d" && ../../scripts/at-clock.sh "${{ matrix.at }}" .venv/bin/python -m pytest -q -n 2 -p no:cacheprovider) || failed="$failed $d"
+            echo "::endgroup::"
+          done
+          [ -z "$failed" ] || { echo "red at ${{ matrix.at }} UTC:$failed"; exit 1; }
+      - name: Workspace tests that name a day
+        working-directory: workspace
+        run: |
+          files=$(grep -lE "[Tt]oday|[Yy]esterday|[Tt]omorrow|\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b" tests/test_*.py)
+          ../scripts/at-clock.sh "${{ matrix.at }}" .venv/bin/python -m pytest -q -n auto -p no:cacheprovider $files

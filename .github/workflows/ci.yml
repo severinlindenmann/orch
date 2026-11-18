@@ -41,6 +41,7 @@ jobs:
       relay: ${{ steps.f.outputs.relay }}
       mobile: ${{ steps.f.outputs.mobile }}
       brand: ${{ steps.f.outputs.brand }}
+      clock: ${{ steps.f.outputs.clock }}
     steps:
       - uses: actions/checkout@v4
       - id: f
@@ -57,6 +58,8 @@ jobs:
             relay: ['relay/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', '.github/workflows/relay.yml']
             # only the contracts the phone tests read (blocks, crypto, look, relay-api, message, chat-groups, vectors, examples, review)
             mobile: ['mobile/**', 'contracts/blocks*', 'contracts/crypto.md', 'contracts/look*/**', 'contracts/look*', 'contracts/relay-api*', 'contracts/message.schema.json', 'contracts/chat-groups*', 'contracts/vectors/**', 'contracts/examples/**', 'contracts/review/**', '.github/workflows/mobile.yml']
+            # the suites at a fake hour (ORCH-390): anything that can change what a page or a test does with the time
+            clock: ['workspace/**', 'workspace-addons/**', 'scripts/at-clock.sh', '.github/workflows/clock.yml']
             brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py']
   contracts:
     needs: changes
@@ -100,6 +103,12 @@ jobs:
     needs: changes
     if: needs.changes.outputs.mobile == 'true' || github.event_name == 'schedule'
     uses: ./.github/workflows/mobile.yml
+  # The add-on suites, the page tests and the workspace tests that name a day at 22:30 and 23:59:40 UTC: a test that
+  # only passes by day goes red here, on its pull request, not on develop at night (ORCH-390, #1371, #1421).
+  clock:
+    needs: changes
+    if: needs.changes.outputs.clock == 'true' || github.event_name == 'schedule'
+    uses: ./.github/workflows/clock.yml
   brand:
     # words from docs/wording.md (R7.5), design tokens and a time limit on every CI job; pure text checks, a few seconds
     needs: changes
@@ -116,7 +125,7 @@ jobs:
       - run: python scripts/check_style.py
   gate:
     if: always()
-    needs: [changes, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, mobile, brand]
+    needs: [changes, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, mobile, clock, brand]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
