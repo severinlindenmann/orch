@@ -10,7 +10,7 @@ const path = require('node:path');
 module.exports = {
   name: 'Updates: dismiss the note after an update, start an update',
   covers: ['update.note.dismiss', 'update.start', 'page:settings/about'],
-  async run({ page, open, reload, act, must, text, home, until, forgetUpdateInfo }) {
+  async run({ page, open, reload, act, must, text, home, until, forgetUpdateInfo, python }) {
     const orchHome = path.join(home, 'orch');
     fs.writeFileSync(path.join(orchHome, 'auto-update-note.json'), JSON.stringify({
       state: 'updated', at: Math.floor(Date.now() / 1000) - 60, from: 'orch 40', to: 'orch 41', changes: ['The board loads faster'] }));
@@ -31,7 +31,9 @@ module.exports = {
     const start = page.locator('[data-key="update-start"]');
     await start.waitFor({ timeout: 60000 }).catch(async () => {
       const info = await page.evaluate(async () => (await fetch('/api/update-info', { cache: 'no-store' })).text());
-      throw new Error('no Update button; update-info says ' + info.slice(0, 500) + '\n' + (await text()).slice(0, 300));
+      const git = python('from pathlib import Path; from orch import addons, safegit\n' +
+        'print(safegit.run(["rev-parse", "HEAD"], Path(addons.repo()), 5, read_only=True, filters=False, root=Path(addons.repo())))');
+      throw new Error('no Update button; update-info says ' + info.slice(0, 300) + '; orch git rev-parse: ' + git.trim().slice(0, 300));
     });
     await act('update.start', () => start.click());
     const failed = page.locator('[data-key="update-failed"]');
