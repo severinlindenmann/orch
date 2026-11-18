@@ -16,6 +16,7 @@ pub fn aad(kind: &str, name: &str) -> String {
     match kind {
         "skills" => format!("skill:{name}"),
         "mcp" => format!("mcp:{name}"),
+        "skillhead" => format!("skillhead:{name}"),
         _ => name.to_string(),
     }
 }
@@ -35,11 +36,17 @@ fn dec(key: &Key, kind: &str, name: &str, blob: &[u8]) -> Value {
 pub fn snapshot(c: &Connection, key: &Key, me: &str) -> rusqlite::Result<Value> {
     let mut skills = vec![];
     for r in c
-        .prepare("SELECT s.name,s.version,s.files FROM skills s JOIN assign a ON a.kind='skills' AND a.name=s.name WHERE a.ws=?1 ORDER BY s.name")?
-        .query_map([me], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, Vec<u8>>(2)?)))?
+        .prepare("SELECT s.name,s.version,s.files,s.head FROM skills s JOIN assign a ON a.kind='skills' AND a.name=s.name WHERE a.ws=?1 ORDER BY s.name")?
+        .query_map([me], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, Vec<u8>>(2)?, r.get::<_, Option<Vec<u8>>>(3)?)))?
     {
-        let (n, v, f) = r?;
-        skills.push(json!({"name": n, "version": v, "files": dec(key, "skills", &n, &f)}));
+        let (n, v, f, h) = r?;
+        let files = dec(key, "skills", &n, &f);
+        let header = match h {
+            Some(h) => dec(key, "skillhead", &n, &h),
+            None => skill_header(&files),
+        };
+        skills.push(json!({"name": n, "version": v, "shown_version": shown_version(&header, v),
+            "header": header, "files": files}));
     }
     let mut mcp = Map::new();
     for r in c
@@ -141,6 +148,11 @@ pub fn put_item(
     let mut ver = 0;
     match kind {
         "skills" => {
+            let head = crypto::seal(
+                key,
+                &aad("skillhead", name),
+                &serde_json::to_vec(&skill_header(value)).unwrap(),
+            );
             ver = c
                 .query_row("SELECT version FROM skills WHERE name=?1", [name], |r| {
                     r.get::<_, i64>(0)
@@ -148,8 +160,8 @@ pub fn put_item(
                 .unwrap_or(0)
                 + 1;
             c.execute(
-                "INSERT INTO skills(name,version,files) VALUES(?1,?2,?3) ON CONFLICT(name) DO UPDATE SET version=?2, files=?3",
-                params![name, ver, blob],
+                "INSERT INTO skills(name,version,files,head) VALUES(?1,?2,?3,?4) ON CONFLICT(name) DO UPDATE SET version=?2, files=?3, head=?4",
+                params![name, ver, blob, head],
             )?;
         }
         "mcp" => {
@@ -180,4 +192,97 @@ pub fn assigned_ws(c: &Connection, kind: &str, name: &str) -> Vec<String> {
     c.prepare("SELECT ws FROM assign WHERE kind=?1 AND name=?2")
         .and_then(|mut s| s.query_map(params![kind, name], |r| r.get(0))?.collect())
         .unwrap_or_default()
+}
+
+// ---------- skill header (the frontmatter of SKILL.md) ----------
+//
+// A restricted reader for the flat skill header (skill format, ORCH-531): top-level `key: value` lines and one
+// `metadata:` map of text values. Anything fancier (nested maps, lists, anchors) is skipped, never an error:
+// the header only feeds labels and the platform check, the files stay as the admin uploaded them.
+
+const HEAD_MAX: usize = 16 * 1024;
+const VALUE_MAX: usize = 1024;
+const META_MAX: usize = 64;
+
+/// The version people see: `metadata.version` when the skill sets one, else the relay's own counter.
+pub fn shown_version(header: &Value, counter: i64) -> String {
+    match header["metadata"]["version"].as_str() {
+        Some(v) if !v.is_empty() => v.to_string(),
+        _ => counter.to_string(),
+    }
+}
+
+fn head_key_ok(k: &str) -> bool {
+    !k.is_empty()
+        && k.len() <= 64
+        && k.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+fn head_value(raw: &str) -> Option<String> {
+    let v = raw.trim();
+    let out = if let Some(inner) = v.strip_prefix('"') {
+        let inner = inner.strip_suffix('"')?;
+        inner.replace("\\\"", "\"").replace("\\\\", "\\")
+    } else if let Some(inner) = v.strip_prefix('\'') {
+        inner.strip_suffix('\'')?.replace("''", "'")
+    } else {
+        if v.starts_with(['[', '{', '&', '*', '!', '|', '>']) {
+            return None;
+        }
+        match v.find(" #") {
+            Some(i) => v[..i].trim_end().to_string(),
+            None => v.to_string(),
+        }
+    };
+    let out: String = out.chars().filter(|c| !c.is_control()).collect();
+    (out.chars().count() <= VALUE_MAX).then_some(out)
+}
+
+/// The parsed header of a skill's `SKILL.md` (files as `{path: base64}`): `{"name", "description",
+/// "metadata": {key: text}}`, only what was readable. `{}` when there is no header.
+pub fn skill_header(files: &Value) -> Value {
+    let text = files["SKILL.md"]
+        .as_str()
+        .and_then(|b| B64.decode(b).ok())
+        .and_then(|b| String::from_utf8(b).ok())
+        .unwrap_or_default();
+    let mut lines = text.lines();
+    if lines.next().map(str::trim_end) != Some("---") {
+        return json!({});
+    }
+    let mut out = Map::new();
+    let mut meta = Map::new();
+    let mut in_meta = false;
+    let mut size = 0;
+    for line in lines {
+        size += line.len() + 1;
+        if size > HEAD_MAX || line.trim_end() == "---" {
+            break;
+        }
+        if line.trim().is_empty() || line.trim_start().starts_with('#') {
+            continue;
+        }
+        let indented = line.starts_with([' ', '\t']);
+        let Some((k, v)) = line.trim().split_once(':') else {
+            continue;
+        };
+        let k = k.trim();
+        if !indented {
+            in_meta = k == "metadata" && v.trim().is_empty();
+            if !in_meta && matches!(k, "name" | "description") {
+                if let Some(v) = head_value(v) {
+                    out.insert(k.to_string(), v.into());
+                }
+            }
+        } else if in_meta && head_key_ok(k) && meta.len() < META_MAX {
+            if let Some(v) = head_value(v) {
+                meta.insert(k.to_string(), v.into());
+            }
+        }
+    }
+    if !meta.is_empty() {
+        out.insert("metadata".into(), Value::Object(meta));
+    }
+    Value::Object(out)
 }
