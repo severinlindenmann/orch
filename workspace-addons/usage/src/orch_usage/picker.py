@@ -22,13 +22,15 @@ A source (one per account, built by the caller from accounts.json and the reader
     {"id", "label", "tool": "claude|codex", "type": "subscription|api-key|helper-tool", "on": bool,
      "at_limit": bool, "resets": "<UTC time it has room again>" | None,
      "week_used": percent (subscription) | None,
-     "left": dollars left | None (unknown), "day_limit": dollars a day | None, "spent_today": dollars | None,
+     "left": dollars left | None (unknown), "left_at": "<UTC time that number was read>" | None,
+     "day_limit": dollars a day | None, "spent_today": dollars | None (a reader may lag: Usage counts the larger of
+     it and the finished starts it knows of),
      "models": {"opus": "<the tool's model name>", ...} | None, "model": "<default model of the tool>" | None}
 
 Money is held before the start: a pick writes a hold of the start's estimated dollars into starts.json under the
 Usage lock, and every later pick counts the open holds against what is left and against the day limit, so two starts
 at once cannot both take the last dollars. finished() replaces the hold with what the start really spent, failed()
-gives the money back. Each start id is in the file once: a retry of a held, started or finished start gets the same
+gives the money back; both are final. Each start id is in the file once: a retry of a held, started or finished start gets the same
 answer and no second hold; a retry after failed() picks again into the same entry, so it still counts once.
 A hold that never started within HOLD_HOURS is treated as failed (the starter crashed).
 
@@ -97,11 +99,23 @@ def _path(root: Path) -> Path:
 
 
 def _load(root: Path) -> dict:
+    """The starts on file. No file yet: none. A file that cannot be read is refused, never overwritten: it holds
+    money other starts count on."""
     try:
-        data = json.loads(_path(root).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        text = _path(root).read_text(encoding="utf-8")
+    except FileNotFoundError:
         return {}
+    except OSError as e:
+        raise store.Refused(f"Usage cannot read its list of helper starts ({e.strerror}).") from None
+    try:
+        data = json.loads(text)
+    except ValueError:
+        data = None
     starts = data.get("starts") if isinstance(data, dict) else None
+    if not isinstance(starts, dict):
+        raise store.Refused(
+            f"Usage's list of helper starts is damaged; fix or remove {_path(root).name} in the Usage folder."
+        )
     return {k: v for k, v in (starts or {}).items() if isinstance(k, str) and isinstance(v, dict)}
 
 
@@ -155,30 +169,36 @@ def _money(e: dict) -> float:
     return 0.0
 
 
-def _open_holds(starts: dict, source: str) -> float:
-    return sum(
-        float(e.get("dollars") or 0)
-        for e in starts.values()
-        if e.get("source") == source and e.get("state") in OPEN
-    )
+def _open_holds(starts: dict, s: dict) -> float:
+    """Dollars not yet in what is left: open holds, and finished starts that ended after `left_at` (the time the
+    number left was read). Without `left_at` the number already counts every finished start."""
+    since = s.get("left_at")
+    total = 0.0
+    for e in starts.values():
+        if e.get("source") != s["id"]:
+            continue
+        if e.get("state") in OPEN:
+            total += float(e.get("dollars") or 0)
+        elif e.get("state") == "done" and since and str(e.get("ended") or "") > str(since):
+            total += _money(e)
+    return round(total, 4)
 
 
 def _used_today(starts: dict, s: dict, day: str) -> float:
-    """Dollars of the day on this source: what the reader saw plus the open holds. Without a reader number, what
-    this file knows (finished starts at their real spend)."""
+    """Dollars of the day on this source: what the reader saw or what this file knows of finished starts, whichever
+    is more (a reader can lag behind a start that just ended), plus the open holds."""
     holds = sum(
         float(e.get("dollars") or 0)
         for e in starts.values()
         if e.get("source") == s["id"] and e.get("day") == day and e.get("state") in OPEN
     )
+    done = sum(
+        _money(e)
+        for e in starts.values()
+        if e.get("source") == s["id"] and e.get("day") == day and e.get("state") == "done"
+    )
     seen = s.get("spent_today")
-    if seen is None:
-        seen = sum(
-            _money(e)
-            for e in starts.values()
-            if e.get("source") == s["id"] and e.get("day") == day and e.get("state") == "done"
-        )
-    return round(float(seen) + holds, 4)
+    return round(max(float(seen or 0), done) + holds, 4)
 
 
 def _ahead_used(starts: dict, day: str) -> float:
@@ -235,7 +255,7 @@ def _room(s: dict, need: float, starts: dict, day: str) -> tuple[bool, str]:
     if s.get("type") in MONEY_TYPES:
         left = s.get("left")
         if left is not None:
-            free = float(left) - _open_holds(starts, s["id"])
+            free = float(left) - _open_holds(starts, s)
             if float(left) <= 0:
                 return False, "empty"
             if free < need:
@@ -267,7 +287,8 @@ def _wake(sources: list[dict], at: datetime, day_limited: bool) -> str | None:
             if t > at:
                 times.append(t)
     if day_limited:
-        times.append(datetime(at.year, at.month, at.day, tzinfo=UTC) + timedelta(days=1))
+        u = at.astimezone(UTC)
+        times.append(datetime(u.year, u.month, u.day, tzinfo=UTC) + timedelta(days=1))
     return _iso(min(times)) if times else None
 
 
@@ -394,7 +415,7 @@ def pick(
         return p
 
 
-def _set(root: Path, sid: str, state: str, spent: float | None = None) -> bool:
+def _set(root: Path, sid: str, state: str, spent: float | None = None, at: datetime | None = None) -> bool:
     with store._lock(root):
         starts = _load(root)
         e = starts.get(sid)
@@ -402,11 +423,12 @@ def _set(root: Path, sid: str, state: str, spent: float | None = None) -> bool:
             return False
         if state == "started" and e.get("state") != "held":
             return False
-        if state == "failed" and e.get("state") not in OPEN:
-            return False
+        if state in ("failed", "done") and e.get("state") not in OPEN:
+            return False  # failed and finished are final; a second call changes nothing
         e["state"] = state
         if state == "done":
             e["spent"] = None if spent is None else round(float(spent), 4)
+            e["ended"] = _iso(at or datetime.now(UTC))
         _save(root, starts)
         return True
 
@@ -421,9 +443,9 @@ def failed(root: Path, start: str) -> bool:
     return _set(root, start, "failed")
 
 
-def finished(root: Path, start: str, spent: float | None = None) -> bool:
+def finished(root: Path, start: str, spent: float | None = None, at: datetime | None = None) -> bool:
     """The helper ended: its real spend replaces the hold (unknown spend keeps the hold as the number)."""
-    return _set(root, start, "done", spent)
+    return _set(root, start, "done", spent, at)
 
 
 def spread(root: Path, day: str) -> dict[str, dict]:

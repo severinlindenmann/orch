@@ -267,8 +267,11 @@ def test_start_id_is_required_and_bad_rows_are_ignored(tmp_path):
         picker.pick(tmp_path, {"kind": "code"}, SHARE, sources(), TUE)
     p = picker.pick(tmp_path, req(1), {"order": [5, None]}, [None, {"label": "no id"}, *sources()], TUE)
     assert p.source == "a_sub001"
-    (store.usage_dir(tmp_path) / picker.STARTS).write_text("not json")
-    assert picker.pick(tmp_path, req(2), SHARE, sources(), TUE).source == "a_sub001"
+    f = store.usage_dir(tmp_path) / picker.STARTS
+    f.write_text("not json")
+    with pytest.raises(store.Refused, match="damaged"):
+        picker.pick(tmp_path, req(2), SHARE, sources(), TUE)
+    assert f.read_text() == "not json"  # kept for a person to look at, never overwritten
 
 
 def test_never_writes_a_key(tmp_path):
@@ -290,3 +293,40 @@ def test_never_writes_a_key(tmp_path):
         "why",
         "tries",
     }  # labels, numbers and times only
+
+
+def test_a_finished_start_still_counts_while_the_reader_lags(tmp_path):
+    src = sources(
+        a_key001={"left": 2.0, "left_at": "2026-11-17T09:00:00Z", "day_limit": 1.5, "spent_today": 0.0}
+    )
+    picker.pick(tmp_path, req(1, "reviews"), SHARE, src, TUE)
+    picker.started(tmp_path, "s1")
+    picker.finished(tmp_path, "s1", 1.0, TUE)
+    p = picker.pick(tmp_path, req(2, "reviews"), SHARE, src, TUE)
+    assert p.source == "a_sub001" and "OpenAI credit only $1 left" in p.why
+    # the readers caught up (the credit topped up to 5): the finished dollar is not counted twice
+    later = sources(
+        a_key001={"left": 5.0, "left_at": "2026-11-17T11:00:00Z", "day_limit": 5.0, "spent_today": 1.0}
+    )
+    p = picker.pick(tmp_path, req(3, "reviews"), SHARE, later, TUE)
+    assert p.source == "a_key001" and "$2.05 of $5 today" in p.why
+
+
+def test_failed_and_finished_are_final(tmp_path):
+    src = sources()
+    picker.pick(tmp_path, req(1, "reviews"), SHARE, src, TUE)
+    picker.failed(tmp_path, "s1")
+    assert not picker.finished(tmp_path, "s1", 1.0)
+    assert picker.spread(tmp_path, "2026-11-17") == {}
+    picker.pick(tmp_path, req(2, "reviews"), SHARE, src, TUE)
+    assert picker.finished(tmp_path, "s2", 0.3)
+    assert not picker.finished(tmp_path, "s2") and not picker.failed(tmp_path, "s2")
+    assert picker._load(tmp_path)["s2"]["spent"] == 0.3
+
+
+def test_the_midnight_wake_is_utc(tmp_path):
+    from datetime import timezone
+
+    local = datetime(2026, 11, 18, 1, 0, tzinfo=timezone(timedelta(hours=2)))  # 17 Nov 23:00 UTC
+    p = picker.pick(tmp_path, req(1), {}, [sources()[2] | {"day_limit": 1.0}], local)
+    assert p.wait and p.until == "2026-11-18T00:00:00Z"
