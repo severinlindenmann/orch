@@ -91,7 +91,12 @@ def test_reruns_stale_overlap_merge():
     assert [p["number"] for p in de.stale_prs(prs, T)] == [1]
     ov = de.overlaps({1: ["a.py", "b.py"], 2: ["b.py"], 3: ["c.py"]})
     assert ov == [{"prs": [1, 2], "files": ["b.py"], "count": 1}]
-    assert de.overlaps({1: ["e2e/focus_d/CLICKTHROUGH.md", "NOTES.md"], 2: ["e2e/focus_d/CLICKTHROUGH.md", "NOTES.md"]}) == []
+    assert (
+        de.overlaps(
+            {1: ["e2e/focus_d/CLICKTHROUGH.md", "NOTES.md"], 2: ["e2e/focus_d/CLICKTHROUGH.md", "NOTES.md"]}
+        )
+        == []
+    )
     m = de.merge_times(
         [
             {"createdAt": "2026-11-17T06:00:00Z", "mergedAt": "2026-11-17T08:00:00Z"},
