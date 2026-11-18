@@ -12,6 +12,9 @@
      work; "waiting" shows as "Needs you". ORCH-152 (owner, 17 Nov): Backlog, To do, Waiting, Won't do, Superseded. */
   const STATUS_ORDER = ['open', 'ready', 'active', 'waiting', 'review', 'done'];
   const statusWord = (status, started) => (status === 'open' || status === 'ready') && started === true ? 'Paused' : STATUS_WORD[status] || 'Backlog';
+  // A person's Send back that is not yet worked: Ready + a task made from their words (origin change_request) still open.
+  // Derived, like the core's changes_asked: Undo and finishing the task clear it. Same rule, same word.
+  const changesAsked = t => !!t && t.status === 'ready' && arr(t.checklist).some(c => c && c.origin === 'change_request' && !c.done && !c.wont_do);
   const columnOf = status => status;
   const STATUS_CHOICES = STATUS_ORDER.map(s => [s, STATUS_WORD[s]]);
   /* The board's lanes, left to right. "blocked" = Waiting: waits for a date, another ticket or the outside, with no
@@ -298,6 +301,7 @@
     if (answerable && /^[a-z][a-z0-9-]*:/.test(String(r.kind || ''))) return {label: 'Review', kind: 'review'};
     if (answerable) return {label: 'Answer', kind: 'answer'};
     if (r.kind === 'addon:not-running' && !r.ticket) return {label: 'Start', kind: 'start'};  // a background add-on that stopped
+    if (r.kind === 'overdue-wait' && r.ticket) return {label: 'Continue', kind: 'run'};  // ORCH-255: a passed wake time with no helper
     if (r.tone === 'bad' && r.ticket) return {label: 'Run again', kind: 'run'};
     return {label: 'Open', kind: 'open'};
   }
@@ -349,8 +353,9 @@
     for (const t of arr(tickets)) {
       const run = runs && runs[t.id], st = helperState(run, t);
       if (!st) continue;
-      const tasks = arr(t.checklist).filter(c => c && !c.wont_do), at = tasks.findIndex(c => c.state === 'doing');
-      const n = at >= 0 ? at : tasks.findIndex(c => !c.done);
+      // every task counts, a skipped one too, so "Step 3 of 4" matches the "3/4" of the Tickets list and the ticket
+      const tasks = arr(t.checklist).filter(Boolean), at = tasks.findIndex(c => !c.wont_do && c.state === 'doing');
+      const n = at >= 0 ? at : tasks.findIndex(c => !c.done && !c.wont_do);
       out.push({ticket: t, ...st, step: tasks.length && n >= 0 ? {n: n + 1, of: tasks.length} : null,
         minutes: Number.isFinite(run.age_seconds) ? Math.floor(run.age_seconds / 60) : null,
         idle: Number.isFinite(run.idle_seconds) ? Math.floor(run.idle_seconds / 60) : null,
@@ -777,6 +782,7 @@
       const c = typeof est.cost === 'number' && est.cost >= 0 ? moneyWords(est.cost) : '';
       if (m || c) parts.push('Estimate: about ' + [m, c].filter(Boolean).join(' · '));
     }
+    if (!parts.length && t && !t.spend && typeof t.range === 'string' && t.range) parts.push('Before Start: ' + t.range);  // ORCH-297
     const so = spendWords(t && t.spend);
     if (so) parts.push('So far: ' + so);
     return parts.join(' — ');
@@ -785,7 +791,7 @@
   function stuckWords(t, nowMs = Date.now()) {
     const why = t && t.stuck;
     if (why === 'question') {
-      const open = (t.questions || []).filter(q => q && q.answer == null && !q.taken_back).map(q => Date.parse(q.sent_at || q.at)).filter(Number.isFinite);
+      const open = (t.questions || []).filter(q => q && q.answer == null && !q.taken_back).map(q => Date.parse(q.asked_at || q.sent_at || q.at)).filter(Number.isFinite);
       const days = open.length ? Math.floor((nowMs - Math.min(...open)) / 86400000) : 1;
       return 'Question waits ' + (days <= 1 ? '1 day' : days + ' days');
     }
@@ -809,5 +815,5 @@
     const due = /T/.test(t.due) ? new Date(t.due).getTime() : new Date(t.due + 'T00:00').getTime();
     return Number.isFinite(due) && due < end;
   }
-  return {historyChange, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
+  return {historyChange, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
 });

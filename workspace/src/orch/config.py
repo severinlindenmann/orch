@@ -474,6 +474,22 @@ def set_focus_session_typing(root: Path, value: bool) -> bool:
     return bool(value)
 
 
+FOCUS_PREVIEW_KEY = "focus.preview"  # the `orch config` key of the setting below
+
+
+def focus_preview_on(root: Path | None) -> bool:
+    """[focus] preview (default off): the dashboard's Focus page shows the new Focus, still being built,
+    instead of today's Focus. Off, or an unreadable config file: today's Focus, exactly as before."""
+    if root is None:
+        return False
+    return file_switch(root, "focus", "preview", False) is True
+
+
+def set_focus_preview(root: Path, value: bool) -> bool:
+    set_key(root, "focus", "preview", bool(value))
+    return bool(value)
+
+
 def record_keep_days(root: Path | None) -> int:
     """[record] keep_days as the file says it (snapped to the allowed list, default 90)."""
     return file_value(root, "record", "keep_days")
@@ -827,6 +843,49 @@ def set_workspace_tags(root: Path, value: str) -> list[str]:
     tags = _parse_tags(value)
     set_key(root, "workspace", "tags", ",".join(tags) or None)
     return tags
+
+
+MAX_PROTECTED = 50
+_PROTECTED_RE = re.compile(r"[a-z0-9][a-z0-9._:-]{0,252}")
+
+
+def _parse_protected(value: str) -> list[str]:
+    out: list[str] = []
+    for t in value.replace(" ", ",").split(","):
+        t = t.strip().lower()
+        if t and t not in out:
+            out.append(t)
+    if any(not _PROTECTED_RE.fullmatch(t) for t in out):
+        raise Refused(
+            "A protected machine is its ssh name or address: letters, digits, dots, colons and hyphens."
+        )
+    if len(out) > MAX_PROTECTED:
+        raise Refused(f"Use at most {MAX_PROTECTED} protected machines.")
+    return out
+
+
+def protected_machines(root: Path | None) -> list[str]:
+    """[workspace] protected_machines = "a,b": the production machines a helper may not connect to outside a
+    release or deploy step (names or addresses); [] when not set or hand-edited into something invalid."""
+    if root is None:
+        return []
+    try:
+        v = (read(root).get("workspace") or {}).get("protected_machines")
+    except Refused:
+        return []
+    if not isinstance(v, str):
+        return []
+    try:
+        return _parse_protected(v)
+    except Refused:
+        return []
+
+
+def set_protected_machines(root: Path, value: str) -> list[str]:
+    """ "a,b" (commas or spaces); "" clears the list."""
+    names = _parse_protected(value)
+    set_key(root, "workspace", "protected_machines", ",".join(names) or None)
+    return names
 
 
 # ---- who set the workspace profile (name, description, tags)

@@ -1054,3 +1054,52 @@ def test_framed_addon_pages_may_show_blob_images():
     from orch_dashboard import server
 
     assert "img-src 'self' data: blob:" in server.PROXY_CSP
+
+
+def test_events_give_back_the_place_of_a_closed_page_within_seconds(server):
+    """Twenty open pages fill the stream places; closed pages hand them back within about a second (ORCH-338: a
+    click-through that reloads often hit 'Too many open pages' while the server waited for its 15 s ping)."""
+    import http.client
+    import time
+
+    port = int(server.rsplit(":", 1)[1])
+
+    def status():  # the status only: a stream that is let in never ends
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        try:
+            c.request("GET", "/api/events")
+            return c.getresponse().status
+        finally:
+            c.close()
+
+    connections = []
+    for _ in range(20):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        c.request("GET", "/api/events")
+        r = c.getresponse()
+        assert r.status == 200
+        assert r.readline() == b"event: rev\n"
+        connections.append((c, r))
+    assert status() == 503
+    for c, r in connections:
+        r.close()
+        c.close()
+    deadline = time.monotonic() + 5
+    while status() == 503 and time.monotonic() < deadline:
+        time.sleep(0.2)
+    assert time.monotonic() < deadline, "the closed pages kept their places"
+
+
+def test_client_gone_reads_only_the_end_of_the_connection():
+    import socket
+
+    from orch_dashboard.server import _client_gone
+
+    a, b = socket.socketpair()
+    try:
+        assert _client_gone(None) is False
+        assert _client_gone(a) is False  # open, nothing sent
+        b.close()
+        assert _client_gone(a) is True  # the page closed
+    finally:
+        a.close()

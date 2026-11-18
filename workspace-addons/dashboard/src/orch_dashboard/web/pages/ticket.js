@@ -315,7 +315,7 @@ function fieldSections(t) {
   });
 }
 async function saveAddonField(t, addon, field, value) {
-  const result = await act('ticket.field', {ticket:t.id, addon, field, value:String(value), if_revision:t.revision});
+  const result = await act('ticket.field', {ticket:t.id, addon, field, value:String(value), if_revision:(ticketOf(t.id) || t).revision});
   if (!result.ok) window.orch.toast(changeError(result), 'error');
 }
 function startAddonField(control) {
@@ -1310,7 +1310,7 @@ function ticketCardShown(t, q, card) {
   const sug = q.recommended === 'ok' ? 'Suggested: ' + (card.ok_label || 'Looks good') : q.recommended === 'no' ? "Suggested: Don't do" : '';
   const go = snapshot ? h('p', {className:'meta'}, 'Waiting for an answer')
     : h('a', {className:'btn outline sm', href:'#review?card=' + encodeURIComponent('core:q:' + t.id + ':' + q.id), 'data-key':'card-go-' + q.id}, 'Look and answer');
-  return h('div', {className:'stack', 'data-key':'card-shown-' + q.id}, tiles, card.why ? h('p', {className:'meta'}, clean(card.why)) : null, h('div', {className:'row'}, go, sug ? h('span', {className:'swipe-sug'}, sug) : null,
+  return h('div', {className:'stack', 'data-key':'card-shown-' + q.id}, tiles, card.why ? (window.UI?.moreText ? window.UI.moreText(clean(card.why)) : h('p', {className:'meta'}, clean(card.why))) : null, h('div', {className:'row'}, go, sug ? h('span', {className:'swipe-sug'}, sug) : null,
     array(q.links).filter(l => l && /^https?:\/\//i.test(String(l.url || ''))).slice(0, 5).map((l, i) => h('a', {className:'btn ghost sm', href:String(l.url), target:'_blank', rel:'noopener', 'data-key':'card-link-' + q.id + '-' + i}, iconEl('link'), clean(l.label)))));
 }
 // A step is named by its title only; the ticket key is a quiet line under Properties.
@@ -1333,7 +1333,7 @@ function ticketAddStep(t) {
     const moved = pick && pick.value ? existing.find(x => x.id === pick.value) : null;
     const title = input.value.trim(); if ((!title && !moved) || send.disabled) return;
     send.disabled = true;
-    const result = moved ? await act('ticket.edit', {ticket:moved.id, parent:t.id, if_revision:moved.revision}) : await act('ticket.new', {title, parent:t.id});
+    const result = moved ? await act('ticket.edit', {ticket:moved.id, parent:t.id, if_revision:(ticketOf(moved.id) || moved).revision}) : await act('ticket.new', {title, parent:t.id});
     if (result.ok) window.orch.close(d); else { send.disabled = false; window.orch.toast(changeError(result), 'error'); }
   });
   input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); send.click(); } };
@@ -1686,6 +1686,7 @@ function missingTicket(id) {
 // The header strip (master .strip): pill, title, one sentence, the main action, then the tabs.
 function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   const m = ticketStripModel(t, run, fresh), actions = [], kidsDone = !questions(t).length && !run?.running ? ticketKidsAllDone(t) : null;
+  let startShown = false;
   if (kidsDone) m.sentence = (kidsDone.length === 1 ? 'Its sub-ticket is done.' : 'All ' + kidsDone.length + ' sub-tickets are done.') + ' Mark it Done when nothing else is left.';
   const quiet = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';  // G2
   if (quiet) m.sentence = (/^Updated /.test(m.sentence || '') || !m.sentence ? '' : m.sentence + ' ') + quiet + '.';  // one line: No news since replaces Updated
@@ -1695,8 +1696,13 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
     else if (t.status === 'review') actions.push(ticketChangesEditor(t));
     else if (m.pill === 'needs' && questions(t).length) { if (!planQ) actions.push(ticketButton('Answer', 'primary sm', e => focusTicketAnswer(t.id, e?.currentTarget), {'data-key':'ticket-answer'})); }
     else if (kidsDone) actions.push(ticketButton('Mark Done', 'primary sm', () => moveTicket(t.id, 'done'), {'data-key':'ticket-kids-done'}));
-    else if (fresh) actions.push(ticketButton('Start helper', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-start'}));
-    else if (ticketPaused(t, run)) actions.push(ticketButton('Continue', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-resume'}));
+    else if (fresh) { startShown = true; actions.push(ticketButton('Start helper', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-start'})); }
+    else if (ticketPaused(t, run)) { startShown = true; actions.push(ticketButton('Continue', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-resume'})); }
+    // ORCH-255: Continue is on the page in every state while no helper runs; Start helper / Continue (paused) already do that job
+    if (!run?.running && !startShown) actions.push(ticketButton('Continue', actions.length ? 'outline sm' : 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-continue'}));
+    // the new live page (Preview, draft D feature 3): one session button that opens this ticket's session in the layer
+    const focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
+    if (focusBtn) actions.push(focusBtn);
     if (menu) actions.push(menu);
   }
   const icon = window.UI?.statusIcon ? window.UI.statusIcon(m.pill) : null;
@@ -1723,8 +1729,9 @@ function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
   // a helper that is not plain working (idle, stuck, waits) still says why in one quiet line; so does "No news since"
   const why = helper.state !== 'working' && helper.detail ? clean(helper.detail) + '.' : '';
   const sentence = [why, quiet ? quiet + '.' : ''].filter(Boolean).join(' ');
-  const live = liveLinkFor(t);
-  const actions = [live ? h('a', {className:'btn primary sm', href:live.url, 'data-key':'watch-live'}, 'Watch live') : null, menu].filter(Boolean);
+  const live = liveLinkFor(t), focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
+  if (focusBtn) focusBtn.className = 'btn primary sm';  // the one filled button while a helper runs, as Watch live was
+  const actions = [focusBtn || (live ? h('a', {className:'btn primary sm', href:live.url, 'data-key':'watch-live'}, 'Watch live') : null), menu].filter(Boolean);
   return h('section', {className:'strip strip-plain ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
       h('div', {className:'grow ticket-strip-text'}, kicker, h('h1', {className:'t-title'}, inlineField(t, 'title')),
@@ -1744,6 +1751,12 @@ function ticketHelperMenuItems(t, run) {
   return [ticketButton(idle ? 'Stop idle helper' : 'Stop', 'menu-item', () => act('run.stop', {ticket:t.id}), {role:'menuitem', 'data-key':'ticket-stop'}),
     run?.claim?.mode === 'oneshot' ? null : copy('Copy watch command', 'orch run attach ' + ref + ' --watch', 'watch'),
     run?.claim?.mode === 'oneshot' ? null : copy('Copy take-over command', 'orch run attach ' + ref, 'take')];
+}
+// ORCH-248: "Show me the plan first" stays visible on the ticket after it was made (the plan card only shows while the plan waits).
+function ticketPlanFirstLine(t, planShown) {
+  if (!t.plan_first || planShown || ['done', 'dropped'].includes(t.status)) return null;
+  const planned = array(t.questions).some(q => String(q.text || '').startsWith('Plan ready') && q.answer != null);
+  return h('p', {className:'meta ticket-plan-first', 'data-key':'plan-first-' + t.id}, planned ? 'You asked to see the plan first. You have approved it.' : 'You asked to see the plan first. The helper waits for your OK before work starts.');
 }
 // ORCH-235: the ticket page offers the same places as the board and the list (Waiting asks for a date and a reason,
 // Superseded for the ticket that replaces it); the lane the ticket is in now is left out.
@@ -1777,6 +1790,7 @@ function detail(t) {
     ticketBringBackRow(t),
     t.status !== 'done' && openQuestions.length ? (planQ ? ticketPlan(t, planQ, children) : ticketQuestion(t, openQuestions[0], true)) : null,
     t.status !== 'done' ? openQuestions.slice(1).map(q => ticketQuestion(t, q)) : null,
+    ticketPlanFirstLine(t, !!planQ),
     ticketReleaseLine(t),
     t.status === 'review' ? ticketReviewCard(t) : null,
     ticketRequestCard(t),
@@ -2210,7 +2224,7 @@ async function fileEmbedIdea(req) {
 }
 addEventListener('message', e => { const req = embedIdeaRequest(e); if (req) fileEmbedIdea(req); });
 
-// "Looks good, all" on the Factory results card: the SAME Looks good as on each ticket page (the status move with the
+// "Looks good" on a Factory stage review (all of the stage's results at once): the SAME Looks good as on each ticket page (the status move with the
 // recorded review tip), for the listed tickets that still wait in review. One toast for the batch, with one Undo.
 const EMBED_BATCH_MAX = 10;
 function embedLooksGoodRequest(e) {
@@ -2255,6 +2269,35 @@ async function looksGoodAll(req) {
   } finally { embedLooksGoodBusy = false; }
 }
 addEventListener('message', e => { const req = embedLooksGoodRequest(e); if (req) looksGoodAll(req); });
+
+// A shipped add-on page's own setting (Usage: a limit, the order, on/off, an end date, switching by itself): the shown
+// page names only one of ITS add-on's verbs and a plain target; the dashboard runs `orch <that add-on> act <verb> -- <target>`
+// through its own op (the person's click with this page's session) and tells the page the add-on's answer or why not.
+// The add-on checks the target itself; nothing here names an add-on. Same origin and shipped-frame fences as orch.idea.
+const EMBED_ACT_VERB = /^[a-z][a-z-]{0,20}$/, EMBED_ACT_MAX = 200, EMBED_ACT_HIDDEN = new RegExp(IDEA_HIDDEN.source);
+function embedActRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.act') return null;
+  const shown = shippedFrame(e);
+  if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id)) return null;
+  if (typeof data.verb !== 'string' || !EMBED_ACT_VERB.test(data.verb) || data.verb === 'refresh') return null;
+  const t = data.target;
+  if (typeof t !== 'string' || !t || t.length > EMBED_ACT_MAX || t.startsWith('-') || t !== t.trim() || EMBED_ACT_HIDDEN.test(t)) return null;
+  return {...shown, id:data.id, verb:data.verb, target:t};
+}
+let embedActBusy = false;  // one setting at a time: a second click while saving is dropped
+async function runEmbedAct(req) {
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  if (embedActBusy) return reply({type:'orch.act.failed', error:'Still saving the last change. Try again in a moment.'});
+  embedActBusy = true;
+  try {
+    const result = await act('addon.act', {addon:req.addon, verb:req.verb, target:req.target});
+    const answer = result.ok ? result.state?.act_answer : null;
+    if (result.ok) reply({type:'orch.act.done', answer:answer && answer.addon === req.addon && answer.answer && typeof answer.answer === 'object' ? {changed:answer.answer.changed !== false} : {}});
+    else reply({type:'orch.act.failed', error:String(result.text || '').slice(0, 300)});
+  } finally { embedActBusy = false; }
+}
+addEventListener('message', e => { const req = embedActRequest(e); if (req) runEmbedAct(req); });
 
 // Ask another workspace at a stop (Factory, 816 A): modelled on the idea box. The shown shipped add-on page names a
 // target ("<order>:s<N>:<workspace>:<items>"); the dashboard runs that add-on's `ask` act (a person's click with this

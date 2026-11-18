@@ -271,7 +271,7 @@ test('ORCH-236: a key typed without its dash finds the ticket ("dem36", "dem 36"
 test('ORCH-236 (owner, 17 Nov): no saved views: only the built-in chips, no + Save view', () => {
   const c = listCtx({URLSearchParams});
   const keys = nodes(c.viewChips()).map(n => n.attrs?.['data-key']).filter(Boolean);
-  assert.deepEqual(keys, ['view-chips', 'view-chip-all', 'view-chip-needs-you', 'view-chip-this-week', 'view-chip-stuck', 'view-chip-working', 'view-chip-backlog', 'view-chip-done-week']);
+  assert.deepEqual(keys, ['view-chips', 'view-chip-all', 'view-chip-needs-you', 'view-chip-this-week', 'view-chip-stuck', 'view-chip-working', 'view-chip-waiting', 'view-chip-backlog', 'view-chip-done-week']);
   assert.doesNotMatch(listSrc, /Save view|orch\.tickets\.saved/);
 });
 test('ORCH-236: a task menu offers Rename, Move up, Move down and Remove; an empty Add says so', () => {

@@ -3,8 +3,8 @@
 const expanded = new Set();
 const treeExpanded = new Set(), treeSeen = new Set(), treeAll = new Set(), ticketTabs = new Map();
 let ticketSearch = '', ticketMine = false, ticketPerson = '', ticketGroup = '';
-// Saved views live on the address: #tickets?view=needs-you|this-week|stuck|working|done-week.
-const TICKET_VIEWS = [['', 'All'], ['needs-you', 'Needs you'], ['this-week', 'This week'], ['stuck', 'Stuck'], ['working', 'Working'], ['backlog', 'Backlog'], ['done-week', 'Done this week']];
+// Saved views live on the address: #tickets?view=needs-you|this-week|stuck|working|waiting|done-week.
+const TICKET_VIEWS = [['', 'All'], ['needs-you', 'Needs you'], ['this-week', 'This week'], ['stuck', 'Stuck'], ['working', 'Working'], ['waiting', 'Waiting'], ['backlog', 'Backlog'], ['done-week', 'Done this week']];
 // Views reached only by a link (Home's "All finished today"), with no chip of their own.
 const LINK_VIEWS = [['done-today', 'Finished today']];
 function savedView() {
@@ -54,6 +54,7 @@ function inView(t, view, nowMs = Date.now()) {
   if (view === 'working') return status === 'active';
   if (view === 'this-week') return window.DashHelpers.inThisWeek(t, status, nowMs);
   if (view === 'stuck') return isStuck(t);
+  if (view === 'waiting') return ticketWaitsOnly(t) || status === 'blocked';  // the Waiting lane: no question for a person, it waits for a time, a ticket or the outside
   if (view === 'backlog') return status === 'open';
   if (view === 'done-today') { const at = new Date(window.DashHelpers.doneAt(t)); return status === 'done' && at.toDateString() === new Date(nowMs).toDateString(); }
   if (view === 'done-week') { const at = Date.parse(window.DashHelpers.doneAt(t)); return status === 'done' && (!Number.isFinite(at) || nowMs - at <= 7 * 86400000); }
@@ -209,6 +210,13 @@ function ticketNext(t) {
   }
   return text || action ? h('div', {className:'row ticket-next'}, text ? h('span', {className:'meta'}, clean(text)) : null, action) : null;
 }
+// The new live page (Preview, draft D feature 3): every row gets the ticket's session button. When it says Answer it takes the
+// place of the row's own Answer, so a row never shows two.
+function ticketRowFocus(t, nextAction) {
+  const live = typeof liveFocusButton === 'function' ? liveFocusButton(t) : null;
+  if (!live) return [nextAction];
+  return live.dataset.verb === 'Answer' && nextAction?.textContent === 'Answer' ? [live] : [nextAction, live];
+}
 function ticketMenu(t, scope) {
   if (snapshot) return null;
   const menu = statusControl(t, scope), summary = menu.querySelector('summary');
@@ -242,9 +250,9 @@ function dueCell(t) {
   if (!t.due) return h('span', {className:'meta'}, '–');
   const late = window.DashHelpers.columnOf(shown(t).status) !== 'done' && (t.stuck === 'overdue' || overdue(t));
   const today = !late && String(t.due).slice(0, 10) === new Date(now()).toLocaleDateString('sv');
-  return h('span', {className:late ? 'bad' : today ? 'warn' : ''}, dueText(t));
+  return h('span', {className:late ? 'bad' : today ? 'warn' : ''}, dueText(t).replace(/^Due /, ''));  // the column head says Due
 }
-function spendCell(t) { return h('span', {className:'meta'}, window.DashHelpers.spendWords(t.spend) || '–'); }
+function spendCell(t) { const words = window.DashHelpers.spendWords(t.spend); return h('span', {className:'meta', title:words ? undefined : 'Not recorded'}, words || '–'); }
 // One table row (a ticket or a part under its parent). `section` is the group it sits in.
 function treeBranch(rows, index, section) {
   const row = rows[index], t = row.ticket;
@@ -264,7 +272,7 @@ function treeBranch(rows, index, section) {
     h('td', {className:'steps'}, stepsCell(t, row)),
     h('td', {className:'numeric spend-cell'}, spendCell(t)),
     h('td', {className:'meta when', title:String(at || '')}, t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : at && window.DashHelpers.ago ? (shown(t).status === 'done' ? 'Finished ' : '') + window.DashHelpers.ago(at, Date.now()) : ''),
-    h('td', {className:'ticket-actions'}, h('div', {className:'ticket-actions-row'}, nextAction, ticketMenu(t, 'tree'))));
+    h('td', {className:'ticket-actions'}, h('div', {className:'ticket-actions-row'}, ...ticketRowFocus(t, nextAction), ticketMenu(t, 'tree'))));
   node.dataset.depth = String(Math.min(row.depth, 6));
   node.classList.add('row-click');
   node.addEventListener('click', e => { if (!e.target.closest('a,button,select,input,[role="menu"]')) location.hash = href(t.id); });
@@ -439,6 +447,17 @@ function askReplacedBy(t, from) {
 const movePending = new Map();
 // Optimistic: the card moves and the notice (with Undo) shows at once; a failed save puts the card back.
 // `extra`: more arguments of the change (Accept on a ticket in Review sends the review tip it showed).
+function offerStart(id) {
+  const toast = window.orch.toast('No helper is working on it yet.', 'ok');
+  if (!toast?.querySelector) return;
+  const start = h('button', {type:'button', className:'btn ghost sm', 'data-action':'offer-start'}, 'Start helper');
+  start.addEventListener('click', async () => {
+    toast.remove();
+    const result = await act('run.start', {ticket:id});
+    if (!result.ok) window.orch.toast(changeError(result), 'error');
+  });
+  toast.querySelector('button[aria-label="Dismiss notification"]')?.before(start);
+}
 /* ORCH-235: Done on a ticket whose sub-tickets are not all finished asks once (no typed word): "Mark Done anyway"
    or Cancel. Resolves true to go on. */
 function confirmOpenKids(t, open) {
@@ -493,6 +512,8 @@ function moveTicket(id, status, undoing = false, extra = {}) {
     if (!result.ok) { set(previous, before); toast?.remove?.(); window.orch.toast(changeError(result), 'error'); }
     unfade();
     render();
+    // ORCH-248 (owner 17 Nov): a move to Working by hand starts no helper; offer Start instead of the silent fall back to To do.
+    if (result.ok && status === 'active' && !undoing && !quiet && state.runs?.[id]?.running !== true) offerStart(id);
   })();
   movePending.set(id, run);
   run.finally(() => { if (movePending.get(id) === run) movePending.delete(id); });
@@ -572,6 +593,8 @@ function shortFact(t, row) {
   return (shown(t).status === 'done' && at ? 'Finished ' : '') + ago(at);
 }
 function shortSide(t, row, status) {
+  const live = typeof liveFocusButton === 'function' ? liveFocusButton(t) : null;
+  if (live) return live;
   if (!snapshot && questions(t).length && shown(t).status !== 'done') return button('Answer', 'outline sm', event => {
     event.stopPropagation();
     const need = needsList().find(x => x.ticket === t.id);

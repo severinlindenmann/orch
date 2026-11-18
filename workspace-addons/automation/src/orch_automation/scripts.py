@@ -247,16 +247,17 @@ def _write(p: Path, text: str) -> None:
     os.replace(tmp, p)
 
 
-def _pidfile(root: Path, tid: str) -> Path:
+def _pidfile(root: Path, tid: str, member: str | None = None) -> Path:
+    """One lock per ticket; a repeat that runs a group of scripts has one lock per script of the group."""
     from .runner import sdir
 
-    return sdir(root) / f"script-{tid}.json"
+    return sdir(root) / (f"script-{tid}-{member}.json" if member else f"script-{tid}.json")
 
 
-def busy(root: Path, tid: str) -> bool:
+def busy(root: Path, tid: str, member: str | None = None) -> bool:
     """A script run for this ticket is going on (its pid file names a live process with the recorded start time)."""
     try:
-        rec = runfiles.read_json(_pidfile(root, tid))
+        rec = runfiles.read_json(_pidfile(root, tid, member))
     except RuntimeError:
         return True  # a link or an unreadable file: start nothing
     if not rec:
@@ -265,10 +266,10 @@ def busy(root: Path, tid: str) -> bool:
     return runfiles.alive(pid) and runfiles.proc_start(pid) == rec.get("started")
 
 
-def _claim(root: Path, tid: str) -> bool:
+def _claim(root: Path, tid: str, member: str | None = None) -> bool:
     """Write this process's pid file; False when another live run holds it."""
-    p = _pidfile(root, tid)
-    if busy(root, tid):
+    p = _pidfile(root, tid, member)
+    if busy(root, tid, member):
         return False
     runfiles.remove(p)  # a stale file of a run that ended without cleaning up
     me = os.getpid()
@@ -281,14 +282,15 @@ def _claim(root: Path, tid: str) -> bool:
     return True
 
 
-def runner_argv(root: Path, tid: str) -> list[str]:
+def runner_argv(root: Path, tid: str, member: str | None = None) -> list[str]:
     """-P: the workspace folder is never on the import path (a planted orch_automation.py there is not run)."""
     import sys
 
-    return [sys.executable, "-P", "-m", "orch_automation", "--dir", str(root), "script", "run", tid]
+    argv = [sys.executable, "-P", "-m", "orch_automation", "--dir", str(root), "script", "run", tid]
+    return [*argv, "--name", member] if member else argv
 
 
-def _start_runner(root: Path, tid: str) -> None:
+def _start_runner(root: Path, tid: str, member: str | None = None) -> None:
     """`orch automation script run <tid>` in the background; it waits for the script and records the result."""
     from orch.procs import background_popen_kwargs
 
@@ -296,7 +298,7 @@ def _start_runner(root: Path, tid: str) -> None:
 
     with runfiles.open_append(sdir(root) / "scripts.log") as out:
         subprocess.Popen(
-            runner_argv(root, tid),
+            runner_argv(root, tid, member),
             cwd=root,
             stdout=out,
             stderr=subprocess.STDOUT,
@@ -305,14 +307,16 @@ def _start_runner(root: Path, tid: str) -> None:
         )
 
 
-def launch(root: Path, tid: str, name: str) -> tuple[str, str | None]:
-    """Start `orch automation script run <tid>` in the background. ("started"|"pending"|"failed", reason)."""
+def launch(root: Path, tid: str, name: str, member: bool = False) -> tuple[str, str | None]:
+    """Start `orch automation script run <tid>` in the background. ("started"|"pending"|"failed", reason).
+    member: the script is one of the ticket's group (its own lock, `script run <tid> --name <name>`)."""
     if command(root, name) is None:
         return "failed", missing(root, name)
-    if busy(root, tid):
+    lock = name if member else None
+    if busy(root, tid, lock):
         return "pending", None
     try:
-        _start_runner(root, tid)
+        _start_runner(root, tid, lock)
     except OSError as e:
         return "failed", f"the script could not be started ({e.__class__.__name__})"
     return "started", None
@@ -330,16 +334,18 @@ def missing(root: Path, name: str) -> str:
     )
 
 
-def run(root: Path, tid: str, name: str, at: str, on_fail) -> int:
+def run(root: Path, tid: str, name: str, at: str, on_fail, member: bool = False) -> int:
     """Run the script in the foreground and wait: log file, runs.jsonl line, one question when it failed.
-    Returns its exit code (75 = another run of it is going on, nothing was started)."""
+    Returns its exit code (75 = another run of it is going on, nothing was started).
+    member: one script of the ticket's group (its own lock and log name, its name on the history line)."""
     from .runner import history
 
     argv = command(root, name)
     if argv is None:
         on_fail(missing(root, name))
         return 2
-    if not _claim(root, tid):
+    lock = name if member else None
+    if not _claim(root, tid, lock):
         return 75
     try:
         logs = root / ".orch" / "run" / "logs"
@@ -348,7 +354,8 @@ def run(root: Path, tid: str, name: str, at: str, on_fail) -> int:
                 on_fail(f"{part} is a symbolic link; the script was not started")
                 return 2
         logs.mkdir(parents=True, exist_ok=True)
-        rel = f".orch/run/logs/{tid}-script-{datetime.now(UTC):%Y%m%dT%H%M%SZ}.log"
+        part = f"script-{name}" if member else "script"
+        rel = f".orch/run/logs/{tid}-{part}-{datetime.now(UTC):%Y%m%dT%H%M%SZ}.log"
         t0 = time.time()
         with runfiles.open_append(root / rel) as out:
             try:
@@ -364,9 +371,9 @@ def run(root: Path, tid: str, name: str, at: str, on_fail) -> int:
             except OSError as e:
                 out.write(f"orch: the script could not be started: {e}\n")
                 code = 127
-        history(root, tid, at, max(0, round(time.time() - t0)), code)
+        history(root, tid, at, max(0, round(time.time() - t0)), code, script=name if member else None)
         if code != 0:
             on_fail(f"the script {name} stopped with exit code {code}. Its output is in {rel}")
         return code
     finally:
-        runfiles.remove(_pidfile(root, tid))
+        runfiles.remove(_pidfile(root, tid, lock))

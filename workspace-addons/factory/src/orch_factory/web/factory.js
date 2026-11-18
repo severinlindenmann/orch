@@ -131,27 +131,110 @@
       c.classList.add('f-attention'); return c;
     });
   }
-  // The crew's results that wait for your Looks good: one card, one link per result (each opens its own ticket, where
-  // the check is your own click). Nothing is checked from here.
-  const results = order => array(order.results).filter(r => validId(r?.ticket));
-  function resultsCard(order, withOrder) {
-    const rows = results(order);
-    const c = card(order.title, node('h3', plural(rows.length, 'result', 'results') + ' built, waiting for your Looks good'),
-      group('stack', ...rows.map((r, i) => link((rows.length > 1 ? 'Look at ' : 'Look at the result: ') + text(r.title), '/#ticket/' + r.ticket, i === 0))),
-      ...(withOrder ? [tail(orderLink(order, 'Review order'))] : []));
-    // Two or more results: one click is the same Looks good on each ticket (only inside the dashboard, which does it).
-    if (rows.length > 1 && embedded()) {
-      const all = node('button', 'Looks good, all', 'btn outline sm f-btn'); all.type = 'button';
-      const problem = meta(''); problem.setAttribute('role', 'alert'); problem.hidden = true;
-      all.addEventListener('click', async () => {
-        all.disabled = true; problem.hidden = true;
-        const result = await askDashboard({type: 'orch.looksgood', tickets: rows.map(r => r.ticket)});
-        if (result.error === undefined) return render();
-        problem.textContent = result.error || 'Looks good could not be saved. Try again.'; problem.hidden = false; all.disabled = false;
-      });
-      c.append(tail(all), problem);
+  // One review per stage (ORCH-335, owner 17 Nov): the stage's built result in a few lines (pictures of the built
+  // screens, a short demo, the tests, whether the code is merged) and ONE Looks good / Change for the whole stage.
+  // The pictures open big in the kit's result overlay; nothing here opens a ticket.
+  const reviews = order => array(order.reviews).filter(r => array(r?.tickets).some(validId));
+  const RESULT_NAME = /^[A-Za-z0-9._-]{1,80}\.(png|jpg|jpeg|webp|gif|mp4|webm)$/;
+  function resultSrc(order, file) {
+    if (!file || !validId(order.id) || !validId(file.ticket) || !RESULT_NAME.test(String(file.name)) || String(file.name).includes('..')) return null;
+    const src = prefix + '/api/order/' + order.id + '/result/' + file.ticket + '/' + encodeURIComponent(file.name);
+    return window.OrchFrame ? window.OrchFrame.url(src) : src;  // the frame pass in the dashboard's sandboxed frame
+  }
+  function shown(order, review) {
+    const items = [];
+    const demo = review.demo, demoSrc = resultSrc(order, demo);
+    if (demoSrc) items.push(/\.gif$/i.test(demo.name)
+      ? {type: 'picture', name: 'Short demo', src: demoSrc, alt: 'Short demo of ' + text(demo.title || 'the built screens'), meta: 'Demo', demo: true}
+      : {type: 'video', name: 'Short demo', src: demoSrc, meta: 'Demo', demo: true});
+    for (const pic of array(review.pictures)) {
+      const src = resultSrc(order, pic);
+      if (src) items.push({type: 'picture', name: text(pic.title || pic.task), src, alt: text(pic.title || pic.task) + ' · ' + text(pic.task), meta: text(pic.task), ticket: pic.ticket});
     }
+    return items;
+  }
+  function factPill(kind, words) { const el = node('span', null, kind ? 'pill ' + kind : 'pill'); el.append(node('span', words)); return el; }
+  // A task's (or the stage's) facts as pills: tests passed / failed, merged / not merged yet (no code: no pill).
+  function facts(tests, code) {
+    const failed = Number(tests?.failed) || 0, passed = Number(tests?.passed) || 0;
+    const merged = Number(code?.merged) || 0, waiting = Number(code?.waiting) || 0;
+    const out = [failed ? factPill('failed', plural(failed, 'test failed', 'tests failed')) : passed ? factPill('done', 'Tests passed') : factPill('', 'No tests recorded')];
+    if (waiting) out.push(factPill('working', 'Not merged yet'));
+    else if (merged) out.push(factPill('done', 'Merged'));
+    return group('row', ...out);
+  }
+  // A small picture that opens the stage's pictures big (kit overlay, arrows through all of them).
+  function thumb(items, index, label) {
+    const b = node('button', null, 'btn ghost'); b.type = 'button'; b.setAttribute('aria-label', label);
+    const img = node('img', null, 'thumbnail'); img.alt = ''; img.loading = 'lazy'; img.src = items[index].src;
+    img.addEventListener('error', () => img.replaceWith(meta('No picture')), {once: true});
+    b.append(img);
+    b.addEventListener('click', () => { if (window.UI && UI.resultOverlay) UI.resultOverlay(items, index); });
+    return b;
+  }
+  // The stage's result in a few lines: the short demo, then one row per built task (a picture, what it is, its
+  // tests and whether it is merged), the stage together, and ONE Looks good / Change. No per-task ticket button.
+  function reviewCard(order, review, withOrder) {
+    const tickets = array(review.tickets).filter(validId), tasks = array(review.tasks);
+    const c = card(stageName(order, review.stage) + ': what your crew built',
+      meta(withOrder ? text(order.title) + ' · ' + plural(tasks.length, 'task', 'tasks') + ' built' : plural(tasks.length, 'task', 'tasks') + ' built'));
+    const items = shown(order, review), rows = group('card f-review-rows');
+    const demoAt = items.findIndex(x => x.demo);
+    if (demoAt >= 0) {
+      const posterAt = items.findIndex(x => !x.demo);
+      const play = node('button', 'Play the demo', 'btn outline sm'); play.type = 'button';
+      play.addEventListener('click', () => { if (window.UI && UI.resultOverlay) UI.resultOverlay(items, demoAt); });
+      rows.append(group('list-row', ...(posterAt >= 0 ? [thumb(items, posterAt, 'Open the short demo')] : []),
+        group('grow stack', node('strong', 'Short demo'), meta('A few seconds of the built screens in use.'), group('actions', play))));
+    }
+    for (const task of tasks) {
+      const at = items.findIndex(x => x.ticket === task.ticket && !x.demo);
+      const failing = array(review.tests?.failing).filter(f => f.task === task.title).map(f => text(f.step));
+      rows.append(group('list-row', at >= 0 ? thumb(items, at, 'Open the pictures of ' + text(task.title)) : meta('No picture'),
+        group('grow stack', node('strong', task.title), ...(failing.length ? [meta('Failed: ' + failing.join('; '))] : []),
+          facts(task.tests, task.code))));
+    }
+    c.append(rows);
+    if (!items.length) c.append(meta('Nothing to show: no pictures or demo were added to this stage.'));
+    if (tasks.length > 1) c.append(group('row', meta('Together:'), facts(review.tests, review.code)));
+    c.append(reviewActions(order, review, tickets, withOrder ? [orderLink(order, 'Review order')] : []));
     c.classList.add('f-attention'); return c;
+  }
+  // Looks good = the same Looks good as on each ticket, for all of the stage's results at once (the dashboard does it).
+  // Change = your words to the helper on the order ("Change at <stage>: ..."), sent as your own message.
+  function reviewActions(order, review, tickets, more = []) {
+    const box = group('stack f-review-actions');
+    if (!embedded() || !validId(order.id)) { box.append(meta('Open Factory in the dashboard to say Looks good or ask for a change with one click.'), ...(more.length ? [tail(...more)] : [])); return box; }
+    const ok = node('button', 'Looks good', 'btn primary'); ok.type = 'button';
+    const change = node('button', 'Change', 'btn outline sm'); change.type = 'button';
+    const buttons = group('actions', ok, change, ...more);
+    const area = node('textarea', null, 'text-input'); area.rows = 3; area.maxLength = NOTE_MAX; area.style.width = '100%';
+    const label = node('label', 'What should change?'); label.append(area);
+    const send = node('button', 'Send', 'btn primary sm'); send.type = 'button';
+    const back = node('button', 'Cancel', 'btn ghost sm'); back.type = 'button';
+    const changeBox = group('stack', label, group('actions', send, back)); changeBox.hidden = true;
+    const status = meta(''); status.setAttribute('role', 'status'); status.hidden = true;
+    const say = words => { status.textContent = words; status.hidden = false; };
+    ok.addEventListener('click', async () => {
+      ok.disabled = change.disabled = true; status.hidden = true;
+      const result = await askDashboard({type: 'orch.looksgood', tickets});
+      if (result.error === undefined) return render();
+      say(result.error || 'Looks good could not be saved. Try again.'); ok.disabled = change.disabled = false;
+    });
+    change.addEventListener('click', () => { buttons.hidden = true; changeBox.hidden = false; area.focus(); });
+    back.addEventListener('click', () => { changeBox.hidden = true; buttons.hidden = false; change.focus(); });
+    send.addEventListener('click', async () => {
+      const words = area.value.trim();
+      if (!words) { area.focus(); return; }
+      send.disabled = true; status.hidden = true;
+      const result = await toAgent(order.id, 'Change at ' + stageName(order, review.stage) + ': ' + words);
+      send.disabled = false;
+      if (result.error !== undefined) { say((result.error || "That didn't work.") + ' Nothing was sent.'); return; }
+      area.value = ''; changeBox.hidden = true; buttons.hidden = false;
+      say('Sent. Your helper changes it and shows you the new result here.');
+    });
+    box.append(buttons, changeBox, status);
+    return box;
   }
   // The run goes on by itself; until its next step has started, say so instead of showing nothing.
   const startingNote = order => order.starting && !waitWords(order) ? [meta('Starting the ' + stageName(order, order.starting) + ' stage…')] : [];
@@ -160,12 +243,14 @@
   function waitWords(order) {
     const w = order.waiting, task = w && w.task ? ' · ' + text(w.task) : '';
     if (!w || typeof w !== 'object' || w.kind === 'starting') return '';
-    if (w.kind === 'you') return 'Nothing moves on until you answer' + task;
-    if (w.kind === 'time' && parseWhen(w.until)) return 'Waiting until ' + when(w.until) + task;
-    if (w.kind === 'time' || w.kind === 'ticket') return 'Waiting for another task to finish' + task;
-    if (w.kind === 'held') return 'Your helper has not started yet' + (w.why ? ': ' + noIso(w.why) : '');
-    if (w.kind === 'watcher') return 'Nothing moves on: the Factory watcher is off';
-    return 'No helper is working on it right now';
+    // one line: why nothing moves, then what moves it on (owner, ORCH-277)
+    if (w.kind === 'you') return 'Nothing moves on until you answer' + task + '. Your answer moves it on.';
+    if (w.kind === 'time' && parseWhen(w.until)) return 'Waiting until ' + when(w.until) + task + '. It goes on by itself then.';
+    if (w.kind === 'time' || w.kind === 'ticket') return 'Waiting for another task to finish' + task + '. It goes on by itself then.';
+    if (w.kind === 'held') return 'Your helper has not started yet' + (w.why ? ': ' + noIso(w.why) : '.');
+    if (w.kind === 'watcher') return 'Nothing moves on: the Factory watcher is off. Start orch on this computer again to move it on.';
+    if (w.kind === 'stuck') return 'No helper is working on it, and starting it again did not help. Write to your helper on the order to move it on.';
+    return 'No helper is working on it right now. Factory starts your helper again in a few minutes.';
   }
   const waitNote = order => { const words = waitWords(order); return words ? [meta(words)] : []; };
   function answer(order) {
@@ -371,7 +456,7 @@
   }
   function home(data) {
     const orders = array(data.orders), auto = data.autopilot;
-    const needing = orders.filter(o => o.open || draftWaiting(o) || results(o).length);
+    const needing = orders.filter(o => o.open || draftWaiting(o) || reviews(o).length);
     const minutes = needing.reduce((sum, o) => sum + (o.open && Number.isFinite(Number(o.owner_min)) && o.owner_min !== null ? Number(o.owner_min) : 0), 0);
     view.append(heading('Factory', needing.length
       ? plural(needing.length, 'Factory item waits for you', 'Factory items wait for you') + (minutes ? ' · about ' + minutes + ' min of your time' : '')
@@ -394,9 +479,9 @@
           tail(decide(o, 'Answer', true), orderLink(o, 'Review order')));
         c.classList.add('f-attention'); return c;
       }],
-      ['results', orders.filter(o => results(o).length), o => resultsCard(o, true)],
+      ['results', orders.filter(o => reviews(o).length), o => reviews(o).map(r => reviewCard(o, r, true))],
     ];
-    const waiting = kinds.flatMap(([, rows, paint]) => rows.map(paint));
+    const waiting = kinds.flatMap(([, rows, paint]) => rows.flatMap(paint));
     if (waiting.length) {
       const block = node('section', null, 'f-section f-waits');
       const mark = badge('Waits for you'); mark.classList.add('attn');
@@ -529,7 +614,8 @@
         group('actions', link('What it decided', '#/autopilot'), ticket(order.id, 'Open order ticket', false))));
     }
     const lineCard = card('The line', stages(order), ...waitNote(order), ...startingNote(order), ...(order.kind === 'run' && order.phase === 'started' ? [nextStop(order)].filter(Boolean) : []));
-    const main = group('stack', lineCard, card('Time + budget', budget(order), ...(order.due ? [meta('Due ' + when(order.due))] : [])));
+    // the stage review sits right under the line (ORCH-335): on a phone it comes before the long lists, not after them
+    const main = group('stack', lineCard, ...reviews(order).map(r => reviewCard(order, r, false)), card('Time + budget', budget(order), ...(order.due ? [meta('Due ' + when(order.due))] : [])));
     const crew = card('Crew now');
     for (const c of array(order.crew)) {
       const label = c.with ? [roleName(c.role), c.with.name, c.with.words].filter(Boolean).join(' · ') : [roleName(c.role), c.agent, statusWord[c.status] || c.status].filter(Boolean).join(' · ');
@@ -558,7 +644,6 @@
       const question = card('Needs you', node('h3', openTitle(order, order.open)), ...openBody(order, order.open, true), rawDetails(order.open), answer(order));
       question.classList.add('f-attention'); aside.append(question);
     }
-    if (results(order).length) aside.append(resultsCard(order, false));
     aside.append(...questionCards(order));
     if (order.problem) aside.append(card('Record needs attention', p(order.problem), group('actions', ticket(order.id, 'Open order ticket', false))));
     const changes = card('Changes');

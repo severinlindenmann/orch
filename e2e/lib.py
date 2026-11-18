@@ -249,6 +249,41 @@ def start_local(e, tmp: Path, bins: dict, used: set[int]) -> tuple[Server, Serve
     return pub, rel
 
 
+EXTRA_ROOTS: list[Path] = []  # folders outside the run's temp root that a scenario made (the Factory workspaces); LEAK checks them too
+
+
+def orch_processes_under(roots) -> list[tuple[int, str]]:
+    """(pid, command) of every add-on process (`-m orch_...`) that belongs to one of the folders: its command line
+    names the folder (--dir), or its working folder is inside it (a folder already deleted still shows by the command)."""
+    roots = [str(Path(r)) for r in roots]
+    out = subprocess.run(["ps", "-axo", "pid,command"], capture_output=True, text=True).stdout
+    found = []
+    for ln in out.splitlines():
+        pid_s, _, cmd = ln.strip().partition(" ")
+        if " -m orch_" not in cmd or not pid_s.isdigit():
+            continue
+        if any(r in cmd for r in roots):
+            found.append((int(pid_s), cmd))
+            continue
+        lsof = subprocess.run([shutil.which("lsof") or "/usr/sbin/lsof", "-a", "-d", "cwd", "-p", pid_s, "-Fn"],
+                              capture_output=True, text=True).stdout
+        cwd = next((x[1:] for x in lsof.splitlines() if x.startswith("n")), "")
+        if cwd and any(cwd == r or cwd.startswith(r + os.sep) for r in roots):
+            found.append((int(pid_s), cmd))
+    return found
+
+
+def end_processes(pids) -> None:
+    import signal
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass
+        time.sleep(0.5)
+
+
 def kill_group(p: subprocess.Popen) -> None:
     """End a process started with start_new_session=True and everything it started (orch runs add-ons as children)."""
     import signal

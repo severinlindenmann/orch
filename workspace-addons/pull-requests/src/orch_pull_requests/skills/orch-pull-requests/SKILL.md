@@ -1,6 +1,6 @@
 ---
 name: orch-pull-requests
-description: Merge a finished pull request through the merge queue, which merges several together after one run of the checks. Use when a ticket's pull request should be merged once its checks pass ("merge on green") and the pull-requests add-on is on. Not for opening pull requests or for pull requests a person merges with a Merge card.
+description: See each pull request's checks and merge state (on the Pull requests page and live on its ticket) and merge a finished pull request through the merge queue, which merges several together after one run of the checks. Use when a ticket links a pull request, should be merged once its checks pass ("merge on green") and the pull-requests add-on is on. Not for opening pull requests or for pull requests a person merges with a Merge card.
 ---
 # orch merge queue
 
@@ -17,14 +17,19 @@ get merged. No AI call: a program does the waiting and merging.
 
 **1. Merge on green through the queue** (replaces `orch ref wait <ticket> --merge`)
 
-    orch pull-requests queue add <pull request url> --ticket <ticket> --wait
+    orch pull-requests queue add <pull request url> --ticket <ticket>
 
-Run it bare, not through a pipe. Exit 0 = merged (alone or with its group); exit 1 = it left the queue, the last line
-says why (checks failed, a draft, closed, changes requested, conflicts with the base branch, GitHub did not answer
-three times). Exit 2 = not queued, the line says why (a draft, a base branch the queue does not merge into, changes
-requested, another GitHub login). The verdict also goes on the ticket. Fix what it says, push, and add it again. The
-pull request must be ready (not a draft) and go into an allowed base branch (develop unless the workspace says
-otherwise; never main).
+Mark the pull request ready first (after your last push), then add it and finish your ticket: do not wait for its
+checks. Exit 0 = in line; exit 2 = not queued, the line says why (a draft, a base branch the queue does not merge
+into, changes requested, another GitHub login): fix it and add it again. The verdict goes on the ticket: the pull
+request link shows `merged`, or a history line says why it left the queue (checks failed, a draft, closed, changes
+requested, conflicts with the base branch, GitHub did not answer three times) and the ticket's helper is woken
+with that reason: fix it, push and add it again. The pull request must go into an allowed base branch (develop unless the workspace
+says otherwise; never main). Do not take the base branch in by hand to get it merged: a pull request that fell
+behind is checked once on top of the base branch by the queue.
+
+Only when a person asks you to stay until it is merged: add `--wait` and run it bare, not through a pipe. Exit 0 =
+merged (alone or with its group); exit 1 = it left the queue, the last line says why.
 
 **2. Or let the ticket's switch do it** (Merge when green)
 
@@ -41,6 +46,14 @@ person says to merge on green; leave it off when a person merges with a Merge ca
 **4. Take a waiting pull request out**
 
     orch pull-requests queue remove <pull request url>
+
+**6. See the checks** (no waiting, no GitHub call of your own)
+
+While the add-on runs (`orch start`), it reads the repositories your tickets link once a minute, read-only, and keeps each linked pull request's state on its ticket: the link shows `Checks running`, `Checks failed`, `Ready to merge`, `Merged` and so on, and the ticket's Details show its newest open pull request's checks and merge state. The dashboard's Pull requests page lists the open pull requests with their ticket, checks and merge state. Update one ticket now:
+
+    orch pull-requests act refresh -- <ticket>
+
+Link every pull request to its ticket with `orch ref add`; one no ticket links shows on the page but on no ticket.
 
 **5. Failed checks** (off until a person turns it on: `orch pull-requests failed-checks on`)
 

@@ -6,7 +6,7 @@ const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
 const marker = source.slice(source.indexOf('// A shipped add-on page'));
 const ORIGIN = 'http://127.0.0.1:8000';
-// Factory "Looks good, all": every collaborator of the handler is faked.
+// Factory stage review "Looks good": every collaborator of the handler is faked.
 function setup({shipped = true, kind = 'page', snapshot = false, statuses = {t_aaaaaa:'review', t_bbbbbb:'review', t_cccccc:'active'}, failFor = [], foreign = [], clicked = true} = {}) {
   const calls = {moves:[], posts:[], toasts:[], undo:null};
   const frameWindow = {postMessage:(m, o) => calls.posts.push([m, o])};

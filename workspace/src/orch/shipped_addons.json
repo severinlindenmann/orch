@@ -252,10 +252,25 @@
   "version": "0.1.0"
  },
  "pull-requests": {
-  "acts": {},
+  "acts": {
+   "refresh": {
+    "summary": "Look up the ticket's pull requests and their checks",
+    "who": "anyone",
+    "writes": [
+     "refs",
+     "ext.pull-requests"
+    ]
+   }
+  },
   "agents_block": "skills/orch-pull-requests/AGENTS-block.md",
   "background": true,
-  "description": "Merge queue: pull requests wait in line and are merged in groups after one run of the checks.",
+  "dashboard": {
+   "icon": "check",
+   "label": "Pull requests",
+   "order": 25,
+   "subtitle": "Open pull requests of the repositories your tickets link, with their checks."
+  },
+  "description": "Open pull requests with their checks, live on each ticket; merge when green and the merge queue.",
   "gitignore": [
    ".orch/addons/pull-requests/"
   ],
@@ -273,7 +288,9 @@
   "ticket_fields": {
    "schema": "ext.schema.json",
    "section": "Pull requests",
-   "show_on_card": []
+   "show_on_card": [
+    "checks"
+   ]
   },
   "ticket_fields_section": {
    "fields": [
@@ -293,14 +310,139 @@
      "read_only": false,
      "title": "Merge when green",
      "type": "choice"
+    },
+    {
+     "hidden": false,
+     "key": "pr",
+     "read_only": true,
+     "title": "Pull request",
+     "type": "text"
+    },
+    {
+     "hidden": false,
+     "key": "checks",
+     "options": [
+      {
+       "label": "Passed",
+       "value": "Passed"
+      },
+      {
+       "label": "Running",
+       "value": "Running"
+      },
+      {
+       "label": "Failed",
+       "value": "Failed"
+      },
+      {
+       "label": "No checks",
+       "value": "No checks"
+      }
+     ],
+     "read_only": true,
+     "title": "Checks",
+     "type": "choice"
+    },
+    {
+     "hidden": false,
+     "key": "merge",
+     "options": [
+      {
+       "label": "Ready to merge",
+       "value": "Ready to merge"
+      },
+      {
+       "label": "Blocked",
+       "value": "Blocked"
+      },
+      {
+       "label": "Behind its base",
+       "value": "Behind its base"
+      },
+      {
+       "label": "Has a conflict",
+       "value": "Has a conflict"
+      },
+      {
+       "label": "Draft",
+       "value": "Draft"
+      },
+      {
+       "label": "Not known yet",
+       "value": "Not known yet"
+      },
+      {
+       "label": "Merged",
+       "value": "Merged"
+      },
+      {
+       "label": "Closed",
+       "value": "Closed"
+      }
+     ],
+     "read_only": true,
+     "title": "Merge",
+     "type": "choice"
     }
    ],
    "section": "Pull requests",
-   "show_on_card": []
+   "show_on_card": [
+    "checks"
+   ]
   },
-  "ticket_links": [],
+  "ticket_links": [
+   {
+    "icon": "link",
+    "kind": "github-pr",
+    "label": "Pull request",
+    "match": [
+     "https://github.com/*/*/pull/*"
+    ],
+    "statuses": [
+     "open",
+     "draft",
+     "checks running",
+     "checks failed",
+     "conflict",
+     "behind",
+     "blocked",
+     "ready to merge",
+     "merged",
+     "closed"
+    ]
+   }
+  ],
   "ticket_view": [],
   "version": "0.2.0"
+ },
+ "services": {
+  "acts": {},
+  "agents_block": "skills/orch-services/AGENTS-block.md",
+  "background": false,
+  "dashboard": {
+   "icon": "box",
+   "label": "Services",
+   "order": 50,
+   "subtitle": "What keeps running on this computer for this workspace."
+  },
+  "description": "Keep this workspace's background services running and see their state and log.",
+  "gitignore": [
+   ".orch/addons/services/"
+  ],
+  "name": "services",
+  "needs": false,
+  "orch_api": 1,
+  "recommended": false,
+  "requires": [],
+  "run": "orch_services",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "skill": "skills/orch-services",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
  },
  "sync": {
   "acts": {},
@@ -325,6 +467,74 @@
   "skill": "skills/orch-sync",
   "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": true,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
+ },
+ "usage": {
+  "acts": {
+   "end": {
+    "summary": "End an account's rule on a date, then go back to the rule before it",
+    "who": "people",
+    "writes": []
+   },
+   "limit": {
+    "summary": "Set or remove one limit of an account",
+    "who": "people",
+    "writes": []
+   },
+   "off": {
+    "summary": "Stop using an account",
+    "who": "people",
+    "writes": []
+   },
+   "on": {
+    "summary": "Use an account again",
+    "who": "people",
+    "writes": []
+   },
+   "order": {
+    "summary": "Use an account earlier or later",
+    "who": "people",
+    "writes": []
+   },
+   "period": {
+    "summary": "Change what a limit counts over: 5 hours, a week, a month or until a date",
+    "who": "people",
+    "writes": []
+   },
+   "switching": {
+    "summary": "Switch accounts by itself, or only show and warn",
+    "who": "people",
+    "writes": []
+   }
+  },
+  "agents_block": "skills/orch-usage/AGENTS-block.md",
+  "background": true,
+  "dashboard": {
+   "icon": "bolt",
+   "label": "Usage",
+   "order": 35
+  },
+  "description": "Every account the helpers spend on, its limits, its order and a history of every change.",
+  "gitignore": [
+   ".orch/addons/usage/"
+  ],
+  "name": "usage",
+  "needs": false,
+  "orch_api": 1,
+  "page": {
+   "label": "Open Usage",
+   "path": "/"
+  },
+  "recommended": false,
+  "requires": [],
+  "run": "orch_usage",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "skill": "skills/orch-usage",
+  "ticket_ext_inert": false,
   "ticket_fields_section": null,
   "ticket_links": [],
   "ticket_view": [],

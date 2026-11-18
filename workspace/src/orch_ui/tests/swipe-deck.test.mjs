@@ -149,3 +149,37 @@ test('ORCH-246: on a question with options the words box sends my answer, not "S
   assert.ok(labels.includes('Send my answer'));
   assert.ok(!labels.includes('Send back for changes'));
 });
+
+test('ORCH-295: Add note saves the words, answers nothing, and keeps the card; Send back stays its own button', async () => {
+  const notes = [];
+  const {d, host, decided, talkBtn} = deck([draft('a'), draft('b')], {onNote: async (it, text) => { notes.push({id: it.id, text}); return {ok: true}; }});
+  talkBtn.click();
+  const sheet = host.querySelector('.swipe-sheet'), ta = sheet.querySelector('textarea');
+  const add = sheet.querySelectorAll('button').find(b => b.textContent === 'Add note');
+  const back = sheet.querySelectorAll('button').find(b => b.textContent === 'Send back for changes');
+  assert.ok(add && back && add !== back, 'two different buttons');
+  assert.equal(add.disabled, true, 'no words: no note');
+  ta.value = 'Please also check the footer'; ta.listeners.input.forEach(f => f());
+  add.click(); await wait(20);
+  assert.deepEqual(notes, [{id: 'a', text: 'Please also check the footer'}]);
+  assert.equal(decided.length, 0, 'no verdict: the card is not answered');
+  assert.equal(host.querySelector('.swipe-sheet'), null, 'the sheet closes');
+  assert.equal(d.index, 0, 'the same card stays on top');
+});
+
+test('ORCH-295: a failed note keeps the sheet and the words', async () => {
+  const {host, decided, talkBtn} = deck([draft('a')], {onNote: async () => ({ok: false, error: {message: 'Could not save the note.'}})});
+  talkBtn.click();
+  const sheet = host.querySelector('.swipe-sheet'), ta = sheet.querySelector('textarea');
+  ta.value = 'hello'; ta.listeners.input.forEach(f => f());
+  sheet.querySelectorAll('button').find(b => b.textContent === 'Add note').click(); await wait(20);
+  assert.ok(host.querySelector('.swipe-sheet'), 'still open');
+  assert.equal(ta.value, 'hello');
+  assert.equal(decided.length, 0);
+});
+
+test('ORCH-295: without onNote there is no Add note button', () => {
+  const {host, talkBtn} = deck([draft('a')]);
+  talkBtn.click();
+  assert.equal(host.querySelectorAll('button').some(b => b.textContent === 'Add note'), false);
+});

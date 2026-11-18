@@ -551,7 +551,7 @@ function everydayCard(settings, phoneAddon) {
   const row = (label, value, action, key) => h('div', {className:'card-row name-row', 'data-key':key}, h('span', {className:'set-label'}, label), settingsText('p', {className:'grow set-ctl'}, value), snapshot ? null : action);
   return h('div', {className:'stack', 'data-key':'settings-everyday'}, h('h2', {className:'set-sub'}, 'Everyday settings'), h('div', {className:'card'},
     row('Helper', chosen ? chosen.label : 'No helper chosen yet', go('agent', 'Manage', 'settings-everyday-helper'), 'settings-everyday-helper-row'),
-    phoneAddon ? row('Phone questions', state.mobile_mode ? (window.DashHelpers.mobileOn(state.mobile_mode) ? 'On' : 'Off') + ' · switch off after ' + state.mobile_mode.default_hours + ' h' : 'Phones are paired on your relay’s admin page.', go('phone', 'Change', 'settings-everyday-phone'), 'settings-everyday-phone-row') : null));
+    phoneAddon ? row('Phone questions', state.mobile_mode ? (window.DashHelpers.mobileOn(state.mobile_mode) ? 'On' + (window.mobileEndWords && state.mobile_mode.ends_at ? ' · until ' + window.mobileEndWords(state.mobile_mode.ends_at) : '') : 'Off · switches off by itself after ' + state.mobile_mode.default_hours + ' h') : 'Phones are paired on your relay’s admin page.', go('phone', 'Change', 'settings-everyday-phone'), 'settings-everyday-phone-row') : null));
 }
 // Phone & workspaces (draft settings-phone): 1. the relay connection, 2. phones (paired on the relay admin page) + delivery,
 // then the workspaces this one may talk to. Everything comes from the relay add-on's saved connection (no network).
@@ -609,6 +609,8 @@ function addonDetailPage(addon) {
       fragment(switchBusy(addon), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':label + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off')), 'addon-detail-switch'),
     addon.page?.live_session === true && addon.active && typeof state.settings?.typing_on === 'boolean' ? row('Typing', h('div', {}, settingsText('p', {}, 'Let me type into the helper\u2019s screen'), settingsText('p', {className:'meta'}, 'When on, you can click the helper\u2019s live screen and type into it.')),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.typing_on, 'aria-label':'Let me type into the helper\u2019s screen', 'data-action':'session-typing', 'data-key':'addon-detail-typing', disabled:snapshot || settingsBusy.has('session-typing')}, state.settings.typing_on ? 'On' : 'Off'), 'addon-detail-typing-row') : null,
+    addon.page?.live_session === true && addon.active && typeof state.settings?.focus_preview_on === 'boolean' ? row('Preview', h('div', {}, settingsText('p', {}, 'Try the new ' + label), settingsText('p', {className:'meta'}, 'Still being built. Turn it off to go back to today\u2019s ' + label + '.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.focus_preview_on, 'aria-label':'Try the new ' + label, 'data-action':'live-preview', 'data-key':'addon-detail-live-preview', disabled:snapshot || settingsBusy.has('live-preview')}, state.settings.focus_preview_on ? 'On' : 'Off'), 'addon-detail-live-preview-row') : null,
     addon.active && d ? row('Connection', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), null, 'addon-detail-connection') : null,
     links && shown !== null ? row('Shared pages', settingsText('p', {}, 'Show workspace name and icon'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on shared pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
@@ -1220,13 +1222,24 @@ async function addonAct(control) {
   const send = async () => {
     locks.add('addon-act'); control.disabled = true;
     const result = await act('addon.act', {addon:id, verb:control.dataset.verb, target:control.dataset.target});
-    locks.delete('addon-act'); control.disabled = false;
+    locks.delete('addon-act'); if (control.isConnected) control.disabled = false;
     if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
+    else if (control.closest('.blk-split')) {   // list and panel: say what happened, in the add-on's own words
+      const said = result.state?.act_answer?.addon === id ? result.state.act_answer.answer?.next : null;
+      if (typeof said === 'string' && said) window.orch.toast(clean(said.split(/(?<=\.)\s/)[0]).slice(0, 160), 'ok');   // the first sentence: no path, no command
+    }
     await loadAddon(id);
   };
   if (!control.dataset.confirm) return send();
   const {d, actions} = dialog(control.dataset.confirm, 'dialog');
-  actions.append(button('Yes', 'primary', async () => { await window.orch.close(d); send(); }));
+  if (control.dataset.confirmLines) {
+    // What will happen, in plain lines; Keep it and the action's own word (danger look), never a typed word.
+    const list = el('ul');
+    control.dataset.confirmLines.split('\n').filter(Boolean).forEach(line => list.append(el('li', '', line)));
+    d.append(el('p', '', 'This is what happens:'), list);
+    actions.firstChild.textContent = control.dataset.keep || 'Keep it';
+    actions.append(button(control.dataset.label || 'Yes', 'danger', async () => { await window.orch.close(d); send(); }));
+  } else actions.append(button('Yes', 'primary', async () => { await window.orch.close(d); send(); }));
   d.append(actions);
   window.orch.open(d);
 }

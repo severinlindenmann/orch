@@ -578,8 +578,8 @@ test('titleTag: the hidden tags show muted only when two visible tickets share a
   assert.equal(c.titleTag(a, [a, b]).children[0], ' [R] [0722]');
   assert.equal(c.titleTag(b, [a, b]).children[0], ' [R] [0811]');
 });
-// Dash 51/28/31: footer line only when the connection is lost; the phone switch hides while on; Ask the helper.
-test('shell: quiet footer, one phone control while on, Ask the helper', () => {
+// Dash 51/28/31: footer line only when the connection is lost; the phone switch hides while on; Chat.
+test('shell: quiet footer, one phone control while on, Chat', () => {
   const on = {settings:{addons:[{name:'relay', active:true, detail:{connected:true}}]}};
   assert.equal(helpers.footerState(on, false), '');
   assert.equal(helpers.footerState({settings:{addons:[{name:'relay', active:true, detail:{connected:false}}]}}, false), 'Not connected');
@@ -587,7 +587,7 @@ test('shell: quiet footer, one phone control while on, Ask the helper', () => {
   const web = f => fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/' + f), 'utf8');
   assert.match(web('style.css'), /\.side-foot:has\(#workspace-mode:empty\)\{display:none\}/);
   assert.doesNotMatch(web('style.css'), /body\.mobile-mode-on \.sidebar>\.mm-toggle\{display:none\}/, 'the sidebar switch stays while on; the chip is in the top bar');
-  assert.match(web('index.html'), /aria-label="Ask the helper"[^>]*>.*<span class="btn-word-wide">Ask the helper<\/span><\/button>/); assert.doesNotMatch(web('index.html') + web('app.js'), /Open helper/);
+  assert.match(web('index.html'), /aria-label="Chat"[^>]*>.*<span class="btn-word-wide">Chat<\/span><\/button>/); assert.doesNotMatch(web('index.html') + web('app.js'), /Open helper/);
   assert.doesNotMatch(web('app.js'), /tk\?\.key/); // no ticket key in the breadcrumb
 });
 // Report r-1117-1256-ws-2: phone width (390, 320) and 150% zoom. The rules are checked here; e2e/dash_page_health.cjs
@@ -605,7 +605,7 @@ test('phone and zoom layout: nothing pushes the page sideways or hides a menu it
   assert.match(phoneBlock, /\.topbar>#mm-chip\{display:none\}/);
   assert.doesNotMatch(style, /#open-agent\{display:none\}/);
   assert.match(web('index.html'), /id="report-problem"[^>]*aria-label="Report a problem"/);
-  assert.match(web('index.html'), /id="open-agent"[^>]*aria-label="Ask the helper"/);
+  assert.match(web('index.html'), /id="open-agent"[^>]*aria-label="Chat"/);
   // the open phone menu is the whole screen, with room for the bottom bar after its last row; any page change closes it
   assert.match(phoneBlock, /\.shell:has\(>\.sidebar\[data-open=true\]\)>div>\.page\{display:none\}/);
   assert.match(phoneBlock, /\.shell>\.sidebar\[data-open=true\]\{padding-bottom:calc\(var\(--touch\)/);
@@ -620,14 +620,16 @@ test('phone and zoom layout: nothing pushes the page sideways or hides a menu it
 test('ticket saved views filter by status and the board shows Changes to add', () => {
   const items = [{id:'w',title:'W',status:'active',owner:'anna'}, {id:'r',title:'R',status:'review',owner:'ben'},
     {id:'d',title:'D',status:'done',owner:'anna',done_at:new Date().toISOString(),bring_back:{state:'waiting'}},
-    {id:'o',title:'O',status:'done',owner:'ben',done_at:'2000-01-01T00:00:00Z'}];
+    {id:'o',title:'O',status:'done',owner:'ben',done_at:'2000-01-01T00:00:00Z'},
+    {id:'k',title:'K',status:'waiting',owner:'ben',waiting_on:{kind:'time',until:'2030-01-01T09:00:00Z'}}];
   const c = context(items);
   const ids = (view, person = '') => c.filterTickets(items, '', false, '', person, view).map(t => t.id).join();
   assert.equal(ids('working'), 'w');
   assert.equal(ids('needs-you'), 'r', 'ORCH-236: a Done ticket with changes to add is not counted in Needs you, so it is not in the view either');
   assert.equal(ids('done-week'), 'd');
   assert.equal(ids('done-today'), 'd');
-  assert.equal(ids('', 'ben'), 'r,o');
+  assert.equal(ids('waiting'), 'k', 'the Waiting chip shows what waits for a time, a ticket or the outside (ORCH-248)');
+  assert.equal(ids('', 'ben'), 'r,o,k');
   assert.match(JSON.stringify(c.boardCard(items[2])), /Changes to add/);
   assert.doesNotMatch(JSON.stringify(c.boardCard(items[3])), /Changes to add/);
 });
@@ -760,16 +762,17 @@ test('tickets list: number before the title, and a search hit is visible without
   vm.runInContext("ticketSearch = ''", c);
   assert.deepEqual(titles(c.ticketTable(c.filteredTickets())), ['ORCH-63 Open one'], 'clearing the search folds Done again');
 });
-test('ORCH-45: a login that stopped working is never "Nothing needs you" or "All clear"; one that runs out soon counts on Home only', () => {
+test('ORCH-45: a login that stopped working is never "Nothing needs you" or "All clear"; neither counts in the one number (ORCH-288)', () => {
   const stop = {name:'gh', label:'GitHub', kind:'login', state:'renew', chosen:false, stops:[]};
   const soon = {name:'claude', label:'Claude Code', kind:'login', state:'soon', ends_at:'2026-11-19T08:00:00Z', chosen:true, stops:[]};
   const page = logins => { const c = context([], {snapshot:false, state:{logins}, locks:new Set(), button:label => ({tag:'button', children:[label], dataset:{}})}); return {c, text:JSON.stringify(c.home())}; };
   const stopped = page({items:[stop]});
   assert.match(stopped.text, /The GitHub login stopped working/);
-  assert.match(stopped.text, /1 thing needs you/);
-  assert.doesNotMatch(stopped.text, /All clear|Nothing needs you/);
+  assert.match(stopped.text, /Things to look at/);  // a login is a banner and a row, never a second number
+  assert.doesNotMatch(stopped.text, /thing needs you|All clear|Nothing needs you/);
   const runs = page({items:[soon]});
-  assert.match(runs.text, /1 thing needs you/);
+  assert.match(runs.text, /Things to look at/);
+  assert.doesNotMatch(runs.text, /thing needs you/);
   assert.match(runs.text, /The Claude Code login ends on/);
   assert.equal(runs.c.needsYouTotal(), 0);  // the menu badges count questions and results only (as drawn)
   assert.match(page({items:[]}).text, /All clear/);

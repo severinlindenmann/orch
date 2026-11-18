@@ -48,9 +48,17 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 - 2026-11-17 (ORCH-191): A phone card settled in orch (answered in orch, review ended, ticket dropped/done/removed) is
   closed with the existing taken-back text and a fixed reason, never the answer; the relay takes back review rounds too.
   Subscribers get a taken-back text as a `closed` event (with `question_id`, `reason`) instead of a plain `text` event.
+- 2026-11-17 (ORCH-146, ORCH-165): One GitHub add-on, `pull-requests` (owner): the merge queue, Merge when green, the Pull
+  requests page and the live pull request state on tickets. Its one background watcher reads the linked repositories
+  (read-only) and then runs Merge when green, every minute. `orch github` (write limit, expert) stays in the core.
+  Screen words "Pull requests", "Merge when green", "Merge queue" approved.
 - 2026-11-17 (ORCH-186): Add-on pages orch ships run sandboxed in the dashboard and act only with a frame pass for
   their own add-on (15 minutes, bound to the sign-in, host name and port; a fixed list of actions per add-on). Their
   program files (`/addon/<shipped>/kit|web/*.js|css|svg|png|woff…`) load without sign-in, also on the port for other
   computers: a sandboxed page sends no cookie, and these files are open-source code with no workspace data. They show
   which shipped add-ons run. Accepted by the manager for the prototype, not decided by the owner: open for the owner
   to overrule.
+- 2026-11-17 (ORCH-308, from ORCH-281/ORCH-354 triage): Every dashboard feature has a click-through (do it, reload,
+  check, no console error) on a seeded demo workspace with the real server; a new action or page brings its
+  click-through in the same pull request. The feature list is read from the code, so the `dashboard` CI job names a
+  feature without one, and `page-smoke` runs them all on every dashboard pull request.

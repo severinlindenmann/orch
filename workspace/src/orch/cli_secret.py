@@ -131,7 +131,11 @@ def _scan(args, root: Path) -> None:
         err = Refused("Couldn't read your saved keys, so the scan could not finish. Fix that and scan again.")
         err.extra = {"code": "stored_keys_unreadable"}
         raise err
-    found = secretscan.find(data.decode("utf-8", "replace"), root)
+    found: list[dict] = []
+    for blob, labels in secretscan.passes(data):  # a PNG's proven pixel runs skip only the label rules
+        found = secretscan.find(blob.decode("utf-8", "replace"), root, labels=labels)
+        if found:
+            break
     if not found:
         print(json.dumps({"found": []}) if getattr(args, "json", False) else "No secrets found.")
         return

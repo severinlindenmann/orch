@@ -35,6 +35,7 @@ KEYS = (
     "workspace.name",
     "workspace.description",
     "workspace.tags",
+    "workspace.protected_machines",
     "workspace.permissions",
     "workspace.live_idle_minutes",
     "workspace.live_max",
@@ -49,6 +50,7 @@ KEYS = (
     "diag.enabled",
     "diag.report_tickets",
     "focus.session_typing",
+    "focus.preview",
     "update.auto",
     *config.INSIGHTS_KEYS,
     *ghlimit.SETTING_KEYS,
@@ -286,6 +288,7 @@ def _config(args, root: Path) -> None:
             "workspace.name": lambda: config.workspace_name(root),
             "workspace.description": lambda: config.workspace_description(root),
             "workspace.tags": lambda: config.workspace_tags(root),
+            "workspace.protected_machines": lambda: config.protected_machines(root),
             "workspace.permissions": lambda: config.permissions(root),
             "workspace.live_idle_minutes": lambda: config.live_idle_minutes(root),
             "workspace.live_max": lambda: config.live_max(root) or "none",
@@ -300,6 +303,7 @@ def _config(args, root: Path) -> None:
             "diag.enabled": lambda: config.diag_enabled(root),
             "diag.report_tickets": lambda: report_tickets.enabled(root),
             "focus.session_typing": lambda: config.focus_session_typing(root),
+            "focus.preview": lambda: config.focus_preview_on(root),
             "update.auto": lambda: autoupdate.enabled(),
             "insights.share_counts": lambda: config.insights_share_counts(root),
             "insights.share_names": lambda: config.insights_share_names(root),
@@ -428,6 +432,15 @@ def _config(args, root: Path) -> None:
             {"focus.session_typing": value},
             "Saved: typing into the helper's screen is " + ("on." if value else "off."),
         )
+    elif args.sub == "set" and args.key == "focus.preview":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        value = config.set_focus_preview(root, args.value == "on")
+        _out(
+            args,
+            {"focus.preview": value},
+            "Saved: Focus shows " + ("the new Focus (Preview)." if value else "today's Focus."),
+        )
     elif args.sub == "set" and args.key == "update.auto":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")
@@ -475,6 +488,17 @@ def _config(args, root: Path) -> None:
             text = f"Saved: the workspace tags are {', '.join(v)}." if v else "Saved: no tags."
         else:
             text = f"Saved: the workspace {what} is {v!r}." if v else f"Saved: no {what}."
+        _out(args, {args.key: v}, text)
+    elif args.sub == "set" and args.key == "workspace.protected_machines":
+        if _actor(args).startswith("agent:"):
+            raise Refused("Only a person changes the list of protected machines.")
+        v = config.set_protected_machines(root, args.value)
+        text = (
+            f"Saved: protected machines are {', '.join(v)}. "
+            "Helpers cannot connect to them outside a release or deploy step."
+            if v
+            else "Saved: no protected machines."
+        )
         _out(args, {args.key: v}, text)
     elif args.sub == "set" and args.key == "workspace.code":
         code = config.set_code(root, args.value)

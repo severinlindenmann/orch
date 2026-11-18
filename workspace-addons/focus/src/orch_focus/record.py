@@ -1,10 +1,15 @@
 """Live steps from the record: `orch record tail --run <run> --follow --json` (contracts/activity.md).
 
-Focus never reads the record files. One followed command per run feeds a small reader thread; `poll()` hands over
-what arrived since the last call, already shaped as the run events the Board folds (tool.start / tool.end,
-helper.*, run.state, usage, denial). Task and question lines of the record are skipped: the ticket watcher
-already makes them from the ticket itself. The newest cursor is kept, so a restart of the command never shows a
-step twice. If the command cannot run, the board simply gets no steps (it still works from ticket changes).
+Focus never reads the record files. One followed command per RUNNING run feeds a small reader thread; `poll()`
+hands over what arrived since the last call, already shaped as the run events the Board folds (tool.start /
+tool.end, helper.*, run.state, usage, denial). Task and question lines of the record are skipped: the ticket
+watcher already makes them from the ticket itself. The newest cursor is kept, so a restart of the command never
+shows a step twice. If the command cannot run, the board simply gets no steps (it still works from ticket changes).
+
+A run that is not running gets no followed command: one plain read (no --follow) catches up its last steps, then
+nothing until it runs again. A followed command that ends at once (a run with no record yet, a refused read) is
+started again later each time (2 s, 4 s ... up to 60 s), so a broken run can never become a stream of processes
+(ORCH-266: three new `orch record tail` per second pushed the load over the start limit).
 """
 
 from __future__ import annotations
@@ -13,12 +18,15 @@ import json
 import re
 import subprocess
 import threading
+import time
 import unicodedata
 from pathlib import Path
 
 from . import actions, cmdout, events
 
-RESTART_SECONDS = 2.0
+RESTART_SECONDS = 2.0  # the first wait before a followed command is started again
+RESTART_MAX = 60.0  # ... doubled after each quick end, up to this
+QUICK_SECONDS = 10.0  # a followed command that lived shorter than this ended "at once"
 MAX_LINE = 64 * 1024
 MAX_QUEUE = 500
 DETAIL_SECONDS = 5.0
@@ -151,7 +159,8 @@ INFO_REASONS = ("missing", "recovered", "rewound", "trimmed", "pending")
 
 
 class RecordFeed:
-    """One per run. Starts the followed command on first poll; `close()` ends it (by its own pid)."""
+    """One per run. `poll(live=True)` keeps one followed command going; `poll(live=False)` ends it and reads once
+    without following; `close()` ends it for good (by its own pid)."""
 
     def __init__(self, root: Path, orch_bin: str | None, run: str, ticket: str):
         self.root, self.orch_bin, self.run, self.ticket = Path(root), orch_bin, run, ticket
@@ -159,19 +168,63 @@ class RecordFeed:
         self.notes: dict[str, dict] = {}  # the last problem marker of orch for this run (S3 shows its text)
         self.lock = threading.Lock()
         self.queue: list[dict] = []
-        self.stopped = threading.Event()
+        self.stopped = threading.Event()  # closed for good
         self.proc = None
         self.thread: threading.Thread | None = None
+        self.halt: threading.Event | None = None  # ends the current thread (an unwanted follow)
+        self.following = False
+        self.caught_up = False  # the one plain read of a run that is not running was done
+        self.delay = RESTART_SECONDS
+        self.last_poll = time.monotonic()
 
-    def poll(self) -> list[dict]:
+    def poll(self, live: bool = True) -> list[dict]:
         if not RUN.fullmatch(self.run) or not self.orch_bin:
             return []
-        if self.thread is None and not self.stopped.is_set():
-            self.thread = threading.Thread(target=self._loop, daemon=True, name="focus-record")
-            self.thread.start()
+        self.last_poll = time.monotonic()
+        if not self.stopped.is_set():
+            self._want(live)
         with self.lock:
             out, self.queue = self.queue, []
         return out
+
+    def _want(self, live: bool) -> None:
+        alive = self.thread is not None and self.thread.is_alive()
+        if live:
+            self.caught_up = False
+            if alive and self.following:
+                return
+            self._halt()
+            self._start(follow=True)
+        else:
+            if alive and self.following:
+                self._halt()  # the run ended: its followed command ends too
+                alive = False
+            if not alive and not self.caught_up:
+                self.caught_up = True
+                self._start(follow=False)
+
+    def rest(self) -> None:
+        """Nobody asked for this run in a while: end its followed command (a later poll starts it again)."""
+        if self.following:
+            self._halt()
+            self.following = False
+
+    def _start(self, *, follow: bool) -> None:
+        self.halt, self.following = threading.Event(), follow
+        self.thread = threading.Thread(
+            target=self._loop, args=(self.halt, follow), daemon=True, name="focus-record"
+        )
+        self.thread.start()
+
+    def _halt(self) -> None:
+        if self.halt is not None:
+            self.halt.set()
+        p = self.proc
+        if p is not None and p.poll() is None:
+            try:
+                p.terminate()  # the thread reaps it
+            except OSError:
+                pass
 
     def problems(self) -> list[str]:
         """orch's own words for what is wrong with this run's records, once each (display only)."""
@@ -185,29 +238,42 @@ class RecordFeed:
                 out.append(text)
         return out
 
-    def _argv(self) -> list[str]:
-        argv = [*actions.argv0(self.orch_bin), "record", "tail", "--run", self.run, "--follow", "--json"]
+    def _argv(self, follow: bool = True) -> list[str]:
+        argv = [*actions.argv0(self.orch_bin), "record", "tail", "--run", self.run, "--json"]
+        if follow:
+            argv.insert(-1, "--follow")
         return argv + ["--since", self.cursor] if self.cursor else argv
 
-    def _loop(self) -> None:
-        while not self.stopped.is_set():
+    def _gone(self, halt: threading.Event) -> bool:
+        return self.stopped.is_set() or halt.is_set()
+
+    def _loop(self, halt: threading.Event, follow: bool) -> None:
+        while not self._gone(halt):
+            began = time.monotonic()
             try:
-                self._once()
+                self._once(halt, follow)
             except OSError:
                 pass  # the command cannot start: no steps, the board goes on without them
-            self.stopped.wait(RESTART_SECONDS)
+            if not follow:
+                return
+            if time.monotonic() - began < QUICK_SECONDS:  # ended at once: wait longer each time
+                wait, self.delay = self.delay, min(self.delay * 2, RESTART_MAX)
+            else:
+                wait = self.delay = RESTART_SECONDS
+            if self.stopped.is_set() or halt.wait(wait):
+                return
 
-    def _once(self) -> None:
+    def _once(self, halt: threading.Event, follow: bool = True) -> None:
         p = _popen(
-            self._argv(), cwd=self.root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            self._argv(follow), cwd=self.root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, env=actions.human_env(self.root, self.orch_bin),
         )  # fmt: skip
         self.proc = p
         try:
-            if self.stopped.is_set():
+            if self._gone(halt):
                 return
             for raw in p.stdout:
-                if self.stopped.is_set():
+                if self._gone(halt):
                     return
                 self._line(raw[:MAX_LINE])
         finally:
@@ -276,6 +342,8 @@ class RecordFeed:
 
     def close(self) -> None:
         self.stopped.set()
+        if self.halt is not None:
+            self.halt.set()
         p = self.proc
         if p is not None:
             self._end(p)

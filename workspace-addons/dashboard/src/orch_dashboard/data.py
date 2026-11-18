@@ -530,6 +530,22 @@ def add_spend(root: Path, tickets: list[dict]) -> None:
         t.pop("spend", None)
         if t.get("id") in got:
             t["spend"] = got[t["id"]]
+    add_range(root, tickets)
+
+
+def add_range(root: Path, tickets: list[dict]) -> None:
+    """`range` ("about 20-40 min · $2.00-$4.00") on tickets nobody has worked on yet: the time and cost range
+    before Start, from this workspace's own finished tickets (the core's usage.estimate_range; ORCH-297)."""
+    try:
+        from orch import usage
+
+        words = usage.range_words(usage.estimate_range(root))
+    except (ImportError, AttributeError, OSError, TypeError, ValueError):
+        words = ""
+    for t in tickets:
+        t.pop("range", None)
+        if words and t.get("status") in ("open", "ready") and not t.get("sessions") and "spend" not in t:
+            t["range"] = words
 
 
 def add_artifact_marks(tickets: list[dict]) -> None:
@@ -965,6 +981,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         copies_mode,
         copy_setup,
         diag_enabled,
+        focus_preview_on,
         focus_session_typing,
         live_max,
         release_merge_on,
@@ -993,6 +1010,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "ws_name": workspace_name(root) or "",
         "ws_description": workspace_description(root) or "",
         "ws_tags": _ws_tags(root),  # the workspace's own tags (Settings > Workspace profile)
+        "focus_preview_on": focus_preview_on(root),  # Settings > Add-ons: the Preview switch
         "typing_on": focus_session_typing(root),  # Settings > Add-ons: "Let me type into the helper's screen"
         "diag_enabled": diag_enabled(root),  # the debug log switch (Settings > Report a problem)
         "diag": _diag_stats(root),
@@ -1336,6 +1354,8 @@ def load_state(
         "build": _build() if with_settings else None,
         # Home and Settings > Helper: what helpers need (tool logins, connections, keys); live page only
         "logins": load_logins(root) if with_settings else None,
+        # Home: tickets waiting in line for a helper and why none starts now (ORCH-266); live page only
+        "start_line": start_line(root) if with_settings else None,
     }
     add_warmth(root, tickets, state["runs"])
     state["rev"] = state_rev(state)
@@ -1383,6 +1403,16 @@ def _build() -> str | None:
     from . import update
 
     return update.build()
+
+
+def start_line(root: Path) -> dict | None:
+    """{"waiting": [ticket ids], "why": plain reason or None, "limit": n or None}, or None when nothing waits."""
+    try:
+        from orch import runs_live
+
+        return runs_live.line_status(root)
+    except Exception:  # noqa: BLE001 - an older orch or an unreadable line: Home simply shows no line
+        return None
 
 
 def _auto_update_note() -> dict | None:

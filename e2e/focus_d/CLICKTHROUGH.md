@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-25 steps: 2 ready (the script clicks them), 23 pending (not built yet).
+25 steps: 8 ready (the script clicks them), 17 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -43,7 +43,7 @@ Must be seen:
 ## 3. Turn the new Focus on with the Preview switch
 
 - Part: start
-- State: pending, waits for: Preview switch for the new Focus (ORCH-264)
+- State: ready, clicked by the script
 - Pictures: `fd-03-preview-on-1280.png`, `fd-03-preview-on-1920.png`, `fd-03-preview-on-390.png`
 
 Do:
@@ -53,7 +53,7 @@ Do:
 
 Must be seen:
 
-- Focus opens as the wall of sessions (step 4).
+- Focus opens as the new Focus, marked Preview (the wall of step 4 fills it).
 - The switch is marked Preview.
 - Turning it off again brings back today's Focus.
 
@@ -95,20 +95,20 @@ Must be seen:
 ## 6. Focus button on a ticket and Open ticket on a session
 
 - Part: wall (draft D feature 3)
-- State: pending, waits for: The wall (crew task wall)
+- State: ready, clicked by the script
 - Pictures: `fd-06-focus-button-1280.png`, `fd-06-focus-button-1920.png`, `fd-06-focus-button-390.png`
 
 Do:
 
-1. Open a ticket page.
-2. Press its Focus button.
-3. In the session press Open ticket.
+1. Open Tickets and press the Focus button of a row.
+2. Open a ticket page and press its Focus button.
+3. In the session press Open ticket, also from full screen.
 
 Must be seen:
 
-- The button says Watch, Answer, Open or Start to fit the ticket.
-- The session opens in the layer.
-- Open ticket goes back to the same ticket page.
+- Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.
+- The session opens in the layer and the page stays.
+- Open ticket goes back to the same ticket page; the session stays open.
 
 ## 7. Pin a session and give it your own name
 
@@ -147,7 +147,7 @@ Must be seen:
 ## 9. The bar under every page
 
 - Part: bar (draft D feature 7, 11)
-- State: pending, waits for: The bar under every page (crew task bar)
+- State: ready, clicked by the script
 - Pictures: `fd-09-bar-1280.png`, `fd-09-bar-1920.png`, `fd-09-bar-390.png`
 
 Do:
@@ -165,20 +165,25 @@ Must be seen:
 ## 10. The layer at the bottom, on the right, full screen, to the bar, to the side
 
 - Part: layer (draft D feature 7)
-- State: pending, waits for: The layer: bottom, right, full screen (crew task layer)
+- State: ready, clicked by the script
 - Pictures: `fd-10-layer-1280.png`, `fd-10-layer-1920.png`, `fd-10-layer-390.png`
 
 Do:
 
 1. Open a session from the bar.
-2. Use Place: bottom, right, full screen.
-3. Minimise it to the bar, then put it to the side.
+2. Change to Tickets, Review and Home.
+3. Use Place: bottom, right, full screen; press Esc twice.
+4. Open it again, minimise it to the bar, then put it to the side and open it from the edge.
+5. Make it larger, then reload the page.
 
 Must be seen:
 
-- Each place works and the page stays usable behind it.
+- Each place works and the page stays usable behind it; on a phone there is no right.
+- The layer stays open while the page changes.
+- Esc goes back one step: full screen, then the panel, then the bar.
+- In full screen Tab stays in the layer.
 - Minimise leaves only the bar; to the side leaves a slim edge.
-- The layer opens where it was last.
+- After the reload the layer opens where it was last, at the same size.
 
 ## 11. Zoom and full screen, Esc goes one step back
 
@@ -201,24 +206,27 @@ Must be seen:
 ## 12. Split into two and three sessions with the pane controls
 
 - Part: split (draft D feature 7)
-- State: pending, waits for: Split into one, two or three sessions (crew task split)
+- State: ready, clicked by the script
 - Pictures: `fd-12-split-1280.png`, `fd-12-split-1920.png`, `fd-12-split-390.png`
 
 Do:
 
 1. In the layer press Add beside twice.
-2. On one pane use pin, Place, minimise and close.
+2. Change to Tickets, Review and Home.
+3. On one pane use pin, Place, minimise and close.
 
 Must be seen:
 
-- Two, then three panes sit next to each other.
+- Two, then three panes sit next to each other; on the right they are stacked.
 - Every pane has pin, add beside, place, minimise and close.
+- The split stays while the page changes.
 - Closing a pane gives its room to the others.
+- On a phone one session shows at a time and there is no add beside.
 
 ## 13. Focus stays open with typed text and split while you change pages
 
 - Part: layer (draft D feature 7)
-- State: pending, waits for: Pages change without a full reload (crew task soft-pages)
+- State: ready, clicked by the script
 - Pictures: `fd-13-stays-open-1280.png`, `fd-13-stays-open-1920.png`, `fd-13-stays-open-390.png`
 
 Do:
