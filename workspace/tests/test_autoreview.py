@@ -413,6 +413,9 @@ def test_away_answers_a_plain_question_and_a_choice_card_at_once(proj, run, new_
         "Delete the old records?",  # cannot be undone
         "Rotate the API key now?",  # logins or keys
         "Log in with the shared profile?",  # logins
+        "Redeploy it tonight?",  # a prefix does not hide it
+        "Run the pre-delete step?",
+        "Truncate the table?",
         "Buy the bigger plan for $20?",  # money
     ],
 )
@@ -523,3 +526,20 @@ def test_away_reads_every_word_of_a_card():
     assert ok is False and "cannot be undone" in why
     plan = {**q, "card": {"kind": "plan", "title": "Plan"}}
     assert autoreview.away_answerable(t, plan)[0] is False
+
+
+def test_away_leaves_a_card_too_deep_to_read():
+    t = {"id": "t_aaaaaa", "title": "x", "status": "active", "human_review": False, "questions": []}
+    deep = "fine"
+    for _ in range(10):
+        deep = {"x": deep}
+    card = {"kind": "choice", "title": "Which?", "extra": deep}
+    q = {
+        "id": "q1",
+        "text": "Which?",
+        "options": ["A", "B"],
+        "recommended": "A",
+        "answer": None,
+        "card": card,
+    }
+    assert autoreview.away_answerable(t, q)[0] is False

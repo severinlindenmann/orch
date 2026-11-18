@@ -86,12 +86,14 @@ AWAY_STAYS = {
     "production": "production prod deploy(s|ed|ing|ment)? releases? servers? relay publish(es|ed|ing)? main"
     " customers? public outside send(s|ing)? sent emails? mail(s|ing)? post(s|ed|ing)? go\\slive vps",
     "cannot be undone": "delet(e|es|ed|ing) remov(e|es|ed|ing) drop(s|ped)? irreversible undo(ne)? force"
-    " merge[sd]? wipe reset migrat(e|es|ion|ions) destroy purge overwrite",
+    " merge[sd]? wipe reset migrat(e|es|ion|ions) destroy purge overwrite push(es|ed|ing)? truncat\\w* rm",
     "logins or keys": "logins? log\\s?in sign(-|\\s)?in passwords? tokens? keys? secrets? credentials?"
     " accounts?"
     " auth\\w* ssh oauth api",
 }
-AWAY_RE = {k: re.compile(rf"(?<![\w-])({'|'.join(v.split())})(?![\w-])", re.I) for k, v in AWAY_STAYS.items()}
+# no boundary in front: a word with any prefix still counts (redeploy, pre-delete, unpublish); a hit only ever
+# leaves the question for the owner, so a word that merely contains one fails safe
+AWAY_RE = {k: re.compile(rf"({'|'.join(v.split())})(?![a-z0-9_])", re.I) for k, v in AWAY_STAYS.items()}
 MONEY_MARK = re.compile(r"[$€£]")
 PLAIN_TEXT = re.compile(r"[\x20-\x7e\n\t]*")
 AWAY_TEXT_MAX = 2000
@@ -396,8 +398,8 @@ def away_answerable(ticket: dict, q: dict) -> tuple[bool, str]:
 
 
 def _strings(v, depth: int = 0) -> list[str]:
-    if depth > 6:
-        return []
+    if depth > 6:  # too deep to read all of it: a mark that is never plain text, so the question stays
+        return ["\x00"]
     if isinstance(v, str):
         return [v]
     if isinstance(v, dict):
