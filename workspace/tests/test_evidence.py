@@ -50,7 +50,7 @@ def test_same_name_twice_keeps_both(proj, run, tid):
 
 
 def test_several_files_on_one_step_are_all_kept(proj, run, tid):
-    # ORCH-420: pictures at 1280, 1920 and 390 on one step; before, only the last --file was kept
+    # ORCH-448: pictures at 1280, 1920 and 390 on one step; before, only the last --file was kept
     for w in ("1280", "1920", "390"):
         (proj / f"shot-{w}.png").write_bytes(b"png" + w.encode())
     code, _, _ = run(

@@ -87,8 +87,19 @@ def test_an_urgent_label_on_older_work_does_not_count(tmp_path, capsys):
     assert out["did"] == []
 
 
-def test_the_pace_counts_from_the_last_try(tmp_path, capsys):
+def test_a_blocked_try_does_not_move_the_pace(tmp_path, capsys):
     out = go(tmp_path, capsys, state={"last_cut_at": rk.now().isoformat()})
+    assert out["did"] == ["dispatch:ci.yml", "dispatch:e2e.yml"]
+    assert out["state"]["release"]["phase"] == "testing"
+
+
+def test_a_started_try_does_not_write_the_pace(tmp_path, capsys):
+    out = go(tmp_path, capsys)
+    assert "last_cut_at" not in out["state"]
+
+
+def test_the_pace_counts_from_the_last_merged_release(tmp_path, capsys):
+    out = go(tmp_path, capsys, last_release_at=rk.now().isoformat())
     assert out["did"] == []
 
 
@@ -1028,3 +1039,314 @@ def test_ci_never_cancels_a_develop_push_run():
     group = re.search(r"group: (ci-.+)", ci).group(1)
     assert "github.ref != 'refs/heads/develop'" in cancel  # develop pushes are never cancelled ...
     assert "format('develop-{0}', github.sha)" in group  # ... and never replaced by a newer pending run
+
+
+# macOS and Windows run only on develop, not in the merge queue (ORCH-315): a red develop run opens the
+# red-develop ticket by itself, once per commit.
+def test_red_develop_push_run_opens_the_red_develop_ticket_once(tmp_path, capsys):
+    runs = {"ci.yml": [run(DEV, "push", "failure", rid=7)], "e2e.yml": []}
+    jobs = {
+        "7": [
+            job("workspace / test (macos-latest, 2/5)", "failure"),
+            job("workspace / test (ubuntu-latest, 1/2)"),
+        ]
+    }
+    out = go(tmp_path, capsys, runs=runs, jobs=jobs)
+    assert "ticket:ci run is red on develop (dddddddd)" in out["did"]
+    assert out["state"]["develop_red_sha"] == DEV
+    again = go(tmp_path, capsys, state=out["state"], runs=runs, jobs=jobs)
+    assert not any(d.startswith("ticket:") for d in again["did"])
+
+
+def test_red_develop_with_an_open_ticket_makes_no_second(tmp_path, capsys):
+    runs = {"ci.yml": [run(DEV, "schedule", "failure")], "e2e.yml": []}
+    open_t = [
+        {
+            "id": "t_1",
+            "key": "ORCH-393",
+            "status": "open",
+            "title": "ci run is red on develop (release 34 blocked)",
+        }
+    ]
+    out = go(tmp_path, capsys, runs=runs, tickets=open_t)
+    assert not any(d.startswith("ticket:") for d in out["did"])
+
+
+def test_a_running_newer_develop_run_is_skipped_and_green_opens_nothing(tmp_path, capsys):
+    newer = run("n" * 40, "push", "", status="in_progress", at="2026-11-17T02:00:00Z")
+    runs = {"ci.yml": [newer, run(DEV, "push")], "e2e.yml": []}
+    out = go(tmp_path, capsys, runs=runs)
+    assert not any(d.startswith("ticket:") for d in out["did"])
+    assert "develop_red_sha" not in out["state"]
+
+
+def test_known_red_windows_on_develop_opens_nothing(tmp_path, capsys):
+    runs = {"ci.yml": [run(DEV, "push", "failure", rid=8)], "e2e.yml": []}
+    jobs = {
+        "8": [
+            job("workspace / test (windows-latest, 3/10)", "failure"),
+            job("workspace / test (macos-latest, 1/5)"),
+        ]
+    }
+    out = go(tmp_path, capsys, runs=runs, jobs=jobs)
+    assert not any(d.startswith("ticket:") for d in out["did"])
+
+
+# ---- release proof (ORCH-456): a red check needs a named, recorded exception; every release runs its walks
+
+WALKS = "install=release-walk,services,clickthrough"
+MAC = "workspace / test (macos-latest)"
+EXC = {MAC: {"ticket": "ORCH-454", "until": "2099-01-01", "why": "tmux missing on the runner"}}
+
+
+def go_walks(tmp_path, walks=WALKS, **sim):
+    sim.setdefault("heads", {"develop": DEV, "main": MAIN, "unreleased": UN3})
+    sim.setdefault("last_release", 30)
+    st = json.loads(json.dumps(sim.pop("state", {})))
+    w = rk.World(None, cfg(tmp_path, walks=walks), json.loads(json.dumps(sim)), known=KNOWN)
+    lines = rk.pass_once(w, st, "ORCH-79", None)
+    return json.loads(json.dumps({"state": st, "did": w.did, "lines": lines}, default=str))
+
+
+def red_mac():
+    return [
+        {"name": "workspace / test (ubuntu-latest)", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"name": MAC, "status": "COMPLETED", "conclusion": "FAILURE"},
+        {"name": "gate", "status": "COMPLETED", "conclusion": "FAILURE"},
+    ]
+
+
+def test_a_red_check_with_a_recorded_exception_gets_the_card_and_is_named(tmp_path, capsys):
+    out = go(
+        tmp_path,
+        state={"release": gate()},
+        open_release={"number": 9031},
+        prs=pr(checks=red_mac()),
+        exceptions=EXC,
+    )
+    assert out["did"] == ["card:release 31", "tend-releases"]
+    assert out["state"]["release"]["known_red"] == [f"{MAC} (ORCH-454, until 2099-01-01)"]
+
+
+def test_a_red_check_without_an_exception_gets_no_card_and_says_how_to_record_one(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        rk.World,
+        "new_ticket",
+        lambda self, parent, title, note, dw, priority="high": seen.update(title=title, note=note) or "t_sim",
+    )
+    out = go(tmp_path, state={"release": gate()}, open_release={"number": 9031}, prs=pr(checks=red_mac()))
+    assert "card:release 31" not in out["did"]
+    assert seen["title"].startswith("Release 31 checks are red") and "release-exception" in seen["note"]
+
+
+def test_an_expired_exception_no_longer_lets_the_check_through(tmp_path):
+    old = {MAC: {**EXC[MAC], "until": "2020-01-01"}}
+    out = go(
+        tmp_path,
+        state={"release": gate()},
+        open_release={"number": 9031},
+        prs=pr(checks=red_mac()),
+        exceptions=old,
+    )
+    assert out["did"] == [f"ticket:Release 31 checks are red: {MAC}"]
+
+
+def test_an_exception_ends_when_its_ticket_is_done(tmp_path):
+    done = [{"id": "t_454", "key": "ORCH-454", "status": "done", "title": "tmux on macOS runners"}]
+    out = go(
+        tmp_path,
+        state={"release": gate()},
+        open_release={"number": 9031},
+        prs=pr(checks=red_mac()),
+        exceptions=EXC,
+        tickets=done,
+    )
+    assert out["did"] == [f"ticket:Release 31 checks are red: {MAC}"]
+
+
+def test_a_cut_release_starts_every_walk_and_waits_for_them(tmp_path):
+    out = go_walks(
+        tmp_path,
+        state={"release": gate(url="https://github.com/x/y/pull/9031")},
+        open_release={"number": 9031},
+        prs=pr(),
+    )
+    assert out["did"] == [
+        "ticket:Release 31: install walk",
+        "ticket:Release 31: services walk",
+        "ticket:Release 31: clickthrough walk",
+    ]
+    assert set(out["state"]["release"]["walks"]) == {"install", "services", "clickthrough"}
+    assert "waits for the walks" in out["lines"][-1] and out["state"]["release"]["phase"] == "gate"
+    again = go_walks(tmp_path, state=out["state"], open_release={"number": 9031}, prs=pr())
+    assert again["did"] == []  # no second ticket per walk
+
+
+def started(at="2026-11-18T10:00:00+00:00"):
+    return {
+        k: {"ticket": f"ORCH-{i}", "at": at} for i, k in enumerate(("install", "services", "clickthrough"), 1)
+    }
+
+
+def result(verdict="pass", commit=DEV[:12], line="walked it"):
+    return {
+        "verdict": verdict,
+        "line": line,
+        "commit": commit,
+        "at": "2026-11-18T11:00:00+00:00",
+        "by": "agent:x",
+    }
+
+
+def test_every_walk_passed_puts_the_card(tmp_path):
+    res = {"31": {k: result() for k in ("install", "services", "clickthrough")}}
+    out = go_walks(
+        tmp_path,
+        state={"release": gate(walks=started())},
+        open_release={"number": 9031},
+        prs=pr(),
+        walk_results=res,
+    )
+    assert out["did"] == ["card:release 31", "tend-releases"]
+
+
+def test_one_walk_missing_still_waits(tmp_path):
+    res = {"31": {k: result() for k in ("install", "services")}}
+    out = go_walks(
+        tmp_path,
+        state={"release": gate(walks=started())},
+        open_release={"number": 9031},
+        prs=pr(),
+        walk_results=res,
+    )
+    assert out["did"] == [] and "clickthrough (ORCH-3)" in out["lines"][-1]
+
+
+def test_a_result_from_an_earlier_cut_does_not_count(tmp_path):
+    res = {"31": {k: result(commit="e" * 12) for k in ("install", "services", "clickthrough")}}
+    out = go_walks(
+        tmp_path,
+        state={"release": gate(walks=started())},
+        open_release={"number": 9031},
+        prs=pr(),
+        walk_results=res,
+    )
+    assert out["did"] == [] and "waits for the walks" in out["lines"][-1]
+
+
+def test_a_failed_walk_opens_one_red_ticket(tmp_path):
+    res = {"31": {"install": result("fail", line="Factory refuses every order"), "services": result()}}
+    out = go_walks(
+        tmp_path,
+        state={"release": gate(walks=started())},
+        open_release={"number": 9031},
+        prs=pr(),
+        walk_results=res,
+    )
+    assert out["did"] == ["ticket:Release 31 walks failed: install (ORCH-1): Factory refuses every order"]
+
+
+def test_a_walk_ticket_finished_without_a_result_says_how_to_record_it(tmp_path):
+    rows = [{"id": "t_3", "key": "ORCH-3", "status": "done", "title": "Release 31: clickthrough walk"}]
+    res = {"31": {k: result() for k in ("install", "services")}}
+    out = go_walks(
+        tmp_path,
+        state={"release": gate(walks=started())},
+        open_release={"number": 9031},
+        prs=pr(),
+        walk_results=res,
+        tickets=rows,
+    )
+    assert (
+        "finished without a result" in out["lines"][-1] and "release-walk 31 clickthrough" in out["lines"][-1]
+    )
+
+
+def test_a_release_merged_red_before_its_card_is_noted_as_without_proof(tmp_path):
+    out = go_walks(
+        tmp_path,
+        state={"release": gate(walks=started())},
+        open_release=None,
+        prs=pr("MERGED", checks=red_mac()),
+    )
+    note = next(d for d in out["did"] if d.startswith("note:"))
+    assert "reached main without" in note
+    assert (
+        "WITHOUT PROOF" in out["lines"][-1]
+        and MAC in out["lines"][-1]
+        and "walks without a pass" in out["lines"][-1]
+    )
+
+
+def test_a_release_merged_from_its_card_has_no_proof_line(tmp_path):
+    out = go_walks(
+        tmp_path, state={"release": gate(phase="card", walks=started())}, open_release=None, prs=pr("MERGED")
+    )
+    assert "WITHOUT PROOF" not in out["lines"][-1]
+
+
+def test_exception_command_is_a_persons_and_dated(proj, run_cli, new_ticket, monkeypatch):
+    tid = new_ticket("macOS runners lack tmux")
+    code, out, _ = run_cli("github", "release-exception")
+    assert code == 0 and "No exception recorded" in out
+    args = ("github", "release-exception", MAC, "--ticket", tid, "--until", "2099-01-01")
+    assert run_cli(*args, "--by", "agent:claude")[0] == 2
+    assert run_cli("github", "release-exception", MAC, "--ticket", tid, "--by", "human:t")[0] == 2  # no date
+    assert (
+        run_cli(
+            "github", "release-exception", MAC, "--ticket", tid, "--until", "2020-01-01", "--by", "human:t"
+        )[0]
+        == 2
+    )
+    code, out, _ = run_cli(*args, "--why", "tmux missing", "--by", "human:t")
+    assert code == 0 and "until 2099-01-01" in out
+    saved = json.loads((proj / ".orch" / "run" / "release-exceptions.json").read_text())
+    assert saved[MAC]["until"] == "2099-01-01" and saved[MAC]["by"] == "human:t"
+    code, out, _ = run_cli("github", "release-exception")
+    assert MAC in out and "tmux missing" in out
+    assert run_cli("github", "release-exception", MAC, "--ticket", "off", "--by", "human:t")[0] == 0
+    assert rk.list_exceptions(proj) == {}
+
+
+def test_walk_command_records_only_a_named_walk(proj, run_cli):
+    assert (
+        run_cli("config", "set", "github.release_walks", "install=release-walk;rm", "--by", "human:t")[0] == 2
+    )
+    assert run_cli("config", "set", "github.release_walks", WALKS, "--by", "human:t")[0] == 0
+    assert run_cli("config", "set", "github.release_walks", WALKS, "--by", "agent:claude")[0] == 2
+    assert run_cli("github", "release-walk", "31", "nope", "pass", "x", "--commit", DEV[:12])[0] == 2
+    assert run_cli("github", "release-walk", "31", "services", "pass", "x", "--commit", "nope")[0] == 2
+    code, out, _ = run_cli(
+        "github",
+        "release-walk",
+        "31",
+        "services",
+        "fail",
+        "watcher left",
+        "--commit",
+        DEV[:12],
+        "--by",
+        "agent:x",
+    )
+    assert code == 0 and "FAILED" in out
+    saved = json.loads((proj / ".orch" / "run" / "release-walks.json").read_text())
+    assert saved["31"]["services"]["verdict"] == "fail" and saved["31"]["services"]["commit"] == DEV[:12]
+    assert rk.walks(WALKS) == [("install", "release-walk"), ("services", None), ("clickthrough", None)]
+
+
+def test_walks_start_at_the_cut_with_the_commit_in_the_note(tmp_path, monkeypatch):
+    notes = []
+    monkeypatch.setattr(
+        rk.World,
+        "new_ticket",
+        lambda self, parent, title, note, dw, priority="high": notes.append((title, note)) or "t_sim",
+    )
+    out = go_walks(
+        tmp_path,
+        state={"release": in_testing()},
+        runs={"ci.yml": [run(DEV, "workflow_dispatch")], "e2e.yml": [run(DEV, "workflow_dispatch")]},
+    )
+    assert out["state"]["release"]["phase"] == "gate" and len(out["state"]["release"]["walks"]) == 3
+    assert [t for t, _ in notes] == [f"Release 31: {k} walk" for k in ("install", "services", "clickthrough")]
+    assert f"--commit {DEV[:12]}" in notes[0][1] and "Use the skill release-walk." in notes[0][1]

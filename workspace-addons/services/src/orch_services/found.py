@@ -12,6 +12,7 @@ processes are skipped, because without the folder there is no way to tell a work
 
 from __future__ import annotations
 
+import hashlib
 import os
 import plistlib
 import re
@@ -33,6 +34,8 @@ INTERPRETERS = {"python", "python3", "node", "ruby", "perl", "php", "bash", "sh"
 PROC = Path("/proc")
 LSOF = "/usr/sbin/lsof"
 ID_RE = re.compile(r"(launchd|systemd):[A-Za-z0-9@._-]{1,200}|process:\d{1,10}")
+PAGE_ID = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,63}")  # a plain item id of the page (addon-view schema)
+HASHED_ID = re.compile(r"found-[0-9a-f]{12}")
 TOOL_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 WINDOWS_NOTE = (
     "On Windows orch cannot look for other background jobs yet; services orch adds are listed as usual."
@@ -93,13 +96,28 @@ def _masked(root: Path, argv: list[str]) -> list[str]:
     return _masked_command(root, argv) if argv else []
 
 
+def _shown(root: Path, text: str) -> str:
+    """A found job's name or description as shown (and the default name on adopt); one with a secret is masked."""
+    from .cli import MASK, _masked_command
+
+    return MASK if text and _masked_command(root, [text]) != [text] else text
+
+
+def page_id(fid: str) -> str:
+    """The id the page uses for a found item: the found id when it is a plain page id, else a stable hash of it.
+    `get` takes either, so Manage with orch on the page sends the page id and adopt finds the real job."""
+    if PAGE_ID.fullmatch(fid):
+        return fid
+    return "found-" + hashlib.sha1(fid.encode("utf-8")).hexdigest()[:12]
+
+
 def _item(root: Path, fid: str, name: str, running: bool, since, what: str, how: dict, argv, auto) -> dict:
     return {
         "id": fid,
-        "name": name[: store.MAX_NAME] or fid,
+        "name": _shown(root, name[: store.MAX_NAME]) or fid,
         "running": bool(running),
         "since": since,
-        "what": what,
+        "what": _shown(root, what),
         "how": how,
         "command": _masked(root, list(argv)),
         "auto": bool(auto),
@@ -400,9 +418,9 @@ def note() -> str | None:
 
 
 def get(root: Path, fid: str) -> dict:
-    if not isinstance(fid, str) or not ID_RE.fullmatch(fid):
+    if not isinstance(fid, str) or not (ID_RE.fullmatch(fid) or HASHED_ID.fullmatch(fid)):
         raise Refused(f"'{fid}' is not a found service. Run orch services found to see them.")
     for it in scan(root):
-        if it["id"] == fid:
+        if it["id"] == fid or (HASHED_ID.fullmatch(fid) and page_id(it["id"]) == fid):
             return it
     raise Refused(f"There is no found service {fid} (any more). Run orch services found to see them.")
