@@ -1390,7 +1390,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         return out + ["waits for every security OK: " + ", ".join(sec_holds)]
     nums = {int(m[1]) for u in un if (m := re.search(r"#(\d+)", u["subject"]))}
     urgent = sorted(nums & w.urgent())
-    last = max([x for x in (w.last_release_at(), ts(st.get("last_cut_at"))) if x], default=None)
+    last = w.last_release_at()  # only a merged release moves the pace; a blocked or red try does not
     gap_h = (now() - last).total_seconds() / 3600 if last else 999
     if not urgent and gap_h < MIN_GAP_H:
         return out + [
@@ -1402,7 +1402,6 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         return out + [f"develop {sha[:8]} was red; waiting for develop to move"]
     n = w.last_release() + 1
     rel = {"n": n, "sha": sha, "unreleased": un, "phase": "testing", "dispatched_at": now().isoformat()}
-    st["last_cut_at"] = now().isoformat()  # the pace counts from the start of a try, so a red one waits too
     if urgent:
         out.append(f"urgent pull request(s) {', '.join('#' + str(x) for x in urgent)}: release now")
     known = w.known_red()

@@ -49,6 +49,27 @@ def test_same_name_twice_keeps_both(proj, run, tid):
     assert len(set(refs)) == 2 and [(proj / r).read_text() for r in refs] == ["1", "2"]
 
 
+def test_several_files_on_one_step_are_all_kept(proj, run, tid):
+    # ORCH-448: pictures at 1280, 1920 and 390 on one step; before, only the last --file was kept
+    for w in ("1280", "1920", "390"):
+        (proj / f"shot-{w}.png").write_bytes(b"png" + w.encode())
+    code, _, _ = run(
+        "check", "done", tid, "c1", "--file", "shot-1280.png", "--file", "shot-1920.png",
+        "--file", "shot-390.png", "--summary", "Looks right at three widths",
+    )  # fmt: skip
+    assert code == 0
+    files = [e for e in read(proj, tid)["checklist"][0]["evidence"] if e["type"] == "file"]
+    assert [Path(e["ref"]).name for e in files] == ["shot-1280.png", "shot-1920.png", "shot-390.png"]
+    assert [(proj / e["ref"]).read_bytes() for e in files] == [b"png1280", b"png1920", b"png390"]
+
+
+def test_more_than_ten_files_refused(proj, run, tid):
+    (proj / "a.png").write_bytes(b"x")
+    code, _, err = run("check", "done", tid, "c1", *(["--file", "a.png"] * 11))
+    assert code == 2 and "At most 10 files" in err
+    assert not (proj / ".orch" / "tickets" / tid / "evidence").exists()
+
+
 def test_too_big_refused(proj, run, tid, monkeypatch):
     big = proj / "demo.mov"
     big.write_bytes(b"x")

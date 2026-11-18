@@ -6,7 +6,9 @@ dropped while Windows was known red). So known red goes on the steps, where the 
 Plain text over the workflow files (no YAML package), like check_ci_timeouts.py.
 """
 
+import datetime as dt
 import re
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -42,3 +44,36 @@ def test_every_test_step_of_the_workspace_job_honours_known_red():
     for s in runs:
         assert "continue-on-error: ${{ matrix.known_red }}" in s, s.splitlines()[0]
     assert '"known_red": o in KNOWN_RED' in text
+
+
+# ORCH-453: every known-red system has an owner and an end date in the written list (docs/ci-checks.md)
+sys.path.insert(0, str(ROOT / "scripts"))
+import ci_known_red as k  # noqa: E402
+
+
+def test_known_red_reads_the_workflow_line():
+    assert k.known_red('          KNOWN_RED = {"windows-latest"}\n') == {"windows-latest"}
+    assert k.known_red("          KNOWN_RED = set()  # Windows is green\n") == set()
+    assert k.known_red("          KNOWN_RED = {}\n") == set()
+
+
+def test_every_known_red_system_has_an_owner_and_an_end_date_in_the_list():
+    red, table = k.known_red(), k.rows()
+    assert set(table) == red, f"docs/ci-checks.md known-red rows {sorted(table)} != KNOWN_RED {sorted(red)}"
+    for system in red:
+        assert table[system]["owner"], system
+        assert k.DATE.match(table[system]["end date"]), system
+
+
+def test_a_passed_end_date_or_a_missing_row_is_named():
+    row = {"owner": "owner", "end date": "2026-11-30"}
+    assert k.problems(dt.date(2026, 11, 30), {"windows-latest"}, {"windows-latest": row}) == []
+    late = k.problems(dt.date(2026, 12, 1), {"windows-latest"}, {"windows-latest": row})
+    assert len(late) == 1 and "past its end date 2026-11-30" in late[0]
+    assert "no row" in k.problems(dt.date(2026, 11, 1), {"macos-latest"}, {})[0]
+    assert "not in KNOWN_RED" in k.problems(dt.date(2026, 11, 1), set(), {"windows-latest": row})[0]
+    assert "no owner" in k.problems(dt.date(2026, 11, 1), {"w"}, {"w": {"owner": "", "end date": "2026-12-01"}})[0]
+
+
+def test_the_warning_never_fails_the_job(capsys):
+    assert k.main(["--warn"]) == 0
