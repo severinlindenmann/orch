@@ -293,7 +293,9 @@ def test_add_and_remove_by_page_click(cli, ws, no_switcher):
     code, _out, _ = cli("act", "add", "anthropic:helper-tool:main:code:none:-:Tool on key", "--by", "human:o")
     assert code == 0 and store.find(store.load(ws)["accounts"], "Tool on key")["type"] == "helper-tool"
     code, _out, _ = cli("act", "remove", a["id"], "--by", "human:o")
-    assert code == 0 and [x["label"] for x in store.load(ws)["accounts"]] == ["Tool on key"]
+    assert code == 0 and [x["label"] for x in store.load(ws)["accounts"] if not x.get("removed")] == [
+        "Tool on key"
+    ]
     assert store.history(ws)[0]["what"] == "account removed"
 
 
