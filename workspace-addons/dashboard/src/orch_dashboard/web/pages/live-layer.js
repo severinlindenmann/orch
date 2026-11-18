@@ -22,10 +22,12 @@ function liveLayerFresh() {
 function liveLayerNarrow(where, n, room, phone) {
   return !!phone || (n > 1 && (where === 'right' || room / n < LIVE_NARROW));
 }
-function liveLayerRead(store) {
+// Kept per workspace (issue 1351: the dashboards of two workspaces can get the same port, so the same browser store).
+function liveLayerKey(ws) { return ws ? LIVE_LAYER_KEY + '.' + ws : LIVE_LAYER_KEY; }
+function liveLayerRead(store, ws = '') {
   const s = liveLayerFresh();
   let saved = null;
-  try { saved = JSON.parse(store?.getItem(LIVE_LAYER_KEY) || 'null'); } catch { saved = null; }
+  try { saved = JSON.parse(store?.getItem(liveLayerKey(ws)) || 'null'); } catch { saved = null; }
   if (!saved || typeof saved !== 'object') return s;
   if (['bar', 'side', 'bottom', 'right'].includes(saved.mode)) s.mode = saved.mode;  // full screen is never where a new page opens
   if (saved.mode === 'full' && LIVE_PLACES.includes(saved.back)) s.mode = saved.back;
@@ -37,8 +39,8 @@ function liveLayerRead(store) {
   if (!s.panes.length && s.mode !== 'bar' && s.mode !== 'side') s.mode = 'bar';
   return s;
 }
-function liveLayerWrite(store, s) {
-  try { store?.setItem(LIVE_LAYER_KEY, JSON.stringify({mode:s.mode, last:s.last, back:s.back, height:s.height, width:s.width, panes:s.panes, cur:s.cur})); } catch { /* private window: nothing kept */ }
+function liveLayerWrite(store, s, ws = '') {
+  try { store?.setItem(liveLayerKey(ws), JSON.stringify({mode:s.mode, last:s.last, back:s.back, height:s.height, width:s.width, panes:s.panes, cur:s.cur})); } catch { /* private window: nothing kept */ }
 }
 // Panes sit in the same order as the chips in the bar (draft D): order is the bar's list; a session not in it stays last.
 function liveLayerSort(s, order) {
@@ -134,8 +136,10 @@ let liveLayerWas = '';
 let liveLayerWasPanes = [];  // the panes painted last: a new one slides in
 function liveLayerStore() { try { return window.localStorage; } catch { return null; } }
 function liveLayerPhone() { return !!window.matchMedia?.('(max-width: 720px)').matches; }
+let liveLayerWs = null;
 function liveLayerModel() {
-  if (!liveLayer) liveLayer = liveLayerRead(liveLayerStore());
+  const ws = typeof state === 'object' && state ? String(state.workspace || '') : '';
+  if (!liveLayer || (ws && liveLayerWs !== ws)) { liveLayer = liveLayerRead(liveLayerStore(), ws); liveLayerWs = ws; }  // a state without its name (an answer in between) keeps the layer
   return liveLayer;
 }
 function liveLayerPage() {
@@ -158,7 +162,7 @@ function liveLayerSession(key) {
   const run = state.runs?.[t.id], helper = run?.running && window.DashHelpers?.helperState ? window.DashHelpers.helperState(run, t) : null;
   const pill = window.UI?.ticketState && window.UI?.ticketPill ? window.UI.ticketPill(window.UI.ticketState(t, helper)) : null;
   const live = window.LiveSessions?.get(t.id) || null;
-  return {pill, key:window.DashHelpers?.ticketKey?.(t) || '', id:t.id, title:clean(t.title) || 'Untitled', live,
+  return {pill, key:window.DashHelpers?.ticketKey?.(t) || '', id:t.id, title:clean(live ? liveName(live) : t.title) || 'Untitled', live,
     running:live ? ['working', 'needs-you', 'idle'].includes(live.status) : !!state.runs?.[t.id]?.running};
 }
 // The live sessions in the bar's order (needs you, pinned, working, idle; pages/livebar.js), else the ticket order.
@@ -175,20 +179,47 @@ function liveLayerFirst() {
 function liveLayerNext(panes) {
   return liveLayerLive().find(k => !panes.includes(k)) || '';
 }
-// Pinned sessions: kept in this browser under the bar's key until orch stores them (the wall task); the bar reads them.
-const LIVE_PINS_KEY = 'orch.live.pins';
+// Pinned sessions: kept by orch for the workspace (window.LiveSessions.pins, ORCH-361); the bar and the wall read them.
 function liveLayerPins() {
-  try { const p = JSON.parse(liveLayerStore()?.getItem(LIVE_PINS_KEY) || '[]'); return Array.isArray(p) ? p.filter(k => typeof k === 'string') : []; } catch { return []; }
+  return array(window.LiveSessions?.pins);
 }
 function liveLayerPin(key) {
-  const pins = liveLayerPins(), on = !pins.includes(key);
-  try { liveLayerStore()?.setItem(LIVE_PINS_KEY, JSON.stringify(on ? [...pins, key] : pins.filter(k => k !== key))); } catch { /* private window */ }
-  window.paintLiveBar?.();
-  liveLayer = liveLayerSort(liveLayerModel(), liveLayerLive());  // a pinned session moves first, in the bar and here
-  liveLayerWrite(liveLayerStore(), liveLayer);
-  liveLayerPaint();
-  window.dispatchEvent(new CustomEvent('orch:live-pins', {detail:{key, pinned:on}}));
+  const on = !liveLayerPins().includes(key);
+  window.LiveSessions?.pin(key, on);  // shows at once ('orch:live-pins'), saved in the workspace
   return on;
+}
+// A pin or unpin (here, on the wall, after a failed save): a pinned session moves first, in the bar and here.
+window.addEventListener('orch:live-pins', () => {
+  if (!document.getElementById('live-dock')) return;
+  window.paintLiveBar?.();
+  liveLayer = liveLayerSort(liveLayerModel(), liveLayerLive());
+  liveLayerWrite(liveLayerStore(), liveLayer, liveLayerWs);
+  liveLayerPaint();
+});
+// Renaming a session in its pane header (draft D: click the name, type, Enter): which session and what is typed so
+// far, so a repaint while typing keeps the text.
+let liveRen = '', liveRenText = '';
+function liveRenForm(key, title) {
+  const id = 'live-ren-' + String(key).replace(/[^a-z0-9_]/gi, '');
+  return h('form', {className:'live-ren', 'data-live-ren':key, 'data-key':'live-ren'},
+    h('label', {className:'sr-only', for:id}, 'Name of this session'),
+    h('input', {className:'input', id, value:liveRenText || title, maxlength:'60', autocomplete:'off', 'data-key':'live-ren-input'}),
+    h('button', {type:'submit', className:'btn outline sm', 'data-key':'live-ren-save'}, 'Save name'));
+}
+function liveRenStart(key) {
+  liveRen = key; liveRenText = '';
+  liveLayerPainted = '';
+  liveLayerPaint();
+  const input = document.querySelector('#live-dock [data-live-ren] input');
+  input?.focus({preventScroll:true});
+  input?.select();
+}
+function liveRenEnd(key, saved) {
+  liveRen = ''; liveRenText = '';
+  liveLayerPainted = '';
+  liveLayerPaint();
+  document.querySelector('#live-dock ' + liveSel(key, 'live-rename'))?.focus({preventScroll:true});
+  if (saved) window.orch?.toast?.('Name saved.');
 }
 function liveDockHost() {
   // Inside the mount that survives a page change (#keep of the soft page changes: render() never touches it and a
@@ -210,7 +241,7 @@ function liveLayerDo(act, after) {
   if (stepped === before) return;
   const next = liveLayerSort(stepped, liveLayerLive());
   liveLayer = next;
-  liveLayerWrite(liveLayerStore(), next);
+  liveLayerWrite(liveLayerStore(), next, liveLayerWs);
   liveLayerPaint();
   if (after) document.querySelector('#live-dock ' + after)?.focus({preventScroll:true});
   window.dispatchEvent(new CustomEvent('orch:live-layer', {detail:{mode:liveLayerWhere(next, liveLayerPhone()), panes:[...next.panes]}}));
@@ -257,6 +288,8 @@ function livePane(key, where, s, o) {
       sess?.key ? h('span', {className:'key'}, sess.key) : null,
       n > 1 && !on
         ? h('button', {type:'button', className:'live-pt', 'data-live':'select', 'data-session':key, title, 'aria-label':'Select the pane of ' + label}, title)
+        : sess && liveRen === key ? liveRenForm(key, title)
+        : sess?.live ? h('button', {type:'button', className:'live-pt', 'data-live':'rename', 'data-session':key, 'data-key':'live-rename', title:'Click to rename', 'aria-label':'Rename ' + title}, title)
         : h('span', {className:'live-pt', title}, title),
       h('span', {className:'live-ctl'},
         o.narrow || typeof liveHistButton !== 'function' ? null : liveHistButton(sess, label),
@@ -350,7 +383,7 @@ function liveLayerPaint() {
   const host = liveDockHost(), s = liveLayerModel(), where = liveLayerWhere(s, liveLayerPhone());
   const shown = s.panes.map(liveLayerSession).map(x => x && [x.key, x.title, x.running, x.pill?.textContent || '']);
   const v = s.panes.length && where !== 'bar' && where !== 'side' ? liveLayerView(s, where) : null;
-  const key = JSON.stringify([where, s.menu, s.panes, s.cur, shown, v && [v.narrow, v.pins.filter(k => s.panes.includes(k)), !!v.next], liveLayerName(), liveLayerPage()?.name, typeof liveHistKey === 'function' ? liveHistKey() : null, typeof window.liveStartKey === 'function' ? window.liveStartKey() : null, typeof window.liveModelKey === 'function' ? window.liveModelKey(s.panes) : null]);
+  const key = JSON.stringify([where, s.menu, s.panes, s.cur, shown, liveRen, v && [v.narrow, v.pins.filter(k => s.panes.includes(k)), !!v.next], liveLayerName(), liveLayerPage()?.name, typeof liveHistKey === 'function' ? liveHistKey() : null, typeof window.liveStartKey === 'function' ? window.liveStartKey() : null, typeof window.liveModelKey === 'function' ? window.liveModelKey(s.panes) : null]);
   host.dataset.mode = where;
   host.style.setProperty('--live-h', s.height ? s.height + 'px' : '');
   host.style.setProperty('--live-w', s.width ? s.width + 'px' : '');
@@ -360,7 +393,9 @@ function liveLayerPaint() {
     // the panel animates only when it appears or moves, not on every repaint
     if (where === liveLayerWas) host.dataset.still = ''; else delete host.dataset.still;
     const shared = liveBarShared(), keepBar = shared ? document.getElementById('live-bar') : null;
+    const typing = !!document.activeElement?.closest?.('#live-dock [data-live-ren]');
     host.replaceChildren(...[liveLayerTree(s, where)].filter(Boolean), ...(keepBar ? [keepBar] : []));
+    if (typing) host.querySelector('[data-live-ren] input')?.focus({preventScroll:true});
     if (shared) {
       // the shared bar goes after the panel in the dock (on top in full screen) and carries Open and Place at its end
       if (!keepBar || keepBar.parentNode !== host) shared.mount(host, {docked:true});
@@ -371,6 +406,7 @@ function liveLayerPaint() {
     liveLayerWasPanes = where === 'bar' || where === 'side' ? [] : [...s.panes];
   }
   liveLayerFill();
+  window.liveStartMount?.();  // the Start choice of a pane with no helper (pages/live-start.js)
   document.body.dataset.liveLayer = where;
   liveLayerInert(where === 'full');
   liveLayerPad();
@@ -475,6 +511,7 @@ document.addEventListener('click', e => {
     if (next) liveLayerDo({type:'beside', key:next}, liveSel(next, 'live-close'));
   }
   else if (act === 'select') liveLayerDo({type:'select', key:b.dataset.session}, liveSel(b.dataset.session, 'live-close'));
+  else if (act === 'rename') liveRenStart(b.dataset.session);
   else if (act === 'pin') {
     const key = b.dataset.session, menu = liveLayerModel().menu;
     liveLayerPin(key);
@@ -486,8 +523,29 @@ document.addEventListener('click', e => {
 function liveSel(key, what) {
   return `.live-pane[data-session="${String(key || '').replace(/["\\]/g, '')}"] [data-key="${what}"]`;
 }
+document.addEventListener('input', e => {
+  if (e.target.closest?.('#live-dock [data-live-ren]')) liveRenText = e.target.value;
+});
+document.addEventListener('submit', e => {
+  const form = e.target.closest?.('#live-dock [data-live-ren]');
+  if (!form) return;
+  e.preventDefault();
+  const key = form.dataset.liveRen, text = form.querySelector('input')?.value || '';
+  const sess = liveLayerSession(key), own = text.trim() && text.trim() !== clean(sess?.live?.title || '') ? text.trim() : '';
+  const saved = window.LiveSessions?.rename(key, own);  // an empty name, or the title itself, goes back to the title
+  liveRenEnd(key, true);
+  Promise.resolve(saved).then(() => requestAnimationFrame(() => {  // the page is drawn again when orch answers
+    const a = document.activeElement;
+    if (!a || a === document.body || !a.isConnected) document.querySelector('#live-dock ' + liveSel(key, 'live-rename'))?.focus({preventScroll:true});
+  }));
+});
 document.addEventListener('keydown', e => {
   if (!document.getElementById('live-dock')) return;
+  if (e.key === 'Escape' && liveRen && e.target.closest?.('#live-dock [data-live-ren]')) {  // Esc leaves the name as it was
+    e.preventDefault();
+    liveRenEnd(liveRen, false);
+    return;
+  }
   const grip = e.target.closest?.('[data-live-grip]');
   if (grip && /^Arrow(Up|Down|Left|Right)$/.test(e.key)) {
     const dim = grip.dataset.liveGrip, panel = grip.closest('.live-panel'), now = dim === 'width' ? panel.offsetWidth : panel.offsetHeight;

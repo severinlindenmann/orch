@@ -300,9 +300,60 @@ def test_a_failed_switch_is_written_and_tried_again_after_ten_minutes(cli, switc
     switcher.failing()
     assert switching.look(ws, at(0))["did"] == "switch failed"
     assert switching.look(ws, at(30))["did"] == "waiting to try again"
-    assert [h["what"] for h in usage_rows(ws)] == ["could not switch to TEAMCO"]
+    assert next(h["what"] for h in usage_rows(ws)) == "could not switch to TEAMCO"
     switcher.failing(False)
     assert switching.look(ws, at(601))["did"] == "switched"
+
+
+def test_a_failed_switch_tries_the_next_good_account_at_once(cli, switcher, ws):
+    """ORCH-620: it waited ten minutes on the same account; now the next account in order is tried in the same look."""
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    first = switcher.active()
+    tried = []
+
+    def switch(slot):
+        tried.append(slot)
+        return len(tried) > 1 and switching._switch(slot)  # the first account it tries never works
+
+    r = switching.look(ws, at(0), switch=switch)
+    assert r["did"] == "switched" and len(tried) == 2 and tried[0] != tried[1]
+    assert switcher.active() == tried[1] != first
+    assert next(h["what"] for h in usage_rows(ws)) == "could not switch to TEAMCO"
+
+
+def test_a_failed_switch_and_a_full_house_show_in_list_and_status(cli, switcher, ws):
+    """ORCH-620: both warnings stayed in the history; now list and status say them too."""
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switcher.failing()
+    switching.look(ws, at(0))
+    _, out = jrun(cli, "list")
+    assert any("Could not switch to TEAMCO" in w for w in out["warnings"])
+
+
+def test_a_switch_another_program_undoes_is_written_once_and_says_so(cli, switcher, ws):
+    """ORCH-591: three 'switched to' rows in a row hid that a second switcher kept moving the account back."""
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    assert switching.look(ws, at(0))["did"] == "switched"
+    for n in (1, 2, 3):
+        switcher.use(active=1)  # the other program switches back to the first account
+        assert switching.look(ws, at(120 * n))["did"] == "switched"  # Usage switches again, quietly
+    assert [h["what"] for h in usage_rows(ws)] == [
+        "switched to TEAMCO",
+        "another program switched back to first",
+    ]
+
+
+def test_a_switch_that_did_not_change_the_account_in_use_is_not_written_as_done(
+    cli, switcher, ws, monkeypatch
+):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    monkeypatch.setattr(switching, "_stuck", lambda key, read=None: False)
+    assert switching.look(ws, at(0))["did"] == "switch failed"
+    assert next(h["what"] for h in usage_rows(ws)) == "could not switch to TEAMCO"
 
 
 def test_a_rule_that_ended_falls_back_before_choosing(cli, switcher, ws):
