@@ -54,6 +54,8 @@ class FakeDriver:
         self.run_counts: dict[
             str, int
         ] = {}  # sid -> starts so far (launchd `runs`); none = the tool cannot say
+        self.start_polls = 0  # a slow start: status says "starting" this many times, then running
+        self.start_dies = False  # a job that never comes up and is not launching either
 
     def check(self):
         from orch_services.drivers import Unavailable
@@ -73,7 +75,8 @@ class FakeDriver:
 
     def start(self, spec):
         self.calls.append(("start", spec.sid))
-        self.entries[spec.sid]["running"] = True
+        self.entries[spec.sid]["running"] = not self.start_dies
+        self.entries[spec.sid]["polls"] = self.start_polls
 
     def stop(self, spec):
         self.calls.append(("stop", spec.sid))
@@ -91,6 +94,9 @@ class FakeDriver:
         from orch_services.drivers import Status
 
         e = self.entries.get(spec.sid)
+        if e and e.get("polls"):
+            e["polls"] -= 1
+            return Status(running=False, starting=True)
         on = bool(e and e["running"])
         return Status(running=on, pid=4242 if on else None, since=STARTED if on else None)
 
