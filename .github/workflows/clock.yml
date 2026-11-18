@@ -4,6 +4,9 @@ name: clock
 # (#1421); each time develop stayed red for an hour and the merge queue dropped about ten pull requests.
 # 22:30 catches "now + a few hours" that crosses midnight; 23:59:40 ticks over midnight in the first seconds, so a
 # fixture made "a few minutes ago" lands on yesterday. scripts/at-clock.sh moves only the wall clock (libfaketime).
+# Where it runs (ci.yml, ORCH-451): merge queue groups, releases, nightly, manual runs and pull requests that change
+# time code (scripts/touches_time_code.py). A new test that shows something by the day uses the shared test clock
+# (workspace/tests/testclock.py and testclock.cjs) instead of the real one.
 on:
   workflow_call:
 permissions:
