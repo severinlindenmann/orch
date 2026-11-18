@@ -305,6 +305,73 @@
        "type": "text"
       },
       {
+       "key": "place",
+       "label": "Place",
+       "type": "text"
+      },
+      {
+       "key": "waited",
+       "label": "Waited",
+       "type": "duration"
+      },
+      {
+       "key": "why",
+       "label": "Why",
+       "type": "text"
+      }
+     ],
+     "meta": "2 waiting · 1 being checked · groups of up to 5",
+     "rows": [
+      {
+       "cells": {
+        "place": "Being checked",
+        "pr": "#421 Show the invoice number on the PDF",
+        "ticket": "BIL-2",
+        "waited": 1740,
+        "why": "Checked alone on top of develop"
+       },
+       "link": "t_pdf014",
+       "subtitle": "acme/billing"
+      },
+      {
+       "cells": {
+        "place": "1st in line",
+        "pr": "#88 New pricing page",
+        "ticket": null,
+        "waited": 1260,
+        "why": "Waits for the group being checked"
+       },
+       "link": "https://github.com/acme/website/pull/88",
+       "subtitle": "acme/website"
+      },
+      {
+       "cells": {
+        "place": "2nd in line",
+        "pr": "#420 Round tax per line, not per invoice",
+        "ticket": "BIL-3",
+        "waited": 480,
+        "why": "Paused for 2 min: GitHub did not answer"
+       },
+       "link": "t_tax015",
+       "subtitle": "acme/billing"
+      }
+     ],
+     "title": "Merge queue",
+     "type": "table"
+    },
+    {
+     "columns": [
+      {
+       "key": "pr",
+       "label": "Pull request",
+       "type": "text"
+      },
+      {
+       "key": "ticket",
+       "label": "Ticket",
+       "type": "text"
+      },
+      {
        "key": "checks",
        "label": "Checks",
        "type": "text"

@@ -26,6 +26,33 @@ def _checks(*pairs):
     ]
 
 
+def _ts(stamp: str) -> float:
+    from datetime import UTC, datetime
+
+    return datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+
+
+def _queue(root: Path) -> None:
+    """The merge queue's line on the loaded page: one being checked, one waiting, one paused (ORCH-432)."""
+    from orch_pull_requests import store
+
+    rows = [
+        ("acme/billing", 421, "t_pdf014", "2026-11-17T09:12:00Z", "running", "in the group being checked", None),
+        ("acme/website", 88, None, "2026-11-17T09:20:00Z", "waiting", "waiting in line", None),
+        ("acme/billing", 420, "t_tax015", "2026-11-17T09:33:00Z", "waiting",
+         "waits again: GitHub did not answer", _ts(AT) + 120),
+    ]  # fmt: skip
+    entries = []
+    for repo, n, tid, added, state, why, later in rows:
+        e = {"url": f"https://github.com/{repo}/pull/{n}", "repo": repo, "number": n, "ticket": tid,
+             "by": "agent:claude", "added": added, "state": state, "why": why, "base": "develop", "login": "bot"}  # fmt: skip
+        if later:
+            e["not_before"] = later
+        entries.append(e)
+    store.folder(root).mkdir(parents=True, exist_ok=True)
+    (store.folder(root) / "queue.json").write_text(json.dumps({"entries": entries}), encoding="utf-8")
+
+
 def build() -> dict:
     from orch import addons, refs, tickets
     from prpage_util import FakeGitHub, gql_pr
@@ -81,8 +108,9 @@ def build() -> dict:
         orig_tickets = poll.tickets
         poll.tickets = lambda _root: [tickets.load(root, tid) for tid in made]
         try:
-            loaded = view.build(root, running=True)
-            stopped = view.build(root, running=False)
+            stopped = view.build(root, running=False, queue_alive=True)
+            _queue(root)
+            loaded = view.build(root, running=True, queue_alive=True, now=_ts(AT))
         finally:
             poll.tickets = orig_tickets
         m = addons.folder_manifest(HERE.parent)

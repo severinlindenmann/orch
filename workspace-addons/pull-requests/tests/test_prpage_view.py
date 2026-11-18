@@ -84,3 +84,78 @@ def test_long_lists_are_cut_with_more(prws, n):
     v = valid(view.build(prws, running=True))
     (table,) = [b for b in v["blocks"] if b["type"] == "table"]
     assert len(table["rows"]) == 100 and table["more"] == 1
+
+
+# -- the merge queue's line (ORCH-432) ------------------------------------------------------------------------
+def _queue(root, *numbers, ticket=None):
+    from orch_pull_requests import store
+
+    for n in numbers:
+        store.add(root, PR.format(n), ticket, "agent:t", base="develop", login="bot")
+
+
+def test_no_queue_block_when_nothing_waits(prws):
+    assert view.queue_block(prws, [], alive=True) is None
+    v = valid(view.build(prws, running=True))
+    assert not [b for b in v["blocks"] if b.get("title") == "Merge queue"]
+
+
+def test_queue_block_shows_place_wait_and_why(prws):
+    from datetime import UTC, datetime
+
+    from orch_pull_requests import store
+
+    _queue(prws, 1, ticket="t_aaaaa1")
+    _queue(prws, 2, 3, 4)
+    added = (
+        datetime.strptime(store.read(prws)[0]["added"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+    )
+    now = added + 600
+    store.claim(prws, [store.read(prws)[1]])  # #2 is in the group being checked
+    store.set_state(
+        prws, PR.format(3), store.WAITING, "waits again: GitHub did not answer", not_before=now + 120
+    )
+    tickets = [{"id": "t_aaaaa1", "key": "DM-1"}]
+    b = view.queue_block(prws, tickets, alive=True, now=now)
+    valid({"schema": "orch.addon-view/1", "generated_at": "2026-11-18T10:00:00Z", "blocks": [b]})
+    assert b["title"] == "Merge queue" and b["meta"] == "3 waiting · 1 being checked · groups of up to 5"
+    cells = [r["cells"] for r in b["rows"]]
+    assert [c["pr"] for c in cells] == ["#2", "#1", "#3", "#4"]  # being checked first, then the line
+    assert [c["place"] for c in cells] == ["Being checked", "1st in line", "2nd in line", "3rd in line"]
+    assert cells[0]["why"] == "Checked alone on top of develop"
+    assert cells[1]["ticket"] == "DM-1" and b["rows"][1]["link"] == "t_aaaaa1"
+    assert cells[1]["why"] == "Waits for the group being checked" and cells[1]["waited"] == 600
+    assert cells[2]["why"] == "Paused for 2 min: GitHub did not answer"
+    assert b["rows"][3]["link"] == PR.format(4) and cells[3]["ticket"] is None
+
+
+def test_queue_block_says_when_the_runner_does_not_run(prws):
+    _queue(prws, 1)
+    b = view.queue_block(prws, [], alive=False)
+    assert b["rows"][0]["cells"]["why"].startswith("The merge queue is not running")
+    assert b["rows"][0]["cells"]["place"] == "1st in line"
+
+
+def test_queue_block_follows_the_group_size_setting(prws):
+    (prws / ".orch" / "config.toml").write_text("[pull_requests]\nmax_group = 10\n", encoding="utf-8")
+    _queue(prws, 1)
+    b = view.queue_block(prws, [], alive=True)
+    assert b["meta"].endswith("groups of up to 10")
+    assert b["rows"][0]["cells"]["why"] == "Goes into the next group"
+
+
+def test_queue_block_names_the_group_partners_and_never_a_raw_address(prws):
+    from orch_pull_requests import store
+
+    _queue(prws, 1, 2, 3)
+    g = "https://github.com/acme/app/pull/500"
+    for n in (1, 2):
+        store.claim(prws, [store.find(store.read(prws), PR.format(n))])
+        store.set_state(prws, PR.format(n), store.RUNNING, f"in the group {g}", group=g)
+    store.set_state(
+        prws, PR.format(3), store.WAITING, f"waits again: the group {g} was not merged: no verdict"
+    )
+    b = view.queue_block(prws, [], alive=True)
+    whys = [r["cells"]["why"] for r in b["rows"]]
+    assert whys == ["Checked together with 1 other", "Checked together with 1 other",
+                    "The group #500 was not merged: no verdict"]  # fmt: skip

@@ -65,7 +65,8 @@ test('Pull requests page: nav entry, open pull requests with ticket, checks and 
       await page.goto(BASE + '/#addon/pull-requests');
       await page.getByText('Add CSV export for invoices').first().waitFor();
       await page.getByRole('heading', {name: 'Pull requests', level: 1}).waitFor();
-      for (const word of ['Failed: lint', 'Ready to merge', 'Has a conflict', 'Running (2 left)', 'Draft', 'acme/website'])
+      for (const word of ['Failed: lint', 'Ready to merge', 'Has a conflict', 'Running (2 left)', 'Draft', 'acme/website',
+                         'Merge queue', 'Being checked', '1st in line', 'Paused for 2 min: GitHub did not answer', '29 min'])
         assert.ok(await page.getByText(word).first().count(), word);
       await page.screenshot({path: path.join(OUT, `pull-requests-${size[0]}.png`), fullPage: true});
     });
