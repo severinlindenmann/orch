@@ -41,6 +41,7 @@ KEYS = (
     "workspace.live_max",
     "workflow.agents_may_finish",
     "workflow.reviewer",
+    "workflow.auto_reviewer",
     "workflow.reviewer_answers",
     "workflow.reviewer_look",
     "workflow.release_merge",
@@ -295,6 +296,7 @@ def _config(args, root: Path) -> None:
             "workspace.live_max": lambda: config.live_max(root) or "none",
             "workflow.agents_may_finish": lambda: config.agents_may_finish(root),
             "workflow.reviewer": lambda: config.reviewer_on(root),
+            "workflow.auto_reviewer": lambda: config.auto_reviewer_on(root),
             "workflow.reviewer_answers": lambda: config.reviewer_answers_on(root),
             "workflow.reviewer_look": lambda: config.reviewer_look_on(root),
             "workflow.release_merge": lambda: config.release_merge_on(root),
@@ -397,6 +399,19 @@ def _config(args, root: Path) -> None:
             {"workflow.reviewer_look": value},
             f"The Reviewer gives bigger finished work a second look: {args.value}."
             + ("" if config.reviewer_on(root) else " It works once workflow.reviewer is on too."),
+        )
+    elif args.sub == "set" and args.key == "workflow.auto_reviewer":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        who = _actor(args)
+        if args.value == "on" and not who.startswith("human:"):  # new tickets then start without human review
+            raise Refused("Only the owner turns this on: orch config set in their own terminal.")
+        value = config.set_auto_reviewer(root, args.value == "on", who)
+        _out(
+            args,
+            {"workflow.auto_reviewer": value},
+            "Saved: new tickets start with Human review needed "
+            + ("off (the Auto Reviewer checks them)." if value else "on."),
         )
     elif args.sub == "set" and args.key == "workflow.release_merge":
         if args.value not in ("on", "off"):
