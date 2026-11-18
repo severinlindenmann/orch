@@ -10,6 +10,7 @@ import json
 import os
 import re
 import stat
+import sys
 import time
 import uuid
 from collections.abc import Callable
@@ -1415,7 +1416,13 @@ def _identity(fd) -> tuple:
     time (a write, a rename over it or a touch of the times moves the change time, which no caller sets)."""
     with _io():
         st = os.fstat(fd)
-    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, _ctime(st))
+
+
+def _ctime(st) -> int:
+    """The change time, or 0 on Windows: there os.stat gives the creation time and os.fstat the change time,
+    so a plain look would never equal the checked open (the memory would never answer)."""
+    return 0 if sys.platform == "win32" else st.st_ctime_ns
 
 
 def _quick(workspace, run):
@@ -1432,14 +1439,14 @@ def _quick(workspace, run):
     try:
         with _io():
             p = _path_info(base / "pending" / run, want_dir=True)
-        pend = (p.st_dev, p.st_ino, p.st_mtime_ns, p.st_ctime_ns)
+        pend = (p.st_dev, p.st_ino, p.st_mtime_ns, _ctime(p))
     except RecordUnavailable as error:
         if error.reason != "missing":
             return None
         pend = None
     except RecordTampered:
         return None
-    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns), pend
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, _ctime(st)), pend
 
 
 def _quick_dirs(workspace):

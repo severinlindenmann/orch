@@ -130,7 +130,7 @@ def test_call_answers_here_then_through_the_worker(three, run):
         readworker.stop_all()
 
 
-def test_the_worker_keeps_its_pipes_from_the_command(three):
+def test_the_worker_keeps_its_pipes_from_the_command(three, subprocess_home):
     """A command that prints, writes to stderr or starts a child cannot break the worker's answers."""
     from orch import readworker
 

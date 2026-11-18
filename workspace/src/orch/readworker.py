@@ -247,7 +247,9 @@ def _answer(request: dict) -> dict:
     spill.seek(0)
     child = spill.read()
     spill.close()
-    return {"code": int(code or 0), "out": (raw.getvalue() + child).decode("utf-8", "replace")}
+    text = (raw.getvalue() + child).decode("utf-8", "replace")
+    # the same text a caller read from `orch` as a child in text mode (Windows writes \r\n)
+    return {"code": int(code or 0), "out": text.replace("\r\n", "\n")}
 
 
 def serve() -> int:
