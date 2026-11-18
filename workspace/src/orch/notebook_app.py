@@ -201,6 +201,46 @@ def _env(h: Path) -> dict:
     return {**keep, "ORCH_NOTEBOOK_SKILLS": str(h / "skills")}
 
 
+def _group_kw() -> dict:
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _kill_tree(p: subprocess.Popen) -> None:
+    """Stop the command and everything it started (its process group; on Windows its process tree)."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)], capture_output=True)
+        return
+    with contextlib.suppress(OSError, ProcessLookupError):
+        os.killpg(p.pid, signal.SIGKILL)
+
+
+@contextlib.contextmanager
+def runner_lock(h: Path):
+    """Only one app answers requests per notebook home (a second `run` is refused), so a request is never run
+    twice and a request marked running really means the app stopped while working on it."""
+    _private_dir(h)
+    f = open(h / "run.lock", "a+")
+    try:
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise Refused(
+                "The notebook app already runs. Stop the other one first: orch notebook stop"
+            ) from None
+        yield
+    finally:
+        f.close()
+
+
 def run_command(
     argv: list[str], folder: Path, stdin: dict, h: Path, timeout: float = TIMEOUT
 ) -> tuple[int, bytes]:
@@ -214,13 +254,12 @@ def run_command(
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        start_new_session=True,
+        **_group_kw(),
     )
     buf, over = bytearray(), threading.Event()
 
     def kill():
-        with contextlib.suppress(OSError, ProcessLookupError):
-            os.killpg(p.pid, signal.SIGKILL)
+        _kill_tree(p)
 
     def read_out():
         while chunk := p.stdout.read(8192):
@@ -235,12 +274,15 @@ def run_command(
         while p.stderr.read(8192):
             pass
 
-    t1, t2 = threading.Thread(target=read_out, daemon=True), threading.Thread(target=drain_err, daemon=True)
-    t1.start()
-    t2.start()
-    with contextlib.suppress(BrokenPipeError, OSError):
-        p.stdin.write(json.dumps(stdin).encode("utf-8"))
-        p.stdin.close()
+    def feed():  # in its own thread: a command that never reads its input cannot hold up the time limit
+        with contextlib.suppress(BrokenPipeError, OSError, ValueError):
+            p.stdin.write(json.dumps(stdin).encode("utf-8"))
+            p.stdin.close()
+
+    threads = [threading.Thread(target=f, daemon=True) for f in (read_out, drain_err, feed)]
+    t1 = threads[0]
+    for t in threads:
+        t.start()
     try:
         code = p.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -416,6 +458,11 @@ def run(h: Path | None = None, stop: threading.Event | None = None) -> None:
     """The loop the background service runs: wait for requests, answer, repeat; back off when the relay is
     away."""
     h = h or home()
+    with runner_lock(h):
+        _loop(h, stop)
+
+
+def _loop(h: Path, stop: threading.Event | None) -> None:
     conn = connection(h)
     with contextlib.suppress(Refused, OSError):
         send_status(conn, h, self_check(h))

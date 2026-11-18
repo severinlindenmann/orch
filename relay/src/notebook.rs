@@ -80,7 +80,12 @@ fn count(c: &Connection, sql: &str, p: impl rusqlite::Params) -> rusqlite::Resul
 }
 
 /// Rules for an `ask` a workspace sends (called from rules::authorize). Returns the message to store.
-pub fn authorize_ask(c: &Connection, sender: &str, msg: Value) -> Res<Value> {
+pub fn authorize_ask(
+    c: &Connection,
+    key: &crate::crypto::Key,
+    sender: &str,
+    msg: Value,
+) -> Res<Value> {
     let to = msg["to"].as_str().unwrap_or("");
     if !valid_id(to, "nb_", 10) {
         return Err(not_allowed(
@@ -116,6 +121,7 @@ pub fn authorize_ask(c: &Connection, sender: &str, msg: Value) -> Res<Value> {
             "`expires_at` must be in the future and at most 7 days away.",
         ));
     }
+    drop_expired(c, key, to)?;
     let waiting = count(
         c,
         "SELECT COUNT(*) FROM messages WHERE to_addr=?1 AND acked_at IS NULL",
@@ -295,16 +301,28 @@ async fn requests(
 
 /// Unacked asks for notebook `me` from its workspace `ws`; an expired ask is dropped (acked) and never handed out.
 fn waiting_asks(c: &Connection, app: &AppState, me: &str, ws: &str) -> Res<Vec<Value>> {
+    drop_expired(c, &app.key, me)?;
     let mut st = c.prepare(&format!(
         "SELECT {MSG_COLS} FROM messages WHERE to_addr=?1 AND from_addr=?2 AND acked_at IS NULL ORDER BY seq LIMIT ?3"
     ))?;
     let rows: Vec<store::Msg> = st
         .query_map(params![me, ws, POLL_LIMIT], msg_from_row)?
         .collect::<Result<_, _>>()?;
+    Ok(rows.iter().map(|m| msg_json(&app.key, m)).collect())
+}
+
+/// Drops (acks) every ask to notebook `nb` past its `expires_at`, so expired asks never fill the waiting cap,
+/// hide live asks behind the poll limit or count as waiting. At most MAX_WAITING rows wait, so this stays small.
+pub fn drop_expired(c: &Connection, key: &crate::crypto::Key, nb: &str) -> Res<()> {
+    let mut st = c.prepare(&format!(
+        "SELECT {MSG_COLS} FROM messages WHERE to_addr=?1 AND acked_at IS NULL ORDER BY seq LIMIT ?2"
+    ))?;
+    let rows: Vec<store::Msg> = st
+        .query_map(params![nb, MAX_WAITING * 2], msg_from_row)?
+        .collect::<Result<_, _>>()?;
     let t = now();
-    let mut out = Vec::new();
     for m in &rows {
-        let (body, _) = open_payload(&app.key, m);
+        let (body, _) = open_payload(key, m);
         let exp = body["notebook"]["expires_at"]
             .as_str()
             .and_then(parse_time)
@@ -314,11 +332,9 @@ fn waiting_asks(c: &Connection, app: &AppState, me: &str, ws: &str) -> Res<Vec<V
                 "UPDATE messages SET acked_at=?2 WHERE id=?1",
                 params![m.id, t],
             )?;
-            continue;
         }
-        out.push(msg_json(&app.key, m));
     }
-    Ok(out)
+    Ok(())
 }
 
 async fn ack(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<StatusCode> {
@@ -411,15 +427,23 @@ async fn send(
                 return Err(already_answered("This request was already answered."));
             }
         }
-        let recent = count(
-            &c,
-            "SELECT COUNT(*) FROM messages WHERE from_addr=?1 AND stored_at>?2",
-            params![me, now() - 60],
-        )?;
-        if recent >= PER_MINUTE {
-            return Err(rate_limited_msg(
-                "Too many messages. Try again in a minute.",
-            ));
+        // Counted per call, not by stored rows: a status replaces the one before it, so rows would undercount.
+        {
+            let t = now();
+            let mut m = app.notebook_rate.lock().unwrap();
+            if m.len() > 10_000 {
+                m.retain(|_, e| t - e.0 < 60);
+            }
+            let e = m.entry(me.clone()).or_insert((t, 0));
+            if t - e.0 >= 60 {
+                *e = (t, 0);
+            }
+            if e.1 >= PER_MINUTE as u32 {
+                return Err(rate_limited_msg(
+                    "Too many messages. Try again in a minute.",
+                ));
+            }
+            e.1 += 1;
         }
         if kind == "status" {
             // Only the newest status waits: an older one the workspace has not fetched yet is replaced.
@@ -461,6 +485,7 @@ async fn list_for_workspace(State(app): State<AppState>, h: HeaderMap) -> Res<Js
         .optional()?;
     let items: Vec<Value> = match row {
         Some((id, name, paired, last)) => {
+            drop_expired(&c, &app.key, &id)?;
             let waiting = count(
                 &c,
                 "SELECT COUNT(*) FROM messages WHERE to_addr=?1 AND acked_at IS NULL",

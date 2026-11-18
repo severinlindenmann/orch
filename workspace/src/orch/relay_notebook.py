@@ -143,11 +143,22 @@ def ask(
         "body": body,
     }
     net.write_json(_ask_path(root, aid), rec)  # first: a reply can never arrive for a request we do not know
-    try:
-        relay._api(root, "POST", "/v1/messages", msg, timeout=30)
-    except Refused:
-        _ask_path(root, aid).unlink(missing_ok=True)
-        raise
+    for attempt in (1, 2):
+        try:
+            relay._api(root, "POST", "/v1/messages", msg, timeout=30)
+            break
+        except Refused as e:
+            status = getattr(e, "status", None)
+            if status is not None and 400 <= status < 500:  # a clear no: nothing was stored, nothing will run
+                _ask_path(root, aid).unlink(missing_ok=True)
+                raise
+            if (
+                attempt == 2
+            ):  # unclear (no answer, a server error): it may have arrived; keep it until it expires
+                rec["unsure"] = True
+                net.write_json(_ask_path(root, aid), rec)
+                break
+            # the same message again: the relay keeps it once (same id and content)
     (_dir(root) / "info.json").unlink(missing_ok=True)  # its waiting count just changed
     _trim(root)
     return rec

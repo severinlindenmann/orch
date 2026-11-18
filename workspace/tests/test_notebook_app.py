@@ -226,3 +226,21 @@ def test_cli_status_needs_no_workspace(nbhome, capsys, tmp_path, monkeypatch):
     assert cli.main(["notebook", "status"]) == 0
     assert "Not connected" in capsys.readouterr().out
     assert "notebook" not in __import__("orch.cli", fromlist=["x"]).build_parser(False, None).format_help()
+
+
+def test_input_never_holds_up_the_time_limit(nbhome):
+    t0 = time.time()
+    big = {"args": {f"a{i}": "ü" * 2000 for i in range(20)}}
+    code, _ = app.run_command(
+        [PY, "-c", "import time; time.sleep(20)"], nbhome / "ways", big, nbhome, timeout=1
+    )
+    assert code == -1 and time.time() - t0 < 8
+
+
+def test_only_one_runner(nbhome):
+    with app.runner_lock(nbhome):
+        with pytest.raises(Refused, match="already runs"):
+            with app.runner_lock(nbhome):
+                pass
+    with app.runner_lock(nbhome):  # free again
+        pass

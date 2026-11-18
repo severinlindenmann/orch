@@ -505,3 +505,48 @@ fn contract_vectors_replay() {
         );
     }
 }
+
+#[tokio::test]
+async fn status_flood_is_rate_limited() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let n = connect(&t, &a).await;
+    let mut last = 0;
+    for _ in 0..61 {
+        last = nb(
+            &t,
+            &n,
+            "POST",
+            "/v1/notebook/send",
+            Some(json!({"id": mid(), "notebook": {"kind": "status", "ways": []}})),
+        )
+        .await
+        .0;
+    }
+    assert_eq!(last, 429);
+}
+
+#[tokio::test]
+async fn expired_asks_free_the_line() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let n = connect(&t, &a).await;
+    // 25 asks that expire, then one that does not: the live one is handed out at once and slots come back.
+    for _ in 0..25 {
+        let (s, _) = t
+            .call(
+                &a,
+                "POST",
+                "/v1/messages",
+                Some(ask_msg(&a, &n.0, "notebook", "ping", &later(1))),
+            )
+            .await;
+        assert_eq!(s, 201);
+    }
+    tokio::time::sleep(Duration::from_millis(2100)).await;
+    let (_, l) = t.call(&a, "GET", "/v1/notebooks", None).await;
+    assert_eq!(l["items"][0]["waiting"], 0);
+    let (_, _, live) = ask(&t, &a, &n.0).await;
+    let (_, r) = nb(&t, &n, "GET", "/v1/notebook/requests?wait=0", None).await;
+    assert_eq!(r["items"][0]["id"], live.as_str());
+}

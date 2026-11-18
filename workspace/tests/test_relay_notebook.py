@@ -199,3 +199,26 @@ def test_status_message_is_cleaned(proj, run, nbrel):
     st = rn.status(proj)
     assert [w["way"] for w in st["ways"]] == ["mail"]
     assert "‮" not in st["ways"][0]["name"] and len(st["ways"][0]["problem"]) <= 300
+
+
+def test_unclear_send_keeps_the_request_and_resends_the_same_id(proj, run, nbrel):
+    calls = []
+
+    def flaky(m, q, body):
+        calls.append(json.loads(body)["id"])
+        return 503, {"error": "busy", "message": "Try again."}
+
+    nbrel.routes.insert(0, ("POST", "/v1/messages", flaky))
+    code, out, err = run("relay", "notebook", "ask", "notes", "find", "--wait", "0", "--json")
+    assert code == 0, err
+    rec = json.loads(out)
+    assert rec["state"] == "waiting" and rec.get("unsure") is True
+    assert len(calls) == 2 and calls[0] == calls[1] == rec["id"]
+
+    def no(m, q, body):
+        return 403, {"error": "not_allowed", "message": "No."}
+
+    nbrel.routes.insert(0, ("POST", "/v1/messages", no))
+    code, _, _ = run("relay", "notebook", "ask", "notes", "find", "--wait", "0")
+    assert code == 2
+    assert len(list((proj / ".orch/local/notebook/asks").glob("m_*.json"))) == 1
