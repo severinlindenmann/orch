@@ -804,6 +804,25 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps(load_links(self.root, self.orch_bin)).encode(), "application/json"
             )
+        m_ticket = re.fullmatch(r"/api/ticket/([A-Za-z0-9_-]{1,40})", path)
+        if (
+            m_ticket
+        ):  # one whole ticket (ORCH-522): a cut-short live row or a finished ticket not in the live state
+            from .data import read_ticket, ticket_id
+
+            tid = ticket_id(self.root, self.orch_bin, m_ticket.group(1))
+            t = read_ticket(self.root, self.orch_bin, tid) if tid else None
+            if t is None:
+                return self._send(404, b'{"error":"no such ticket"}', "application/json")
+            body = json.dumps({"ticket": t}).encode()
+            hdr = {"Cache-Control": "no-store"}
+            if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+                import gzip
+
+                body = gzip.compress(body, 3)
+                hdr["Content-Encoding"] = "gzip"
+                hdr["Vary"] = "Accept-Encoding"
+            return self._send(200, body, "application/json", hdr)
         if path == "/api/state":
             fresh = "fresh=1" in query.split(
                 "&"

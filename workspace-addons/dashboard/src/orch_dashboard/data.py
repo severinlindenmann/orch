@@ -424,20 +424,146 @@ def _add_question_digests(t: dict) -> None:
             q["digest"] = question_digest(q)
 
 
-def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], int]:
-    """Valid-looking tickets (schema orch.ticket/1, id, title, status). Returns (tickets, skipped).
-    Read through `$ORCH_BIN ticket list --all --json` (without --all, done and dropped tickets would vanish); without the orch command (standalone use) from .orch/tickets."""
-    branch_cache: dict = {}  # the work branches, listed once per load (see _review_tip)
+# The live page's state (ORCH-522): open tickets and those finished in the last RECENT_DAYS (at most RECENT_MAX);
+# older finished tickets load when a page asks (GET /api/ticket/<id>, the Tickets list's own pages). Rows in the
+# live state are cut short (history tail, last evidence per task): the ticket page reads the whole ticket itself.
+RECENT_DAYS = 7
+RECENT_MAX = 200
+HISTORY_TAIL = 3
+EVIDENCE_TAIL = 2
+FINISHED = ("done", "dropped")
+ANSWERED_MAX = 200  # decided questions in the live state (Review > Answered), newest first
+
+
+def _index_rows(root: Path) -> list[dict] | None:
+    """Every ticket's short row from the core's ticket index (ORCH-521), hidden ones left out; None without one."""
+    try:
+        from orch import ticketindex
+    except ImportError:
+        return None
+    try:
+        rows = ticketindex.rows(root)
+    except Exception:  # noqa: BLE001 - a broken index: the full read below still answers
+        return None
+    return (
+        [r for r in rows if isinstance(r, dict) and isinstance(r.get("id"), str)]
+        if isinstance(rows, list)
+        else None
+    )
+
+
+def _when(value) -> float:
+    try:
+        return datetime.fromisoformat(str(value)).timestamp()
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+
+
+def live_ids(rows: list[dict], now: float | None = None) -> list[str]:
+    """The ids the live state holds: every open ticket, plus finished ones changed in the last RECENT_DAYS (the
+    RECENT_MAX newest of them)."""
+    cutoff = (time.time() if now is None else now) - RECENT_DAYS * 86400
+    open_ = [r["id"] for r in rows if r.get("status") not in FINISHED]
+    done = [r for r in rows if r.get("status") in FINISHED and _when(r.get("updated_at")) >= cutoff]
+    done.sort(key=lambda r: _when(r.get("updated_at")), reverse=True)
+    return open_ + [r["id"] for r in done[:RECENT_MAX]]
+
+
+def ticket_counts(rows: list[dict]) -> dict:
+    """{"total": n, "by_status": {status: n}} over every ticket (finished ones too)."""
+    by: dict[str, int] = {}
+    for r in rows:
+        st = r.get("status")
+        if st in STATUS_ORDER:
+            by[st] = by.get(st, 0) + 1
+    return {"total": sum(by.values()), "by_status": by}
+
+
+def _parts(rows: list[dict]) -> dict[str, dict]:
+    """Per parent id: its children's ids and how many of them are done, from every ticket's row."""
+    out: dict[str, dict] = {}
+    for r in sorted(rows, key=lambda r: str(r.get("updated_at", "")), reverse=True):
+        parent = r.get("parent")
+        if isinstance(parent, str) and parent:
+            p = out.setdefault(parent, {"children": [], "parts_done": 0, "parts_total": 0})
+            p["children"].append(r["id"])
+            p["parts_total"] += 1
+            p["parts_done"] += int(r.get("status") == "done")
+    return out
+
+
+def _raw_list(root: Path, orch_bin: str | None) -> list[tuple]:
+    """(ticket, file stem) of every ticket: `orch ticket list --all --json`, else the files themselves."""
     raw = run_orch(orch_bin, ["ticket", "list", "--all", "--json"], root)
     if isinstance(raw, dict):
         raw = raw.get("tickets")
     if isinstance(raw, list):
-        items = [(t, None) for t in raw]
-    else:
-        items = [(_load(f), f.stem) for f in _json_files(root / ".orch" / "tickets")]
-        for t, _stem in items:  # without the core nothing can verify a verdict: a raw Done is Review (V1)
-            if isinstance(t, dict) and t.get("status") == "done":
-                t["status"], t["verdict_needed"] = "review", True
+        return [(t, None) for t in raw]
+    items = [(_load(f), f.stem) for f in _json_files(root / ".orch" / "tickets")]
+    for t, _stem in items:  # without the core nothing can verify a verdict: a raw Done is Review (V1)
+        if isinstance(t, dict) and t.get("status") == "done":
+            t["status"], t["verdict_needed"] = "review", True
+    return items
+
+
+def _show_here(root: Path, tid: str):
+    """One ticket as `orch ticket show <id> --json` prints it, read in this process (the real server only)."""
+    try:
+        from orch import reads
+        from orch.errors import Refused
+    except ImportError:
+        return None
+    try:
+        return reads.answer(root, ["ticket", "show", tid, "--json"])
+    except (reads.NotHere, Refused):
+        return None
+    except Exception:  # noqa: BLE001 - a ticket the core cannot read is left out, never an error
+        return None
+
+
+def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], int]:
+    """Every valid-looking ticket (schema orch.ticket/1, id, title, status), finished ones too. Returns
+    (tickets, skipped). Read through `$ORCH_BIN ticket list --all --json` (without --all, done and dropped tickets
+    would vanish); without the orch command (standalone use) from .orch/tickets. Snapshots use this; the live page
+    uses load_live_tickets."""
+    tickets, skipped, rows = _shape_items(root, orch_bin, _raw_list(root, orch_bin))
+    _add_parts(tickets, _parts(rows))
+    return tickets, skipped
+
+
+def load_live_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], int, dict]:
+    """The live page's tickets (live_ids) and the counts of all tickets: (tickets, skipped, counts). On the real
+    server the ticket index names them and only their files are read; elsewhere the full list is cut the same way."""
+    rows = _index_rows(root) if orch_bin == SELF else None
+    if rows is not None:
+        ids = live_ids(rows)
+        items = [(_show_here(root, tid), None) for tid in ids]
+        tickets, skipped, _ = _shape_items(root, orch_bin, [(t, s) for t, s in items if t is not None])
+        counts = ticket_counts(rows)
+    else:  # no index (an older core, a test's orch): the full list, cut before it is shaped
+        items = _raw_list(root, orch_bin)
+        rows = _rows_of(items)
+        keep = set(live_ids(rows))
+        tickets, skipped, _ = _shape_items(
+            root, orch_bin, [(t, s) for t, s in items if not _valid_ticket(t, s) or t["id"] in keep]
+        )
+        counts = ticket_counts(rows)
+    _add_parts(tickets, _parts(rows))
+    return tickets, skipped, counts
+
+
+def _rows_of(items: list[tuple]) -> list[dict]:
+    """The short rows (id, key, status, parent, updated_at) of read tickets, the General conversation left out."""
+    return [
+        {k: t.get(k) for k in ("id", "key", "status", "parent", "updated_at")}
+        for t, stem in items
+        if _valid_ticket(t, stem) and t.get("general") is not True
+    ]
+
+
+def _shape_items(root: Path, orch_bin: str | None, items: list[tuple]) -> tuple[list[dict], int, list[dict]]:
+    """Shape the read tickets as the page reads them: (tickets newest first, skipped, rows of all of them)."""
+    branch_cache: dict = {}  # the work branches, listed once per load (see _review_tip)
     tickets, skipped = [], 0
     for t, stem in items:
         if isinstance(t, dict) and t.get("general") is True:  # the hidden General conversation is no ticket
@@ -448,17 +574,75 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
         tickets.append(_shape_ticket(root, orch_bin, t, branch_cache))
     _mark_tickets(root, tickets)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
-    by_id = {t["id"]: t for t in tickets}
+    rows = [
+        {"id": t["id"], "status": t["status"], "parent": t.get("parent"), "updated_at": t.get("updated_at")}
+        for t in tickets
+    ]
+    return tickets, skipped, rows
+
+
+def _add_parts(tickets: list[dict], parts: dict[str, dict]) -> None:
     for t in tickets:
-        t.update(children=[], parts_done=0, parts_total=0)
-    for t in tickets:
-        parent = t.get("parent")
-        if isinstance(parent, str) and parent in by_id:
-            p = by_id[parent]
-            p["children"].append(t["id"])
-            p["parts_total"] += 1
-            p["parts_done"] += int(t["status"] == "done")
-    return tickets, skipped
+        p = parts.get(t["id"]) or {}
+        t.update(
+            children=list(p.get("children") or []),
+            parts_done=p.get("parts_done", 0),
+            parts_total=p.get("parts_total", 0),
+        )
+
+
+def _done_entry(history: list) -> int | None:
+    for i in range(len(history) - 1, -1, -1):
+        e = history[i]
+        if isinstance(e, dict) and (
+            e.get("kind") == "done"
+            or re.search(r"(?:->|to) done\b|^Done\b", str(e.get("text") or ""), re.IGNORECASE)
+        ):
+            return i
+    return None
+
+
+def slim_row(t: dict) -> dict:
+    """A ticket as a live-state row: the last HISTORY_TAIL history lines (and the line that marked it done, and
+    the lines shown in Chat), the last EVIDENCE_TAIL proofs per task. Marked "slim": true with what was left out
+    ("history_more"), so the ticket page reads the whole ticket (GET /api/ticket/<id>). Unchanged when nothing
+    was cut."""
+    history = t.get("history") if isinstance(t.get("history"), list) else []
+    keep = set(range(max(0, len(history) - HISTORY_TAIL), len(history)))
+    done = _done_entry(history)
+    if done is not None:
+        keep.add(done)
+    keep |= {i for i, e in enumerate(history) if isinstance(e, dict) and e.get("in_chat") is True}
+    checklist = t.get("checklist") if isinstance(t.get("checklist"), list) else []
+    cut_evidence = any(
+        isinstance(c, dict) and isinstance(c.get("evidence"), list) and len(c["evidence"]) > EVIDENCE_TAIL
+        for c in checklist
+    )
+    if len(keep) == len(history) and not cut_evidence:
+        return t
+    out = dict(t)
+    out["history"] = [e for i, e in enumerate(history) if i in keep]
+    out["history_more"] = len(history) - len(out["history"])
+    if cut_evidence:
+        out["checklist"] = [
+            {
+                **c,
+                "evidence": c["evidence"][-EVIDENCE_TAIL:],
+                "evidence_more": len(c["evidence"]) - EVIDENCE_TAIL,
+            }
+            if isinstance(c, dict)
+            and isinstance(c.get("evidence"), list)
+            and len(c["evidence"]) > EVIDENCE_TAIL
+            else c
+            for c in checklist
+        ]
+    out["slim"] = True
+    return out
+
+
+def ticket_rows_view(tickets: list[dict]) -> list[dict]:
+    """Shaped tickets as the rows a list shows (the live state's rows; the Tickets list's pages use the same)."""
+    return [slim_row(t) for t in tickets]
 
 
 def _shape_ticket(root: Path, orch_bin: str | None, t: dict, branch_cache: dict) -> dict:
@@ -1263,7 +1447,8 @@ def load_review(root: Path, orch_bin: str | None) -> dict:
         done = done.get("answered", done.get("entries"))
     return {
         "cards": [c for c in cards if isinstance(c, dict)] if isinstance(cards, list) else [],
-        "answered": [c for c in done if isinstance(c, dict)] if isinstance(done, list) else [],
+        # newest first; the live state carries the newest ANSWERED_MAX only (ORCH-522: thousands at 10,000 tickets)
+        "answered": [c for c in done if isinstance(c, dict)][:ANSWERED_MAX] if isinstance(done, list) else [],
         # Tickets the Reviewer accepted for the owner today (`orch review accepted --json`); [] when off or none.
         "accepted": [c for c in acc if isinstance(c, dict)] if isinstance(acc, list) else [],
     }
@@ -1300,6 +1485,49 @@ def state_rev(state: dict) -> str:
     ).hexdigest()[:12]
 
 
+def ticket_id(root: Path, orch_bin: str | None, ref: str) -> str | None:
+    """The ticket id for an id or a key (any case) the page names; None when no ticket has it."""
+    if re.fullmatch(r"t_[a-z0-9]{6,16}", ref):
+        return ref
+    rows = _index_rows(root) if orch_bin == SELF else None
+    if rows is None:
+        got = run_orch(orch_bin, ["ticket", "show", ref, "--json"], root) if orch_bin else None
+        return got["id"] if isinstance(got, dict) and isinstance(got.get("id"), str) else None
+    up = ref.upper()
+    return next((r["id"] for r in rows if str(r.get("key") or "").upper() == up), None)
+
+
+def read_ticket(root: Path, orch_bin: str | None, tid: str) -> dict | None:
+    """One whole ticket as the page reads it (GET /api/ticket/<id>, ORCH-522): the ticket page asks for it when its
+    live row is cut short or a finished ticket is not in the live state. None when there is no such ticket."""
+    raw = (
+        _show_here(root, tid)
+        if orch_bin == SELF
+        else run_orch(orch_bin, ["ticket", "show", tid, "--json"], root)
+    )
+    if not orch_bin:  # standalone: the file itself
+        raw = (
+            _load(root / ".orch" / "tickets" / f"{tid}.json")
+            if re.fullmatch(r"t_[a-z0-9]{6,16}", tid)
+            else None
+        )
+        if isinstance(raw, dict) and raw.get("status") == "done":
+            raw["status"], raw["verdict_needed"] = "review", True
+    if not (isinstance(raw, dict) and raw.get("general") is not True and _valid_ticket(raw)):
+        return None
+    t = _shape_ticket(root, orch_bin, raw, {})
+    _mark_tickets(root, [t])
+    add_spend(root, [t])
+    _shape_refs(root, [t], True)
+    add_link_views([t], _KINDS.get(str(root), []))
+    rows = _index_rows(root) if orch_bin == SELF else None
+    if rows is not None:
+        _add_parts([t], _parts(rows))
+    elif orch_bin:  # without the index: every ticket's row from the full list (slow, as before ORCH-521)
+        _add_parts([t], _parts(_rows_of(_raw_list(root, orch_bin))))
+    return t
+
+
 def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dict | None:
     """A click's answer (ORCH-102): the last full state with the clicked ticket read again, its run and the
     review cards fresh; everything else stays as it was until the background build replaces it. Before, every
@@ -1333,11 +1561,13 @@ def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dic
         tickets.insert(0, t)
     parent = t.get("parent")
     if isinstance(parent, str) and parent in old:  # its parent counts done parts
-        kids = [x for x in tickets if x.get("parent") == parent]
-        tickets = [
-            {**x, "parts_done": sum(int(k["status"] == "done") for k in kids)} if x["id"] == parent else x
-            for x in tickets
-        ]
+        rows = _index_rows(root) if orch_bin == SELF else None
+        if rows is not None:  # every part, finished ones too (the live rows hold only recent ones)
+            done = _parts(rows).get(parent, {}).get("parts_done", 0)
+        else:
+            was = int(before.get("status") == "done") if before else 0
+            done = old[parent].get("parts_done", 0) - was + int(t["status"] == "done")
+        tickets = [{**x, "parts_done": max(0, done)} if x["id"] == parent else x for x in tickets]
     out["tickets"] = tickets
     out["runs"] = {k: v for k, v in (state.get("runs") or {}).items() if k != tid}
     if runs.get(tid):
@@ -1374,7 +1604,8 @@ def load_state(
 
     # The independent `orch ... --json` reads run side by side; .result() in the old order raises as before.
     with ThreadPoolExecutor(max_workers=6) as pool:
-        f_tickets = pool.submit(load_tickets, root, orch_bin)
+        # the live page holds open and recent tickets only (ORCH-522); a snapshot keeps every ticket
+        f_tickets = pool.submit(load_live_tickets if with_settings else load_tickets, root, orch_bin)
         f_raw = pool.submit(run_orch, orch_bin, ["addon", "list", "--json"], root)
         f_needs = pool.submit(run_orch, orch_bin, ["needs", "--json"], root) if with_addons else None
         # the cards and decisions are for the live page only (a snapshot is shared and carries none)
@@ -1387,7 +1618,9 @@ def load_state(
         f_mobile = pool.submit(mobile.load_mobile, root, orch_bin) if with_settings else None
         f_look = pool.submit(look.load_look, root, orch_bin, fresh) if with_settings else None
         f_settings = pool.submit(load_settings, root, orch_bin) if with_settings else None
-    tickets, skipped = f_tickets.result()
+    got = f_tickets.result()
+    tickets, skipped = got[0], got[1]
+    counts = got[2] if len(got) > 2 else ticket_counts(tickets)
     raw = f_raw.result()
     addons = hide_unset_sharing(load_addons(root, orch_bin, raw), root, orch_bin) if with_addons else []
     if not with_addons:
@@ -1419,7 +1652,9 @@ def load_state(
         "people": people.load(root)
         if with_settings
         else None,  # the "You: ..." switch (live page only)  # who "You" is in a history line (the live page only)
-        "tickets": tickets,
+        "tickets": ticket_rows_view(tickets) if with_settings else tickets,
+        # every ticket's count per status, finished ones too (the live rows above are open and recent only)
+        "counts": counts,
         "skipped": skipped,
         "addons": addons,
         "general": general,  # snapshots carry no phone chat

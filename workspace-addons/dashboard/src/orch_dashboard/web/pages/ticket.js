@@ -1685,6 +1685,8 @@ function ticketProperties(t, parent) {
 const ticketLookups = new Map();
 let ticketLookupWait = 1000, ticketLookupLimit = 5000;
 async function lookupTicket(id, entry) {
+  // a finished ticket is not in the live state (ORCH-522): read it alone first
+  if (!fullMissing.has(String(id)) && await loadFullTicket(id) && ticketOf(id)) { ticketLookups.delete(id); return; }
   const stop = Date.now() + ticketLookupLimit;
   for (;;) {
     try {
@@ -1786,6 +1788,8 @@ function ticketMoveItems(t) {
 }
 function detail(t) {
   if (!t) return missingTicket(route().id);
+  // a live row cut short (ORCH-522): read the whole ticket once, the row itself only when that read failed
+  if (t.slim && !snapshot && !fullMissing.has(String(t.id))) { loadFullTicket(t.id); return skeletonFor('ticket'); }
   ticketLookups.delete(t.id);
   const openQuestions = questions(t), selected = ticketSelectedTab(t);
   const run = state.runs?.[t.id], sessions = array(t.sessions);

@@ -86,7 +86,28 @@ const age = value => {
 const tickets = () => array(state?.tickets).filter(t => t.status !== 'dropped');
 const addons = () => array(state?.addons);
 // Every ticket, Won't do and Superseded too: their board cards open the ticket page and can move back.
-const ticketOf = id => array(state?.tickets).find(t => String(t.id) === String(id) || (typeof t.key === 'string' && t.key.toUpperCase() === String(id).toUpperCase()));
+const sameTicket = (t, id) => t && (String(t.id) === String(id) || (typeof t.key === 'string' && t.key.toUpperCase() === String(id).toUpperCase()));
+// ORCH-522: the live state holds open and recently finished tickets, as rows cut short ("slim": the last history lines
+// and proofs). The ticket page reads one whole ticket from GET /api/ticket/<id>, kept here; a newer live row reads it again.
+const fullTickets = new Map(), fullLoading = new Set(), fullMissing = new Set();
+function loadFullTicket(ref) {
+  const key = String(ref);
+  if (snapshot || fullLoading.has(key)) return null;
+  fullLoading.add(key);
+  return fetch('/api/ticket/' + encodeURIComponent(key), {cache:'no-store'})
+    .then(res => res.ok ? res.json() : (res.status === 404 ? (fullMissing.add(key), null) : Promise.reject(new Error(String(res.status)))))
+    .then(body => { const t = body?.ticket; if (t?.id) { fullTickets.set(t.id, t); fullMissing.delete(key); } return t || null; })
+    .catch(() => { fullMissing.add(key); return null; })
+    .finally(() => { fullLoading.delete(key); if (typeof render === 'function') render(); });
+}
+const ticketOf = id => {
+  const row = array(state?.tickets).find(t => sameTicket(t, id));
+  if (row && !row.slim) return row;
+  const full = row ? fullTickets.get(row.id) : [...fullTickets.values()].find(t => sameTicket(t, id));
+  if (!full) return row;
+  if (row && String(row.updated_at || '') > String(full.updated_at || '')) loadFullTicket(row.id);  // changed since: read again, show the last whole copy meanwhile
+  return full;
+};
 const href = id => '#ticket/' + encodeURIComponent(id);
 const questions = t => array(t.questions).filter(q => q.answer == null);
 const activeTicket = t => !['done', 'dropped'].includes(t.status);
