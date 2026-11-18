@@ -119,6 +119,30 @@ def test_two_accounts_and_a_lower_week_limit_count_together(proj, calm):
     assert (t["target"], t["pace"]) == (1, 0.69) and t["used"] == pytest.approx(47.4, abs=0.1)
 
 
+def test_one_full_5_hour_window_is_not_all_and_a_past_reset_aims_high(proj, calm):
+    _on(proj, 2)
+    _budget(proj, [_week(20, 84, short=100), _week(20, 84)])  # the second reports no 5-hour number
+    assert dispatcher.target(proj, NOW)["target"] == 3
+    _budget(proj, [_week(50, -1)])  # the reset just passed: whatever is left is free
+    assert dispatcher.target(proj, NOW)["target"] == 4
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        {"accounts": 1},
+        {"accounts": [1, "x", {"week_used": 10**400}, {"week_used": True}]},
+        {"accounts": [{"week_used": 10, "week_cap": "a", "week_resets_at": 5, "short_used": 10**400}]},
+    ],
+)
+def test_a_bad_budget_file_never_breaks_the_pass(proj, calm, doc):
+    _on(proj, 3)
+    d = proj / ".orch" / "addons" / "usage"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "budget.json").write_text(json.dumps({"schema": "orch.budget/1", "at": _iso(NOW), **doc}))
+    assert dispatcher.target(proj, NOW)["target"] in (3, 4)
+
+
 def test_unknown_or_stale_budget_uses_the_set_number(proj, calm):
     _on(proj, 3)
     assert dispatcher.target(proj, NOW)["target"] == 3
@@ -254,5 +278,8 @@ def test_config_keys(proj, run):
     assert config.dispatcher_on(proj)
     code, _, err = run("config", "set", "workflow.dispatcher_helpers", "12")
     assert code == 2
-    assert run("config", "set", "workflow.dispatcher_helpers", "4")[0] == 0
-    assert config.dispatcher_helpers(proj) == 4
+    code, _, err = run("config", "set", "workflow.dispatcher_helpers", "4", "--by", "agent:helper")
+    assert code == 2 and "Only the owner raises" in err
+    assert run("config", "set", "workflow.dispatcher_helpers", "4", "--by", "human:owner")[0] == 0
+    assert run("config", "set", "workflow.dispatcher_helpers", "2", "--by", "agent:helper")[0] == 0
+    assert config.dispatcher_helpers(proj) == 2

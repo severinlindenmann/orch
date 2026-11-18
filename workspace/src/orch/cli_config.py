@@ -422,6 +422,12 @@ def _config(args, root: Path) -> None:
             else "The dispatcher is off: tickets start only when someone starts them.",
         )
     elif args.sub == "set" and args.key == "workflow.dispatcher_helpers":
+        v = args.value.strip()
+        higher = v.isdigit() and int(v) > config.dispatcher_helpers(root)
+        if higher and not _actor(args).startswith("human:"):  # more helpers spend more: the owner's choice
+            raise Refused(
+                "Only the owner raises this: orch config set in their own terminal. Lowering is fine."
+            )
         n = config.set_dispatcher_helpers(root, args.value)
         _out(
             args,

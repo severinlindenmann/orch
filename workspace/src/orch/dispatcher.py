@@ -56,7 +56,14 @@ def _ts(iso: object) -> float | None:
 
 
 def _num(v: object) -> float | None:
-    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
+    """A finite number, else None (a bool, text, NaN, infinity or an int too big for a float is no number)."""
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return None
+    try:
+        f = float(v)
+    except OverflowError:
+        return None
+    return f if math.isfinite(f) else None
 
 
 # ---------------------------------------------------------------- budget
@@ -79,7 +86,8 @@ def budget_accounts(root: Path, now: float | None = None) -> list[dict]:
         at = _ts(data.get("at"))
         if at is None or not 0 <= now - at <= BUDGET_FRESH_SECONDS:
             continue
-        for a in data.get("accounts") or []:
+        rows = data.get("accounts")
+        for a in rows if isinstance(rows, list) else []:
             if isinstance(a, dict) and _num(a.get("week_used")) is not None:
                 out.append(a)
     return out
@@ -87,9 +95,9 @@ def budget_accounts(root: Path, now: float | None = None) -> list[dict]:
 
 def pace(accounts: list[dict], now: float) -> dict | None:
     """{"ratio": budget left / budget the time left would use on pace, "used": combined week %, "short_full":
-    every 5-hour window is used up}, or None when nothing is known. ratio 1.0 = exactly on pace."""
+    every account reports its 5-hour window used up}, or None when nothing is known. ratio 1.0 = on pace."""
     left = want = cap_sum = used_sum = 0.0
-    short_known = short_full = 0
+    short_full = 0
     for a in accounts:
         used = max(0.0, _num(a.get("week_used")) or 0.0)
         cap = _num(a.get("week_cap"))
@@ -102,7 +110,6 @@ def pace(accounts: list[dict], now: float) -> dict | None:
         used_sum += min(used, cap)
         s_used, s_cap = _num(a.get("short_used")), _num(a.get("short_cap"))
         if s_used is not None:
-            short_known += 1
             s_cap = 100.0 if s_cap is None or s_cap <= 0 else s_cap
             short_full += s_used >= s_cap
     if not cap_sum:
@@ -116,7 +123,7 @@ def pace(accounts: list[dict], now: float) -> dict | None:
     return {
         "ratio": ratio,
         "used": round(100.0 * used_sum / cap_sum, 1),
-        "short_full": bool(short_known) and short_full == short_known,
+        "short_full": short_full == len(accounts),  # an account with no 5-hour number may still have room
     }
 
 
@@ -144,7 +151,7 @@ def target(root: Path, now: float | None = None, load=None) -> dict:
     elif p["ratio"] <= 0:
         n, why = 0, f"the weekly budget is used up ({p['used']:g} %)"
     else:
-        n = h if p["ratio"] == float("inf") else int(round(h * p["ratio"]))
+        n = most if p["ratio"] == float("inf") else int(round(h * p["ratio"]))  # inf: the reset is now
         word = "on pace" if 0.9 <= p["ratio"] <= 1.1 else "behind pace" if p["ratio"] > 1 else "ahead of pace"
         why = f"weekly budget {p['used']:g} % used, {word}"
     n = max(0, min(n, most))
