@@ -16,7 +16,7 @@ jobs:
         at: ["22:30:00", "23:59:40"]
     name: at ${{ matrix.at }} UTC
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -26,7 +26,7 @@ jobs:
       - name: Install every add-on and the workspace (real clock)
         run: |
           for d in workspace workspace-addons/*/; do
-            [ -f "$d/pyproject.toml" ] && (cd "$d" && uv sync -q)
+            [ -f "$d/pyproject.toml" ] && (cd "$d" && uv sync -q && uv pip install -q pytest-timeout)
           done
       - name: Dashboard and master library page tests
         working-directory: workspace-addons/dashboard
@@ -37,7 +37,7 @@ jobs:
           for d in workspace-addons/*/; do
             [ -d "$d/tests" ] && [ -x "$d/.venv/bin/python" ] || continue
             echo "::group::$d"
-            (cd "$d" && ../../scripts/at-clock.sh "${{ matrix.at }}" .venv/bin/python -m pytest -q -n 2 -p no:cacheprovider) || failed="$failed $d"
+            (cd "$d" && ../../scripts/at-clock.sh "${{ matrix.at }}" .venv/bin/python -m pytest -q -n auto -p no:cacheprovider -rfE --timeout 120) || failed="$failed $d"
             echo "::endgroup::"
           done
           [ -z "$failed" ] || { echo "red at ${{ matrix.at }} UTC:$failed"; exit 1; }
@@ -45,4 +45,4 @@ jobs:
         working-directory: workspace
         run: |
           files=$(grep -lE "[Tt]oday|[Yy]esterday|[Tt]omorrow|\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b" tests/test_*.py)
-          ../scripts/at-clock.sh "${{ matrix.at }}" .venv/bin/python -m pytest -q -n auto -p no:cacheprovider $files
+          ../scripts/at-clock.sh "${{ matrix.at }}" .venv/bin/python -m pytest -q -n auto -p no:cacheprovider -rfE --timeout 120 $files
