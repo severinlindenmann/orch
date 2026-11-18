@@ -15,9 +15,11 @@ def test_new_ticket_is_on_unless_unticked():
     assert "--human-review=no" in off
 
 
-def test_new_ticket_takes_only_true_or_false():
+@pytest.mark.parametrize("bad", ["no", None, 0, ""])
+def test_new_ticket_takes_only_true_or_false(bad):
     with pytest.raises(actions.BadRequest):
-        actions.build_argv("ticket.new", {"title": "Spring campaign", "human_review": "no"})
+        actions.build_argv("ticket.new", {"title": "Spring campaign", "human_review": bad})
+    assert actions.turns_review_off("ticket.new", {"title": "Spring campaign", "human_review": bad})
 
 
 @pytest.mark.parametrize(("on", "flag"), [(True, "--human-review=yes"), (False, "--human-review=no")])
@@ -55,6 +57,7 @@ def test_tickets_inside_an_epic_follow_its_choice(monkeypatch):
     [
         ("ticket.new", {"title": "Spring campaign", "human_review": False}),
         ("ticket.edit", {"ticket": "t_abcdef", "human_review": False}),
+        ("ticket.new", {"title": "Spring campaign", "human_review": None}),
         ("ticket.new", {"title": "Epic", "epic": True, "steps": [{"title": "One", "human_review": False}]}),
     ],
 )

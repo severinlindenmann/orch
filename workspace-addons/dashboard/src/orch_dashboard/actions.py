@@ -159,7 +159,10 @@ def turns_review_off(op, args) -> bool:
     if op not in ("ticket.new", "ticket.edit") or not isinstance(args, dict):
         return False
     steps = args.get("steps") if isinstance(args.get("steps"), list) else []
-    return any(isinstance(x, dict) and x.get("human_review") is False for x in [args, *steps])
+    # anything but true counts as off here, so the check never reads a value differently from the command
+    return any(
+        isinstance(x, dict) and "human_review" in x and x["human_review"] is not True for x in [args, *steps]
+    )
 
 
 def _tid(v) -> str:
@@ -300,8 +303,11 @@ def _ticket_new(a):
     )
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
     # ORCH-424: the Human review needed box is on unless the person unticks it
-    if "human_review" in a and not _flag(a["human_review"]):
-        flags.append("--human-review=no")
+    if "human_review" in a:
+        if not isinstance(a["human_review"], bool):
+            raise BadRequest("human_review is true or false.")
+        if not a["human_review"]:
+            flags.append("--human-review=no")
     if _flag(a.get("title_auto")):  # the title is a placeholder: the agent writes the real one
         flags.append("--title-auto")
     if _flag(a.get("plan_first")):
