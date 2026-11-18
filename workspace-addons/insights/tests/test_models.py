@@ -171,3 +171,18 @@ def test_week_bar_subscription_percent_and_skips():
     ]
     assert build_week({"accounts": skipped}) is None  # off, no reading, no budget: no bar, never a fake zero
     assert build_week(None) is None and build_week({"accounts": "x"}) is None and build_week({}) is None
+
+
+def test_tickets_without_owner_count_for_the_chosen_person():
+    """ORCH-410: 'You: Severin' is chosen but no ticket has an owner: one row under that name, not 'No owner'."""
+    rows = [
+        {"owner": "", "finished": 2, "open": 3, "seconds": 3600, "cost": 1.5},
+        {"owner": "human:Severin", "finished": 1, "open": 0, "seconds": 600, "cost": 0.5},
+        {"owner": "human:anna", "finished": 1, "open": 1, "seconds": 0, "cost": 0},
+    ]
+    people = build_team(usage(seconds=4200, cost=2.0, finished=4, team=rows), "Severin")["people"]
+    assert [(p["name"], p["finished"], p["open"], p["time"], p["cost"]) for p in people] == [
+        ("Severin", 3, 3, "1 h 10 min", "$2.00"),
+        ("anna", 1, 1, "–", "–"),
+    ]
+    assert build_team(usage(seconds=1, team=rows[:1]))["people"][0]["name"] == "No owner"

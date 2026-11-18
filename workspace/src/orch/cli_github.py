@@ -16,9 +16,16 @@
         one pass of the release keeper (releasekeeper.py): green develop -> release pull request -> Merge card
         -> merged by the switch or the owner's click -> orch update here -> deploy prepared, production
         only on the owner's go; off until github.release_keeper, github.release_repo and
-    github.release_clone are set orch github release-hold "<why>" | off     stop cutting new releases (a
-    running one goes on) / lift it orch github release-deployed <server>[,<server>]=<commit>   write down
-    what production runs after a deploy
+        github.release_clone are set
+    orch github release-hold "<why>" | off
+        stop cutting new releases (a running one goes on) / lift it
+    orch github release-deployed <server>[,<server>]=<commit>
+        write down what production runs after a deploy
+    orch github release-exception ["<check>" --ticket <key> --until <YYYY-MM-DD> [--why ...] | --ticket off]
+        a named exception (a person's): this check may be red in a release until the date or until the
+        ticket is done; shown on the Merge card and in the note. Without a check: the list
+    orch github release-walk <N> <walk> pass|fail "<one line>" --commit <sha>
+        a walk helper's result for release N (github.release_walks); the Merge card waits for every pass
 
 The limits are settings: `orch config set github.merge_per_hour 12` (also pr_, comment_, other_per_hour).
 """
@@ -29,7 +36,7 @@ import argparse
 import json
 from pathlib import Path
 
-from orch import ghlimit
+from orch import ghlimit, tickets
 from orch.errors import Refused
 
 
@@ -76,6 +83,19 @@ def add_parsers(sub, common) -> None:
     g.add_parser("develop-green", parents=[common], help="the last develop commit whose checks all passed")
     dp = g.add_parser("release-deployed", parents=[common], help="write down what production runs")
     dp.add_argument("spec", metavar="SERVER=COMMIT", help="e.g. relay=58e00713 or relay,publish=<commit>")
+    ex = g.add_parser(
+        "release-exception", parents=[common], help="let one check be red in releases, named and dated"
+    )
+    ex.add_argument("check", nargs="?", help="the check as the pull request shows it; none lists them")
+    ex.add_argument("--ticket", help="the ticket that fixes it (off removes the exception)")
+    ex.add_argument("--until", help="the end date, YYYY-MM-DD")
+    ex.add_argument("--why", help="why it may be red, in a few words")
+    wk = g.add_parser("release-walk", parents=[common], help="record a release walk's result")
+    wk.add_argument("n", type=int, metavar="N", help="the release number")
+    wk.add_argument("walk", help="the walk's name (github.release_walks)")
+    wk.add_argument("verdict", choices=("pass", "fail"))
+    wk.add_argument("line", help="what was walked (pass) or the worst problem (fail), one line")
+    wk.add_argument("--commit", required=True, help="the commit you walked (the walk ticket names it)")
 
 
 def _release(args, root: Path | None) -> None:
@@ -89,6 +109,15 @@ def _release(args, root: Path | None) -> None:
     elif args.sub == "release":
         res = rk.run(root, dry_run=args.dry_run, known=rk.parse_known(args.known_red))
         print(json.dumps(res, indent=2, default=str) if args.json else rk.text(res, args.dry_run))
+    elif args.sub == "release-exception":
+        _exception(args, root, rk)
+    elif args.sub == "release-walk":
+        by = tickets.current_actor(getattr(args, "by", None))
+        e = rk.record_walk(root, args.n, args.walk, args.verdict, args.line, by, args.commit)
+        msg = (
+            f"Recorded: release {args.n} {args.walk} walk {'passed' if args.verdict == 'pass' else 'FAILED'}."
+        )
+        print(json.dumps(e) if args.json else msg)
     elif args.sub == "release-hold":
         v = rk.set_hold(root, args.why)
         data = {"hold": v}
@@ -105,6 +134,32 @@ def _release(args, root: Path | None) -> None:
         print(json.dumps(got) if args.json else msg)
 
 
+def _exception(args, root: Path, rk) -> None:
+    if not args.check:
+        rows = rk.list_exceptions(root)
+        text = "\n".join(
+            f"{c}: {e.get('ticket')}, until {e.get('until')}" + (f" ({e['why']})" if e.get("why") else "")
+            for c, e in rows.items()
+        )
+        print(
+            json.dumps(rows) if args.json else (text or "No exception recorded: every check must be green.")
+        )
+        return
+    who = tickets.current_actor(getattr(args, "by", None))
+    if tickets.agent_tool() or not who.startswith("human:"):
+        raise Refused(
+            "Only a person records a release exception. Ask the owner to run: "
+            f'orch github release-exception "{args.check}" --ticket <key> --until <YYYY-MM-DD>'
+        )
+    e = rk.set_exception(root, args.check, args.ticket, args.until, args.why, who)
+    msg = (
+        f"Recorded: {args.check} may be red in releases until {e['until']} or until {e['ticket']} is done."
+        if e
+        else f"Removed: {args.check} must be green again in releases."
+    )
+    print(json.dumps({"check": args.check, "exception": e}) if args.json else msg)
+
+
 def _when(secs) -> str:
     if secs is None:
         return "none this hour"
@@ -114,7 +169,14 @@ def _when(secs) -> str:
 def dispatch(args, root: Path | None) -> bool:
     if getattr(args, "cmd", None) != "github":
         return False
-    if args.sub in ("release", "release-hold", "release-deployed", "develop-green"):
+    if args.sub in (
+        "release",
+        "release-hold",
+        "release-deployed",
+        "develop-green",
+        "release-exception",
+        "release-walk",
+    ):
         _release(args, root)
         return True
     if args.sub == "expert":

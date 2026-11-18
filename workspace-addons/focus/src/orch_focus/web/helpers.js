@@ -6,7 +6,7 @@
     if (c.wont_do) return "Won't do";
     const ev = (c.evidence || []).slice(-1)[0];
     const text = ev && (cleanOutcome(ev.summary) || cleanOutcome(ev.text) || (ev.type === 'note' ? cleanOutcome(ev.ref) : ''));
-    return text || (c.done ? 'Completed.' : c.state === 'doing' ? 'Working on this task.' : 'Not started yet.');
+    return text || (c.done ? 'Completed.' : c.state === 'doing' ? 'Working on this task.' : c.origin === 'change_request' ? 'Waiting for your helper.' : 'Not started yet.');
   }
   function phase(v) {
     const t = v.ticket, run = v.run || {};
