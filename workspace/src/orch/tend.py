@@ -40,7 +40,19 @@ import json
 import time
 from pathlib import Path
 
-from orch import adapters, bgwork, brake, history, limitstop, runs, runs_live, runwatch, stuck, tickets
+from orch import (
+    adapters,
+    bgwork,
+    brake,
+    dispatcher,
+    history,
+    limitstop,
+    runs,
+    runs_live,
+    runwatch,
+    stuck,
+    tickets,
+)
 
 BY = "agent:helper-watcher"
 VIA = "watcher"
@@ -493,7 +505,13 @@ def run(root: Path, dry_run: bool = False, now: float | None = None) -> dict:
         for tid in started:
             with contextlib.suppress(Exception):
                 done.append({"ticket": tid, "key": runs_live.ref(root, tid), "action": "start", "done": True})
-    return {"paused": False, "actions": done, "queue": queue(root)}
+    # ORCH-507: after the line, the dispatcher fills free places up to its target (off unless the owner
+    # turned it on)
+    try:
+        disp = dispatcher.run(root, dry_run=dry_run, now=now)
+    except Exception as e:  # noqa: BLE001 - a broken dispatcher never stops the watcher's own pass
+        disp = {"on": True, "error": str(e)}
+    return {"paused": False, "actions": done, "queue": queue(root), "dispatcher": disp}
 
 
 def queue(root: Path) -> list[dict]:
@@ -532,4 +550,9 @@ def text(result: dict, dry_run: bool = False) -> str:
         lines.append(
             "Waiting in line: " + ", ".join(f"{q['key']} ({q['priority']})" for q in result["queue"])
         )
+    disp = result.get("dispatcher") or {}
+    if disp.get("error"):
+        lines.append(f"Dispatcher: could not work out what to start: {disp['error']}")
+    elif disp.get("on"):
+        lines.append(dispatcher.text(disp, dry_run))
     return "\n".join(lines) or "All helpers are fine: nothing to do."
