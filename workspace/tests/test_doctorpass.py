@@ -549,7 +549,7 @@ def test_paused_closed_unplanned_and_not_repeating_are_left_out():
     assert [r["ticket"] for r in doctorpass.overdue_repeats(rows, NOW, 30)] == ["t_done"]
 
 
-def test_a_repeat_whose_add_on_started_it_after_the_planned_time_is_not_stopped():
+def test_a_repeat_whose_add_on_started_it_after_the_planned_time_is_not_stopped(ws):
     """ORCH-395: the add-on started the 23:00 run but its last/next run write was lost; the run shows."""
     planned = "2026-11-17T10:00:00Z"
     ran = _rep("t_ran", planned, "2026-11-17T09:45:00Z")
@@ -563,7 +563,7 @@ def test_a_repeat_whose_add_on_started_it_after_the_planned_time_is_not_stopped(
         {"at": "2026-11-17T09:45:10Z", "by": "agent:automation", "text": "Set ext.automation"},
         {"at": "2026-11-17T10:20:00Z", "by": "human:owner", "text": "Edited note"},
     ]
-    assert [r["ticket"] for r in doctorpass.overdue_repeats([ran, other], NOW, 30)] == ["t_other"]
+    assert [r["ticket"] for r in doctorpass.overdue_repeats([ran, other], NOW, 30, ws)] == ["t_other"]
 
 
 def test_the_pass_opens_one_ticket_for_a_stopped_repeat(ws):

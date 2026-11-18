@@ -344,10 +344,12 @@ def _sched(t: dict) -> dict:
     return _sched_of(t)[1]
 
 
-def _acted_since(t: dict, by: str, since: datetime) -> bool:
+def _acted_since(root: Path, t: dict, by: str, since: datetime) -> bool:
     """The add-on wrote on the ticket at or after `since` (it started the run): the repeat did not stop, even
     when its own last/next run write was lost (ORCH-395)."""
-    for h in reversed(t.get("history") or []):
+    from orch import history
+
+    for h in reversed(history.lines(root, t)):  # as shown: a synced line cannot pass for the add-on
         if not isinstance(h, dict):
             continue
         at = _when(h.get("at"))
@@ -374,11 +376,12 @@ def _utc(d: datetime) -> str:
     return d.strftime("%Y-%m-%d %H:%M UTC")
 
 
-def overdue_repeats(rows: list[dict], now: datetime, late_min: float) -> list[dict]:
+def overdue_repeats(rows: list[dict], now: datetime, late_min: float, root: Path | None = None) -> list[dict]:
     """Repeats that stopped: [{ticket, key, title, planned, last}]. A repeat is late when its planned next
     run lies more than max(late_min, one interval, at most a day) in the past. Paused repeats, closed
     tickets, repeats without a planned time (set before orch saved one; they get it with their next
-    run) and repeats whose add-on wrote on the ticket after the planned time (it ran) are left out."""
+    run) and, with the workspace root, repeats whose add-on wrote on the ticket after the planned time (it
+    ran) are left out."""
     out = []
     for t in rows:
         name, a = _sched_of(t)
@@ -391,7 +394,9 @@ def overdue_repeats(rows: list[dict], now: datetime, late_min: float) -> list[di
             continue
         gap = (planned - last_run).total_seconds() if last_run and last_run < planned else 0
         late = (now - planned).total_seconds()
-        if late >= max(late_min * 60, min(gap, DAY)) and not _acted_since(t, f"agent:{name}", planned):
+        if late >= max(late_min * 60, min(gap, DAY)) and not (
+            root and _acted_since(root, t, f"agent:{name}", planned)
+        ):
             out.append(
                 {
                     "ticket": str(t.get("id", "")),
@@ -509,7 +514,7 @@ def checks(cfg: dict, p: Probes, mem: dict) -> list[dict]:
             )
 
     late_min = (cfg.get("repeats") or {}).get("late_min", LATE_MIN)
-    for r in overdue_repeats(p.repeats(), p.now, late_min):
+    for r in overdue_repeats(p.repeats(), p.now, late_min, p.root):
         last_s = f"It last ran {_utc(r['last'])}." if r["last"] else "It has not run yet."
         add(
             f"repeat-{r['ticket']}",
