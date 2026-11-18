@@ -1092,6 +1092,16 @@ def test_known_red_windows_on_develop_opens_nothing(tmp_path, capsys):
     assert not any(d.startswith("ticket:") for d in out["did"])
 
 
+def test_the_limit_setting_is_set_by_a_person_only(proj, run_cli):
+    key = "github.security_reviews_per_day"
+    assert run_cli("config", "set", key, "30", "--by", "agent:claude")[0] == 2
+    assert run_cli("config", "set", key, "lots", "--by", "human:t")[0] == 2
+    assert run_cli("config", "set", key, "30", "--by", "human:t")[0] == 0
+    assert rk.Cfg(proj).security_limit == "30" and rk.secreview.limit(rk.Cfg(proj).security_limit) == 30
+    code, out, _ = run_cli("config", "get", key)
+    assert code == 0 and "30" in out
+
+
 # ---- release proof (ORCH-456): a red check needs a named, recorded exception; every release runs its walks
 
 WALKS = "install=release-walk,services,clickthrough"

@@ -106,7 +106,7 @@ class World:
         p = self.prs[n]
         return {"state": p["state"], "isDraft": p["isDraft"], "baseRefName": p["base"],
                 "reviewDecision": p["review"], "reviews": p.get("reviews", []), "headRefOid": self.head(n), "number": n,
-                "title": f"Change {n}", "isCrossRepository": False}  # fmt: skip
+                "title": f"Change {n}", "isCrossRepository": False, "files": [{"path": f"src/m{n}.py"}]}  # fmt: skip
 
     def own_checks_failed(self, u):
         return False
@@ -206,7 +206,7 @@ def make(ws: Path, w: World, take=None, waiter=None, logs=None):
         t[0] += secs
 
     def real_waiter(u, before_merge):
-        return prwait.run_one(u, True, src=Src(w, u), before_merge=before_merge)
+        return prwait.run_one(u, True, src=Src(w, u), before_merge=before_merge, queue=True)
 
     return runner.Runner(
         ws, w, lambda repo: Git(store.folder(ws), REPO, url=str(w.bare)), waiter=waiter or real_waiter,
