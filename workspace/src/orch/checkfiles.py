@@ -21,8 +21,8 @@ descriptor the variable ORCH_CHECK_KEY_FD names (on Windows the plain variable O
 argument and never in a file. The script runs from a private copy of exactly the bytes that were approved.
 
 Security (R5.2 and the cloned-project rule of health.py): a check file from the project folder never runs on
-its own. It runs only after the person approved it (`orch checks approve <name>`), and again only after a
-new approval whenever its content (the file and its script) changes. Approvals are kept as content hashes in
+its own. It runs only after the person approved it (`orch checks approve <name>`); whenever its content (the
+file and its script) changes, the person approves it again first. What was approved is kept as content hashes in
 the guarded orch home (key folder record `checks`, field `approved`), never in `.orch/`. An agent cannot
 approve. What a check prints is handled as before: only works / ends are kept, nothing is stored or shown.
 """
@@ -181,7 +181,7 @@ def _approved(root: Path) -> dict:
 
 
 def entries(root: Path) -> list[dict]:
-    """Every check file: {name, recipe (None when broken), digest, approval: approved | new | changed}."""
+    """Every check file: {name, recipe (None when broken), digest, status: approved | new | changed}."""
     ok = _approved(root)
     out = []
     for name in _names(root):
@@ -189,18 +189,18 @@ def entries(root: Path) -> list[dict]:
         r = parse(name, doc)
         if r:
             r["v"] = (dg or "")[:16]
-        approval = "approved" if dg and ok.get(name) == dg else "changed" if name in ok else "new"
-        out.append({"name": name, "recipe": r, "digest": dg, "approval": approval, "doc": doc})
+        status = "approved" if dg and ok.get(name) == dg else "changed" if name in ok else "new"
+        out.append({"name": name, "recipe": r, "digest": dg, "status": status, "doc": doc})
     return out
 
 
 def recipes(root: Path) -> list[dict]:
     """The check files that may run: well formed and approved with their current content."""
-    return [e["recipe"] for e in entries(root) if e["recipe"] and e["approval"] == "approved"]
+    return [e["recipe"] for e in entries(root) if e["recipe"] and e["status"] == "approved"]
 
 
-def _how_to_approve(name: str, approval: str) -> str:
-    what = "changed" if approval == "changed" else "new"
+def _how_to_approve(name: str, status: str) -> str:
+    what = "changed" if status == "changed" else "new"
     return (
         f"This check is {what} and runs only after you approve it. "
         f"Look at .orch/checks/{name}.json, then run:"
@@ -212,7 +212,7 @@ def waiting_rows(root: Path) -> list[dict]:
     says how to approve it (the command shown with Copy, never run by orch)."""
     rows = []
     for e in entries(root):
-        if e["approval"] == "approved" and e["recipe"]:
+        if e["status"] == "approved" and e["recipe"]:
             continue
         r = e["recipe"]
         doc = e["doc"] if isinstance(e["doc"], dict) else {}
@@ -220,7 +220,7 @@ def waiting_rows(root: Path) -> list[dict]:
         if not health._LABEL.fullmatch(label or ""):
             label = e["name"]
         if r:
-            how, sign_in = _how_to_approve(e["name"], e["approval"]), f"orch checks approve {e['name']}"
+            how, sign_in = _how_to_approve(e["name"], e["status"]), f"orch checks approve {e['name']}"
         else:
             how, sign_in = (
                 f"The check file .orch/checks/{e['name']}.json cannot be read. Fix it with the template.",
@@ -240,7 +240,7 @@ def waiting_rows(root: Path) -> list[dict]:
                 "key": None,
                 "how": how,
                 "sign_in": sign_in,
-                "approve": e["approval"] if r else "broken",
+                "approve": e["status"] if r else "broken",
             }
         )
     return rows
@@ -263,7 +263,7 @@ def _runner(ext: str, path: str) -> list[str] | None:
 def prepared(root: Path, r: dict):
     """(argv, env, pass_fds) to run a script check, or (None, None, ()) when it may not or cannot run here.
 
-    The check is read again and its hash compared with the approval right now; the bytes that matched are
+    The check is read again and its hash compared with the approved one right now; the bytes that matched are
     written to a private copy that is run (never the project file, which could change in between) and
     removed afterwards. A named key goes through a pipe (renew.hand_over: KEY_ENV + "_FD" names it; the
     plain variable on Windows), never as an argument or a file."""
@@ -367,7 +367,7 @@ def _write(root: Path, name: str, doc: dict) -> Path:
 
 
 def remove(root: Path, name: str) -> bool:
-    """Delete one check file and forget its approval (a script next to it is the person's file and stays)."""
+    """Delete one check file and forget that it was approved (a script next to it is the person's file and stays)."""
     if not health._NAME.fullmatch(name or ""):
         return False
     path = folder(root) / f"{name}.json"

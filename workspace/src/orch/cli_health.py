@@ -77,7 +77,7 @@ def line(r: dict) -> str:
     if r.get("approve") == "broken":
         return f"{label}: {r.get('how') or 'the check file cannot be read.'}"
     if r.get("approve"):
-        return f"{label} waits for your approval: run orch checks approve {r['name']}"
+        return f"{label} waits until you approve it: run orch checks approve {r['name']}"
     return f"{label} did not answer, so orch cannot tell whether its {kind} works."
 
 

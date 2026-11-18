@@ -26,7 +26,7 @@ def add_parsers(sub, common) -> None:
         "approve", parents=[common], help="let a new or changed check file run (a person only)"
     )
     ap.add_argument("name")
-    r = acts.add_parser("remove", parents=[common], help="delete a check file and its approval")
+    r = acts.add_parser("remove", parents=[common], help="delete a check file and forget that it was approved")
     r.add_argument("name")
     run = acts.add_parser("run", parents=[common], help="run the checks now (or one)")
     run.add_argument("name", nargs="?")
@@ -43,7 +43,7 @@ def _rows(root) -> list[dict]:
         r, row = e["recipe"], last.get(e["name"]) or {}
         ran = row.get("checked_at") if not row.get("approve") else None
         nxt = None
-        if r and e["approval"] == "approved":
+        if r and e["status"] == "approved":
             if ran and row.get("v") == r.get("v"):
                 at = datetime.strptime(ran, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
                 nxt = (at + timedelta(seconds=r["interval"])).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -54,7 +54,7 @@ def _rows(root) -> list[dict]:
                 "name": e["name"],
                 "label": r["label"] if r else e["name"],
                 "kind": r["kind"] if r else None,
-                "approval": e["approval"] if r else "broken",
+                "status": e["status"] if r else "broken",
                 "state": row.get("state") if ran and row.get("v") == (r or {}).get("v") else None,
                 "last_run": ran if ran and row.get("v") == (r or {}).get("v") else None,
                 "next_run": nxt,
@@ -65,11 +65,11 @@ def _rows(root) -> list[dict]:
 
 
 def _list_line(x: dict) -> str:
-    if x["approval"] == "broken":
+    if x["status"] == "broken":
         return f"{x['name']}: the file cannot be read; fix it with {checkfiles.TEMPLATE_FILE}"
-    if x["approval"] != "approved":
-        head = f"{x['name']} ({x['label']}): {x['approval']}"
-        return f"{head}, waits for approval: orch checks approve {x['name']}"
+    if x["status"] != "approved":
+        head = f"{x['name']} ({x['label']}): {x['status']}"
+        return f"{head}, waits until you approve it: orch checks approve {x['name']}"
     nxt = x["next_run"] if x["next_run"] and "T" not in x["next_run"] else _when(x["next_run"])
     head = f"{x['name']} ({x['label']}): {x['state'] or 'not run yet'}"
     return f"{head}, last run {_when(x['last_run'])}, next {nxt}"

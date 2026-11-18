@@ -81,10 +81,10 @@ def test_without_a_check_folder_the_old_checks_run_with_a_notice(proj, databrick
     assert checkfiles.notice(proj) is None and health.overview(proj, NOW) == []
 
 
-# ------------------------------------------------------------------------------------------------ approval
+# ------------------------------------------------------------------------------------------------ approve
 
 
-def test_a_new_check_file_runs_only_after_approval(proj, databricks):
+def test_a_new_check_file_runs_only_once_approved(proj, databricks):
     doc = {"label": "Databricks dev", "command": ["databricks", "current-user", "me", "--profile", "dev"]}
     _write(proj, "db-dev", doc)
     rows = health.overview(proj, NOW)
@@ -95,7 +95,7 @@ def test_a_new_check_file_runs_only_after_approval(proj, databricks):
     assert rows[0]["state"] == "works" and not rows[0].get("approve") and len(databricks) == 1
 
 
-def test_a_changed_check_file_waits_for_approval_again(proj, databricks):
+def test_a_changed_check_file_must_be_approved_again(proj, databricks):
     _write(proj, "db-dev", {"command": ["databricks", "current-user", "me", "--profile", "dev"]})
     checkfiles.approve(proj, "db-dev", "human:Ann")
     _write(proj, "db-dev", {"command": ["databricks", "current-user", "me", "--profile", "other"]})
@@ -104,7 +104,7 @@ def test_a_changed_check_file_waits_for_approval_again(proj, databricks):
     assert checkfiles.recipes(proj) == []
 
 
-def test_a_changed_script_waits_for_approval_again(proj):
+def test_a_changed_script_must_be_approved_again(proj):
     _write(proj, "api", {"script": "api.py"})
     (checkfiles.folder(proj) / "api.py").write_text("print(1)\n")
     checkfiles.approve(proj, "api", "human:Ann")
@@ -127,7 +127,7 @@ def test_an_agent_cannot_approve(proj, monkeypatch, env):
         checkfiles.approve(proj, "x", "agent:claude")
 
 
-def test_approvals_live_in_the_guarded_home_not_in_the_project(proj):
+def test_what_was_approved_lives_in_the_guarded_home_not_in_the_project(proj):
     _write(proj, "x", {"command": ["xtool", "status"]})
     checkfiles.approve(proj, "x", "human:Ann")
     assert keystore.record_read(proj, "checks")["approved"]["x"] == checkfiles.digest(proj, "x")
@@ -247,7 +247,7 @@ def test_a_script_check_gets_its_key_as_a_variable_only(proj, monkeypatch):
     assert rows[0]["state"] == "works" and "tok-12345678" not in json.dumps(rows)
 
 
-def test_a_script_swapped_after_approval_does_not_run(proj, monkeypatch):
+def test_a_script_swapped_once_approved_does_not_run(proj, monkeypatch):
     monkeypatch.setattr(health, "helper_recipes", lambda: [])
     _write(proj, "api", {"script": "api.py"})
     (checkfiles.folder(proj) / "api.py").write_text("import sys; sys.exit(0)\n")
@@ -300,7 +300,7 @@ def test_checks_command(proj, run, databricks):
     assert code == 0 and "databricks auth login --profile pilatus_hub_sbox" in out
     _write(proj, "own", {"label": "Own", "command": ["databricks", "current-user", "me"]})
     code, out, _ = run("checks", "list")
-    assert "own (Own): new, waits for approval: orch checks approve own" in out
+    assert "own (Own): new, waits until you approve it: orch checks approve own" in out
     assert "databricks-pilatus-hub-sbox (Databricks pilatus_hub_sbox): renew" in out
     code, out, _ = run("checks", "approve", "own")
     assert code == 0 and "Approved own. The Own login works." in out

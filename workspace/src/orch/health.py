@@ -449,7 +449,7 @@ def overview(
     checked_at}. A helper tool that is not installed is not set here and is left out; a workspace recipe
     whose command is missing is unreachable. due_only: a check whose last row is still within its interval
     keeps that row (the background run, ORCH-529); only: run just this check and keep the other rows.
-    A check file that waits for the person's approval gets a row that says how to approve it, and runs
+    A check file the person has not approved (yet, or again) gets a row that says how to approve it, and runs
     nothing."""
     from orch import checkfiles
 
