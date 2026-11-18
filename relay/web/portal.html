@@ -271,7 +271,7 @@ const selected=f=>[...f.querySelectorAll('input[name="workspace"]:checked')].map
 // only some members have the tool starts open; "whole group" and "none" stay folded.
 function usedBy(data,kind,itemName,saved,kinds){
  const has=w=>(data.assign?.[w.id]?.[kind]||[]).includes(itemName);
- async function put(w,on){const old=data.assign?.[w.id]||{},payload={};for(const [k]of kinds)payload[k]=[...(old[k]||[])];payload[kind]=on?[...new Set([...payload[kind],itemName])]:payload[kind].filter(n=>n!==itemName);await api('/shared/assign/'+enc(w.id),'PUT',payload);data.assign??={};data.assign[w.id]=payload}
+ async function put(w,on){const old=data.assign?.[w.id]||{},payload={};for(const [k]of kinds)payload[k]=[...(old[k]||[])];payload[kind]=on?[...new Set([...payload[kind],itemName])]:payload[kind].filter(n=>n!==itemName);const r=await api('/shared/assign/'+enc(w.id),'PUT',payload);if(r?.added?.length){payload.skills=[...new Set([...payload.skills,...r.added])];toast('Also shared '+r.added.join(', ')+': '+itemName+' needs '+(r.added.length===1?'it':'them')+'.')}if(r?.missing?.length)toast(itemName+' needs '+r.missing.join(', ')+', which is not here yet. Add '+(r.missing.length===1?'it':'them')+' to share '+itemName+' fully.','error');data.assign??={};data.assign[w.id]=payload}
  const box=el('div',{class:'used-by'});
  async function run(fn){const controls=[...box.querySelectorAll('input')];controls.forEach(x=>x.disabled=true);saved.className='save-state';saved.textContent='Saving…';try{await fn();saved.textContent='Saved'}catch(e){saved.className='save-state form-error';saved.setAttribute('role','alert');saved.textContent='Couldn’t save. Try again.'}finally{controls.forEach(x=>x.disabled=false);render()}}
  function block(g,members){

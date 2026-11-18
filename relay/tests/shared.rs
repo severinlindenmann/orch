@@ -176,3 +176,63 @@ async fn shared_workspace_edit_hints_related_and_stored_encrypted() {
         .unwrap();
     assert!(!String::from_utf8_lossy(&raw).contains("PLAIN-CRED"));
 }
+
+async fn put_skill(t: &T, name: &str, text: &str) {
+    let r = t
+        .http
+        .put(format!("{}/admin/api/shared/skills/{name}", t.admin))
+        .header("X-Orch-Admin", ADMIN)
+        .body(skill_tar(&format!("{name}/"), text))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+}
+
+#[tokio::test]
+async fn shared_skill_brings_the_skills_it_needs() {
+    // skill format step 5 (ORCH-536): sharing a skill also gives the skills in its metadata.requires-skills
+    let t = start().await;
+    let b = t.add_ws("Home").await;
+    put_skill(&t, "github", "---\nname: github\ndescription: d\nmetadata:\n  requires-skills: \"git-basics, gone\"\n---\n").await;
+    put_skill(
+        &t,
+        "git-basics",
+        "---\nname: git-basics\ndescription: d\nmetadata:\n  requires-skills: \"shell\"\n---\n",
+    )
+    .await;
+    put_skill(&t, "shell", "---\nname: shell\ndescription: d\n---\n").await;
+    let path = format!("/admin/api/shared/assign/{}", b.id);
+    let (s, v) = t
+        .admin_json(
+            "PUT",
+            &path,
+            Some(json!({"skills": ["github"], "mcp": [], "credentials": []})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    let mut added: Vec<String> = serde_json::from_value(v["added"].clone()).unwrap();
+    added.sort();
+    assert_eq!(added, vec!["git-basics", "shell"]);
+    assert_eq!(v["missing"], json!(["gone"]));
+    let (_, snap) = t.call(&b, "GET", "/v1/refresh", None).await;
+    let names: Vec<&str> = snap["skills"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["git-basics", "github", "shell"]);
+    // the admin takes a needed skill away again: it stays away (only a newly given skill brings its needs)
+    let (s, v) = t
+        .admin_json(
+            "PUT",
+            &path,
+            Some(json!({"skills": ["github", "git-basics"], "mcp": [], "credentials": []})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    assert_eq!(v, json!({"added": [], "missing": []}));
+    let (_, snap) = t.call(&b, "GET", "/v1/refresh", None).await;
+    assert_eq!(snap["skills"].as_array().unwrap().len(), 2);
+}

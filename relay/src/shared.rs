@@ -188,6 +188,29 @@ pub fn table(kind: &str) -> &'static str {
     }
 }
 
+/// The skills a stored skill names in `metadata.requires-skills` (skill format, ORCH-531 step 5): one comma line,
+/// trimmed, empty parts dropped. A skill saved before the header column is read from its files. An unknown skill or
+/// one without the field needs nothing.
+pub fn requires_skills(c: &Connection, key: &Key, name: &str) -> Vec<String> {
+    let row: Option<(Vec<u8>, Option<Vec<u8>>)> = c
+        .query_row("SELECT files,head FROM skills WHERE name=?1", [name], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .ok();
+    let Some((f, h)) = row else { return vec![] };
+    let header = match h {
+        Some(h) => dec(key, "skillhead", name, &h),
+        None => skill_header(&dec(key, "skills", name, &f)),
+    };
+    header["metadata"]["requires-skills"]
+        .as_str()
+        .unwrap_or("")
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
 pub fn assigned_ws(c: &Connection, kind: &str, name: &str) -> Vec<String> {
     c.prepare("SELECT ws FROM assign WHERE kind=?1 AND name=?2")
         .and_then(|mut s| s.query_map(params![kind, name], |r| r.get(0))?.collect())
