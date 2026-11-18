@@ -10,6 +10,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -51,6 +52,7 @@ READ_WORDS = {
 }
 WRITE_WORDS = {"never": "Never", "add": "Add new notes", "change": "Add and change"}
 ACTIVITY_KEEP = 500
+_USED_LOCK = threading.Lock()  # the page server answers clicks in threads: one hand-over at a time
 
 
 def base(root: Path) -> Path:
@@ -162,6 +164,21 @@ def used(root: Path) -> dict:
 
 
 def mark_used(root: Path, ticket: str, part_name: str, item: str, by: str, attached: str) -> None:
+    with _USED_LOCK:
+        _mark_used(root, ticket, part_name, item, by, attached)
+
+
+def forget_used(root: Path, part_name: str) -> None:
+    """A new source (another notes folder): what was attached from the old one no longer opens anything new."""
+    with _USED_LOCK:
+        data = {t: [r for r in rows if r.get("part") != part_name] for t, rows in used(root).items()}
+        _atomic_write(
+            base(root) / "used.json",
+            json.dumps({t: r for t, r in data.items() if r}, ensure_ascii=False, indent=2) + "\n",
+        )
+
+
+def _mark_used(root: Path, ticket: str, part_name: str, item: str, by: str, attached: str) -> None:
     data = used(root)
     rows = [r for r in data.get(ticket, []) if not (r.get("part") == part_name and r.get("id") == item)]
     rows.append({"part": part_name, "id": item, "by": by, "at": now(), "file": attached})

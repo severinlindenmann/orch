@@ -10,6 +10,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import urlencode
 
+from .runfiles import is_link
+
 HELPERS_DIR = "From helpers"
 _MAX_BYTES = 1024 * 1024
 _LINK = re.compile(r"\[\[([^\]\n]+)\]\]")
@@ -46,7 +48,7 @@ class Vault:
         path = self.folder
         for part in (*parts[:-1], parts[-1] + ".md"):
             path = path / part
-            if path.is_symlink():
+            if is_link(path):
                 raise Refused("This note uses a shortcut; choose a note directly inside the notes folder.")
         if not path.resolve().is_relative_to(self.folder):
             raise Refused("This note is outside the notes folder; choose a note inside it.")
@@ -59,7 +61,7 @@ class Vault:
         def walk(folder: str | Path, prefix: str = "") -> None:
             with os.scandir(folder) as entries:
                 for entry in entries:
-                    if entry.name.startswith(".") or entry.is_symlink():
+                    if entry.name.startswith(".") or entry.is_symlink() or is_link(Path(entry.path)):
                         continue
                     relative = prefix + entry.name
                     if entry.is_dir(follow_symlinks=False):
@@ -233,7 +235,7 @@ class Vault:
     def change(self, note_id: str, text: str) -> Note:
         path = self._path(note_id)
         helpers = self.folder / HELPERS_DIR
-        if helpers.is_symlink() or not path.resolve().is_relative_to(helpers.resolve()):
+        if is_link(helpers) or not path.resolve().is_relative_to(helpers.resolve()):
             raise Refused("Only notes in From helpers can be changed; create a note there instead.")
         self._refresh()
         if note_id not in self._notes:
@@ -244,6 +246,6 @@ class Vault:
     def app_link(self, note_id: str) -> str | None:
         note = self.get(note_id)
         settings = self.folder / ".obsidian"
-        if settings.is_symlink() or not settings.exists():
+        if is_link(settings) or not settings.exists():
             return None
         return "obsidian://open?" + urlencode({"vault": self.folder.name, "file": note.id})

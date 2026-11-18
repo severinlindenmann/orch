@@ -168,3 +168,35 @@ def test_text_output_prints_next_step(cli, vault):
     setup_notes(cli, vault)
     code, out, _ = cli("notes", "find", "Fixpreis")
     assert code == 0 and "Projects/Preismodell 2027" in out and "Next:" in out
+
+
+def test_new_folder_forgets_what_was_attached(cli, vault, monkeypatch, fake_orch, tmp_path):
+    setup_notes(cli, vault)
+    jrun(cli, "use", "t_abc123", "notes", "Projects/Helvetia Logistik")
+    other = tmp_path / "Other"
+    (other / "Projects").mkdir(parents=True)
+    (other / "Projects" / "Helvetia Logistik.md").write_text(
+        "A different note with the same name.\n", encoding="utf-8"
+    )
+    jrun(cli, "notes", "folder", str(other))
+    as_helper(monkeypatch)
+    assert jrun(cli, "notes", "list")[1]["notes"] == []
+    assert jrun(cli, "notes", "show", "Projects/Helvetia Logistik")[0] == 2
+
+
+def test_helper_refusal_never_names_other_notes(cli, vault, monkeypatch, fake_orch):
+    (vault / "People" / "Helvetia Logistik.md").write_text("Same title, other folder.\n", encoding="utf-8")
+    setup_notes(cli, vault)
+    as_helper(monkeypatch)
+    code, d = jrun(cli, "notes", "show", "Helvetia Logistik")
+    assert code == 2 and "People/" not in d["error"] and "Projects/" not in d["error"]
+
+
+def test_find_filters_before_it_cuts(cli, vault, monkeypatch, fake_orch):
+    for i in range(60):
+        (vault / "Projects" / f"Helvetia {i:02d}.md").write_text("Helvetia\n", encoding="utf-8")
+    (vault / "People" / "Zeta.md").write_text("helvetia mention\n", encoding="utf-8")
+    setup_notes(cli, vault)
+    jrun(cli, "use", "t_abc123", "notes", "People/Zeta")
+    as_helper(monkeypatch)
+    assert [n["id"] for n in jrun(cli, "notes", "find", "helvetia")[1]["notes"]] == ["People/Zeta"]

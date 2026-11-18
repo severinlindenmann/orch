@@ -276,7 +276,7 @@
     const box = $('parts-nav');
     box.replaceChildren();
     const items = [['', 'All'], ...today.parts.map(p => [p.part, p.label])];
-    items.forEach(([k, label]) => { const a = link('#' + k, 'chip' + (current === k ? ' active' : ''), label); if (current === k) a.setAttribute('aria-current', 'page'); box.append(a); });
+    items.forEach(([k, label]) => { const a = link('#' + k, null, label); if (current === k) a.setAttribute('aria-current', 'page'); box.append(a); });
     box.hidden = today.parts.length === 0;
   }
   async function route() {

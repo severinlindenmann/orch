@@ -176,6 +176,8 @@ def notes_list(root: Path, who: Who, group: str | None = None) -> dict:
     allowed = _visible(root, who, p)
     rows = [_row(v, n, allowed) for n in v.notes(group) if allowed is None or n.id in allowed]
     groups = v.groups() if allowed is None else []
+    if who.helper and rows:
+        store.log(root, "notes", f"listed {len(rows)} notes", who.by, who.ticket)
     return {
         "schema": "orch.personal.notes/1",
         "notes": rows,
@@ -191,7 +193,7 @@ def notes_find(root: Path, who: Who, words: str) -> dict:
     p, v = _vault(root)
     allowed = _visible(root, who, p)
     out = []
-    for n, snippet in v.find(words, limit=50):
+    for n, snippet in v.find(words, limit=100_000):
         if allowed is not None and n.id not in allowed:
             continue
         if who.helper and _secret(root, v.text(n.id)):
@@ -213,7 +215,7 @@ def notes_find(root: Path, who: Who, words: str) -> dict:
 def notes_show(root: Path, who: Who, ref: str) -> dict:
     p, v = _vault(root)
     allowed = _visible(root, who, p)
-    n = _get(v, ref)
+    n = _get(v, ref) if allowed is None else _get_allowed(v, ref, allowed)
     if allowed is not None and n.id not in allowed:
         raise Refused(
             f"“{n.title}” is not attached to your ticket. The person attaches it with Use in a ticket."
@@ -267,8 +269,11 @@ def set_folder(root: Path, who: Who, folder: str) -> dict:
     dot = (Path(root) / ".orch").resolve()
     if path == dot or dot in path.parents:
         raise Refused("Choose your notes folder, not the workspace's own files.")
-    if "notes" not in store.settings(root)["parts"]:
+    current = store.settings(root)["parts"].get("notes")
+    if current is None:
         store.add_part(root, "notes")
+    elif current["folder"] and Path(current["folder"]) != path:
+        store.forget_used(root, "notes")
     return store.set_rules(root, "notes", None, None, str(path))
 
 
@@ -326,6 +331,7 @@ def _attach(root: Path, ticket: str, name: str, body: str, by: str) -> str:
     try:
         r = subprocess.run(
             cmd,
+            env={**os.environ, "ORCH_ROOT": str(root)},
             input=body,
             capture_output=True,
             text=True,
@@ -363,6 +369,20 @@ def _get(v: notes_mod.Vault, ref: str):
         return v.get(ref)
     except notes_mod.Refused as e:
         raise Refused(str(e)) from None
+
+
+def _get_allowed(v: notes_mod.Vault, ref: str, allowed: set[str]):
+    """Resolve a name only among the notes this helper may read, so a refusal never names other notes."""
+    hits = [i for i in allowed if i == ref] or [
+        i for i in allowed if i.rsplit("/", 1)[-1].casefold() == ref.casefold()
+    ]
+    if len(hits) != 1:
+        raise Refused(
+            f"“{ref}” is not attached to your ticket. The person attaches it with Use in a ticket."
+            if not hits
+            else f"Several attached notes have this name; use one of: {', '.join(sorted(hits))}."
+        )
+    return _get(v, hits[0])
 
 
 def _title(v: notes_mod.Vault, note_id: str) -> str:
