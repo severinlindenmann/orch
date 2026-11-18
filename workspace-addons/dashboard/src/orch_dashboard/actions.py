@@ -153,6 +153,15 @@ def needs_session(op) -> bool:
     return isinstance(op, str) and op not in FREE_OPS
 
 
+def turns_review_off(op, args) -> bool:
+    """ORCH-424: a ticket.new or ticket.edit that turns Human review needed off (also for a ticket inside an epic).
+    It lets work be accepted without the person, so it needs the page session even though the op is free."""
+    if op not in ("ticket.new", "ticket.edit") or not isinstance(args, dict):
+        return False
+    steps = args.get("steps") if isinstance(args.get("steps"), list) else []
+    return any(isinstance(x, dict) and x.get("human_review") is False for x in [args, *steps])
+
+
 def _tid(v) -> str:
     if not isinstance(v, str) or not TID.fullmatch(v):
         raise BadRequest("That is not a ticket id.")
@@ -1515,6 +1524,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
 
         update.dismiss_auto_note()
         return 200, "", None
+    if orch_bin == SELF and turns_review_off(op, args) and not session:  # ORCH-424: only the signed-in person
+        raise NeedsPerson(SIGNIN)
     if op == "ticket.new" and isinstance(args, dict) and "steps" in args:
         return epic_new(root, orch_bin, args, session)
     argv = build_argv(op, args, root)
