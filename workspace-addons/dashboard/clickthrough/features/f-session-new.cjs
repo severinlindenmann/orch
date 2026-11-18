@@ -11,15 +11,17 @@ module.exports = {
   name: 'New menu: start a plain terminal without a ticket',
   covers: ['session.new'],
   async run({ page, open, reload, act, must, orch }) {
-    let last = null;
     await page.route(/\/api\/state(\?.*)?$/, async route => {
       const res = await route.fetch();
       if (res.status() !== 200) return route.fulfill({ response: res });
       const st = await res.json();
-      if (st.unchanged && last) return route.fulfill({ response: res, json: last });
-      st.addons = [...(st.addons || []).filter(a => a.name !== LIVE.name), LIVE];
-      st.settings = { ...(st.settings || {}), focus_preview_on: true };
-      last = st;
+      // a full state, or a changes-only answer (ORCH-517) whose changed keys are in st.set; an unchanged answer
+      // keeps the page's own copy, which already holds the stand-ins
+      const into = st.delta ? st.set : st;
+      if (!st.unchanged && into) {
+        if (!st.delta || 'addons' in into) into.addons = [...(into.addons || []).filter(a => a.name !== LIVE.name), LIVE];
+        if (!st.delta || 'settings' in into) into.settings = { ...(into.settings || {}), focus_preview_on: true };
+      }
       route.fulfill({ response: res, json: st });
     });
     await open('#home');

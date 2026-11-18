@@ -29,7 +29,7 @@ PR_URL = re.compile(r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull
 WAITING, RUNNING, MERGED, OUT = "waiting", "running", "merged", "out"
 FINISHED = (MERGED, OUT)
 LOCK_SECS = 10.0
-KEEP_FINISHED = 50  # finished entries kept for `queue list`; older ones are dropped
+KEEP_FINISHED = 500  # finished entries kept for `queue list` and `queue audit` (a busy night: 64)
 
 
 def folder(root: Path) -> Path:

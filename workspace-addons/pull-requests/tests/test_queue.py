@@ -127,6 +127,8 @@ class FakeGitHub:
         self.groups: dict[str, list[int]] = {}
         self.gstate: dict[str, str] = {}  # group pull request -> state
         self.closed, self.deleted = [], []
+        self.marks: list[tuple[str, str]] = []  # (commit, text) the queue's mark was set on
+        self.direct: list[str] = []  # pull requests the waiter looked at on their own (no group)
         self.me = login
 
     def login(self):
@@ -144,6 +146,7 @@ class FakeGitHub:
                 "baseRefName": p.get("base", "develop"), "reviewDecision": p.get("review", ""),
                 "isCrossRepository": p.get("fork", False),
                 "headRefOid": p.get("head", f"{n:040d}"), "number": n, "title": f"Change {n}",
+                "files": [{"path": x} for x in p.get("files", ("src/app.py",))],
                 "closingIssuesReferences": [{"number": 100 + n, "repository": {"name": "app", "owner": {"login": "acme"}}}]}  # fmt: skip
 
     def own_checks_failed(self, u):
@@ -164,17 +167,28 @@ class FakeGitHub:
         self.deleted.append(branch)
         return True
 
+    def set_status(self, repo, sha, text, target="", state="success"):
+        if state != "success":  # taken back
+            self.marks = [m for m in self.marks if m[0] != sha]
+            self.unmarked = getattr(self, "unmarked", []) + [sha]
+            return True
+        self.marks.append((sha, text))
+        return True
+
 
 class FakeGit:
-    def __init__(self, conflicts=(), push_fails=False):
+    """conflicts: with other pull requests (only in a group of several); base_conflicts: with the base."""
+
+    def __init__(self, conflicts=(), push_fails=False, base_conflicts=()):
         self.conflicts, self.push_fails, self.pushed = set(conflicts), push_fails, []
+        self.base_conflicts = set(base_conflicts)
 
     def fetch(self, base, nums):
         return {"base": "b" * 40, **{str(n): f"{n:040d}" for n in nums}}
 
     def build(self, base_sha, heads):
-        inc = [n for n, _ in heads if n not in self.conflicts]
-        return "c" * 40, inc, [n for n, _ in heads if n in self.conflicts]
+        bad = self.base_conflicts | (self.conflicts if len(heads) > 1 else set())
+        return "c" * 40, [n for n, _ in heads if n not in bad], [n for n, _ in heads if n in bad]
 
     def push(self, sha, branch):
         if self.push_fails:
@@ -182,22 +196,23 @@ class FakeGit:
         self.pushed.append(branch)
 
 
-def make(ws, gh, git, bad=(), log=None, behind=(), red_on_base=()):
-    """bad: red wherever it runs; behind: alone, the base changed its files (the core waiter in queue mode
-    says behind); red_on_base: red once checked on top of the base (in a group)."""
+def make(ws, gh, git, bad=(), log=None, red_on_base=(), ask=None):
+    """bad: red wherever it runs; red_on_base: red once checked on top of the base (in a group)."""
     calls = []
     t = [1000.0]
 
     def sleep(secs):
         t[0] += secs
 
-    def waiter(u, before_merge=None):
-        calls.append(u)
+    def waiter(u, before_merge=None, merge=True):
+        (calls if u in gh.groups else gh.direct).append(u)  # calls: group runs; direct: a member's own look
         members = gh.groups.get(u) or [int(u.rsplit("/", 1)[1])]
         if any(m in bad for m in members) or (u in gh.groups and any(m in red_on_base for m in members)):
             return Outcome(u, False, "checks failed", f"Checks of {u}: NOT green")
-        if u not in gh.groups and members[0] in behind:
-            return Outcome(u, False, "behind", f"develop changed files of {u}; not merged alone.")
+        if not merge:
+            return Outcome(u, True, "checks passed", f"Checks of {u}: green")
+        if u not in gh.groups and not gh.prs[members[0]].get("fresh"):  # develop changed its files
+            return Outcome(u, False, "behind", f"{u}: develop changed files it changes")
         held = before_merge and before_merge(gh.pr(u)["headRefOid"])
         if held:
             return Outcome(u, False, "held", f"not merged: {held}")
@@ -206,7 +221,7 @@ def make(ws, gh, git, bad=(), log=None, behind=(), red_on_base=()):
         gh.gstate[u] = "MERGED"
         return Outcome(u, True, "merged", f"Merged {u} on green checks.")
 
-    r = runner.Runner(ws, gh, lambda repo: git, waiter=waiter, take=lambda k, w: True,
+    r = runner.Runner(ws, gh, lambda repo: git, waiter=waiter, take=lambda k, w: True, ask=ask,
                       log=(log if log is not None else (lambda s: None)), clock=lambda: t[0], sleep=sleep)  # fmt: skip
     r.sign_in()  # run() does this itself; tests that call next_batch() directly need it too
     return r, calls
@@ -216,12 +231,69 @@ def states(ws):
     return {r["number"]: r["state"] for r in store.read(ws)}
 
 
-def test_one_pull_request_goes_to_the_core_waiter(ws):
+def test_a_lone_green_pull_request_develop_did_not_touch_is_marked_and_merged_without_a_group(ws):
+    """Owner, ORCH-432 q2: its own checks green and develop changed none of its files: no second run."""
     store.add(ws, url(1), None, "agent:t", login="bot")
-    gh = FakeGitHub({1: {}})
-    r, calls = make(ws, gh, FakeGit())
+    gh, git = FakeGitHub({1: {"fresh": True}}), FakeGit()
+    r, calls = make(ws, gh, git)
     r.run()
-    assert calls == [url(1)] and states(ws) == {1: "merged"} and not gh.groups
+    assert calls == [] and gh.direct == [url(1)] and states(ws) == {1: "merged"}
+    assert git.pushed == [] and gh.groups == {}
+    assert gh.marks == [(f"{1:040d}", "Its own checks were green and develop changed none of its files")]
+
+
+def test_a_lone_pull_request_is_not_merged_when_its_mark_could_not_be_set(ws):
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh = FakeGitHub({1: {"fresh": True}})
+    gh.set_status = lambda repo, sha, text, target="", state="success": False
+    r, _ = make(ws, gh, FakeGit())
+    r.process(r.next_batch())
+    row = store.find(store.read(ws), url(1))
+    assert gh.prs[1].get("state", "OPEN") == "OPEN" and row["state"] == "waiting"
+    assert "mark could not be set" in row["why"]
+
+
+def test_a_lone_pull_request_marked_but_not_merged_gets_its_mark_taken_back(ws):
+    """The merge itself failed after the mark was set: nobody may merge that head past the queue on it."""
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh = FakeGitHub({1: {"fresh": True}})
+    r, _ = make(ws, gh, FakeGit())
+
+    def waiter(u, before_merge=None, merge=True):
+        assert before_merge(gh.pr(u)["headRefOid"]) is None  # marked
+        return Outcome(u, False, "", "GitHub refused the merge")
+
+    r.waiter = waiter
+    r.process(r.next_batch())
+    assert gh.marks == [] and gh.unmarked == [f"{1:040d}"]
+    assert store.find(store.read(ws), url(1))["state"] == "waiting"
+
+
+def test_a_waiter_that_fails_after_the_mark_still_takes_every_mark_back(ws):
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh = FakeGitHub({1: {"fresh": True}})
+    r, _ = make(ws, gh, FakeGit())
+
+    def waiter(u, before_merge=None, merge=True):
+        head = gh.pr(u)["headRefOid"]
+        assert before_merge(head) is None and before_merge(head) is None  # asked twice: marked twice
+        raise RuntimeError("the waiter broke")
+
+    r.waiter = waiter
+    with pytest.raises(RuntimeError):
+        r.process(r.next_batch())
+    assert gh.marks == [] and gh.unmarked == [f"{1:040d}"]  # taken back once per head
+
+
+def test_one_pull_request_alone_is_checked_in_a_group_of_one_on_top_of_the_base(ws):
+    """develop changed files it changes since it took develop in (the fake waiter's default): a group of one."""
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh, git = FakeGitHub({1: {}}), FakeGit()
+    r, calls = make(ws, gh, git)
+    r.run()
+    assert len(calls) == 1 and gh.groups[calls[0]] == [1] and states(ws) == {1: "merged"}
+    assert len(git.pushed) == 1 and "checked once on top of its base branch" in gh.bodies[0]
+    assert gh.marks == [("c" * 40, "Built by the orch merge queue")]  # the develop rule can require it
 
 
 def test_a_green_group_merges_all_with_one_check_run(ws):
@@ -245,8 +317,9 @@ def test_a_red_group_is_split_and_the_good_ones_still_merge(ws):
     r, calls = make(ws, gh, FakeGit(), bad={3})
     r.run()
     assert states(ws) == {1: "merged", 2: "merged", 3: "out", 4: "merged"}
-    assert len(gh.closed) == 2  # [1,2,3,4] and [3,4] were red
-    assert calls[-2:] == [url(3), url(4)]  # the last half of two ran one by one
+    assert len(gh.closed) == 2  # [1,2,3,4] and [3,4] were red; #3 alone is red in its own checks: no group
+    assert url(3) in gh.direct  # #3 alone: red in its own checks
+    assert gh.groups[calls[-1]] == [4]  # #4: develop changed its files, a group of one
 
 
 def test_entries_that_cannot_be_merged_leave_with_a_reason(ws):
@@ -268,48 +341,37 @@ def test_a_conflicting_pull_request_runs_alone_after_the_group(ws):
     gh = FakeGitHub({1: {}, 2: {}, 3: {}})
     r, calls = make(ws, gh, FakeGit(conflicts={2}))
     r.run()
-    assert gh.groups[calls[0]] == [1, 3] and calls[1] == url(2)
+    assert gh.groups[calls[0]] == [1, 3] and gh.groups[calls[1]] == [2]
     assert states(ws) == {1: "merged", 2: "merged", 3: "merged"}
-    assert "conflicted" in {x["number"]: x for x in store.read(ws)}[2]["why"]
-
-
-def test_a_pull_request_behind_its_base_is_checked_once_on_top_of_it_not_taken_in(ws):
-    store.add(ws, url(1), None, "agent:t", login="bot")
-    gh, git = FakeGitHub({1: {}}), FakeGit()
-    r, calls = make(ws, gh, git, behind={1})
-    r.run()
-    assert calls[0] == url(1) and gh.groups[calls[1]] == [1] and len(calls) == 2  # one run on top of develop
-    assert states(ws) == {1: "merged"} and len(git.pushed) == 1
-    assert "checked once on top of its base branch" in gh.bodies[0] and "Closes #101" in gh.bodies[0]
 
 
 def test_a_pull_request_red_on_top_of_its_base_leaves_the_queue(ws):
     store.add(ws, url(1), None, "agent:t", login="bot")
     gh = FakeGitHub({1: {}})
-    r, calls = make(ws, gh, FakeGit(), behind={1}, red_on_base={1})
+    r, calls = make(ws, gh, FakeGit(), red_on_base={1})
     r.run()
     row = store.read(ws)[0]
-    assert states(ws) == {1: "out"} and len(calls) == 2 and "group of one was red" in row["why"]
-    assert gh.closed == [calls[1]]  # its group pull request is closed, the branch deleted
+    assert states(ws) == {1: "out"} and len(calls) == 1 and "queue group was red" in row["why"]
+    assert gh.closed == [calls[0]]  # its group pull request is closed, the branch deleted
 
 
-def test_a_pull_request_behind_that_conflicts_with_its_base_leaves_with_what_to_do(ws):
+def test_a_pull_request_that_conflicts_with_its_base_leaves_with_what_to_do(ws):
     store.add(ws, url(1), None, "agent:t", login="bot")
     gh = FakeGitHub({1: {}})
-    r, calls = make(ws, gh, FakeGit(conflicts={1}), behind={1})
+    r, calls = make(ws, gh, FakeGit(base_conflicts={1}))
     r.run()
     row = store.read(ws)[0]
-    assert states(ws) == {1: "out"} and calls == [url(1)] and not gh.groups
+    assert states(ws) == {1: "out"} and calls == [] and not gh.groups
     assert "conflicts with develop" in row["why"] and "by hand" in row["why"]
 
 
-def test_a_fork_behind_its_base_is_never_built_on_a_branch(ws):
+def test_a_fork_is_never_built_on_a_branch_and_a_person_merges_it(ws):
     store.add(ws, url(1), None, "agent:t", login="bot")
     gh, git = FakeGitHub({1: {"fork": True}}), FakeGit()
-    r, calls = make(ws, gh, git, behind={1})
+    r, calls = make(ws, gh, git)
     r.run()
-    assert states(ws) == {1: "out"} and calls == [url(1)] and not git.pushed
-    assert "fork" in store.read(ws)[0]["why"]
+    assert states(ws) == {1: "out"} and calls == [] and not git.pushed
+    assert "fork" in store.read(ws)[0]["why"] and "a person merges it" in store.read(ws)[0]["why"]
 
 
 def test_the_queue_calls_the_core_waiter_in_queue_mode(ws, monkeypatch):
@@ -340,8 +402,8 @@ def test_a_pull_request_with_a_new_commit_waits_again(ws):
     r, _ = make(ws, gh, FakeGit())
     real = r.waiter
 
-    def waiter(u, before_merge=None):
-        o = real(u, before_merge)
+    def waiter(u, before_merge=None, merge=True):
+        o = real(u, before_merge, merge)
         if u in gh.groups:
             gh.prs[2].update(state="OPEN", head="e" * 40)  # its new head is not in the group
         return o
@@ -471,10 +533,14 @@ def test_a_pull_request_with_a_merge_card_on_any_ticket_is_never_merged_here(ws,
     )
     for n in (1, 2):
         store.add(ws, url(n), None, "agent:t", login="bot")
-    r, calls = make(ws, FakeGitHub({1: {}, 2: {}}), FakeGit())
+    gh = FakeGitHub({1: {}, 2: {}})
+    r, calls = make(ws, gh, FakeGit())
     r.run()
-    assert calls == [url(1)] and states(ws) == {1: "merged", 2: "out"}
-    assert "Merge card on DM1-7" in store.find(store.read(ws), url(2))["why"]
+    # #2 is only checked, alone in its own group, and the person merges it with the card
+    assert [gh.groups[c] for c in calls] == [[1], [2]] and states(ws) == {1: "merged", 2: "out"}
+    assert gh.prs[2].get("state", "OPEN") == "OPEN" and (f"{2:040d}", gh.marks[-1][1]) == gh.marks[-1]
+    why = store.find(store.read(ws), url(2))["why"]
+    assert "checked green in its own queue group" in why and "Merge card on DM1-7" in why
 
 
 def test_a_head_that_moved_before_the_fetch_is_left_out_of_the_group(ws):
@@ -494,7 +560,7 @@ def test_a_head_that_moved_before_the_fetch_is_left_out_of_the_group(ws):
     git.fetch = fetch
     r, calls = make(ws, gh, git)
     r.run()
-    assert gh.groups[calls[0]] == [1, 3] and calls[1] == url(2)
+    assert gh.groups[calls[0]] == [1, 3] and gh.groups[calls[1]] == [2]
     assert states(ws) == {1: "merged", 2: "merged", 3: "merged"}
 
 
@@ -503,14 +569,14 @@ def test_a_title_cannot_close_issues():
     assert "- #1 `Fixes #5, 'closes' acme/x#9`" in body and "Closes" not in body
 
 
-def test_a_fork_pull_request_runs_alone(ws):
+def test_a_fork_pull_request_leaves_and_the_others_merge_in_a_group(ws):
     for n in (1, 2, 3):
         store.add(ws, url(n), None, "agent:t", login="bot")
     gh = FakeGitHub({1: {}, 2: {"fork": True}, 3: {}})
     r, calls = make(ws, gh, FakeGit())
     r.run()
-    assert url(2) in calls and all(2 not in g for g in gh.groups.values())
-    assert states(ws) == {1: "merged", 2: "merged", 3: "merged"}
+    assert url(2) not in calls and all(2 not in g for g in gh.groups.values())
+    assert states(ws) == {1: "merged", 2: "out", 3: "merged"}
 
 
 def test_entries_a_dead_runner_left_running_go_back_in_line(ws):
