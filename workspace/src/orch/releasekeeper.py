@@ -230,10 +230,22 @@ def ts(s) -> datetime | None:
     return d if d is None or d.tzinfo else d.replace(tzinfo=UTC)
 
 
+def known_name(name: str, names) -> str | None:
+    """The entry of `names` that covers job `name`: the same name, or the job without its part. A job split
+    into parts (ORCH-315, "workspace / test (windows-latest, 3/6)") is covered by "workspace / test
+    (windows-latest)", so a known-red entry keeps working when CI splits the job."""
+    if name in names:
+        return name
+    for n in names:
+        if n.endswith(")") and name.startswith(n[:-1] + ", "):
+            return n
+    return None
+
+
 def checks_green(rollup, ignore=frozenset()) -> str:
     """green, red or pending for a pull request's statusCheckRollup (newest run of each check counts); checks
     named in `ignore` (known red, roll-ups) do not count."""
-    rollup = [c for c in rollup or [] if (c.get("name") or c.get("context")) not in ignore]
+    rollup = [c for c in rollup or [] if known_name(c.get("name") or c.get("context") or "", ignore) is None]
     if not rollup:
         return "pending"
     last: dict = {}
@@ -284,7 +296,7 @@ def not_reported(rollup, names) -> list[str]:
 def failed_checks(rollup, ignore=frozenset()) -> list[str]:
     out = []
     for c in rollup or []:
-        if (c.get("name") or c.get("context")) in ignore:
+        if known_name(c.get("name") or c.get("context") or "", ignore) is not None:
             continue
         word = c.get("conclusion") if "status" in c else c.get("state")
         if (c.get("status") in (None, "COMPLETED")) and word not in PASSED and word not in (None, "PENDING"):
@@ -1125,9 +1137,10 @@ def run_state(
         name = j.get("name") or ""
         if name in ROLLUP_JOBS:
             continue
-        if name in known:
+        entry = known_name(name, known)
+        if entry is not None:
             if j.get("status") == "completed" and j.get("conclusion") not in ("success", "skipped"):
-                noted.append(f"{name} ({known[name]})")
+                noted.append(f"{name} ({known[entry]})")
             continue  # neither waited for nor a blocker
         if j.get("status") != "completed":
             state = "pending" if state == "green" else state
