@@ -52,6 +52,9 @@ def look3(e):
 def look4(e):
     """Publish: a shared file's /f/<id>/meta has the workspace name and look; switched off -> workspace null."""
     pid, tok = e.connect_publish("Pilatus")
+    # own starting point: LOOK-2 (runs before, same workspace) switches the shared-pages setting off on publish
+    on = http("PATCH", e.pub.url + "/v1/me", ws_hdr(pid, tok), {"show_on_shared_pages": True})
+    check(on.status == 200, f"switch on first: {on}")
     r, _ = share(e, "Pilatus", name="look4.bin", size=2000)
     _, fid, _ = link_parts(r["link"])
     ok = http("PATCH", e.pub.url + "/v1/me", ws_hdr(pid, tok), {"icon": "wallet", "color": "amber"})
@@ -200,7 +203,9 @@ def look2(e):
     check((who["icon"], who["color"]) == ("wallet", "amber"), f"relay whoami {who}")
     check((who.get("pending") or {}).get("description") == "Product work, now with a Wallet", f"pending {who.get('pending')}")
     check("Waiting for relay approval" in got["pending"], f"pending text {got['pending']!r}")
-    check(got["shared"] == "false" and e.orchj(n, "look", "shared-pages")["on"] is False, f"shared-pages {got['shared']}")
+    shared_off = e.orchj(n, "look", "shared-pages")["on"] is False
+    e.person(n, "look", "shared-pages", "on")  # leave Pilatus as found: LOOK-4 reads the publish meta of this workspace
+    check(got["shared"] == "false" and shared_off, f"shared-pages {got['shared']}")
     check(set(got["items"]) >= {n, other}, f"switcher items {got['items']}")
     check(["teal", True] in got["itemLooks"] and ["amber", True] in got["itemLooks"], f"badges {got['itemLooks']}")
     check(got["noOverflow"] and not got["errors1280"] and not got["errors720"], f"layout/errors {got}")
