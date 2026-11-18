@@ -58,3 +58,7 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
   computers: a sandboxed page sends no cookie, and these files are open-source code with no workspace data. They show
   which shipped add-ons run. Accepted by the manager for the prototype, not decided by the owner: open for the owner
   to overrule.
+- 2026-11-17 (ORCH-308, from ORCH-281/ORCH-354 triage): Every dashboard feature has a click-through (do it, reload,
+  check, no console error) on a seeded demo workspace with the real server; a new action or page brings its
+  click-through in the same pull request. The feature list is read from the code, so the `dashboard` CI job names a
+  feature without one, and `page-smoke` runs them all on every dashboard pull request.
