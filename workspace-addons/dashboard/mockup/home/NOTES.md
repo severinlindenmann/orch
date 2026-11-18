@@ -42,6 +42,7 @@ Home: the question is body text; answering moves the card out, the next one in, 
 ## Work that stopped short (16 Nov 2026, ORCH-26)
 
 - Needs-you block, `home.html?stuck=1`: two rows with two one-click buttons each, built from the existing need row, no new style.
+- Stuck tickets (ORCH-426), same `?stuck=1`: three rows at the very top of Needs you, whether or not the ticket needs a person's review: a helper waiting on your OK on its screen, a step whose checks keep failing (Open, Nudge, Start fresh), the Reviewer not sure (Open). The same rows reach a paired phone as one text each while the relay is on.
   "The pull request passed its checks but was not merged, and no helper is working on it." has `Merge` (the person's own GitHub login, exactly the commit shown) and `Start helper` (`Nudge` when a helper sits idle on it).
   "The helper has been idle for 14 min with nothing running." has `Nudge` and `Start fresh`.
   A click answers with a toast and the row leaves. Hidden without the flag, so the shared demo count (3) stays.

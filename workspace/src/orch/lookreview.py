@@ -280,6 +280,7 @@ def verdict(root: Path, tid: str, word: str, line: str, points: list[str] | None
     else:
         after = tickets.log(root, tid, "Left for you by the Reviewer: second look: " + why, tickets.REVIEWER)
     mine_r["rev"] = after.get("revision")
+    reviewer.remember_left(mine_r, word, "second look: " + why if word == "leave" else why)
     rst[tid] = mine_r
     reviewer._write_state(root, rst)
     st = read_state(root)

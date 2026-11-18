@@ -198,8 +198,12 @@ function needActionsRow(row, key) {
 }
 // Work that stopped short (core rows): a pull request left open after its checks passed, or a helper idle at its
 // prompt. Two buttons, each one click on an op the page already has; the words sent to the helper are fixed here.
-const HELPER_ROWS = ['helper:unmerged', 'helper:idle'];
+// Stuck tickets (ORCH-426) come first in the list, whether or not the ticket needs a person's review: a helper waiting
+// on the person's OK on its screen, a step whose checks keep failing, a ticket the Reviewer was not sure about.
+const STUCK_ROWS = ['helper:permission', 'helper:failing', 'reviewer:unsure'];
+const HELPER_ROWS = ['helper:unmerged', 'helper:idle', ...STUCK_ROWS];
 const isHelperRow = row => !!row && row.source === 'core' && HELPER_ROWS.includes(row.kind) && !!row.ticket;
+const isStuckRow = row => isHelperRow(row) && STUCK_ROWS.includes(row.kind);
 const MERGE_ASK = 'The pull request of this ticket passed its checks but is still open. If the ticket or the workspace rules say to merge it, merge it now and record it on the ticket; if not, say on the ticket why it stays open.';
 const NUDGE = 'You have been idle for a while with open tasks on this ticket. Carry on with the next open task, or ask if something blocks you.';
 async function nudgeHelper(tid, text) {
@@ -219,6 +223,7 @@ function helperRow(row, key) {
   const acts = row.kind === 'helper:unmerged'
     ? [['Merge', 'primary sm', () => act('pull.merge', {ticket:row.ticket, url:pull.url, head:pull.head}), 'Merged'],
       [alive ? 'Nudge' : 'Start helper', 'outline sm', () => nudgeHelper(row.ticket, MERGE_ASK), alive ? 'Message sent' : 'Helper started']]
+    : row.kind === 'helper:permission' || row.kind === 'reviewer:unsure' ? []  // the answer is on the ticket page: the Open link
     : [['Nudge', 'outline sm', () => nudgeHelper(row.ticket, NUDGE), 'Message sent'],
       ['Start fresh', 'outline sm', () => restartFresh(row.ticket), 'Helper started fresh']];
   const controls = snapshot ? [] : acts.map(([label, style, run, done]) => {
@@ -234,10 +239,11 @@ function helperRow(row, key) {
     return control;
   });
   const link = row.kind === 'helper:unmerged' && /^https:\/\/github\.com\//.test(String(pull.url || '')) ? h('a', {href:pull.url, target:'_blank', rel:'noopener noreferrer'}, 'Pull request') : null;
+  const open = isStuckRow(row) && t ? h('a', {className:'btn outline sm', href:href(t.id), 'data-key':key + '-open'}, 'Open') : null;
   return h('div', {className:'card-row home-need need-acts', 'data-key':key, 'data-need-row':row.id},
     h('div', {className:'grow'}, h('p', {}, clean(row.text)),
       h('p', {className:'meta'}, t ? h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)) : clean(row.title), link ? [' · ', link] : null)),
-    h('div', {className:'acts'}, controls));
+    h('div', {className:'acts'}, open, controls));
 }
 function startFailedRow(t, sf) {
   return h('div', {className:'card-row home-need', 'data-key':'start-failed-' + t.id}, ticketTitle(t),
@@ -428,7 +434,7 @@ function homeSection(key, title, body, count = '', more = null) {
 function homeNeeds(rows) {
   const groups = new Map(), out = [], byQuestion = new Map();
   for (const row of rows) {
-    const key = row.ticket || row.id;
+    const key = isStuckRow(row) ? row.id : row.ticket || row.id;  // a stuck row never hides behind a question of its ticket
     if (!groups.has(key)) groups.set(key, {row, count:0, same:[]});
     groups.get(key).count++;
   }
@@ -631,9 +637,10 @@ function home() {
   }
   const first = groupedNeeds.slice().sort((a, b) => (Date.parse(a.row.since) || Infinity) - (Date.parse(b.row.since) || Infinity))
     .find(g => g.row.answer?.question && array(g.row.answer.options).length && !needActs(g.row).length && !needCardQuestion(g.row));
-  const further = groupedNeeds.filter(g => g !== first).map(({row, count, same}) => needCardQuestion(row) ? cardSetRow(row) : needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same));
-  const list = [first ? needRow(first.row, newest, first.count, first.same) : null, ...logins.soon.map(loginSoonRow), ...further, ...failed.map(([t, sf]) => startFailedRow(t, sf)),
-    ...results.map(resultRow), ...changes.map(changeRow), ...notes];
+  const stuck = groupedNeeds.filter(g => isStuckRow(g.row)), unsure = new Set(stuck.filter(g => g.row.kind === 'reviewer:unsure').map(g => g.row.ticket));
+  const further = groupedNeeds.filter(g => g !== first && !isStuckRow(g.row)).map(({row, count, same}) => needCardQuestion(row) ? cardSetRow(row) : needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same));
+  const list = [...stuck.map(g => needRow(g.row, newest, g.count, g.same)), first ? needRow(first.row, newest, first.count, first.same) : null, ...logins.soon.map(loginSoonRow), ...further, ...failed.map(([t, sf]) => startFailedRow(t, sf)),
+    ...results.filter(g => !g.every(t => unsure.has(t.id))).map(resultRow), ...changes.map(changeRow), ...notes];
   return fragment(head, banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
       anyNeeds ? attentionCard('needs-you', needCount ? 'Needs you · ' + needCount : 'Needs you', 'needs', list, first ? whoAsked(ticketOf(first.row.ticket)) : '', [clearOldButton(), reviewAllButton()]) : null),
