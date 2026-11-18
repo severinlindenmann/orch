@@ -347,7 +347,7 @@ def _summary(ticket, d, root=None, held=None, watcher=True, stuck=False):
         "open": open_,
         "owner_min": ((proposal or {}).get("time") or {}).get("owner_min"),
         "working": _working(root, ticket, phase),
-        "agent_draft": _agent_draft(ticket),
+        "agent_draft": _agent_draft(ticket, d.get("store")),
         "draft_v": _draft_v(ticket),
         "questions": _plain_questions(ticket),
         "results": _results(d) if started_run else [],
@@ -379,12 +379,24 @@ def _working(root, ticket, phase):
     return not (claim.get("mode") == "live" and (claim.get("live") or {}).get("state") in IDLE)
 
 
-def _agent_draft(ticket):
+def _agent_draft(ticket, store=None):
     """The newest draft is the agent's: an idea-box order starts with the person's own words as v1, so only v2 and later
-    count (an order an agent filed with `orch factory idea` has the agent's v1). Until then Plan the run is not offered."""
+    count (an order an agent filed with `orch factory idea` has the agent's v1). Until then Plan the run is not offered.
+    An empty draft file never counts (persona test 18 Nov: an order from before ORCH-231 kept an empty v1, so Factory
+    said it waited for you and offered Plan the run on "This draft is empty")."""
     x = (ticket.get("ext") or {}).get("factory") or {}
     v = _draft_v(ticket) or 0
-    return v >= (2 if x.get("idea_box") is True else 1)
+    if v < (2 if x.get("idea_box") is True else 1):
+        return False
+    return store is None or _written(store, ticket["id"], v)
+
+
+def _written(store, order_id, v):
+    """Whether draft v of an order has any text (an unreadable file counts as not written)."""
+    try:
+        return bool(_read_regular(store.path(f"drafts/{order_id}/v{v}.md"), 4096).strip())
+    except (OSError, Refused):
+        return False
 
 
 def _draft_v(ticket):

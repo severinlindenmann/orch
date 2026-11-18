@@ -84,6 +84,7 @@ module.exports = {
   `orchAsPerson(...)` is the same as the person at the computer, `orchIn(dir, ...)` in another folder of the home,
   `git(dir, ...)` git with no settings of this computer, `python(code, ...args)` a short snippet with orch importable.
 - `until(check, what)`: after a change made outside the page, wait until the page's state passes `check(state)`.
+- `addonOff(name)`: turn an add-on off again at the end (as the person) and wait until the state no longer lists it; the one 404 the page may still get for that add-on's view (its own state lags a poll) is not an error.
 - `home` is the throw-away home, `standins` where the stand-ins listen.
 - `open(hash)` goes to a dashboard address and waits until it is drawn; `reload()` reloads and waits.
 - `act(op, fn)` runs `fn` (your click) and waits for the page to send `op`; it fails when the server refuses it.
