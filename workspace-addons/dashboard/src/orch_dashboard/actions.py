@@ -788,10 +788,17 @@ def _chat_make_ticket(a):
 
 
 def _run_start(a):
-    _only(a, ("ticket", "fresh", "take_over"))
+    """Start a helper on the ticket: continue its last conversation, or fresh; the Start choice (ORCH-362) can
+    name the tool (`--agent`, a name from `orch agents`); orch refuses a tool it does not know."""
+    _only(a, ("ticket", "fresh", "take_over", "agent"))
     flags = (["--fresh"] if _flag(a.get("fresh")) else []) + (
         ["--take-over"] if _flag(a.get("take_over")) else []
     )
+    agent = a.get("agent")
+    if agent is not None:
+        if not isinstance(agent, str) or not AGENT.fullmatch(agent):
+            raise BadRequest("That is not a tool name.")
+        flags += ["--agent", agent]
     return ["run", "start", _tid(a.get("ticket"))], flags, []
 
 
@@ -803,6 +810,18 @@ def _session_reopen(a):
     if not isinstance(sid, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", sid):
         raise BadRequest("That is not a session id.")
     return ["run", "start", _tid(a.get("ticket"))], ["--session", sid], []
+
+
+SESSION_KINDS = ("empty", "chat", "terminal", "manager")  # core sessions.KINDS (ORCH-364)
+
+
+def _session_new(a):
+    """The New menu of the live bar: a session without a ticket (empty helper, chat helper, plain terminal,
+    Manager), through the core's one start path. A second New of the same kind goes to the one that is open."""
+    _only(a, ("kind",))
+    if a.get("kind") not in SESSION_KINDS:
+        raise BadRequest("Choose an empty helper, a chat helper, a plain terminal or the Manager.")
+    return ["session", "new", a["kind"]], [], []
 
 
 def _run_send(a):
@@ -1130,6 +1149,7 @@ OPS = {
     "check.move": _check_move,
     "run.start": _run_start,
     "session.reopen": _session_reopen,
+    "session.new": _session_new,
     "run.stop": _run_stop,
     "run.send": _run_send,
     "run.take_back": _run_take_back,

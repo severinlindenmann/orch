@@ -78,6 +78,28 @@ test('plugs into the layer: a chip opens its session there, open ones are marked
   assert.ok(css.includes('.lbar.lbar-docked{position:relative') && css.includes('.lbar-chip[aria-current=true]{'));
 });
 
+test('sessions without a ticket (ORCH-364): open ones join the bar by their title, a plain terminal is open until closed', () => {
+  const sessions = [
+    {id:'t_emp', kind:'empty', title:'Empty helper', open:true},
+    {id:'t_chat', kind:'chat', title:'Chat helper', open:false},
+    {id:'t_term', kind:'terminal', title:'Plain terminal', open:true},
+    {id:'t_man', kind:'manager', title:'Manager', open:true},
+    {id:'t_odd', kind:'ticket', title:'Not a kind', open:true},
+  ];
+  // the sessions API lists the open ones with their kind (sessions.py no_ticket): a plain terminal is idle, word Open
+  const list = [sess('t_emp', '', 'working', {title:'Empty helper', kind:'empty'}), sess('t_a', 'ORCH-1', 'working'),
+    sess('t_term', '', 'idle', {title:'Plain terminal', kind:'terminal', word:'Open'}), sess('t_man', '', 'idle', {title:'Manager', kind:'manager', word:'Idle'})];
+  const all = bar.liveBarModel(list, ['t_emp', 't_term', 't_man']);
+  assert.deepEqual(all.map(o => [o.key || o.title, o.s, o.pin, o.kind]), [['Empty helper', 'run', true, 'empty'], ['ORCH-1', 'run', false, ''],
+    ['Plain terminal', 'idle', true, 'terminal'], ['Manager', 'idle', true, 'manager']]);
+  assert.equal(all.find(o => o.kind === 'terminal').word, 'Open');
+  assert.deepEqual(all.filter(o => bar.liveBarIn(o, 'pin')).map(o => o.title), ['Empty helper', 'Plain terminal', 'Manager'], 'a new one is pinned: a chip');
+  assert.equal(bar.liveBarNewOpen(sessions, 'manager').id, 't_man');
+  assert.equal(bar.liveBarNewOpen(sessions, 'chat'), null, 'a closed one starts again');
+  assert.equal(bar.liveBarNewOpen(null, 'empty'), null);
+  assert.deepEqual(bar.LIVEBAR_NEW.map(n => n.title), ['Empty helper', 'Chat helper', 'Plain terminal', 'Manager'], 'draft D words, in its order');
+});
+
 // ORCH-365: the Focus button on every ticket says what pressing it does, from the same session states as the bar.
 test('the Focus button word: Answer, Watch, Open, In line, Start; none on a finished ticket without a helper', () => {
   const ask = {questions:[{id:'q1', text:'Which one?'}]};

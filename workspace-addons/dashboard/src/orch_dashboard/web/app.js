@@ -548,14 +548,14 @@ async function act(op, args) {
   if (snapshot) return {ok:false, status:0, text:'This is a shared copy.'};
   const busy = busyOn();
   const before = op === 'run.start' ? ticketOf(args.ticket)?.status : null;
-  let succeeded = false;
+  let succeeded = false, queued = false;
   if (before) { starting.add(args.ticket); state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:'active'} : t); render(); }
   writing++;
   mutation++;
   try {
     const body = JSON.stringify({op, args});
     const res = await fetch('/api/act', {method:'POST', ...(body.length < 60000 ? {keepalive:true} : {}), headers:{'Content-Type':'application/json', 'X-Orch-Op':String(op)}, body});
-    if (res.status !== 200) return {ok:false, status:res.status, text:await res.text()};
+    if (res.status !== 200) { const text = await res.text(); queued = op === 'run.start' && /waits in line/i.test(text); return {ok:false, status:res.status, text, queued}; }
     const next = await res.json();
     succeeded = true;
     starting.delete(args.ticket);
@@ -568,7 +568,8 @@ async function act(op, args) {
     if (!writing && refreshAgain) refresh();  // a change notice that came during the write
     if (before) {
       starting.delete(args.ticket);
-      if (!succeeded) { state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:before} : t); window.orch.toast('Could not start the helper' + (ticketOf(args.ticket)?.title ? ' on ' + ticketOf(args.ticket).title : '') + '.', 'error'); }
+      // a start orch put in line (every helper place in use) is not a failure: the caller says it waits in line
+      if (!succeeded) { state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:before} : t); if (!queued) window.orch.toast('Could not start the helper' + (ticketOf(args.ticket)?.title ? ' on ' + ticketOf(args.ticket).title : '') + '.', 'error'); }
       render();
     }
   }

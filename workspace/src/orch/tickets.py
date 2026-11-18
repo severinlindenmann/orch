@@ -687,7 +687,7 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
                 continue
             if _newer_format(t):
                 continue  # a newer orch's file: not shown here, never rewritten
-            if include_general or (t.get("general") is not True and t.get("manager") is not True):
+            if include_general or not is_hidden(t):
                 out.append(t)
     out.sort(key=lambda t: t.get("created_at", ""))
     return out
@@ -713,6 +713,14 @@ def is_manager(root: Path, tid: str) -> bool:
     """True for the hidden Manager ticket: the workspace's always-on helper session (ORCH-147)."""
     try:
         return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("manager") is True
+    except (OSError, ValueError, Refused, AttributeError):
+        return False
+
+
+def is_session(root: Path, tid: str) -> bool:
+    """True for the hidden ticket of a session without a ticket (empty helper, plain terminal; ORCH-364)."""
+    try:
+        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("session") in SESSION_KINDS
     except (OSError, ValueError, Refused, AttributeError):
         return False
 
@@ -747,6 +755,53 @@ def ensure_manager(root: Path, by: str) -> str:
         "manager": True,
         "status": "open",
         "note": MANAGER_NOTE,
+        "created_at": t,
+        "updated_at": t,
+        "checklist": [],
+        "refs": [],
+        "questions": [],
+        "history": [],
+    }
+    add_history(ticket, by, "Created", "cli", at=t)
+    save(root, ticket)
+    harness.protect_local(root)
+    return ticket["id"]
+
+
+# Sessions without a ticket (ORCH-364, draft D): the empty helper and the plain terminal, one of each per
+# workspace, each a hidden ticket like the Manager's (flag session: <kind>, no display key, kept out of git).
+SESSION_KINDS = ("empty", "terminal")
+SESSION_TITLES = {"empty": "Empty helper", "terminal": "Plain terminal"}
+SESSION_NOTES = {
+    "empty": "A helper with no ticket and no task yet: it waits for the person's first message.",
+    "terminal": "A plain terminal in this workspace, no helper.",
+}
+
+
+def session_id(root: Path, kind: str) -> str | None:
+    """The id of this workspace's hidden ticket of a session without a ticket of this kind, or None."""
+    for t in list_all(root, include_general=True):
+        if isinstance(t, dict) and t.get("session") == kind and hidden_kind(t) == kind:
+            return t["id"]
+    return None
+
+
+def ensure_session(root: Path, kind: str, by: str) -> str:
+    """The hidden ticket of a session without a ticket (empty helper or plain terminal), made once."""
+    from orch import harness
+
+    if kind not in SESSION_KINDS:
+        raise Refused(f"No such session without a ticket: {kind}.")
+    if tid := session_id(root, kind):
+        return tid
+    t = now()
+    ticket = {
+        "schema": "orch.ticket/1",
+        "id": new_id(root),
+        "title": SESSION_TITLES[kind],
+        "session": kind,
+        "status": "open",
+        "note": SESSION_NOTES[kind],
         "created_at": t,
         "updated_at": t,
         "checklist": [],
@@ -1170,20 +1225,36 @@ def _check_not_too_early(root: Path, ticket: dict) -> None:
 
 GENERAL_REFUSAL = "The Chat is not a ticket: it is never finished, dropped or reopened."
 MANAGER_REFUSAL = "The Manager is not a ticket: it is never finished, dropped or reopened."
+SESSION_REFUSAL = "A session without a ticket is not a ticket: it is never finished, dropped or reopened."
 
 
 def hidden_kind(ticket: dict) -> str | None:
-    """'general' (Chat) or 'manager' for the two hidden tickets that hold a conversation, never a piece of
-    work: no status moves, never Working. None for every other ticket."""
+    """'general' (Chat), 'manager', or a session without a ticket ('empty' helper, 'terminal'; ORCH-364) for
+    the hidden tickets that hold a conversation, never a piece of work: no status moves, never Working. None
+    for every other ticket."""
     if ticket.get("general") is True:
         return "general"
     if ticket.get("manager") is True:
         return "manager"
+    if ticket.get("session") in SESSION_KINDS:
+        return str(ticket["session"])
     return None
 
 
+def is_hidden(ticket) -> bool:
+    """A hidden ticket (Chat, Manager, a session without a ticket): never in the ticket list."""
+    return isinstance(ticket, dict) and hidden_kind(ticket) is not None
+
+
 def _hidden_refusal(ticket: dict) -> str:
-    return MANAGER_REFUSAL if hidden_kind(ticket) == "manager" else GENERAL_REFUSAL
+    kind = hidden_kind(ticket)
+    return (
+        MANAGER_REFUSAL
+        if kind == "manager"
+        else SESSION_REFUSAL
+        if kind in SESSION_KINDS
+        else GENERAL_REFUSAL
+    )
 
 
 GENERAL_REFUSED = (

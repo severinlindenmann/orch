@@ -42,6 +42,13 @@ typing and the message box; Start fresh begins an empty conversation, even while
     orch manager status             # on or off, and the terminal command to join it (orch run attach <id>)
     orch manager stop               # its conversation is kept for the next start
 
+**Sessions without a ticket** (new Focus, Preview): the bar's New menu starts an empty helper, the chat helper, a
+plain terminal (no process yet) or the Manager; one of each, a second New goes to the open one. Only when the person asks:
+
+    orch session new <empty|chat|terminal|manager>   # already open: nothing new starts
+    orch session list                                # which ones exist and are open
+    orch session close <kind>                        # a helper's conversation is kept; the terminal closes
+
 Focus adds rows to `orch needs` only for a live run waiting for an OK and for a refused tool nobody answered yet.
 `orch focus view --json` feeds the Live tab of the dashboard.
 

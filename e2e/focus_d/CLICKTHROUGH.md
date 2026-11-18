@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-27 steps: 10 ready (the script clicks them), 17 pending (not built yet).
+27 steps: 12 ready (the script clicks them), 15 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -243,7 +243,7 @@ Must be seen:
 ## 14. Start: continue, fresh start or an earlier session
 
 - Part: sessions (draft D feature 4, 12)
-- State: pending, waits for: Start choice, earlier sessions and sessions without a ticket (crew tasks of the Wall and sessions stage)
+- State: ready, clicked by the script
 - Pictures: `fd-14-start-1280.png`, `fd-14-start-1920.png`, `fd-14-start-390.png`
 
 Do:
@@ -257,22 +257,25 @@ Must be seen:
 - One question: continue the last conversation, fresh start, or reopen an earlier session.
 - Up to 10 earlier sessions with date and step.
 - The usual tool and model are preselected: one click starts it.
+- How many helper places are in use; when all are taken, how many wait in line, and a start waits in line.
 
 ## 15. Sessions without a ticket
 
 - Part: sessions (draft D feature 6)
-- State: pending, waits for: Start choice, earlier sessions and sessions without a ticket (crew tasks of the Wall and sessions stage)
+- State: ready, clicked by the script
 - Pictures: `fd-15-no-ticket-1280.png`, `fd-15-no-ticket-1920.png`, `fd-15-no-ticket-390.png`
 
 Do:
 
 1. Open the New menu in the bar.
 2. Start an Empty helper, a Chat helper, a Plain terminal and the Manager.
+3. Open Focus and press one of the four buttons at its top.
 
 Must be seen:
 
 - The four choices are at the top of Focus and in the New menu.
-- Each new session is pinned by itself.
+- Each new session opens in the layer and is pinned by itself.
+- One that is open already says "Already open: go to it" and is not started twice.
 
 ## 16. Tool, model and open time on every session
 
@@ -284,12 +287,14 @@ Do:
 
 1. Open a session that needs you from the bar.
 2. Look at the pane: what it does now, its last lines and the line under them.
+3. Open the model choice of a working session and pick another model.
 
 Must be seen:
 
 - The open question, the last lines of its screen, then tool and model (for example "Helper · Opus").
 - How long it is open and how long it stays (warm while it works, or when it closes for being idle).
 - All of it stays current while you look; the keyboard place does not jump.
+- A new model applies when the helper finishes its current step (or at its next start) and says so.
 
 ## 17. Chat: messages with the results inside
 
