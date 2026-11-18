@@ -120,6 +120,7 @@ def runs(rows: list[dict] | None) -> dict | None:
     got = {k: 0 for k in ("pull_requests", "groups", "pushes", "other")}
     for kind in seen.values():
         got[kind] += 1
+    got["incomplete"] = len(rows) >= 1000  # GitHub lists at most 1000 runs of one time search
     return got
 
 
@@ -154,7 +155,8 @@ def run(root: Path, gh, hours: float, now: datetime | None = None) -> dict:
             merged_at += [t for g in every if (t := _iso(g.get("mergedAt")))]
             report["bases"].append({"repo": repo, "base": base, **got})
         look = getattr(gh, "runs", None)
-        report["runs"][repo] = runs(look(repo, since.strftime("%Y-%m-%dT%H:%M:%SZ"))) if look else None
+        window = (since.strftime("%Y-%m-%dT%H:%M:%SZ"), until.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        report["runs"][repo] = runs(look(repo, *window)) if look else None
     report["still"] = stood_still(rows, merged_at, since, until)
     return report
 
@@ -188,11 +190,16 @@ def text(report: dict) -> str:
             lines.append(f"- {repo} check runs: GitHub did not answer; not counted.")
             continue
         merged = sum(_merges(b) for b in report["bases"] if b["repo"] == repo)
-        total = sum(c.values())
+        total = c["pull_requests"] + c["groups"] + c["pushes"] + c["other"]
         per = f"{total / merged:.1f} per merge" if merged else "no merge"
         lines.append(
             f"- {repo} check runs: {total} ({per}): {c['pull_requests']} on pull requests, {c['groups']} on queue "
-            f"groups, {c['pushes']} on pushes, {c['other']} other."
+            f"groups, {c['pushes']} on pushes, {c['other']} other"
+            + (
+                " (at least: GitHub lists only 1000 runs; ask for fewer hours)."
+                if c.get("incomplete")
+                else "."
+            )
         )
     w = report.get("waited") or []
     if w:

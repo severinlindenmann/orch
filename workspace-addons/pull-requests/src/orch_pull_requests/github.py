@@ -15,6 +15,7 @@ VIEW = (
 # the commit status the queue sets on what it checked (a develop rule can require it)
 MARK = "orch/merge-queue"
 GONE = ("reference does not exist", "not found", "http 404")
+RUNS_MOST = 1000  # GitHub's limit for a search of workflow runs by time
 
 
 class GitHub:
@@ -164,11 +165,11 @@ class GitHub:
         )  # fmt: skip
         return [r for r in v if isinstance(r, dict)] if isinstance(v, list) else None
 
-    def runs(self, repo: str, since: str) -> list[dict] | None:
-        """Workflow runs started since an ISO time: {head_sha, event, head_branch, name}, None when GitHub did not
-        answer."""
+    def runs(self, repo: str, since: str, until: str) -> list[dict] | None:
+        """Workflow runs started between two ISO times: {head_sha, event, head_branch, name}, None when GitHub did
+        not answer. GitHub lists at most RUNS_MOST of one such search."""
         got = self._run(
-            "api", "--paginate", f"repos/{repo}/actions/runs?created=>={since}&per_page=100",
+            "api", "--paginate", f"repos/{repo}/actions/runs?created={since}..{until}&per_page=100",
             "--jq", ".workflow_runs[] | {head_sha, event, head_branch, name}", timeout=120,
         )  # fmt: skip
         if got.returncode != 0:

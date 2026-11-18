@@ -135,7 +135,8 @@ class RunsGitHub(AuditGitHub):
         super().__init__(merged)
         self.rows = runs
 
-    def runs(self, repo, since):
+    def runs(self, repo, since, until):
+        self.window = (since, until)
         return self.rows
 
 
@@ -155,7 +156,14 @@ def test_check_runs_per_merge_count_one_round_per_commit_and_event(ws):
     entry(ws, 1, at(22), at(22, 20))  # the audit counts the repositories the queue knows
     gh = RunsGitHub([pr(500, "orch-queue/develop-1-abc", "Merge queue: #1, #2"), pr(1), pr(2)], rows)
     report = audit.run(ws, gh, 14, now=NOW)
-    assert report["runs"][REPO] == {"pull_requests": 2, "groups": 1, "pushes": 1, "other": 1}
+    assert report["runs"][REPO] == {
+        "pull_requests": 2,
+        "groups": 1,
+        "pushes": 1,
+        "other": 1,
+        "incomplete": False,
+    }
+    assert gh.window == (z(NOW - timedelta(hours=14)), z(NOW))
     assert "check runs: 5 (2.5 per merge): 2 on pull requests, 1 on queue groups, 1 on pushes, 1 other" in (
         audit.text(report)
     )
@@ -171,3 +179,12 @@ def test_minutes_from_joining_the_queue_to_merged(ws):
     assert "middle 90 min, longest 90 min (2 merged by the queue)" in out
     assert "check runs: GitHub did not answer" in out
     assert audit.as_json(report)["waited_minutes"] == [30, 90]
+
+
+def test_a_count_at_githubs_limit_says_at_least(ws):
+    entry(ws, 1, at(22), at(22, 20))
+    rows = [run_row(f"s{i}") for i in range(1000)]
+    report = audit.run(ws, RunsGitHub([pr(1)], rows), 14, now=NOW)
+    assert report["runs"][REPO]["incomplete"] and "at least: GitHub lists only 1000 runs" in audit.text(
+        report
+    )
