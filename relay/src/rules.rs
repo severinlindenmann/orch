@@ -111,6 +111,9 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
         }
         check_taken_back(c, key, sender, &msg)?;
     }
+    if typ == "notebook" {
+        return crate::notebook::authorize_ask(c, sender, msg);
+    }
     if let Some((idx, label)) = kind_of(&typ) {
         if to == "phones" || valid_id(&to, "ph_", 10) {
             if idx != 0 {
