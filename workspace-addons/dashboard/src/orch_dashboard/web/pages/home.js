@@ -137,7 +137,7 @@ function factoryDraftRow(row, key) {
     h('p', {className:'meta'}, 'Factory draft', tag),
     h('h2', {className:'question-title'}, clean(row.title)),
     h('p', {className:'muted'}, 'Read the draft, then plan the run or ask for changes.'),
-    h('p', {className:'meta question-context'}, 'Your agent wrote it' + (when ? ' ' + when : '') + ' · ',
+    h('p', {className:'meta question-context'}, (t ? whoAsked(t) : 'Helper') + ' wrote it' + (when ? ' ' + when : '') + ' · ',
       h('a', {href:factoryOrderHref(row.ticket, 'draft'), 'data-key':key + '-draft'}, 'Read draft')),
     snapshot ? null : factoryDraftActions(row, key));
 }
@@ -147,10 +147,10 @@ function factoryDraftActions(row, key) {
   status.hidden = !said;
   if (said) return status;
   const words = window.DashHelpers.FACTORY_DRAFT_WORDS;
-  const plan = button('Plan the run', 'outline sm', () => go(words.plan, 'Sent. Your agent is planning the run; the proposal shows up here.'));
+  const plan = button('Plan the run', 'outline sm', () => go(words.plan, 'Sent. Your helper is planning the run; the proposal shows up here.'));
   const change = button('Ask for changes', 'outline sm', () => writing(true));
   const note = h('textarea', {className:'text-input', rows:'3', maxLength:'2000', 'aria-label':'What should change', placeholder:'For example: shorter, and add a map', 'data-key':key + '-note'});
-  const send = button('Send', 'primary sm', () => { const w = note.value.trim(); if (w) go(words.change(w), 'Sent. Your agent is changing the draft.'); });
+  const send = button('Send', 'primary sm', () => { const w = note.value.trim(); if (w) go(words.change(w), 'Sent. Your helper is changing the draft.'); });
   const cancel = button('Cancel', 'ghost sm', () => writing(false));
   plan.dataset.key = key + '-plan'; change.dataset.key = key + '-change'; send.dataset.key = key + '-send'; cancel.dataset.key = key + '-cancel';
   const pick = h('div', {className:'actions'}, plan, change), write = h('div', {className:'actions'}, send, cancel);
@@ -163,7 +163,7 @@ function factoryDraftActions(row, key) {
     for (const b of [plan, change, send, cancel]) b.disabled = true;
     try {
       const r = await sendAndStart(row.ticket, text);
-      if (r.ok) { draftSent.set(row.id, r.delivered || r.started ? sent : 'Saved. Your agent gets it as soon as it is free.'); window.orch.toast(draftSent.get(row.id), 'ok'); return; }
+      if (r.ok) { draftSent.set(row.id, r.delivered || r.started ? sent : 'Saved. Your helper gets it as soon as it is free.'); window.orch.toast(draftSent.get(row.id), 'ok'); return; }
       window.orch.toast((r.error ? r.error + ' ' : "That didn't work. ") + 'Nothing was sent.', 'error');
     } finally { locks.delete(key); render(); }
   }

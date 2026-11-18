@@ -57,7 +57,7 @@ Home: the question is body text; answering moves the card out, the next one in, 
 ## Factory draft ready (18 Nov 2026, ORCH-479)
 
 - `home.html?draft=1`: a Factory draft that is ready for Plan the run waits on Home as on the Factory page: "Factory
-  draft", its title, "Read the draft, then plan the run or ask for changes.", "Your agent wrote it … · Read draft",
+  draft", its title, "Read the draft, then plan the run or ask for changes.", "Helper wrote it … · Read draft",
   and Plan the run, Ask for changes (same weight; Ask for changes opens a box with Send and Cancel). It counts in
   "N things need you" ("1 draft to read"). Review shows it as a card: Plan the run, Ask for changes (the comment
   sheet), link Read draft. Factory, Home and Review then show the same waiting items and the same number. Hidden

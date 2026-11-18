@@ -37,5 +37,5 @@
 
 - A Factory draft that is ready for Plan the run is a card in the stack (group "Factory", kind Draft): its title, "Read
   the draft, then plan the run or ask for changes.", the link Read draft, and the buttons Ask for changes (opens the
-  comment sheet; the words go to the agent as "Change the draft: …") and Plan the run. A Factory proposal card has
+  comment sheet; the words go to the helper as "Change the draft: …") and Plan the run. A Factory proposal card has
   the link Read proposal. Drawn on Home (`home.html?draft=1`); the product draws the card with the kit deck as is.

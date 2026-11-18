@@ -15,7 +15,7 @@ function reviewDraftCards() {
       since:r.since, digest:'', group:'Factory', text:'Read the draft, then plan the run or ask for changes.',
       links:[{label:'Read draft', url:link}],
       card:{kind:'draft', title:clean(r.title), ok_label:'Plan the run', no_label:'Ask for changes', no_words:true,
-        then:'Your agent plans the whole run; the proposal comes here for your Start.'}};
+        then:'Your helper plans the whole run; the proposal comes here for your Start.'}};
   });
 }
 // A Factory proposal reads like Home's card (ORCH-183): its title as the question, the goal and the time in two short
