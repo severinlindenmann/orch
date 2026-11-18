@@ -151,7 +151,7 @@ def test_an_old_or_broken_card_is_not_shown():
     assert not selfcheck.card_path().exists()
 
 
-def test_signing_in_to_a_page_server(monkeypatch, tmp_path):
+def test_a_page_server_lets_a_person_in(monkeypatch, tmp_path):
     monkeypatch.setattr(selfcheck.time, "sleep", lambda s: None)
     calls = []
 
