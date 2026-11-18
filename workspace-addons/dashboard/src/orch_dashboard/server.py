@@ -1302,7 +1302,9 @@ class Handler(BaseHTTPRequestHandler):
         elif reply:  # a delta: the click's keys ride in it as set keys (the page keeps only the listed keys)
             out["set"] = {**out["set"], **reply}
             out["keys"] = [*out["keys"], *(k for k in reply if k not in out["keys"])]
-            out["reply"] = list(reply)  # which set keys are the click's own (kept when the delta does not fit)
+            out["reply"] = list(
+                reply
+            )  # which set keys are the click's own (kept when the delta does not fit)
         body = json.dumps(out).encode()
         hdr = {"X-Orch-Boot": self.server.act_ids.boot}
         if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):

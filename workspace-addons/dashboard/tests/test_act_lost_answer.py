@@ -254,7 +254,10 @@ def test_a_click_is_only_told_to_who_sent_it():
     mem.finish(entry, (200, "", {"id": "t_x"}), {"created": {"id": "t_x"}})
     assert mem.status("own-0123456789", (True, None))["reply"] == {"created": {"id": "t_x"}}
     assert mem.status("own-0123456789", (False, None)) == {"state": "unknown", "boot": mem.boot}  # watch-only
-    assert mem.status("own-0123456789", (True, "sync")) == {"state": "unknown", "boot": mem.boot}  # an add-on page's pass
+    assert mem.status("own-0123456789", (True, "sync")) == {
+        "state": "unknown",
+        "boot": mem.boot,
+    }  # an add-on page's pass
 
 
 def test_status_names_the_dashboard_run_and_a_refused_click_is_unknown():
