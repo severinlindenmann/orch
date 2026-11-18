@@ -341,6 +341,22 @@ def test_queue_mode_merges_without_waiting_for_the_hourly_merge_count_but_counts
     assert pull.counted == [("merge", PR)]
 
 
+def test_stop_ends_the_wait_without_a_verdict_and_never_merges(fake_gh):
+    pulls, merges = fake_gh
+    asked: list[int] = []
+
+    def stop():
+        asked.append(1)
+        return "the group before it was not merged" if len(asked) > 1 else None
+
+    pull = FakePull(PR, _case("pr978-second-run"))
+    o = prwait.run_one(PR, True, src=pull, queue=True, stop=stop)
+    assert o.status == "stopped" and not o.ok and merges == []
+    assert o.verdict.unknown and "the group before it was not merged" in o.line
+    pull = FakePull(PR, _case("pr978-second-run"))  # a stop that never says stop changes nothing
+    assert prwait.run_one(PR, True, src=pull, queue=True, stop=lambda: None).status == "merged"
+
+
 def test_overlap_that_github_cannot_take_in_is_left_to_the_helper(proj, tk, run, fake_gh):
     pulls, merges = fake_gh
     pulls[PR] = FakePull(
