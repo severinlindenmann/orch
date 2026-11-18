@@ -99,6 +99,11 @@ def _kit(name: str) -> bytes | None:
     return None
 
 
+# The Focus page of one ticket: t/<ticket> (the dashboard's links), the short <ticket> a person may type after
+# #addon/focus/ (report r-1118-0544), and t/t/<ticket> when a surface joins the path twice.
+PAGE_PATH = re.compile(r"(?:/t){0,2}/t_[a-z0-9]{6,16}")
+
+
 class Tracker:
     """Per ticket: turns ticket changes into run events (written to the log) and folds the log into a Board."""
 
@@ -714,7 +719,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
-        if (path == "/" or re.fullmatch(r"(/t)?/t/t_[a-z0-9]{6,16}", path)) and selfupdate.answer(self):
+        if (path == "/" or PAGE_PATH.fullmatch(path)) and selfupdate.answer(self):
             return
         if (
             path == "/ready" and self.nonce
@@ -790,7 +795,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.root, m.group(1), m.group(2), unquote(m.group(3))
             )
             return self._send(code, body, ctype, {"Cross-Origin-Resource-Policy": "same-origin", **extra})
-        if path == "/" or re.fullmatch(r"(/t)?/t/t_[a-z0-9]{6,16}", path):
+        if path == "/" or PAGE_PATH.fullmatch(path):
             pre = self.headers.get("X-Forwarded-Prefix") or ""
             pre = pre if PREFIX.fullmatch(pre) else ""
             return self._send(200, _web("index.html").replace(b"__P__", pre.encode()), TYPES[".html"])

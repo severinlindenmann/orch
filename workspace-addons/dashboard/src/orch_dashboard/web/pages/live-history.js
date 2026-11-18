@@ -43,14 +43,15 @@ function liveHistLoad(id) {
 }
 // The History button of a pane header (a toggle: the pane shows the list instead of the session).
 function liveHistButton(sess, label) {
-  if (!sess) return null;
+  if (!sess || sess.kind === 'terminal') return null; // a plain terminal has no helper, so no earlier sessions
   const on = liveHistOpen.has(sess.id);
   return h('button', {type:'button', className:'btn sm ghost', 'data-live-hist':'toggle', 'data-session':sess.id, 'data-key':'live-history',
     'aria-pressed':String(on), title:'Earlier sessions of ' + label}, 'History');
 }
 // The same toggle in the More menu of a narrow pane (draft D: History sits in More when the pane is narrow).
 function liveHistMenuItem(key) {
-  if (!liveLayerSession(key)) return null;
+  const sess = liveLayerSession(key);
+  if (!sess || sess.kind === 'terminal') return null;
   const on = liveHistOpen.has(key);
   return h('button', {type:'button', className:'live-opt', 'data-live-hist':'toggle', 'data-session':key, 'data-key':'live-history-item', 'aria-pressed':String(on)},
     liveIc('clock'), h('span', {}, on ? 'Hide history' : 'History'));

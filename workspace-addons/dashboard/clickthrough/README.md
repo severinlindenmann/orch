@@ -52,6 +52,8 @@ No real agent can run: the workspace helper is a stand-in script, and programs n
 tools (read from orch's adapter list) are stand-ins first on PATH, so a Start, a Test or a ticket pinned to a
 built-in tool runs a stand-in. `server.py` refuses to
 start otherwise. A click-through that needs a helper's own move (a chat reply, a proposal) uses `orch(...)`.
+Sync is one of the add-ons installed (off) in the demo home, so the Sync page runs against the real server with one
+sign-in (`features/f-sync-page.cjs`).
 
 ## Write one
 
