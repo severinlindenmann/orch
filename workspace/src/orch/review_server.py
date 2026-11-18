@@ -274,16 +274,28 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = self.path.split("?", 1)[0]
         if path not in ("/session", "/api/answer"):
-            return self._text(405, "not allowed")
+            return self._refuse(405, "not allowed")
         why = self._origin_check("POST", True)
         if why:
-            return self._text(403, why)
+            return self._refuse(403, why)
         if (self.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):
-            return self._text(403, "This request came from another website and was refused.")
+            return self._refuse(403, "This request came from another website and was refused.")
         body = self._body()
         if path == "/session":
             return self._session(body)
         self._answer(body)
+
+    def _refuse(self, code: int, text: str):
+        """Refuse a POST, reading its (small) body first: closing a socket with unread bytes makes Windows
+        reset the connection, and the client then never sees the refusal (WinError 10053)."""
+        try:
+            n = int(self.headers.get("Content-Length") or "0")
+            if 0 < n <= MAX_BODY:
+                self.rfile.read(n)
+        except (ValueError, OSError):
+            pass
+        self.close_connection = True
+        self._text(code, text)
 
     def _body(self) -> dict | None:
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":

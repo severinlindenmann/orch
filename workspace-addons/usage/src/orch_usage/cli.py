@@ -13,7 +13,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import store
+from . import store, switching
 from .readers import credit_reader, cswap
 from .store import PERIOD_WORDS, Refused
 
@@ -183,6 +183,8 @@ def gather(root: Path) -> dict:
         warnings.append(
             f"{d['unreadable']} account(s) in .orch/addons/usage could not be read and are skipped."
         )
+    mem = switching._read(switching.memory_path(root))  # what the loop's last look found (ORCH-620)
+    warnings += [w for w in mem.get("alerts") or [] if isinstance(w, str)]
     return {"accounts": out, "switcher": found is not None, "warnings": warnings}
 
 
@@ -405,6 +407,9 @@ def _loop_cmd(args, root: Path) -> int:
             line += " " + NO_SWITCHER
         else:
             line += " Switching is " + ("on." if on else "off: Usage only shows what it would switch.")
+        line += "".join(
+            f"\nWarning: {w}" for w in (switching._read(switching.memory_path(root)).get("alerts") or [])
+        )
         if last:
             line += f"\nLast look {last.get('at', '')[:16].replace('T', ' ')} UTC: {last.get('did')} ({last.get('why')})."
         print(json.dumps(data, ensure_ascii=False) if args.json else line)
