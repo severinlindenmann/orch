@@ -34,7 +34,8 @@
     root.append(...(INAPP ? [] : [h('header', {class: 'fx-top'}, h('span', {class: 'meta fx-workspace', text: 'Focus'}), h('button', {class: 'btn ghost sm', 'data-act': 'help', text: 'Help'}))]),
       h('main', {class: 'fx-pick'}, h('h1', {text: 'Focus'}), h('p', {class: 'meta fx-sub', text: 'Loading your tickets…'}), skeleton()));
     /* the lists wait for the first Live now answer (at most a few seconds), so nothing moves after they show */
-    const tickets = fetch(P + '/api/tickets').then(r => { if (!r.ok) throw Error(); return r.json(); });
+    /* a call that never answers must not leave the grey bars up for ever (ORCH-398): after TICKETS_WAIT_MS the page says so */
+    const tickets = fetch(P + '/api/tickets', {signal: AbortSignal.timeout(TICKETS_WAIT_MS)}).then(r => { if (!r.ok) throw Error(); return r.json(); });
     /* Focus opens on this start page, the Helpers list first (ORCH-61); the next ticket that needs the person is one
        button below it, never a jump. */
     tickets.then(payload => S.views.livenow.ready(LIVE_WAIT_MS).then(() => payload)).then(payload => {
@@ -85,7 +86,7 @@
         box.append(h('section', {class: 'fx-pick-group fx-group-done'}, h('div', {class: 'row'}, h('h2', {class: 'grow'}, 'Done ', h('span', {class: 'meta', text: '(' + done.length + ')'})), done.length > 5 ? search : null), card));
       }
       S.views.livenow.hideListed();
-    }).catch(() => root.querySelector('.fx-pick').append(h('p', {role: 'alert', text: 'Could not load tickets. Reload to try again.'})));
+    }).catch(() => { const box = root.querySelector('.fx-pick'); box.querySelector('.fx-skel')?.remove(); box.append(h('p', {role: 'alert', text: 'Could not load tickets. Reload to try again.'})); });
     S.views.areas.mount(root.querySelector('.fx-pick'));
     S.views.livenow.mount(root.querySelector('.fx-pick'));
     S.views.jobs.mount(root.querySelector('.fx-pick'));
@@ -119,6 +120,7 @@
   }
 
   const LIVE_WAIT_MS = 4000;
+  const TICKETS_WAIT_MS = 10000;
   /* the page's shape before the tickets arrive, so nothing jumps */
   function skeleton() {
     return h('div', {class: 'fx-skel', 'aria-hidden': 'true'}, [0, 1, 2].map(() => h('div', {class: 'skeleton fx-skel-row'})));

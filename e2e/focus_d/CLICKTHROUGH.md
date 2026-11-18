@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-25 steps: 7 ready (the script clicks them), 18 pending (not built yet).
+27 steps: 11 ready (the script clicks them), 16 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -95,20 +95,20 @@ Must be seen:
 ## 6. Focus button on a ticket and Open ticket on a session
 
 - Part: wall (draft D feature 3)
-- State: pending, waits for: The wall (crew task wall)
+- State: ready, clicked by the script
 - Pictures: `fd-06-focus-button-1280.png`, `fd-06-focus-button-1920.png`, `fd-06-focus-button-390.png`
 
 Do:
 
-1. Open a ticket page.
-2. Press its Focus button.
-3. In the session press Open ticket.
+1. Open Tickets and press the Focus button of a row.
+2. Open a ticket page and press its Focus button.
+3. In the session press Open ticket, also from full screen.
 
 Must be seen:
 
-- The button says Watch, Answer, Open or Start to fit the ticket.
-- The session opens in the layer.
-- Open ticket goes back to the same ticket page.
+- Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.
+- The session opens in the layer and the page stays.
+- Open ticket goes back to the same ticket page; the session stays open.
 
 ## 7. Pin a session and give it your own name
 
@@ -243,7 +243,7 @@ Must be seen:
 ## 14. Start: continue, fresh start or an earlier session
 
 - Part: sessions (draft D feature 4, 12)
-- State: pending, waits for: Start choice, earlier sessions and sessions without a ticket (crew tasks of the Wall and sessions stage)
+- State: ready, clicked by the script
 - Pictures: `fd-14-start-1280.png`, `fd-14-start-1920.png`, `fd-14-start-390.png`
 
 Do:
@@ -257,6 +257,7 @@ Must be seen:
 - One question: continue the last conversation, fresh start, or reopen an earlier session.
 - Up to 10 earlier sessions with date and step.
 - The usual tool and model are preselected: one click starts it.
+- How many helper places are in use; when all are taken, how many wait in line, and a start waits in line.
 
 ## 15. Sessions without a ticket
 
@@ -277,19 +278,21 @@ Must be seen:
 ## 16. Tool, model and open time on every session
 
 - Part: sessions (draft D feature 12)
-- State: pending, waits for: Live data for every session (crew task live-data)
+- State: ready, clicked by the script
 - Pictures: `fd-16-tool-model-1280.png`, `fd-16-tool-model-1920.png`, `fd-16-tool-model-390.png`
 
 Do:
 
-1. Look at a tile and at a pane header.
-2. Open the model choice of a running session.
+1. Open a session that needs you from the bar.
+2. Look at the pane: what it does now, its last lines and the line under them.
+3. Open the model choice of a working session and pick another model.
 
 Must be seen:
 
-- Tool and model are shown (for example "Claude CLI · Opus").
-- How long it is open and when it closes for being idle.
-- A new model applies from the next fresh start and says so.
+- The open question, the last lines of its screen, then tool and model (for example "Helper · Opus").
+- How long it is open and how long it stays (warm while it works, or when it closes for being idle).
+- All of it stays current while you look; the keyboard place does not jump.
+- A new model applies when the helper finishes its current step (or at its next start) and says so.
 
 ## 17. Chat: messages with the results inside
 
@@ -438,4 +441,35 @@ Must be seen:
 - The wall is one column.
 - The layer opens at the bottom and shows one session; right falls back to bottom.
 - Nothing scrolls sideways; every button can be reached.
+
+## 26. Earlier sessions in the History tab, reopened with one click
+
+- Part: sessions (draft D feature 4)
+- State: ready, clicked by the script
+- Pictures: `fd-26-history-1280.png`, `fd-26-history-1920.png`, `fd-26-history-390.png`
+
+Do:
+
+1. Open a session in the layer and press History (in More when the pane is narrow).
+2. Press Reopen on an earlier session.
+
+Must be seen:
+
+- Up to 10 sessions of the ticket, newest first, each with its time, first message and number of messages.
+- The session in use says In use; one that is not on this computer has no Reopen.
+- Reopen starts the helper on that conversation and the list closes.
+
+## 27. Change the model of a running session
+
+- Part: sessions (draft D feature 12)
+- State: pending, waits for: Start choice, earlier sessions and sessions without a ticket (crew tasks of the Wall and sessions stage)
+- Pictures: `fd-27-model-choice-1280.png`, `fd-27-model-choice-1920.png`, `fd-27-model-choice-390.png`
+
+Do:
+
+1. Open the model choice of a running session.
+
+Must be seen:
+
+- A new model applies from the next fresh start and says so.
 

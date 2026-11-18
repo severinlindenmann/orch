@@ -63,7 +63,7 @@
   const asked = new Map();
   addEventListener('message', e => {
     const d = e.data;
-    if (e.origin !== location.origin || e.source !== window.parent || !d || typeof d !== 'object' || !asked.has(d.id)) return;
+    if ((e.origin !== location.origin && !(window.OrchFrame || {}).on) || e.source !== window.parent || !d || typeof d !== 'object' || !asked.has(d.id)) return;
     if (d.type === 'orch.act.done') asked.get(d.id)({ok: true, answer: d.answer});
     else if (d.type === 'orch.act.failed') asked.get(d.id)({ok: false, error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
   });
@@ -73,7 +73,7 @@
       const timer = setTimeout(() => finish({ok: false, error: 'The dashboard did not answer. Reload the page and try again.'}), 30000);
       function finish(r) { clearTimeout(timer); asked.delete(id); resolve(r); }
       asked.set(id, finish);
-      // the dashboard's per-frame code (kit/frame.js, ORCH-186): the page runs in a sandboxed frame
+      // sandboxed frame: its own origin is opaque (location.origin is still the dashboard's address), so the dashboard checks this frame and its code (kit/frame.js), not an origin
       window.parent.postMessage({type: 'orch.act', id, verb, target, chan: (window.OrchFrame || {}).chan}, location.origin);
     });
   }

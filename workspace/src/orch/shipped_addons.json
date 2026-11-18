@@ -431,7 +431,8 @@
   "dashboard": {
    "icon": "box",
    "label": "Services",
-   "order": 50
+   "order": 50,
+   "subtitle": "What keeps running on this computer for this workspace."
   },
   "description": "Keep this workspace's background services running and see their state and log.",
   "gitignore": [

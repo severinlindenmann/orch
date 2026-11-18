@@ -249,3 +249,36 @@ def test_a_branch_build_skips_a_failed_commit_and_takes_the_next_one(ws, branch,
     )
     assert autoupdate.tick(ws.root, start, now=t + autoupdate.BRANCH_CHECK_EVERY + 10) == "started"
     assert start.calls == 1
+
+
+def test_a_branch_build_waits_for_helpers_at_most_an_hour(ws, branch):
+    autoupdate.set_enabled(True)
+    helper_running(ws.root, os.getpid())  # a helper that never ends (the demo's stand-in helpers)
+    start = Starter()
+    assert autoupdate.tick(ws.root, start, now=NOW) == "waiting: 1 helper is working"
+    t = NOW + autoupdate.RETRY_BUSY + 1
+    assert autoupdate.tick(ws.root, start, now=t) == "waiting: 1 helper is working"
+    assert start.calls == 0
+    # an hour of waiting: a development build updates anyway
+    assert autoupdate.tick(ws.root, start, now=NOW + autoupdate.BRANCH_MAX_WAIT + 1) == "started"
+    assert start.calls == 1
+
+
+def test_a_release_build_keeps_waiting_for_helpers(ws):
+    autoupdate.set_enabled(True)
+    helper_running(ws.root, os.getpid())
+    start = Starter()
+    assert autoupdate.tick(ws.root, start, now=NOW) == "waiting: 1 helper is working"
+    later = NOW + 6 * 3600
+    assert autoupdate.tick(ws.root, start, now=later) == "waiting: 1 helper is working"
+    assert start.calls == 0
+
+
+def test_a_person_clicking_still_holds_a_branch_build_back(ws, branch):
+    autoupdate.set_enabled(True)
+    helper_running(ws.root, os.getpid())
+    start = Starter()
+    assert autoupdate.tick(ws.root, start, now=NOW).startswith("waiting")
+    late = NOW + autoupdate.BRANCH_MAX_WAIT + 1
+    assert autoupdate.tick(ws.root, start, clicking=True, now=late).startswith("waiting: a person")
+    assert start.calls == 0

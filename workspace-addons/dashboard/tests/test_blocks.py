@@ -605,3 +605,129 @@ def test_a_list_switch_shows_its_words_beside_it(tmp_path):
     nodes = list(walk(run(tmp_path, view)))
     words = [n for n in nodes if n["cls"] == "switch-text"]
     assert len(words) == 1 and words[0]["text"] == "Repeats" and words[0]["attrs"]["aria-hidden"] == "true"
+
+
+# ---- list and panel (split, ORCH-326)
+
+
+def _services():
+    return _page("valid-services-page.json")
+
+
+def _by_data(tree, key, value=None):
+    return [x for x in walk(tree) if key in x["data"] and (value is None or x["data"][key] == value)]
+
+
+@node
+def test_split_draws_a_list_and_one_shown_panel_per_item(tmp_path):
+    tree = run(tmp_path, _services())
+    split = next(x for x in walk(tree) if x["cls"] == "split-view")
+    assert (
+        "picked" not in split["data"]
+    )  # nothing chosen yet: the first item is shown, the list leads on a phone
+    rows = _by_data(tree, "splitRow")
+    assert [r["data"]["splitRow"] for r in rows] == [
+        "budget-guard",
+        "web-preview",
+        "dashboard-front",
+        "old-test-page",
+    ]
+    assert "cur" in rows[0]["cls"].split() and not any("cur" in r["cls"].split() for r in rows[1:])
+    panels = _by_data(tree, "splitPanel")
+    assert [p.get("hidden", False) for p in panels] == [False, True, True, True]
+    picks = [x for x in _by_data(tree, "splitPick") if x["tag"] == "a"]
+    assert picks[1]["attrs"]["href"] == "?svc=web-preview"
+    assert [x["text"] for x in walk(tree) if x["tag"] == "h2" and x["cls"] == ""] == [
+        "Managed with orch",
+        "Found on this computer",
+    ]
+    assert "1 running · 1 stopped · 1 failing" in texts(tree)
+    back = [x for x in _by_data(tree, "splitPick", "") if x["tag"] == "button"]
+    assert len(back) == 4 and back[0]["text"] == "← All services"
+
+
+@node
+def test_split_buttons_switch_log_and_remove(tmp_path):
+    tree = run(tmp_path, _services())
+    web = _by_data(tree, "splitPanel", "web-preview")[0]
+    acts = [
+        (x["text"], x["data"]["verb"])
+        for x in walk(web)
+        if x["data"].get("addonAct") and x["tag"] == "button"
+    ]
+    assert acts == [("Stop", "stop"), ("Restart", "restart"), ("", "auto-off"), ("Remove", "remove")]
+    assert all(x["data"]["target"] == "web-preview" for x in walk(web) if x["data"].get("addonAct"))
+    sw = next(x for x in walk(web) if x["cls"] == "switch")
+    assert sw["attrs"]["role"] == "switch" and sw["attrs"]["aria-checked"] == "true"
+    assert [x["text"] for x in walk(web) if x["data"].get("splitLog")] == ["Open log"]
+    log = next(x for x in walk(web) if x["cls"] == "log-lines")
+    assert [x["text"] for x in walk(log) if x["tag"] == "li"][-1] == "12:15:40 key loaded: ••••••"
+    rm = next(x for x in walk(web) if x["data"].get("verb") == "remove")
+    assert "danger" in rm["cls"].split() and rm["data"]["confirm"] == "Remove Web preview?"
+    assert rm["data"]["confirmLines"].split("\n")[0] == "It stops now and leaves this list."
+    assert rm["data"]["keep"] == "Keep it"
+    made = [x for x in walk(web) if x["tag"] == "a" and x["attrs"].get("href", "").startswith("#ticket/")]
+    assert made and made[0]["kids"][0]["text"] == "ORCH-22"
+    stopped = _by_data(tree, "splitPanel", "dashboard-front")[0]
+    assert [x["text"] for x in walk(stopped) if x["data"].get("addonAct") and x["text"]][:1] == ["Start"]
+    assert [x["cls"] for x in walk(stopped) if x["cls"].startswith("pill")] == ["pill"]
+    assert "has not written anything yet" in texts(stopped)
+    found = _by_data(tree, "splitPanel", "old-test-page")[0]
+    assert [(x["text"], x["data"]["verb"]) for x in walk(found) if x["data"].get("addonAct")] == [
+        ("Manage with orch", "adopt")
+    ]
+
+
+@node
+def test_split_question_is_pinned_and_its_service_has_no_list_button(tmp_path):
+    tree = run(tmp_path, _services())
+    banner = [x for x in walk(tree) if x["cls"] == "banner attn"]
+    assert len(banner) == 1 and "Budget guard keeps stopping" in texts(banner[0])
+    got = [x["text"] or texts(x) for x in walk(banner[0]) if x["tag"] in ("button", "a")]
+    assert got == ["Restart", "Stop", "Look into it"]
+    row = _by_data(tree, "splitRow", "budget-guard")[0]
+    assert not [x for x in walk(row) if x["tag"] == "button"]
+    panel = _by_data(tree, "splitPanel", "budget-guard")[0]
+    assert "The question above is about this one." in texts(panel)
+    assert [x["cls"] for x in walk(panel) if x["cls"].startswith("pill")] == ["pill failed"]
+
+
+@node
+def test_split_action_for_another_item_or_op_is_not_drawn(tmp_path):
+    page = _services()
+    items = page["blocks"][0]["groups"][0]["items"]
+    items[1]["panel"]["buttons"][0]["action"]["args"]["target"] = (
+        "budget-guard"  # Stop aimed at another service
+    )
+    items[1]["panel"]["buttons"][1]["action"]["op"] = "link.stop"
+    items[1]["panel"]["danger"]["action"]["args"]["target"] = "dashboard-front"
+    tree = run(tmp_path, page)
+    web = _by_data(tree, "splitPanel", "web-preview")[0]
+    assert [x["data"]["verb"] for x in walk(web) if x["data"].get("addonAct")] == ["auto-off"]
+
+
+@node
+def test_split_with_no_items_shows_one_sentence_and_one_button(tmp_path):
+    tree = run(tmp_path, _page("valid-services-empty.json"))
+    assert not _by_data(tree, "splitRow")
+    t = texts(tree)
+    assert "No services yet" in t and "keep running on this computer" in t
+    links = [x for x in walk(tree) if x["tag"] == "a"]
+    assert [(x["text"] or texts(x), x["attrs"]["href"]) for x in links] == [("Ask the helper", "#chat")]
+
+
+def test_split_checks_match_the_schema_on_bad_input():
+    from orch_dashboard.views import check_view
+
+    good = _services()
+    assert check_view(good)["blocks"][0]["type"] == "split"
+    for mutate in (
+        lambda b: b["groups"][0]["items"][0].update(id="Bad Id"),
+        lambda b: b["groups"][0]["items"][0]["panel"].update(command="rm -rf"),
+        lambda b: b["groups"][0]["items"][0]["panel"]["log"]["lines"].append("x" * 201),
+        lambda b: b["groups"][0]["items"][0]["state"].update(tone="purple"),
+        lambda b: b.update(param="svc=1"),
+    ):
+        bad = json.loads(json.dumps(good))
+        mutate(bad["blocks"][0])
+        assert check_view(bad) is None

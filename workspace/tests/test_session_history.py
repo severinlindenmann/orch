@@ -100,3 +100,95 @@ def test_record_session_keeps_and_continue_switches(proj, run, new_ticket, tmp_p
     assert code == 0, err
     s = tickets.load(root, tid)["sessions"][0]
     assert s["id"] == "s-one" and [e["id"] for e in s["earlier"]] == ["s-two"]
+
+
+def test_a_ticket_keeps_its_last_ten_sessions(proj, new_ticket, tmp_path):
+    from orch import runs, tickets
+
+    tid = new_ticket()
+    for i in range(14):
+        tickets.record_session(tmp_path, tid, "claude", f"s-{i:02d}", runs.host())
+    s = tickets.load(tmp_path, tid)["sessions"][0]
+    kept = [s["id"]] + [e["id"] for e in s["earlier"]]
+    assert kept == [f"s-{i:02d}" for i in range(13, 3, -1)]  # the newest 10, newest first
+    assert tickets.SESSIONS_KEPT == 10
+
+
+def test_ten_counts_every_tool_and_machine_and_keeps_those_in_use(proj, new_ticket, tmp_path, monkeypatch):
+    from orch import tickets
+
+    tid = new_ticket()
+    clock = iter(f"2026-11-17T10:{m:02d}:00Z" for m in range(60))
+    monkeypatch.setattr(tickets, "now", lambda: next(clock))
+    for i in range(6):
+        tickets.record_session(tmp_path, tid, "claude", f"c-{i}", "h1")
+        tickets.record_session(tmp_path, tid, "codex", f"x-{i}", "h1")
+    tickets.record_session(tmp_path, tid, "claude", "other-host", "h2")
+    ss = tickets.load(tmp_path, tid)["sessions"]
+    ids = [x["id"] for s in ss for x in [s, *(s.get("earlier") or [])]]
+    assert len(ids) == 10
+    assert {"c-5", "x-5", "other-host"} <= set(ids)  # the ones in use always stay
+    assert not {"c-0", "x-0", "c-1"} & set(ids)  # the oldest went first, whatever the tool
+
+
+def test_reopen_is_for_a_person_and_a_conversation_on_this_computer(proj, new_ticket, tmp_path, monkeypatch):
+    from orch import runs, session_history, tickets
+    from orch.errors import Refused
+
+    tid = new_ticket()
+    for sid in ("s-one", "s-two"):
+        tickets.record_session(tmp_path, tid, "claude", sid, runs.host())
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    for bad, why in (
+        (("s-one", "agent:x"), "Only a person"),
+        (("../x", "human:p"), "not a session id"),
+        (("s-nine", "human:p"), "does not belong"),
+        (("s-one", "human:p"), "not on this computer"),
+    ):
+        try:
+            session_history.reopen(tmp_path, tid, bad[0], bad[1])
+        except Refused as e:
+            assert why in str(e)
+        else:
+            raise AssertionError(bad)
+    _w(tmp_path / "cfg" / "projects" / "-p" / "s-one.jsonl", [{"type": "mode"}])
+    rows = {r["id"]: r for r in session_history.sessions(tickets.load(tmp_path, tid), root=tmp_path)}
+    assert rows["s-one"]["reopenable"] is True and rows["s-two"]["reopenable"] is False  # in use
+    rec = session_history.reopen(tmp_path, tid, "s-one", "human:p")
+    assert rec["agent"] == "claude"
+    assert tickets.sessions_for(tmp_path, tid, tickets.load(tmp_path, tid), "claude", runs.host()) == "s-one"
+    monkeypatch.setattr(runs, "read", lambda root, t: {"pid": 1, "run": "r"})
+    monkeypatch.setattr(runs, "state", lambda rec: "alive")
+    try:
+        session_history.reopen(tmp_path, tid, "s-two", "human:p")
+    except Refused as e:
+        assert "Stop it first" in str(e)
+    else:
+        raise AssertionError("a working helper must be stopped first")
+
+
+def test_start_with_session_continues_that_conversation(proj, run, new_ticket, tmp_path, monkeypatch):
+    from orch import runs, tickets
+
+    tid = new_ticket()
+    for sid in ("s-one", "s-two"):
+        tickets.record_session(tmp_path, tid, "claude", sid, runs.host())
+    _w(tmp_path / "cfg" / "projects" / "-p" / "s-one.jsonl", [{"type": "mode"}])
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    seen = {}
+
+    def fake_start(root, t, by, **kw):
+        seen.update(kw, sid=tickets.sessions_for(root, t, tickets.load(root, t), kw["agent"], runs.host()))
+        done = {"notes": [], "resumed": True, "mode": "oneshot", "run": "r1", "log": "l"}
+        return {**done, "agent": kw["agent"]}
+
+    monkeypatch.setattr(runs, "start", fake_start)
+    code, _, err = run("run", "start", tid, "--session", "s-one", "--fresh", "--by", "human:p")
+    assert code == 2 and "Pick one" in err and not seen
+    code, _, err = run("run", "start", tid, "--session", "s-one", "--agent", "codex", "--by", "human:p")
+    assert code == 2 and "only be continued there" in err and not seen
+    code, _, err = run("run", "start", tid, "--session", "s-one", "--by", "agent:x")
+    assert code == 2 and not seen
+    code, out, err = run("run", "start", tid, "--session", "s-one", "--by", "human:p", "--json")
+    assert code == 0, err
+    assert seen["agent"] == "claude" and seen["sid"] == "s-one" and seen["fresh"] is False

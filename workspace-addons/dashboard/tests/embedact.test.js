@@ -41,7 +41,6 @@ test("the person's click runs the shown add-on's act and tells the page", async 
   const {ctx, calls, frameWindow} = setup();
   await ctx.runEmbedAct(ctx.embedActRequest(msg(frameWindow)));
   assert.deepEqual(plain(calls.acts), [['addon.act', {addon:'usage', verb:'limit', target:'a_abc123:week:90%'}]]);
-  // to '*': the shipped page runs in a sandboxed frame (origin "null"); an answer sent to this origin is dropped
   assert.deepEqual(plain(calls.posts), [[{type:'orch.act.done', answer:{changed:true}, id:'abcdefgh1234'}, '*']]);
 });
 

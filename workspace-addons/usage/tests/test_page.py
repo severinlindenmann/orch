@@ -227,15 +227,14 @@ def test_server_serves_page_model_and_kit_only(served):
     assert _get(served, "/kit/gallery.html")[0] == 404
 
 
-def test_page_runs_in_the_dashboards_sandboxed_frame(served):
-    # ORCH-307: the dashboard shows pages orch ships in a sandboxed frame (ORCH-186). Without kit/frame.js, loaded
-    # before any other script, the page's own data call is refused there and the page shows "Failed to fetch".
+def test_page_loads_the_frame_code_first(served):
+    # The dashboard shows this page in a sandboxed frame (origin "null"): without kit/frame.js first, its fetch of
+    # api/page carries no frame pass and the browser blocks it ("Failed to fetch", ORCH-381 / ORCH-397).
     code, body, _ = _get(served, "/", {"X-Forwarded-Prefix": "/addon/usage"})
-    scripts = re.findall(rb'<script src="([^"]+)"', body)
-    assert code == 200 and scripts[0] == b"/addon/usage/kit/frame.js"
-    assert _get(served, "/kit/frame.js")[0] == 200
-    js = (Path(page.__file__).parent / "web" / "usage.js").read_text(encoding="utf-8")
-    assert "type: 'orch.act', id, verb, target, chan: (window.OrchFrame || {}).chan" in js
+    scripts = re.findall(rb'<script src="([^"]+)"([^>]*)>', body)
+    assert code == 200 and scripts[0] == (b"/addon/usage/kit/frame.js", b"")  # first, and not deferred
+    code, body, _ = _get(served, "/kit/frame.js")
+    assert code == 200 and b"X-Orch-Frame" in body
 
 
 def test_server_only_reads_and_proves_its_start(served):
