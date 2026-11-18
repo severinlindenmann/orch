@@ -265,12 +265,13 @@ def _review_answer(a):
 
 def review_error(out, stderr: str, status: int) -> str:
     """The JSON the Review page reads for a refused card: {"ok": false, "error": {"code", "message"}}. The core's
-    codes (changed, too_large, not_found, needs_person, refused) pass through; anything else is "refused"."""
+    codes (changed, too_large, not_found, needs_person, refused, busy, decided) pass through; anything else is
+    "refused". decided (ORCH-548): the Check result was decided elsewhere; the message says who and when."""
     code = out.get("code") if isinstance(out, dict) else None
     msg = out.get("error") if isinstance(out, dict) else None
     if not isinstance(msg, str) or not msg:
         msg = (stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
-    if code not in ("changed", "too_large", "not_found", "needs_person", "refused", "busy"):
+    if code not in ("changed", "too_large", "not_found", "needs_person", "refused", "busy", "decided"):
         code = "refused"
     return json.dumps({"ok": False, "error": {"code": code, "message": msg[:500]}}, ensure_ascii=False)
 
