@@ -278,3 +278,41 @@ def test_bind_again_waits_for_a_busy_port_and_gives_up_at_the_deadline(tmp_path,
         with pytest.raises(OSError) as e:
             cli._bind_again(tmp_path, busy.getsockname()[1], wait=0.3)
         assert e.value.errno == 98 or e.value.errno == 48  # Linux / macOS "Address already in use"
+
+
+def test_a_taken_port_gives_a_plain_message_not_a_traceback(tmp_path, monkeypatch, capsys):
+    """ORCH-632: `orch dashboard` on a port another program holds printed 'Address already in use' as a
+    Python traceback after the self-update retry gave up."""
+    import errno as _errno
+
+    from orch_dashboard import cli
+
+    (tmp_path / ".orch").mkdir()
+    monkeypatch.setattr(cli.service, "running", lambda root: None)
+    monkeypatch.setattr(cli, "_listen", lambda root: (None, None))
+
+    def busy(*a, **k):
+        raise OSError(_errno.EADDRINUSE, "Address already in use")
+
+    monkeypatch.setattr(cli, "make_server", busy)
+    monkeypatch.setattr(cli, "_bind_again", busy)
+    assert cli.main(["--dir", str(tmp_path), "serve", "--port", "8420"]) == 1
+    err = capsys.readouterr().err
+    assert "Port 8420 is taken by another program" in err and "Traceback" not in err
+
+
+def test_orch_dashboard_while_the_background_one_runs_prints_its_link(tmp_path, monkeypatch, capsys):
+    from orch_dashboard import cli
+
+    (tmp_path / ".orch").mkdir()
+    monkeypatch.setattr(cli.service, "_record", lambda root: {"pid": os.getpid() + 1})
+    monkeypatch.setattr(cli.service, "running", lambda root: {"pid": os.getpid() + 1, "port": 8420})
+    monkeypatch.setattr(cli, "make_server", lambda *a, **k: pytest.fail("must not bind"))
+    assert cli.main(["--dir", str(tmp_path)]) == 0
+    assert "The dashboard already runs for" in capsys.readouterr().out
+    # a self-update restart is the same pid: it binds its port again, and its record is not even checked
+    monkeypatch.setattr(cli.service, "_record", lambda root: {"pid": os.getpid()})
+    monkeypatch.setattr(
+        cli.service, "running", lambda root: pytest.fail("must not verify (it drops the file)")
+    )
+    assert cli._running_elsewhere(tmp_path) is None

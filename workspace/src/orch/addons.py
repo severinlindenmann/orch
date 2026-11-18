@@ -260,6 +260,18 @@ def _is_local(r: str) -> bool:
     return bool(o.get("local")) and r == o["repo"] and Path(r).is_dir()
 
 
+def _origin_commit() -> str | None:
+    """The commit uv recorded for a git install (direct_url.json vcs_info.commit_id), else None."""
+    from importlib.metadata import PackageNotFoundError, distribution
+
+    try:
+        d = json.loads(distribution("orch-workspace").read_text("direct_url.json") or "{}")
+    except (PackageNotFoundError, OSError, ValueError):
+        return None
+    vcs = d.get("vcs_info") if isinstance(d, dict) else None
+    return _sha_or_none(vcs.get("commit_id")) if isinstance(vcs, dict) else None
+
+
 # A GitHub source zip (what spec() installs), as uv records it: .../archive/[refs/heads/|refs/tags/]<ref>.zip
 _GITHUB_ZIP = re.compile(
     r"^(?P<repo>https://github\.com/[^/]+/[^/]+)/archive/(?:refs/(?:heads|tags)/)?(?P<ref>.+)\.zip$"
@@ -1848,7 +1860,9 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
 
 
 def help_lines(root: Path) -> list[str]:
-    return [f"  {n:<12}{m['description']}" for n, m in sorted(active_manifests(root).items())]
+    rows = sorted(active_manifests(root).items())
+    w = max([12, *(len(n) + 2 for n, _ in rows)])  # long names keep a gap to their text
+    return [f"  {n:<{w}}{m['description']}" for n, m in rows]
 
 
 # ---------------------------------------------------------------- add / remove / uninstall
@@ -2676,9 +2690,10 @@ def _restart_locked(
         lines.append(f"{root.name}: {note}")
     for n in sorted(names):
         diff = launchenv.differs((recorded or {}).get(n), used)
-        if diff:
+        if diff:  # say where each came from: HOME may be the system's, not this terminal's (ORCH-632)
+            took = " and ".join(f"{k} from {launchenv.source(k, over)}" for k in diff)
             lines.append(
-                f"{label(n)} started with a different {'/'.join(diff)}; restarted with this terminal's "
+                f"{label(n)} started with a different {'/'.join(diff)}; restarted with {took} "
                 f"(run orch stop, then orch start, in {root} if that is wrong)"
             )
     errors: dict[str, str] = {}
@@ -2721,7 +2736,7 @@ def update(
     if after_install:
         from orch import updateinfo
 
-        sha_now = _source_sha()
+        sha_now = _source_sha() or _sha_or_none(updateinfo.origin_sha())  # no network: what uv recorded
         _save_installed(sha_now, updateinfo.release_now(sha_now))
         reg = _current_registry()
         if reg:
