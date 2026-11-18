@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerSort, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerSort, liveAskModel, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -247,4 +247,14 @@ test('a drag ends when the grip loses the pointer (a repaint mid-drag), and keep
 test('a window resize draws the layer again only across the phone width', () => {
   assert.doesNotMatch(page, /addEventListener\('resize', \(\) => \{ if \(document\.getElementById\('live-dock'\)\) \{ liveLayerPainted = ''/);
   assert.match(page, /if \(now !== phone\)/);
+});
+
+test('the pane shows the waiting question with its options and answers it there (ORCH-675)', () => {
+  const {liveAskModel} = load();
+  const t = {questions:[{id:'q1', answer:'x', text:'old'}, {id:'q2', digest:'d', text:'Which banner colour should I use?', options:['Blue', 'Green', '']}]};
+  assert.deepEqual(JSON.parse(JSON.stringify(liveAskModel(t))), {id:'q2', digest:'d', text:'Which banner colour should I use?', options:['Blue', 'Green'], plain:true});
+  assert.equal(liveAskModel({questions:[{id:'q1', answer:'x'}]}), null);
+  assert.equal(liveAskModel({}), null);
+  assert.equal(liveAskModel({questions:[{id:'q3', kind:'plan', text:'Plan?'}]}).plain, false);
+  assert.match(source, /liveAskFill[^]*?act\('answer', \{ticket:id, question:q\.id, digest:q\.digest/, 'the answer is the same op a question card sends');
 });
