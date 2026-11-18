@@ -1411,9 +1411,12 @@ def start(
     text: str | None = None,
     agent: str | None = None,
     priority: str = "normal",
+    credit: dict | None = None,
 ) -> dict:
     """Start (or continue) the agent on a ticket. mode None = live in tmux when the agent and the machine can,
-    else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent."""
+    else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent.
+    credit: run on an API key ({"account", "key", "why"}, keystart.py): one step at a time, the key given only
+    to the helper, the reason and the spend on the ticket."""
     from orch import runs_live, worktrees
 
     tickets.load(root, tid)  # an unknown ticket is refused before anything is planned or spawned
@@ -1429,6 +1432,13 @@ def start(
     a = adapters.load(name, root)
     adapters.check_start_folder(name, root)  # live or oneshot, any agent: before anything is claimed
     notes = []
+    if credit is not None:
+        from orch import keystart
+
+        credit = keystart.check(root, name, credit)  # three plain strings; refused before anything is claimed
+        if mode == "live":
+            notes.append("A start on an API key works one step at a time; it does not open a live session.")
+        mode = "oneshot"
     live_ok = runs_live.available(a)
     if mode is None and any(i.get("live_retry") for i in undelivered(root, tid)):
         mode = "oneshot"  # a live session did not take this input (check_submit): one step at a time now
@@ -1476,6 +1486,12 @@ def start(
     )
     notes += copy_notes
     try:
+        if (
+            credit is not None
+        ):  # on the run record before the wrapper starts: names and words only, never a value
+            set_process_fields(root, tid, rec["run"], credit=credit)
+            with contextlib.suppress(Exception):
+                tickets.log(root, tid, keystart.start_line(credit), by)
         p = plan(root, tid, fresh=fresh, mode=mode, allow=allow, agent=name)
         if p.get("note"):
             notes.append(p["note"])
@@ -1565,14 +1581,50 @@ def _run_turn(
     on_proc=None,
     watchdog: float | None = None,
     flags: dict | None = None,
+    key: dict | None = None,
 ):
     """One agent process. Returns (exit code, the output of this turn). watchdog: an agent that wrote no
     output within that many seconds is hung: its process tree is ended (kill_tree: SIGTERM, then SIGKILL)
-    and flags["hung"] is set."""
+    and flags["hung"] is set. key: a run on an API key (wrap: root, run, tid, name, credit, turns): the key is
+    handed to this process only (keystart.handoff), and the turn's spend is written before and after it."""
     log.parent.mkdir(parents=True, exist_ok=True)
     start = log.stat().st_size if log.exists() else 0
+    hand = None
+    secret = None
     with open_log(log) as out:
         try:
+            pass_fds: tuple = ()
+            if key is not None:
+                from orch import keystart
+
+                try:
+                    hand = keystart.handoff(
+                        key["root"],
+                        key["run"],
+                        key["tid"],
+                        key["name"],
+                        key["credit"],
+                        env,
+                        argv[0] if argv else "",
+                    )
+                except Refused as e:
+                    said = f"orch could not hand the API key to the agent: {e}\n"
+                    out.write(said.encode())
+                    return 1, said
+                env, pass_fds, secret = hand.env, hand.pass_fds, hand.secret
+                key["n"] = key.get("n", 0) + 1
+                key["row"] = f"{key['run']}:{key['n']}"
+                try:  # unknown until the turn says otherwise; a paid step that cannot be counted never starts
+                    keystart.write_spend(key["root"], key["row"], key["tid"], key["credit"], None)
+                except OSError:
+                    hand.close()
+                    hand.forget()
+                    key["row"] = None
+                    said = (
+                        "orch could not write down the spend of this step, so it did not start the agent.\n"
+                    )
+                    out.write(said.encode())
+                    return 1, said
             proc = subprocess.Popen(
                 argv,
                 cwd=root,
@@ -1581,11 +1633,21 @@ def _run_turn(
                 stdout=out,
                 stderr=subprocess.STDOUT,
                 start_new_session=os.name != "nt",  # its own group: stop can end it with its helpers
+                **({"pass_fds": pass_fds} if pass_fds else {}),
             )
+            if hand is not None:
+                hand.after_spawn()  # the value into the pipe, both ends closed here
         except OSError as e:
+            if hand is not None:
+                hand.close()
             said = f"orch could not start the agent: {e}\n"
             out.write(said.encode())
             return 127, said
+        finally:
+            if hand is not None:
+                hand.close()
+                hand.forget()
+            env = {}  # nothing below needs it; a key in it does not stay around in this frame
         if on_proc:
             on_proc(proc)
         if on_started:
@@ -1606,9 +1668,23 @@ def _run_turn(
                     break
                 time.sleep(0.2)
         rc = proc.wait()
+    if key is not None:
+        from orch import keystart
+
+        keystart.scrub_log(log, start, secret)
+        secret = None
     with open(log, "rb") as f:
         f.seek(start)
-        return rc, f.read().decode("utf-8", "replace")
+        text = f.read().decode("utf-8", "replace")
+    if key is not None and key.get("row"):
+        spent = keystart.turn_spend(key["name"], text, key["root"])
+        with contextlib.suppress(OSError):
+            keystart.write_spend(
+                key["root"], key["row"], key["tid"], key["credit"], spent["usd"], spent["tokens"]
+            )
+        key.setdefault("turns", []).append(spent)
+        key["row"] = None
+    return rc, text
 
 
 def _record_turn(
@@ -1722,6 +1798,13 @@ def wrap(
         current["proc"] = proc
         set_process_fields(root, tid, run, agent_pid=proc.pid, agent_pid_started=pid_started(proc.pid))
 
+    credit = rec.get("credit") if isinstance(rec.get("credit"), dict) else None
+    key = None
+    if credit is not None:  # a run on an API key (keystart.py): the key goes to each turn's process only
+        from orch import keystart
+
+        keystart.no_core_dumps()
+        key = {"root": root, "run": run, "tid": tid, "name": name, "credit": credit, "turns": []}
     # only an agent that streams its steps is expected to say something at once; others may work quietly
     streams = adapters.caps(name, root).get("stream") and mode == "oneshot"
     watch = start_watchdog_seconds() if streams else None
@@ -1747,6 +1830,7 @@ def wrap(
                 on_proc,
                 watch,
                 flags,
+                key,
             )
         )
         if flags.get("hung"):  # no sign of life: stop it and start fresh once (its session was never saved)
@@ -1756,13 +1840,13 @@ def wrap(
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session, resumed = p["argv"], p["stdin"], p["session"], False
             flags.clear()
-            rc, out = collected(_run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags))
+            rc, out = collected(_run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags, key))
         elif resumed and rc != 0 and adapters.session_missing(name, out, root):
             # only "that session does not exist" starts fresh; the input of this turn goes in with it
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session = p["argv"], p["stdin"], p["session"]
             flags.clear()
-            rc, out = collected(_run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags))
+            rc, out = collected(_run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags, key))
         if flags.get("hung"):  # the last try hung too: no further try; this turn's input waits for the next
             again = [i["id"] for i in turn_items if i.get("via") != "start"]  # a start prompt is made anew
             if undeliver(root, tid, again):
@@ -1801,6 +1885,9 @@ def wrap(
                     tickets.log(root, tid, limitstop.stopped_text(hit), "agent:helper-watcher")
         drain = turns <= MAX_DRAIN_TURNS and not flags.get("hung") and brake.paused(root) is None
         if release(root, tid, run, keep_if_pending=drain)["released"]:
+            if key is not None and key["turns"]:  # what the run cost on its credit, or that it is unknown
+                with contextlib.suppress(Exception):
+                    tickets.log(root, tid, keystart.end_line(credit, key["turns"]), f"agent:{name}")
             # ended without finishing or asking: not Working any more (anything still waiting stays queued)
             settle(root, tid, f"agent:{name}", ignore_input=True)
             return 0 if rc == 0 else rc

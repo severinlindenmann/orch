@@ -224,7 +224,11 @@ def _use_text(row: dict) -> str:
             if u["pct"] is not None:
                 bits.append(f"{word} {u['pct']:g}% used")
         elif u.get("spent") is not None:
-            bits.append(f"{word} ${u['spent']:g} spent" + (" (estimated)" if u.get("estimated") else ""))
+            bits.append(
+                f"{word} ${u['spent']:g} spent"
+                + (" (estimated)" if u.get("estimated") else "")
+                + (f", {u['note']}" if u.get("note") else "")
+            )
         elif u.get("note"):
             bits.append(u["note"])
     return "; ".join(bits)
