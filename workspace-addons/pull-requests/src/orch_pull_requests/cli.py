@@ -88,10 +88,8 @@ def start_runner(root: Path) -> None:
     d.mkdir(parents=True, exist_ok=True)
     argv = [sys.executable, "-I", "-P", "-m", "orch_pull_requests", "queue", "run", "--root", str(root)]
     with open(d / "runner.log", "a", encoding="utf-8") as log:
-        subprocess.Popen(
-            argv, cwd=root, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-            start_new_session=os.name != "nt", **procs.background_popen_kwargs(),
-        )  # fmt: skip
+        # background_popen_kwargs sets stdin and the own session (or the hidden Windows console): never pass them here too
+        subprocess.Popen(argv, cwd=root, stdout=log, stderr=log, **procs.background_popen_kwargs())
 
 
 def _github():

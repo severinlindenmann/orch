@@ -17,7 +17,7 @@ from pathlib import Path
 from . import actions
 from .checkup import build_checkup, build_show
 from .lists import KINDS, build_list
-from .models import build_models
+from .models import build_models, build_week
 from .overview import build_overview, retries_view
 from .settings import build_settings
 
@@ -180,6 +180,8 @@ class Handler(BaseHTTPRequestHandler):
                     read_json(self.root, self.orch_bin, ["github", "retries", "--days", "30", "--json"])
                 )
             return self._json(view)
+        if path == "/api/week":
+            return self._json({"week": build_week(self._read("usage", "list", "--json"))})
         if path == "/api/models":
             return self._json(build_models(self._read("tokens", "--days", "30", "--json")))
         if path.startswith("/api/list/") and path[10:] in KINDS:

@@ -41,6 +41,17 @@ function liveBarModel(tickets, runs, pins, helperState) {
   out.sort((a, b) => rank[a.s] - rank[b.s] || (b.pin ? 1 : 0) - (a.pin ? 1 : 0));
   return out;
 }
+// The word on a ticket's session button (draft D feature 3, "the button on every ticket"): Answer when it needs you, Watch while its helper works, Open
+// when the helper sits idle, In line while it waits for a free place, Start when no helper runs. A finished ticket with
+// no helper gets no button (''). The same session states as the bar, so the button and the bar never disagree.
+function liveFocusVerb(t, run, helperState) {
+  if (!t || !t.id) return '';
+  const o = liveBarModel([t], run ? {[t.id]:run} : {}, [], helperState)[0];
+  const asks = Array.isArray(t.questions) && t.questions.some(q => q && q.answer == null);
+  if (o?.s === 'wait' || (asks && !['done', 'dropped', 'superseded'].includes(t.status) && o?.s !== 'run')) return 'Answer';
+  if (o) return {run:'Watch', idle:'Open', queue:'In line'}[o.s];
+  return ['done', 'dropped', 'superseded'].includes(t.status) ? '' : 'Start';
+}
 // Which sessions a list (or a chip group) holds. Needs you wins over pinned; pinned is taken out of the counts.
 function liveBarIn(o, l) {
   const w = o.s === 'wait';
@@ -55,7 +66,7 @@ function liveBarCountText(l, n, compact) {
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveBarModel, liveBarIn, liveBarSessions, liveBarCountText, LIVEBAR_LISTS};
+  module.exports = {liveBarModel, liveFocusVerb, liveBarIn, liveBarSessions, liveBarCountText, LIVEBAR_LISTS};
 } else {
   (() => {
     const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0};
