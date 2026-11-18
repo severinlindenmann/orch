@@ -1282,7 +1282,7 @@ function ticketChangesEditor(t) {
   // ORCH-250: with a step still open Looks good is off and says why; Send back is the way on.
   const unfinished = array(t.checklist).filter(c => !c.done && !c.wont_do).length;
   // ORCH-548 (owner 18 Nov): an open question stops it too, with the same words as the Review card
-  const asks = questions(t).filter(q => !q.taken_back).length;
+  const asks = array(t.questions).filter(q => q && q.answer == null && !q.taken_back).length;
   if (unfinished || asks) { done.disabled = true; done.setAttribute('aria-disabled', 'true'); }
   const askNote = asks ? h('span', {className:'meta warn', 'data-key':'ticket-review-open-question'}, '! ' + (asks === 1 ? 'A question on this ticket still waits for your answer. Answer it first, then press Looks good.' : asks + ' questions on this ticket still wait for your answer. Answer them first, then press Looks good.')) : null;
   const unfinishedNote = unfinished ? h('span', {className:'meta warn', 'data-key':'ticket-review-open-steps'}, '! ' + (unfinished === 1 ? '1 step is' : unfinished + ' steps are') + ' not finished. Send it back to get ' + (unfinished === 1 ? 'it' : 'them') + ' done.') : null;

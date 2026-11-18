@@ -459,7 +459,9 @@ def _answer(args, root: Path) -> None:
         raise ReviewError("too_large", "A note is at most 8 KB.")
     if key == "review":
         q = None
-        if t.get("status") != "review":  # decided elsewhere (the Reviewer, the phone, another tab): say who and when
+        if (
+            t.get("status") != "review"
+        ):  # decided elsewhere (the Reviewer, the phone, another tab): say who and when
             raise ReviewError("decided", review.not_in_review(root, t))
         current = review.check_digest(t, root)
     else:

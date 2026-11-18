@@ -301,13 +301,16 @@ def _check_card(run):
 
 
 def _ok(run, tid, digest):
-    code, out, err = run("review", "answer", tid, "review", "--verdict", "ok", "--digest", digest, "--by", ME, "--json")
+    code, out, err = run(
+        "review", "answer", tid, "review", "--verdict", "ok", "--digest", digest, "--by", ME, "--json"
+    )
     return code, json.loads(out) if out.strip() else {}, err
 
 
 def test_a_second_looks_good_says_it_is_done_already(tk, run):
-    """ORCH-548: a Looks good saved twice (another tab, the phone, a page that sent its held answers again) is not a
-    failure: it says the ticket is Done, who did it and when (code decided), never "not waiting for your review"."""
+    """ORCH-548: a Looks good saved twice (another tab, the phone, a page that sent its held answers again)
+    is not a failure: it says the ticket is Done, who did it and when (code decided), never "not waiting for
+    your review"."""
     root, tid = tk
     _in_review(root, tid)
     digest = _check_card(run)["digest"]
@@ -331,8 +334,9 @@ def test_looks_good_after_the_reviewer_accepted_says_so(tk, run):
 
 
 def test_looks_good_after_the_reviewer_sent_it_back_says_why(tk, run):
-    """The race with the Reviewer (ORCH-548): it sent the ticket back in the seconds before the person's Looks good
-    was saved. The answer names the Reviewer's reason and what happens next, even with the card's old digest."""
+    """The race with the Reviewer (ORCH-548): it sent the ticket back in the seconds before the person's Looks
+    good was saved. The answer names the Reviewer's reason and what happens next, even with the card's old
+    digest."""
     root, tid = tk
     _in_review(root, tid)
     digest = _check_card(run)["digest"]
@@ -340,9 +344,10 @@ def test_looks_good_after_the_reviewer_sent_it_back_says_why(tk, run):
     code, out, _ = _ok(run, tid, digest)
     assert code == 2 and out["code"] == "decided", out
     assert out["error"].startswith("The Reviewer sent it back today "), out
-    assert ": Pull request #12 is not merged yet. It is To do now and comes back to Check when the helper is done." in out[
-        "error"
-    ], out
+    assert (
+        ": Pull request #12 is not merged yet. It is To do now and comes back to Check"
+        " when the helper is done." in out["error"]
+    ), out
     assert tickets.load(root, tid)["status"] == "ready"
 
 
@@ -391,7 +396,8 @@ def test_an_open_question_turns_looks_good_off(tk, run):
 
 
 def test_an_unmerged_pull_request_and_a_second_look_only_say_so(tk, run):
-    """Owner 18 Nov (ORCH-548): a pull request not merged yet and the Reviewer's second look still to come do not
+    """Owner 18 Nov (ORCH-548): a pull request not merged yet and the Reviewer's second look still to come do
+    not
     stop Looks good; the card's "If you approve" line says them, and Looks good makes the ticket Done."""
     from orch import lookreview
 
@@ -401,12 +407,18 @@ def test_an_unmerged_pull_request_and_a_second_look_only_say_so(tk, run):
     t = tickets.load(root, tid)
     for r in t["refs"]:  # as the pull-requests add-on keeps them
         r.update(kind="github-pr", status="ready to merge")
-    assert review.check_card(t, root)["then"] == "The ticket is done, although pull request #12 is not merged yet."
+    assert (
+        review.check_card(t, root)["then"]
+        == "The ticket is done, although pull request #12 is not merged yet."
+    )
     lookreview.queue(root, tid, "the look of a page changed")
     t = tickets.load(root, tid)
     for r in t["refs"]:
         r.update(kind="github-pr", status="merged")
-    assert review.check_card(t, root)["then"] == "The ticket is done. The Reviewer's second look is not needed then."
+    assert (
+        review.check_card(t, root)["then"]
+        == "The ticket is done. The Reviewer's second look is not needed then."
+    )
     assert "blocked" not in review.check_card(t, root)
     assert _ok(run, tid, _check_card(run)["digest"])[0] == 0
     assert tickets.load(root, tid)["status"] == "done"

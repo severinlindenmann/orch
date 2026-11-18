@@ -953,10 +953,13 @@ def _checks_chips(ticket: dict) -> list[dict]:
 
 
 def accept_blocked(ticket: dict) -> str:
-    """Why Looks good is off on this Check result, with what to press (ORCH-548, owner 18 Nov: open steps and an
+    """Why Looks good is off on this Check result, with what to press (ORCH-548, owner 18 Nov: open steps and
+    an
     open question stop it, like the ticket page's Looks good since ORCH-250); "" when nothing stops it."""
     steps = sum(
-        1 for c in ticket.get("checklist") or [] if isinstance(c, dict) and not c.get("done") and not c.get("wont_do")
+        1
+        for c in ticket.get("checklist") or []
+        if isinstance(c, dict) and not c.get("done") and not c.get("wont_do")
     )
     asks = sum(
         1
@@ -974,29 +977,39 @@ def accept_blocked(ticket: dict) -> str:
         out.append(
             "A question on this ticket still waits for your answer. Answer it first, then press Looks good."
             if asks == 1
-            else f"{asks} questions on this ticket still wait for your answer. Answer them first, then press Looks good."
+            else f"{asks} questions on this ticket still wait for your answer. Answer them first, "
+            "then press Looks good."
         )
     return " ".join(out)
 
 
 def _accept_then(ticket: dict, root: Path | None) -> str:
     """What Looks good does (the card's "If you approve"), with what does not stop it said in the same line
-    (ORCH-548): a pull request not merged yet, the Reviewer's second look still to come. Only the pull request's
+    (ORCH-548): a pull request not merged yet, the Reviewer's second look still to come. Only the pull
+    request's
     number, never its changing GitHub state, so the card (and its digest) changes only when it is merged."""
     prs = []
     for r in ticket.get("refs") or []:
-        if isinstance(r, dict) and r.get("kind") == "github-pr" and r.get("status") not in ("merged", "closed"):
+        if (
+            isinstance(r, dict)
+            and r.get("kind") == "github-pr"
+            and r.get("status") not in ("merged", "closed")
+        ):
             m = _PR_NUMBER.search(str(r.get("url") or ""))
             if m and f"#{m.group(1)}" not in prs:
                 prs.append(f"#{m.group(1)}")
     line = "The ticket is done"
     if prs:
-        line += f", although pull request {prs[0]} is not merged yet" if len(prs) == 1 else (
-            f", although pull requests {', '.join(prs[:5])} are not merged yet"
+        line += (
+            f", although pull request {prs[0]} is not merged yet"
+            if len(prs) == 1
+            else (f", although pull requests {', '.join(prs[:5])} are not merged yet")
         )
     line += "."
     if root is not None:
-        from orch import lookreview  # imported here: it reads the run folder (runs), not needed for every card
+        from orch import (
+            lookreview,
+        )  # imported here: it reads the run folder (runs), not needed for every card
 
         try:
             waits = ticket["id"] in lookreview.read_state(root)["line"]
@@ -1250,7 +1263,8 @@ def tend_releases_text(result: dict, dry_run: bool = False) -> str:
 
 _STATUS_WORDS = {"active": "Working", "ready": "To do", "waiting": "Waiting", "backlog": "Backlog",
                  "dropped": "Dropped", "done": "Done"}  # fmt: skip
-# The lines that take a ticket out of Review: an accept or a move ("Status review -> done"), a send back by the
+# The lines that take a ticket out of Review: an accept or a move ("Status review -> done"), a send back by
+# the
 # Reviewer or by a person (tickets.ask_for_changes writes no status line, only its own).
 _LEFT_REVIEW = re.compile(
     r"Status review -> \w+|" + re.escape(tickets.SENT_BACK_LINE) + r"(?P<back>.+)|Asked for changes: .+", re.S
@@ -1259,7 +1273,8 @@ _LEFT_REVIEW = re.compile(
 
 def not_in_review(root: Path, ticket: dict) -> str:
     """Why a Check result cannot be answered any more (ORCH-548), in one line with what to do: who moved the
-    ticket out of Review and when. A Looks good that arrives after the Reviewer, another tab or the phone decided
+    ticket out of Review and when. A Looks good that arrives after the Reviewer, another tab or the phone
+    decided
     then says what happened, never only "not waiting for your review"."""
     from orch.net import when
 
@@ -1280,7 +1295,9 @@ def not_in_review(root: Path, ticket: dict) -> str:
     word = _STATUS_WORDS.get(status, status or "changed")
     then = f"It is {word} now and comes back to Check when the helper is done."
     if by == tickets.REVIEWER:
-        return _clip(f"The Reviewer sent it back{at}" + (f": {back.rstrip('.')}" if back else "") + f". {then}", 300)
+        return _clip(
+            f"The Reviewer sent it back{at}" + (f": {back.rstrip('.')}" if back else "") + f". {then}", 300
+        )
     if by.startswith("human:"):
         return _clip(f"You sent it back{at}. {then}", 300)
     return _clip(f"It is not in Check any more: it is {word} now. Open the ticket to see why.", 300)
