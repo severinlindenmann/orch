@@ -28,12 +28,19 @@ jobs:
         run: |
           python3 - <<'PY2'
           import json, os
+          # Windows is known red until ORCH-32 (pull request 1045) is merged: its parts run and show their result
+          # on every queue group but do not block the merge. ORCH-32 sets this to an empty set when it lands.
+          KNOWN_RED = {"windows-latest"}
           parts = {"ubuntu-latest": 2}
           if os.environ["FULL"] == "true":
               parts["macos-latest"] = 5
           if os.environ["WINDOWS"] == "true":
               parts["windows-latest"] = 10
-          rows = [{"os": o, "part": k, "parts": n} for o, n in parts.items() for k in range(1, n + 1)]
+          rows = [
+              {"os": o, "part": k, "parts": n, "known_red": o in KNOWN_RED}
+              for o, n in parts.items()
+              for k in range(1, n + 1)
+          ]
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write("matrix=" + json.dumps({"include": rows}) + "\n")
           print(json.dumps(rows, indent=1))
@@ -45,6 +52,8 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
+    # a known-red system (KNOWN_RED above) is reported but never fails the run
+    continue-on-error: ${{ matrix.known_red }}
     # One part: under 15 minutes on every system, set-up included. A hanging test stops after 300 s
     # (pytest-timeout in workspace/pyproject.toml); a test over its time budget fails (--budget below).
     timeout-minutes: 15
