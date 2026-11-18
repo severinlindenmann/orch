@@ -1275,12 +1275,30 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str,
         by = "agent:" + str(agent_tool())
     if status in ("done", "review") and by.startswith("agent:") and ticket["status"] != status:
         _check_not_too_early(root, ticket)
+    if status == "waiting" and by.startswith("agent:") and not hidden_kind(ticket):
+        _check_waits_on_something(ticket)
     if status == "done" and by.startswith("agent:"):
         _check_can_finish(ticket)
         if not config.agents_may_finish(root):
             add_history(ticket, by, f"{by} finished the work and sent it to Check")
             return "review", by
     return status, by
+
+
+WAITING_NO_REASON = (
+    "Waiting needs something to wait on, or the person sees Waiting with no reason. Blocked or need an answer: "
+    'orch ask {key} "<what blocks you and what you need>" --option <A> --option <B> --recommend <A>. '
+    "Waiting for a time: orch wait {key} --until <time>."
+)
+
+
+def _check_waits_on_something(ticket: dict) -> None:
+    """ORCH-602: an agent moves its ticket to Waiting only with a question, a time or a thing to wait on.
+    A helper blocked by its tool's sandbox set Waiting with only a summary line (ORCH-548, ORCH-549, 18 Nov):
+    the ticket sat in Waiting with no card and no reason shown. A person may still set Waiting by hand."""
+    if ticket.get("waiting_on") or _open_questions(ticket):
+        return
+    raise Refused(WAITING_NO_REASON.format(key=ticket.get("key") or ticket.get("id") or "<id>"))
 
 
 AGENT_FINISH_TEXT = "finished by the agent (agents may finish is on)"
