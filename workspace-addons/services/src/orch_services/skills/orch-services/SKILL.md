@@ -36,6 +36,7 @@ itself.
     orch services stop <id>
     orch services restart <id>
     orch services auto <id> on      # or off
+    orch services important <id> on # the person relies on it: Stop on the page asks once first
 
 **Health check and a service that keeps stopping** (one pass, then it ends)
 

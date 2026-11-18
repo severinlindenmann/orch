@@ -131,6 +131,7 @@ def _valid(d: object, sid: str) -> bool:
         and bool(d["command"])
         and all(isinstance(a, str) and a for a in d["command"])
         and isinstance(d.get("auto", False), bool)
+        and isinstance(d.get("important", False), bool)
     )
 
 

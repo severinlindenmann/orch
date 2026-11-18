@@ -35,6 +35,7 @@
     },
     "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
     "auto": { "type": "boolean", "description": "Starts by itself after this computer restarts (or the person logs in)." },
+    "important": { "type": "boolean", "default": false, "description": "The person relies on it: Stop on the Services page asks once before it stops (ORCH-641). Absent = false." },
     "made_by": {
       "description": "Who asked for this service.",
       "oneOf": [

@@ -15,7 +15,17 @@ from . import drivers, store, watch
 from .store import Refused
 
 MASK = "••••••"
-ACT_VERBS = ("start", "stop", "restart", "auto-on", "auto-off", "remove", "adopt")
+ACT_VERBS = (
+    "start",
+    "stop",
+    "restart",
+    "auto-on",
+    "auto-off",
+    "important-on",
+    "important-off",
+    "remove",
+    "adopt",
+)
 
 
 def _root(start: str) -> Path:
@@ -149,6 +159,7 @@ def _row(root: Path, rec: dict, st: drivers.Status | None) -> dict:
         "state": "running" if running else "stopped",
         "since": since,
         "auto": bool(rec.get("auto")),
+        "important": bool(rec.get("important")),
         "made_by": rec.get("made_by"),
         "port": rec.get("port"),
         "command": _masked_command(root, rec["command"]),
@@ -397,6 +408,17 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
     if verb == "adopt":
         return cmd_adopt(args, root, sid)
     rec = store.get(root, sid)
+    if verb in ("important-on", "important-off"):  # only the record changes: no driver, the job keeps running
+        want = verb == "important-on"
+        if bool(rec.get("important")) != want:
+            rec["important"] = want
+            store.save(root, rec)
+        nxt = (
+            f"{rec['name']} is marked important: Stop asks once before it stops."
+            if want
+            else f"{rec['name']} is no longer marked important: Stop stops it right away."
+        )
+        return _emit(args, {"service": _state(root, _driver(), rec, _workspace_id(root)), "next": nxt}, nxt)
     if verb == "remove" and rec.get("adopted") is not None:  # orch did not make its entry: only forget it
         store.delete(root, rec["id"])
         nxt = f"{rec['name']} is no longer managed by orch; the job itself is left as it is on this computer."
@@ -604,6 +626,8 @@ def run(args) -> int:
         return cmd_simple(args, root, cmd, args.id)
     if cmd == "auto":
         return cmd_simple(args, root, f"auto-{args.value}", args.id)
+    if cmd == "important":
+        return cmd_simple(args, root, f"important-{args.value}", args.id)
     if cmd == "act":
         if len(args.target) != 1:
             raise Refused("Say which service: orch services act <verb> -- <id>")
@@ -658,9 +682,10 @@ def main(argv=None) -> int:
     s.add_argument("--start", action="store_true")
     for verb in ("start", "stop", "restart", "remove"):
         p(verb).add_argument("id")
-    s = p("auto")
-    s.add_argument("id")
-    s.add_argument("value", choices=("on", "off"))
+    for name in ("auto", "important"):
+        s = p(name)
+        s.add_argument("id")
+        s.add_argument("value", choices=("on", "off"))
     s = p("log")
     s.add_argument("id")
     s.add_argument("--lines", type=int, default=20)

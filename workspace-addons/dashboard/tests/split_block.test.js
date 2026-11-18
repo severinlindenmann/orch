@@ -100,3 +100,17 @@ test('Remove says what happens with Keep it and its own word, never a typed word
   assert.doesNotMatch(body, /<input|type=['"]text/);
   assert.match(body, /act_answer\?\.addon === id/);   // the toast uses only the open add-on's own answer
 });
+
+test('Stop on a job marked important asks once, on the list row and in the panel (ORCH-641)', () => {
+  address = '#addon/services';
+  const s = draw();
+  const stops = s.querySelectorAll('[data-addon-act]').filter(b => b.dataset.verb === 'stop');
+  const web = stops.filter(b => b.dataset.target === 'web-preview'), other = stops.filter(b => b.dataset.target !== 'web-preview');
+  assert.equal(web.length, 2);   // the row button and the panel button
+  for (const b of web) {
+    assert.equal(b.dataset.confirm, 'Stop Web preview?');
+    assert.match(b.dataset.confirmLines, /marked important/);
+    assert.equal(b.dataset.keep, 'Keep it running');
+  }
+  assert.ok(other.length > 0 && other.every(b => b.dataset.confirm === undefined));   // other jobs stop at once
+});

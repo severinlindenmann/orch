@@ -73,6 +73,21 @@
           }
          },
          {
+          "label": "Important",
+          "value": "No",
+          "switch": {
+           "on": false,
+           "label": "Important: Budget guard",
+           "action": {
+            "op": "addon.act",
+            "args": {
+             "verb": "important-on",
+             "target": "budget-guard"
+            }
+           }
+          }
+         },
+         {
           "label": "Made by",
           "value": "ORCH-7",
           "link": "t_7k3f9q2"
@@ -158,6 +173,15 @@
           "verb": "stop",
           "target": "web-preview"
          }
+        },
+        "confirm": {
+         "title": "Stop Web preview?",
+         "lines": [
+          "It is marked important: you rely on it.",
+          "These stop working: The short dashboard address.",
+          "It stays stopped until you start it again."
+         ],
+         "keep": "Keep it running"
         }
        },
        "panel": {
@@ -170,6 +194,15 @@
             "verb": "stop",
             "target": "web-preview"
            }
+          },
+          "confirm": {
+           "title": "Stop Web preview?",
+           "lines": [
+            "It is marked important: you rely on it.",
+            "These stop working: The short dashboard address.",
+            "It stays stopped until you start it again."
+           ],
+           "keep": "Keep it running"
           }
          },
          {
@@ -199,6 +232,21 @@
             "op": "addon.act",
             "args": {
              "verb": "auto-off",
+             "target": "web-preview"
+            }
+           }
+          }
+         },
+         {
+          "label": "Important",
+          "value": "Yes, Stop asks first",
+          "switch": {
+           "on": true,
+           "label": "Important: Web preview",
+           "action": {
+            "op": "addon.act",
+            "args": {
+             "verb": "important-off",
              "target": "web-preview"
             }
            }
@@ -290,6 +338,21 @@
             "op": "addon.act",
             "args": {
              "verb": "auto-on",
+             "target": "dashboard-front"
+            }
+           }
+          }
+         },
+         {
+          "label": "Important",
+          "value": "No",
+          "switch": {
+           "on": false,
+           "label": "Important: Dashboard front",
+           "action": {
+            "op": "addon.act",
+            "args": {
+             "verb": "important-on",
              "target": "dashboard-front"
             }
            }

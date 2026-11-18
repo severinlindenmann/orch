@@ -280,3 +280,31 @@ def test_a_running_job_that_does_not_answer_is_amber_in_the_list(ws):
     assert by["hung"]["state"] == {"label": "Not answering", "tone": "warn"}
     assert by["fine"]["state"] == {"label": "Running", "tone": "good"}
     assert _facts(by["hung"])["State"]["value"] == "Running"  # the panel keeps the plain state
+
+
+def test_stop_on_a_job_marked_important_asks_once_everywhere(ws):
+    # ORCH-641: the list row, the panel and the pinned question all carry the one question; other jobs stop at once
+    from orch_services.view import build
+
+    def row(sid, important, state="running"):
+        return {
+            "id": sid,
+            "name": sid.title(),
+            "state": state,
+            "since": None,
+            "auto": False,
+            "important": important,
+        }
+
+    fwd = row("fwd", True, "failing")
+    fwd["question"] = {"title": "Fwd keeps stopping", "ticket": "t_abc123"}
+    items = build(ws, ([fwd, row("plain", False)], 0, None))["blocks"][0]["groups"][0]["items"]
+    by = {i["id"]: i for i in items}
+    stops = [by["fwd"]["action"], by["fwd"]["panel"]["buttons"][0], by["fwd"]["question"]["buttons"][1]]
+    for b in stops:
+        assert b["label"] == "Stop" and b["confirm"]["title"] == "Stop Fwd?"
+        assert b["confirm"]["keep"] == "Keep it running" and "marked important" in b["confirm"]["lines"][0]
+    assert "confirm" not in by["plain"]["action"] and "confirm" not in by["plain"]["panel"]["buttons"][0]
+    f, g = _facts(by["fwd"])["Important"], _facts(by["plain"])["Important"]
+    assert f["value"] == "Yes, Stop asks first" and f["switch"]["action"]["args"]["verb"] == "important-off"
+    assert g["value"] == "No" and g["switch"]["action"]["args"]["verb"] == "important-on"
