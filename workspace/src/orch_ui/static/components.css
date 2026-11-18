@@ -356,6 +356,8 @@ details.menu>summary::-webkit-details-marker,.dropdown summary::-webkit-details-
 .start-pop .live-hist-list{max-height:200px;overflow:auto}
 .start-more{align-self:flex-start;margin-top:var(--s1)}
 .start-why{margin:0;color:var(--text-muted);font-size:var(--fs-meta)}
+/* an open Start choice is never cut off by the card it sits in (the composer's Send and start helper) */
+.card:has(.start-split>details[open]){overflow:visible}
 /* Phone: the choice spans the screen under its button wherever the button sits in a row. */
 @media (max-width:720px){.start-pop.menu-pop{position:fixed;left:var(--s4,16px);right:var(--s4,16px);top:auto;width:auto;max-height:70vh;overflow:auto}
   .start-opt:has(.start-run){row-gap:2px}.start-opt:has(.start-run)>.start-opt-t{display:contents}.start-opt:has(.start-run)>.start-opt-t>:not(.start-run){grid-column:1}.start-opt:has(.start-run)>.start-opt-t>.start-run{grid-column:1/-1}.start-opt:has(.start-run)>.btn{grid-column:2;grid-row:1/3}}
