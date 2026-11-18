@@ -3,23 +3,50 @@ on:
   workflow_call:
     inputs:
       full:
-        description: "also run macOS (push to develop/main, PRs into main, manual runs)"
+        description: "also run macOS (push to develop/main, PRs into main, merge queue groups, manual runs)"
         type: boolean
         default: false
       windows:
-        description: "also run Windows (unit tests + standard-user install); manual runs only, Windows is tested locally on winvm"
+        description: "also run Windows (merge queue groups, PRs that change file, process or path code, nightly, manual)"
         type: boolean
         default: false
 jobs:
+  # Which systems and how many parts each (ORCH-315). Every part has a 15-minute limit; the full suite
+  # takes about 12 min on Ubuntu, 22-40 min on macOS and ~45 min on Windows, so the slow systems get more parts.
+  # Each part runs every N-th test by a hash of its name (workspace/tests/ci_parts.py, --part K/N).
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        env:
+          FULL: ${{ inputs.full }}
+          WINDOWS: ${{ inputs.windows }}
+        run: |
+          python3 - <<'PY2'
+          import json, os
+          parts = {"ubuntu-latest": 2}
+          if os.environ["FULL"] == "true":
+              parts["macos-latest"] = 5
+          if os.environ["WINDOWS"] == "true":
+              parts["windows-latest"] = 6
+          rows = [{"os": o, "part": k, "parts": n} for o, n in parts.items() for k in range(1, n + 1)]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("matrix=" + json.dumps({"include": rows}) + "\n")
+          print(json.dumps(rows, indent=1))
+          PY2
   test:
+    needs: plan
+    name: test (${{ matrix.os }}, ${{ matrix.part }}/${{ matrix.parts }})
     strategy:
       fail-fast: false
-      matrix:
-        os: ${{ fromJSON(inputs.windows && (inputs.full && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest","windows-latest"]') || (inputs.full && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]')) }}
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
-    # The full suite (7000+ tests): 15 min on Ubuntu, 22-40 min on macOS (runner speed varies up to 2x, ORCH-260).
-    # A hanging test stops after 300 s (pytest-timeout in workspace/pyproject.toml), not at the job limit.
-    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 40 || 60 }}
+    # One part: under 15 minutes on every system, set-up included. A hanging test stops after 300 s
+    # (pytest-timeout in workspace/pyproject.toml); a test over its time budget fails (--budget below).
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: workspace
@@ -30,14 +57,22 @@ jobs:
           enable-cache: true
       - run: uv sync
       - run: uv run ruff check .
+        if: matrix.part == 1
       - run: uv run ruff format --check .
-      # -n auto: the runners have 4 vCPU (pytest-xdist is a dev dependency; the suite is xdist-safe, #237)
-      - run: uv run pytest -q -n auto
-        if: runner.os != 'Windows'
+        if: matrix.part == 1
+      # -n auto: the runners have 3-4 vCPU (pytest-xdist is a dev dependency; the suite is xdist-safe, #237).
+      # --durations=30 (pyproject.toml) lists the 30 slowest tests of every part at the end of its log.
+      # Time budget per test: 45 s on Ubuntu (slowest today ~34 s), 180 s on the slower macOS and Windows runners
+      # (slowest today ~102 s on macOS); a test that needs longer says why with @pytest.mark.budget(N).
+      - run: uv run pytest -q -n auto --part ${{ matrix.part }}/${{ matrix.parts }} --budget 45
+        if: runner.os == 'Linux'
+      - run: uv run pytest -q -n auto --part ${{ matrix.part }}/${{ matrix.parts }} --budget 180
+        if: runner.os == 'macOS'
       # Windows: a test that hangs is stopped after 120 s with every thread's stack, so the log names it.
-      - run: uv run --with pytest-timeout pytest -q -n auto --timeout 120 --timeout-method thread
+      - run: uv run pytest -q -n auto --part ${{ matrix.part }}/${{ matrix.parts }} --budget 180 --timeout 120 --timeout-method thread
         if: runner.os == 'Windows'
       - name: Installed wheel smoke (orch init, junction on Windows)
+        if: matrix.part == 1
         shell: bash
         run: |
           uv build --wheel -o "$RUNNER_TEMP/dist"
@@ -49,7 +84,7 @@ jobs:
           test -f .claude/skills/orch/SKILL.md
           orch ticket list
       - name: Junction check (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.part == 1
         shell: pwsh
         run: |
           # Since #215 .claude\skills is a plain folder with one link per skill (a copy where links are refused)
@@ -62,7 +97,7 @@ jobs:
     # The README's Windows install as a standard user (no admin), no git, default execution
     # policy, from this commit's GitHub zip; then init, a ticket, an add-on and an update (e2e/windows/).
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 15  # ~6 min
     steps:
       - uses: actions/checkout@v4
       - name: Install and first steps as a standard user
