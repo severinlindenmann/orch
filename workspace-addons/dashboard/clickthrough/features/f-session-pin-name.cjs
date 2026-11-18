@@ -14,19 +14,24 @@ module.exports = {
     const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
       description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
       dashboard: { label: 'Focus', icon: 'target', order: 20 } };
-    await page.route(/\/api\/state(\?.*)?$/, async route => {
-      const res = await route.fetch();
-      if (res.status() !== 200) return route.fulfill({ response: res });
-      const st = await res.json();
-      // a full state, or a changes-only answer (ORCH-517) whose changed keys are in st.set; an unchanged answer
-      // is left alone
-      const into = st.delta ? st.set : st;
-      if (!st.unchanged && into) {
+    // a full state, or a changes-only answer (ORCH-517) whose changed keys are in st.set; an unchanged answer is
+    // left alone. The answer of an action is a full state the page takes as it is, so it gets the same stand-ins:
+    // a later poll sends only what changed and would not bring them back
+    const dress = st => {
+      const into = st && (st.delta ? st.set : st);
+      if (st && !st.unchanged && into) {
         if (!st.delta || 'addons' in into) into.addons = [...(into.addons || []).filter(a => a.name !== live.name), live];
         if (!st.delta || 'settings' in into) into.settings = { ...(into.settings || {}), focus_preview_on: true };
       }
-      route.fulfill({ response: res, json: st });
-    });
+      return st;
+    };
+    const stand = async route => {
+      const res = await route.fetch();
+      if (res.status() !== 200) return route.fulfill({ response: res });
+      route.fulfill({ response: res, json: dress(await res.json()) });
+    };
+    await page.route(/\/api\/state(\?.*)?$/, stand);
+    await page.route(/\/api\/act$/, stand);
     await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
       body: '<!doctype html><title>Focus</title><main>Focus</main>' }));
     const kept = () => {
