@@ -6,8 +6,13 @@ Windows breaks where code moves files, sets file times or rights, starts or stop
 diff against the base branch and answers `true` when a changed Python line under workspace/ or
 workspace-addons/ uses such a call, or when a file whose job is exactly that changed (WHOLE_FILES).
 
+While Windows is known red (KNOWN_RED in .github/workflows/workspace.yml, docs/ci-checks.md) the answer for a pull
+request is `false` with --pr: the Windows parts run on queue groups and nightly only, until they are green
+(ORCH-453: 841 Windows minutes on pull requests in one night, every result known red and unable to block).
+
 Usage: python3 scripts/touches_os_code.py --base origin/develop   prints true or false (exit 0)
        python3 scripts/touches_os_code.py --base origin/develop --why   also names the first lines that matched
+       python3 scripts/touches_os_code.py --base origin/develop --pr    false while Windows is known red
 Plain text over `git diff`; no packages.
 """
 
@@ -17,6 +22,7 @@ import argparse
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 # files that are about files, processes, rights or paths through and through: any change runs Windows
 WHOLE_FILES = re.compile(
@@ -76,11 +82,24 @@ def reasons(rows: list[tuple[str, str]]) -> list[str]:
     return found
 
 
+def windows_known_red() -> bool:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import ci_known_red
+
+    return "windows-latest" in ci_known_red.known_red()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--base", required=True, help="the base branch, such as origin/develop")
     ap.add_argument("--why", action="store_true", help="name the first lines that matched")
+    ap.add_argument("--pr", action="store_true", help="a pull request: false while Windows is known red")
     args = ap.parse_args(argv)
+    if args.pr and windows_known_red():
+        print("false")
+        if args.why:
+            print("  Windows is known red (docs/ci-checks.md): its parts run on queue groups and nightly", file=sys.stderr)
+        return 0
     found = reasons(changed(args.base))
     print("true" if found else "false")
     if args.why:

@@ -133,3 +133,36 @@ test('the page files share one global scope: no name of this part is taken by an
     for (const n of names) assert.doesNotMatch(src, new RegExp('(function|const|let) ' + n + '\\b'), n + ' is also defined in ' + f);
   }
 });
+
+// ORCH-218 (owner, 17 Nov): a tool orch cannot sign in itself shows the exact terminal command with one Copy button.
+test('a tool orch cannot renew shows its sign-in command with a Copy button on Home and in Settings', () => {
+  const copies = [];
+  const UI = {commandCopy: (cmd, o) => { copies.push([cmd, o]); return {tag: 'div', attrs: {className: 'cmd-copy', 'data-key': o.dataKey}, kids: [o.lead || '', cmd, 'Copy']}; }};
+  const az = item({name: 'azure', label: 'Azure CLI', helper: null, chosen: false, state: 'renew', sign_in: 'az login'});
+  const {api, c} = page({items: [az]});
+  c.window.UI = UI;
+  const b = api.loginBanner(api.loginWarnings().stopped);
+  assert.match(text(b), /The Azure CLI login stopped working/);
+  assert.match(text(b), /Open a terminal on this computer and run:az loginCopy/);
+  assert.deepEqual(JSON.parse(JSON.stringify(copies[0])), ['az login', {lead: 'Open a terminal on this computer and run:', dataKey: 'login-how-azure'}]);
+  const card = api.helperNeedsCard();
+  assert.match(text(card), /az loginCopy/);
+  // a Renew button or Replace key takes the place: no command then, and none while it works
+  assert.equal(helpers.needSignIn({...az, renew: true}), '');
+  assert.equal(helpers.needSignIn({...az, key: 'K'}), '');
+  assert.equal(helpers.needSignIn({...az, state: 'works'}), '');
+  assert.equal(helpers.needSignIn({...az, sign_in: 'az login; rm -rf ~'}), '');
+  assert.equal(helpers.needHow({...az, how: 'Ask IT to reset it.'}), 'Ask IT to reset it.');
+  // without the kit widget the words still carry the command
+  const plain = page({items: [az]});
+  assert.match(text(plain.api.loginBanner(plain.api.loginWarnings().stopped)), /run: az login/);
+});
+
+test('a command a helper writes in backticks in its question is offered to copy; names and step ids are not', () => {
+  const q = 'The Azure login ran out. Sign in again with `az login`, then `gcloud auth login --update-adc`; see `c1`, `Wiki` and `rm`.';
+  assert.deepEqual(helpers.questionCommands(q), ['az login', 'gcloud auth login --update-adc']);
+  assert.deepEqual(helpers.questionCommands('no command here'), []);
+  assert.deepEqual(helpers.questionCommands('`a b` `c d` `e f`'), ['a b', 'c d']);  // at most two
+  assert.match(home, /questionCommandRows\(needQuestion\(row\), key\)/);
+  assert.equal(helpers.questionWords(q), 'The Azure login ran out. Sign in again with az login, then gcloud auth login --update-adc; see `c1`, `Wiki` and `rm`.');
+});

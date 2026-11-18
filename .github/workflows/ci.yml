@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       windows:
-        description: "also run the Windows jobs (merge queue groups and pull requests that change file, process or path code run them by themselves)"
+        description: "also run the Windows jobs (pushes to develop, the nightly run and pull requests that change file, process or path code run them by themselves)"
         type: boolean
         default: false
   push:
@@ -42,6 +42,7 @@ jobs:
       relay: ${{ steps.f.outputs.relay }}
       mobile: ${{ steps.f.outputs.mobile }}
       brand: ${{ steps.f.outputs.brand }}
+      dashshots: ${{ steps.f.outputs.dashshots }}
       clock: ${{ steps.f.outputs.clock }}
       oscode: ${{ steps.os.outputs.oscode }}
     steps:
@@ -73,15 +74,21 @@ jobs:
             relay: ['relay/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', '.github/workflows/relay.yml']
             # only the contracts the phone tests read (blocks, crypto, look, relay-api, message, chat-groups, vectors, examples, review)
             mobile: ['mobile/**', 'contracts/blocks*', 'contracts/crypto.md', 'contracts/look*/**', 'contracts/look*', 'contracts/relay-api*', 'contracts/message.schema.json', 'contracts/chat-groups*', 'contracts/vectors/**', 'contracts/examples/**', 'contracts/review/**', '.github/workflows/mobile.yml']
+            # the dashboard's pages and what takes their pictures (ORCH-312)
+            dashshots: ['workspace-addons/dashboard/src/**', 'workspace/src/orch_ui/static/**', 'workspace/src/orch/cli_shot.py', 'workspace/src/orch/dashshots.py', 'e2e/dash_ci_shots.py', '.github/workflows/dash-shots.yml']
             # the suites at a fake hour (ORCH-390): anything that can change what a page or a test does with the time
             clock: ['workspace/**', 'workspace-addons/**', 'scripts/at-clock.sh', '.github/workflows/clock.yml']
-            brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py', 'scripts/touches_os_code.py', 'scripts/ci_changes_base.sh']
-      # A pull request that changes file, process or path code also runs the Windows tests (ORCH-315).
+            brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py', 'scripts/touches_os_code.py', 'scripts/ci_known_red.py', 'scripts/ci_changes_base.sh', 'docs/ci-checks.md']
+      # A pull request that changes file, process or path code also runs the Windows tests (ORCH-315), but not while
+      # Windows is known red: then its parts run on queue groups and nightly only (--pr, docs/ci-checks.md, ORCH-453).
       - id: os
         if: github.event_name == 'pull_request'
         env:
           BASE: origin/${{ github.base_ref }}
-        run: echo "oscode=$(python3 scripts/touches_os_code.py --base "$BASE" --why)" >> "$GITHUB_OUTPUT"
+        run: echo "oscode=$(python3 scripts/touches_os_code.py --base "$BASE" --pr --why)" >> "$GITHUB_OUTPUT"
+      # A known-red system with no owner or end date, or past its end date: a warning on the run, never a red check.
+      - name: known red has an owner and an end date (docs/ci-checks.md)
+        run: python3 scripts/ci_known_red.py --warn
   contracts:
     needs: changes
     if: needs.changes.outputs.contracts == 'true'
@@ -91,14 +98,17 @@ jobs:
     if: needs.changes.outputs.workspace == 'true' || github.event_name == 'schedule'
     uses: ./.github/workflows/workspace.yml
     with:
-      # PRs into develop: Linux only (+ the CLI smoke on Windows/macOS below). Everything else (push to develop/main,
-      # PRs into main, merge queue groups, manual, nightly): + macOS.
-      # A merge queue group is the pull request from an orch-queue/... branch (the pull-requests add-on): it is what
-      # lands on develop, so it runs on all three systems, each split into parts under 15 minutes (ORCH-315).
-      full: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' || startsWith(github.head_ref, 'orch-queue/') }}
-      # Windows: merge queue groups, pull requests that change file, process or path code
-      # (scripts/touches_os_code.py), the nightly run and a manual run with windows=true.
-      windows: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.windows) || startsWith(github.head_ref, 'orch-queue/') || needs.changes.outputs.oscode == 'true' }}
+      # PRs into develop and merge queue groups: Linux only (+ the CLI smoke on Windows/macOS below). macOS and
+      # Windows run on develop itself: every push (never cancelled, see concurrency), the nightly run and the
+      # release check (the keeper's manual run with windows=true); a red one opens the release keeper's
+      # red-develop ticket (releasekeeper.develop_red). Merge queue groups ran all three systems for a day
+      # (PR 1428) and waited 50+ minutes on GitHub's 5 macOS machines at once (18 Nov, ORCH-315).
+      # PRs into main and manual runs keep macOS too. Each system stays split into parts under 15 minutes.
+      full: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
+      # Windows: every push to develop, the nightly run, a manual run with windows=true and pull requests that
+      # change file, process or path code while Windows is not known red (scripts/touches_os_code.py --pr), except
+      # merge queue groups. Which check is required where: docs/ci-checks.md.
+      windows: ${{ github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/develop') || (github.event_name == 'workflow_dispatch' && inputs.windows) || (needs.changes.outputs.oscode == 'true' && !startsWith(github.head_ref, 'orch-queue/')) }}
   # Fast CLI smoke on Windows + macOS for PRs that touch the CLI or an add-on (R1.6, R3.4); the full suite is nightly.
   cli-smoke:
     needs: changes
@@ -145,9 +155,14 @@ jobs:
       - run: pip install pytest
       - run: python -m pytest -q brand/tests
       - run: python scripts/check_style.py
+  dash-shots:
+    # pictures of the dashboard pages a pull request changes, for its review card (ORCH-312)
+    needs: changes
+    if: needs.changes.outputs.dashshots == 'true' && github.event_name == 'pull_request'
+    uses: ./.github/workflows/dash-shots.yml
   gate:
     if: always()
-    needs: [changes, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, mobile, clock, brand]
+    needs: [changes, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, mobile, clock, brand, dash-shots]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

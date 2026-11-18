@@ -155,6 +155,7 @@ Write the question for a person who has not seen your work, in plain words:
 - Say what you need to know and why it matters. Use names (the task, the document), never internal ids like `c1` or `q1`, and never folder or file paths such as `docs/` or `.orch/...` (a path is fine only inside a quoted error message).
 - Offer short answer options a person can click. Keep the question to one sentence or two.
 - NEVER ask the person to provide, paste or type a password, token, API key or any other credential, neither in the question nor as an option (not even "and credentials in .orch/secrets/ if needed"). `orch ask` refuses such questions.
+- When the person must sign in to a tool again or run one step in their own terminal, put the exact command in backticks in the question: "The Azure login ran out. Sign in again with `az login`, then choose I signed in again." The card shows the command with a Copy button.
 - If you need access you do not have: ask only "Is access to <the service> set up for this workspace?" or offer the option "I will set it up myself", and say in the ticket summary what is missing. A person sets access up outside the chat (credentials live in `.orch/secrets/`, ignored by git); you never receive them in an answer.
 
 **To ask the owner to decide on something they must see** (a draft, options A/B/C, before/after, a plan, a link before it goes public), put a card on the question. It is the same `orch ask`, with `--draft`, `--link`, `--plan` or `--choose` and `--then` (what happens after the answer). Never decide for the owner.
@@ -285,6 +286,10 @@ Base it on what is in the folder (never `.orch/secrets/`). Choose icons and colo
 **Screenshot a page or file** (never start a browser yourself: it can pop a keychain password window on the person's screen)
 
     orch shot <address or html file> --width 1280,1920,390 --out <folder>    # one picture per width, prints the paths
+    orch shot <address> --page home,tickets --out <folder>                  # several pages of one site in one run
+
+When the project's checks already take pictures of the pages a pull request changes, take none yourself: `orch ask <id> "<question>" --draft "<title>" --ci-shots <pull request address> --then "<what next>"`
+puts them on the card, every page at each width.
 
 ## Rules
 - orch's permission mode (ask, auto, full) never widens Codex beyond writing in this workspace; a stricter personal Codex setting (read-only) stays.
