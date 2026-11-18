@@ -15,7 +15,7 @@ module.exports = {
     const ws = await page.evaluate(() => state.settings.folder);
     must(/\.orch-test[\\/]clickthrough-/.test(ws), 'not the throw-away workspace: ' + ws);
     const home = path.dirname(ws), repo = path.resolve(__dirname, '..', '..', '..', '..');
-    const base = { PATH: process.env.PATH, HOME: home, USERPROFILE: home, ORCH_HOME: home + '/orch', ORCH_HOME_STRICT: '1',
+    const base = { PATH: path.join(home, 'bin') + path.delimiter + process.env.PATH, HOME: home, USERPROFILE: home, ORCH_HOME: home + '/orch', ORCH_HOME_STRICT: '1',
       UV_CACHE_DIR: process.env.UV_CACHE_DIR || path.join(os.homedir(), '.cache', 'uv') };
     const run = (cmd, args, env = {}) => execFileSync('env', ['-i', ...Object.entries({ ...base, ...env }).map(([k, v]) => `${k}=${v}`), cmd, ...args], { cwd: ws, encoding: 'utf8' });
     const orch = (...a) => run('uv', ['run', '-q', '--project', repo + '/workspace', 'python', '-I', '-m', 'orch', ...a]);

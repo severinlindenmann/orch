@@ -29,7 +29,10 @@ module.exports = {
     await forgetUpdateInfo();   // an earlier page may have asked already: the server keeps the answer 10 minutes
     await open('#settings/about');
     const start = page.locator('[data-key="update-start"]');
-    await start.waitFor({ timeout: 60000 }).catch(async () => { throw new Error('no Update button:\n' + (await text()).slice(0, 600)); });
+    await start.waitFor({ timeout: 60000 }).catch(async () => {
+      const info = await page.evaluate(async () => (await fetch('/api/update-info', { cache: 'no-store' })).text());
+      throw new Error('no Update button; update-info says ' + info.slice(0, 500) + '\n' + (await text()).slice(0, 300));
+    });
     await act('update.start', () => start.click());
     const failed = page.locator('[data-key="update-failed"]');
     await failed.waitFor({ timeout: 90000 }).catch(async () => { throw new Error('the update never said how it ended:\n' + (await text()).slice(0, 600)); });
