@@ -24,7 +24,7 @@ module.exports = {
     await page.route(/\/api\/sessions\/t_[a-z0-9]+$/, route => route.fulfill({ json: { available: true, sessions: [
       { id: 's-mon', label: 'Helper', last_used: at(30), title: 'Read the menu and pick three dishes', turns: 12, current: false, reopenable: true },
     ] } }));
-    await page.addInitScript(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+    await page.addInitScript(() => { try { Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
 
     await open('#home');
     await page.waitForFunction(() => window.LiveLayer && document.getElementById('live-dock'), null, { timeout: 10000 });
