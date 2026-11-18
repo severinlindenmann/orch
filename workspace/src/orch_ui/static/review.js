@@ -236,9 +236,13 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
   let first=-1;if(!deck&&o.startId){first=items.findIndex(i=>i.id===o.startId);o.startId=null}/* opened for one card (the ticket page's Look and answer) */
   build(items,at>0?at:first>0?first:0,later,pins)};
  const load=async force=>{if(loading||!alive)return;loading=true;try{const cards=await api.stack();touchMeta();apply(cards,!!force)}catch(e){if(!deck||isAuth(e))err(e)}finally{loading=false}};
+ const ANS_STEP=50;let ansShown=ANS_STEP;
  const drawAnswered=async()=>{try{const list=await api.answered();if(!alive)return;ansEl.replaceChildren();
    if(!list.length){ansEl.append(UI.state({kind:'empty',title:'No answers yet',text:'Your answers appear here and on each ticket.'}));return}
-   list.forEach(e=>ansEl.append(UI.answerRecord(e,{fileUrl:api.fileUrl,now:o.now,ticketHref:o.ticketHref})))}
+   /* ORCH-523: the first ANS_STEP answers, the next ones when the end scrolls into view (thousands at 10,000 tickets) */
+   list.slice(0,ansShown).forEach(e=>ansEl.append(UI.answerRecord(e,{fileUrl:api.fileUrl,now:o.now,ticketHref:o.ticketHref})));
+   if(list.length>ansShown){const more=el('p','meta');more.textContent='Loading more…';more.setAttribute('role','status');more.dataset.more='answered';ansEl.append(more);
+    if(typeof IntersectionObserver==='function'){const io=new IntersectionObserver(es=>{if(es.some(x=>x.isIntersecting)&&alive){io.disconnect();ansShown+=ANS_STEP;drawAnswered()}},{rootMargin:'400px 0px'});io.observe(more)}}}
   catch(e){ansEl.replaceChildren(isAuth(e)?UI.state({kind:'empty',title:'Sign in',text:'Run orch review in your terminal. It opens this page signed in.'}):UI.state({kind:'error',title:"Can't reach orch",text:'Is the review page still running in your terminal?',action:{label:'Try again',onClick:drawAnswered}}))}};
  bWait.onclick=()=>setView('deck');bAns.onclick=()=>setView('answered');
  deckEl.replaceChildren(UI.state({kind:'loading'}));waitCount(0);setView('deck');
