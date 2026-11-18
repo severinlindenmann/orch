@@ -74,12 +74,10 @@ def test_recent_runs_short_list_with_titles(ws):
     s.tick(T(8, 1))
     v = build(ws, T(9))
     check(v)
-    (lst,) = blocks(v, "list", "Recent starts")
-    assert (
-        lst["items"][0]["title"] == "Bank check"
-        and lst["items"][0]["chips"][0] == {"label": "Stopped", "tone": "bad"}
-        and lst["items"][0]["link"] == "t_wake002"
-    )
+    (lst,) = blocks(v, "table", "Recent starts")  # one line per start since ORCH-537
+    assert lst["compact"] is True
+    assert lst["rows"][0]["cells"] == {"ticket": "Bank check", "when": "Wed 08:00", "result": "Stopped"}
+    assert lst["rows"][0]["link"] == "t_wake002"
     assert "exit" not in json.dumps(lst).lower()
 
 
@@ -95,8 +93,8 @@ def test_good_run_has_duration(ws):
     s.tick(T(8, 1))
     v = build(ws, T(9))
     check(v)
-    item = blocks(v, "list", "Recent starts")[0]["items"][0]
-    assert item["chips"][0]["label"] == "Done" and "done in" in item["subtitle"]
+    row = blocks(v, "table", "Recent starts")[0]["rows"][0]
+    assert row["cells"]["result"].startswith("Done in ")
 
 
 def test_view_is_read_only_and_cli_prints_json(ws, capsys):
@@ -401,11 +399,11 @@ def test_recent_runs_and_last_result_read_the_same_runs(ws):
     )
     v = build(ws, T(9))
     check(v)
-    (table,) = blocks(v, "table")
+    (table,) = blocks(v, "table", "Repeating")
     assert table["rows"][0]["cells"]["last"].startswith("Started")
-    (lst,) = blocks(v, "list", "Recent starts")
-    assert [i["title"] for i in lst["items"]] == ["Weekly report"]
-    assert lst["items"][0]["chips"] == [{"label": "Started", "tone": "neutral"}]
+    (lst,) = blocks(v, "table", "Recent starts")
+    assert [r["cells"]["ticket"] for r in lst["rows"]] == ["Weekly report"]
+    assert lst["rows"][0]["cells"]["result"] == "Started"
 
 
 def test_a_synced_schedule_not_allowed_here_offers_allow_instead_of_run_now(ws, monkeypatch):

@@ -378,6 +378,41 @@ const OrchBlocks = (() => {
     l.scrollIntoView({block: 'nearest'}); l.focus({preventScroll: true});
   }
 
+  // Compact week (calendar `compact`, ORCH-537): the frequent repeats as one line of small pills, then one row per day
+  // with its starts side by side on single lines; a run of empty days folds into one quiet row ("Thu 5 – Tue 10").
+  function compactWeek(s, box, days, bands, banded, today) {
+    box.classList.add('week-compact');
+    if (bands.length) {
+      const row = el('div', 'week-pills');
+      for (const x of bands) {
+        const a = linked('run pill t-' + tone(x.tone), x.link, [el('time', 'every', x.every), el('span', '', x.title)]);
+        a.title = x.full || x.title; row.append(a);
+      }
+      box.append(row);
+    }
+    const label = d => d.toLocaleDateString('en-GB', {weekday: 'short'}) + ' ' + d.getDate();
+    const ol = el('ol', 'week-rows');
+    for (let i = 0; i < days.length;) {
+      const d = parseDate(days[i].date), items = arr(days[i].items).filter(it => !banded(it));
+      const isToday = d.toDateString() === today;
+      if (!items.length) {
+        let j = i; while (j + 1 < days.length && !arr(days[j + 1].items).filter(it => !banded(it)).length) j++;
+        const li = el('li', 'week-row none' + (isToday ? ' today' : ''));
+        li.append(el('span', 'week-day', j > i ? label(d) + ' \u2013 ' + label(parseDate(days[j].date)) : label(d)), el('span', 'week-none', 'Nothing planned'));
+        ol.append(li); i = j + 1; continue;
+      }
+      const li = el('li', 'week-row' + (isToday ? ' today' : '')), runs = el('div', 'week-runs');
+      li.append(el('span', 'week-day', isToday ? 'Today' : label(d)));
+      for (const it of items) {
+        const a = linked('run line t-' + tone(it.tone), it.link, [el('time', '', it.time || ''), el('span', '', it.title)]);
+        a.title = it.full || it.title; runs.append(a);
+      }
+      li.append(runs); ol.append(li); i++;
+    }
+    box.append(ol); s.append(box);
+    return s;
+  }
+
   const draw = {
     stat(b) {
       const d = el('div', 'stat t-' + tone(b.tone));
@@ -455,6 +490,7 @@ const OrchBlocks = (() => {
         }
       });
       const banded = it => it.every && bands.some(x => x.link === it.link && x.every === it.every);
+      if (b.compact) return compactWeek(s, box, days, bands, banded, today);
       if (bands.length) {
         const row = el('div', 'week-bands');
         for (const x of bands) {
@@ -524,6 +560,7 @@ const OrchBlocks = (() => {
             const a = linked('cell-link', r.link, [...td.childNodes]); td.replaceChildren(a);
           }
           if (i === 0 && r.subtitle) td.append(el('span', 'subline', r.subtitle));
+          if (i === 0 && b.compact) td.title = String((r.cells || {})[c.key] ?? '') + (r.subtitle ? ' \u00b7 ' + r.subtitle : '');
           tr.append(td);
         });
         if (hasActions) {

@@ -607,6 +607,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
         week = {
             "type": "calendar",
             "title": "Coming up",
+            "compact": True,
             "meta": span,
             "days": days,
         }
@@ -648,7 +649,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
             }
         )
 
-    recent = []
+    recent = []  # Recent starts: one line each (ORCH-537), ticket, when, how it ended
     events_ = [(parse(r["at"]), r, None) for r in runs[-5:]] + [
         (at, None, t) for at, t in _started(tickets, runs)
     ]
@@ -656,28 +657,24 @@ def build(root: Path, now: datetime | None = None) -> dict:
         if started:
             recent.append(
                 {
-                    "title": _name(started),
-                    "subtitle": f"{_at.astimezone():%a %H:%M}",
-                    "chips": [{"label": "Started", "tone": "neutral"}],
+                    "cells": {"ticket": _name(started), "when": f"{_at.astimezone():%a %H:%M}", "result": "Started"},
                     "link": started["id"],
                 }
             )
             continue
         ok = r["exit"] == 0
-        when = parse(r["at"]).astimezone().strftime("%a %H:%M")
         took = r.get("took")
         how = (
-            (
-                "done"
-                + (f" in {max(1, round(took / 60))} min" if isinstance(took, int | float) and took else "")
-            )
+            "Done" + (f" in {max(1, round(took / 60))} min" if isinstance(took, int | float) and took else "")
             if ok
-            else "did not finish"
+            else "Stopped"
         )
         row = {
-            "title": title(r["ticket"]),
-            "subtitle": f"{when}" + (f" · {how}" if ok else ""),
-            "chips": [{"label": "Done" if ok else "Stopped", "tone": "good" if ok else "bad"}],
+            "cells": {
+                "ticket": title(r["ticket"]),
+                "when": parse(r["at"]).astimezone().strftime("%a %H:%M"),
+                "result": how,
+            }
         }
         if r["ticket"] in by_id:
             row["link"] = r["ticket"]
@@ -701,11 +698,24 @@ def build(root: Path, now: datetime | None = None) -> dict:
             soon = f"{_name(t)} is scheduled for {here[0]:%A}. " if here else None
         blocks.append(
             {
+                "type": "table",
+                "title": "Recent starts",
+                "meta": "Latest activity",
+                "compact": True,
+                "columns": [
+                    {"key": "ticket", "label": "Ticket", "type": "text"},
+                    {"key": "when", "label": "When", "type": "text"},
+                    {"key": "result", "label": "Result", "type": "text"},
+                ],
+                "rows": recent,
+            }
+            if recent
+            else {
                 "type": "list",
                 "title": "Recent starts",
                 "meta": "Latest activity",
                 "above": True,
-                "items": recent,
+                "items": [],
                 "empty": {
                     "title": "Nothing has run yet",
                     "text": (soon or "") + "You can also run it now.",

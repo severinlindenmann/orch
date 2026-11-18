@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 
 class El {
   constructor(tag) { this.tagName = tag.toUpperCase(); this.className = ''; this.dataset = {}; this.attrs = {}; this.kids = []; this.text = ''; this.hidden = false; this.style = {}; this.parent = null; }
+  get classList() { const self = this; return {add: c => { self.className = (self.className + ' ' + c).trim(); }, contains: c => self.className.split(' ').includes(c)}; }
   setAttribute(k, v) { this.attrs[k] = String(v); }
   getAttribute(k) { return this.attrs[k] ?? null; }
   set textContent(v) { this.text = String(v); this.kids = []; }
@@ -49,4 +50,19 @@ test('a table that fits, or one without show, has no button and no hidden row', 
     assert.equal(s.find('button', 'blk-show').length, 0);
     assert.ok(!s.find('table')[0].className.split(' ').includes('compact'));
   }
+});
+
+test('a compact week has one row per day, folds empty days and puts frequent repeats on one line of pills', () => {
+  const day = (date, items) => ({date, items});
+  const five = {time: '', every: 'Every 5 min', title: 'Helper watcher', link: 't_role00098'};
+  const b = {type: 'calendar', title: 'Coming up', compact: true, days: [
+    day('2026-11-04', [five, {time: '09:00', title: 'Services', link: 't_once00001'}, {time: '10:21', title: 'Flaky tests', link: 't_once00002'}]),
+    day('2026-11-05', [five]), day('2026-11-06', []), day('2026-11-07', []),
+    day('2026-11-08', [{time: '08:00', title: 'Weekly report', link: 't_rec000001'}]), day('2026-11-09', []), day('2026-11-10', [])]};
+  const s = draw(b), rows = s.find('li', 'week-row');
+  assert.equal(s.find('a', 'pill').length, 1);
+  assert.equal(s.find('a', 'pill')[0].textContent, 'Every 5 minHelper watcher');
+  assert.deepEqual(rows.map(r => r.kids[0].textContent), ['Wed 4', 'Thu 5 \u2013 Sat 7', 'Sun 8', 'Mon 9 \u2013 Tue 10']);
+  assert.deepEqual(rows[0].find('a', 'line').map(a => a.textContent), ['09:00Services', '10:21Flaky tests']);
+  assert.equal(rows[1].kids[1].textContent, 'Nothing planned');
 });

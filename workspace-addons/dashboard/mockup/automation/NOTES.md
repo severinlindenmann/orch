@@ -45,3 +45,4 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 
 - automation.html: the one table is split into "Repeating" (plan, next time, last time, switch) and "Once" (ticket, starts, Start now); one-time rows lose the "Once" / "Not yet" / "One-time wake-up" words they repeated.
 - Both tables use the compact table rows (40 px, the quiet line beside the name); a table shows five rows and the rest behind "Show N more".
+- Second round (owner: "make all look a bit tighter and compact and nicer", challenged with an outside review): Coming up is the compact week (frequent repeats as one line of pills, one row per day with its starts on single lines, empty days folded into one row); Recent starts is a compact one-line table; long ticket names end with "…" on one line (full name on hover); at phone width a compact table row is the name, one quiet line of facts, then the buttons.
