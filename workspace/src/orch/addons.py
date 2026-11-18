@@ -2408,7 +2408,12 @@ def file_repo(r: str) -> Path | None:
     from urllib.request import url2pathname
 
     folder = Path(url2pathname(urlparse(r).path))
-    return folder if folder.is_absolute() and folder.is_dir() else None
+    if not folder.is_absolute():
+        return None
+    for f in (folder, folder.with_name(folder.name + ".git")):  # uv records a bare repo's URL without .git
+        if f.is_dir():
+            return f
+    return None
 
 
 def _source_sha() -> str | None:

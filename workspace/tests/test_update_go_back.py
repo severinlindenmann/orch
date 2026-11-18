@@ -217,3 +217,11 @@ def test_a_fix_release_ends_the_hold_and_can_be_gone_back_to(_setup):
     assert updateinfo.installed()["release"] == "33.1"
     addons.switch_to("33")
     assert addons.ref() == SHA[33] and addons.pinned()["left"] == "33.1"
+
+
+def test_a_bare_file_source_recorded_without_dot_git(tmp_path):
+    bare = tmp_path / "origin.git"
+    bare.mkdir()
+    assert addons.file_repo(f"file://{tmp_path}/origin") == bare
+    assert addons.file_repo(f"file://{tmp_path}/origin.git") == bare
+    assert addons.file_repo(f"file://{tmp_path}/nothing") is None and addons.file_repo("https://x/y") is None
