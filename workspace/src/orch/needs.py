@@ -19,7 +19,8 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import addons, history, services, tickets
+from orch import addons, history, services, ticketindex, tickets
+from orch.errors import Refused
 
 PULL_TIMEOUT = 2
 TONES = ("needs-you", "bad", "warn")
@@ -70,11 +71,50 @@ def _bring_back_row(tid: str, title: str, back: dict, now: str) -> dict:
     }
 
 
+def _may_need(r: dict, live: set[str]) -> bool:
+    """True when the ticket of index row r could give a row below: a bring-back that waits, or an open ticket
+    with an open question, a wait with an end time, a pull request in Review (stuck.py) or a helper record
+    (an idle helper, stuck.py). Every other ticket gives none, so its file is not read."""
+    if r.get("bring_back"):
+        return True
+    if r.get("status") in OPEN:
+        return False
+    w = r.get("waiting_on") or {}
+    return bool(
+        r.get("questions_open")
+        or isinstance(w.get("until"), str)
+        or r.get("status") == "review"
+        or r["id"] in live
+    )
+
+
+def _candidates(root: Path) -> list[dict]:
+    """The tickets core_rows looks at, read in full, in list_all order: only those the index says may
+    need a person (ORCH-521: with 10,000 tickets reading every file took seconds)."""
+    try:
+        live = {
+            e.name[:-5] for e in os.scandir(root / ".orch" / "run" / "tickets") if e.name.endswith(".json")
+        }
+    except OSError:
+        live = set()
+    out = []
+    for r in ticketindex.rows(root):
+        if not _may_need(r, live):
+            continue
+        try:
+            t = tickets.load(root, r["id"])
+        except (Refused, OSError):
+            continue  # a listing never stalls on a bad file
+        if not tickets.is_hidden(t):
+            out.append(t)
+    return out
+
+
 def core_rows(root: Path, now: str | None = None) -> list[dict]:
     now = now or _now()
     rows = []
     seen = set()
-    shown = history.shown_json(root, tickets.list_all(root))  # every person field as proven here
+    shown = history.shown_json(root, _candidates(root))  # every person field as proven here
     for t in shown:
         seen.add(t["id"])
         back = (t.get("work") or {}).get("bring_back") or {}

@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from orch import history, review, tickets
+from orch import history, review, ticketindex, tickets
 from orch.errors import Refused
 
 
@@ -25,18 +25,49 @@ def ticket_rows(root: Path, status: str | None = None, all_: bool = False) -> li
     counts and the quiet mark."""
     from orch.cli import visible
 
-    everything = tickets.list_all(root)
-    ts = [
-        visible(root, t)
-        for t in everything
-        if (t["status"] == status if status else all_ or t["status"] not in ("done", "dropped"))
-    ]
-    ts.sort(key=lambda t: tuple(tickets.STATUS_WORDS).index(t["status"]))
-    for t in ts:
-        t["children"] = tickets.children_counts(everything, t["id"])
+    everything = ticketindex.rows(root)  # which tickets and their children: the index, not every file
+    kids = ticketindex.children_counts(everything)
+    ts = []
+    for r in _picked(everything, status, all_):
+        try:
+            t = tickets.load(root, r["id"])  # only the listed tickets are read in full
+        except (Refused, OSError):
+            continue  # changed into something unlistable meanwhile: a listing never stalls on a bad file
+        if tickets.is_hidden(t) or t.get("status") not in tickets.STATUS_WORDS:
+            continue
+        t = visible(root, t)
+        t["children"] = dict(kids.get(t["id"]) or ticketindex.no_children())
         if quiet := tickets.quiet_since(t):
             t["quiet_since"] = quiet
+        ts.append(t)
+    ts.sort(key=lambda t: tuple(tickets.STATUS_WORDS).index(t["status"]))
     return ts
+
+
+def _picked(everything: list[dict], status: str | None, all_: bool) -> list[dict]:
+    return [
+        r
+        for r in everything
+        if r.get("status") in tickets.STATUS_WORDS
+        and (r["status"] == status if status else all_ or r["status"] not in ("done", "dropped"))
+    ]
+
+
+def index_list(root: Path, status: str | None = None, all_: bool = False) -> tuple[list[dict], list[dict]]:
+    """(the listed rows, every row) for the text `orch ticket list`: index rows only, no ticket file read.
+    Each listed row gets children and quiet_since like ticket_rows."""
+    everything = ticketindex.rows(root)
+    kids = ticketindex.children_counts(everything)
+    ts = _picked(everything, status, all_)
+    ts.sort(key=lambda r: tuple(tickets.STATUS_WORDS).index(r["status"]))
+    for r in ts:
+        r["children"] = dict(kids.get(r["id"]) or ticketindex.no_children())
+        stamps = {"status": r["status"], "updated_at": r.get("updated_at"), "created_at": r.get("created_at")}
+        if r.get("last_at"):
+            stamps["history"] = [{"at": r["last_at"]}]
+        if quiet := tickets.quiet_since(stamps):
+            r["quiet_since"] = quiet
+    return ts, everything
 
 
 def run_status(root: Path, ids: list[str]) -> dict:
