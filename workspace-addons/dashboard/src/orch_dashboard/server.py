@@ -231,6 +231,12 @@ RESTARTING_OPS = ("addon.set", "addon.uninstall")
 _PRIVATE_PREFIXES = ("/api/", "/view/", "/addon/", "/page/", "/ready", "/styleguide")
 
 
+def _hide_keys(path: str) -> str:
+    """A path for the debug log without the unguessable key of a ticket page (/view/.../k/<key>/, /page/<t>/<key>/)."""
+    path = re.sub(r"(/view/t_[a-z0-9]{6,16}/k/)[0-9a-f]{16}", r"\1<hidden>", path)
+    return re.sub(r"(/page/t_[a-z0-9]{6,16}/)[0-9a-f]{16}", r"\1<hidden>", path)
+
+
 def _arm_resume(root: Path, session) -> None:
     """Like the Update button: the restarted server adopts this tab's session once (15 min, one use), so the
     open tabs keep working after the add-on change restarts it. Written only for a click with a page session."""
@@ -279,7 +285,9 @@ class Handler(BaseHTTPRequestHandler):
             "dashboard.request",
             "debug",
             method=getattr(self, "command", ""),
-            path="/go/<hidden>" if self.path.startswith("/go/") else self.path.split("?", 1)[0][:200],
+            path="/go/<hidden>"
+            if self.path.startswith("/go/")
+            else _hide_keys(self.path.split("?", 1)[0][:200]),
         )
 
     def log_message(self, *a):  # quiet
@@ -359,13 +367,21 @@ class Handler(BaseHTTPRequestHandler):
         if px and PAGE_PATH.fullmatch(px.group(2) or ""):  # an unguessable key in the address
             return True
         kv = VIEW_KEYED.fullmatch(path)
-        if kv and ticketfiles.view_key_ok(kv.group(1), kv.group(2)):
-            # a ticket page's own files by the unguessable key only a signed-in page was given (browser headers
-            # anyone can forge prove nothing, also on this computer: ORCH-481)
+        if kv and not kv.group(4).lower().endswith((".html", ".htm")) and self._view_key_ok(kv):
+            # a ticket page's own files (never a page) by the unguessable key only a signed-in page was given
+            # (browser headers anyone can forge prove nothing, also on this computer: ORCH-481)
             return True
         return path == "/" or (
             not path.startswith(_PRIVATE_PREFIXES) and path.lower().endswith((*STATIC_EXT, ".html"))
         )
+
+    def _signin_tag(self) -> str:
+        """What ties a ticket page's key to the current sign-in: a new or ended sign-in changes it."""
+        session = getattr(self, "session", None)
+        return str(getattr(session, "cookie", "") or "") if session is not None else ""
+
+    def _view_key_ok(self, kv) -> bool:
+        return ticketfiles.view_key_ok(kv.group(1), kv.group(2), self._signin_tag())
 
     def _refuse_host(self):
         """The answer when _host_ok says no. A well-formed host name (a proxy, another computer) only lacks the
@@ -709,7 +725,7 @@ class Handler(BaseHTTPRequestHandler):
             kv or pv
         ):  # a ticket's web page and its own assets, only ever inside a sandboxed frame (no cookie, no /api)
             tid, kind, rest = (kv.group(1), kv.group(3), kv.group(4)) if kv else pv.groups()
-            if kv and not ticketfiles.view_key_ok(tid, kv.group(2)):
+            if kv and not self._view_key_ok(kv):
                 return self._send(404, b"not found", "text/plain")
             site = self.headers.get("Sec-Fetch-Site")
             if site not in (None, "same-origin", "none"):
@@ -724,9 +740,8 @@ class Handler(BaseHTTPRequestHandler):
             if (
                 not kv
             ):  # signed in (checked above): on to the address with the key, so the page's own files load
-                where = f"/view/{tid}/k/{ticketfiles.view_key(tid)}/{kind}/{rest}" + (
-                    f"?{query}" if query else ""
-                )
+                key = ticketfiles.view_key(tid, self._signin_tag())
+                where = f"/view/{tid}/k/{key}/{kind}/{rest}" + (f"?{query}" if query else "")
                 return self._send(
                     302, b"", "text/plain", {"Location": where, "Referrer-Policy": "no-referrer"}
                 )

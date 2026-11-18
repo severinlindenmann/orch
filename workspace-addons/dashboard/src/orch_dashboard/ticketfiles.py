@@ -89,19 +89,21 @@ PAGE_ASSETS = {
 }
 PAGE_SUBRESOURCE_DEST = ("style", "script", "image", "font", "audio", "video")
 
-# The key in a ticket page's address (/view/<ticket>/k/<key>/<kind>/<file>): HMAC of the ticket id under a secret
-# made at server start. A signed-in request for /view/<ticket>/<kind>/<file> is sent on to the address with the key,
-# so the page's own stylesheet, script and pictures (from its sandboxed, opaque origin: no cookie) load by the key.
+# The key in a ticket page's address (/view/<ticket>/k/<key>/<kind>/<file>): HMAC of the sign-in and the ticket id
+# under a secret made at server start. A signed-in request for /view/<ticket>/<kind>/<file> is sent on to the address
+# with the key, so the page's own stylesheet, script and pictures (from its sandboxed, opaque origin: no cookie) load
+# by the key; the page itself still needs the sign-in. A new sign-in or an ended one makes every old key worthless.
 # Browser headers anyone can forge are no proof (ORCH-481): without the key or the sign-in no ticket file is read.
 _VIEW_SECRET = secrets.token_bytes(32)
 
 
-def view_key(tid: str) -> str:
-    return hmac.new(_VIEW_SECRET, str(tid).encode(), hashlib.sha256).hexdigest()[:16]
+def view_key(tid: str, signin: str = "") -> str:
+    msg = (str(signin) + "\0" + str(tid)).encode()
+    return hmac.new(_VIEW_SECRET, msg, hashlib.sha256).hexdigest()[:16]
 
 
-def view_key_ok(tid: str, key: str) -> bool:
-    return hmac.compare_digest(view_key(tid), str(key))
+def view_key_ok(tid: str, key: str, signin: str = "") -> bool:
+    return hmac.compare_digest(view_key(tid, signin), str(key))
 
 
 PAGE_CSP = (

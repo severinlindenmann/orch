@@ -176,3 +176,23 @@ def test_a_ticket_page_needs_the_sign_in_or_its_key_never_forged_headers(live):
     assert st == 200 and body == b"body{color:red}"
     assert call(port, "GET", keyed.replace(keyed.split("/")[4], "0" * 16) + "/style.css", forged)[0] == 401
     assert call(port, "GET", keyed.replace("t_abcdef", "t_abcdeg") + "/style.css", forged)[0] == 401
+    assert call(port, "GET", where, h)[0] == 401  # the key opens the page's own files, never the page itself
+    assert call(port, "GET", where, {**h, "Cookie": ck})[0] == 200
+
+
+def test_the_key_of_a_ticket_page_follows_the_sign_in_and_stays_out_of_the_log():
+    from orch_dashboard import ticketfiles
+    from orch_dashboard.server import _hide_keys
+
+    k = ticketfiles.view_key("t_abcdef", "cookie-one")
+    assert ticketfiles.view_key_ok("t_abcdef", k, "cookie-one")
+    assert not ticketfiles.view_key_ok(
+        "t_abcdef", k, "cookie-two"
+    )  # a new or ended sign-in: old keys are dead
+    assert not ticketfiles.view_key_ok("t_abcdeg", k, "cookie-one")
+    logged = _hide_keys(f"/view/t_abcdef/k/{k}/artifacts/x.css")
+    assert k not in logged and logged == "/view/t_abcdef/k/<hidden>/artifacts/x.css"
+    assert (
+        _hide_keys("/addon/focus/page/t_abcdef/" + "a" * 16 + "/i.html")
+        == "/addon/focus/page/t_abcdef/<hidden>/i.html"
+    )
