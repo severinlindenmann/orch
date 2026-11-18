@@ -23,7 +23,11 @@ The shape (the wall builds on it; keep it in step with the PR text):
       "opened_at": "<ISO>" | null, "open_seconds": int | null,     # when the session opened
       "idle_seconds": int | null, "closes_in_seconds": int | null, # idle close countdown (live sessions)
       "last_at": "<ISO>" | null,                                   # the ticket's last history line
-    }
+      "kind": "" | "empty" | "chat" | "terminal" | "manager",      # "" = a ticket's; else a session without a
+    }                                                              # ticket (ORCH-364), named by its title
+
+A session without a ticket is listed only while it is open; a plain terminal has no helper and shows as idle,
+word "Open", until it is closed.
 
 Sessions come in the order needs you, working, in line, idle, closed; inside one status by key number.
 """
@@ -166,7 +170,28 @@ def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> 
         "idle_seconds": _int(run.get("idle_seconds")) if alive else None,
         "closes_in_seconds": _int(warmth.get("seconds_left")) if alive else None,
         "last_at": last.get("at") if isinstance(last.get("at"), str) else None,
+        "kind": "",
     }
+
+
+def no_ticket(x: dict, run: dict | None, tool_of) -> dict | None:
+    """One open session without a ticket (state["sessions"], data.shape_sessions), or None when it is closed."""
+    if not (isinstance(x, dict) and isinstance(x.get("id"), str) and x.get("open") is True):
+        return None
+    kind = x.get("kind") if x.get("kind") in ("empty", "chat", "terminal", "manager") else None
+    if not kind:
+        return None
+    t = {"id": x["id"], "key": "", "title": x.get("title") or "Session"}
+    if kind == "terminal":
+        s = session(t, None, False, None)
+        s.update(status="idle", word="Open")
+    else:
+        claim = (run or {}).get("claim") if isinstance((run or {}).get("claim"), dict) else {}
+        s = session(t, run, False, tool_of(claim.get("agent")))
+        if s["status"] == "closed":
+            return None
+    s["kind"] = kind
+    return s
 
 
 def build(root: Path, orch_bin: str | None, state: dict, lines: int = LINES) -> list[dict]:
@@ -189,6 +214,14 @@ def build(root: Path, orch_bin: str | None, state: dict, lines: int = LINES) -> 
         out.append(s)
         if s["mode"] == "live":
             live.append(tid)
+    for x in state.get("sessions") or []:  # sessions without a ticket (ORCH-364): their tickets are hidden
+        s = no_ticket(
+            x, runs.get(x.get("id")) if isinstance(x, dict) else None, lambda a: tool_label(root, a)
+        )
+        if s and all(o["id"] != s["id"] for o in out):
+            out.append(s)
+            if s["mode"] == "live":
+                live.append(s["id"])
     shots = tails(root, orch_bin, live, n)
     for s in out:
         s["lines"] = shots.get(s["id"], [])

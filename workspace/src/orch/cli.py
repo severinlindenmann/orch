@@ -31,6 +31,7 @@ from orch import (
     cli_run,
     cli_screen,
     cli_secret,
+    cli_session,
     cli_shot,
     cli_status,
     diag,
@@ -347,7 +348,19 @@ def visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat", "private"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "tokens", "github", "manager", "triage"}
+ADVANCED_TOP = {
+    "update",
+    "wait",
+    "log",
+    "answer",
+    "ref",
+    "ext",
+    "tokens",
+    "github",
+    "manager",
+    "session",
+    "triage",
+}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -825,6 +838,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_look.add_parsers(sub, common)
     cli_chat.add_parsers(sub, common)
     cli_manager.add_parsers(sub, common)
+    cli_session.add_parsers(sub, common)
     p.formatter_class = argparse.RawDescriptionHelpFormatter
     notes = []
     if addon_lines:
@@ -1045,6 +1059,7 @@ def run(args: argparse.Namespace) -> None:
         or cli_look.dispatch(args, root)
         or cli_shot.dispatch(args, root)
         or cli_manager.dispatch(args, root)
+        or cli_session.dispatch(args, root)
     ):
         pass
     elif cmd == "ticket" and sub == "new":
