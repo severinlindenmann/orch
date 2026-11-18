@@ -2,7 +2,8 @@
 
 One runner per workspace (lock folder `runner.lock`). It first checks which GitHub login gh uses: with the
 setting `[pull_requests] login` it runs only as that login, and it only takes entries added by its own login.
-While pull requests wait, it takes up to MAX_GROUP of one repository and base branch, in line order:
+While pull requests wait, it takes up to `[pull_requests] max_group` (default 5) of one repository and base
+branch, in line order:
 
 - one pull request: the core waiter merges it on green (orch.prwait.run_one). When the base branch changed
   files of it since it took the base in, the queue never takes the base into its branch and runs it again:
@@ -42,7 +43,7 @@ from pathlib import Path
 from . import settings, store
 from .store import FINISHED, MERGED, OUT, RUNNING, WAITING, Refused
 
-MAX_GROUP = 5
+MAX_GROUP = settings.DEFAULT_MAX_GROUP  # the setting max_group wins (settings.max_group)
 MAX_TRIES = 3
 PAUSE_SECS = 120  # before a group that hit trouble is tried again
 MARK_SECS = 60  # how long GitHub may take to mark the members of a merged group merged
@@ -216,7 +217,7 @@ class Runner:
         self.tidy()
 
     def next_batch(self) -> list[dict] | None:
-        """Up to MAX_GROUP waiting pull requests of the first one's repository and base, marked running.
+        """Up to max_group waiting pull requests of the first one's repository and base, marked running.
         None when nothing waits; [] when this round only cleared entries or everything is paused."""
         for r in store.waiting(self.root):  # added before entries kept their login: nobody would take it
             if not r.get("login"):
@@ -235,7 +236,8 @@ class Runner:
         repo, base, batch, unseen, answered = rows[0]["repo"], None, [], [], False
         guess = str(rows[0].get("base") or "")  # the base seen at add time; checked again below
         red = self.red_base(repo, guess)
-        most = 1 if red else MAX_GROUP  # the base branch itself is red: no groups, one at a time
+        size = settings.max_group(self.root)
+        most = 1 if red else size  # the base branch itself is red: no groups, one at a time
         if red:  # its fixes first
             rows = sorted(rows, key=lambda r: not self.is_fix(r))
         for r in rows:
@@ -260,7 +262,7 @@ class Runner:
                 self.finish(r, OUT, line, "checks failed")
                 continue
             if not base and b != guess:  # moved to another base branch since it was added: that one counts
-                most = 1 if self.red_base(repo, b) else MAX_GROUP
+                most = 1 if self.red_base(repo, b) else size
             base = base or b
             r.update(
                 base=b, head=v["headRefOid"], fork=bool(v.get("isCrossRepository")),
