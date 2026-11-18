@@ -732,18 +732,21 @@ def _release_fix(root: Path, tid: str | None) -> bool:
     return "green" in str(t.get("done_when") or "")  # its deploy tickets are done when production answers
 
 
+OWNERS_FILES = ("CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS")  # where GitHub reads code owners
+
+
 def owner_change(v: dict) -> bool:
     """The pull request changes a CI workflow or the code owners file (or more files than GitHub lists, so one
     could be among them): GitHub holds it for the code owner, so a person merges it (ORCH-305) and the queue
     only checks it."""
-    from orch.ghmerge import WORKFLOW_DIR
+    from orch.ghmerge import is_workflow
 
-    files = v.get("files") or []
-    if len(files) >= 100:  # GitHub lists at most 100 files: a workflow could be among the rest
+    files = v.get("files")
+    if not isinstance(files, list) or len(files) >= 100:  # not listed, or a workflow could be in the rest
         return True
     for f in files:
         path = str(f.get("path") or "") if isinstance(f, dict) else ""
-        if path.startswith(WORKFLOW_DIR) or path == ".github/CODEOWNERS":
+        if is_workflow(path) or path in OWNERS_FILES:
             return True
     return False
 

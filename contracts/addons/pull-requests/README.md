@@ -91,7 +91,7 @@ of the queue. Alone (`alone_paths`): a pull request that changes CI or the queue
 setting's paths, or more than 100 files, so GitHub's list may be cut) never joins others: it runs in a group of its
 own, first when it is first in line, otherwise in a later round, so its own green run is the proof before it
 counts. Proof run: a pull request a person merges (an unanswered Merge card on any ticket, or it changes
-`.github/workflows/` or `.github/CODEOWNERS`, which GitHub holds for the code owner, or it has 100 files or more, so one of them could hide in what GitHub does not list) is checked alone in its group of
+a workflow under `.github/workflows/` or a CODEOWNERS file (root, `.github/` or `docs/`), which GitHub holds for the code owner; or GitHub listed no files, or 100 or more, so one of them could hide in what it does not list) is checked alone in its group of
 one with the core waiter in check-only mode (`run_one(url, False, queue=True)`) and never merged by the queue; its
 group is closed afterwards. Green: its head gets the mark ("Checked green in a queue group on top of <base>"), the
 Merge card is made on its ticket when there is none (the person's click merges it), and the entry ends `out`

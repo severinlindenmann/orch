@@ -106,7 +106,7 @@ class World:
         p = self.prs[n]
         return {"state": p["state"], "isDraft": p["isDraft"], "baseRefName": p["base"],
                 "reviewDecision": p["review"], "reviews": p.get("reviews", []), "headRefOid": self.head(n), "number": n,
-                "title": f"Change {n}", "isCrossRepository": False}  # fmt: skip
+                "title": f"Change {n}", "isCrossRepository": False, "files": [{"path": f"src/m{n}.py"}]}  # fmt: skip
 
     def own_checks_failed(self, u):
         return False

@@ -107,8 +107,9 @@ def test_no_mark_on_the_group_commit_means_no_group_run(ws):
 def test_owner_change_reads_workflows_and_code_owners():
     assert runner.owner_change({"files": [{"path": ".github/workflows/ci.yml"}]})
     assert runner.owner_change({"files": [{"path": ".github/CODEOWNERS"}]})
+    assert runner.owner_change({"files": [{"path": "docs/CODEOWNERS"}]})
     assert not runner.owner_change({"files": [{"path": ".github/actions/a.yml"}]})
-    assert not runner.owner_change({})
+    assert runner.owner_change({})  # GitHub listed no files: a person merges it (fails closed)
 
 
 def test_github_sets_and_reads_the_mark(monkeypatch):
