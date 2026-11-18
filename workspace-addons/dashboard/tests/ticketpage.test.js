@@ -301,6 +301,17 @@ test('result preview tiles keep HTML static and bound text excerpts', async () =
   assert.ok(pre.children[0].split('\n').length <= 8);
 });
 
+test('a listed file the server cannot find says it is missing in its preview tile', async () => {
+  const h = (tag, attrs = {}, ...children) => ({tag, attrs, children, append(...kids){this.children.push(...kids);}});
+  const ctx = {h, window:{UI:{...kitState}, DashHelpers:helpers}, snapshot:false, route:() => ({kind:'home'}), render(){}, URL, TextDecoder, fetch:async () => new Response('not found',{status:404})};
+  vm.createContext(ctx);
+  vm.runInContext(source.slice(source.indexOf('const PREVIEW_EXT'),source.indexOf('function loadArtifacts')),ctx);
+  vm.runInContext(source.slice(source.indexOf('const ticketPreviewText'),source.indexOf('function ticketResultCard')),ctx);
+  const tile = ctx.ticketPreviewTile({id:'t_test'},{name:'orders-5000.csv'},'evidence');
+  await new Promise(resolve => setTimeout(resolve,20));
+  assert.match(JSON.stringify(tile), /This file is missing/);
+});
+
 test('task proof chips: only plain evidence files and http(s) links get a chip, and the summary is the task line', () => {
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false)});
   const opened = [];
