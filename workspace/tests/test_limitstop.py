@@ -278,3 +278,95 @@ def test_a_run_that_ends_on_the_limit_is_noted(proj, new_ticket):
     hit = limitstop.from_output(out, runs.failure_text(1, out))
     assert hit is not None and limitstop.note(proj, tid, hit)
     assert limitstop.active(proj) is not None or limitstop.due(proj) == [tid]
+
+
+# ---------------------------------------------------------------- ORCH-642: the tool's own notices, a switch
+
+
+def _notice(text, at="2026-11-18T17:52:12.027Z"):
+    """Shape Claude Code saved on 18 Nov (report r-1118-1812-ws): a system notice, no answer line."""
+    return {
+        "type": "system",
+        "subtype": "informational",
+        "timestamp": at,
+        "content": text,
+        "level": "warning",
+    }
+
+
+LIMIT_NOTICE = "Usage limit reached · continuing automatically at 7:10pm · esc to cancel"
+SWITCH_NOTICE = "Automatic continue stopped · your login changed or ended · send a prompt to continue"
+
+
+def test_the_tools_limit_notice_is_a_limit_stop_with_its_time():
+    now = 1795024000  # 2026-11-18 17:46:40 UTC
+    hit = limitstop.from_entries([_answer(), _notice(LIMIT_NOTICE)], now)
+    assert hit is not None and not hit.get("switched")
+    assert time.localtime(hit["until"])[3:5] == (19, 10)
+    assert "notice" not in hit
+
+
+def test_a_login_change_after_the_notice_says_switched_and_keeps_the_time():
+    hit = limitstop.from_entries([_notice(LIMIT_NOTICE), {"type": "system", "subtype": "turn_duration"},
+                                  _notice(SWITCH_NOTICE)])  # fmt: skip
+    assert hit["switched"] is True and hit["until"] is not None and "login changed" in hit["text"]
+
+
+def test_a_prompt_after_the_notice_means_it_goes_on():
+    prompt = {"type": "user", "message": {"role": "user", "content": "Carry on with the open tasks."}}
+    result = {
+        "type": "user",
+        "message": {"role": "user", "content": [{"type": "tool_result", "content": "ok"}]},
+    }
+    assert limitstop.from_entries([_notice(LIMIT_NOTICE), _notice(SWITCH_NOTICE), prompt]) is None
+    assert limitstop.from_entries([_notice(LIMIT_NOTICE), result]) is not None
+    assert limitstop.from_entries([_notice("Some other notice"), _answer()]) is None
+
+
+def _live_like_production(proj, tid, pid, state, since_s, run="r_test1234"):
+    """A live run record as orch writes it: no session id in it (the ticket keeps that)."""
+    runs._write(
+        proj,
+        {
+            "schema": "orch.run/1", "ticket": tid, "run": run, "by": "human:tester", "agent": "claude",
+            "mode": "live", "pid": pid, "up": True, "started_at": _since(7200), "renewed_at": _since(since_s),
+            "live": {"state": state, "since": _since(since_s)},
+        },
+    )  # fmt: skip
+    tickets.record_session(proj, tid, "claude", SID, runs.host())
+
+
+def test_a_session_stuck_as_working_after_a_switch_is_sent_on_once(
+    proj, new_ticket, child, claude_home, starts
+):
+    """Report r-1118-1812-ws: the turn ended on the limit without the Stop hook, Usage switched the account,
+    the tool stopped its own automatic continue; the session showed as working and nothing sent the prompt."""
+    other = new_ticket()
+    limitstop.note(proj, other, {"until": time.time() + 3600})  # held for the old account's reset
+    tid = new_ticket()
+    _live_like_production(proj, tid, child(), "working", since_s=5 * 60)
+    _transcript(proj, claude_home, [_answer(), _notice(LIMIT_NOTICE), _notice(SWITCH_NOTICE)])
+    res = tend.run(proj)
+    assert [a["action"] for a in res["actions"] if a["ticket"] == tid] == ["carry"]
+    assert runs.read(proj, tid)["live"]["state"] == "idle"
+    assert any("account was switched" in i["text"] for i in runs.undelivered(proj, tid))
+    assert any("account was switched while it waited at the usage limit" in h for h in _history(proj, tid))
+    assert limitstop.active(proj) is None  # the hold is lifted: the new account has room
+    # the next pass does not send it again while the first one waits to go in
+    assert [a for a in tend.run(proj)["actions"] if a["ticket"] == tid and a["action"] == "carry"] == []
+    assert len([h for h in _history(proj, tid) if "account was switched" in h]) == 1
+
+
+def test_a_session_stuck_as_working_at_the_limit_is_noted(proj, new_ticket, child, claude_home, starts):
+    tid = new_ticket()
+    _live_like_production(proj, tid, child(), "working", since_s=5 * 60)
+    _transcript(proj, claude_home, [_answer(), _notice(LIMIT_NOTICE)])
+    assert [a["action"] for a in tend.run(proj)["actions"]] == ["limit"]
+    assert tid in limitstop.read(proj)["tickets"]
+
+
+def test_a_session_working_for_a_short_while_is_not_looked_at(proj, new_ticket, child, claude_home, starts):
+    tid = new_ticket()
+    _live_like_production(proj, tid, child(), "working", since_s=30)
+    _transcript(proj, claude_home, [_notice(LIMIT_NOTICE), _notice(SWITCH_NOTICE)])
+    assert tend.run(proj)["actions"] == []
