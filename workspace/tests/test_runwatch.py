@@ -275,8 +275,8 @@ def test_status_carries_the_helper_state_and_last_activity(proj, new_ticket, run
 def test_a_helper_noted_at_the_usage_limit_shows_stopped_with_the_time_it_continues(
     proj, new_ticket, run, monkeypatch, child
 ):
-    """ORCH-643 (report r-1118-1812-ws): a helper the watcher noted as stopped on the usage limit showed as working
-    or waiting for an OK on Home. Now every page reads 'Stopped: usage limit' and when it continues."""
+    """ORCH-643 (report r-1118-1812-ws): a helper the watcher noted as stopped on the usage limit showed as
+    working or waiting for an OK on Home. Now every page reads 'Stopped: usage limit' and when it goes on."""
     from orch import limitstop
 
     tid, other = new_ticket(), new_ticket("B")
@@ -288,12 +288,21 @@ def test_a_helper_noted_at_the_usage_limit_shows_stopped_with_the_time_it_contin
     assert data["helper"] == {
         "state": "limit",
         "word": "Stopped: usage limit",
-        "detail": f"Continues at {limitstop.clock(at)}",
+        "detail": f"Continues at {limitstop.clock(at + limitstop.GRACE)}",
     }
     rows = json.loads(run("run", "list", "--json")[1])["runs"]
     assert rows[0]["helper"]["word"] == "Stopped: usage limit"
     # the reset passed but the watcher has not started it yet; a ticket that is not noted keeps its state
-    assert runwatch.limit_state(proj, tid, now=at + 1)["detail"] == "Continues shortly"
+    assert runwatch.limit_state(proj, tid, now=at + limitstop.GRACE + 1)["detail"] == "Continues shortly"
+    # a helper that works again after the note (a person's prompt) is no longer shown as stopped
+    rec = runs.read(proj, tid)
+    working = {**rec, "live": {"state": "working", "since": _since(-5)}}
+    assert runwatch.limit_state(proj, tid, working) is None
+    # still "working" from before the note (the tool ended the turn without its hook, ORCH-642): stopped
+    assert (
+        runwatch.limit_state(proj, tid, {**rec, "live": {"state": "working", "since": _since(600)}})["state"]
+        == "limit"
+    )
     assert runwatch.limit_state(proj, other) is None
     # no helper runs: no state at all, also when the ticket is still noted
     assert json.loads(run("run", "status", other, "--json")[1])["helper"] is None

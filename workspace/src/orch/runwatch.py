@@ -362,17 +362,26 @@ def helper_state(sig: str, waits: list[dict], idle_seconds: int | None) -> dict 
     return {"state": key, "word": HELPER_WORDS[key], "detail": detail}
 
 
-def limit_state(root: Path, tid: str, now: float | None = None) -> dict | None:
-    """ORCH-643: the helper state of a ticket the watcher noted as stopped on the usage limit (limitstop), with
-    the time it continues; None when the ticket is not noted. Home showed such a helper as working or as
-    waiting for an OK on the screen (report r-1118-1812-ws)."""
+def limit_state(root: Path, tid: str, rec: dict | None = None, now: float | None = None) -> dict | None:
+    """ORCH-643: the helper state of a ticket the watcher noted as stopped on the usage limit (limitstop),
+    with the time orch starts it again; None when the ticket is not noted, or when its helper started working
+    again after the note (a person's prompt or start; the note stays until the reset). Home showed such a
+    helper as working or as waiting for an OK on the screen (report r-1118-1812-ws)."""
     from orch import limitstop
 
     data = limitstop.read(root)
-    if tid not in (data.get("tickets") or {}):
+    noted = (data.get("tickets") or {}).get(tid)
+    if not isinstance(noted, dict):
         return None
+    live = (rec or {}).get("live") or {}
+    if live.get("state") in ("working", "starting"):
+        try:
+            if runs._parse(live.get("since")) > float(noted.get("at") or 0):
+                return None  # it went on after the note
+        except (TypeError, ValueError):
+            pass
     now = time.time() if now is None else now
-    at = limitstop._num(data.get("until")) or limitstop.until(data)
+    at = limitstop.until(data)  # the reset plus the short wait: when the watcher starts it again
     detail = f"Continues at {limitstop.clock(at)}" if at is not None and at > now else "Continues shortly"
     return {"state": "limit", "word": HELPER_WORDS["limit"], "detail": detail}
 
@@ -407,7 +416,7 @@ def describe(root: Path, tid: str, rec: dict | None = None, table: list | None =
     sig = signal(rec, waits)
     helper = helper_state(sig, waits, _age(since))
     if helper is not None:
-        helper = limit_state(root, tid) or helper
+        helper = limit_state(root, tid, rec) or helper
     return {
         "signal": sig,
         "helper": helper,
