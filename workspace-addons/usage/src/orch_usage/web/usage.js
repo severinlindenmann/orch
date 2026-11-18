@@ -1,4 +1,5 @@
-// The Usage page (stage 1): accounts with their use, resets and rule; switching by itself; the history.
+// The Usage page (stage 1): accounts with their use, resets and rule; switching by itself; today's helper starts per
+// source (ORCH-660); the history.
 // It only reads from its own server (GET api/page). Every change is a click the dashboard runs as the person:
 // the page names a verb and a target (postMessage `orch.act`), the dashboard runs `orch usage act` and answers.
 // All text is set with textContent; the look is the master kit only (no page sheet).
@@ -190,6 +191,31 @@
       h('div', {className: 'stack', role: 'list'}, list.map((a, i) => card(a, i, list))));
   }
 
+  // ---- Today: helper starts per source, percent of the day, money and the last 7 days (ORCH-660, draft C) ----
+  const money = v => '$' + (Math.round(v * 100) / 100).toFixed(2);
+  const startsWord = n => n + (n === 1 ? ' start' : ' starts');
+  function todayTile(s, i) {
+    const t = h('div', {className: 'stat-tile', role: 'listitem'}, h('span', {className: 'stat-label', text: s.label}));
+    if (!(s.skipped && !s.starts)) {
+      t.append(h('span', {className: 'stat-value', text: String(s.starts)}),
+        h('span', {className: 'stat-delta', text: s.pct + ' % of today · ' + (s.dollars == null ? 'in the subscription' : money(s.dollars))}));
+    }
+    if (s.skipped) t.append(h('span', {className: 'pill', text: 'Skipped'}), h('span', {className: 'stat-delta', text: s.skipped}));
+    if (s.kinds && s.kinds.length) t.append(h('span', {className: 'meta', text: s.kinds.join(', ')}));
+    if (s.week_starts) {
+      const days = (model.spread.days || []).map(d => stamp(d + 'T12:00:00Z', {time: false}));
+      t.append(window.UI.spark(s.week, {tone: i + 1, label: 'Last 7 days, ' + s.label + ': ' + s.week.map((n, k) => (days[k] ? days[k] + ' ' : '') + n).join(', ')}),
+        h('span', {className: 'meta', text: startsWord(s.week_starts) + ' in 7 days' + (s.week_dollars == null ? '' : ' · ' + money(s.week_dollars))}));
+    }
+    return t;
+  }
+  function today(sp) {
+    const head = sp.starts ? startsWord(sp.starts).replace('start', 'helper start') + ' · ' + money(sp.dollars) : 'No helper starts yet today';
+    return h('section', {className: 'stack', 'aria-label': 'Today'},
+      h('div', {className: 'row between'}, h('h2', {text: 'Today'}), h('span', {className: 'meta', text: head + (sp.sources.some(s => s.week_starts) ? ' · the line shows the last 7 days' : '')})),
+      h('div', {className: 'stat-row four', role: 'list'}, sp.sources.map(todayTile)));
+  }
+
   function history(rows) {
     return h('section', {className: 'card'},
       h('div', {className: 'card-h'}, h('h2', {text: 'History'}), h('span', {className: 'meta', text: 'Last 30 days'})),
@@ -221,6 +247,7 @@
         h('h2', {text: 'One account found'}), h('p', {text: 'Usage shows its use and warns before it runs out. Switching needs a second account.'})));
     }
     const subsNote = m.one_account || !m.switcher ? '' : m.switching ? 'Switched early, before a limit is reached.' : 'Switching by itself is off: Usage only shows and warns.';
+    if (m.spread && m.spread.sources.length && window.UI?.spark) parts.push(today(m.spread));
     if (subs.length) parts.push(section('Subscriptions', subsNote, subs));
     if (other.length) parts.push(section('API keys and helper tools', 'Each one stops at its limit.', other));
     parts.push(history(m.history || []));
