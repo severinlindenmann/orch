@@ -305,18 +305,89 @@ def test_a_failed_switch_is_written_and_tried_again_after_ten_minutes(cli, switc
     assert switching.look(ws, at(601))["did"] == "switched"
 
 
-def test_a_switch_another_program_undoes_is_written_once_and_says_so(cli, switcher, ws):
-    """ORCH-591: three 'switched to' rows in a row hid that a second switcher kept moving the account back."""
+def test_a_second_switcher_is_noted_tried_once_more_then_usage_stops_and_asks(cli, switcher, ws):
+    """ORCH-591 / ORCH-612: another program switched back after every Usage switch (12 switches in 20 minutes).
+    Usage writes the outside switch, switches away once more, then stops and asks once which rule should win."""
     seed(cli)
     jrun(cli, "switching", "on", "--by", "human:owner")
     assert switching.look(ws, at(0))["did"] == "switched"
-    for n in (1, 2, 3):
-        switcher.use(active=1)  # the other program switches back to the first account
-        assert switching.look(ws, at(120 * n))["did"] == "switched"  # Usage switches again, quietly
+    assert switching.needs_rows(ws) == []
+    switcher.use(active=1)  # the other program switches back to the first account
+    assert switching.look(ws, at(120))["did"] == "switched"  # the one more try
+    switcher.use(active=1)  # and again
+    for n in range(2, 10):  # every later look stays: no fight
+        assert switching.look(ws, at(120 * n))["did"] == "held"
+    assert switcher.active() == 1
+    assert [c for c in switcher.changes() if c.startswith("switch")] == ["switch 3", "switch 3"]
     assert [h["what"] for h in usage_rows(ws)] == [
         "switched to TEAMCO",
-        "another program switched back to first",
+        "another program switched to first",
+        "switched to TEAMCO",
+        "stopped switching: another program keeps switching back to first",
     ]
+    rows = switching.needs_rows(ws)
+    assert len(rows) == 1  # asked once, not once per look
+    r = rows[0]
+    assert r["source"] == "usage" and r["tone"] == "needs-you" and "Which rule should win?" in r["text"]
+    assert [(x["verb"], x["target"]) for x in r["actions"]] == [("switching", "on"), ("switching", "off")]
+    code, out = jrun(cli, "needs")
+    assert code == 0 and out == rows
+
+
+def test_answer_usage_wins_switches_again_and_asks_again_only_after_a_new_fight(cli, switcher, ws):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switching.look(ws, at(0))
+    for n in (1, 2):
+        switcher.use(active=1)
+        switching.look(ws, at(120 * n))
+    assert switching.held(ws)
+    code, out = jrun(cli, "act", "switching", "on", "--by", "human:owner")  # the button "Usage's limits win"
+    assert code == 0 and out["changed"] is True
+    assert switching.needs_rows(ws) == []
+    assert switching.look(ws, at(400))["did"] == "switched"
+    assert "switching again: Usage's limits win" in [h["what"] for h in store.history(ws)]
+    switcher.use(active=1)  # the other program still runs: one more try, then ask again
+    assert switching.look(ws, at(500))["did"] == "switched"
+    switcher.use(active=1)
+    assert switching.look(ws, at(600))["did"] == "held"
+    assert len(switching.needs_rows(ws)) == 1
+
+
+def test_answer_the_other_program_wins_turns_switching_off(cli, switcher, ws):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switching.look(ws, at(0))
+    for n in (1, 2):
+        switcher.use(active=1)
+        switching.look(ws, at(120 * n))
+    code, _ = jrun(cli, "act", "switching", "off", "--by", "human:owner")
+    assert code == 0
+    assert switching.needs_rows(ws) == []
+    assert switching.look(ws, at(400))["did"] == "would switch"
+    assert switcher.active() == 1
+
+
+def test_a_held_account_is_let_go_when_there_is_nothing_to_fight_about(cli, switcher, ws):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switching.look(ws, at(0))
+    for n in (1, 2):
+        switcher.use(active=1)
+        switching.look(ws, at(120 * n))
+    assert switching.held(ws)
+    switcher.use(active=1, first=(10, 10))  # first's use dropped (a reset): staying is right
+    assert switching.look(ws, at(400))["did"] == "stay"
+    assert switching.needs_rows(ws) == []
+
+
+def test_without_a_second_switcher_nothing_is_noted(cli, switcher, ws):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    assert switching.look(ws, at(0))["did"] == "switched"
+    for n in range(1, 5):
+        assert switching.look(ws, at(60 * n))["did"] == "stay"
+    assert [h["what"] for h in usage_rows(ws)] == ["switched to TEAMCO"]
 
 
 def test_a_switch_that_did_not_change_the_account_in_use_is_not_written_as_done(

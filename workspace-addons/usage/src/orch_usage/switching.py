@@ -10,6 +10,11 @@ switch, so an account left early is not taken back until its use drops (a reset)
 
 Files in .orch/addons/usage/: `settings.json` {"switching": bool} (written by the command; off until the person turns
 it on) and `switching.json` (the loop's own memory: samples, pace, the last choice). Only labels, numbers and times.
+
+Another program that switches accounts (ORCH-612): Usage remembers the account it put in use. When the account in
+use changes without Usage, it writes that in the history and switches away once more; when the other program
+switches back again, Usage stops switching away from that account and asks the person once which rule should win
+(`orch usage needs`: Usage's limits win = `switching on`, the other program wins = `switching off`).
 """
 
 from __future__ import annotations
@@ -37,9 +42,8 @@ PACE_FORGET_MINUTES = 30  # a remembered pace older than this is dropped
 RETRY_MINUTES = 10  # a failed switch to the same account is tried again (and written down) after this
 WINDOW_OF = {"5h": "5h", "week": "week"}  # rule period -> switcher window
 SWITCH_TIMEOUT = 30
-BACK_MINUTES = (
-    10  # an account switched away from and active again within this is "another program switched back"
-)
+FIGHT_MINUTES = 60  # outside switches back to the same account this close together count as one fight
+FIGHT_TRIES = 1  # after an outside switch Usage switches away this many times more, then stops and asks
 
 
 # ---------------------------------------------------------------- files
@@ -79,29 +83,57 @@ def switching_on(root: Path) -> bool:
 
 
 def set_switching(root: Path, who: str, on: bool) -> bool:
-    """Turn switching on or off; True when it changed. Written in the history."""
+    """Turn switching on or off; True when it changed. Written in the history.
+
+    `on` while Usage holds still because another program kept switching back (see held()) is the person's answer
+    "Usage's limits win": Usage switches by itself again (True). Any answer settles the hold: it counts up `answers`
+    in settings.json, which the loop reads (the loop alone writes its memory, so this never races with a look)."""
     with store._lock(root):
         cur = switching_on(root)
-        if cur == on:
+        hold = held(root) if on else None
+        if cur == on and not hold:
             return False
         s = _read(settings_path(root))
         s["switching"] = on
+        s["answers"] = answers(root) + 1
         _write(settings_path(root), s)
-        store._append_history(
-            root,
-            [
-                {
-                    "at": store.now(),
-                    "who": who,
-                    "what": "switching turned on" if on else "switching turned off",
-                    "account": None,
-                    "label": "Usage",
-                    "before": cur,
-                    "after": on,
-                }
-            ],
-        )
+        if cur == on:
+            row = {
+                "what": "switching again: Usage's limits win",
+                "account": hold.get("account"),
+                "label": hold.get("label") or "Usage",
+                "before": "stopped",
+                "after": True,
+            }
+        else:
+            row = {
+                "what": "switching turned on" if on else "switching turned off",
+                "account": None,
+                "label": "Usage",
+                "before": cur,
+                "after": on,
+            }
+        store._append_history(root, [{"at": store.now(), "who": who, **row}])
     return True
+
+
+def answers(root: Path) -> int:
+    n = _read(settings_path(root)).get("answers")
+    return n if isinstance(n, int) and not isinstance(n, bool) else 0
+
+
+def _live_hold(memory: dict, root: Path) -> dict | None:
+    hold = memory.get("hold")
+    if not isinstance(hold, dict) or hold.get("answers") != answers(root):
+        return None  # answered since (or a broken entry)
+    return hold
+
+
+def held(root: Path) -> dict | None:
+    """Usage stopped switching because another program keeps switching back, and nobody answered yet."""
+    if not switching_on(root):
+        return None
+    return _live_hold(_read(memory_path(root)), root)
 
 
 def config(root: Path) -> dict:
@@ -361,13 +393,58 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     memory["all_at_limit"] = ch.all_at_limit
 
     t = ch.target
-    if t and (ch.active is None or t.use.key != ch.active.use.key):
+    wants = bool(t and (ch.active is None or t.use.key != ch.active.use.key))
+    label_of = {a["id"]: a["label"] for a in accounts}
+
+    # another program changed the account in use (ORCH-612): say so once per change
+    outside_row = None
+    mine = memory.get("mine")
+    if not on:
+        for k in ("mine", "outside", "hold"):
+            memory.pop(k, None)  # switching off: Usage only shows; it fights nothing
+    elif isinstance(mine, dict) and ch.active and ch.active.account["id"] != mine.get("to"):
+        now_id, now_label = ch.active.account["id"], ch.active.account["label"]
+        mine_label = label_of.get(mine.get("to"), "another account")
+        prev = memory.get("outside") or {}
+        same = (
+            prev.get("to") == now_id
+            and isinstance(prev.get("at"), str)
+            and at - store.to_time(prev["at"]) < timedelta(minutes=FIGHT_MINUTES)
+        )
+        count = int(prev.get("count", 0)) + 1 if same else 1
+        memory["outside"] = {"to": now_id, "at": _iso(at), "count": count}
+        memory.pop("mine", None)
+        outside_row = _row(
+            f"another program switched to {now_label}",
+            ch.active.account,
+            mine_label,
+            now_label,
+            f"Usage switched to {mine_label} at {mine.get('at')}; the account in use changed without Usage",
+            at,
+        )
+    memory.pop("switched", None)  # ORCH-591's memory, replaced by mine / outside
+
+    hold = _live_hold(memory, root) if on else None
+    answered = on and isinstance(memory.get("hold"), dict) and hold is None  # the person answered: start anew
+    if answered or (hold and not (wants and ch.active and ch.active.account["id"] == hold.get("account"))):
+        hold = None  # answered, or nothing to fight about any more (a reset, a new rule, the person switched)
+        memory.pop("outside", None)
+    if not hold:
+        memory.pop("hold", None)
+
+    if wants:
         before = ch.active.account["label"] if ch.active else None
         if ch.active and not ch.active.good and ch.active.why:
             why = f"{ch.active.account['label']}: {ch.active.why}"  # the account left, not the new one
         else:
             why = ch.why
         plan = {"to": t.account["id"], "from": ch.active.account["id"] if ch.active else None}
+        outside = memory.get("outside") or {}
+        fights = (
+            ch.active is not None
+            and outside.get("to") == ch.active.account["id"]
+            and int(outside.get("count", 0)) > FIGHT_TRIES
+        )
         if not on:
             did = "would switch"
             if memory.get("would") != plan:  # once per choice, not every 30 seconds
@@ -382,6 +459,31 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
                     )
                 )
             memory["would"] = plan
+        elif hold:
+            did = "held"  # asked the person once (orch usage needs); quiet until they answer
+        elif fights:
+            did = "held"
+            memory["hold"] = {
+                "account": ch.active.account["id"],
+                "label": before,
+                "target": t.account["id"],
+                "target_label": t.account["label"],
+                "since": _iso(at),
+                "why": why,
+                "answers": answers(root),
+            }
+            outside_row = None  # this row says it
+            hist.append(
+                _row(
+                    f"stopped switching: another program keeps switching back to {before}",
+                    ch.active.account,
+                    t.account["label"],
+                    before,
+                    f"Usage would leave {why}; it switched away and was switched back {outside.get('count')} "
+                    "times. Which rule should win? Usage asks once and waits for the answer",
+                    at,
+                )
+            )
         else:
             memory.pop("would", None)
             last_fail = memory.get("failed") or {}
@@ -395,40 +497,17 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
             elif switch(t.use.slot) and _stuck(t.use.key):
                 did = "switched"
                 memory.pop("failed", None)
-                prev = memory.get("switched") or {}
-                again = (
-                    prev.get("to") == t.account["id"]
-                    and isinstance(prev.get("at"), str)
-                    and at - store.to_time(prev["at"]) < timedelta(minutes=BACK_MINUTES)
+                memory["mine"] = {"to": t.account["id"], "at": _iso(at)}
+                hist.append(
+                    _row(
+                        f"switched to {t.account['label']}",
+                        t.account,
+                        before,
+                        t.account["label"],
+                        why,
+                        at,
+                    )
                 )
-                if not again:  # a switch is written once
-                    hist.append(
-                        _row(
-                            f"switched to {t.account['label']}",
-                            t.account,
-                            before,
-                            t.account["label"],
-                            why,
-                            at,
-                        )
-                    )
-                elif not prev.get("back_noted"):  # something moved the account back: one row, not one per try
-                    hist.append(
-                        _row(
-                            f"another program switched back to {before or 'the first account'}",
-                            ch.active.account if ch.active else None,
-                            t.account["label"],
-                            before,
-                            f"Usage switched to {t.account['label']} at {prev['at']} and the account in use "
-                            "changed again without Usage; it is switching again",
-                            at,
-                        )
-                    )
-                memory["switched"] = {
-                    "to": t.account["id"],
-                    "at": prev["at"] if again else _iso(at),
-                    "back_noted": bool(again),
-                }
             else:
                 did = "switch failed"
                 memory["failed"] = {"to": t.account["id"], "at": _iso(at)}
@@ -444,6 +523,10 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
                 )
     else:
         memory.pop("would", None)
+        if on and ch.active:
+            memory["mine"] = {"to": ch.active.account["id"], "at": _iso(at)}  # staying is a choice too
+    if outside_row:
+        hist.insert(0, outside_row)
 
     memory["last"] = {
         "at": _iso(at),
@@ -467,6 +550,47 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
         "all_at_limit": ch.all_at_limit,
         "pace": pace,
     }
+
+
+def needs_rows(root: Path) -> list[dict]:
+    """`orch usage needs --json` (needs.schema.json): one question while Usage holds still because another program
+    keeps switching back. The two buttons are the two answers; either one settles it (set_switching)."""
+    hold = held(root)
+    if not hold:
+        return []
+    acc, target = hold.get("label") or "an account", hold.get("target_label") or "another account"
+    text = (
+        f"Another program keeps switching back to {acc}, which Usage counts as at its limit "
+        f"({hold.get('why') or 'its limit'}). Usage stopped switching to {target} and waits for you. "
+        "Which rule should win?"
+    )
+    return [
+        {
+            "id": f"usage:outside-switch:{hold['since']}",
+            "source": "usage",
+            "kind": "usage:outside-switch",
+            "ticket": None,
+            "title": "Usage: which rule should win?",
+            "text": text[:500],
+            "tone": "needs-you",
+            "since": hold["since"],
+            "cli": "orch usage switching on   (Usage's limits win)   or   orch usage switching off",
+            "actions": [
+                {
+                    "label": "Usage's limits win",
+                    "verb": "switching",
+                    "target": "on",
+                    "review": {"done": "Usage switches by itself again. Stop the other program first."},
+                },
+                {
+                    "label": "The other program wins",
+                    "verb": "switching",
+                    "target": "off",
+                    "review": {"done": "Usage only shows and warns; it does not switch."},
+                },
+            ],
+        }
+    ]
 
 
 # ---------------------------------------------------------------- the loop
@@ -494,7 +618,7 @@ def run_forever(root: Path, once: bool = False, clock=None, sleep=None, log=prin
             return
         try:
             r = look(root, clock())
-            if r["did"] not in ("stay", "nothing"):
+            if r["did"] not in ("stay", "nothing", "held"):  # held: said once in the history
                 log(f"{r['at']} {r['did']}: {r.get('active')} -> {r.get('target')}")
         except store.Refused as e:
             log(f"skipped: {e}")

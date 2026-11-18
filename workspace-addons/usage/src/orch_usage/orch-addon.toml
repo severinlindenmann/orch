@@ -9,6 +9,7 @@ skill = "skills/orch-usage"
 agents_block = "skills/orch-usage/AGENTS-block.md"
 gitignore = [".orch/addons/usage/"]
 background = true
+needs = true                                # orch usage needs --json: another program keeps switching back
 
 [dashboard]
 label = "Usage"
