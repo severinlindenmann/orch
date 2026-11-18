@@ -341,12 +341,40 @@ def _tree(all_: list[dict], t: dict, prefix: str = "", seen: frozenset = frozens
 CORE_EXT = {"relay"}  # ext keys the core itself writes (relay-created tickets)
 
 
+_SHOWN_EXT: dict[str, tuple[float, object, frozenset[str]]] = {}
+SHOWN_EXT_SECONDS = 2.0  # one listing asks once: addons.active reads the registry and consents (ORCH-518)
+
+
+def _switch_stamp(root: Path) -> object:
+    try:
+        st = os.stat(addons.activation_path(root))
+    except OSError:
+        return None
+    return (st.st_size, st.st_mtime_ns, st.st_ino)
+
+
+def visible_ext(root: Path) -> frozenset[str]:
+    """The ext keys shown here: the add-ons that are on, and the core's own. Kept for SHOWN_EXT_SECONDS while
+    the workspace's add-on switch file is unchanged, so a listing of 10,000 tickets reads the add-on registry
+    and consents once instead of once per ticket (65 s at 10,000). It only hides fields: an add-on turned on
+    from another process shows its fields at most SHOWN_EXT_SECONDS later."""
+    import time
+
+    key, now, stamp = str(root), time.monotonic(), _switch_stamp(root)
+    hit = _SHOWN_EXT.get(key)
+    if hit is not None and 0 <= now - hit[0] < SHOWN_EXT_SECONDS and hit[1] == stamp:
+        return hit[2]
+    on = frozenset(set(addons.active(root)) | CORE_EXT)
+    _SHOWN_EXT[key] = (now, stamp, on)
+    return on
+
+
 def visible(root: Path, t: dict) -> dict:
     """Ticket data as the CLI shows it: ext keys of add-ons that are not on stay in the file, hidden."""
     ext = t.get("ext")
     if not ext:
         return t
-    on = set(addons.active(root)) | CORE_EXT
+    on = visible_ext(root)
     return {**t, "ext": {k: v for k, v in ext.items() if k in on}}
 
 
