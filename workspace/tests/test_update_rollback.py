@@ -27,9 +27,12 @@ def _install(tmp_path, monkeypatch):
     bindir = tmp_path / "home" / ".local" / "bin"
     bindir.mkdir(parents=True)
     (bindir / "orch").symlink_to(env / "bin" / "orch")
+    install_path = json.dumps(
+        str(bindir / "orch")
+    )  # a TOML basic string, backslashes escaped as uv writes them
     (env / "uv-receipt.toml").write_text(
-        '[tool]\nentrypoints = [\n    { name = "orch", install-path = "%s", from = "orch-workspace" },\n]\n'
-        % (bindir / "orch")
+        "[tool]\nentrypoints = [\n"
+        f'    {{ name = "orch", install-path = {install_path}, from = "orch-workspace" }},\n]\n'
     )
     (env / "orch-install.json").write_text(orch_home.install_record_text("test", env))
     monkeypatch.setattr(orch_home.sys, "prefix", str(env))
@@ -64,9 +67,12 @@ def test_failed_reinstall_keeps_the_old_orch(tmp_path, monkeypatch, message, wor
         addons._install_tool([])
     assert words in str(e.value) and "orch is still the old version" in str(e.value)
     assert (env / "lib.py").read_text() == "OLD = True\n" and (env / "orch-install.json").is_file()
-    assert os.readlink(bindir / "orch") == str(env / "bin" / "orch")
-    out = subprocess.run([str(bindir / "orch")], capture_output=True, text=True)
-    assert out.stdout.strip() == "old orch"  # orch still runs
+    assert os.readlink(bindir / "orch").removeprefix("\\\\?\\") == str(
+        env / "bin" / "orch"
+    )  # Windows: \\?\ form
+    if os.name != "nt":  # the fake orch is a sh script
+        out = subprocess.run([str(bindir / "orch")], capture_output=True, text=True)
+        assert out.stdout.strip() == "old orch"  # orch still runs
     assert not (tmp_path / "tools" / "orch-workspace.orch-backup").exists()  # no backup left behind
     log = winfinish.log_path(addons.home()).read_text()
     assert "uv failed:" in log and message.split(":")[1].strip()[:10] in log

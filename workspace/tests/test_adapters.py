@@ -94,6 +94,13 @@ for _e in _STEP_EVENTS:
 SETTINGS = ["--settings", json.dumps({"hooks": _REMINDER}, separators=(",", ":"))]
 
 
+@pytest.fixture(autouse=True)
+def _record_hooks_wired(monkeypatch):
+    """The adapter leaves the record hooks out on Windows (#547, no process-tree reader there); these tests
+    check the wiring itself, so they run it as on POSIX; the Windows test below sets it back."""
+    monkeypatch.setattr(adapters, "_is_windows", lambda: False)
+
+
 def _claude_argvs(root):
     """The snapshots: the permission flags (the adapter's own disallowed-tools list stays)."""
     deny = DENY
@@ -899,6 +906,7 @@ def test_windows_leaves_out_the_record_hooks_but_keeps_the_reminder_hooks(monkey
     assert set(_RECORD_EVENTS) <= set(adapters.reminder_doc("claude")["hooks"])
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="nvm (POSIX) layout and a ':' path list")
 def test_find_binary_looks_in_nvm_when_the_path_is_clean(tmp_path, monkeypatch):
     nvm = tmp_path / ".nvm" / "versions" / "node" / "v22.1.0" / "bin"
     nvm.mkdir(parents=True)

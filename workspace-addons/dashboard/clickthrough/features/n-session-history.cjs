@@ -7,7 +7,7 @@ const OLD = 'standin-session-old1', NEW = 'standin-session-new2';
 module.exports = {
   name: 'Session history: reopen an earlier conversation of a ticket',
   covers: ['session.reopen'],
-  async run({ page, open, reload, act, must, text, orch, orchAsPerson, addonOn, python, workspace, home, until }) {
+  async run({ page, open, reload, act, must, text, orch, orchAsPerson, addonOn, python, workspace, home, until, addonOff }) {
     addonOn('focus');
     orchAsPerson('config', 'set', 'focus.preview', 'on');
     const tid = JSON.parse(orch('ticket', 'new', 'Write the party invite', '--json')).id;
@@ -47,8 +47,7 @@ module.exports = {
     must(sessions.some(s => s.id === OLD), 'the ticket does not continue the earlier conversation: ' + JSON.stringify(sessions.map(s => s.id)));
     try { orchAsPerson('run', 'stop', tid); } catch (e) { /* the stand-in already ended */ }
     orchAsPerson('config', 'set', 'focus.preview', 'off');
-    orchAsPerson('addon', 'remove', 'focus');
-    await until(s => !(s.addons || []).some(a => a.name === 'focus'), 'focus off again');
+    await addonOff('focus');
     await page.evaluate(() => localStorage.removeItem('orch.live.layer'));
   },
 };

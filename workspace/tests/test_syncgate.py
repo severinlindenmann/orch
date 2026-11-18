@@ -261,7 +261,7 @@ def test_replace_retries_on_windows_only(tmp_path, monkeypatch):
     monkeypatch.setattr(syncgate, "REPLACE_DELAY", 0)
     with pytest.raises(PermissionError):
         syncgate.replace(a, b)
-    assert len(calls) == 1  # not Windows: no retry
+    assert len(calls) == (syncgate.REPLACE_TRIES if os.name == "nt" else 1)  # only Windows retries
     monkeypatch.setattr(syncgate.os, "name", "nt")
     calls.clear()
     with pytest.raises(PermissionError):
@@ -283,13 +283,16 @@ def test_fake_gates_are_ignored(proj, other):
     tid = _ticket(proj)
     _write_gate(proj, other.pid, procs.pid_started(other.pid), step=False)  # fake: no step record
     assert syncgate.live_holder(proj) is None
-    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
-    try:
-        _write_gate(proj, sleeper.pid, procs.pid_started(sleeper.pid))  # live pid, but not an orch process
-        assert syncgate.live_holder(proj) is None
-    finally:
-        sleeper.kill()
-        sleeper.wait()
+    if os.name != "nt":  # Windows has no cheap command line: _looks_like_orch is always True there
+        sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        try:
+            _write_gate(
+                proj, sleeper.pid, procs.pid_started(sleeper.pid)
+            )  # live pid, but not an orch process
+            assert syncgate.live_holder(proj) is None
+        finally:
+            sleeper.kill()
+            sleeper.wait()
     for junk in ("", "{ half", "[1]"):
         syncgate.gate_path(proj).write_text(junk)
         old = time.time() - 60  # an unreadable file that is not fresh: nobody is mid-write

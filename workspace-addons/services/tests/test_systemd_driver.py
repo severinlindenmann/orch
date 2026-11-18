@@ -25,6 +25,8 @@ if not args or args[0] != "--user":
 verb, rest = args[1], args[2:]
 units = Path(os.environ["HOME"]) / ".config/systemd/user"
 if verb == "show-environment":
+    if os.environ.get("FAKE_SD_HOME"):
+        print("HOME=" + os.environ["FAKE_SD_HOME"])
     save(); sys.exit(0)
 if verb == "daemon-reload":
     st["loaded"] = sorted(p.name for p in units.glob("*.service")) if units.is_dir() else []
@@ -186,3 +188,17 @@ def test_linux_remove_keeps_the_service_when_it_does_not_stop(scli, sd, ws, monk
     assert sd()["units"][unit]["active"] is True
     monkeypatch.delenv("FAKE_SD_STOP_FAILS")
     assert jrun(scli, "remove", "web")[0] == 0 and not path.exists()
+
+
+def test_linux_refuses_in_plain_words_when_home_is_not_the_one_the_service_manager_reads(
+    scli, sd, ws, monkeypatch
+):
+    # ORCH-371 bug 9: with HOME elsewhere the unit was written where systemd never looks: a raw systemd line came back
+    from orch_services.drivers.systemd import HOME_ELSEWHERE
+
+    monkeypatch.setenv("FAKE_SD_HOME", str(ws / "not-this-home"))
+    code, out = jrun(scli, "add", "Web", "--id", "web", "--", "python3", "-m", "http.server")
+    assert code == 2 and out["error"] == HOME_ELSEWHERE
+    assert not (Path.home() / ".config/systemd/user" / f"orch-svc-{WID}-web.service").exists()
+    monkeypatch.setenv("FAKE_SD_HOME", str(Path.home()))  # the same home: works as before
+    assert jrun(scli, "add", "Web", "--id", "web", "--", "python3", "-m", "http.server")[0] == 0
