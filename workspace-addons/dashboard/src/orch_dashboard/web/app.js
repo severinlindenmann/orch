@@ -582,6 +582,7 @@ async function act(op, args) {
 // A notice that comes while a fetch or a change is under way is kept, never dropped: that fetch may have read the
 // tickets before the change (load_state reads tickets first, run status last), so one more fetch follows it.
 let refreshAgain = false;
+let wantFull = false;  // the last delta did not fit the state held: ask for the whole state once
 async function refresh() {
   if (snapshot) return;
   if (fetching || writing) { refreshAgain = true; return; }
@@ -592,9 +593,16 @@ async function refresh() {
   const connection = document.getElementById('connection');
   try {
     // Say which revision we hold: an unchanged state comes back as a few bytes, not the whole state again.
-    const res = await fetch('/api/state' + (state?.rev ? '?have=' + encodeURIComponent(state.rev) : ''), {cache:'no-store'});
+    const have = state?.rev && !wantFull ? '?have=' + encodeURIComponent(state.rev) : '';
+    wantFull = false;
+    const res = await fetch('/api/state' + have, {cache:'no-store'});
     if (!res.ok) throw new Error('Could not load the workspace.');
-    const next = await res.json();
+    let next = await res.json();
+    if (next.delta) {  // only what changed since the revision held (ORCH-517); a delta that does not fit: the whole state
+      const merged = window.DashHelpers.applyStateDelta(state, next);
+      if (!merged) { wantFull = true; refreshAgain = true; return; }
+      next = merged;
+    }
     if (next.unchanged && state) {
       if (writing || version !== mutation) { refreshAgain = true; return; }
       connection.hidden = true;

@@ -820,7 +820,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(
                     200, json.dumps({"unchanged": True, "rev": rev}).encode(), "application/json", hdr
                 )
-            body = json.dumps(state).encode()
+            # a revision the page held a moment ago: only what changed since then (ORCH-517)
+            out = self.server.state_cache.answer(state, "" if fresh else have)
+            body = json.dumps(out).encode()
             if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
                 import gzip
 
@@ -885,6 +887,13 @@ class Handler(BaseHTTPRequestHandler):
             code, body, ctype, extra = ticketfiles.read_file(
                 self.root, one("t"), one("k"), one("n"), one("dl") == "1"
             )
+            if code == 200 and not self.headers.get("Range"):
+                # ORCH-517: the same pictures were sent again on every redraw (no-store). Now the browser keeps
+                # them and asks "still this?" by content hash; an unchanged file answers 304 with no body.
+                tag = '"' + hashlib.blake2b(body, digest_size=12).hexdigest() + '"'
+                extra = {**extra, "ETag": tag, "Cache-Control": "private, no-cache"}
+                if tag in [t.strip() for t in (self.headers.get("If-None-Match") or "").split(",")]:
+                    return self._send(304, b"", ctype, {"ETag": tag, "Cache-Control": "private, no-cache"})
             if one("k") == "reviewed":  # a card's own copy: inert, sandboxed, never sniffed
                 return self._send(code, body, ctype, extra, csp=ticketfiles.REVIEWED_CSP)
             rng = re.fullmatch(r"bytes=(\d{0,15})-(\d{0,15})", self.headers.get("Range") or "")
