@@ -171,3 +171,31 @@ def test_a_live_session_past_the_first_30_open_tickets_is_still_asked_for(tmp_pa
     data._RUNS.clear()
     data.load_runs(tmp_path, "orch", tickets, fresh=True)
     assert len(asked) == data.RUNS_MAX + 1 and "t_sess0040" in asked and "t_sess0031" not in asked
+
+
+def test_open_sessions_without_a_ticket_join_the_list_by_their_title(tmp_path, screens):
+    """ORCH-364: the New menu's sessions (their tickets are hidden) come from state["sessions"], open ones only."""
+    st = _state()
+    st["sessions"] = [
+        {"id": "t_empty001", "kind": "empty", "title": "Empty helper", "open": True},
+        {"id": "t_general1", "kind": "chat", "title": "Chat helper", "open": False},
+        {"id": "t_term0001", "kind": "terminal", "title": "Plain terminal", "open": True},
+        {"id": "t_manager1", "kind": "manager", "title": "Manager", "open": True},
+        {"id": "t_oddkind1", "kind": "ticket", "title": "Not a kind", "open": True},
+    ]
+    st["runs"]["t_empty001"] = _run()
+    st["runs"]["t_manager1"] = _run("idle", "Idle")
+    got = {s["id"]: s for s in sessions.build(tmp_path, "orch", st, 2)}
+    assert "t_general1" not in got and "t_oddkind1" not in got
+    emp, term, man = got["t_empty001"], got["t_term0001"], got["t_manager1"]
+    assert (emp["kind"], emp["key"], emp["title"], emp["status"]) == ("empty", "", "Empty helper", "working")
+    assert emp["lines"] == ["t_empty001 one", "t_empty001 last"]
+    assert (term["kind"], term["status"], term["word"], term["tool"], term["lines"]) == (
+        "terminal",
+        "idle",
+        "Open",
+        None,
+        [],
+    )
+    assert (man["kind"], man["status"]) == ("manager", "idle")
+    assert got["t_sess0001"]["kind"] == ""

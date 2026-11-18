@@ -24,6 +24,8 @@ merges, so sync holds a changed block until a person allows it.
 - `orch pull-requests queue run`: the runner (one per workspace, lock folder `runner.lock`).
 - `orch pull-requests failed-checks on|off|status|tend [--json]`: the failed-checks part (below). `on`/`off` write
   the setting `act_on_failed_checks`; `tend` runs one pass now (nothing when off).
+- `orch pull-requests helper-stopped on|off|status [--json]`: `on`/`off` write the setting
+  `queue_when_helper_stops` (below).
 
 ## Settings (`.orch/config.toml`, section `[pull_requests]`)
 - `bases` (list, default `["develop"]`): the base branches the queue merges into. `main` and `master` are dropped
@@ -33,6 +35,10 @@ merges, so sync holds a changed block until a person allows it.
   it, and only a runner with that same login takes it (logins compare without case).
 
 - `act_on_failed_checks` (true/false, default false): act on failed checks (below). Any other value is off.
+- `queue_when_helper_stops` (true/false, default false, ORCH-433): the Merge when green pass also puts in the
+  queue each pull request a ticket records as `ready to merge` when the ticket has no switch, no helper works on
+  it (none, or idle at its prompt), no question is open and it is not in Backlog, Done or Dropped. Entries are
+  added `by` `agent:helper-stopped`; turning the setting off takes nothing out. Any other value is off.
 
 ## Queue file `.orch/addons/pull-requests/queue.json`
 `{"entries": [{url, repo, number, ticket, by, added, state, why, base, login, [head, title, closes, group, tries,
