@@ -34,7 +34,7 @@ STATE_MAX = 256 * 1024
 FILE = "limit-stop.json"
 
 _WORDS = re.compile(r"(hit|reached) your .{0,40}limit|usage limit reached", re.IGNORECASE)
-# ORCH-642: newer Claude Code saves the stop as a `system` notice, not an answer: "Usage limit reached ·
+# ORCH-642: newer tool versions save the stop as a `system` notice, not an answer: "Usage limit reached ·
 # continuing automatically at 7:10pm · esc to cancel", and, when the login changes before then (Usage switched
 # the account), "Automatic continue stopped · your login changed or ended · send a prompt to continue".
 # Nothing continues it then.
