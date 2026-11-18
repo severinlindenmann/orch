@@ -208,9 +208,9 @@ def _keeps_busy(root: Path, rec: dict) -> bool:
 def live_alive(root: Path) -> list[dict]:
     """Live runs that count against the limit. A session that is idle or waiting for a person on a ticket in
     Review, Done or Dropped does not (it closes by itself after FINISHED_IDLE_SECONDS), nor does one idle
-    while it only waits for pull request checks, nor one idle on a ticket that waits for a time, another ticket or
-    something outside (ORCH-666); a working or starting one does. Both stay under the
-    hard ceiling in _full (the limit plus HARD_EXTRA)."""
+    while it only waits for pull request checks, nor one idle on a ticket that waits for a time, another
+    ticket or something outside (ORCH-666); a working or starting one does. Both stay under the hard ceiling
+    in _full (the limit plus HARD_EXTRA)."""
     return [
         r
         for r in live_all(root)
