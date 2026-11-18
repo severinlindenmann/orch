@@ -903,6 +903,22 @@ class Handler(BaseHTTPRequestHandler):
                     else "default-src 'none'; img-src 'self'; media-src 'self'; sandbox"
                 ),
             )
+        # a listed read-only add-on verb (the Sync card's status): the rights of /api/state, no page secret (ORCH-413)
+        if path == "/api/addon-read":
+            q = parse_qs(query)
+            try:
+                code, text, out = actions.addon_read(
+                    self.root, self.orch_bin, (q.get("addon") or [""])[0], (q.get("verb") or [""])[0]
+                )
+            except actions.BadRequest as e:
+                return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
+            except actions.Unavailable as e:
+                return self._send(503, str(e).encode(), "text/plain; charset=utf-8")
+            if code != 200:
+                return self._send(code, text.encode(), "text/plain; charset=utf-8")
+            return self._send(
+                200, json.dumps(out).encode(), "application/json", {"Cache-Control": "no-store"}
+            )
         if path.startswith("/api/addon/"):  # only names that are active here and have a tab
             name = path[len("/api/addon/") :]
             if not any(a["name"] == name and a["dashboard"] for a in load_addons(self.root, self.orch_bin)):
