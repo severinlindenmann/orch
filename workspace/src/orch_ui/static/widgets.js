@@ -136,8 +136,7 @@ UI.docBox=(p,hTag)=>{p=p||{};const d=el('div','doc');const st=p.status;
    if(r.key)li.append(el('span','chip doc-row-key',r.key));if(r.n)li.append(el('span','doc-row-n','#'+r.n));ul.append(li)});d.append(ul)}
  if(p.steps){const ol=el('ol');p.steps.forEach(x=>ol.append(el('li','',x)));d.append(ol)}
  if(p.foot)d.append(el('p','doc-foot',p.foot));
- if(Array.isArray(p.details)&&p.details.length){const dt=el('details','doc-details');dt.append(el('summary','','Details'));p.details.forEach(x=>dt.append(el('p','',x)));
-   dt.addEventListener('pointerdown',e=>e.stopPropagation());d.append(dt)}
+ if(Array.isArray(p.details)&&p.details.length){const dt=el('div','doc-details');p.details.forEach(x=>dt.append(el('p','meta',x)));d.append(dt)}
  return d};
 UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const t=document.createElement('template');t.innerHTML=window.icon?window.icon(n,z||20):'';return t.content};
  let idx=o.start||0,overlay=null,cur=null,busy=false;const done=[],ans={},pins={},drafts={},later=new Set(o.later||[]),picked=Object.assign({},o.picked);

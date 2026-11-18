@@ -114,10 +114,12 @@ def size_reasons(files: list[dict], added: dict[str, list[str]] | None = None) -
     additions, deletions}]; added: the added lines per file (from the diff), for words and new commands in
     code."""
     counts = {"security": 0, "look": 0, "words": 0, "structure": 0, "concept": 0, "other": 0}
-    n_files = n_lines = 0
+    n_files = n_lines = all_files = all_lines = 0
     for f in files:
         path = str(f.get("path") or "")
         kind = kind_of(path)
+        all_files += 1
+        all_lines += int(f.get("additions") or 0) + int(f.get("deletions") or 0)
         if kind == "test":
             continue
         n_files += 1
@@ -138,7 +140,7 @@ def size_reasons(files: list[dict], added: dict[str, list[str]] | None = None) -
             f"too big for a small fix ({n_files} files, {n_lines} lines; "
             f"small is {MAX_FILES} and {MAX_LINES})"
         )
-    return why, {"files": n_files, "lines": n_lines}
+    return why, {"files": n_files, "lines": n_lines, "all_files": all_files, "all_lines": all_lines}
 
 
 # ------------------------------------------------------------------ facts
@@ -302,28 +304,39 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
     if open_part:
         return {"verdict": "leave", "why": open_part}
     why: list[str] = []
-    files = lines = 0
+    files = lines = all_files = all_lines = 0
     for f in facts:
         reasons, counts = size_reasons(f["files"], f["added"])
         why += reasons
         files += counts["files"]
         lines += counts["lines"]
+        all_files += counts["all_files"]
+        all_lines += counts["all_lines"]
     if not why and (files > MAX_FILES or lines > MAX_LINES):
         why.append(f"too big for a small fix ({files} files, {lines} lines)")
     if why:
         return {"verdict": "leave", "why": "; ".join(dict.fromkeys(why)) + "."}
-    note = "".join(f" Could not match: {p}" for p in unmatched[:3])
     prs = ", ".join(f"#{f['number']}" for f in facts)
-    checks = sum(f["checks"] for f in facts)
-    done = sum(1 for c in items if c.get("done") and c.get("evidence"))
+    done = _first_sentence(ticket.get("summary"))
+    what = f"{done} " if done else ""
     return {
         "verdict": "accept",
         "why": (
-            f"{'pull request' if len(facts) == 1 else 'pull requests'} {prs} merged, "
-            f"{_n('check', checks)} green, {done} of {len(items)} tasks with evidence, "
-            f"small fix ({_n('file', files)}, {_n('line', lines)})." + note
+            f"{what}{'Pull request' if len(facts) == 1 else 'Pull requests'} {prs} "
+            f"merged with all checks green, every task has proof and the change is small "
+            f"({_n('file', all_files)}, {_n('line', all_lines)} changed)."
         ),
     }
+
+
+def _first_sentence(text) -> str:
+    t = " ".join(str(text or "").split())
+    if not t:
+        return ""
+    i = t.find(". ")
+    t = t[: i + 1] if i > 0 else t
+    t = t[:160].rstrip()
+    return t if t.endswith((".", "!", "?")) else t + "."
 
 
 def _back_or_leave(why: str, sent_back: int) -> dict:
