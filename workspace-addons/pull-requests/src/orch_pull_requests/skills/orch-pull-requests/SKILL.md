@@ -80,6 +80,13 @@ cause and push; do not rerun jobs by hand that orch already reran.
 Merges into develop checked in a queue group, checked alone and merged by a person, or past the queue; and the times
 the queue stood still (30 minutes or more with a pull request in line and no merge) with the reasons.
 
+**8. What a day cost**
+
+    orch pull-requests queue stats [--day 2026-11-18]
+
+Check runs per merged pull request and minutes from ready to merged for one day, next to the saved baseline
+(`--save-baseline` keeps the day's numbers as the new baseline; only when the person asks).
+
 ## Rules
 - Every merge into develop goes through the queue; it sets the mark `orch/merge-queue` on each group commit it
   built and on each head it merges alone (a develop rule can require it).

@@ -1,4 +1,4 @@
-"""orch pull-requests queue add|list|remove|run, tend, failed-checks, helper-stopped, start|stop|status (contract: contracts/addons/pull-requests/README.md)."""
+"""orch pull-requests queue add|list|audit|stats|remove|run, tend, failed-checks, helper-stopped, start|stop|status (contract: contracts/addons/pull-requests/README.md)."""
 
 from __future__ import annotations
 
@@ -304,6 +304,28 @@ def _switch_cmd(args, root: Path) -> int:
     return 0 if pid else 1
 
 
+def _stats(root: Path, args) -> int:
+    from datetime import date
+
+    from . import stats
+
+    try:
+        day = date.fromisoformat(args.day) if args.day else date.today()
+    except ValueError:
+        raise Refused("--day is a date like 2026-11-18.") from None
+    report = stats.run(root, _github(), day, args.until, args.repo, args.workflow)
+    if args.save_baseline:
+        stats.save_baseline(root, report)
+    base = stats.baseline(root)
+    if args.json:
+        print(json.dumps({**report, "baseline": base}, indent=1))
+    else:
+        print(stats.text(report, base))
+        if args.save_baseline:
+            print("Saved as the baseline.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="orch pull-requests")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -323,6 +345,15 @@ def main(argv: list[str] | None = None) -> int:
     au = q.add_parser("audit", help="merges past the queue and times it stood still, for the last hours")
     au.add_argument("--hours", type=float, default=14, help="how far back (default 14: one night)")
     au.add_argument("--json", action="store_true")
+    st = q.add_parser(
+        "stats", help="runs per merged pull request and minutes from ready to merged, for a day"
+    )
+    st.add_argument("--day", help="YYYY-MM-DD (default today)")
+    st.add_argument("--until", help="HH:MM: count only up to this time of the day")
+    st.add_argument("--repo", help="owner/name (default: the repositories the queue has seen)")
+    st.add_argument("--workflow", default="ci.yml", help="the main check workflow (default ci.yml)")
+    st.add_argument("--save-baseline", action="store_true", help="keep these numbers as the baseline")
+    st.add_argument("--json", action="store_true")
     rm = q.add_parser("remove", help="take a waiting pull request out of the queue")
     rm.add_argument("url")
     r = q.add_parser("run", help="the runner (add starts it by itself)")
@@ -386,6 +417,8 @@ def main(argv: list[str] | None = None) -> int:
             report = audit.run(root, _github(), args.hours)
             print(json.dumps(audit.as_json(report), indent=1) if args.json else audit.text(report))
             return 0
+        if args.sub == "stats":
+            return _stats(root, args)
         if args.sub == "remove":
             if store.remove(root, args.url, _actor()):
                 print(f"Taken out of the merge queue: {args.url}")

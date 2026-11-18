@@ -14,6 +14,11 @@ VIEW = (
 )
 # the commit status the queue sets on what it checked (a develop rule can require it)
 MARK = "orch/merge-queue"
+_MERGED_READY = (
+    "query($q:String!,$after:String){search(query:$q,type:ISSUE,first:100,after:$after){"
+    "pageInfo{hasNextPage endCursor} nodes{... on PullRequest{number url headRefName createdAt mergedAt "
+    "timelineItems(itemTypes:[READY_FOR_REVIEW_EVENT],last:1){nodes{... on ReadyForReviewEvent{createdAt}}}}}}}"
+)
 GONE = ("reference does not exist", "not found", "http 404")
 
 
@@ -163,6 +168,45 @@ class GitHub:
             "--search", f"merged:>={since}", "--json", "number,title,headRefName,headRefOid,mergedAt,url",
         )  # fmt: skip
         return [r for r in v if isinstance(r, dict)] if isinstance(v, list) else None
+
+    def runs(self, repo: str, workflow: str, since: str, until: str) -> list[dict] | None:
+        """Runs of one workflow started between two ISO times: {databaseId, event, conclusion, createdAt}, None
+        when GitHub did not answer."""
+        v = self._json(
+            "run", "list", "--repo", repo, "--workflow", workflow, "--created", f"{since}..{until}",
+            "--limit", "5000", "--json", "databaseId,event,conclusion,createdAt",
+        )  # fmt: skip
+        return [r for r in v if isinstance(r, dict)] if isinstance(v, list) else None
+
+    def merged_ready(self, repo: str, base: str, since: str, until: str) -> list[dict] | None:
+        """Pull requests merged into base between two ISO times, with the last time each was marked ready for
+        review: {number, url, headRefName, createdAt, mergedAt, readyAt (None: never a draft)}. None when GitHub
+        did not answer."""
+        q = f"repo:{repo} is:pr base:{base} merged:{since}..{until}"
+        out, after = [], None
+        for _ in range(10):  # GitHub search stops at 1000 results
+            args = ["api", "graphql", "-f", f"query={_MERGED_READY}", "-f", f"q={q}"]
+            if after:
+                args += ["-f", f"after={after}"]
+            v = self._json(*args)
+            try:
+                found = v["data"]["search"]
+                nodes = found["nodes"]
+            except (KeyError, TypeError):
+                return None
+            for n in nodes:
+                if not isinstance(n, dict) or not n.get("number"):
+                    continue
+                ready = ((n.get("timelineItems") or {}).get("nodes") or [{}])[-1] or {}
+                out.append({
+                    "number": n["number"], "url": n.get("url"), "headRefName": n.get("headRefName"),
+                    "createdAt": n.get("createdAt"), "mergedAt": n.get("mergedAt"), "readyAt": ready.get("createdAt"),
+                })  # fmt: skip
+            page = found.get("pageInfo") or {}
+            if not page.get("hasNextPage"):
+                return out
+            after = page.get("endCursor")
+        return out
 
     def close(self, url: str) -> bool:
         """Close a group pull request (its branch is deleted on its own, one more write)."""

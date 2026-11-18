@@ -26,6 +26,14 @@ merges, so sync holds a changed block until a person allows it.
   person (its head carries the mark), past the queue, and not known (GitHub did not say whether the head is marked); and the times the queue stood still: stretches of at
   least 30 minutes with an entry in line (added, not ended) and no merge of any kind, each with the reasons its entries gave.
   A repository GitHub did not answer for is named, not counted.
+- `orch pull-requests queue stats [--day YYYY-MM-DD] [--until HH:MM] [--repo R] [--workflow ci.yml] [--save-baseline] [--json]`
+  (ORCH-554): for one day in this computer's time zone (default today, up to now; `--until` cuts it short), the runs
+  of the main check workflow that started that day (any event), the pull requests merged into the queue's base
+  branches (queue group pull requests on `orch-queue/` branches not counted), runs per merged pull request, and the
+  minutes from ready to merged (last ready-for-review event, else opened; middle value and slowest tenth). Repositories:
+  `--repo`, else those in the queue file (none: refused). `--save-baseline` writes the numbers to `baseline.json` in
+  the add-on folder (refused when GitHub did not answer for a part or nothing merged); every later call shows the
+  baseline under the day. JSON: the report plus `"baseline"` (null when none).
 - `orch pull-requests queue remove <url>`: only a waiting entry.
 - `orch pull-requests queue run`: the runner (one per workspace, lock folder `runner.lock`).
 - `orch pull-requests failed-checks on|off|status|tend [--json]`: the failed-checks part (below). `on`/`off` write
