@@ -31,7 +31,7 @@ REPLAYS = [
     ("second-workflow-stuck", False, "unfinished workflow runs: rules"),
     ("draft", False, "draft"),
     ("no-checks", False, "no checks after"),
-    ("required-check-missing", False, "still waiting"),
+    ("required-check-missing", False, "required check(s) never reported"),
     ("other-repo-skipped", False, "b SKIPPED"),
     ("other-repo-green", True, "all 1 checks SUCCESS"),
     ("release-into-main", True, "the base branch has no required checks: the default branch's passed"),
@@ -482,7 +482,7 @@ def test_into_main_a_missing_required_check_is_waited_for():
     case = _case("release-into-main")
     case["polls"][0]["checks"] = [c for c in case["polls"][0]["checks"] if c["name"] != case["required"][0]]
     v = prwait.wait(prwait.Replay(case))
-    assert not v.green and "still waiting" in v.why
+    assert not v.green and v.unknown and "never reported: " + case["required"][0] in v.why
 
 
 def test_a_pull_request_moved_to_another_base_while_waiting_is_not_merged(monkeypatch):
@@ -647,3 +647,20 @@ def test_a_wait_for_room_in_the_merge_limit_is_said_at_most_once_a_minute(monkey
     assert len(lines) == 3  # at 0, 60 and 120 seconds
     assert f"checks of {PR} passed" in lines[0] and "GitHub limit for merges (12 of 12 this hour" in lines[0]
     assert "next fits in about 15 min" in lines[0]
+
+
+def test_a_required_check_that_never_comes_is_not_waited_for_an_hour():
+    """18 Nov: a merge queue group's run was cancelled before its final check; nothing ran any more and the
+    wait sat the whole hour for a check that could not come. Then: NOT green, unknown."""
+    v = prwait.wait(prwait.Replay(_case("required-check-missing")))
+    assert not v.green and v.unknown and "never reported" in v.why
+    src = prwait.Replay(_case("required-check-missing"))
+    prwait.wait(src)
+    assert src.t < prwait.NO_CHECKS_SECS + 3 * prwait.POLL_SECS
+
+
+def test_a_missing_required_check_is_waited_for_while_a_run_is_still_open():
+    runs = {"checks": [{"name": "banned-words", "state": "SUCCESS", "bucket": "pass"}],
+            "runs": [{"name": "ci", "status": "queued"}]}  # fmt: skip
+    v = prwait.wait(prwait.Replay({"required": ["needed"], "polls": [runs]}), timeout=1800)
+    assert not v.green and "still waiting" in v.why and "unfinished workflow runs: ci" in v.why

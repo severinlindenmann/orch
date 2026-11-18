@@ -445,6 +445,7 @@ def _wait_once(src, no_checks: float, timeout: float) -> Verdict:
     except Refused as e:
         return Verdict(False, str(e), unknown=True)
     src.sleep(FIRST_NAP)  # a fresh push reports "no checks" for a moment
+    idle_since = None  # since when nothing runs any more although a required check is missing
     while True:
         raw, open_runs = src.look()
         checks = [
@@ -458,6 +459,17 @@ def _wait_once(src, no_checks: float, timeout: float) -> Verdict:
         if checks and not pending and have_required and not open_runs:
             break
         el = src.elapsed()
+        if checks and not pending and not open_runs and not have_required:
+            idle_since = el if idle_since is None else idle_since
+            if el - idle_since >= no_checks:  # every run finished without it (18 Nov: a cancelled group run)
+                gone = ", ".join(r for r in required if r not in names)
+                why = (
+                    f"required check(s) never reported: {gone}; every check and workflow run finished "
+                    f"without it for {int(el - idle_since)}s (a cancelled run? run it again)"
+                )
+                return Verdict(False, why, _sorted(checks), unknown=True)
+        else:
+            idle_since = None
         if not checks and el >= no_checks:
             return Verdict(False, f"no checks after {int(el)}s", unknown=True)
         if el >= timeout:
