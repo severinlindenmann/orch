@@ -127,3 +127,13 @@ test('the ticket page and every ticket row use the one Focus button; a pane has 
   assert.match(layer, /'data-key':'live-open-ticket'/);
   assert.match(layer, /'data-key':'live-more-ticket'/);
 });
+
+test('the bar says All calm only when nothing waits on the person (ORCH-464)', () => {
+  assert.equal(bar.liveBarNeedText(0, 0), 'All calm');
+  assert.equal(bar.liveBarNeedText(4, 0), '4 need you');  // four review items, no live session asks
+  assert.equal(bar.liveBarNeedText(1, 0), '1 needs you');
+  assert.equal(bar.liveBarNeedText(0, 2), '2 need you');   // sessions that ask count even when the total is behind
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livebar.js'), 'utf8');
+  assert.ok(src.includes("liveBarNeedText(needTotal(), need.length)"), 'the wide bar reads the one needs-you number');
+  assert.ok(src.includes("'data-key':'lbar-cnt-need'"), 'the phone bar shows the number, linked to Review');
+});

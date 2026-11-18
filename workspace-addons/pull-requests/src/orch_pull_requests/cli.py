@@ -1,4 +1,4 @@
-"""orch pull-requests queue add|list|remove|run, tend, failed-checks, start|stop|status (contract: contracts/addons/pull-requests/README.md)."""
+"""orch pull-requests queue add|list|remove|run, tend, failed-checks, helper-stopped, start|stop|status (contract: contracts/addons/pull-requests/README.md)."""
 
 from __future__ import annotations
 
@@ -253,6 +253,24 @@ def _checks_cmd(args, root: Path) -> int:
     return 0
 
 
+def _stopped_cmd(args, root: Path) -> int:
+    """helper-stopped on|off|status: a ready pull request a helper left open goes into the merge queue."""
+    from . import switch
+
+    if args.state in ("on", "off"):
+        on = switch.set_stopped(root, args.state == "on")
+    else:
+        on = switch.stopped_is_on(root)
+    text = (
+        "Helper stopped: on. When no helper works on a ticket, its pull requests that are ready to merge go into "
+        "the merge queue (the Merge when green watcher, every minute)."
+        if on
+        else "Helper stopped: off."
+    )
+    print(json.dumps({"on": on}) if args.json else text, flush=True)
+    return 0
+
+
 def _switch_cmd(args, root: Path) -> int:
     """tend, start, stop, status, watch: the Merge when green switch and its background watcher."""
     from . import service
@@ -326,6 +344,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     fc.add_argument("state", nargs="?", choices=("on", "off", "status", "tend"), default="status")
     fc.add_argument("--json", action="store_true")
+    hs = sub.add_parser(
+        "helper-stopped", help="a ready pull request a helper left open goes into the merge queue by itself"
+    )
+    hs.add_argument("state", nargs="?", choices=("on", "off", "status"), default="status")
+    hs.add_argument("--json", action="store_true")
     w = sub.add_parser("watch", help=argparse.SUPPRESS)
     w.add_argument("--root", help=argparse.SUPPRESS)
     args = p.parse_args(argv)
@@ -335,6 +358,8 @@ def main(argv: list[str] | None = None) -> int:
             return _page_cmd(args, root)
         if args.cmd == "failed-checks":
             return _checks_cmd(args, root)
+        if args.cmd == "helper-stopped":
+            return _stopped_cmd(args, root)
         if args.cmd != "queue":
             return _switch_cmd(args, root)
         if args.sub == "run":

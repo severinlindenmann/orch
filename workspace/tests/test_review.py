@@ -167,6 +167,9 @@ def test_check_send_back_asks_for_changes(tk):
     assert t["status"] != "review" and t["status"] != "done"
     assert any(c.get("origin") == "change_request" and c["text"] == "Shorter." for c in t["checklist"])
     assert e["decision"]["action"] == "send_back" and e["answer"] == "Send back for changes: Shorter."
+    block = review.applies_now_block(t, root)
+    assert "Sent back for changes. The helper makes a new version." in block
+    assert "The ticket is done." not in block
 
 
 def test_check_with_old_digest_is_refused(tk):

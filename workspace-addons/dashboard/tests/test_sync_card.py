@@ -9,7 +9,7 @@ import pytest
 pytest.importorskip("orch")
 
 from orch_dashboard import actions
-from tests.test_page_session import live, post, session
+from tests.test_page_session import SECRETS, live, post, session
 
 __all__ = ["live"]
 
@@ -262,3 +262,98 @@ def test_a_confirming_click_with_a_stale_seen_is_refused_and_a_matching_one_runs
         tmp_path, SELF, "addon.act", {**args, "seen": "sync:keep-mine:" + "a" * 64}, session=True
     )
     assert st == 200 and "keep-mine" in calls[-1] and "--proof-target" not in calls[-1]
+
+
+# ORCH-413: Settings and the Sync page read the card's status with GET /api/addon-read, with the rights of /api/state
+# (no page secret). A page without an acting session shows the setting and sends no click that is refused.
+STATUS = {"mode": "local", "shown": "never", "not_synced": []}
+
+
+def _status_reply(calls):
+    def run(argv, *a, **k):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(STATUS), "")
+
+    return run
+
+
+def _get(port, path, headers=None):
+    from tests.test_page_session import _raw
+
+    st, _h, body = _raw(port, "GET", path, None, {"Sec-Fetch-Site": "same-origin", **(headers or {})})
+    return st, body
+
+
+READ = "/api/addon-read?addon=sync&verb=status"
+
+
+def test_the_sync_status_reads_without_an_acting_session(live, monkeypatch):
+    root, port = live
+    calls = []
+    monkeypatch.setattr(actions, "_run", _status_reply(calls))
+    monkeypatch.setattr(actions, "_addon_is_on", lambda *a: True)
+    ck = session(root, port)
+    # the cookie only (no page secret): the click is refused, the read is not
+    args = {"addon": "sync", "verb": "status", "target": "sync"}
+    assert (
+        post(port, "/api/act", {"op": "addon.act", "args": args}, {"Cookie": ck, "X-Orch-Page": None})[0]
+        == 403
+    )
+    assert calls == []
+    st, body = _get(port, READ, {"Cookie": ck})
+    assert st == 200 and json.loads(body) == STATUS
+    expected = ["sync", "act", "status", *common("sync")]
+    assert calls[-1][-len(expected) :] == expected  # the same command as the click
+    # this computer's page with no sign-in at all reads it like /api/state; with a full session too
+    assert _get(port, READ) == (200, json.dumps(STATUS).encode())
+    assert _get(port, READ, {"Cookie": ck, "X-Orch-Page": SECRETS[ck]})[0] == 200
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "addon=sync&verb=set",
+        "addon=sync&verb=now",
+        "addon=sync&verb=check",
+        "addon=other&verb=status",
+        "addon=sync",
+        "verb=status",
+        "",
+    ],
+)
+def test_only_listed_read_verbs_can_be_read(live, monkeypatch, query):
+    _root, port = live
+    monkeypatch.setattr(actions, "_run", lambda *a, **k: pytest.fail("ran an unlisted verb"))
+    monkeypatch.setattr(actions, "_addon_is_on", lambda *a: True)
+    st, body = _get(port, "/api/addon-read?" + query)
+    assert st == 400 and body.decode() == "That cannot be read here."
+
+
+def test_the_sync_status_read_needs_the_addon_on_and_a_sign_in_from_another_computer(live, monkeypatch):
+    from tests.test_page_session import REMOTE
+
+    root, port = live
+    calls = []
+    monkeypatch.setattr(actions, "_run", _status_reply(calls))
+    monkeypatch.setattr(actions, "_addon_is_on", lambda *a: False)
+    assert _get(port, READ)[0] == 400  # sync is off here
+    monkeypatch.setattr(actions, "_addon_is_on", lambda *a: True)
+    assert _get(port, READ, {"Host": REMOTE})[0] == 401  # another computer without a sign-in: nothing is read
+    assert _get(port, READ, {"Sec-Fetch-Site": "cross-site"})[0] == 403  # a foreign page never triggers it
+    assert calls == []
+    ck = session(root, port)
+    assert _get(port, READ, {"Host": REMOTE, "Cookie": ck})[0] == 200  # the cookie is enough to read
+
+
+def test_a_failed_status_read_answers_plain_words(live, monkeypatch):
+    _root, port = live
+    monkeypatch.setattr(actions, "_addon_is_on", lambda *a: True)
+    monkeypatch.setattr(
+        actions,
+        "_run",
+        lambda argv, *a, **k: subprocess.CompletedProcess(
+            argv, 2, "", "Refused: Sync settings could not be read\n"
+        ),
+    )
+    assert _get(port, READ) == (422, b"Sync settings could not be read")

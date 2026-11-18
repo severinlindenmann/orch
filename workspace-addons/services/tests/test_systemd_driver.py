@@ -36,6 +36,8 @@ if verb in ("start", "restart", "stop", "enable", "disable") and unit not in st[
 if verb in ("start", "restart"):
     u["active"] = True
 elif verb == "stop":
+    if os.environ.get("FAKE_SD_STOP_FAILS") == "1":
+        print("Job for unit failed.", file=sys.stderr); save(); sys.exit(1)
     u["active"] = False
 elif verb == "enable":
     u["enabled"] = True
@@ -170,3 +172,17 @@ def test_linux_add_still_works_when_keeping_running_is_refused(scli, sd, ws, mon
     assert out["note"] == "This computer did not allow it: your services stop when you log out."
     code, text, _ = scli("list")
     assert code == 0 and "web" in text
+
+
+def test_linux_remove_keeps_the_service_when_it_does_not_stop(scli, sd, ws, monkeypatch):
+    # review ORCH-378: a failed stop was ignored; the unit file and the record went while the program kept running
+    unit = f"orch-svc-{WID}-web.service"
+    path = Path.home() / ".config/systemd/user" / unit
+    assert jrun(scli, "add", "Web", "--id", "web", "--start", "--", "python3", "-m", "http.server")[0] == 0
+    monkeypatch.setenv("FAKE_SD_STOP_FAILS", "1")
+    code, out = jrun(scli, "remove", "web")
+    assert code == 2 and "Could not stop it" in out["error"]
+    assert path.is_file() and (ws / ".orch/addons/services/services/web.json").is_file()
+    assert sd()["units"][unit]["active"] is True
+    monkeypatch.delenv("FAKE_SD_STOP_FAILS")
+    assert jrun(scli, "remove", "web")[0] == 0 and not path.exists()
