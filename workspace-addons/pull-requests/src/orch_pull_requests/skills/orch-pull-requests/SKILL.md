@@ -65,6 +65,11 @@ When it is on, a cancelled or timed-out job of your ticket's pull request is run
 check fails for real you get a message with the failed job and the last lines of its log (once per commit). Fix the
 cause and push; do not rerun jobs by hand that orch already reran.
 
+When the same test fails the same way on 3 or more unrelated pull requests within an hour, the test is broken, not
+your change: orch opens one issue and tells each helper so. Got that message: do not change your pull request for
+it and do not rerun it; go on with your ticket. A person decides on the "Broken test" ticket whether the test is
+set aside (it still runs and shows, but no longer counts) until its issue is closed.
+
 ## Rules
 - A pull request a person merges with a Merge card is never queued; a Merge card made while it waits takes it out.
 - A pull request that is closed, made a draft, moved to another base branch, gets a new commit or gets changes

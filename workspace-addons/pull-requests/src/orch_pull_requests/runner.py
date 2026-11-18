@@ -39,7 +39,7 @@ import hashlib
 import time
 from pathlib import Path
 
-from . import settings, store
+from . import broken, settings, store
 from .store import FINISHED, MERGED, OUT, RUNNING, WAITING, Refused
 
 MAX_GROUP = 5
@@ -189,14 +189,21 @@ class Runner:
         self, repo: str, base: str, url: str, entries: list[dict], failed: frozenset[str] | None = None
     ) -> bool:
         """When every failed check of url also failed on the red base branch, the entries are not blamed: they
-        wait for the fix (no try used, except for a fix, which did not fix it). True when that happened."""
+        wait for the fix (no try used, except for a fix, which did not fix it). True when that happened.
+        The same for checks with a test that is broken for everyone (broken.py, ORCH-455): not their change."""
         red = self.red_base(repo, base)
-        if not red:
+        broke = broken.aside_checks(self.root, repo)
+        if not red and not broke:
             return False
         failed = self.failed_checks(url) if failed is None else failed
-        if not failed or not failed <= red:
+        if not failed or not failed <= red | broke:
             return False
-        why = f"{base} itself is red in the same checks ({_names(failed)}); waits for the fix"
+        if failed <= broke and not failed <= red:
+            why = (
+                f"it failed only in a test that is broken for everyone ({_names(failed)}); waits for the fix"
+            )
+        else:
+            why = f"{base} itself is red in the same checks ({_names(failed)}); waits for the fix"
         for e in entries:
             if self.is_fix(e):  # it was meant to fix those very checks: a counted try
                 self.retry([e], f"{url} is still red in the checks {base} fails ({_names(failed)})")

@@ -130,6 +130,23 @@ class GitHub:
         ]
         return lines[-1] if got.returncode == 0 and lines else None
 
+    def create_issue(self, repo: str, title: str, body: str) -> str | None:
+        """Open an issue (a write: the caller takes a slot of the write limit first); its address or None."""
+        got = self._run("issue", "create", "--repo", repo, "--title", title, "--body", body)
+        lines = [
+            x.strip() for x in (got.stdout or "").splitlines() if x.strip().startswith("https://github.com/")
+        ]
+        return lines[-1] if got.returncode == 0 and lines else None
+
+    def issue_state(self, url: str) -> str | None:
+        """OPEN or CLOSED, None when GitHub did not answer (one read)."""
+        v = self._json("issue", "view", url, "--json", "state")
+        return v.get("state") if isinstance(v, dict) and isinstance(v.get("state"), str) else None
+
+    def set_variable(self, repo: str, name: str, value: str) -> bool:
+        """Set a repository's Actions variable (a write: the caller takes a slot of the write limit first)."""
+        return self._run("variable", "set", name, "--repo", repo, "--body", value).returncode == 0
+
     def close(self, url: str) -> bool:
         """Close a group pull request (its branch is deleted on its own, one more write)."""
         return self._run("pr", "close", url).returncode == 0

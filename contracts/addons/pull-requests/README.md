@@ -162,3 +162,31 @@ is Ready, Working, Waiting or in Review (not Backlog, Done or Won't do) (a pull 
 - each rerun and wake writes one history line on the ticket (`agent:failed-checks`).
 Memory: `.orch/addons/pull-requests/checks.json` `{pull request key: {head, reran: {name: {job, ok, at}}, woke}}`;
 a new commit starts over; pull requests no longer open on an open ticket are dropped.
+
+### A test broken for everyone (ORCH-455)
+Part of the same pass, so off with it. Before the wake, the logs of up to 6 failed jobs are read once. "The same
+way" is the check name plus every failing test its log names (pytest `FAILED a.py::t`, also after xdist's
+`[gw0] [ 50%]`; node `not ok N - name`; sorted, joined by ` + `), else the last error line with numbers, hashes
+and temp paths taken out; a log naming neither never counts, nor does a pull request from a fork.
+- When the same check fails the same way on 3 or more pull requests of 3 or more tickets within an hour, the test
+  is broken: one GitHub issue is opened (`gh issue create`, a slot of kind `other` first; no room or refused: a
+  later pass tries again), its body lists the pull requests and the secret-checked end of one log.
+- The helpers of the pull requests that showed it, also those already woken to fix it, are woken once with "not
+  your change: do not change your pull request for it" (one history line each). Later pull requests failing only
+  in a broken test get that text instead of the fix-it wake; one with another failure too gets the fix-it wake
+  with a "Not your change" list. A failed check whose log names no failure of its own, next to a broken test, only
+  sums up the others: not counted as theirs, and remembered with the broken test (`along`).
+- orch makes one ticket per broken test ("Broken test: ...", the issue linked) and asks a person there once
+  (kind `pull-requests:aside`, options "Put it aside" / "Leave it"). "Put it aside": the test is set aside; the
+  repository's Actions variable `ORCH_ASIDE` (`gh variable set`, a slot of kind `other`) is set to a JSON list of
+  `{check, test, issue}` so the repository's own test run can count it as an expected failure (still run and
+  shown); a pull request failing only in set-aside tests wakes no helper (a history line only). "Leave it": never
+  asked again.
+- The merge queue does not blame a pull request or group whose failed checks are all checks with a broken test
+  (found or set aside) or such a summing-up check: not split, no try used, it waits 5 minutes, as for a red base
+  branch.
+- Every 10 minutes the issue is read (`gh issue view --json state`); closed: the test counts again, `ORCH_ASIDE`
+  is set without it, a history line goes on its ticket. A broken test without an issue and no new failure for
+  2 days is forgotten.
+Memory: `.orch/addons/pull-requests/broken.json` `{hits: [{key, pr, ticket, at}], tests: {key: {repo, check, test,
+prs, issue, ticket, question, aside, fixed, told, ...}}}`.
