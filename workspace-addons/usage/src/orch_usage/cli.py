@@ -1,4 +1,4 @@
-"""orch usage list|needs|history|limit|period|order|on|off|end|switching|act|run|start|stop|status
+"""orch usage list|needs|seen|history|limit|period|order|on|off|end|switching|act|run|start|stop|status
 (store: store.py; readers: readers/; early switching: switching.py; background process: service.py)."""
 
 from __future__ import annotations
@@ -293,6 +293,15 @@ def run(args) -> int:
         return _emit(
             args, rows, "\n".join(f"{r['title']}: {r['text']}" for r in rows) or "Nothing needs you here."
         )
+    if cmd == "seen":
+        from . import switching
+
+        changed = switching.mark_seen(root, _actor(args.by), args.warning, args.since)
+        return _emit(
+            args,
+            {"warning": args.warning, "changed": changed},
+            "Hidden until it comes back." if changed else "Already hidden until it comes back.",
+        )
 
     who = _actor(args.by)
     end = parse_time(args.end) if getattr(args, "end", None) else None
@@ -464,6 +473,10 @@ def main(argv=None) -> int:
 
     p("list")
     p("needs")
+    s = p("seen")
+    s.add_argument("warning", choices=("all-at-limit", "switch-failed"))
+    s.add_argument("--since")
+    s.add_argument("--by")
     s = p("history")
     s.add_argument("--account")
     s = p("limit")

@@ -56,6 +56,10 @@ it is switched back again, Usage stops and asks the person once which rule shoul
 Home). Their answer is `switching on` (Usage's limits win) or `switching off` (the other program wins); never answer
 it for them.
 
+The warnings "every account is at or near its limit" and "could not switch to an account" reach the person once each
+as a row in `orch usage needs` (Home shows it). The same warning shows again only after it was gone for 10 minutes
+and came back. `orch usage seen <warning>` (Got it) hides it until then; that is the person's click, not yours.
+
 An account is named by its label from `orch usage list` (or the start of it). Every command takes `--json`.
 
 ## Rules

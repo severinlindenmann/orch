@@ -44,6 +44,9 @@ WINDOW_OF = {"5h": "5h", "week": "week"}  # rule period -> switcher window
 SWITCH_TIMEOUT = 30
 FIGHT_MINUTES = 60  # outside switches back to the same account this close together count as one fight
 FIGHT_TRIES = 1  # after an outside switch Usage switches away this many times more, then stops and asks
+CLEAR_MINUTES = 10  # a warning counts as cleared only after it was gone this long (no new card per flicker)
+FRESH_MINUTES = 15  # a warning from an older look is not shown: the loop stopped, so it may be out of date
+WARNINGS = ("all-at-limit", "switch-failed")
 
 
 # ---------------------------------------------------------------- files
@@ -127,6 +130,72 @@ def _live_hold(memory: dict, root: Path) -> dict | None:
     if not isinstance(hold, dict) or hold.get("answers") != answers(root):
         return None  # answered since (or a broken entry)
     return hold
+
+
+WARNING_WORDS = {
+    "all-at-limit": "every account is at or near its limit",
+    "switch-failed": "could not switch to an account",
+}
+
+
+def seen(root: Path) -> dict:
+    """{warning: since} the person said Got it to (settings.json); that warning stays hidden until it comes back."""
+    s = _read(settings_path(root)).get("seen")
+    return {k: v for k, v in s.items() if k in WARNINGS and isinstance(v, str)} if isinstance(s, dict) else {}
+
+
+def mark_seen(root: Path, who: str, warning: str, since: str | None = None) -> bool:
+    """Got it: hide this warning until it clears and comes back. `since` (from the card) must be the warning that
+    is showing now, so a late click never hides a newer one. True when it changed. Written in the history."""
+    if warning not in WARNINGS:
+        raise store.Refused(f"Usage has no warning '{warning}'. Warnings: {', '.join(WARNINGS)}.")
+    with store._lock(root):
+        live = _read(memory_path(root)).get("warnings")
+        cur = live.get(warning) if isinstance(live, dict) else None
+        if not isinstance(cur, dict) or cur.get("cleared") or not isinstance(cur.get("since"), str):
+            raise store.Refused("That warning is not showing any more.")
+        if since is not None and since != cur["since"]:
+            raise store.Refused("That warning changed since. Reload the page and look again.")
+        s = _read(settings_path(root))
+        marks = s.get("seen") if isinstance(s.get("seen"), dict) else {}
+        if marks.get(warning) == cur["since"]:
+            return False
+        s["seen"] = {**{k: v for k, v in marks.items() if k in WARNINGS}, warning: cur["since"]}
+        _write(settings_path(root), s)
+        store._append_history(
+            root,
+            [
+                {
+                    "at": store.now(),
+                    "who": who,
+                    "what": f"warning seen: {WARNING_WORDS[warning]}",
+                    "account": cur.get("to"),
+                    "label": cur.get("label") or "Usage",
+                    "before": "shown",
+                    "after": "hidden until it comes back",
+                }
+            ],
+        )
+    return True
+
+
+def _episodes(old, now: dict, at: datetime) -> dict:
+    """Each warning keeps the time it started (`since`) while it lasts. Gone, it is kept `cleared` for CLEAR_MINUTES:
+    back within that time it is the same warning (same since); after that it is forgotten, so it starts anew."""
+    old = old if isinstance(old, dict) else {}
+    out = {}
+    for k in WARNINGS:
+        prev = old.get(k) if isinstance(old.get(k), dict) else None
+        if prev and not isinstance(prev.get("since"), str):
+            prev = None
+        if k in now:
+            same = prev and prev.get("to") == now[k].get("to")
+            out[k] = {**now[k], "since": prev["since"] if same else _iso(at)}
+        elif prev:
+            cleared = prev.get("cleared") or _iso(at)
+            if at - store.to_time(cleared) < timedelta(minutes=CLEAR_MINUTES):
+                out[k] = {**prev, "cleared": cleared}
+    return out
 
 
 def held(root: Path) -> dict | None:
@@ -528,6 +597,21 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     if outside_row:
         hist.insert(0, outside_row)
 
+    # the warnings `orch usage needs` tells the person about, once each (ORCH-644)
+    warn_now: dict = {}
+    if ch.all_at_limit:
+        warn_now["all-at-limit"] = {}
+    failed = memory.get("failed") or {}
+    if (
+        on
+        and wants
+        and t
+        and did in ("switch failed", "waiting to try again")
+        and failed.get("to") == t.account["id"]
+    ):
+        warn_now["switch-failed"] = {"to": t.account["id"], "label": t.account["label"]}
+    memory["warnings"] = _episodes(memory.get("warnings"), warn_now, at)
+
     memory["last"] = {
         "at": _iso(at),
         "did": did,
@@ -552,9 +636,71 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     }
 
 
-def needs_rows(root: Path) -> list[dict]:
+def needs_rows(root: Path, at: datetime | None = None) -> list[dict]:
     """`orch usage needs --json` (needs.schema.json): one question while Usage holds still because another program
-    keeps switching back. The two buttons are the two answers; either one settles it (set_switching)."""
+    keeps switching back (either button settles it, set_switching), and one row per warning (ORCH-644)."""
+    return _hold_rows(root) + warning_rows(root, at)
+
+
+def warning_rows(root: Path, at: datetime | None = None) -> list[dict]:
+    """One row per live warning. Its id carries the time the warning started, so a surface that remembers what it
+    showed tells the person once; a warning that cleared and came back is a new row. Got it hides it until then."""
+    at = at or datetime.now(UTC)
+    memory = _read(memory_path(root))
+    last = memory.get("last") if isinstance(memory.get("last"), dict) else {}
+    try:
+        fresh = at - store.to_time(last["at"]) < timedelta(minutes=FRESH_MINUTES)
+    except (KeyError, TypeError, ValueError):
+        fresh = False
+    live = memory.get("warnings")
+    if not fresh or not isinstance(live, dict):
+        return []
+    hidden = seen(root)
+    rows = []
+    for k in WARNINGS:
+        w = live.get(k)
+        if not isinstance(w, dict) or w.get("cleared") or not isinstance(w.get("since"), str):
+            continue
+        if hidden.get(k) == w["since"]:
+            continue
+        if k == "all-at-limit":
+            title, tone = "Usage: every account is at or near its limit", "bad"
+            text = (
+                "Every account is at or near its limit, so Usage has no account to switch to. Helpers may stop "
+                "until a limit resets. Raise a limit or turn on another account in Usage."
+            )
+        else:
+            label = w.get("label") or "the next account"
+            title, tone = f"Usage: could not switch to {label}", "warn"
+            text = (
+                f"Usage tried to switch to {label} and could not. It tries again every {RETRY_MINUTES} minutes. "
+                "Check that the account switcher still works and that this account is still signed in."
+            )
+        rows.append(
+            {
+                "id": f"usage:{k}:{w['since']}",
+                "source": "usage",
+                "kind": f"usage:{k}",
+                "ticket": None,
+                "title": title[:200],
+                "text": text[:500],
+                "tone": tone,
+                "since": w["since"],
+                "cli": f"orch usage list   (Got it: orch usage seen {k})",
+                "actions": [
+                    {
+                        "label": "Got it",
+                        "verb": "seen",
+                        "target": f"{k}:{w['since']}",
+                        "review": {"done": "Hidden until it comes back."},
+                    }
+                ],
+            }
+        )
+    return rows
+
+
+def _hold_rows(root: Path) -> list[dict]:
     hold = held(root)
     if not hold:
         return []
