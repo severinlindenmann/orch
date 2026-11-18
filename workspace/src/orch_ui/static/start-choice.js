@@ -16,7 +16,9 @@
        (true: no caret now, e.g. a helper already works), hasSessions (false: the ticket never ran, so no Continue while
        the earlier sessions load), inline (true: the Start choice itself, drawn in place with no
        button or caret: the live page's pane of a ticket with no helper)}
-   Returns {el, update(changes), open(), close()}. Pages call update({running, sessions, runs, ...}) on every refresh;
+   Returns {el, update(changes), open(), close(), start(how), starting()}: start() is the main button's click from
+   elsewhere on the page (a keyboard key, a second Start in the feed); start('fresh') a fresh start on the usual tool
+   and model. Pages call update({running, sessions, runs, ...}) on every refresh;
    update({running:true}) also ends Starting. */
 (() => {
   'use strict';
@@ -151,7 +153,7 @@
     }
     let more = false; /* the earlier sessions folded out (owner, ORCH-484: the newest one shows, the rest behind Show more) */
     function earlier(v) {
-      if (v.state === 'empty') return null;
+      if (v.state === 'empty' || (v.state === 'loading' && o.hasSessions === false)) return null; /* a ticket that never ran has none */
       const w = el('div', 'live-hist');
       w.dataset.key = 'start-earlier';
       const hid = me + '-earlier';
@@ -292,6 +294,11 @@
         render();
       },
       open() { isOpen = true; render('summary'); },
+      start(how) {
+        if (how === 'fresh') { const pk = pickOf(); return go(S.freshOps(o.ticket, pk, pk.tools.usual, pk.cur), 'fresh'); }
+        if (S.why('main', ctx())) return undefined;
+        return go([['run.start', {ticket: o.ticket}]], S.main(view(), o).what);
+      },
       close() { isOpen = false; render(); },
     };
   };

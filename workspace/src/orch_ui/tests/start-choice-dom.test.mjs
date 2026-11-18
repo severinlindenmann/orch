@@ -207,7 +207,16 @@ test('while the earlier sessions load, Continue shows only for a ticket that ran
   const never = mount({sessions: null, hasSessions: false});
   never.btn.open();
   assert.equal(never.q(n => n.dataset.start === 'continue'), null);
+  assert.equal(never.q(n => n.dataset.key === 'start-earlier'), null, 'no Loading line for a ticket that never ran');
   const ran = mount({sessions: null, hasSessions: true});
   ran.btn.open();
   assert.ok(ran.q(n => n.dataset.start === 'continue'));
+});
+
+test('start() is the main click from elsewhere; start("fresh") starts fresh; neither runs twice', async () => {
+  const m = mount();
+  m.btn.start();
+  m.btn.start('fresh');
+  await tick();
+  assert.deepEqual(m.sent, [['run.start', {ticket: 't_1'}]]);
 });
