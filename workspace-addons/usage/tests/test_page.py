@@ -260,7 +260,7 @@ def test_many_switches_in_a_short_while_give_one_warning(ws):
     now = datetime(2026, 11, 18, 18, 0, tzinfo=UTC)
     assert page.switch_flapping(ws, now) is None
     rows = [
-        {"at": (now - timedelta(minutes=10 * i)).isoformat(), "who": store.USAGE, "what": "switched to x",
+        {"at": (now - timedelta(minutes=10 * i)).strftime("%Y-%m-%dT%H:%M:%SZ"), "who": store.USAGE, "what": "switched to x",
          "label": "x", "account": None}
         for i in range(8)
     ]

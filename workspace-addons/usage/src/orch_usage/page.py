@@ -107,7 +107,7 @@ def switch_flapping(root: Path, at: datetime | None = None) -> dict | None:
             times.append(t)
     if len(times) < FLAP_MIN:
         return None
-    return {"count": len(times), "from": min(times).isoformat(), "to": max(times).isoformat()}
+    return {"count": len(times), "from": min(times).strftime("%Y-%m-%dT%H:%M:%SZ"), "to": max(times).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
 
 def build(data: dict, root: Path) -> dict:
