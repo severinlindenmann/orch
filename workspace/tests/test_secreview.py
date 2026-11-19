@@ -481,24 +481,22 @@ def test_a_person_links_the_fix_of_a_problems_finding(tmp_path, monkeypatch):
     assert got["verdict"] == "problems" and got["fixed_by"] == 3 and got["line"] == "race in subs"
 
 
-def test_a_recheck_under_the_review_ticket_may_record_but_another_helper_may_not(tmp_path, monkeypatch):
+def test_another_helper_may_not_link_a_fix_even_from_a_sub_ticket(tmp_path, monkeypatch):
     from orch import tickets, worktrees
 
     root = tmp_path / "ws"
     (root / ".orch").mkdir(parents=True)
     _keeper_state(root, entry(sha=H2))
-    parents = {"t_recheck": "t_sec2", "t_deeper": "t_recheck", "t_other": "t_role"}
-    monkeypatch.setattr(tickets, "load", lambda r, t: {"id": t, "parent": parents.get(t)})
     monkeypatch.setattr(tickets, "log", lambda *a, **k: {})
-    monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: "t_other")
-    with pytest.raises(Refused, match="sub-ticket of its review ticket \\(SEC-2\\)"):
-        secreview.verdict(root, 2, "problems", "race", "agent:claude", H2[:7])
-    monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: "t_deeper")
+    monkeypatch.setattr(tickets, "load", lambda r, t: {"id": t, "parent": "t_sec2"})  # a helper can re-parent
+    monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: "t_sec2")
     secreview.verdict(root, 2, "problems", "race", "agent:claude", H2[:7])
-    monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: "t_other")
-    with pytest.raises(Refused, match="Only the security review helper"):
-        secreview.link_fix(root, 2, 3, "agent:claude")
     monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: "t_recheck")
+    with pytest.raises(Refused, match="fixed-by <fix pull request>"):
+        secreview.link_fix(root, 2, 3, "agent:claude")
+    with pytest.raises(Refused, match="Only the security review helper"):
+        secreview.verdict(root, 2, "ok", "fine", "agent:claude", H2[:7])
+    monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: "t_sec2")
     assert secreview.link_fix(root, 2, 3, "agent:claude")["fixed_by"] == 3
 
 

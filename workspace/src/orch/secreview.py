@@ -17,7 +17,7 @@ Each keeper pass (no AI call while nothing is new):
            release anyway. Only a person's answer counts.
   fix      `orch review security <N> fixed-by <M>` links the pull request that fixes the finding (ORCH-789).
            #N then counts as fixed once #M is merged in the same release with a security OK for its merged
-           commit. A helper on a sub-ticket of #N's review ticket (a re-check) may record verdicts and links.
+           commit. Only a person or #N's review helper links it; #M still needs its own OK.
   hold     before a cut: every matched pull request in the release needs an OK (or the owner's "Release
            anyway") for the head that was merged. Anything else holds the release with one line why. A
            failed GitHub read stops the pass (the keeper never cuts on a read it could not make).
@@ -196,37 +196,20 @@ def _keeper_entry(root: Path, n: int) -> dict | None:
     return e if isinstance(e, dict) else None
 
 
-def _under(root: Path, tid: str, review: str) -> bool:
-    """The ticket is the review ticket or one of its sub-tickets (a re-check made under it)."""
-    seen: set[str] = set()
-    cur: str | None = tid
-    while cur and cur not in seen and len(seen) < 20:
-        if cur == review:
-            return True
-        seen.add(cur)
-        try:
-            cur = tickets.load(root, cur).get("parent")
-        except (Refused, OSError, ValueError):
-            return False
-    return False
-
-
 def _may_record(root: Path, n: int, e: dict) -> None:
-    """A person, the review helper of pull request #n, or a helper on a sub-ticket of its review ticket."""
+    """A person or the review helper of pull request #n. Not a sub-ticket of the review ticket: any helper can
+    put its own ticket under another one, so that would let any helper clear a finding (ORCH-789)."""
     from orch import worktrees
 
-    key = str(e.get("key") or e.get("tid") or "its review ticket")
     nobody = (
-        "Only the security review helper of this pull request, a helper on a sub-ticket of its review "
-        f"ticket ({key}) or a person records its verdict."
+        "Only the security review helper of this pull request or a person records its verdict or its fix. "
+        f"Ask the person: orch review security {n} fixed-by <fix pull request>."
     )
     try:
         me = worktrees._agent_ticket(root)
     except Refused:
         raise Refused(nobody) from None
-    if me is None:
-        return
-    if not e.get("tid") or not _under(root, me, str(e["tid"])):
+    if me is not None and me != e.get("tid"):
         raise Refused(nobody)
 
 
