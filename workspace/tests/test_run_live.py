@@ -379,6 +379,20 @@ def test_a_set_limit_of_four_and_the_fifth_starts_when_one_closes(proj, run, lab
 
 
 @needs_tmux
+def test_an_urgent_start_goes_past_the_limit(proj, run, lab, tmp_path, monkeypatch):
+    """ORCH-699: a red develop's fix ticket starts at once, also when every helper slot is taken."""
+    _fake_claude(tmp_path, monkeypatch)
+    _claude_live(proj)
+    config.set_live_max(proj, "2")
+    a, c, b = _ticket(run, "A"), _ticket(run, "C"), _ticket(run, "B")
+    assert run("run", "start", a)[0] == 0 and run("run", "start", c)[0] == 0
+    with pytest.raises(runs.Busy):
+        runs.start(proj, b, "tester")
+    runs.start(proj, b, "tester", over_limit=True)
+    assert runs.read(proj, b) is not None and len(runs_live.live_alive(proj)) == 3
+
+
+@needs_tmux
 def test_no_limit_by_default_the_fifth_starts_at_once(proj, run, lab, tmp_path, monkeypatch):
     _fake_claude(tmp_path, monkeypatch)
     _claude_live(proj)
