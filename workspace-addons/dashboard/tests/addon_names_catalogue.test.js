@@ -145,23 +145,14 @@ test('the add-on page offers Remove, and says plainly when the add-on is part of
   assert.match(text(find(core, byKey('addon-detail-core'))), /Relay is part of orch\. You can turn it off, but not remove it\./);
 });
 
-// ORCH-264: the Preview switch for the new Focus sits on the Focus add-on page, only when Focus is on
-test('the live-session add-on page shows the Preview switch, off by default, only there', () => {
-  const mk = (settings) => {
-    const ctx = settingsCtx({addons: () => [], state: {look: null, settings}, heading: t => el('h1', {}, t)});
-    vm.runInContext(head + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
-    return ctx;
-  };
-  const focus = {name: 'focus', label: 'Focus', page: {live_session: true}, active: true, description: 'd', removable: true};
-  const off = find(mk({focus_preview_on: false}).page(focus), byKey('addon-detail-live-preview'));
-  assert.equal(off.props['data-action'], 'live-preview');
-  assert.equal(off.props['aria-checked'], false);
-  assert.equal(text(off), 'Off');
-  assert.equal(text(find(mk({focus_preview_on: true}).page(focus), byKey('addon-detail-live-preview'))), 'On');
-  assert.match(text(find(mk({focus_preview_on: false}).page(focus), byKey('addon-detail-live-preview-row'))), /Preview.*Try the new Focus.*today’s Focus/);
-  assert.equal(find(mk({focus_preview_on: false}).page({...focus, active: false}), byKey('addon-detail-live-preview')), null);
-  assert.equal(find(mk({focus_preview_on: false}).page({name: 'sync', active: true, description: 'd'}), byKey('addon-detail-live-preview')), null);
-  assert.equal(find(mk({}).page(focus), byKey('addon-detail-live-preview')), null, 'no setting in the state (an old server): no switch');
+// ORCH-816: the new Focus is the only Focus; its add-on page has no Preview switch, in any state
+test('the live-session add-on page has no Preview switch', () => {
+  const ctx = settingsCtx({addons: () => [], state: {look: null, settings: {focus_preview_on: false, typing_on: false}}, heading: t => el('h1', {}, t)});
+  vm.runInContext(head + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+  const page = ctx.page({name: 'focus', label: 'Focus', page: {live_session: true}, active: true, description: 'd', removable: true});
+  assert.equal(find(page, byKey('addon-detail-live-preview')), null);
+  assert.doesNotMatch(text(page), /Preview|today’s Focus/);
+  assert.ok(find(page, byKey('addon-detail-typing')), 'the Typing switch stays');
 });
 
 // 19: the Update button keeps the version before, so the end says "Updated orch 23 → 24."
