@@ -1,5 +1,5 @@
 // ORCH-908: counts use the normal font, the narrow To do lane heading stays on one line, and the
-// New ticket Done when box has room for its whole placeholder.
+// New ticket Done when box has room for its whole placeholder (the dialog's 44px input minimum shrank it).
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
@@ -24,6 +24,7 @@ test('collapsed lane heading does not wrap', () => {
   assert.match(rule(read('pages/tickets.css'), '.board .kanban-col.col-collapsed .col-head h2'), /white-space:nowrap/);
 });
 
-test('Done when box on New ticket has three rows', () => {
-  assert.match(read('pages/newticket.js'), /done\.rows = 3;/);
+test('Done when box on New ticket keeps the tall minimum of the first box', () => {
+  assert.match(read('pages/newticket.js'), /el\('textarea', 'input new-ticket-text'\); done\.name = 'done_when'/);
+  assert.match(read('pages/newticket.css'), /\.new-ticket \.new-ticket-text\{min-height:96px\}/);
 });
