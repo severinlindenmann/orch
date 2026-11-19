@@ -336,6 +336,24 @@ A helper that needs you turns the whole tile orange. The pane's message box (`.l
 "Message to: Write the texts (ORCH-301). Only this helper gets it." In the bar the group is one chip with the helper
 count (`.lbar-n`), the same number as its tile.
 
+### Chat view of a session (ORCH-687)
+A ticket's pane has Chat | Terminal in its header (`.segmented.live-view`, `aria-pressed`; in a narrow pane "Show
+terminal" / "Show chat" in More). Chat is the default and the choice is kept per browser. `.live-chat` (`role=log`) is
+the ticket read as a conversation, oldest first: a done step and other events are one muted line (`.live-ev`, "✓ Step 2
+done: … · 14:21"); the helper's words are `.live-chat-msg` on the left (`surface-2`), your words on the right
+(`data-w=y`, `brand-soft`), each with "Helper · 14:38" or "You · 14:55" above, and its links (`.live-links`) inside.
+The waiting question is never a message: it is the orange card (`.live-ask`, `needs-you` edge, `warning-soft`) above
+the chat, answered there with its options or own words.
+
+### Voice into the message box (ORCH-696)
+Only while the relay is on: a microphone (`btn icon sm ghost`, "Speak") sits in `.live-msg-row` between the words and
+Send. While listening `.live-voice` (`role=status`, `surface-2`, `r1`) above the row shows a moving level
+(`.live-voice-wave`, still with reduced motion), "Listening 0:04", Stop and Cancel; Esc cancels and the microphone is
+hidden. Then "Writing down your words…", then the words land in the box and `.live-vhint` under it says "From your
+voice. Check the words, change what is wrong, then send." (gone on the first key). Nothing is sent by itself. A
+refusal (microphone blocked, nothing heard, the relay said no) is one plain sentence in the same place (`role=alert`).
+The recording itself is `UI.voiceRecorder` (composer.js) with `words:false`, its own controls drawn by the page.
+
 ## Loading, errors and performance
 
 The brief asks for shell + skeleton within 100 ms while the numeric checklist says not to show indicators for sub-second work. Reconcile by expected latency (BP-05, BP-55–67):

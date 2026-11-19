@@ -149,7 +149,7 @@ let barAsk = false;
 let barAnswered = new Set();
 const BAR_QUESTION = { id: 'q1', digest: 'd-q1', text: 'Keep the old file name when the same file is added twice?',
   options: ['Keep the old name', 'Add a number'], answer: null };
-async function liveBarState(page) {
+async function liveBarState(page, tweak = null) {
   barPrefs = { pins: { t_bar228: true }, names: {} };
   barEnded = new Set();
   barAsk = false;
@@ -184,6 +184,7 @@ async function liveBarState(page) {
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
     st.settings = { ...(st.settings || {}), focus_preview_on: true,
       addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
+    if (tweak) tweak(st);
     if (Array.isArray(st.tickets) && st.workspace) barState = st;  // a full state, not the poll's "unchanged"
     route.fulfill({ response: res, json: st });
   });
@@ -250,6 +251,208 @@ async function paneData(page, dash) {
   if ((await page.textContent(idle)).trim() !== 'Stop idle helper') throw new Error('an idle helper\'s pane does not say Stop idle helper');
   await page.evaluate(() => window.LiveLayer.open('t_bar238'));
   await noSideways(page);
+}
+
+// Step 17 (ORCH-687): a ticket's pane opens in Chat: its done step, what the helper said about it with the pull
+// request inside, an earlier question with your answer, and the waiting question as an orange card above. Answering
+// it there sends the answer (the stand-in server marks it answered, as orch does) and it moves into the chat as yours;
+// a message from the box shows at once. Terminal shows the last lines; the choice stays after a reload.
+async function chatView(page, dash) {
+  let answered = '';
+  const sent = [];
+  const tweak = st => {
+    const t = (st.tickets || []).find(x => x.id === 't_bar238');
+    if (!t) return;
+    t.checklist = [
+      { id: 'c1', text: 'Files can be dropped on a ticket', done: true, evidence: [
+        { type: 'note', ref: 'node --test tests/attach.test.js', summary: 'Uploading works for pictures, pages and tables. Notes sit below the files.', by: 'agent:claude', at: '2026-11-19T14:21:00Z' },
+        { type: 'pr', ref: 'https://github.com/severinlindenmann/orch/pull/1309', by: 'agent:claude', at: '2026-11-19T14:21:00Z' }] },
+      { id: 'c2', text: 'Keep or change the file name', done: false, evidence: [] }];
+    t.history = [{ at: '2026-11-19T14:02:00Z', by: 'agent:factory', via: 'cli', text: 'Claude started', chat_message: false }];
+    t.questions = [
+      { id: 'q1', text: 'Should notes sit above or below the files?', options: ['Below', 'Above'], answer: 'Below', answered_by: 'human:demo', asked_at: '2026-11-19T14:30:00Z', answered_at: '2026-11-19T14:33:00Z' },
+      { id: 'q2', digest: 'd2', text: 'Keep the old file name when the same file is added twice?', options: ['Keep the old name', 'Use the new name'],
+        answer: answered || null, answered_by: answered ? 'human:demo' : undefined, asked_at: '2026-11-19T14:52:00Z', answered_at: answered ? new Date().toISOString() : undefined }];
+  };
+  await liveBarState(page, tweak);
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (body.op === 'answer' && body.args.ticket === 't_bar238' && body.args.question === 'q2') answered = body.args.answer;
+    else if (body.op === 'run.send' && body.args.ticket === 't_bar238') sent.push(body.args.text);
+    else return route.fallback();
+    const st = JSON.parse(JSON.stringify(barState));
+    tweak(st);
+    route.fulfill({ json: st });
+  });
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.evaluate(() => { try { localStorage.removeItem('orch.live.view'); } catch {} });
+  await page.waitForSelector('#live-bar :is([data-lbar-open="t_bar238"], [data-lbar-list="wait"])', { timeout: 10000 });
+  if (!(await page.$('#live-bar [data-lbar-open="t_bar238"]'))) await page.click('#live-bar [data-lbar-list="wait"]');  // a phone: counts only
+  await page.click('#live-bar [data-lbar-open="t_bar238"]');
+  const pane = '#live-dock .live-pane[data-session="t_bar238"]', chat = `${pane} [data-live-chat]`;
+  await page.waitForFunction(c => /Step 1 done/.test(document.querySelector(c)?.textContent || ''), chat, { timeout: 10000 });
+  const rows = await page.$$eval(`${chat} > *`, els => els.map(el => (el.dataset.w || 'e') + ' ' + el.textContent.replace(/\s+/g, ' ').trim()));
+  const want = [/^e ✓ The helper started/, /^e ✓ Step 1 done: Files can be dropped on a ticket/, /^h Helper · .*Uploading works.*Pull request 1309$/,
+    /^h Helper · .*above or below the files\?$/, /^y Demo · .*Below$|^y You · .*Below$/];
+  if (rows.length !== want.length || want.some((re, i) => !re.test(rows[i]))) throw new Error('the chat reads:\n' + rows.join('\n'));
+  if (await page.isVisible(`${pane} [data-live-lines]`)) throw new Error('Chat also shows the last lines');
+  const ask = `${pane} [data-live-ask]`;
+  if (!/Keep the old file name/.test(await page.textContent(ask))) throw new Error('the waiting question is not shown above the chat');
+  if (rows.some(r => /Keep the old file name/.test(r))) throw new Error('the waiting question is also a chat message');
+  const [edge, goal] = await page.evaluate(a => {
+    const t = document.createElement('span'); t.style.color = 'var(--needs-you)'; document.body.append(t);
+    const g = getComputedStyle(t).color; t.remove();
+    return [getComputedStyle(document.querySelector(a)).borderTopColor, g];
+  }, ask);
+  if (edge !== goal) throw new Error(`the question card is not orange (${edge}, want ${goal})`);
+  await noSideways(page);
+  // answer inside the chat
+  await page.click(`${ask} [data-key="live-ask-option-0"]`);
+  await page.waitForFunction(([c, a]) => /Keep the old name/.test(document.querySelector(c)?.textContent || '') && document.querySelector(a)?.hidden, [chat, ask], { timeout: 10000 });
+  if (answered !== 'Keep the old name') throw new Error('the answer sent was ' + JSON.stringify(answered));
+  // a message from the box shows as yours at once
+  await page.fill(`${pane} [data-live-msg-text]`, 'Please also try a PDF.');
+  await page.click(`${pane} [data-key="live-msg-send"]`);
+  await page.waitForFunction(c => /You · [^]*Please also try a PDF\./.test(document.querySelector(c)?.textContent || ''), chat, { timeout: 10000 });
+  if (sent.join() !== 'Please also try a PDF.') throw new Error('the message sent was ' + JSON.stringify(sent));
+  // Terminal: the last lines; the choice stays after a reload; back to Chat
+  const pick = async v => {
+    if (await page.isVisible(`${pane} [data-key="live-view-${v}"]`)) return page.click(`${pane} [data-key="live-view-${v}"]`);
+    await page.click(`${pane} [data-key="live-pane-more"]`);  // a narrow pane: the choice is in More
+    await page.click(`${pane} [data-key="live-more-view"]`);
+  };
+  await pick('term');
+  await page.waitForFunction(p => document.querySelector(p + ' [data-live-body]')?.dataset.liveView === 'term', pane, { timeout: 5000 });
+  if (!(await page.isVisible(`${pane} [data-live-lines]`)) || await page.isVisible(chat)) throw new Error('Terminal does not show the last lines instead of the chat');
+  await page.reload();
+  await mainHasText(page);
+  await page.waitForFunction(p => document.querySelector(p + ' [data-live-body]')?.dataset.liveView === 'term', pane, { timeout: 10000 });
+  await pick('chat');
+  await page.waitForFunction(c => { const el = document.querySelector(c); return el && !el.hidden && /Step 1 done/.test(el.textContent); }, chat, { timeout: 5000 });
+  answered = '';  // the picture: the chat with the waiting question above it
+  await page.evaluate(() => window.LiveSessions.refresh());
+  await page.reload();
+  await mainHasText(page);
+  await page.waitForFunction(a => { const el = document.querySelector(a); return el && !el.hidden; }, ask, { timeout: 10000 });
+  await noSideways(page);
+}
+
+// Step 19 (ORCH-696): voice into the message box. The relay is on in the page's state (the relay add-on on and
+// connected, as Settings reads it); the sound goes to POST /api/voice/words, answered here as the dashboard does with
+// the local relay stand-in (workspace/tests/fakes.py: "Please keep the old file name."). The fake microphone of the
+// browser speaks. The real server with the stand-in itself: workspace-addons/dashboard/tests/test_voice.py.
+async function voiceBox(page, dash) {
+  let relayOn = true;
+  const heard = [], sent = [];
+  await liveBarState(page, st => {
+    const relay = { name: 'relay', label: 'Relay', active: relayOn, detail: relayOn ? { connected: true, address: 'https://relay.example', workspaces: [] } : null };
+    st.settings = { ...(st.settings || {}), addons: [...((st.settings || {}).addons || []).filter(a => a.name !== 'relay'), relay] };
+  });
+  await page.route('**/api/voice/words', async route => {
+    const r = route.request(), kind = (r.headers()['content-type'] || '').split(';')[0];
+    heard.push({ kind, size: (r.postDataBuffer() || Buffer.alloc(0)).length });
+    if (!/^audio\/(webm|mp4|m4a|wav)$/.test(kind) || !heard[heard.length - 1].size) return route.fulfill({ status: 415, contentType: 'text/plain', body: 'no' });
+    route.fulfill({ json: { text: 'Please keep the old file name.' } });
+  });
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (body.op === 'run.send') { sent.push(body.args.text); return route.fulfill({ json: barState }); }
+    return route.fallback();
+  });
+  const pane = '#live-dock .live-pane[data-session="t_bar238"]', mic = `${pane} [data-key="live-voice"]`;
+  const strip = `${pane} [data-key="live-voice-strip"]`, box = `${pane} [data-live-msg-text]`;
+  const openPane = async () => {
+    await page.goto('about:blank');  // the same #home address would not load the page again
+    await page.goto(dash + '/#home');
+    await mainHasText(page);
+    await page.waitForSelector('#live-bar :is([data-lbar-open="t_bar238"], [data-lbar-list="wait"])', { timeout: 10000 });
+    if (!(await page.$(pane))) {
+      if (!(await page.$('#live-bar [data-lbar-open="t_bar238"]'))) await page.click('#live-bar [data-lbar-list="wait"]');  // a phone: counts only
+      await page.click('#live-bar [data-lbar-open="t_bar238"]');
+    }
+    await page.waitForSelector(box, { timeout: 10000 });
+  };
+  const speak = async () => {
+    await page.click(mic);
+    await page.waitForFunction(s => /Listening \d:\d\d/.test(document.querySelector(s)?.textContent || ''), strip, { timeout: 10000 });
+    if (await page.isVisible(mic)) throw new Error('the microphone still shows while listening');
+    await page.waitForTimeout(1300);
+    await page.click(`${pane} [data-key="live-voice-stop"]`);
+    await page.waitForFunction(b => /Please keep the old file name\./.test(document.querySelector(b)?.value || ''), box, { timeout: 10000 });
+  };
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.evaluate(() => { try { localStorage.removeItem('orch.live.view'); } catch {} });
+  await openPane();
+  await page.waitForSelector(mic, { timeout: 10000 });
+  // a blocked microphone: one plain sentence, nothing recorded
+  await page.evaluate(() => {
+    window.__gum = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('blocked', 'NotAllowedError'));
+  });
+  await page.click(mic);
+  await page.waitForFunction(p => /^The microphone is blocked for this page; allow it in the browser, then try again\.$/.test(document.querySelector(p + ' [data-key="live-voice-error"]')?.textContent || ''), pane, { timeout: 10000 });
+  await page.evaluate(() => { navigator.mediaDevices.getUserMedia = window.__gum; });
+  // listening says so; Esc cancels only the voice (the panel stays open), nothing is turned into words
+  await page.click(mic);
+  await page.waitForFunction(s => /Listening \d:\d\d/.test(document.querySelector(s)?.textContent || ''), strip, { timeout: 10000 });
+  await noSideways(page);
+  if (process.env.FD_SHOTS) {  // a folder: a picture of the listening strip too, for the look review
+    await page.$eval(`${pane} [data-key="live-msg"]`, f => f.scrollIntoView({ block: 'end' }));
+    await page.waitForTimeout(1200);
+    await page.screenshot({ path: `${process.env.FD_SHOTS}/fd-19-voice-listening-${page.viewportSize().width}.png` });
+  }
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(([s, m]) => !document.querySelector(s) && document.querySelector(m), [strip, mic], { timeout: 10000 });
+  if (heard.length) throw new Error('a cancelled recording was turned into words');
+  if (await page.$(`${pane} [data-key="live-voice-error"]`)) throw new Error('the old refusal is still shown after a new try');
+  // closing the pane while listening stops the microphone; nothing is turned into words
+  await page.evaluate(() => {
+    const ask = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    window.__streams = [];
+    navigator.mediaDevices.getUserMedia = async c => { const st = await ask(c); window.__streams.push(st); return st; };
+  });
+  await page.click(mic);
+  await page.waitForFunction(s => /Listening \d:\d\d/.test(document.querySelector(s)?.textContent || ''), strip, { timeout: 10000 });
+  await page.click(`${pane} [data-key="live-close"]`);
+  await page.waitForFunction(() => window.__streams.length && window.__streams.every(st => st.getTracks().every(t => t.readyState === 'ended')), null, { timeout: 5000 })
+    .catch(() => { throw new Error('the microphone keeps listening after its pane closed'); });
+  if (heard.length) throw new Error('a recording of a closed pane was turned into words');
+  await openPane();
+  await page.waitForSelector(mic, { timeout: 10000 });
+  // speak, stop: the words land in the box with the line under it, and nothing is sent
+  await page.fill(box, 'Thanks.');
+  await page.dispatchEvent(box, 'input');
+  await speak();
+  if (heard.length !== 1 || !/^audio\//.test(heard[0].kind) || !heard[0].size) throw new Error('the recording sent: ' + JSON.stringify(heard));
+  if ((await page.inputValue(box)) !== 'Thanks. Please keep the old file name.') throw new Error('the box reads ' + JSON.stringify(await page.inputValue(box)));
+  if (!/^From your voice\. Check the words, change what is wrong, then send\.$/.test(await page.textContent(`${pane} [data-key="live-voice-done"]`))) throw new Error('the line under the words is missing');
+  await page.waitForTimeout(1500);
+  if (sent.length) throw new Error('the words were sent by themselves: ' + JSON.stringify(sent));
+  // change them: the line goes on the first key, the words stay
+  await page.focus(box);
+  await page.keyboard.press('End');
+  await page.keyboard.type(' And add a note.');
+  if (await page.$(`${pane} [data-key="live-voice-done"]`)) throw new Error('the line stays while changing the words');
+  if (!/file name\. And add a note\.$/.test(await page.inputValue(box))) throw new Error('the change did not land: ' + await page.inputValue(box));
+  if (sent.length) throw new Error('changing the words sent them');
+  // the relay off: no microphone, no hint to turn it on
+  relayOn = false;
+  await openPane();
+  await page.waitForTimeout(500);
+  if (await page.$(mic)) throw new Error('the microphone shows with the relay off');
+  if (/relay|microphone|speak/i.test(await page.textContent(`${pane} [data-key="live-msg"]`))) throw new Error('the box hints at the relay while it is off');
+  // on again, for the picture: the words in the box, ready to check
+  relayOn = true;
+  await page.fill(box, '');
+  await page.dispatchEvent(box, 'input');
+  await openPane();
+  await page.waitForSelector(mic, { timeout: 10000 });
+  await speak();
+  if (await page.$eval(box, b => b.scrollHeight > b.clientHeight + 1)) throw new Error('the words do not fit in the box to check them');
+  await noSideways(page);
+  await page.$eval(`${pane} [data-key="live-msg"]`, f => f.scrollIntoView({ block: 'end' }));  // the picture: the box with the words, ready to check
 }
 
 // Step 13 until the layer exists (crew task layer replaces the stand-in with the real layer): a small open dialog with
@@ -1611,10 +1814,13 @@ const STEPS = [
     draft: { q: '?page=focus&cur=ORCH-247&view=zoom&pm=ORCH-247:model' },
   },
   {
-    n: 17, pic: 'fd-17-chat', area: 'chat', title: 'Chat: messages with the results inside', feature: [5],
-    waits: T.chat,
-    do: ['Open a session in Chat view.', 'Read the messages and press a result inside one.'],
-    see: ['Plain messages with time; step events between them.', 'Results show as small widgets and open big.'],
+    n: 17, pic: 'fd-17-chat', area: 'chat', title: 'Chat: messages and ticket events, questions answered inside', feature: [5],
+    do: ['Open a session: it opens in Chat.', 'Answer its waiting question in the orange card and send a message.',
+      'Switch to Terminal, reload, switch back to Chat.'],
+    see: ['Plain messages with time; done steps and other events as lines between them; the pull request inside the message.',
+      'The waiting question is an orange card above the chat, not a message; once answered it moves into the chat as yours.',
+      'A sent message shows at once; Terminal shows the last lines and the choice stays after a reload.'],
+    run: ({ page, dash }) => chatView(page, dash),
     draft: { q: '?page=focus&cur=ORCH-228&view=zoom' },
   },
   {
@@ -1626,10 +1832,10 @@ const STEPS = [
   },
   {
     n: 19, pic: 'fd-19-voice', area: 'voice', title: 'Voice into the message box', feature: [13],
-    waits: T.chat,
     do: ['With the relay on, press the microphone and speak.', 'Stop, read the words in the box, edit them.', 'Turn the relay off.'],
     see: ['While listening the button says so and Esc cancels.', 'The words land in the box and are never sent by themselves.',
-      'With the relay off there is no microphone.'],
+      'With the relay off there is no microphone.', 'A blocked microphone or nothing heard is one plain sentence.'],
+    run: ({ page, dash }) => voiceBox(page, dash),
     draft: { q: '?page=focus&cur=ORCH-238&view=zoom&voice=done' },
   },
   {

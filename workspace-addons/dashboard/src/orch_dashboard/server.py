@@ -1019,7 +1019,7 @@ class Handler(BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|live|soft|live-layer|live-history|live-start|live-model|livebar|livesessions|livegroups|livewall)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|live|soft|live-layer|live-history|live-start|live-model|livebar|livesessions|livegroups|livewall|livechat|livevoice)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
@@ -1177,6 +1177,34 @@ class Handler(BaseHTTPRequestHandler):
         code, text = termsession.keys(self.root, self.orch_bin, str(body["ticket"]), body["items"])
         self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
 
+    def _voice_words(self):
+        """POST /api/voice/words (ORCH-696): the sound of the message box's microphone in, its words out, through
+        the connected speech service (voice.py). The person's own dashboard session only, as typing; nothing is sent on."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+        from . import voice
+
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= voice.MAX_AUDIO:
+                raise ValueError
+        except ValueError:
+            return self._send(413, voice.LONG.encode(), "text/plain; charset=utf-8")
+        try:
+            with _BIG_READS:  # one big body in memory at a time
+                audio = self.rfile.read(n)
+        except OSError:
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        code, body, kind = voice.words(
+            self.root, self.orch_bin, audio, self.headers.get("Content-Type") or ""
+        )
+        self._send(code, body, kind)
+
     def _standing_link(self, sent: str):
         """GET /go/<secret>: the person's standing sign-in link (a bookmark, see pagelaunch). Right secret: a
         redirect to a fresh one-time launch link, which the page spends as with any sign-in link. Anything else
@@ -1235,6 +1263,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._session_post()
         if path == "/api/term/keys":
             return self._term_keys()
+        if path == "/api/voice/words":
+            return self._voice_words()
         if path in ("/api/diag", "/api/diag/report", "/api/diag/open", "/api/diag/share"):
             return self._diag_post(path)
         px = PROXY.fullmatch(path)

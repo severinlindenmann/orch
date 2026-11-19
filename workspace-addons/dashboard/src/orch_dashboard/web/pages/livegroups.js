@@ -152,17 +152,22 @@ function liveGroupKey(panes) {
   return (panes || []).map(k => { const g = liveGroupOf(liveGroups(), k); return g ? [k, g.id, liveGroupRows(g, k).map(r => [r.id || r.of, r.status, r.word, r.title])] : null; });
 }
 // The message box of a pane with a working helper: who receives it, the words, Send (run.send). What is typed is
-// kept per session across repaints of the dock.
+// kept per session across repaints of the dock. With the relay on, a microphone puts spoken words into the box
+// (pages/livevoice.js, ORCH-696): the strip while listening above the row, the line after the words under it.
 const liveMsgDraft = new Map();
 const liveMsgBusy = new Set();
 function liveMsgBox(sess) {
   if (!sess || sess.kind || !sess.running || snapshot) return null;
   const g = liveGroupOf(liveGroups(), sess.id), id = 'live-msg-' + sess.id, busy = liveMsgBusy.has(sess.id);
+  const voice = what => typeof window[what] === 'function' ? window[what](sess) : null;
   return h('form', {className:'live-msg', 'data-live-msg':sess.id, 'data-key':'live-msg'},
     h('label', {className:'live-to', for:id, 'data-key':'live-msg-to'}, liveMsgTo(sess, g)),
+    voice('liveVoiceStrip'),
     h('div', {className:'live-msg-row'},
       h('textarea', {className:'input', id, rows:'1', maxlength:String(LIVE_MSG_MAX), placeholder:'Write to this helper', 'data-live-msg-text':sess.id}, liveMsgDraft.get(sess.id) || ''),
-      h('button', {type:'submit', className:'btn sm primary', disabled:busy, 'data-key':'live-msg-send'}, busy ? 'Sending…' : 'Send')));
+      voice('liveVoiceMic'),
+      h('button', {type:'submit', className:'btn sm primary', disabled:busy, 'data-key':'live-msg-send'}, busy ? 'Sending…' : 'Send')),
+    voice('liveVoiceHint'));
 }
 if (typeof window === 'object' && typeof document === 'object' && !(typeof module === 'object' && module.exports)) {
   document.addEventListener('input', e => {
@@ -188,6 +193,7 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
     // only what was sent is cleared: words typed while it was on its way stay in the box
     const sent = r.ok && String(liveMsgDraft.get(id) || '').trim() === text;
     if (sent) liveMsgDraft.delete(id);
+    if (r.ok && typeof liveChatNote === 'function') { liveChatNote(id, text); if (typeof liveLayerFill === 'function') liveLayerFill(); }  // shows in the chat at once
     const box = document.querySelector(`#live-dock [data-live-msg-text="${id.replace(/["\\]/g, '')}"]`);
     if (box && sent) box.value = '';
     if (btn) { btn.disabled = false; btn.textContent = 'Send'; }

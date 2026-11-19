@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-32 steps: 23 ready (the script clicks them), 9 pending (not built yet).
+32 steps: 25 ready (the script clicks them), 7 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -300,21 +300,23 @@ Must be seen:
 - Stop in the pane stops its helper; an idle helper's button says Stop idle helper.
 - A new model applies when the helper finishes its current step (or at its next start) and says so.
 
-## 17. Chat: messages with the results inside
+## 17. Chat: messages and ticket events, questions answered inside
 
 - Part: chat (draft D feature 5)
-- State: pending, waits for: Chat (crew tasks of the Chat stage)
+- State: ready, clicked by the script
 - Pictures: `fd-17-chat-1280.png`, `fd-17-chat-1920.png`, `fd-17-chat-390.png`
 
 Do:
 
-1. Open a session in Chat view.
-2. Read the messages and press a result inside one.
+1. Open a session: it opens in Chat.
+2. Answer its waiting question in the orange card and send a message.
+3. Switch to Terminal, reload, switch back to Chat.
 
 Must be seen:
 
-- Plain messages with time; step events between them.
-- Results show as small widgets and open big.
+- Plain messages with time; done steps and other events as lines between them; the pull request inside the message.
+- The waiting question is an orange card above the chat, not a message; once answered it moves into the chat as yours.
+- A sent message shows at once; Terminal shows the last lines and the choice stays after a reload.
 
 ## 18. Files and screenshots in the message box, with a preview before sending
 
@@ -335,7 +337,7 @@ Must be seen:
 ## 19. Voice into the message box
 
 - Part: voice (draft D feature 13)
-- State: pending, waits for: Chat (crew tasks of the Chat stage)
+- State: ready, clicked by the script
 - Pictures: `fd-19-voice-1280.png`, `fd-19-voice-1920.png`, `fd-19-voice-390.png`
 
 Do:
@@ -349,6 +351,7 @@ Must be seen:
 - While listening the button says so and Esc cancels.
 - The words land in the box and are never sent by themselves.
 - With the relay off there is no microphone.
+- A blocked microphone or nothing heard is one plain sentence.
 
 ## 20. All 16 result widgets, small and big
 
