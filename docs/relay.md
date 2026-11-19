@@ -119,8 +119,10 @@ Deleting a workspace (admin page, `DELETE /admin/api/workspaces/<id>`) removes i
 rules, group link, webhooks, notebook, phone links and mutes, and everything that belongs only to it: messages from or
 to it, the files those messages and its problem reports name (rows and files on disk, unless another message still
 names them), its problem reports, cached speech of those messages, and subscriber log lines that name those files; it
-is taken off subscribers' workspace lists. `?dry_run=1` answers the counts (`removes`: messages, files, problems,
-sub_log, subscribers) and changes nothing; the admin page shows them before the person confirms.
+is taken off subscribers' workspace lists. `GET /admin/api/workspaces/<id>/removal` answers the counts (`removes`: messages, files, problems,
+sub_log, subscribers) and changes nothing (a separate route, so an older server answers 404 instead of deleting); the admin page
+shows them before the person confirms. A subscriber whose cursor was a removed message resumes from where it
+stood (only a hash of the id is kept, 90 days).
 
 History of workspaces deleted before this (rows that name a `ws_…` id no longer in `workspaces`, and log lines of
 subscribers that no longer exist): `POST /admin/api/cleanup?dry_run=1` counts it, `POST /admin/api/cleanup` removes it.

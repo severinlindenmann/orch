@@ -31,8 +31,8 @@ Admin options:
 The admin token comes from ORCH_PUBLISH_ADMIN_TOKEN, ORCH_PUBLISH_ADMIN_TOKEN_FILE, /etc/orch-publish/admin-token or
 <data folder>/admin-token; the admin commands only read it, never make one.
 
-Start checks: the server refuses to start as root (pass --allow-root or set ORCH_PUBLISH_ALLOW_ROOT=1 to allow it),
-when its ports are taken, or when another orch-publish uses the same data folder.
+Start checks: the server refuses to start as root (pass --allow-root or set ORCH_PUBLISH_ALLOW_ROOT=1 to allow it;
+ORCH_PUBLISH_SANDBOX=systemd allows it too, as that sandbox needs root), when its ports are taken, or when another orch-publish uses the same data folder.
 ";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -146,7 +146,9 @@ pub fn is_root() -> bool {
 /// Refuse root unless the flag or ORCH_PUBLISH_ALLOW_ROOT=1 says so.
 pub fn check_root(allow_flag: bool, root: bool) -> Result<(), String> {
     let allow_env = std::env::var("ORCH_PUBLISH_ALLOW_ROOT").is_ok_and(|v| v == "1");
-    if root && !allow_flag && !allow_env {
+    // The systemd sandbox starts system units (systemd-run), which needs root: that setting is the permission.
+    let systemd = crate::config::var("SANDBOX").is_some_and(|v| v == "systemd");
+    if root && !allow_flag && !allow_env && !systemd {
         return Err(
             "refusing to run as root: files in the data folder would belong to root. \
                     Run it as the service user, or pass --allow-root."
@@ -226,10 +228,15 @@ pub fn admin_target(a: &Admin) -> Result<(String, String), String> {
         None => read_env_file(Path::new("/etc/orch-publish/env")).unwrap_or_default(),
     };
     let get = |k: &str| {
-        [format!("ORCH_PUBLISH_{k}"), format!("PUBLISH_{k}")]
+        let names = [format!("ORCH_PUBLISH_{k}"), format!("PUBLISH_{k}")];
+        names
             .iter()
-            .find_map(|n| std::env::var(n).ok().or_else(|| file.get(n).cloned()))
-            .filter(|v| !v.trim().is_empty())
+            .find_map(|n| std::env::var(n).ok().filter(|v| !v.trim().is_empty()))
+            .or_else(|| {
+                names
+                    .iter()
+                    .find_map(|n| file.get(n).cloned().filter(|v| !v.trim().is_empty()))
+            })
     };
     let data_dir = PathBuf::from(get("DATA_DIR").unwrap_or_else(|| "/var/lib/orch-publish".into()));
     let token = match get("ADMIN_TOKEN") {
@@ -372,7 +379,13 @@ pub async fn run_admin_at(a: Admin, url: &str, token: &str) -> Result<String, St
         }
         AdminWhat::WorkspacesRemove(id) => {
             let p = format!("/admin/api/workspaces/{}", enc(&id));
-            let v = c.call("DELETE", &format!("{p}?dry_run=1")).await?;
+            let v = c.call("GET", &format!("{p}/removal")).await?;
+            if v["dry_run"] != Value::Bool(true) {
+                return Err(
+                    "the server gave no preview; nothing was removed (is it an older version?)"
+                        .into(),
+                );
+            }
             let name = v["name"].as_str().unwrap_or("").to_string();
             let what = format!(
                 "{}, {}",

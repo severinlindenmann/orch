@@ -462,8 +462,8 @@ async fn delete_workspace_leaves_no_row_or_file_of_it() {
 
     let pre = t
         .adm(
-            "DELETE",
-            &format!("/admin/api/workspaces/{}?dry_run=1", gone.0),
+            "GET",
+            &format!("/admin/api/workspaces/{}/removal", gone.0),
             Value::Null,
         )
         .await;

@@ -189,6 +189,18 @@ pub fn run(c: &Connection, scope: Scope) -> rusqlite::Result<(Counts, Files)> {
             [],
         )?;
     }
+    // Subscribers resume after an event id: keep where each removed message stood, by a hash only.
+    let seqs: Vec<(String, i64)> = c
+        .prepare("SELECT id,seq FROM messages WHERE id IN (SELECT id FROM wipe_msgs)")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    let at = crate::util::now();
+    for (id, seq) in &seqs {
+        c.execute(
+            "INSERT OR REPLACE INTO gone_events(h,seq,at) VALUES(?1,?2,?3)",
+            params![event_hash(id), seq, at],
+        )?;
+    }
     let messages = c.execute(
         "DELETE FROM messages WHERE id IN (SELECT id FROM wipe_msgs)",
         [],
@@ -257,4 +269,10 @@ fn safe_name(s: &str) -> bool {
         && s.len() <= 128
         && s.bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// The kept trace of a removed message: a hash of its id (never the id), for subscriber cursors.
+pub fn event_hash(id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(format!("gone-event:{id}").as_bytes()))
 }

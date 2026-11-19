@@ -99,7 +99,7 @@ publish/
 ## Command line
 `orch-publish --help` (`-h`) prints help, `--version` (`-V`) the version; neither reads settings, writes to the data
 folder (no admin token, no apps folder) or binds a port. Unknown arguments are refused (exit 2). The server refuses to
-start as root (`--allow-root` or `ORCH_PUBLISH_ALLOW_ROOT=1` allows it), when its ports are taken, or when another
+start as root (`--allow-root`, `ORCH_PUBLISH_ALLOW_ROOT=1` or the `systemd` sandbox, which needs root, allows it), when its ports are taken, or when another
 orch-publish holds the data folder (`<data dir>/.orch-publish.lock`); the ports and the lock come before anything is
 written.
 
@@ -109,8 +109,8 @@ Admin commands talk to the running server's admin port; they read the admin toke
 orch-publish admin workspaces list
 orch-publish admin workspaces remove <id> --dry-run   # then without --dry-run: its files and apps go with it
 ```
-Publish has no groups (they live on the relay). `DELETE /admin/api/workspaces/<id>?dry_run=1` answers
-`removes: {files, apps}` and changes nothing.
+Publish has no groups (they live on the relay). `GET /admin/api/workspaces/<id>/removal` answers
+`removes: {files, apps}` (a separate route, so an older server answers 404 instead of deleting).
 
 ## Private-network listener (app reach)
 An app with `reach = "private"` in `app.toml` is served only on a third listener, on the private network. Two settings, both

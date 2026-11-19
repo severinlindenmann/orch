@@ -27,6 +27,7 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
             digest TEXT NOT NULL, payload BLOB NOT NULL, stored_at INTEGER NOT NULL, acked_at INTEGER);
         CREATE INDEX IF NOT EXISTS msg_to ON messages(to_addr, acked_at);
         CREATE INDEX IF NOT EXISTS msg_reply ON messages(reply_to);
+        CREATE INDEX IF NOT EXISTS msg_blob ON messages(blob_id);
         DROP INDEX IF EXISTS msg_text_to;
         DROP INDEX IF EXISTS msg_text_from;
         CREATE INDEX IF NOT EXISTS msg_type_to_from ON messages(type, to_addr, from_addr, seq);
@@ -54,6 +55,7 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
             blob_id TEXT NOT NULL, files INTEGER NOT NULL, attachments INTEGER NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL,
             data BLOB NOT NULL, UNIQUE(from_ws, ref));
         CREATE TABLE IF NOT EXISTS problem_readers(ws TEXT PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS gone_events(h TEXT PRIMARY KEY, seq INTEGER NOT NULL, at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS notebooks(id TEXT PRIMARY KEY, name TEXT NOT NULL, workspace TEXT NOT NULL UNIQUE,
             token_hash TEXT, created_at INTEGER NOT NULL, paired_at INTEGER, last_seen INTEGER, status_msg TEXT);
         CREATE TABLE IF NOT EXISTS notebook_codes(hash TEXT PRIMARY KEY, notebook_id TEXT NOT NULL, expires_at INTEGER NOT NULL,
@@ -731,6 +733,7 @@ pub fn purge(c: &Connection, data_dir: &Path, at: i64) -> rusqlite::Result<(usiz
         let _ = std::fs::remove_file(data_dir.join("blobs").join(id));
         c.execute("DELETE FROM blobs WHERE id=?1", [id])?;
     }
+    c.execute("DELETE FROM gone_events WHERE at<?1", [cutoff])?;
     c.execute("DELETE FROM pair_codes WHERE expires_at<?1", [at - 86400])?;
     c.execute(
         "DELETE FROM notebook_codes WHERE expires_at<?1",

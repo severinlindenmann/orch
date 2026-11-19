@@ -75,6 +75,7 @@ pub fn router(app: AppState) -> Router {
             axum::routing::patch(edit_ws).delete(del_ws),
         )
         .route("/admin/api/workspaces/:id/token", post(new_token))
+        .route("/admin/api/workspaces/:id/removal", get(ws_removal))
         .route(
             "/admin/api/workspaces/:id/profile/approve",
             post(approve_profile),
@@ -399,28 +400,37 @@ fn dry_run(q: &HashMap<String, String>) -> bool {
     )
 }
 
-/// Delete a workspace with everything that belongs only to it (crate::wipe), in one transaction.
-/// `?dry_run=1` answers what would go, changing nothing.
-async fn del_ws(
+/// What deleting a workspace would remove (the admin page shows it before the person confirms). A separate GET
+/// route, so an older server answers 404 instead of deleting.
+async fn ws_removal(
     State(app): State<AppState>,
     h: HeaderMap,
     Path(id): Path<String>,
-    Query(q): Query<HashMap<String, String>>,
-) -> Res<axum::response::Response> {
+) -> Res<Json<Value>> {
     guard(&app, &h)?;
     let mut c = app.db.lock().unwrap();
     if !store::ws_exists(&c, &id) {
         return Err(not_found("No such workspace."));
     }
-    if dry_run(&q) {
-        let n = crate::wipe::preview(&mut c, crate::wipe::Scope::Workspace(&id))?;
-        let name: String = c.query_row("SELECT name FROM workspaces WHERE id=?1", [&id], |r| {
-            r.get(0)
-        })?;
-        return Ok(
-            Json(json!({"id": id, "name": name, "dry_run": true, "removes": n.json()}))
-                .into_response(),
-        );
+    let n = crate::wipe::preview(&mut c, crate::wipe::Scope::Workspace(&id))?;
+    let name: String = c.query_row("SELECT name FROM workspaces WHERE id=?1", [&id], |r| {
+        r.get(0)
+    })?;
+    Ok(Json(
+        json!({"id": id, "name": name, "dry_run": true, "removes": n.json()}),
+    ))
+}
+
+/// Delete a workspace with everything that belongs only to it (crate::wipe), in one transaction.
+async fn del_ws(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Res<StatusCode> {
+    guard(&app, &h)?;
+    let mut c = app.db.lock().unwrap();
+    if !store::ws_exists(&c, &id) {
+        return Err(not_found("No such workspace."));
     }
     let rel: Vec<String> = store::related(&c, &id)
         .into_iter()
@@ -460,7 +470,7 @@ async fn del_ws(
     drop(c);
     files.remove(&app.cfg.data_dir);
     app.notify.notify_waiters();
-    Ok(StatusCode::NO_CONTENT.into_response())
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// History (messages, files, problem reports, log lines) of workspaces that no longer exist.

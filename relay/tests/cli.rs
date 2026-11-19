@@ -3,6 +3,7 @@ mod common;
 use common::*;
 use orch_relay::cli::{self, Admin, AdminWhat};
 use serde_json::json;
+use std::future::IntoFuture;
 use std::process::{Command, Output};
 
 const BIN: &str = env!("CARGO_BIN_EXE_orch-relay");
@@ -251,4 +252,34 @@ fn admin_reads_the_env_file() {
         "from-the-file-0123456789"
     );
     assert!(!m.contains_key("OTHER"));
+}
+
+#[tokio::test]
+async fn a_dry_run_against_an_older_server_never_deletes() {
+    // An older server: DELETE removes at once and there is no preview route.
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    let deletes = Arc::new(AtomicUsize::new(0));
+    let d = deletes.clone();
+    let app = axum::Router::new().route(
+        "/admin/api/workspaces/:id",
+        axum::routing::delete(move || {
+            d.fetch_add(1, Ordering::SeqCst);
+            async { axum::http::StatusCode::NO_CONTENT }
+        }),
+    );
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", l.local_addr().unwrap());
+    tokio::spawn(axum::serve(l, app).into_future());
+    for dry in [true, false] {
+        let e = cli::run_admin_at(
+            admin(AdminWhat::WorkspacesRemove("ws_x".into()), dry),
+            &url,
+            ADMIN,
+        )
+        .await
+        .unwrap_err();
+        assert!(e.contains("404"), "{e}");
+    }
+    assert_eq!(deletes.load(Ordering::SeqCst), 0);
 }

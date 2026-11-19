@@ -323,6 +323,8 @@ pub async fn run_admin(a: Admin) -> Result<String, String> {
     let c = Client {
         http: reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300))
+            // The admin token is a custom header: never let a redirect carry it to another host.
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| e.to_string())?,
         url,
@@ -334,7 +336,10 @@ pub async fn run_admin(a: Admin) -> Result<String, String> {
 /// Run against a given address and token (tests).
 pub async fn run_admin_at(a: Admin, url: &str, token: &str) -> Result<String, String> {
     let c = Client {
-        http: reqwest::Client::new(),
+        http: reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| e.to_string())?,
         url: url.trim_end_matches('/').to_string(),
         token: token.to_string(),
     };
@@ -373,7 +378,13 @@ async fn run_with(c: &Client, a: Admin) -> Result<String, String> {
         }
         AdminWhat::WorkspacesRemove(id) => {
             let p = format!("/admin/api/workspaces/{}", enc(&id));
-            let (_, v) = c.call(Method::DELETE, &format!("{p}?dry_run=1")).await?;
+            let (_, v) = c.call(Method::GET, &format!("{p}/removal")).await?;
+            if v["dry_run"] != Value::Bool(true) {
+                return Err(
+                    "the server gave no preview; nothing was removed (is it an older version?)"
+                        .into(),
+                );
+            }
             let name = v["name"].as_str().unwrap_or("").to_string();
             let what = counts_line(&v["removes"]);
             if a.dry_run {

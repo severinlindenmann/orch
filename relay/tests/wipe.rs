@@ -152,8 +152,8 @@ async fn delete_workspace_leaves_no_row_or_file_of_it() {
     // The count the admin page shows before the person confirms.
     let (s, v) = t
         .admin_json(
-            "DELETE",
-            &format!("/admin/api/workspaces/{}?dry_run=1", a.id),
+            "GET",
+            &format!("/admin/api/workspaces/{}/removal", a.id),
             None,
         )
         .await;
@@ -311,10 +311,7 @@ async fn delete_and_cleanup_need_the_admin_token() {
     let t = start().await;
     let a = t.add_ws("A").await;
     for (m, p) in [
-        (
-            "DELETE",
-            format!("/admin/api/workspaces/{}?dry_run=1", a.id),
-        ),
+        ("GET", format!("/admin/api/workspaces/{}/removal", a.id)),
         ("POST", "/admin/api/cleanup?dry_run=1".to_string()),
     ] {
         let r = t
@@ -328,4 +325,39 @@ async fn delete_and_cleanup_need_the_admin_token() {
             .unwrap();
         assert_eq!(r.status(), 401, "{m} {p}");
     }
+}
+
+#[tokio::test]
+async fn a_subscriber_resumes_after_an_event_of_a_deleted_workspace() {
+    let t = start().await;
+    let a = t.add_ws("Gone").await;
+    let b = t.add_ws("Stays").await;
+    let (s, v) = t
+        .admin_json(
+            "POST",
+            "/admin/api/subscribers",
+            Some(json!({"name": "Bot", "workspaces": [a.id, b.id]})),
+        )
+        .await;
+    assert_eq!(s, 201, "{v}");
+    let token = v["token"].as_str().unwrap().to_string();
+    {
+        let c = t.app.db.lock().unwrap();
+        raw_msg(&c, "m_cursor_a", &a.id, "phones", "text", None);
+    }
+    let events = |after: &str| {
+        t.http
+            .get(format!("{}/v1/sub/{token}/events?after={after}", t.base))
+            .send()
+    };
+    assert_eq!(events("m_cursor_a").await.unwrap().status(), 200);
+    let (s, _) = t
+        .admin_json("DELETE", &format!("/admin/api/workspaces/{}", a.id), None)
+        .await;
+    assert_eq!(s, 204);
+    // The event is gone, its place is kept (by a hash, not the id).
+    assert_eq!(events("m_cursor_a").await.unwrap().status(), 200);
+    assert_eq!(events("m_never_was").await.unwrap().status(), 422);
+    let c = t.app.db.lock().unwrap();
+    assert!(rows_naming(&c, "m_cursor_a").is_empty());
 }
