@@ -547,17 +547,24 @@ def r18(e):
     tok = e.tmp / "r18-admin-token"
     tok.write_text(e.rel.admin.token)
     tok.chmod(0o600)
-    got = browser_half(e, "relay_admin.cjs", e.rel.admin_url, str(tok), a, b, group, os.environ.get("E2E_SHOTS", ""))
-    tok.unlink()
+    def drop_group():
+        gs = (e.rel.admin.call("GET", "/admin/api/groups").json() or {}).get("items", [])
+        for g in gs:
+            if g.get("name") == group:
+                e.rel.admin.call("DELETE", f"/admin/api/groups/{g['id']}")
+    e.cleanup.append(drop_group)  # also when the browser half fails half way
+    try:
+        got = browser_half(e, "relay_admin.cjs", e.rel.admin_url, str(tok), a, b, group, os.environ.get("E2E_SHOTS", ""))
+    finally:
+        tok.unlink()
     check(got.get("signedIn") and got.get("groupDone") and got.get("ruleSaved"), f"browser steps: {got}")
     check(not got["errors"], f"script errors on the admin page: {got['errors'][:3]}")
     wide = [r for r, h in got["narrow"].items() if h]
     check(not wide, f"admin pages scroll sideways at 390: {wide}")
-    groups = (e.rel.admin.call("GET", "/admin/api/groups").json() or {})
-    items = groups.get("items", groups) if isinstance(groups, dict) else groups
-    mine = [g for g in items if g.get("name") == group]
+    groups = (e.rel.admin.call("GET", "/admin/api/groups").json() or {}).get("items", [])
+    mine = [g for g in groups if g.get("name") == group]
     check(len(mine) == 1, f"group {group} not in the admin API: {str(groups)[:300]}")
-    members = set(mine[0].get("members") or [m.get("id") for m in mine[0].get("workspaces", [])])
+    members = {m if isinstance(m, str) else m.get("id") for m in mine[0].get("members", [])}
     check(set(names.values()) <= members, f"group members {members}")
     rules = (e.rel.admin.call("GET", "/admin/api/rules").json() or {}).get("rules", [])
     check(any(x["from"] == names["R18-Alp"] and x["to"] == names["R18-Bern"] and x.get("text") for x in rules),

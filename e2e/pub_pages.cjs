@@ -1,6 +1,6 @@
 // P10 browser half: opens shared-link and app pages of the local publish server like a person, at 1440 and 390 wide.
 // usage: PW_DIR=<node_modules folder with playwright> node pub_pages.cjs <pages.json> <shots dir or ''>
-// pages.json: [{"name": "viewer", "url": "http://127.0.0.1:N/f/<id>#k=<key>", "expect": ["text", ...]}, ...]
+// pages.json: [{"name": "viewer", "url": "http://127.0.0.1:N/f/<id>#k=<key>", "expect": ["text", ...], "status": 404?}, ...]
 // Prints one JSON line: [{name, width, found: [texts seen], missing: [...], hscroll, errors: [...]}]. Exit 1 when the
 // browser itself could not start; the checks are the Python half's.
 const { chromium } = require(require('path').join(process.env.PW_DIR, 'playwright'));
@@ -17,8 +17,9 @@ const pages = JSON.parse(fs.readFileSync(specFile, 'utf8'));
       const p = await ctx.newPage();
       const errors = [];
       p.on('pageerror', e => errors.push(e.message));
-      // a gone file (404) or a paused app (503) answers with that status on purpose: only script errors count there
-      p.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(m.text()); });
+      // a gone file (404) or a paused app (503) answers with that status on purpose ("status" in pages.json): only
+      // there a failed load is expected; everywhere else it counts
+      p.on('console', m => { if (m.type() === 'error' && !(pg.status && /Failed to load resource/.test(m.text()))) errors.push(m.text()); });
       await p.goto(pg.url, { waitUntil: 'load', timeout: 30000 }).catch(e => errors.push('goto: ' + e.message.split('\n')[0]));
       const found = [];
       for (const t of pg.expect) {

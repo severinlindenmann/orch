@@ -339,7 +339,7 @@ def p9(e):
 @scenario("P10", local_only=True)
 def p10(e):
     """Shared-link and app pages in a browser at 1440 and 390 (ORCH-895): the file page decrypts the link's file and
-    shows it, a cut-short key says so, a stopped link says the file is gone, a stopped app says it is paused. No
+    shows it, a cut-short or wrong key says so, a stopped link says the file is gone, a stopped app says it is paused. No
     sideways scrolling, no script error. Browser half: pub_pages.cjs."""
     from scenarios_look import browser_half
 
@@ -357,9 +357,10 @@ def p10(e):
     check(e.orchj("Pilatus", "publish", "stop", n)["status"] == "stopped", "stop the app")
     pages = [
         {"name": "file", "url": r["link"], "expect": ["p10-sales.csv", "Anna", "Ben"]},
-        {"name": "cut-key", "url": r["link"].split("#k=")[0] + "#k=" + "A" * 43, "expect": ["It may have been cut short"]},
-        {"name": "gone", "url": gone["link"], "expect": ["Check the link or ask the sender"]},
-        {"name": "paused", "url": app["link"], "expect": ["This app is paused"]},
+        {"name": "cut-key", "url": r["link"][:-12], "expect": ["It may have been cut short"]},  # a link pasted short
+        {"name": "wrong-key", "url": r["link"].split("#k=")[0] + "#k=" + "A" * 43, "expect": ["It may have been cut short"]},
+        {"name": "gone", "url": gone["link"], "expect": ["Check the link or ask the sender"], "status": 404},
+        {"name": "paused", "url": app["link"], "expect": ["This app is paused"], "status": 503},
     ]
     spec = e.tmp / "p10-pages.json"
     spec.write_text(json.dumps(pages))
@@ -369,4 +370,4 @@ def p10(e):
     bad += [f"{x['name']}@{x['width']}: scrolls sideways" for x in got if x["hscroll"]]
     bad += [f"{x['name']}@{x['width']}: {x['errors'][:2]}" for x in got if x["errors"]]
     check(not bad, "; ".join(bad))
-    return "file page, cut key, gone link and paused app at 1440 and 390"
+    return "file page, cut and wrong key, gone link and paused app at 1440 and 390"
