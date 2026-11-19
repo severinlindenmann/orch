@@ -53,11 +53,7 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
             created_at TEXT NOT NULL, shared_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'new', taken_by TEXT, taken_by_name TEXT,
             blob_id TEXT NOT NULL, files INTEGER NOT NULL, attachments INTEGER NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL,
             data BLOB NOT NULL, UNIQUE(from_ws, ref));
-        CREATE TABLE IF NOT EXISTS problem_readers(ws TEXT PRIMARY KEY);
-        CREATE TABLE IF NOT EXISTS notebooks(id TEXT PRIMARY KEY, name TEXT NOT NULL, workspace TEXT NOT NULL UNIQUE,
-            token_hash TEXT, created_at INTEGER NOT NULL, paired_at INTEGER, last_seen INTEGER, status_msg TEXT);
-        CREATE TABLE IF NOT EXISTS notebook_codes(hash TEXT PRIMARY KEY, notebook_id TEXT NOT NULL, expires_at INTEGER NOT NULL,
-            used INTEGER NOT NULL DEFAULT 0);",
+        CREATE TABLE IF NOT EXISTS problem_readers(ws TEXT PRIMARY KEY);",
     )?;
     // Older databases: add the profile columns (ignore "duplicate column"). Existing rows count as written by the workspace.
     for col in [
@@ -732,10 +728,6 @@ pub fn purge(c: &Connection, data_dir: &Path, at: i64) -> rusqlite::Result<(usiz
         c.execute("DELETE FROM blobs WHERE id=?1", [id])?;
     }
     c.execute("DELETE FROM pair_codes WHERE expires_at<?1", [at - 86400])?;
-    c.execute(
-        "DELETE FROM notebook_codes WHERE expires_at<?1",
-        [at - 86400],
-    )?;
     Ok((m, ids.len()))
 }
 

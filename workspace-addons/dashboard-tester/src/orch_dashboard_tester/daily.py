@@ -137,7 +137,10 @@ class World:
     def browse(self, routes: list[str]) -> dict:
         from . import browser
 
-        return browser.look(self.launch_url(), routes, words.load(), self.out, self.root)
+        try:
+            return browser.look(self.launch_url(), routes, words.load(), self.out, self.root)
+        except browser.Unreachable as e:  # no page could be read: say so once, report no page as empty
+            raise Refused(str(e)) from None
 
     def send(self, rep: dict) -> tuple[str | None, str]:
         """One report through `orch report problem`, kept on this computer (not shared). (ref, how)."""
