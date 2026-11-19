@@ -1,6 +1,6 @@
-// Soft page changes (ORCH-336): with Preview on, links to this dashboard page change the address instead of loading
+// Soft page changes (ORCH-336): wherever Focus runs, links to this dashboard page change the address instead of loading
 // the page again, a dialog in the keep place survives a page change, Back and Forward land where the person was, and a
-// page that cannot be drawn loads once the normal way. Off, nothing changes.
+// page that cannot be drawn loads once the normal way. In a shared copy (no Focus) nothing changes.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -11,11 +11,11 @@ const softSource = fs.readFileSync(path.join(WEB, 'pages/soft.js'), 'utf8');
 const app = fs.readFileSync(path.join(WEB, 'app.js'), 'utf8');
 const index = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8');
 
-function load(preview = true, extra = {}) {
+function load(focus = true, extra = {}) {
   const listeners = {};
   const keep = {contains: n => n.inKeep === true};
   const ctx = {
-    livePreviewOn: () => preview, URL, Map, JSON, Date, CustomEvent: class { constructor(type, o) { this.type = type; this.detail = o.detail; } },
+    liveFocusOn: () => focus, URL, Map, JSON, Date, CustomEvent: class { constructor(type, o) { this.type = type; this.detail = o.detail; } },
     requestAnimationFrame: fn => fn(),
     document: {getElementById: id => (id === 'keep' ? keep : null), querySelectorAll: () => extra.dialogs || [], addEventListener: (t, fn) => { listeners['doc:' + t] = fn; }},
     history: extra.history || {state:null, replaceState(s) { this.state = s; }},
@@ -53,23 +53,23 @@ test('a link to this same dashboard page goes softly to its address; everything 
   }
 });
 
-test('the click handler acts only with Preview on', () => {
-  for (const preview of [true, false]) {
-    const {ctx, listeners} = load(preview);
+test('the click handler acts only where Focus runs', () => {
+  for (const focus of [true, false]) {
+    const {ctx, listeners} = load(focus);
     let prevented = false;
     const a = anchor('/#tickets');
     listeners['doc:click']({...click(), target:{closest: () => a}, preventDefault() { prevented = true; }});
-    assert.equal(prevented, preview);
-    assert.equal(ctx.location.hash, preview ? '#tickets' : '#home');
+    assert.equal(prevented, focus);
+    assert.equal(ctx.location.hash, focus ? '#tickets' : '#home');
   }
 });
 
-test('a page change closes the open dialogs except the ones in the keep place, and only with Preview on', () => {
+test('a page change closes the open dialogs except the ones in the keep place, and only where Focus runs', () => {
   const modal = {id:'modal'}, layer = {id:'layer', inKeep:true};
   const on = load(true, {dialogs:[modal, layer]});
   assert.deepEqual([...on.soft.dialogsToClose().map(d => d.id)], ['modal']);
   const off = load(false, {dialogs:[modal, layer]});
-  assert.deepEqual([...off.soft.dialogsToClose().map(d => d.id)], ['modal', 'layer'], 'off: every dialog closes, as before');
+  assert.deepEqual([...off.soft.dialogsToClose().map(d => d.id)], ['modal', 'layer'], 'a shared copy: every dialog closes');
 });
 
 test('Back and Forward land where the person was; a new page starts at the top', () => {
@@ -85,10 +85,10 @@ test('Back and Forward land where the person was; a new page starts at the top',
   hist.state = {softNav:first};  // Back
   assert.deepEqual([...soft.scrollAfterChange()], [0, 640]);
   const off = load(false, {history:{state:{softNav:first}, replaceState() {}}});
-  assert.deepEqual([...off.soft.scrollAfterChange()], [0, 0], 'off: the top, as before');
+  assert.deepEqual([...off.soft.scrollAfterChange()], [0, 0], 'a shared copy: the top');
 });
 
-test('a page that cannot be drawn loads once the normal way, never in a loop, never with Preview off', () => {
+test('a page that cannot be drawn loads once the normal way, never in a loop, never in a shared copy', () => {
   const store = new Map();
   const {soft, ctx} = load(true, {store});
   assert.equal(soft.fallBack('#tickets', ctx.sessionStorage, ctx.location, 1000), true);

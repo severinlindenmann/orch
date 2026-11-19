@@ -1,5 +1,5 @@
 'use strict';
-// The wall of the new live page (draft D, ORCH-360), behind the Preview switch (pages/live.js). Every session of the
+// The wall of the live page (draft D, ORCH-360; pages/live.js). Every session of the
 // workspace in bands: Pinned, Needs you and working (orange needs-you tiles first), In line, Idle and no session. A
 // working tile shows what its helper does in one sentence and a peek of its last lines, kept current by the live
 // sessions API (pages/livesessions.js, ORCH-359). A filter keeps the matching tiles; a band folds away and stays

@@ -59,7 +59,6 @@ SETTINGS_OPS = (
     "away.set",
     "diag.set",
     "typing.set",
-    "focus_preview.set",
     "update.auto",
     "copies.set",
     "mobile.set",

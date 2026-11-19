@@ -123,7 +123,7 @@ test('the ticket page and every ticket row use the one Focus button; a pane has 
   assert.match(list, /function ticketRowFocus/);
   assert.match(list, /ticketRowFocus\(t, nextAction\)/, 'the table row');
   assert.match(list, /function shortSide[^]*?liveFocusButton\(t\)/, 'the phone row');
-  assert.match(layer, /function liveFocusButton[^]*?livePreviewOn\(\)/, 'only behind the Preview switch');
+  assert.match(layer, /function liveFocusButton[^]*?liveFocusOn\(\)/, 'only where Focus runs');
   assert.match(layer, /'data-key':'live-open-ticket'/);
   assert.match(layer, /'data-key':'live-more-ticket'/);
 });

@@ -50,63 +50,41 @@ async function mainHasText(page) {
   }, null, { timeout: 20000 });
 }
 
-// Step 3. The test dashboard reads files only, so it has no add-on list (that comes from the orch command): the step
-// adds the live-session add-on to the page's state and answers the switch's one call (focus_preview.set) like the
-// server does. Everything else is the real page: Settings row, the click, the address, today's frame, the new page.
-async function previewSwitch(page, dash) {
-  let on = false;
+// Steps 2 and 3. The test dashboard reads files only, so it has no add-on list (that comes from the orch command): the
+// steps add the live-session add-on to the page's state, as an updated workspace has it. Nothing else is set: Focus is
+// the new Focus with no switch (ORCH-816). Everything else is the real page: the side bar, the address, Settings.
+async function focusIsNew(page, dash) {
   const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
     description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
     dashboard: { label: 'Focus', icon: 'target', order: 20 } };
-  let last = null;
-  const dress = st => {
-    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: on,
-      addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
-    last = st;
-    return st;
-  };
   await page.route(/\/api\/state(\?.*)?$/, async route => {
     const res = await route.fetch();
     if (res.status() !== 200) return route.fulfill({ response: res });
-    route.fulfill({ response: res, json: dress(await res.json()) });
+    const st = await res.json();
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
+    route.fulfill({ response: res, json: st });
   });
-  await page.route('**/api/act', async route => {
-    const body = route.request().postDataJSON();
-    if (body.op !== 'focus_preview.set') return route.fallback();
-    on = body.args.on === true;
-    route.fulfill({ json: dress({ ...last }) });
-  });
-  await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
-    body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
-  const sw = '[data-key="addon-detail-live-preview"]';
-  const settings = async want => {
-    await page.evaluate(() => { location.hash = '#settings/addons/focus'; });
-    await page.waitForSelector(sw, { timeout: 20000 });
-    if (await page.getAttribute(sw, 'aria-checked') !== String(!want)) throw new Error('the Preview switch is not ' + (want ? 'off' : 'on') + ' before the click');
-    await page.click(sw);
-    await page.waitForSelector(`${sw}[aria-checked="${want}"]`, { timeout: 10000 });
-  };
-  const focusPage = async () => { await page.evaluate(() => { location.hash = '#addon/focus'; }); await page.waitForTimeout(300); };
-  await page.goto(dash + '/#settings/addons/focus');
-  await page.waitForSelector(sw, { timeout: 20000 });
-  await focusPage();
-  await page.waitForSelector('iframe.embed', { timeout: 10000 });  // off: today's Focus
-  await settings(true);
-  await focusPage();
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  const link = page.locator('a[href="#addon/focus"]').first();
+  await link.waitFor({ state: 'attached', timeout: 20000 });  // the side bar's Focus link (folded away at phone width)
+  if (await link.isVisible()) await link.click(); else await page.evaluate(() => { location.hash = '#addon/focus'; });
   await page.waitForSelector('[data-key="live-next"]', { timeout: 10000 });
-  if (await page.$('iframe.embed')) throw new Error('today\'s Focus still shows with Preview on');
-  if ((await page.textContent('[data-key="live-next-tag"]')).trim() !== 'Preview') throw new Error('the new Focus is not marked Preview');
-  await settings(false);
-  await focusPage();
-  await page.waitForSelector('iframe.embed', { timeout: 10000 });  // off again: today's Focus is back
-  await settings(true);
-  await focusPage();
-  await page.waitForSelector('[data-key="live-next"]', { timeout: 10000 });
+  if (await page.$('iframe.embed')) throw new Error('the old Focus page shows');
+  if (/Preview|today.s Focus/.test(await page.textContent('main'))) throw new Error('Focus still says Preview or names an old Focus');
   await noSideways(page);
 }
 
-// Step 13. Preview on without the switch's clicks (step 3 clicks them): the page's state says the switch is on.
+async function noPreviewSwitch(page) {
+  await page.evaluate(() => { location.hash = '#settings/addons/focus'; });
+  await page.waitForSelector('[data-key="addon-detail-typing"]', { timeout: 20000 });
+  if (await page.$('[data-key="addon-detail-live-preview"]')) throw new Error('Focus settings still have a Preview switch');
+  if (/Preview|today.s Focus/.test(await page.textContent('main'))) throw new Error('Focus settings still say Preview');
+  await noSideways(page);
+}
+
+// Step 13. The page's state has the live-session add-on.
 async function previewOn(page) {
   const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
     description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
@@ -116,14 +94,13 @@ async function previewOn(page) {
     if (res.status() !== 200) return route.fulfill({ response: res });
     const st = await res.json();
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true };
     route.fulfill({ response: res, json: st });
   });
 }
 
 // Step 9. The test dashboard has no running helpers, so the step gives the page draft D's 24 sessions (3 need you,
 // 1 pinned, 3 working, 9 in line, 8 idle) as extra tickets in its state and as the answer of the live sessions API
-// (/api/sessions, ORCH-359: the bar and the panes read it), with the Preview switch on. A pin or a name (session.pin /
+// (/api/sessions, ORCH-359: the bar and the panes read it), with the live-session add-on. A pin or a name (session.pin /
 // session.name, ORCH-361) is taken by a stand-in, as the real server keeps it in the workspace (this test page has no
 // sign-in; the dashboard click-through f-session-pin-name sends them to the real server), and the stand-in list then
 // carries it, as the real API does. Everything else is the real page: the bar, its fold, list and search.
@@ -182,7 +159,7 @@ async function liveBarState(page, tweak = null) {
         : { running: true, helper: { state: HELPER[s] }, claim: { agent: 'agent:claude' } };
     });
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true,
+    st.settings = { ...(st.settings || {}), 
       addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
     if (tweak) tweak(st);
     if (Array.isArray(st.tickets) && st.workspace) barState = st;  // a full state, not the poll's "unchanged"
@@ -514,9 +491,9 @@ async function barIsOneRow(page) {
   if (r.bottom > r.vh + 1) throw new Error('the bar is below the screen');
 }
 
-// The new page with Preview on, for the steps after step 3: the same dressing of the page's state as previewSwitch
-// (the live-session add-on and the setting), plus the one ticket of the test workspace marked as having a working helper.
-async function livePreview(page) {
+// Focus, for the steps after step 3: the same dressing of the page's state as focusIsNew
+// (the live-session add-on), plus the one ticket of the test workspace marked as having a working helper.
+async function liveFocus(page) {
   let one = null;
   const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
     description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
@@ -526,7 +503,6 @@ async function livePreview(page) {
     if (res.status() !== 200) return route.fulfill({ response: res });
     const st = await res.json();
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true };
     const first = (st.tickets || [])[0];
     if (first) st.runs = { ...(st.runs || {}), [first.id]: { running: true, state: 'alive' } };
     if (first && !first.key) first.key = 'ORCH-238';  // the test ticket has no key; the pane shows the key, never the raw id
@@ -547,7 +523,7 @@ async function layer(page, dash, width) {
   const phone = width <= 720;
   const panel = m => `#live-dock[data-mode="${m}"] .live-panel[data-mode="${m}"]`;
   const press = async key => { await page.keyboard.press(key); await page.waitForTimeout(50); };
-  await livePreview(page);
+  await liveFocus(page);
   // start with nothing kept, without an extra page load (the reload below must keep what this step chose)
   await page.addInitScript(() => { try { if (!sessionStorage.getItem('fd10')) { Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); sessionStorage.setItem('fd10', '1'); } } catch (e) { /* none */ } });
   await page.goto(dash + '/#home');
@@ -636,7 +612,6 @@ async function history(page, dash) {
     if (res.status() !== 200) return route.fulfill({ response: res });
     const st = await res.json();
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true };
     const first = (st.tickets || [])[0];
     if (first) { tid = first.id; if (!first.key) first.key = 'ORCH-189'; st0 = st; }  // a full state, for the fake Reopen answer
     route.fulfill({ response: res, json: st });
@@ -711,7 +686,7 @@ async function startChoice(page, dash) {
     const st = await res.json();
     st.rev = 'fake-' + (full ? 'full' : 'free');
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true, live_max: full ? 4 : 6,
+    st.settings = { ...(st.settings || {}), live_max: full ? 4 : 6,
       agents: [{ name: 'claude', label: 'Claude Code', found: true, chosen: true, models: true },
         { name: 'codex', label: 'Codex', found: true, chosen: false, models: false }] };
     const first = (st.tickets || [])[0];
@@ -787,7 +762,7 @@ async function toolModel(page, dash) {
     const st = await res.json();
     st.rev = 'fake-tool-model';
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true,
+    st.settings = { ...(st.settings || {}), 
       agents: [{ name: 'claude', label: 'Claude Code', found: true, chosen: true, models: true }] };
     const first = (st.tickets || [])[0];
     if (first) {
@@ -970,7 +945,6 @@ async function noTicket(page, dash, width) {
   let last = null;
   const dress = st => {
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true };
     st.sessions = made.map(([kind, title, id]) => ({ id, kind, title, open: true }));
     st.runs = { ...(st.runs || {}) };
     made.forEach(([kind, , id]) => { if (kind !== 'terminal') st.runs[id] = { running: true, helper: { state: kind === 'empty' ? 'working' : 'idle' }, claim: { agent: 'agent:claude' } }; });
@@ -1059,7 +1033,7 @@ async function noTicket(page, dash, width) {
 }
 
 // Step 6: the Focus button on the ticket page and on every ticket row, and Open ticket back from the session. The test
-// workspace has one ticket, so the step adds four with the run states the button speaks for (Preview on).
+// workspace has one ticket, so the step adds four with the run states the button speaks for.
 const FOCUS_TICKETS = [['run', 'ORCH-189', 'New price list for the shop', 'Watch'], ['wait', 'ORCH-190', 'Send the weekly summary', 'Answer'],
   ['idle', 'ORCH-191', 'Tidy the release notes', 'Open'], ['none', 'ORCH-192', 'Opening hours page', 'Start']];
 async function focusButton(page, dash, width) {
@@ -1090,7 +1064,7 @@ async function focusButton(page, dash, width) {
     st.runs = { ...(st.runs || {}) };
     FOCUS_TICKETS.forEach(([s, key]) => { if (s !== 'none') st.runs[id(key)] = { running: true, helper: { state: HELPER[s] }, claim: { agent: 'agent:claude' } }; });
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true,
+    st.settings = { ...(st.settings || {}), 
       addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
     lastState = st;
     route.fulfill({ response: res, json: answered ? unasked(st) : st });
@@ -1137,7 +1111,7 @@ async function focusButton(page, dash, width) {
   const strip = `[data-key="ticket-strip-${id('ORCH-189')}"] [data-key="live-session-btn"]`;
   await page.waitForSelector(strip, { timeout: 10000 });
   if ((await page.textContent(strip)).trim() !== 'Watch in Focus') throw new Error('the ticket page does not say Watch in Focus');
-  if (await page.$('[data-key="watch-live"]')) throw new Error('today\'s Watch live still shows with Preview on');
+  if (await page.$('[data-key="watch-live"]')) throw new Error('the old Watch live still shows');
   await page.click(strip);
   const pane = `#live-dock .live-pane[data-session="${id('ORCH-189')}"]`;
   await page.waitForSelector(pane, { timeout: 5000 });
@@ -1448,7 +1422,7 @@ async function groupState(page) {
       else if (s !== 'closed') st.runs[gid(key)] = { running: true, helper: { state: HELPER[s] }, claim: { agent: 'agent:claude' } };
     });
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true,
+    st.settings = { ...(st.settings || {}), 
       addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
     return st;
   };
@@ -1636,24 +1610,22 @@ const STEPS = [
     draft: { q: '?page=home' },
   },
   {
-    n: 2, pic: 'fd-02-focus-today', area: 'start', title: 'Today\'s Focus still works with Preview off', feature: [], focus: true,
-    do: ['Leave the Preview switch off.', 'Open Focus from the side bar.'],
-    see: ['Today\'s Focus opens with its list of live helpers.', 'Nothing of the new Focus shows.'],
-    async run({ page, focus }) {
-      await page.goto(focus + '/');
-      await page.waitForSelector('.fx-livenow .helper-row', { timeout: 20000 });
-      await noSideways(page);
+    n: 2, pic: 'fd-02-focus-new', area: 'start', title: 'Focus opens as the new Focus', feature: [],
+    do: ['Open Focus from the side bar (at phone width from its address).'],
+    see: ['Focus opens as the new Focus (the wall of step 4 fills it), with no Preview mark.', 'No old Focus page shows.',
+      'At 390 wide nothing scrolls sideways.'],
+    async run({ page, dash }) {
+      await focusIsNew(page, dash);
     },
   },
   {
-    n: 3, pic: 'fd-03-preview-on', area: 'start', title: 'Turn the new Focus on with the Preview switch', feature: [],
-    do: ['Open Settings and turn on the Preview switch for the new Focus.', 'Open Focus from the side bar.'],
-    see: ['Focus opens as the new Focus, marked Preview (the wall of step 4 fills it).', 'The switch is marked Preview.',
-      'Turning it off again brings back today\'s Focus.'],
+    n: 3, pic: 'fd-03-no-switch', area: 'start', title: 'Focus has no Preview switch', feature: [],
+    do: ['Open Settings, Add-ons, Focus.'],
+    see: ['The Typing switch is there; there is no Preview switch and no word Preview.'],
     async run({ page, dash }) {
-      await previewSwitch(page, dash);
+      await focusIsNew(page, dash);
+      await noPreviewSwitch(page);
     },
-    draft: { q: '' },
   },
   {
     n: 4, pic: 'fd-04-wall', area: 'wall', title: 'The live wall in bands', feature: [1],
@@ -1979,4 +1951,4 @@ const STEPS = [
   },
 ];
 
-module.exports = { STEPS, AREAS, SIZES, WIDGETS, noSideways, mainHasText, liveBarState, barIsOneRow, livePreview };
+module.exports = { STEPS, AREAS, SIZES, WIDGETS, noSideways, mainHasText, liveBarState, barIsOneRow, liveFocus };
