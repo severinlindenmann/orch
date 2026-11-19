@@ -1054,8 +1054,23 @@ button.live-pt:hover{color:var(--brand)}
 .live-pb[data-live-body]>.btn{align-self:flex-start}
 .live-now{margin:0;font-weight:600;overflow-wrap:anywhere}
 .live-ask{display:grid;gap:var(--s2);margin:var(--s2) 0}.live-ask-q{margin:0;font-weight:600;overflow-wrap:anywhere}.live-ask-opts,.live-ask-line{display:flex;flex-wrap:wrap;gap:var(--s2)}.live-ask-line .input{flex:1;min-width:0}
-.live-lines{flex:1 1 auto;min-height:var(--s8);margin:0;padding:var(--s2) var(--s3);overflow:auto;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text)}
+.live-lines{flex:1 0 auto;min-height:var(--s8);margin:0;padding:var(--s2) var(--s3);overflow:auto;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text)}
 .live-meta{margin:0}
+/* the chat view of a ticket's pane (ORCH-687, draft D feature 5): the helper's messages and the ticket's events, oldest
+   first; your words on the right. Chat | Terminal in the header; the waiting question is an orange card above it. */
+.live-view{flex:none}
+.live-view .btn{min-height:28px;padding:0 var(--s2);font-size:var(--fs-meta)}
+.live-pb[data-live-body] .live-ask{margin:0;padding:var(--s3);border:1px solid var(--needs-you);border-radius:var(--r1);background:var(--warning-soft)}
+.live-chat{display:flex;flex:1 1 auto;flex-direction:column;gap:var(--s3);min-height:min(calc(var(--s8) * 4),45vh);overflow:auto;overscroll-behavior:contain}
+.live-chat-msg{display:grid;gap:var(--s1);max-width:min(100%,var(--reading-width))}
+.live-chat-msg p{margin:0;padding:var(--s2) var(--s3);border-radius:var(--radius);background:var(--surface-2);overflow-wrap:anywhere;white-space:pre-line}
+.live-chat-msg[data-w=y]{align-self:flex-end;justify-items:end}
+.live-chat-msg[data-w=y] p{background:var(--brand-soft)}
+.live-ev{margin:0;overflow-wrap:anywhere}
+.live-links{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.live-link{overflow-wrap:anywhere}
+.live-chat-empty{margin:auto 0}
+.live-pb[data-live-view=chat] .live-lines{display:none}
 /* the History tab of a pane (ORCH-363): the earlier sessions of the ticket, newest first, each with Reopen */
 .live-pb.live-pb-hist{align-items:stretch;justify-content:flex-start;padding:var(--s4);text-align:left;color:var(--text)}
 .live-hist{display:flex;flex-direction:column;gap:var(--s2);width:100%;max-width:76ch}

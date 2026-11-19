@@ -2942,6 +2942,14 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                     _group_allow(root, m)
             elif _is_mobile_off(m):
                 note, auto = _handle_mobile_off(root, m), True
+            elif typ == "notebook" and str(m.get("from", "")).startswith("nb_"):
+                from orch import relay_notebook
+
+                with locked(root):
+                    if m["id"] not in seen(root):
+                        note = relay_notebook.receive(root, m)
+                        _mark_seen(root, m["id"])  # last
+                auto = True
             elif typ == "text" and str(m.get("from", "")).startswith("ph_"):
                 with locked(root):
                     if m["id"] not in seen(root):

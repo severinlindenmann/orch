@@ -69,8 +69,10 @@ def guard_hook_command(tool: str) -> str:
     return command_line(orch_argv("protected-check", "--hook", tool))
 
 
-def record_hook_command() -> str:
-    return command_line(record_hook_argv())
+def record_hook_command(tool: str | None = None) -> str:
+    """The record hook command; with `tool` it also runs that tool's guard and step notice in the same process
+    (`orch record hook --with <tool>`, ORCH-634: one Python per tool event instead of up to three)."""
+    return command_line(record_hook_argv() + (["--with", tool] if tool else []))
 
 
 def can_import(root: Path | None) -> bool:

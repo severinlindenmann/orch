@@ -18,8 +18,8 @@ function reviewPlainCard(c) {
 function reviewAnswered() { return array(state?.review?.answered); }
 // The cards of the stack: every open question (an add-on's own too, e.g. Factory's Start?) and every result to check.
 function reviewCount() { return reviewCards().length; }
-// The subtitle shows THE needs-you number (needsYouTotal: open questions plus results to check, exactly what this page
-// shows as cards; the Review menu entry and the top bar show the same one, ORCH-63).
+// The subtitle shows THE needs-you number (needsYouTotal: open questions, results to check and work that stopped; the
+// Review menu entry, the top bar, Home and the live bar show the same one, ORCH-63, ORCH-705).
 function reviewSubtitle() {
   // A card put off on Home ("Later today") is not in the one number, but it is still a card here: the subtitle never
   // says "Nothing waits" above a Waiting tab with cards in it (ORCH-420, owner's picture 18 Nov).

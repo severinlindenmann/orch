@@ -118,36 +118,44 @@ def verdict(root: Path, command: str, ticket: str | None, home: Path | None = No
     return reason(host)
 
 
+def hook_answer(data) -> str | None:
+    """The before-tool refusal for one tool payload (a dict), as the one JSON line the tool reads, or None
+    when the command may run. Never raises (a hook never gets in the agent's way)."""
+    try:
+        if not isinstance(data, dict) or data.get("tool_name") != "Bash":
+            return None
+        command = (data.get("tool_input") or {}).get("command")
+        if not isinstance(command, str):
+            return None
+        from orch import workcheck
+
+        env = os.environ.get("ORCH_ROOT")  # a run in its own copy sits outside the workspace folder
+        root = Path(env) if env else workcheck.find_root(Path(data.get("cwd") or os.getcwd()))
+        why = verdict(root, command, os.environ.get("ORCH_TICKET"))
+        if not why:
+            return None
+        return json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": why,
+                }
+            }
+        )
+    except BaseException:  # noqa: BLE001
+        return None
+
+
 def hook_main(argv: list[str] | None = None, watchdog=None) -> int:
     """`orch protected-check --hook <tool>`: exit 0 always. When the command is refused, stdout carries the
     tool's one JSON refusal (the before-tool refusal: `permissionDecision: deny`)."""
     if watchdog is not None:
         watchdog.cancel()
     try:
-        data = json.loads(sys.stdin.read(1024 * 1024) or "{}")
-        if data.get("tool_name") != "Bash":
-            return 0
-        command = (data.get("tool_input") or {}).get("command")
-        if not isinstance(command, str):
-            return 0
-        from orch import workcheck
-
-        env = os.environ.get("ORCH_ROOT")  # a run in its own copy sits outside the workspace folder
-        root = Path(env) if env else workcheck.find_root(Path(data.get("cwd") or os.getcwd()))
-        why = verdict(root, command, os.environ.get("ORCH_TICKET"))
-        if why:
-            sys.stdout.write(
-                json.dumps(
-                    {
-                        "hookSpecificOutput": {
-                            "hookEventName": "PreToolUse",
-                            "permissionDecision": "deny",
-                            "permissionDecisionReason": why,
-                        }
-                    }
-                )
-                + "\n"
-            )
+        line = hook_answer(json.loads(sys.stdin.read(1024 * 1024) or "{}"))
+        if line:
+            sys.stdout.write(line + "\n")
             sys.stdout.flush()
     except BaseException:  # noqa: BLE001
         pass

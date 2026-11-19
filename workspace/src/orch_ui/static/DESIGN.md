@@ -336,6 +336,15 @@ A helper that needs you turns the whole tile orange. The pane's message box (`.l
 "Message to: Write the texts (ORCH-301). Only this helper gets it." In the bar the group is one chip with the helper
 count (`.lbar-n`), the same number as its tile.
 
+### Chat view of a session (ORCH-687)
+A ticket's pane has Chat | Terminal in its header (`.segmented.live-view`, `aria-pressed`; in a narrow pane "Show
+terminal" / "Show chat" in More). Chat is the default and the choice is kept per browser. `.live-chat` (`role=log`) is
+the ticket read as a conversation, oldest first: a done step and other events are one muted line (`.live-ev`, "✓ Step 2
+done: … · 14:21"); the helper's words are `.live-chat-msg` on the left (`surface-2`), your words on the right
+(`data-w=y`, `brand-soft`), each with "Helper · 14:38" or "You · 14:55" above, and its links (`.live-links`) inside.
+The waiting question is never a message: it is the orange card (`.live-ask`, `needs-you` edge, `warning-soft`) above
+the chat, answered there with its options or own words.
+
 ## Loading, errors and performance
 
 The brief asks for shell + skeleton within 100 ms while the numeric checklist says not to show indicators for sub-second work. Reconcile by expected latency (BP-05, BP-55–67):
