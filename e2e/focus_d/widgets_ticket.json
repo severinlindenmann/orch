@@ -1,5 +1,5 @@
 {
-  "_about": "Demo ticket with every result widget kind (ORCH-697). e2e/focus_insights/dashboard_server.py writes it and its files into the test workspace; workspace-addons/dashboard/tests/results_feed.test.js checks every kind comes out of it. files: name -> {sample: a file of the kit's samples folder} or {text: the content}.",
+  "_about": "Demo ticket with every result widget kind (ORCH-697). e2e/focus_insights/dashboard_server.py writes its files into the test workspace and e2e/focus_d/steps.cjs adds the ticket to the page's state; workspace-addons/dashboard/tests/results_feed.test.js checks every kind comes out of it. files: name -> {sample: a file of the kit's samples folder} or {text: the content}.",
   "ticket": {
     "schema": "orch.ticket/1",
     "id": "t_widget16",

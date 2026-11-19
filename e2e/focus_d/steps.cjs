@@ -306,9 +306,9 @@ async function chatView(page, dash) {
   await noSideways(page);
 }
 
-// Steps 20 and 21 (ORCH-697): the result widgets. The demo ticket (widgets_ticket.json, written with its files into the
-// test workspace by e2e/focus_insights/dashboard_server.py) has one result of every kind; the real server reads its
-// files. Only the list of its result files comes from a stand-in, as orch lists them (the test page has no orch).
+// Steps 20 and 21 (ORCH-697): the result widgets. The demo ticket (widgets_ticket.json) has one result of every kind:
+// e2e/focus_insights/dashboard_server.py writes its files into the test workspace and the real server reads them; the
+// ticket joins the page's state here and the list of its result files comes from a stand-in, as orch lists them.
 const WIDGET_DEMO = require('./widgets_ticket.json');
 const WIDGET_ID = WIDGET_DEMO.ticket.id;
 const WIDGET_KINDS = ['md', 'text', 'code', 'data', 'table', 'page', 'pdf', 'picture', 'video', 'audio', 'chart', 'change', 'pr', 'archive', 'link', 'file'];
@@ -363,6 +363,7 @@ async function extraShot(page, name, width) {
 }
 async function widgetsTicket(page, dash, width) {
   await liveBarState(page, st => {
+    st.tickets = [...(st.tickets || []).filter(t => t.id !== WIDGET_ID), JSON.parse(JSON.stringify(WIDGET_DEMO.ticket))];
     st.runs = { ...(st.runs || {}), [WIDGET_ID]: { running: true, helper: { state: 'working' }, claim: { agent: 'agent:claude' } } };
   });
   const files = widgetFiles();

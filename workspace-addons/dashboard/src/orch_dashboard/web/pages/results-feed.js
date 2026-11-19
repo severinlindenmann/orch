@@ -122,10 +122,12 @@ function resultsItems(t, files) {
       }
     });
   }
-  // the newest run of each command, the newest few overall
+  // the newest run of each command per step; on a tile and the ticket page only the newest few (stepOnly marks the rest,
+  // which still show inside their own step's message)
   const lastRun = new Map();
-  for (const r of runs) { const k = r.text.split('\n')[0]; if (!lastRun.has(k) || String(lastRun.get(k).at) <= String(r.at)) lastRun.set(k, r); }
-  [...lastRun.values()].sort((a, b) => String(a.at).localeCompare(String(b.at))).slice(-RESULTS_RUNS).forEach(r => add(r, r.step));
+  for (const r of runs) { const k = r.step + '\u0001' + r.text.split('\n')[0]; if (!lastRun.has(k) || String(lastRun.get(k).at) <= String(r.at)) lastRun.set(k, r); }
+  const kept = [...lastRun.values()].sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  kept.forEach((r, n) => { if (n < kept.length - RESULTS_RUNS) r.stepOnly = true; add(r, r.step); });
   for (const r of resultsArr(t.refs)) {
     const url = r && typeof (r.url || r.ref) === 'string' ? (r.url || r.ref) : '';
     if (r && (r.kind === 'url' || !r.kind) && /^https:\/\//.test(url)) add(resultsLinkItem(url, r));
@@ -140,13 +142,18 @@ function resultsDiffFiles(text) {
   const files = [];
   let cur = null;
   for (const line of String(text || '').split('\n')) {
+    const old = /^--- (?:a\/)?(.+)$/.exec(line);
+    if (old) { cur = null; files.from = old[1].trim(); continue; }
     const m = /^\+\+\+ (?:b\/)?(.+)$/.exec(line);
-    if (m) { cur = [m[1].trim(), 0, 0]; if (cur[0] !== '/dev/null') files.push(cur); continue; }
-    if (/^diff --git /.test(line) || /^--- /.test(line)) continue;
+    if (m) {  // a deleted file has /dev/null here: its name is the one on the --- line
+      const name = m[1].trim() === '/dev/null' ? files.from : m[1].trim();
+      cur = [name || '', 0, 0]; if (name && name !== '/dev/null') files.push(cur); continue;
+    }
+    if (/^diff --git /.test(line)) { cur = null; continue; }
     if (cur && line[0] === '+') cur[1]++;
     else if (cur && line[0] === '-') cur[2]++;
   }
-  return files;
+  return files.slice();
 }
 // A JSON chart: {labels: [...], values: [numbers]} of the same length (unit, kind: 'line' are kept)
 function resultsChart(text) {
@@ -206,29 +213,34 @@ function resultsAt(it) { const ms = Date.parse(it.at || ''); return Number.isFin
 function resultsSize(n) { return n < 1024 ? n + ' B' : n < 1048576 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1048576).toFixed(1) + ' MB'; }
 // ---- the page: reading, caching, drawing
 const resultsCache = new Map();   // '<url>' -> {at, p: Promise, v}
-function resultsGet(url, how) {
-  const hit = resultsCache.get(url);
-  if (hit && Date.now() - hit.at < RESULTS_TTL) return hit.p;
+function resultsGet(url, how, version = '') {
+  const key = url + (version ? '#' + version : ''), hit = resultsCache.get(key);
+  // a file whose size and time are known is read once per version; anything else again after a while
+  if (hit && (version ? !hit.failed : Date.now() - hit.at < RESULTS_TTL)) return hit.p;
   const p = fetch(url, {credentials:'same-origin'}).then(async r => {
     if (r.status === 413) return {error:'large'};
     if (!r.ok) return {error:'error'};
     return how === 'json' ? r.json() : {text:await r.text()};
   }).catch(() => ({error:'error'}));
-  resultsCache.set(url, {at:Date.now(), p});
+  const entry = {at:Date.now(), p};
+  p.then(d => { if (d && d.error) entry.failed = true; });
+  resultsCache.set(key, entry);
+  if (resultsCache.size > 400) resultsCache.delete(resultsCache.keys().next().value);
   return p;
 }
 function resultsFiles(tid) {
+  if (!/^t_[a-z0-9]{6,16}$/.test(String(tid))) return Promise.resolve({files:[]});  // only an id the server lists files for
   return resultsGet('/api/artifacts/' + encodeURIComponent(tid), 'json').then(d => (d && !d.error ? d : {files:[]}));
 }
 function resultsFill(item) {
   if (item.state !== 'loading' || !item.src0) return Promise.resolve(item);
-  const {tid, kind, name} = item.src0;
+  const {tid, kind, name} = item.src0, v = typeof item.size === 'number' && item.at ? item.size + '|' + item.at : '';
   if (item.type === 'archive' || item.type === 'pdf' || (item.type === 'table' && /\.xlsx$/i.test(name))) {
-    return resultsGet(resultsInfoUrl(tid, kind, name), 'json').then(d => d && d.error === 'too large' ? resultsWith(item, {error:'large'})
+    return resultsGet(resultsInfoUrl(tid, kind, name), 'json', v).then(d => d && d.error === 'too large' ? resultsWith(item, {error:'large'})
       : d && d.error === 'unreadable' ? resultsWith(item, {error:'error'})
         : d && d.error ? resultsWith(item, d) : resultsWith(item, {info:d || {}}));
   }
-  return resultsGet(resultsUrl(tid, kind, name), 'text').then(d => resultsWith(item, d));
+  return resultsGet(resultsUrl(tid, kind, name), 'text', v).then(d => resultsWith(item, d));
 }
 // All results of a ticket, read: the list draws at once (text kinds loading) and again when each one is read
 function resultsLoad(t, onItems) {
@@ -241,7 +253,11 @@ function resultsLoad(t, onItems) {
     Promise.all(list.map(resultsFill)).then(onItems);
   });
 }
-function resultsSig(list) { return list.map(it => [it.key, it.type, it.state || '', it.meta || '', (it.text || '').length, it.status || ''].join('\u0001')).join('\u0002'); }
+function resultsItemSig(it) {
+  return [it.key, it.type, it.state || '', it.name || '', it.title || '', it.meta || '', it.href || '', it.at || '', it.status || '', (it.text || '').length,
+    (it.text || '').slice(0, 200), (it.values || []).join(','), (it.files || []).length, (it.checks || []).length].join('\u0001');
+}
+function resultsSig(list) { return list.map(resultsItemSig).join('\u0002'); }
 // Draws a list of items into a host: small widgets in a grid, plain links as rows under them; a click opens the
 // overlay over the whole list. max: at most that many widgets, then "+N more" (opens the overlay at the next one).
 function resultsDraw(host, list, o = {}) {
@@ -253,19 +269,30 @@ function resultsDraw(host, list, o = {}) {
   const widgets = list.filter(it => it.type !== 'link'), links = list.filter(it => it.type === 'link');
   if (o.newest) widgets.sort((a, b) => resultsAt(b) - resultsAt(a));  // a wall tile shows the newest result first
   const shown = o.max ? widgets.slice(0, o.max) : widgets, rest = widgets.length - shown.length;
-  const grid = document.createElement('div');
+  const grid = host.resultsGrid || document.createElement('div');
+  host.resultsGrid = grid;
   grid.className = 'result-grid' + (o.size === 'lg' ? ' big' : '');
+  const want = [];
   // the overlay steps through every result of the ticket (draft D), also from a step's message that shows only its own
   const pool = o.all ? o.all.filter(it => it.type !== 'link') : widgets;
-  shown.forEach(it => grid.append(UI.result(it, {size:o.size === 'lg' ? 'lg' : 'sm', list:pool, index:Math.max(0, pool.indexOf(it)), onRetry:() => { resultsForget(it); resultsRefill(host); }})));
+  // a widget whose result did not change is kept as it is: an open overlay keeps its opener, the keyboard stays
+  const before = host.resultsCards || new Map(), cards = new Map();
+  shown.forEach(it => {
+    const k = resultsItemSig(it) + '\u0003' + pool.length, had = before.get(it.key);
+    const card = had && had.k === k ? had.el : UI.result(it, {size:o.size === 'lg' ? 'lg' : 'sm', list:pool, index:Math.max(0, pool.indexOf(it)), onRetry:() => { resultsForget(it); resultsRefill(host); }});
+    cards.set(it.key, {k, el:card});
+    want.push(card);
+  });
+  host.resultsCards = cards;
   if (rest > 0) {
     const more = document.createElement('button');
     more.type = 'button'; more.className = 'btn ghost sm result-more';
     more.textContent = '+' + rest + ' more';
     more.setAttribute('aria-label', 'Open the other ' + RESULTS_PLURAL(rest, 'result') + ' big');
     more.addEventListener('click', () => UI.resultOverlay(pool, Math.max(0, pool.indexOf(widgets[shown.length]))));
-    grid.append(more);
+    want.push(more);
   }
+  resultsPlace(grid, want);
   const parts = [];
   if (widgets.length) parts.push(grid);
   if (links.length && !o.max) {
@@ -280,14 +307,19 @@ function resultsDraw(host, list, o = {}) {
     parts.push(p);
   }
   const log = host.closest('[data-live-chat]'), end = log && log.scrollHeight - log.scrollTop - log.clientHeight < 8;
-  host.replaceChildren(...parts);
+  resultsPlace(host, parts);
   host.hidden = !parts.length;
   if (end) log.scrollTop = log.scrollHeight;  // a chat that was at its end stays there when the widgets come in
+}
+// Puts exactly these children in place, moving only what moved: a kept node is never taken out (it keeps the keyboard)
+function resultsPlace(parent, kids) {
+  kids.forEach((k, i) => { if (parent.children[i] !== k) parent.insertBefore(k, parent.children[i] || null); });
+  while (parent.children.length > kids.length) parent.lastElementChild.remove();
 }
 function resultsForget(item) {
   if (!item?.src0) return;
   const {tid, kind, name} = item.src0;
-  resultsCache.delete(resultsUrl(tid, kind, name)); resultsCache.delete(resultsInfoUrl(tid, kind, name));
+  for (const k of [...resultsCache.keys()]) if (k.startsWith(resultsUrl(tid, kind, name)) || k.startsWith(resultsInfoUrl(tid, kind, name))) resultsCache.delete(k);
 }
 // A host element: <div data-results-host="<ticket id>" data-results-size="sm|lg" data-results-max="3"
 //   data-results-step="<task id>" data-results-empty="...">. The page's redraw keeps its children (app.js sync).
@@ -301,7 +333,13 @@ function resultsRefill(host) {
   if (!t) return;
   const step = host.dataset.resultsStep || '';
   const o = {size:host.dataset.resultsSize, max:Number(host.dataset.resultsMax) || 0, empty:host.dataset.resultsEmpty || '', newest:host.dataset.resultsMax ? true : false};
-  resultsLoad(t, list => { if (host.isConnected) resultsDraw(host, step ? list.filter(it => it.step === step) : list, step ? {...o, all:list} : o); });
+  const gen = (host.resultsGen || 0) + 1;
+  host.resultsGen = gen;  // an older load that answers late never draws over a newer one
+  resultsLoad(t, list => {
+    if (!host.isConnected || host.resultsGen !== gen) return;
+    const wide = list.filter(it => !it.stepOnly);
+    resultsDraw(host, step ? list.filter(it => it.step === step) : wide, step ? {...o, all:wide} : o);
+  });
 }
 // Fills every host under root; called after each redraw. A host fills again only when its ticket changed.
 function resultsFillAll(root) {

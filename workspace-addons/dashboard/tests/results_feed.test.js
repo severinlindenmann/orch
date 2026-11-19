@@ -152,3 +152,11 @@ test('a workbook shows its header and rows; only a zip lists its files, other ar
   const items = F.resultsItems({id: 't_abcdef', checklist: []}, {files: [{name: 'a.tar.gz', size: 9}, {name: 'b.zip', size: 9}]});
   assert.deepEqual(items.map(it => it.type), ['file', 'archive']);
 });
+
+test('a change that deletes a file names it; a check run in two steps shows in both steps', () => {
+  const del = 'diff --git a/old.txt b/old.txt\n--- a/old.txt\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-a\n-b\n';
+  assert.deepEqual(F.resultsDiffFiles(del), [['old.txt', 0, 2]]);
+  const run = at => ({type: 'command', ref: 'pytest -q', exit: 0, at});
+  const items = F.resultsItems({id: 't_abcdef', checklist: [{id: 'c1', evidence: [run('2026-11-19T10:00:00Z')]}, {id: 'c2', evidence: [run('2026-11-19T11:00:00Z')]}]}, null);
+  assert.deepEqual(items.map(it => it.step), ['c1', 'c2']);
+});
