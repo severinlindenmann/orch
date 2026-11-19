@@ -6,3 +6,7 @@
 .attachment-name{overflow-wrap:anywhere;line-height:1.35}
 /* phone: the remove button is a 44 px tap target beside the name, never over it (ORCH-422 look check) */
 @media(max-width:599px){.attachment-tile{padding-right:50px;min-height:56px}.attachment-tile .btn.attachment-remove{width:44px;height:44px;right:2px;top:2px}}
+/* One line (ticket Overview, ORCH-777 draft E): only the text box while it has no focus, no text and no files; the full
+   composer (actions, hint, staged files) comes back as soon as one of them is there. */
+.attachment-composer.one-line:not(:focus-within):not(:has(textarea:not(:placeholder-shown))):not(:has(.attachment-tile)) :is(.composer-actions,.staged-files,p){display:none}
+.attachment-composer.one-line:not(:focus-within):not(:has(textarea:not(:placeholder-shown))):not(:has(.attachment-tile)) textarea{min-height:var(--s5);height:var(--s5);resize:none;overflow:hidden}
