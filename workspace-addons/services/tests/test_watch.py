@@ -2,7 +2,6 @@
 orch CLI (no sleeping, no real ticket)."""
 
 import json
-import shutil
 import socket
 import subprocess
 import sys
@@ -11,6 +10,7 @@ from pathlib import Path
 import pytest
 from conftest import jrun
 
+from orch_services.watch import _lsof as REAL_LSOF
 from orch_services.watch import listeners as REAL_LISTENERS  # the autouse fixture replaces it in every test
 
 T0 = 1_800_000_000.0
@@ -417,7 +417,15 @@ def test_no_listener_of_this_account_means_someone_else(monkeypatch):
     assert watch.owns_port(4242, 5173) is None
 
 
-@pytest.mark.skipif(sys.platform == "win32" or not shutil.which("lsof"), reason="lsof reads listeners")
+def test_lsof_is_found_outside_the_path(monkeypatch):
+    from orch_services import watch
+
+    monkeypatch.setenv("PATH", "/nonexistent")
+    got = watch._lsof()
+    assert got == "lsof" or Path(got).is_file()  # /usr/sbin/lsof on a Mac even when PATH lacks /usr/sbin
+
+
+@pytest.mark.skipif(sys.platform == "win32" or not Path(REAL_LSOF()).is_file(), reason="lsof reads listeners")
 def test_owns_port_with_a_real_listener(monkeypatch):
     import os
     import socket

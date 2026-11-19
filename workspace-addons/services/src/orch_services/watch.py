@@ -17,6 +17,7 @@ carry the service's name and counts only, never log text.
 from __future__ import annotations
 
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -62,6 +63,14 @@ def port_answers(port: int) -> bool:
 LOOPBACK_V4 = ("127.0.0.1", "*", "0.0.0.0", "[::]", "[::ffff:127.0.0.1]")
 
 
+def _lsof() -> str:
+    """lsof by full path: macOS keeps it in /usr/sbin, which a job's or helper's PATH often leaves out."""
+    for p in ("/usr/sbin/lsof", "/usr/bin/lsof", "/sbin/lsof", "/bin/lsof"):
+        if os.access(p, os.X_OK):
+            return p
+    return shutil.which("lsof") or "lsof"
+
+
 def listeners(port: int) -> set[int] | None:
     """The process ids listening on TCP 127.0.0.1:<port> or on every address (lsof), or None when this computer
     cannot say (Windows, no lsof). A listener on ::1 or another address only does not take the probe's connect."""
@@ -69,7 +78,7 @@ def listeners(port: int) -> set[int] | None:
         return None
     try:
         cp = subprocess.run(
-            ["lsof", "-nP", "-Fpn", f"-iTCP:{int(port)}", "-sTCP:LISTEN"],
+            [_lsof(), "-nP", "-Fpn", f"-iTCP:{int(port)}", "-sTCP:LISTEN"],
             capture_output=True,
             text=True,
             timeout=OWNER_TIMEOUT,
