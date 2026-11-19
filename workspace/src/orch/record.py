@@ -10,7 +10,6 @@ import json
 import os
 import re
 import stat
-import sys
 import time
 import uuid
 from collections.abc import Callable
@@ -1425,7 +1424,7 @@ def _quick(workspace, run):
     Equal to what was verified before = the same bytes and the same pending writes (adding or removing a
     pending write moves the folder's times). Always None on Windows: there a plain look gives the creation
     time where the open file gives the change time, so no plain look can stand for the checked open."""
-    if sys.platform == "win32":
+    if os.name == "nt":
         return None
     base = record_dir(workspace)
     try:

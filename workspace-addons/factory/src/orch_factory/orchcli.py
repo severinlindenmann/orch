@@ -87,6 +87,14 @@ def set_ext(root, ticket, by=None, **changes):
     ext = dict(ticket.get("ext", {}).get("factory", {}))
     ext.update(changes)
     return call(
-        root, "ext", "set", ticket["id"], "factory", json.dumps(ext), "--if-revision",
-        str(ticket["revision"]), write=True, by=by,
+        root,
+        "ext",
+        "set",
+        ticket["id"],
+        "factory",
+        json.dumps(ext),
+        "--if-revision",
+        str(ticket["revision"]),
+        write=True,
+        by=by,
     )
