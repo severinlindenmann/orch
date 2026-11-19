@@ -20,12 +20,15 @@ class NotHere(LookupError):
     """This argv is not answered in-process: run the command."""
 
 
-def ticket_rows(root: Path, status: str | None = None, all_: bool = False) -> list[dict]:
+def ticket_rows(
+    root: Path, status: str | None = None, all_: bool = False, ext: str | None = None
+) -> list[dict]:
     """`orch ticket list` rows, before the JSON shaping: the visible tickets, sorted by status, with children
-    counts and the quiet mark."""
+    counts and the quiet mark. `ext`: only tickets with that add-on's data, without children counts (those
+    need every ticket; ORCH-603)."""
     from orch.cli import visible
 
-    everything = tickets.list_all(root)
+    everything = tickets.list_all(root, ext=ext)
     ts = [
         visible(root, t)
         for t in everything
@@ -33,7 +36,8 @@ def ticket_rows(root: Path, status: str | None = None, all_: bool = False) -> li
     ]
     ts.sort(key=lambda t: tuple(tickets.STATUS_WORDS).index(t["status"]))
     for t in ts:
-        t["children"] = tickets.children_counts(everything, t["id"])
+        if ext is None:
+            t["children"] = tickets.children_counts(everything, t["id"])
         if quiet := tickets.quiet_since(t):
             t["quiet_since"] = quiet
     return ts
