@@ -51,16 +51,16 @@ def svc1(e):
     # user's bus says "the service manager of your account is not running" (orch start keeps it as it is)
     saved = {k: e.env.get(k) for k in linux}
     e.env.update(linux)
-    for a in ("dashboard", "automation", "services"):
-        rc, out, err = e.addon_add(ws, a)
-        check(rc == 0, f"addon add {a}: {(err or out)[-300:]}")
-    tid = e.orchj(ws, "ticket", "new", "Preview the site")["id"]
     port = free_port(set())
-    web = ["services", "add", "Web preview", "--id", IDS[0], "--port", str(port), "--ticket", tid, "--auto", "--start",
-           "--", "python3", "-m", "http.server", str(port), "--bind", "127.0.0.1"]
     tick = ["services", "add", "Ticker", "--id", IDS[1], "--start", "--", "sh", "-c",
             "while true; do echo tick $(date +%H:%M:%S); sleep 1; done"]
     try:
+        for a in ("dashboard", "automation", "services"):
+            rc, out, err = e.addon_add(ws, a)
+            check(rc == 0, f"addon add {a}: {(err or out)[-300:]}")
+        tid = e.orchj(ws, "ticket", "new", "Preview the site")["id"]
+        web = ["services", "add", "Web preview", "--id", IDS[0], "--port", str(port), "--ticket", tid, "--auto",
+               "--start", "--", "python3", "-m", "http.server", str(port), "--bind", "127.0.0.1"]
         e.orch(ws, *web)
         e.orch(ws, *tick)
         check(wait_for(lambda: _answers(port), 30), "the web preview never answered on its port")
