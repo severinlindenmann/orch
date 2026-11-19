@@ -288,3 +288,15 @@ def test_a_loop_in_the_parent_chain_is_never_followed(tmp_path, screens):
 def test_the_api_answer_carries_the_groups(tmp_path, screens):
     got = sessions.answer(tmp_path, "orch", _epic_state(), 0.0, 2)
     assert [g["id"] for g in got["groups"]] == ["t_sess0020"]
+
+
+def test_a_quiet_session_whose_result_waits_reads_check_like_its_ticket():
+    """ORCH-674: the tile said Idle while the layer (the ticket's pill) said Check for the same session."""
+    idle = sessions.session(_t(9, status="review"), _run("idle", "Idle"), False, None)
+    assert (idle["status"], idle["word"]) == ("idle", "Check")
+    closed = sessions.session(_t(10, status="review"), {"running": False}, False, None)
+    assert (closed["status"], closed["word"]) == ("closed", "Check")
+    plain = sessions.session(_t(11), _run("idle", "Idle"), False, None)
+    assert plain["word"] == "Idle"
+    asks = sessions.session(_t(12, status="review"), _run("you", "Waits for you"), False, None)
+    assert asks["word"] == "Waits for you"
