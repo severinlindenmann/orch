@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-32 steps: 23 ready (the script clicks them), 9 pending (not built yet).
+32 steps: 26 ready (the script clicks them), 6 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -297,21 +297,23 @@ Must be seen:
 - All of it stays current while you look; the keyboard place does not jump.
 - A new model applies when the helper finishes its current step (or at its next start) and says so.
 
-## 17. Chat: messages with the results inside
+## 17. Chat: messages and ticket events, questions answered inside
 
 - Part: chat (draft D feature 5)
-- State: pending, waits for: Chat (crew tasks of the Chat stage)
+- State: ready, clicked by the script
 - Pictures: `fd-17-chat-1280.png`, `fd-17-chat-1920.png`, `fd-17-chat-390.png`
 
 Do:
 
-1. Open a session in Chat view.
-2. Read the messages and press a result inside one.
+1. Open a session: it opens in Chat.
+2. Answer its waiting question in the orange card and send a message.
+3. Switch to Terminal, reload, switch back to Chat.
 
 Must be seen:
 
-- Plain messages with time; step events between them.
-- Results show as small widgets and open big.
+- Plain messages with time; done steps and other events as lines between them; the pull request inside the message.
+- The waiting question is an orange card above the chat, not a message; once answered it moves into the chat as yours.
+- A sent message shows at once; Terminal shows the last lines and the choice stays after a reload.
 
 ## 18. Files and screenshots in the message box, with a preview before sending
 
@@ -350,7 +352,7 @@ Must be seen:
 ## 20. All 16 result widgets, small and big
 
 - Part: 16 widgets (draft D feature 10)
-- State: pending, waits for: Result widgets and big overlay in the style guide (ORCH-263)
+- State: ready, clicked by the script
 - Pictures: `fd-20-widgets-1280.png`, `fd-20-widgets-1920.png`, `fd-20-widgets-390.png`
 
 Do:
@@ -364,21 +366,24 @@ Must be seen:
 - Each opens big in an overlay; arrows step through, Esc closes and gives the focus back.
 - Empty, loading and error look like the style guide states.
 
-## 21. The same widgets on a ticket page
+## 21. The same widgets on a tile, in the chat and on a ticket page
 
 - Part: 16 widgets (draft D feature 10)
-- State: pending, waits for: Result widgets and big overlay in the style guide (ORCH-263)
+- State: ready, clicked by the script
 - Pictures: `fd-21-widgets-ticket-1280.png`, `fd-21-widgets-ticket-1920.png`, `fd-21-widgets-ticket-390.png`
 
 Do:
 
-1. Open a ticket with results.
-2. Open one result big.
+1. Open Focus and look at the tile of a ticket with results; open its result big.
+2. Open the session: each finished step carries its results inside its message; open one big.
+3. Open the ticket page and open one result big.
 
 Must be seen:
 
-- The ticket shows the same widgets as Focus.
-- The big overlay is the same one.
+- The tile shows the newest result small and how many more there are.
+- The chat shows the files, check runs and pull request of a step inside that step's message.
+- The ticket page shows every result of the ticket as the same widgets as Focus, all 16 kinds from its real files, evidence and links.
+- The big overlay is the same one everywhere: arrows step through, Esc closes and gives the focus back.
 
 ## 22. A real terminal: type, select, copy and paste
 
