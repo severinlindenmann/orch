@@ -646,6 +646,10 @@ def test_a_read_only_workflow_with_harmless_added_lines_is_safe_to_merge():
         ),
         (READ_ONLY + "x: &w write\n", "    timeout-minutes: 30"),  # an anchor
         (READ_ONLY + "      contents: !!str write\n", "    timeout-minutes: 30"),  # a tag
+        (READ_ONLY.replace("contents: read", "contents: >\n    write"), "    timeout-minutes: 30"),  # folded
+        (READ_ONLY + "      - run: echo 'x\n", "    timeout-minutes: 30"),  # an open single quote
+        (READ_ONLY + "      env: {A: 1,\n", "    timeout-minutes: 30"),  # a flow mapping over lines
+        (READ_ONLY + "---\npermissions: write-all\n".replace("write-all", "{}"), "    timeout-minutes: 30"),
     ],
 )
 def test_anything_risky_takes_the_safe_label_away(whole, added):

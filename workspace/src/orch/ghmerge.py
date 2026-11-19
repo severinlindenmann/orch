@@ -327,18 +327,28 @@ def line_risks(text: str) -> list[tuple[str, str, bool]]:
 
 def whole_is_read_only(text) -> bool:
     """A whole workflow file (at the checked commit) whose jobs can only read: it says its permissions at the
-    top, none of them writes, it reads no secret but GitHub's own token, runs on no risky trigger, downloads
-    nothing (curl, wget), and has no escape, tag, anchor or open quote that could hide a word.
+    top, the word write is nowhere, it reads no secret but GitHub's own token, runs on no risky trigger,
+    downloads nothing (curl, wget), is one YAML document, and has no escape, tag, anchor, open quote or
+    bracket going on over lines that could hide a word.
     Lines, not YAML, like the rest of the check: when in doubt it is not read-only."""
     if not isinstance(text, str) or not TOP_PERMISSIONS.search(text) or ESCAPES.search(text):
         return False
-    if WRITES.search(text) or re.search(_FETCH, text, re.I):  # any download at all: the owner looks
+    # the word write anywhere (a folded `>` value or a comment could move it off its key's line), any download
+    if re.search(r"\bwrite(?:-all)?\b", text, re.I) or re.search(_FETCH, text, re.I):
         return False
+    started = False
     for line in text.splitlines():
-        if line[:1].strip() and not TOP_LINE.match(line):
+        top = line[:1].strip()
+        if top and not TOP_LINE.match(line):
             return False  # text at the top that is no key: a quoted value going on over lines
-        if line.replace('\\"', "").count('"') % 2 or (line[:1].strip() and line.count("'") % 2):
-            return False  # an open quote could carry a fake "permissions:" line
+        if re.match(r"(?:---|\.\.\.)(?:\s|$)", line) and started:
+            return False  # a second YAML document
+        started = started or bool(top and not line.startswith(("#", "---")))
+        if line.replace('\\"', "").count('"') % 2 or line.count("'") % 2:
+            return False  # an open quote could carry a fake "permissions:" line (an apostrophe too: no label)
+        flow = re.sub(r"\$\{\{.*?\}\}", "", line)
+        if flow.count("{") != flow.count("}") or flow.count("[") != flow.count("]"):
+            return False  # a { or [ going on over lines
     if any((m[1] or "").upper() != "GITHUB_TOKEN" for m in SECRET.finditer(text)):
         return False
     return not any(re.search(rf"\b{t}\b", text) for t in RISKY_TRIGGERS)
