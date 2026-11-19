@@ -30,6 +30,13 @@ def _git_repo(proj):
     _git(proj, "config", "user.name", "t")
 
 
+def _no_known_tools(monkeypatch):
+    """A faked win32 on another system breaks shutil.which; init's check folder asks which tools are here."""
+    from orch import health
+
+    monkeypatch.setattr(health, "known_recipes", lambda: [])
+
+
 def test_init_creates_everything(proj, run):
     code, out, _ = run("init")
     assert code == 0
@@ -1214,6 +1221,7 @@ def _win448(monkeypatch, junctions):
     real_is_dir = pathlib.Path.is_dir
     real_is_link = harness.is_link
     monkeypatch.setattr(harness.sys, "platform", "win32")
+    _no_known_tools(monkeypatch)
 
     def is_dir(self, *a, **k):
         if self in junctions:
@@ -1289,6 +1297,7 @@ def test_windows_makes_a_copy_not_a_junction(proj, run, monkeypatch):
     from orch import harness
 
     monkeypatch.setattr(harness.sys, "platform", "win32")
+    _no_known_tools(monkeypatch)
     assert run("init")[0] == 0
     cp = proj / ".agents/skills/orch"
     assert cp.is_dir() and not cp.is_symlink() and (cp / harness.COPY_MARK).is_file()
@@ -1298,6 +1307,7 @@ def test_relay_file_in_a_copy_survives_sync(proj, run, monkeypatch):
     from orch import harness
 
     monkeypatch.setattr(harness.sys, "platform", "win32")
+    _no_known_tools(monkeypatch)
     sk = proj / ".orch/harness/skills/orch-relay"
     sk.mkdir(parents=True)
     (sk / "SKILL.md").write_text("relay", encoding="utf-8")
@@ -1437,3 +1447,31 @@ def test_github_skill_in_a_folder_with_spaces_and_umlauts(proj, run, fake_gh, mo
     _git(folder, "remote", "add", "origin", "ssh://git@github.com/acme/billing.git")
     assert run("init")[0] == 0
     assert _github_skill_is_on(folder)
+
+
+def test_new_workspace_checks_only_what_it_adds(proj, run, monkeypatch, tmp_path):
+    # report r-1119-1255-ws-8: Databricks set up on this computer for another project warned on Home of a
+    # new workspace that never used it. A new workspace gets its own check folder (ORCH-529) at init.
+    from orch import checkfiles, health
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".databrickscfg").write_text("x")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("DATABRICKS_CONFIG_FILE", raising=False)
+    monkeypatch.setattr(health.shutil, "which", lambda b: f"/bin/{b}" if b == "databricks" else None)
+    assert "databricks" in [r["name"] for r in health.known_recipes()]  # set up on this computer
+    code, out, _ = run("init")
+    assert code == 0
+    assert checkfiles.present(proj)
+    assert "databricks" not in [r["name"] for r in health.recipes(proj)]
+    assert "set up on this computer: databricks" in out  # how to add it when this workspace needs it
+
+
+def test_init_again_keeps_an_old_workspace_as_it_was(proj, run):
+    (proj / ".orch" / "tickets").mkdir(parents=True)  # set up before per-workspace checks existed
+    code, _, _ = run("init")
+    assert code == 0
+    from orch import checkfiles
+
+    assert not checkfiles.present(proj)  # only `orch checks init` changes what it checks

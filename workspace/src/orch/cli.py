@@ -1036,7 +1036,9 @@ def run(args: argparse.Namespace) -> None:
         asking = term.is_terminal(sys.stdin) and not args.json
         new = init_mod.is_new(root)  # before anything is written (choose_agent makes .orch/)
         agent = init_mod.choose_agent(root, args.yes, asking)
-        lines = init_mod.init(root, args.code)
+        lines = init_mod.init(root, args.code, new)
+        if you := init_mod.ask_name(root, asking and not args.yes):
+            lines.append(you)
         start = None
         if new and (asking if args.starter is None else args.starter):
             t = init_mod.starter(root, by())

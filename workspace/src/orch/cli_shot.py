@@ -30,12 +30,26 @@ SAFE_FLAGS = (
 )
 DEFAULT_WIDTHS = (1280, 1920, 390)
 QUIET_SEC = 0.7  # no new network event for this long = the page has settled
+_APPS = "/Applications"  # macOS apps folder (a test points it at a temp folder)
+# In order of preference. Any Chromium-based browser takes the same headless flags and keychain options.
 _CANDIDATES = (
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "{apps}/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "{apps}/Chromium.app/Contents/MacOS/Chromium",
+    # Playwright's own browser: newer builds ship Chrome for Testing, older ones Chromium.app (newest first)
+    "~/Library/Caches/ms-playwright/chromium-*/chrome-mac*/Google Chrome for Testing.app/Contents/MacOS/"
+    "Google Chrome for Testing",
     "~/Library/Caches/ms-playwright/chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium",
-    "~/.cache/ms-playwright/chromium-*/chrome-linux/chrome",
+    "~/.cache/ms-playwright/chromium-*/chrome-linux*/chrome",
+    "{apps}/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "{apps}/Brave Browser.app/Contents/MacOS/Brave Browser",
 )
+_ON_PATH = ("google-chrome", "chromium", "chromium-browser", "microsoft-edge", "brave-browser")
+
+
+def _build(path: str) -> int:
+    """Playwright's build number in .../chromium-1248/..., so the newest install is tried first."""
+    m = re.search(r"/chromium-(\d+)/", path)
+    return int(m.group(1)) if m else 0
 
 
 def add_parsers(sub, common) -> None:
@@ -61,13 +75,14 @@ def find_browser() -> str:
     if env and os.access(env, os.X_OK):
         return env
     for c in _CANDIDATES:
-        for p in sorted(glob.glob(os.path.expanduser(c))):
+        found = glob.glob(os.path.expanduser(c.format(apps=_APPS)))
+        for p in sorted(found, key=lambda x: (-_build(x), x)):
             if os.access(p, os.X_OK):
                 return p
-    for n in ("google-chrome", "chromium", "chromium-browser"):
+    for n in _ON_PATH:
         if w := shutil.which(n):
             return w
-    raise Refused("No Chrome or Chromium found. Set ORCH_SHOT_BROWSER to its path.")
+    raise Refused("No Chrome, Chromium, Edge or Brave found. Set ORCH_SHOT_BROWSER to its path.")
 
 
 def parse_widths(text: str) -> list[int]:
