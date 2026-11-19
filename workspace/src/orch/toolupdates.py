@@ -563,7 +563,7 @@ def _check(r: dict, path: str, last: dict | None) -> dict:
         try:
             got, url = notes_of(r["notes"], installed, newest)
             notes, more = _cap(got)
-        except (OSError, ValueError, KeyError, AttributeError) as e:
+        except (OSError, ValueError, KeyError, AttributeError):
             notes_error = "What is new could not be read just now."
             url = None
     if error and last and last.get("newest"):
