@@ -100,7 +100,8 @@
         "state": { "enum": ["waiting", "preparing", "prepared", "not_prepared"] },
         "at": { "$ref": "#/$defs/time" },
         "run": { "type": "string", "minLength": 1, "maxLength": 64 },
-        "why": { "type": "string", "maxLength": 200 }
+        "why": { "type": "string", "maxLength": 200 },
+        "seen": { "type": "object", "description": "Optional. The ticket as Prepare left it (ORCH-739): title, note, description, done_when, due, owner, checks (step id to text), files (artifact names) and lines (how many history lines there were). A later Start compares the ticket with it and tells the helper what changed since." }
       }
     },
     "plan_first": { "type": "boolean", "description": "Optional. True when the person chose \"Show plan first\": the agent makes the plan (parent and steps), asks one question \"Plan ready\" and waits for the answer before work starts. Set at creation only." },

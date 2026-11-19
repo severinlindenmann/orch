@@ -2231,6 +2231,8 @@ def set_prepare(
             rec["run"] = run
         if why:
             rec["why"] = " ".join(str(why).split())[:200]
+        if state == "prepared":  # what Prepare left, so Start can tell what changed since (ORCH-739)
+            rec["seen"] = _prepare_seen(root, ticket)
         ticket["prepare"] = rec
         if state == "prepared":
             add_history(ticket, by, PREPARED_LINE)
@@ -2244,6 +2246,111 @@ def set_prepare(
         if ticket_path(root, tid).exists():
             raise
         return False
+
+
+_PREPARE_FIELDS = (
+    ("title", "Title"),
+    ("note", "The person's note"),
+    ("description", "Description"),
+    ("done_when", "Done when"),
+    ("due", "Due date"),
+    ("owner", "Owner"),
+)
+_SEEN_FILES_MAX = 200
+# lines that only say the work started (the Start itself), not something the helper must react to
+_START_NOISE = re.compile(r"^(Status \S+ -> \S+|\S+( \S+)? started|" + re.escape(PREPARED_LINE) + r")$")
+
+
+def _artifact_names(root: Path, tid: str) -> list[str]:
+    """The files in the ticket's artifacts folder (relative names, sorted, capped); [] when there is none.
+    Read only: never creates the folder, never follows a link."""
+    d = artifacts_path(root, tid)
+    try:
+        if d.is_symlink() or not d.is_dir():
+            return []
+        names = sorted(
+            p.relative_to(d).as_posix() for p in d.rglob("*") if p.is_file() and not p.is_symlink()
+        )
+    except OSError:
+        return []
+    return names[:_SEEN_FILES_MAX]
+
+
+def _prepare_seen(root: Path, ticket: dict) -> dict:
+    """The ticket as Prepare left it: its fields, its steps and its files (ORCH-739)."""
+    seen: dict = {k: ticket.get(k) for k, _ in _PREPARE_FIELDS if ticket.get(k) not in (None, "")}
+    seen["checks"] = {
+        str(c.get("id")): str(c.get("text") or "")
+        for c in ticket.get("checklist") or []
+        if isinstance(c, dict) and c.get("id")
+    }
+    seen["files"] = _artifact_names(root, ticket["id"])
+    seen["lines"] = history.length(ticket)  # lines from here on came after Prepare
+    return seen
+
+
+def _short(v: object, n: int = 300) -> str:
+    s = " ".join(str(v).split())
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def changed_since_prepare(root: Path, ticket: dict, agent: str | None = None) -> list[str] | None:
+    """What changed on a prepared ticket since Prepare ended, one plain line each: a field a person edited,
+    steps added, removed or reworded, new files, and what others wrote on the ticket since (answers,
+    messages). [] = nothing changed; None = the ticket was never marked Prepared (no record to compare).
+    agent: the helper's own label (agent:<name>), whose own lines are left out."""
+    p = ticket.get("prepare") if isinstance(ticket.get("prepare"), dict) else {}
+    seen = p.get("seen") if p.get("state") == "prepared" else None
+    if not isinstance(seen, dict):
+        return None
+    out: list[str] = []
+    for key, label in _PREPARE_FIELDS:
+        old, new = seen.get(key), ticket.get(key)
+        if old in (None, "") and new in (None, ""):
+            continue
+        if old == new:
+            continue
+        if old in (None, ""):
+            out.append(f"{label} added: {_short(new)}")
+        elif new in (None, ""):
+            out.append(f"{label} removed (was: {_short(old)})")
+        else:
+            out.append(f"{label} changed from: {_short(old)} | to: {_short(new)}")
+    old_checks = seen.get("checks") if isinstance(seen.get("checks"), dict) else {}
+    now_checks = {
+        str(c.get("id")): c for c in ticket.get("checklist") or [] if isinstance(c, dict) and c.get("id")
+    }
+    for cid, c in now_checks.items():
+        text = str(c.get("text") or "")
+        if cid not in old_checks:
+            out.append(f"Step added: {cid} {_short(text, 200)}")
+        elif old_checks[cid] != text:
+            out.append(f"Step {cid} reworded from: {_short(old_checks[cid], 200)} | to: {_short(text, 200)}")
+    for cid, text in old_checks.items():
+        if cid not in now_checks:
+            out.append(f"Step removed: {cid} {_short(text, 200)}")
+    old_files = set(seen.get("files") or [])
+    new_files = [f for f in _artifact_names(root, ticket["id"]) if f not in old_files]
+    if new_files:
+        out.append("New files: " + ", ".join(new_files[:20]) + (" …" if len(new_files) > 20 else ""))
+    lines = history.lines(root, ticket)
+    start = seen.get("lines")
+    if not isinstance(start, int) or isinstance(start, bool) or not 0 <= start <= len(lines):
+        since = str(p.get("at") or "")  # no position kept (or the history was cut): by time, strictly after
+        lines = [h for h in lines if isinstance(h, dict) and str(h.get("at") or "") > since]
+    else:
+        lines = lines[start:]
+    said = []
+    for h in lines:
+        if not isinstance(h, dict):
+            continue
+        by, text = str(h.get("by") or "?"), str(h.get("text") or "")
+        if (agent and by == agent) or by in (SYSTEM, "orch") or _START_NOISE.match(text):
+            continue
+        said.append(f"{by}: {_short(text)}")
+    if said:
+        out.append("Written on the ticket since:\n" + "\n".join(f"  - {s}" for s in said[-10:]))
+    return out
 
 
 def prepare_state(root: Path, ticket: dict) -> dict | None:
