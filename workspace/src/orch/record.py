@@ -19,9 +19,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Generic, Literal, TypeVar
 
-from jsonschema import Draft202012Validator, FormatChecker
-
 from orch import hider as hiding
+from orch import lazyschema
 from orch.collect_execjson import _hash, detail_name
 from orch.errors import Refused
 from orch.hider import Hider, NoHiderError
@@ -3426,16 +3425,20 @@ _SCHEMA = {
     },
 }
 
-_VALIDATOR = Draft202012Validator(_SCHEMA, format_checker=FormatChecker())
-_BODY_VALIDATOR = Draft202012Validator(
-    {"$ref": "#/$defs/event_body", "$defs": _SCHEMA["$defs"]}, format_checker=FormatChecker()
-)
-_DETAIL_VALIDATOR = Draft202012Validator(
-    {"$ref": "#/$defs/detail_file", "$defs": _SCHEMA["$defs"]}, format_checker=FormatChecker()
-)
-_META_VALIDATOR = Draft202012Validator(
-    {"$ref": "#/$defs/record_meta", "$defs": _SCHEMA["$defs"]}, format_checker=FormatChecker()
-)
-_CHANGE_VALIDATOR = Draft202012Validator(
-    {"$ref": "#/$defs/record_change", "$defs": _SCHEMA["$defs"]}, format_checker=FormatChecker()
-)
+
+def _validator(schema):
+    """Built on first use (lazyschema): loading jsonschema costs every orch command about 20 ms."""
+    from jsonschema import Draft202012Validator, FormatChecker
+
+    return Draft202012Validator(schema, format_checker=FormatChecker())
+
+
+def _def_checker(name):
+    return lazyschema.checker(lambda: _validator({"$ref": f"#/$defs/{name}", "$defs": _SCHEMA["$defs"]}))
+
+
+_VALIDATOR = lazyschema.checker(lambda: _validator(_SCHEMA))
+_BODY_VALIDATOR = _def_checker("event_body")
+_DETAIL_VALIDATOR = _def_checker("detail_file")
+_META_VALIDATOR = _def_checker("record_meta")
+_CHANGE_VALIDATOR = _def_checker("record_change")

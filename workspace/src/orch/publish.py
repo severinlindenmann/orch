@@ -13,9 +13,6 @@ import tarfile
 import tomllib
 from pathlib import Path
 
-from cryptography.exceptions import InvalidTag
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
 from orch import net, secretscan
 from orch.errors import Refused
 
@@ -64,6 +61,10 @@ def encrypt(
         head["note"] = note
     header = json.dumps(head, ensure_ascii=False, separators=(",", ":")).encode()
     plain = struct.pack(">I", len(header)) + header + content
+    # loaded here, not at the top: the library takes about 45 ms to load and every orch command imports this
+    # module (ORCH-609)
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
     return MAGIC + iv + AESGCM(key).encrypt(iv, plain, MAGIC), key
 
 
@@ -71,6 +72,9 @@ def decrypt(blob: bytes, key: bytes) -> tuple[dict, bytes]:
     """Reader rules of crypto.md. Any failure raises Refused('wrong key or broken file')."""
     if len(blob) < 32 or blob[:4] != MAGIC or len(key) != 32:
         raise Refused(BROKEN)
+    from cryptography.exceptions import InvalidTag  # loaded on use (ORCH-609, see encrypt)
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
     try:
         plain = AESGCM(key).decrypt(blob[4:16], blob[16:], MAGIC)
     except InvalidTag:

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from pathlib import Path
 
 from . import ask, authority, autopilot, flow, handover, orchcli
 from .store import Refused, Store, clock
@@ -304,6 +305,11 @@ def start_stage(root, order, stage):
 
 def loop(root, sleep=time.sleep):
     while True:
+        if not (Path(root) / ".orch").is_dir():
+            # the workspace folder was deleted or moved: nothing left to watch. Without this the watcher lived on
+            # for days (ORCH-609: a dozen of them, 16 MB each, after test workspaces were removed)
+            print("the workspace is gone; the watcher stops", file=sys.stderr, flush=True)
+            return
         try:
             for w in once(root):
                 print(f"{'started' if 'stage' in w else 'woke'} {w['order']}: {w['why']}", flush=True)

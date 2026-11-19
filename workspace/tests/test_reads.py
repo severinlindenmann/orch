@@ -196,3 +196,63 @@ def test_the_worker_keeps_what_a_child_of_the_command_prints(tmp_path):
     )
     r = subprocess.run([sys.executable, "-c", code], cwd=tmp_path, capture_output=True, text=True, timeout=60)
     assert json.loads(r.stderr.strip().splitlines()[-1]) == {"code": 0, "out": "123\n"}
+
+
+def _idle_worker(readworker, idle_for: float):
+    """A worker in the idle list without a process (the reaper only reads its times and stops it)."""
+    import time
+
+    w = readworker._Worker.__new__(readworker._Worker)
+    w.started = time.monotonic()
+    w.used = time.monotonic() - idle_for
+    w.answers = 0
+    w.stopped = False
+
+    class _Proc:
+        def poll(self):
+            return 0 if w.stopped else None
+
+    w.proc = _Proc()
+    w.stop = lambda: setattr(w, "stopped", True)
+    return w
+
+
+def test_idle_workers_are_ended_without_a_new_read(monkeypatch):
+    """ORCH-609: idle workers (50-100 MB each) used to live until the next read, for good when none came.
+    The reaper ends the spares after SPARE_IDLE_SECONDS and the last one after IDLE_SECONDS, with no read."""
+    import time
+
+    from orch import readworker
+
+    patient = readworker.REAP_EVERY
+    monkeypatch.setattr(readworker, "REAP_EVERY", 0.05)
+    key = ("test-env",)
+    last = _idle_worker(readworker, 1)
+    spare = _idle_worker(readworker, readworker.SPARE_IDLE_SECONDS + 5)
+    old = _idle_worker(readworker, readworker.IDLE_SECONDS + 5)
+    with readworker._COND:
+        readworker._IDLE[key] = [spare, old, last]
+    try:
+        gone = readworker._reap_locked()
+        assert spare in gone and old in gone and last not in gone  # the one used last stays while young
+        with readworker._COND:
+            readworker._IDLE[key] = [last]
+            readworker._BUSY[key] = 1
+        last.used = time.monotonic() - readworker.IDLE_SECONDS - 1
+        readworker._give_back(key, _idle_worker(readworker, 0), ok=False)  # a give-back that keeps none
+        readworker._BUSY[key] = 1
+        fresh = _idle_worker(readworker, 0)
+        readworker._give_back(key, fresh, ok=True)  # starts the reaper
+        fresh.used = time.monotonic() - readworker.IDLE_SECONDS - 1
+        end = time.monotonic() + patient + 5  # a reaper another test started sleeps its own time
+        while (not last.stopped or not fresh.stopped) and time.monotonic() < end:
+            time.sleep(0.02)
+        assert last.stopped and fresh.stopped
+        end = time.monotonic() + 5
+        while readworker._REAPER and time.monotonic() < end:
+            time.sleep(0.02)
+        assert not readworker._REAPER  # nothing idle: the reaper thread ended too
+    finally:
+        with readworker._COND:
+            readworker._IDLE.pop(key, None)
+            readworker._BUSY.pop(key, None)

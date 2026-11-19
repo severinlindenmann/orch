@@ -35,7 +35,11 @@ from pathlib import Path
 
 RETIRE_AFTER = 2000  # answers per worker
 RETIRE_SECONDS = 1800  # seconds a worker lives at most
-IDLE_SECONDS = 600  # an idle worker (of any environment) is ended after this long without a read
+IDLE_SECONDS = 120  # an idle worker (of any environment) is ended after this long without a read
+# the spare workers of one environment (all but the one used last) are ended sooner: a burst of reads
+# needs up to MAX_WORKERS, a quiet page one; each worker holds 50-100 MB (ORCH-609)
+SPARE_IDLE_SECONDS = 30
+REAP_EVERY = 10  # seconds between two looks of the reaper thread, which runs only while a worker is idle
 STARTS = {
     "worker": 0,
     "answers": 0,
@@ -69,8 +73,8 @@ class _Worker:
             pass
         self.lines.put(None)
 
-    def idle_too_long(self) -> bool:
-        return time.monotonic() - self.used > IDLE_SECONDS
+    def idle_too_long(self, limit: float | None = None) -> bool:
+        return time.monotonic() - self.used > (IDLE_SECONDS if limit is None else limit)
 
     def alive(self) -> bool:
         return (
@@ -115,6 +119,7 @@ MAX_WORKERS = 3  # per environment: a slow read (a look at the network) does not
 _COND = threading.Condition()
 _IDLE: dict[tuple, list[_Worker]] = {}  # environment -> workers waiting for a read
 _BUSY: dict[tuple, int] = {}  # environment -> workers answering a read now
+_REAPER: list[threading.Thread] = []  # the one reaper thread while it runs
 
 
 def _env_key(env: dict) -> tuple:
@@ -137,10 +142,8 @@ def _take(key: tuple, env: dict, timeout: float) -> _Worker | None:
     wait."""
     end = time.monotonic() + timeout
     with _COND:
-        for ws in _IDLE.values():  # workers of any environment that retired or sat idle too long
-            for w in [w for w in ws if w.idle_too_long() or not w.alive()]:
-                ws.remove(w)
-                w.stop()
+        for w in _reap_locked():
+            w.stop()
         while True:
             idle = _IDLE.setdefault(key, [])
             while idle:
@@ -164,12 +167,45 @@ def _take(key: tuple, env: dict, timeout: float) -> _Worker | None:
         return None
 
 
+def _reap_locked() -> list[_Worker]:
+    """Take out (under _COND) every idle worker that retired, sat idle longer than IDLE_SECONDS, or is a spare
+    idle longer than SPARE_IDLE_SECONDS; the caller stops them outside the lock."""
+    out = []
+    for ws in _IDLE.values():
+        last = max(ws, key=lambda w: w.used, default=None)  # the one kept longest: the next read takes it
+        for w in list(ws):
+            if not w.alive() or w.idle_too_long() or (w is not last and w.idle_too_long(SPARE_IDLE_SECONDS)):
+                ws.remove(w)
+                out.append(w)
+    return out
+
+
+def _reaper() -> None:
+    """Ends idle workers while nobody reads: without it a worker lived until the next read, for good when none
+    came (a page closed, a quiet night)."""
+    while True:
+        time.sleep(REAP_EVERY)
+        with _COND:
+            gone = _reap_locked()
+            last = not any(_IDLE.values())
+            if last:
+                _REAPER.clear()
+        for w in gone:
+            w.stop()
+        if last:
+            return
+
+
 def _give_back(key: tuple, w: _Worker, ok: bool) -> None:
     with _COND:
         _BUSY[key] -= 1
         if ok and w.alive():
             w.used = time.monotonic()
             _IDLE.setdefault(key, []).append(w)
+            if not _REAPER:
+                t = threading.Thread(target=_reaper, daemon=True, name="orch-readworker-reaper")
+                _REAPER.append(t)
+                t.start()
         else:
             w.stop()
         _COND.notify()
