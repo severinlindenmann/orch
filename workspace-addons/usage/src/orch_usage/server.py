@@ -29,6 +29,7 @@ KIT_FILES = (
     "overlay.js",
     "components.js",
     "date.js",
+    "widgets.js",
 )
 WEB_FILES = ("index.html", "usage.js")
 TYPES = {"html": "text/html; charset=utf-8", "css": "text/css; charset=utf-8", "js": "text/javascript"}
