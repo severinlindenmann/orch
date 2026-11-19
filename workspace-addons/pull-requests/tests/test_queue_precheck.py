@@ -186,3 +186,32 @@ def test_the_precheck_runs_the_command_in_a_copy_of_the_group_commit(tmp_path):
     probe = "import subprocess; print(subprocess.run(['git', 'rev-parse', '--git-dir', 'HEAD:rule.txt'], capture_output=True, text=True).stdout)"
     seen = precheck.run(git, sha, f'{py} -c "{probe}"')
     assert seen.ok is True and seen.tail.splitlines()[0] == ".git"  # its own repository, not the queue's copy
+
+
+@pytest.mark.skipif(os.name == "nt", reason="process groups")
+def test_a_precheck_that_takes_too_long_stops_its_whole_process_group(tmp_path):
+    marker = tmp_path / "late"
+    cmd = f"(sleep 3; touch '{marker}') & sleep 30"  # a child that would outlive the shell
+    with pytest.raises(subprocess.TimeoutExpired):
+        precheck._shell(cmd, tmp_path, dict(os.environ), timeout=1)
+    import time
+
+    time.sleep(3.5)
+    assert not marker.exists()
+
+
+@pytest.mark.skipif(shutil.which("git") is None or os.name == "nt", reason="needs git and symlinks")
+def test_a_link_pointing_outside_the_tree_means_no_precheck_not_a_crash(tmp_path):
+    origin = tmp_path / "origin"
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+           "GIT_COMMITTER_EMAIL": "t@t"}  # fmt: skip
+    subprocess.run(["git", "init", "-q", "-b", "develop", str(origin)], check=True, env=env)
+    (origin / "out").symlink_to("/etc/hosts")
+    subprocess.run(["git", "-C", str(origin), "add", "."], check=True, env=env)
+    subprocess.run(["git", "-C", str(origin), "commit", "-qm", "x"], check=True, env=env)
+    git = Git(tmp_path / "queue", "o/r", url=origin.as_uri())
+    git.prepare()
+    git.run("fetch", "-q", "origin", "+refs/heads/develop:refs/queue/base")
+    sha = git.run("rev-parse", "refs/queue/base").stdout.strip()
+    got = precheck.run(git, sha, "true")
+    assert got.ok in (None, True)  # Python without the data filter unpacks it; with it: no copy, never red

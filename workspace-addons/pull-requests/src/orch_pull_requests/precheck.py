@@ -17,6 +17,7 @@ own login and never from a fork. Trouble (no copy, no command, too slow) is neve
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import subprocess
@@ -83,6 +84,37 @@ def own_repo(git_exe: str, src: Path, home: Path, timeout: int = TIMEOUT_SECS) -
             raise Refused(f"git {args[0]} failed: {(got.stderr or got.stdout).strip()[:200]}")
 
 
+def _shell(command: str, cwd: Path, environ: dict[str, str], timeout: int) -> tuple[int, str]:
+    """(exit code, output) of command in its own process group: on a timeout the whole group is stopped (uv,
+    pytest workers), not only the shell, then TimeoutExpired is raised."""
+    kw: dict = (
+        {"start_new_session": True}
+        if os.name != "nt"
+        else {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    )
+    proc = subprocess.Popen(
+        command, shell=True, cwd=cwd, env=environ, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace", **kw,
+    )  # fmt: skip
+    try:
+        out, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if os.name != "nt":
+            import signal
+
+            with contextlib.suppress(OSError):
+                os.killpg(proc.pid, signal.SIGKILL)
+        else:  # pragma: no cover - Windows
+            with contextlib.suppress(OSError):
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, check=False
+                )
+        proc.kill()
+        proc.communicate()
+        raise
+    return proc.returncode, out or ""
+
+
 def run(git, sha: str, command: str, timeout: int = TIMEOUT_SECS) -> Result:
     """Run command in a copy of commit sha. ok True = exit 0, False = any other exit, None = it could not run."""
     # next to the queue's git copy, not in the system temp folder: some checks treat a home or Python there as
@@ -99,14 +131,11 @@ def run(git, sha: str, command: str, timeout: int = TIMEOUT_SECS) -> Result:
         except Refused as e:
             return Result(None, f"no copy of the group commit: {e}")
         try:
-            got = subprocess.run(
-                command, shell=True, cwd=src, env=env(home), capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, check=False,
-            )  # fmt: skip
+            code, out = _shell(command, src, env(home), timeout)
         except subprocess.TimeoutExpired:
             return Result(None, f"the precheck did not finish in {timeout // 60} minutes")
         except OSError as e:
             return Result(None, f"the precheck did not start: {e}")
-        return Result(got.returncode == 0, _tail((got.stdout or "") + "\n" + (got.stderr or "")))
+        return Result(code == 0, _tail(out))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

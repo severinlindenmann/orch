@@ -121,11 +121,19 @@ class Git:
                 raise Refused(f"git archive failed: {(why or ['no reason'])[0][:200]}")
             tar.seek(0)
             dest.mkdir(parents=True, exist_ok=True)
-            with tarfile.open(fileobj=tar) as t:
-                if hasattr(tarfile, "data_filter"):  # no paths outside dest, no device files
-                    t.extractall(dest, filter="data")
-                else:  # pragma: no cover - Python 3.11 before 3.11.4
-                    t.extractall(dest)  # a tar git itself wrote from a commit tree
+            try:
+                with tarfile.open(fileobj=tar) as t:
+                    if hasattr(tarfile, "data_filter"):  # no paths outside dest, no device files
+                        t.extractall(dest, filter="data")
+                    else:  # pragma: no cover - Python 3.11 before 3.11.4
+                        t.extractall(dest)  # a tar git itself wrote from a commit tree
+            except (
+                tarfile.TarError,
+                OSError,
+            ) as e:  # e.g. a link pointing outside the tree: no copy, not red
+                raise Refused(
+                    f"the files of {sha[:12]} could not be unpacked: {e.__class__.__name__}"
+                ) from None
 
     def push(self, sha: str, branch: str) -> None:
         self.run("push", "-q", "origin", f"{sha}:refs/heads/{branch}", timeout=600)
