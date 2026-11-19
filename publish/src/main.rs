@@ -12,7 +12,10 @@ async fn main() {
     let admin_listen = std::env::var("ORCH_PUBLISH_ADMIN_LISTEN")
         .or_else(|_| std::env::var("PUBLISH_ADMIN_LISTEN"))
         .unwrap_or_else(|_| "127.0.0.1:8411".into());
-    if let Err(e) = cfg.validate() {
+    if let Err(e) = cfg
+        .validate()
+        .and_then(|_| orch_publish::check_admin_listen(&admin_listen))
+    {
         eprintln!("orch-publish: {e}");
         std::process::exit(1);
     }
@@ -24,7 +27,11 @@ async fn main() {
         .unwrap_or_else(|e| panic!("cannot listen on {listen}: {e}"));
     let admin = tokio::net::TcpListener::bind(&admin_listen)
         .await
-        .unwrap_or_else(|e| panic!("cannot listen on {admin_listen}: {e}"));
+        .unwrap_or_else(|e| {
+            // fail closed: never fall back to another address for the admin page
+            eprintln!("orch-publish: cannot listen on {admin_listen} (admin): {e}");
+            std::process::exit(1)
+        });
     let private = match &private_listen {
         Some(l) => match tokio::net::TcpListener::bind(l).await {
             Ok(p) => Some(p),

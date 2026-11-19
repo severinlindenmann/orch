@@ -213,6 +213,25 @@ pub fn split_authority(a: &str, dflt: u16) -> (String, u16) {
 }
 
 /// 100.64/10, 10/8, 172.16/12, 192.168/16, fd00::/8 or loopback (local runs). Never unspecified.
+/// Startup check for the admin listener: an IP address and port on loopback or the private
+/// network. A host name, 0.0.0.0 or a public address is refused, so the admin page can never be
+/// reached from the internet by a config mistake. A private address that is missing on this
+/// machine (private network down) makes the bind fail, so the service stops instead of falling
+/// back to another address.
+pub fn check_admin_listen(listen: &str) -> Result<(), String> {
+    let ok = listen
+        .trim()
+        .parse::<std::net::SocketAddr>()
+        .is_ok_and(|a| private_ip(a.ip()));
+    if ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "ORCH_PUBLISH_ADMIN_LISTEN={listen} must be an IP address and port on loopback or the private network (not 0.0.0.0, not a public address, not a host name)."
+        ))
+    }
+}
+
 fn private_ip(ip: std::net::IpAddr) -> bool {
     use std::net::IpAddr::*;
     match ip {

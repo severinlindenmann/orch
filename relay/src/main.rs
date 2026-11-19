@@ -35,7 +35,7 @@ async fn run() -> Result<(), String> {
         .map_err(|e| format!("{pub_addr}: {e}"))?;
     let al = tokio::net::TcpListener::bind(&admin_addr)
         .await
-        .map_err(|e| format!("{admin_addr}: {e}"))?;
+        .map_err(|e| format!("cannot listen on {admin_addr} (admin): {e}"))?;
     tracing::info!("public on {pub_addr}, admin on {admin_addr}");
     let a = axum::serve(pl, api::router(app.clone()));
     let b = axum::serve(al, admin::router(app));
