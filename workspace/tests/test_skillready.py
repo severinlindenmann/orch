@@ -47,6 +47,32 @@ def test_missing_programs_logins_and_addons(proj, monkeypatch):
     assert skillready.missing(proj, {"requires": "$(touch x), ../bin/gh, a b"}) == []
 
 
+def test_codex_review_cases(tmp_path, proj, monkeypatch):
+    """Inline comments are not part of a value; the list stays within the schema; an unusable login is
+    missing."""
+    folder = tmp_path / "c"
+    folder.mkdir()
+    (folder / "SKILL.md").write_text(
+        '---\nname: c\nmetadata:\n  requires: gh # GitHub CLI\n  tags: "a # b"\n---\n'
+    )
+    assert skillready.metadata(folder) == {"requires": "gh", "tags": "a # b"}
+    monkeypatch.setattr(skillready.shutil, "which", lambda p: None)
+    many = skillready.missing(proj, {"requires": ",".join(f"tool{i}" for i in range(70))})
+    assert len(many) == skillready.MAX_MISSING
+    from orch import keystore
+
+    monkeypatch.setattr(
+        keystore,
+        "list_keys",
+        lambda root: [
+            {"name": "ok-login", "state": "active"},
+            {"name": "stale-login", "state": keystore.NEEDS_REENTRY},
+        ],
+    )
+    meta = {"requires-logins": "ok-login, stale-login"}
+    assert skillready.missing(proj, meta) == ["login stale-login"]
+
+
 def test_note_words():
     assert skillready.note(["gh"]) == "not ready here: gh missing"
     assert skillready.note(["gh", "login github-login"]) == "not ready here: gh, login github-login missing"

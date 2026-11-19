@@ -17,6 +17,7 @@ BLOCK = "skills-ready"  # .orch/harness/blocks/skills-ready.md
 WORD_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")  # a requirement that may be shown and written
 MAX_SKILLS = 30  # lines in the helper block
 MAX_ITEMS = 8  # requirements shown per skill
+MAX_MISSING = 64  # the inventory schema's cap on `missing`
 HEADER_CAP = 64 * 1024  # bytes of SKILL.md read for the header
 
 
@@ -40,6 +41,8 @@ def _fallback_header(text: str) -> dict:
         if not sep:
             continue
         value = value.strip()
+        if value[:1] not in ('"', "'"):
+            value = value.split(" #", 1)[0].rstrip()  # an inline YAML comment
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
         if indented and in_meta:
@@ -90,7 +93,12 @@ def _login_names(root: Path) -> set[str]:
     from orch.errors import Refused
 
     try:
-        return {k.get("name") for k in keystore.list_keys(Path(root)) if isinstance(k.get("name"), str)}
+        return {
+            k.get("name")
+            for k in keystore.list_keys(Path(root))
+            if isinstance(k.get("name"), str)
+            and k.get("state") != keystore.NEEDS_REENTRY  # unusable = missing
+        }
     except (Refused, OSError, ValueError):  # a damaged key store: every login reads as missing
         return set()
 
@@ -123,7 +131,7 @@ def missing(root: Path, meta: dict[str, str], *, _cache: dict | None = None) -> 
         if "addons" not in cache:
             cache["addons"] = _active_addons(root)
         out += [f"add-on {n}" for n in wanted if n not in cache["addons"]]
-    return out
+    return out[:MAX_MISSING]
 
 
 def note(lacks: list[str]) -> str:
