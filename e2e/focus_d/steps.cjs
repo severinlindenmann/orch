@@ -846,6 +846,15 @@ async function focusButton(page, dash, width) {
     dashboard: { label: 'Focus', icon: 'target', order: 20 } };
   const HELPER = { wait: 'you', run: 'working', idle: 'idle' };
   const id = key => 't_fb' + key.slice(5);
+  let answered = null, lastState = null;  // the answer the pane sent; the page's state as last served
+  const unasked = st => ({ ...st, tickets: st.tickets.map(t => t.id === id('ORCH-190') ? { ...t, questions: [] } : t) });
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (body.op !== 'answer' || body.args.ticket !== id('ORCH-190') || !lastState) return route.fallback();
+    answered = body.args.answer;
+    await new Promise(r => setTimeout(r, 300));  // the answer takes a moment, as with orch: the buttons wait disabled
+    route.fulfill({ json: unasked(lastState) });  // the server answers an action with the page's state
+  });
   await page.route(/\/api\/state(\?.*)?$/, async route => {
     const res = await route.fetch();
     if (res.status() !== 200) return route.fulfill({ response: res });
@@ -860,7 +869,8 @@ async function focusButton(page, dash, width) {
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
     st.settings = { ...(st.settings || {}), focus_preview_on: true,
       addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
-    route.fulfill({ response: res, json: st });
+    lastState = st;
+    route.fulfill({ response: res, json: answered ? unasked(st) : st });
   });
   // the added tickets have no files on disk: their ticket pages get an empty list of results
   await page.route(/\/api\/artifacts\/t_fb/, route => route.fulfill({ json: { files: [] } }));
@@ -884,6 +894,20 @@ async function focusButton(page, dash, width) {
   await page.waitForSelector(`#live-dock .live-pane[data-session="${id('ORCH-191')}"]`, { timeout: 5000 });
   if (await page.evaluate(() => location.hash) !== '#tickets') throw new Error('the row\'s Focus button left the list');
   if (!await page.evaluate(() => !!document.activeElement?.closest('#live-dock'))) throw new Error('the keyboard did not move into the session');
+  // ORCH-709: the waiting question answered with the keyboard in its pane; the keyboard stays in the pane (never by
+  // hand here) and Esc steps the layer back to the bar
+  await page.click(`${rowSel('ORCH-190')} [data-key="live-session-btn"]`);
+  const waitPane = `#live-dock .live-pane[data-session="${id('ORCH-190')}"]`;
+  await page.waitForSelector(`${waitPane} [data-live-ask] [data-key="live-ask-option-0"]`, { timeout: 5000 });
+  await page.focus(`${waitPane} [data-key="live-ask-option-0"]`);
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(p => document.querySelector(p + ' [data-live-ask]')?.hidden, waitPane, { timeout: 10000 });
+  if (answered !== 'Whole team') throw new Error('the answer sent was ' + JSON.stringify(answered));
+  await page.waitForTimeout(100);
+  const at = await page.evaluate(p => { const a = document.activeElement; return document.querySelector(p)?.contains(a) ? '' : (a?.tagName || 'nothing'); }, waitPane);
+  if (at) throw new Error('after the answer the keyboard is on ' + at + ', not in the pane');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 }).catch(() => { throw new Error('Esc after the answer did not step the layer back'); });
   // the ticket page: "Watch in Focus" opens its session; Open ticket comes back to the same page
   await page.evaluate(h => { location.hash = h; }, '#ticket/' + id('ORCH-189'));
   await mainHasText(page);
@@ -1395,10 +1419,11 @@ const STEPS = [
   {
     n: 6, pic: 'fd-06-focus-button', area: 'wall', title: 'Focus button on a ticket and Open ticket on a session',
     feature: [3],
-    do: ['Open Tickets and press the Focus button of a row.', 'Open a ticket page and press its Focus button.',
-      'In the session press Open ticket, also from full screen.'],
+    do: ['Open Tickets and press the Focus button of a row.', 'Press Answer on a waiting row and answer with the keyboard, then Esc.',
+      'Open a ticket page and press its Focus button.', 'In the session press Open ticket, also from full screen.'],
     see: ['Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.',
-      'The session opens in the layer and the page stays.', 'Open ticket goes back to the same ticket page; the session stays open.'],
+      'The session opens in the layer and the page stays.', 'After the answer the keyboard stays in the session; Esc steps back to the bar.',
+      'Open ticket goes back to the same ticket page; the session stays open.'],
     async run({ page, dash, width }) {
       await focusButton(page, dash, width);
     },
