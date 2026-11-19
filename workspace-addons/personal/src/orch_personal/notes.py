@@ -36,7 +36,7 @@ class Vault:
         self.folder = Path(folder).resolve()
         if not self.folder.is_dir():
             raise Refused("This notes folder does not exist; choose an existing folder.")
-        self._signature: dict[str, tuple[int, int]] | None = None
+        self._fingerprint: dict[str, tuple[int, int]] | None = None
         self._notes: dict[str, Note] = {}
         self._texts: dict[str, str] = {}
         self._titles: dict[str, list[str]] = {}
@@ -55,7 +55,7 @@ class Vault:
         return path
 
     def _refresh(self) -> None:
-        signature: dict[str, tuple[int, int]] = {}
+        fingerprint: dict[str, tuple[int, int]] = {}
         changed: dict[str, float] = {}
 
         def walk(folder: str | Path, prefix: str = "") -> None:
@@ -68,18 +68,18 @@ class Vault:
                         walk(entry.path, relative + "/")
                     elif entry.name.endswith(".md") and entry.is_file(follow_symlinks=False):
                         stat = entry.stat(follow_symlinks=False)
-                        signature[relative[:-3]] = (stat.st_mtime_ns, stat.st_size)
+                        fingerprint[relative[:-3]] = (stat.st_mtime_ns, stat.st_size)
                         changed[relative[:-3]] = stat.st_mtime
 
         try:
             walk(self.folder)
-            if signature == self._signature:
+            if fingerprint == self._fingerprint:
                 return
             texts: dict[str, str] = {}
             notes: dict[str, Note] = {}
             titles: dict[str, list[str]] = {}
-            for note_id in sorted(signature):
-                if signature[note_id][1] > _MAX_BYTES:
+            for note_id in sorted(fingerprint):
+                if fingerprint[note_id][1] > _MAX_BYTES:
                     continue  # a very large file is not a note to look things up in: skipped, never refused
                 with self._path(note_id).open("rb") as stream:
                     data = stream.read(_MAX_BYTES + 1)
@@ -119,7 +119,7 @@ class Vault:
                 sources.sort(key=lambda source: (notes[source].title.casefold(), source))
                 notes[note_id] = replace(notes[note_id], linked_from=tuple(sources))
             self._notes, self._texts, self._titles = notes, texts, titles
-            self._signature = signature
+            self._fingerprint = fingerprint
         except OSError as exc:
             raise Refused(
                 "The notes folder could not be read; check that it is available and try again."
