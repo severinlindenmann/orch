@@ -95,7 +95,7 @@ function reviewApi() {
     get box() { return snapshot || typeof FEEDBACK_BOX === 'undefined' ? null : FEEDBACK_BOX; },
     attach: async ({ticket, files}) => {
       if (snapshot || typeof ticket !== 'string') return {ok:false, error:{code:'refused', message:'Files cannot be added here.'}};
-      const r = await ticketAttachFiles(ticket, files);
+      const r = await ticketAttachFiles(ticket, files, true);  // the feedback folder: the card being answered stays the same
       return r.ok ? r : {ok:false, error:{code:'error', message:String(r.text || 'The files could not be added.').slice(0, 300)}};
     },
     // "Add note" on the Comment sheet: the words (and files) go to the ticket's helper (queued if none is running); no verdict, the card stays.

@@ -1168,10 +1168,12 @@ function ticketTalkText(typed, names) {
 }
 const talkFailed = result => result.status === 0 ? "Can't reach orch. Nothing was sent." : window.DashHelpers.scrubText(String(result.text || '')).slice(0, 300) || 'That did not work. Try again.';
 // The box's files onto the ticket in one ticket.attach call; the names orch kept come back (it may rename "x (2).png").
-async function ticketAttachFiles(tid, files) {
+// feedback: the files of an answer on Review go in the ticket's feedback folder, so the Check card being answered
+// does not change under the answer (its own files are the helper's result; ORCH-420 follow-up).
+async function ticketAttachFiles(tid, files, feedback = false) {
   const list = array(files);
   if (!list.length) return {ok:true, names:[]};
-  const added = await act('ticket.attach', {ticket:tid, files:list.map(f => ({name:f.name, data:String(f.url || '').slice(String(f.url || '').indexOf(',') + 1)}))});
+  const added = await act('ticket.attach', {ticket:tid, files:list.map(f => ({name:f.name, data:String(f.url || '').slice(String(f.url || '').indexOf(',') + 1)})), ...(feedback ? {feedback:true} : {})});
   if (!added.ok) return {ok:false, text:talkFailed(added)};
   if (typeof artifactData !== 'undefined') artifactData.delete(tid);  // the Files tab counts the new files on the next draw
   const saved = array(added.state?.attached?.saved).filter(n => typeof n === 'string');
