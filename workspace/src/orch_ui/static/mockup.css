@@ -1862,3 +1862,21 @@ body.mk-focus-v4d .mw-st[data-s=stop]{color:var(--failed)}
 .gd-links{display:flex;gap:var(--s1);align-items:center}
 @media(max-width:900px){.gd-cols{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:720px){body.mk-focus-v4d .gd-tile{grid-column:auto}.gd-cols>.gd-tree[data-mode=strip]{border:0;padding:0}}
+/* ORCH-817: Stop and End session in the pane, the wall tile menu and the bar; the idle note of a helper pane */
+body.mk-focus-v4d .mw-tile,body.mk-focus-v4d .mw-line{position:relative}
+body.mk-focus-v4d .mw-tile:has(.mw-smenu),body.mk-focus-v4d .mw-line:has(.mw-smenu){z-index:7}
+body.mk-focus-v4d .mw-tfoot .mw-smenu,body.mk-focus-v4d .mw-line .mw-smenu{top:auto;bottom:calc(100% - var(--s2));right:var(--s2)}
+body.mk-focus-v4d .mw-smenu{width:min(300px,calc(100vw - var(--s5)))}
+body.mk-focus-v4d .mw-pmenu .mw-sopt{align-items:flex-start;min-height:var(--touch)}
+body.mk-focus-v4d .mw-sopt .ic{margin-top:2px;flex:none}
+body.mk-focus-v4d .mw-sopt-t{display:grid;gap:2px;min-width:0}
+body.mk-focus-v4d .mw-sopt-t .meta{font-size:var(--text-xs,12px)}
+body.mk-focus-v4d .mw-endq{display:grid;gap:var(--s2)}
+body.mk-focus-v4d .mw-endq p{margin:0}
+body.mk-focus-v4d .mw-endb{display:flex;flex-wrap:wrap;gap:var(--s2)}
+body.mk-focus-v4d .mw-idle{display:grid;gap:var(--s2);margin:0 0 var(--s3);padding:var(--s3);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2,var(--surface))}
+body.mk-focus-v4d .mw-idle p{margin:0}
+body.mk-focus-v4d .mw-lrw{display:flex;gap:var(--s1);align-items:center}
+body.mk-focus-v4d .mw-lrw .mw-lrow{flex:1;min-width:0}
+body.mk-focus-v4d .mw-pop-sess{grid-template-rows:none;width:min(340px,calc(100% - var(--s5)))}
+body.mk-focus-v4d .mw-pop-sess .mw-opt{display:flex;gap:var(--s2);align-items:flex-start;width:100%;text-align:left;min-height:var(--touch);padding:var(--s1) var(--s3)}

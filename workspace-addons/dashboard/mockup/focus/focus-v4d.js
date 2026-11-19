@@ -57,7 +57,7 @@
   var PAGES = { focus: 'Focus', home: 'Home', tickets: 'Tickets', ticket: 'Tickets', review: 'Review', widgets: 'Widgets' };
   var AG = window.MW_TOOLS, TOOL = { t1: AG.t1.label, t2: AG.t2.label, shell: 'Plain terminal' };
   var NEW = [['Empty helper', 'A helper with no ticket and no task yet'], ['Chat helper', 'Ask anything, no ticket'], ['Plain terminal', 'An empty terminal in this workspace'], ['Manager', 'Looks after all helpers']];
-  var st = { page: 'focus', view: 'wall', cur: 'ORCH-238', term: false, mode: 'bar', last: 'bottom', full: false, ask: false, ren: '', menu: '', list: '', lq: '', f: '', col: {}, panes: ['ORCH-238'], act: 0, pm: '', ov: null, nt: 't1', nm: 'Sonnet', voice: '', vk: '', many: false, sheet: false, feat: 0, marks: false, tk: 'ORCH-238' };
+  var st = { page: 'focus', view: 'wall', cur: 'ORCH-238', term: false, mode: 'bar', last: 'bottom', full: false, ask: false, ren: '', menu: '', list: '', lq: '', f: '', col: {}, panes: ['ORCH-238'], act: 0, pm: '', endask: '', ov: null, nt: 't1', nm: 'Sonnet', voice: '', vk: '', many: false, sheet: false, feat: 0, marks: false, tk: 'ORCH-238' };
   var drafts = {}, picks = {}, uid = 0, feedAt = 0;
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   try { picks = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { picks = {}; }
@@ -106,6 +106,7 @@
     back: ic('<path d="M11 5l-7 7 7 7M4 12h16"/>'), plus: ic('<path d="M12 5v14M5 12h14"/>'), minus: ic('<path d="M5 12h14"/>'),
     file: ic('<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>'), play: ic('<circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/>'), wave: ic('<path d="M4 10v4M8 6v12M12 9v6M16 4v16M20 10v4"/>'),
     clip: ic('<path d="m20 11-8 8a5 5 0 0 1-7-7l8-8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1-3-3l7-7"/>'), mic: ic('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>'), stop: ic('<rect x="7" y="7" width="10" height="10" rx="1"/>'),
+    power: ic('<path d="M12 3v8"/><path d="M6.4 6.6a8 8 0 1 0 11.2 0"/>'),
     x: ic('<path d="M6 6l12 12M18 6 6 18"/>'), more: ic('<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>'), ext: ic('<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>'),
     t1: ic('<path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9"/>'), t2: ic('<path d="m8 7-5 5 5 5m8-10 5 5-5 5"/>'), shell: ic('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m5 0h5"/>'),
     img: ic('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m5 18 5-5 4 4 2-2 3 3"/>'),
@@ -284,7 +285,7 @@
     return '<div class="mw-term"><div class="mw-tbar"><span class="meta">Terminal · click and type · select text to copy it</span>' + btn('btn xs ghost', 'copyterm', 'Copy', { 'data-k': s.k }) + '</div><pre class="mw-screen" data-screen="' + esc(s.k) + '" tabindex="0" role="textbox" aria-multiline="true" aria-label="Terminal of ' + esc(s.k) + '. Type here, Enter sends the line.">' + esc(screenText(s)) + '</pre></div>';
   }
   function histHTML(s) {
-    return '<div class="mw-old"><h3>Earlier sessions</h3><ul>' + HIST.map(function (x, i) {
+    return '<div class="mw-old"><h3>Earlier sessions</h3><ul>' + hist(s).map(function (x, i) {
       return '<li><span class="mw-hd">' + x[0] + '</span><span class="meta">reached ' + x[1] + '</span><span class="mw-hs">' + x[2] + '</span>' + btn('btn outline sm', 'reopen', 'Reopen', { 'data-k': s.k, 'data-i': i, 'aria-label': 'Reopen the session from ' + x[0] }) + '</li>';
     }).join('') + '</ul><p class="meta">orch keeps the last 10 sessions of this ticket on this computer.</p></div>';
   }
@@ -316,13 +317,13 @@
     else h += '<span class="mw-pt truncate">' + esc(nm(s)) + '</span>';
     if (!o.compact && segOk && size === 'lg') h += seg(term, o.mk);
     h += o.ctl ? ctlHTML(s, o) : (o.tools || '');
-    ['place', 'model', 'more'].forEach(function (kd) { if (pmOpen(s.k, kd)) h += paneMenu(s, kd, o); });
+    ['place', 'model', 'more', 'end'].forEach(function (kd) { if (pmOpen(s.k, kd)) h += paneMenu(s, kd, o); });
     var r2 = o.compact ? '' : (segOk && size !== 'lg' ? seg(term, false) : '') + (o.tools2 || '') + (size === 'sm' ? '' : mdlBtn(s, o.main) + meta(s, true) + (o.mk ? mk(12) : '') + tkLink(s));
     if (r2) h += '<span class="mw-prow">' + r2 + '</span>';
     h += '</header><div class="mw-pb">' + (qOut ? '<div class="mw-qwrap">' + qHTML(s, o.quiet) + '</div>' : '') + '<div class="mw-pmain">';
     if (asking) h += startHTML(s, o.mk);
     else if (s.s === 'queue') h += '<div class="mw-start"><h2>In line</h2><p class="meta">All ' + max() + ' helper places are in use. This one starts by itself when a place is free. Idle helpers close after about an hour.</p></div>';
-    else h += (s.q && !qOut ? qHTML(s, o.quiet) : '') + (term ? termHTML(s) : chatHTML(s, o.prim && !s.q, o.mk));
+    else h += (s.q && !qOut ? qHTML(s, o.quiet) : '') + idleHTML(s) + (term ? termHTML(s) : chatHTML(s, o.prim && !s.q, o.mk));
     h += '</div>' + (size === 'sm' || o.noshelf ? '' : shelf(s, o.mk)) + '</div></section>';
     return h;
   }
@@ -332,11 +333,13 @@
     var it = function (act, label, x) { x = x || {}; x['data-k'] = s.k; return btn('mw-opt', act, label, x); }, m = eff(), segOk = s.kind !== 'shell' && live(s) && s.s !== 'queue';
     var place = it('mode', I.bottom + '<span>At the bottom</span>', { 'data-m': 'bottom', 'aria-pressed': String(m === 'bottom') }) + '<span class="mw-nophone">' + it('mode', I.right + '<span>On the right</span>', { 'data-m': 'right', 'aria-pressed': String(m === 'right') }) + '</span>' + it('full', I.full + '<span>Full screen</span>', { 'aria-pressed': String(m === 'full') });
     if (kind === 'place') return '<div class="mw-pmenu" role="group" aria-label="Where Focus sits"><p class="mw-poph">Where Focus sits</p>' + place + '</div>';
+    if (kind === 'end') return sessMenu(s, 'end');
     if (kind === 'model') return '<div class="mw-pmenu" role="group" aria-label="Model"><p class="mw-poph">' + TOOL[s.tool || 't1'] + ': model</p>' + MODELS[s.tool || 't1'].map(function (x) { return it('smodel', x + (x === mdl(s) ? ' (now)' : ''), { 'data-v': x, 'aria-pressed': String((s.next || mdl(s)) === x) }); }).join('') + '<p class="meta">A new model applies when the helper finishes its current step (or at its next start).</p></div>';
-    return '<div class="mw-pmenu" role="group" aria-label="More for ' + esc(s.k) + '">' + (segOk ? it('view', st.term ? 'Show chat' : 'Show terminal', { 'data-v': st.term ? 'chat' : 'term' }) : '') + (s.kind !== 'shell' ? it('ask', 'History') + it('pm', 'Model: ' + mdl(s), { 'data-kind': 'model' }) : '') + (o.narrow ? it('pin', s.pin ? 'Unpin' : 'Pin') + place : '') + (s.kind === 'ticket' ? it('ticket', 'Open ticket') : '') + '</div>';
+    return '<div class="mw-pmenu" role="group" aria-label="More for ' + esc(s.k) + '">' + (segOk ? it('view', st.term ? 'Show chat' : 'Show terminal', { 'data-v': st.term ? 'chat' : 'term' }) : '') + (s.kind !== 'shell' ? it('ask', 'History') + it('pm', 'Model: ' + mdl(s), { 'data-kind': 'model' }) : '') + (o.narrow ? it('pin', s.pin ? 'Unpin' : 'Pin') + place : '') + (s.kind === 'ticket' ? it('ticket', 'Open ticket') : '') + (o.compact && live(s) ? '<p class="mw-poph">This session</p>' + sessItems(s, 'more') : '') + '</div>';
   }
   function ctlHTML(s, o) {
     var h = '<span class="mw-ctl">';
+    if (!o.compact) h += stopBtn(s) + endBtn(s);
     if (!o.narrow) h += pinBtn(s);
     h += btn('btn icon sm ghost mw-nophone', 'addpane', I.plus, { disabled: o.n >= 3 ? 'disabled' : false, 'aria-label': 'Add a session beside this one', title: o.n >= 3 ? 'Three sessions is the most' : 'Add a session beside this one' });
     if (!o.narrow) h += pmBtn(s, 'place', I[eff() === 'right' ? 'right' : 'bottom'], 'Where Focus sits');
@@ -353,14 +356,67 @@
   function histBtn(s) { return s.kind !== 'shell' ? btn('btn sm ghost', st.ask ? 'askoff' : 'ask', 'History', { 'aria-pressed': String(!!st.ask && live(s)) }) : ''; }
   function paneTools(s) { return pinBtn(s); }
 
+  /* ---------- Stop and End session (ORCH-817): the same two in the pane, the wall tile menu and the bar ----------
+     Stop ends the current step; the session stays. End session ends the process after one question; a helper's
+     session moves to History (Continue, Fresh start or Reopen bring it back), a plain terminal just closes. */
+  function working(s) { return s.s === 'run' || s.s === 'wait'; }
+  function hist(s) { return (s.hist || []).concat(HIST); }
+  function stopBtn(s) {
+    if (!live(s) || s.kind === 'shell') return '';
+    return btn('btn icon sm ghost', 'stopstep', I.stop, { 'data-k': s.k, disabled: working(s) ? false : 'disabled', 'aria-label': 'Stop the current step of ' + s.k, title: working(s) ? 'Stop: ends the current step, the session stays' : 'Nothing is running right now' });
+  }
+  function endBtn(s) { return live(s) ? pmBtn(s, 'end', I.power, 'End session of ' + s.k) : ''; }
+  function endQ(s) {
+    return '<div class="mw-endq" role="group" aria-label="End ' + esc(nm(s)) + '?"><p><strong>End ' + esc(nm(s)) + '?</strong></p><p class="meta">' + (s.kind === 'shell' ? 'The terminal closes.' : 'The helper stops for good. Its conversation is kept in History, where you can reopen it.') + '</p><div class="mw-endb">' + btn('btn danger sm', 'endok', 'End session', { 'data-k': s.k }) + btn('btn ghost sm', 'endno', 'Keep it', { 'data-k': s.k }) + '</div></div>';
+  }
+  function sessItems(s, where) {
+    if (!live(s)) return '';
+    if (st.endask === s.k || where === 'end') return endQ(s);
+    var it = function (act, icon, label, sub, x) { x = x || {}; x['data-k'] = s.k; return btn('mw-opt mw-sopt', act, icon + '<span class="mw-sopt-t"><span>' + label + '</span><span class="meta">' + sub + '</span></span>', x); };
+    return (s.kind === 'shell' ? '' : it('stopstep', I.stop, 'Stop', working(s) ? 'Ends the current step. The session stays.' : 'Nothing is running right now.', { disabled: working(s) ? false : 'disabled' }))
+      + it('endask', I.power, 'End session', s.kind === 'shell' ? 'Closes the terminal.' : 'Ends the helper. It moves to History.');
+  }
+  function sessMenu(s, where) { return '<div class="mw-pmenu mw-smenu" role="group" aria-label="Stop or end ' + esc(s.k) + '">' + (where === 'end' ? '' : '<p class="mw-poph">' + esc(nm(s)) + '</p>') + sessItems(s, where) + '</div>'; }
+  /* an idle helper never shows an empty box: what it is doing, what to type, and a way out when it hangs */
+  function idleHTML(s) {
+    if (s.s !== 'idle' || s.kind === 'shell') return '';
+    var head = s.login ? 'The helper stopped: its login changed.' : (s.sl || 'Idle') + '. Nothing is running.';
+    var tail = s.login ? 'Start it again to use the new login. The conversation is kept.' : 'Type a message below to give it work. If it hangs, start it again.';
+    return '<div class="mw-idle" role="status"><p><strong>' + esc(head) + '</strong> ' + tail + '</p><div class="mw-endb">' + btn('btn outline sm', 'restart', 'Start again', { 'data-k': s.k, 'aria-label': 'Start ' + s.k + ' again' }) + btn('btn ghost sm', 'pm', 'End session', { 'data-k': s.k, 'data-kind': 'end' }) + '</div></div>';
+  }
+  function hhmm() { var d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+  function stopStep(k) {
+    var s = by(k); if (!working(s)) return;
+    push(s, '⏺ Stopped by you. Tell me what to do next.'); s.feed = null; s.s = 'idle'; s.sl = 'Stopped just now'; s.now = 'Stopped by you. The session stays; type to go on.';
+    st.pm = ''; st.endask = '';
+    render('.mw-pane[data-k="' + k + '"] input'); say(k + ' stopped its step. The session stays.');
+  }
+  function endSession(k, quiet) {
+    var s = by(k);
+    st.pm = ''; st.endask = '';
+    if (s.kind === 'shell') {
+      S.splice(S.indexOf(s), 1);
+      var i = st.panes.indexOf(k);
+      if (i >= 0) { if (st.panes.length < 2) { st.mode = 'bar'; st.panes = [S[0].k]; st.cur = S[0].k; } else { st.panes.splice(i, 1); st.act = 0; st.cur = st.panes[0]; } }
+      if (st.cur === k) st.cur = S[0].k;
+      if (!quiet) { render('.mw-bar .mw-home'); say('Plain terminal closed.'); }
+      return;
+    }
+    var t = hhmm();
+    s.lines.push('', '  Session ended by you at ' + t); s.chat.push(['e', 'Session ended', t]);
+    s.s = 'none'; s.sl = 'Ended'; s.feed = null; s.q = null; s.login = false; s.last = 'today ' + t; s.now = 'Session ended at ' + t + '. Its conversation is in History.';
+    s.hist = [['Today ' + t, 'just now', 'The session you ended']].concat(s.hist || []);
+    if (!quiet) { render('.mw-pane[data-k="' + k + '"] .mw-start button'); say(k + ' ended. Its conversation is in History.'); }
+  }
+
   /* ---------- Focus page: the wall in bands, and zoom ---------- */
-  function tileActs(s) { return '<span class="grow"></span>' + tkLink(s) + (s.s === 'none' ? btn('btn outline sm', 'zoom', 'Start', { 'data-k': s.k }) : '') + pinBtn(s) + besideBtn(s); }
+  function tileActs(s) { return '<span class="grow"></span>' + tkLink(s) + (s.s === 'none' ? btn('btn outline sm', 'zoom', 'Start', { 'data-k': s.k }) : '') + pinBtn(s) + besideBtn(s) + (live(s) ? pmBtn(s, 'tile', I.more, 'More for ' + s.k) : '') + (pmOpen(s.k, 'tile') ? sessMenu(s, 'tile') : ''); }
   function openB(s, cls, inner) { return btn(cls, 'zoom', inner, { 'data-k': s.k, 'aria-label': 'Open ' + s.k + ', ' + nm(s) + ', ' + word(s) }); }
   function tile(s) {
     return '<article class="mw-tile mw-work" data-tile="' + esc(s.k) + '" data-s="' + s.s + '">' + openB(s, 'mw-topen', '<span class="mw-thead">' + stat(s) + '<span class="mw-key">' + esc(s.k) + '</span></span><span class="mw-tt">' + esc(nm(s)) + '</span><span class="mw-now" data-now="' + esc(s.k) + '">' + esc(now(s)) + '</span>' + (live(s) ? '<span class="mw-peek" data-peek="' + esc(s.k) + '" aria-hidden="true">' + esc(peekText(s)) + '</span>' : '')) + meta(s) + '<footer class="mw-tfoot">' + steps(s) + tileActs(s) + '</footer></article>';
   }
   function line(s) {
-    return '<div class="mw-line" data-tile="' + esc(s.k) + '" data-s="' + s.s + '">' + openB(s, 'mw-lopen', stat(s) + '<span class="mw-key">' + esc(s.k) + '</span><span class="mw-tt">' + esc(nm(s)) + '</span><span class="mw-lnow" data-now="' + esc(s.k) + '">' + esc(now(s)) + '</span>') + '<span class="mw-lmeta meta">' + tool(s) + '<span>' + warm(s) + '</span></span>' + tkLink(s) + (s.s === 'none' ? btn('btn outline sm', 'zoom', 'Start', { 'data-k': s.k }) : '') + pinBtn(s) + '</div>';
+    return '<div class="mw-line" data-tile="' + esc(s.k) + '" data-s="' + s.s + '">' + openB(s, 'mw-lopen', stat(s) + '<span class="mw-key">' + esc(s.k) + '</span><span class="mw-tt">' + esc(nm(s)) + '</span><span class="mw-lnow" data-now="' + esc(s.k) + '">' + esc(now(s)) + '</span>') + '<span class="mw-lmeta meta">' + tool(s) + '<span>' + warm(s) + '</span></span>' + tkLink(s) + (s.s === 'none' ? btn('btn outline sm', 'zoom', 'Start', { 'data-k': s.k }) : '') + pinBtn(s) + (live(s) ? pmBtn(s, 'tile', I.more, 'More for ' + s.k) : '') + (pmOpen(s.k, 'tile') ? sessMenu(s, 'tile') : '') + '</div>';
   }
   function band(id, title, list, draw, cls, empty, extra) {
     var col = !!st.col[id];
@@ -385,7 +441,7 @@
   }
   function zoomHTML() {
     var s = by(st.cur);
-    var tools = histBtn(s) + paneTools(s) + '<span class="mw-view">' + mk(8) + btn('btn icon sm ghost', 'full', I.full, { 'aria-label': 'Full screen' }) + '</span>';
+    var tools = histBtn(s) + stopBtn(s) + endBtn(s) + paneTools(s) + '<span class="mw-view">' + mk(8) + btn('btn icon sm ghost', 'full', I.full, { 'aria-label': 'Full screen' }) + '</span>';
     return '<div class="mw-zoom"><h1 class="sr-only">Focus: ' + esc(s.k) + '</h1>' + pane(s.k, 'lg', { main: true, prim: true, mk: true, pre: btn('btn sm ghost', 'back', I.back + '<span>Wall</span>'), tools: tools }) + '</div>';
   }
 
@@ -450,9 +506,11 @@
   }
   function listRows() {
     var q = st.lq.trim().toLowerCase(), l = sorted().filter(function (o) { return inList(o, st.list) && (!q || (o.k + ' ' + nm(o)).toLowerCase().indexOf(q) >= 0); });
-    return l.length ? l.map(function (o) { return btn('mw-opt mw-lrow', 'switch', stat(o) + '<span class="mw-key">' + esc(o.k) + '</span><span class="mw-rn">' + esc(nm(o)) + '</span><span class="meta">' + esc(tlabel(o)) + '</span>', { 'data-k': o.k }); }).join('') : '<p class="meta">No session matches.</p>';
+    return l.length ? l.map(function (o) { return '<div class="mw-lrw">' + btn('mw-opt mw-lrow', 'switch', stat(o) + '<span class="mw-key">' + esc(o.k) + '</span><span class="mw-rn">' + esc(nm(o)) + '</span><span class="meta">' + esc(tlabel(o)) + '</span>', { 'data-k': o.k }) + (live(o) ? pmBtn(o, 'bar', I.more, 'Stop or end ' + o.k) : '') + '</div>'; }).join('') : '<p class="meta">No session matches.</p>';
   }
   function popHTML(mode) {
+    var bk = /\|bar$/.test(st.pm) ? st.pm.slice(0, -4) : '';
+    if (bk && has(bk)) return '<div class="mw-pop mw-pop-sess" role="group" aria-label="Stop or end ' + esc(bk) + '">' + (st.list ? btn('mw-tkl', 'pm', '‹ ' + LIST[st.list][2], { 'data-k': bk, 'data-kind': 'bar' }) : '') + '<p class="mw-poph">' + esc(nm(by(bk))) + ' <span class="mw-key">' + esc(bk) + '</span></p>' + sessItems(by(bk), 'bar') + '</div>';
     if (st.menu === 'new') return '<div class="mw-pop" role="group" aria-label="New session without a ticket"><p class="mw-poph">New session without a ticket</p>' + pickHTML() + '<div class="mw-plist">' + NEW.map(function (o) { return btn('mw-opt', 'new', '<strong>' + o[0] + '</strong><span class="meta">' + (has(o[0]) ? 'Already open: go to it' : o[1]) + '</span>', { 'data-k': o[0] }); }).join('') + '</div><p class="meta">' + used() + ' of ' + max() + ' helper places in use</p></div>';
     if (st.menu === 'pos') {
       var po = function (act, m, icon, label, on, cls) { return btn('mw-opt mw-posopt' + (cls || ''), act, icon + '<span>' + label + '</span>', { 'data-m': m, 'aria-pressed': String(on) }); };
@@ -546,6 +604,7 @@
     if (st.list) p.push('list=' + st.list);
     if (st.menu) p.push('menu=' + st.menu);
     if (st.pm) p.push('pm=' + encodeURIComponent(st.pm.replace('|', ':')));
+    if (st.endask) p.push('endask=' + encodeURIComponent(st.endask));
     if (st.nt !== 't1' || st.nm !== 'Sonnet') p.push('tool=' + st.nt, 'model=' + encodeURIComponent(st.nm));
     if ((by(st.cur).att || []).length) p.push('att=1');
     if (st.voice) p.push('voice=' + st.voice);
@@ -737,9 +796,14 @@
     var nav = e.target.closest('.sidebar .nav-item[aria-label], .sidebar .brand');
     if (nav) { var p = nav.classList.contains('brand') ? 'home' : nav.getAttribute('aria-label').toLowerCase(); if (PAGES[p]) { e.preventDefault(); setPage(p); return; } }
     var b = e.target.closest('[data-act]');
-    if (!b) { if ((st.menu || st.list || st.pm) && !e.target.closest('.mw-pop, .mw-pmenu')) { st.menu = ''; st.list = ''; st.pm = ''; render(); } return; }
+    if (!b) { if ((st.menu || st.list || st.pm) && !e.target.closest('.mw-pop, .mw-pmenu')) { st.menu = ''; st.list = ''; st.pm = ''; st.endask = ''; render(); } return; }
     var a = b.dataset.act, k = b.dataset.k, s;
-    if (a === 'pm') { var pk = k + '|' + b.dataset.kind; st.pm = st.pm === pk ? '' : pk; st.menu = ''; st.list = ''; render(st.pm ? '.mw-pmenu .mw-opt' : '[data-act=pm][data-k="' + k + '"][data-kind=' + b.dataset.kind + ']'); return; }
+    if (a === 'pm') { var pk = k + '|' + b.dataset.kind; st.pm = st.pm === pk ? '' : pk; st.endask = ''; st.menu = ''; if (b.dataset.kind !== 'bar') st.list = ''; render(st.pm ? '.mw-pmenu .mw-opt:not([disabled]), .mw-pmenu .btn, .mw-pop-sess .mw-opt:not([disabled])' : '[data-act=pm][data-k="' + k + '"][data-kind=' + b.dataset.kind + ']'); return; }
+    if (a === 'stopstep') { stopStep(k); return; }
+    if (a === 'endask') { st.endask = k; render('.mw-endq .btn'); return; }
+    if (a === 'endno') { st.endask = ''; st.pm = ''; render(); say('The session stays.'); return; }
+    if (a === 'endok') { endSession(k); return; }
+    if (a === 'restart') { s = by(k); st.pm = ''; st.endask = ''; s.login = false; s.s = 'none'; begin(s, ['', '⏺ Started again. Picking up the same conversation.'], 'Started again'); return; }
     if (st.pm) { st.pm = ''; if (k && has(k) && (a === 'ask' || a === 'view')) st.cur = k; }
     if (a === 'ntool') { st.nt = b.dataset.v; st.nm = AG[st.nt].usual; render('[data-act=ntool][data-v=' + st.nt + ']'); return; }
     if (a === 'nmodel') { st.nm = b.dataset.v; render('[data-act=nmodel][aria-pressed=true]'); return; }
@@ -773,7 +837,7 @@
     else if (a === 'ren') { st.ren = k; render('.mw-ren input'); var ri = q1('.mw-ren input'); if (ri) ri.select(); }
     else if (a === 'answer') answer(k, +b.dataset.a);
     else if (a === 'start') start(k, b.dataset.how);
-    else if (a === 'reopen') { s = by(k); begin(s, ['', '⏺ Reopened the session from ' + HIST[+b.dataset.i][0] + '.'], 'Reopened the session from ' + HIST[+b.dataset.i][0]); }
+    else if (a === 'reopen') { s = by(k); var hd = hist(s)[+b.dataset.i][0]; begin(s, ['', '⏺ Reopened the session from ' + hd + '.'], 'Reopened the session from ' + hd); }
     else if (a === 'ask') { st.ask = true; render('.mw-start button'); }
     else if (a === 'askoff') { st.ask = false; render('[data-act=ask]'); }
     else if (a === 'new') create(k);
@@ -788,6 +852,10 @@
     else if (a === 'copy') clip('Focus draft D: my picks\n' + F.map(function (f) { return f[0] + '. ' + f[1] + ': ' + (picks[f[0]] || 'not picked'); }).join('\n') + '\n\nResult widgets\n' + WG.map(function (w) { return w[1] + ': ' + (picks['w:' + w[0]] || 'not picked'); }).join('\n'), function () { var c = $('mw-copied'); if (c) c.textContent = 'Copied'; });
   });
   function closeOv() { var o = st.ov; st.ov = null; render(o ? '[data-act=ov][data-src="' + o.src + '"][data-i="' + o.i + '"]' : ''); }
+  document.addEventListener('contextmenu', function (e) {
+    var c = e.target.closest('.mw-bar [data-act=switch][data-k]'); if (!c || !live(by(c.dataset.k))) return;
+    e.preventDefault(); st.pm = c.dataset.k + '|bar'; st.endask = ''; st.menu = ''; st.list = ''; render('.mw-pop-sess .mw-opt:not([disabled])');
+  });
   document.addEventListener('change', function (e) {
     if (e.target.id === 'mw-marks') { st.marks = e.target.checked; render('#mw-marks'); }
     if (e.target.id === 'mw-many') { many(e.target.checked); render('#mw-many'); say(e.target.checked ? 'Demo shows 24 sessions.' : 'Demo shows 6 sessions.'); }
@@ -898,8 +966,11 @@
     if (/^(new|pos)$/.test(v = q.get('menu') || '')) st.menu = v;
     if (MODELS[v = q.get('tool')]) { st.nt = v; st.nm = MODELS[v].indexOf(q.get('model')) >= 0 ? q.get('model') : AG[v].usual; }
     else if (MODELS.t1.indexOf(q.get('model')) >= 0) st.nm = q.get('model');
-    if ((v = q.get('pm'))) { var pc = v.lastIndexOf(':'); if (pc > 0 && has(v.slice(0, pc)) && /^(place|model|more)$/.test(v.slice(pc + 1))) st.pm = v.slice(0, pc) + '|' + v.slice(pc + 1); }
+    if ((v = q.get('pm'))) { var pc = v.lastIndexOf(':'); if (pc > 0 && has(v.slice(0, pc)) && /^(place|model|more|end|tile|bar)$/.test(v.slice(pc + 1))) st.pm = v.slice(0, pc) + '|' + v.slice(pc + 1); }
     if (q.get('att') === '1') by(st.cur).att = DEMO.slice();
+    if ((v = q.get('hung')) && has('Manager')) { var mg = by('Manager'); mg.s = 'idle'; mg.feed = null; mg.sl = 'Nothing running for 3 min'; mg.now = 'Nothing running for 3 min.'; if (v === 'login') { mg.login = true; mg.lines.push('  ⎿ API Error: 401 · Your login changed. Please run /login'); } }
+    if ((v = q.get('ended')) && has(v)) endSession(v, true);
+    if ((v = q.get('endask')) && has(v)) st.endask = v;
     if (/^(rec|done)$/.test(v = q.get('voice') || '')) { st.voice = v; st.vk = st.cur; if (v === 'done') drafts['c:' + st.cur] = 'Please keep the old file name, and add a note for the support team.'; }
     st.f = q.get('q') || '';
     if ((v = q.get('res'))) { var c = v.lastIndexOf(':'), src = v.slice(0, c), ri = +v.slice(c + 1); if ((src === '*' || has(src.replace(/^(att|sent):/, ''))) && files(src)[ri]) st.ov = { src: src, i: ri }; }
