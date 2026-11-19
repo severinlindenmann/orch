@@ -115,8 +115,9 @@ Those workspaces can send the phone text and questions (`orch relay send ph_… 
 - CI: `relay/**`, `contracts/**`; `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`.
 
 ## Deploy
-`relay-deploy.yml` on push to `main`: build, copy over SSH, `systemctl restart orch-relay`, check `/health`.
-First install: `deploy/install.sh` (user, folders, master key, admin token, Caddy route). Same VPS as publish.
+Built by the `relay` CI job (artifact `orch-relay-linux-x86_64`), copied to the server and `systemctl restart orch-relay`, check `/health`.
+First install: `deploy/install.sh` (user, folders, master key, admin token, service; Caddy route in `deploy/Caddyfile`). Same server as publish.
+Moving to a new server: `deploy/MOVE.md`.
 
 ## Groups
 Each workspace is in one group (Private, Work, ...). A group's defaults say which kinds of shared tools its members get
