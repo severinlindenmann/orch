@@ -167,6 +167,23 @@ def _only_waits_for_checks(rec: dict) -> bool:
     return False
 
 
+def _waits_on_time_or_work(root: Path, rec: dict) -> bool:
+    """Idle at its prompt on a ticket that waits for a time, another ticket or something outside (a pull
+    request, the merge queue): the ticket wakes by its timer or the verdict, the session does nothing and
+    uses no machine, so it does not hold a slot. A wait on a question or a start that failed still counts."""
+    if (rec.get("live") or {}).get("state") != "idle":
+        return False
+    with contextlib.suppress(Exception):
+        t = tickets.load(root, rec["ticket"])
+        w = t.get("waiting_on") or {}
+        return (
+            t.get("status") == "waiting"
+            and w.get("kind") in ("time", "ticket", "external")
+            and not w.get("start")
+        )
+    return False
+
+
 def _runs_check_wait(rec: dict) -> bool:
     """The agent runs a wait on pull request checks (orch ref wait, orch github wait) right now. The tool
     says idle once it put the wait in the background and ended its turn, but the wait still merges on green
@@ -191,14 +208,16 @@ def _keeps_busy(root: Path, rec: dict) -> bool:
 def live_alive(root: Path) -> list[dict]:
     """Live runs that count against the limit. A session that is idle or waiting for a person on a ticket in
     Review, Done or Dropped does not (it closes by itself after FINISHED_IDLE_SECONDS), nor does one idle
-    while it only waits for pull request checks; a working or starting one does. Both stay under the
-    hard ceiling in _full (the limit plus HARD_EXTRA)."""
+    while it only waits for pull request checks, nor one idle on a ticket that waits for a time, another
+    ticket or something outside (ORCH-666); a working or starting one does. Both stay under the hard ceiling
+    in _full (the limit plus HARD_EXTRA)."""
     return [
         r
         for r in live_all(root)
         if not (
             ((r.get("live") or {}).get("state") in ("idle", "attention") and _finished(root, r["ticket"]))
             or _only_waits_for_checks(r)
+            or _waits_on_time_or_work(root, r)
         )
     ]
 

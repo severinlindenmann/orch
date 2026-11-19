@@ -243,3 +243,17 @@ def test_the_dashboards_exact_command_shape(cli, fake_switcher, ws):
     assert code == 0 and json.loads(out)["account"]["rule"]["limits"] == [
         {"value": 88, "unit": "%", "period": "week"}
     ]
+
+
+def test_until_on_a_week_limit_is_refused_with_a_hint_to_use_end(cli, fake_switcher, ws):
+    _seed(cli)
+    f = ws / ".orch/addons/usage/accounts.json"
+    before = f.read_text()
+    for argv in (
+        ("limit", "first", "90%", "--period", "week", "--until", "2099-02-01"),
+        ("limit", "first", "90%", "--period", "5h", "--until", "2099-02-01"),
+        ("period", "first", "5h", "--of", "week", "--until", "2099-02-01"),
+    ):
+        code, out, err = cli(*argv)
+        assert code == 2 and "--end" in (out + err), argv
+    assert f.read_text() == before

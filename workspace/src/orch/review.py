@@ -17,7 +17,7 @@ import os
 import re
 from pathlib import Path
 
-from orch import history, safefile, tickets
+from orch import history, ownerpick, safefile, tickets
 from orch.tickets import Refused
 
 KINDS = ("draft", "check", "link", "choice", "plan")
@@ -876,7 +876,7 @@ _CHECK_FILE_TYPES = {
     ".html": "page", ".htm": "page", ".pdf": "file",
 }  # fmt: skip
 _CHECK_FILE_NAME = re.compile(r"[^/\\\x00-\x1f\x7f]{1,200}(/[^/\\\x00-\x1f\x7f]{1,200}){0,3}")
-MAX_CHECK_FILES = 6
+MAX_CHECK_FILES = 24  # the card shows 5 tiles and a "+N more" tile (ORCH-421)
 
 
 def _check_files(ticket: dict, root: Path | None) -> list[dict]:
@@ -1023,18 +1023,22 @@ def decide(
     digest: str | None = None,
     phone: str | None = None,
     pid: str | None = None,
+    person: bool = False,
 ) -> dict:
     """One swipe. key is a question id (q3) or "review" (a ticket in Review). Returns the decision entry
-    (the answered question). The person's own checks (human: author, not an agent) stay in tickets."""
+    (the answered question). The person's own checks (human: author, not an agent) stay in tickets.
+    person: a signed-in person on the dashboard or a paired phone; a draft card, and the Check of a ticket
+    that carries one, take nothing else (ORCH-582, orch/ownerpick.py)."""
     ticket = tickets.load(root, tid)
     if key == "review":
         if picked is not None:
             raise BadVerdict("A Check result has no options to pick.")
-        return _decide_check(root, ticket, verdict, note, by, via, digest, phone, pid)
+        return _decide_check(root, ticket, verdict, note, by, via, digest, phone, pid, person)
     q = _find(ticket, key)
     tickets.refuse_if_taken_back(q)
     if q.get("answer") is not None:
         raise Refused(f"{key} is already answered. Use change to answer again.")
+    ownerpick.refuse_card(q, person)  # before a merge or anything else is tried
     card = _card_of(q)
     d = _decision(q, card, verdict, picked, note)
     if digest is not None and tickets.question_digest(q) != digest:  # before a merge, not only at the write
@@ -1044,7 +1048,15 @@ def decide(
     except _merge_failed() as e:  # GitHub said no: the helper gets the reason and fixes it
         d = _send_back_after_failed_merge(card, str(e))
     _, out = tickets.answer(
-        root, tid, key, _plain_answer(q, d), by, via, expected_question_digest=digest, decision=d
+        root,
+        tid,
+        key,
+        _plain_answer(q, d),
+        by,
+        via,
+        expected_question_digest=digest,
+        decision=d,
+        person=person,
     )
     return out
 
@@ -1199,10 +1211,12 @@ def _decide_check(
     digest: str | None,
     phone: str | None = None,
     pid: str | None = None,
+    person: bool = False,
 ) -> dict:
     tid = ticket["id"]
     if not by.startswith("human:"):  # a verdict on a Check result is a person's (label check)
         raise Refused("Only a person can decide this. Ask the human to do it themselves.")
+    ownerpick.refuse_ticket(ticket, person)  # ORCH-582: a ticket with a draft is accepted only by a person
     if verdict not in VERDICTS:
         raise Refused(f"verdict is one of {', '.join(VERDICTS)}.")
     if ticket.get("status") != "review":
@@ -1213,7 +1227,7 @@ def _decide_check(
     n = _note_bv(note)
     if verdict == "ok":
         d = _bare("approve", card["ok_label"], [], n)
-        tickets.accept_review(root, tid, by, via)
+        tickets.accept_review(root, tid, by, via, person=person)
     else:
         changes = _what_changes(n)
         if not changes:
@@ -1229,7 +1243,7 @@ def _decide_check(
         "card": card,
         "decision": d,
     }
-    return tickets.record_answered(root, tid, entry, by, via)
+    return tickets.record_answered(root, tid, entry, by, via, person=person)
 
 
 def change(
@@ -1243,6 +1257,7 @@ def change(
     by: str,
     via: str,
     digest: str | None = None,
+    person: bool = False,
 ) -> dict:
     """Answer an answered card again: a NEW entry (same card and shown) with decision.replaces = qid; the old
     entry only gets decision.replaced_by. Nothing is overwritten."""
@@ -1255,6 +1270,7 @@ def change(
         raise Refused("A Check result is final. Reopen the ticket to look at it again.")
     if digest is not None and tickets.question_digest(old) != digest:
         raise Refused(f"{qid} changed after it was shown. Look at the question again, then answer.")
+    ownerpick.refuse_card(old, person)
     card = _card_of(old)
     d = _decision(old, card, verdict, picked, note)
     if merge_url(old) and (old.get("decision") or {}).get("action") == "approve":
@@ -1268,7 +1284,7 @@ def change(
     }
     entry["answer"] = _plain_answer(old, d)
     entry["decision"] = d
-    return tickets.record_answered(root, tid, entry, by, via, replaces=qid)
+    return tickets.record_answered(root, tid, entry, by, via, replaces=qid, person=person)
 
 
 # ---------------------------------------------------------------- the stack
@@ -1405,6 +1421,8 @@ def applies_now_block(ticket: dict, root: Path | None = None) -> str:
             "none_of_these": "None of the options.",
         }.get(d.get("action"), d.get("summary", ""))
         then = card.get("then")
+        if d.get("action") == "send_back" and card.get("kind") == "check":
+            then = "The helper makes a new version."  # not the card's "The ticket is done."
         lines.append(
             f"{head}{' ' + then if then and d.get('action') not in ('dont', 'none_of_these') else ''}"
         )

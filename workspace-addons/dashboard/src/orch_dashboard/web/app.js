@@ -180,6 +180,20 @@ function skeletonFor(kind) {
     : [bar('sk-title'), stack(3)];
   return h('div', {className:'skeleton-page sk-' + kind, 'data-key':'loading', 'aria-busy':'true'}, h('p', {className:'sr-only', role:'status'}, 'Loading…'), shape);
 }
+// One menu entry; `here` is the address of the page shown, which gets aria-current.
+function navEntry(here, url, text, glyph, tail = null) {
+  return h('a', {className:'nav-item', href:url, 'aria-label':text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
+}
+// The menu before the state is there (report r-1118-2330, ORCH-692): on a busy machine the first state can take
+// seconds after 'orch start', and the menu stayed empty until then. Home, Tickets and Review never depend on the
+// state, so they show at once; the sidebar says it is still loading until render() draws the rest (Chat, add-ons,
+// Settings) into the same entries.
+function startNav(hash) {
+  const k = String(hash || '').split('?')[0], kind = k.replace(/^#/, '').split('/')[0];
+  const here = !kind || kind === 'home' ? '#home' : kind === 'ticket' ? '#tickets' : k;
+  document.getElementById('side-menu')?.setAttribute('aria-busy', 'true');
+  reconcile(nav, fragment(navEntry(here, '#home', 'Home', 'home'), navEntry(here, '#tickets', 'Tickets', 'tickets'), navEntry(here, '#review', 'Review', 'review')));
+}
 // The skeleton for an address before the state is there (no state needed).
 function hashKind(hash) {
   const k = String(hash || '').split('?')[0].replace(/^#/, '').split('/')[0];
@@ -402,9 +416,10 @@ function render(arrived = new Set()) {
   const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
   const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' || r.kind === 'live' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
-  const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-label':text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
+  const navLink = (url, text, glyph, tail = null) => navEntry(here, url, text, glyph, tail);
   const needsWords = window.DashHelpers.needsYou(needCount), contactsAddon = addons().find(a => a.dashboard?.panel === 'phone' && a.dashboard);
   // The needs-you number sits on Review (the page that lists exactly those questions and results), not on Home (ORCH-63)
+  document.getElementById('side-menu')?.removeAttribute('aria-busy');
   reconcile(nav, fragment(navLink('#home', 'Home', 'home'), navLink('#tickets', 'Tickets', 'tickets'),
     snapshot ? null : navLink('#review', 'Review', 'review', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null),
     state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null,
@@ -430,8 +445,10 @@ function render(arrived = new Set()) {
   }
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
   if (typeof liveDockSync === 'function') liveDockSync();  // the layer of the new live page (Preview), outside main
+  if (typeof liveOpenFromAddress === 'function') liveOpenFromAddress(r);  // a ticket's address opens its session (ORCH-465)
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'ticket') mountTicketTalk(main);
+  if (typeof startMount === 'function') startMount(main);  // every Start button (pages/start.js)
   main.querySelectorAll('[data-question]').forEach(host => {
     if (!mounts.has(host)) {
       const t = ticketOf(host.dataset.ticket), q = array(t?.questions).find(q => q.id === host.dataset.question);
@@ -484,11 +501,12 @@ async function actRetry(op, args, applies) {
   if (!applies()) return first;
   return act(op, args());
 }
-window.orchAct = (op, args) => act(op, args);
+window.orchAct = (op, args, opts) => act(op, args, opts);
+window.orchActId = () => newActId();  // one id a form keeps for its retries (ORCH-580)
 // Turning an add-on on or off restarts the running services, this page's server too. When the answer is lost on
 // the way (the server restarted), read the state again once it is back: the add-on's switch says if it worked.
 async function addonSet(name, on, tries = 20, pause = 1500) {
-  const result = await act('addon.set', {name, on});
+  const result = await act('addon.set', {name, on}, {check:false});  // the server restarts: its click ids are gone
   if (result.ok || result.status !== 0 || snapshot) return result;
   for (let i = 0; i < tries; i++) {
     await new Promise(done => setTimeout(done, pause));
@@ -512,7 +530,7 @@ async function addonUninstall(name, tries = 20, pause = 1500) {
     const off = await addonSet(name, false);
     if (!off.ok) return off;
   }
-  const result = await act('addon.uninstall', {name});
+  const result = await act('addon.uninstall', {name}, {check:false});
   if (result.ok || result.status !== 0 || snapshot) return result;
   for (let i = 0; i < tries; i++) {
     await new Promise(done => setTimeout(done, pause));
@@ -548,7 +566,9 @@ function busyOff(busy) {
   busy.control.removeAttribute('aria-busy');
   if (busy.was === null) busy.control.removeAttribute('aria-disabled'); else busy.control.setAttribute('aria-disabled', busy.was);
 }
-async function act(op, args) {
+// opts.quiet: no "Could not start" notice of its own (the kit's Start button says what went wrong, pages/start.js).
+// opts.id: the click id to send (a form keeps one for its retries, ORCH-580); opts.check false: no lost-answer check.
+async function act(op, args, opts = {}) {
   if (snapshot) return {ok:false, status:0, text:'This is a shared copy.'};
   const busy = busyOn();
   const before = op === 'run.start' ? ticketOf(args.ticket)?.status : null;
@@ -556,17 +576,36 @@ async function act(op, args) {
   if (before) { starting.add(args.ticket); state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:'active'} : t); render(); }
   writing++;
   mutation++;
+  const id = opts.id || newActId();
+  const boot = serverBoot;  // the run of the dashboard this click goes to, as far as the page knows
+  let sent = false;
   try {
     const body = JSON.stringify({op, args});
-    const res = await fetch('/api/act', {method:'POST', ...(body.length < 60000 ? {keepalive:true} : {}), headers:{'Content-Type':'application/json', 'X-Orch-Op':String(op)}, body});
-    if (res.status !== 200) { const text = await res.text(); queued = op === 'run.start' && /waits in line/i.test(text); return {ok:false, status:res.status, text, queued}; }
-    const next = await res.json();
+    const headers = {'Content-Type':'application/json', 'X-Orch-Op':String(op), 'X-Orch-Act-Id':id};
+    if (state?.rev) headers['X-Orch-Have'] = String(state.rev);
+    let next;
+    try {
+      const res = await fetch('/api/act', {method:'POST', ...(body.length < 60000 ? {keepalive:true} : {}), headers, body});
+      sent = true;
+      serverBoot = res.headers?.get?.('X-Orch-Boot') || serverBoot;
+      if (res.status !== 200) { const text = await res.text(); queued = op === 'run.start' && /waits in line/i.test(text); return {ok:false, status:res.status, text, queued}; }
+      next = await actAnswer(await res.json());
+    } catch (err) {
+      // No answer, or a cut one (ERR_CONTENT_LENGTH_MISMATCH): did the click go through?
+      if (opts.check === false) throw err;
+      const lost = await actLost(id, boot);
+      if (!lost.ok) return lost;
+      succeeded = true;
+      if (before) startedAt.set(args.ticket, Date.now());
+      starting.delete(args.ticket);
+      return lost;
+    }
     succeeded = true;
     if (before) startedAt.set(args.ticket, Date.now());
     starting.delete(args.ticket);
     accept(next);
     return {ok:true, status:200, state:next};
-  } catch (err) { return {ok:false, status:0, text:err.message || 'Could not reach orch.'}; }
+  } catch (err) { return {ok:false, status:0, text:err.message || 'Could not reach orch.', sent}; }
   finally {
     busyOff(busy);
     writing--;
@@ -574,14 +613,65 @@ async function act(op, args) {
     if (before) {
       starting.delete(args.ticket);
       // a start orch put in line (every helper place in use) is not a failure: the caller says it waits in line
-      if (!succeeded) { state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:before} : t); if (!queued) window.orch.toast('Could not start the helper' + (ticketOf(args.ticket)?.title ? ' on ' + ticketOf(args.ticket).title : '') + '.', 'error'); }
+      if (!succeeded) { state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:before} : t); if (!queued && !opts.quiet) window.orch.toast('Could not start the helper' + (ticketOf(args.ticket)?.title ? ' on ' + ticketOf(args.ticket).title : '') + '.', 'error'); }
       render();
     }
   }
 }
+// Every click carries an id made here (ORCH-580). The server runs an id once: a repeat (a retry, a double click)
+// gets the first result. When the answer is lost on the way, the page asks the server whether the click went
+// through before it says anything, and says which it was.
+function newActId() {
+  const c = window.crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  const b = new Uint8Array(16); c?.getRandomValues ? c.getRandomValues(b) : b.forEach((_, i) => { b[i] = Math.random() * 256; });
+  return [...b].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+const LOST_NOT_DONE = 'The answer did not arrive, and orch checked: it was not done. Nothing was saved, try again.';
+const LOST_UNKNOWN = 'The answer did not arrive and orch could not tell whether it went through. Look in the ticket list before you try again.';
+// Which run of the dashboard the page talks to (X-Orch-Boot): a restarted one has forgotten every click id, so its
+// "unknown" never means "not done".
+let serverBoot = null;
+// The answer was lost: ask whether this id went through (a few tries, the server may still be at it). `boot`: the
+// run of the dashboard the click was sent to; "unknown" from another run (restarted meanwhile) cannot tell.
+async function actLost(id, boot, tries = 20, pause = 1500) {
+  for (let i = 0; i < tries; i++) {
+    if (i) await new Promise(done => setTimeout(done, pause));
+    let st = null;
+    try {
+      const res = await fetch('/api/act/status?id=' + encodeURIComponent(id), {cache:'no-store'});
+      if (res.ok) st = await res.json();
+    } catch (_) { /* not reachable yet */ }
+    if (!st || st.state === 'running') continue;
+    if (st.state !== 'done') {
+      if (!boot || st.boot !== boot) return {ok:false, status:0, text:LOST_UNKNOWN, lost:'unknown'};
+      return {ok:false, status:0, text:LOST_NOT_DONE, lost:'not-done'};
+    }
+    let full = null;
+    try {
+      const res = await fetch('/api/state', {cache:'no-store'});
+      if (res.ok) full = await res.json();
+    } catch (_) { /* the click went through all the same */ }
+    if (full && !full.delta) accept(full);
+    return {ok:true, status:200, state:{...(full && !full.delta ? full : state), ...(st.reply || {})}, recovered:true};
+  }
+  return {ok:false, status:0, text:LOST_UNKNOWN, lost:'unknown'};
+}
+// A click's answer may be only what changed since the revision this page holds (ORCH-580): merged here; one
+// that does not fit is replaced by the whole state, with the click's own keys kept (the server lists them in `reply`).
+async function actAnswer(next) {
+  if (!next || !next.delta) return next;
+  const merged = window.DashHelpers.applyStateDelta(state, next);
+  if (merged) return merged;
+  const own = Object.fromEntries((Array.isArray(next.reply) ? next.reply : []).filter(k => next.set && k in next.set).map(k => [k, next.set[k]]));
+  const res = await fetch('/api/state', {cache:'no-store'});
+  if (!res.ok) throw new Error('Could not load the workspace.');
+  return {...(await res.json()), ...own};
+}
 // A notice that comes while a fetch or a change is under way is kept, never dropped: that fetch may have read the
 // tickets before the change (load_state reads tickets first, run status last), so one more fetch follows it.
 let refreshAgain = false;
+let wantFull = false;  // the last delta did not fit the state held: ask for the whole state once
 async function refresh() {
   if (snapshot) return;
   if (fetching || writing) { refreshAgain = true; return; }
@@ -592,9 +682,17 @@ async function refresh() {
   const connection = document.getElementById('connection');
   try {
     // Say which revision we hold: an unchanged state comes back as a few bytes, not the whole state again.
-    const res = await fetch('/api/state' + (state?.rev ? '?have=' + encodeURIComponent(state.rev) : ''), {cache:'no-store'});
+    const have = state?.rev && !wantFull ? '?have=' + encodeURIComponent(state.rev) : '';
+    wantFull = false;
+    const res = await fetch('/api/state' + have, {cache:'no-store'});
     if (!res.ok) throw new Error('Could not load the workspace.');
-    const next = await res.json();
+    serverBoot = res.headers?.get?.('X-Orch-Boot') || serverBoot;
+    let next = await res.json();
+    if (next.delta) {  // only what changed since the revision held (ORCH-517); a delta that does not fit: the whole state
+      const merged = window.DashHelpers.applyStateDelta(state, next);
+      if (!merged) { wantFull = true; refreshAgain = true; return; }
+      next = merged;
+    }
     if (next.unchanged && state) {
       if (writing || version !== mutation) { refreshAgain = true; return; }
       connection.hidden = true;
@@ -975,11 +1073,18 @@ main.addEventListener('click', async event => {
   if (action === 'start') {
     if (locks.has('background')) return;
     locks.add('background');
+    // Starting… while it starts (ORCH-475): disabled, so a double click starts it once. It starts background work, not a
+    // helper on a ticket, so there is no Start choice here.
+    const was = control.textContent;
     control.disabled = true;
+    control.setAttribute('aria-busy', 'true');
+    control.textContent = 'Starting…';
     const result = await act('addon.start', {});
     if (!result.ok) window.orch.toast(result.text, 'error');
     locks.delete('background');
     control.disabled = false;
+    control.removeAttribute('aria-busy');
+    control.textContent = was;
     render();
   }
 });
@@ -989,6 +1094,7 @@ window.addEventListener('hashchange', async () => {
   const soft = typeof SoftNav === 'object' ? SoftNav : null;
   soft?.hold(true);
   for (const d of soft ? soft.dialogsToClose() : document.querySelectorAll('dialog[open]')) await window.orch.close(d);
+  if (!state && !snapshot) startNav(location.hash);  // a click before the first state still moves the menu's mark
   render();
   soft?.hold(false);  // render() returns early before the state arrives: scrolls must not stay unremembered (ORCH-340)
 });
@@ -1013,6 +1119,7 @@ document.querySelector('.sidebar')?.addEventListener('mouseout', () => clearTime
 if (snapshot) accept(window.ORCH_SNAPSHOT || {});
 else {
   main.replaceChildren(skeletonFor(hashKind(location.hash)));
+  startNav(location.hash);
   { const k = String(location.hash || '').split('?')[0].replace(/^#/, '').split('/')[0]; const names = {tickets:'Tickets', ticket:'Ticket', chat:'Chat', settings:'Settings'}; if (names[k]) document.getElementById('crumb').textContent = names[k]; }
   setInterval(paintUpdated, 30000);
   refresh();

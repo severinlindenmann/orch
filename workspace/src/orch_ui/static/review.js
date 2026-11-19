@@ -55,7 +55,7 @@ const mapPreview=(p,c,api)=>{if(!p||typeof p!=='object')return {type:'doc'};cons
  if(q.type==='compare'){q.before=mapPreview(p.before,c,api);q.after=mapPreview(p.after,c,api)}
  if(q.type==='options'){q.options=(p.options||[]).map(op=>Object.assign({},op,{preview:op.preview?mapPreview(op.preview,c,api):undefined,suggested:!!(op.suggested||(c&&c.recommended&&c.recommended===op.id))}));if(p.before)q.before=mapPreview(p.before,c,api)}
  return q};
-const mapFiles=(fs,c,api)=>(Array.isArray(fs)?fs:[]).filter(f=>f&&typeof f.ref==='string'&&typeof f.name==='string'&&f.name).slice(0,6)
+const mapFiles=(fs,c,api)=>(Array.isArray(fs)?fs:[]).filter(f=>f&&typeof f.ref==='string'&&typeof f.name==='string'&&f.name).slice(0,24)/* the card shows 5 and a "+N more" tile (ORCH-421) */
  .map(f=>({label:f.name.slice(0,80),type:f.type==='img'||f.type==='page'?f.type:'file',src:api.fileUrl(c,f.ref)||''})).filter(f=>f.src);
 const safeOpen=u=>typeof u==='string'&&/^https?:\/\//i.test(u)?u:undefined;
 const mapCard=(c,api,now)=>{const k=c.card||{},kd=KIND[k.kind]||[k.kind||'Review','file'];
@@ -151,7 +151,7 @@ UI.answerRecord=(e,o)=>{o=o||{};const d=e.decision||{},k=e.card||{},c=el('articl
  if(lines.length){const b=el('div','decision-words');lines.forEach(x=>b.append(el('p','',x)));c.append(b)}
  const f=el('div','decision-foot'),first=Object.keys((e.shown||{}).files||{})[0];
  if(o.fileUrl&&first){const a=el('a','btn ghost sm','View reviewed version');a.href=o.fileUrl(e,'reviewed/'+(((e.shown||{}).copy||'').replace(/^reviewed\//,'').replace(/\/$/,''))+'/'+first);a.target='_blank';a.rel='noopener';f.append(a)}
- f.append(el('span','',d.replaced_by?'Replaced by a later answer.':d.replaces?'Replaces your earlier answer.':'Kept exactly as you saw it.'));
+ f.append(el('span','',d.replaced_by?'Replaced by a later answer.':d.replaces?'Replaces your earlier answer.':d.action==='send_back'&&(e.card||{}).kind==='check'?'Your note went to the helper for a new version.':'Kept exactly as you saw it.'));
  if(d.replaced_by)c.classList.add('replaced');
  c.append(f);return c};
 

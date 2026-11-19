@@ -125,6 +125,10 @@ def _service_item(root: Path, r: dict) -> dict:
     word, tone = WORD.get(state, "Stopped"), TONE.get(state, "neutral")
     since = _when(r.get("since"))
     stopped = state == "stopped"
+    h = r.get("health")
+    # alive but not answering on its address: a hung job must not look healthy in the list (ORCH-641)
+    hung = state == "running" and isinstance(h, dict) and h.get("ok") is False
+    list_state = {"label": "Not answering", "tone": "warn"} if hung else {"label": word, "tone": tone}
     main = _btn("Start", "start", sid) if stopped else _btn("Stop", "stop", sid)
     auto = bool(r.get("auto"))
     facts: list[dict] = [
@@ -146,16 +150,16 @@ def _service_item(root: Path, r: dict) -> dict:
             {
                 "label": "Health check",
                 "value": _plain(health["text"]),
-                "tone": "good" if health.get("ok") else "bad",
+                "tone": "neutral" if stopped else ("good" if health.get("ok") else "bad"),
             }
         )
     depends = [_plain(d, 80) for d in r.get("depends") or [] if isinstance(d, str) and d.strip()][:6]
     if depends:
         facts.append({"label": "Depends on it", "value": _plain(", ".join(depends))})
-    return {
+    item: dict = {
         "id": sid,
         "title": name,
-        "state": {"label": word, "tone": tone},
+        "state": list_state,
         "action": main,
         "panel": {
             "buttons": [main] if stopped else [main, _btn("Restart", "restart", sid)],
@@ -173,6 +177,27 @@ def _service_item(root: Path, r: dict) -> dict:
             },
         },
     }
+    question = _question(root, r)
+    if question:
+        item["question"] = question
+    return item
+
+
+def _question(root: Path, r: dict) -> dict | None:
+    """The open question of a failing service, pinned on top of the page as in the mockup: Restart and Stop act
+    right away (the next check takes the ticket question back), Look into it opens the ticket that holds it."""
+    q = r.get("question")
+    if r.get("state") != "failing" or not isinstance(q, dict) or not isinstance(q.get("title"), str):
+        return None
+    sid = r["id"]
+    buttons = [_btn("Restart", "restart", sid), _btn("Stop", "stop", sid)]
+    tid = _ticket_id(root, q["ticket"]) if isinstance(q.get("ticket"), str) else None
+    if tid:
+        buttons.append({"label": "Look into it", "link": tid})
+    out = {"title": _plain(q["title"], 80), "buttons": buttons}
+    if isinstance(q.get("text"), str) and q["text"].strip():
+        out["text"] = _plain(q["text"])
+    return out
 
 
 def _found_item(f: dict) -> dict | None:
@@ -185,16 +210,16 @@ def _found_item(f: dict) -> dict | None:
     from .found import page_id
 
     vid = page_id(sid)
-    since = _when(f.get("since"))
-    facts = [
-        {"label": "Found", "value": (f"Running since {since}" if since else "Running") + ", not made by orch"}
-    ]
+    running = f.get("running") is not False  # older found lists had no running flag: they listed running jobs
+    since = _when(f.get("since")) if running else None
+    word = "Running" if running else "Stopped"
+    facts = [{"label": "Found", "value": (f"{word} since {since}" if since else word) + ", not made by orch"}]
     if isinstance(f.get("what"), str) and f["what"].strip():
         facts.append({"label": "What it is", "value": _plain(f["what"])})
     return {
         "id": vid,
         "title": _plain(name, 80),
-        "state": {"label": "Running, not managed", "tone": "neutral"},
+        "state": {"label": f"{word}, not managed", "tone": "neutral"},
         "panel": {
             "facts": facts,
             "note": "orch leaves it alone until you say so.",
@@ -217,7 +242,10 @@ def build(root, listing: tuple[list[dict], int, str | None], found: list[dict] |
         groups.append({"title": "Managed with orch", "meta": _summary(rows), "items": items})
     found_items = [i for i in (_found_item(f) for f in found or [] if isinstance(f, dict)) if i][:50]
     if found_items:
-        groups.append({"title": "Found on this computer", "items": found_items})
+        found_group: dict = {"title": "Found on this computer", "items": found_items}
+        if not order:  # the Managed group is left out when it is empty: say so in one line
+            found_group["meta"] = "orch manages none of these yet"
+        groups.append(found_group)
     view: dict = {
         "schema": "orch.addon-view/1",
         "generated_at": store.now(),

@@ -233,6 +233,7 @@ def test_windows_refuses_when_schtasks_is_missing(ws, fake, monkeypatch, capsys,
 
 def test_windows_is_picked_on_windows(monkeypatch):
     from orch_services import drivers
+    from orch_services.drivers import windows  # noqa: F401 - load it on this platform first (no kernel32 here)
 
     monkeypatch.setattr(sys, "platform", "win32")
     assert drivers.get().name == "windows"

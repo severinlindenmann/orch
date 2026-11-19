@@ -191,3 +191,92 @@ def test_an_adopted_service_shows_its_own_log_and_remove_says_it_is_only_forgott
         "orch stops managing it and it leaves this list.",
         "The job itself is left as it is on this computer.",
     ]
+
+
+def test_the_open_question_is_pinned_with_restart_stop_and_a_link_to_its_ticket(ws):
+    # ORCH-371 bug 1: list had the question, the page never showed it
+    from orch_services.view import build
+
+    rows = [
+        {
+            "id": "b",
+            "name": "Budget guard",
+            "state": "failing",
+            "since": None,
+            "auto": False,
+            "health": {"ok": False, "text": "Not alive"},
+            "question": {
+                "ticket": "t_abc1234",
+                "id": "q1",
+                "title": "Budget guard keeps stopping",
+                "text": "It failed 3 times in the last 10 minutes. Restart, Stop or Look into it?",
+            },
+        },
+        {"id": "a", "name": "Alpha", "state": "running", "since": None, "auto": False, "question": None},
+    ]
+    view = build(ws, (rows, 0, None))
+    assert not [e.message for e in validator(VIEW_SCHEMA).iter_errors(view)]
+    failing, fine = view["blocks"][0]["groups"][0]["items"]
+    assert failing["question"] == {
+        "title": "Budget guard keeps stopping",
+        "text": "It failed 3 times in the last 10 minutes. Restart, Stop or Look into it?",
+        "buttons": [
+            {"label": "Restart", "action": {"op": "addon.act", "args": {"verb": "restart", "target": "b"}}},
+            {"label": "Stop", "action": {"op": "addon.act", "args": {"verb": "stop", "target": "b"}}},
+            {"label": "Look into it", "link": "t_abc1234"},
+        ],
+    }
+    assert "question" not in fine
+
+
+def test_a_stopped_found_job_says_stopped_and_the_found_group_says_none_are_managed(ws):
+    # ORCH-371 bugs 4 and 7
+    from orch_services.view import build
+
+    found = [{"id": "launchd:com.example.walkfound", "name": "walkfound", "running": False, "since": None}]
+    view = build(ws, ([], 0, None), found=found)
+    assert not [e.message for e in validator(VIEW_SCHEMA).iter_errors(view)]
+    (group,) = view["blocks"][0]["groups"]
+    assert group["meta"] == "orch manages none of these yet"
+    (item,) = group["items"]
+    assert item["state"] == {"label": "Stopped, not managed", "tone": "neutral"}
+    assert _facts(item)["Found"]["value"] == "Stopped, not made by orch"
+
+
+def test_a_stopped_service_has_a_quiet_health_line(ws):
+    # ORCH-371 bug 6: a red dot next to "Stopped, so not checked" read like an alarm
+    from orch_services.view import build
+
+    rows = [
+        {
+            "id": "w",
+            "name": "Web",
+            "state": "stopped",
+            "since": None,
+            "auto": False,
+            "health": {"ok": False, "text": "Stopped, so not checked"},
+        }
+    ]
+    (item,) = build(ws, (rows, 0, None))["blocks"][0]["groups"][0]["items"]
+    assert _facts(item)["Health check"]["tone"] == "neutral"
+
+
+def test_a_running_job_that_does_not_answer_is_amber_in_the_list(ws):
+    # ORCH-641: alive but silent on its address must not show a green Running dot in the list
+    from orch_services.view import build
+
+    def row(sid, ok):
+        return {
+            "id": sid,
+            "name": sid,
+            "state": "running",
+            "since": None,
+            "auto": False,
+            "health": {"ok": ok, "text": "x"},
+        }
+
+    items = build(ws, ([row("hung", False), row("fine", True)], 0, None))["blocks"][0]["groups"][0]["items"]
+    by = {i["id"]: i for i in items}
+    assert by["hung"]["state"] == {"label": "Not answering", "tone": "warn"}
+    assert by["fine"]["state"] == {"label": "Running", "tone": "good"}
+    assert _facts(by["hung"])["State"]["value"] == "Running"  # the panel keeps the plain state
