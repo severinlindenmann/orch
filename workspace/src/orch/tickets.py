@@ -671,21 +671,26 @@ def save(root: Path, ticket: dict) -> None:
         _write(root, ticket)
 
 
-def list_all(root: Path, include_general: bool = False) -> list[dict]:
+def list_all(root: Path, include_general: bool = False, ext: str | None = None) -> list[dict]:
     """Every ticket by creation time. The hidden General ticket of the phone conversation (flag
     `general: true`) and the hidden Manager ticket (flag `manager: true`) are left out unless include_general:
-    they are not tickets anyone lists, counts or closes."""
+    they are not tickets anyone lists, counts or closes. `ext`: only tickets with add-on data under that name;
+    a file whose text does not name it is not parsed (ORCH-603: an add-on reads its own tickets fast)."""
     d = tickets_dir(root)
     out = []
+    mark = json.dumps(ext) if ext is not None else None
     if d.is_dir():
         for p in sorted(d.glob("t_*.json")):
             try:
-                t = json.loads(
-                    p.read_text(encoding="utf-8")
-                )  # no retry: a listing never stalls on a bad file
+                text = p.read_text(encoding="utf-8")
+                if mark is not None and mark not in text:
+                    continue
+                t = json.loads(text)  # no retry: a listing never stalls on a bad file
             except (OSError, ValueError):
                 continue
             if not isinstance(t, dict) or t.get("id") != p.stem:
+                continue
+            if ext is not None and not (isinstance(t.get("ext"), dict) and ext in t["ext"]):
                 continue
             if _newer_format(t):
                 continue  # a newer orch's file: not shown here, never rewritten
@@ -4238,10 +4243,10 @@ def artifacts_dir(root: Path, tid: str) -> Path:
         return _artifacts_dir_raw(root, tid)
 
 
-def _artifacts_dir_raw(root: Path, tid: str) -> Path:
-    d = artifacts_path(root, tid)
+def _artifacts_dir_raw(root: Path, tid: str, sub: tuple = ()) -> Path:
+    d = artifacts_path(root, tid).joinpath(*sub)
     cur = root / ".orch"
-    for part in ("tickets", tid, "artifacts"):
+    for part in ("tickets", tid, "artifacts", *sub):
         cur = cur / part
         if cur.is_symlink():
             raise Refused("The artifacts folder of this ticket is a link. orch will not use it.")
@@ -4322,13 +4327,13 @@ def _check_attach(name: str, data) -> str:
     return ext
 
 
-def _open_artifacts_fd(root: Path, tid: str) -> int:
+def _open_artifacts_fd(root: Path, tid: str, sub: tuple = ()) -> int:
     """A handle on .orch/tickets/<id>/artifacts (created), every folder opened from the workspace root with
     O_NOFOLLOW|O_DIRECTORY: a folder swapped for a link meanwhile is refused, never followed."""
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
     try:
-        for part in (".orch", "tickets", tid, "artifacts"):
+        for part in (".orch", "tickets", tid, "artifacts", *sub):
             try:
                 nxt = os.open(part, flags, dir_fd=fd)
             except FileNotFoundError:
@@ -4344,17 +4349,27 @@ def _open_artifacts_fd(root: Path, tid: str) -> int:
         ) from None
 
 
-def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | None = None) -> dict:
+# A person's feedback files (screenshots, files, voice notes sent with an answer on Review) go in this
+# sub-folder of the artifacts: the Files tab lists them, but a Check card shows only the helper's own result
+# files, so adding feedback never makes the card being answered look changed (ORCH-420 follow-up).
+FEEDBACK_DIR = "feedback"
+
+
+def attach(
+    root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | None = None, folder: str | None = None
+) -> dict:
     """The file is written under gate -> ticket lock; the history line (its own lock) comes after.
     Keep `data` as a file in .orch/tickets/<id>/artifacts/ (name picked by attach_name; a clash gets
     ' (2)', ' (3)' ...; created with O_EXCL, no link followed on the file or any folder). Text must be UTF-8
     without NUL bytes, a picture must start with its type's signature. One history line says what was
     attached. `exact` (an allowed file name made by orch itself): that name or nothing, an existing file
     means it was done before (returned with existed=True, nothing written)."""
+    if folder not in (None, FEEDBACK_DIR):
+        raise Refused("That folder is not allowed.")
     ticket_path(root, tid)
     with _locked(root, tid):
         _refuse_closed_agent(root, tid, by)  # before the file is written
-        res = _attach_write(root, tid, hint, data, exact)
+        res = _attach_write(root, tid, hint, data, exact, (folder,) if folder else ())
     text = f"Attached {res['name']}"
     if res.get("existed"):
         # done before: only the history line may be missing (an earlier call was refused as busy after the
@@ -4374,7 +4389,7 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
     return res
 
 
-def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None) -> dict:
+def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None, sub: tuple = ()) -> dict:
     load(root, tid)  # the id has the shape of a ticket id and the ticket exists
     name = attach_name(exact or hint)
     if exact and name != exact:
@@ -4383,7 +4398,7 @@ def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None) ->
     stem = name[: -len(ext) - 1]
     wflags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     if hasattr(os, "O_DIRECTORY") and os.open in os.supports_dir_fd:
-        dfd = _open_artifacts_fd(root, tid)
+        dfd = _open_artifacts_fd(root, tid, sub)
         opener = lambda n: os.open(n, wflags, 0o644, dir_fd=dfd)  # noqa: E731
         remove = lambda n: os.unlink(n, dir_fd=dfd)  # noqa: E731
         linker = lambda a, b: os.link(a, b, src_dir_fd=dfd, dst_dir_fd=dfd, **_nofollow_link())  # noqa: E731
@@ -4391,7 +4406,7 @@ def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None) ->
         names = lambda: os.listdir(dfd)  # noqa: E731
         close = lambda: os.close(dfd)  # noqa: E731
     else:  # Windows: no handles on folders; the folders are checked one by one
-        d0 = _artifacts_dir_raw(root, tid)
+        d0 = _artifacts_dir_raw(root, tid, sub)
         opener = lambda n: os.open(d0 / n, wflags, 0o644)  # noqa: E731
         remove = lambda n: (d0 / n).unlink()  # noqa: E731
         linker = lambda a, b: os.link(d0 / a, d0 / b, **_nofollow_link())  # noqa: E731
@@ -4421,9 +4436,9 @@ def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None) ->
                 except FileExistsError:
                     if exact:
                         return {
-                            "name": final,
+                            "name": "/".join((*sub, final)),
                             "size": len(data),
-                            "path": _art_rel(tid, final),
+                            "path": _art_rel(tid, "/".join((*sub, final))),
                             "existed": True,
                         }
                     continue
@@ -4435,7 +4450,8 @@ def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None) ->
                 remove(tmp)
     finally:
         close()
-    return {"name": final, "size": len(data), "path": _art_rel(tid, final)}
+    shown = "/".join((*sub, final))
+    return {"name": shown, "size": len(data), "path": _art_rel(tid, shown)}
 
 
 def _nofollow_link() -> dict:
