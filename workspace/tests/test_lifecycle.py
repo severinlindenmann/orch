@@ -123,6 +123,23 @@ def test_run_stop_with_waiting_input_holds_it_from_the_automation(proj, run):
     assert json.loads(run("run", "status", tid, "--json")[1])["stop_held_ids"] == []
 
 
+def test_run_status_keeps_the_persons_sent_messages_after_they_are_read(proj, run):
+    """ORCH-695: the chat of a session shows the person's own messages after a reload, read or not. An agent's
+    line, an answer and a run's start prompt are never among them."""
+    tid = _new(run)
+    mine = runs.pending_add(proj, tid, "human:owner", "message", "Please also try a PDF.")
+    runs.pending_add(proj, tid, "agent:manager", "message", "a manager's nudge")
+    runs.pending_add(proj, tid, "human:owner", "answer", "Below")
+    runs.pending_add(proj, tid, "human:owner", "message", "start prompt", via="start")
+    st = json.loads(run("run", "status", tid, "--json")[1])
+    assert [(m["id"], m["text"], m["by"], m["read"]) for m in st["sent_input"]] == [
+        (mine["id"], "Please also try a PDF.", "human:owner", False)
+    ]
+    runs.mark_delivered(proj, tid, [mine["id"]])  # the helper read it: it stays, marked read
+    st = json.loads(run("run", "status", tid, "--json")[1])
+    assert [(m["text"], m["read"]) for m in st["sent_input"]] == [("Please also try a PDF.", True)]
+
+
 def _held(run, tid):
     code, out, err = run("run", "status", tid, "--json")
     assert code == 0, err
