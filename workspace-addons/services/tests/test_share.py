@@ -463,7 +463,7 @@ def test_the_service_keeps_this_python_unresolved(cli, fake, base, folder):
     assert code == 0, out
     argv = fake.entries[out["service"]["id"]]["spec"].argv
     assert argv[0] == os.path.abspath(sys.executable)
-    assert argv[1:4] == ["-I", "-m", "orch_services.share_server"]
+    assert argv[1:5] == ["-I", "-P", "-m", "orch_services.share_server"]
 
 
 def test_the_real_service_command_serves_the_link(cli, ws, fake, base, folder, monkeypatch):

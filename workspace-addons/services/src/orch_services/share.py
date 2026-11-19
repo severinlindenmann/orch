@@ -215,10 +215,11 @@ def _existing(root: Path, folder: Path) -> dict | None:
 
 
 def _argv(folder: Path, port: int, mark: str) -> list[str]:
-    # this Python (it has the add-on), -I: no folder, PYTHON* variable or user site can plant a module
+    # this Python (it has the add-on), -I -P: no folder, PYTHON* variable or user site can plant a module
     return [
         sys.executable,
         "-I",
+        "-P",
         "-m",
         "orch_services.share_server",
         "--dir",
