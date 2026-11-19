@@ -759,6 +759,13 @@ class Handler(BaseHTTPRequestHandler):
             from . import update
 
             return self._send(200, json.dumps(update.update_info()).encode(), "application/json")
+        if path == "/api/tool-updates":  # the tools' versions and notes: same-origin only, no secrets
+            from . import update
+
+            fresh = (parse_qs(query).get("refresh") or [""])[0] == "1"
+            return self._send(
+                200, json.dumps(update.tool_updates(self.root, refresh=fresh)).encode(), "application/json"
+            )
         if path == "/api/release":  # a finished ticket: is its merged change in the installed release?
             from . import update
 
@@ -793,9 +800,23 @@ class Handler(BaseHTTPRequestHandler):
                 n = sessions.LINES
             state, age = self.server.state_cache.get()
             body = sessions.answer(self.root, self.orch_bin, state, age, n)
-            return self._send(
-                200, json.dumps(body).encode(), "application/json", {"Cache-Control": "no-store"}
+            # An idle page asked for the same ~22 KB list every 3 s. The tag is taken over the list as a person
+            # sees it (clock, state age and second counters left out; counters in whole minutes), so an
+            # unchanged list answers 304 with no body.
+            stable = {k: v for k, v in body.items() if k not in ("now", "age_ms")}
+            stable["sessions"] = [
+                {k: (v // 60 if k.endswith("_seconds") and isinstance(v, int) else v) for k, v in x.items()}
+                for x in body["sessions"]
+            ]
+            tag = (
+                '"'
+                + hashlib.blake2b(json.dumps(stable, sort_keys=True).encode(), digest_size=12).hexdigest()
+                + '"'
             )
+            hdr = {"ETag": tag, "Cache-Control": "private, no-cache"}
+            if tag in [t.strip() for t in (self.headers.get("If-None-Match") or "").split(",")]:
+                return self._send(304, b"", "application/json", hdr)
+            return self._send(200, json.dumps(body).encode(), "application/json", hdr)
         if path == "/api/events":
             return self._events()
         if path == "/api/ref-file":
@@ -1332,6 +1353,19 @@ class Handler(BaseHTTPRequestHandler):
                     actions.human_env(self.root, self.orch_bin),
                     session=self.session,
                     to=to,
+                )
+                return self._send(code, text.encode(), "text/plain; charset=utf-8")
+            if body.get("op") == "tools.update":  # Update on one tool in Settings (a person only)
+                from . import update
+
+                if not session:
+                    raise actions.NeedsPerson(actions.SIGNIN)
+                args = body.get("args") or {}
+                code, text = update.start_tool_update(
+                    self.root,
+                    self.orch_bin,
+                    actions.human_env(self.root, self.orch_bin),
+                    args.get("name") if isinstance(args, dict) else None,
                 )
                 return self._send(code, text.encode(), "text/plain; charset=utf-8")
             if body.get("op") in RESTARTING_OPS and session:
