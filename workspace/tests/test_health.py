@@ -510,3 +510,27 @@ def test_the_line_names_the_sign_in_command():
     )
     assert cli_health.line({**row, "sign_in": "az login", "how": "Ask IT."}).endswith("Ask IT.")
     assert health.how_words({"sign_in": "az login"}) == "Open a terminal on this computer and run: az login"
+
+
+def test_only_the_helper_this_workspace_uses_shows(proj, new_ticket, monkeypatch):
+    """ORCH-833: claude is chosen here; codex is installed on the computer but unused, so its expired login
+    never warns. While a run here works with codex, its login shows again."""
+    from orch import config
+
+    config.set_key(proj, "workspace", "agent", "claude")
+    monkeypatch.setattr(health.shutil, "which", lambda b: f"/bin/{b}" if b in ("claude", "codex") else None)
+
+    def fake(argv, **kw):
+        if argv[0] == "/bin/codex":
+            return subprocess.CompletedProcess(argv, 1, stdout=None, stderr=None)
+        doc = {"loggedIn": True, "loginExpiresAt": "2026-12-17T21:24:57Z"}
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(doc), stderr=None)
+
+    monkeypatch.setattr(health.subprocess, "run", fake)
+    rows = health.overview(proj, NOW)
+    assert [(r["name"], r["chosen"]) for r in rows] == [("claude", True)]
+    tid = new_ticket("Review the diff")
+    runs.claim(proj, tid, "agent:scheduler", "codex", pid=os.getpid())
+    rows = {r["name"]: r for r in health.overview(proj, NOW)}
+    assert list(rows) == ["claude", "codex"] and rows["codex"]["state"] == "renew"
+    assert [t["id"] for t in rows["codex"]["stops"]] == [tid]

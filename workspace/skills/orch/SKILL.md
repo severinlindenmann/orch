@@ -274,6 +274,9 @@ by itself. It is not your ticket's work: do not stop to wait for it, and do not 
     orch checks remove <name>
     orch checks approve <name> --hash <h>              # the PERSON only, in their own terminal
 
+Only what the workspace added is checked, plus the login of the helper it uses: a tool that is merely set up on
+this computer is not checked. Add a tool only when the person said the helpers use it here.
+
 Your own check (any command or a small script, for example an API call with a key) goes in
 `.orch/checks/<name>.json`, written from `_template.json`. A new or changed check file runs only after the person
 approved it; you cannot approve it. Tell them to look at the file and run the approve command that

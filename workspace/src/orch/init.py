@@ -66,6 +66,7 @@ STARTER_STEPS = (
     "Add two to four tags",
     "Pick an icon and a colour that fit",
     "Suggest up to three first tasks for the work found here",
+    "Ask which tools the helpers use here and check only those",
 )
 STARTER_NOTE = """\
 orch added this task when the workspace was set up. Start it to let your helper fill in the workspace profile.
@@ -79,6 +80,11 @@ For the helper:
 - Icon and colour: orch look list, then orch look set --icon <id> --color <token>
 - If orch says the person already chose one of these, leave it as it is.
 - First tasks: name up to three in the summary; do not create them.
+- Tools: orch checks list names the tools set up on this computer (GitHub, Databricks, ...). None of them is
+  checked for this workspace until it is added. Ask the person once per tool whether the helpers use it
+  here (orch ask with the options "Yes, check it here" and "No", recommend "No"). Add each yes with
+  orch checks add <name> (orch checks templates lists the names); when every answer is no, run
+  orch checks init. Never add a tool only because it is set up on the computer.
 - Prove each step with what you set (orch config get workspace.name, orch look show)."""
 
 
