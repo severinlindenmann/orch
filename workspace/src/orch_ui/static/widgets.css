@@ -1373,6 +1373,20 @@ button.gtree-row:hover{background:var(--surface-2)}
 .live-msg{display:grid;gap:var(--s1);margin-top:auto;padding-top:var(--s2);border-top:1px solid var(--border)}
 .live-to{font-size:var(--fs-meta);line-height:16px;color:var(--text-muted)}
 .live-msg-row{display:flex;gap:var(--s2);align-items:flex-end;min-width:0}
-.live-msg-row .input{flex:1;min-width:0;min-height:var(--touch);max-height:calc(var(--s8) * 3);resize:vertical}
+.live-msg-row .input{flex:1;min-width:0;min-height:var(--touch);max-height:calc(var(--s8) * 3);resize:vertical;height:auto;field-sizing:content}
+/* voice into the message box (ORCH-696, draft D feature 13): the strip while listening (a moving level, the time, Stop,
+   Cancel) sits above the row; the line after the words, or one plain refusal, sits under it. Still with reduced motion. */
+.live-voice{display:flex;gap:var(--s2);align-items:center;min-width:0;padding:var(--s1) var(--s2);border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2)}
+.live-voice>span:not(.live-voice-wave){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.live-voice-wave{display:flex;flex:none;align-items:center;gap:2px;height:24px}
+.live-voice-wave i{display:block;width:3px;height:20%;border-radius:2px;background:var(--brand)}
+.live-voice[data-rec] .live-voice-wave i{animation:live-voice-bar .7s ease-in-out infinite alternate}
+.live-voice[data-rec] .live-voice-wave i:nth-child(3n+2){animation-delay:-.25s}
+.live-voice[data-rec] .live-voice-wave i:nth-child(3n){animation-delay:-.5s}
+.live-voice-t{font-variant-numeric:tabular-nums}
+.live-vhint{margin:0}
+.live-vhint[role=alert]{color:var(--text)}
+@keyframes live-voice-bar{from{height:20%}to{height:100%}}
+@media(prefers-reduced-motion:reduce){.live-voice[data-rec] .live-voice-wave i{animation:none;height:60%}}
 .lbar-n{min-width:16px;padding:0 var(--s1);border-radius:var(--r1);background:var(--surface-3);color:var(--text-muted);font-variant-numeric:tabular-nums;text-align:center}
 @media(prefers-reduced-motion:reduce){.gtree-row{transition:none}}

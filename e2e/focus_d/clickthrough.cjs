@@ -35,6 +35,7 @@ function args(argv) {
     else if (a === '--out') o.out = path.resolve(argv[++i].replace(/^~/, os.homedir()));
     else if (a === '--repo') o.repo = path.resolve(argv[++i].replace(/^~/, os.homedir()));
     else if (a === '--only') o.only = new Set(argv[++i].split(',').map(Number));
+    else if (a === '--video') o.video = path.resolve(argv[++i].replace(/^~/, os.homedir()));
     else throw new Error(`unknown option ${a}`);
   }
   if (!['dashboard', 'draft'].includes(o.target)) throw new Error(`--target is dashboard or draft, not ${o.target}`);
@@ -168,7 +169,9 @@ async function main() {
     }
     const { chromium } = playwright();
     profile = fs.mkdtempSync(path.join(os.tmpdir(), 'focus-d-prof-'));
-    browser = await headless.launchPersistent(chromium, profile);
+    // a fake microphone that is always allowed (step 19 speaks into the message box with it, ORCH-696)
+    browser = await headless.launchPersistent(chromium, profile, { args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
+      ...(o.video ? { recordVideo: { dir: o.video, size: { width: 1280, height: 800 } } } : {}) });  // --video: a recording of each page
     for (const s of steps) {
       if (!todo.includes(s)) {
         const why = s.waits ? `waits for: ${s.waits}` : 'not in draft D, today\'s page only';

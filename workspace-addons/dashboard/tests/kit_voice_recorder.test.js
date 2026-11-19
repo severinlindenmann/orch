@@ -84,3 +84,37 @@ test('on-device recognition: its words come back with the file', async () => {
   r.button.onclick(); await new Promise(res => setTimeout(res, 450));
   assert.deepEqual(got, ['make the button bigger']);
 });
+// ORCH-696: a page that draws its own controls (the new Focus message box) starts, stops and cancels by itself, is
+// told when listening starts and ends, and gets the reason of a refusal as a code.
+test('start() and stop() from the page: onState says when listening starts and ends, then the file', async () => {
+  const {UI} = load();
+  const seen = [];
+  const r = UI.voiceRecorder({words:false, onState:(on, how) => seen.push([on, how]), onDone:f => seen.push(['file', f.type])});
+  r.start(); await tick();
+  assert.equal(r.recording, true);
+  r.stop(); await tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(seen)), [[true, {}], [false, {cancelled:false, empty:false}], ['file', 'audio/webm']]);
+});
+test('cancel() drops the recording: no file, the microphone released', async () => {
+  const {UI, tracks} = load();
+  const seen = [];
+  const r = UI.voiceRecorder({onState:(on, how) => seen.push([on, how && how.cancelled]), onDone:() => seen.push('file')});
+  r.start(); await tick();
+  r.cancel(); await tick();
+  assert.deepEqual(seen, [[true, undefined], [false, true]]);
+  assert.equal(tracks[0].stopped, true);
+});
+test('cancel() while the browser still asks for the microphone: nothing starts', async () => {
+  const {UI, made, tracks} = load();
+  const seen = [];
+  const r = UI.voiceRecorder({onState:(on, how) => seen.push([on, how && how.cancelled]), onDone:() => seen.push('file')});
+  r.start(); r.cancel(); await tick();
+  assert.deepEqual(seen, [[false, true]]);
+  assert.equal(made.length, 0);
+  assert.equal(tracks[0].stopped, true);
+});
+test('a refusal comes with its code', async () => {
+  const codes = [];
+  load({deny:true}).UI.voiceRecorder({onError:(m, c) => codes.push(c)}).start(); await tick();
+  assert.deepEqual(codes, ['blocked']);
+});
