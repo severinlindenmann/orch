@@ -1,6 +1,9 @@
 ---
 name: orch-usage
 description: Use when the person asks how far a subscription or API credit is used, which account is in use, whether Usage switches by itself, or asks to change an account's limit, the period it counts over, its order, to turn it on or off, or to make a rule temporary. Usage keeps only labels, numbers, rules and a history, never a login or key. Not for buying, topping up, adding or removing accounts.
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch usage
 
@@ -40,6 +43,19 @@ The person sees and changes the same on the Usage page of the dashboard; its cli
 
 When a rule ends it falls back to the rule before its last change, and the history says so.
 
+**How work is spread** (the share; change it only when the person asks)
+
+    orch usage share                               # read it back as one sentence, with what each number counts
+    orch usage share --preset even                 # save | even | sub: a ready-made spread
+    orch usage share --week 70 --day wed           # at most 70 % of a subscription's week by the end of Wednesday
+    orch usage share --api reviews,scripts         # kinds of work on API credit (or none)
+    orch usage share --tool "one in 4"             # Code tickets on the helper tool: one in N, all or none
+    orch usage share --ahead api --dollars 10      # a subscription ahead of its pace: api, tool, both or none
+    orch usage share --order "Personal 1, Company" # the accounts in order
+    orch usage share --clear                       # no share: accounts in order, one after the other
+
+A share that contradicts itself is refused with the reason; every change is one line in the history.
+
 **Switching early** (subscriptions, through the account switcher)
 
     orch usage status                              # running? switching on or off? the last look
@@ -50,6 +66,10 @@ Usage looks every 30 seconds while it runs (`orch start`). It keeps the first ac
 limits and would not reach one within 10 minutes at the current pace, and moves on before the limit. Every switch, a
 switch it would make while switching is off, and a warning when every account is at or near its limit land in the
 history. Switching is off until the person turns it on. Without the account switcher Usage shows and warns only.
+
+The warnings "every account is at or near its limit" and "could not switch to an account" reach the person once each
+as a row in `orch usage needs` (Home shows it). The same warning shows again only after it was gone for 10 minutes
+and came back. `orch usage seen <warning>` (Got it) hides it until then; that is the person's click, not yours.
 
 An account is named by its label from `orch usage list` (or the start of it). Every command takes `--json`.
 

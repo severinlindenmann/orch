@@ -243,6 +243,9 @@ HINTS = {
     "logins replace": _logins_replace,
     "logins add": "orch logins",
     "logins remove": "orch logins",
+    "tools list": "orch tools notes <name>  (what is new; the person updates in Settings > About & updates)",
+    "tools notes": "the person picks Update in Settings > About & updates",
+    "tools update": "orch tools list",
     "checks list": "orch checks templates  (what a workspace can add)",
     "checks init": "orch checks templates",
     "checks templates": "orch checks add <template> [--profile <name>]",
@@ -306,6 +309,9 @@ HINTS = {
     "relay problem done": "orch relay problem list",
     "relay problem back": "orch relay problem list",
     "relay *": "carry on; a reply comes in on your next run.",
+    "skill check": "after you change a skill, run it again: orch skill check",
+    "skill list": "orch skill show <name>",
+    "skill show": "orch skill check <name>",
 }
 
 
