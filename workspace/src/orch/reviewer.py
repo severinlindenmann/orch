@@ -673,7 +673,8 @@ def accepted(root: Path, since: str) -> list[dict]:
             row = {**base, "at": h.get("at"), "auto": auto, "sent_back": False, "undo": None, "undone": False}
             if prefix in ans_lines:
                 qid = txt[len(prefix) :].split(" ", 1)[0]
-                q = next((x for x in t.get("questions") or [] if x.get("id") == qid), None)
+                shown = history.shown_ticket(root, t)  # person fields only as shown here (history.md)
+                q = next((x for x in shown.get("questions") or [] if x.get("id") == qid), None)
                 row.update(answer=True, question=qid, why="answered " + txt[len(prefix) :])
                 row["undone"] = any(f" on {qid} (" in u for u in undone) and not (
                     q and q.get("answered_by") == BY

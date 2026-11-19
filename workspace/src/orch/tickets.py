@@ -1533,6 +1533,12 @@ def undo_reviewer_send_back(root: Path, tid: str, cid: str, by: str) -> dict:
     return apply_op(root, tid, op, by=by)[0]
 
 
+def _reviewer_answer_stored(q: dict) -> bool:
+    """Writer guard (ORCH-425): the stored question still holds an answer the Reviewer gave (raw bytes
+    compared inside the locked write; nothing is shown)."""
+    return q.get("answered_by") == REVIEWER and q.get("answer") is not None and q.get("taken_back") is None
+
+
 def undo_reviewer_answer(root: Path, tid: str, qid: str, by: str) -> dict:
     """ORCH-425: a person undoes an answer the Reviewer or Away mode gave: the question is open again and
     marked
@@ -1546,7 +1552,7 @@ def undo_reviewer_answer(root: Path, tid: str, qid: str, by: str) -> dict:
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)
         if q is None:
             raise Refused(f"Ticket {tid} has no question {qid}.")
-        if q.get("answered_by") != REVIEWER or q.get("answer") is None or q.get("taken_back") is not None:
+        if not _reviewer_answer_stored(q):
             raise Refused(f"{qid} was not answered by the Reviewer, so there is nothing to undo.")
         old = q["answer"]
         for k in ("answered_at", "decision"):
