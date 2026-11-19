@@ -26,7 +26,7 @@ TEXT = {
 
 
 def checker(tools_here: dict[str, dict]) -> tuple[str, dict] | None:
-    """The first tool used here that can report sign-ins: (name, tool)."""
+    """The first tool used here that can report the sign-in state: (name, tool)."""
     for name, tool in tools_here.items():
         if isinstance(tool.get("connection_check"), dict) and tool.get("binary"):
             return name, tool
