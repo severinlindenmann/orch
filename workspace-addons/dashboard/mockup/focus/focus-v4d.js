@@ -511,7 +511,7 @@
   function popHTML(mode) {
     var bk = /\|bar$/.test(st.pm) ? st.pm.slice(0, -4) : '';
     if (bk && has(bk)) return '<div class="mw-pop mw-pop-sess" role="group" aria-label="Stop or end ' + esc(bk) + '">' + (st.list ? btn('mw-tkl', 'pm', '‹ ' + LIST[st.list][2], { 'data-k': bk, 'data-kind': 'bar' }) : '') + '<p class="mw-poph">' + esc(nm(by(bk))) + ' <span class="mw-key">' + esc(bk) + '</span></p>' + sessItems(by(bk), 'bar') + '</div>';
-    if (st.menu === 'new') return '<div class="mw-pop" role="group" aria-label="New session without a ticket"><p class="mw-poph">New session without a ticket</p>' + pickHTML() + '<div class="mw-plist">' + NEW.map(function (o) { return btn('mw-opt', 'new', '<strong>' + o[0] + '</strong><span class="meta">' + (has(o[0]) ? 'Already open: go to it' : o[1]) + '</span>', { 'data-k': o[0] }); }).join('') + '</div><p class="meta">' + used() + ' of ' + max() + ' helper places in use</p></div>';
+    if (st.menu === 'new') return '<div class="mw-pop" role="group" aria-label="New session without a ticket"><p class="mw-poph">New session without a ticket</p>' + pickHTML() + '<div class="mw-plist">' + NEW.map(function (o) { var gone = has(o[0]) && by(o[0]).s === 'none'; var b = btn('mw-opt', 'new', '<strong>' + o[0] + '</strong><span class="meta">' + (gone ? 'Ended: start it again' : has(o[0]) ? 'Already open: go to it' : o[1]) + '</span>', { 'data-k': o[0] }); return gone ? '<span class="mw-lrw">' + b + btn('btn sm ghost', 'zoom', 'History', { 'data-k': o[0], 'aria-label': 'History of the ' + o[0] }) + '</span>' : b; }).join('') + '</div><p class="meta">' + used() + ' of ' + max() + ' helper places in use</p></div>';
     if (st.menu === 'pos') {
       var po = function (act, m, icon, label, on, cls) { return btn('mw-opt mw-posopt' + (cls || ''), act, icon + '<span>' + label + '</span>', { 'data-m': m, 'aria-pressed': String(on) }); };
       return '<div class="mw-pop" role="group" aria-label="Where Focus sits"><p class="mw-poph">Where Focus sits</p><div class="mw-plist">' + po('mode', 'bottom', I.bottom, 'At the bottom', mode === 'bottom') + po('mode', 'right', I.right, 'On the right', mode === 'right', ' mw-nophone') + po('full', '', I.full, 'Full screen', false) + po('mode', 'bar', I.down, 'Bar only', mode === 'bar') + po('mode', 'side', I.side, 'Closed to the side', false) + '</div></div>';
@@ -697,7 +697,7 @@
         S.push({ k: k, t: t[0], kind: 'free', tool: st.nt, model: st.nm, s: fullUp ? 'queue' : 'run', up: 0, pin: true, now: fullUp ? 'Waits in line for a free helper place.' : t[1], lines: [t[2]], chat: [['h', t[2].slice(2), 'now']], files: [] });
       }
       say(k + ' opened and pinned.');
-    }
+    } else if (by(k).s === 'none') { var gs = by(k); gs.lines.push('', '⏺ Started again. Picking up the same conversation.'); gs.s = 'run'; gs.sl = ''; gs.now = 'Started again.'; say(k + ' started again.'); }
     st.menu = '';
     if (st.page === 'focus') zoom(k); else { openSess(k); render('.mw-panel input, .mw-panel pre'); }
   }
