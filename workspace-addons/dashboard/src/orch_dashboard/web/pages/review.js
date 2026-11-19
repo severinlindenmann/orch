@@ -74,6 +74,30 @@ function acceptRelease(it, saved) {
   refresh();
 }
 
+// One Run it now click (op card.run) for any page: {ok, exit, output, error?} to show on the card. 403 = not signed in.
+async function runCardClick({ticket, key, digest, confirmed}) {
+  const args = {ticket, key, digest};
+  if (confirmed) args.confirmed = true;
+  const r = await act('card.run', args);
+  if (r.ok) return r.state?.run_result || {ok:false, error:'orch did not say how it went. Look at the ticket before you try again.'};
+  if (r.status === 403) return {ok:false, error:'Sign in to run it: run orch review in your terminal.'};
+  return {ok:false, error:String(r.text || 'Could not run it.').slice(0, 300)};
+}
+// The Run it now card of a question on Home and the ticket page (outlined button; Review has the filled one). The other
+// answer goes through the same signed answer as Review's (op review.answer, verdict no).
+function runCardNode(ticketId, q) {
+  if (!window.UI?.runCard || !q?.card || q.card.kind !== 'run' || !q.card.run) return null;
+  const card = q.card, key = String(q.id || '');
+  return window.UI.runCard(card, {
+    primary: false, last: q.run_last && typeof q.run_last === 'object' ? q.run_last : undefined,
+    run: ({confirmed}) => runCardClick({ticket:ticketId, key, digest:q.digest, confirmed}),
+    no: async () => {
+      const r = await act('review.answer', {ticket:ticketId, key, verdict:'no', digest:q.digest});
+      if (r.ok) return {ok:true};
+      return {ok:false, error:r.status === 403 ? 'Sign in to answer: run orch review in your terminal.' : String(r.text || 'Could not save your answer.').slice(0, 300)};
+    }
+  });
+}
 // What the page's api needs, from the dashboard: state in, one signed click out, files through /api/file.
 function reviewApi() {
   return {
@@ -106,6 +130,12 @@ function reviewApi() {
       if (!kept.ok) return {ok:false, error:{code:'error', message:String(kept.text || 'The files could not be added.').slice(0, 300)}};
       const r = await act('run.send', {ticket, text:ticketTalkText(text, kept.names)});
       return r.ok ? {ok:true} : {ok:false, error:{code:'error', message:String(r.text || 'Could not save the note.').slice(0, 300)}};
+    },
+    // Run it now (ORCH-848): the click runs the card's command; the answer carries what it printed (run_result).
+    run: async ({id, digest, confirmed}) => {
+      const m = REVIEW_ID.exec(String(id || ''));
+      if (!m || !m[1]) return {ok:false, error:'That card is not here any more.'};
+      return runCardClick({ticket:m[1], key:m[2], digest, confirmed});
     },
     hold: (it, verdict) => acceptHold(it, verdict),
     release: it => acceptRelease(it, false),
