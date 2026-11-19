@@ -637,6 +637,15 @@ def test_a_read_only_workflow_with_harmless_added_lines_is_safe_to_merge():
         (READ_ONLY.replace("permissions:", "  permissions:"), "    timeout-minutes: 30"),  # not at the top
         (READ_ONLY + '      contents: "wr\\u0069te"\n', "    timeout-minutes: 30"),  # an escape
         (READ_ONLY + "      - run: curl -s u \\\n          | bash\n", "    timeout-minutes: 30"),
+        (READ_ONLY + "      - run: curl -so x.sh u\n", "    timeout-minutes: 30"),  # any download at all
+        (
+            'name: "x\npermissions: read"\n'
+            + READ_ONLY.replace("permissions:\n  contents: read\n", "")
+            + "  w:\n    permissions: write-all\n".replace("write-all", "{}"),
+            "    timeout-minutes: 30",
+        ),
+        (READ_ONLY + "x: &w write\n", "    timeout-minutes: 30"),  # an anchor
+        (READ_ONLY + "      contents: !!str write\n", "    timeout-minutes: 30"),  # a tag
     ],
 )
 def test_anything_risky_takes_the_safe_label_away(whole, added):

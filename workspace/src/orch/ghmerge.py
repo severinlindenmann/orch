@@ -262,7 +262,12 @@ PIPE_SHELL = re.compile(  # a pipe anywhere after the download: | tee x | bash, 
     rf"{_FETCH}.*\|\s*{_SHELL}|\b(?:ba|z)?sh\s+<\(\s*{_FETCH}|\b(?:ba|z)?sh\s+-c\s+['\"]?\$\(\s*{_FETCH}",
     re.I,
 )
-ESCAPES = re.compile(r"\\[uUx]|!!")  # YAML escapes and tags could hide a word from these line checks
+# What could hide a word from these line checks, so a file with it is never read-only: YAML escapes, tags
+# (also `${{ !x }}`, a word too many), anchors and aliases.
+ESCAPES = re.compile(r"\\[uUx0-9]|!!|(?:^|[:\[{,-])\s*!\S|(?:^|[\s:\[{,-])[&*][A-Za-z_]", re.M)
+TOP_LINE = re.compile(
+    r"(?:#|---|\.\.\.|['\"]?[A-Za-z_][\w-]*['\"]?\s*:)"
+)  # a line at the top: key or comment
 SAFE_NAME = re.compile(r"[A-Za-z0-9._/-]+")  # a workflow name read whole (never a query in the address)
 COMPARE_MAX = 300  # GitHub's compare lists at most this many files: more could hide a workflow
 OWN_ACTIONS = ("./", "actions/", "github/")
@@ -322,13 +327,18 @@ def line_risks(text: str) -> list[tuple[str, str, bool]]:
 
 def whole_is_read_only(text) -> bool:
     """A whole workflow file (at the checked commit) whose jobs can only read: it says its permissions at the
-    top, none of them writes, it reads no secret but GitHub's own token, runs on no risky trigger, pipes no
-    download into a shell (lines joined where they go on), and has no escape or tag that could hide a word.
+    top, none of them writes, it reads no secret but GitHub's own token, runs on no risky trigger, downloads
+    nothing (curl, wget), and has no escape, tag, anchor or open quote that could hide a word.
     Lines, not YAML, like the rest of the check: when in doubt it is not read-only."""
     if not isinstance(text, str) or not TOP_PERMISSIONS.search(text) or ESCAPES.search(text):
         return False
-    if WRITES.search(text) or PIPE_SHELL.search(re.sub(r"\\\s*\n", " ", text)):
+    if WRITES.search(text) or re.search(_FETCH, text, re.I):  # any download at all: the owner looks
         return False
+    for line in text.splitlines():
+        if line[:1].strip() and not TOP_LINE.match(line):
+            return False  # text at the top that is no key: a quoted value going on over lines
+        if line.replace('\\"', "").count('"') % 2 or (line[:1].strip() and line.count("'") % 2):
+            return False  # an open quote could carry a fake "permissions:" line
     if any((m[1] or "").upper() != "GITHUB_TOKEN" for m in SECRET.finditer(text)):
         return False
     return not any(re.search(rf"\b{t}\b", text) for t in RISKY_TRIGGERS)
