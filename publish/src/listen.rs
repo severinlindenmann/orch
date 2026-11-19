@@ -32,7 +32,7 @@ fn interface_form(listen: &str) -> Option<(&str, u16)> {
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    Some((name, port.parse().ok()?)).filter(|_| ok)
+    ok.then_some((name, port.parse().ok()?))
 }
 
 /// Checks the form without looking at the machine's interfaces (startup config check).
