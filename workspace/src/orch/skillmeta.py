@@ -3,7 +3,7 @@
 A skill header is the open-standard frontmatter: six top-level keys (name, description, license, compatibility,
 allowed-tools, metadata), and `metadata` is one level of text values. Lists inside metadata are one line with
 commas ("gh, git"). The reader is small on purpose and refuses anything fancier (nested maps, anchors, block
-values, lists) instead of guessing; strict tools such as claude.ai upload refuse those too.
+values, lists) instead of guessing; strict skill uploads refuse those too.
 
 Shared by the install rules, the not-ready note and the relay: nobody else parses a SKILL.md header.
 Other modules add checks that need every skill at once by appending to CHECKS (fn(entries, root) -> findings).
