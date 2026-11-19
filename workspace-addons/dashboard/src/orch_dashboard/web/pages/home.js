@@ -488,7 +488,7 @@ function needsToday() {
   // what helpers need: a login that runs out soon is a row of Home's list; the stopped ones are the banner
   const logins = loginWarnings();
   // Work that stopped (stuck tickets, a pull request left open, an idle helper) is part of THE number, so Home, the
-  // top bar, Menu, the Focus bar and the wall say the same (ORCH-705). A ticket the Reviewer was not sure about is that
+  // top bar, Menu, the live bar and the wall say the same (ORCH-705). A ticket the Reviewer was not sure about is that
   // row, not also a result to check.
   const stuck = groups.filter(g => isHelperRow(g.row)), unsure = new Set(stuck.filter(g => g.row.kind === 'reviewer:unsure').map(g => g.row.ticket));
   const hiddenResults = review.filter(t => unsure.has(t.id)).length, questions = window.DashHelpers.needsYouCount(needs);
@@ -496,7 +496,7 @@ function needsToday() {
     count:questions + review.length + stuck.length - hiddenResults};
 }
 // The one needs-you number (questions, results to check and work that stopped): the Review menu entry, Menu, top bar,
-// Home, Review and Tickets headers, the Focus bar and the wall all read it.
+// Home, Review and Tickets headers, the live bar and the wall all read it.
 function needsYouTotal() { return state ? needsToday().count : 0; }
 // When the oldest of exactly those needs came (the top bar's "longest wait"): a question row since it was asked, a
 // result since its ticket moved to Review. A dropped ticket's old question is no need, so it never counts (ORCH-407).
