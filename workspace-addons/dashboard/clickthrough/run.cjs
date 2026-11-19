@@ -36,7 +36,7 @@ const UV_RUN = ['uv', 'run', '-q', '--project', path.join(REPO, 'workspace'),
  *  above count as shipped and "the newest orch" is read from here, never from the internet */
 const runEnv = dir => ({ HOME: dir, USERPROFILE: dir, ORCH_HOME: path.join(dir, 'orch'), ORCH_HOME_STRICT: '1',
   // the stand-in programs of server.py (agent tools, gh) first, for every orch the run starts, not only the server
-  PATH: `${path.join(dir, 'bin')}${path.delimiter}${process.env.PATH}`, LANG: 'en_US.UTF-8', ORCH_REPO: REPO,
+  PATH: `${path.join(dir, 'bin')}${path.delimiter}${process.env.PATH}`, LANG: 'en_US.UTF-8', ORCH_REPO: REPO, ORCH_NO_TOOL_CHECK: '1',
   UV_CACHE_DIR: process.env.UV_CACHE_DIR || path.join(os.homedir(), '.cache', 'uv') });
 const envArgs = env => ['-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`)];
 

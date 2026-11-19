@@ -141,8 +141,11 @@ const BAR_SESSIONS = [
 // What the stand-in server kept: one pin to start with.
 let barPrefs = { pins: { t_bar228: true }, names: {} };
 let barState = {};
+// Sessions a step ended (step 31): no run in the state, closed in the sessions list, as orch shows a helper that stopped.
+let barEnded = new Set();
 async function liveBarState(page) {
   barPrefs = { pins: { t_bar228: true }, names: {} };
+  barEnded = new Set();
   const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
     description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
     dashboard: { label: 'Focus', icon: 'target', order: 20 } };
@@ -165,6 +168,7 @@ async function liveBarState(page) {
     st.tickets = [...(st.tickets || []).filter(t => !String(t.id).startsWith('t_bar')), ...extra];
     st.runs = { ...(st.runs || {}) };
     BAR_SESSIONS.forEach(([s, key]) => {
+      if (barEnded.has('t_bar' + key.slice(5))) { delete st.runs['t_bar' + key.slice(5)]; return; }
       st.runs['t_bar' + key.slice(5)] = s === 'queue' ? { running: false, hold: 'Waits for a free place' }
         : { running: true, helper: { state: HELPER[s] }, claim: { agent: 'agent:claude' } };
     });
@@ -175,13 +179,16 @@ async function liveBarState(page) {
     route.fulfill({ response: res, json: st });
   });
   await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { sessions: barSessions(), lines: 8, age_ms: 0 } }));
+  // the stand-in tickets have no earlier sessions or files on the test server (it would answer 404)
+  await page.route(/\/api\/(sessions|artifacts)\/t_bar\d+/, route => route.fulfill({ json: route.request().url().includes('/artifacts/') ? { files: [] } : { available: true, sessions: [] } }));
 }
 // The same 24 sessions as the live sessions API gives them (the shape in workspace-addons/dashboard/.../sessions.py).
-const BAR_STATUS = { wait: 'needs-you', run: 'working', queue: 'in-line', idle: 'idle' };
-const BAR_WORD = { wait: 'Waits for you', run: 'Working', queue: 'In line', idle: 'Idle' };
+const BAR_STATUS = { wait: 'needs-you', run: 'working', queue: 'in-line', idle: 'idle', ended: 'closed' };
+const BAR_WORD = { wait: 'Waits for you', run: 'Working', queue: 'In line', idle: 'Idle', ended: 'No session' };
 function barSessions() {
-  return BAR_SESSIONS.map(([s, key, title], i) => {
-    const live = s !== 'queue';
+  return BAR_SESSIONS.map(([s0, key, title], i) => {
+    const s = barEnded.has('t_bar' + key.slice(5)) ? 'ended' : s0;
+    const live = s !== 'queue' && s !== 'ended';
     return { id: 't_bar' + key.slice(5), key, title, status: BAR_STATUS[s], word: BAR_WORD[s],
       detail: s === 'run' ? 'Running the tests' : '', waiting_on: [],
       question: s === 'wait' ? 'Keep the old file name when the same file is added twice?' : null,
@@ -918,7 +925,11 @@ async function focusButton(page, dash, width) {
   await page.waitForFunction(h => location.hash === h, '#ticket/' + id('ORCH-189'), { timeout: 10000 });
   await page.waitForSelector(`[data-key="ticket-strip-${id('ORCH-189')}"]`, { timeout: 10000 });
   if (await page.$('#live-dock[data-mode="full"]')) throw new Error('Open ticket left the ticket page hidden behind full screen');
-  if (!await page.$(pane)) throw new Error('the session closed when Open ticket was pressed');
+  // ORCH-676: the layer steps down to the bar so the ticket page is usable; the session stays and Open brings it back
+  await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
+  if (!await page.evaluate(k => window.LiveLayer.panes.includes(k), id('ORCH-189'))) throw new Error('the session closed when Open ticket was pressed');
+  await page.click('[data-key="live-open"]');
+  await page.waitForSelector(pane, { timeout: 5000 });
   // a narrow pane keeps Open ticket in More as well (draft D)
   if (await page.$(`${pane} [data-key="live-pane-more"]`)) {
     await page.click(`${pane} [data-key="live-pane-more"]`);
@@ -1138,6 +1149,215 @@ async function zoom(page, dash, width) {
   await page.waitForSelector(`#live-dock[data-mode="full"] ${pane}`, { timeout: 5000 });
   await page.waitForTimeout(300);
   await noSideways(page);
+}
+
+// Step 28 (ORCH-345): an epic with its helpers, as one group. The state gets the epic "Autumn newsletter" and its four
+// sub-tickets (parent chain), the live sessions API answers with their sessions and the group (sessions.py `groups`):
+// the main helper and "Write the texts" work (two small helpers inside), "Build the mail page" needs you, "Check the
+// links" is in line, "Send a test to the team" has no session yet. One other session works outside the group.
+const GROUP = [
+  ['ORCH-300', 'Autumn newsletter', 'working', 0], ['ORCH-301', 'Write the texts', 'working', 1],
+  ['ORCH-302', 'Build the mail page', 'needs-you', 1], ['ORCH-303', 'Send a test to the team', 'closed', 1],
+  ['ORCH-304', 'Check the links', 'in-line', 1], ['ORCH-12', 'Tidy the release notes', 'working', -1],
+];
+const GWORD = { working: 'Working', 'needs-you': 'Waits for you', 'in-line': 'In line', closed: 'No session' };
+const GRANK = { 'needs-you': 0, working: 1, 'in-line': 2 };
+const gid = key => 't_grp' + key.slice(5);
+const SMALL = [{ what: 'Draft intro', seconds: 180 }, { what: 'Draft offers', seconds: 60 }];
+async function groupState(page) {
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  const HELPER = { working: 'working', 'needs-you': 'you' };
+  await page.addInitScript(() => {
+    try {
+      if (sessionStorage.getItem('grp') !== '1') {
+        localStorage.setItem('orch.live.layer', '{}');
+        localStorage.setItem('orch.live.pins', '[]');
+        sessionStorage.setItem('grp', '1');
+      }
+    } catch (e) { /* none */ }
+  });
+  // the dashboard's own state with the group's tickets and runs on top (also the answer to a send: the page takes it whole)
+  const shape = st => {
+    const base = (st.tickets || [])[0] || {};
+    const extra = GROUP.map(([key, title, , depth]) => ({ ...base, id: gid(key), key, title, status: 'active', questions: [], checks: [],
+      sessions: [], parent: depth === 1 ? gid('ORCH-300') : null }));
+    st.tickets = [...(st.tickets || []).filter(t => !String(t.id).startsWith('t_grp')), ...extra];
+    st.runs = { ...(st.runs || {}) };
+    GROUP.forEach(([key, , s]) => {
+      if (s === 'in-line') st.runs[gid(key)] = { running: false, hold: 'Waits for a free place' };
+      else if (s !== 'closed') st.runs[gid(key)] = { running: true, helper: { state: HELPER[s] }, claim: { agent: 'agent:claude' } };
+    });
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true,
+      addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
+    return st;
+  };
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    route.fulfill({ response: res, json: shape(await res.json()) });
+  });
+  const sessions = GROUP.filter(([, , s]) => s !== 'closed').map(([key, title, s]) => ({ id: gid(key), key, title, status: s, word: GWORD[s],
+    detail: s === 'working' ? 'Writing the offers section' : '', waiting_on: [], question: s === 'needs-you' ? 'Which header picture for the mail page?' : null,
+    lines: s === 'working' ? ['⏺ ' + title + ': step 2 of 4'] : [], tool: s === 'in-line' ? null : 'Claude Code', model: 'Opus', mode: s === 'in-line' ? null : 'live',
+    opened_at: null, open_seconds: s === 'in-line' ? null : 1500, idle_seconds: null, closes_in_seconds: null, last_at: null, kind: '',
+    parent: key === 'ORCH-300' || key === 'ORCH-12' ? null : gid('ORCH-300'), small: key === 'ORCH-301' ? SMALL : [] }))
+    .sort((a, b) => GRANK[a.status] - GRANK[b.status]);
+  const group = { id: gid('ORCH-300'), key: 'ORCH-300', title: 'Autumn newsletter', kind: 'epic',
+    members: GROUP.filter(([, , , d]) => d >= 0).map(([key, title, s, depth]) => ({ id: gid(key), key, title, depth, main: depth === 0,
+      status: s, word: GWORD[s], small: key === 'ORCH-301' ? SMALL : [] })) };
+  await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { sessions, groups: [group], lines: 8, age_ms: 0 } }));
+  await page.route(/\/api\/act$/, async route => {
+    const r = await route.fetch({ url: new URL('/api/state', route.request().url()).href, method: 'GET' });
+    await route.fulfill({ json: shape(await r.json()) });
+  });
+}
+// The epic is one orange tile; a click opens the helper that needs you with the group beside it; a click on a row swaps
+// the session in that pane and the message box names who receives it; small helpers are watch only.
+async function groups(page, dash, width) {
+  await groupState(page);
+  await page.goto(dash + '/#addon/focus');
+  const tile = `[data-key="live-wall"] [data-tile="${gid('ORCH-300')}"]`;
+  await page.waitForSelector(tile, { timeout: 15000 });
+  const t = await page.textContent(tile);
+  for (const w of ['Autumn newsletter', '3 helpers', '2 small helpers', '1 needs you', 'Build the mail page']) if (!t.includes(w)) throw new Error(`the group tile misses "${w}": ${t}`);
+  if (await page.getAttribute(tile, 'data-s') !== 'needs-you') throw new Error('one helper needs you, but the group tile is not orange');
+  for (const k of ['ORCH-301', 'ORCH-302', 'ORCH-304']) if (await page.$(`[data-key="live-wall"] [data-tile="${gid(k)}"]`)) throw new Error(`${k} has its own tile beside its group`);
+  await page.click(`${tile} [data-wall-open]`);
+  const pane = `#live-dock .live-pane[data-session="${gid('ORCH-302')}"]`;
+  await page.waitForSelector(`${pane} [data-key="live-group"]`, { timeout: 10000 });
+  const rows = await page.textContent(`${pane} [data-key="live-group"]`);
+  for (const w of ['Main helper', 'Write the texts', 'Draft intro', 'Small helper', 'watch only', 'Send a test to the team', 'Check the links', 'Earlier sessions']) if (!rows.includes(w)) throw new Error(`the switcher misses "${w}"`);
+  await page.click(`${pane} [data-key="live-group-${gid('ORCH-301')}"]`);
+  const next = `#live-dock .live-pane[data-session="${gid('ORCH-301')}"]`;
+  await page.waitForSelector(`${next} [data-key="live-msg-to"]`, { timeout: 10000 });
+  const to = (await page.textContent(`${next} [data-key="live-msg-to"]`)).trim();
+  if (to !== 'Message to: Write the texts (ORCH-301). Only this helper gets it.') throw new Error('the message box says: ' + to);
+  if (await page.getAttribute(`${next} [data-key="live-group-${gid('ORCH-301')}"]`, 'aria-current') !== 'true') throw new Error('the shown helper is not marked in the switcher');
+  if ((await page.$$('#live-dock .live-pane')).length !== 1) throw new Error('the swap opened a second pane');
+  await page.fill(`${next} [data-live-msg-text]`, 'Use the short intro.');
+  const sent = page.waitForRequest(r => r.url().endsWith('/api/act') && r.method() === 'POST' && (r.postData() || '').includes('run.send'));
+  await page.click(`${next} [data-key="live-msg-send"]`);
+  const body = (await sent).postData() || '';
+  if (!body.includes(gid('ORCH-301')) || !body.includes('Use the short intro.')) throw new Error('the message did not go to Write the texts: ' + body.slice(0, 200));
+  await page.click(`${next} [data-key="live-group-${gid('ORCH-300')}"]`);
+  const main = `#live-dock .live-pane[data-session="${gid('ORCH-300')}"] [data-key="live-msg-to"]`;
+  await page.waitForSelector(main, { timeout: 10000 });
+  if (!(await page.textContent(main)).includes('the main helper')) throw new Error('the main helper is not named in its message box');
+  if (width <= 720 && await page.getAttribute('#live-dock [data-key="live-group"]', 'data-mode') !== 'strip') throw new Error('on a phone the switcher is not a strip');
+  await noSideways(page);
+}
+
+// Steps 29 to 32 (ORCH-663, the clean end-to-end test of the new Focus): what a person does besides the draft's own
+// features, each found working on a fresh workspace with real helpers and kept here on the 24 stand-in sessions.
+const panesNow = page => page.evaluate(() => window.LiveLayer.panes);
+const inDock = page => page.evaluate(() => !!document.activeElement?.closest?.('#live-dock'));
+// A second tab a step opens: its page errors and console errors fail the step like the first tab's.
+function watchTab(p) {
+  const bad = [];
+  p.on('pageerror', e => bad.push(`second tab: page error: ${String(e.message).slice(0, 160)}`));
+  p.on('console', m => { if (m.type() === 'error') bad.push(`second tab: console error: ${m.text().slice(0, 160)}`); });
+  return () => { if (bad.length) throw new Error([...new Set(bad)].join(' | ')); };
+}
+
+// Step 25: at phone width one session shows at a time, right falls back to bottom, Add beside opens instead of splitting.
+async function phone(page, dash, width) {
+  await wallPage(page, dash, 'fd25');
+  await page.click(`${tileOf('t_bar238')} [data-wall-open]`);
+  await page.waitForSelector('[data-key="live-panel"]', { timeout: 5000 });
+  if (width > 720) {
+    await page.evaluate(() => window.LiveLayer.place('right'));
+    await page.waitForTimeout(300);
+    if (await page.evaluate(() => window.LiveLayer.mode) !== 'right') throw new Error('a wide screen cannot put the layer on the right');
+    return;
+  }
+  await page.evaluate(() => { window.LiveLayer.place('right'); window.LiveLayer.beside('t_bar201'); });
+  await page.waitForTimeout(300);
+  const st = await page.evaluate(() => ({ mode: window.LiveLayer.mode, n: document.querySelector('[data-key="live-panel"]').dataset.n,
+    shown: [...new Set([...document.querySelectorAll('#live-dock [data-key="live-panel"] [data-session]')].map(e => e.dataset.session))] }));
+  if (st.mode !== 'bottom') throw new Error(`on a phone the layer went to ${st.mode}, not the bottom`);
+  if (st.n !== '1') throw new Error(`on a phone ${st.n} sessions show at once, not one`);
+  if (st.shown.length !== 1 || st.shown[0] !== 't_bar201') throw new Error(`Add beside on a phone should show ORCH-201 instead, it shows ${st.shown.join(', ')}`);
+  if (await page.$('#live-dock [data-key="live-pane-place"]')) throw new Error('on a phone a pane still offers Place');
+  await noSideways(page);
+}
+
+// Step 29: a ticket's address opened in a new tab shows the wall with that session in the layer; an address of a ticket
+// that does not exist shows the wall and nothing breaks.
+async function address(page, dash) {
+  await liveBarState(page);
+  await page.goto(dash + '/#addon/focus/t/t_bar201');
+  await page.waitForSelector('[data-key="live-wall"] .wall-band', { timeout: 15000 });
+  await page.waitForFunction(() => window.LiveLayer?.panes?.includes('t_bar201'), null, { timeout: 8000 })
+    .catch(() => { throw new Error('the address of ORCH-201 did not open its session in the layer'); });
+  await page.waitForSelector('#live-dock [data-key="live-panel"]', { timeout: 5000 });
+  const other = await page.context().newPage();
+  const otherOk = watchTab(other);
+  try {
+    await liveBarState(other);
+    await other.goto(dash + '/#addon/focus/t/t_nothere1');
+    await other.waitForSelector('[data-key="live-wall"] .wall-band', { timeout: 15000 });
+    if ((await panesNow(other)).includes('t_nothere1')) throw new Error('an unknown ticket address opened an empty pane');
+    otherOk();
+  } finally { await other.close(); }
+}
+
+// Step 30: keyboard only. Tab reaches a tile, Enter opens it with the keyboard in the layer, Esc goes back one step at
+// a time until the bar, and the keyboard lands on the bar's Open.
+async function keyboard(page, dash) {
+  await wallPage(page, dash, 'fd30');
+  let found = false;
+  for (let i = 0; i < 120 && !found; i++) {
+    await page.keyboard.press('Tab');
+    found = await page.evaluate(() => document.activeElement?.dataset?.wallOpen === 't_bar238');
+  }
+  if (!found) throw new Error('Tab never reached the tile of ORCH-238');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.LiveLayer?.panes?.includes('t_bar238'), null, { timeout: 5000 });
+  await page.waitForTimeout(200);
+  if (!(await inDock(page))) throw new Error('after Enter the keyboard is not in the layer');
+  const mode0 = await page.evaluate(() => window.LiveLayer.mode);
+  if (mode0 !== 'bottom') throw new Error(`Enter opened the layer ${mode0}, not at the bottom`);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  const mode1 = await page.evaluate(() => window.LiveLayer.mode);
+  if (mode1 !== 'bar') throw new Error(`one Esc from the layer at the bottom went to ${mode1}, not the bar`);
+  if (!(await page.evaluate(() => document.activeElement?.matches?.('[data-key="live-open"]')))) throw new Error('after Esc the keyboard is not on the bar\'s Open');
+}
+
+// Step 31: two tabs. A pin and a new name made in one tab show in the other on its next look (no reload).
+async function twoTabs(page, dash) {
+  const other = await page.context().newPage();
+  const otherOk = watchTab(other);
+  try {
+    await wallPage(other, dash, 'fd31b');
+    await wallPage(page, dash, 'fd31a');  // the stand-in server's pins start fresh here
+    await page.click(`${tileOf('t_bar232')} [data-wall-pin]`);
+    await page.evaluate(() => window.LiveLayer.open('t_bar232'));
+    await page.click('#live-dock [data-live="rename"][data-session="t_bar232"]');
+    await page.keyboard.press('ControlOrMeta+A');
+    await page.keyboard.type('Usage page (mine)');
+    await page.keyboard.press('Enter');
+    await other.waitForFunction(() => window.LiveLayer?.pins?.includes('t_bar232'), null, { timeout: 10000 })
+      .catch(() => { throw new Error('the pin made in one tab did not show in the other'); });
+    await other.waitForFunction(() => /Usage page \(mine\)/.test(document.querySelector('[data-tile="t_bar232"]')?.innerText || ''), null, { timeout: 10000 })
+      .catch(() => { throw new Error('the name given in one tab did not show in the other'); });
+    otherOk();
+  } finally { await other.close(); }
+}
+
+// Step 32: a session that ends while it is open: its tile leaves Working and its pane offers the Start choice.
+async function ended(page, dash) {
+  await wallPage(page, dash, 'fd32');
+  await page.evaluate(() => window.LiveLayer.open('t_bar235'));
+  await page.waitForSelector('#live-dock [data-live-lines], #live-dock [data-key="live-panel"]', { timeout: 5000 });
+  barEnded.add('t_bar235');
+  await page.waitForSelector('#live-dock [data-key="live-start"]', { timeout: 15000 })
+    .catch(() => { throw new Error('the pane of a session that ended does not offer Start'); });
+  const s = await page.getAttribute(tileOf('t_bar235'), 'data-s');
+  if (s !== 'closed') throw new Error(`the tile of a session that ended says ${s}, not closed`);
 }
 
 const STEPS = [
@@ -1404,10 +1624,12 @@ const STEPS = [
   },
   {
     n: 25, pic: 'fd-25-phone', area: 'phone width', title: 'Phone width: one session at a time', feature: [7],
-    waits: T.layer,
     do: ['At 390 wide open Focus, open a session, then try to put the layer on the right.'],
     see: ['The wall is one column.', 'The layer opens at the bottom and shows one session; right falls back to bottom.',
       'Nothing scrolls sideways; every button can be reached.'],
+    async run({ page, dash, width }) {
+      await phone(page, dash, width);
+    },
     draft: { q: '?page=focus&cur=ORCH-238&mode=right' },
   },
   {
@@ -1427,6 +1649,55 @@ const STEPS = [
     do: ['Open the model choice of a running session.'],
     see: ['A new model applies from the next fresh start and says so.'],
     draft: { q: '?page=focus&cur=ORCH-247&view=zoom&pm=ORCH-247:model' },
+  },
+  {
+    n: 28, pic: 'fd-28-groups', area: 'layer', title: 'An epic and its helpers in one place', feature: [],
+    do: ['Open Focus while an epic has a main helper and helpers on its tickets.', 'Click the epic\'s tile.',
+      'Click another helper in the list beside the session, then write it a message.'],
+    see: ['The epic is one tile with its helpers counted ("3 helpers · 2 small helpers"), orange while one of them needs you.',
+      'The click opens the helper that needs you, with the main helper, every helper, the small helpers (watch only) and Earlier sessions beside it.',
+      'A click on a helper shows it in the same pane; the message box says who gets the message.',
+      'On a phone the list is one line that scrolls inside itself.'],
+    async run({ page, dash, width }) {
+      await groups(page, dash, width);
+    },
+    draft: { q: '?page=focus&cur=ORCH-228&view=zoom' },
+  },
+  {
+    n: 29, pic: 'fd-29-address', area: 'layer', title: 'The address of a ticket opens its session', feature: [3],
+    do: ['Open the address of a ticket\'s session (#addon/focus/t/<ticket>) in a new tab.', 'Open the address of a ticket that does not exist.'],
+    see: ['The wall shows with that session open in the layer.', 'An unknown ticket shows the wall and opens nothing.'],
+    async run({ page, dash }) {
+      await address(page, dash);
+    },
+    draft: { q: '?page=focus&cur=ORCH-201&view=zoom' },
+  },
+  {
+    n: 30, pic: 'fd-30-keyboard', area: 'wall', title: 'Keyboard only: wall, layer and back to the bar', feature: [8],
+    do: ['Without a mouse, press Tab until a tile is marked, then Enter.', 'Press Esc until the layer is back in the bar.'],
+    see: ['Enter opens the session in the layer with the keyboard in it.', 'Each Esc goes back one step; at the end the keyboard is on the bar.'],
+    async run({ page, dash }) {
+      await keyboard(page, dash);
+    },
+    draft: { q: '?page=focus&cur=ORCH-238&view=zoom' },
+  },
+  {
+    n: 31, pic: 'fd-31-two-tabs', area: 'sessions', title: 'Two tabs: a pin and a name show in both', feature: [11],
+    do: ['Open Focus in two tabs.', 'In one, pin a session and give it a name.'],
+    see: ['The other tab shows the pin and the name within a few seconds, without a reload.'],
+    async run({ page, dash }) {
+      await twoTabs(page, dash);
+    },
+    draft: { q: '?page=focus' },
+  },
+  {
+    n: 32, pic: 'fd-32-ended', area: 'sessions', title: 'A session that ends while it is open', feature: [4],
+    do: ['Open a working session in the layer.', 'Let its helper stop.'],
+    see: ['Its tile leaves Working and says No session.', 'Its pane offers the Start choice.'],
+    async run({ page, dash }) {
+      await ended(page, dash);
+    },
+    draft: { q: '?page=focus&cur=ORCH-235&view=zoom&ask=1' },
   },
 ];
 

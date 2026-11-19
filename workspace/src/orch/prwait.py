@@ -69,6 +69,7 @@ class Verdict:
     # failed: a caller that can try again later does not count it as red
     unknown: bool = False
     retried: list = field(default_factory=list)  # check names orch ran once more before this verdict
+    stopped: bool = False  # the caller's stop() said to stop waiting (the merge queue's group behind another)
 
     def line(self) -> str:
         return f"GREEN: {self.why}" if self.green else f"NOT green: {self.why}"
@@ -434,6 +435,13 @@ def wait(src, no_checks: float = NO_CHECKS_SECS, timeout: float = TIMEOUT_SECS) 
     return v2
 
 
+def _stopped(src) -> Verdict | None:
+    """src.stop() (set by run_one's stop) returns a reason to stop waiting, or None to go on."""
+    stop = getattr(src, "stop", None)
+    why = stop() if stop is not None else None
+    return Verdict(False, f"stopped: {why}", unknown=True, stopped=True) if why else None
+
+
 def _wait_once(src, no_checks: float, timeout: float) -> Verdict:
     """Wait until the checks have finished, then say GREEN or NOT green. Never raises for GitHub trouble:
     what cannot be read keeps the wait going or ends NOT green."""
@@ -447,6 +455,9 @@ def _wait_once(src, no_checks: float, timeout: float) -> Verdict:
     src.sleep(FIRST_NAP)  # a fresh push reports "no checks" for a moment
     idle_since = None  # since when nothing runs any more although a required check is missing
     while True:
+        halt = _stopped(src)
+        if halt is not None:
+            return halt
         raw, open_runs = src.look()
         checks = [
             c
@@ -569,13 +580,15 @@ def run_one(
     src: Live | None = None,
     before_merge=None,
     queue: bool = False,
+    stop=None,
 ) -> Outcome:
     """Wait for one pull request's checks; with merge, merge it on green as GitHub's branch rules allow, only
     its checked commit. When the base branch got commits since the branch last took it in, and they touch a
     file the pull request changes (or a test file of the same module), the base branch is taken in first and
     the checks are waited for once more: two green pull requests on the same code must not break it
     together. before_merge(head) is asked right before the merge: a reason (text) stops it, status
-    "held"; None lets it go on.
+    "held"; None lets it go on. stop() is asked before every look at the checks: a reason ends the wait
+    without a verdict, status "stopped" (the merge queue stops a group built on top of one that failed).
 
     queue=True is the merge queue's call: the base branch is never taken into the branch (status "behind"
     instead; the queue checks it once on top of the base branch itself), and the merge does not wait for the
@@ -589,7 +602,11 @@ def run_one(
     if v.get("state") != "OPEN":
         return Outcome(url, False, "closed", f"{url} is closed; nothing was done.")
     head, base = v["headRefOid"], v.get("baseRefName") or ""
+    if stop is not None:  # asked before every look at the checks: a reason ends the wait (status "stopped")
+        src.stop = stop
     verdict = wait(src, timeout=timeout)
+    if verdict.stopped:
+        return Outcome(url, False, "stopped", f"Checks of {url}: {verdict.line()}", verdict)
     if not verdict.green:
         return Outcome(url, False, "checks failed", f"Checks of {url}: {verdict.line()}", verdict)
     if not merge:

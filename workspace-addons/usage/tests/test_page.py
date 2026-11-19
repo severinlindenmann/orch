@@ -5,6 +5,7 @@ import re
 import threading
 import urllib.error
 import urllib.request
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from conftest import jrun, switcher_data
@@ -243,6 +244,35 @@ def test_the_dashboards_exact_command_shape(cli, fake_switcher, ws):
     assert code == 0 and json.loads(out)["account"]["rule"]["limits"] == [
         {"value": 88, "unit": "%", "period": "week"}
     ]
+
+
+def test_a_full_five_hour_window_is_full_not_ready(cli, fake_switcher, ws):
+    _seed(cli)
+    m = page.build(usage_cli.gather(ws), ws)
+    row = {"on": True, "active": False, "use": {"5h": {"pct": 100.0, "resets_at": "2026-11-18T20:00:00Z"}}}
+    assert page._state(row) == "full" and page._full_until(row) == "2026-11-18T20:00:00Z"
+    assert page._state({**row, "use": {"5h": {"pct": 99.0}}}) == "ready"
+    assert page._state({**row, "active": True}) == "in-use"
+    assert all("full_until" in a for a in m["accounts"])
+
+
+def test_many_switches_in_a_short_while_give_one_warning(ws):
+    now = datetime(2026, 11, 18, 18, 0, tzinfo=UTC)
+    assert page.switch_flapping(ws, now) is None
+    rows = [
+        {
+            "at": (now - timedelta(minutes=10 * i)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "who": store.USAGE,
+            "what": "switched to x",
+            "label": "x",
+            "account": None,
+        }
+        for i in range(8)
+    ]
+    store.usage_dir(ws).mkdir(parents=True, exist_ok=True)
+    store._append_history(ws, rows)
+    w = page.switch_flapping(ws, now)
+    assert w and w["count"] == 8
 
 
 def test_until_on_a_week_limit_is_refused_with_a_hint_to_use_end(cli, fake_switcher, ws):

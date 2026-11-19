@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerCompact, liveLayerSort, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerCompact, liveLayerSort, liveAskModel, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -50,6 +50,19 @@ test('minimise leaves the bar, closed to the side leaves the edge; both open aga
   s = run(s, [{type:'reopen'}, {type:'place', mode:'full'}, {type:'min'}, {type:'reopen'}]);
   assert.equal(s.mode, 'right', 'minimised from full screen it opens docked, not full');
   assert.equal(L.liveLayerStep(s, {type:'open', key:'t_2'}).mode, 'right', 'opening another session keeps the place');
+});
+
+test('Open ticket steps a bottom or full screen layer down to the bar and leaves a docked one (ORCH-676)', () => {
+  const open = L.liveLayerStep(L.liveLayerFresh(), {type:'open', key:'t_1'});
+  assert.equal(open.mode, 'bottom');
+  assert.equal(L.liveLayerStep(open, {type:'to-ticket'}).mode, 'bar', 'the bottom panel gets out of the way');
+  const full = L.liveLayerStep(open, {type:'place', mode:'full'});
+  assert.equal(L.liveLayerStep(full, {type:'to-ticket'}).mode, 'bar');
+  assert.equal(L.liveLayerStep(L.liveLayerStep(full, {type:'to-ticket'}), {type:'reopen'}).mode, 'bottom', 'it opens again where it was');
+  const right = L.liveLayerStep(open, {type:'place', mode:'right'});
+  assert.equal(L.liveLayerStep(right, {type:'to-ticket'}), right, 'docked beside the page it covers nothing');
+  const bar = L.liveLayerFresh();
+  assert.equal(L.liveLayerStep(bar, {type:'to-ticket'}), bar);
 });
 
 test('closing the last session keeps the bar (or the edge) and forgets the session', () => {
@@ -277,4 +290,21 @@ test('a button with a word is named by the word unless its label starts with it'
   assert.equal(ctx.f('b', 'pin', 'Pin ORCH-1', 'g', {}, 'Pin')['aria-label'], 'Pin ORCH-1');
   assert.equal(ctx.f('b', 'x', 'Where it sits', 'g', {}, 'Bottom')['aria-label'], null);
   assert.equal(ctx.f('b', 'x', 'Where it sits', 'g')['aria-label'], 'Where it sits');
+});
+
+test('ORCH-679: a running helper has Stop in its pane (run.stop, "Stop idle helper" when idle); no helper, no Stop', () => {
+  assert.match(source, /sess\.kind \|\| !sess\.running \? null : h\('button'[^\n]*'data-live-stop':sess\.id\}, liveStopLabel\(sess\)\)/);
+  assert.match(source, /\['idle', 'stuck'\]\.includes\(h2\.state\) \? 'Stop idle helper' : 'Stop'/);
+  assert.match(source, /#live-dock \[data-live-stop\][\s\S]{0,200}act\('run\.stop', \{ticket:b\.dataset\.liveStop\}\)/);
+  assert.match(source, /x\.running && !x\.kind \? liveStopLabel\(x\) : ''/);  // the dock repaints when idle turns into working
+});
+
+test('the pane shows the waiting question with its options and answers it there (ORCH-675)', () => {
+  const {liveAskModel} = load();
+  const t = {questions:[{id:'q1', answer:'x', text:'old'}, {id:'q2', digest:'d', text:'Which banner colour should I use?', options:['Blue', 'Green', '']}]};
+  assert.deepEqual(JSON.parse(JSON.stringify(liveAskModel(t))), {id:'q2', digest:'d', text:'Which banner colour should I use?', options:['Blue', 'Green'], plain:true});
+  assert.equal(liveAskModel({questions:[{id:'q1', answer:'x'}]}), null);
+  assert.equal(liveAskModel({}), null);
+  assert.equal(liveAskModel({questions:[{id:'q3', kind:'plan', text:'Plan?'}]}).plain, false);
+  assert.match(source, /liveAskFill[^]*?act\('answer', \{ticket:id, question:q\.id, digest:q\.digest/, 'the answer is the same op a question card sends');
 });

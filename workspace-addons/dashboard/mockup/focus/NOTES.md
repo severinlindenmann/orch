@@ -304,3 +304,20 @@ the dashboard), not per browser (issue 1351); the layer's place and panes are ke
 without a ticket is pinned until it is unpinned. One change in the bar: at its last fold (needs you and More) More
 holds the pinned sessions too, so a pinned one is never hidden. Master: `.live-ren` in widgets.css (style guide: Live
 layer); click-through step 7.
+
+## Groups: an epic or a run order, built (ORCH-345, 18 Nov)
+
+The owner picked draft A of ORCH-344 and the word "small helper" (17 Nov) and OK'd it on the new Focus. The mockup is
+`groups/a-on-d.html` (written by `groups/build_d.py` from `focus-v4d.js`, which stays untouched; edit the script, run
+`python3 build_d.py`). Fixed on the way in: the bar chip counts helpers, the same number as the tile ("5 helpers · 2
+small helpers"), not sessions; the message box says "Message to: Write the texts. Only this helper gets it." (the main
+helper is not sent a copy, so the draft's "The main helper sees it too" is gone); in a narrow pane the switcher is the
+one-line strip on top, so the message box keeps the pane's full width.
+
+Built behind the Preview switch: the live sessions API sends `groups` (the top ticket of a parent chain and its open
+sub-tickets in tree order, the small helpers each helper started inside its session). Wall: one tile per group with
+its counts and a small tree, orange while one helper needs you, found by the filter by any helper. Bar: one chip with
+the helper count. Pane: the switcher beside the session (main helper, its tickets, small helpers watch only, Earlier
+sessions); a click swaps the session in that pane. Not built yet from the draft: Pause all, the question strip across
+the top, the Stopped card. Master: `.gtree*`, `.live-gwrap`, `.live-msg`, `.live-to`, `.lbar-n` in widgets.css (style
+guide: Live groups); click-through step 28.

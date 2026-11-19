@@ -326,3 +326,27 @@ def test_sent_back_to_working_keeps_the_session(proj, run, closed, monkeypatch):
 
     monkeypatch.setattr(runs_live, "_finished", flip)
     assert runs_live.cleanup(proj) == [] and closed == []
+
+
+@pytest.mark.parametrize(
+    "on,counts",
+    [
+        ({"kind": "time", "until": "2099-01-01T10:00:00Z"}, False),
+        ({"kind": "external", "ref": "merge queue merges PR 1585"}, False),
+        ({"kind": "ticket", "ref": "t_other"}, False),
+        ({"kind": "question", "ref": "q1"}, True),
+        ({"kind": "external", "ref": "no sign-in", "start": True}, True),
+    ],
+)
+def test_idle_helper_that_waits_on_a_time_or_the_queue_frees_its_place(proj, run, on, counts):
+    _limit(proj)
+    tids = [_live(proj, run, "idle", 1) for _ in range(LIMIT)]
+    for t in tids:
+        tickets.apply_op(
+            proj,
+            t,
+            lambda tk, on=on: tk.update(status="waiting", waiting_on=dict(on)),
+            by="human:t",
+        )
+    assert (len(runs_live.live_alive(proj)) == LIMIT) is counts
+    assert (runs_live._full(proj) == LIMIT) is counts
