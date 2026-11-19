@@ -141,6 +141,8 @@ def outside_result(repo: str, now: dt.datetime | None = None, runner=subprocess.
             repo,
             "--workflow",
             "live-check.yml",
+            "--status",
+            "completed",
             "--limit",
             "1",
             "--json",
@@ -156,15 +158,15 @@ def outside_result(repo: str, now: dt.datetime | None = None, runner=subprocess.
         raise AssertionError(f"gh run list failed: {p.stderr.strip()[:200]}")
     runs = json.loads(p.stdout or "[]")
     if not runs:
-        raise Skip("no outside run yet (live-check.yml)")
+        raise Skip("no finished outside run yet (live-check.yml)")
     r = runs[0]
     started = dt.datetime.fromisoformat(r["createdAt"])
     age_h = ((now or dt.datetime.now(dt.UTC)) - started).total_seconds() / 3600
-    if r["status"] == "completed" and r["conclusion"] != "success":
+    if r["conclusion"] != "success":
         raise AssertionError(f"outside run {r['conclusion']}: {r['url']}")
     if age_h > OUTSIDE_MAX_AGE_H:
         raise AssertionError(f"newest outside run is {age_h:.1f} h old: {r['url']}")
-    return f"outside run {r['conclusion'] or r['status']} {age_h:.1f} h ago"
+    return f"outside run passed {age_h:.1f} h ago"
 
 
 def orch(ws: str, *args: str) -> dict | list:
@@ -206,14 +208,15 @@ def publish_round_trip(ws: str, base: str = PUBLISH) -> str:
         r = orch(ws, "publish", "file", str(f), "--days", "1", "--note", "orch live check")
     fid = r["id"]
     try:
-        code, _ = http_status(f"{base}/f/{fid}/meta")
-        if code != 200:
-            raise AssertionError(f"fetch of the published file answered {code}")
+        for part in ("meta", "blob"):
+            code, body = http_status(f"{base}/f/{fid}/{part}")
+            if code != 200 or not body:
+                raise AssertionError(f"fetch of the published file ({part}) answered {code}")
     finally:
         orch(ws, "publish", "delete", fid)
     code, _ = http_status(f"{base}/f/{fid}/meta")
-    if code == 200:
-        raise AssertionError("the file is still there after delete")
+    if code not in (404, 410):
+        raise AssertionError(f"after delete the file answered {code} (expected 404 or 410)")
     return "published, fetched and deleted a test file"
 
 

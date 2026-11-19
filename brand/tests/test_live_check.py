@@ -99,12 +99,19 @@ def run_json(conclusion, created="2026-11-19T21:17:00Z", status="completed"):
 
 
 def test_outside_result():
-    assert "success" in lc.outside_result("r", NOW, gh(run_json("success")))
+    assert "passed" in lc.outside_result("r", NOW, gh(run_json("success")))
     with pytest.raises(AssertionError, match="failure"):
         lc.outside_result("r", NOW, gh(run_json("failure")))
     with pytest.raises(AssertionError, match="old"):
         lc.outside_result("r", NOW, gh(run_json("success", "2026-11-19T10:00:00Z")))
-    assert "in_progress" in lc.outside_result("r", NOW, gh(run_json("", status="in_progress")))
+    calls = []
+
+    def runner(cmd, **k):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, run_json("success"), "")
+
+    lc.outside_result("r", NOW, runner)
+    assert "--status" in calls[0] and calls[0][calls[0].index("--status") + 1] == "completed"
     with pytest.raises(lc.Skip):
         lc.outside_result(
             "r", NOW, gh(rc=1, stderr="HTTP 404: workflow live-check.yml not found on the default branch")
@@ -158,3 +165,43 @@ def test_result_and_exit_code(site, tmp_path, monkeypatch):
     monkeypatch.setattr(lc, "admin_open_private", lambda h, p: "200")
     assert lc.main(["--where", "inside", "--relay", up, "--publish", up, "--out", str(out)]) == 0
     assert json.loads(out.read_text())["summary"] == "All checks passed."
+
+
+def test_relay_round_trip_finds_the_message(monkeypatch):
+    sent = {}
+
+    def orch(ws, *args):
+        if args[:2] == ("relay", "status"):
+            return {"configured": True, "workspace": "ws_b"}
+        if args[:2] == ("relay", "send"):
+            sent["to"], sent["text"] = args[2], args[3]
+            return {}
+        # the shape `orch relay inbox --json` prints: message fields at the top level
+        return [{"type": "text", "from": "ws_a", "body": {"text": sent["text"]}, "allowed": True}]
+
+    monkeypatch.setattr(lc, "orch", orch)
+    assert "arrived" in lc.relay_round_trip("a", "b", wait_s=5)
+    assert sent["to"] == "ws_b"
+
+
+def test_publish_round_trip(monkeypatch):
+    state = {"deleted": False}
+    monkeypatch.setattr(
+        lc, "orch", lambda ws, *a: state.update(deleted=True) if a[1] == "delete" else {"id": "f_1"}
+    )
+
+    def status(url):
+        if state["deleted"]:
+            return state["after"], b""
+        return state.get("blob", 200) if url.endswith("/blob") else 200, b"x"
+
+    monkeypatch.setattr(lc, "http_status", status)
+    state["after"] = 404
+    assert "deleted" in lc.publish_round_trip("ws")
+    state.update(deleted=False, after=502)
+    with pytest.raises(AssertionError, match="502"):
+        lc.publish_round_trip("ws")
+    state.update(deleted=False, after=404, blob=500)
+    with pytest.raises(AssertionError, match="blob"):
+        lc.publish_round_trip("ws")
+    assert state["deleted"]  # deleted even when the fetch failed
