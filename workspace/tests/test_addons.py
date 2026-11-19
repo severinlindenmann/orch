@@ -602,7 +602,9 @@ def test_default_repo_is_never_a_folder(proj, monkeypatch):
     planted = proj / "https:" / "github.com" / "severinlindenmann" / "orch"
     planted.mkdir(parents=True)
     assert not addons._is_local(addons.DEFAULT_REPO)
-    assert addons.spec("workspace").startswith("https://github.com/severinlindenmann/orch/archive/")
+    assert addons.spec("workspace").startswith(
+        "orch-workspace @ https://github.com/severinlindenmann/orch/archive/"
+    )
     monkeypatch.setenv("ORCH_REPO", "relative/dir")  # relative: not local either
     (proj / "relative" / "dir").mkdir(parents=True)
     assert not addons._is_local("relative/dir")
@@ -1077,13 +1079,13 @@ def test_addons_install_from_where_orch_came_from(proj, monkeypatch, uv_calls):
         "--reinstall",
         "--refresh",
         "--no-sources",
-        f"{zip_}#subdirectory=workspace",
+        f"orch-workspace @ {zip_}#subdirectory=workspace",
     ]
     assert args[6:] == [
         "--with",
-        f"{zip_}#subdirectory=workspace-addons/dashboard",
+        f"orch-dashboard @ {zip_}#subdirectory=workspace-addons/dashboard",
         "--with",
-        f"{zip_}#subdirectory=workspace-addons/focus",
+        f"orch-focus @ {zip_}#subdirectory=workspace-addons/focus",
     ]
     monkeypatch.setenv("ORCH_REF", "v1")  # an explicit override still wins
     assert addons.spec("workspace").endswith("/archive/v1.zip#subdirectory=workspace")
@@ -1129,18 +1131,47 @@ def test_github_sources_install_without_git(monkeypatch):
         (
             "https://github.com/a/orch",
             "main",
-            "https://github.com/a/orch/archive/main.zip#subdirectory=workspace",
+            "orch-workspace @ https://github.com/a/orch/archive/main.zip#subdirectory=workspace",
         ),
         (
             "https://github.com/a/orch.git",
             "fix/win",
-            "https://github.com/a/orch/archive/fix/win.zip#subdirectory=workspace",
+            "orch-workspace @ https://github.com/a/orch/archive/fix/win.zip#subdirectory=workspace",
         ),
-        ("https://gitlab.com/a/orch", "main", "git+https://gitlab.com/a/orch@main#subdirectory=workspace"),
+        (
+            "https://gitlab.com/a/orch",
+            "main",
+            "orch-workspace @ git+https://gitlab.com/a/orch@main#subdirectory=workspace",
+        ),
     ]:
         monkeypatch.setattr(addons, "_install_origin", lambda r=repo, f=ref: {"repo": r, "ref": f})
         monkeypatch.delenv("ORCH_REF", raising=False)
         assert addons.spec("workspace") == want
+
+
+def test_builtin_package_names_match_spec(monkeypatch):
+    """ORCH-871: uv 0.12 keys an unnamed URL requirement by the URL without #subdirectory, and core and every
+    built-in add-on share one GitHub zip, so each --with was taken for orch-workspace ("Package metadata name
+    orch-automation does not match given name orch-workspace"). spec() names each package orch-<folder>;
+    that name must be the one in the folder's pyproject.toml, or uv refuses the install."""
+    import tomllib
+
+    monkeypatch.delenv("ORCH_REPO", raising=False)
+    monkeypatch.delenv("ORCH_REF", raising=False)
+    origin = {"repo": "https://github.com/a/orch", "ref": "main"}
+    monkeypatch.setattr(addons, "_install_origin", lambda: origin)
+    root = Path(__file__).resolve().parents[2]
+    built_in = sorted(p.parent for p in (root / "workspace-addons").glob("*/pyproject.toml"))
+    folders = [root / "workspace", *built_in]
+    assert len(folders) > 5
+    names = set()
+    for f in folders:
+        sub = f.relative_to(root).as_posix()
+        want = tomllib.loads((f / "pyproject.toml").read_text(encoding="utf-8"))["project"]["name"]
+        got = addons.spec(sub)
+        assert got.startswith(f"{want} @ https://github.com/a/orch/archive/main.zip#subdirectory={sub}"), got
+        names.add(want)
+    assert len(names) == len(folders)  # one distinct name per package
 
 
 def test_install_origin_reads_direct_url(monkeypatch, tmp_path):
