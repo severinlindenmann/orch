@@ -42,6 +42,7 @@ def _state():
         _t(6, status="dropped"),
         _t(7),
         _t(8),
+        _t(9),  # never had a helper: its status row says nothing ran, so it is no session
     ]
     runs = {
         "t_sess0001": _run(
@@ -49,9 +50,11 @@ def _state():
             detail="Running pytest",
         ),
         "t_sess0002": _run("you", "Waits for you", "Your answer"),
-        "t_sess0003": {"running": False, "pending": 0},
+        # ran before, closed now: a helper wrote to it (kept conversation)
+        "t_sess0003": {"running": False, "pending": 0, "last_activity": {"at": "2026-11-17T19:00:00Z"}},
         "t_sess0004": _run("idle", "Idle", "Nothing running for 5 min", idle_seconds=300),
         "t_sess0005": {"running": False},
+        "t_sess0009": {"running": False, "pending": 0, "last_activity": None, "claim": None},
         "t_sess0007": _run(
             "waiting", "On hold", "Waiting for the pull request checks", live=False, hold="x y"
         ),
@@ -92,6 +95,9 @@ def test_every_session_with_status_waits_lines_tool_model_and_open_time(tmp_path
     assert line["status"] == "in-line" and line["word"] == "In line"
     assert idle["status"] == "idle" and idle["idle_seconds"] == 300
     assert closed["status"] == "closed" and closed["tool"] is None and closed["open_seconds"] is None
+    assert (
+        "ORCH-9" not in got
+    )  # ORCH-701: a ticket that never ran is no session and claims no kept conversation
     # one screen read for every live session, never for a oneshot or a closed one
     assert (
         len(screens) == 1
