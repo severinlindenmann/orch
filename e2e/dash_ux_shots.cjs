@@ -10,6 +10,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const headless = require('./headless.cjs'); // the keychain options (ORCH-615)
 
 const PW = process.env.PW_DIR || path.join(os.homedir(), 'orch-dev', 'e2e', 'dashboard', 'node_modules');
 const OUT = process.env.SHOTS_DIR || path.join(os.tmpdir(), 'dash-ux-shots');
@@ -74,7 +75,7 @@ test('dashboard UX shots: Chat (Today, Earlier, a past day) and Settings at 1280
   let chromium;
   try { ({chromium} = require(path.join(PW, 'playwright'))); } catch (e) { t.skip('playwright not found at ' + PW + ' (set PW_DIR)'); return; }
   fs.mkdirSync(OUT, {recursive: true});
-  const data = fixtures(), report = {}, browser = await chromium.launch();
+  const data = fixtures(), report = {}, browser = await headless.launch(chromium);
   try {
     for (const [w, h] of [[1280, 800], [720, 900], [390, 844]]) {
       const context = await browser.newContext({viewport: {width: w, height: h}, deviceScaleFactor: 1});

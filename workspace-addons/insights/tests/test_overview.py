@@ -457,7 +457,7 @@ def test_lost_helper_actions_are_said(answer, nothing):
         )
         assert view["lost"] == {
             "lines": 2136,
-            "text": "2,136 helper actions in the last 30 days were not recorded, so the counts on this page are too low.",
+            "text": "2,136 helper actions in the last 30 days were not recorded, so the counts on this page are too low. They cannot be added back. If the number keeps growing, press Report a problem.",
         }
     assert build_overview({**answer, "lost": {"lines": 0, "reasons": {}, "errors": {}}})["lost"] is None
 

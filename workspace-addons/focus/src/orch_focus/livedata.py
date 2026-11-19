@@ -95,7 +95,7 @@ def records(root: Path) -> list[dict]:
 
 def tickets(root: Path, orch_bin: str | None) -> dict[str, dict]:
     try:
-        code, out, _ = actions.orch(Path(root), orch_bin, ["ticket", "list", "--all", "--json"], timeout=10)
+        code, out, _ = actions.read(Path(root), orch_bin, ["ticket", "list", "--all", "--json"], timeout=10)
         rows = json.loads(out) if code == 0 else []
     except (actions.Unavailable, ValueError, RecursionError):
         rows = []

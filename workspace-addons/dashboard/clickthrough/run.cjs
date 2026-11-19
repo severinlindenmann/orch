@@ -29,14 +29,14 @@ const REPO = path.resolve(__dirname, '..', '..', '..');
 let SIZE = { width: 1280, height: 900 };
 /** Add-ons of this checkout the demo home has installed (off until a click-through turns one on, see server.py):
  *  every orch the run starts sees the same ones. */
-const ADDONS = ['focus', 'lessons', 'pull-requests'];
+const ADDONS = ['focus', 'lessons', 'pull-requests', 'factory', 'sync'];
 const UV_RUN = ['uv', 'run', '-q', '--project', path.join(REPO, 'workspace'),
   ...ADDONS.flatMap(n => ['--with-editable', path.join(REPO, 'workspace-addons', n)])];
 /** the env of every process of the run: the throw-away home only; ORCH_REPO = this checkout, so the add-ons
  *  above count as shipped and "the newest orch" is read from here, never from the internet */
 const runEnv = dir => ({ HOME: dir, USERPROFILE: dir, ORCH_HOME: path.join(dir, 'orch'), ORCH_HOME_STRICT: '1',
   // the stand-in programs of server.py (agent tools, gh) first, for every orch the run starts, not only the server
-  PATH: `${path.join(dir, 'bin')}${path.delimiter}${process.env.PATH}`, LANG: 'en_US.UTF-8', ORCH_REPO: REPO,
+  PATH: `${path.join(dir, 'bin')}${path.delimiter}${process.env.PATH}`, LANG: 'en_US.UTF-8', ORCH_REPO: REPO, ORCH_NO_TOOL_CHECK: '1',
   UV_CACHE_DIR: process.env.UV_CACHE_DIR || path.join(os.homedir(), '.cache', 'uv') });
 const envArgs = env => ['-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`)];
 
@@ -140,14 +140,23 @@ async function signIn(browser, srv) {
 
 /** Record what the page does: ops sent (with their answer) and the router kinds it showed. */
 function recorder(page, base) {
-  const rec = { ops: [], pages: new Set(), errors: [], refusedOk: new Set(), failed: [] };
-  page.on('response', r => { if (r.status() >= 400) rec.failed.push(`${r.status()} ${r.request().method()} ${r.url().replace(base, '')}`); });
+  const rec = { ops: [], pages: new Set(), errors: [], refusedOk: new Set(), failed: [], offAddons: new Set(), offViews404: 0 };
+  page.on('response', r => {
+    if (r.status() < 400) return;
+    const line = `${r.status()} ${r.request().method()} ${r.url().replace(base, '')}`;
+    rec.failed.push(line);
+    // the page warms add-on views in the background from its own copy of the state, which lags the server by a poll:
+    // the view of an add-on the click-through itself just turned off (addonOff) may answer 404 once; that is fine
+    const m = /^404 GET \/api\/addon\/([^/?]+)$/.exec(line);
+    if (m && rec.offAddons.has(decodeURIComponent(m[1]))) rec.offViews404++;
+  });
   page.on('pageerror', e => rec.errors.push(`uncaught exception: ${String(e.message).slice(0, 300)}`));
   page.on('console', m => {
     if (m.type() !== 'error') return;
     const t = m.text();
     // Chromium logs every 4xx answer as a console error; an action a click-through expects to be refused is fine
     if (/Failed to load resource: the server responded with a status of 4\d\d/.test(t) && rec.ops.some(o => o.status >= 400 && rec.refusedOk.has(o.op))) return;
+    if (/Failed to load resource: the server responded with a status of 404/.test(t) && rec.offViews404 > 0) { rec.offViews404--; return; }
     // name the address of a failed load (Chromium's line does not)
     rec.errors.push(`console error: ${t.slice(0, 300)}${/Failed to load resource/.test(t) && rec.failed.length ? ` (${rec.failed.at(-1)})` : ''}`);
   });
@@ -178,6 +187,10 @@ function tools(page, srv, rec, shots = null) {
     await page.waitForTimeout(150);
     const k = await page.evaluate(PAGE_KIND);
     if (k) rec.pages.add(`page:${k}`);
+  };
+  const openMore = async () => {
+    const closed = page.locator('details[data-key^="settings-more-"]:not([open]) > summary:visible');
+    for (let n = await closed.count(); n > 0; n--) await closed.first().click();
   };
   const t = {
     page, ids: srv.ids, base: srv.base,
@@ -216,10 +229,12 @@ function tools(page, srv, rec, shots = null) {
       return execFileSync('env', [...envArgs(runEnv(srv.dir)), ...UV_RUN, 'python', '-I', '-c', code, ...rest],
         { cwd: path.join(srv.dir, 'Pilatus'), encoding: 'utf8', timeout: 120000 });
     },
+    /** Settings keeps its technical switches in a closed "More" fold (ORCH-300): click it open, as a person does */
+    openMore,
     /** open a dashboard address (`#tickets`, `#ticket/<id>`, `#settings/agent`) and wait until it is drawn */
-    async open(hash = '#home') { await page.goto(`${srv.base}/${hash}`); await settle(); },
+    async open(hash = '#home') { await page.goto(`${srv.base}/${hash}`); await settle(); await openMore(); },
     /** reload the page and wait until it is drawn again: what is shown now came from the files, not the page's memory */
-    async reload() { await page.reload(); await settle(); },
+    async reload() { await page.reload(); await settle(); await openMore(); },
     /** wait until the page has drawn the current address (after a click that changed it) */
     settle,
     /** run fn and wait for the action `op` it sends; returns {status, text}. `refused: true` = a 4xx is the expected answer */
@@ -261,6 +276,13 @@ function tools(page, srv, rec, shots = null) {
         path.join(srv.dir, 'Pilatus'), name);
       return t.orchAsPerson('addon', 'add', name, '--project-only');
     },
+    /** turn an add-on off again (as the person) and wait until the page's state no longer lists it; the page may still
+     *  ask once for that add-on's view in the meantime (its state lags a poll), and that 404 is not counted as an error */
+    async addonOff(name) {
+      rec.offAddons.add(name);
+      t.orchAsPerson('addon', 'remove', name);
+      return t.until(s => !(s.addons || []).some(a => a.name === name), `${name} off again`);
+    },
     /** with --out: keep pictures of the page now at the UX checklist sizes, <file>-<name>-<w>.png (a state worth
      *  showing in a review), with `el` (a locator) scrolled into view; the window goes back to its size after */
     async shot(name, el = null) {
@@ -283,6 +305,15 @@ function tools(page, srv, rec, shots = null) {
   return t;
 }
 
+/** ` (at f-x.cjs:31: <that line>)`: the step of the click-through that failed or waited, read from the error's stack */
+function where(e) {
+  const m = /([^\s()]*\/features\/([\w.-]+\.cjs)):(\d+):\d+/.exec(String(e && e.stack || ''));
+  if (!m) return '';
+  let src = '';
+  try { src = fs.readFileSync(m[1], 'utf8').split('\n')[Number(m[3]) - 1].trim().slice(0, 160); } catch (_) { /* gone */ }
+  return ` (at ${m[2]}:${m[3]}${src ? ': ' + src : ''})`;
+}
+
 async function main() {
   const o = args(process.argv.slice(2));
   const all = catalogue.clickthroughs();
@@ -297,7 +328,8 @@ async function main() {
   if (o.out) fs.mkdirSync(o.out, { recursive: true });
   const srv = await serve();
   const { chromium } = playwright();
-  const browser = await chromium.launch({ args: ['--use-mock-keychain', '--password-store=basic'] });
+  // a fake microphone that is always allowed (ORCH-422: the voice note click-through records with it)
+  const browser = await chromium.launch({ args: ['--use-mock-keychain', '--password-store=basic', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
   const done = new Set(), results = [];
   try {
     const ctx = await signIn(browser, srv);
@@ -309,7 +341,7 @@ async function main() {
       try {
         await c.run(tools(page, srv, rec, o.out ? path.join(o.out, c.file.replace(/\.cjs$/, '')) : null));
       } catch (e) {
-        problems.push(String(e.message).split('\n')[0]);
+        problems.push(String(e.message).split('\n')[0] + where(e));
       }
       if (o.out) await page.screenshot({ path: path.join(o.out, c.file.replace(/\.cjs$/, '.png')) }).catch(() => {});
       await page.close();
@@ -340,6 +372,6 @@ async function main() {
   return failed.length || missing.length ? 1 : 0;
 }
 
-module.exports = { tools };
+module.exports = { tools, recorder, where };
 
 if (require.main === module) main().then(c => process.exit(c), e => { console.error(e); process.exit(1); });

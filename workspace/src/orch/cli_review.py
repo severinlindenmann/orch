@@ -10,7 +10,18 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from orch import ghmerge, history, nextstep, review, review_server, runs_live, safefile, tickets
+from orch import (
+    dashshots,
+    ghmerge,
+    history,
+    nextstep,
+    ownerpick,
+    review,
+    review_server,
+    runs_live,
+    safefile,
+    tickets,
+)
 from orch.errors import Refused
 
 SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict", "security")
@@ -355,6 +366,16 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
     """`orch ask TICKET TEXT --draft|--link|--plan|--choose TITLE ...`: the question with a card on it."""
     if not args.then:
         raise Refused("A card needs --then: what happens after the answer.")
+    if getattr(args, "ci_shots", None):  # ORCH-312: the pictures CI took, never the helper's own
+        if args.file or args.before or args.after or getattr(args, "choose", None) is not None:
+            raise Refused(
+                "--ci-shots shows the pictures by itself: leave out --file, --before, --after and --choose."
+            )
+        if getattr(args, "merge", False):
+            raise Refused("--ci-shots goes on its own card, not on a Merge card.")
+        args.file = _guard(dashshots.card_file, root, tid, args.ci_shots)
+        if not args.open:
+            args.open = args.ci_shots
     card, options, suggest, _title = _guard(build_card, root, args)
     links = _guard(links_of, getattr(args, "ref", None) or [])
     if getattr(args, "merge_workflow", None) and len(links or []) < LINKS_MAX:  # ORCH-305: the diff itself
@@ -449,6 +470,10 @@ def _answer(args, root: Path) -> None:
         raise ReviewError("too_large", "A note is at most 8 KB.")
     if key == "review":
         q = None
+        if (
+            t.get("status") != "review"
+        ):  # decided elsewhere (the Reviewer, the phone, another tab): say who and when
+            raise ReviewError("decided", review.not_in_review(root, t))
         current = review.check_digest(t, root)
     else:
         q = next((x for x in t.get("questions") or [] if x.get("id") == key), None)
@@ -469,9 +494,24 @@ def _answer(args, root: Path) -> None:
         args.by
     )  # the person chosen in orch (--by human:<name>), else the computer's user
     digest = given or current
+    # ORCH-582: a draft, or the Check of a ticket that carries one, needs the signed-in dashboard's one-time
+    # person grant (a paired phone answers through the relay); never a script or a helper's shell
+    granted = ownerpick.person_granted(root, who)  # always used up, so no child inherits it
+    needs = ownerpick.is_draft_card(q) if q is not None else ownerpick.carries_draft(t)
+    person = needs and granted
     fn = review.change if q is not None and q.get("answer") is not None else review.decide
     entry = _guard(
-        fn, root, tid, key, args.verdict, args.picked, args.note, by=who, via=args.via, digest=digest
+        fn,
+        root,
+        tid,
+        key,
+        args.verdict,
+        args.picked,
+        args.note,
+        by=who,
+        via=args.via,
+        digest=digest,
+        person=person,
     )
     import contextlib
 
@@ -537,12 +577,13 @@ def _accepted(args, root: Path) -> None:
     from orch import relay, reviewer
 
     rows = reviewer.accepted(root, reviewer.since_time(args.since))
+    picks = ownerpick.waiting_rows(root)  # ORCH-582: drafts waiting for the owner, shown on their own
     word = args.since if args.since in ("today", "yesterday") else "since " + args.since
-    text = reviewer.accepted_text(rows, word)
-    data: dict = {"since": args.since, "accepted": rows}
+    text = reviewer.accepted_text(rows, word, picks)
+    data: dict = {"since": args.since, "accepted": rows, "waiting_pick": picks}
     if args.phone:
         data["sent"] = False
-        if rows:  # nothing accepted: no message
+        if rows or picks:  # nothing accepted and no draft waiting: no message
             try:
                 relay.send_text(root, "phones", text, general=True)
                 data["sent"] = True

@@ -37,6 +37,13 @@ function context({settings = {}, needs = [], answers = {}, reviews = {}} = {}) {
     activeTicket:() => true, sorted:v => v, state:{who:'mia', settings, needs}, addons:() => [], addonLabel:a => a?.dashboard?.label || a?.name,
     dialog:title => { const d = node('dialog', {title}), actions = node('div', {className:'actions'}); dialogs.push({d, actions, title}); return {d, actions}; },
     URL,
+    // the status is a GET read (ORCH-413): recorded as ['addon.read', {addon, verb}], never a click
+    fetch:async url => {
+      const q = new URL(url, 'http://127.0.0.1').searchParams, args = {addon:q.get('addon'), verb:q.get('verb')};
+      calls.push(['addon.read', args]);
+      const answer = typeof answers[args.verb] === 'function' ? answers[args.verb](args) : answers[args.verb];
+      return {ok:true, status:200, json:async () => JSON.parse(JSON.stringify(answer ?? {}))};
+    },
     act:async (op, args) => {
       calls.push(JSON.parse(JSON.stringify([op, args])));  // plain objects of this realm
       if (args?.review) return reviews[args.verb] ? {ok:true, state:{act_answer:{addon:args.addon, answer:reviews[args.verb]}}} : {ok:false, text:'This file is not waiting for a choice'};
@@ -142,7 +149,7 @@ test('changing the choice, address or interval shows a review line; Undo drops i
   assert.equal(title, 'Sync to this address?');
   assert.equal(text(byKey(d, 'confirm-value')), 'https://box.example.net/orch');
   await click(byKey(actions, 'confirm-ok'));
-  assert.deepEqual(calls.slice(-2), [['addon.act', {addon:'sync', verb:'set', target:'https://box.example.net/orch', value:'60', sign:true, seen:SET_TARGET}], ['addon.act', {addon:'sync', verb:'status', target:'sync'}]]);
+  assert.deepEqual(calls.slice(-2), [['addon.act', {addon:'sync', verb:'set', target:'https://box.example.net/orch', value:'60', sign:true, seen:SET_TARGET}], ['addon.read', {addon:'sync', verb:'status'}]]);
   assert.deepEqual(toasts.at(-1), ['Confirmed. Sync address chosen.', 'ok']);
   assert.equal(ui.draft, null);
   // the same address, only how often: no sign step
@@ -403,7 +410,7 @@ test('fb18: a failed sync is one plain sentence and one button, never a raw erro
 test('ORCH-184: changing Sync in Settings drops the Sync page\'s saved view, so the page and Settings never disagree', async () => {
   const {c} = context({answers:{set:{mode:'local'}, status:BASE}});
   vm.runInContext("addonViews.sync = {state:'ok', view:{}}; addonViews.other = {state:'ok'};", c);
-  await vm.runInContext("syncAct('status', 'sync')", c);
+  await vm.runInContext("syncRead()", c);
   assert.equal(vm.runInContext("!!addonViews.sync", c), true, 'reading the status keeps it');
   await vm.runInContext("syncAct('set', 'local')", c);
   assert.equal(vm.runInContext("addonViews.sync", c), undefined, 'a change drops it');
@@ -430,4 +437,24 @@ test('bug hunt 17 Nov: each place to keep a copy says what it does, and the Sync
   const {c, ui} = context();
   ui.card = {...BASE};
   assert.equal(all(c.syncCard(ON), n => n.tag === 'h3' && text(n) === 'Backup').length, 1, 'Settings keeps the card heading');
+});
+
+test('ORCH-413: the status is read with a GET, never a click: a page without a session sends nothing that is refused', async () => {
+  const {c, calls, ui} = context({settings:{...ON}, answers:{status:{...BASE}}});
+  await c.syncLoad();
+  assert.deepEqual(calls, [['addon.read', {addon:'sync', verb:'status'}]]);
+  assert.equal(ui.card.mode, 'remote');
+  const card = c.syncCard(ON);
+  assert.equal(byKey(card, 'sync-unread'), undefined);
+  assert.equal(byKey(card, 'sync-where-remote').checked, true);
+});
+
+test('ORCH-413: a status read that fails keeps the card on its reading line and sends no click', async () => {
+  const {c, calls, ui} = context({settings:{...ON}});
+  c.fetch = async () => ({ok:false, status:422, json:async () => { throw new Error('not json'); }});
+  ui.card = null;
+  await c.syncLoad();
+  assert.deepEqual(calls, []);
+  assert.equal(ui.card, null);
+  assert.match(text(byKey(c.syncCard(ON), 'sync-unread')), /Reading the sync setting/);
 });

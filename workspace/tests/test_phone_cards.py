@@ -19,9 +19,9 @@ from orch.errors import Refused
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 PHONE = "ph_iphone0001"
-VEC = json.loads((CONTRACTS / "vectors" / "review-card-v1.json").read_text())
-RQ = json.loads((CONTRACTS / "vectors" / "review-question-v1.json").read_text())
-SCHEMA = json.loads((CONTRACTS / "message.schema.json").read_text())
+VEC = json.loads((CONTRACTS / "vectors" / "review-card-v1.json").read_text(encoding="utf-8"))
+RQ = json.loads((CONTRACTS / "vectors" / "review-question-v1.json").read_text(encoding="utf-8"))
+SCHEMA = json.loads((CONTRACTS / "message.schema.json").read_text(encoding="utf-8"))
 MSG_V = jsonschema.Draft202012Validator(SCHEMA)
 
 
@@ -101,7 +101,9 @@ def test_workspace_vector_cases(proj, run, new_ticket, conn):
 
             tickets.apply_op(proj, tid, edit, by="agent:claude")
         if st.get("answered"):
-            review.decide(proj, tid, case["question"], "ok", "B", None, by=st["answered"]["by"], via="page")
+            review.decide(
+                proj, tid, case["question"], "ok", "B", None, by=st["answered"]["by"], via="page", person=True
+            )
             assert question(proj, tid, case["question"])["decision"]["summary"] == st["answered"]["summary"]
         before = len(results(conn))
         put_answer(conn, qmsg, case, i)
@@ -144,7 +146,7 @@ def test_no_change_from_the_phone_after_a_computer_answer(proj, run, new_ticket,
     qmsg = send_card(proj, conn, tid, "q4")
     calls = []
     monkeypatch.setattr(review, "change", lambda *a, **k: calls.append(1))
-    review.decide(proj, tid, "q4", "ok", "A", None, by="human:me", via="page")
+    review.decide(proj, tid, "q4", "ok", "A", None, by="human:me", via="page", person=True)
     case = next(c for c in VEC["workspace"] if c["name"] == "choice-ok-picked")
     put_answer(conn, qmsg, case, 1)
     run("relay", "inbox")

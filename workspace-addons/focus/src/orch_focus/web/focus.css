@@ -365,8 +365,8 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 .fx-pick .fx-proc a+a{border-top:0}
 .fx-confirm .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
 .fx-group-done .row{align-items:center;gap:12px;margin-bottom:12px}
-.fx-group-done .row h2{margin:0}
-.fx-group-done input[type=search]{max-width:260px}
+.fx-group-done .row h2{margin:0;flex:none;white-space:nowrap}
+.fx-group-done input[type=search]{max-width:260px;flex:1 1 120px;min-width:0}
 .fx-none{padding:12px 16px;margin:0}
 
 /* fb16: "Add a task" is always visible, also at phone width where the task list is folded */
@@ -540,6 +540,8 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 .fx-pick a.fx-pick-row .key{display:inline;flex:none}
 .fx-pick a.fx-pick-row small{display:inline;margin:0;flex:none;max-width:30%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fx-pick-row:hover .fx-show-all{margin-top:8px}
+/* ORCH-691: at phone width the title gets its own full line; time and button wrap to a second line */
+@media(max-width:520px){.fx-pick a.fx-pick-row{flex-wrap:wrap;row-gap:4px}.fx-pick a.fx-pick-row strong{flex:1 1 100%}.fx-pick a.fx-pick-row small{max-width:none}}
 .fx-empty .row{gap:8px;margin-top:12px}
 @media(max-width:720px){
  .fx-top{padding:0 8px;gap:4px}

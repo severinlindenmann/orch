@@ -353,7 +353,7 @@ def test_catalogue_dialog_uses_the_switch_op_and_plain_states():
     start = src.index("function addonCatalog()")
     body = src[start : src.index("function settingsConfirm", start)]
     assert "addonSet(name, true)" in body  # same op as the switch (addon.set), recovered after a restart
-    assert "act('addon.set', {name, on})" in src[src.index("async function addonSet(") :][:400]
+    assert "act('addon.set', {name, on}, {check:false})" in src[src.index("async function addonSet(") :][:400]
     assert "'Every add-on that comes with orch is already here and turned on.'" in body
     assert (
         "'Turned on.'" in body and "It starts with orch start" not in body

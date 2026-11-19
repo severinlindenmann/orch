@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from test_ticket_view import assert_valid, conn, views  # noqa: F401 (fixture)
 
-from orch import hider, keystore, phone_results, phone_view, relay, tickets
+from orch import hider, keystore, phone_results, phone_view, relay, secretscan, tickets
 from orch.errors import Refused
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
@@ -507,6 +507,59 @@ def test_plain_pairs_stay():
         "Fail: 0, pass rate: 100%, pass_count=5, passed: 12"
     )
     assert phone_view.redact("pass: 12") == "pass: [hidden]"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "node --test review_page.test.js (23 pass: upload then answer, delete)",
+        "23 pass: upload then answer",
+        "pytest -q, 5 pass: all green, 0 fail",
+        "2 PASS: login works",
+        "12\tPass: all ok",
+        "first line\n4 pass: second line ok",
+        "x; 2 pass: both fine",
+    ],
+)
+def test_a_test_count_before_pass_is_no_password_label(text):
+    """A count right before a bare pass is a test result (ORCH-447), not a password label."""
+    assert phone_view.redact(text) == text
+    assert secretscan.find(text) == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "pass: 1234",
+        "db pass: hunter2",
+        "v2 pass: hunter2",
+        "1.5 pass: hunter2",
+        "23 pass=hunter2",
+        "5432 pass: hunter2",
+        "port: 5432 pass: correct horse",
+        "port=5432 pass: correct horse",
+        # the security review of the first fix (ORCH-493): a count after a word, no space after the colon,
+        # a non-ASCII digit (the value on the next line: see the test below)
+        "user 42 pass: hunter2 ok",
+        "Account #2 pass: hunter2 (old)",
+        "server 1 pass: correct horse battery staple",
+        "user=bob 3 pass: hunter2 x",
+        "3 pass:hunter2 x",
+        "\u0663 pass: hunter2 x",
+        "\uff13 pass: hunter2 x",
+        "a long line of words before it, then 7 more words 3 pass: hunter2 x",
+    ],
+)
+def test_pass_without_a_test_count_stays_a_password_label(text):
+    assert "[hidden]" in phone_view.redact(text)
+    assert secretscan.find(text)
+
+
+@pytest.mark.parametrize("text", ["3 pass:\nhunter2 x", "3 pass: \nhunter2 x", "(3 pass:\nhunter2 x"])
+def test_a_test_count_never_lets_the_next_line_out(text):
+    """The words must stand on the label's own line (ORCH-493): the scrub still hides the next line. The
+    line-by-line secretscan.find never saw a value on the next line, with or without a count."""
+    assert phone_view.redact(text).endswith("\n[hidden]")
 
 
 @pytest.mark.parametrize("unit", ["a=", "x: ", "Config: ", "a=1,", "user=bob&"])

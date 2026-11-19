@@ -8,7 +8,6 @@ footnote to Automation. The dashboard draws the block; every button sends `addon
 
 from __future__ import annotations
 
-import hashlib
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -20,7 +19,6 @@ WORD = {"running": "Running", "stopped": "Stopped", "failing": "Failing"}
 TONE = {"running": "good", "stopped": "neutral", "failing": "bad"}
 AUTO_WORDS = {True: "Yes, after this computer restarts", False: "No, you start it by hand"}
 TICKET_ID = re.compile(r"t_[a-z0-9]{6,16}")
-ITEM_ID = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,63}")
 
 
 def _plain(text: str, n: int = 200) -> str:
@@ -82,17 +80,31 @@ def _made_by(root: Path, made: object) -> dict:
     return {"label": "Made by", "value": "Added by hand"}
 
 
-def _log(root: Path, sid: str) -> list[str]:
-    from .cli import tail_masked
+def _adopted(r: dict) -> bool:
+    made = r.get("made_by")
+    return isinstance(made, dict) and bool(made.get("found"))
+
+
+def _log(root: Path, r: dict) -> list[str]:
+    """The last log lines, masked; an adopted job's own log (its plist log or journal), as orch services log shows."""
+    from .cli import _log_lines, tail_masked
 
     try:
-        lines = tail_masked(root, store.log_path(root, sid), LOG_LINES * 2)  # blank lines are dropped below
+        if _adopted(r):
+            lines = _log_lines(root, store.get(root, r["id"]), LOG_LINES * 2)  # blank lines are dropped below
+        else:
+            lines = tail_masked(root, store.log_path(root, r["id"]), LOG_LINES * 2)
     except store.Refused:
         return []
     return [_plain(ln) for ln in lines if ln.strip()][-LOG_LINES:]
 
 
 def _remove_lines(r: dict, depends: list[str]) -> list[str]:
+    if _adopted(r):  # remove only forgets an adopted job (cli.cmd_simple): say that, not "it stops now"
+        return [
+            "orch stops managing it and it leaves this list.",
+            "The job itself is left as it is on this computer.",
+        ]
     stopped = r["state"] == "stopped"
     lines = [
         "It stays stopped and leaves this list." if stopped else "It stops now and leaves this list.",
@@ -113,6 +125,10 @@ def _service_item(root: Path, r: dict) -> dict:
     word, tone = WORD.get(state, "Stopped"), TONE.get(state, "neutral")
     since = _when(r.get("since"))
     stopped = state == "stopped"
+    h = r.get("health")
+    # alive but not answering on its address: a hung job must not look healthy in the list (ORCH-641)
+    hung = state == "running" and isinstance(h, dict) and h.get("ok") is False
+    list_state = {"label": "Not answering", "tone": "warn"} if hung else {"label": word, "tone": tone}
     main = _btn("Start", "start", sid) if stopped else _btn("Stop", "stop", sid)
     auto = bool(r.get("auto"))
     facts: list[dict] = [
@@ -134,21 +150,21 @@ def _service_item(root: Path, r: dict) -> dict:
             {
                 "label": "Health check",
                 "value": _plain(health["text"]),
-                "tone": "good" if health.get("ok") else "bad",
+                "tone": "neutral" if stopped else ("good" if health.get("ok") else "bad"),
             }
         )
     depends = [_plain(d, 80) for d in r.get("depends") or [] if isinstance(d, str) and d.strip()][:6]
     if depends:
         facts.append({"label": "Depends on it", "value": _plain(", ".join(depends))})
-    return {
+    item: dict = {
         "id": sid,
         "title": name,
-        "state": {"label": word, "tone": tone},
+        "state": list_state,
         "action": main,
         "panel": {
             "buttons": [main] if stopped else [main, _btn("Restart", "restart", sid)],
             "facts": facts,
-            "log": {"lines": _log(root, sid), "empty": _plain(f"{name} has not written anything yet.")},
+            "log": {"lines": _log(root, r), "empty": _plain(f"{name} has not written anything yet.")},
             "danger": {
                 "label": "Remove",
                 "note": "Remove takes it off this list for good.",
@@ -161,6 +177,27 @@ def _service_item(root: Path, r: dict) -> dict:
             },
         },
     }
+    question = _question(root, r)
+    if question:
+        item["question"] = question
+    return item
+
+
+def _question(root: Path, r: dict) -> dict | None:
+    """The open question of a failing service, pinned on top of the page as in the mockup: Restart and Stop act
+    right away (the next check takes the ticket question back), Look into it opens the ticket that holds it."""
+    q = r.get("question")
+    if r.get("state") != "failing" or not isinstance(q, dict) or not isinstance(q.get("title"), str):
+        return None
+    sid = r["id"]
+    buttons = [_btn("Restart", "restart", sid), _btn("Stop", "stop", sid)]
+    tid = _ticket_id(root, q["ticket"]) if isinstance(q.get("ticket"), str) else None
+    if tid:
+        buttons.append({"label": "Look into it", "link": tid})
+    out = {"title": _plain(q["title"], 80), "buttons": buttons}
+    if isinstance(q.get("text"), str) and q["text"].strip():
+        out["text"] = _plain(q["text"])
+    return out
 
 
 def _found_item(f: dict) -> dict | None:
@@ -168,22 +205,25 @@ def _found_item(f: dict) -> dict | None:
     if not (isinstance(sid, str) and 0 < len(sid) <= 200 and isinstance(name, str) and name.strip()):
         return None
     # Found ids keep the platform's label (often with capitals); the page takes only a plain id, so the item gets
-    # a stable one of its own and Manage with orch still sends the real found id.
-    vid = sid if ITEM_ID.fullmatch(sid) else "found-" + hashlib.sha1(sid.encode("utf-8")).hexdigest()[:12]
-    since = _when(f.get("since"))
-    facts = [
-        {"label": "Found", "value": (f"Running since {since}" if since else "Running") + ", not made by orch"}
-    ]
+    # a stable one of its own. Manage with orch sends that id (the page only draws a button aimed at its own item)
+    # and adopt finds the real job from it (found.get).
+    from .found import page_id
+
+    vid = page_id(sid)
+    running = f.get("running") is not False  # older found lists had no running flag: they listed running jobs
+    since = _when(f.get("since")) if running else None
+    word = "Running" if running else "Stopped"
+    facts = [{"label": "Found", "value": (f"{word} since {since}" if since else word) + ", not made by orch"}]
     if isinstance(f.get("what"), str) and f["what"].strip():
         facts.append({"label": "What it is", "value": _plain(f["what"])})
     return {
         "id": vid,
         "title": _plain(name, 80),
-        "state": {"label": "Running, not managed", "tone": "neutral"},
+        "state": {"label": f"{word}, not managed", "tone": "neutral"},
         "panel": {
             "facts": facts,
             "note": "orch leaves it alone until you say so.",
-            "buttons": [_btn("Manage with orch", "adopt", sid)],
+            "buttons": [_btn("Manage with orch", "adopt", vid)],
         },
     }
 
@@ -202,7 +242,10 @@ def build(root, listing: tuple[list[dict], int, str | None], found: list[dict] |
         groups.append({"title": "Managed with orch", "meta": _summary(rows), "items": items})
     found_items = [i for i in (_found_item(f) for f in found or [] if isinstance(f, dict)) if i][:50]
     if found_items:
-        groups.append({"title": "Found on this computer", "items": found_items})
+        found_group: dict = {"title": "Found on this computer", "items": found_items}
+        if not order:  # the Managed group is left out when it is empty: say so in one line
+            found_group["meta"] = "orch manages none of these yet"
+        groups.append(found_group)
     view: dict = {
         "schema": "orch.addon-view/1",
         "generated_at": store.now(),

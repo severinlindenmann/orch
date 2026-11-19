@@ -29,7 +29,7 @@ PR_URL = re.compile(r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull
 WAITING, RUNNING, MERGED, OUT = "waiting", "running", "merged", "out"
 FINISHED = (MERGED, OUT)
 LOCK_SECS = 10.0
-KEEP_FINISHED = 50  # finished entries kept for `queue list`; older ones are dropped
+KEEP_FINISHED = 500  # finished entries kept for `queue list` and `queue audit` (a busy night: 64)
 
 
 def folder(root: Path) -> Path:
@@ -268,6 +268,7 @@ def back_to_front(root: Path, urls: list[str], why: str, not_before: float | Non
             rows.remove(r)
             r.update(state=WAITING, why=why)
             r.pop("group", None)
+            r.pop("taken", None)
             if not_before:
                 r["not_before"] = not_before
             else:
@@ -287,7 +288,7 @@ def claim(root: Path, batch: list[dict]) -> list[dict]:
             row = find(rows, b["url"])
             if row is None or row.get("state") != WAITING or row.get("added") != b.get("added"):
                 continue
-            row.update(state=RUNNING, why="in the group being checked")
+            row.update(state=RUNNING, why="in the group being checked", taken=now())
             row.pop("not_before", None)
             got.append(b)
         return got

@@ -400,6 +400,8 @@ def _trace_fallback(real: Path, reason: str) -> None:
         )
         flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
         flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        if not hasattr(os, "O_NOFOLLOW") and os.path.islink(log):
+            return  # Windows has no O_NOFOLLOW: a symlinked trace file is refused up front
         fd = os.open(log, flags, 0o600)
         try:
             st = os.fstat(fd)
@@ -703,8 +705,19 @@ def _tool_args(entries: list[dict]) -> list[str]:
     """uv arguments that install orch with these add-ons in one uv tool env. An entry that can not be
     installed any more is left out with a note (it stays in the registry), so one stale entry never blocks
     the rest."""
-    # --refresh: a branch zip has the same URL after every push, so never take it from uv's cache
-    args = ["tool", "install", *_reinstall_flags(), "--refresh", *_same_python(), spec("workspace")]
+    # --refresh: a branch zip has the same URL after every push, so never take it from uv's cache.
+    # --no-sources: an add-on's [tool.uv.sources] (sync's points orch-workspace at an editable checkout) must
+    # never replace the core asked for here; an editable core has no install origin, so the next add-on add
+    # fell back to main (ORCH-690).
+    args = [
+        "tool",
+        "install",
+        *_reinstall_flags(),
+        "--refresh",
+        "--no-sources",
+        *_same_python(),
+        spec("workspace"),
+    ]
     for e in entries:
         why = _missing_source(e)
         if why:

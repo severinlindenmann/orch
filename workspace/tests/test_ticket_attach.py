@@ -97,6 +97,45 @@ def test_attach_does_not_follow_a_planted_link_in_the_folder(proj, run, tmp_path
     assert victim.read_text() == "keep" and r["name"] == "note (2).md"
 
 
+def test_feedback_files_go_in_their_folder_and_leave_the_check_card_as_it_was(proj, run):
+    # ORCH-420 follow-up: a screenshot sent with Send back must not change the Check card being answered
+    from orch import review
+
+    tid = _new(run)
+    tickets.attach(proj, tid, "result.png", b"\x89PNG\r\n\x1a\n" + b"0" * 20, "agent:x")
+    card = review.check_card(tickets.load(proj, tid), proj)
+    r = tickets.attach(
+        proj, tid, "Screenshot 09-30.png", b"\x89PNG\r\n\x1a\n" + b"1" * 20, "human:t", folder="feedback"
+    )
+    assert r["name"] == "feedback/Screenshot 09-30.png"
+    assert r["path"] == f".orch/tickets/{tid}/artifacts/feedback/Screenshot 09-30.png"
+    t = tickets.load(proj, tid)
+    assert t["history"][-1]["text"] == "Attached feedback/Screenshot 09-30.png"
+    assert review.check_card(t, proj) == card  # the card, and so its fingerprint, did not change
+    assert "feedback/Screenshot 09-30.png" in [f["name"] for f in tickets.artifacts_list(proj, tid)]
+    again = tickets.attach(
+        proj, tid, "Screenshot 09-30.png", b"\x89PNG\r\n\x1a\n2", "human:t", folder="feedback"
+    )
+    assert again["name"] == "feedback/Screenshot 09-30 (2).png"
+    with pytest.raises(Refused):
+        tickets.attach(proj, tid, "x.png", b"\x89PNG\r\n\x1a\n", "human:t", folder="../evil")
+
+
+def test_cli_attach_feedback_flag(proj, run, monkeypatch):
+    import io
+
+    tid = _new(run)
+
+    class In:
+        buffer = io.BytesIO(b"hello")
+
+    monkeypatch.setattr(sys, "stdin", In())
+    code, out, _ = run(
+        "ticket", "attach", tid, "--name", "note.txt", "--feedback", "--by", "human:t", "--json"
+    )
+    assert code == 0 and json.loads(out)["name"] == "feedback/note.txt"
+
+
 def test_cli_attach_reads_stdin(proj, run, monkeypatch):
     import io
 
@@ -226,3 +265,37 @@ def test_attach_works_where_links_cannot_be_followed_or_made(proj, run, monkeypa
     r2 = tickets.attach(proj, tid, "b.md", b"two", "human:t")
     assert (proj / r2["path"]).read_bytes() == b"two"
     assert [p.name for p in (proj / r["path"]).parent.iterdir() if p.name.startswith(".")] == []
+
+
+@pytest.mark.parametrize(
+    "hint,data",
+    [
+        ("voice-note.webm", b"\x1a\x45\xdf\xa3\x9fB\x86\x81\x01"),
+        ("voice-note.ogg", b"OggS\x00\x02rest"),
+        ("voice-note.m4a", b"\x00\x00\x00\x1cftypM4A \x00\x00"),
+        ("voice-note.mp3", b"ID3\x04\x00rest"),
+        ("voice-note.wav", b"RIFF\x24\x00\x00\x00WAVEfmt "),
+    ],
+)
+def test_attach_keeps_a_voice_recording(proj, run, hint, data):
+    """ORCH-422: a voice note from the browser lands on the ticket like a picture, checked by first bytes."""
+    tid = _new(run)
+    r = tickets.attach(proj, tid, hint, data, "human:t")
+    assert r["name"] == hint and (proj / r["path"]).read_bytes() == data
+
+
+@pytest.mark.parametrize(
+    "hint,data",
+    [
+        ("v.webm", b"<html>no</html>"),
+        ("v.ogg", b"#!/bin/sh"),
+        ("v.m4a", b"\x00\x00\x00\x1cmoov...."),
+        ("v.mp3", b"plain text"),
+        ("v.wav", b"RIFF1234WEBPVP8 "),
+    ],
+)
+def test_attach_refuses_a_recording_that_is_not_one(proj, run, hint, data):
+    tid = _new(run)
+    with pytest.raises(Refused, match="recording"):
+        tickets.attach(proj, tid, hint, data, "human:t")
+    assert tickets.artifacts_list(proj, tid) == []

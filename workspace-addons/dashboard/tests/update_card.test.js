@@ -12,7 +12,8 @@ function node(tag, attrs = {}, children = []) {
     addEventListener(t, fn) { (this.listeners[t] ||= []).push(fn); }};
 }
 const text = n => n == null ? '' : typeof n === 'string' ? n : (n.children || []).map(text).join(' ').replace(/\s+/g, ' ').trim();
-const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
+// the Tools card (ORCH-589) sits in the same panel; these tests look at the orch update only
+const all = (n, f) => !n || typeof n !== 'object' || n.attrs?.['data-key'] === 'settings-tools' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
 function context(info) {
   const posts = [], listeners = {}, store = {};
   const c = vm.createContext({
@@ -22,6 +23,7 @@ function context(info) {
     sessionStorage:{getItem:k => store[k] ?? null, setItem:(k, v) => { store[k] = v; }},
     window:{addEventListener:(name, fn) => { listeners[name] = fn; }},
     fetch:async (url, opt) => url === '/api/update-info' ? {ok:true, json:async () => info}
+      : String(url).startsWith('/api/tool-updates') ? {ok:true, json:async () => ({tools:[]})}
       : (posts.push(JSON.parse(opt.body)), {status:202, text:async () => 'Update started.'}),
   });
   vm.runInContext(block, c);

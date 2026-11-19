@@ -117,6 +117,46 @@ def label(cmd: str) -> str:
     return _base(words[0])[:60] or "a command"
 
 
+_TEST_PROGRAMS = {"pytest", "jest", "vitest", "mocha", "ava", "playwright", "xctest", "rspec", "phpunit"}
+_BUILD_PROGRAMS = {"make", "xcodebuild", "tsc", "webpack", "vite", "esbuild", "gradle", "mvn", "msbuild"}
+_WAIT_PROGRAMS = {"sleep", "wait", "timeout"}
+_SCRIPT_ENDS = (".sh", ".py", ".js", ".cjs", ".mjs", ".ts", ".rb", ".ps1")
+
+
+def doing(cmd: str) -> str:
+    """What a helper does with one command, in plain words for every page (ORCH-407: never a program name
+    such as orch, sleep or walk.cjs): Running tests, Building, Waiting, Waiting for the pull request checks,
+    Updating the ticket, Working on the code, Running a script, else Running a command. Takes a whole command
+    or its label(). Arguments are only matched, never shown."""
+    text = " ".join(str(cmd or "").split())
+    if text.startswith("the "):  # label() already said what it waits for
+        return "Waiting for " + text
+    if text.startswith("helper: "):
+        return "Working with its own helper"
+    words = [w for w in text.split() if "=" not in w or w.startswith("-")]
+    bases = [_base(w).lower() for w in words if not w.startswith("-")]
+    if not bases:
+        return "Running a command"
+    if is_check_wait(text):
+        return "Waiting for the pull request checks"
+    first = next((b for b in bases if b not in _INTERPRETERS and b not in ("run", "exec")), bases[0])
+    orch_waits = first in ("orch", "orch.exe") and "--wait" in words  # any orch command that waits
+    if first in _WAIT_PROGRAMS or orch_waits:
+        return "Waiting"
+    tests = first in _TEST_PROGRAMS or "test" in bases or "--test" in words
+    if tests or any(b.startswith("test_") or ".test." in b or ".spec." in b for b in bases):
+        return "Running tests"
+    if first in _BUILD_PROGRAMS or "build" in bases:
+        return "Building"
+    if first in ("orch", "orch.exe"):
+        return "Updating the ticket"
+    if first in ("git", "gh"):
+        return "Working on the code"
+    if first.endswith(_SCRIPT_ENDS):
+        return "Running a script"
+    return "Running a command"
+
+
 _CHECK_WAITS = {("ref", "wait"), ("github", "wait")}
 
 
@@ -165,6 +205,7 @@ def tool_commands(agent_pid: int | None, table: list | None = None) -> list[dict
         out.append(
             {
                 "label": name,
+                "doing": doing(inner[3]) if inner else "Running a command",
                 "seconds": secs,
                 "pid": pid,
                 "check_wait": bool(inner) and is_check_wait(inner[3]),
@@ -228,6 +269,7 @@ def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | 
                     "kind": "command",
                     "what": f"{c['label']} (running {span(c['seconds'])})",
                     "label": c["label"],
+                    "doing": c.get("doing") or doing(c["label"]),
                     "seconds": c["seconds"],
                 }
             )
@@ -307,22 +349,24 @@ def helper_state(sig: str, waits: list[dict], idle_seconds: int | None) -> dict 
             }[(answer, ok)]
         else:
             key = "waiting"
-            parts = [
-                f"{w['label']} · {span(w.get('seconds'))}"
-                if w.get("kind") == "command" and w.get("label")
-                else w["what"]
-                for w in waits
-                if w.get("what")
-            ]
-            detail = "Waiting for " + ", ".join(parts)
+            # plain words for what it does (ORCH-407), never the program's name
+            cmds = [f"{_doing(w)} · {span(w.get('seconds'))}" for w in waits if _is_cmd(w)]
+            other = [w["what"] for w in waits if not _is_cmd(w) and w.get("what")]
+            detail = ", ".join(cmds + (["Waiting for " + ", ".join(other)] if other else []))
     elif sig == "starting":
         key = "starting"
     else:
         key = "working"
-        cmds = [w["label"] for w in waits if w.get("kind") == "command" and w.get("label")]
-        if cmds:
-            detail = "Running " + ", ".join(cmds)
+        detail = ", ".join(dict.fromkeys(_doing(w) for w in waits if _is_cmd(w)))
     return {"state": key, "word": HELPER_WORDS[key], "detail": detail}
+
+
+def _is_cmd(w: dict) -> bool:
+    return w.get("kind") == "command" and bool(w.get("label") or w.get("doing"))
+
+
+def _doing(w: dict) -> str:
+    return str(w.get("doing") or doing(str(w.get("label") or "")))
 
 
 def last_activity(root: Path, ticket: dict | None) -> dict | None:
@@ -453,9 +497,38 @@ def _rows(text: str, n: int) -> tuple[list[str], str | None]:
     raw = text.rstrip("\n").split("\n")
     rows = [runs_live.clean(_ANSI.sub("", ln)).rstrip() for ln in raw]
     hint = _suggestion(raw, rows)
+    rows = _below_frame_dropped(rows)
+    rows = [r for r in rows if not _is_frame(r)]
+    # at most one blank row in a row: padding must not fill a short view
+    rows = [r for i, r in enumerate(rows) if r.strip() or (i and rows[i - 1].strip())]
     while rows and not rows[-1].strip():
         rows.pop()
     return rows[-n:], hint
+
+
+_PROMPT = re.compile(r"^\s*[>\u276f\u203a]")
+
+
+def _below_frame_dropped(rows: list[str]) -> list[str]:
+    """The tool's status rows under its prompt box (model, usage, mode, shortcuts) are frame, not work.
+    Only when the box is found (a rule, a prompt row, a rule) are the rows under it dropped."""
+    rules = [i for i, r in enumerate(rows) if _RULE.match(r)]
+    for b in reversed(rules):
+        a = next((i for i in reversed(rules) if i < b), None)
+        if a is not None and _PROMPT.match(rows[a + 1]) and b - a <= 12:
+            return rows[: b + 1]
+    return rows
+
+
+_RULE = re.compile(r"^[\s\u2500-\u257f\-=_~]{3,}$")  # a row of box lines or dashes
+_EMPTY_PROMPT = re.compile(r"^\s*[>\u276f\u203a]\s*$")
+_FOOTER = re.compile(r"^\s*(\? for shortcuts|\u23f5\u23f5)")
+
+
+def _is_frame(row: str) -> bool:
+    """The tool's own prompt frame (rows of rules, an empty prompt, the shortcut footer) says nothing about
+    the work, and fills the last lines of a narrow or short view. Typed or suggested prompt text stays."""
+    return bool(_RULE.match(row) or _EMPTY_PROMPT.match(row) or _FOOTER.match(row))
 
 
 _TAIL_MARK = "@@orch-tail "

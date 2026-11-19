@@ -811,7 +811,9 @@ def _automation_on(root: Path) -> bool:
     )
 
 
-def listing(root: Path) -> dict:
+def listing(root: Path, light: bool = False) -> dict:
+    """`light`: from this add-on's own files only, no orch call (running False, weekly unavailable): what
+    `orch insights needs` needs, without starting a second orch (ORCH-603)."""
     st = _state(root)
     docs = all_proposals(root)
     last = st.get("last")
@@ -820,8 +822,8 @@ def listing(root: Path) -> dict:
                 "found": sum(1 for d in docs if d["checkup"]["ticket"] == last.get("ticket"))}  # fmt: skip
     return {
         "last": last or None,
-        "running": _running(root, st),
-        "weekly": weekly_state(root),
+        "running": False if light else _running(root, st),
+        "weekly": "unavailable" if light else weekly_state(root),
         "proposals": [_item(d) for d in docs],
     }
 

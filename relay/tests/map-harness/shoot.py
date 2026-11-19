@@ -9,6 +9,9 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "e2e"))
+import headless  # noqa: E402 - the keychain options (ORCH-615)
+
 BASE, OUT = sys.argv[1].rstrip("/"), Path(sys.argv[2])
 TAG = sys.argv[3] if len(sys.argv) > 3 else "after"
 OUT.mkdir(parents=True, exist_ok=True)
@@ -23,7 +26,7 @@ def open_scenario(page, key):
 
 
 with sync_playwright() as p:
-    browser = p.chromium.launch()
+    browser = headless.launch(p.chromium)
     for key in SCENARIOS:
         for width in (1440, 720):
             ctx = browser.new_context(viewport={"width": width, "height": 900}, color_scheme="dark",

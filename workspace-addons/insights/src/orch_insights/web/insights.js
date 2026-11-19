@@ -74,10 +74,12 @@ function servicesTile(view, small) {
 }
 
 // First day, nothing recorded yet: the same tiles as the overview, each saying when it fills.
-function emptyTiles(view) {
+function emptyTiles(view, team) {
   const note = 'Fills after a helper’s first work';
-  // No run is recorded: say so, never a 0 (the record can be empty although helpers worked, ORCH-139).
-  return [metric('Times helpers worked', null, 'No work by helpers is recorded here yet'), servicesTile(view, note)];
+  // No run is recorded: say so, never a 0 (the record can be empty although helpers worked, ORCH-139). When the
+  // tickets show helper time, say where that comes from, so the page does not contradict itself (ORCH-410).
+  const worked = team && team.time && team.time !== '–';
+  return [metric('Times helpers worked', null, worked ? 'Not counted here; the helper time above comes from the tickets' : 'No work by helpers is recorded here yet'), servicesTile(view, note)];
 }
 
 function fillMetrics() {
@@ -211,6 +213,7 @@ async function loadModels() {
   try { week = (await read('/api/week')).week; } catch { week = null; }
   renderWeek(view && !view.error && view.team ? week : null);
   renderModels(view);
+  return view && !view.error ? view.team : null;
 }
 
 function stateBadge(row) {
@@ -381,10 +384,10 @@ async function refresh() {
     overview = answer;
     renderLost(overview);
     if (overview.first_day) {
-      loadModels();
+      const team = await loadModels();
       showView('empty');
       const grid = node('div', undefined, 'metric-grid');
-      grid.append(...emptyTiles(overview));
+      grid.append(...emptyTiles(overview, team));
       byId('empty').replaceChildren(grid);
       return;
     }

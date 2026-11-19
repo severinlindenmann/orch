@@ -23,6 +23,12 @@ One pass moves the release one phase on (state: .orch/run/release-keeper.json):
            settings and data changes listed) and a deploy card asked (production: the owner's go; on "Deploy
            now" a helper ticket gets the prepared program), the highlights as a short note on the role ticket,
            the release worktree removed -> idle.
+Release proof (ORCH-456): a red check holds the release unless a person recorded a named exception for it
+(`orch github release-exception "<check>" --ticket <key> --until <date>`, shown on the Merge card and in the
+note); and the walks named in github.release_walks (install walk, services test, click-through pass) each get
+a helper ticket when the release is cut; the Merge card waits until every walk recorded a pass
+(`orch github release-walk <N> <walk> pass|fail "<line>"`). A release that reached main without that proof
+is written on the role ticket.
 Every pass also runs the security check (secreview.py, ORCH-317): pull requests touching the servers, sign-in,
 secrets or what leaves this computer get a security review helper by themselves, and the idle phase cuts
 nothing until each of them in the release has an OK.
@@ -58,6 +64,8 @@ REPO_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
 LOGIN_RE = re.compile(r"^[A-Za-z0-9-]{1,39}$")
 HOST_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}@[A-Za-z0-9_.:-]{1,253}$")
 SERVER_RE = re.compile(r"^[a-z][a-z0-9-]{0,30}$")
+WALK_RE = re.compile(r"^[a-z][a-z0-9-]{0,30}(=[A-Za-z0-9:_-]{1,60})?$")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 WORKFLOW_RE = re.compile(r"^[A-Za-z0-9_.-]{1,80}\.ya?ml(:[A-Za-z0-9_-]{1,40}=[A-Za-z0-9_.-]{0,80})*$")
 TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
 
@@ -95,6 +103,10 @@ SETTINGS = {
     "github.release_deploy_script": "the install command the deploy helper runs after the owner's go",
     "github.release_security_paths": "files whose change needs a security review before a release "
     "(default: servers, sign-in, secrets, what leaves this computer, CI)",
+    "github.security_reviews_per_day": "security review helpers the keeper starts for one release "
+    f"(default {secreview.PER_DAY}; counts again after each release)",
+    "github.release_walks": "walks every release needs before its Merge card, each a name or name=skill, "
+    "e.g. install=release-walk,services,clickthrough",
 }
 SETTING_KEYS = tuple(SETTINGS)
 
@@ -159,6 +171,16 @@ def set_setting(root: Path, key: str, value: str) -> str | None:
         v = _path_ok(v)
     elif name == "release_security_paths":
         v = secreview.check_patterns(v)
+    elif name == "security_reviews_per_day":
+        v = secreview.check_limit(v)
+    elif name == "release_walks":
+        parts = [x.strip() for x in v.split(",") if x.strip()]
+        if not parts or any(not WALK_RE.match(x) for x in parts):
+            raise Refused(
+                "Give the walks separated by commas, each a short name or name=skill: "
+                "install=release-walk,services,clickthrough"
+            )
+        v = ",".join(parts)
     config.set_key(root, "github", name, v)
     return v
 
@@ -172,6 +194,15 @@ def workflows(spec: str | None) -> list[tuple[str, list[str]]]:
         for kv in inputs:
             flags += ["-f", kv]
         out.append((name, flags))
+    return out
+
+
+def walks(spec: str | None) -> list[tuple[str, str | None]]:
+    """[(walk name, skill or None)] from "install=release-walk,services"."""
+    out = []
+    for item in [x.strip() for x in (spec or "").split(",") if x.strip()]:
+        name, _, skill = item.partition("=")
+        out.append((name, skill or None))
     return out
 
 
@@ -196,6 +227,8 @@ class Cfg:
         self.deploy_key = Path(g("deploy_key")) if g("deploy_key") else None
         self.deploy_script = g("deploy_script")
         self.security_paths = g("security_paths")
+        self.security_limit = over.get("security_limit", _raw(root, "security_reviews_per_day"))
+        self.walks = walks(g("walks"))
         self.run_dir = runs.run_dir(root) if root is not None else Path(over.get("run_dir") or ".")
 
     @property
@@ -209,6 +242,14 @@ class Cfg:
     @property
     def hold_path(self) -> Path:
         return self.run_dir / "release-hold.txt"
+
+    @property
+    def exceptions_path(self) -> Path:
+        return self.run_dir / "release-exceptions.json"
+
+    @property
+    def walks_path(self) -> Path:
+        return self.run_dir / "release-walks.json"
 
     @property
     def stage_dir(self) -> Path:
@@ -632,12 +673,34 @@ class World:
         )
         return ts(rows[0]["mergedAt"]) if rows else None
 
+    def exceptions(self) -> dict[str, dict]:
+        """The named exceptions a person recorded: {check: {ticket, until, why, by, at}}."""
+        if self.sim is not None:
+            return dict(self.sim.get("exceptions") or {})
+        return _read_json(self.cfg.exceptions_path)
+
+    def walk_results(self) -> dict[str, dict]:
+        """{release number: {walk: {verdict, line, at, by}}} as the walk helpers recorded them."""
+        if self.sim is not None:
+            return dict(self.sim.get("walk_results") or {})
+        return _read_json(self.cfg.walks_path)
+
     def known_red(self) -> dict[str, str]:
-        """{job name: ticket key} of known-red jobs whose ticket is not done yet."""
+        """{check name: "<ticket>[, until <date>]"} of checks that may be red: a recorded exception until its
+        end date, or a --known-red job, each only while its ticket is not done yet."""
         table = self.sim.get("known_red", self.known_table) if self.sim is not None else self.known_table
+        rows: dict[str, tuple[str, str | None]] = {job: (key, None) for job, key in table.items()}
+        for check, e in self.exceptions().items():
+            if isinstance(e, dict) and e.get("ticket"):
+                rows[check] = (str(e["ticket"]), e.get("until"))
         status = {t.get("key"): t.get("status") for t in self.tickets()}
         status.update({t.get("id"): t.get("status") for t in self.tickets()})
-        return {job: key for job, key in table.items() if (status.get(key) or "open") not in DONE}
+        today = now().date().isoformat()
+        return {
+            job: key + (f", until {until}" if until else "")
+            for job, (key, until) in rows.items()
+            if (status.get(key) or "open") not in DONE and not (until and str(until) < today)
+        }
 
     def runs(self, workflow: str, event: str) -> list[dict]:
         """Runs of one event only: merge bursts push the nightly run far down an unfiltered list."""
@@ -872,7 +935,13 @@ class World:
         self.act(f"dispatch:{workflow}", go)
 
     def new_ticket(
-        self, parent: str, title: str, note: str, done_when: str, priority: str = "high"
+        self,
+        parent: str,
+        title: str,
+        note: str,
+        done_when: str,
+        priority: str = "high",
+        over_limit: bool = False,
     ) -> str | None:
         def go():
             try:
@@ -887,7 +956,7 @@ class World:
             except Refused as e:
                 return f"not opened ({e})"
             with contextlib.suppress(Exception):  # busy, paused or no agent: the ticket waits in line
-                runs.start(self.root, t["id"], BY, priority=priority)
+                runs.start(self.root, t["id"], BY, priority=priority, over_limit=over_limit)
             return str(t.get("key") or t["id"])
 
         return self.act(f"ticket:{title}", go) or (None if self.sim is None else "t_sim")
@@ -1184,6 +1253,90 @@ def open_red_ticket(rows: list[dict], words: str) -> dict | None:
     )
 
 
+def recut(w: World, st: dict, rel: dict, h: dict, what: str) -> bool:
+    """A release held by red `what` (checks, walks) whose fix ticket is closed while develop moved on: close
+    its pull request so the next pass cuts it again from the new develop. True when it did."""
+    if h.get("green") == rel["sha"] or open_red_ticket(w.tickets(), f"Release {rel['n']} {what}"):
+        return False
+    w.close_release(rel)
+    st["release"] = None
+    st["skip_sha"] = None
+    return True
+
+
+def start_walks(w: World, rel: dict) -> list[str]:
+    """One helper ticket per walk in github.release_walks that this release has not started yet."""
+    started = rel.setdefault("walks", {})
+    out = []
+    for name, skill in w.cfg.walks:
+        if name in started:
+            continue
+        how = (
+            f"Use the skill {skill}."
+            if skill
+            else f"Run this workspace's {name} walk as its skill or brief says."
+        )
+        tid = w.new_ticket(
+            w.cfg.role or "",
+            f"Release {rel['n']}: {name} walk",
+            f"Release {rel['n']} waits for this walk before its Merge card: pull request "
+            f"{rel.get('url') or ''} "
+            f"(commit {rel['sha'][:12]}). {how} Walk exactly this commit in a test home or on a throwaway "
+            "server, never on production or the real home. Open one ticket per bug you find. Then record the "
+            f'result: orch github release-walk {rel["n"]} {name} pass "<what was walked, one line>" '
+            f'--commit {rel["sha"][:12]} (or fail "<the worst problem>"), and finish this ticket.',
+            f"The {name} walk of release {rel['n']} is recorded as passed or failed",
+            priority="normal",
+        )
+        started[name] = {"ticket": tid, "at": now().isoformat()}
+        out.append(f"release {rel['n']}: started the {name} walk ({tid})")
+    return out
+
+
+def walk_verdicts(w: World, rel: dict) -> dict:
+    """{"passed", "failed", "waiting"} lines for the walks of github.release_walks; only a result for this
+    release's own commit counts (an earlier cut of the same number walked another one)."""
+    got = (w.walk_results() or {}).get(str(rel["n"])) or {}
+    started = rel.get("walks") or {}
+    status = {t.get(k): t.get("status") for t in w.tickets() for k in ("key", "id")}
+    res: dict[str, list[str]] = {"passed": [], "failed": [], "waiting": []}
+    for name, _ in w.cfg.walks:
+        s = started.get(name) or {}
+        r = got.get(name) or {}
+        tk = s.get("ticket") or "no ticket"
+        c = str(r.get("commit") or "")
+        fresh = bool(r) and len(c) >= 7 and rel["sha"].startswith(c)
+        if fresh and r.get("verdict") == "pass":
+            res["passed"].append(f"{name} ({tk})")
+        elif fresh and r.get("verdict") == "fail":
+            res["failed"].append(f"{name} ({tk}): {r.get('line') or 'failed'}")
+        elif (status.get(tk) or "") in DONE:
+            res["waiting"].append(
+                f"{name} ({tk} finished without a result: "
+                f"orch github release-walk {rel['n']} {name} pass|fail ... --commit {rel['sha'][:12]})"
+            )
+        else:
+            res["waiting"].append(f"{name} ({tk})")
+    return res
+
+
+def proof_gaps(w: World, rel: dict, p: dict) -> list[str]:
+    """What a release merged before its Merge card was missing: red checks with no recorded exception,
+    unfinished checks, walks without a pass."""
+    rollup = p.get("statusCheckRollup")
+    ignore = frozenset(w.known_red()) | ROLLUP_JOBS
+    gaps = []
+    bad = failed_checks(rollup, ignore)
+    if bad:
+        gaps.append(f"red checks with no recorded exception: {', '.join(bad)}")
+    elif checks_green(rollup, ignore) == "pending":
+        gaps.append("its checks had not finished")
+    wv = walk_verdicts(w, rel)
+    if wv["failed"] or wv["waiting"]:
+        gaps.append(f"walks without a pass: {'; '.join(wv['failed'] + wv['waiting'])}")
+    return gaps
+
+
 def red(w: World, st: dict, role: str, title: str, words: str, note: str, done_when: str) -> list[str]:
     """One top ticket per red thing: never a second while one with the same words is open."""
     cur = open_red_ticket(w.tickets(), words)
@@ -1192,14 +1345,52 @@ def red(w: World, st: dict, role: str, title: str, words: str, note: str, done_w
             w.note(cur.get("key") or cur["id"], f"Release keeper: still red. {note[:600]}")
             st["red_logged"] = title
         return [f"red, ticket {cur.get('key') or cur['id']} is open"]
-    tid = w.new_ticket(role, title, note, done_when)
+    tid = w.new_ticket(role, title, note, done_when, over_limit=True)  # a red base starts at once (ORCH-699)
     st["red_logged"] = title
     return [f"red: opened top ticket {tid} ({title})"]
+
+
+def develop_red(w: World, st: dict, role: str) -> list[str]:
+    """macOS and Windows run on develop only (every push, at night, the release check), not in the merge
+    queue (ORCH-315): the newest FINISHED push or nightly run on develop that is red opens the red-develop
+    ticket, once per commit (the same words as a red release run, so it is one ticket). Judged job by job."""
+    wf = w.cfg.workflows[0][0] if w.cfg.workflows else "ci.yml"
+    known = w.known_red()
+    rows = [r for e in ("push", "schedule") for r in w.runs(wf, e) if r.get("event") == e]
+    seen: set[str] = set()
+    for r in sorted(rows, key=lambda x: str(x.get("createdAt")), reverse=True):
+        sha = r.get("headSha")
+        if not sha or sha in seen:
+            continue
+        seen.add(sha)
+        state, run_, _ = run_state(w, wf, sha, None, ("push", "schedule"), known)
+        if state in ("pending", "none"):
+            continue
+        if state == "green" or st.get("develop_red_sha") == sha:
+            return []
+        st["develop_red_sha"] = sha
+        name = _wf_name(wf)
+        return red(
+            w,
+            st,
+            role,
+            f"{name} run is red on develop ({sha[:8]})",
+            f"{name} run is red on develop",
+            f"The {name} run on develop {sha[:8]} failed: {(run_ or {}).get('url')}. macOS and Windows run "
+            "only on develop (not in the merge queue), so fix it on develop with a normal pull request "
+            "(orch pull-requests queue add --first).",
+            f"The next {name} run on develop is green",
+        )
+    return []
 
 
 def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
     out: list[str] = []
     h = w.heads()
+    try:
+        out += develop_red(w, st, role)
+    except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
+        out.append(f"the develop check could not run: {e}")
     try:  # every pass, so a review starts while a pull request is still open
         sec_lines, sec_holds = secreview.tend(w, st, role)
     except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
@@ -1213,6 +1404,8 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
     if rel and rel.get("phase") in ("gate", "card"):
         p = w.pr(rel["pr"])
         if p.get("state") == "MERGED":
+            if rel["phase"] == "gate":  # merged before the keeper put its Merge card: what proof was missing
+                rel["unproven"] = proof_gaps(w, rel, p)
             rel["phase"] = "merged"
         elif p.get("state") == "CLOSED":
             out.append(f"release {rel['n']} PR {rel['pr']} was closed by someone: back to idle")
@@ -1220,6 +1413,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
             st["release"] = None
             return out
         elif rel["phase"] == "gate":
+            out += start_walks(w, rel)
             req = w.required("main")  # the branch the release goes INTO; never develop's
             if req is None:
                 return out + [f"release {rel['n']}: could not read the rules of main; asked again next pass"]
@@ -1235,12 +1429,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
                 return out + [f"release {rel['n']}: release checks still running"]
             if g == "red":
                 bad = ", ".join(failed_checks(p.get("statusCheckRollup"), ignore)) or "see the pull request"
-                if h.get("green") != rel["sha"] and not open_red_ticket(
-                    w.tickets(), f"Release {rel['n']} checks"
-                ):
-                    w.close_release(rel)
-                    st["release"] = None
-                    st["skip_sha"] = None
+                if recut(w, st, rel, h, "checks"):
                     return out + [
                         f"release {rel['n']}: checks were red, develop moved and the fix ticket is closed: "
                         "closed the pull request; cut again next pass"
@@ -1254,12 +1443,47 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
                     f"The release pull request {p.get('url')} into main is red on: {bad}. Fix it on "
                     "develop (a normal pull request); the release keeper closes this release and cuts it "
                     "again once develop "
-                    "has the fix and this ticket is done.",
+                    "has the fix and this ticket is done. A red check ships only with a named exception a "
+                    'person records: orch github release-exception "<check>" --ticket <key> --until '
+                    "<YYYY-MM-DD>.",
                     f"Release {rel['n']}'s checks are green (after a fix on develop)",
                 )
+            wv = walk_verdicts(w, rel)
+            if wv["failed"]:
+                bad = "; ".join(wv["failed"])
+                if recut(w, st, rel, h, "walks"):
+                    return out + [
+                        f"release {rel['n']}: a walk failed, develop moved and the fix ticket is closed: "
+                        "closed the pull request; cut again next pass"
+                    ]
+                return out + red(
+                    w,
+                    st,
+                    role,
+                    f"Release {rel['n']} walks failed: {bad}"[:120],
+                    f"Release {rel['n']} walks",
+                    f"A walk of release {rel['n']} ({p.get('url')}) failed: {bad}. Fix what it found on "
+                    "develop (one ticket per bug); the release keeper closes this release and cuts it again "
+                    "once develop has the fixes and this ticket is done.",
+                    f"Every walk of release {rel['n']} passes (after the fixes on develop)",
+                )
+            if wv["waiting"]:
+                return out + [
+                    f"release {rel['n']}: checks green; waits for the walks: {'; '.join(wv['waiting'])}"
+                ]
+            allowed = w.known_red()
+            excused = [
+                f"{c} ({allowed[e]})"
+                for c in failed_checks(p.get("statusCheckRollup"), ROLLUP_JOBS)
+                if (e := known_name(c, allowed)) is not None
+            ]
+            rel["known_red"] = sorted(set((rel.get("known_red") or []) + excused))
+            proof = (f" Red by a named exception: {', '.join(excused)}." if excused else "") + (
+                f" Walks passed: {', '.join(wv['passed'])}." if wv["passed"] else ""
+            )
             ask = [
                 role,
-                f"Merge release {rel['n']} into main?",
+                f"Merge release {rel['n']} into main?{proof}",
                 "--link",
                 f"Release {rel['n']}",
                 "--open",
@@ -1352,7 +1576,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         return out + ["waits for every security OK: " + ", ".join(sec_holds)]
     nums = {int(m[1]) for u in un if (m := re.search(r"#(\d+)", u["subject"]))}
     urgent = sorted(nums & w.urgent())
-    last = max([x for x in (w.last_release_at(), ts(st.get("last_cut_at"))) if x], default=None)
+    last = w.last_release_at()  # only a merged release moves the pace; a blocked or red try does not
     gap_h = (now() - last).total_seconds() / 3600 if last else 999
     if not urgent and gap_h < MIN_GAP_H:
         return out + [
@@ -1364,7 +1588,6 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         return out + [f"develop {sha[:8]} was red; waiting for develop to move"]
     n = w.last_release() + 1
     rel = {"n": n, "sha": sha, "unreleased": un, "phase": "testing", "dispatched_at": now().isoformat()}
-    st["last_cut_at"] = now().isoformat()  # the pace counts from the start of a try, so a red one waits too
     if urgent:
         out.append(f"urgent pull request(s) {', '.join('#' + str(x) for x in urgent)}: release now")
     known = w.known_red()
@@ -1403,7 +1626,7 @@ def cut_now(w: World, st: dict, h: dict) -> list[str]:
     if not got:
         return [f"release {rel['n']}: cut failed (see the log)"]
     rel.update(phase="gate", pr=got["number"], url=got["url"], wt=got["wt"], main_before=h["main"])
-    return [f"release {rel['n']}: cut, pull request {got['url']}; its checks next"]
+    return [f"release {rel['n']}: cut, pull request {got['url']}; its checks next", *start_walks(w, rel)]
 
 
 def installed(w: World, st: dict, role: str, rel: dict, h: dict) -> list[str]:
@@ -1458,9 +1681,12 @@ def installed(w: World, st: dict, role: str, rel: dict, h: dict) -> list[str]:
     else:  # a release from before the keeper kept its list: the lines of its pull request
         items = [ln[2:] for ln in (w.pr(rel["pr"]).get("body") or "").splitlines() if ln.startswith("- ")]
     kr = rel.get("known_red") or []
-    head = f"Release {n} is on main and installed here ({upd})."
+    gaps = rel.get("unproven") or []
+    head = f"Release {n} is on main and installed here ({upd})." + (
+        f" It reached main without its proof: {'; '.join(gaps)}." if gaps else ""
+    )
     tail = (
-        (f"\nKnown red, not a blocker: {', '.join(kr)}." if kr else "")
+        (f"\nRed by a named exception: {', '.join(kr)}." if kr else "")
         + "".join(
             f"\nThe {x} server already runs this release (deployed {_when(running[x])}): nothing to deploy."
             for x in done
@@ -1473,6 +1699,7 @@ def installed(w: World, st: dict, role: str, rel: dict, h: dict) -> list[str]:
     st["last_installed"] = n
     return [
         f"release {n}: merged, {upd}, highlights noted"
+        + (f", WITHOUT PROOF ({'; '.join(gaps)})" if gaps else "")
         + (", deploy card asked" if parts else "")
         + (f", {' and '.join(done)} already deployed" if done else "")
     ]
@@ -1642,6 +1869,92 @@ def set_hold(root: Path, why: str) -> str | None:
     cfg.run_dir.mkdir(parents=True, exist_ok=True)
     runs._atomic(cfg.hold_path, v + "\n")
     return v
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def set_exception(
+    root: Path, check: str, ticket: str | None, until: str | None, why: str | None, by: str
+) -> dict | None:
+    """`orch github release-exception "<check>" --ticket <key> --until <YYYY-MM-DD> [--why ...]`: a named
+    exception that lets this one check be red in a release until the date or until the ticket is done.
+    `off` as the ticket removes it. Returns the entry, or None when removed."""
+    cfg = Cfg(root)
+    check = " ".join((check or "").split())
+    if not check or len(check) > 120:
+        raise Refused(
+            'Name the check as the pull request shows it, e.g. "workspace / test (windows-latest)".'
+        )
+    data = _read_json(cfg.exceptions_path)
+    if (ticket or "").strip().lower() == "off":
+        if data.pop(check, None) is None:
+            raise Refused(f"No exception is recorded for {check}.")
+        runs._atomic(cfg.exceptions_path, json.dumps(data, indent=1) + "\n")
+        return None
+    if not ticket or not until:
+        raise Refused("An exception needs its ticket and an end date: --ticket <key> --until <YYYY-MM-DD>.")
+    t = tickets.load(root, tickets.resolve(root, ticket.strip()))  # an unknown ticket is refused here
+    if not DATE_RE.match(until.strip()) or ts(until.strip()) is None:
+        raise Refused("Give the end date as YYYY-MM-DD.")
+    if until.strip() < now().date().isoformat():
+        raise Refused("The end date is in the past.")
+    e = {
+        "ticket": str(t.get("key") or t["id"]),
+        "until": until.strip(),
+        "why": " ".join((why or "").split())[:300],
+        "by": by,
+        "at": now().isoformat(timespec="seconds"),
+    }
+    data[check] = e
+    cfg.run_dir.mkdir(parents=True, exist_ok=True)
+    runs._atomic(cfg.exceptions_path, json.dumps(data, indent=1) + "\n")
+    return e
+
+
+def list_exceptions(root: Path) -> dict[str, dict]:
+    return _read_json(Cfg(root).exceptions_path)
+
+
+def record_walk(root: Path, n: int, name: str, verdict: str, line: str, by: str, commit: str = "") -> dict:
+    """`orch github release-walk <N> <walk> pass|fail "<line>" --commit <sha>`: a walk helper's result for
+    release N, for the commit it walked."""
+    cfg = Cfg(root)
+    names = [x for x, _ in cfg.walks]
+    if name not in names:
+        raise Refused(
+            f"{name} is not a release walk here "
+            f"({', '.join(names) or 'none: orch config set github.release_walks'})."
+        )
+    if verdict not in ("pass", "fail"):
+        raise Refused("The result is pass or fail.")
+    text = " ".join((line or "").split())[:300]
+    if not text:
+        raise Refused("Say in one line what was walked (pass) or the worst problem (fail).")
+    if n < 1:
+        raise Refused("Give the release number.")
+    commit = (commit or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{7,40}", commit):
+        raise Refused("Give the commit you walked: --commit <sha> (its ticket names it).")
+    data = _read_json(cfg.walks_path)
+    for k in sorted(data, key=lambda x: int(x) if str(x).isdigit() else 0)[:-20]:  # keep the last 20 releases
+        data.pop(k, None)
+    e = {
+        "verdict": verdict,
+        "line": text,
+        "commit": commit,
+        "by": by,
+        "at": now().isoformat(timespec="seconds"),
+    }
+    data.setdefault(str(n), {})[name] = e
+    cfg.run_dir.mkdir(parents=True, exist_ok=True)
+    runs._atomic(cfg.walks_path, json.dumps(data, indent=1) + "\n")
+    return e
 
 
 def missing(cfg: Cfg) -> list[str]:

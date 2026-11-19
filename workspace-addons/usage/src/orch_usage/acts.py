@@ -9,6 +9,9 @@ the rules, refusals and history lines are the CLI's own:
     on, off    <account>
     end        <account>:<YYYY-MM-DD> | <account>:none
     switching  on | off
+    seen       all-at-limit:<since> | switch-failed:<since>   (Got it on a warning card; since = its start time)
+    share      preset:<save|even|sub> | week:<10-100>:<weekday> | api:<none|kind,kind> | tool:<0-20>
+               | ahead:<api|tool|both|none>:<dollars> | clear      (how helper work is spread, ORCH-657)
 """
 
 from __future__ import annotations
@@ -19,10 +22,11 @@ from pathlib import Path
 from . import store
 from .store import Refused
 
-VERBS = ("limit", "period", "order", "on", "off", "end", "switching")
+VERBS = ("limit", "period", "order", "on", "off", "end", "switching", "share", "seen")
 _ACC = r"a_[a-z0-9]{6}"
 _PERIOD = r"5h|week|month|until"
 _DAY = r"\d{4}-\d\d-\d\d"
+_KIND = "|".join(store.KINDS)
 _VALUE = r"none|\$?\d{1,7}(?:\.\d{1,4})?[%$]?"
 PATTERNS = {
     "limit": re.compile(rf"({_ACC}):({_PERIOD}):({_VALUE})(?::({_DAY}))?"),
@@ -32,6 +36,12 @@ PATTERNS = {
     "off": re.compile(rf"({_ACC})"),
     "end": re.compile(rf"({_ACC}):({_DAY}|none)"),
     "switching": re.compile(r"(on|off)"),
+    "seen": re.compile(r"(all-at-limit|switch-failed):(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)"),
+    "share": re.compile(
+        r"(preset):(save|even|sub)|(week):(\d{2,3}):(monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+        rf"|(api):(none|(?:{_KIND})(?:,(?:{_KIND})){{0,5}})|(tool):(\d{{1,2}})"
+        r"|(ahead):(api|tool|both|none):(\d{1,4}(?:\.\d{1,2})?)|(clear)"
+    ),
 }
 NOT_THIS = "That is not something Usage can change. Reload the page and try again."
 
@@ -63,4 +73,23 @@ def argv_for(root: Path, verb: str, target: str, by: str | None) -> list[str]:
         return [verb, g[0], *who]
     if verb == "end":
         return ["end", g[0], g[1], *who]
+    if verb == "seen":
+        return ["seen", g[0], "--since", g[1], *who]
+    if verb == "share":
+        return ["share", *_share_words([x for x in g if x is not None]), *who]
     return ["switching", g[0], *who]
+
+
+def _share_words(parts: list[str]) -> list[str]:
+    head, rest = parts[0], parts[1:]
+    if head == "preset":
+        return ["--preset", rest[0]]
+    if head == "week":
+        return ["--week", rest[0], "--day", rest[1]]
+    if head == "api":
+        return ["--api", rest[0]]
+    if head == "tool":
+        return ["--tool", rest[0]]
+    if head == "ahead":
+        return ["--ahead", rest[0], "--dollars", rest[1]]
+    return ["--clear"]

@@ -71,10 +71,11 @@ def test_a_small_merged_fix_is_accepted_for_the_owner_with_its_reasons(proj, run
     assert t["status"] == "done"
     last = t["history"][-1]
     assert last["by"] == "agent:reviewer"
-    assert last["text"] == (
-        "Accepted for you by the Reviewer: pull request #12 merged, 17 checks green, 1 of 1 tasks with "
-        "evidence, small fix (1 file, 24 lines)."
-    )
+    assert last["text"].startswith("Accepted for you by the Reviewer: ")
+    assert "Pull request #12 merged with all checks green" in last["text"]
+    assert "(2 files, 104 lines changed)" in last["text"]
+    for jargon in ("small fix", "second look", "points shown", "Could not match"):
+        assert jargon not in last["text"]
     assert any(h["text"] == "Status review -> done" and h["by"] == "agent:reviewer" for h in t["history"])
 
 
@@ -219,7 +220,7 @@ def test_the_owner_sees_the_list_and_can_send_one_back(proj, run, new_ticket, fa
     code, out, _ = run("review", "accepted", "--json")
     rows = json.loads(out)["accepted"]
     assert code == 0 and [r["ticket"] for r in rows] == [tid] and rows[0]["sent_back"] is False
-    assert "small fix" in rows[0]["why"]
+    assert "the change is small" in rows[0]["why"]
     code, out, _ = run("review", "accepted")
     assert out.startswith("Accepted for you today: 1 ticket")
     # the owner sends it back from Done (same path as from Review)
@@ -353,7 +354,7 @@ def test_work_in_other_words_is_accepted_with_a_could_not_match_note(proj, run, 
     tid = _real(proj, run, new_ticket, name)
     res = reviewer.run(proj)["actions"][0]
     assert res["verdict"] == "accept", res
-    assert "Could not match:" in res["why"] and REAL[name][0] in res["why"]
+    assert "Could not match" not in res["why"] and "merged with all checks green" in res["why"]
     assert tickets.load(proj, tid)["status"] == "done"
 
 

@@ -1,6 +1,6 @@
 ---
 name: orch-insights
-description: Use when a person asks which skills, connections or keys the agents used, which ones fail or were never used, or what is shared with the admin. Insights is a read-only page over the workspace counts. Not for changing keys, connections or skills, and not for live work on one ticket (that is Focus).
+description: Use when a person asks which skills, connections or keys the agents used, which ones fail or were never used, or what is shared with the admin, or why Insights shows "Not measured yet" or no runs. Insights is a read-only page over the workspace counts. Not for changing keys, connections or skills, and not for live work on one ticket (that is Focus).
 ---
 # orch insights
 
@@ -23,6 +23,18 @@ It only reads `orch record counts --json`. It never changes anything and never s
 **See the numbers without the page**
 
     orch record counts --days 30 --json
+
+**The page says "Not measured yet" or shows no runs**
+
+Every helper run orch starts is recorded by itself; nothing needs to be set up. Look at the counts:
+- `runs` is 0 and `since` is empty: no helper run was recorded yet; it fills after the first one.
+- `lost.lines` above 0: helper actions were not recorded (`lost.reasons` says why). Before release 34, a workspace
+  without stored keys never recorded; update orch, and the counts fill from then on.
+- `inventory.skills` / `inventory.connections` empty: orch found no skill in `.agents/skills` or the helper tool's
+  own skill folder, and no connection in `.orch/mcp.json` or the helper tool's own settings. An older orch always
+  sent these lists empty, so Connected services said "Not measured yet": update orch.
+
+Turn the page on in a workspace with `orch addon add insights`.
 
 ## Rules
 - Read only: you do not need to feed Insights, and it cannot change anything.

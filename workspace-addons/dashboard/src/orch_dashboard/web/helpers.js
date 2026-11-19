@@ -277,8 +277,8 @@
   }
   /* A helper's changes waiting to be added: shown as "Changes to add" from the ticket, not as a second row. */
   const isBringBack = row => !!row && row.kind === 'copies:bring-back';
-  /* The one "Needs you" number (Review menu entry, top bar, Home heading, Review page, Tickets pill, Focus): the open
-     questions plus the results to check, the same things the Review page shows as cards (owner, 16 Nov, ORCH-63).
+  /* The open questions plus the results to check, the same things the Review page shows as cards (owner, 16 Nov,
+     ORCH-63). The dashboard's one "Needs you" number (needsYouTotal) adds the rows of work that stopped (ORCH-705).
      One per question (a ticket with two open questions counts two); a ticket that only waits for another ticket, a
      failed start, a helper idle at its prompt and other rows without a question are shown on Home but not counted.
      results is a number or a list. */
@@ -621,6 +621,18 @@
       : s === 'renew' ? {word:'Needs renewing', tone:'error'} : {word:'Cannot be reached', tone:'error'};
   }
   const needStopsWord = n => n ? 'Stops ' + n + (n === 1 ? ' ticket' : ' tickets') : '';
+  /* Terminal commands a helper wrote in backticks in a question (ORCH-218: "Sign in again with `az login`"): at most two,
+     each a tool name and at least one more word in plain characters, so a quoted name or `c1` is never one. */
+  const questionCommands = text => [...new Set([...String(text || '').matchAll(/`([^`\n]{3,120})`/g)].map(m => m[1].trim())
+    .filter(c => /^[a-z][a-z0-9._-]{0,31}( [A-Za-z0-9._:=\/@,'"+-]+)+$/.test(c)))].slice(0, 2);
+  /* The question as shown: the backticks around those commands dropped (the command itself stays in the words). */
+  const questionWords = text => { const cmds = questionCommands(text); return cmds.reduce((t, c) => t.split('`' + c + '`').join(c), String(text ?? '')); };
+  const needOwnStep = item => item && item.state !== 'works' && !item.renew && !item.key;
+  /* The terminal command that signs in again (ORCH-218: 'az login'), shown with a Copy button under the words. */
+  const needSignIn = item => needOwnStep(item) && typeof item.sign_in === 'string' && /^[A-Za-z0-9][A-Za-z0-9 ._:=\/@,'"+-]{0,119}$/.test(item.sign_in) ? item.sign_in : '';
+  /* What the person does to renew when orch cannot start it (ORCH-48): the check's own plain step, else the lead line of
+     its sign-in command; none when a Renew or Replace button is there or it works. */
+  const needHow = item => !needOwnStep(item) ? '' : typeof item.how === 'string' && item.how ? item.how : needSignIn(item) ? 'Open a terminal on this computer and run:' : '';
   /* The rows of the last check, cleaned: [{name, label, kind, state, ends_at, chosen, stops:[{id, key, title}]}]. */
   function needItems(logins) {
     return arr(logins && logins.items).filter(i => i && ['works', 'soon', 'renew', 'unreachable'].includes(i.state))
@@ -815,5 +827,32 @@
     const due = /T/.test(t.due) ? new Date(t.due).getTime() : new Date(t.due + 'T00:00').getTime();
     return Number.isFinite(due) && due < end;
   }
-  return {historyChange, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
+  // ORCH-517: a poll that held a recent revision gets only what changed (state_delta.py). Returns the new state,
+  // or null when the delta does not fit the state held (the caller then fetches the whole state). Unchanged
+  // tickets stay the same objects.
+  function applyStateDelta(state, d) {
+    if (!state || !d || d.delta !== true || !state.rev || d.base !== state.rev || !Array.isArray(d.keys)) return null;
+    const next = {};
+    for (const k of d.keys) next[k] = Object.prototype.hasOwnProperty.call(d.set || {}, k) ? d.set[k] : state[k];
+    const byId = new Map(arr(state.tickets).map(t => [t && t.id, t]));
+    for (const id of arr(d.remove)) byId.delete(id);
+    for (const row of arr(d.upsert)) {
+      if (!row || typeof row.id !== 'string') return null;
+      const old = byId.get(row.id);
+      const t = old ? {...old, ...row} : {...row};
+      const append = row['~append'] && typeof row['~append'] === 'object' ? row['~append'] : {};
+      for (const k of Object.keys(append)) {
+        if (!old || !Array.isArray(old[k])) return null;
+        t[k] = [...old[k], ...arr(append[k])];
+      }
+      for (const k of arr(row['~drop'])) delete t[k];
+      delete t['~drop']; delete t['~append'];
+      byId.set(row.id, t);
+    }
+    const order = Array.isArray(d.order) ? d.order : arr(state.tickets).map(t => t && t.id).filter(id => byId.has(id));
+    if (order.length !== byId.size || order.some(id => !byId.has(id))) return null;
+    next.tickets = order.map(id => byId.get(id));
+    return next;
+  }
+  return {historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
 });
