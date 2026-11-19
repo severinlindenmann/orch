@@ -261,16 +261,41 @@ def test_needs_nothing_when_all_decided_or_cli_fails(core):
     assert rows(core.parent.parent, core) == []
 
 
-def test_needs_cli_prints_json(core, ws, monkeypatch, capsys):
-    from orch_insights import cli
+def test_needs_cli_prints_json_from_own_files_without_orch(core, ws, monkeypatch, capsys):
+    """ORCH-603: `orch insights needs` reads the add-on's own files in-process (light listing), never a second
+    orch: the fake orch on ORCH_BIN is not called."""
+    from orch_insights import checkup_core, cli
 
     monkeypatch.setenv("ORCH_BIN", str(core))
+    seen = []
+
+    def listing(root, light=False):
+        seen.append(light)
+        return LISTING
+
+    monkeypatch.setattr(checkup_core, "listing", listing)
     assert cli.main(["--dir", str(ws), "needs", "--json"]) == 0
     out = json.loads(capsys.readouterr().out)
-    assert [r["kind"] for r in out] == ["insights:checkup"]
-    (core.parent / "list.code").write_text("1")
+    assert [r["kind"] for r in out] == ["insights:checkup"] and seen == [True]
+    assert (
+        not (core.parent / "calls.jsonl").exists()
+        or "checkup" not in (core.parent / "calls.jsonl").read_text()
+    )
+
+    def broken(root, light=False):
+        raise checkup_core.CheckupError("The check-up file cannot be read.", "not_available")
+
+    monkeypatch.setattr(checkup_core, "listing", broken)
     assert cli.main(["--dir", str(ws), "needs", "--json"]) == 0
     assert json.loads(capsys.readouterr().out) == []
+
+
+def test_light_listing_asks_no_orch(ws, monkeypatch):
+    from orch_insights import checkup_core
+
+    monkeypatch.setattr(checkup_core, "orchcall", lambda *a, **k: pytest.fail(f"orch called: {a}"))
+    out = checkup_core.listing(ws, light=True)
+    assert out["running"] is False and out["weekly"] == "unavailable" and out["proposals"] == []
 
 
 def test_session_is_a_fake_session_class():

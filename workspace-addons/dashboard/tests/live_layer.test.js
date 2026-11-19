@@ -262,6 +262,13 @@ test('a window resize draws the layer again only across the phone width', () => 
   assert.match(page, /if \(now !== phone\)/);
 });
 
+test('ORCH-679: a running helper has Stop in its pane (run.stop, "Stop idle helper" when idle); no helper, no Stop', () => {
+  assert.match(source, /sess\.kind \|\| !sess\.running \? null : h\('button'[^\n]*'data-live-stop':sess\.id\}, liveStopLabel\(sess\)\)/);
+  assert.match(source, /\['idle', 'stuck'\]\.includes\(h2\.state\) \? 'Stop idle helper' : 'Stop'/);
+  assert.match(source, /#live-dock \[data-live-stop\][\s\S]{0,200}act\('run\.stop', \{ticket:b\.dataset\.liveStop\}\)/);
+  assert.match(source, /x\.running && !x\.kind \? liveStopLabel\(x\) : ''/);  // the dock repaints when idle turns into working
+});
+
 test('the pane shows the waiting question with its options and answers it there (ORCH-675)', () => {
   const {liveAskModel} = load();
   const t = {questions:[{id:'q1', answer:'x', text:'old'}, {id:'q2', digest:'d', text:'Which banner colour should I use?', options:['Blue', 'Green', '']}]};
@@ -270,4 +277,16 @@ test('the pane shows the waiting question with its options and answers it there 
   assert.equal(liveAskModel({}), null);
   assert.equal(liveAskModel({questions:[{id:'q3', kind:'plan', text:'Plan?'}]}).plain, false);
   assert.match(source, /liveAskFill[^]*?act\('answer', \{ticket:id, question:q\.id, digest:q\.digest/, 'the answer is the same op a question card sends');
+});
+
+// ORCH-706: a helper that waits for an OK on its screen shows its choice in the last lines; in a short pane (the panel
+// at the bottom, a phone) the box was squeezed to two lines. It never shrinks below its lines (the API sends at most
+// a few), the pane body scrolls instead.
+test('the last-lines box never shrinks below its lines in a short pane', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8');
+  const rule = (css.match(/(?:^|\n)\.live-lines\{([^}]*)\}/) || [])[1];
+  assert.ok(rule, 'the .live-lines rule is in widgets.css');
+  const flex = (rule.match(/(?:^|;)flex:([^;]*)/) || [])[1] || '';
+  const shrink = (rule.match(/(?:^|;)flex-shrink:([^;]*)/) || [])[1] || flex.trim().split(/\s+/)[1];
+  assert.equal(String(shrink).trim(), '0', 'flex shrink of .live-lines is 0: ' + rule);
 });

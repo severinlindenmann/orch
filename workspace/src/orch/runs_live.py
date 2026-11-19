@@ -392,10 +392,12 @@ def start_live(
     take_over: bool,
     busy_text: str,
     priority: str = "normal",
+    over_limit: bool = False,
 ) -> dict:
     cur = runs.read(root, tid)
     mine = cur is not None and runs.state(cur) == "alive"
-    hit = None if mine or tickets.is_manager(root, tid) else _full(root)  # the Manager never waits in line
+    # the Manager and an urgent start (red develop, ORCH-699) never wait in line
+    hit = None if mine or over_limit or tickets.is_manager(root, tid) else _full(root)
     held = None if (mine or hit) else _held(root, by)
     if held:
         _queue_for_slot(root, tid, by, busy_text, priority)

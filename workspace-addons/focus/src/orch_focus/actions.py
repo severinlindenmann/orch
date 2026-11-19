@@ -373,6 +373,36 @@ def orch(root: Path, orch_bin: str | None, argv: list[str], timeout: int = 60) -
     return r.returncode, r.stdout, r.stderr
 
 
+READS = {
+    "here": 0,
+    "process": 0,
+}  # reads answered without a new process (ORCH-634), and reads that started one
+
+
+def read(root: Path, orch_bin: str | None, argv: list[str], timeout: int = 60) -> tuple[int, str, str]:
+    """`orch` for a READ (`... --json`, changes nothing), as `orch()` returns it. The real server (`orch:self`)
+    asks the core in this process or its one read worker (orch.reads.call) instead of starting Python for every
+    read; a test's fake orch, an older core or a read nobody could answer starts the command as before."""
+    if orch_bin == SELF and _run is subprocess.run:  # a test that replaced the process starter: as before
+        try:
+            from orch import reads
+        except ImportError:
+            reads = None
+        got = None
+        if reads is not None and hasattr(reads, "call"):
+            try:
+                got = reads.call(Path(root), list(argv), timeout=timeout, environ=human_env(root, orch_bin))
+            except Exception:  # noqa: BLE001 - the command gets its chance
+                got = None
+        if got is not None and (got[0] or got[1] is not None):
+            READS["here"] += 1
+            code, value = got
+            err = value.get("error", "") if code and isinstance(value, dict) else ""
+            return code, json.dumps(value, ensure_ascii=False), str(err)
+    READS["process"] += 1
+    return orch(root, orch_bin, argv, timeout)
+
+
 def _attach_all(root: Path, orch_bin: str | None, tid: str, files: list[tuple[str, bytes]]) -> dict:
     """Keep each file with the ticket through `orch ticket attach` (orch picks the name and checks type, content and
     size). A refused file is listed as failed by its (cleaned) name."""

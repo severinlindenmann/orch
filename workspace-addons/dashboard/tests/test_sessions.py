@@ -142,10 +142,20 @@ def test_the_api_serves_the_sessions(tmp_path, screens):
     base = f"http://127.0.0.1:{srv.server_address[1]}"
     try:
         with urllib.request.urlopen(base + "/api/sessions?lines=3") as r:
-            assert r.headers["Cache-Control"] == "no-store"
+            assert r.headers["Cache-Control"] == "private, no-cache"
+            tag = r.headers["ETag"]
             body = json.loads(r.read())
         assert body["lines"] == 3 and body["age_ms"] == 250 and len(body["sessions"]) == 6
         assert body["sessions"][0]["key"] == "ORCH-2"
+        # an unchanged list (even with another clock and state age) answers 304 with no body
+        srv.state_cache.get = lambda: (_state(), 2.5)
+        again = urllib.request.Request(base + "/api/sessions?lines=3", headers={"If-None-Match": tag})
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(again)
+        assert e.value.code == 304 and e.value.read() == b""
+        other = urllib.request.Request(base + "/api/sessions?lines=3", headers={"If-None-Match": '"x"'})
+        with urllib.request.urlopen(other) as r:
+            assert r.status == 200
         req = urllib.request.Request(base + "/api/sessions", headers={"Origin": "http://evil.example"})
         with pytest.raises(urllib.error.HTTPError) as e:
             urllib.request.urlopen(req)
@@ -278,3 +288,15 @@ def test_a_loop_in_the_parent_chain_is_never_followed(tmp_path, screens):
 def test_the_api_answer_carries_the_groups(tmp_path, screens):
     got = sessions.answer(tmp_path, "orch", _epic_state(), 0.0, 2)
     assert [g["id"] for g in got["groups"]] == ["t_sess0020"]
+
+
+def test_a_quiet_session_whose_result_waits_reads_check_like_its_ticket():
+    """ORCH-674: the tile said Idle while the layer (the ticket's pill) said Check for the same session."""
+    idle = sessions.session(_t(9, status="review"), _run("idle", "Idle"), False, None)
+    assert (idle["status"], idle["word"]) == ("idle", "Check")
+    closed = sessions.session(_t(10, status="review"), {"running": False}, False, None)
+    assert (closed["status"], closed["word"]) == ("closed", "Check")
+    plain = sessions.session(_t(11), _run("idle", "Idle"), False, None)
+    assert plain["word"] == "Idle"
+    asks = sessions.session(_t(12, status="review"), _run("you", "Waits for you"), False, None)
+    assert asks["word"] == "Waits for you"

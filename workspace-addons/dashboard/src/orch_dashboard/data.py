@@ -106,7 +106,7 @@ def _child_env(env, orch_bin):
 
 SELF = "orch:self"  # orch.pagesession.SELF: the real server, which runs in the core's own interpreter
 _MISS = object()
-READS = {"process": 0, "here": 0}  # how each read was answered (the timing test counts the processes)
+READS = {"process": 0, "here": 0, "worker": 0}  # how each read was answered (the tests count the processes)
 
 
 def _read_here(orch_bin: str, args: list[str], root: Path):
@@ -167,13 +167,40 @@ def _person_environ(environ) -> dict | None:
         return None
 
 
+def _by_worker(orch_bin: str, args: list[str], root: Path, timeout: float, env: dict):
+    """The real server only: a read orch.reads does not answer goes to this process's read worker (ORCH-634)
+    instead of a new `python -I -P -m orch` per read. _MISS = start the command (an older core, or no worker
+    could answer)."""
+    if orch_bin != SELF or _run is not subprocess.run:  # a test that replaced the process starter: no worker
+        return _MISS
+    try:
+        from orch import readworker
+    except ImportError:
+        return _MISS
+    try:
+        got = readworker.run(root, args, timeout=timeout, environ=env)
+    except Exception:  # noqa: BLE001 - the command gets its chance
+        return _MISS
+    if got is None:
+        return _MISS
+    READS["worker"] += 1
+    code, out = got
+    try:
+        return json.loads(out) if code == 0 else None
+    except ValueError:
+        return None
+
+
 def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
-    READS["process"] += 1
     env = {**os.environ, "ORCH_ROOT": str(root)}
     if tuple(args[:2]) in _PERSON_READS:
         env = _person_environ(env)
         if env is None:
             return None
+    got = _by_worker(orch_bin, args, root, timeout, env)
+    if got is not _MISS:
+        return got
+    READS["process"] += 1
     try:
         r = _run(
             [*_argv0(orch_bin), *args],
@@ -543,23 +570,20 @@ def _raw_list(root: Path, orch_bin: str | None) -> list[tuple]:
 
 
 def _read_many(root: Path, ids: list[str]) -> list[dict]:
-    """These tickets as `orch ticket show <id> --json` prints each, read in this process in one pass: the active
-    add-ons and the history proof worked out once for all of them (ORCH-522). A ticket that cannot be read is
-    left out."""
+    """These tickets as `orch ticket show <id> --json` prints each, read in this process in one pass: the history
+    proof worked out once for all of them (ORCH-522; the core keeps the active add-ons between tickets). A ticket
+    that cannot be read is left out."""
     try:
-        from orch import addons, history
+        from orch import history
         from orch import tickets as core
         from orch.cli import visible
         from orch.errors import Refused
-
-        on = set(addons.active(root))
-        visible(root, {}, on)  # an older core without `on`: TypeError, each ticket alone below
-    except (ImportError, TypeError):
+    except ImportError:
         return [t for t in (_show_here(root, tid) for tid in ids) if t is not None]
     out = []
     for tid in ids:
         try:
-            out.append(visible(root, core.load(root, tid), on))
+            out.append(visible(root, core.load(root, tid)))
         except (Refused, OSError, ValueError, KeyError, TypeError):
             continue
     return json.loads(json.dumps(history.shown_json(root, out), ensure_ascii=False))
