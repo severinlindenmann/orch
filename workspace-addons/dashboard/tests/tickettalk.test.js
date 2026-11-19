@@ -45,7 +45,8 @@ test('files land on the ticket first, then a working helper gets the message', a
   assert.deepEqual(plain(acts), [
     ['ticket.attach', {ticket:'t_talk0001', files:[{name:'Screenshot 14-02.png', data:'iVBORw0KGgo='}, {name:'feedback.md', data:'aGVsbG8='}]}],
     ['run.send', {ticket:'t_talk0001', text:'User feedback, round 2\n\nI added 2 files to this ticket: Screenshot 14-02.png, feedback.md. Read them first.'}]]);
-  assert.deepEqual(plain(result), {ok:true, text:'Sent. The helper reads it now.'});
+  // said: the words as sent, so the Focus chat can show them (and their files) at once (ORCH-695)
+  assert.deepEqual(plain(result), {ok:true, said:'User feedback, round 2\n\nI added 2 files to this ticket: Screenshot 14-02.png, feedback.md. Read them first.', text:'Sent. The helper reads it now.'});
 });
 
 test('with no helper on the ticket the message is queued and a helper starts', async () => {

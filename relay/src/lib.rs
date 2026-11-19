@@ -6,7 +6,6 @@ pub mod error;
 pub mod groups;
 pub mod look;
 pub mod mobile;
-pub mod notebook;
 pub mod onboarding;
 pub mod phone;
 pub mod problems;
