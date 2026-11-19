@@ -124,7 +124,8 @@ class Runner:
                 url, merge, before_merge=before_merge, queue=True, stop=stop
             )
         )
-        self.take = take or ghlimit.take
+        self._take = take
+        self._limit_take = ghlimit.take
         self.wake = wake or _wake
         self.ask = ask or _ask_merge
         self.me: str | None = None
@@ -132,6 +133,34 @@ class Runner:
         self._red: dict[tuple[str, str], tuple[float, frozenset[str]]] = {}
         self._ahead: Lead | None = None  # set while a group is built and checked on top of a running one
         self._live: set[str] = set()  # group branches whose checks run now: tidy leaves them alone
+
+    def take(self, kind: str, what: str = "") -> bool:
+        """A slot of this computer's GitHub write limit. While it waits for room, the running entries say so
+        (queue list, Pull requests page) with the time left, instead of looking like checks are running."""
+        if self._take is not None:
+            return self._take(kind, what)
+        said: list[str] = []
+
+        def on_wait(left: float, waited: float) -> None:
+            mins = max(1, round(left / 60))
+            text = f"waiting for room in this computer's GitHub write limit, about {mins} min"
+            if text in said:
+                return
+            first = not said
+            said[:] = [text]
+            if first:
+                self.log(f"The merge queue {text} ({what}).")
+            for r in store.read(self.root):
+                if r.get("state") == RUNNING and settings.same_login(r.get("login"), self.me):
+                    store.set_state(self.root, r["url"], RUNNING, text)
+
+        try:
+            return self._limit_take(kind, what, on_wait=on_wait)
+        finally:
+            if said:  # back to the plain text of a group being checked
+                for r in store.read(self.root):
+                    if r.get("state") == RUNNING and r.get("why") == said[0]:
+                        store.set_state(self.root, r["url"], RUNNING, "in the group being checked")
 
     # -- the loop ----------------------------------------------------------------------------------------
     def run(self) -> int:

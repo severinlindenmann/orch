@@ -687,3 +687,27 @@ def test_a_wake_with_no_free_slot_waits_in_line_at_high_priority(ws, monkeypatch
     monkeypatch.setattr(runs, "start", start)
     assert checks.wake(ws, "t_abc123", "fix it") == "the helper waits in line for a free slot"
     assert seen["priority"] == "high"
+
+
+def test_a_full_write_limit_is_said_on_the_running_entries_while_the_queue_waits(ws, monkeypatch):
+    """ORCH-941: 30 of 30 writes this hour: the queue list says it waits for room and for how long."""
+    from orch import ghlimit
+
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    store.add(ws, url(2), None, "agent:t", login="bot")
+    [store.set_state(ws, url(n), store.RUNNING, "in the group being checked") for n in (1, 2)]
+    logs, seen = [], []
+
+    def fake_take(kind, what="", on_wait=None, **_):
+        on_wait(1500, 0)  # 25 minutes to the next room
+        seen.append({r["number"]: r["why"] for r in store.read(ws)})
+        on_wait(1440, 60)  # 24 minutes: the text changes, the log does not repeat
+        return True
+
+    monkeypatch.setattr(ghlimit, "take", fake_take)
+    r = runner.Runner(ws, object(), lambda repo: None, log=logs.append)
+    r.me = "bot"
+    assert r.take("other", "acme/app push x") is True
+    assert all("GitHub write limit, about 25 min" in why for why in seen[0].values())
+    assert len(logs) == 1 and "write limit" in logs[0]
+    assert {r_["why"] for r_ in store.read(ws)} == {"in the group being checked"}  # back to plain after
