@@ -1830,10 +1830,18 @@ def restart_after_give_up(root: Path, tid: str, name: str) -> dict | None:
     return result
 
 
+def _own_rank(root: Path, tid: str) -> int:
+    """ORCH-813: the priority a person set on the ticket as 0 (high), 1 (normal) or 2 (low)."""
+    with contextlib.suppress(Exception):
+        return PRIORITIES.index(tickets.priority(tickets.load(root, tid)))
+    return PRIORITIES.index("normal")
+
+
 def _line_rank(root: Path, tid: str, items: list[dict]) -> int:
     """ORCH-813: a waiting ticket's place in line. The priority a person set on the ticket, raised by a start
-    that asked for a higher one (orch run start --priority, a red develop). Without one set by a person, the
-    starts decide as before (the highest asked, normal when none asked)."""
+    that asked for a higher one (orch run start --priority, a red develop, a repair of a pull request the
+    merge queue dropped). Without one set by a person, the starts decide as before (the highest asked, normal
+    when none asked)."""
     asked = [_rank(i) for i in items]
     with contextlib.suppress(Exception):
         t = tickets.load(root, tid)
@@ -1844,7 +1852,8 @@ def _line_rank(root: Path, tid: str, items: list[dict]) -> int:
 
 def waiting_line(root: Path) -> list[tuple[str, str]]:
     """Tickets whose live start waits for a free slot, in the order they start: priority (high, normal,
-    low; _line_rank), then the oldest first. [(ticket id, priority)]"""
+    low; _line_rank), then the ticket's own priority (two repairs at high: the more important ticket first),
+    then the oldest first. [(ticket id, priority)]"""
     d = runs.run_dir(root) / "pending"
     waiting = []
     for f in sorted(d.glob("t_*.jsonl")) if d.is_dir() else []:
@@ -1855,7 +1864,7 @@ def waiting_line(root: Path) -> list[tuple[str, str]]:
         if items:
             rank = _line_rank(root, tid, items)
             with contextlib.suppress(OSError):
-                waiting.append((rank, items[0]["at"], f.stat().st_mtime_ns, tid))
+                waiting.append((rank, _own_rank(root, tid), items[0]["at"], f.stat().st_mtime_ns, tid))
     return [(w[-1], PRIORITIES[w[0]]) for w in sorted(waiting)]
 
 

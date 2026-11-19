@@ -117,3 +117,14 @@ def test_without_a_ticket_priority_the_start_decides_as_before(proj, new_ticket)
     _queue(proj, a, "low")  # e.g. the Development expert's low start
     _queue(proj, b)
     assert runs_live.waiting_line(proj) == [(b, "normal"), (a, "low")]
+
+
+def test_a_repair_keeps_the_ticket_priority(proj, new_ticket):
+    """A dropped pull request wakes its ticket at high (ORCH-688): the higher priority repair first."""
+    a, b, c = new_ticket("a"), new_ticket("b"), new_ticket("c")
+    tickets.set_priority(proj, b, "high", "human:tester")
+    tickets.set_priority(proj, c, "low", "human:tester")
+    _queue(proj, c, "high")  # repairs, oldest first
+    _queue(proj, a, "high")
+    _queue(proj, b, "high")
+    assert runs_live.waiting_line(proj) == [(b, "high"), (a, "high"), (c, "high")]
