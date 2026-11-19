@@ -2287,6 +2287,8 @@ def tidy(
         if wrote:
             ticket["description"] = description
             ticket["description_by"] = by[:100]
+            if ticket.get("note") == LONG_NOTE:  # only orch's placeholder note goes, never a person's
+                ticket.pop("note", None)
             add_history(ticket, by, f"Description written by {by[:100]}")
         estimated = bool(est and not ticket.get("estimate"))
         if estimated:

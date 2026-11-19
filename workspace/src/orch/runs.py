@@ -1131,7 +1131,8 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
         f"Files you make for this ticket (reports, exports, drafts) go in the folder printed by "
         f"orch ticket artifacts-dir {tid}, unless the person asked for a file in the project itself.",
     ]
-    if ticket.get("title_auto"):  # the title is only the first words of what the person wrote
+    first_pickup = not tickets.tidied(root, ticket) and not ticket.get("checklist")
+    if ticket.get("title_auto") and not first_pickup:  # a placeholder title on a ticket already worked on
         out.insert(
             1,
             "The title above is only a placeholder (the first words of what the person wrote). FIRST read "
@@ -1141,11 +1142,17 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
             '--description "<what this is about>". Do this before you add tasks. It only works while the '
             "title is a placeholder: a title a person wrote is never changed.",
         )
-    elif not tickets.tidied(root, ticket) and not ticket.get("checklist"):  # first pickup of a new ticket
+    elif first_pickup:  # first pickup of a new ticket; a placeholder title gets the whole tidy too (ORCH-737)
+        placeholder = (
+            "The title above is only a placeholder (the first words of what the person wrote): read their "
+            f"text (the note, and any files in .orch/tickets/{tid}/artifacts/) before you write the title. "
+            if ticket.get("title_auto")
+            else ""
+        )
         out.insert(
             1,
-            "FIRST tidy this new ticket, directly, do not ask anyone, so the person does not have to "
-            "write it: "
+            placeholder + "FIRST tidy this new ticket, directly, do not ask anyone, so the person does not "
+            "have to write it: "
             "fix typos and write a short clear title, a description (what this is about and why, 1 to 3 "
             "sentences, from their note), and a done-when line (what must be true when it is done; when they "
             "wrote one, keep it). Fill the owner and due date only where the person's text says them: "
