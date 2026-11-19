@@ -1141,10 +1141,13 @@ def decide(
         raise Refused(f"{key} is already answered. Use change to answer again.")
     ownerpick.refuse_card(q, person)  # before a merge or anything else is tried
     card = _card_of(q)
-    if card.get("kind") == "run" and verdict == "ok":  # ORCH-848: only the run itself answers I ran it
+    if card.get("kind") == "run":  # ORCH-848: only the run itself answers I ran it; nothing while it runs
         from orch import runcard
 
-        raise Refused(runcard.OK_REFUSAL)
+        if verdict == "ok":
+            raise Refused(runcard.OK_REFUSAL)
+        if runcard.running(root, tid, key):
+            raise Refused("It is running now. Wait for it to finish.")
     d = _decision(q, card, verdict, picked, note)
     if digest is not None and tickets.question_digest(q) != digest:  # before a merge, not only at the write
         raise Refused(f"{key} changed after it was shown. Look at the question again, then answer.")

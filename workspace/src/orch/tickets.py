@@ -3708,10 +3708,17 @@ def _claims_ran(q: dict, text: str, decision: dict | None) -> bool:
         return False
     if isinstance(decision, dict):
         return decision.get("action") in ("approve", "use", "use_with_changes")
-    others = [o.casefold() for o in (q.get("options") or []) if isinstance(o, str)]
+
+    def norm(v: str) -> str:
+        return " ".join(v.split()).casefold()
+
+    said = norm(text)
+    if said == "i ran it":  # never, whatever the card's other answer is called
+        return True
+    others = [norm(o) for o in (q.get("options") or []) if isinstance(o, str)]
     if isinstance(card.get("no_label"), str):
-        others.append(card["no_label"].casefold())
-    return text.strip().casefold() not in others
+        others.append(norm(card["no_label"]))
+    return said not in others
 
 
 def mark_question_sent(root: Path, tid: str, qid: str, by: str = "orch") -> None:

@@ -54,6 +54,7 @@ OUT_MAX = 64 * 1024  # bytes of output read; the rest is dropped
 TAIL_LINES = 20  # lines of output shown on the card and given to the helper
 SAFE_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin")
 OK_LABEL = "I ran it"
+PHONE_RUN = False  # Run it now from a paired phone: on once the phone shows the card (ORCH-860)
 UNCHECKED = "orch did not check this command. Read it before you run it in your terminal."
 
 PERSON_REFUSAL = (
@@ -308,7 +309,7 @@ def check_spec(root: Path | None, spec) -> dict:
 
 def _orch_argv() -> list[str]:
     """This orch, by absolute path (never the PATH a helper may have changed)."""
-    return [sys.executable, "-m", "orch"]
+    return [sys.executable, "-I", "-m", "orch"]  # -I: no orch.py of the workspace folder, no PYTHON* settings
 
 
 def _env(root: Path) -> dict:
@@ -331,51 +332,61 @@ def _env(root: Path) -> dict:
 
 
 def _exec(argv: list[str], root: Path, timeout: float) -> tuple[int | None, str, float]:
-    """Run without a shell, stdin closed, in its own process group.
-    Returns (exit code or None on a timeout, output, seconds)."""
+    """Run without a shell, stdin closed, in its own process group (POSIX) or group (Windows). A reader thread
+    keeps at most OUT_MAX bytes. Returns (exit code or None on a timeout, output, seconds)."""
+    import threading
+
     t0 = time.monotonic()
+    extra = (
+        {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        if os.name == "nt"
+        else {"start_new_session": True}
+    )
     p = subprocess.Popen(
         argv, cwd=root, env=_env(root), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT, start_new_session=True,
+        stderr=subprocess.STDOUT, **extra,
     )  # fmt: skip
     buf = bytearray()
-    import selectors
 
-    sel = selectors.DefaultSelector()
-    sel.register(p.stdout, selectors.EVENT_READ)
+    def read():
+        with contextlib.suppress(OSError, ValueError):
+            for chunk in iter(lambda: p.stdout.read(8192), b""):
+                if len(buf) < OUT_MAX:
+                    buf.extend(chunk[: OUT_MAX - len(buf)])
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
     code = None
     try:
-        while True:
-            left = timeout - (time.monotonic() - t0)
-            if left <= 0:
-                break
-            if not sel.select(timeout=min(left, 0.5)):
-                if p.poll() is not None:
-                    break
-                continue
-            chunk = os.read(p.stdout.fileno(), 8192)
-            if not chunk:
-                break
-            if len(buf) < OUT_MAX:
-                buf += chunk[: OUT_MAX - len(buf)]
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            code = p.wait(timeout=max(0.1, timeout - (time.monotonic() - t0)))
+        code = p.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        code = None
     finally:
         if code is None:
-            with contextlib.suppress(ProcessLookupError, PermissionError):
-                os.killpg(p.pid, signal.SIGKILL)
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                p.wait(timeout=5)
-        sel.close()
-        p.stdout.close()
-    return code, buf.decode("utf-8", "replace"), time.monotonic() - t0
+            _kill(p)
+        reader.join(timeout=5)
+        with contextlib.suppress(OSError):
+            p.stdout.close()
+    return code, bytes(buf).decode("utf-8", "replace"), time.monotonic() - t0
+
+
+def _kill(p) -> None:
+    """Stop the command and what it started (its process group on POSIX)."""
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        if os.name == "nt":
+            p.kill()
+        else:
+            os.killpg(p.pid, signal.SIGKILL)
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        p.wait(timeout=5)
 
 
 def masked(root: Path, text: str) -> str:
     """Lines that look like a secret are hidden (secretscan); fail closed: on an error all of it is hidden."""
     from orch import secretscan
 
-    lines = text.splitlines()
+    text = text.replace("\r\n", "\n").replace("\r", "\n")  # one line numbering for the scan and the mask
+    lines = text.split("\n")
     try:
         bad = {f["line"] for f in secretscan.find(text, root)}
     except Exception:  # noqa: BLE001
@@ -424,7 +435,7 @@ def phone_ok(q) -> bool:
     """The phone shows Run it now only for orch's own operations."""
     card = card_of(q)
     spec = card.get("run") if card else None
-    return isinstance(spec, dict) and spec.get("class") == "orch"
+    return PHONE_RUN and isinstance(spec, dict) and spec.get("class") == "orch"
 
 
 def run(
@@ -441,11 +452,61 @@ def run(
 ) -> dict:
     """Run a run card's command for the person and answer it. Returns {ok, exit, output, answered, ...}.
     A failure (exit not 0, a timeout, a setting that did not change) saves the attempt on the ticket and
-    returns ok False; the card stays open."""
+    returns ok False; the card stays open. One run per card at a time: the lock covers the checks, the run
+    and the answer (review.decide refuses another answer while it is held)."""
     from orch import tickets
 
-    ticket = tickets.load(root, tid)
-    q = next((x for x in ticket.get("questions") or [] if x.get("id") == qid), None)
+    attempt = {"at": datetime.now(UTC).isoformat(timespec="seconds"), "by": by, "via": via, "ticket": tid,
+               "question": qid}  # fmt: skip
+    tickets.load(root, tid)  # a plain ticket id before the lock file is named after it
+    with _Lock(root, tid, qid):
+        try:
+            spec = _checked(root, tid, qid, digest, by=by, person=person, via=via, confirmed=confirmed)
+        except Refused as e:
+            _log(root, {**attempt, "refused": str(e)})
+            raise
+        attempt.update(digest=digest, argv=spec["argv"], cls=spec["class"])
+        argv = [*_orch_argv(), *spec["argv"][1:], "--by", by] if spec["class"] == "orch" else [
+            spec["exe"], *spec["argv"][1:]]  # fmt: skip
+        code, out, secs = _exec(argv, Path(spec["cwd"]), timeout)
+        out = masked(root, out)
+        ok, reason = code == 0, None
+        if code is None:
+            reason = "timeout"
+        elif code != 0:
+            reason = "exit"
+        elif spec["class"] == "orch" and spec["op"]["verb"] == "config.set":
+            if _current(root, spec["op"]["key"]) != spec["op"]["value"]:
+                ok, reason = False, "unchanged"
+        why = error_words(reason, code, spec)
+        tail = _tail(out)
+        attempt.update(exit=code, secs=round(secs, 1), ok=ok, output=tail, reason=reason)
+        _log(root, attempt)
+        with contextlib.suppress(Refused, OSError):
+            tickets.note_history(root, tid, by, f"Ran the card's command ({'ok' if ok else 'failed'}): "
+                                 f"{spec['command']}", via)  # fmt: skip
+        if not ok:
+            _save_attempt(root, tid, qid, attempt, why)
+            return {"ok": False, "exit": code, "output": tail, "error": why, "answered": False}
+        d = {
+            "action": "approve", "picked": None, "allows": OK_LABEL, "changes": [], "words": {"text": ""},
+            "pins": [], "replaces": None, "replaced_by": None, "summary": OK_LABEL,
+            "ran": {"at": attempt["at"], "exit": code, "secs": attempt["secs"], "output": tail,
+                    "digest": digest},
+        }  # fmt: skip
+        tickets.answer(root, tid, qid, OK_LABEL, by, via, expected_question_digest=digest, decision=d,
+                       person=True, ran=True)  # fmt: skip
+        _save_attempt(root, tid, qid, attempt, None)
+    return {"ok": True, "exit": code, "output": tail, "answered": True}
+
+
+def _checked(
+    root: Path, tid: str, qid: str, digest, *, by: str, person: bool, via: str, confirmed: bool
+) -> dict:
+    """Every check before a run, read fresh under the lock. Returns the card's spec, or Refused."""
+    from orch import tickets
+
+    q = next((x for x in tickets.load(root, tid).get("questions") or [] if x.get("id") == qid), None)
     if q is None:
         _refuse(f"Ticket {tid} has no question {qid}.")
     tickets.refuse_if_taken_back(q)
@@ -454,59 +515,28 @@ def run(
         _refuse("That card has no command to run.")
     if q.get("answer") is not None:
         _refuse(f"{qid} is answered already.")
-    attempt = {"at": datetime.now(UTC).isoformat(timespec="seconds"), "by": by, "via": via, "ticket": tid,
-               "question": qid}  # fmt: skip
-    try:
-        if not person or not by.startswith("human:"):
-            _refuse(PERSON_REFUSAL)
-        if digest is None or tickets.question_digest(q) != digest:
-            _refuse(CHANGED)
-        spec = check_spec(root, card.get("run"))
-        attempt.update(digest=digest, argv=spec["argv"], cls=spec["class"])
-        if via == "phone" and spec["class"] != "orch":
-            _refuse("The phone runs only orch's own commands. Run this one at your computer.")
-        if spec["class"] == "login":
-            _refuse("This one signs you in, so it needs a terminal: copy it and run it in your terminal.")
-        if spec["class"] == "copy":
-            _refuse("This command runs in your own terminal: copy it and run it there.")
-        if spec["class"] == "other" and not confirmed:
-            _refuse("This is not an orch command: confirm it first (it runs exactly as shown).")
-    except Refused as e:
-        _log(root, {**attempt, "refused": str(e)})
-        raise
-    argv = [*_orch_argv(), *spec["argv"][1:]] if spec["class"] == "orch" else [spec["exe"], *spec["argv"][1:]]
-    if spec["class"] == "orch":
-        argv += ["--by", by]
-    with _Lock(root, tid, qid):
-        code, out, secs = _exec(argv, Path(spec["cwd"]), timeout)
-    out = masked(root, out)
-    ok, reason = code == 0, None
-    if code is None:
-        reason = "timeout"
-    elif code != 0:
-        reason = "exit"
-    elif spec["class"] == "orch" and spec["op"]["verb"] == "config.set":
-        if _current(root, spec["op"]["key"]) != spec["op"]["value"]:
-            ok, reason = False, "unchanged"
-    why = error_words(reason, code, spec)
-    tail = _tail(out)
-    attempt.update(exit=code, secs=round(secs, 1), ok=ok, output=tail, reason=reason)
-    _log(root, attempt)
-    with contextlib.suppress(Refused, OSError):
-        tickets.note_history(root, tid, by, f"Ran the card's command ({'ok' if ok else 'failed'}): "
-                             f"{spec['command']}", via)  # fmt: skip
-    if not ok:
-        _save_attempt(root, tid, qid, attempt, why)
-        return {"ok": False, "exit": code, "output": tail, "error": why, "answered": False}
-    d = {
-        "action": "approve", "picked": None, "allows": OK_LABEL, "changes": [], "words": {"text": ""},
-        "pins": [], "replaces": None, "replaced_by": None, "summary": OK_LABEL,
-        "ran": {"at": attempt["at"], "exit": code, "secs": attempt["secs"], "output": tail, "digest": digest},
-    }  # fmt: skip
-    tickets.answer(root, tid, qid, OK_LABEL, by, via, expected_question_digest=digest, decision=d,
-                   person=True, ran=True)  # fmt: skip
-    _save_attempt(root, tid, qid, attempt, None)
-    return {"ok": True, "exit": code, "output": tail, "answered": True}
+    if not person or not by.startswith("human:"):
+        _refuse(PERSON_REFUSAL)
+    if digest is None or tickets.question_digest(q) != digest:
+        _refuse(CHANGED)
+    spec = check_spec(root, card.get("run"))
+    if via == "phone" and not (PHONE_RUN and spec["class"] == "orch"):
+        _refuse("The phone runs only orch's own commands. Run this one at your computer.")
+    if spec["class"] == "login":
+        _refuse("This one signs you in, so it needs a terminal: copy it and run it in your terminal.")
+    if spec["class"] == "copy":
+        _refuse("This command runs in your own terminal: copy it and run it there.")
+    if spec["class"] == "other" and not confirmed:
+        _refuse("This is not an orch command: confirm it first (it runs exactly as shown).")
+    return spec
+
+
+def running(root: Path, tid: str, qid: str) -> bool:
+    """A Run it now of this card is under way (review.decide refuses another answer meanwhile)."""
+    p = _Lock(root, tid, qid).path
+    with contextlib.suppress(OSError):
+        return time.time() - p.stat().st_mtime <= TIMEOUT + 60
+    return False
 
 
 def error_words(reason: str | None, code, spec: dict | None = None) -> str | None:

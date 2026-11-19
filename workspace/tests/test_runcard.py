@@ -1,6 +1,7 @@
 """The "run this" card (ORCH-848): `orch ask --run`, `orch review run`, and every refusal."""
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,9 @@ from orch import review, runcard, tickets
 from orch.errors import Refused
 
 ME = "human:pat"
+POSIX = pytest.mark.skipif(
+    os.name == "nt", reason="runs echo, false, sleep, cat or true from the system folders"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -98,6 +102,7 @@ def test_refused_when_the_card_is_made(tk, run, command, words):
     assert code == 2 and words in (out + err), out + err
 
 
+@POSIX
 def test_an_allowed_program_needs_its_change_line(tk, run):
     _root, tid = tk
     code, out, err = _ask(run, tid, "true")
@@ -131,6 +136,7 @@ def test_brew_install_with_plain_names_is_an_allowed_shape():
     assert not runcard._other_op(["brew", "install", "a", "b", "c", "d", "e", "f"])
 
 
+@POSIX
 def test_a_program_inside_the_workspace_is_refused(tk, run, monkeypatch):
     root, tid = tk
     tool = Path(root) / "tool.sh"
@@ -172,6 +178,7 @@ def test_the_person_runs_it_and_the_card_answers_itself(tk, run, person_grant):
     assert json.loads(log[-1])["ok"] is True and json.loads(log[-1])["by"] == ME
 
 
+@POSIX
 def test_a_failure_leaves_the_card_open_with_the_error(tk, run, person_grant):
     root, tid = tk
     q = _card(run, tid, "false", "--changes", "Nothing")
@@ -186,6 +193,7 @@ def test_a_failure_leaves_the_card_open_with_the_error(tk, run, person_grant):
     assert row["run_last"]["error"].startswith("It ended with exit code 1")
 
 
+@POSIX
 def test_other_commands_need_the_confirm(tk, run, person_grant):
     root, tid = tk
     q = _card(run, tid, "echo hello", "--changes", "Says hello")
@@ -333,8 +341,18 @@ def test_two_runs_at_once_are_refused(tk, run):
 # ------------------------------------------------------------------ phone, output, timeout
 
 
-def test_the_phone_runs_only_orchs_own_operations(tk, run):
+def test_the_phone_does_not_run_until_it_shows_the_card(tk, run):
     root, tid = tk
+    q = _card(run, tid, "orch config set workflow.reviewer_look on")
+    assert not runcard.phone_ok(_q(root, tid, q["id"]))  # ORCH-860 turns it on
+    with pytest.raises(Refused, match="phone runs only orch"):
+        runcard.run(Path(root), tid, q["id"], _digest(root, tid, q["id"]), by=ME, person=True, via="phone")
+    assert _q(root, tid, q["id"])["answer"] is None
+
+
+def test_the_phone_runs_only_orchs_own_operations(tk, run, monkeypatch):
+    root, tid = tk
+    monkeypatch.setattr(runcard, "PHONE_RUN", True)
     q = _card(run, tid, "echo hello", "--changes", "Says hello")
     assert not runcard.phone_ok(_q(root, tid, q["id"]))
     with pytest.raises(Refused, match="phone runs only orch"):
@@ -348,6 +366,7 @@ def test_the_phone_runs_only_orchs_own_operations(tk, run):
     assert res["ok"]
 
 
+@POSIX
 def test_a_secret_in_the_output_is_hidden(tk, run):
     root, tid = tk
     (Path(root) / "k.txt").write_text("key AKIAIOSFODNN7EXAMPLE\n")
@@ -359,6 +378,7 @@ def test_a_secret_in_the_output_is_hidden(tk, run):
     assert "AKIA" not in json.dumps(tickets.load(root, tid))
 
 
+@POSIX
 def test_a_slow_command_is_stopped_and_stays_open(tk, run):
     root, tid = tk
     q = _card(run, tid, "sleep 30", "--changes", "Waits")
@@ -392,9 +412,10 @@ def test_hand_edited_words_on_an_orch_card_are_refused(tk, run, person_grant):
     assert _q(root, tid, q["id"])["answer"] is None
 
 
-def test_relay_applies_a_phone_run_only_for_orchs_own_operations(tk, run):
+def test_relay_applies_a_phone_run_only_for_orchs_own_operations(tk, run, monkeypatch):
     from orch import relay
 
+    monkeypatch.setattr(runcard, "PHONE_RUN", True)
     root, tid = tk
     seen = []
 
@@ -440,3 +461,44 @@ def test_ext_data_cannot_fake_a_failed_try(tk, run):
         "--by", "agent:x")  # fmt: skip
     (row,) = [c for c in review.stack(Path(root)) if c["key"] == q["id"]]
     assert "run_last" not in row
+
+
+def test_an_orch_py_in_the_workspace_never_runs(tk, run, person_grant):
+    root, tid = tk
+    mark = Path(root) / "planted.txt"
+    (Path(root) / "orch.py").write_text(f"open({str(mark)!r}, 'w').write('ran')\n")
+    q = _card(run, tid, "orch config set github.release_walks install")
+    person_grant(root)
+    assert _run_card(run, root, tid, q["id"])[0] == 0
+    assert not mark.exists()
+
+
+@pytest.mark.parametrize("label", [" I ran it ", "I  ran it", "i ran IT"])
+def test_i_ran_it_cannot_be_the_other_answer(tk, run, label):
+    _root, tid = tk
+    code, out, err = _ask(run, tid, "orch config set workflow.reviewer_look on", "--option", label)
+    assert code == 2
+
+
+def test_i_ran_it_with_spaces_is_still_refused(tk, run):
+    root, tid = tk
+    q = _card(run, tid, "orch config set workflow.reviewer_look on", "--option", "Leave it off for now")
+    for said in (" I ran it ", "I  RAN it"):
+        with pytest.raises(Refused):
+            tickets.answer(Path(root), tid, q["id"], said, ME, "dashboard", person=True)
+
+
+def test_a_key_after_a_carriage_return_is_hidden(tk):
+    root, _tid = tk
+    out = runcard.masked(Path(root), "progress\rkey AKIAIOSFODNN7EXAMPLE\nnext line\n")
+    assert "AKIA" not in out and "next line" in out
+
+
+def test_no_other_answer_while_it_runs(tk, run):
+    root, tid = tk
+    q = _card(run, tid, "orch config set workflow.reviewer_look on", "--option", "Leave it off for now")
+    with runcard._Lock(Path(root), tid, q["id"]), pytest.raises(Refused, match="running now"):
+        review.decide(
+            Path(root), tid, q["id"], "no", by=ME, via="dashboard", digest=_digest(root, tid, q["id"])
+        )
+    assert _q(root, tid, q["id"])["answer"] is None
