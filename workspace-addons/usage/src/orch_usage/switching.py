@@ -348,7 +348,13 @@ def choose(
     active = next((c for c in cands if c.use.active), None)
     good = [c for c in cands if c.good and c.account["id"] not in skip]  # skip: a switch to it just failed
     if good:
-        return Choice(good[0], active, cands, False, "first account under its limits")
+        return Choice(
+            good[0],
+            active,
+            cands,
+            False,
+            f"{good[0].account['label']} is the first account in order that is under its limits",
+        )
     if active and active.under:
         return Choice(active, active, cands, True, "every account is at or near a limit; staying")
     under = [c for c in cands if c.under and c.account["id"] not in skip]
@@ -473,6 +479,7 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     memory["all_at_limit"] = ch.all_at_limit
 
     t = ch.target
+    why = ch.why
     while t and (ch.active is None or t.use.key != ch.active.use.key):
         before = ch.active.account["label"] if ch.active else None
         if ch.active and not ch.active.good and ch.active.why:
@@ -578,7 +585,7 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
         "active": ch.active.account["id"] if ch.active else None,
         "target": t.account["id"] if t else None,
         "all_at_limit": ch.all_at_limit,
-        "why": ch.why,
+        "why": why,
     }
     with store._lock(root):
         _write(memory_path(root), memory)

@@ -127,3 +127,40 @@ test('changesAsked: Ready with an open change_request task only', () => {
   assert.equal(helpers.changesAsked({status:'review', checklist:[ask]}), false);
   assert.equal(helpers.changesAsked({status:'ready', checklist:[{done:false}]}), false);
 });
+
+// ORCH-426: stuck tickets come first, whether or not the ticket needs a person's review.
+const stuckRow = (kind, text, tone = 'needs-you') => ({id:'core:' + kind.split(':')[1] + ':' + TID, source:'core', kind, ticket:TID, title:'Invoice export', tone, since:'2026-11-16T10:00:00Z', text});
+const PERMISSION = stuckRow('helper:permission', 'The helper has waited 5 min for your OK on its screen.');
+const FAILING = stuckRow('helper:failing', 'The check failed 2 times in a row on the step "Export works".', 'bad');
+const UNSURE = stuckRow('reviewer:unsure', 'The Reviewer was not sure and left it for you: no pull request to check.');
+
+test('stuck rows: Open goes to the ticket; a failing step also offers Nudge and Start fresh', () => {
+  const {c} = context({runs:{[TID]:{running:true}}});
+  for (const row of [PERMISSION, UNSURE]) {
+    const el = c.needRow(row, null);
+    assert.deepEqual(buttons(el), []);
+    const open = all(el, x => x.tag === 'a' && /btn/.test(x.attrs.className || ''));
+    assert.deepEqual(open.map(a => [text(a), a.attrs.href]), [['Open', '#ticket/' + TID]]);
+  }
+  const failing = c.needRow(FAILING, null);
+  assert.match(text(failing), /failed 2 times in a row/);
+  assert.deepEqual(buttons(failing).map(text), ['Nudge', 'Start fresh']);
+});
+
+test('stuck rows never merge with a question of the same ticket', () => {
+  const {c} = context();
+  const question = {id:'core:q:' + TID + ':q1', source:'core', kind:'question', ticket:TID, title:'Invoice export', tone:'needs-you', since:'2026-11-16T09:00:00Z', text:'Which format?', answer:{question:'q1', options:['CSV', 'PDF']}};
+  const groups = c.homeNeeds([question, PERMISSION, FAILING]);
+  assert.deepEqual([...groups.map(g => g.row.id)], [question.id, PERMISSION.id, FAILING.id]);
+});
+
+test('work that stopped carries the Helpers list word as a pill: Stuck, or Idle for an idle helper', () => {
+  const {c} = context();
+  c.window.UI = {helperPill:(state, word) => node('span', {className:'pill helper-pill', 'data-state':state}, [word])};
+  const pill = row => all(c.needRow(row, null), x => /helper-pill/.test(x.attrs.className || '')).map(text);
+  assert.deepEqual(pill(PERMISSION), ['Stuck']);
+  assert.deepEqual(pill(FAILING), ['Stuck']);
+  assert.deepEqual(pill(UNSURE), ['Stuck']);
+  assert.deepEqual(pill(UNMERGED), ['Stuck']);
+  assert.deepEqual(pill(IDLE), ['Idle']);
+});

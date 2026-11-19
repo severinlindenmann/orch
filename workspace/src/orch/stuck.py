@@ -2,7 +2,11 @@
 
 - a ticket in Review whose pull request is open with every check passed, and no helper working on it
   (the helper left without merging);
-- a live helper idle at its prompt with nothing running for IDLE_MINUTES, on a ticket that is not finished.
+- a live helper idle at its prompt with nothing running for IDLE_MINUTES, on a ticket that is not finished;
+- a stuck ticket (ORCH-426), listed whether or not the ticket needs a person's review: a helper waiting on a
+  person's OK on its screen (a permission) for PERMISSION_MINUTES, a step whose last FAILED_RUNS recorded
+  checks failed, and a ticket in Review the Reviewer left for the person (it was not sure). STUCK_KINDS; the
+  same rows go to the phone (phone_stuck.py).
 
 GitHub is never asked while a command waits: `orch needs` reads the last look from a small file and, when
 that is older than CHECK_EVERY, starts one detached look (`orch needs --look-at-pulls`). No gh, no login or
@@ -22,6 +26,9 @@ from pathlib import Path
 from orch import ghmerge, runs, runwatch
 
 IDLE_MINUTES = 10
+PERMISSION_MINUTES = 2  # a permission prompt this long with nobody answering it: stuck
+FAILED_RUNS = 2  # recorded checks in a row that failed on one step: stuck
+STUCK_KINDS = ("helper:permission", "helper:failing", "reviewer:unsure")
 CHECK_EVERY = 180  # seconds between two looks at one pull request
 ASK_EVERY = 30  # seconds between two detached looks
 MAX_PULLS = 10  # pull requests per look
@@ -215,10 +222,146 @@ def _idle_rows(root: Path, tickets_: list[dict], now: float) -> list[dict]:
     return rows
 
 
+def _title(t: dict) -> str:
+    return " ".join(str(t.get("title") or t["id"]).split())[:200] or t["id"]
+
+
+def _clip(text: str, n: int = 500) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= n else text[: n - 1] + "…"
+
+
+def _open_question(t: dict) -> bool:
+    return any(q.get("answer") is None for q in t.get("questions") or [] if isinstance(q, dict))
+
+
+def _permission_rows(root: Path, tickets_: list[dict], now: float) -> list[dict]:
+    """A live helper that has waited on a person's OK on its screen (a permission prompt) too long."""
+    rows = []
+    for t in tickets_:
+        if t.get("status") in FINISHED or t.get("general") is True:
+            continue
+        rec = runs.read(root, t["id"])
+        live = (rec or {}).get("live") or {}
+        if not rec or rec.get("mode") != "live" or live.get("state") != "attention":
+            continue
+        if runs.state(rec) != "alive":
+            continue
+        secs = runwatch._age(live.get("since"), now)
+        if secs is None or secs < PERMISSION_MINUTES * 60:
+            continue
+        key = t.get("key") or t["id"]
+        rows.append(
+            {
+                "id": f"core:permission:{t['id']}",
+                "source": "core",
+                "kind": "helper:permission",
+                "ticket": t["id"],
+                "title": _title(t),
+                "text": f"The helper has waited {runwatch.span(secs)} for your OK on its screen.",
+                "tone": "needs-you",
+                "since": live["since"],
+                "cli": f"orch run screen {key}",
+            }
+        )
+    return rows
+
+
+def _check_runs(item: dict) -> list[dict]:
+    """The step's recorded check runs (command evidence with an exit code), oldest first."""
+    return [
+        e
+        for e in item.get("evidence") or []
+        if isinstance(e, dict) and e.get("type") == "command" and "exit" in e
+    ]
+
+
+def failed_runs(item: dict) -> int:
+    """How many of the step's last recorded check runs failed in a row (non-zero exit)."""
+    n = 0
+    for e in reversed(_check_runs(item)):
+        if e.get("exit") in (0, None):
+            break
+        n += 1
+    return n
+
+
+def _failing_rows(root: Path, tickets_: list[dict], now: float) -> list[dict]:
+    """An open step whose last FAILED_RUNS recorded checks all failed: the helper keeps failing at it."""
+    rows = []
+    for t in tickets_:
+        if t.get("status") in FINISHED or t.get("general") is True:
+            continue
+        for item in t.get("checklist") or []:
+            if not isinstance(item, dict) or item.get("done") or item.get("wont_do"):
+                continue
+            n = failed_runs(item)
+            if n < FAILED_RUNS:
+                continue
+            last = _check_runs(item)[-1]
+            step = " ".join(str(item.get("text") or "").split())[:120]
+            since = last.get("ran_at") or last.get("at") or _iso(now)
+            rows.append(
+                {
+                    "id": f"core:failing:{t['id']}",
+                    "source": "core",
+                    "kind": "helper:failing",
+                    "ticket": t["id"],
+                    "title": _title(t),
+                    "text": _clip(f'The check failed {n} times in a row on the step "{step}".'),
+                    "tone": "bad",
+                    "since": since,
+                    "cli": f"orch ticket show {t.get('key') or t['id']}",
+                }
+            )
+            break  # one row per ticket: its first failing step
+    return rows
+
+
+def _unsure_rows(root: Path, tickets_: list[dict], now: float) -> list[dict]:
+    """A ticket in Review the Reviewer left for the person (reviewer.json `left`): it was not sure. A ticket
+    whose own question waits has that question as its row."""
+    from orch import reviewer
+
+    state = reviewer._read_state(root)
+    rows = []
+    for t in tickets_:
+        mine = state.get(t["id"]) or {}
+        why = mine.get("left")
+        if t.get("status") != "review" or not isinstance(why, str) or not why or _open_question(t):
+            continue
+        rows.append(
+            {
+                "id": f"core:unsure:{t['id']}",
+                "source": "core",
+                "kind": "reviewer:unsure",
+                "ticket": t["id"],
+                "title": _title(t),
+                "text": _clip("The Reviewer was not sure and left it for you: " + why.rstrip(".") + "."),
+                "tone": "needs-you",
+                "since": t.get("updated_at") or _iso(now),
+                "cli": f"orch ticket show {t.get('key') or t['id']}",
+            }
+        )
+    return rows
+
+
+def stuck_rows(root: Path, tickets_: list[dict], now: float | None = None) -> list[dict]:
+    """Only the stuck tickets (STUCK_KINDS), for the phone. Never raises."""
+    now = time.time() if now is None else now
+    out: list[dict] = []
+    for make in (_permission_rows, _failing_rows, _unsure_rows):
+        try:
+            out += make(root, tickets_, now)
+        except Exception:  # noqa: BLE001, S112 - what waits for a person must always be listed
+            continue
+    return out
+
+
 def rows(root: Path, tickets_: list[dict], now: float | None = None) -> list[dict]:
     """The rows for `orch needs`. A broken run record or cache never breaks the list."""
     now = time.time() if now is None else now
-    out: list[dict] = []
+    out: list[dict] = stuck_rows(root, tickets_, now)
     for make in (_unmerged_rows, _idle_rows):
         try:
             out += make(root, tickets_, now)
