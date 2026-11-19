@@ -145,7 +145,13 @@ function liveWallTile(s, pinned) {
       h('span', {className:'wall-now', 'data-wall-now':s.id}, liveNow(s)),
       peek ? h('span', {className:'wall-peek', 'data-wall-peek':s.id, 'aria-hidden':'true'}, peek) : null),
     meta.length ? h('span', {className:'wall-meta meta'}, meta.map(x => h('span', {}, x))) : null,
+    liveWallResults(s),
     h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), liveWallTicketLink(s), liveWallPin(s, pinned), liveWallBeside(s)));
+}
+// The ticket's newest result, small, and "+N more" (ORCH-697); a click opens it big. None without a ticket.
+function liveWallResults(s) {
+  const t = typeof ticketOf === 'function' ? ticketOf(s.id) : null;
+  return t && typeof resultsHost === 'function' ? resultsHost(t.id, {key:'wall-results-' + s.id, max:typeof RESULTS_TILE === 'number' ? RESULTS_TILE : 1, cls:'wall-results', label:'Results of ' + liveWallLabel(s)}) : null;
 }
 function liveWallLine(s, pinned) {
   const meta = [liveTool(s), liveWarm(s)].filter(Boolean), now = liveNow(s);
@@ -202,6 +208,7 @@ function liveWallRepaint() {
   if (!host || typeof reconcile !== 'function') return;
   const next = h('div', {}, ...liveWallBody());
   reconcile(host, next);
+  if (typeof resultsFillAll === 'function') resultsFillAll(host);
 }
 if (typeof window === 'object' && typeof document === 'object' && !(typeof module === 'object' && module.exports)) {
   window.addEventListener('orch:live-sessions', liveWallRepaint);

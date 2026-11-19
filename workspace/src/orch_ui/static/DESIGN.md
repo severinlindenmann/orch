@@ -23,7 +23,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `motion.css`, `motion.js` | Motion tokens in use (see Motion contract). |
 | `icons.js` | One icon set, `icon('check', 16)`. |
 | `preview.css`, `fileviewer.*`, `evidence.js`, `blocks.*` | File and result previews, viewer, proof, blocks. |
-| `results.css`, `results.js` (17 Nov, ORCH-263) | Result widgets, look from Focus draft D: `UI.result(item, {size: 'sm' \| 'lg', state})` for the 16 kinds (Markdown, text and logs, code, JSON and YAML, table, web page, PDF, picture, video, audio, chart, change, pull request link, archive, plain link, unknown file), each loaded, empty, loading, error and too big; `UI.resultOverlay(list, i)` the big overlay (← → between results, × Close, Esc, a click outside). `UI.result.kindOf(name)` picks the kind. No fetching: the page hands in the content. Gallery: Result widgets. |
+| `results.css`, `results.js` (17 Nov, ORCH-263) | Result widgets, look from Focus draft D: `UI.result(item, {size: 'sm' \| 'lg', state})` for the 16 kinds (Markdown, text and logs, code, JSON and YAML, table, web page, PDF, picture, video, audio, chart, change, pull request link, archive, plain link, unknown file), each loaded, empty, loading, error and too big; `UI.resultOverlay(list, i)` the big overlay (← → between results, × Close, Esc, a click outside). `UI.result.kindOf(name)` picks the kind. No fetching: the page hands in the content. Gallery: Result widgets. The dashboard feeds them from a ticket's real files, evidence, check runs and links in one place (`pages/results-feed.js`, ORCH-697: `resultsHost(ticket)` on wall tiles, in a session's chat and on the ticket page); `.results-host`, `.result-links` and `.result-more` lay them out. |
 | `question-card*.js`, `composer.*` | Question card, chat composer (`UI.composer`: words, pasted screenshots, picked or dropped files; `voice:true` adds Record, `UI.voiceRecorder`, words only from on-device speech to text; `send:false` inside the Review comment sheet, ORCH-422). |
 | `gallery.html`, `gallery.js`, `gallery.css`, `state-controls.js`, `samples/` | The living style guide, its fixtures, and the Loaded / Loading / Empty / Error switcher the mockup pages use. |
 | `mockup.css` | Mockup-only layout, linked only by the dashboard mockup pages (merged from the former per-draft sheets, #795 D1). Every rule is scoped with `body.mk-<draft>`; not for product pages, no new rules (R6.2). |
@@ -335,6 +335,15 @@ carry a tag. The selected row is `aria-current` (brand edge), a helper that need
 A helper that needs you turns the whole tile orange. The pane's message box (`.live-msg`) starts with `.live-to`:
 "Message to: Write the texts (ORCH-301). Only this helper gets it." In the bar the group is one chip with the helper
 count (`.lbar-n`), the same number as its tile.
+
+### Chat view of a session (ORCH-687)
+A ticket's pane has Chat | Terminal in its header (`.segmented.live-view`, `aria-pressed`; in a narrow pane "Show
+terminal" / "Show chat" in More). Chat is the default and the choice is kept per browser. `.live-chat` (`role=log`) is
+the ticket read as a conversation, oldest first: a done step and other events are one muted line (`.live-ev`, "✓ Step 2
+done: … · 14:21"); the helper's words are `.live-chat-msg` on the left (`surface-2`), your words on the right
+(`data-w=y`, `brand-soft`), each with "Helper · 14:38" or "You · 14:55" above, and its links (`.live-links`) inside.
+The waiting question is never a message: it is the orange card (`.live-ask`, `needs-you` edge, `warning-soft`) above
+the chat, answered there with its options or own words.
 
 ## Loading, errors and performance
 

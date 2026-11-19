@@ -81,7 +81,7 @@ test('folded bands are kept per workspace in this browser; broken or foreign dat
 test('loaded before app.js after the layer, served as a page module, names no add-on, a tile opens in the layer', () => {
   const index = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8'), at = f => index.indexOf('pages/' + f);
   assert.ok(at('livewall.js') > at('live-layer.js') && at('livewall.js') > at('livesessions.js') && at('livewall.js') < index.indexOf('src="app.js"'));
-  assert.match(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/server.py'), 'utf8'), /\|livewall\)/);
+  assert.match(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/server.py'), 'utf8'), /\|livewall[|)]/);
   const src = fs.readFileSync(path.join(WEB, 'pages/livewall.js'), 'utf8');
   assert.doesNotMatch(src.replace(/\.focus\(/g, ''), /\b(focus|automation|factory|insights|relay)\b/i, 'the wall never names the add-on');
   assert.match(src, /window\.LiveLayer\.open\(open\.dataset\.wallOpen, true\)/, 'zoom: the tile opens in the layer, the keyboard in its pane');
