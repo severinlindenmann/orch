@@ -897,7 +897,11 @@ async function focusButton(page, dash, width) {
   await page.waitForFunction(h => location.hash === h, '#ticket/' + id('ORCH-189'), { timeout: 10000 });
   await page.waitForSelector(`[data-key="ticket-strip-${id('ORCH-189')}"]`, { timeout: 10000 });
   if (await page.$('#live-dock[data-mode="full"]')) throw new Error('Open ticket left the ticket page hidden behind full screen');
-  if (!await page.$(pane)) throw new Error('the session closed when Open ticket was pressed');
+  // ORCH-676: the layer steps down to the bar so the ticket page is usable; the session stays and Open brings it back
+  await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
+  if (!await page.evaluate(k => window.LiveLayer.panes.includes(k), id('ORCH-189'))) throw new Error('the session closed when Open ticket was pressed');
+  await page.click('[data-key="live-open"]');
+  await page.waitForSelector(pane, { timeout: 5000 });
   // a narrow pane keeps Open ticket in More as well (draft D)
   if (await page.$(`${pane} [data-key="live-pane-more"]`)) {
     await page.click(`${pane} [data-key="live-pane-more"]`);
