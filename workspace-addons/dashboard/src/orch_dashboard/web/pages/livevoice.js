@@ -45,8 +45,13 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
     if (typeof liveLayerPaint === 'function') liveLayerPaint();
     if (focus) requestAnimationFrame(() => document.querySelector(focus)?.focus({preventScroll:true}));
   };
+  // Every half second while a try runs: the time in the strip; and when the box of that session is gone (the pane
+  // closed, the helper stopped, the panel went to the bar), the try is cancelled and the microphone released.
   const tick = () => {
-    const el = liveVoiceAt && document.querySelector(`#live-dock [data-live-voice-t="${String(liveVoiceAt.id).replace(/["\\]/g, '')}"]`);
+    if (!liveVoiceAt) return;
+    const id = String(liveVoiceAt.id).replace(/["\\]/g, '');
+    if (!document.querySelector(`#live-dock [data-live-msg="${id}"]`)) { liveVoiceCancel(); return; }
+    const el = document.querySelector(`#live-dock [data-live-voice-t="${id}"]`);
     if (el && liveVoiceRec) el.textContent = liveVoiceClock(liveVoiceRec.secs());
   };
   const stopTimer = () => { clearInterval(liveVoiceTimer); liveVoiceTimer = null; };
@@ -126,11 +131,9 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
         if (on) {
           liveVoiceAt = {id, phase:'rec'};
           repaint(voiceSel(id, 'live-voice-stop'));
-          liveVoiceTimer = setInterval(tick, 500);
          
           return;
         }
-        stopTimer();
         if (how?.cancelled) { end(id, null, 'live-voice'); }
         else if (how?.empty) { end(id, {kind:'err', text:LIVE_VOICE_SAY.empty}, 'live-voice'); }
       },
@@ -145,6 +148,7 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
     liveVoiceRec = rec;
     liveVoiceAt = {id, phase:'ask'};
     repaint(voiceSel(id, 'live-voice-cancel'));
+    liveVoiceTimer = setInterval(tick, 500);
     rec.start();
   }
   function liveVoiceCancel() {

@@ -371,6 +371,20 @@ async function voiceBox(page, dash) {
   await page.waitForFunction(([s, m]) => !document.querySelector(s) && document.querySelector(m), [strip, mic], { timeout: 10000 });
   if (heard.length) throw new Error('a cancelled recording was turned into words');
   if (await page.$(`${pane} [data-key="live-voice-error"]`)) throw new Error('the old refusal is still shown after a new try');
+  // closing the pane while listening stops the microphone; nothing is turned into words
+  await page.evaluate(() => {
+    const ask = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    window.__streams = [];
+    navigator.mediaDevices.getUserMedia = async c => { const st = await ask(c); window.__streams.push(st); return st; };
+  });
+  await page.click(mic);
+  await page.waitForFunction(s => /Listening \d:\d\d/.test(document.querySelector(s)?.textContent || ''), strip, { timeout: 10000 });
+  await page.click(`${pane} [data-key="live-close"]`);
+  await page.waitForFunction(() => window.__streams.length && window.__streams.every(st => st.getTracks().every(t => t.readyState === 'ended')), null, { timeout: 5000 })
+    .catch(() => { throw new Error('the microphone keeps listening after its pane closed'); });
+  if (heard.length) throw new Error('a recording of a closed pane was turned into words');
+  await openPane();
+  await page.waitForSelector(mic, { timeout: 10000 });
   // speak, stop: the words land in the box with the line under it, and nothing is sent
   await page.fill(box, 'Thanks.');
   await page.dispatchEvent(box, 'input');
