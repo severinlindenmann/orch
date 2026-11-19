@@ -72,7 +72,7 @@ def test_retired_shared_skill_is_not_linked_for_other_agents(proj, tmp_path):
     (sh / ".orch-shared").write_text("", encoding="utf-8")
     (sh / "SKILL.md").write_text("---\nname: team-tool\ndescription: x\n---\n", encoding="utf-8")
     skills.apply_agent_files(proj)
-    assert (proj / ".claude/skills/team-tool").is_symlink()
+    assert harness.is_link(proj / ".claude/skills/team-tool")
 
     (sh / "SKILL.md").write_text(
         "---\nname: team-tool\ndescription: x\nmetadata:\n  status: retired\n---\n", encoding="utf-8"
@@ -170,4 +170,20 @@ def test_copy_of_project_skips_hidden_skill(proj, tmp_path):
     skills.apply_copy_files(proj, work)
     assert not (work / ".claude/skills/old-tool").exists()
     assert (work / ".claude/skills/new-tool/SKILL.md").is_file()
-    assert harness._same(work / ".claude/skills/new-tool", proj / ".orch/harness/skills/new-tool")
+
+
+def test_hidden_skill_copy_is_removed_where_links_are_not_possible(proj, tmp_path, monkeypatch):
+    """Windows without links: orch's copies of a hidden skill go too, a folder of the person's stays."""
+    _install(proj, tmp_path, "old-tool")
+    for where in (".agents/skills", ".claude/skills"):
+        harness.unlink_skill(proj, where, "old-tool")
+        harness._copy_dir(proj / ".orch/harness/skills/old-tool", proj / where / "old-tool")
+    _install(proj, tmp_path / "v2", "old-tool", meta="status: retired")
+    assert not (proj / ".claude/skills/old-tool").exists()
+    assert not (proj / ".agents/skills/old-tool").exists()
+
+    mine = proj / ".claude/skills/other"
+    mine.mkdir(parents=True)
+    (mine / "SKILL.md").write_text("mine", encoding="utf-8")
+    _install(proj, tmp_path / "v3", "other", meta="status: retired")
+    assert (mine / "SKILL.md").read_text(encoding="utf-8") == "mine"

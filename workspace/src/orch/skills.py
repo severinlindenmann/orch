@@ -170,7 +170,7 @@ def apply_agent_files(root: Path) -> list[str]:
         for n in names:
             harness.check_harness(root, sk / n)
             if skillstatus.hidden_reason(sk / n):  # retired, or not for this system: not offered, files stay
-                harness.unlink_skill(root, where, n)
+                _unlink_ours(root, where, n, sk / n)
                 continue
             try:
                 harness.link_skill(root, where, n)
@@ -179,7 +179,7 @@ def apply_agent_files(root: Path) -> list[str]:
     for sh in _shared_skills(root):  # skills the relay delivered (not orch*): visible to every detected agent
         for where in places[1:]:
             if skillstatus.hidden_reason(sh):
-                _unlink_shared(root, where, sh)
+                _unlink_ours(root, where, sh.name, sh)
                 continue
             try:
                 harness.link_skill(root, where, sh.name, sh)
@@ -234,8 +234,7 @@ def apply_copy_files(root: Path, work: Path, linked: set[str] | frozenset = froz
         for n in _harness_skill_names(root):
             harness.check_harness(root, sk / n)
             if skillstatus.hidden_reason(sk / n):
-                if harness._same(work / where / n, sk / n):
-                    harness.unlink_skill(work, where, n)
+                _unlink_ours(work, where, n, sk / n)
                 continue
             if harness.is_link(work / where / n) and not harness._same(work / where / n, sk / n):
                 refused = refused or Refused(f"{work / where / n} is a link to somewhere else.")
@@ -249,7 +248,7 @@ def apply_copy_files(root: Path, work: Path, linked: set[str] | frozenset = froz
             if via_link(where) or not plain(where):
                 continue
             if skillstatus.hidden_reason(sh):
-                _unlink_shared(work, where, sh)
+                _unlink_ours(work, where, sh.name, sh)
                 continue
             try:
                 harness.link_skill(work, where, sh.name, sh)
@@ -267,12 +266,14 @@ def apply_copy_files(root: Path, work: Path, linked: set[str] | frozenset = froz
         raise refused
 
 
-def _unlink_shared(root: Path, where: str, sh: Path) -> None:
-    """Remove <where>/<name> only when it is orch's link to this shared skill (never a folder of the person's)."""
-    dest = root / where / sh.name
-    if harness.is_link(root / where) or not harness.is_link(dest) or not harness._same(dest, sh):
+def _unlink_ours(root: Path, where: str, name: str, target: Path) -> None:
+    """Remove <where>/<name> when it is orch's: a link to `target`, or orch's copy of it where links are not
+    possible (harness.unlink_skill keeps a copy that has files of the person's). A link to somewhere else and
+    a plain folder of the person's stay."""
+    dest = root / where / name
+    if harness.is_link(dest) and not harness._same(dest, target):
         return
-    harness.unlink_skill(root, where, sh.name)
+    harness.unlink_skill(root, where, name)
 
 
 def hidden_skills(root: Path) -> dict[str, str]:
