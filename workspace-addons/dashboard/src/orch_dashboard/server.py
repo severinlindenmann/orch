@@ -1194,20 +1194,23 @@ class Handler(BaseHTTPRequestHandler):
         w = termbridge.join(self.root, self.orch_bin, tid)
         if w == "busy":
             return self._send(503, b"Too many open terminals.", "text/plain")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Accel-Buffering", "no")
-        if getattr(self, "_frame_cors", False):
-            self.send_header("Access-Control-Allow-Origin", "null")
-            self.send_header("Vary", "Origin")
-        self.end_headers()
 
         def write(b: bytes) -> None:
             self.wfile.write(b)
             self.wfile.flush()
 
-        try:
+        def gone() -> bool:  # the page closed, or its sign-in ended (Sign out everywhere, a link used twice)
+            return _client_gone(getattr(self, "connection", None)) or not (self._frame or self._signed_in())
+
+        try:  # from here on the watch is given back whatever happens, also when the page left before the headers
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Accel-Buffering", "no")
+            if getattr(self, "_frame_cors", False):
+                self.send_header("Access-Control-Allow-Origin", "null")
+                self.send_header("Vary", "Origin")
+            self.end_headers()
             # the setting only, as /api/term says it: a stream cannot carry the page secret, typing checks it
             write(
                 f"event: hello\ndata: {json.dumps({'typing_allowed': _typing_allowed(self.root)})}\n\n".encode()
@@ -1215,7 +1218,7 @@ class Handler(BaseHTTPRequestHandler):
             if isinstance(w, str):
                 write(f"event: end\ndata: {json.dumps({'state': w})}\n\n".encode())
                 return
-            termbridge.stream(w, write, lambda: _client_gone(getattr(self, "connection", None)))
+            termbridge.stream(w, write, gone)
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
         finally:

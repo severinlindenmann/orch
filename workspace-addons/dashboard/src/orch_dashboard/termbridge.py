@@ -45,6 +45,7 @@ LINGER = 5.0  # seconds a watch stays open after its last page left (a reload re
 MAX_PAGES = 8  # pages watching at once, all sessions together (each holds one server thread)
 MAX_BUFFER = 512 * 1024  # bytes kept for pages that fall behind; older ones get the screen again
 MAX_INPUT = 64 * 1024  # characters in one typing request (a long paste)
+MAX_NUL = 32  # Ctrl+Space keys in one typing request: each is its own tmux call (ORCH-745)
 PART = 1500  # characters per send-keys call: well inside one tmux message (16 KB) even when all are 4 bytes
 COLS, ROWS = (10, 500), (3, 300)  # the sizes a resize may ask for
 PANE = re.compile(r"%[0-9]{1,9}")
@@ -343,7 +344,7 @@ def watching(tid: str) -> Watch | None:
 
 def type_text(tid: str, data) -> tuple[int, str]:
     """Send what the page typed (raw terminal input: text, control keys, escape sequences, a bracketed paste)."""
-    if not isinstance(data, str) or not 0 < len(data) <= MAX_INPUT:
+    if not isinstance(data, str) or not 0 < len(data) <= MAX_INPUT or data.count("\x00") > MAX_NUL:
         return 400, "That request could not be read."
     w = watching(tid)
     if w is None:
@@ -389,7 +390,7 @@ def resize(tid: str, cols, rows) -> tuple[int, str]:
 def stream(w: Watch, write, gone, ping: float = 15.0) -> None:
     """Server-sent events to one page until the session ends or the page leaves: `screen` (the whole screen,
     first and after falling behind), `out` (bytes, base64), `size`, then `end`. write(bytes) sends;
-    gone() says the page closed. Raises what write raises (the server ends the request then)."""
+    gone() says the page closed or may no longer watch (asked about once a turn, also while output flows). Raises what write raises (the server ends the request then)."""
 
     def ev(name: str, data: str) -> None:
         write(f"event: {name}\ndata: {data}\n\n".encode())
@@ -414,6 +415,9 @@ def stream(w: Watch, write, gone, ping: float = 15.0) -> None:
         if ended:
             ev("end", json.dumps({"state": "none"}))
             return
+        # asked on every turn, also while output flows: a revoked sign-in ends the stream (ORCH-745)
+        if gone():
+            return
         got, behind = w.since(seq)
         if behind:
             seq = screen()
@@ -425,9 +429,6 @@ def stream(w: Watch, write, gone, ping: float = 15.0) -> None:
             seq = s
             ev("size", payload.decode()) if kind == "size" else ev("out", base64.b64encode(payload).decode())
             last = time.monotonic()
-        if not got:
-            if gone():
-                return
-            if time.monotonic() - last >= ping:
-                write(b": ping\n\n")
-                last = time.monotonic()
+        if not got and time.monotonic() - last >= ping:
+            write(b": ping\n\n")
+            last = time.monotonic()

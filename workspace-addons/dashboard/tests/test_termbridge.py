@@ -498,3 +498,70 @@ def test_a_late_answer_goes_to_its_own_read_not_the_next():
     assert new["blocks"][0] == (True, b"NEW SCREEN") and new["at"] == 1  # after the output it must not repeat
     assert new["done"].is_set() and w._owed == []
     assert termbridge.draw(b"x", b"@@orch 1 2") is None  # reads it cannot understand: no screen
+
+
+def test_a_revoked_sign_in_ends_the_stream_also_while_output_flows(helper, server):
+    """ORCH-745 M1: the sign-in is asked again on every turn of the stream, not only when it opens."""
+    person = Person()
+    port = server(person).server_address[1]
+    s = Stream(port)
+    s.next("screen")
+    assert wait(lambda: termbridge._PAGES[0] == 1)
+    person.ok = False  # Sign out everywhere: the cookie this page holds is no longer the server's
+    stop = threading.Event()
+
+    def flow():  # the helper keeps writing, so the stream is never idle
+        while not stop.is_set():
+            tm("send-keys", "-t", f"={TID}:", "-l", "x")
+            time.sleep(0.05)
+
+    threading.Thread(target=flow, daemon=True).start()
+    try:
+        assert wait(lambda: termbridge._PAGES[0] == 0, timeout=5.0)
+    finally:
+        stop.set()
+        s.close()
+
+
+def test_too_many_ctrl_space_keys_in_one_request_are_refused(helper, monkeypatch):
+    """ORCH-745: every NUL is its own tmux call; one request may not start thousands of them."""
+    sent = []
+    w = termbridge.Watch(SOCK[0], TID)
+    w.pages, w.pane = 1, "%0"
+    termbridge._WATCHES[(SOCK[0], TID)] = w
+    monkeypatch.setattr(
+        termbridge, "_tmux", lambda sock, *a, **k: sent.append(a) or subprocess.CompletedProcess(a, 0)
+    )
+    try:
+        assert termbridge.type_text(TID, "\x00" * (termbridge.MAX_NUL + 1))[0] == 400
+        assert sent == []
+        assert termbridge.type_text(TID, "\x00" * termbridge.MAX_NUL) == (200, "{}")
+    finally:
+        del termbridge._WATCHES[(SOCK[0], TID)]
+
+
+def test_a_page_that_leaves_before_the_headers_gives_its_place_back(helper, server, monkeypatch):
+    """ORCH-745: a stream slot is given back also when writing the headers fails."""
+    from orch_dashboard import server as srvmod
+
+    def broken(self):
+        raise BrokenPipeError
+
+    monkeypatch.setattr(srvmod.Handler, "end_headers", broken)
+    port = server().server_address[1]
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request("GET", f"/api/term/stream?ticket={TID}", headers={"Host": f"127.0.0.1:{port}"})
+    try:
+        conn.getresponse()
+    except (OSError, http.client.HTTPException):
+        pass
+    conn.close()
+    assert wait(lambda: termbridge._PAGES[0] == 0)
+
+
+def test_no_add_on_frame_may_watch_or_type_into_the_terminal():
+    """ORCH-745: a sandboxed add-on page's pass (some may act) never reaches the terminal bridge, so it can never
+    read or type into the plain terminal's shell. Adding these routes to FRAME_ROOT needs a security review."""
+    from orch_dashboard import framepass
+
+    assert not framepass.ALL_ROOT_PATHS & {"/api/term/stream", "/api/term/input", "/api/term/size"}
