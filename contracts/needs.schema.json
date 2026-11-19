@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://orch.severin.io/contracts/needs.schema.json",
   "title": "orch Needs you v1 (stdout of `orch needs --json`)",
-  "description": "What waits for a person, one list for every surface (terminal, browser, phone). The core makes its rows from tickets alone: open questions and waits past their `until`. An active add-on whose manifest has `needs = true` adds rows through `orch <name> needs --json` (same row shape, pulled with a 2 s timeout; on failure its last rows come back with stale = true). Rows are sorted questions first, then bad, then warn; ids are stable and unique, so a surface can remember what it showed. Unknown fields are kept.",
+  "description": "What waits for a person, one list for every surface (terminal, browser, phone). The core makes its rows from tickets alone: open questions and waits past their `until`. An active add-on whose manifest has `needs = true` adds rows through `orch <name> needs --json` (same row shape; the add-ons are asked side by side while the core rows are made, the first answer is waited for up to 2 s; a later add-on answers from its last good rows, refreshed in the background; those come back with stale = true when the add-on failed or the rows are older than 2 minutes). Rows are sorted questions first, then bad, then warn; ids are stable and unique, so a surface can remember what it showed. Unknown fields are kept.",
   "type": "array",
   "items": { "$ref": "#/$defs/row" },
   "$defs": {
