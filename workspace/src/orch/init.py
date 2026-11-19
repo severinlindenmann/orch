@@ -108,7 +108,7 @@ def ask_name(root: Path, asking: bool) -> str | None:
         return None  # only a person names themselves, never a helper in a terminal
     while True:
         try:
-            answer = input("Your name (shown on tickets; Enter to skip): ").strip()
+            answer = input("Your name (the dashboard shows it as You; Enter to skip): ").strip()
         except EOFError:
             return None
         if not answer:
@@ -118,7 +118,7 @@ def ask_name(root: Path, asking: bool) -> str | None:
         except people.BadName as e:
             print(e)
             continue
-        return f"You         {name} (change it on the dashboard: You, above Settings)"
+        return f"You         {name} (on the dashboard; change it there: You, above Settings)"
 
 
 def is_new(root: Path) -> bool:

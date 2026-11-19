@@ -171,6 +171,10 @@ def test_status_json_names_a_workspace_by_its_name(ws, run, monkeypatch):
     code, out, _ = run("status", "--json")
     rows = [w for w in json.loads(out) if w["workspace"] == str(ws.resolve())]
     assert rows[0]["name"] == ws.resolve().name
+    config.set_key(ws, "workspace", "name", "Evil\x1b]0;x\x07")  # a hand edit: never printed
+    code, out, _ = run("status", "--json")
+    rows = [w for w in json.loads(out) if w["workspace"] == str(ws.resolve())]
+    assert rows[0]["name"] == ws.resolve().name
 
 
 def test_cli_shared_pages(ws, run, monkeypatch, tmp_path):

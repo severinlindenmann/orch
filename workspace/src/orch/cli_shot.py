@@ -48,7 +48,7 @@ _ON_PATH = ("google-chrome", "chromium", "chromium-browser", "microsoft-edge", "
 
 def _build(path: str) -> int:
     """Playwright's build number in .../chromium-1248/..., so the newest install is tried first."""
-    m = re.search(r"/chromium-(\d+)/", path)
+    m = re.search(r"[\\/]chromium-(\d+)[\\/]", path)
     return int(m.group(1)) if m else 0
 
 

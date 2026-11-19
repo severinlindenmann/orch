@@ -211,6 +211,7 @@ def no_browser(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # what expanduser reads on Windows
     monkeypatch.delenv("ORCH_SHOT_BROWSER", raising=False)
     monkeypatch.setattr(cli_shot, "_APPS", str(tmp_path / "Applications"))
     monkeypatch.setattr(cli_shot.shutil, "which", lambda n: None)

@@ -792,7 +792,9 @@ def workspace_name(root: Path | None) -> str | None:
         v = (read(root).get("workspace") or {}).get("name")
     except Refused:
         return None
-    return v if isinstance(v, str) and 1 <= len(v) <= MAX_WS_NAME and v == v.strip() else None
+    if not isinstance(v, str) or any(unicodedata.category(c)[0] == "C" for c in v):
+        return None  # a hand edit with control characters is never printed (the setter refuses them)
+    return v if 1 <= len(v) <= MAX_WS_NAME and v == v.strip() else None
 
 
 def workspace_description(root: Path | None) -> str | None:
