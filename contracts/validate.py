@@ -1776,6 +1776,20 @@ def kind_tool_alert():
                 _expect(f"tool-alert phone {c['name']} {item['message']['id']}", _msgs(vm, item["message"]), [])
 
 
+def kind_notebook():
+    """Notebook messages (relay-api.md Notebook, vectors/notebook-v1.json): every valid / invalid message against
+    message.schema.json (`long_text` = make body.notebook.text that many characters long first)."""
+    vm = _w("message")
+    vec = _vec("notebook-v1.json")
+    for c in vec["valid"]:
+        _expect(f"notebook valid {c['name']}", _msgs(vm, c["message"]), [])
+    for c in vec["invalid"]:
+        m = json.loads(json.dumps(c["message"]))
+        if c.get("long_text"):
+            m["body"]["notebook"]["text"] = "x" * c["long_text"]
+        _expect(f"notebook invalid {c['name']} is refused", bool(_msgs(vm, m)), True)
+
+
 # --- dispatch (keep last in this block) ------------------------------------------------------------------------------
 KINDS = {
     "review-card": kind_review_card,
@@ -1792,6 +1806,7 @@ KINDS = {
     "proposal": kind_proposal,
     "diag": kind_diag,
     "tool-alert": kind_tool_alert,
+    "notebook": kind_notebook,
 }
 
 
