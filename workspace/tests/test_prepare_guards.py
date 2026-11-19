@@ -301,3 +301,46 @@ def test_only_a_person_turns_prepare_on_save_on(proj, run):
     assert code == 0, err
     code, out, _ = run("config", "get", "workflow.prepare_on_save")
     assert code == 0 and "true" in out.lower()
+
+
+def test_with_the_limit_reached_a_busy_machine_does_not_queue_it_for_later(proj, new_ticket, monkeypatch):
+    config.set_key(proj, "workflow", "prepare_daily_limit", 0)
+    monkeypatch.setattr(runs_live, "_full", lambda root: 3)  # every helper place taken
+    tid = new_ticket("x pls")
+    assert runs.start_prepare(proj, tid, "human:t")["skipped"] == prepare.LIMIT_WHY
+    assert tid not in [t for t, _ in runs_live.waiting_line(proj)]
+    assert tickets.load(proj, tid)["prepare"]["state"] == "not_prepared"
+
+
+def test_a_prepare_that_waited_in_line_and_is_then_skipped_does_not_stay_waiting(proj, new_ticket, starts):
+    tid = new_ticket("x pls")
+    tickets.set_prepare(proj, tid, "waiting", "human:t")
+    runs_live._queue_for_slot(proj, tid, "human:t", "saved", "low", prepare=True)
+    config.set_prepare_on_save(proj, False)  # turned off while it waited
+    assert runs_live.start_waiting(proj) == [] and starts == []
+    p = tickets.load(proj, tid)["prepare"]
+    assert p["state"] == "not_prepared" and "off in Settings" in p["why"]
+
+
+def test_every_status_path_is_closed_to_the_prepare_helper(proj, new_ticket):
+    """set_status, a patch and a wait all go through the same guard (security review of ORCH-741)."""
+    tid = new_ticket("sales report pls")
+    runs.claim(proj, tid, "human:t", "fake", pid=os.getpid(), prepare=True)
+    rev = tickets.load(proj, tid).get("revision", 0)
+    with pytest.raises(Refused, match="being prepared"):
+        tickets.patch(proj, tid, rev, json.dumps({"status": "done"}), "agent:claude")
+    with pytest.raises(Refused, match="being prepared"):
+        tickets.wait(proj, tid, "2099-01-01T10:00", None, "agent:claude")
+    tickets.patch(proj, tid, rev, json.dumps({"owner": "Anna"}), "agent:claude")  # fields are fine
+    assert tickets.load(proj, tid)["status"] == "open"
+
+
+def test_preparing_one_question_keeps_the_ticket_in_backlog(proj, new_ticket):
+    tid = new_ticket("the report Anna asked for")
+    runs.claim(proj, tid, "human:t", "fake", pid=os.getpid(), prepare=True)
+    tickets.ask(proj, tid, "Which month?", ["October", "November"], "November", "agent:claude")
+    t = tickets.load(proj, tid)
+    assert t["status"] == "open" and not t.get("waiting_on") and len(t["questions"]) == 1
+    other = new_ticket("normal ticket")  # outside Prepare a question still means Waiting
+    tickets.ask(proj, other, "Which month?", ["October", "November"], "November", "agent:claude")
+    assert tickets.load(proj, other)["status"] == "waiting"

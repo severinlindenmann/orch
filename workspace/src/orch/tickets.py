@@ -1284,9 +1284,26 @@ GENERAL_REFUSED = (
 DRAFT_TO_CHECK = "a ticket with a draft, mockup or design waits for the owner's Check"
 
 
+PREPARE_NO_STATUS = (
+    "This ticket is being prepared: Prepare never changes its status. It stays in Backlog until a person "
+    "starts it."
+)
+
+
+def _preparing_agent(root: Path, tid: str, by: str, person: bool = False) -> bool:
+    """A helper (not a person) acts on a ticket a prepare-only run works on now (ORCH-741)."""
+    if person or not (agent_tool() or by.startswith("agent:")):
+        return False
+    from orch import prepare
+
+    return prepare.running_prepare(root, tid)
+
+
 def _finish_status(root: Path, ticket: dict, status: str, by: str, person: bool = False) -> tuple[str, str]:
     """person: a signed-in person (the dashboard's one-time grant); only then does a ticket that carries a
     draft become Done (ORCH-582). An agent's Done goes to Review instead, also with agents may finish on."""
+    if status != ticket.get("status") and _preparing_agent(root, ticket["id"], by, person):
+        raise Refused(PREPARE_NO_STATUS)  # every status write of set_status and patch passes here
     if hidden_kind(ticket) and status in GENERAL_REFUSED:  # the ONE status guard (agent, person, wrapper)
         raise Refused(_hidden_refusal(ticket))
     if agent_tool():  # an agent in the environment counts as an agent whatever --by says
@@ -1689,14 +1706,6 @@ def set_status(
     if superseded_by is not None and status != "dropped":
         raise Refused("--superseded-by goes with the status dropped (Won't do).")
     other = superseded_value(root, tid, superseded_by) if superseded_by is not None else None
-    if (agent_tool() or by.startswith("agent:")) and not person:
-        from orch import prepare
-
-        if prepare.running_prepare(root, tid):  # Prepare only fills the ticket (ORCH-741)
-            raise Refused(
-                "This ticket is being prepared: Prepare never changes its status. It stays in Backlog "
-                "until a person starts it."
-            )
 
     def op(ticket):
         target, actor = _finish_status(root, ticket, status, by, person)
@@ -3522,6 +3531,8 @@ def ask(
                 "and say in the ticket summary what is missing."
             )
 
+    preparing = _preparing_agent(root, tid, by)  # ORCH-741: asked during Prepare
+
     def op(ticket):
         for old in ticket["questions"]:  # the same open question is not asked twice
             if old["answer"] is None and old["text"] == text.strip() and old["options"] == list(options):
@@ -3552,6 +3563,9 @@ def ask(
             if links:  # part of what the person is shown: in the digest (question_digest)
                 q["links"] = [dict(x) for x in links]
         ticket["questions"].append(q)
+        if preparing and ticket["status"] == "open":  # Prepare's one question: the ticket stays in Backlog
+            add_history(ticket, by, f"Asked {q['id']}")
+            return q
         ticket["status"] = "waiting"
         ticket["waiting_on"] = {"kind": "question", "ref": q["id"]}
         add_history(ticket, by, f"Asked {q['id']}, waiting")
@@ -3868,6 +3882,9 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
             raise Refused("--on needs <kind>:<ref>, kind ticket, question or external. For a time: --until.")
         w = waiting_value(kind, ref)
         note = f"Waiting on {kind} {w['ref']}"
+
+    if _preparing_agent(root, tid, by):
+        raise Refused(PREPARE_NO_STATUS)
 
     def op2(ticket):
         ticket["waiting_on"] = w

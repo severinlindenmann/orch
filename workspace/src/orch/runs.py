@@ -1654,7 +1654,14 @@ def start_prepare(root: Path, tid: str, by: str, *, agent: str | None = None) ->
     why = prepare.skip_reason(root, ticket)  # the guards, no AI call (ORCH-741)
     if why:
         _drop_prepare_slot(root, tid)
+        p = ticket.get("prepare") if isinstance(ticket.get("prepare"), dict) else {}
+        if p.get("state") == "waiting":  # it waited in line and the guard said no meanwhile: not stuck there
+            tickets.set_prepare(root, tid, "not_prepared", "orch", why=why)
         return {"ticket": tid, "prepare": True, "skipped": why}
+    if prepare.used(root)["used"] >= prepare.used(root)["limit"]:  # also before it waits in line
+        _drop_prepare_slot(root, tid)
+        tickets.set_prepare(root, tid, "not_prepared", "orch", why=prepare.LIMIT_WHY)
+        return {"ticket": tid, "prepare": True, "skipped": prepare.LIMIT_WHY}
     counted: float | None = None
     try:
         brake.check_start(root, tid, runs_live.AUTOMATION_BY)  # counted like an automatic start (R8.6)
@@ -1709,7 +1716,7 @@ def _start_pressed(root: Path, tid: str) -> str | None:
     helper can never pass for a person here."""
     for i in undelivered(root, tid):
         by = str(i.get("by") or "")
-        if i.get("kind") == "event" and i.get("via") is None and by.startswith("human:") and len(by) > 6:
+        if i.get("kind") == "event" and i.get("via") is None and history.is_person_line(by):
             return by
     return None
 
