@@ -8,6 +8,8 @@ module.exports = {
   name: 'New ticket: files and parts make an epic, empty Start refused, unsent text kept',
   covers: ['ticket.new', 'page:ticket'],
   async run({ page, open, reload, act, must, text, orch, home }) {
+    const starts = [];
+    page.on('request', r => { if (r.url().endsWith('/api/act') && r.headers()['x-orch-op'] === 'run.start') starts.push(r.url()); });
     await open('#tickets');
     await page.getByRole('button', { name: 'New ticket' }).first().click();
     let dlg = page.locator('dialog[open]');
@@ -43,6 +45,7 @@ module.exports = {
     const epic = all.find(t => t.title === 'Autumn fair: everything for our stand');
     must(epic, 'no ticket was made from the text');
     must(epic.epic === true, 'the ticket with parts is not an epic');
+    must(!starts.length && !epic.started, 'Save without starting started a helper');
     must(page.url().includes(epic.id), 'the page did not open the new epic: ' + page.url());
     const kids = all.filter(t => t.parent === epic.id).map(t => t.title).sort();
     must(JSON.stringify(kids) === JSON.stringify(['Book the stand', 'Order the banner']), 'the epic\'s tickets are ' + kids.join(', '));

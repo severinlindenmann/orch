@@ -6,7 +6,7 @@ const idOf = out => (/\[(t_[A-Za-z0-9]+)\]/.exec(out) || [])[1];
 module.exports = {
   name: 'Tickets list: search, no hit, views, Part of, Board Show more',
   covers: ['page:tickets'],
-  async run({ page, open, reload, must, text, orch, orchAsPerson }) {
+  async run({ page, open, reload, must, text, orch, orchAsPerson, until }) {
     const complaint = idOf(orch('ticket', 'new', 'Answer the Müller complaint'));
     const domain = idOf(orch('ticket', 'new', 'Renew the shop domain'));
     const epic = idOf(orch('ticket', 'new', 'Spring fair', '--epic'));
@@ -14,6 +14,8 @@ module.exports = {
     orch('ticket', 'new', 'Order the fair banner', '--parent', epic);
     for (let i = 1; i <= 5; i++) orchAsPerson('ticket', 'status', idOf(orchAsPerson('ticket', 'new', 'Closed monthly report ' + i)), 'done');
     must(complaint && domain && epic, 'the seed tickets were not made');
+    await open('#tickets');  // until() asks the page's server, so a page must be open
+    await until(s => [complaint, domain, epic].every(id => JSON.stringify(s.tickets || []).includes(id)), 'the new tickets');
     const search = page.getByRole('searchbox', { name: 'Search tickets' });
 
     // a word with an umlaut, kept in the address and after a reload
@@ -43,10 +45,12 @@ module.exports = {
     must((await search.inputValue()) === '', 'Show all does not clear the search');
     must((await text()).includes('Renew the shop domain'), 'Show all does not show every ticket again');
 
-    // a view chip: Backlog shows the tickets nobody started, not the finished ones
+    // a view chip: Backlog shows only the tickets nobody started
     await page.locator('[data-key="view-chips"] a', { hasText: 'Backlog' }).click();
     await page.waitForTimeout(300);
-    must((await text()).includes('Renew the shop domain') && !(await text()).includes('Closed monthly report 1'), 'the Backlog view shows the wrong tickets');
+    const groups = await page.locator('[data-key="ticket-table"] [data-key^="group-toggle-"]').evaluateAll(n => n.map(x => x.dataset.key));
+    must(groups.length > 0 && groups.every(k => k === 'group-toggle-open'), 'the Backlog view shows other groups: ' + groups.join(', '));
+    must((await text()).includes('Renew the shop domain'), 'the Backlog view does not show a ticket nobody started');
     await page.locator('[data-key="view-chips"] a', { hasText: 'All' }).first().click();
     await page.waitForTimeout(300);
 
@@ -65,12 +69,20 @@ module.exports = {
     await open('#tickets');
     await page.getByRole('button', { name: 'Board' }).first().click();
     await page.waitForTimeout(400);
-    const more = page.locator('[data-action="board-more"]').filter({ hasText: /^Show (\d+ more|fewer)$/ }).first();
+    const lane = page.locator('section[data-status="done"]');
+    const cards = () => lane.locator('article.ticket-card').count();
+    const more = lane.locator('[data-action="board-more"]');
     must(await more.count(), 'the Done lane has no Show more button');
-    must(/^Show \d+ more$/.test((await more.innerText()).trim()), 'the Done lane button says ' + await more.innerText());
+    const m = /^Show (\d+) more$/.exec((await more.innerText()).trim());
+    must(m, 'the Done lane button says ' + await more.innerText());
+    must((await cards()) === 3, 'the Done lane does not start with three cards: ' + await cards());
     await more.click();
     await page.waitForTimeout(300);
+    must((await cards()) === 3 + Number(m[1]), `Show ${m[1]} more shows ${await cards()} cards`);
     must((await more.innerText()).trim() === 'Show fewer', 'Show more does not turn into Show fewer');
+    await more.click();
+    await page.waitForTimeout(300);
+    must((await cards()) === 3, 'Show fewer does not go back to three cards');
     await page.getByRole('button', { name: 'List' }).first().click();
   },
 };
