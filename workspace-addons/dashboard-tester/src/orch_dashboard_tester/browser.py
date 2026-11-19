@@ -101,7 +101,7 @@ def reachable_url(launch_url: str, answers=_answers) -> str:
     local = parts.scheme == "http" and parts.hostname not in (
         "127.0.0.1",
         "localhost",
-    )  # https: name on the cert
+    )  # https stays on its own name
     if local and answers("127.0.0.1", port):
         return urlunsplit(parts._replace(netloc=f"127.0.0.1:{port}"))
     raise Unreachable(UNREACHABLE.format(where=f"{parts.hostname}:{port}"))

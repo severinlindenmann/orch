@@ -386,7 +386,7 @@ def test_look_falls_back_to_this_computers_own_address():
     with pytest.raises(browser.Unreachable, match="could not be reached") as e:
         browser.reachable_url(url, lambda h, p: False)
     assert "SECRET" not in str(e.value)
-    with pytest.raises(browser.Unreachable):  # https keeps its name (the certificate is for it)
+    with pytest.raises(browser.Unreachable):  # https keeps its own name
         browser.reachable_url("https://develop.example:8790/go/SECRET", only_local)
 
 
