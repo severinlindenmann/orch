@@ -94,14 +94,19 @@ All times are from the moment the old services stop.
    `relay.db`; files and apps in `publish.db`). Stop on the old server: `systemctl stop orch-relay orch-publish`.
    Published apps keep running on their own, so stop them too, or they write their data during the copy:
    container mode: `docker -H unix:///run/kiri/docker.sock ps -q --filter label=orch.publish.app | xargs -r docker -H unix:///run/kiri/docker.sock stop`,
-   then the same `ps` must list nothing; systemd mode: `systemctl stop 'orch-app@*'` and `systemctl list-units 'orch-app*'`
-   shows none running. From now on nothing is written there.
+   then the same `ps` must list nothing; systemd mode (transient units named `orch-app-<hex>-<port>`): `systemctl stop 'orch-app-*'` and
+   `systemctl list-units --state=active 'orch-app-*'` shows none. From now on nothing is written there.
 2. (1 min) Consistent copies: `sqlite3 /var/lib/orch-relay/relay.db ".backup /var/lib/orch-relay/move.db"` and the same
    for `publish.db`, then `PRAGMA integrity_check` on both copies.
 3. (2-10 min) Copy, server to server through the laptop (no key on either server for the other):
    `/var/lib/orch-relay`, `/var/lib/orch-publish`, `/srv/orch-publish` if it exists, `/etc/orch-relay/{master.key,admin-token,apns.p8}`,
-   `/etc/orch-publish/admin-token`, and every setting that is not an address (APNs ids, sandbox, limits). Use
-   `scp -3 -r` (or `rsync -a` through the laptop). On the new server delete any
+   `/etc/orch-publish/admin-token`, and every setting that is not an address (APNs ids, sandbox, limits). Stream a tar
+   through the laptop so links, modes and owners stay as they are (apps keep `.venv` links and group-write folders for
+   the container user; `scp` would break them):
+   `ssh orch-dev-root 'tar -C / -cpf - var/lib/orch-relay var/lib/orch-publish etc/orch-relay etc/orch-publish' | ssh root@2.24.146.133 'tar -C / -xpf -'`
+   (add `srv/orch-publish` if it exists). As root, tar maps owners by name (the users exist on both servers) and keeps
+   numbers without a name (the container user). The old `env` files land too: compare them with the new ones and keep
+   the new addresses. On the new server delete any
    `relay.db-wal`, `relay.db-shm` (and the same for `publish.db`) first, then put `move.db` back as `relay.db` /
    `publish.db`. Owners `orch-relay:` / `orch-publish:`, keys 0600.
 4. (10 min) Start on the new server: `systemctl start orch-relay orch-publish`; `curl -s localhost:8103/health` and
