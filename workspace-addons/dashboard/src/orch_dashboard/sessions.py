@@ -159,6 +159,9 @@ def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> 
         status, word = "in-line", "In line"
     else:
         status, word = "closed", "No session"
+    if status in ("idle", "closed") and ticket.get("status") == "review":
+        # ORCH-674: a quiet session whose result waits for the person reads Check, as its ticket does everywhere else
+        word = "Check"
     waits = [
         {"kind": str(w.get("kind") or ""), "what": " ".join(str(w.get("what") or "").split())[:200]}
         for w in run.get("waiting_on") or []
