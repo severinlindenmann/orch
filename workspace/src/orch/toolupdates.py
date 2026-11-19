@@ -1,10 +1,11 @@
-"""Updates for the tools a workspace uses (ORCH-589): the helper tools (Claude Code, Codex) and any tool
+"""Updates for the tools a workspace uses (ORCH-589): the helper tools and any tool
 the workspace's checks name (Databricks CLI, GitHub CLI, a Google Ads CLI ...). For each one: the installed
 version, the newest one, the update notes in between and, when orch can tell how the tool was installed,
 an update the person starts (`orch tools update <name>`, or Update in Settings).
 
-Generic by design: a tool is known by its command name. The built-in library (known_tools.json) covers common
-tools; a workspace adds its own with an `update` block in one of its check files (.orch/checks/<name>.json),
+Generic by design: a tool is known by its command name. The built-in library (known_tools.json, plus the
+helper tools' own recipes in agents/updates.json) covers common tools; a workspace adds its own with an
+`update` block in one of its check files (.orch/checks/<name>.json),
 which therefore runs only after the person approved that file (checkfiles.py):
 
     "update": {"label": "Google Ads CLI", "latest": {"pypi": "google-ads-cli"},
@@ -15,8 +16,8 @@ Safety (plan challenged on the ticket):
   - Versions and notes come only from typed sources on fixed HTTPS hosts (npm, PyPI, GitHub, Homebrew), with a
     time and size limit and no redirect to another host; never a free URL.
   - Update is offered only for an install orch recognises from the real path of the command (a Homebrew cellar
-    or cask folder of the named formula, node_modules/<the named package>, or a recipe path such as Claude
-    Code's own versions folder). The update is a fixed argument list built here, never a shell; it runs from
+    or cask folder of the named formula, node_modules/<the named package>, or a recipe path such as a helper
+    tool's own versions folder). The update is a fixed argument list built here, never a shell; it runs from
     the home folder, never from the project (no project .npmrc). Otherwise the person updates it themselves.
   - Only a person starts an update (refused inside a helper run). One update at a time; it is never killed.
   - Release notes are text from outside: shown to the person as plain lines, never given to a helper.
@@ -40,6 +41,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from orch import agentsdata
 from orch.errors import Refused
 
 CACHE_SECONDS = 6 * 3600
@@ -121,8 +123,13 @@ def library() -> dict:
         doc = json.loads(Path(__file__).with_name("known_tools.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
+    tools = dict(doc.get("tools") or {})
+    with contextlib.suppress(OSError, ValueError, AttributeError):
+        helpers = json.loads((agentsdata.agents_dir() / "updates.json").read_text(encoding="utf-8"))
+        for name, d in (helpers.get("tools") or {}).items():
+            tools.setdefault(name, d)
     out = {}
-    for name, d in (doc.get("tools") or {}).items():
+    for name, d in tools.items():
         r = recipe(name, d)
         if r:
             out[name] = r

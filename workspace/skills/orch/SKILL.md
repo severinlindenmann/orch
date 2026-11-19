@@ -275,6 +275,9 @@ Your own check (any command or a small script, for example an API call with a ke
 `.orch/checks/<name>.json`, written from `_template.json`. A new or changed check file runs only after the person
 approved it; you cannot approve it. Tell them to look at the file and run the approve command.
 
+Updates of these tools: `orch tools list` (installed and newest version) and `orch tools notes <name>`. Only the
+person updates a tool (Settings > About & updates); a check file may add an `update` block for its tool.
+
 **End of every run**
 
     orch ticket summary <id> "<what was done and what is left>"      # at most 200 characters

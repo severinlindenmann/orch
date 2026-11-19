@@ -377,6 +377,7 @@ ADVANCED_TOP = {
     "session",
     "triage",
     "checks",  # ORCH-529: --help-all only
+    "tools",  # ORCH-589: --help-all only (updates are a person's choice in Settings)
 }
 ADVANCED_SUB = {"relay": {"allow"}}
 

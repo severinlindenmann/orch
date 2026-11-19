@@ -1,36 +1,39 @@
 {
-  "_doc": "How orch finds the newest version, the update notes and the update of a tool (toolupdates.py). Keyed by the tool's command name. latest/notes: npm | pypi | github (releases; tag_prefix) | github_file (o/r/branch/path, '## x.y.z' sections) | brew / cask (Homebrew API). installs: how orch recognises an install from the real path of the command; the first that matches is used, none: the person updates it themselves.",
+  "_doc": "How orch finds the newest version, the update notes and the update of a tool (toolupdates.py). Keyed by the tool's command name; the helper tools' recipes are in agents/updates.json. latest/notes: npm | pypi | github (releases; tag_prefix) | github_file (o/r/branch/path, '## x.y.z' sections) | brew / cask (Homebrew API). installs: how orch recognises an install from the real path of the command; the first that matches is used, none: the person updates it themselves.",
   "tools": {
-    "claude": {
-      "label": "Claude Code",
-      "latest": {"npm": "@anthropic-ai/claude-code"},
-      "notes": {"github_file": "anthropics/claude-code/main/CHANGELOG.md"},
-      "installs": [
-        {"via": "self", "path": "{home}/.local/share/claude/versions/", "command": ["claude", "update"]},
-        {"via": "brew", "cask": "claude-code"},
-        {"via": "npm", "package": "@anthropic-ai/claude-code"}
-      ]
-    },
-    "codex": {
-      "label": "Codex",
-      "latest": {"npm": "@openai/codex"},
-      "notes": {"github": "openai/codex", "tag_prefix": "rust-v"},
-      "installs": [
-        {"via": "brew", "cask": "codex"},
-        {"via": "npm", "package": "@openai/codex"}
-      ]
-    },
     "gh": {
       "label": "GitHub CLI",
-      "latest": {"github": "cli/cli", "tag_prefix": "v"},
-      "notes": {"github": "cli/cli", "tag_prefix": "v"},
-      "installs": [{"via": "brew", "formula": "gh"}]
+      "latest": {
+        "github": "cli/cli",
+        "tag_prefix": "v"
+      },
+      "notes": {
+        "github": "cli/cli",
+        "tag_prefix": "v"
+      },
+      "installs": [
+        {
+          "via": "brew",
+          "formula": "gh"
+        }
+      ]
     },
     "databricks": {
       "label": "Databricks CLI",
-      "latest": {"github": "databricks/cli", "tag_prefix": "v"},
-      "notes": {"github": "databricks/cli", "tag_prefix": "v"},
-      "installs": [{"via": "brew", "formula": "databricks"}]
+      "latest": {
+        "github": "databricks/cli",
+        "tag_prefix": "v"
+      },
+      "notes": {
+        "github": "databricks/cli",
+        "tag_prefix": "v"
+      },
+      "installs": [
+        {
+          "via": "brew",
+          "formula": "databricks"
+        }
+      ]
     }
   }
 }
