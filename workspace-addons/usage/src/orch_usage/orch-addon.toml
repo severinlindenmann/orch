@@ -9,6 +9,7 @@ skill = "skills/orch-usage"
 agents_block = "skills/orch-usage/AGENTS-block.md"
 gitignore = [".orch/addons/usage/"]
 background = true
+needs = true                                # orch usage needs --json: the warnings, once each
 
 [dashboard]
 label = "Usage"
@@ -46,6 +47,10 @@ who = "people"
 
 [acts.switching]
 summary = "Switch accounts by itself, or only show and warn"
+who = "people"
+
+[acts.seen]
+summary = "Got it: hide a Usage warning until it clears and comes back"
 who = "people"
 
 [acts.share]
