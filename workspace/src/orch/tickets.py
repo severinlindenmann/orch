@@ -102,7 +102,7 @@ def now() -> str:
 
 
 def parse_time(text: str) -> str:
-    """Any ISO 8601 time -> UTC RFC 3339 ending in Z. Without offset = UTC."""
+    """Any ISO 8601 time -> UTC RFC 3339 ending in Z. Without offset = this computer's local time (ORCH-619)."""
     t = text.strip()
     if t.endswith(("Z", "z")):
         t = t[:-1] + "+00:00"
@@ -110,9 +110,7 @@ def parse_time(text: str) -> str:
         dt = datetime.fromisoformat(t)
     except ValueError:
         raise Refused(f"'{text}' is not a time. Use e.g. 2026-11-05T08:00:00+01:00") from None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")  # a naive time is read as local by astimezone
 
 
 def agent_tool() -> str | None:
