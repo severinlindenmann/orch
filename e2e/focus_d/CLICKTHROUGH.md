@@ -24,38 +24,35 @@ Must be seen:
 - Home shows its content, no loading shape stays.
 - At 390 wide nothing scrolls sideways.
 
-## 2. Today's Focus still works with Preview off
+## 2. Focus opens as the new Focus
 
 - Part: start
 - State: ready, clicked by the script
-- Pictures: `fd-02-focus-today-1280.png`, `fd-02-focus-today-1920.png`, `fd-02-focus-today-390.png`
+- Pictures: `fd-02-focus-new-1280.png`, `fd-02-focus-new-1920.png`, `fd-02-focus-new-390.png`
 
 Do:
 
-1. Leave the Preview switch off.
-2. Open Focus from the side bar.
+1. Open Focus from the side bar (at phone width from its address).
 
 Must be seen:
 
-- Today's Focus opens with its list of live helpers.
-- Nothing of the new Focus shows.
+- Focus opens as the new Focus (the wall of step 4 fills it), with no Preview mark.
+- No old Focus page shows.
+- At 390 wide nothing scrolls sideways.
 
-## 3. Turn the new Focus on with the Preview switch
+## 3. Focus has no Preview switch
 
 - Part: start
 - State: ready, clicked by the script
-- Pictures: `fd-03-preview-on-1280.png`, `fd-03-preview-on-1920.png`, `fd-03-preview-on-390.png`
+- Pictures: `fd-03-no-switch-1280.png`, `fd-03-no-switch-1920.png`, `fd-03-no-switch-390.png`
 
 Do:
 
-1. Open Settings and turn on the Preview switch for the new Focus.
-2. Open Focus from the side bar.
+1. Open Settings, Add-ons, Focus.
 
 Must be seen:
 
-- Focus opens as the new Focus, marked Preview (the wall of step 4 fills it).
-- The switch is marked Preview.
-- Turning it off again brings back today's Focus.
+- The Typing switch is there; there is no Preview switch and no word Preview.
 
 ## 4. The live wall in bands
 
