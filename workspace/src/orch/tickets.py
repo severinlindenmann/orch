@@ -3713,13 +3713,12 @@ def _claims_ran(q: dict, text: str, decision: dict | None) -> bool:
     def norm(v: str) -> str:
         return " ".join(v.split()).casefold()
 
+    from orch import runcard
+
     said = norm(text)
-    if said == "i ran it":  # never, whatever the card's other answer is called
-        return True
-    others = [norm(o) for o in (q.get("options") or []) if isinstance(o, str)]
-    if isinstance(card.get("no_label"), str):
-        others.append(norm(card["no_label"]))
-    return said not in others
+    no = card.get("no_label")
+    # the one other answer: orch's own words (runcard.NO_LABELS), never the question's options or free text
+    return not (isinstance(no, str) and no in runcard.NO_LABELS and said == norm(no))
 
 
 def mark_question_sent(root: Path, tid: str, qid: str, by: str = "orch") -> None:

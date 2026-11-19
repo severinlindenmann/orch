@@ -333,8 +333,13 @@ def validate_card(card) -> dict:
     if card["kind"] == "run":  # ORCH-848: the command, as orch parsed it (runcard.check_spec at run time)
         if not isinstance(card.get("run"), dict):
             raise Refused("A run card needs its command (orch ask --run).")
+        from orch import runcard
+
         out["run"] = card["run"]
-        out["no_label"] = _text(card.get("no_label"), "no_label", 40)
+        no = card.get("no_label", "Not now")
+        if no not in runcard.NO_LABELS:  # orch's own words only: never a look-alike of "I ran it"
+            raise Refused("A run card's other answer is one of: " + ", ".join(runcard.NO_LABELS) + ".")
+        out["no_label"] = no
     elif card.get("run") is not None:
         raise Refused("Only a run card carries a command.")
     return {k: v for k, v in out.items() if v is not None}

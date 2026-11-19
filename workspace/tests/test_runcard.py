@@ -556,3 +556,31 @@ def test_brew_with_a_version_is_allowed():
 def test_brew_never_loads_a_formula_from_a_path(tk):
     root, _tid = tk
     assert runcard._env(Path(root))["HOMEBREW_FORBID_PACKAGES_FROM_PATHS"] == "1"
+
+
+@pytest.mark.parametrize("label", ["I ran it.", "I ran it \u2713", "Done"])
+def test_a_card_made_another_way_cannot_carry_a_look_alike(tk, label):
+    root, tid = tk
+    spec = runcard.parse(Path(root), "orch config set workflow.reviewer_look on")
+    card = {
+        "kind": "run",
+        "title": "Turn it on?",
+        "then": "x",
+        "ok_label": "I ran it",
+        "no_label": label,
+        "run": spec,
+    }
+    with pytest.raises(Refused, match="other answer is one of"):
+        review.validate_card(card)
+
+
+def test_options_are_never_an_other_answer(tk, run):
+    root, tid = tk
+    q = _card(run, tid, "orch config set workflow.reviewer_look on", "--option", "Leave it off for now")
+
+    def add_option(t):
+        next(x for x in t["questions"] if x["id"] == q["id"])["options"].append("I ran it \u2713")
+
+    tickets.apply_op(Path(root), tid, add_option, by="agent:x")
+    with pytest.raises(Refused):
+        tickets.answer(Path(root), tid, q["id"], "I ran it \u2713", ME, "dashboard", person=True)
