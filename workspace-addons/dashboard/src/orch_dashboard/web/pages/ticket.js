@@ -654,7 +654,9 @@ async function copyFileLink(url) {
 const viewerKind = name => window.FileViewer ? window.FileViewer.kindOf(name) : 'other';
 const viewerWord = kind => window.FileViewer ? window.FileViewer.word(kind) : 'File';
 function ticketFileEntries(t) {
-  const entries = ticketFileGroups(t).flatMap(g => g.files.map(file => fileEntry(t, g, file)));
+  // Draft E (ORCH-778): the files a person attached are listed too (Who added it: You), after the helper's.
+  const mine = inputFiles(t), groups = [...ticketFileGroups(t), ...(mine.length ? [{label:'From you', kind:'artifacts', files:mine}] : [])];
+  const entries = groups.flatMap(g => g.files.map(file => fileEntry(t, g, file)));
   // A web page with its own stylesheet, script and pictures in a folder is ONE website, not four files.
   const sites = new Map(entries.filter(f => f.fileKind === 'page' && f.name.includes('/')).map(f => [f.name.slice(0, f.name.lastIndexOf('/') + 1), f]));
   const parts = new Map();
@@ -746,7 +748,18 @@ function ticketFileGroups(t) {
 }
 const ticketFileCount = t => ticketFileEntries(t).length;
 // ---- Files tab: one card per file (thumbnail, name, kind · size · date); a toolbar (find, sort, cards/list) only above 6 files.
-const filesUI = {q:'', sort:'newest', view:'cards'};
+const filesUI = {q:'', sort:'newest', view:'cards', who:'All'};
+// Draft E (ORCH-778): who added a file. "You" = files a person attached; "Helper" = results and the files tasks proved.
+const fileWho = f => f.role === 'Attached by you' ? 'You' : 'Helper';
+// All / Helper / You with counts, only when both kinds are there (one kind needs no filter).
+function filesWhoFilter(all) {
+  const n = who => all.filter(f => who === 'All' || fileWho(f) === who).length;
+  if (!n('Helper') || !n('You')) return null;
+  return h('div', {className:'segmented', role:'group', 'aria-label':'Who added it', 'data-key':'files-who'}, ['All', 'Helper', 'You'].map(who =>
+    ticketButton([who, ' ', h('span', {className:'seg-count'}, String(n(who)))], '', () => { filesUI.who = who; render(); }, {'aria-pressed':String(filesWho(all) === who), 'data-key':'files-who-' + who})));
+}
+// The filter only counts while both kinds exist; otherwise every file shows.
+const filesWho = all => all.some(f => fileWho(f) === 'You') && all.some(f => fileWho(f) === 'Helper') ? filesUI.who : 'All';
 const FILES_TOOLBAR_FROM = 7;
 const SORTS = [['newest', 'Newest'], ['oldest', 'Oldest'], ['name', 'Name']];
 function sortedEntries(list) {
@@ -776,12 +789,12 @@ function fileTile(t, f) {
   return h('article', {className:'file-tile', 'data-key':'file-tile-' + f.kind + '-' + f.name}, link);
 }
 function visibleFileEntries(t, all) {
-  const q = filesUI.q.trim().toLowerCase();
-  return sortedEntries(all.filter(f => !q || (f.title + ' ' + f.name).toLowerCase().includes(q)));
+  const q = filesUI.q.trim().toLowerCase(), who = filesWho(all);
+  return sortedEntries(all.filter(f => (who === 'All' || fileWho(f) === who) && (!q || (f.title + ' ' + f.name).toLowerCase().includes(q))));
 }
 function filesPanelBody(t, all) {
   const entries = visibleFileEntries(t, all);
-  if (!entries.length) return h('p', {className:'muted', 'data-key':'files-none'}, all.length ? 'No files match. Clear the search.' : 'No files attached yet. Files your helper attaches appear here.');
+  if (!entries.length) return h('p', {className:'muted', 'data-key':'files-none'}, all.length ? (filesUI.q.trim() ? 'No files match. Clear the search.' : 'No files here. Choose All.') : 'No files attached yet. Files your helper attaches appear here.');
   return h('div', {className:'files-collection', 'data-view-mode':filesUI.view === 'list' ? 'list' : 'grid', 'data-key':'files-collection'}, h('div', {className:'file-grid'}, entries.map(f => fileTile(t, f))));
 }
 function filesToolbar(count) {
@@ -803,15 +816,12 @@ function artifactsPanel(t) {
   const all = ticketFileEntries(t);
   if (!all.length && !artifactData.get(t.id)?.data) return [h('div', {className:'file-grid file-skeleton', 'aria-busy':'true', 'aria-label':'Loading files', 'data-key':'files-skeleton'},
     [0, 1, 2].map(i => h('div', {className:'file-tile skeleton-tile', 'data-key':'skeleton-' + i})))];
-  return [all.length >= FILES_TOOLBAR_FROM ? filesToolbar(all.length) : null, filesPanelBody(t, all)];
+  const who = filesWhoFilter(all);
+  return [who ? h('div', {className:'tab-head', 'data-key':'files-head'}, who) : null, all.length >= FILES_TOOLBAR_FROM ? filesToolbar(all.length) : null, filesPanelBody(t, all)];
 }
 function ticketActor(by) {
   if (typeof chatDmName === 'function' && chatDmName(by)) return chatDmName(by);  // another workspace answered: its contact name
   return /^agent:/.test(by || '') || array(state.settings?.agents).some(a => a.name === by) ? window.DashHelpers.agentLabel(state.settings, {agent:String(by).replace(/^agent:/, '')}) : name(window.DashHelpers.personName(by, state));
-}
-function ticketTaskOutcome(task) {
-  const ev = array(task.evidence).slice(-1)[0];
-  return window.DashHelpers.outcome(task) + (ev?.at ? ' · ' + window.DashHelpers.stamp(ev.at, Date.now()) : '') + (ev?.by ? ' — ' + ticketActor(ev.by) : '');
 }
 // A small chip per proof worth opening: a file opens its preview, a PR or web address opens in a new tab.
 function taskProofChips(t, task) {
@@ -844,7 +854,6 @@ function taskRows(t) {
     for (const key of [...taskMenus.keys()]) if (key.startsWith(t.id + ':') && !ids.has(key.slice(t.id.length + 1))) taskMenus.delete(key);
   }
   return array(t.checklist).map((task, i) => {
-    const meta = [ticketActor(task.owner || task.by), clean(window.DashHelpers.cleanOutcome(task.summary))].filter(Boolean).join(' · ');
     const doing = !task.wont_do && task.state === 'doing', change = changeTask(task.text, task.origin);
     const mark = snapshot || !task.id ? (task.wont_do ? h('span', {className:'muted'}, '–') : task.done ? h('span', {className:'good'}, iconEl('check')) : h('span', {className:'dot ' + (doing && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'working' : 'idle')}))
       : h('button', {type:'button', className:'task-check' + (task.wont_do ? ' muted' : task.done ? ' on' : ''), role:task.wont_do ? null : 'checkbox', 'aria-checked':task.wont_do ? null : String(!!task.done), 'aria-label':task.wont_do ? 'Open again' : clean(task.text), 'data-key':'task-check-' + task.id}, task.wont_do ? '–' : task.done ? iconEl('check') : null);
@@ -889,10 +898,8 @@ function taskRows(t) {
       h('div', {className:'grow'}, h('h3', {className:task.wont_do ? 'task-wont' : ''}, doing && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? h('span', {className:'ticket-spinner', title:'Helper is working', 'aria-label':'Helper is working'}) : null, clean(change ? change.title : task.text)),
         change ? h('p', {className:'meta preserve-lines task-asked'}, 'You asked: ' + clean(change.asked)) : null,
         task.wont_do ? h('p', {className:'meta task-note'}, task.reason ? 'Skipped: ' + clean(task.reason) : 'Skipped. No reason was given.') : null,
-        array(task.evidence).filter(ev => (ev.type || ev.kind) === 'note' && (ev.text || ev.title)).map(ev => h('p', {className:'preserve-lines task-evidence-note'}, clean(ev.text || ev.title))),
-        meta ? h('p', {className:'meta'}, meta) : null,
-        task.wont_do ? null : h('p', {className:'meta task-proof'}, doing && window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'Not started yet.' : ticketTaskOutcome(task)),
-        taskProofChips(t, task)), h('span', {className:'meta task-word'}, taskWord(task)), menu);
+        ticketTaskLine(t, task, doing),
+        task.done && !task.wont_do ? taskProofChips(t, task) : null), h('span', {className:'meta task-word'}, taskWord(task)), menu);
   });
 }
 // ORCH-236: a task can be renamed, moved up or down and removed from its "..." menu (orch check edit / move / remove;
@@ -925,6 +932,37 @@ function taskEditRow(t, task, i) {
     after?.id ? ticketButton('Move down', 'ghost sm', () => taskAct('check.move', {ticket:t.id, check:task.id, after:after.id}), {'data-key':'task-down-' + task.id}) : null,
     ticketButton('Remove', 'ghost sm', () => { taskMenus.delete(t.id + ':' + task.id); locks.delete('task-menu-' + task.id); taskAct('check.remove', {ticket:t.id, check:task.id}).then(r => { if (r.ok) window.orch.toast('Removed. It stays in the Activity.', 'ok'); }); }, {'data-key':'task-remove-' + task.id}));
 }
+// Draft E (ORCH-778): one line under a task. A done task says what came out (its summary or the last evidence), with
+// the time and who; the task the helper is on says so; a task still to do shows nothing.
+function ticketTaskLine(t, task, doing) {
+  if (task.wont_do) return null;
+  if (task.done) {
+    const ev = array(task.evidence).slice(-1)[0];
+    const outcome = window.DashHelpers.outcome(task), said = clean(window.DashHelpers.cleanOutcome(task.summary)) || (outcome === 'Completed.' ? '' : clean(outcome));
+    const line = [said, ev?.at ? window.DashHelpers.stamp(ev.at, Date.now()) : '', ev?.by ? ticketActor(ev.by) : ''].filter(Boolean).join(' · ');
+    return line ? h('p', {className:'meta task-proof', 'data-key':'task-result-' + (task.id || '')}, line) : null;
+  }
+  if (!doing) return null;
+  return h('p', {className:'meta task-proof'}, window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'Not started yet.' : 'The helper is on it.');
+}
+// Draft E (ORCH-778): the Tasks tab opens with one line: a bar with one step per task, "N of M tasks done" and
+// "+ Add a task" (it opens the add box under the line; a ticket without tasks shows the box at once). Then the tasks.
+const taskAddOpen = new Set();
+function ticketTaskBar(list) {
+  const done = list.filter(window.DashHelpers.resolved).length;
+  return h('div', {className:'progress-steps', role:'progressbar', 'aria-label':'Tasks done', 'aria-valuemin':'0', 'aria-valuemax':String(list.length), 'aria-valuenow':String(done), 'data-key':'tasks-bar'},
+    list.map(c => h('span', {className:c.wont_do ? 'skipped' : c.done ? 'done' : c.state === 'doing' ? 'doing' : null})));
+}
+function ticketTasksPanel(t) {
+  const list = array(t.checklist), total = list.length, done = list.filter(window.DashHelpers.resolved).length;
+  const canAdd = !snapshot && t.status !== 'done', open = canAdd && (!total || taskAddOpen.has(t.id) || locks.has('add-task-tasks-' + t.id));
+  const add = canAdd && total ? ticketButton([iconEl('plus'), 'Add a task'], 'ghost sm', () => { taskAddOpen.add(t.id); render(); setTimeout(() => document.querySelector('[data-key="add-task-tasks-' + t.id + '"] input')?.focus(), 0); },
+    {'aria-expanded':String(open), 'data-key':'tasks-add-' + t.id}) : null;
+  return [h('div', {className:'tab-head', 'data-key':'tasks-head'}, total ? ticketTaskBar(list) : null,
+    h('strong', {}, total ? done + ' of ' + total + ' tasks done' : 'No tasks yet.'), add),
+  open ? addTaskRow(t, 'tasks') : null,
+  total ? h('section', {className:'card tasks-list', 'data-key':'tasks'}, taskRows(t)) : null];
+}
 // "+ Add task": one line, Enter adds it (orch check add). The draft is kept while the page refreshes.
 function addTaskRow(t, scope) {
   if (snapshot) return null;
@@ -932,13 +970,13 @@ function addTaskRow(t, scope) {
   const input = el('input', 'input');
   Object.assign(input, {type:'text', placeholder:'+ Add task', maxLength:500, name:'task'});
   input.setAttribute('aria-label', 'Add a task');
-  const form = el('form', 'card-row add-task');
+  const form = el('form', 'row add-task');
   form.dataset.key = key;
   const send = button('Add', 'outline sm', null);
   send.type = 'submit';
   form.append(input, send);
   input.addEventListener('focusin', () => locks.add(key));
-  input.addEventListener('blur', () => { if (!input.value.trim()) { locks.delete(key); setTimeout(render, 0); } });
+  input.addEventListener('blur', () => { if (!input.value.trim()) { locks.delete(key); taskAddOpen.delete(t.id); setTimeout(render, 0); } });
   form.addEventListener('submit', async event => {
     event.preventDefault();
     const text = input.value.trim();
@@ -1120,11 +1158,14 @@ function ticketHistoryPanel(t) {
     const day = ticketHistoryDay(entry.at);
     if (!groups.has(day)) groups.set(day, []);
     groups.get(day).push(h('div', {className:'ticket-event'}, entry.via === 'phone' ? phoneEntry(t.id, entry) : null,
-      h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · ')),
+      h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · '), entry.via === 'phone' ? [' ', h('span', {className:'tag', 'data-key':'history-phone'}, 'Phone')] : null),
       (change => change ? h('p', {className:'meta ticket-change'}, 'Was: ' + clean(change.was) + '  →  Now: ' + clean(change.now)) : null)(window.DashHelpers.historyChange(entry)), h('time', {className:'meta', datetime:entry.at}, time(entry.at))));
   }
-  const controls = snapshot ? null : h('div', {className:'ticket-history-filters', role:'group', 'aria-label':'Show'}, ['All', 'People', 'Helper'].map(label => ticketButton(label, 'outline sm', () => { ticketHistoryActor = label; render(); }, {'aria-pressed':String(ticketHistoryActor === label)})));
-  return card('history', 'Activity', '', [controls, groups.size ? [...groups].map(([day, rows]) => h('section', {className:'ticket-history-day'}, h('h3', {}, day), rows)) : emptyRow('No history yet.')]);
+  // Draft E (ORCH-778): the master segmented control, each choice with its count (the entries it would show).
+  const count = label => ticketHistoryEntries(t, label).filter(e => views.has(e)).length;
+  const controls = snapshot ? null : h('div', {className:'tab-head ticket-history-filters', 'data-key':'history-head'}, h('div', {className:'segmented', role:'group', 'aria-label':'Show'},
+    ['All', 'People', 'Helper'].map(label => ticketButton([label, ' ', h('span', {className:'seg-count'}, String(count(label)))], '', () => { ticketHistoryActor = label; render(); }, {'aria-pressed':String(ticketHistoryActor === label), 'data-key':'history-show-' + label}))));
+  return h('section', {className:'stack ticket-history', 'data-key':'history'}, controls, groups.size ? [...groups].map(([day, rows]) => h('section', {className:'ticket-history-day'}, h('h3', {}, day), rows)) : emptyRow(ticketHistoryActor === 'All' ? 'No history yet.' : 'Nothing here yet. Choose All.'));
 }
 function ticketWarmth(t, run, session) {
   const seconds = [session?.seconds_left, session?.warmth?.seconds_left, run?.claim?.warmth?.seconds_left, t.warmth?.seconds_left].find(v => typeof v === 'number' && Number.isFinite(v));
@@ -1634,7 +1675,7 @@ function ticketProgress(t, run) {
 }
 // The review card: "Result" = in short + the result preview (the verdict buttons live in the header strip).
 function ticketReviewCard(t) {
-  const found = reviewFile(t), file = found?.file, count = ticketFileCount(t);
+  const found = reviewFile(t), file = found?.file, count = ticketFileEntries(t).filter(f => fileWho(f) === 'Helper').length;
   return h('section', {className:'card attention decision review-card', 'data-key':'review-card-' + t.id},
     h('div', {className:'section-head'}, h('h2', {}, 'Result'), count ? h('span', {className:'meta'}, count + (count === 1 ? ' file' : ' files')) : null),
     t.summary ? h('p', {className:'preserve-lines', 'data-key':'summary'}, h('strong', {}, 'In short. '), linkRefs(t, t.summary)) : null,
@@ -1843,7 +1884,6 @@ function detail(t) {
       repeatsAddon() ? [ticketButton('Repeat…', 'menu-item', () => repeatsDialog(t.id, repeatsAddon()), {role:'menuitem', 'data-key':'ticket-repeat'})] : null));
   const tabs = ticketTabList(t);
   const panel = (id, label, body) => h('section', {id:'ticket-panel-' + id, role:snapshot ? null : 'tabpanel', 'aria-labelledby':snapshot ? null : 'ticket-tab-' + id, className:'stack ticket-panel', hidden:!snapshot && selected !== id, tabindex:'0'}, snapshot ? h('h2', {}, label) : null, body);
-  const total = array(t.checklist).length, done = array(t.checklist).filter(window.DashHelpers.resolved).length;
   const overview = [
     ticketBringBackRow(t),
     t.status !== 'done' && openQuestions.length ? (planQ ? ticketPlan(t, planQ, children) : ticketQuestion(t, openQuestions[0], true)) : null,
@@ -1874,7 +1914,7 @@ function detail(t) {
     h('div', {className:'columns ticket-layout' + (selected === 'files' ? ' wide' : '')},
       h('div', {className:'stack story'},
         panel('overview', 'Overview', overview),
-        panel('tasks', 'Tasks', card('tasks', 'Tasks', total ? done + ' of ' + total + ' done' : '', [total ? taskRows(t) : emptyRow('No tasks yet.'), t.status === 'done' ? null : addTaskRow(t, 'tasks')])),
+        panel('tasks', 'Tasks', ticketTasksPanel(t)),
         panel('files', 'Files', artifactsPanel(t)),
         panel('activity', 'Activity', ticketHistoryPanel(t))),
       h('div', {className:'stack ticket-side'}, ticketProperties(t, parent), fieldSections(t)))));
