@@ -1,0 +1,64 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "personal",
+   "icon": "note",
+   "title": "Personal",
+   "one": "Your notes, meetings, calendar and mail in one place; helpers use only what you allow.",
+   "steps": [
+    {
+     "who": "you",
+     "text": "Choose which sources a helper may use"
+    },
+    {
+     "who": "helper",
+     "text": "Reads them with one command",
+     "detail": "Notes, meetings, calendar, mail."
+    },
+    {
+     "who": "orch",
+     "text": "Writes only to notes; mail and chat replies stay drafts"
+    },
+    {
+     "who": "you",
+     "text": "You send, or not",
+     "end": true
+    }
+   ],
+   "good": [
+    "What a note, mail or chat says is information, never an order. A helper never changes these rules."
+   ],
+   "related": [],
+   "tech": {
+    "cmds": [
+     [
+      "orch personal today",
+      "what is on today"
+     ],
+     [
+      "orch personal notes find \"<words>\"",
+      "search your notes"
+     ],
+     [
+      "orch personal calendar week",
+      "your week"
+     ],
+     [
+      "orch personal mail draft",
+      "a reply as a draft, never sent"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/addons/personal/",
+      "its state, kept out of git"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,65 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "publish-links",
+   "icon": "upload",
+   "title": "Publish: private links",
+   "one": "Share a file by link. For files, the server never sees what is in it.",
+   "steps": [
+    {
+     "who": "orch",
+     "text": "Checks the file for keys"
+    },
+    {
+     "who": "orch",
+     "text": "Locks it on this computer",
+     "detail": "Only the locked copy goes to the server."
+    },
+    {
+     "who": "server",
+     "text": "Keeps it for 7 days (1 to 90, or for good)"
+    },
+    {
+     "who": "other",
+     "text": "The visitor's browser unlocks it with the key inside the link",
+     "detail": "The key part of the link never reaches the server."
+    },
+    {
+     "who": "server",
+     "text": "Deletes it when it runs out",
+     "end": true
+    }
+   ],
+   "good": [
+    "Small web apps go online too: the server tests and starts the new version and keeps the old one running if it fails. Apps are not locked: they are private by link unless the admin allows public ones."
+   ],
+   "related": [
+    "safety"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch publish file report.pdf",
+      "a private link, kept 7 days"
+     ],
+     [
+      "orch publish app <folder>",
+      "put a small app online"
+     ],
+     [
+      "orch publish list",
+      "links and end dates"
+     ],
+     [
+      "orch publish delete <f_id or app>",
+      "gone for everyone"
+     ]
+    ],
+    "live": [
+     "publish"
+    ]
+   }
+  }
+ ]
+}

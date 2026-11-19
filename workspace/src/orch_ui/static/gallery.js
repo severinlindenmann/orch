@@ -115,3 +115,10 @@ document.addEventListener('click', e => {
   const b = e.target.closest('[data-show-rows]'); if (!b) return;
   b.previousElementSibling.querySelectorAll('tr[hidden]').forEach(r => { r.hidden = false; }); b.remove();
 });
+/* Documentation page (UI.docs): one state per address #docs-page[/<page>] */
+(()=>{const host=document.getElementById('docs-demo');if(!host||!window.UI||!UI.docs||!window.DOCS_SAMPLE)return;let shown=null;
+const draw=()=>{const h=location.hash;if(h.indexOf('#docs-page')!==0&&shown)return;const at=h.startsWith('#docs-page/')?decodeURIComponent(h.slice(11)):'';
+if(shown)shown.destroy();shown=UI.docs(host,DOCS_SAMPLE,{at:at.startsWith('g-')?at:at,link:x=>x?'#docs-page/'+encodeURIComponent(x):'#docs-page',settings:'#docs-page'});
+document.querySelectorAll('#docs-page [data-docs-at]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.docsAt===at)));};
+document.querySelectorAll('#docs-page [data-docs-at]').forEach(b=>b.onclick=()=>{location.hash=b.dataset.docsAt?'#docs-page/'+b.dataset.docsAt:'#docs-page';});
+window.addEventListener('hashchange',draw);draw();})();

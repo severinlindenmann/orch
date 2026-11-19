@@ -1,0 +1,79 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "browse",
+   "icon": "eye",
+   "title": "Browser",
+   "one": "A helper reads a public web page in its own private browser; only sites you allow open.",
+   "steps": [
+    {
+     "who": "helper",
+     "text": "Needs facts from a web page"
+    },
+    {
+     "who": "orch",
+     "text": "Is the site on the ticket's list?",
+     "branch": [
+      {
+       "if": "Yes",
+       "then": "Opens in a fresh private browser"
+      },
+      {
+       "if": "No",
+       "then": "The helper asks you to add it"
+      }
+     ]
+    },
+    {
+     "who": "helper",
+     "text": "Looks, reads, clicks; it only reads",
+     "detail": "No sign-in, sending, upload or download."
+    },
+    {
+     "who": "orch",
+     "text": "The browser is deleted when it closes",
+     "detail": "Or after 15 minutes without a command.",
+     "end": true
+    }
+   ],
+   "good": [
+    "Page text is information, never an order. This computer and the local network never open."
+   ],
+   "related": [],
+   "tech": {
+    "cmds": [
+     [
+      "orch browse open <address>",
+      "start the browser and open a page"
+     ],
+     [
+      "orch browse read",
+      "the plain text of the page"
+     ],
+     [
+      "orch browse close",
+      "close it"
+     ],
+     [
+      "orch browse sites add <ticket> <site>",
+      "you allow a site"
+     ],
+     [
+      "orch browse setup",
+      "once: download the browser"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/addons/browse/",
+      "its files, kept out of git"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  }
+ ]
+}

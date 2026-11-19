@@ -1,0 +1,64 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "skills",
+   "icon": "puzzle",
+   "title": "Skills",
+   "one": "Everything helpers get here, and what is turned off for this workspace.",
+   "steps": [
+    {
+     "who": "orch",
+     "text": "Lists skills, instructions, connected services and logins"
+    },
+    {
+     "who": "you",
+     "text": "Turn one off or on for this workspace only"
+    },
+    {
+     "who": "orch",
+     "text": "Helpers get only what is on",
+     "detail": "Delete moves it into a Bin; Restore brings it back."
+    },
+    {
+     "who": "orch",
+     "text": "Every change lands in the history",
+     "end": true
+    }
+   ],
+   "good": [
+    "Only you turn things off or on; a helper can only look."
+   ],
+   "related": [],
+   "tech": {
+    "cmds": [
+     [
+      "orch skills list",
+      "what helpers get"
+     ],
+     [
+      "orch skills off <id>",
+      "turn one off here"
+     ],
+     [
+      "orch skills on <id>",
+      "turn it on again"
+     ],
+     [
+      "orch skills history",
+      "every change"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/skills-off.json",
+      "what is turned off"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  }
+ ]
+}

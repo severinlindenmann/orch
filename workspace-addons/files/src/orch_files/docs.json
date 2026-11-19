@@ -1,0 +1,64 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "files",
+   "icon": "box",
+   "title": "Files",
+   "one": "Browse every file here, and find any file by its name or by what is written in it.",
+   "steps": [
+    {
+     "who": "you",
+     "text": "Open Files, or a helper searches"
+    },
+    {
+     "who": "orch",
+     "text": "Keeps one index of names and text",
+     "detail": "No AI call; accents do not matter."
+    },
+    {
+     "who": "orch",
+     "text": "Name hits first, then files that hold the words"
+    },
+    {
+     "who": "you",
+     "text": "Preview any kind of file",
+     "end": true
+    }
+   ],
+   "good": [
+    "The text of a new file is read the first time you search; run the index to finish it."
+   ],
+   "related": [],
+   "tech": {
+    "cmds": [
+     [
+      "orch files search \"<words>\"",
+      "find a file"
+     ],
+     [
+      "orch files index",
+      "bring the index up to date"
+     ],
+     [
+      "orch files open",
+      "start the page and open it"
+     ],
+     [
+      "orch files status",
+      "is it running?"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/cache/files/",
+      "the search index"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  }
+ ]
+}

@@ -3,6 +3,7 @@ orch_api = 1
 name = "personal"
 version = "0.1.0"
 description = "Your notes (and next your meetings, calendar, messages and mail) in one place; helpers use only what you allow."
+docs = "docs.json"
 run = "orch_personal"
 skill = "skills/orch-personal"
 agents_block = "skills/orch-personal/AGENTS-block.md"

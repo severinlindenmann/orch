@@ -1,0 +1,65 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "focus",
+   "icon": "target",
+   "title": "Focus",
+   "one": "Every helper session live: watch them work, answer their questions, send them a message.",
+   "steps": [
+    {
+     "who": "you",
+     "text": "Watch live on a ticket"
+    },
+    {
+     "who": "orch",
+     "text": "Shows the helper's steps as they happen"
+    },
+    {
+     "who": "you",
+     "text": "Type a message",
+     "branch": [
+      {
+       "if": "The helper is running",
+       "then": "It reads it after the current step"
+      },
+      {
+       "if": "It stopped",
+       "then": "Kept for its next start"
+      }
+     ]
+    },
+    {
+     "who": "helper",
+     "text": "A tool was refused?",
+     "branch": [
+      {
+       "if": "You press Allow and retry",
+       "then": "Allowed for this run only"
+      }
+     ],
+     "end": true
+    }
+   ],
+   "good": [],
+   "related": [
+    "helper-run"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch focus open <id>",
+      "the live page of one ticket"
+     ],
+     [
+      "orch focus needs --json",
+      "sessions waiting for you"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  }
+ ]
+}
