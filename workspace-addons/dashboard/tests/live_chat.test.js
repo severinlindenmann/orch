@@ -1,0 +1,119 @@
+'use strict';
+// ORCH-687: the chat view of a ticket's session in Focus (pages/livechat.js). The model turns the ticket the page
+// already has into one conversation: step events, the helper's summaries and questions, your answers and messages.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const web = path.join(__dirname, '../src/orch_dashboard/web');
+const source = fs.readFileSync(path.join(web, 'pages/livechat.js'), 'utf8');
+const model = source.slice(0, source.indexOf('// --- the page ---'));
+const ctx = {};
+vm.createContext(ctx);
+vm.runInContext(model + '\nthis.api = {liveChatModel, liveViewRead, liveViewWrite, LIVE_CHAT_MAX, LIVE_CHAT_TEXT, LIVE_VIEW_KEY};', ctx);
+const C = ctx.api;
+const plain = x => JSON.parse(JSON.stringify(x));
+
+const ticket = () => ({
+  id: 't_1',
+  checklist: [
+    {id: 'c1', text: 'Files can be dropped on a ticket', done: true, evidence: [
+      {type: 'note', ref: 'ran tests', summary: 'Uploading works for pictures, pages and tables.', by: 'agent:claude', at: '2026-11-19T14:21:00Z'},
+      {type: 'pr', ref: 'https://github.com/o/r/pull/12', by: 'agent:claude', at: '2026-11-19T14:21:00Z'}]},
+    {id: 'c2', text: 'Notes below the files', done: false, evidence: []},
+  ],
+  questions: [
+    {id: 'q1', text: 'Keep the old file name?', options: ['Keep', 'New'], answer: 'Keep', answered_by: 'human:lume', asked_at: '2026-11-19T14:52:00Z', answered_at: '2026-11-19T14:55:00Z'},
+    {id: 'q2', text: 'Send it now?', options: ['Yes', 'No'], answer: null, asked_at: '2026-11-19T15:10:00Z'},
+  ],
+  history: [
+    {at: '2026-11-19T14:00:00Z', by: 'agent:factory', text: 'Claude started', chat_message: false},
+    {at: '2026-11-19T14:05:00Z', by: 'agent:claude', text: 'Added check c1', chat_message: false},
+    {at: '2026-11-19T14:30:00Z', by: 'human:anna', text: 'Please also try a PDF.', chat_message: true},
+    {at: '2026-11-19T15:20:00Z', by: 'human:lume', text: 'Status active -> review', chat_message: false},
+  ],
+});
+
+test('a ticket reads as one conversation, oldest first: events, helper messages and your words', () => {
+  const rows = plain(C.liveChatModel(ticket(), 'human:lume'));
+  assert.deepEqual(rows.map(r => [r.w, r.text]), [
+    ['e', 'The helper started'],
+    ['e', 'Step 1 done: Files can be dropped on a ticket'],
+    ['h', 'Uploading works for pictures, pages and tables.'],
+    ['y', 'Please also try a PDF.'],
+    ['h', 'Keep the old file name?'],
+    ['y', 'Keep'],
+    ['e', 'Moved to Review by Lume'],
+  ]);
+  assert.deepEqual(rows[2].links, [{href: 'https://github.com/o/r/pull/12', label: 'Pull request 12'}], 'the step\'s pull request sits in its message');
+  assert.equal(rows[3].who, 'Anna', 'another person is named');
+  assert.equal(rows[5].who, '', 'your own answer says You');
+});
+
+test('the open question is not a message: the pane shows it as its card', () => {
+  const rows = C.liveChatModel(ticket(), 'human:lume');
+  assert.ok(!rows.some(r => r.text === 'Send it now?'));
+});
+
+test('an answer given for you by a program is an event, not your message', () => {
+  const t = ticket();
+  t.questions[0].answered_by = 'agent:reviewer';
+  const rows = plain(C.liveChatModel(t, 'human:lume'));
+  assert.deepEqual(rows.find(r => r.text.startsWith('Answered')), {w: 'e', text: 'Answered for you: Keep', at: '2026-11-19T14:55:00Z'});
+});
+
+test('technical history lines stay on the ticket; a step without a time is left out', () => {
+  const t = ticket();
+  t.history.push({at: '2026-11-19T15:30:00Z', by: 'agent:claude', text: 'pull-requests refresh: github.com/o/r/pull/12 title', chat_message: false});
+  t.checklist[1] = {id: 'c2', text: 'No time', done: true, evidence: [{type: 'note', ref: 'x'}]};
+  const rows = C.liveChatModel(t, 'human:lume');
+  assert.ok(!rows.some(r => /refresh|No time/.test(r.text)));
+});
+
+test('a message sent from this page shows as yours at once', () => {
+  const rows = plain(C.liveChatModel(ticket(), 'human:lume', [{text: 'Try a PDF too', at: '2026-11-19T15:40:00Z'}]));
+  assert.deepEqual(rows.at(-1), {w: 'y', text: 'Try a PDF too', at: '2026-11-19T15:40:00Z', sent: true});
+});
+
+test('long words are cut and the newest rows are kept', () => {
+  const t = {checklist: [], questions: [], history: []};
+  for (let i = 0; i < C.LIVE_CHAT_MAX + 5; i++) t.history.push({at: new Date(Date.UTC(2026, 10, 19, 10, i)).toISOString(), by: 'agent:claude', text: 'line ' + i, chat_message: true});
+  t.history[t.history.length - 1].text = 'x'.repeat(C.LIVE_CHAT_TEXT + 50);
+  const rows = C.liveChatModel(t, '');
+  assert.equal(rows.length, C.LIVE_CHAT_MAX);
+  assert.equal(rows[0].text, 'line 5');
+  assert.equal(rows.at(-1).text.length, C.LIVE_CHAT_TEXT);
+  assert.ok(rows.at(-1).text.endsWith('…'));
+});
+
+test('no ticket, no rows; broken entries are skipped', () => {
+  assert.equal(C.liveChatModel(null).length, 0);
+  assert.equal(C.liveChatModel({checklist: [null, 3], questions: ['x'], history: [null, {at: 'never', text: 'Claude started'}]}).length, 0);
+});
+
+test('only an address opens as a link; other evidence refs are not links', () => {
+  const t = ticket();
+  t.checklist[0].evidence.push({type: 'url', ref: 'javascript:alert(1)', at: '2026-11-19T14:21:00Z'});
+  const links = C.liveChatModel(t, '').find(r => r.links)?.links;
+  assert.equal(links.length, 1);
+});
+
+test('Chat or Terminal is kept per browser; chat is the default and broken data reads as nothing', () => {
+  const m = new Map(), store = {getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, v)};
+  assert.deepEqual(plain(C.liveViewRead(store)), {});
+  C.liveViewWrite(store, {t_1: 'term'});
+  assert.deepEqual(plain(C.liveViewRead(store)), {t_1: 'term'});
+  m.set(C.LIVE_VIEW_KEY, '{"t_2":"chat","t_3":"term","":"term"}');
+  assert.deepEqual(plain(C.liveViewRead(store)), {t_3: 'term'});
+  m.set(C.LIVE_VIEW_KEY, 'not json');
+  assert.deepEqual(plain(C.liveViewRead(store)), {});
+  assert.deepEqual(plain(C.liveViewRead(null)), {});
+});
+
+test('the page loads the chat before the layer that uses it', () => {
+  const html = fs.readFileSync(path.join(web, 'index.html'), 'utf8');
+  const chat = html.indexOf('pages/livechat.js'), layer = html.indexOf('pages/live-layer.js');
+  assert.ok(chat > 0 && chat < layer);
+});

@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-28 steps: 18 ready (the script clicks them), 10 pending (not built yet).
+28 steps: 19 ready (the script clicks them), 9 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -297,21 +297,23 @@ Must be seen:
 - All of it stays current while you look; the keyboard place does not jump.
 - A new model applies when the helper finishes its current step (or at its next start) and says so.
 
-## 17. Chat: messages with the results inside
+## 17. Chat: messages and ticket events, questions answered inside
 
 - Part: chat (draft D feature 5)
-- State: pending, waits for: Chat (crew tasks of the Chat stage)
+- State: ready, clicked by the script
 - Pictures: `fd-17-chat-1280.png`, `fd-17-chat-1920.png`, `fd-17-chat-390.png`
 
 Do:
 
-1. Open a session in Chat view.
-2. Read the messages and press a result inside one.
+1. Open a session: it opens in Chat.
+2. Answer its waiting question in the orange card and send a message.
+3. Switch to Terminal, reload, switch back to Chat.
 
 Must be seen:
 
-- Plain messages with time; step events between them.
-- Results show as small widgets and open big.
+- Plain messages with time; done steps and other events as lines between them; the pull request inside the message.
+- The waiting question is an orange card above the chat, not a message; once answered it moves into the chat as yours.
+- A sent message shows at once; Terminal shows the last lines and the choice stays after a reload.
 
 ## 18. Files and screenshots in the message box, with a preview before sending
 
