@@ -269,3 +269,5 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
   Cannot be reached) and "Stops N tickets" when it stops any. No card before the first check or when nothing is set.
 - `Renew` / `Replace` come with the renew step (ORCH-46). Until then a row that needs renewing shows `Check again`, a
   connection that cannot be reached `Try again`, and a row that works no button.
+
+- Helper tab, last card: "Prepare tickets when I save" (ORCH-741), one switch, on by default; saves at once. Off: Save without starting keeps the ticket as written until Start. Only a person turns it on. The daily limit (30 by default) is named in the text and shown in Usage.

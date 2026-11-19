@@ -137,6 +137,9 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("run.start", {"ticket": "t_abcdef", "agent": "--all"}),
         ("run.start", {"ticket": "t_abcdef", "agent": 5}),
         ("run.start", {"ticket": "t_abcdef", "model": "opus"}),
+        ("run.start", {"ticket": "t_abcdef", "prepare": "yes"}),
+        ("run.start", {"ticket": "t_abcdef", "prepare": True, "agent": "codex"}),  # ORCH-738: goes alone
+        ("run.start", {"ticket": "t_abcdef", "prepare": True, "fresh": True}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "../x"}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "-rf"}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "s-1", "fresh": True}),
@@ -307,6 +310,10 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         (
             {"op": "run.start", "args": {"ticket": "t_abcdef", "fresh": True, "take_over": True}},
             ["run", "start", "t_abcdef", "--fresh", "--take-over", *common],
+        ),
+        (  # ORCH-738: Save without starting only prepares the ticket
+            {"op": "run.start", "args": {"ticket": "t_abcdef", "prepare": True}},
+            ["run", "start", "t_abcdef", "--prepare", *common],
         ),
         (  # ORCH-362: the Start choice's fresh start on the tool the person picked
             {"op": "run.start", "args": {"ticket": "t_abcdef", "fresh": True, "agent": "codex"}},
@@ -1038,6 +1045,20 @@ def test_release_merge_switch_is_one_config_set_by_a_human():
         assert argv[argv.index("--by") + 1].startswith("human:")
     with pytest.raises(actions.BadRequest):
         build_argv("release_merge.set", {"on": "yes"})
+
+
+def test_prepare_switch_is_one_config_set_by_a_human():
+    """Settings > Prepare tickets when I save (ORCH-741)."""
+    from orch_dashboard.actions import build_argv
+
+    for on in (True, False):
+        argv = build_argv("prepare.set", {"on": on})
+        assert argv[:4] == ["config", "set", "workflow.prepare_on_save", "on" if on else "off"]
+        assert argv[argv.index("--by") + 1].startswith("human:")
+    with pytest.raises(actions.BadRequest):
+        build_argv("prepare.set", {"on": "yes"})
+    with pytest.raises(actions.BadRequest):
+        build_argv("prepare.set", {"on": True, "limit": 5})
 
 
 def test_browser_actions_do_not_inherit_the_servers_agent_identity(ws, monkeypatch):
