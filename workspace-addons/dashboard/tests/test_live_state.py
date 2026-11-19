@@ -213,3 +213,17 @@ def test_index_rows_are_kept_until_a_ticket_file_changes(tmp_path, monkeypatch):
     st = p.stat()
     os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 10_000_000))
     assert data._index_rows(tmp_path)[0]["status"] == "done" and len(reads) == 3
+
+
+def test_read_ticket_takes_the_parts_from_its_live_row(tmp_path, monkeypatch):
+    """A ticket in the live state: its row there already counts every part, so no ticket file scan per page."""
+    _write(tmp_path, "t_epic01", "active", 1)
+    _write(tmp_path, "t_part01", "dropped", 60, parent="t_epic01")
+    live = {"id": "t_epic01", "children": ["t_part01", "t_gone01"], "parts_done": 1, "parts_total": 2}
+    monkeypatch.setattr(data, "_index_rows", lambda root: (_ for _ in ()).throw(AssertionError("scanned")))
+    t = data.read_ticket(tmp_path, None, "t_epic01", live)
+    assert t["children"] == ["t_part01", "t_gone01"] and (t["parts_done"], t["parts_total"]) == (1, 2)
+    t["children"].append("x")
+    assert live["children"] == ["t_part01", "t_gone01"]  # the stored copy is not changed
+    other = data.read_ticket(tmp_path, None, "t_part01", live)  # a row of another ticket is not used
+    assert other["id"] == "t_part01" and other.get("parts_total", 0) == 0

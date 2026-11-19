@@ -1645,7 +1645,7 @@ def ticket_id(root: Path, orch_bin: str | None, ref: str) -> str | None:
     return next((r["id"] for r in rows if str(r.get("key") or "").upper() == up), None)
 
 
-def read_ticket(root: Path, orch_bin: str | None, tid: str) -> dict | None:
+def read_ticket(root: Path, orch_bin: str | None, tid: str, live: dict | None = None) -> dict | None:
     """One whole ticket as the page reads it (GET /api/ticket/<id>, ORCH-522): the ticket page asks for it when its
     live row is cut short or a finished ticket is not in the live state. None when there is no such ticket."""
     raw = (
@@ -1668,6 +1668,11 @@ def read_ticket(root: Path, orch_bin: str | None, tid: str) -> dict | None:
     add_spend(root, [t], background=True)
     _shape_refs(root, [t], True)
     add_link_views([t], _KINDS.get(str(root), []))
+    if isinstance(live, dict) and live.get("id") == t["id"] and isinstance(live.get("children"), list):
+        # its row in the live state already counts every part (from all rows at the last build): no scan of every
+        # ticket file per page (with other requests running, that scan alone took half a second at 10,000)
+        _add_parts([t], {t["id"]: live})
+        return t
     rows = _index_rows(root) if orch_bin == SELF else None
     if rows is not None:
         _add_parts([t], _parts(rows))

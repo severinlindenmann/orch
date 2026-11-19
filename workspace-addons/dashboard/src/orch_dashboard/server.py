@@ -810,8 +810,21 @@ class Handler(BaseHTTPRequestHandler):
         ):  # one whole ticket (ORCH-522): a cut-short live row or a finished ticket not in the live state
             from .data import read_ticket, ticket_id
 
-            tid = ticket_id(self.root, self.orch_bin, m_ticket.group(1))
-            t = read_ticket(self.root, self.orch_bin, tid) if tid else None
+            ref = m_ticket.group(1)
+            held = getattr(self.server, "state_cache", None)
+            held = held.state if held is not None else None  # the stored copy as it is; never starts a build
+            rows = (held or {}).get("tickets") or []
+            live = next(
+                (
+                    x
+                    for x in rows
+                    if isinstance(x, dict)
+                    and (x.get("id") == ref or str(x.get("key") or "").upper() == ref.upper())
+                ),
+                None,
+            )
+            tid = live["id"] if live else ticket_id(self.root, self.orch_bin, ref)
+            t = read_ticket(self.root, self.orch_bin, tid, live) if tid else None
             if t is None:
                 return self._send(404, b'{"error":"no such ticket"}', "application/json")
             body = json.dumps({"ticket": t}).encode()
