@@ -1286,7 +1286,8 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str,
 
 
 WAITING_NO_REASON = (
-    "Waiting needs something to wait on, or the person sees Waiting with no reason. Blocked or need an answer: "
+    "Waiting needs something to wait on, or the person sees Waiting with no reason. "
+    "Blocked or need an answer: "
     'orch ask {key} "<what blocks you and what you need>" --option <A> --option <B> --recommend <A>. '
     "Waiting for a time: orch wait {key} --until <time>."
 )
