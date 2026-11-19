@@ -5,8 +5,9 @@
 orch owns that tmux server (own socket), so a person's own tmux is never touched. The claim's pid is the pane
 process (the wrapper). Input waits in the pending file and is pasted (bracketed paste, then a separate Enter)
 only when the agent says it is idle (the wrapper then checks that it was submitted: watch_submit): the tool's
-own hooks call `orch run event --kind idle`, a generic agent calls
-`orch run done`. Any number of live sessions per workspace, unless Settings > Helper > Helpers at
+own hooks call `orch run event --kind idle` (also when an error such as a usage limit or a login that changed
+ended the turn: the tool then fires its failure hook instead of the normal one, ORCH-689), a generic agent
+calls `orch run done`. Any number of live sessions per workspace, unless Settings > Helper > Helpers at
 once (workspace.live_max) sets a limit; then a start waits in line for a slot. A session idle (or
 waiting for a person) for an hour (workspace.live_idle_minutes; 10 minutes once the ticket is in Review,
 Done or Dropped, and such a session does not count toward the limit, nor does one idle while it only waits for
@@ -391,10 +392,12 @@ def start_live(
     take_over: bool,
     busy_text: str,
     priority: str = "normal",
+    over_limit: bool = False,
 ) -> dict:
     cur = runs.read(root, tid)
     mine = cur is not None and runs.state(cur) == "alive"
-    hit = None if mine or tickets.is_manager(root, tid) else _full(root)  # the Manager never waits in line
+    # the Manager and an urgent start (red develop, ORCH-699) never wait in line
+    hit = None if mine or over_limit or tickets.is_manager(root, tid) else _full(root)
     held = None if (mine or hit) else _held(root, by)
     if held:
         _queue_for_slot(root, tid, by, busy_text, priority)

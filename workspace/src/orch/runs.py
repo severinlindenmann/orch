@@ -1414,9 +1414,11 @@ def start(
     text: str | None = None,
     agent: str | None = None,
     priority: str = "normal",
+    over_limit: bool = False,
 ) -> dict:
     """Start (or continue) the agent on a ticket. mode None = live in tmux when the agent and the machine can,
-    else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent."""
+    else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent.
+    over_limit: start even when the helper limit is reached (a red develop must not wait, ORCH-699)."""
     from orch import runs_live, worktrees
 
     tickets.load(root, tid)  # an unknown ticket is refused before anything is planned or spawned
@@ -1458,6 +1460,7 @@ def start(
             take_over=take_over,
             busy_text=text or f"{by} asked for more work on this ticket.",
             priority=priority,
+            over_limit=over_limit,
         )
         r["notes"] = notes + r.get("notes", []) + ([notice] if notice else [])
         return r
