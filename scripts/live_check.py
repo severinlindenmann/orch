@@ -2,7 +2,7 @@
 """Live check of the relay and publish servers (ORCH-950). No AI, standard library only.
 
 What must be true:
-- both answer /health, their TLS is valid and last at least 14 more days;
+- both answer /health, their TLS is valid and lasts at least 14 more days;
 - the admin pages are closed from the internet: /admin and /admin/api/... answer 404 on the public
   sites, and the admin ports are closed on the server's public address;
 - the admin pages are open over the private network (run with --where inside);
