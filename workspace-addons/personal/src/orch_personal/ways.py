@@ -16,7 +16,9 @@ Rules, checked here before a helper sees anything:
   its folder: any change afterwards stops it until the person turns it on again.
 - Only the commands listed in way.toml run, never through a shell; a relative program stays inside its folder.
 - Text only: UTF-8 without NUL, at most 64 KB, nothing that looks like a secret; 60 seconds at most.
-A way in is the person's own program and runs as them: "text only" is what a helper gets, not a sandbox.
+A way in is the person's own program and runs as them: "text only" is what a helper gets, not a sandbox. The
+folder hash makes "on" mean the scripts the person saw; it does not stop a program of the same user that
+changes them between the check and the run (helpers can run programs anyway; R5 inside-workspace security).
 """
 
 from __future__ import annotations

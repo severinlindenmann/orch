@@ -34,7 +34,7 @@ is turned on by the person, with its own rules for what helpers may do. orch che
 A way in runs only the actions listed in its `way.toml`, gives text only (at most 64 KB, nothing that looks like a
 secret) and checks itself once a day. Off, Needs your permission or Stopped: tell the person on your ticket; only
 they turn a way in on or off (`orch personal ways on|off <way>`) or fix its script. Changing anything in a way's
-folder stops it until the person turns it on again; a script keeps what it writes in `$ORCH_PERSONAL_WAY_DATA`.
+folder stops it until the person turns it on again; a script keeps what it writes in `$ORCH_PERSONAL_WAY_DATA` and never loads code from there.
 
 **Hand a note to a ticket** (the person does this; you only when the read rule is "All notes")
 
