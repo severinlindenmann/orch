@@ -87,7 +87,7 @@ AWAY_STAYS = {
     " customers? public outside send(s|ing)? sent emails? mail(s|ing)? post(s|ed|ing)? go\\slive vps",
     "cannot be undone": "delet(e|es|ed|ing) remov(e|es|ed|ing) drop(s|ped)? irreversible undo(ne)? force"
     " merge[sd]? wipe reset migrat(e|es|ion|ions) destroy purge overwrite push(es|ed|ing)? truncat\\w* rm",
-    "logins or keys": "logins? log\\s?in sign(-|\\s)?in passwords? tokens? keys? secrets? credentials?"
+    "logins or keys": "logins? log\\s?in sig[n][-\\s]?in passwords? tokens? keys? secrets? credentials?"
     " accounts?"
     " auth\\w* ssh oauth api",
 }

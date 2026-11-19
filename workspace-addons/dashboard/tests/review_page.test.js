@@ -294,3 +294,10 @@ test('Accepted for you: each decision says who and what, and Undo takes it back 
   const keys = nodes(c.reviewAcceptedCard()).map(n => n.attrs?.['data-key']).filter(k => /^review-accepted-t_/.test(k || '') && !/-(send|undo)$/.test(k));
   assert.equal(new Set(keys).size, keys.length, 'one key per row');
 });
+test('ORCH-420 follow-up: files of an answer go in the ticket\'s feedback folder, so the Check card does not change under the answer', async () => {
+  const calls = [];
+  const c = ctx({review:{cards:[CARD]}}, {FEEDBACK_BOX:{accept:['png'], voice:true, maxBytes:1}, ticketTalkText:t => t,
+    ticketAttachFiles:async (tid, files, feedback) => { calls.push([tid, feedback === true]); return {ok:true, names:files.map(f => f.name)}; }});
+  await c.reviewApi().attach({ticket:'t_abcdef', files:[{name:'shot.png', url:'data:image/png;base64,iVBO'}]});
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [['t_abcdef', true]]);
+});
