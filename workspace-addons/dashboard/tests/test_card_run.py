@@ -102,7 +102,13 @@ def test_a_refusal_is_a_plain_error(ws, monkeypatch):
 def test_the_page_gets_what_the_command_printed():
     from orch_dashboard.server import act_reply
 
-    out = {"ok": False, "exit": 1, "output": "x" * 9000, "error": "It ended with exit code 1.", "answered": False}
+    out = {
+        "ok": False,
+        "exit": 1,
+        "output": "x" * 9000,
+        "error": "It ended with exit code 1.",
+        "answered": False,
+    }
     r = act_reply({"op": "card.run"}, out)["run_result"]
     assert r["ok"] is False and r["exit"] == 1 and len(r["output"]) == 8000 and r["answered"] is False
     assert "run_result" not in act_reply({"op": "card.run"}, None)
