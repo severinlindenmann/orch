@@ -3,6 +3,7 @@ warning and the history. Only labels, numbers and times: never a login, token, k
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -107,12 +108,40 @@ def _together(data: dict, accounts: list[dict]) -> list[dict]:
     return out
 
 
+_SKILL = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+_CREDIT_FIELDS = ("left", "set", "set_at", "spent_since", "spent_today", "spent_month", "over")
+
+
+def skill_name(v) -> str | None:
+    """The name of the skill that declared a credit, or None: a plain lowercase name only; anything key-shaped
+    (sk-, a long token) is dropped, so it never reaches `orch usage list` or the page."""
+    if isinstance(v, str) and _SKILL.fullmatch(v) and not store._SECRETISH.search(v):
+        return v
+    return None
+
+
+def _credit(row: dict) -> dict | None:
+    """An API credit's amounts for the page (ORCH-628): what is left (the person's figure minus the spend since),
+    spent today and this month, and its end. Numbers and times only; never the skill's key name, path or log."""
+    if row["type"] != "api-key":
+        return None
+    v = row.get("credit") if isinstance(row.get("credit"), dict) else {}
+    out = {k: v.get(k) for k in _CREDIT_FIELDS}
+    # the credit's own end (ORCH-627 refuses a call past it); without one the rule's end
+    out["ends"] = row.get("credit_ends") or row["rule"].get("ends")
+    out["skill"] = skill_name(row.get("skill"))
+    return out
+
+
 def build(data: dict, root: Path) -> dict:
     """The page model from `cli.gather()` (accounts with use) plus switching, the warning and the history."""
     memory = switching._read(switching.memory_path(root))
-    accounts = []
+    accounts, removed = [], []
     for row in data["accounts"]:
         rule = row["rule"]
+        if row.get("removed"):  # kept with its rule, amount left and history; the page offers Bring back
+            removed.append({"id": row["id"], "label": row["label"], "type": row["type"]})
+            continue
         accounts.append(
             {
                 "id": row["id"],
@@ -126,10 +155,16 @@ def build(data: dict, root: Path) -> dict:
                 "limits": [dict(lim) for lim in rule["limits"]],
                 "periods": list(store.allowed_periods(row)),
                 "unit": store.default_unit(row),
-                "ends": rule.get("ends"),
+                # an API credit or helper tool ends itself (credit_ends, ORCH-626); a subscription's rule ends
+                "ends": (row.get("credit_ends") if row["type"] in store.MONEY_TYPES else None)
+                or rule.get("ends"),
                 "for": list(rule.get("for") or []),
                 "model": rule.get("model"),
                 "provider": row.get("provider") or "",
+                "provider_label": store.provider_words(row.get("provider") or "")
+                if row.get("provider")
+                else "",
+                "credit": _credit(row),
                 "removable": row["type"] in store.MONEY_TYPES,
                 "falls_back": bool(row.get("prev")),
                 "fetched_at": row.get("fetched_at"),
@@ -152,6 +187,7 @@ def build(data: dict, root: Path) -> dict:
             for k, h in sorted(routing.held(root).items(), key=lambda kv: store.KINDS.index(kv[0]))
         ],
         "accounts": accounts,
+        "removed": removed,
         # one money limit over every account of a provider (one row per provider with a money account)
         "together": _together(data, accounts),
         "providers": [{"id": p, "label": store.provider_words(p)} for p in store.PROVIDERS],
