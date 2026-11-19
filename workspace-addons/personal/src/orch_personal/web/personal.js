@@ -388,7 +388,8 @@
     catch (e) {
       const st = (today.parts.find(p => p.part === 'calendar') || {}).status;
       if (/permission|Allow calendars|System Settings|access/i.test(e.message) || st === 'Needs your permission') {
-        return [state('empty', 'Allow orch to read your calendars', e.message + ' macOS asks once; your calendars stay on this computer.',
+        const why = /choose Allow calendars/.test(e.message) ? 'macOS asks you once. Your calendars stay on this computer.' : e.message;
+        return [state('empty', 'Allow orch to read your calendars', why,
           {label: 'Allow calendars', onClick: () => calAct('cal_allow', {})})];
       }
       return [state('error', 'Your calendars can’t be read', e.message, {label: 'Try again', onClick: () => calAct('cal_check', {})})];
