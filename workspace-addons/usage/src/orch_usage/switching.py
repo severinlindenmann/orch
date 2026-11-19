@@ -406,11 +406,14 @@ def _recent_failures(memory: dict, at: datetime) -> dict[str, str]:
     return out
 
 
+ALL_AT_LIMIT_ALERT = "Every account is at or near its limit."
+
+
 def alerts(accounts: list[dict], ch: Choice, failed: dict[str, str]) -> list[str]:
     """What the person should see now (list, status, the page), in plain words; empty when all is well."""
     out = []
     if ch.all_at_limit:
-        out.append("Every account is at or near its limit.")
+        out.append(ALL_AT_LIMIT_ALERT)
     names = {a["id"]: a["label"] for a in accounts}
     for k in failed:
         out.append(f"Could not switch to {names.get(k, k)}; Usage tries the next account in order.")
@@ -631,7 +634,7 @@ def warning_rows(root: Path, at: datetime | None = None) -> list[dict]:
         if k == "all-at-limit":
             title, tone = "Usage: every account is at or near its limit", "bad"
             text = (
-                "Every account is at or near its limit, so Usage has no account to switch to. Helpers may stop "
+                "Usage has no account to switch to, so helpers may stop "
                 "until a limit resets. Raise a limit or turn on another account in Usage."
             )
         else:
@@ -652,7 +655,7 @@ def warning_rows(root: Path, at: datetime | None = None) -> list[dict]:
                 "text": text[:500],
                 "tone": tone,
                 "since": w["since"],
-                "cli": f"orch usage list   (Got it: orch usage seen {k})",
+                "cli": f"orch usage list; hide it with: orch usage seen {k}",
                 "actions": [
                     {
                         "label": "Got it",
