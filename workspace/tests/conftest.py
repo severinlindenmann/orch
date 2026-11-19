@@ -603,3 +603,15 @@ def _no_selfcheck_after_update(request, monkeypatch):
     from orch import selfcheck
 
     monkeypatch.setattr(selfcheck, "after_update", lambda *a, **k: [])
+
+
+@pytest.fixture
+def person_grant(monkeypatch):
+    """ORCH-582: hand the NEXT orch call a one-time person grant, as the signed-in dashboard does (the grant
+    is used up by the call that reads it). Call it with the workspace root right before the call."""
+    from orch import renew
+
+    def _grant(root):
+        monkeypatch.setenv(renew.GRANT_ENV, renew.grant(Path(root)))
+
+    return _grant

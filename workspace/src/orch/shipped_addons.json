@@ -532,6 +532,16 @@
     "who": "people",
     "writes": []
    },
+   "seen": {
+    "summary": "Got it: hide a Usage warning until it clears and comes back",
+    "who": "people",
+    "writes": []
+   },
+   "share": {
+    "summary": "Change how helper work is spread over subscriptions, API credit and helper tools",
+    "who": "people",
+    "writes": []
+   },
    "switching": {
     "summary": "Switch accounts by itself, or only show and warn",
     "who": "people",
@@ -550,7 +560,7 @@
    ".orch/addons/usage/"
   ],
   "name": "usage",
-  "needs": false,
+  "needs": true,
   "orch_api": 1,
   "page": {
    "label": "Open Usage",

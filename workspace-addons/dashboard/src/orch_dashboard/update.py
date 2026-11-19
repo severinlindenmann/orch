@@ -213,3 +213,51 @@ def start_ticker(root: Path, orch_bin, env_for, every: float = TICK_SECONDS) -> 
     t = threading.Thread(target=loop, daemon=True, name="autoupdate")
     t.start()
     return t
+
+
+# ---- Tool updates (ORCH-589): the helper tools and the other tools this workspace uses, their newest version,
+# notes and an Update button. orch.toolupdates does the work; this only reads it and starts one update.
+
+
+def tool_updates(root: Path, refresh: bool = False) -> dict:
+    """Every tool with installed / newest version and notes (orch keeps the answers 6 hours)."""
+    try:
+        from orch import toolupdates
+
+        return toolupdates.status(Path(root), refresh=refresh)
+    except Exception:  # noqa: BLE001 - never an error page for a version line
+        return {"tools": [], "updates": 0, "job": None}
+
+
+def start_tool_update(root: Path, orch_bin, env, name: str, start=None) -> tuple[int, str]:
+    """The person clicked Update on one tool: `orch tools update <name>` in the background (it keeps its own
+    state, which the page reads back from tool_updates)."""
+    import re
+    import subprocess
+
+    if pagelaunch is None:
+        return 503, "Updating is not available in this install."
+    if not (isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", name)):
+        return 400, "Choose a tool."
+    doc = tool_updates(root)
+    job = doc.get("job") or {}
+    if job.get("status") == "running":
+        return 409, f"{job.get('label') or 'Another tool'} is being updated. Try again when it is done."
+    have = {t.get("name"): t for t in doc.get("tools") or []}
+    if not (have.get(name) or {}).get("can_update"):
+        return 409, "There is no update orch can install for this tool."
+    from orch import pagesession, procs
+
+    argv = [*pagesession.argv0(orch_bin), "tools", "update", name]
+    try:
+        (start or subprocess.Popen)(
+            argv,
+            cwd=str(root),
+            env=pagesession.child_env(env, orch_bin),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            **procs.background_popen_kwargs(),
+        )
+    except OSError:
+        return 503, "The update could not be started. Please try again."
+    return 202, "Update started."

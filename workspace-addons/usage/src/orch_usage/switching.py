@@ -36,10 +36,19 @@ TRUST_SPAN_SECONDS = 300  # a lower pace replaces a higher remembered one only w
 PACE_FORGET_MINUTES = 30  # a remembered pace older than this is dropped
 RETRY_MINUTES = 10  # a failed switch to the same account is tried again (and written down) after this
 WINDOW_OF = {"5h": "5h", "week": "week"}  # rule period -> switcher window
+# ORCH-642: a window the account's rule sets no limit for: switch early at this percent (the account still counts
+# as having room up to 100 %). Without it an account with only a weekly limit was left only AT 100 % of its
+# 5 hours, after every helper had stopped on it.
+DEFAULT_EARLY = {"5h": 90.0, "week": 100.0}
 SWITCH_TIMEOUT = 30
 BACK_MINUTES = (
     10  # an account switched away from and active again within this is "another program switched back"
 )
+
+
+CLEAR_MINUTES = 10  # a warning counts as cleared only after it was gone this long (no new card per flicker)
+FRESH_MINUTES = 15  # a warning from an older look is not shown: the loop stopped, so it may be out of date
+WARNINGS = ("all-at-limit", "switch-failed")
 
 
 # ---------------------------------------------------------------- files
@@ -102,6 +111,74 @@ def set_switching(root: Path, who: str, on: bool) -> bool:
             ],
         )
     return True
+
+
+WARNING_WORDS = {
+    "all-at-limit": "every account is at or near its limit",
+    "switch-failed": "could not switch to an account",
+}
+
+
+def seen(root: Path) -> dict:
+    """{warning: since} the person said Got it to (settings.json); that warning stays hidden until it comes back."""
+    s = _read(settings_path(root)).get("seen")
+    return {k: v for k, v in s.items() if k in WARNINGS and isinstance(v, str)} if isinstance(s, dict) else {}
+
+
+def mark_seen(root: Path, who: str, warning: str, since: str | None = None) -> bool:
+    """Got it: hide this warning until it clears and comes back. `since` (from the card) must be the warning that
+    is showing now, so a late click never hides a newer one. True when it changed. Written in the history."""
+    if warning not in WARNINGS:
+        raise store.Refused(f"Usage has no warning '{warning}'. Warnings: {', '.join(WARNINGS)}.")
+    with store._lock(root):
+        live = _read(memory_path(root)).get("warnings")
+        cur = live.get(warning) if isinstance(live, dict) else None
+        if not isinstance(cur, dict) or cur.get("cleared") or not isinstance(cur.get("since"), str):
+            raise store.Refused("That warning is not showing any more.")
+        if since is not None and since != cur["since"]:
+            raise store.Refused("That warning changed since. Reload the page and look again.")
+        s = _read(settings_path(root))
+        marks = s.get("seen") if isinstance(s.get("seen"), dict) else {}
+        if marks.get(warning) == cur["since"]:
+            return False
+        s["seen"] = {**{k: v for k, v in marks.items() if k in WARNINGS}, warning: cur["since"]}
+        _write(settings_path(root), s)
+        store._append_history(
+            root,
+            [
+                {
+                    "at": store.now(),
+                    "who": who,
+                    "what": f"warning seen: {WARNING_WORDS[warning]}",
+                    "account": cur.get("to"),
+                    "label": cur.get("label") or "Usage",
+                    "before": "shown",
+                    "after": "hidden until it comes back",
+                }
+            ],
+        )
+    return True
+
+
+def _episodes(old, now: dict, at: datetime) -> dict:
+    """Each warning keeps the time it started (`since`) while it lasts. Gone, it is kept `cleared` for CLEAR_MINUTES:
+    back within that time it is the same warning (same since); after that it is forgotten, so it starts anew."""
+    old = old if isinstance(old, dict) else {}
+    out = {}
+    for k in WARNINGS:
+        prev = old.get(k) if isinstance(old.get(k), dict) else None
+        if prev and not isinstance(prev.get("since"), str):
+            prev = None
+        gone = prev and isinstance(prev.get("cleared"), str) and at - store.to_time(prev["cleared"])
+        if gone and gone >= timedelta(minutes=CLEAR_MINUTES):
+            prev = None  # gone long enough (also when no look came between): it starts anew
+        if k in now:  # the same warning while it lasts, also when another account is the one that fails now
+            out[k] = {**now[k], "since": prev["since"] if prev else _iso(at)}
+        elif prev:
+            cleared = prev.get("cleared") or _iso(at)
+            if at - store.to_time(cleared) < timedelta(minutes=CLEAR_MINUTES):
+                out[k] = {**prev, "cleared": cleared}
+    return out
 
 
 def config(root: Path) -> dict:
@@ -207,15 +284,16 @@ class Choice:
     why: str = ""
 
 
-def _limits(a: dict) -> list[tuple[str, float]]:
-    """(window, percent) pairs of the account's rule; a subscription can never go past 100 %."""
+def _limits(a: dict) -> list[tuple[str, float, float]]:
+    """(window, switch at, full at) per window: the account's rule (both the same), else DEFAULT_EARLY and 100 %
+    (a subscription can never go past 100 %)."""
     out = [
-        (WINDOW_OF[x["period"]], float(x["value"]))
+        (WINDOW_OF[x["period"]], float(x["value"]), float(x["value"]))
         for x in a["rule"]["limits"]
         if x.get("unit") == "%" and x.get("period") in WINDOW_OF
     ]
-    seen = {w for w, _ in out}
-    out += [(w, 100.0) for w in ("5h", "week") if w not in seen]
+    seen = {w for w, _, _ in out}
+    out += [(w, DEFAULT_EARLY[w], 100.0) for w in ("5h", "week") if w not in seen]
     return out
 
 
@@ -225,7 +303,7 @@ def judge(a: dict, use: SubscriptionUse, pace: dict[str, float], ahead: float) -
         return Candidate(a, use, False, False, "turned off in the account switcher")
     if not any(w.pct is not None for w in use.windows.values()):
         return Candidate(a, use, False, False, "use unknown")
-    for window, limit in _limits(a):
+    for window, limit, full in _limits(a):
         w = use.windows.get(window)
         word = store.PERIOD_WORDS[window]
         if w is None:
@@ -237,9 +315,12 @@ def judge(a: dict, use: SubscriptionUse, pace: dict[str, float], ahead: float) -
                 under = good = False  # a limit Usage cannot check counts as reached
                 why = why or f"{word} use unknown"
             continue
-        if w.pct >= limit:
+        if w.pct >= full:
             under = good = False
-            why = why or f"{word} {w.pct:g}% of {limit:g}%"
+            why = why or f"{word} {w.pct:g}% of {full:g}%"
+        elif w.pct >= limit:
+            good = False  # past the early switch, not full: left when another has room, else kept
+            why = why or f"{word} {w.pct:g}%, switches early at {limit:g}%"
         elif w.pct + pace.get(window, 0.0) * ahead >= limit:
             good = False
             why = why or f"{word} {w.pct:g}% of {limit:g}%, reached in under {ahead:g} min at this pace"
@@ -247,7 +328,11 @@ def judge(a: dict, use: SubscriptionUse, pace: dict[str, float], ahead: float) -
 
 
 def choose(
-    accounts: list[dict], found: list[SubscriptionUse], pace: dict[str, float], ahead: float
+    accounts: list[dict],
+    found: list[SubscriptionUse],
+    pace: dict[str, float],
+    ahead: float,
+    skip: frozenset[str] = frozenset(),
 ) -> Choice:
     """The first account in order that is good; else stay on the active one while it is under its limits; else the
     first one under its limits. all_at_limit when no account is good."""
@@ -261,12 +346,18 @@ def choose(
             continue
         cands.append(judge(a, f, pace, ahead))
     active = next((c for c in cands if c.use.active), None)
-    good = [c for c in cands if c.good]
+    good = [c for c in cands if c.good and c.account["id"] not in skip]  # skip: a switch to it just failed
     if good:
-        return Choice(good[0], active, cands, False, "first account under its limits")
+        return Choice(
+            good[0],
+            active,
+            cands,
+            False,
+            f"{good[0].account['label']} is the first account in order that is under its limits",
+        )
     if active and active.under:
         return Choice(active, active, cands, True, "every account is at or near a limit; staying")
-    under = [c for c in cands if c.under]
+    under = [c for c in cands if c.under and c.account["id"] not in skip]
     if under:
         return Choice(under[0], active, cands, True, "every account is at or near a limit; this one has room")
     return Choice(None, active, cands, True, "every account is at its limit")
@@ -298,6 +389,32 @@ def _stuck(key: str, read=cswap.read) -> bool:
         return any(f.active and f.key == key for f in read())
     except cswap.ReaderError:
         return False
+
+
+def _recent_failures(memory: dict, at: datetime) -> dict[str, str]:
+    """Accounts a switch failed to within RETRY_MINUTES: {account id: when}. (An older memory kept one {to, at}.)"""
+    raw = memory.get("failed") or {}
+    if "to" in raw and "at" in raw:
+        raw = {raw["to"]: raw["at"]}
+    out = {}
+    for k, v in raw.items():
+        try:
+            if isinstance(v, str) and at - store.to_time(v) < timedelta(minutes=RETRY_MINUTES):
+                out[k] = v
+        except (ValueError, TypeError):
+            pass
+    return out
+
+
+def alerts(accounts: list[dict], ch: Choice, failed: dict[str, str]) -> list[str]:
+    """What the person should see now (list, status, the page), in plain words; empty when all is well."""
+    out = []
+    if ch.all_at_limit:
+        out.append("Every account is at or near its limit.")
+    names = {a["id"]: a["label"] for a in accounts}
+    for k in failed:
+        out.append(f"Could not switch to {names.get(k, k)}; Usage tries the next account in order.")
+    return out
 
 
 def _row(what: str, a: dict | None, before, after, why: str, at: datetime) -> dict:
@@ -339,8 +456,9 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     memory = _read(memory_path(root))
     active_use = next((f for f in found if f.active), None)
     pace = update_pace(memory, active_use, at)
-    ch = choose(accounts, found, pace, ahead)
     on = switching_on(root)
+    failed = _recent_failures(memory, at)  # account id -> when a switch to it failed, within RETRY_MINUTES
+    ch = choose(accounts, found, pace, ahead, frozenset(failed))
     hist: list[dict] = []
     did = "stay"
 
@@ -361,7 +479,8 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     memory["all_at_limit"] = ch.all_at_limit
 
     t = ch.target
-    if t and (ch.active is None or t.use.key != ch.active.use.key):
+    why = ch.why
+    while t and (ch.active is None or t.use.key != ch.active.use.key):
         before = ch.active.account["label"] if ch.active else None
         if ch.active and not ch.active.good and ch.active.why:
             why = f"{ch.active.account['label']}: {ch.active.why}"  # the account left, not the new one
@@ -382,19 +501,13 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
                     )
                 )
             memory["would"] = plan
+            break
         else:
             memory.pop("would", None)
-            last_fail = memory.get("failed") or {}
-            recent = (
-                last_fail.get("to") == t.account["id"]
-                and isinstance(last_fail.get("at"), str)
-                and at - store.to_time(last_fail["at"]) < timedelta(minutes=RETRY_MINUTES)
-            )
-            if recent:
-                did = "waiting to try again"
-            elif switch(t.use.slot) and _stuck(t.use.key):
+            if switch(t.use.slot) and _stuck(t.use.key):
                 did = "switched"
                 memory.pop("failed", None)
+                failed = {}
                 prev = memory.get("switched") or {}
                 again = (
                     prev.get("to") == t.account["id"]
@@ -429,9 +542,11 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
                     "at": prev["at"] if again else _iso(at),
                     "back_noted": bool(again),
                 }
+                break
             else:
                 did = "switch failed"
-                memory["failed"] = {"to": t.account["id"], "at": _iso(at)}
+                failed[t.account["id"]] = _iso(at)
+                memory["failed"] = dict(failed)
                 hist.append(
                     _row(
                         f"could not switch to {t.account['label']}",
@@ -442,9 +557,27 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
                         at,
                     )
                 )
+                # try the next good account now, not the same one again in RETRY_MINUTES
+                ch = choose(accounts, found, pace, ahead, frozenset(failed))
+                t = ch.target
     else:
         memory.pop("would", None)
+        if did == "stay" and failed and ch.active and not ch.active.good:
+            did = "waiting to try again"  # the accounts to go to just failed; tried again after RETRY_MINUTES
 
+    # the warnings `orch usage needs` tells the person about, once each (ORCH-644)
+    # at a limit = by the limits alone: an account left out only because a switch to it failed still has room
+    limits = choose(accounts, found, pace, ahead) if failed else ch
+    warn_now: dict = {}
+    if limits.all_at_limit:
+        warn_now["all-at-limit"] = {}
+    if failed:
+        first = min(failed, key=lambda k: failed[k])  # the account that failed first names the warning
+        label = next((a["label"] for a in accounts if a["id"] == first), first)
+        warn_now["switch-failed"] = {"to": first, "label": label}
+    memory["warnings"] = _episodes(memory.get("warnings"), warn_now, at)
+
+    memory["alerts"] = alerts(accounts, limits, failed)
     memory["last"] = {
         "at": _iso(at),
         "did": did,
@@ -452,7 +585,7 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
         "active": ch.active.account["id"] if ch.active else None,
         "target": t.account["id"] if t else None,
         "all_at_limit": ch.all_at_limit,
-        "why": ch.why,
+        "why": why,
     }
     with store._lock(root):
         _write(memory_path(root), memory)
@@ -467,6 +600,70 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
         "all_at_limit": ch.all_at_limit,
         "pace": pace,
     }
+
+
+def needs_rows(root: Path, at: datetime | None = None) -> list[dict]:
+    """`orch usage needs --json` (needs.schema.json): one row per Usage warning (ORCH-644)."""
+    return warning_rows(root, at)
+
+
+def warning_rows(root: Path, at: datetime | None = None) -> list[dict]:
+    """One row per live warning. Its id carries the time the warning started, so a surface that remembers what it
+    showed tells the person once; a warning that cleared and came back is a new row. Got it hides it until then."""
+    at = at or datetime.now(UTC)
+    memory = _read(memory_path(root))
+    last = memory.get("last") if isinstance(memory.get("last"), dict) else {}
+    try:
+        fresh = at - store.to_time(last["at"]) < timedelta(minutes=FRESH_MINUTES)
+    except (KeyError, TypeError, ValueError):
+        fresh = False
+    live = memory.get("warnings")
+    if not fresh or not isinstance(live, dict):
+        return []
+    hidden = seen(root)
+    rows = []
+    for k in WARNINGS:
+        w = live.get(k)
+        if not isinstance(w, dict) or w.get("cleared") or not isinstance(w.get("since"), str):
+            continue
+        if hidden.get(k) == w["since"]:
+            continue
+        if k == "all-at-limit":
+            title, tone = "Usage: every account is at or near its limit", "bad"
+            text = (
+                "Every account is at or near its limit, so Usage has no account to switch to. Helpers may stop "
+                "until a limit resets. Raise a limit or turn on another account in Usage."
+            )
+        else:
+            label = w.get("label") or "the next account"
+            title, tone = f"Usage: could not switch to {label}", "warn"
+            text = (
+                f"Usage could not switch to {label} and tries the next account in order; {label} is tried again "
+                f"after {RETRY_MINUTES} minutes. Check that the account switcher works and that {label} is still "
+                "signed in."
+            )
+        rows.append(
+            {
+                "id": f"usage:{k}:{w['since']}",
+                "source": "usage",
+                "kind": f"usage:{k}",
+                "ticket": None,
+                "title": title[:200],
+                "text": text[:500],
+                "tone": tone,
+                "since": w["since"],
+                "cli": f"orch usage list   (Got it: orch usage seen {k})",
+                "actions": [
+                    {
+                        "label": "Got it",
+                        "verb": "seen",
+                        "target": f"{k}:{w['since']}",
+                        "review": {"done": "Hidden until it comes back."},
+                    }
+                ],
+            }
+        )
+    return rows
 
 
 # ---------------------------------------------------------------- the loop
