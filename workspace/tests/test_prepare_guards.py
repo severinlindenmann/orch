@@ -242,6 +242,18 @@ def test_fields_a_person_wrote_while_prepare_ran_are_kept(proj, new_ticket, run)
     assert t["description"] == "Make the report." and t["estimate"]["minutes"] == 30  # empty ones are filled
 
 
+def test_a_persons_edit_right_after_save_is_not_refused_by_prepare_starting(proj, new_ticket):
+    # the page holds the revision of the saved ticket; Prepare starting in the background must not make the
+    # person's first edit a conflict (dashboard click-through a-ticket-properties, ORCH-741)
+    tid = new_ticket("sales report pls")
+    seen = tickets.revision(tickets.load(proj, tid))
+    tickets.set_prepare(proj, tid, "waiting", "orch")
+    tickets.set_prepare(proj, tid, "preparing", "orch", run="r_1")
+    assert tickets.load(proj, tid)["prepare"]["state"] == "preparing"
+    tickets.edit(proj, tid, "November sales report", "human:t", if_revision=seen)
+    assert tickets.load(proj, tid)["title"] == "November sales report"
+
+
 @pytest.mark.parametrize("status", ["active", "ready", "dropped", "done"])
 def test_an_old_prepare_result_never_changes_a_newer_status(proj, new_ticket, status):
     tid = new_ticket("sales report pls")
