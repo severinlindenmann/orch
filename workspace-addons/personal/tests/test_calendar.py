@@ -99,6 +99,7 @@ def reader(tmp_path, monkeypatch):
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("ORCH_PERSONAL_CALENDAR_READER", str(script))
     cal._OWNER_CACHE.clear()
+    monkeypatch.setattr(cal, "_now", lambda: cal.dt.datetime(2026, 11, 18, 7, 0, tzinfo=cal.dt.UTC))
 
     def set_answer(a):
         data.write_text(json.dumps(a), encoding="utf-8")
@@ -355,11 +356,17 @@ def test_unreadable_rules_fall_back_to_closed(added):
     assert p["moves"] == "never"
 
 
+def test_overlaps_that_are_over_are_not_shown(added, monkeypatch):
+    monkeypatch.setattr(cal, "_now", lambda: cal.dt.datetime(2026, 11, 19, 12, 0, tzinfo=cal.dt.UTC))
+    assert api.calendar_week(added, person(), "2026-11-16", 7)["overlaps"] == []
+
+
 def test_helper_use_is_logged_without_content(added):
     api.calendar_rule(added, person(), "Work", "titles", None)
     api.calendar_week(added, helper(), "2026-11-16", 7)
     rows = store.activity(added)
     assert rows[0]["part"] == "calendar" and rows[0]["ticket"] == "t_abc123"
+    assert rows[0]["what"].endswith(": Work (busy times, titles and people)")
     assert "Helvetia" not in json.dumps(rows)
 
 

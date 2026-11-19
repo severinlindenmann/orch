@@ -506,11 +506,18 @@ def for_owner(root: Path, frm: dt.date, days: int = 7) -> dict:
     return view
 
 
+def _now() -> dt.datetime:
+    return dt.datetime.now(dt.UTC)
+
+
 def overlaps(ans: dict) -> list[dict]:
     """Timed events of different calendars that overlap (the "two things at once" line)."""
     zone = ans["zone"]
-    timed = [
-        e for e in ans["events"] if not e["all_day"] and not e["declined"] and e["availability"] != "free"
+    now = _now()
+    timed = [  # only what is still to come: a clash this morning needs nothing any more
+        e
+        for e in ans["events"]
+        if not e["all_day"] and not e["declined"] and e["availability"] != "free" and e["end"] > now
     ]
     titles = {c["id"]: c["title"] for c in ans["calendars"]}
     out = []

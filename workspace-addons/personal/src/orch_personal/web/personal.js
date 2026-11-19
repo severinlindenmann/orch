@@ -336,7 +336,7 @@
       const card = el('section', 'card');
       card.append(el('div', 'card-h', el('h2', null, fmtDay(d, {weekday: 'short', day: 'numeric', month: 'short'})), d === todayIso ? el('span', 'badge working', 'Today') : null));
       evs.forEach(e => { const c = cals[e.cal] || {};
-        const row = el('div', 'list-row', el('span', 'when meta', e.all_day ? 'All day' : hm(e.start)),
+        const row = el('div', 'list-row', el('span', 'when meta', e.all_day ? 'All day' : hm(e.start) + '–' + hm(e.end)),
           el('div', 'grow', el('strong', null, e.title || 'Busy'), el('p', 'meta', c.title || '')), el('span', 'cal-dot cal-' + (c.color % 6)));
         row.dataset.cal = e.cal; card.append(row); });
       list.append(card);
@@ -369,8 +369,8 @@
   function calRulesCard(moves, words) {
     const card = el('section', 'card');
     card.append(el('div', 'card-h', el('h2', null, 'What helpers may do'), el('span', 'meta', 'Changes apply at once')));
-    card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'See when you are busy'), el('p', 'meta', 'Only in calendars you share above. Helpers plan around your meetings without seeing what they are.')), el('span', 'badge', 'Per calendar')));
-    card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'Read titles and people'), el('p', 'meta', 'Only in calendars set to “Busy times, titles and people”. Never places, notes or links.')), el('span', 'badge', 'Per calendar')));
+    card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'See when you are busy'), el('p', 'meta', 'Only in calendars you share above. Helpers plan around your meetings without seeing what they are.')), el('span', 'meta', 'Per calendar')));
+    card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'Read titles and people'), el('p', 'meta', 'Only in calendars set to “Busy times, titles and people”. People by name, never their email. Never places, notes or links.')), el('span', 'meta', 'Per calendar')));
     const sel = el('select', 'input');
     sel.setAttribute('aria-label', 'Add or move an event');
     for (const [k, word] of Object.entries(words)) { const o = el('option', null, word); o.value = k; o.selected = k === moves; sel.append(o); }
@@ -399,7 +399,7 @@
     const out = [];
     const end = addDays(w.from, 6);
     const bar = el('div', 'row between');
-    const legend = el('div', 'cal-legend');
+    const legend = el('div', 'cal-legend', el('span', 'meta', 'Show here:'));
     for (const c of w.calendars) {
       const box = el('input'); box.type = 'checkbox'; box.checked = !calHidden.has(c.id);
       box.addEventListener('change', () => { box.checked ? calHidden.delete(c.id) : calHidden.add(c.id); calHide(); });
@@ -506,7 +506,7 @@
     let out;
     const [screen, ...rest] = h.split('/');
     const head = (title, sub) => { $('page-title').firstChild.textContent = title + ' '; $('page-sub').textContent = sub; };
-    if (screen === 'calendar') { head('Calendar', 'Work, private and family in one week. Tick a calendar off to hide it.'); out = await calendarScreen(); }
+    if (screen === 'calendar') { head('Calendar', 'Work, private and family in one week. What helpers may see is set under Sources.'); out = await calendarScreen(); }
     else if (screen === 'notes') { head('Notes', 'What you and your helpers know, as linked notes. Click a link to follow it.'); out = await notesScreen(rest.join('/') || null); }
     else if (screen === 'parts') { head('Add a part', 'One click adds it. You choose what helpers may do before anything is read.'); out = addScreen(); }
     else { head('Personal', 'What needs you, then each part at a glance. You see everything; helpers use only what you turned on.'); out = home(); }

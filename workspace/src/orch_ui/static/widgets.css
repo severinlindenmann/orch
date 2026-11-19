@@ -1368,7 +1368,7 @@ body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:
 .cal-day{display:grid;grid-template-rows:repeat(var(--rows),var(--s4));grid-auto-columns:minmax(0,1fr);border-left:1px solid var(--border);background:repeating-linear-gradient(to bottom,var(--border) 0 1px,transparent 1px calc(var(--s4)*4))}
 .cal-day.today,.cal-day-all.today{background-color:var(--surface-2)}
 .cal-ev{display:block;min-width:0;overflow:hidden;margin:0 var(--space-0) var(--space-0);padding:var(--space-0) var(--s1) var(--space-0) var(--s2);border-left:var(--s1) solid var(--cal);border-radius:var(--s1);background:var(--cal-soft);color:var(--text);font-size:var(--fs-meta);line-height:var(--s4)}
-.cal-ev-t{display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cal-ev-t{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;font-weight:500;overflow:hidden;overflow-wrap:anywhere}
 .cal-ev .meta{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cal-ev.declined .cal-ev-t{text-decoration:line-through;color:var(--text-muted)}
 .cal-ev.free{background:transparent;border-left-style:dashed}

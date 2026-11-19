@@ -148,8 +148,8 @@ def _calendar_tile(root: Path, p: dict, needs: list, who: Who) -> dict:
                 {
                     "part": "calendar",
                     "suggestion": s["id"],
-                    "title": f"A helper suggests “{s['title']}”",
-                    "text": f"{_when_words(s['start'])}, {s['minutes']} minutes",
+                    "title": f"A helper suggests a new event: “{s['title']}”",
+                    "text": f"{_when_words(s['start'])}, {s['minutes']} minutes · you pick the calendar when you save it",
                     "action": "Add to calendar",
                     "ticket": s.get("ticket"),
                 }
@@ -428,9 +428,9 @@ def calendar_week(root: Path, who: Who, frm: str | None = None, days: int = 7) -
                 "The person shares no calendar with helpers. Ask them on your ticket if you need their times."
             )
         out = cal_mod.for_helper(cal_mod.read(root, day, days), lv)
-        store.log(
-            root, "calendar", f"read {days} day{'s' if days != 1 else ''} from {day}", who.by, who.ticket
-        )
+        shared = ", ".join(f"{c['title']} ({c['uses'].lower()})" for c in out["calendars"]) or "no calendar"
+        what = f"read {days} day{'s' if days != 1 else ''} from {day}: {shared}"
+        store.log(root, "calendar", what, who.by, who.ticket)
         return out
     return cal_mod.for_owner(root, day, days)
 

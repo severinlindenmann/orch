@@ -20,9 +20,8 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs
 
-from . import api
+from . import api, store
 from . import calendar as cal_mod
-from . import store
 from .store import Refused
 
 DEFAULT_PORT = 8433
@@ -158,7 +157,12 @@ class Handler(BaseHTTPRequestHandler):
             if not self._vouched():
                 return self._send(403, FROM_DASHBOARD.encode())
             return self._api_get(path, parse_qs(query))
-        if path in ("/", "/notes", "/calendar", "/parts"):  # the screens: one page, the path picks the first screen
+        if path in (
+            "/",
+            "/notes",
+            "/calendar",
+            "/parts",
+        ):  # the screens: one page, the path picks the first screen
             prefix = self.headers.get("X-Forwarded-Prefix") or ""
             prefix = prefix if PREFIX.fullmatch(prefix) else ""
             return self._send(200, _web("index.html").replace(b"__P__", prefix.encode()), TYPES["html"])
