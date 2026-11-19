@@ -168,6 +168,8 @@ def test_a_failed_script_asks_once(ws, person):
     (q,) = tk(ws, "t_scr00002")["questions"]
     assert q["kind"] == "automation:failure" and "exit code 3" in q["text"]
     assert q["options"] == ["Try again", "Leave it"]
+    assert ".orch/" not in q["text"] and "boom-output.txt" in q["text"]
+    assert "broken" in (ws / "attached.txt").read_text()
     assert wait_for(lambda: history_rows(ws)) and history_rows(ws)[0]["exit"] == 3
 
 
