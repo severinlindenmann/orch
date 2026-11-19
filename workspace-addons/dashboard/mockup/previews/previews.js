@@ -76,7 +76,7 @@ if(dialog){
  if(!$('.file-variant[data-file="'+CSS.escape(selected.name)+'"]',dialog)){location.replace(selected.url);return;}
  $$('.file-variant',dialog).forEach(v=>v.hidden=v.dataset.file!==selected.name);
  $('#viewer-title').textContent=selected.title;$('#viewer-meta').textContent=`${selected.kind} · ${selected.size} · Created 13 Nov 2026, 13:38 · Task: ${selected.step} · ${selected.role}`;$('#viewer-position').textContent=`${index+1} of ${list.length} files`;
- $('#open-original').href=$('#download-file').href='assets/'+selected.name;
+ $('#open-original').href=$('#download-file').href='assets/'+(selected.file||selected.name);
  if(selected.viewer==='html'){
    $('#open-original').href='assets/site/index.html';
    $('#download-file').href='assets/site.zip';$('#download-file').textContent='Download website';
