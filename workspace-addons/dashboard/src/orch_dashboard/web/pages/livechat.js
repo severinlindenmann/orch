@@ -59,7 +59,9 @@ function liveChatModel(t, me = '', sent = []) {
     rows.push({w:'e', text:'Step ' + (i + 1) + ' done: ' + liveChatCut(c.text), at});
     const said = ev.find(v => clean0(v.summary));
     const links = liveChatLinks(ev);
-    if (said || links.length) rows.push({w:'h', text:said ? liveChatCut(said.summary) : '', at, links});
+    // a file the step proved or a check run is a result too: it shows as a widget inside the message (ORCH-687, ORCH-697)
+    const made = ev.some(v => (v.type === 'file' && /^\.orch\/tickets\/[^/]+\/(evidence|artifacts)\//.test(String(v.ref || ''))) || (v.type === 'command' && (typeof v.exit === 'number' || v.output_tail)));
+    if (said || links.length || made) rows.push({w:'h', text:said ? liveChatCut(said.summary) : '', at, links, step:typeof c.id === 'string' ? c.id : ''});
   });
   for (const q of Array.isArray(t.questions) ? t.questions : []) {
     if (!q || typeof q !== 'object' || q.answer == null) continue;  // the open one is the question card
@@ -128,32 +130,36 @@ function liveChatBox(sess, label) {
   return h('div', {className:'live-chat', 'data-live-chat':sess.id, role:'log', 'aria-label':'Messages and ticket events of ' + label, tabindex:'0',
     hidden:liveViewOf(sess.id) !== 'chat'});
 }
-function liveChatRow(r) {
+function liveChatRow(r, tid = '') {
   const stamp = typeof time === 'function' ? time(r.at) : '';
   if (r.w === 'e') return h('p', {className:'live-ev meta'}, h('span', {'aria-hidden':'true'}, '✓'), ' ' + r.text + (stamp ? ' · ' + stamp : ''));
-  const links = (r.links || []).map(l => h('a', {className:'live-link', href:l.href, target:'_blank', rel:'noopener'}, l.label));
+  // the step's results as small widgets (pages/results-feed.js); plain links only where no widget can be drawn
+  const widgets = !!(r.step && tid && typeof resultsHost === 'function' && typeof window === 'object' && window.UI?.result);
+  const links = widgets ? [] : (r.links || []).map(l => h('a', {className:'live-link', href:l.href, target:'_blank', rel:'noopener'}, l.label));
   return h('div', {className:'live-chat-msg', 'data-w':r.w},
     h('span', {className:'meta'}, (r.w === 'y' ? r.who || 'You' : 'Helper') + (stamp ? ' · ' + stamp : '')),
     r.text ? h('p', {}, r.text) : null,
-    links.length ? h('div', {className:'live-links'}, links) : null);
+    links.length ? h('div', {className:'live-links'}, links) : null,
+    widgets ? resultsHost(tid, {key:'chat-results-' + tid + '-' + r.step, step:r.step, cls:'live-results', label:'Results of this step'}) : null);
 }
 // Written only when the rows change, so the scroll and a selection stay; follows the end while it is at the end.
 function liveChatFill(box) {
   const id = box.dataset.liveChat, t = typeof ticketOf === 'function' ? ticketOf(id) : null;
   const rows = liveChatModel(t, typeof state === 'object' && state ? state.me || '' : '', liveChatSent.get(id));
-  const sigs = rows.map(r => [r.w, r.at, r.text, (r.links || []).map(l => l.href).join(' ')].join('\u0001'));
+  const sigs = rows.map(r => [r.w, r.at, r.text, (r.links || []).map(l => l.href).join(' '), r.step || ''].join('\u0001'));
   const was = box.liveChatSigs, sig = sigs.join('\u0002');
   if (was && was.join('\u0002') === sig && box.dataset.sig) return;
   const end = !box.dataset.sig || box.scrollHeight - box.scrollTop - box.clientHeight < 8;
   box.dataset.sig = '1';
   box.liveChatSigs = sigs;
   // new rows at the end only: they are added, so a focused link or a selection in the older rows stays
-  if (was && was.length && sigs.length > was.length && was.every((x, i) => x === sigs[i])) for (const r of rows.slice(was.length)) box.append(liveChatRow(r));
+  if (was && was.length && sigs.length > was.length && was.every((x, i) => x === sigs[i])) for (const r of rows.slice(was.length)) box.append(liveChatRow(r, id));
   else {
     box.textContent = '';
     if (!rows.length) box.append(h('p', {className:'meta live-chat-empty'}, 'No messages yet. Steps the helper finishes and its questions show here.'));
-    else for (const r of rows) box.append(liveChatRow(r));
+    else for (const r of rows) box.append(liveChatRow(r, id));
   }
+  if (typeof resultsFillAll === 'function') resultsFillAll(box);
   if (end) box.scrollTop = box.scrollHeight;
 }
 // Shows the chosen view in a pane's body: the chat, or the last lines (the terminal's place until it comes).

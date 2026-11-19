@@ -1,0 +1,54 @@
+{
+  "_about": "Demo ticket with every result widget kind (ORCH-697). e2e/focus_insights/dashboard_server.py writes it and its files into the test workspace; workspace-addons/dashboard/tests/results_feed.test.js checks every kind comes out of it. files: name -> {sample: a file of the kit's samples folder} or {text: the content}.",
+  "ticket": {
+    "schema": "orch.ticket/1",
+    "id": "t_widget16",
+    "key": "ORCH-250",
+    "title": "Files on a ticket: upload, preview and share",
+    "status": "active",
+    "revision": 3,
+    "created_at": "2026-11-19T13:40:00Z",
+    "updated_at": "2026-11-19T14:52:00Z",
+    "description": "People drop files on a ticket and see them right there: pictures, pages, tables and recordings.",
+    "checklist": [
+      {"id": "c1", "text": "Files can be dropped on a ticket", "done": true, "evidence": [
+        {"type": "file", "ref": ".orch/tickets/t_widget16/artifacts/release-notes.md", "title": "Release notes", "summary": "Uploading works for pictures, pages and tables. Notes sit below the files.", "by": "agent:claude", "at": "2026-11-19T14:21:00Z"},
+        {"type": "command", "ref": "node --test tests/attach.test.js", "exit": 0, "ran_at": "2026-11-19T14:20:00Z", "output_tail": "✔ a picture is kept with its name (12 ms)\n✔ a page opens in its frame (9 ms)\n✔ a table shows its rows (7 ms)\nℹ tests 3 · pass 3 · fail 0", "by": "agent:claude", "at": "2026-11-19T14:20:00Z"},
+        {"type": "pr", "ref": "https://github.com/severinlindenmann/orch/pull/1309", "by": "agent:claude", "at": "2026-11-19T14:21:00Z"}
+      ]},
+      {"id": "c2", "text": "Every kind of file shows a preview", "done": true, "evidence": [
+        {"type": "file", "ref": ".orch/tickets/t_widget16/artifacts/home-390.svg", "title": "Home at phone width", "summary": "Pictures, pages, PDFs, recordings and tables preview on the ticket.", "by": "agent:claude", "at": "2026-11-19T14:36:00Z"},
+        {"type": "file", "ref": ".orch/tickets/t_widget16/artifacts/phone-widths.html", "by": "agent:claude", "at": "2026-11-19T14:36:00Z"},
+        {"type": "file", "ref": ".orch/tickets/t_widget16/artifacts/walkthrough.webm", "by": "agent:claude", "at": "2026-11-19T14:37:00Z"},
+        {"type": "url", "ref": "https://wiki.example.com/phone-widths", "title": "Notes on phone widths", "by": "agent:claude", "at": "2026-11-19T14:38:00Z"}
+      ]},
+      {"id": "c3", "text": "Keep or change the file name", "done": false, "evidence": []}
+    ],
+    "refs": [
+      {"kind": "url", "url": "https://github.com/severinlindenmann/orch/pull/1309", "title": "Files can be dropped on a ticket", "status": "draft", "at": "2026-11-19T14:21:00Z", "by": "agent:claude"},
+      {"kind": "url", "url": "https://wiki.example.com/phone-widths", "title": "Notes on phone widths", "at": "2026-11-19T14:38:00Z", "by": "agent:claude"}
+    ],
+    "questions": [],
+    "history": [
+      {"at": "2026-11-19T13:40:00Z", "by": "human:demo", "via": "dashboard", "text": "Created", "chat_message": false},
+      {"at": "2026-11-19T14:02:00Z", "by": "agent:factory", "via": "cli", "text": "Claude started", "chat_message": false}
+    ],
+    "ext": {}
+  },
+  "files": {
+    "release-notes.md": {"sample": "sample-notes.md"},
+    "test-run.log": {"text": "15:04:01 node --test tests/attach.test.js\n15:04:02 ✔ a picture is kept with its name (12 ms)\n15:04:02 ✔ a page opens in its frame (9 ms)\n15:04:03 ✔ a table shows its rows (7 ms)\n15:04:03 ℹ tests 3 · pass 3 · fail 0\n"},
+    "attach.py": {"text": "def keep_name(old, new):\n    # the first name stays, links keep working\n    if old.name == new.name:\n        return old.name\n    return unique(new.name)\n"},
+    "settings.json": {"sample": "sample-hours.json"},
+    "upload-sizes.csv": {"text": "Kind,Size,Shown\nPicture,2.1 MB,yes\nPage,48 KB,yes\nTable,12 KB,yes\n"},
+    "phone-widths.html": {"sample": "sample-page.html"},
+    "offer.pdf": {"sample": "sample-summary.pdf"},
+    "home-390.svg": {"sample": "sample-poster.svg"},
+    "walkthrough.webm": {"sample": "sample-clip.webm"},
+    "voice-note.wav": {"sample": "sample-tone.wav"},
+    "uses-by-day.json": {"text": "{\"title\": \"Uploads by day\", \"label\": \"Day\", \"unit\": \"Uploads\", \"labels\": [\"Mon\", \"Tue\", \"Wed\", \"Thu\", \"Fri\", \"Sat\", \"Sun\"], \"values\": [41, 56, 38, 72, 88, 12, 9]}\n"},
+    "keep-name.diff": {"text": "diff --git a/attach.py b/attach.py\n--- a/attach.py\n+++ b/attach.py\n@@ -1,3 +1,5 @@\n def keep_name(old, new):\n-    return new.name\n+    if old.name == new.name:\n+        return old.name\n+    return unique(new.name)\n"},
+    "export.zip": {"sample": "sample-print.zip"},
+    "layout-v3.sketch": {"text": "SKETCH-DEMO-BYTES"}
+  }
+}
