@@ -319,6 +319,17 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, ValueError):
             pass
 
+    def _refuse_type(self):
+        """415 for a body that is not JSON. Reads a small body first: Windows resets a connection closed with
+        unread data, and the client then sees an abort instead of the answer."""
+        try:
+            n = int(self.headers.get("Content-Length") or "0")
+            if 0 < n <= 65536:
+                self.rfile.read(n)
+        except (ValueError, OSError):
+            pass
+        return self._send(415, b"send JSON", "text/plain")
+
     def _send(self, code, body: bytes, ctype: str, extra: dict | None = None, csp: str | None = None):
         self._answer_log(code)
         act = getattr(self, "_act", None)
@@ -630,7 +641,7 @@ class Handler(BaseHTTPRequestHandler):
         body = None
         if method == "POST":
             if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
-                return self._send(415, b"send JSON", "text/plain")
+                return self._refuse_type()
             try:
                 n = int(self.headers.get("Content-Length") or "")
                 if not 0 < n <= PROXY_BODY:
@@ -759,6 +770,13 @@ class Handler(BaseHTTPRequestHandler):
             from . import update
 
             return self._send(200, json.dumps(update.update_info()).encode(), "application/json")
+        if path == "/api/tool-updates":  # the tools' versions and notes: same-origin only, no secrets
+            from . import update
+
+            fresh = (parse_qs(query).get("refresh") or [""])[0] == "1"
+            return self._send(
+                200, json.dumps(update.tool_updates(self.root, refresh=fresh)).encode(), "application/json"
+            )
         if path == "/api/release":  # a finished ticket: is its merged change in the installed release?
             from . import update
 
@@ -1105,7 +1123,7 @@ class Handler(BaseHTTPRequestHandler):
 
             return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
-            return self._send(415, b"send JSON", "text/plain")
+            return self._refuse_type()
         limit = diagapi.MAX_REPORT if path == "/api/diag/report" else diagapi.MAX_TRAIL
         try:
             n = int(self.headers.get("Content-Length") or "")
@@ -1140,7 +1158,7 @@ class Handler(BaseHTTPRequestHandler):
 
             return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
-            return self._send(415, b"send JSON", "text/plain")
+            return self._refuse_type()
         try:
             n = int(self.headers.get("Content-Length") or "")
             if not 0 < n <= 16384:
@@ -1227,7 +1245,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._proxy("POST", px.group(1), px.group(2), "")
         _PORTS.clear()  # an action may start, stop or restart add-ons: every port is looked up live next time
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
-            return self._send(415, b"send JSON", "text/plain")
+            return self._refuse_type()
         try:
             n = int(self.headers.get("Content-Length") or "")
             # The limit comes from the header (checked before the body is read); the body must say the same op.
@@ -1346,6 +1364,19 @@ class Handler(BaseHTTPRequestHandler):
                     actions.human_env(self.root, self.orch_bin),
                     session=self.session,
                     to=to,
+                )
+                return self._send(code, text.encode(), "text/plain; charset=utf-8")
+            if body.get("op") == "tools.update":  # Update on one tool in Settings (a person only)
+                from . import update
+
+                if not session:
+                    raise actions.NeedsPerson(actions.SIGNIN)
+                args = body.get("args") or {}
+                code, text = update.start_tool_update(
+                    self.root,
+                    self.orch_bin,
+                    actions.human_env(self.root, self.orch_bin),
+                    args.get("name") if isinstance(args, dict) else None,
                 )
                 return self._send(code, text.encode(), "text/plain; charset=utf-8")
             if body.get("op") in RESTARTING_OPS and session:

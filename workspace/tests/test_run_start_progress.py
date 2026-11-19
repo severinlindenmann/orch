@@ -104,6 +104,20 @@ def test_a_tool_without_a_stream_gets_no_stream_args(proj, run):
     assert "--output-format" not in runs.plan(proj, tid, mode="oneshot")["argv"]
 
 
+def test_codex_start_says_why_it_cannot_reach_out_below_full(proj, run, monkeypatch):
+    # ORCH-604: below full codex keeps its sandbox and Start says so; at full it runs without it
+    monkeypatch.setenv("CODEX_HOME", str(proj.parent / f"{proj.name}_codexhome"))  # no personal config
+    tid = _ticket(run)
+    config.set_key(proj, "workspace", "agent", "codex")
+    config.set_permissions(proj, "auto")
+    p = runs.plan(proj, tid, mode="oneshot")
+    assert 'sandbox_mode="workspace-write"' in p["argv"]
+    assert "no other folders, no GitHub" in p["permission_note"] and p["permission_note"] in p["note"]
+    config.set_permissions(proj, "full")
+    p = runs.plan(proj, tid, mode="oneshot")
+    assert 'sandbox_mode="danger-full-access"' in p["argv"] and p["permission_note"] is None
+
+
 # ---------------------------------------------------------------- folder trust (adapter data only)
 
 

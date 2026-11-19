@@ -10,7 +10,7 @@
   const embedded = window.parent !== window;
   const PERIOD = {'5h': 'per 5 hours', week: 'per week', month: 'per month', until: 'until a date'};
   const TYPE = {subscription: 'Subscription', 'api-key': 'API key', 'helper-tool': 'Helper tool'};
-  const STATE = {'in-use': ['In use now', 'pill done'], ready: ['Ready', 'pill'], off: ['Off', 'pill'], missing: ['Not found', 'pill needs']};
+  const STATE = {'in-use': ['In use now', 'pill done'], ready: ['Ready', 'pill'], full: ['Full', 'pill needs'], off: ['Off', 'pill'], missing: ['Not found', 'pill needs']};
   let model = null, busy = false;
   // The toast names what was saved: the account's name and the kind of change.
   const nameOf = target => model?.accounts.find(a => a.id === target.split(':')[0])?.label || 'Account';
@@ -116,14 +116,23 @@
     const until = datePick('Counts until, ' + a.label, lim?.until ? day(lim.until) : '', () => untilPicked());
     const untilField = h('div', {className: 'field meta', hidden: period !== 'until'}, 'Until', until.node);
     const select = h('select', {'aria-label': 'Counts for ' + a.label}, a.periods.map(p => h('option', {value: p, selected: p === period, disabled: p !== period && a.limits.some(l => l.period === p), text: PERIOD[p]})));
+    const askRemove = go => {
+      const box = h('span', {className: 'row', role: 'group', 'data-confirm': '', 'aria-label': 'Remove the limit of ' + a.label},
+        h('span', {className: 'meta', text: 'Remove this limit?'}),
+        h('button', {type: 'button', className: 'btn danger sm', onclick: go}, 'Remove'),
+        h('button', {type: 'button', className: 'btn ghost sm', onclick: () => { value.value = lim ? num(lim.value) : ''; box.replaceWith(row); }}, 'Keep it'));
+      row.replaceWith(box);
+      box.querySelector('button').focus();
+    };
     const saveValue = () => {
       const v = value.value.trim().replace(/\s+/g, '').replace(/[%$]/g, '');
       if (!v && (isNew || !lim)) return;
-      if (v && !/^\d{1,7}(\.\d{1,4})?$/.test(v)) { value.setAttribute('aria-invalid', 'true'); return say('Write a number, like 90, or leave it empty for no limit.', 'error'); }
+      if (v && !/^\d{1,7}(\.\d{1,4})?$/.test(v)) { value.setAttribute('aria-invalid', 'true'); return say('Write a number, like 90.', 'error'); }
       value.removeAttribute('aria-invalid');
       const p = select.value;
       if (p === 'until' && !until.field.value) return say('Pick the date it counts until.', 'error');
       if (lim && v && Number(v) === lim.value && p === lim.period) return;
+      if (!v && lim) return askRemove(() => act('limit', a.id + ':' + p + ':none', value));
       act('limit', a.id + ':' + p + ':' + (v ? v + a.unit : 'none') + (p === 'until' ? ':' + day(until.field.value) : ''), value);
     };
     value.addEventListener('change', saveValue);
@@ -140,10 +149,11 @@
         ? a.id + ':until:' + num(lim.value) + a.unit + ':' + d
         : a.id + ':' + lim.period + ':until:' + d, until.toggle);
     }
-    return h('div', {className: 'row'},
+    const row = h('div', {className: 'row'},
       h('label', {className: 'field meta'}, 'Limit in ' + a.unit, value),
       h('label', {className: 'field meta'}, 'Counts', select),
       untilField);
+    return row;
   }
 
   function endRow(a) {
@@ -163,7 +173,8 @@
   }
 
   function card(a, i, list) {
-    const [stateText, stateClass] = STATE[a.state] || STATE.ready;
+    let [stateText, stateClass] = STATE[a.state] || STATE.ready;
+    if (a.state === 'full') stateText = a.full_until ? 'Full until ' + stamp(a.full_until) : 'Full';
     const move = (way, to) => h('button', {type: 'button', className: 'btn ghost sm', disabled: !to || null,
       'aria-label': (way === 'up' ? 'Use ' + a.label + ' earlier' : 'Use ' + a.label + ' later'),
       onclick: e => act('order', a.id + ':' + to.order, e.currentTarget)}, way === 'up' ? '↑' : '↓');
@@ -313,6 +324,11 @@
         h('h3', {text: 'Every account is at or near its limit'}),
         h('p', {text: 'Helpers wait when the last one reaches its limit. Raise a limit or turn an account on.'}))));
     }
+    if (m.flapping) {
+      parts.push(h('div', {className: 'banner attn', role: 'alert'}, h('div', {className: 'grow'},
+        h('h3', {text: 'Accounts switched ' + m.flapping.count + ' times back and forth'}),
+        h('p', {text: 'Between ' + stamp(m.flapping.from) + ' and ' + window.UI.clock(m.flapping.to) + '. Another program may be switching accounts too. Turn switching off here or in the other program.'}))));
+    }
     for (const w of m.warnings || []) if (w && !/switcher is not installed/.test(w)) parts.push(h('div', {className: 'banner info', role: 'status'}, h('p', {className: 'grow', text: w})));
     if (!m.accounts.length) {
       parts.push(h('section', {className: 'card empty state-empty'}, h('span', {className: 'file-type', 'aria-hidden': 'true', text: '—'}),
@@ -359,5 +375,6 @@
   $('auto').addEventListener('change', e => act('switching', e.currentTarget.checked ? 'on' : 'off', e.currentTarget));
   $('retry').addEventListener('click', () => { show('loading'); load(true); });
   load(false);
-  setInterval(() => { if (!busy && !document.hidden && !document.activeElement?.matches?.('input,select')) load(false); }, 30000);
+  // an open 'Remove this limit?' question stays until it is answered
+  setInterval(() => { if (!busy && !document.hidden && !document.activeElement?.matches?.('input,select') && !document.querySelector('[data-confirm]')) load(false); }, 30000);
 })();

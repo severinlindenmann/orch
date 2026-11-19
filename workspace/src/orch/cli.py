@@ -35,6 +35,7 @@ from orch import (
     cli_session,
     cli_shot,
     cli_status,
+    cli_tools,
     diag,
     diag_incident,
     fields,
@@ -405,6 +406,7 @@ ADVANCED_TOP = {
     "session",
     "triage",
     "checks",  # ORCH-529: --help-all only
+    "tools",  # ORCH-589: --help-all only (updates are a person's choice in Settings)
 }
 ADVANCED_SUB = {"relay": {"allow"}}
 
@@ -525,6 +527,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_leave.add_parsers(sub, common)
     cli_health.add_parsers(sub, common)
     cli_checks.add_parsers(sub, common)
+    cli_tools.add_parsers(sub, common)
 
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
     x = t.add_parser("new", parents=[common])
@@ -1112,6 +1115,7 @@ def run(args: argparse.Namespace) -> None:
         or cli_leave.dispatch(args, root)
         or cli_health.dispatch(args, root)
         or cli_checks.dispatch(args, root)
+        or cli_tools.dispatch(args, root)
     ):
         pass
     elif (
@@ -1911,6 +1915,10 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
         return protected.hook_main(argv, watchdog)
     if argv[:1] == ["work-check"] and "--hook" in argv:  # a tool's hook: no parser, no error may reach it
         return workcheck.hook_main(argv, watchdog)
+    if argv[:1] == ["notebook"]:  # the app on the person's notebook: no workspace folder, not in --help
+        from orch import cli_notebook
+
+        return cli_notebook.main(argv[1:])
     show_all = "--help-all" in argv
     argv = ["--help" if a == "--help-all" else a for a in argv]
     want_json = "--json" in argv

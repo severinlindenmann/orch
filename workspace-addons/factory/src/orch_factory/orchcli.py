@@ -2,13 +2,54 @@
 
 import json
 import os
+import shutil
 import subprocess
+from pathlib import Path
 
 from .store import Refused
 
+READS = {"here": 0, "process": 0}  # reads answered without a new process (ORCH-634), and commands started
+
+
+def _here(root, args):
+    """A read answered by the core in this process or by its one read worker (orch.reads.call), when ORCH_BIN is
+    this very orch: (code, value), or None to start the command as before (a test's fake orch, an older core)."""
+    try:
+        from orch import reads
+    except ImportError:
+        return None
+    if not hasattr(reads, "call"):
+        return None
+    orch_bin = os.environ.get("ORCH_BIN") or shutil.which("orch")
+    if not reads.same_orch(orch_bin):
+        return None
+    try:
+        return reads.call(Path(root), [*args, "--json"])
+    except Exception:  # noqa: BLE001 - the command gets its chance
+        return None
+
+
+def _value(code, value):
+    if code:
+        if not isinstance(value, dict):
+            raise Refused("Orch refused the request.", "refused")
+        error = Refused(value.get("error", "Orch refused the request."), value.get("code", "refused"))
+        error.found = value.get("found")  # `orch secret scan`: what it found (kind and line, never the text)
+        raise error
+    if value is None:
+        raise Refused("Orch did not return a readable answer.", "not_available")
+    return value
+
 
 def call(root, *args, write=False, by=None, data=None):
-    """`by`: who a write is recorded as (a person's dashboard click passes `human:<name>`); default the add-on."""
+    """`by`: who a write is recorded as (a person's dashboard click passes `human:<name>`); default the add-on.
+    A read (no write, no input) is answered without a new process when it can be (`_here`)."""
+    if not write and data is None:
+        got = _here(root, args)
+        if got is not None and (got[0] or got[1] is not None):  # an unreadable answer: the command itself
+            READS["here"] += 1
+            return _value(*got)
+    READS["process"] += 1
     cmd = [os.environ.get("ORCH_BIN") or "orch", *args, "--json"]
     if write:
         cmd += ["--by", by or "agent:factory"]
@@ -31,13 +72,7 @@ def call(root, *args, write=False, by=None, data=None):
         value = json.loads(result.stdout)
     except (ValueError, UnicodeError):
         raise Refused("Orch did not return a readable answer.", "not_available") from None
-    if result.returncode:
-        if not isinstance(value, dict):
-            raise Refused("Orch refused the request.", "refused")
-        error = Refused(value.get("error", "Orch refused the request."), value.get("code", "refused"))
-        error.found = value.get("found")  # `orch secret scan`: what it found (kind and line, never the text)
-        raise error
-    return value
+    return _value(result.returncode, value)
 
 
 def ticket(root, order):
