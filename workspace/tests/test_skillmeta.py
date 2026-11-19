@@ -300,3 +300,16 @@ def test_values_that_yaml_reads_as_not_text(tmp_path, value):
     folder = skill(tmp_path, "s", f"name: s\ndescription: {value}\nmetadata:\n  version: {value}\n")
     errors = {x["field"] for x in skillmeta.check_skill(folder) if x["level"] == "error"}
     assert {"description", "metadata.version"} <= errors
+
+
+@pytest.mark.parametrize("escape", ["\\ud800", "\\x01", "\\U0000dfff"])
+def test_escapes_to_surrogates_or_control_characters_are_refused(tmp_path, escape):
+    folder = skill(tmp_path, "a", f'name: a\ndescription: "say {escape} here"\n')
+    with pytest.raises(skillmeta.HeaderError, match="escape"):
+        skillmeta.read_header(folder)
+
+
+def test_a_dotted_top_level_key_does_not_clash_with_metadata(tmp_path):
+    folder = skill(tmp_path, "a", "name: a\ndescription: x\nmetadata.version: 1\n")
+    fields = {x["field"] for x in skillmeta.check_skill(folder)}
+    assert "metadata.version" in fields

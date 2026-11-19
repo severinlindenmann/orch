@@ -66,6 +66,8 @@ def _scalar(raw: str, where: str) -> tuple[str, bool]:
                     or len(digits) != width
                     or not re.fullmatch(r"[0-9A-Fa-f]+", digits)
                     or int(digits, 16) > 0x10FFFF
+                    or 0xD800 <= int(digits, 16) <= 0xDFFF
+                    or (int(digits, 16) < 0x20 and int(digits, 16) not in (9, 10))
                 ):
                     raise HeaderError(
                         f"{where}: the escape \\{e} is not read here. Write the character itself."
@@ -109,9 +111,9 @@ def _reads_as_not_text(val: str) -> bool:
     return bool(_NOT_TEXT.match(val) or re.match(r"^\d{4}-\d\d-\d\d", val))
 
 
-def parse_header(text: str) -> tuple[dict, list[str]]:
+def parse_header(text: str) -> tuple[dict, list[tuple[str, str]]]:
     """The header of a SKILL.md text and the metadata keys whose plain value a YAML reader would not take as
-    text (a number, true/false, a date): ({"name": ..., "metadata": {...}}, ["version"]). Raises HeaderError."""
+    text (a number, true/false, a date): ({"name": ..., "metadata": {...}}, [("metadata", "version")]). Raises HeaderError."""
     lines = text.replace("\r\n", "\n").split("\n")
     if not lines or lines[0].strip() != "---":
         raise HeaderError("SKILL.md does not start with a --- header.")
@@ -120,7 +122,7 @@ def parse_header(text: str) -> tuple[dict, list[str]]:
     except StopIteration:
         raise HeaderError("The SKILL.md header has no closing --- line.") from None
     out: dict = {}
-    not_text: list[str] = []
+    not_text: list[tuple[str, str]] = []
     in_meta, meta_indent = False, ""
     for n, ln in enumerate(lines[1:end], start=2):
         if not ln.strip() or ln.lstrip().startswith("#"):
@@ -151,7 +153,7 @@ def parse_header(text: str) -> tuple[dict, list[str]]:
                     f"Line {n}: metadata {key!r} needs a text value (one level only, no nested map)."
                 )
             if not quoted and _reads_as_not_text(val):
-                not_text.append(f"metadata.{key}")
+                not_text.append(("metadata", key))
             if key in out["metadata"]:
                 raise HeaderError(f"Line {n}: metadata {key!r} is written twice.")
             out["metadata"][key] = val
@@ -169,7 +171,7 @@ def parse_header(text: str) -> tuple[dict, list[str]]:
         in_meta = False
         out[key], quoted = _scalar(raw, f"Line {n}")
         if not quoted and _reads_as_not_text(out[key]):
-            not_text.append(key)
+            not_text.append(("", key))
     out.setdefault("metadata", {})
     return out, not_text
 
@@ -277,10 +279,9 @@ def check_skill(skill_dir: Path, *, name: str | None = None, root: Path | None =
         if key not in STANDARD_KEYS:
             out.append(f("error", key, f"{key!r} is not a standard header field; move it under metadata."))
     meta = head.get("metadata") or {}
-    for path in not_text:
-        key = path.removeprefix("metadata.")
-        value = meta[key] if path.startswith("metadata.") else head[key]
-        label = f"metadata {key!r}" if path.startswith("metadata.") else repr(key)
+    for scope, key in not_text:
+        value = (meta if scope else head).get(key, "")
+        path, label = (f"metadata.{key}", f"metadata {key!r}") if scope else (key, repr(key))
         out.append(
             f(
                 "error",
