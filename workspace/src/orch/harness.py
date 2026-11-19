@@ -507,7 +507,11 @@ def git_visible_warning(root: Path) -> str | None:
     seen = git_visible(root)
     if not seen:
         return None
-    return "Git sees new orch files that it would commit: " + ", ".join(seen) + ". Add them to .git/info/exclude to keep them local."
+    return (
+        "Git sees new orch files that it would commit: "
+        + ", ".join(seen)
+        + ". Add them to .git/info/exclude to keep them local."
+    )
 
 
 def check_private_path(root: Path, path: Path) -> None:
