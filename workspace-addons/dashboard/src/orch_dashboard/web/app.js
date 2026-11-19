@@ -938,6 +938,8 @@ main.addEventListener('click', async event => {
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
   if (action === 'reviewer-set') { await reviewerSwitch(); return; }
   if (action === 'release-merge-set') { await releaseMergeSwitch(); return; }
+  if (action === 'auto-reviewer-set') { await reviewSwitch('auto'); return; }
+  if (action === 'away-set') { await reviewSwitch('away'); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
   if (action === 'auto-update-note-ok') { const r = await act('update.note.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
