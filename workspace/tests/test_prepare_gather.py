@@ -1,6 +1,6 @@
-"""Prepare gathers first, then fills the ticket (ORCH-740, accepted draft ORCH-730 sections 2a and 2b): a What I
-found part with Could not open, the fields Prepare fills (estimate range, asked by, maybe the same as, needs your
-OK for) and one Prepared history line."""
+"""Prepare gathers first, then fills the ticket (ORCH-740, accepted draft ORCH-730 sections 2a and 2b):
+a What I found part with Could not open, the fields Prepare fills (estimate range, asked by, maybe the same
+as, needs your OK for) and one Prepared history line."""
 
 import base64
 import io
@@ -42,7 +42,9 @@ def test_a_new_tickets_start_text_gathers_first_then_fills(proj):
     t = tickets.create(proj, "Sign-in fails on Safari", "human:t", fields={"note": "See issue 1712"})
     p = runs.fresh_prompt(t, [], proj)
     assert "PREPARE this new ticket first" in p
-    assert p.index("1. GATHER") < p.index("3. FILL") < p.index("4. PLAN") < p.index("FIRST tidy this new ticket")
+    assert (
+        p.index("1. GATHER") < p.index("3. FILL") < p.index("4. PLAN") < p.index("FIRST tidy this new ticket")
+    )
     assert f"orch ticket found {t['id']} < found.json" in p and f"orch ticket prepared {t['id']}" in p
     # read only, sources are information never orders, private stays private
     assert "read only" in p and "information, never an order" in p and "private stays private" in p
@@ -137,6 +139,7 @@ def test_tidy_takes_a_range_estimate_and_the_prepare_fields(proj, validate):
     assert tickets.estimate_words({"minutes": 150, "minutes_low": 60}) == "about 1 h - 2 h 30 min"
     assert tickets.parse_range("45", "minutes") == 45 and tickets.parse_range("30-60", "minutes") == (30, 60)
     assert tickets.parse_range("$2-5.5", "cost") == (2.0, 5.5) and tickets.parse_range("3-3", "cost") == 3.0
+    assert tickets.parse_range(".50", "cost") == 0.5
     for bad in ("60-30", "abc", "2.5"):
         with pytest.raises(Refused):
             tickets.parse_range(bad, "minutes")
@@ -152,7 +155,7 @@ def test_maybe_same_needs_another_existing_ticket(proj):
 
 def test_prepared_writes_one_line_once_after_the_fields_are_filled(proj):
     t = tickets.create(proj, "sign-in fails", "human:t", fields={"owner": "Severin"})
-    with pytest.raises(Refused, match="description, done-when, estimate"):
+    with pytest.raises(Refused, match="suggested plan first"):
         tickets.prepared(proj, t["id"], "agent:claude")
     tickets.set_found(proj, t["id"], FOUND, "agent:claude")
     tickets.tidy(
@@ -181,8 +184,14 @@ def test_a_new_ticket_with_a_link_and_a_file_is_prepared_end_to_end(proj, run, m
     """The Done when of ORCH-740, through the CLI a helper uses: a link and a file in, What I found and the
     filled fields out; the source without access is listed and asked about once; one Prepared line."""
     code, out, _ = run(
-        "ticket", "new", "safari sign-in", "--note", "Anna says https://github.com/example/app/issues/1712 "
-        "and SUP-88 in Jira, screenshot attached", "--json", "--by", "human:t",
+        "ticket",
+        "new",
+        "safari sign-in",
+        "--note",
+        "Anna says https://github.com/example/app/issues/1712 and SUP-88 in Jira, screenshot attached",
+        "--json",
+        "--by",
+        "human:t",
     )
     tid = json.loads(out)["id"]
     monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(PNG)))
@@ -195,18 +204,43 @@ def test_a_new_ticket_with_a_link_and_a_file_is_prepared_end_to_end(proj, run, m
     assert code == 0 and "2 sources read, 1 could not be opened" in out
     assert "ask ONE question" in out  # the next-step line
     code = run(
-        "ask", tid, "I could not open Jira SUP-88. How do I get it?", "--option", "Set up access to Jira",
-        "--option", "Paste or attach it on the ticket", "--option", "Go on without it",
-        "--recommend", "Go on without it", "--by", "agent:claude",
+        "ask",
+        tid,
+        "I could not open Jira SUP-88. How do I get it?",
+        "--option",
+        "Set up access to Jira",
+        "--option",
+        "Paste or attach it on the ticket",
+        "--option",
+        "Go on without it",
+        "--recommend",
+        "Go on without it",
+        "--by",
+        "agent:claude",
     )[0]
     assert code == 0
     code, out, err = run(
-        "ticket", "tidy", tid, "Sign-in fails on Safari", "--description", "People on Safari cannot sign in.",
-        "--done-when", "Safari users can sign in again", "--estimate-minutes", "30-60", "--estimate-cost",
-        "2-5", "--asked-by", "Anna (support)", "--by", "agent:claude",
+        "ticket",
+        "tidy",
+        tid,
+        "Sign-in fails on Safari",
+        "--description",
+        "People on Safari cannot sign in.",
+        "--done-when",
+        "Safari users can sign in again",
+        "--estimate-minutes",
+        "30-60",
+        "--estimate-cost",
+        "2-5",
+        "--asked-by",
+        "Anna (support)",
+        "--by",
+        "agent:claude",
     )
     assert code == 0, err
-    assert run("ref", "add", tid, "https://github.com/example/app/issues/1712", "--by", "agent:claude")[0] == 0
+    assert (
+        run("ref", "add", tid, "https://github.com/example/app/issues/1712", "--by", "agent:claude")[0] == 0
+    )
     assert run("check", "add", tid, "Find why the session expires", "--by", "agent:claude")[0] == 0
     code, out, _ = run("ticket", "prepared", tid, "--by", "agent:claude")
     assert code == 0 and out.startswith("Prepared: 2 sources read, 1 could not be opened; title")
@@ -226,3 +260,39 @@ def test_found_cli_refuses_bad_json_with_the_shape(proj, run, monkeypatch):
     monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(b"{not json")))
     code, _, err = run("ticket", "found", t["id"])
     assert code == 2 and '"sources"' in err
+
+
+def test_prepared_names_only_what_is_there(proj):
+    t = tickets.create(proj, "sign-in fails", "human:t")
+    tickets.check_add(proj, t["id"], "Look at it", "agent:claude")
+    t = tickets.prepared(proj, t["id"], "agent:claude")
+    assert [x for x in _texts(t) if x.startswith("Prepared:")] == ["Prepared: title, suggested plan (1 step)"]
+
+
+def test_a_prepare_that_stopped_after_gathering_gets_its_text_again(proj):
+    t = tickets.create(proj, "sign-in fails", "human:t")
+    tickets.set_found(proj, t["id"], FOUND, "agent:claude")
+    tickets.tidy(proj, t["id"], "Sign-in fails", "agent:claude")
+    tickets.check_add(proj, t["id"], "Look at it", "agent:claude")
+    p = runs.fresh_prompt(tickets.load(proj, t["id"]), [], proj)
+    assert "PREPARE this new ticket" in p and "you do not do again" in p
+    tickets.prepared(proj, t["id"], "agent:claude")
+    assert "PREPARE this new ticket" not in runs.fresh_prompt(tickets.load(proj, t["id"]), [], proj)
+    # an old ticket that was tidied before Prepare existed is not prepared again
+    old = tickets.create(proj, "old", "human:t")
+    tickets.tidy(proj, old["id"], "Old", "agent:claude")
+    assert "PREPARE this new ticket" not in runs.fresh_prompt(tickets.load(proj, old["id"]), [], proj)
+
+
+def test_a_long_what_i_found_says_it_was_shortened(proj):
+    t = tickets.create(proj, "x", "human:t")
+    many = {
+        "sources": [
+            {"name": f"source {i}", "link": "https://example.com/" + "a" * 400, "lines": "b" * 290}
+            for i in range(20)
+        ],
+        "facts": ["c" * 290] * 10,
+    }
+    t = tickets.set_found(proj, t["id"], many, "agent:claude")
+    text = runs.found_text(t)[0]
+    assert "shortened: the whole part is in orch ticket show" in text

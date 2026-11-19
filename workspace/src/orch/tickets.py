@@ -2240,7 +2240,7 @@ def parse_range(text: object, kind: str):
     if text is None or isinstance(text, int | float | tuple):
         return text
     s = str(text).strip().replace("$", "").replace(" ", "").replace("–", "-")
-    num = r"\d+" if kind == "minutes" else r"\d+(?:\.\d+)?"
+    num = r"\d+" if kind == "minutes" else r"\d*\.?\d+"
     m = re.fullmatch(rf"({num})(?:-({num}))?", s)
     if not m:
         what = "whole minutes" if kind == "minutes" else "dollars"
@@ -2256,9 +2256,9 @@ def parse_range(text: object, kind: str):
 
 
 def _estimate(minutes: object, cost: object) -> dict | None:
-    """ORCH-189: the helper's own estimate from its first run (helper minutes, dollars at list price). Either may
-    be a (low, high) range (ORCH-740): stored as minutes/cost = the high end, so every older reader keeps a
-    number, and minutes_low/cost_low = the low end."""
+    """ORCH-189: the helper's own estimate from its first run (helper minutes, dollars at list price).
+    Either may be a (low, high) range (ORCH-740): stored as minutes/cost = the high end, so every older
+    reader keeps a number, and minutes_low/cost_low = the low end."""
     if minutes is None and cost is None:
         return None
     out: dict = {}
@@ -2353,7 +2353,7 @@ def tidy(
     return apply_op(root, tid, op, by=by)[0]
 
 
-# Prepare (ORCH-740, accepted draft ORCH-730 2a/2b): what the helper fills besides tidy's fields, and its words.
+# Prepare (ORCH-740, accepted draft ORCH-730 2a/2b): what the helper fills besides tidy's fields.
 PREPARE_FIELDS = {"asked_by": "Asked by", "maybe_same": "Maybe the same as", "needs_ok": "Needs your OK for"}
 PREPARED_PREFIX = "Prepared:"
 FOUND_MAX_SOURCES = 20
@@ -2488,14 +2488,18 @@ def prepare_lines(ticket: dict, root: Path | None = None) -> list[str]:
         missed = [x for x in src if x.get("opened") is not True]
         lines = ["What I found:"]
         lines += [
-            f"  - {x.get('name', '?')}" + (f" ({x['link']})" if x.get("link") else "") + f": {x.get('lines', '')}"
+            f"  - {x.get('name', '?')}"
+            + (f" ({x['link']})" if x.get("link") else "")
+            + f": {x.get('lines', '')}"
             for x in read
         ]
         lines += [f"  * {f}" for f in found.get("facts") or [] if isinstance(f, str)]
         if missed:
             lines.append("Could not open:")
             lines += [
-                f"  - {x.get('name', '?')}" + (f" ({x['link']})" if x.get("link") else "") + f": {x.get('why', '')}"
+                f"  - {x.get('name', '?')}"
+                + (f" ({x['link']})" if x.get("link") else "")
+                + f": {x.get('why', '')}"
                 for x in missed
             ]
         out.append("\n".join(lines))
@@ -2503,7 +2507,8 @@ def prepare_lines(ticket: dict, root: Path | None = None) -> list[str]:
 
 
 def set_found(root: Path, tid: str, data: object, by: str) -> dict:
-    """Write the ticket's What I found part (ORCH-740): what Prepare read from the sources the ticket points to,
+    """Write the ticket's What I found part (ORCH-740): what Prepare read from the sources the ticket points
+    to,
     one or two lines each with its link, the key facts, and the sources it could not open with the reason.
     A later call replaces it whole (the helper gathered again). Information, never instructions: later helpers
     get it labelled as such. Nothing with a secret in it is written (R5.2)."""
@@ -2516,29 +2521,43 @@ def set_found(root: Path, tid: str, data: object, by: str) -> dict:
         again = isinstance(ticket.get("found"), dict)
         ticket["found"] = {**found, "by": by[:100], "at": now()}
         add_history(
-            ticket, by, ("What I found, gathered again: " if again else "What I found: ") + sources_words(found)
+            ticket,
+            by,
+            ("What I found, gathered again: " if again else "What I found: ") + sources_words(found),
         )
 
     return apply_op(root, tid, op, by=by)[0]
 
 
+def is_prepared(root: Path, ticket: dict) -> bool:
+    """The ticket has its Prepared line (ORCH-740)."""
+    texts = (
+        str(h.get("text", "")).removeprefix(history.SYNCED_UNVERIFIED) for h in history.lines(root, ticket)
+    )
+    return any(t.startswith(PREPARED_PREFIX) for t in texts)
+
+
 def prepared(root: Path, tid: str, by: str) -> dict:
-    """End of Prepare (ORCH-740): one history line that says what it read and filled, e.g. "Prepared: 2 sources
+    """End of Prepare (ORCH-740): one history line that says what it read and filled, e.g. "Prepared: 2
+    sources
     read, 1 could not be opened; title, description, done-when, estimate, asked by, suggested plan (4 steps)".
-    Once per ticket. Refused while the description, done-when or estimate is still missing (tidy first)."""
+    Once per ticket. It names only what is there; refused while the ticket has no suggested plan (no task)."""
 
     def op(ticket):
-        texts = (str(h.get("text", "")).removeprefix(history.SYNCED_UNVERIFIED) for h in history.lines(root, ticket))
-        if any(t.startswith(PREPARED_PREFIX) for t in texts):
+        if is_prepared(root, ticket):
             raise Refused("This ticket is already prepared; go on with the work.")
-        missing = [w for k, w in (("description", "description"), ("done_when", "done-when"), ("estimate", "estimate")) if not ticket.get(k)]
-        if missing:
-            raise Refused(
-                f"Not prepared yet: the {', '.join(missing)} is missing. Fill it with orch ticket tidy {tid} first."
-            )
+        steps = [c for c in ticket.get("checklist") or [] if not c.get("wont_do")]
+        if not steps:
+            raise Refused(f'Add the suggested plan first, one task per step: orch check add {tid} "<step>"')
         filled = [] if ticket.get("title_auto") else ["title"]
-        filled += ["description", "done-when", "estimate"]
-        for k, w in (("owner", "owner"), ("asked_by", "asked by"), ("due", "due date")):
+        for k, w in (
+            ("description", "description"),
+            ("done_when", "done-when"),
+            ("estimate", "estimate"),
+            ("owner", "owner"),
+            ("asked_by", "asked by"),
+            ("due", "due date"),
+        ):
             if ticket.get(k):
                 filled.append(w)
         refs = [r for r in ticket.get("refs") or [] if isinstance(r, dict)]
@@ -2547,9 +2566,7 @@ def prepared(root: Path, tid: str, by: str) -> dict:
         for k, w in (("maybe_same", "maybe the same as"), ("needs_ok", "needs your OK for")):
             if ticket.get(k):
                 filled.append(w)
-        steps = [c for c in ticket.get("checklist") or [] if not c.get("wont_do")]
-        if steps:
-            filled.append(f"suggested plan ({len(steps)} step{'s' if len(steps) != 1 else ''})")
+        filled.append(f"suggested plan ({len(steps)} step{'s' if len(steps) != 1 else ''})")
         head = sources_words(ticket["found"]) + "; " if isinstance(ticket.get("found"), dict) else ""
         add_history(ticket, by, f"{PREPARED_PREFIX} {head}{', '.join(filled)}")
 

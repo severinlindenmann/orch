@@ -662,7 +662,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         "--maybe-same", dest="maybe_same", metavar="TICKET", help="a ticket that looks like the same work"
     )
     x.add_argument(
-        "--needs-ok", dest="needs_ok", help="what the plan will need the person's OK for (production, money...)"
+        "--needs-ok",
+        dest="needs_ok",
+        help="what the plan will need the person's OK for (production, money...)",
     )
     x = t.add_parser(
         "found",
