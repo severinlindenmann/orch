@@ -154,4 +154,5 @@ def build(data: dict, root: Path) -> dict:
         "spread": spread.build(root, accounts),
         "history": history_rows(root),
         "share": share.view(root, data["accounts"]),
+        "prepare": data.get("prepare"),  # preparing tickets on Save: used today of the daily limit (ORCH-741)
     }
