@@ -131,7 +131,7 @@ class NeedsPerson(Exception):
 
 # the ONLY check is the sign-in (owner rule, 16 Nov): never a same-computer refusal, never a check of where the
 # browser is. Kept equal to orch.pagesession.SIGNIN_MSG (the page shows the sign-in notice for it).
-SIGNIN = "Sign in to do this: open the dashboard with a sign-in link from orch."
+SIGNIN = "Sign in to do this: run orch dashboard open in your terminal."
 
 
 # Ops any scripted request may do without a page session: they are what an agent can do through the CLI as
