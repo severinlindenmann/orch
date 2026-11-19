@@ -118,8 +118,7 @@ def helper_uses(name: str, p: dict) -> str:
         }[p["read"]]
         if p["read"] == "never":
             return "nothing, never the sound"
-        extra = " · may write a missing summary" if p["write"] != "never" else ""
-        return f"{read}: transcript, summary, next steps; never the sound{extra}"
+        return f"{read} · never the sound"
     return "nothing"
 
 
@@ -223,6 +222,7 @@ def _meetings_tile(root: Path, p: dict, needs: list, who: Who) -> dict:
         "status": f"{len(items)} meeting" + ("" if len(items) == 1 else "s"),
         "line": last["title"] if last else "No meeting has arrived yet.",
         "changed": last.get("arrived") if last else None,
+        "changed_word": "arrived",
         "source": ", ".join(w["name"] for w in recs) or None,
     }
 

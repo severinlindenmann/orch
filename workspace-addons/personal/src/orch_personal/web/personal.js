@@ -75,7 +75,7 @@
     const tone = {ok: 'done', empty: 'working', stopped: 'attn'}[t.state] || '';
     const card = el('article', 'card part-tile');
     card.append(el('div', 'card-h', el('h2', null, link('#' + t.part, 'part-tile-link', t.label)), el('span', 'badge ' + tone, t.status)));
-    const body = el('div', 'part-tile-body', el('p', 'glance', el('strong', null, t.line), t.changed ? el('span', 'side meta', 'changed ' + when(t.changed)) : null));
+    const body = el('div', 'part-tile-body', el('p', 'glance', el('strong', null, t.line), t.changed ? el('span', 'side meta', (t.changed_word || 'changed') + ' ' + when(t.changed)) : null));
     if (t.source) body.append(el('p', 'meta', t.source));
     card.append(body, el('div', 'part-tile-foot meta', 'Helpers can use: ' + t.uses));
     return card;
