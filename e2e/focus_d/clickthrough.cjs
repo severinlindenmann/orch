@@ -134,7 +134,7 @@ async function runOne(ctx, step, [w, h], o, urls) {
       await page.waitForSelector('body[data-mw-boot], #mw-page *', { state: 'attached', timeout: 10000 });
       if (step.draft.act) await step.draft.act(page);
     } else {
-      await step.run({ page, dash: urls.dash, focus: urls.focus, width: w });
+      await step.run({ page, dash: urls.dash, width: w });
     }
     await page.waitForTimeout(400); // let any move end before the picture
     await page.screenshot({ path: path.join(o.out, shot(step, w, o.target === 'draft')), fullPage: false });
@@ -170,13 +170,8 @@ async function main() {
   let browser, profile;
   try {
     if (o.target === 'dashboard' && todo.length) {
-      const needFocus = todo.some(s => s.focus); // steps on today's Focus page need its own server
       servers.push(await serve('workspace-addons/dashboard', 'e2e/focus_insights/dashboard_server.py', 'focus-d-dash'));
       urls.dash = servers[0].base;
-      if (needFocus) {
-        servers.push(await serve('workspace-addons/focus', 'e2e/focus_insights/server.py', 'focus-d-focus'));
-        urls.focus = servers[1].base;
-      }
     }
     const { chromium } = playwright();
     profile = fs.mkdtempSync(path.join(os.tmpdir(), 'focus-d-prof-'));
