@@ -1147,7 +1147,27 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
         f"Files you make for this ticket (reports, exports, drafts) go in the folder printed by "
         f"orch ticket artifacts-dir {tid}, unless the person asked for a file in the project itself.",
     ]
-    if ticket.get("title_auto"):  # the title is only the first words of what the person wrote
+    new = not tickets.tidied(root, ticket)
+    tidy_cmd = (
+        "fix typos and write a short clear title, a description (what this is about and why, 1 to 3 "
+        "sentences, from their note), and a done-when line (what must be true when it is done; when they "
+        "wrote one, keep it). Fill the owner and due date only where the person's text says them. "
+        "Also estimate the helper time in minutes and the cost in dollars at list price for the whole "
+        "ticket (shown on the ticket, next to what it really took): "
+        f'orch ticket tidy {tid} "<short clear title>" --description "<what and why>" '
+        '--done-when "<one plain line>" --estimate-minutes <n> --estimate-cost <dollars> '
+        "[--owner <name>] [--due YYYY-MM-DD]. "
+        "Their original title stays in the history. The steps come next, as tasks. "
+        "Do this before you add tasks."
+    )
+    if ticket.get("title_auto") and new:  # ORCH-737: a placeholder title gets the whole tidy, in one step
+        out.insert(
+            1,
+            "The title above is only a placeholder (the first words of what the person wrote). FIRST read "
+            f"their text (the note, and any files in .orch/tickets/{tid}/artifacts/), then tidy this new "
+            "ticket, directly, do not ask anyone, so the person does not have to write it: " + tidy_cmd,
+        )
+    elif ticket.get("title_auto"):  # tidied before, the title still a placeholder: only the title is left
         out.insert(
             1,
             "The title above is only a placeholder (the first words of what the person wrote). FIRST read "
@@ -1157,21 +1177,11 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
             '--description "<what this is about>". Do this before you add tasks. It only works while the '
             "title is a placeholder: a title a person wrote is never changed.",
         )
-    elif not tickets.tidied(root, ticket) and not ticket.get("checklist"):  # first pickup of a new ticket
+    elif new and not ticket.get("checklist"):  # first pickup of a new ticket
         out.insert(
             1,
             "FIRST tidy this new ticket, directly, do not ask anyone, so the person does not have to "
-            "write it: "
-            "fix typos and write a short clear title, a description (what this is about and why, 1 to 3 "
-            "sentences, from their note), and a done-when line (what must be true when it is done; when they "
-            "wrote one, keep it). Fill the owner and due date only where the person's text says them: "
-            "Also estimate the helper time in minutes and the cost in dollars at list price for the whole "
-            "ticket (shown on the ticket, next to what it really took): "
-            f'orch ticket tidy {tid} "<short clear title>" --description "<what and why>" '
-            '--done-when "<one plain line>" --estimate-minutes <n> --estimate-cost <dollars> '
-            "[--owner <name>] [--due YYYY-MM-DD]. "
-            "Their original title stays in the history. The steps come next, as tasks. "
-            "Do this before you add tasks.",
+            "write it: " + tidy_cmd,
         )
     out[1:1] = (
         _plan_first_plan(ticket) + _epic_plan(ticket, root) + _done_when_plan(ticket)

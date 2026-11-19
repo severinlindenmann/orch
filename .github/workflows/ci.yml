@@ -78,7 +78,7 @@ jobs:
             workspace: ['workspace/**', 'workspace-addons/*/src/**', 'contracts/**', 'install.ps1', 'install.sh', 'e2e/windows/**', '.github/workflows/workspace.yml']
             smoke: ['workspace/**', 'workspace-addons/**', 'install.ps1', 'install.sh', 'e2e/ci/**', '.github/workflows/cli-smoke.yml']
             e2e: ['workspace/**', 'workspace-addons/**', 'e2e/**', 'install.sh', '.github/workflows/e2e-smoke.yml']
-            addons: ['workspace-addons/**', 'workspace/**', 'contracts/**', 'e2e/focus_insights*', '.github/workflows/addons.yml']
+            addons: ['workspace-addons/**', 'workspace/**', 'contracts/**', 'e2e/focus_insights*', 'e2e/scenarios_services.py', 'e2e/dash_services_tab.cjs', '.github/workflows/addons.yml']
             publish: ['publish/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', 'workspace/src/orch/templates/**', '.github/workflows/publish.yml']
             relay: ['relay/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', '.github/workflows/relay.yml']
             # only the contracts the phone tests read (blocks, crypto, look, relay-api, message, chat-groups, vectors, examples, review)
