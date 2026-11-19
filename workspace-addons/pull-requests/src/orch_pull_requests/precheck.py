@@ -10,7 +10,7 @@ The command is the person's setting, never read from the repository, and runs in
 the group commit's files (`git archive`, then a fresh repository of its own with them as one commit: no link back
 to the queue's git copy, so the code can never plant a hook or config there) with a throw-away home: HOME, USERPROFILE and ORCH_HOME point into that folder and
 ORCH_HOME_STRICT=1, so the orch of this computer is never touched by accident. Only PATH, the language and uv's own
-cache and Python folders are kept from this computer's environment (shared for speed, as every local test run
+cache and Python folders are kept from the queue machine's environment (shared for speed, as every local test run
 here shares them). It is no sandbox against hostile code: it runs only pull requests the queue takes, i.e. of its
 own login and never from a fork. Trouble (no copy, no command, too slow) is never red: the group run decides then.
 """
