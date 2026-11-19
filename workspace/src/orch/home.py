@@ -417,8 +417,10 @@ MOVED_FROM = (
     "If you moved it here, run this yourself in a terminal in this folder: " + MOVE_HERE
 )
 COPY_OF = (
-    "Refused: this folder is a copy of {old} (copied or moved, and that folder still has the same "
-    "workspace id). Its saved keys stay with {old}."
+    "Refused: this folder is a copy of {old} (copied or moved, and that folder is still there), so its saved "
+    "keys stay with {old}. If {old} is not this workspace any more, rename it, then run "
+    + MOVE_HERE
+    + " again."
 )
 
 
@@ -433,15 +435,19 @@ class BoundElsewhere(Refused):
 
 
 def _still_there(old: str, wid: str | None) -> bool:
-    """The folder at `old` still exists and still carries this workspace id: a copy, not a move. Cannot be
-    told (no id, an unreadable folder): a copy (fail closed, never re-bound)."""
+    """A copy, not a move: the folder at `old` still exists and does not clearly belong to ANOTHER workspace
+    (its own valid id, different from `wid`). The same id, no id, a damaged or unreadable id (an agent can
+    delete or break .local-id in the original) all count as a copy: fail closed, never re-bound."""
     from orch import addons
 
     if not wid:
         return True
     try:
         p = Path(old)
-        return p.is_dir() and addons.read_local_id(p) == wid
+        if not os.path.lexists(p):
+            return False  # gone: a move
+        other = addons.read_local_id(p) if p.is_dir() and not p.is_symlink() else None
+        return other is None or other == wid
     except Exception:  # noqa: BLE001 - fail closed
         return True
 
@@ -593,10 +599,15 @@ def binding_state(root: Path) -> str:
     return binding_check(root)[0]
 
 
-def move_here(root: Path) -> dict:
+CHANGED_WHILE_ASKED = "This folder changed while orch asked, so nothing was moved. Run it again."
+
+
+def move_here(root: Path, expect_id: str, expect_old: str) -> dict:
     """Re-bind this workspace's key folder to its new real path after the folder was moved (N17 stays: a copy,
     a missing or loose binding, or a second folder bound to this path is refused). The caller makes sure a
-    person asked for it. Returns {"moved": bool, "old": path, "new": path, "id": workspace id}."""
+    person asked for it, about exactly `expect_id` bound to `expect_old`: both are checked again under the
+    lock (.local-id is workspace-writable and could be swapped while the question waits).
+    Returns {"moved": bool, "old": path, "new": path, "id": workspace id}."""
     from orch import addons
 
     home = guarded_home(root)
@@ -606,6 +617,8 @@ def move_here(root: Path) -> dict:
     own = addons.read_local_id(root)
     if own is None:
         raise Refused("This folder has no orch workspace id, so there are no saved keys to move.")
+    if own != expect_id:
+        raise Refused(CHANGED_WHILE_ASKED)
     d = keys / own
     if not d.is_dir() or d.is_symlink():
         raise Refused("No saved keys belong to this folder's workspace id, so there is nothing to move.")
@@ -613,6 +626,8 @@ def move_here(root: Path) -> dict:
     _check_dir(keys)
     with _folders_lock(keys):  # the same step as "one key folder per path" in key_dir
         _check_dir(d)
+        if addons.read_local_id(root) != expect_id:
+            raise Refused(CHANGED_WHILE_ASKED)
         f = d / "binding.json"
         try:
             stored = json.loads(_read_guarded(f).decode("utf-8")).get("realpath")
@@ -628,6 +643,8 @@ def move_here(root: Path) -> dict:
             same = False
         if same:
             return {"moved": False, "old": stored, "new": here, "id": own}
+        if stored != expect_old:
+            raise Refused(CHANGED_WHILE_ASKED)
         if _still_there(stored, own):
             raise Refused(COPY_OF.format(old=stored))
         if any(n != own for n in _bound_folders(root, home, own)):

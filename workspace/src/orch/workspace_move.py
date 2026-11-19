@@ -26,19 +26,25 @@ def _hash_key(path: str) -> str:
     return hashlib.sha256(path.encode("utf-8")).hexdigest()[:32]  # = config._perm_key of that real path
 
 
-def _rewrite(f: Path, change) -> bool:
-    """Apply `change(doc) -> bool` to the JSON in `f` and replace it atomically, keeping the file's rights; a
-    link, a missing or malformed file, or a file that changed meanwhile (three tries): untouched."""
+MOVED, NONE, FAILED = "moved", "none", "failed"
+
+
+def _rewrite(f: Path, change) -> str:
+    """Apply `change(doc) -> bool` to the JSON in `f` and replace it atomically, keeping the file's rights.
+    MOVED; NONE (no file, or nothing of the old path in it); FAILED (a link, a malformed or unreadable file, a
+    write error, or a file that kept changing): then it is untouched and the move stops before the keys."""
+    if not os.path.lexists(f):
+        return NONE
     if f.is_symlink() or not f.is_file():
-        return False
+        return FAILED
     for _ in range(3):
         try:
             raw = f.read_bytes()
             doc = json.loads(raw)
         except (OSError, ValueError):
-            return False
+            return FAILED
         if not change(doc):
-            return False
+            return NONE
         tmp = f.with_name(f".{f.name}.orch-move-{os.getpid()}.tmp")
         try:
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, f.stat().st_mode & 0o777)
@@ -48,15 +54,15 @@ def _rewrite(f: Path, change) -> bool:
             if f.read_bytes() != raw:
                 continue
             os.replace(tmp, f)
-            return True
+            return MOVED
         except OSError:
-            return False
+            return FAILED
         finally:
             try:
                 tmp.unlink()
             except OSError:
                 pass
-    return False
+    return FAILED
 
 
 def _rename_key(old_key: str, new_key: str):
@@ -102,26 +108,31 @@ def _rename_field(old: str, new: str, wid: str | None = None):
     return change
 
 
-def move_records(home: Path, old: str, new: str, wid: str) -> list[str]:
-    """Move the old path's entries in the orch home to the new path. Returns the files changed."""
-    from orch import services
-
-    done = []
+def move_records(home: Path, old: str, new: str, wid: str) -> tuple[list[str], list[str]]:
+    """Move the old path's entries in the orch home to the new path: (files changed, files that failed).
+    Safe to run again: what already moved has nothing of the old path left."""
+    done, failed = [], []
     for name, change in (
         ("permissions.json", _rename_key(_hash_key(old), _hash_key(new))),
         ("copies.json", _rename_key(_hash_key(old), _hash_key(new))),
         ("ports.json", _rename_prefix(old, new)),
         ("consent.json", _rename_field(old, new, wid)),
     ):
-        if _rewrite(home / name, change):
-            done.append(name)
+        got = _rewrite(home / name, change)
+        (done if got == MOVED else failed if got == FAILED else []).append(name)
+    return done, failed
+
+
+def move_running(home: Path, old: str, new: str) -> bool:
+    """running.json is only a hint for restarts (written under the services lock): best effort, after the
+    keys moved. False when it could not be updated (then services started in the old folder restart once)."""
+    from orch import services
+
     try:
-        with services.locked(timeout=30):  # running.json is written under the services lock
-            if _rewrite(home / "running.json", _rename_field(old, new)):
-                done.append("running.json")
+        with services.locked(timeout=30):
+            return _rewrite(home / "running.json", _rename_field(old, new)) != FAILED
     except Refused:
-        pass  # only a hint for restarts; never blocks the move
-    return done
+        return False
 
 
 def is_person(by: str | None) -> bool:
@@ -140,7 +151,9 @@ def is_person(by: str | None) -> bool:
 
 
 def move_here(root: Path, *, by: str | None = None, ask=input) -> dict:
-    """The whole command: person check, the question with both folders, re-bind, then the records."""
+    """The whole command: person check, the question with both folders, the records, then the re-bind (checked
+    again under the lock against what the person was asked). A record that cannot be moved stops it before the
+    keys, so running it again finishes the job."""
     from orch import addons
     from orch import home as orch_home
 
@@ -154,7 +167,8 @@ def move_here(root: Path, *, by: str | None = None, ask=input) -> dict:
         raise Refused("No saved keys belong to this folder, so there is nothing to move.")
     if state == "copy":
         raise Refused(orch_home.COPY_OF.format(old=old))
-    if state != "moved":
+    wid = addons.read_local_id(root)
+    if state != "moved" or old is None or wid is None:
         orch_home.key_dir(root, create=False)  # says what is wrong in its own words
         raise Refused(orch_home.TRY_AGAIN)
     try:
@@ -163,8 +177,17 @@ def move_here(root: Path, *, by: str | None = None, ask=input) -> dict:
         answer = ""
     if answer.strip().lower() not in ("y", "yes"):
         raise Refused("Nothing was moved.")
-    res = orch_home.move_here(root)
-    files = ["binding.json"] if res["moved"] else []
+    home = addons.home()
+    files, failed = move_records(home, old, new, wid)
+    if failed:
+        raise Refused(
+            f"orch could not update {', '.join(failed)} in your orch folder, so the saved keys were not "
+            "moved. Close other orch windows and run it again."
+        )
+    res = orch_home.move_here(root, expect_id=wid, expect_old=old)
+    out = {"moved": res["moved"], "old": res["old"], "new": res["new"], "files": [*files]}
     if res["moved"]:
-        files += move_records(addons.home(), res["old"], res["new"], res["id"])
-    return {"moved": res["moved"], "old": res["old"], "new": res["new"], "files": files}
+        out["files"].insert(0, "binding.json")
+        if not move_running(home, old, new):
+            out["not_moved"] = ["running.json"]
+    return out

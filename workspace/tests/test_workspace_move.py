@@ -117,7 +117,8 @@ def test_a_copy_is_refused_and_the_original_keeps_its_keys(tws, acct, person):
     with pytest.raises(Refused, match="is a copy of"):
         workspace_move.move_here(copy, ask=_yes)
     with pytest.raises(Refused, match="is a copy of"):
-        orch_home.move_here(copy)  # the core step refuses on its own too
+        wid = addons.read_local_id(copy)
+        orch_home.move_here(copy, expect_id=wid, expect_old=os.path.realpath(tws))  # the core refuses too
     assert keystore.get_value(tws, "k") == TOKEN
 
 
@@ -150,14 +151,69 @@ def test_the_old_paths_records_move_along(tws, acct, person):
     tws.rename(m)
     new = os.path.realpath(m)
     res = workspace_move.move_here(m, ask=_yes)
-    assert set(res["files"]) >= {
-        "binding.json",
-        "permissions.json",
-        "ports.json",
-        "consent.json",
-        "running.json",
-    }
+    assert set(res["files"]) == {"binding.json", "permissions.json", "ports.json", "consent.json"}
+    assert "not_moved" not in res
     assert json.loads((home / "permissions.json").read_text()) == {h(new): "full", "other": "ask"}
     assert json.loads((home / "ports.json").read_text()) == {f"{new}\tdashboard": 8790, "/x\tdashboard": 8791}
     assert json.loads((home / "consent.json").read_text())[0]["workspace"] == new
     assert json.loads((home / "running.json").read_text())[0]["workspace"] == new
+
+
+def test_an_id_swapped_while_the_question_waits_moves_nothing(moved, acct, person):
+    # Codex review: .local-id is workspace-writable; the re-bind checks the id the person was asked about
+    idf = moved / ".orch" / ".local-id"
+
+    def swap(q):
+        idf.write_text("f" * 32)
+        return "y"
+
+    with pytest.raises(Refused, match="changed while orch asked"):
+        workspace_move.move_here(moved, ask=swap)
+
+
+def test_the_core_step_checks_the_confirmed_id_and_folder(moved):
+    wid = addons.read_local_id(moved)
+    with pytest.raises(Refused, match="changed while orch asked"):
+        orch_home.move_here(moved, expect_id="e" * 32, expect_old="/x")
+    with pytest.raises(Refused, match="changed while orch asked"):
+        orch_home.move_here(moved, expect_id=wid, expect_old="/not/the/old/folder")
+    assert orch_home.binding_state(moved) == "moved"
+
+
+def test_an_original_whose_id_was_removed_still_counts_as_a_copy(tws, acct, person):
+    # Codex review: a missing or broken id in the original folder must not let a copy take its keys
+    copy = acct / ".orch-test" / "copy"
+    shutil.copytree(tws, copy)
+    (tws / ".orch" / ".local-id").unlink()
+    assert orch_home.binding_state(copy) == "copy"
+    with pytest.raises(Refused, match="is a copy of"):
+        workspace_move.move_here(copy, ask=_yes)
+    shutil.rmtree(tws / ".orch")
+    with pytest.raises(Refused, match="is a copy of"):  # a plain folder left at the old place: still refused
+        workspace_move.move_here(copy, ask=_yes)
+
+
+def test_a_new_workspace_at_the_old_place_does_not_block_the_move(tws, acct, person):
+    m = acct / ".orch-test" / "moved"
+    tws.rename(m)
+    (tws / ".orch").mkdir(parents=True)
+    (tws / ".orch" / ".local-id").write_text("a" * 32)  # another workspace now lives at the old path
+    assert workspace_move.move_here(m, ask=_yes)["moved"]
+    assert keystore.get_value(m, "k") == TOKEN
+
+
+def test_a_record_that_cannot_be_moved_stops_before_the_keys_and_a_retry_finishes(tws, acct, person):
+    # Codex review: a failed record was skipped and could never be retried once the keys moved
+    old = os.path.realpath(tws)
+    home = addons.home()
+    (home / "ports.json").write_text(json.dumps({f"{old}\tdashboard": 8790}))
+    (home / "permissions.json").mkdir()  # cannot be read as a file: a failure
+    m = acct / ".orch-test" / "moved"
+    tws.rename(m)
+    with pytest.raises(Refused, match="permissions.json"):
+        workspace_move.move_here(m, ask=_yes)
+    assert orch_home.binding_state(m) == "moved"  # the keys did not move
+    (home / "permissions.json").rmdir()
+    res = workspace_move.move_here(m, ask=_yes)
+    assert res["moved"] and "ports.json" not in res["files"]  # moved in the first try already
+    assert json.loads((home / "ports.json").read_text()) == {f"{os.path.realpath(m)}\tdashboard": 8790}
