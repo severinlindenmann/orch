@@ -53,7 +53,14 @@ START_LABELS = {
 }
 # "cost" was not a label before ORCH-478: every earlier set gets the word it said then ("target"), nothing else changes.
 EARLIER_START_LABELS = (
-    {"stops": "Stops", "steps": "Steps", "crew": "Crew", "cap": "Cap", "ship": "Ship", "cost": "target"},  # up to release 32
+    {
+        "stops": "Stops",
+        "steps": "Steps",
+        "crew": "Crew",
+        "cap": "Cap",
+        "ship": "Ship",
+        "cost": "target",
+    },  # up to release 32
     {  # until the owner's word list (ORCH-300)
         "stops": "I will pause at",
         "steps": "Steps",
