@@ -48,6 +48,15 @@ def tickets(root):
     return call(root, "ticket", "list", "--all")
 
 
+def own_tickets(root):
+    """Only the tickets with Factory's data (orders and their crew), without reading every ticket (ORCH-603).
+    An orch without `--ext` refuses it: then the full list."""
+    try:
+        return call(root, "ticket", "list", "--all", "--ext", "factory")
+    except Refused:
+        return tickets(root)
+
+
 def set_ext(root, ticket, by=None, **changes):
     ext = dict(ticket.get("ext", {}).get("factory", {}))
     ext.update(changes)

@@ -668,3 +668,22 @@ def test_unreadable_tickets_merge_nothing(ws, monkeypatch):
 
 def test_card_keys_ignore_case():
     assert runner.pr_key("https://github.com/Acme/App/pull/007") == runner.pr_key(url(7)) == "acme/app#7"
+
+
+def test_a_wake_with_no_free_slot_waits_in_line_at_high_priority(ws, monkeypatch):
+    """ORCH-688: a pull request the queue dropped holds up the line; its helper must not wait behind new work."""
+    from orch import runs
+
+    from orch_pull_requests import checks
+
+    seen = {}
+
+    def start(root, tid, by, **kw):
+        seen.update(kw)
+        raise runs.Busy("waits in line", {})
+
+    monkeypatch.setattr(runs, "read", lambda root, tid: None)
+    monkeypatch.setattr(runs, "pending_add", lambda *a: None)
+    monkeypatch.setattr(runs, "start", start)
+    assert checks.wake(ws, "t_abc123", "fix it") == "the helper waits in line for a free slot"
+    assert seen["priority"] == "high"

@@ -8,6 +8,8 @@
 - `alone_paths`: a pull request that changes a file under one of these runs alone in its own queue group (never
   with others), so its green run is the proof before it counts. Default: CI (`.github/`) and the merge queue's
   own code in the orch repository.
+- `overlap`: while a group's checks run, the next group is built on top of it and checked at the same time; it
+  merges only after the group before it merged (ORCH-432). Default true; `false` checks one group at a time.
 - `max_group`: how many pull requests go into one queue group at most. Default 5, from 1 to 20; any other value
   means the default. Read at the start of every round, so a change counts without restarting the runner.
 - `merge_alone`: true (default) = a pull request waiting alone whose own checks are green and whose files the
@@ -63,6 +65,10 @@ def alone_paths(root: Path) -> list[str]:
     if not isinstance(got, list) or not all(isinstance(x, str) for x in got):
         return list(DEFAULT_ALONE)
     return [x.strip().lstrip("/") for x in got if x.strip()]
+
+
+def overlap(root: Path) -> bool:
+    return _table(root).get("overlap") is not False
 
 
 def merge_alone(root: Path) -> bool:
