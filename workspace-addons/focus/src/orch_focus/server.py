@@ -646,8 +646,10 @@ class Tracker:
 
 
 def _link_msg(session, name: str) -> bytes:
-    from orch.pagesession import REVOKED_MSG
+    from orch.pagesession import AGENT_STARTED_MSG, REVOKED_MSG
 
+    if not session.active:
+        return AGENT_STARTED_MSG.encode()
     if session.revoked:
         return REVOKED_MSG.encode()
     return f"This link was already used. Open {name} again from orch.".encode()

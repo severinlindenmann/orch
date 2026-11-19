@@ -43,6 +43,10 @@ SIGNIN_MSG = "Sign in to do this: open the dashboard with a sign-in link from or
 SIGNIN_PREFIX = "Sign in to "  # session.js shows the sign-in notice for a refusal that starts with this
 VOUCH_HEADER = "X-Orch-Person"  # the dashboard's word to an add-on page behind it: the person sent this
 SESSION_LIFE = 30 * 24 * 3600  # seconds a page session lasts (cookie Max-Age and the kept session file)
+AGENT_STARTED_MSG = (
+    "Sign-in is off because an agent started this page. Restart it from your own terminal: "
+    "run orch stop, then orch start."
+)
 REVOKED_MSG = "Someone else tried to use this sign-in link. Open the dashboard again from orch."
 
 
