@@ -280,7 +280,12 @@
     card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'The sound'), el('p', 'meta', 'It stays in the recorder on this computer.')), el('span', 'badge', 'Never')));
     return card;
   }
-  async function meetingPanel(id) {
+  function dueDay(d) {
+    // a plain day (2026-11-20) reads as "Fri 20 Nov"; anything else the recorder wrote stays as it is
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d || '')) return d || '';
+    return new Date(d + 'T12:00:00').toLocaleDateString([], {weekday: 'short', day: 'numeric', month: 'short'});
+  }
+  async function meetingPanel(id, calm) {
     const panel = el('article', 'split-panel stack');
     panel.tabIndex = -1;
     let m;
@@ -295,14 +300,15 @@
     if (!m.steps.length) panel.append(el('p', 'muted', 'Nobody took a next step in this meeting.'));
     const box = el('div', 'card');
     const ticked = new Set(open.map(s => s.n));
-    const make = button('', 'btn primary', async () => {
+    // one filled button per screen: an answer waiting above (did everyone agree?) keeps this one outlined
+    const make = button('', calm ? 'btn outline' : 'btn primary', async () => {
       if (!ticked.size) return;
       make.disabled = true;
       await meetAct('meet_tickets', {id: m.id, steps: [...ticked]}, r => r.made.length === 1 ? 'Made 1 ticket: ' + r.made[0].key : 'Made ' + r.made.length + ' tickets.');
     });
     const label = () => { make.textContent = ticked.size === 1 ? 'Make 1 ticket' : 'Make ' + ticked.size + ' tickets'; make.disabled = !ticked.size; };
     for (const s of m.steps) {
-      const said = [s.who && 'Said by ' + s.who, s.due && 'until ' + s.due].filter(Boolean).join(' · ');
+      const said = [s.who && 'Said by ' + s.who, s.due && 'until ' + dueDay(s.due)].filter(Boolean).join(' · ');
       const text = el('span', 'grow', el('strong', null, s.text), said ? el('span', 'subline', said) : null);
       if (s.ticket) {
         box.append(el('div', 'list-row', text, el('span', 'chip', m.keys[s.ticket] || s.ticket)));
@@ -371,7 +377,7 @@
         list.append(row);
       }
     }
-    split.append(list, id ? await meetingPanel(id) : el('div', 'split-panel muted', 'Pick a meeting to read it.'));
+    split.append(list, id ? await meetingPanel(id, d.waiting.length > 0) : el('div', 'split-panel muted', 'Pick a meeting to read it.'));
     out.push(split, meetRulesCard(rules), el('p', 'footnote meta', d.consent + ' Helpers use: orch personal meetings show <meeting>.'));
     return out;
   }
