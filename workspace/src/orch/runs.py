@@ -605,6 +605,10 @@ def claim(
     record. prepare: a prepare-only run (ORCH-738): the ticket stays in Backlog, marked Preparing."""
     ticket = tickets.load(root, tid)
     with locked(root, tid):
+        if prepare:
+            ticket = tickets.load(
+                root, tid
+            )  # read again under the lock: a person may have moved it meanwhile
         cur = read(root, tid)
         if cur:
             st = state(cur)
@@ -622,6 +626,8 @@ def claim(
                     _write(root, cur)
                 raise _busy(cur, why, queued)
             # dead pid, or maybe-stale with --take-over: the old claim is replaced
+        if prepare and (ticket.get("status") != "open" or ticket.get("started")):
+            raise Refused("Only a ticket in Backlog that no helper started yet can be prepared.")
         _drop_start_prompts_locked(root, tid)
         rec = _new_record(tid, by, agent, mode, ticket, reason, Path(folder) if folder else root)
         if pid:
@@ -1261,7 +1267,7 @@ def prepare_prompt(ticket: dict, items: list[dict], root: Path) -> str:
 def _prepared_start_plan(ticket: dict) -> list[str]:
     """A Start after Prepare continues the prepare conversation: the work begins now (ORCH-739 adds more)."""
     p = ticket.get("prepare") if isinstance(ticket.get("prepare"), dict) else {}
-    if p.get("state") != "prepared" or ticket.get("status") == "open":
+    if not p.get("state") or ticket.get("status") == "open":  # also after a Prepare that did not finish
         return []
     return [
         "The person pressed Start: preparing is over. Read the ticket again (it may have changed since you "
@@ -1671,11 +1677,11 @@ def start_prepare(root: Path, tid: str, by: str, *, agent: str | None = None) ->
 
 
 def _prepare_end(root: Path, tid: str, run: str, rc: int, by: str) -> None:
-    """The prepare run ended: Prepared when the ticket was filled (title, description, done-when), else Not
+    """The prepare run ended: Prepared when the ticket is filled (description, done-when, estimate), else Not
     prepared yet with the reason. Its conversation stays recorded on the ticket for Start (wrap did that)."""
     with contextlib.suppress(Exception):
         t = tickets.load(root, tid)
-        filled = tickets.tidied(root, t) or bool(t.get("description") and t.get("done_when"))
+        filled = bool(t.get("description") and t.get("done_when") and t.get("estimate"))
         if rc == 0 and filled:
             tickets.set_prepare(root, tid, "prepared", by, run=run)
         else:
@@ -2034,9 +2040,9 @@ def wrap(
             turns <= MAX_DRAIN_TURNS and not flags.get("hung") and brake.paused(root) is None
             and not rec.get("prepare")
         )  # fmt: skip
+        if rec.get("prepare"):  # marked before the claim goes, so a Start right after sees how it ended
+            _prepare_end(root, tid, run, rc, f"agent:{name}")
         if release(root, tid, run, keep_if_pending=drain)["released"]:
-            if rec.get("prepare"):
-                _prepare_end(root, tid, run, rc, f"agent:{name}")
             if key is not None and key["turns"]:  # what the run cost on its credit, or that it is unknown
                 with contextlib.suppress(Exception):
                     tickets.log(root, tid, keystart.end_line(credit, key["turns"]), f"agent:{name}")

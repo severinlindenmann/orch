@@ -227,3 +227,29 @@ def test_prepare_keeps_a_model_the_person_chose(proj, new_ticket):
     tid = new_ticket()
     assert cli.main(["ticket", "model", tid, "opus", "--by", "human:t"]) == 0
     assert runs.plan(proj, tid, agent="claude", prepare=True)["model"] == "opus"
+
+
+def test_start_after_a_prepare_that_did_not_finish_also_says_the_work_begins(proj, new_ticket, transcript):
+    tid = new_ticket()
+    p = runs.plan(proj, tid, agent="claude", prepare=True)
+    tickets.record_session(proj, tid, "claude", p["session"], runs.host())
+    tickets.set_prepare(proj, tid, "not_prepared", "orch", why="the helper stopped with an error")
+    tickets.set_status(proj, tid, "active", "human:t")
+    s = runs.plan(proj, tid, agent="claude")
+    assert s["resumed"] is True and "preparing is over" in s["prompt"]
+
+
+def test_a_ticket_with_done_when_only_is_not_prepared_by_a_helper_that_does_nothing(proj, run, helper):
+    helper("nothing")
+    tid = _new(run)
+    assert run("ticket", "edit", tid, "--done-when", "The report is sent", "--by", "human:t")[0] == 0
+    assert run("run", "start", tid, "--prepare", "--by", "human:t")[0] == 0
+    assert _prepare_soon(proj, tid, "not_prepared")["why"]
+
+
+def test_a_ticket_moved_out_of_backlog_before_the_claim_is_not_prepared(proj, new_ticket):
+    tid = new_ticket()
+    tickets.set_status(proj, tid, "ready", "human:t")
+    with pytest.raises(Exception, match="Backlog"):
+        runs.claim(proj, tid, "human:t", "fake", "oneshot", prepare=True)
+    assert runs.read(proj, tid) is None
