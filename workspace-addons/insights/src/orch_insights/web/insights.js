@@ -216,7 +216,8 @@ async function loadModels() {
 }
 
 function stateBadge(row) {
-  const badge = node('span', `${MARKS[row.health] || ''}${row.state.text}`, `badge ${BADGE[row.state.tone] || ''}`.trim());
+  const mark = row.ready ? MARKS.look : MARKS[row.health];  // not ready here (ORCH-534): a warning mark
+  const badge = node('span', `${mark || ''}${row.state.text}`, `badge ${BADGE[row.state.tone] || ''}`.trim());
   return badge;
 }
 
