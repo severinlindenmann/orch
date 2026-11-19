@@ -103,7 +103,7 @@
 .ticket-page .ticket-tabs{display:flex;gap:8px;border-bottom:1px solid var(--border);margin:0 0 24px;overflow-x:auto;flex-wrap:nowrap}
 .ticket-page .ticket-tabs button{border-radius:0;white-space:nowrap;padding:10px 14px;border:0;border-bottom:2px solid transparent;min-height:44px}
 .ticket-page .ticket-tabs [aria-selected=true]{color:var(--text);border-bottom-color:var(--brand);background:var(--surface-2)}
-.ticket-page .tab-count{font:12px var(--font-mono);color:var(--text-muted);margin-left:2px}
+.ticket-page .tab-count{font-size:12px;font-variant-numeric:tabular-nums;color:var(--text-muted);margin-left:2px}
 .ticket-page .ticket-layout{display:grid;grid-template-columns:minmax(0,1fr) 296px;gap:24px;align-items:start}
 .ticket-page .ticket-panel[hidden]{display:none!important}
 .ticket-page .story{display:grid;gap:24px;min-width:0}
