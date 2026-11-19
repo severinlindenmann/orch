@@ -363,6 +363,9 @@ def _last_result(runs: list[dict], tid: str) -> str | None:
         return None
     r = mine[-1]
     when = parse(r["at"]).astimezone().strftime("%a %H:%M")
+    newest = {x["script"]: x for x in mine if x.get("script")}  # a group: each script's own newest run
+    if len(newest) > 1 and any(x["exit"] != 0 for x in newest.values()):
+        return f"A script failed · {when}"
     return f"{'Done' if r['exit'] == 0 else 'Stopped'} · {when}"
 
 
