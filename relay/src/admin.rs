@@ -105,11 +105,6 @@ pub fn router(app: AppState) -> Router {
         )
         .route("/admin/api/webhooks", get(webhooks))
         .route("/admin/api/webhooks/:id", delete(del_webhook))
-        .route(
-            "/admin/api/notebooks",
-            get(list_notebooks).post(add_notebook),
-        )
-        .route("/admin/api/notebooks/:id", delete(del_notebook))
         .route("/admin/api/phones", get(list_phones).post(add_phone))
         .route(
             "/admin/api/phones/:id",
@@ -448,7 +443,6 @@ async fn del_ws(
     ] {
         tx.execute(sql, [&id])?;
     }
-    crate::notebook::forget_workspace(&tx, &id)?;
     let phones: Vec<(String, String)> = tx
         .prepare("SELECT id,workspaces FROM phones")?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
@@ -956,41 +950,6 @@ async fn del_webhook(
     if n == 0 {
         return Err(not_found("No such webhook."));
     }
-    Ok(StatusCode::NO_CONTENT)
-}
-
-// ---------- notebooks (notebook.rs) ----------
-
-async fn list_notebooks(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> {
-    guard(&app, &h)?;
-    let c = app.db.lock().unwrap();
-    Ok(Json(crate::notebook::admin_list(&c)?))
-}
-
-async fn add_notebook(
-    State(app): State<AppState>,
-    h: HeaderMap,
-    body: Bytes,
-) -> Res<(StatusCode, Json<Value>)> {
-    guard(&app, &h)?;
-    let v = parse_body(&body)?;
-    let c = app.db.lock().unwrap();
-    let r = crate::notebook::admin_add(&c, &app.cfg.public_url, &v)?;
-    Ok((StatusCode::CREATED, Json(r)))
-}
-
-async fn del_notebook(
-    State(app): State<AppState>,
-    h: HeaderMap,
-    Path(id): Path<String>,
-) -> Res<StatusCode> {
-    guard(&app, &h)?;
-    {
-        let mut c = app.db.lock().unwrap();
-        crate::notebook::admin_remove(&mut c, &id)?;
-    }
-    // An open long-poll of the removed notebook wakes and is refused.
-    app.notify.notify_waiters();
     Ok(StatusCode::NO_CONTENT)
 }
 

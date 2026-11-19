@@ -402,36 +402,6 @@ the token is stored nowhere else) and `.orch/secrets/relay.json` with url and wo
 Phone onboarding link (from the admin portal, also as QR code, valid 24 h, one use):
 `orch://pair?relay=https%3A%2F%2Frelay.severin.io&code=pc_<22 chars>`
 
-## Notebook (the small orch app on the person's notebook)
-
-One notebook belongs to exactly one workspace; a workspace has at most one. The admin adds it on the relay admin page
-(Notebooks: name + workspace) and runs the shown line on the notebook (`orch notebook connect <relay url> <code>`, code
-`nc_<22 chars>`, one use, 24 h). Nothing else pairs a notebook. Messages are type `notebook` (message.schema.json
-`$defs.notebook`), text only (no blob on any notebook route), stored encrypted at rest like every message. Every
-notebook route takes the notebook and its workspace from the token, never from the body.
-
-**Notebook auth:** `X-Orch-Notebook: nb_…` + `Authorization: Bearer orn_<43 chars>`. A workspace or phone token never
-works here, and a notebook token never works on workspace or phone routes.
-
-| Method | Path | Body | Answer |
-|---|---|---|---|
-| POST | `/v1/notebook/pair` | `{code, name?}` | `201 {notebook_id, token, workspace: {id, name}}`. Unknown code `401`; used or expired `410` (only one of two calls at the same time wins) |
-| GET | `/v1/notebook/requests?wait=0..30` | – | `{items: [message…]}`: unacked asks from its workspace, oldest first, at most 20; long-poll up to `wait` s. Not acked = handed out again (at least once). An ask past its `expires_at` is dropped, never handed out. At most 2 open calls per notebook (`429`). Each call marks the notebook seen |
-| POST | `/v1/notebook/ack` | `{ids: [m_…] ≤ 100}` | `204`; only its own asks |
-| POST | `/v1/notebook/send` | `{id, reply_to?, notebook: {kind: reply\|status, …}}` | `201 {id}`. The relay builds the message (`from` the notebook, `to` its workspace). `reply`: `reply_to` must be an ask from its workspace to this notebook (`403`), one reply per ask (`409 already_answered`); the same id and content again → `200 {id, duplicate: true}`. `status`: only the newest unfetched status waits (an older unfetched one is replaced). 60 per minute (`429`) |
-| GET | `/v1/notebooks` (workspace auth) | – | `{items: [{id, name, paired, last_seen, online, waiting}]}` (0 or 1 item). `online` = seen in the last 120 s (a waiting notebook calls at least every 30 s); `waiting` = asks not acked yet |
-
-**Asks from the workspace** go through `POST /v1/messages` (`to: nb_…`, type `notebook`, `body.notebook.kind: ask`,
-no `ticket`, no `reply_to`): only to the sender's own connected notebook (another workspace's notebook answers `404`
-like an unknown one; not connected yet `403`), `expires_at` in the future and at most 7 days away (`422`), at most 100
-waiting and 60 per minute (`429`). No other type goes to `nb_…`, and a workspace never sends `reply` or `status`.
-Every workspace check of the content (what a helper may see) happens again in the workspace; the notebook's own list of
-actions is the boundary of what runs there.
-
-Admin: `GET/POST /admin/api/notebooks` (POST `{name, workspace}` → `201 {notebook_id, code, line}`; a second notebook
-for one workspace `409`), `DELETE /admin/api/notebooks/<id>` (`204`: its token stops at once, an open long-poll is
-refused, its codes and waiting asks are deleted). Removing a workspace removes its notebook.
-
 ## Subscribers (other systems that listen)
 
 A **subscriber** is another system or agent (a team chat bot, a script, a monitoring tool, another AI agent) that the admin

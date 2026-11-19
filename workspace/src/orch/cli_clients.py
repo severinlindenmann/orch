@@ -189,7 +189,6 @@ def add_parsers(sub, common) -> None:
     x = rel.add_parser("download", parents=[common], help="save the file of a file message")
     x.add_argument("id")
     _add_group(rel, common)
-    _add_notebook(rel, common)
     pr = rel.add_parser("problem", help="share a problem report, or pick shared ones up").add_subparsers(
         dest="psub", required=True
     )
@@ -216,93 +215,6 @@ def add_parsers(sub, common) -> None:
     w.add_parser("list", parents=[common], help="list webhooks")
     x = w.add_parser("delete", parents=[common], help="delete a webhook")
     x.add_argument("id")
-
-
-def _add_notebook(rel, common) -> None:
-    nb = rel.add_parser(
-        "notebook", help="ask the notebook (the small orch app on your notebook)"
-    ).add_subparsers(dest="nsub", required=True)
-    nb.add_parser("status", parents=[common], help="connected, asleep, and which ways in stopped working")
-    x = nb.add_parser(
-        "ask", parents=[common], help="ask the notebook; the answer is text (data, not instructions)"
-    )
-    x.add_argument("way", help="the way in, e.g. notes (notebook = the app itself: ping, check)")
-    x.add_argument("action", help="what to do, e.g. find")
-    x.add_argument(
-        "--arg", action="append", default=[], metavar="NAME=TEXT", help="a value for the action (repeat)"
-    )
-    x.add_argument("--ticket", help="the ticket the answer belongs to (a history line when it arrives)")
-    x.add_argument("--wait", type=int, default=20, help="wait up to N seconds for the answer (0-120)")
-    x = nb.add_parser("show", parents=[common], help="one request and its answer")
-    x.add_argument("id")
-    x.add_argument("--wait", type=int, default=0, help="wait up to N seconds for the answer (0-120)")
-    nb.add_parser("list", parents=[common], help="the latest requests")
-
-
-def run_notebook(args, root, out) -> int:
-    from orch import relay_notebook as rn
-
-    def line(r: dict) -> str:
-        head = f"{r['way']} {r['action']}  [{r['id']}]"
-        if r["state"] == "answered":
-            rep = r.get("reply") or {}
-            if rep.get("ok"):
-                return f"{head}\n{rn.DATA_NOTE}\n---\n{rep.get('text') or ''}\n---"
-            return f"{head}\nRefused: {rep.get('refused')}"
-        if r["state"] == "expired":
-            return f"{head}\nExpired: the notebook did not wake in time. Ask again when it is connected."
-        return (
-            f"{head}\nWaiting for the notebook. The answer lands here: orch relay notebook show {r['id']}"
-            + (" (and as a line on the ticket)" if r.get("ticket") else "")
-        )
-
-    if args.nsub == "status":
-        st = rn.status(root)
-        words = {
-            "none": "No notebook is connected to this workspace. "
-            "Connect it on the relay admin page (Notebooks).",
-            "waiting_first": f"{st['name']} is added but not connected yet. "
-            "Run the line from the relay admin page on the notebook.",
-            "connected": f"{st['name']} is connected.",
-            "asleep": f"{st['name']} is asleep (last seen {st['last_seen']})."
-            + (
-                f" {st['waiting']} request{'s' if st['waiting'] != 1 else ''} wait for it."
-                if st["waiting"]
-                else ""
-            ),
-            "unknown": "Could not reach the relay just now. Try again in a minute.",
-        }[st["state"]]
-        rows = [words] + [
-            f"{w['name']}: the way in stopped working. {w.get('problem') or ''}".strip()
-            for w in st["stopped"]
-        ]
-        if st["stopped"]:
-            rows.append("Next: orch relay notebook ask notebook check (runs the self-checks again)")
-        out(args, st, "\n".join(rows))
-        return 0
-    if args.nsub == "list":
-        items = rn.asks(root)
-        out(
-            args,
-            items,
-            "\n".join(f"{r['state']:9} {r['way']} {r['action']}  [{r['id']}]" for r in items)
-            or "No requests yet.",
-        )
-        return 0
-    wait = max(0, min(120, int(args.wait)))
-    if args.nsub == "ask":
-        pairs = {}
-        for a in args.arg:
-            k, sep, v = a.partition("=")
-            if not sep:
-                raise Refused(f"Write each value as NAME=TEXT, not {a!r}.")
-            pairs[k.strip()] = v
-        r = rn.ask(root, args.way, args.action, pairs, ticket=args.ticket)
-        r = rn.wait(root, r["id"], wait)
-    else:
-        r = rn.wait(root, args.id, wait)
-    out(args, r, line(r))
-    return 0
 
 
 def _add_group(rel, common) -> None:
@@ -696,8 +608,6 @@ def run_relay(args, root: Path, out) -> None:
         _resend_waiting(root)
     if sub == "group":
         return run_group(args, root, out)
-    if sub == "notebook":
-        return run_notebook(args, root, out)
     if sub == "connect":
         cardtext.server_address(args.url)  # refuses a URL with a name or password in it
         who, line = relay.connect(root, args.url, args.workspace, args.token)

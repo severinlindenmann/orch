@@ -1042,6 +1042,17 @@ def _accept_then(ticket: dict, root: Path | None, uncovered: bool) -> str:
     return done + (_CHECK_SEND_BACK_UNCOVERED if uncovered else _CHECK_SEND_BACK)
 
 
+def _review_problem(ticket: dict, root: Path | None) -> str:
+    """ORCH-826: the problem a review ticket orch made itself found ("" when none or not one): the card says
+    it first, so the owner checks what is not good instead of reading what is."""
+    if root is None:
+        return ""
+    from orch import reviewer  # here: it reads run files, not needed for every card
+
+    found = reviewer.review_result(root, ticket)
+    return str(found["line"]) if found and not found["ok"] else ""
+
+
 def check_card(ticket: dict, root: Path | None = None) -> dict:
     """A Check result as a card, glance first (ORCH-329): one headline sentence, a progress bar, chips and
     the short step titles. Everything long (the summary, Done when, the parent, each step's evidence) sits
@@ -1067,10 +1078,11 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
             "What to do: send it back and say which part is missing,"
             " or approve it if that part does not matter."
         )
+    problem = _review_problem(ticket, root)
     card = {
         "kind": "check",
         "title": ticket.get("title", ticket["id"]),
-        "why": "The helper says this is ready for your check.",
+        "why": f"Check this: {problem}" if problem else "The helper says this is ready for your check.",
         "then": _accept_then(ticket, root, bool(uncovered)),
         "ok_label": "Looks good",
     }
@@ -1088,11 +1100,15 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
         card["files"] = files
     if steps or paras:
         pv: dict = {"type": "doc"}
-        if summary_text:
+        if problem:  # ORCH-826: the problem first, not the good news
+            pv["headline"] = _short(f"Problem found: {problem}", 200)
+        elif summary_text:
             pv["headline"] = _short(summary_text, 200)
         if total:
             pv["progress"] = {"done": done, "total": total}
         chips = _checks_chips(ticket)
+        if problem:
+            chips.insert(0, {"text": "Problem found", "tone": "bad"})
         if uncovered:
             chips.append({"text": "Done when not fully covered", "tone": "warn"})
         if chips:

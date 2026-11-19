@@ -282,6 +282,7 @@ async function chatView(page, dash) {
     else return route.fallback();
     const st = JSON.parse(JSON.stringify(barState));
     tweak(st);
+    if (body.op === 'run.send') st.send_result = { id: 'p_17', delivered: 1, state: 'idle' };  // as the server answers
     route.fulfill({ json: st });
   });
   await page.goto(dash + '/#home');
@@ -335,6 +336,102 @@ async function chatView(page, dash) {
   await page.reload();
   await mainHasText(page);
   await page.waitForFunction(a => { const el = document.querySelector(a); return el && !el.hidden; }, ask, { timeout: 10000 });
+  await noSideways(page);
+}
+
+// Step 18 (ORCH-695): the message box of a ticket's pane takes files by the clip, a pasted screenshot and a file dropped
+// on the pane; each shows as a preview (a picture's thumbnail or a file chip) that can be taken out before Send. Send
+// puts the files on the ticket (ticket.attach) and then tells the helper (run.send), the ticket page's one way. The sent
+// message carries the files as small previews and stays after a reload (orch lists it in run status sent_input).
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+async function messageBox(page, dash) {
+  const attached = [], sent = [];
+  const tweak = st => {
+    const t = (st.tickets || []).find(x => x.id === 't_bar238');
+    if (!t) return;
+    t.questions = [];
+    t.checklist = [{ id: 'c1', text: 'Files can be dropped on a ticket', done: false, evidence: [] }];
+    t.history = [{ at: new Date(Date.now() - 30 * 60e3).toISOString(), by: 'agent:factory', via: 'cli', text: 'Claude started', chat_message: false }];
+    const run = st.runs?.t_bar238;
+    if (run) run.sent_input = sent.map((text, i) => ({ id: 'p_18' + i, text, at: new Date(Date.now() - 60e3).toISOString(), by: st.me || 'human:demo', read: true }));
+  };
+  await liveBarState(page, tweak);
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (body.args?.ticket !== 't_bar238' || !['ticket.attach', 'run.send'].includes(body.op)) return route.fallback();
+    const st = JSON.parse(JSON.stringify(barState));
+    if (body.op === 'ticket.attach') { attached.push(...body.args.files.map(f => f.name)); st.attached = { saved: body.args.files.map(f => f.name), failed: [] }; }
+    else { sent.push(body.args.text); st.send_result = { id: 'p_18', delivered: 1, state: 'idle' }; }
+    tweak(st);
+    route.fulfill({ json: st });
+  });
+  await page.route(/\/api\/file\?/, route => route.fulfill({ contentType: 'image/png', body: Buffer.from(PNG, 'base64') }));
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.waitForSelector('#live-bar :is([data-lbar-open="t_bar238"], [data-lbar-list="wait"])', { timeout: 10000 });
+  if (!(await page.$('#live-bar [data-lbar-open="t_bar238"]'))) await page.click('#live-bar [data-lbar-list="wait"]');  // a phone: counts only
+  await page.click('#live-bar [data-lbar-open="t_bar238"]');
+  const pane = '#live-dock .live-pane[data-session="t_bar238"]', box = `${pane} [data-key="live-msg-box"]`, tiles = `${box} .attachment-tile`;
+  const chat = `${pane} [data-live-chat]`;
+  await page.waitForSelector(`${box} [data-live-msg-text]`, { timeout: 10000 });
+  const hint = await page.textContent(box);
+  if (!/up to 10 files, 25 MB each/.test(hint)) throw new Error('the box does not say its limits in plain words: ' + hint);
+  // the clip opens the file choice
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click(`${box} [data-attach]`)]);
+  await chooser.setFiles({ name: 'notes.md', mimeType: 'text/markdown', buffer: Buffer.from('# Notes\nKeep the old name.\n') });
+  // a screenshot pasted into the box, a file dropped on the pane (on the chat, not on the box)
+  await page.evaluate(([b, png]) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([Uint8Array.from(atob(png), c => c.charCodeAt(0))], 'image.png', { type: 'image/png' }));
+    document.querySelector(b + ' [data-live-msg-text]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  }, [box, PNG]);
+  await page.evaluate(c => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(['second file\n'], 'second.txt', { type: 'text/plain' }));
+    const at = document.querySelector(c);
+    for (const type of ['dragenter', 'dragover', 'drop']) at.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, chat);
+  await page.waitForFunction(t => document.querySelectorAll(t).length === 3 && !document.querySelector(t + ' progress:not([value="100"])'), tiles, { timeout: 5000 });
+  const names = await page.$$eval(`${tiles} .attachment-name`, els => els.map(el => el.textContent));
+  if (names[0] !== 'notes.md' || !/^Screenshot \d\d-\d\d\.png$/.test(names[1]) || names[2] !== 'second.txt') throw new Error('the previews read: ' + names.join(', '));
+  if (!(await page.$(`${tiles}:nth-child(2) img`)) || !(await page.$(`${tiles}:nth-child(1) .attachment-kind`))) throw new Error('a picture shows no thumbnail, or a file no chip');
+  // a file over the limit is refused in plain words and not added
+  await page.evaluate(b => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array(26 * 1024 * 1024)], 'huge.png', { type: 'image/png' }));
+    document.querySelector(b + ' [data-live-msg-text]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  }, box);
+  const err = await page.textContent(`${box} .attachment-error`);
+  if (!/larger than 25 MB/.test(err) || (await page.$$(tiles)).length !== 3) throw new Error('a file over 25 MB was not refused plainly: ' + err);
+  if (attached.length || sent.length) throw new Error('something was sent before Send');
+  await noSideways(page);
+  // take one out, then send
+  await page.click(`${tiles}:nth-child(1) .attachment-remove`);
+  await page.waitForFunction(t => document.querySelectorAll(t).length === 2, tiles, { timeout: 3000 });
+  await page.fill(`${box} [data-live-msg-text]`, 'Here is what I see.');
+  await page.click(`${box} [data-key="live-msg-send"]`);
+  await page.waitForFunction(t => document.querySelectorAll(t).length === 0, tiles, { timeout: 8000 });
+  if (attached.length !== 2 || attached[0] !== names[1] || attached[1] !== 'second.txt') throw new Error('the files put on the ticket: ' + attached.join(', '));
+  if (sent.length !== 1 || !sent[0].startsWith('Here is what I see.\n\nI added 2 files to this ticket: ' + names[1] + ', second.txt.')) throw new Error('the message sent: ' + JSON.stringify(sent));
+  const mine = `${chat} .live-chat-msg[data-w="y"]`;
+  const shows = async where => {
+    await page.waitForFunction(m => { const el = document.querySelectorAll(m); const last = el[el.length - 1];
+      return last && /Here is what I see\./.test(last.textContent) && last.querySelectorAll('.live-chat-file').length === 2; }, mine, { timeout: 10000 })
+      .catch(async () => { throw new Error(where + ': the chat reads ' + (await page.textContent(chat))); });
+    if (/I added 2 files/.test(await page.textContent(chat))) throw new Error(where + ': the file line shows as words');
+    if (!(await page.$(`${mine} .live-chat-file img`))) throw new Error(where + ': the sent picture has no thumbnail');
+  };
+  await shows('after Send');
+  // the sent message stays after a reload
+  await page.reload();
+  await mainHasText(page);
+  await page.waitForSelector(chat, { timeout: 10000 });
+  await shows('after a reload');
+  // the picture: two previews waiting in the box under the sent message
+  const [again] = await Promise.all([page.waitForEvent('filechooser'), page.click(`${box} [data-attach]`)]);
+  await again.setFiles([{ name: 'home-390.png', mimeType: 'image/png', buffer: Buffer.from(PNG, 'base64') },
+    { name: 'test-run.log', mimeType: 'text/plain', buffer: Buffer.from('ok 1 adds a picture\n') }]);
+  await page.waitForFunction(t => document.querySelectorAll(t).length === 2 && !document.querySelector(t + ' progress:not([value="100"])'), tiles, { timeout: 5000 });
   await noSideways(page);
 }
 
@@ -961,6 +1058,15 @@ async function focusButton(page, dash, width) {
     dashboard: { label: 'Focus', icon: 'target', order: 20 } };
   const HELPER = { wait: 'you', run: 'working', idle: 'idle' };
   const id = key => 't_fb' + key.slice(5);
+  let answered = null, lastState = null;  // the answer the pane sent; the page's state as last served
+  const unasked = st => ({ ...st, tickets: st.tickets.map(t => t.id === id('ORCH-190') ? { ...t, questions: [] } : t) });
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (body.op !== 'answer' || body.args.ticket !== id('ORCH-190') || !lastState) return route.fallback();
+    answered = body.args.answer;
+    await new Promise(r => setTimeout(r, 300));  // the answer takes a moment, as with orch: the buttons wait disabled
+    route.fulfill({ json: unasked(lastState) });  // the server answers an action with the page's state
+  });
   await page.route(/\/api\/state(\?.*)?$/, async route => {
     const res = await route.fetch();
     if (res.status() !== 200) return route.fulfill({ response: res });
@@ -975,7 +1081,8 @@ async function focusButton(page, dash, width) {
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
     st.settings = { ...(st.settings || {}), focus_preview_on: true,
       addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
-    route.fulfill({ response: res, json: st });
+    lastState = st;
+    route.fulfill({ response: res, json: answered ? unasked(st) : st });
   });
   // the added tickets have no files on disk: their ticket pages get an empty list of results
   await page.route(/\/api\/artifacts\/t_fb/, route => route.fulfill({ json: { files: [] } }));
@@ -999,6 +1106,20 @@ async function focusButton(page, dash, width) {
   await page.waitForSelector(`#live-dock .live-pane[data-session="${id('ORCH-191')}"]`, { timeout: 5000 });
   if (await page.evaluate(() => location.hash) !== '#tickets') throw new Error('the row\'s Focus button left the list');
   if (!await page.evaluate(() => !!document.activeElement?.closest('#live-dock'))) throw new Error('the keyboard did not move into the session');
+  // ORCH-709: the waiting question answered with the keyboard in its pane; the keyboard stays in the pane (never by
+  // hand here) and Esc steps the layer back to the bar
+  await page.click(`${rowSel('ORCH-190')} [data-key="live-session-btn"]`);
+  const waitPane = `#live-dock .live-pane[data-session="${id('ORCH-190')}"]`;
+  await page.waitForSelector(`${waitPane} [data-live-ask] [data-key="live-ask-option-0"]`, { timeout: 5000 });
+  await page.focus(`${waitPane} [data-key="live-ask-option-0"]`);
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(p => document.querySelector(p + ' [data-live-ask]')?.hidden, waitPane, { timeout: 10000 });
+  if (answered !== 'Whole team') throw new Error('the answer sent was ' + JSON.stringify(answered));
+  await page.waitForTimeout(100);
+  const at = await page.evaluate(p => { const a = document.activeElement; return document.querySelector(p)?.contains(a) ? '' : (a?.tagName || 'nothing'); }, waitPane);
+  if (at) throw new Error('after the answer the keyboard is on ' + at + ', not in the pane');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 }).catch(() => { throw new Error('Esc after the answer did not step the layer back'); });
   // the ticket page: "Watch in Focus" opens its session; Open ticket comes back to the same page
   await page.evaluate(h => { location.hash = h; }, '#ticket/' + id('ORCH-189'));
   await mainHasText(page);
@@ -1548,10 +1669,11 @@ const STEPS = [
   {
     n: 6, pic: 'fd-06-focus-button', area: 'wall', title: 'Focus button on a ticket and Open ticket on a session',
     feature: [3],
-    do: ['Open Tickets and press the Focus button of a row.', 'Open a ticket page and press its Focus button.',
-      'In the session press Open ticket, also from full screen.'],
+    do: ['Open Tickets and press the Focus button of a row.', 'Press Answer on a waiting row and answer with the keyboard, then Esc.',
+      'Open a ticket page and press its Focus button.', 'In the session press Open ticket, also from full screen.'],
     see: ['Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.',
-      'The session opens in the layer and the page stays.', 'Open ticket goes back to the same ticket page; the session stays open.'],
+      'The session opens in the layer and the page stays.', 'After the answer the keyboard stays in the session; Esc steps back to the bar.',
+      'Open ticket goes back to the same ticket page; the session stays open.'],
     async run({ page, dash, width }) {
       await focusButton(page, dash, width);
     },
@@ -1708,9 +1830,11 @@ const STEPS = [
   },
   {
     n: 18, pic: 'fd-18-message-box', area: 'message box', title: 'Files and screenshots in the message box, with a preview before sending',
-    feature: [13], waits: T.chat,
-    do: ['Attach a file, paste a screenshot, drop a second file.', 'Remove one, then send.'],
-    see: ['Each one shows as a small preview before sending.', 'Removing one takes it out; the sent message carries the rest.'],
+    feature: [13],
+    do: ['Attach a file, paste a screenshot, drop a second file.', 'Remove one, then send.', 'Reload the page.'],
+    see: ['Each one shows as a small preview before sending.', 'Removing one takes it out; the sent message carries the rest.',
+      'The box says its limits in plain words; a file over 25 MB is refused.', 'The sent message and its files stay after a reload.'],
+    run: ({ page, dash }) => messageBox(page, dash),
     draft: { q: '?page=focus&cur=ORCH-238&view=zoom&att=1' },
   },
   {
