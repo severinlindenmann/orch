@@ -810,6 +810,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(403, TERM_HERE.encode(), "text/plain; charset=utf-8")
             if not (self._frame or self._same_origin()):
                 return self._send(403, b"forbidden", "text/plain")
+            if not (self._frame or self._signed_in()):  # a helper's screen or a shell: the sign-in, always
+                from orch.pagesession import SIGNIN_MSG
+
+                return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
             return self._term_stream(query)
         if path == "/api/sessions":  # every session for the live page (ORCH-359): built from the cached state
             if not (self._frame or self._same_origin()):

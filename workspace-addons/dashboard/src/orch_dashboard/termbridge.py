@@ -1,23 +1,29 @@
-"""The terminal bridge (ORCH-743): a live session's real screen in the browser, on this computer only.
+"""The terminal bridge (ORCH-743): a live session's real screen in the browser.
 
 Watching: ONE tmux control-mode client per session, shared by every page that watches it:
   tmux -L <socket> -C attach-session -f ignore-size -t =<session>:
 - `ignore-size`: the client never changes the helper's window size (a page is sized to the pane instead).
-- Nothing is ever written to its stdin, so it runs no tmux command. It is not attached read-only on purpose: tmux
-  takes an outside `send-keys` as coming from a read-only client and refuses it, which would stop orch's own typing.
-- A page that joins gets the screen as it is now (capture-pane with colours and the last HISTORY lines, then the
-  cursor), then every byte the pane's program writes (`%output`), and the size again whenever the window changes.
+- It is not attached read-only on purpose: tmux takes an outside `send-keys` as coming from a read-only client and
+  refuses it, which would stop orch's own typing. The only commands it ever gets are the two fixed reads of
+  screen_cmd (capture-pane, display-message) for the session's own pane id; nothing from a request reaches it.
+- Everything is pinned to the pane the watch began with (`%<n>`), so a second pane can never get the typing
+  while the page shows the first.
+- A page that joins gets the screen as it is now: the capture (colours, the last HISTORY lines), the cursor and
+  the terminal modes the program turned on (bracketed paste, cursor keys, keypad, mouse, wrap, insert). The capture
+  runs through the control client itself, so it lands at an exact point of the output stream: the page then gets
+  every byte the program wrote after it (`%output`), never one twice. The size again whenever the window changes.
   The client ends when the session ends (`%exit` or end of file) or a while after the last page left (LINGER).
 
 Typing: text goes to the pane with `send-keys -l` (literal: every character is a key, no key names, no tmux
-command), in parts small enough for one tmux message; a NUL byte (Ctrl+Space) is the key C-@. Resizing: one
-`resize-window`, then the window's size follows tmux's own rule again (the option is unset), so a person's own
-terminal joined later still fits. Both only reach a session a page watches right now (its names were checked when
-the watch began), never a name from the request.
+command), in parts small enough for one tmux message, one request at a time per session (a paste is never cut
+by other keys); a NUL byte (Ctrl+Space) is the key C-@. Resizing: one `resize-window`, then the window's size
+follows tmux's own rule again (the option is unset), so a person's own terminal joined later still fits. Both only
+reach a session a page watches right now (its names were checked when the watch began), never a name from the
+request.
 
-Who may: the server (server.py) serves all of this only on the loopback port with a name of this computer in Host
-(never on the port for other computers), the stream to the dashboard's own page, typing and resizing only to the
-person's dashboard session with the typing setting on (watching only by default)."""
+Who may (server.py): the stream needs the dashboard's sign-in (its cookie) or a frame pass, from the dashboard's
+own page; typing and resizing need the person's own dashboard session with the typing setting on (watching only
+by default)."""
 
 from __future__ import annotations
 
@@ -41,10 +47,34 @@ MAX_BUFFER = 512 * 1024  # bytes kept for pages that fall behind; older ones get
 MAX_INPUT = 64 * 1024  # characters in one typing request (a long paste)
 PART = 1500  # characters per send-keys call: well inside one tmux message (16 KB) even when all are 4 bytes
 COLS, ROWS = (10, 500), (3, 300)  # the sizes a resize may ask for
+PANE = re.compile(r"%[0-9]{1,9}")
+_FLAGS = (  # (tmux format flag, the sequence that turns the mode on in the page's terminal)
+    ("bracket_paste_flag", "\x1b[?2004h"),
+    ("keypad_cursor_flag", "\x1b[?1h"),
+    ("keypad_flag", "\x1b="),
+    ("mouse_standard_flag", "\x1b[?1000h"),
+    ("mouse_button_flag", "\x1b[?1002h"),
+    ("mouse_all_flag", "\x1b[?1003h"),
+    ("mouse_sgr_flag", "\x1b[?1006h"),
+    ("insert_flag", "\x1b[4h"),
+)
+_META = (
+    "@@orch #{cursor_x} #{cursor_y} #{pane_width} #{pane_height} #{alternate_on} #{cursor_flag} #{wrap_flag}"
+)
+_META += "".join(f" #{{{f}}}" for f, _ in _FLAGS)
 _OCTAL = re.compile(rb"\\([0-7]{3})")
 _LOCK = threading.Lock()
 _WATCHES: dict[tuple[str, str], Watch] = {}
 _PAGES = [0]
+
+
+def screen_cmd(pane: str) -> bytes:
+    """The two reads a joining page needs, as one line for the control client (two answer blocks)."""
+    if not PANE.fullmatch(pane):
+        raise ValueError(pane)
+    return (
+        f'capture-pane -e -N -p -S -{HISTORY} -t {pane} ; display-message -p -t {pane} "{_META}"\n'.encode()
+    )
 
 
 def _unescape(data: bytes) -> bytes:
@@ -66,6 +96,26 @@ def _tmux(sock: str, *args: str, timeout: float = termsession.TIMEOUT) -> subpro
     )
 
 
+def draw(capture: bytes, meta: bytes) -> dict | None:
+    """The bytes a terminal draws to show this capture (scrollback, visible lines), then the cursor and the modes
+    the program turned on. None when the reads cannot be understood."""
+    try:
+        f = [int(x) for x in meta.decode().removeprefix("@@orch ").split()]
+    except (UnicodeDecodeError, ValueError):
+        return None
+    if len(f) != 7 + len(_FLAGS):
+        return None
+    cx, cy, cols, rows, alt, cur, wrap = f[:7]
+    lines = capture.decode(errors="replace").removesuffix("\n").split("\n")
+    if alt:
+        lines = lines[-rows:]  # an alternate screen has no scrollback of its own
+    out = "\x1b[0m\x1b[H\x1b[2J\x1b[3J" + ("\x1b[?1049h\x1b[H" if alt else "")
+    out += "\r\n".join(ln + "\x1b[0m" for ln in lines)
+    out += "".join(on for (_, on), v in zip(_FLAGS, f[7:]) if v) + ("" if wrap else "\x1b[?7l")
+    out += f"\x1b[{cy + 1};{cx + 1}H" + ("\x1b[?25h" if cur else "\x1b[?25l")
+    return {"cols": cols, "rows": rows, "data": base64.b64encode(out.encode()).decode()}
+
+
 class Watch:
     """One session's control client and what it wrote, for every page that watches it."""
 
@@ -81,38 +131,33 @@ class Watch:
         self.pane = ""
         self.size = (0, 0)
         self.proc: subprocess.Popen | None = None
+        self.typing = threading.Lock()  # one typing request at a time
+        self._asking = threading.Lock()  # one screen read at a time
+        self._ask: dict | None = None  # the screen read under way: {done, at, blocks}
 
     def start(self) -> bool:
         """Attach the control client; False when the session is gone or tmux cannot."""
         try:
-            r = _tmux(
+            r = _tmux(self.sock, "display-message", "-p", "-t", f"={self.sess}:", "#{pane_id}")
+            pane = r.stdout.strip()
+            if r.returncode != 0 or not PANE.fullmatch(pane):
+                return False
+            self.pane = pane
+            argv = [
+                "tmux",
+                "-L",
                 self.sock,
-                "display-message",
-                "-p",
+                "-C",
+                "attach-session",
+                "-f",
+                "ignore-size",
                 "-t",
                 f"={self.sess}:",
-                "#{pane_id} #{pane_width} #{pane_height}",
-            )
-            pane, cols, rows = r.stdout.split()
-            self.pane, self.size = pane, (int(cols), int(rows))
+            ]
             self.proc = subprocess.Popen(
-                [
-                    "tmux",
-                    "-L",
-                    self.sock,
-                    "-C",
-                    "attach-session",
-                    "-f",
-                    "ignore-size",
-                    "-t",
-                    f"={self.sess}:",
-                ],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                env=_env(),
+                argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=_env()
             )
-        except (OSError, ValueError, subprocess.TimeoutExpired):
+        except (OSError, subprocess.TimeoutExpired):
             return False
         threading.Thread(target=self._read, name=f"term-{self.sess}", daemon=True).start()
         return True
@@ -128,10 +173,30 @@ class Watch:
 
     def _read(self) -> None:
         out = self.proc.stdout if self.proc else None
+        block: tuple[list[bytes], bool, list[bytes]] | None = None  # (begin's time and number, ours, lines)
         try:
-            for line in iter(out.readline, b"") if out else ():
-                line = line.rstrip(b"\n")
-                if line.startswith(b"%output "):
+            for raw in iter(out.readline, b"") if out else ():
+                line = raw.removesuffix(b"\n")
+                if block is not None:
+                    word = line.split(b" ")
+                    if word[0] in (b"%end", b"%error") and word[1:3] == block[0]:
+                        if block[1] and self._ask is not None:
+                            self._ask["blocks"].append((word[0] == b"%end", b"\n".join(block[2])))
+                            if len(self._ask["blocks"]) == 2:
+                                self._ask["done"].set()
+                        block = None
+                    else:
+                        block[2].append(line)
+                elif line.startswith(b"%begin "):
+                    word = line.split(b" ")
+                    ours = word[3:4] == [b"1"]  # 1: a command this client sent (attach's own block says 0)
+                    block = (word[1:3], ours, [])
+                    if ours and self._ask is not None and self._ask["at"] is None:
+                        with self.cond:
+                            self._ask["at"] = (
+                                self.seq
+                            )  # the capture sees everything up to here, nothing after
+                elif line.startswith(b"%output "):
                     _, pane, data = (line.split(b" ", 2) + [b""])[:3]
                     if pane.decode(errors="replace") == self.pane:
                         self._push("out", _unescape(data))
@@ -148,9 +213,7 @@ class Watch:
     def resized(self) -> None:
         """Read the pane's size again; tell the pages when it changed."""
         try:
-            r = _tmux(
-                self.sock, "display-message", "-p", "-t", f"={self.sess}:", "#{pane_width} #{pane_height}"
-            )
+            r = _tmux(self.sock, "display-message", "-p", "-t", self.pane, "#{pane_width} #{pane_height}")
             size = tuple(int(x) for x in r.stdout.split())
         except (OSError, ValueError, subprocess.TimeoutExpired):
             return
@@ -158,31 +221,28 @@ class Watch:
             self.size = size  # type: ignore[assignment]
             self._push("size", json.dumps({"cols": size[0], "rows": size[1]}).encode())
 
-    def screen(self) -> dict | None:
-        """The screen as it is now, as bytes a terminal draws: scrollback, visible lines, cursor. None: gone."""
-        try:
-            r = _tmux(
-                self.sock, "capture-pane", "-e", "-N", "-p", "-S", f"-{HISTORY}", "-t", f"={self.sess}:", ";",
-                "display-message", "-p", "-t", f"={self.sess}:",
-                "@@orch #{cursor_x} #{cursor_y} #{pane_width} #{pane_height} #{alternate_on} #{cursor_flag}",
-            )  # fmt: skip
-        except (OSError, subprocess.TimeoutExpired):
+    def screen(self) -> tuple[dict, int] | None:
+        """(the screen to draw, the seq it shows everything up to). None: the session is gone or did not answer."""
+        with self._asking:
+            ask = {"done": threading.Event(), "at": None, "blocks": []}
+            self._ask = ask
+            try:
+                if self.ended or self.proc is None or self.proc.stdin is None:
+                    return None
+                self.proc.stdin.write(screen_cmd(self.pane))
+                self.proc.stdin.flush()
+                if not ask["done"].wait(termsession.TIMEOUT):
+                    return None
+            except (OSError, ValueError):
+                return None
+            finally:
+                self._ask = None
+        (ok1, capture), (ok2, meta) = ask["blocks"]
+        snap = draw(capture, meta) if ok1 and ok2 and ask["at"] is not None else None
+        if snap is None:
             return None
-        body, _, meta = r.stdout.rpartition("@@orch ")
-        try:
-            cx, cy, cols, rows, alt, cur = (int(x) for x in meta.split()[:6])
-        except ValueError:
-            return None
-        if r.returncode != 0:
-            return None
-        lines = body.removesuffix("\n").split("\n")
-        if alt:
-            lines = lines[-rows:]  # an alternate screen has no scrollback of its own
-        draw = "\x1b[0m\x1b[H\x1b[2J\x1b[3J" + ("\x1b[?1049h\x1b[H" if alt else "")
-        draw += "\r\n".join(ln + "\x1b[0m" for ln in lines)
-        draw += f"\x1b[{cy + 1};{cx + 1}H" + ("\x1b[?25h" if cur else "\x1b[?25l")
-        self.size = (cols, rows)
-        return {"cols": cols, "rows": rows, "data": base64.b64encode(draw.encode()).decode()}
+        self.size = (snap["cols"], snap["rows"])
+        return snap, ask["at"]
 
     def since(self, seq: int) -> tuple[list[tuple[int, str, bytes]], bool]:
         """What came after seq, and whether the page fell so far behind that it needs the screen again."""
@@ -220,10 +280,10 @@ def _reap() -> None:
 
 
 def join(root: Path, orch_bin: str | None, tid: str) -> Watch | str:
-    """Start watching the ticket's live session (or join the watch that is on). The reason when there is none:
-    'none', 'oneshot', 'notmux' (as termsession.ref), 'busy' (too many pages watch already)."""
+    """Start watching the ticket's live session, or the plain terminal's shell (or join the watch that is on).
+    The reason when there is none: 'none', 'oneshot', 'notmux' (as termsession.ref), 'busy' (too many pages)."""
     _reap()
-    r = termsession.ref(root, orch_bin, tid)
+    r = termsession.ref(root, orch_bin, tid, plain=True)
     if isinstance(r, str):
         return r
     if not shutil.which("tmux"):
@@ -251,7 +311,9 @@ def leave(w: Watch) -> None:
         _PAGES[0] = max(0, _PAGES[0] - 1)
         if w.pages == 0:
             w.left_at = time.monotonic()
-    threading.Timer(LINGER + 0.1, _reap).start()
+    t = threading.Timer(LINGER + 0.1, _reap)
+    t.daemon = True
+    t.start()
 
 
 def watching(tid: str) -> Watch | None:
@@ -276,12 +338,13 @@ def type_text(tid: str, data) -> tuple[int, str]:
             calls.append(["C-@"])
         for at in range(0, len(piece), PART):
             calls.append(["-l", "--", termsession._literal(piece[at : at + PART])])
-    try:
-        for args in calls:
-            if _tmux(w.sock, "send-keys", "-t", f"={w.sess}:", *args).returncode != 0:
-                return 502, "The session did not take that."
-    except (OSError, subprocess.TimeoutExpired):
-        return 502, "The session did not answer."
+    with w.typing:
+        try:
+            for args in calls:
+                if _tmux(w.sock, "send-keys", "-t", w.pane, *args).returncode != 0:
+                    return 502, "The session did not take that."
+        except (OSError, subprocess.TimeoutExpired):
+            return 502, "The session did not answer."
     return 200, "{}"
 
 
@@ -294,11 +357,10 @@ def resize(tid: str, cols, rows) -> tuple[int, str]:
     w = watching(tid)
     if w is None:
         return 409, "There is no live session to resize."
-    t = f"={w.sess}:"
     try:
         r = _tmux(
-            w.sock, "resize-window", "-t", t, "-x", str(cols), "-y", str(rows), ";",
-            "set-window-option", "-u", "-t", t, "window-size",
+            w.sock, "resize-window", "-t", w.pane, "-x", str(cols), "-y", str(rows), ";",
+            "set-window-option", "-u", "-t", w.pane, "window-size",
         )  # fmt: skip
     except (OSError, subprocess.TimeoutExpired):
         return 502, "The session did not answer."
@@ -316,13 +378,17 @@ def stream(w: Watch, write, gone, ping: float = 15.0) -> None:
     def ev(name: str, data: str) -> None:
         write(f"event: {name}\ndata: {data}\n\n".encode())
 
-    with w.cond:
-        seq = w.seq
-    snap = w.screen()
-    if snap is None:
-        ev("end", json.dumps({"state": "none"}))
+    def screen() -> int | None:
+        got = w.screen()
+        if got is None:
+            ev("end", json.dumps({"state": "none"}))
+            return None
+        ev("screen", json.dumps(got[0]))
+        return got[1]
+
+    seq = screen()
+    if seq is None:
         return
-    ev("screen", json.dumps(snap))
     last = time.monotonic()
     while True:
         with w.cond:
@@ -334,21 +400,14 @@ def stream(w: Watch, write, gone, ping: float = 15.0) -> None:
             return
         got, behind = w.since(seq)
         if behind:
-            with w.cond:
-                seq = w.seq
-            snap = w.screen()
-            if snap is None:
-                ev("end", json.dumps({"state": "none"}))
+            seq = screen()
+            if seq is None:
                 return
-            ev("screen", json.dumps(snap))
             last = time.monotonic()
             continue
         for s, kind, payload in got:
             seq = s
-            if kind == "size":
-                ev("size", payload.decode())
-            else:
-                ev("out", base64.b64encode(payload).decode())
+            ev("size", payload.decode()) if kind == "size" else ev("out", base64.b64encode(payload).decode())
             last = time.monotonic()
         if not got:
             if gone():

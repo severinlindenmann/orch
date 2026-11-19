@@ -333,7 +333,7 @@ def test_too_many_pages_are_refused(helper, server, monkeypatch):
 def test_a_long_paste_goes_in_parts_and_nul_is_ctrl_space(helper, monkeypatch):
     sent = []
     w = termbridge.Watch(SOCK[0], TID)
-    w.pages = 1
+    w.pages, w.pane = 1, "%0"
     termbridge._WATCHES[(SOCK[0], TID)] = w
     monkeypatch.setattr(
         termbridge, "_tmux", lambda sock, *a, **k: sent.append(a) or subprocess.CompletedProcess(a, 0)
@@ -359,10 +359,11 @@ def test_the_plain_terminal_is_found_by_its_session(tmp_path):
                 ]
             },
         )
-        assert termsession.ref(tmp_path, orch, sid) == (SOCK[0], sid)
-        assert termsession.ref(tmp_path, orch, "t_other0002") == "none"
+        assert termsession.ref(tmp_path, orch, sid, plain=True) == (SOCK[0], sid)
+        assert termsession.ref(tmp_path, orch, sid) == "none"  # the old screen and keys routes: helpers only
+        assert termsession.ref(tmp_path, orch, "t_other0002", plain=True) == "none"
         fake_orch(tmp_path, {"running": False}, {"sessions": [{"id": sid, "kind": "terminal", "open": True}]})
-        assert termsession.ref(tmp_path, orch, sid) == "none"  # its shell does not run
+        assert termsession.ref(tmp_path, orch, sid, plain=True) == "none"  # its shell does not run
         fake_orch(
             tmp_path,
             {"running": False},
@@ -372,6 +373,86 @@ def test_the_plain_terminal_is_found_by_its_session(tmp_path):
                 ]
             },
         )
-        assert termsession.ref(tmp_path, orch, sid) == "none"  # names must have core's shape
+        assert termsession.ref(tmp_path, orch, sid, plain=True) == "none"  # names must have core's shape
     finally:
         tm("kill-server")
+
+
+def test_watching_needs_the_sign_in(helper, server):
+    port = server(Person(False)).server_address[1]
+    s = Stream(port)
+    assert s.resp.status == 403 and not termbridge._WATCHES
+
+
+def test_a_page_that_joins_gets_the_modes_the_program_turned_on(helper, server):
+    tm(
+        "respawn-pane",
+        "-k",
+        "-t",
+        f"={TID}:",
+        "sh",
+        "-c",
+        "printf '\\033[?2004h\\033[?1h\\033[?1000hready'; cat",
+    )
+    assert wait(
+        lambda: tm("display-message", "-p", "-t", f"={TID}:", "#{bracket_paste_flag}").stdout.strip() == "1"
+    )
+    port = server().server_address[1]
+    s = Stream(port)
+    data = base64.b64decode(json.loads(s.next("screen")[1])["data"])
+    assert b"ready" in data and b"\x1b[?2004h" in data and b"\x1b[?1h" in data and b"\x1b[?1000h" in data
+    assert b"\x1b[?1003h" not in data  # only what is on
+    s.close()
+
+
+def test_joining_while_output_flows_shows_every_line_once(helper, server):
+    tm(
+        "respawn-pane",
+        "-k",
+        "-t",
+        f"={TID}:",
+        "sh",
+        "-c",
+        "i=0; while [ $i -lt 400 ]; do i=$((i+1)); echo n$i; sleep 0.005; done; cat",
+    )
+    time.sleep(0.3)  # it is printing now
+    port = server().server_address[1]
+    s = Stream(port)
+    shown = base64.b64decode(json.loads(s.next("screen")[1])["data"])
+    assert s.until(b"n400\r\n", timeout=15)
+    import re
+
+    nums = [int(x) for x in re.findall(rb"n([0-9]+)\r", shown + s.seen)]
+    assert nums == list(range(nums[0], 401))  # the capture and the stream meet exactly: no line twice or lost
+    s.close()
+
+
+def test_typing_stays_on_the_pane_the_page_shows(helper, server, tmp_path):
+    typing_on(tmp_path)
+    port = server().server_address[1]
+    s = Stream(port)
+    s.next("screen")
+    first = termbridge.watching(TID).pane
+    tm("split-window", "-t", f"={TID}:", "--", "sh", "-c", "cat")  # a second pane, now the active one
+    assert post(port, "/api/term/input", {"ticket": TID, "data": "pinned\r"}) == (200, b"{}")
+    assert wait(lambda: "pinned" in tm("capture-pane", "-p", "-t", first).stdout)
+    s.close()
+
+
+def test_two_typing_requests_never_mix(helper, monkeypatch):
+    w = termbridge.Watch(SOCK[0], TID)
+    w.pages, w.pane = 1, "%0"
+    termbridge._WATCHES[(SOCK[0], TID)] = w
+    sent = []
+
+    def slow(sock, *a, **k):
+        sent.append(a[-1][:1])
+        time.sleep(0.002)
+        return subprocess.CompletedProcess(a, 0)
+
+    monkeypatch.setattr(termbridge, "_tmux", slow)
+    ts = [threading.Thread(target=termbridge.type_text, args=(TID, c * termbridge.PART * 5)) for c in "ab"]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert "".join(sent) in ("aaaaabbbbb", "bbbbbaaaaa")
+    del termbridge._WATCHES[(SOCK[0], TID)]

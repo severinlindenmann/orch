@@ -71,17 +71,17 @@ def _tmux(socket: str, *args: str, timeout: float = TIMEOUT) -> subprocess.Compl
     )
 
 
-def ref(root: Path, orch_bin: str | None, tid: str) -> tuple[str, str] | str:
+def ref(root: Path, orch_bin: str | None, tid: str, plain: bool = False) -> tuple[str, str] | str:
     """(socket, session) of the ticket's live session, or the plain reason there is none: 'oneshot' (a run that
-    works one step at a time), 'none' (nothing runs), 'notmux' (this machine cannot show it)."""
+    works one step at a time), 'none' (nothing runs), 'notmux' (this machine cannot show it). plain: the plain
+    terminal's shell counts too (only the terminal bridge, ORCH-743; the screen and keys routes stay helpers')."""
     if not TID.fullmatch(tid or ""):
         return "none"
     status = run_orch(orch_bin, ["run", "status", tid, "--json"], root)
     claim = (status or {}).get("claim") if isinstance(status, dict) else None
     if not isinstance(claim, dict) or not (status or {}).get("running"):
-        claim = _plain_terminal(
-            root, orch_bin, tid
-        )  # no helper runs: the plain terminal's shell, when it is one
+        # no helper runs: the plain terminal's shell, when it is one and the caller is the bridge
+        claim = _plain_terminal(root, orch_bin, tid) if plain else None
         if claim is None:
             return "none"
     t = claim.get("tmux")
