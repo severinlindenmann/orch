@@ -950,12 +950,18 @@ def _checks_chips(ticket: dict) -> list[dict]:
     return out + ([{"text": f"{bad} check{'s' if bad != 1 else ''} failed", "tone": "bad"}] if bad else [])
 
 
-# What each button of a Check card does, in the card's own words (ORCH-585: the person could not tell whether
-# Looks good also starts follow-up work). Looks good only closes the ticket (tickets.accept_review); Send back
-# adds the note as a task and starts a helper on it (tickets.ask_for_changes). The record keeps the first part.
+# What each button of a Check card does, in the card's own words (ORCH-585: the person could not tell
+# whether Looks good also starts follow-up work). Looks good only closes the ticket (tickets.accept_review);
+# Send back adds the note as a task and starts a helper on it (tickets.ask_for_changes). The record keeps
+# the first part.
 CHECK_DONE = "The ticket is done. Nothing else starts: no new ticket, no more work."
-CHECK_DONE_UNCOVERED = "The ticket is done as it is. The missing part is dropped: no new ticket is made for it."
-CHECK_THEN = CHECK_DONE + " To change something, press Send back and say what; a helper then works on it in this ticket."
+CHECK_DONE_UNCOVERED = (
+    "The ticket is done as it is. The missing part is dropped: no new ticket is made for it."
+)
+CHECK_THEN = (
+    CHECK_DONE + " To change something, press Send back and say what;"
+    " a helper then works on it in this ticket."
+)
 CHECK_THEN_UNCOVERED = (
     CHECK_DONE_UNCOVERED + " To get it done, press Send back and say what is missing;"
     " a helper then works on it in this ticket."
@@ -1416,7 +1422,8 @@ def applies_now_block(ticket: dict, root: Path | None = None) -> str:
         }.get(d.get("action"), d.get("summary", ""))
         then = card.get("then")
         if card.get("kind") == "check" and then in (CHECK_THEN, CHECK_THEN_UNCOVERED):
-            then = CHECK_DONE if then == CHECK_THEN else CHECK_DONE_UNCOVERED  # what happened, not the other button
+            # what happened, not the other button
+            then = CHECK_DONE if then == CHECK_THEN else CHECK_DONE_UNCOVERED
         if d.get("action") == "send_back" and card.get("kind") == "check":
             then = "The helper makes a new version."  # not the card's "The ticket is done."
         lines.append(
