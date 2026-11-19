@@ -187,7 +187,10 @@ def test_an_added_template_is_approved_as_written(proj, databricks):
 
 
 def test_a_badly_named_check_file_is_never_shown(proj):
-    _write(proj, "bad\x1b[2Jname", {"command": ["xtool", "status"]})
+    # Windows refuses control characters in file names, so the escape-code name exists only elsewhere.
+    if os.name != "nt":
+        _write(proj, "bad\x1b[2Jname", {"command": ["xtool", "status"]})
+    _write(proj, "bad name", {"command": ["xtool", "status"]})
     _write(proj, "Upper", {"command": ["xtool", "status"]})
     assert checkfiles.entries(proj) == [] and checkfiles.waiting_rows(proj) == []
 
