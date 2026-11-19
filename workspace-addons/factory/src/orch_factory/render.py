@@ -147,15 +147,39 @@ def stop_options(s):
     return SHIP_OPTIONS if s["stage"] == "ship" else STOP_OPTIONS
 
 
+TAG_WORDS = {"taste": "your call", "cant-undo": "can't be undone"}  # routine says nothing: it is the plain case
+
+
 def stop_text(s, n):
-    # no image names (owners read this line); the agent's suggestion stays on routine items
+    # no image names, no internal tags (owners read this line); a suggestion shows only when it is one of the buttons
+    buttons = {o.casefold(): o for o in stop_options(s)}
+    items = []
+    for i in s["items"]:
+        notes = [TAG_WORDS[i["tag"]]] if i["tag"] in TAG_WORDS else []
+        pick = buttons.get(clean(i.get("recommend") or "", 40).casefold())
+        if pick:
+            notes.append(f"suggested: {pick}")
+        items.append(clean(i["title"]) + (f" ({', '.join(notes)})" if notes else ""))
+    segments = [f"Stop at {clean(s['stage'], 40)}. Decide", "; ".join(items)]
+    segments[0] += ": " + segments.pop(1)
+    for label, key in (
+        ("Checked", "checked"),
+        ("Not checked", "not_checked"),
+        ("Changed during run", "changed_during_run"),
+    ):
+        if s.get(key):
+            segments.append(f"{label}: {lines(s[key])}")
+    return join(segments, f"Stop {n}")
+
+
+def earlier_stop_text(s, n):
+    """The Stop card's words up to release 33 (internal tags, free-text suggestion): asked questions still match."""
     items = [
         f"{clean(i['title'])} ({i['tag']}"
         + (f", suggested: {clean(i['recommend'], 40)})" if i.get("recommend") else ")")
         for i in s["items"]
     ]
-    segments = [f"Stop at {clean(s['stage'], 40)}. Decide", "; ".join(items)]
-    segments[0] += ": " + segments.pop(1)
+    segments = [f"Stop at {clean(s['stage'], 40)}. Decide: " + "; ".join(items)]
     for label, key in (
         ("Checked", "checked"),
         ("Not checked", "not_checked"),
@@ -199,6 +223,8 @@ def render(kind, data, n):
 
 def earlier_renders(kind, data, n):
     """(text, options) Factory asked for this frozen file under earlier words."""
+    if kind == "factory:stop":
+        return [(earlier_stop_text(data, n), list(stop_options(data)))]
     if kind != "factory:start":
         return []
     return [(start_text(data, n, labels), list(START_OPTIONS)) for labels in EARLIER_START_LABELS]
