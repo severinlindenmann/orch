@@ -1519,8 +1519,9 @@ def _tasks_sig(ticket: dict, root: Path | None = None) -> str:
         data.append(True)
     prep, found = ticket.get("prepare"), ticket.get("found")  # ORCH-742: Preparing / Prepared and What I found
     if isinstance(prep, dict) or isinstance(found, dict):
-        data.append([prep.get("state") if isinstance(prep, dict) else None, found.get("at") if isinstance(found, dict) else None])
-    return hashlib.sha256(json.dumps(data).encode()).hexdigest()[:16]
+        # the whole What I found (a change without a new time re-sends too); default=str keeps odd values hashable
+        data.append([prep.get("state") if isinstance(prep, dict) else None, found if isinstance(found, dict) else None])
+    return hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
 def remember(root: Path, tid: str, to: str) -> None:

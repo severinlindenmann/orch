@@ -284,6 +284,11 @@ def test_prepare_and_found_change_the_snapshot_signature(proj, new_ticket):
     preparing = phone_view._tasks_sig(t)
     t["prepare"]["state"] = "prepared"
     assert len({before, preparing, phone_view._tasks_sig(t)}) == 3
+    prepared = phone_view._tasks_sig(t)
+    t["found"] = {"sources": [{"name": "Mail", "opened": False}], "facts": []}
+    with_found = phone_view._tasks_sig(t)
+    t["found"]["facts"] = ["For 1,400 customers"]  # changed, still without a time
+    assert len({prepared, with_found, phone_view._tasks_sig(t)}) == 3
 
 
 def test_redact_and_safe_url_units():
