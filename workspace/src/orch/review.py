@@ -1424,6 +1424,10 @@ def change(
         raise Refused(f"{qid} changed after it was shown. Look at the question again, then answer.")
     ownerpick.refuse_card(old, person)
     card = _card_of(old)
+    if card.get("kind") == "run" and verdict == "ok":  # ORCH-848: changing an answer never says it ran
+        from orch import runcard
+
+        raise Refused(runcard.OK_REFUSAL)
     d = _decision(old, card, verdict, picked, note)
     if merge_url(old) and (old.get("decision") or {}).get("action") == "approve":
         raise Refused(f"{qid} was merged on GitHub. That cannot be taken back here.")

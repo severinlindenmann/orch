@@ -121,7 +121,7 @@ def test_brew_words_come_from_orch():
     "command",
     ["sudo true", "env true", "bash -c true", "python3 -c 'print(1)'", "git -c core.pager=x log",
      "find . -exec true", "echo -e hi", "echo a!b", "echo ../x", "no-such-program-848",
-     "brew install --HEAD x", "brew install attacker/tap/jq",
+     "brew install --HEAD x", "brew install attacker/tap/jq", "brew install evil.rb", "brew install x.json",
      "brew tap x/y", "npm install -g x"],
 )  # fmt: skip
 def test_any_other_command_is_copy_only(tk, run, person_grant, command):
@@ -375,8 +375,8 @@ def test_the_phone_runs_only_orchs_own_operations(tk, run, monkeypatch):
 @POSIX
 def test_a_secret_in_the_output_is_hidden(tk, run):
     root, tid = tk
-    (Path(root) / "k.txt").write_text("key AKIAIOSFODNN7EXAMPLE\n")
-    q = _card(run, tid, "cat k.txt", "--changes", "Prints a key")
+    (Path(root) / "k").write_text("key AKIAIOSFODNN7EXAMPLE\n")
+    q = _card(run, tid, "cat k", "--changes", "Prints a key")
     res = runcard.run(
         Path(root), tid, q["id"], _digest(root, tid, q["id"]), by=ME, person=True, confirmed=True
     )
@@ -480,7 +480,18 @@ def test_an_orch_py_in_the_workspace_never_runs(tk, run, person_grant):
 
 
 @pytest.mark.parametrize(
-    "label", [" I ran it ", "I  ran it", "i ran IT", "I ran it.", "Ran it ✓", "Done", "Did it"]
+    "label",
+    [
+        " I ran it ",
+        "I  ran it",
+        "i ran IT",
+        "I ran it.",
+        "Ran it ✓",
+        "Done",
+        "Did it",
+        "I r\u0430n it",
+        "Finished",
+    ],
 )
 def test_i_ran_it_cannot_be_the_other_answer(tk, run, label):
     _root, tid = tk
@@ -518,3 +529,30 @@ def test_a_typed_comment_saying_it_ran_is_refused(tk, run):
     with pytest.raises(Refused):
         review.decide(Path(root), tid, q["id"], "talk", None, {"words": {"text": "I ran it"}}, by=ME,
                       via="dashboard", digest=_digest(root, tid, q["id"]))  # fmt: skip
+
+
+def test_login_is_only_for_a_sign_in_and_carries_orchs_words(tk, run):
+    _root, tid = tk
+    code, out, err = _ask(run, tid, "brew uninstall git", "--login", "--changes", "Signs you in to GitHub")
+    assert code == 2 and "sign-in command" in out + err
+    q = _card(run, tid, "gh auth login", "--changes", "Deletes nothing")
+    assert q["card"]["run"]["changes"] == "Signs you in again"
+
+
+def test_an_answer_changed_later_never_says_it_ran(tk, run):
+    root, tid = tk
+    q = _card(run, tid, "orch config set workflow.reviewer_look on", "--option", "Leave it off for now")
+    d = _digest(root, tid, q["id"])
+    review.decide(Path(root), tid, q["id"], "no", by=ME, via="dashboard", digest=d)
+    with pytest.raises(Refused, match="click Run it now"):
+        review.change(Path(root), tid, q["id"], "ok", by=ME, via="dashboard", digest=d)
+
+
+def test_brew_with_a_version_is_allowed():
+    assert runcard._other_op(["brew", "install", "python@3.12"])
+    assert not runcard._other_op(["brew", "install", "evil.rb"])
+
+
+def test_brew_never_loads_a_formula_from_a_path(tk):
+    root, _tid = tk
+    assert runcard._env(Path(root))["HOMEBREW_FORBID_PACKAGES_FROM_PATHS"] == "1"

@@ -228,11 +228,10 @@ def build_run_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
                          login=bool(getattr(args, "login", False)))  # fmt: skip
     if len(args.option) > 1:
         raise Refused('A run card has one other answer besides I ran it: --option "Leave it off for now".')
-    no_label = " ".join((args.option[0] if args.option else "Not now").split())
-    if not no_label or len(no_label) > 40:
-        raise Refused("The other answer is a few words like Leave it off for now.")
-    if re.search(r"\b(ran|run|done|did)\b", re.sub(r"[^a-z ]", " ", no_label.casefold())):
-        raise Refused("The other answer must not sound like it ran (say e.g. Leave it off for now).")
+    given = " ".join((args.option[0] if args.option else "Not now").split()).casefold()
+    no_label = next((x for x in runcard.NO_LABELS if x.casefold() == given), None)
+    if no_label is None:
+        raise Refused("The other answer is one of: " + ", ".join(runcard.NO_LABELS) + ".")
     if args.suggest is not None and args.suggest not in SUGGEST_VERDICTS:
         raise Refused("On this card --suggest is ok (run it) or no (the other answer).")
     title = args.text.strip().splitlines()[0][:200] if args.text.strip() else "Run this command"

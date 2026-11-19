@@ -54,6 +54,8 @@ OUT_MAX = 64 * 1024  # bytes of output read; the rest is dropped
 TAIL_LINES = 20  # lines of output shown on the card and given to the helper
 SAFE_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin")
 OK_LABEL = "I ran it"
+# the card's other answer: orch's own words, one of these (never a helper's, which could look like "I ran it")
+NO_LABELS = ("Not now", "Leave it off for now", "Leave it as it is", "Skip it", "Do it later")
 PHONE_RUN = False  # Run it now from a paired phone: on once the phone shows the card (ORCH-860)
 UNCHECKED = "orch did not check this command. Read it before you run it in your terminal."
 
@@ -68,9 +70,8 @@ _CONTROL = re.compile(r"[\x00-\x1f\x7f​-‏‪-‮⁦-⁩﻿]")
 _SHELL = set(";|&<>`$\\")
 # The only non-orch commands a card runs (with the person's confirm): exact shapes, plain names, no flags.
 # Every other command still gets a card, with Copy only: the person runs it in their own terminal.
-_PKG = re.compile(
-    r"^[a-z0-9][a-z0-9@._+-]{0,60}$"
-)  # no tap/owner/name: that would fetch code from any repository
+# letters, digits and dashes, an @version at most: no tap (owner/name), no local file (x.rb, x.json)
+_PKG = re.compile(r"^[a-z0-9][a-z0-9+_-]{0,60}(@[0-9][0-9.]{0,15})?$")
 OTHER_OPS: dict[tuple[str, ...], int] = {
     ("brew", "install"): 1,
     ("brew", "uninstall"): 1,
@@ -227,9 +228,11 @@ def parse(root: Path, command, changes=None, undo=None, *, login: bool = False) 
         _refuse("No settings before the command (like NAME=value cmd).")
     base = prog.rsplit("/", 1)[-1]
     spec: dict = {"v": POLICY, "command": command, "argv": argv, "cwd": str(root.resolve())}
-    if login or _login(argv):
-        spec.update({"class": "login", "exe": None})
-        spec["changes"] = _line(changes, "changes") or "Signs you in again"
+    if login and not _login(argv):
+        _refuse("--login is for a sign-in command such as codex login or gh auth login.")
+    if _login(argv):  # orch's own words, never the helper's
+        _line(changes, "changes"), _line(undo, "undo")
+        spec.update({"class": "login", "exe": None, "changes": "Signs you in again"})
         return spec
     if base == "orch":
         if prog != "orch":
@@ -330,6 +333,7 @@ def _env(root: Path) -> dict:
         "LANG": os.environ.get("LANG") or "en_US.UTF-8",
         "ORCH_ROOT": str(root),
         "NO_COLOR": "1",
+        "HOMEBREW_FORBID_PACKAGES_FROM_PATHS": "1",  # brew never loads a formula from a file path
         "TERM": "dumb",
     }
     for k in ("ORCH_HOME", "ORCH_HOME_STRICT", "TMPDIR"):  # where this orch keeps its own files
