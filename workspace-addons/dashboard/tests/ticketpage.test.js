@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
+const startSource = fs.readFileSync(require('node:path').join(__dirname, '../src/orch_dashboard/web/pages/start.js'), 'utf8');  // the one Start button (ORCH-475)
 const helpers = require('../src/orch_dashboard/web/helpers.js');
 function context(extra = {}) {
   const ctx = {array:v => Array.isArray(v) ? v : [], h:(tag, attrs, ...children) => ({tag, attrs, children}), iconEl:name => name, window:{UI:{...kitState}, DashHelpers:helpers, orch:{toast(){}}}, snapshot:false, changeError:r => r.text, actRetry:(op, args) => ctx.act(op, args()), ...extra};
@@ -49,7 +50,7 @@ test('classic script loads before state and snapshot detail stays read-only insi
     questions:t => (t.questions || []).filter(q => q.answer == null), capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [], ticketOf:() => null,
     statusChip:() => h('span', {}, 'Done'), chip:text => h('span', {}, text), href:id => '#ticket/' + id,
     fetch:() => { throw Error('snapshot fetched'); }};
-  vm.createContext(ctx); vm.runInContext(source, ctx); // No state or snapshot at script load.
+  vm.createContext(ctx); vm.runInContext(source, ctx); vm.runInContext(startSource, ctx); // No state or snapshot at script load.
   ctx.snapshot = true; ctx.state = {};
   for (const status of ['open', 'active', 'waiting', 'review', 'done']) {
     const tree = ctx.detail({id:'t_test', title:'Test', status, questions:[{id:'q1', text:'Choose?', options:['Yes']}]});
@@ -128,6 +129,7 @@ test('Send back on the ticket page opens the feedback box: words, screenshots, f
   await opts.onSend({text:'', files:[{name:'shot.png', url:'data:image/png;base64,iVBO'}, {name:'voice-note-0931.webm', url:'data:audio/webm;base64,GkXf'}]});
   assert.equal(acts[0][0], 'ticket.attach');
   assert.deepEqual(plain(acts[0][1].files), [{name:'shot.png', data:'iVBO'}, {name:'voice-note-0931.webm', data:'GkXf'}]);
+  assert.equal(acts[0][1].feedback, undefined, 'the ticket page keeps files where they always were (only Review answers use the feedback folder)');
   assert.equal(acts[1][0], 'ticket.changes');
   assert.match(acts[1][1].text, /I added 2 files to this ticket: shot \(2\)\.png, voice-note-0931\.webm\./);
   assert.match(acts[1][1].text, /voice note came without written words/);
@@ -192,7 +194,7 @@ test('the review buttons show whenever the status is Review, an open question fi
     surface:v => v, inlineField:() => null, ticketHistoryPanel:() => null, artifactsPanel:() => null, ticketParts:() => null, taskRows:() => null, addTaskRow:() => null, artifactCount:() => 0,
     linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, ticketDoneLine:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false,
     repeatsAddon:() => null, fetch:() => new Promise(() => {})};
-  vm.createContext(ctx); vm.runInContext(source, ctx);
+  vm.createContext(ctx); vm.runInContext(source, ctx); vm.runInContext(startSource, ctx);
   const text = JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[{id:'q1', text:'Which colour?', options:[]}]}));
   assert.match(text, /Looks good/);
   assert.match(text, /Send back/);
@@ -219,7 +221,7 @@ test('Repeat (not Copy ticket) shows in the ticket menu only when the repeats ad
     surface:v => v, inlineField:() => null, ticketHistoryPanel:() => null, artifactsPanel:() => null, ticketParts:() => null, taskRows:() => null, addTaskRow:() => null, artifactCount:() => 0,
     linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, ticketDoneLine:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false,
     repeatsAddon:() => null, fetch:() => new Promise(() => {})};
-  vm.createContext(ctx); vm.runInContext(source, ctx);
+  vm.createContext(ctx); vm.runInContext(source, ctx); vm.runInContext(startSource, ctx);
   const t = {id:'t_test', title:'Test', status:'open', questions:[]};
   assert.doesNotMatch(JSON.stringify(ctx.detail(t)), /Copy ticket|Repeat…/);
   ctx.repeatsAddon = () => 'automation';
@@ -268,7 +270,7 @@ test('next question stays above every tab and Answer scrolls and focuses it', ()
     questions:t => t.questions || [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[],
     main:{querySelector:() => ({scrollIntoView(){scrolled=true;},classList:{add(){},remove(){}},querySelector:() => ({focus(){focused=true;}})})}};
-  vm.createContext(ctx); vm.runInContext(source,ctx);
+  vm.createContext(ctx); vm.runInContext(source,ctx); vm.runInContext(startSource, ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[{name:'claude',label:'Claude',chosen:true}]}};
   vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;",ctx);
   const nodes = n => typeof n === 'object' && n ? [n,...n.children.flatMap(nodes)] : [];
@@ -472,7 +474,7 @@ test('plan-first waiting card answers and edits only unstarted steps', async () 
     questions:t => t.questions || [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[],
     main:{querySelector:() => ({scrollIntoView(){scrolled=true;},classList:{add(){},remove(){}},querySelector:() => ({focus(){focused=true;}})})}};
-  vm.createContext(ctx); vm.runInContext(source,ctx);
+  vm.createContext(ctx); vm.runInContext(source,ctx); vm.runInContext(startSource, ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[{name:'claude',label:'Claude',chosen:true}]}};
   vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;",ctx);
   const nodes = n => typeof n === 'object' && n ? [n,...n.children.flatMap(nodes)] : [];
@@ -611,7 +613,7 @@ test('a file is listed once per list, and Overview chips skip the file already i
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
     questions:() => [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Review'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[], locks:new Set()};
-  vm.createContext(ctx); vm.runInContext(source,ctx);
+  vm.createContext(ctx); vm.runInContext(source,ctx); vm.runInContext(startSource, ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[]}};
   vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;" +
     "artifactData.set('t_dup', {at:Date.now(), data:{files:[{name:'report.pdf', size:10}, {name:'report.pdf', size:10}, {name:'notes.pdf', size:5}]}});", ctx);
@@ -629,7 +631,7 @@ test('a file that is both an artifact and a proof shows once in the Files tab an
   const shot = {type:'file', ref:'.orch/tickets/t_both/evidence/shot.pdf', title:'Shot', at:'2026-11-01T10:00:00Z'};
   const t = {id:'t_both', title:'Both', status:'doing', checklist:[{id:'a', text:'One', done:true, evidence:[shot]}]};
   const ctx = {repeatsAddon:() => null, window:{UI:{...kitState}, DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h, array:v => Array.isArray(v) ? v : []};
-  vm.createContext(ctx); vm.runInContext(source, ctx);
+  vm.createContext(ctx); vm.runInContext(source, ctx); vm.runInContext(startSource, ctx);
   ctx.snapshot = false;
   vm.runInContext("artifactData.set('t_both', {at:Date.now(), data:{files:[{name:'shot.pdf', size:10}]}});", ctx);
   ctx.tt = t;

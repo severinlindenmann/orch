@@ -33,6 +33,18 @@
       "additionalProperties": false,
       "properties": {
         "label": { "type": "string", "minLength": 1, "maxLength": 32, "description": "Shown to people. \"{name}\" = the user's entry name." },
+        "api_key": {
+          "type": "object", "additionalProperties": false,
+          "description": "How a start on an API key hands the key to this tool's process only (workspace/src/orch/keystart.py). Exactly one of fd_env (a pipe; this variable holds its number) or env (this variable of the tool's process). Never a key value.",
+          "oneOf": [{ "required": ["fd_env"] }, { "required": ["env"] }],
+          "properties": {
+            "fd_env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" },
+            "env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" },
+            "set": { "type": "object", "propertyNames": { "pattern": "^[A-Z][A-Z0-9_]{0,63}$" }, "additionalProperties": { "type": "string" }, "description": "Plain settings for the tool's process on a key start." },
+            "drop": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" }, "description": "Sign-in variables removed from the tool's process, so the picked key is the only one." },
+            "spend": { "enum": ["result-cost", "turn-tokens"], "description": "Where the tool's own output says what a step cost: result-cost = total_cost_usd of the last result line; turn-tokens = tokens of turn.completed lines (no dollars)." }
+          }
+        },
         "store_args": {
           "type": "object", "additionalProperties": false, "required": ["after", "args"],
           "description": "Optional, built-in adapters only (orch ignores it elsewhere). For a tool sandboxed to its working folder: when the agent works in a separate copy of the project, `--add-dir <workspace>/.orch` is inserted into the oneshot argv after the template word `after`, so the workspace's own store stays writable. Nothing else is allowed here: exactly `--add-dir` and `{store}` once.",

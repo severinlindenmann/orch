@@ -35,7 +35,7 @@ test('loaded before the layer and the bar, served as a page module, polled only 
   const at = f => index.indexOf('pages/' + f);
   assert.ok(at('livesessions.js') > 0 && at('livesessions.js') < at('live-layer.js') && at('livesessions.js') < at('livebar.js'));
   const server = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/server.py'), 'utf8');
-  assert.match(server, /\|livesessions\)\\\.js/);
+  assert.match(server, /\|livesessions\|/);
   assert.match(server, /path == "\/api\/sessions"/);
   const src = fs.readFileSync(path.join(WEB, 'pages/livesessions.js'), 'utf8');
   assert.match(src, /livePreviewOn\(\)/);

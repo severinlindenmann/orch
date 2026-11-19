@@ -50,6 +50,7 @@ def test_web_scripts_are_served_and_loaded_in_order():
         "settings",
         "live",
         "ticket",
+        "start",
         "compose",
         "focus",
     ]

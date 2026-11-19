@@ -519,6 +519,12 @@ TEMPLATE = {
         "For a script: the name of a key (orch keys). The script reads it from the file descriptor in "
         "ORCH_CHECK_KEY_FD (Windows: the variable ORCH_CHECK_KEY). The script runs from a private copy."
     ),
+    "_update": (
+        "Optional, for a tool orch does not know yet: how orch finds its updates and notes (orch tools). "
+        'Example: {"label": "Google Ads CLI", "latest": {"pypi": "<package>"}, "notes": {"github": '
+        '"<owner>/<repo>", "tag_prefix": "v"}, "installs": [{"via": "brew", "formula": "<name>"}, '
+        '{"via": "npm", "package": "<name>"}]}. Sources: npm, pypi, github, github_file, brew, cask.'
+    ),
     "label": "Databricks dev",
     "kind": "login",
     "command": ["databricks", "current-user", "me", "--profile", "dev"],

@@ -17,6 +17,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
+const headless = require('../headless.cjs'); // the keychain options (ORCH-615)
 const { spawn, execFileSync } = require('node:child_process');
 const { STEPS, SIZES } = require('./steps.cjs');
 
@@ -116,8 +117,14 @@ async function runOne(ctx, step, [w, h], o, urls) {
   const problems = [];
   page.on('pageerror', e => problems.push(`page error: ${String(e.message).slice(0, 200)}`));
   // a step may name console lines it causes on purpose (okConsole: a refusal the page shows as a plain message)
+  // a failed address is named, so a "Failed to load resource" console line can be traced to its request
+  page.on('response', r => { if (r.status() >= 400 && !(step.okConsole && step.okConsole.test(`status of ${r.status()}`))) problems.push(`failed request: ${r.status()} ${r.url().replace(/^https?:\/\/[^/]+/, '')}`); });
   page.on('console', m => { if (m.type() === 'error' && !(step.okConsole && step.okConsole.test(m.text()))) problems.push(`console error: ${m.text().slice(0, 200)}`); });
   try {
+    // The steps dress the page's state (/api/state) with their stand-in data. A poll that holds a revision gets only
+    // what changed (ORCH-517), and that answer cannot be dressed: once the test server's own settings move, the page
+    // would take them (Preview off) a few minutes into the run. So the page always asks for the whole state here.
+    // (set on the browser, so a second tab a step opens asks the same way: see main)
     await page.setViewportSize({ width: w, height: h });
     if (step.reduce) await page.emulateMedia({ reducedMotion: 'reduce' });
     if (o.target === 'draft') {
@@ -167,7 +174,11 @@ async function main() {
     }
     const { chromium } = playwright();
     profile = fs.mkdtempSync(path.join(os.tmpdir(), 'focus-d-prof-'));
-    browser = await chromium.launchPersistentContext(profile, { args: ['--use-mock-keychain', '--password-store=basic'] });
+    browser = await headless.launchPersistent(chromium, profile);
+    if (o.target !== 'draft') await browser.addInitScript(() => {
+      const f = window.fetch;
+      window.fetch = (u, opts) => f(typeof u === 'string' && u.startsWith('/api/state') ? u.replace(/([?&])have=[^&]*&?/, '$1').replace(/[?&]$/, '') : u, opts);
+    });
     for (const s of steps) {
       if (!todo.includes(s)) {
         const why = s.waits ? `waits for: ${s.waits}` : 'not in draft D, today\'s page only';

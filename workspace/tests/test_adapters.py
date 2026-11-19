@@ -72,25 +72,19 @@ _RECORD_EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure")
 _GUARD_CMD = reminder_settings.guard_hook_command("claude")  # before each Bash command (test_protected.py)
 # #1268: after each tool step the work-check command again, so a one-step run hears of waiting input
 _STEP_EVENTS = ("PostToolUse", "PostToolUseFailure")
+# ORCH-634: one process per tool event: the record hook runs the guard (before a call) and the step notice
+# (after one) itself (`orch record hook --with claude`), instead of two more Python starts per tool call
+_STEP_CMD = reminder_settings.record_hook_command("claude")
 _REMINDER = {
     **{
         e: [{"hooks": [{"type": "command", "command": _REMINDER_CMD, "timeout": 5}]}]
         for e in ("SessionStart", "UserPromptSubmit")
     },
     **{
-        e: [{"matcher": "*", "hooks": [{"type": "command", "command": _RECORD_CMD, "timeout": 5}]}]
+        e: [{"matcher": "*", "hooks": [{"type": "command", "command": _STEP_CMD, "timeout": 5}]}]
         for e in _RECORD_EVENTS
     },
-    # the record group stays first on PreToolUse; the guard (Bash only) is its own group after it
-    "PreToolUse": [
-        {"matcher": "*", "hooks": [{"type": "command", "command": _RECORD_CMD, "timeout": 5}]},
-        {"matcher": "Bash", "hooks": [{"type": "command", "command": _GUARD_CMD, "timeout": 5}]},
-    ],
 }
-for _e in _STEP_EVENTS:
-    _REMINDER[_e].append(
-        {"matcher": "*", "hooks": [{"type": "command", "command": _REMINDER_CMD, "timeout": 5}]}
-    )
 SETTINGS = ["--settings", json.dumps({"hooks": _REMINDER}, separators=(",", ":"))]
 
 
@@ -598,7 +592,9 @@ def test_hooks_doc_comes_from_data():
     d = adapters.hooks_doc("claude", "r_8k2m")
     cmds = {k: v[0]["hooks"][0]["command"] for k, v in d["hooks"].items()}
     assert cmds["Stop"] == "orch run event --run r_8k2m --kind idle"
-    run_events = {"SessionStart", "Stop", "Notification", "UserPromptSubmit"}
+    # ORCH-689: a turn ended by an error (usage limit, login changed) fires StopFailure, not Stop: idle too
+    assert cmds["StopFailure"] == "orch run event --run r_8k2m --kind idle"
+    run_events = {"SessionStart", "Stop", "StopFailure", "Notification", "UserPromptSubmit"}
     assert set(cmds) == run_events | set(_RECORD_EVENTS)
     for event in _RECORD_EVENTS:  # the record hook first, every tool; after a step the input notice too
         assert d["hooks"][event] == _REMINDER[event]
@@ -638,10 +634,9 @@ def test_one_settings_blob_holds_the_work_check_and_the_record_hooks(proj):
     def both(doc):
         for event in ("SessionStart", "UserPromptSubmit"):
             assert _REMINDER_CMD in _orch_groups(doc, event)
-        for event in _RECORD_EVENTS:
-            want = [_RECORD_CMD, _REMINDER_CMD] if event in _STEP_EVENTS else [_RECORD_CMD]
-            assert _orch_groups(doc, event) == want
-        assert not any(_RECORD_CMD in _orch_groups(doc, e) for e in ("SessionStart", "UserPromptSubmit"))
+        for event in _RECORD_EVENTS:  # one command per tool event (ORCH-634)
+            assert _orch_groups(doc, event) == [_STEP_CMD]
+        assert not any(_STEP_CMD in _orch_groups(doc, e) for e in ("SessionStart", "UserPromptSubmit"))
 
     v = {"prompt": "p", "new_session": NEW, "session": OLD, "permissions": "ask", "stream": True}
     for kind in ("fresh", "resume"):
@@ -684,7 +679,7 @@ def test_record_hook_command_for_a_windows_interpreter(monkeypatch, exe, want):
     assert cmd_words == argv  # cmd: the quoted path is one word (adapters._split's rule)
     monkeypatch.setattr(reminder_settings, "can_import_cached", lambda: True)  # no such interpreter here
     doc = adapters.reminder_doc("claude")
-    assert all(_orch_groups(doc, e)[0] == cmd for e in _RECORD_EVENTS)
+    assert all(_orch_groups(doc, e)[0] == f"{cmd} --with claude" for e in _RECORD_EVENTS)  # ORCH-634
     assert _orch_groups(doc, "SessionStart") == [f"{want} -I -P -m orch work-check --hook claude"]
 
 

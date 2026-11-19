@@ -80,7 +80,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | POST | `/v1/phone/blobs` | Body = the raw bytes, any `Content-Type` (image/jpeg, image/png, image/heic, application/pdf, audio/m4a, text/plain, application/octet-stream, …), max 25 MB | `201 {blob_id, size, sha256}`. `413 too_large` over 25 MB, `422 invalid` when empty. Stored like workspace blobs (encrypted at rest), kept **90 days** after the upload, then deleted (`404`). Readable only by this phone (`GET /v1/phone/blobs/<id>`) and by the workspace a text of this phone names it in (`GET /v1/blobs/<id>`). A retried upload makes a new blob; an unused one simply expires. The `Content-Type` is not stored or checked: every blob is served as `application/octet-stream`. No upload rate limit or storage cap in v3 besides the 25 MB per blob |
 | GET | `/v1/phone/blobs/<blob_id>` | – | raw bytes (`application/octet-stream`) of a proof file a workspace on the phone's list named in a `body.ticket_view` attachment of a text it sent to this phone or to `phones` (the same filter as `/v1/phone/messages`), of a card file such a workspace named in `body.card_files[].blob_id` of a **question** it sent to this phone or to `phones` (same filter: uploaded by that workspace, the workspace on the list at read time, a question to `phones` only when stored after this phone was paired; answered or not, while the question is stored), or of a blob this phone uploaded; anything else, an unknown id included, answers `404` |
 | POST | `/v1/phone/answer` | `{question_message_id, answer, client_id, verdict?}` | `201 {id, client_id}`. The relay builds the `answer` message (`from: ph_…`, `answered_by: human:<phone name>`, `body.client_id`, `body.verdict` copied as is when sent (rules in "Review cards on the phone"), routed as above). Same `client_id` from this phone again → `200 {id, client_id, duplicate: true}` with the first answer's id (checked before the 409, so a retry of the winning answer is not a conflict). First answer wins; later answers from any phone → `409 already_answered`. A question the workspace took back ("Question taken back") is closed: `409 taken_back` with the message `This question was taken back: <reason>`, nothing stored |
-| POST | `/v1/phone/send` | `{to: ws_…, client_id, text?, ticket?, general?, reply_to?, attachments?, voice?, location?, feedback?}` (phone-api.schema.json `send_request`) | `201 {id, client_id}`. A `text` message from the phone, built by the relay (see Phone app v3). `to` must be on the phone's list (`403 not_allowed`). Same `client_id` from this phone again → `200 {id, client_id, duplicate: true}`, no second message (the relay does not compare the content) |
+| POST | `/v1/phone/send` | `{to: ws_…, client_id, text?, ticket?, general?, reply_to?, attachments?, voice?, location?, feedback?, human_review?}` (phone-api.schema.json `send_request`) | `201 {id, client_id}`. A `text` message from the phone, built by the relay (see Phone app v3). `human_review` (true or false, ORCH-424) is copied into the body only on a new topic (no ticket, no general): the person's Human review needed choice for the ticket it starts; no field = the workspace default. `to` must be on the phone's list (`403 not_allowed`). Same `client_id` from this phone again → `200 {id, client_id, duplicate: true}`, no second message (the relay does not compare the content) |
 | POST | `/v1/phone/control` | `{to: ws_…, control: "mobile_mode_off", client_id?}` (phone-api.schema.json `control_request`) | `201 {id, client_id}`. The relay stores a `control` message `from: ph_…`, `to` the workspace, `body: {control, client_id?}`. `to` must be on the phone's list (`403 not_allowed`), an unknown `control` value → `422 invalid`. Same `client_id` again → `200 {id, client_id, duplicate: true}`. Not listed in any phone view (`/v1/phone/messages` shows `text` only). See **Mobile mode** |
 | POST | `/v1/phone/transcribe` | Body = the audio bytes, `Content-Type: audio/m4a` (also `audio/wav`, `audio/webm`), max 10 MB / 2 min, optional `?language=de` (`de`, `en`, `de-CH`, …; else the language is detected, or `de-CH` when the phone's `swiss_german` setting is on: Deepgram nova-3 with `language=de-CH`) | `200 {text, language, duration}` (`duration` in seconds). `503 transcription_off` when the admin set no Deepgram key (the app then uses on-device speech), `502 transcription_failed` when Deepgram fails or is unreachable, `429 rate_limited` after 30 calls a minute per phone, `413 too_large`, `422 invalid` (type, empty, language) |
 | POST | `/v1/phone/signout` | – | `204`. Deletes the token and the push registration; the old token gets `401` from now on |
@@ -401,6 +401,36 @@ the token is stored nowhere else) and `.orch/secrets/relay.json` with url and wo
 
 Phone onboarding link (from the admin portal, also as QR code, valid 24 h, one use):
 `orch://pair?relay=https%3A%2F%2Frelay.severin.io&code=pc_<22 chars>`
+
+## Notebook (the small orch app on the person's notebook)
+
+One notebook belongs to exactly one workspace; a workspace has at most one. The admin adds it on the relay admin page
+(Notebooks: name + workspace) and runs the shown line on the notebook (`orch notebook connect <relay url> <code>`, code
+`nc_<22 chars>`, one use, 24 h). Nothing else pairs a notebook. Messages are type `notebook` (message.schema.json
+`$defs.notebook`), text only (no blob on any notebook route), stored encrypted at rest like every message. Every
+notebook route takes the notebook and its workspace from the token, never from the body.
+
+**Notebook auth:** `X-Orch-Notebook: nb_…` + `Authorization: Bearer orn_<43 chars>`. A workspace or phone token never
+works here, and a notebook token never works on workspace or phone routes.
+
+| Method | Path | Body | Answer |
+|---|---|---|---|
+| POST | `/v1/notebook/pair` | `{code, name?}` | `201 {notebook_id, token, workspace: {id, name}}`. Unknown code `401`; used or expired `410` (only one of two calls at the same time wins) |
+| GET | `/v1/notebook/requests?wait=0..30` | – | `{items: [message…]}`: unacked asks from its workspace, oldest first, at most 20; long-poll up to `wait` s. Not acked = handed out again (at least once). An ask past its `expires_at` is dropped, never handed out. At most 2 open calls per notebook (`429`). Each call marks the notebook seen |
+| POST | `/v1/notebook/ack` | `{ids: [m_…] ≤ 100}` | `204`; only its own asks |
+| POST | `/v1/notebook/send` | `{id, reply_to?, notebook: {kind: reply\|status, …}}` | `201 {id}`. The relay builds the message (`from` the notebook, `to` its workspace). `reply`: `reply_to` must be an ask from its workspace to this notebook (`403`), one reply per ask (`409 already_answered`); the same id and content again → `200 {id, duplicate: true}`. `status`: only the newest unfetched status waits (an older unfetched one is replaced). 60 per minute (`429`) |
+| GET | `/v1/notebooks` (workspace auth) | – | `{items: [{id, name, paired, last_seen, online, waiting}]}` (0 or 1 item). `online` = seen in the last 120 s (a waiting notebook calls at least every 30 s); `waiting` = asks not acked yet |
+
+**Asks from the workspace** go through `POST /v1/messages` (`to: nb_…`, type `notebook`, `body.notebook.kind: ask`,
+no `ticket`, no `reply_to`): only to the sender's own connected notebook (another workspace's notebook answers `404`
+like an unknown one; not connected yet `403`), `expires_at` in the future and at most 7 days away (`422`), at most 100
+waiting and 60 per minute (`429`). No other type goes to `nb_…`, and a workspace never sends `reply` or `status`.
+Every workspace check of the content (what a helper may see) happens again in the workspace; the notebook's own list of
+actions is the boundary of what runs there.
+
+Admin: `GET/POST /admin/api/notebooks` (POST `{name, workspace}` → `201 {notebook_id, code, line}`; a second notebook
+for one workspace `409`), `DELETE /admin/api/notebooks/<id>` (`204`: its token stops at once, an open long-poll is
+refused, its codes and waiting asks are deleted). Removing a workspace removes its notebook.
 
 ## Subscribers (other systems that listen)
 

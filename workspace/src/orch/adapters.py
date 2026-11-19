@@ -479,6 +479,7 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
     try:
         reminder = reminder_settings.hook_command(name)
         recorder = reminder_settings.record_hook_command() if rec else ""
+        combined = reminder_settings.record_hook_command(name) if rec else ""
     except ValueError:
         return None  # an interpreter path no shell can carry safely: no orch hooks, the run goes on
     if not reminder_settings.can_import_cached():
@@ -489,12 +490,19 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
         return {"matcher": matcher, **g} if matcher is not None else g
 
     hooks: dict[str, list] = {event: [group(reminder)] for event in rh}
+    steps = a.get("step_hooks") or {}
+    # One process per tool event (ORCH-634): where the record hook runs on an event, it also runs the tool's
+    # guard (before a call) and step notice (after one) itself (`orch record hook --with <tool>`); they were
+    # two more Python starts per tool call. Events without a record hook (Windows) keep their own commands.
     for event in rec:  # every tool ("*"); its own group next to any other on the same event
-        hooks.setdefault(event, []).append(group(recorder, "*"))
+        both = event in guard or event in steps
+        hooks.setdefault(event, []).append(group(combined if both else recorder, "*"))
     for event, matcher in guard.items():  # the protected-machines guard: only the shell tool, before it runs
-        hooks.setdefault(event, []).append(group(reminder_settings.guard_hook_command(name), matcher))
-    for event in a.get("step_hooks") or {}:  # after each tool step: a one-step run hears of waiting input
-        hooks.setdefault(event, []).append(group(reminder, "*"))
+        if event not in rec:
+            hooks.setdefault(event, []).append(group(reminder_settings.guard_hook_command(name), matcher))
+    for event in steps:  # after each tool step: a one-step run hears of waiting input
+        if event not in rec:
+            hooks.setdefault(event, []).append(group(reminder, "*"))
     return {"hooks": hooks}
 
 
