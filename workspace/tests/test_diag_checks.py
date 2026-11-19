@@ -39,7 +39,7 @@ def test_all_checks_are_registered_and_one_file_each():
     assert names == {
         "run_gone_ticket_working", "dead_lock_holder", "no_heartbeat", "waiting_for_permission",
         "ticket_op_refused", "hook_lines_missing", "relay_unreachable", "clock_skew", "disk_low",
-        "diag_dropped", "key_binding_moved",
+        "diag_dropped", "workspace_folder_moved",
     }  # fmt: skip
 
 
@@ -219,17 +219,17 @@ def test_disk_low(proj, monkeypatch):
     assert one(proj, "disk_low")["verdict"] == "problem"
 
 
-def test_key_binding_moved(proj, monkeypatch):
+def test_workspace_folder_moved(proj, monkeypatch):
     from orch import home as orch_home
 
     for state, verdict in (("here", "ok"), ("none", "ok"), ("unknown", "cannot_check")):
         monkeypatch.setattr(orch_home, "binding_state", lambda root, s=state: s)
-        assert one(proj, "key_binding_moved")["verdict"] == verdict
+        assert one(proj, "workspace_folder_moved")["verdict"] == verdict
     monkeypatch.setattr(orch_home, "binding_state", lambda root: "moved")
-    c = one(proj, "key_binding_moved")
+    c = one(proj, "workspace_folder_moved")
     assert c["verdict"] == "problem" and "orch workspace move-here" in c["evidence"][0]
     monkeypatch.setattr(orch_home, "binding_state", lambda root: "copy")
-    assert "copy" in one(proj, "key_binding_moved")["fact"]
+    assert "copy" in one(proj, "workspace_folder_moved")["fact"]
 
 
 def test_diag_dropped(proj):

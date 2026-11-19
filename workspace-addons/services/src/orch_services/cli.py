@@ -199,7 +199,7 @@ def _no_secret(root: Path, rec: dict) -> None:
         why = _stored_keys_unreadable(root)
         if why or unreadable:  # the comparison could not run: say why instead of blaming a harmless command
             why = why or "orch could not read them. Try again in a moment."
-            raise Refused(f"Could not compare the command with this workspace's stored keys: {why}")
+            raise Refused(f"Could not compare the command with this workspace's stored keys, because {why}")
     if hits:
         raise Refused(
             "The name or command holds a secret. Leave it out and read it inside the command with orch secret exec."

@@ -341,7 +341,7 @@ def test_add_says_why_even_when_a_word_also_looks_like_a_secret(cli, monkeypatch
     )
     assert code == 2
     assert out["error"] == (
-        "Could not compare the command with this workspace's stored keys: "
+        "Could not compare the command with this workspace's stored keys, because "
         "this folder's saved keys still belong to /old/ws (moved)."
     )
 
@@ -359,5 +359,5 @@ def test_add_says_why_when_the_stored_keys_cannot_be_read(cli, monkeypatch):
     code, out = jrun(cli, "add", "Web", "--id", "web", "--", "python3", "-m", "http.server")
     assert code == 2
     assert out["error"] == (
-        "Could not compare the command with this workspace's stored keys: This is a test install outside the test folder."
+        "Could not compare the command with this workspace's stored keys, because This is a test install outside the test folder."
     )

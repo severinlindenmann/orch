@@ -322,7 +322,7 @@ def env_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
         "now": _iso(now),
         "config_keys": cfg,
         "diag_enabled": enabled,
-        "key_binding": binding,
+        "workspace_folder": binding,
     }, gaps
 
 

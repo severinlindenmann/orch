@@ -3,13 +3,13 @@ every secret check fails closed and commands refuse in ways that look unrelated.
 
 from orch.diag_checks import data, verdict
 
-NAME = "key_binding_moved"
+NAME = "workspace_folder_moved"
 
 
 def check(snap):
-    state = data(snap, "env").get("key_binding")
+    state = data(snap, "env").get("workspace_folder")
     if state in (None, "unknown"):
-        return verdict(NAME, "cannot_check", "the binding of the saved keys could not be read")
+        return verdict(NAME, "cannot_check", "orch could not tell which folder the saved keys belong to")
     if state == "moved":
         return verdict(
             NAME,

@@ -230,3 +230,29 @@ def test_the_text_says_when_running_services_were_not_updated():
     res = {"moved": True, "old": "/a", "new": "/b", "files": ["binding.json"], "not_moved": ["running.json"]}
     assert "running background services" in cli_workspace._text(res)
     assert "running" not in cli_workspace._text({**res, "not_moved": []})
+
+
+def test_none_of_the_new_texts_reads_as_a_secret():
+    # the line scrub reads "<key word>: <value>" as a secret: a helper quoting one of these in a note, or a
+    # problem report holding the check, would itself be refused or blanked when shared
+    from orch import cli_workspace
+    from orch.diag_checks import workspace_folder_moved as chk
+
+    old = "/Users/someone/Documents/Internal"
+    texts = [
+        orch_home.MOVED_FROM.format(old=old),
+        orch_home.COPY_OF.format(old=old),
+        orch_home.CHANGED_WHILE_ASKED,
+        workspace_move.NOT_A_PERSON,
+        cli_workspace._text(
+            {"moved": True, "old": old, "new": "/b", "files": [], "not_moved": ["running.json"]}
+        ),
+        cli_workspace._text({"moved": False}),
+        f"orch could not compare the text with your saved keys, so it stays refused: {orch_home.MOVED_FROM}",
+        json.dumps({"workspace_folder": "moved"}),
+    ]
+    for state in ("here", "moved", "copy", "none", "unknown"):
+        c = chk.check({"collected": {"env": {"data": {"workspace_folder": state}}}})
+        texts += [f"[{c['verdict']}] {c['name']}: {c['fact']}", *c["evidence"]]
+    for t in texts:
+        assert secretscan.find(t.removeprefix("Refused: ")) == [], t

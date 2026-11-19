@@ -17,8 +17,8 @@ from pathlib import Path
 from orch.errors import Refused
 
 NOT_A_PERSON = (
-    "Only you can move a workspace's saved keys: run orch workspace move-here yourself in a terminal in the "
-    "moved folder (a helper can't)."
+    "Only you can do this, a helper can't. Run orch workspace move-here yourself in a terminal in the moved "
+    "folder."
 )
 
 
