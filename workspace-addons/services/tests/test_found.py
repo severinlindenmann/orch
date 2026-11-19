@@ -504,7 +504,11 @@ def test_a_program_started_by_a_managed_service_is_not_found_again(cli, mac, too
     # ORCH-847: the service runs a shell script; the program the script starts is a child of launchd's main pid
     code, out = jrun(cli, "add", "Abacus", "--id", "abacus", "--start", "--", "/bin/sh", "app.sh")
     assert code == 0, out
-    pid = next(j["pid"] for k, j in tools.read()["launchd"].items() if k.startswith("ch.orch.svc.") and j.get("running"))
+    pid = next(
+        j["pid"]
+        for k, j in tools.read()["launchd"].items()
+        if k.startswith("ch.orch.svc.") and j.get("running")
+    )
     tools.set(
         ps=[
             {"pid": pid, "ppid": 1, "tty": "??", "argv": ["/bin/sh", "app.sh"]},
