@@ -374,31 +374,66 @@ def meetings_tickets(root: Path, who: Who, mid: str, numbers: list[int] | None) 
     store.part(root, "meetings")
     m = meetings_mod.load(root, mid)
     steps = m.get("steps") or []
-    pick = [s for s in steps if not s.get("ticket") and (numbers is None or s["n"] in numbers)]
     if numbers and any(n not in {s["n"] for s in steps} for n in numbers):
         raise Refused(f"This meeting has next steps 1 to {len(steps)}.")
-    if not pick:
-        raise Refused("Every chosen next step has a ticket already.")
     body = meetings_mod.as_markdown(m, False, MEETING_NOTE)
     _no_secret(root, body)
-    made = []
-    for s in pick:
-        note = f"From the meeting “{m['title']}” ({m.get('started', '')[:10]})."
-        if s.get("who"):
-            note += f" Said by {s['who']}."
-        tid = _new_ticket(root, s["text"], note, s.get("due") or "", who.by)
-        with meetings_mod._locked(root):  # save each ticket at once: a failure later never makes it twice
+    # Claim the chosen steps under the lock, so a second click at the same time never makes a ticket twice. A
+    # claim older than CLAIM_SECONDS (a crash) is free again. A step whose ticket exists but whose attach failed
+    # is attached again.
+    now = time.time()
+    with meetings_mod._locked(root):
+        cur = meetings_mod.load(root, mid)
+        claimed = []
+        for x in cur.get("steps") or []:
+            if numbers is not None and x["n"] not in numbers:
+                continue
+            if x.get("ticket") and x.get("attached", True):
+                continue
+            if not x.get("ticket") and now - float(x.get("making") or 0) < CLAIM_SECONDS:
+                continue
+            if not x.get("ticket"):
+                x["making"] = now
+            claimed.append(dict(x))
+        meetings_mod.save_meeting(root, cur)
+    if not claimed:
+        raise Refused("Every chosen next step has a ticket already.")
+
+    def save_step(n: int, **fields) -> None:
+        with meetings_mod._locked(root):
             cur = meetings_mod.load(root, mid)
             for x in cur.get("steps") or []:
-                if x["n"] == s["n"]:
-                    x["ticket"] = tid
+                if x["n"] == n:
+                    x.update(fields)
+                    if x.get("ticket") or x.get("making") is None:
+                        x.pop("making", None)
             meetings_mod.save_meeting(root, cur)
+
+    made = []
+    for s in claimed:
+        tid = s.get("ticket")
+        if not tid:
+            note = f"From the meeting “{m['title']}” ({m.get('started', '')[:10]})."
+            if s.get("who"):
+                note += f" Said by {s['who']}."
+            try:
+                tid = _new_ticket(root, s["text"], note, s.get("due") or "", who.by)
+            except Refused:
+                save_step(s["n"], making=None)
+                raise
+            save_step(
+                s["n"], ticket=tid, attached=False
+            )  # saved at once: a failure later never makes it twice
         attached = _attach(root, tid, f"{m['title']}.md", body, who.by)
         store.mark_used(root, tid, SUMMARY_ONLY, mid, who.by, attached)
+        save_step(s["n"], attached=True)
         made.append({"n": s["n"], "text": s["text"], "ticket": tid})
     store.log(root, "meetings", f"made {len(made)} tickets from “{m['title']}”", who.by)
     keys = _keys(root, [x["ticket"] for x in made])
     return {"id": mid, "made": [{**x, "key": keys.get(x["ticket"], x["ticket"])} for x in made]}
+
+
+CLAIM_SECONDS = 300
 
 
 def _new_ticket(root: Path, title: str, note: str, due: str, by: str) -> str:
@@ -599,6 +634,11 @@ def way_check(root: Path, who: Who, slug: str | None) -> list[dict]:
 
 
 def way_ask(root: Path, who: Who, slug: str, action: str, values: dict | None) -> dict:
+    w = ways_mod.found(root).get(slug)
+    if (
+        w and w["part"] == "meetings"
+    ):  # a recorder is read only through Meetings: consent and read rules first
+        raise Refused("A recorder is read through Meetings, after your OK: orch personal meetings list")
     r = ways_mod.ask(root, slug, action, values)
     store.log(root, "ways", f"asked {r['name']}: {action}", who.by, who.ticket)
     return {**r, "note": WAY_NOTE}

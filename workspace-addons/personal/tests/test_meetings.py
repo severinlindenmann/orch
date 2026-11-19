@@ -326,3 +326,39 @@ def test_use_in_a_ticket_attaches_the_whole_meeting(cli, ws, fake_orch):
     assert code == 0 and r["part"] == "meetings"
     sent = json.loads(fake_orch.read_text())
     assert "## Transcript" in sent["data"] and "Petra Zingg 09:02" in sent["data"]
+
+
+def test_a_recorder_is_never_asked_directly(cli, ws, monkeypatch):
+    data = recorder(ws, cli, [HELVETIA])
+    jrun(cli, "add", "meetings")
+    for helper in (False, True):
+        if helper:
+            as_helper(monkeypatch)
+        code, d = jrun(cli, "ways", "ask", "yogurt", "meeting", "--values", '{"ref": "yg-2026-11-19-0900"}')
+        assert code == 2 and "read through Meetings" in d["error"]
+    assert calls(data) == []
+
+
+def test_a_claimed_step_is_not_made_twice_and_a_failed_attach_is_retried(cli, ws, fake_tickets, monkeypatch):
+    from orch_personal import api, meetings
+
+    _, mid = taken_in(cli, ws)
+    m = meetings.load(ws, mid)
+    m["steps"][0]["making"] = __import__("time").time()  # another click is making it right now
+    meetings.save_meeting(ws, m)
+    code, r = jrun(cli, "meetings", "tickets", mid)
+    assert code == 0 and [x["n"] for x in r["made"]] == [2]
+    real = api._attach
+    monkeypatch.setattr(api, "_attach", lambda *a: (_ for _ in ()).throw(api.Refused("attach failed")))
+    m = meetings.load(ws, mid)
+    m["steps"][0].pop("making")
+    meetings.save_meeting(ws, m)
+    code, d = jrun(cli, "meetings", "tickets", mid)
+    assert code == 2 and "attach failed" in d["error"]
+    step = meetings.load(ws, mid)["steps"][0]
+    assert step["ticket"] and step["attached"] is False
+    monkeypatch.setattr(api, "_attach", real)
+    news = sum(1 for x in fake_tickets() if x["argv"][:2] == ["ticket", "new"])
+    code, r = jrun(cli, "meetings", "tickets", mid)
+    assert code == 0 and r["made"][0]["ticket"] == step["ticket"]
+    assert sum(1 for x in fake_tickets() if x["argv"][:2] == ["ticket", "new"]) == news  # no second ticket
