@@ -198,3 +198,18 @@ It is the ticket page's own box, separate from Focus (owner answer on ORCH-238).
 - Check after a move by a person reads "Moved to Check by Anna 14:23", never "Helper finished".
 - An epic whose sub-tickets are all done says so and offers Mark Done; Done with open sub-tickets asks first
   ("Mark Done anyway" or Cancel).
+
+## Prepare on a saved ticket (ORCH-742, look B picked by the owner 19 Nov)
+
+Saved from the real ticket page (draft ORCH-730 section 6, draft folder draft-742 removed):
+
+- `ticket-preparing.html`: the sentence under the title says "Preparing: reading the links and filling in the ticket."
+  with a small spinner; Start stays, no live Working header.
+- `ticket-prepared.html`: "☰ Prepared today 09:41. Press Start to begin." (hover: described by the helper, not checked).
+  Under What was asked, What I found is one line ("2 sources read", "! 1 could not be opened"); a click opens the key
+  facts and the sources with Open ↗. The sources it could not open stay in sight in the same box, each with Attach it
+  (moves to Add to this ticket).
+- `ticket-not-prepared.html`: "Not prepared yet. Start still works." In line: "In line to be prepared. Start still works."
+- Phone (no static mockup; Simulator `-relayMode mock -seedPaired YES -mockPrepare YES -openChat ws_pilatus001
+  -openTicket t_prepspring` or `t_prepsurvey`): Preparing / ☰ Prepared under the title, a What I found row above the
+  steps row that opens a sheet with the facts, the sources and Could not open.

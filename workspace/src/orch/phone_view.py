@@ -1350,6 +1350,52 @@ def _closed_view(ticket: dict, running: bool, done: int, total: int) -> dict:
     }
 
 
+_PREPARE_STATES = ("waiting", "preparing", "prepared", "not_prepared")
+FOUND_SOURCES = 10  # the phone shows at most this many sources of What I found (the ticket keeps up to 20)
+
+
+def _prepare_view(ticket: dict) -> dict | None:
+    """Where Prepare stands on a saved ticket in Backlog (ORCH-738 / ORCH-742): only while the ticket is open."""
+    p = ticket.get("prepare")
+    if ticket.get("status") != "open" or not isinstance(p, dict) or p.get("state") not in _PREPARE_STATES:
+        return None
+    out = {"state": p["state"]}
+    if _TIME.fullmatch(str(p.get("at") or "")):
+        out["at"] = p["at"]
+    return out
+
+
+def _found_view(ticket: dict, h) -> dict | None:
+    """What I found (ORCH-740), for the phone's What I found row (ORCH-742): written by a helper, so every text
+    goes through the scrub and the value hider, and links only as safe http(s) addresses."""
+    f = ticket.get("found")
+    if not isinstance(f, dict):
+        return None
+    sources = []
+    for s in f.get("sources") or []:
+        if not isinstance(s, dict) or not isinstance(s.get("name"), str):
+            continue
+        name = _clip(s["name"], 120, h)
+        if not name:
+            continue
+        item: dict = {"name": name, "opened": s.get("opened") is True}
+        if isinstance(s.get("link"), str) and (link := _url(s["link"], h)) and len(link) <= 500:
+            item["link"] = link
+        for key, n in (("lines", 300), ("why", 200)):
+            if isinstance(s.get(key), str) and (text := _clip(s[key], n, h)):
+                item[key] = text
+        sources.append(item)
+    # the ones it could not open first: they need the person, so a cut never drops them
+    sources = sorted(sources, key=lambda x: x["opened"])[:FOUND_SOURCES]
+    facts = [t for x in (f.get("facts") or [])[:10] if isinstance(x, str) and (t := _clip(x, 300, h))]
+    if not sources and not facts:
+        return None
+    out: dict = {"sources": sources, "facts": facts}
+    if _TIME.fullmatch(str(f.get("at") or "")):
+        out["at"] = f["at"]
+    return out
+
+
 def build(root: Path, ticket: dict, atts: list[dict], h=None) -> dict:
     """The full view. Every text goes through the scrub and the value hider `h` (built here when not given):
     a stored key value never leaves, also in prose without a label. No value hider, or a value still in the
@@ -1397,6 +1443,10 @@ def build(root: Path, ticket: dict, atts: list[dict], h=None) -> dict:
         view["summary"] = summary
     if _DUE.fullmatch(str(ticket.get("due") or "")):  # YYYY-MM-DD or YYYY-MM-DDTHH:MM, as the schema says
         view["due"] = ticket["due"]  # full snapshots only: light_view never has it
+    if prep := _prepare_view(ticket):
+        view["prepare"] = prep  # full snapshots only, as due
+    if found := _found_view(ticket, h):
+        view["found"] = found  # full snapshots only, as due
     try:
         results = phone_results.prepare(root, result_candidates(root, ticket), h)
     except Exception:  # whatever is wrong with a result: the snapshot goes without results
@@ -1420,6 +1470,8 @@ def fit(view: dict) -> dict:
         view["attachments"].pop()
     while size_of(view) > BUDGET and view.get("refs"):
         view["refs"].pop()
+    while size_of(view) > BUDGET and (view.get("found") or {}).get("sources"):
+        view["found"]["sources"].pop()  # the read ones go first (sorted last); Could not open stays longest
     for n in (120, 40):
         if size_of(view) > BUDGET:
             for c in view["checklist"]:
@@ -1465,6 +1517,9 @@ def _tasks_sig(ticket: dict, root: Path | None = None) -> str:
     data = [items, ticket.get("status"), running]
     if ticket.get("started") is True:
         data.append(True)
+    prep, found = ticket.get("prepare"), ticket.get("found")  # ORCH-742: Preparing / Prepared and What I found
+    if isinstance(prep, dict) or isinstance(found, dict):
+        data.append([prep.get("state") if isinstance(prep, dict) else None, found.get("at") if isinstance(found, dict) else None])
     return hashlib.sha256(json.dumps(data).encode()).hexdigest()[:16]
 
 
