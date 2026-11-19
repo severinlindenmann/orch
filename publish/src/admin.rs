@@ -331,13 +331,20 @@ async fn ws_token(
     ))
 }
 
+#[derive(Deserialize, Default)]
+struct DryRun {
+    dry_run: Option<String>,
+}
+
+/// Delete a workspace with its files and apps. `?dry_run=1` answers what would go, changing nothing.
 async fn ws_delete(
     St(st): St<State>,
     h: HeaderMap,
     Path(id): Path<String>,
-) -> ApiResult<StatusCode> {
+    Query(q): Query<DryRun>,
+) -> ApiResult<Response> {
     check(&st, &h)?;
-    get_ws(&st, &id)?;
+    let w = get_ws(&st, &id)?;
     let (fids, names) = {
         let c = st.db.lock().unwrap();
         let f = db::file_ids_of(&c, &id)?;
@@ -348,6 +355,11 @@ async fn ws_delete(
             .collect();
         (f, n)
     };
+    if matches!(q.dry_run.as_deref(), Some("1" | "true" | "yes")) {
+        return Ok(Json(json!({"id": id, "name": w.name, "dry_run": true,
+            "removes": {"files": fids.len(), "apps": names.len()}}))
+        .into_response());
+    }
     for f in fids {
         files::remove(&st, &f);
     }
@@ -356,7 +368,7 @@ async fn ws_delete(
         apps::remove(&st, &n).await;
     }
     db::delete_workspace(&st.db.lock().unwrap(), &id)?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 async fn files_list(St(st): St<State>, h: HeaderMap, Query(q): Query<Q>) -> ApiResult<Json<Value>> {

@@ -114,6 +114,33 @@ Those workspaces can send the phone text and questions (`orch relay send ph_… 
 - In-process server + temp dir; APNs behind a trait with a fake. Every `contracts/examples/message/*` is accepted/refused as expected.
 - CI: `relay/**`, `contracts/**`; `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`.
 
+## Deleting a workspace
+Deleting a workspace (admin page, `DELETE /admin/api/workspaces/<id>`) removes in one transaction the workspace, its
+rules, group link, webhooks, notebook, phone links and mutes, and everything that belongs only to it: messages from or
+to it, the files those messages and its problem reports name (rows and files on disk, unless another message still
+names them), its problem reports, cached speech of those messages, and subscriber log lines that name those files; it
+is taken off subscribers' workspace lists. `?dry_run=1` answers the counts (`removes`: messages, files, problems,
+sub_log, subscribers) and changes nothing; the admin page shows them before the person confirms.
+
+History of workspaces deleted before this (rows that name a `ws_…` id no longer in `workspaces`, and log lines of
+subscribers that no longer exist): `POST /admin/api/cleanup?dry_run=1` counts it, `POST /admin/api/cleanup` removes it.
+
+## Command line
+`orch-relay --help` (`-h`) prints help, `--version` (`-V`) the version; neither reads settings, opens the data folder
+or binds a port. Unknown arguments are refused (exit 2). The server refuses to start as root (`--allow-root` or
+`ORCH_RELAY_ALLOW_ROOT=1` allows it), when its ports are taken, or when another orch-relay holds the data folder
+(`<data dir>/.orch-relay.lock`).
+
+Admin commands talk to the running server's admin port with the admin token (from the environment, or
+`--env-file`, default `/etc/orch-relay/env`):
+```
+sudo -u orch-relay orch-relay admin workspaces list
+sudo -u orch-relay orch-relay admin workspaces remove <id> --dry-run   # then without --dry-run
+sudo -u orch-relay orch-relay admin groups list
+sudo -u orch-relay orch-relay admin groups remove <id> [--dry-run]     # its workspaces stay, outside any group
+sudo -u orch-relay orch-relay admin cleanup --dry-run                  # back up relay.db first, then without --dry-run
+```
+
 ## Deploy
 `relay-deploy.yml` on push to `main`: build, copy over SSH, `systemctl restart orch-relay`, check `/health`.
 First install: `deploy/install.sh` (user, folders, master key, admin token, Caddy route). Same VPS as publish.
