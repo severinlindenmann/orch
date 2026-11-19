@@ -450,6 +450,26 @@ def _binding_realpath(f: Path):
     return stored
 
 
+_SETTLE_TRIES = 5
+_SETTLE_PAUSE = 0.05
+
+
+def _binding_settled(f: Path):
+    """_binding_realpath, read again a few times when the file cannot be told: _bind_new links a temp file
+    into place and then removes it, so for a moment another process or thread sees binding.json with two
+    names, which the guarded read refuses. A file that stays that way is still refused (last error raised)."""
+    for i in range(_SETTLE_TRIES):
+        try:
+            return _binding_realpath(f)
+        except (FileNotFoundError, ValueError, AttributeError):
+            raise
+        except (winacl.Unknown, OSError, Refused):
+            if i == _SETTLE_TRIES - 1:
+                raise
+            time.sleep(_SETTLE_PAUSE)
+    return None
+
+
 def _bound_folders(root: Path, home: Path, own: str | None = None) -> list[str]:
     """Names of the key folders in `home` whose binding.json names this workspace's real path (identity by
     samefile where both exist, else equal real paths). A folder with no or a damaged binding names nothing."""
@@ -468,7 +488,7 @@ def _bound_folders(root: Path, home: Path, own: str | None = None) -> list[str]:
         try:
             if not stat.S_ISDIR((keys / name).lstat().st_mode):  # keys.lock and the like
                 continue
-            stored = _binding_realpath(keys / name / "binding.json")
+            stored = _binding_settled(keys / name / "binding.json")
         except FileNotFoundError:  # no binding.json: bound to nothing
             continue
         except (ValueError, AttributeError):  # garbage JSON: bound to nothing
