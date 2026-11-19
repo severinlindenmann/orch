@@ -159,8 +159,10 @@ Done on the Hostinger server `2.24.146.133` (private `100.71.225.229`). Differen
   `ORCH_PUBLISH_ADMIN_TOKEN`), the APNs key in `/etc/orch-relay/apns/`, apps in `/srv/orch-publish/apps`
   (`ORCH_PUBLISH_APPS_DIR`, unit `ReadWritePaths` includes `/srv/orch-publish`), and `DOCKER_CONFIG` in the data
   folder. The units, `env` files and keys were copied from the old server with `tar` through the laptop, then only
-  the addresses were changed. The engine socket on the new server is `/var/run/docker.sock` (group `kiri`).
-- The private-app address is `http://publish.internal.severin.io:8410` (a record in the private network's own DNS).
+  the addresses were changed. The engine socket on the new server is `/var/run/docker.sock` (group `kiri`, Kiri's engine): pass it as
+  `ORCH_PUBLISH_ENGINE_SOCKET`; `install.sh` refuses a socket that is not Kiri's.
+- The private-app address is `http://publish.internal.severin.io:8410`, a record only in the private network's own DNS
+  (as on the old server); `install.sh` writes the plain private address, which needs no DNS.
 - The relay needs about 5 seconds before it listens; check `/health` in a loop, not once.
 - The DNS was switched by the owner before the data moved. Caddy sites were added right after the copy, and HTTPS
   worked within seconds. Adding them before DNS points at the server makes Caddy fail HTTPS attempts and back off.
