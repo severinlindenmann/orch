@@ -1,5 +1,5 @@
-// A session without a ticket from the live bar's New menu (ORCH-364, draft D). The bar shows with the Focus add-on
-// and the Preview switch; the demo has neither, so the page's state says both are on (nothing else is changed). The
+// A session without a ticket from the live bar's New menu (ORCH-364, draft D). The bar shows with the Focus add-on;
+// the demo has none, so the page's state says it is on (nothing else is changed). The
 // click is real: the server runs this checkout's `orch session new terminal` in the demo workspace. The plain terminal
 // is the kind that starts no process (a placeholder until the terminal stage), so no helper runs. After a reload the
 // session is still listed by orch and shown in the bar.
@@ -20,7 +20,6 @@ module.exports = {
       const into = st.delta ? st.set : st;
       if (!st.unchanged && into) {
         if (!st.delta || 'addons' in into) into.addons = [...(into.addons || []).filter(a => a.name !== LIVE.name), LIVE];
-        if (!st.delta || 'settings' in into) into.settings = { ...(into.settings || {}), focus_preview_on: true };
       }
       route.fulfill({ response: res, json: st });
     });

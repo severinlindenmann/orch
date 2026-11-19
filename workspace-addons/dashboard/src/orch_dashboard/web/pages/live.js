@@ -1,10 +1,9 @@
 'use strict';
-// The new live page (draft D, ORCH-261), behind the Preview switch on the settings page of the add-on whose page has
-// live sessions (one setting in the core config). Off, the default: that add-on's addresses show its own page,
-// exactly as before. On: the same addresses show this page: the wall of every session (pages/livewall.js), with the
-// bar and the layer under every page. The dashboard names no add-on: the page is found by its live_session capability.
-function livePreviewOn() {
-  return !snapshot && state?.settings?.focus_preview_on === true;
+// Focus (draft D, ORCH-261; the only Focus since ORCH-816): the addresses of the add-on whose page has live sessions
+// show this page: the wall of every session (pages/livewall.js), with the bar and the layer under every page. Never in
+// a shared copy (it has no live sessions). The dashboard names no add-on: the page is found by its live_session capability.
+function liveFocusOn() {
+  return !snapshot;
 }
 function livePageOf(id) {
   return addons().find(a => a.name === id && a.page?.live_session === true) || null;
@@ -26,14 +25,12 @@ function liveNewButtons() {
 function liveNextPage(r) {
   const label = addonLabel(livePageOf(r.id));
   window.LiveSessions?.sync();
-  return fragment(heading(label, '', {actions:h('span', {className:'badge info', 'data-key':'live-next-tag'}, 'Preview')}),
+  return fragment(heading(label, ''),
     liveNewButtons(),
-    h('section', {'data-key':'live-next', 'data-path':r.path || '', 'aria-label':'Sessions'}, liveWall()),
-    h('p', {className:'meta'}, h('a', {href:'#settings/addons/' + encodeURIComponent(r.id), 'data-key':'live-next-off'}, 'Back to today’s ' + label)));
+    h('section', {'data-key':'live-next', 'data-path':r.path || '', 'aria-label':'Sessions'}, liveWall()));
 }
-// One ticket's address (#addon/<page>/t/<ticket>, as Home, a ticket page or an old link names it) with Preview on:
-// the new page underneath and that ticket's session opened in the layer with the keyboard in it, so the address never
-// shows less than today's page did (ORCH-465). Once per address: closed again, it stays closed until the address changes.
+// One ticket's address (#addon/<page>/t/<ticket>, as Home, a ticket page or an old link names it): the page
+// underneath and that ticket's session opened in the layer with the keyboard in it (ORCH-465). Once per address: closed again, it stays closed until the address changes.
 function liveAddressTicket(r) {
   const m = r && r.kind === 'live' ? /^t\/([A-Za-z0-9_-]{1,64})$/.exec(r.path || '') : null;
   return m ? m[1] : null;

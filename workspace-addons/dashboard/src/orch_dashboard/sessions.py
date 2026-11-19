@@ -1,5 +1,5 @@
 """Live sessions (ORCH-359): one list of every session that the live page (draft D: the wall, the bar and the
-panes) reads, served as GET /api/sessions and polled while the Preview switch is on.
+panes) reads, served as GET /api/sessions and polled while Focus is shown.
 
 Nothing here asks orch anything new. Status, what a session waits on, tool, model and open time come from the
 state the page already polls (the state cache: `orch run status` rows, the tickets and the start line); the
