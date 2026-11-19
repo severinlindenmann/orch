@@ -119,11 +119,8 @@ impl Config {
             return Err("ORCH_PUBLISH_PRIVATE_LISTEN and ORCH_PUBLISH_PRIVATE_URL must be set together or not at all.".into());
         }
         if let (Some(l), Some(u)) = (&self.private_listen, &self.private_url) {
-            let ok = l
-                .parse::<std::net::SocketAddr>()
-                .is_ok_and(|a| private_ip(a.ip()));
-            if !ok {
-                return Err("ORCH_PUBLISH_PRIVATE_LISTEN must be an IP address and port on the private network (not 0.0.0.0, not a public address).".into());
+            if !crate::listen::valid_form(l) {
+                return Err("ORCH_PUBLISH_PRIVATE_LISTEN must be an IP address and port on the private network, or a private-network interface and port such as wt0:8410 (not 0.0.0.0, not a public address).".into());
             }
             if u.trim_end_matches('/') == self.public_url.trim_end_matches('/') {
                 return Err("ORCH_PUBLISH_PRIVATE_URL must differ from the public URL.".into());
@@ -213,37 +210,13 @@ pub fn split_authority(a: &str, dflt: u16) -> (String, u16) {
 }
 
 /// 100.64/10, 10/8, 172.16/12, 192.168/16, fd00::/8 or loopback (local runs). Never unspecified.
-/// Startup check for the admin listener: an IP address and port on loopback or the private
-/// network. A host name, 0.0.0.0 or a public address is refused, so the admin page can never be
-/// reached from the internet by a config mistake. A private address that is missing on this
-/// machine (private network down) makes the bind fail, so the service stops instead of falling
-/// back to another address.
-pub fn check_admin_listen(listen: &str) -> Result<(), String> {
-    let ok = listen
-        .trim()
-        .parse::<std::net::SocketAddr>()
-        .is_ok_and(|a| private_ip(a.ip()));
-    if ok {
-        Ok(())
-    } else {
-        Err(format!(
-            "ORCH_PUBLISH_ADMIN_LISTEN={listen} must be an IP address and port on loopback or the private network (not 0.0.0.0, not a public address, not a host name)."
-        ))
-    }
+/// Startup check for the admin listener (see `listen`): loopback or private-network address, or the
+/// interface form `wt0:8411`. Returns the address to bind; anything else stops the service.
+pub fn resolve_admin_listen(listen: &str) -> Result<String, String> {
+    crate::listen::resolve("ORCH_PUBLISH_ADMIN_LISTEN", listen)
 }
 
-fn private_ip(ip: std::net::IpAddr) -> bool {
-    use std::net::IpAddr::*;
-    match ip {
-        V4(a) => {
-            let o = a.octets();
-            !a.is_unspecified()
-                && (a.is_loopback()
-                    || o[0] == 10
-                    || (o[0] == 100 && (64..128).contains(&o[1]))
-                    || (o[0] == 172 && (16..32).contains(&o[1]))
-                    || (o[0] == 192 && o[1] == 168))
-        }
-        V6(a) => !a.is_unspecified() && (a.is_loopback() || a.octets()[0] == 0xfd),
-    }
+/// Same rule without the resolving step, for callers that only need yes or no.
+pub fn check_admin_listen(listen: &str) -> Result<(), String> {
+    resolve_admin_listen(listen).map(|_| ())
 }

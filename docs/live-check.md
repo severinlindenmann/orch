@@ -53,9 +53,28 @@ failed. The program exits 0 when `ok` is `true` and 1 otherwise.
 
 ## Admin pages stay private
 
-Relay (`ORCH_RELAY_ADMIN_LISTEN`) and publish (`ORCH_PUBLISH_ADMIN_LISTEN`) refuse to start when the admin address
-is not an IP address on loopback or the private network (10/8, 100.64/10, 172.16/12, 192.168/16, fd00::/8).
-0.0.0.0, a public address and a host name are refused. When the private address is missing on the machine (the
-private network is down), opening the admin listener fails and the service stops. It never falls back to
-another address. The public Caddy sites only proxy to the public listener, which has no admin paths. The live
-check proves this from the outside every hour.
+Relay (`ORCH_RELAY_ADMIN_LISTEN`) and publish (`ORCH_PUBLISH_ADMIN_LISTEN`, and the optional
+`ORCH_PUBLISH_PRIVATE_LISTEN`) take one of two forms:
+
+- `<interface>:<port>`, for example `wt0:8412`: the private address of the private-network interface, read at every
+  start. This is the setting on the server: a server move or a rebuilt private network gives a new address and no
+  config change is needed.
+- `<IP>:<port>`: an IP address on loopback or the private network (10/8, 100.64/10, 172.16/12, 192.168/16,
+  fd00::/8).
+
+0.0.0.0, a public address, a host name and an interface without a private IPv4 address are refused, and the service
+stops. It never falls back to another address. When the private network is not up yet at boot, the relay start fails
+and systemd tries again every 10 seconds (`RestartSec=10`, no start limit). The publish private listener is optional:
+without its interface, private-network apps stay hidden and the rest keeps running. The public Caddy sites only proxy
+to the public listener, which has no admin paths. The live check proves this from the outside every hour.
+
+### Runbook: set or change the admin address
+
+1. In `/etc/orch-relay/env` set `ORCH_RELAY_ADMIN_LISTEN=wt0:8412`. In `/etc/orch-publish/env` set
+   `ORCH_PUBLISH_ADMIN_LISTEN=wt0:8411` and, when private-network apps are used, `ORCH_PUBLISH_PRIVATE_LISTEN=wt0:8410`.
+   The deploy only replaces the program, so these files stay as they are.
+2. For publish, put `Restart=on-failure`, `RestartSec=10` and `StartLimitIntervalSec=0` in its unit too, the same as
+   `relay/deploy/orch-relay.service`.
+3. `systemctl restart orch-relay orch-publish`, then `journalctl -u orch-relay -n 5` shows `admin on <private IP>:8412`.
+4. Check from a private-network device: `http://<private name>:8412/admin` and `:8411/admin` answer 200, and
+   `python3 scripts/live_check.py --where inside` passes.

@@ -1140,6 +1140,7 @@ dependencies = [
  "hex",
  "jsonschema",
  "jsonwebtoken",
+ "libc",
  "percent-encoding",
  "qrcode",
  "rand 0.8.8",

@@ -13,6 +13,7 @@ name = "orch-publish"
 path = "src/main.rs"
 
 [dependencies]
+libc = "0.2"
 axum = "0.7"
 tokio-util = { version = "0.7", features = ["io"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "net", "time", "fs", "io-util", "sync"] }

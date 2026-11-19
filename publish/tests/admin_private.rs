@@ -56,3 +56,36 @@ async fn public_listener_has_no_admin_paths() {
         assert_eq!(r.status.as_u16(), 404, "public {p} answered {}", r.status);
     }
 }
+
+#[test]
+fn interface_form_takes_the_private_address_at_start() {
+    use orch_publish::listen::resolve_with;
+    use std::net::Ipv4Addr;
+    let wt0 = |n: &str| match n {
+        "wt0" => vec![Ipv4Addr::new(100, 73, 196, 187)],
+        "eth0" => vec![Ipv4Addr::new(2, 24, 146, 133)],
+        _ => vec![],
+    };
+    assert_eq!(
+        resolve_with("V", "wt0:8411", wt0).unwrap(),
+        "100.73.196.187:8411"
+    );
+    assert!(resolve_with("V", "eth0:8411", wt0).is_err());
+    assert!(resolve_with("V", "wt1:8411", wt0).is_err());
+    assert!(orch_publish::listen::valid_form("wt0:8410"));
+    assert!(!orch_publish::listen::valid_form("0.0.0.0:8410"));
+}
+
+#[cfg(unix)]
+#[test]
+fn interface_form_reads_the_real_loopback() {
+    let lo = ["lo", "lo0"]
+        .into_iter()
+        .find(|n| !orch_publish::listen::interface_ipv4(n).is_empty())
+        .expect("a loopback interface");
+    assert_eq!(
+        orch_publish::resolve_admin_listen(&format!("{lo}:8411")).unwrap(),
+        "127.0.0.1:8411"
+    );
+    assert!(check_admin_listen("no-such-if9:8411").is_err());
+}

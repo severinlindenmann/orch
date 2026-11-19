@@ -1,6 +1,6 @@
 #!/bin/sh
 # First install on the VPS (run as root): user, folders, master key, admin token, service.
-# Usage: ./install.sh <path-to-orch-relay-binary> [private-ip]
+# Usage: ./install.sh <path-to-orch-relay-binary> [private-ip or private-network interface, e.g. wt0]
 set -eu
 BIN="$1"; IP="${2:-127.0.0.1}"
 id orch-relay >/dev/null 2>&1 || useradd --system --home /var/lib/orch-relay --shell /usr/sbin/nologin orch-relay

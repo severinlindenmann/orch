@@ -12,14 +12,22 @@ async fn main() {
     let admin_listen = std::env::var("ORCH_PUBLISH_ADMIN_LISTEN")
         .or_else(|_| std::env::var("PUBLISH_ADMIN_LISTEN"))
         .unwrap_or_else(|_| "127.0.0.1:8411".into());
-    if let Err(e) = cfg
+    let admin_listen = match cfg
         .validate()
-        .and_then(|_| orch_publish::check_admin_listen(&admin_listen))
+        .and_then(|_| orch_publish::resolve_admin_listen(&admin_listen))
     {
-        eprintln!("orch-publish: {e}");
-        std::process::exit(1);
-    }
-    let private_listen = cfg.private_listen.clone();
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("orch-publish: {e}");
+            std::process::exit(1);
+        }
+    };
+    // the private listener is optional: when its interface has no address, private apps stay hidden
+    let private_listen = cfg.private_listen.clone().and_then(|l| {
+        orch_publish::listen::resolve("ORCH_PUBLISH_PRIVATE_LISTEN", &l)
+            .map_err(|e| tracing::error!("{e} Private-network apps stay hidden."))
+            .ok()
+    });
     let st = new_state(cfg).expect("cannot open the data folder");
     orch_publish::sweep_containers_at_start(&st).await;
     let public = tokio::net::TcpListener::bind(&listen)

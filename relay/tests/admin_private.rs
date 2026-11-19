@@ -57,3 +57,36 @@ async fn public_listener_has_no_admin_paths() {
         );
     }
 }
+
+#[test]
+fn interface_form_takes_the_private_address_at_start() {
+    use orch_relay::listen::resolve_with;
+    use std::net::Ipv4Addr;
+    let wt0 = |n: &str| match n {
+        "wt0" => vec![Ipv4Addr::new(100, 73, 196, 187)],
+        "eth0" => vec![Ipv4Addr::new(2, 24, 146, 133)],
+        _ => vec![],
+    };
+    assert_eq!(
+        resolve_with("V", "wt0:8412", wt0).unwrap(),
+        "100.73.196.187:8412"
+    );
+    // a public interface, a missing one (private network down) and a host name all stop the service
+    let e = resolve_with("V", "eth0:8412", wt0).unwrap_err();
+    assert!(e.contains("no private IPv4 address"), "{e}");
+    assert!(resolve_with("V", "wt1:8412", wt0).is_err());
+    assert!(resolve_with("V", "hostinger-vps.nb.severin.io:8412", wt0).is_err());
+    assert!(resolve_with("V", "wt0:port", wt0).is_err());
+    assert!(resolve_with("V", "wt0", wt0).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn interface_form_reads_the_real_loopback() {
+    let lo = ["lo", "lo0"]
+        .into_iter()
+        .find(|n| !orch_relay::listen::interface_ipv4(n).is_empty())
+        .expect("a loopback interface");
+    assert_eq!(check_admin_listen(&format!("{lo}:8412")), Ok(()));
+    assert!(check_admin_listen("no-such-if9:8412").is_err());
+}

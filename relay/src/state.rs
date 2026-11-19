@@ -44,7 +44,7 @@ impl Config {
             topic: get("ORCH_RELAY_APNS_TOPIC").unwrap_or("io.severin.orch".into()),
         });
         let admin_listen = get("ORCH_RELAY_ADMIN_LISTEN").unwrap_or("127.0.0.1:8412".into());
-        check_admin_listen(&admin_listen)?;
+        let admin_listen = crate::listen::resolve("ORCH_RELAY_ADMIN_LISTEN", &admin_listen)?;
         Ok(Config {
             public_listen: get("ORCH_RELAY_LISTEN").unwrap_or("127.0.0.1:8103".into()),
             admin_listen,
@@ -65,30 +65,10 @@ impl Config {
     }
 }
 
-/// Startup check for the admin listener: an IP address and port on loopback or the private
-/// network (10/8, 100.64/10, 172.16/12, 192.168/16, fd00::/8). A host name, 0.0.0.0 or a public
-/// address is refused, so the admin page can never be reached from the internet by a config
-/// mistake. A private address missing on this machine (private network down) makes the bind
-/// fail and the service stop: it never falls back to another address.
+/// Startup check for the admin listener (see `listen`): loopback or private-network address, or the
+/// interface form `wt0:8412`; anything else stops the service.
 pub fn check_admin_listen(listen: &str) -> Result<(), String> {
-    use std::net::IpAddr::*;
-    let private = |ip: std::net::IpAddr| match ip {
-        V4(a) => {
-            let o = a.octets();
-            a.is_loopback()
-                || o[0] == 10
-                || (o[0] == 100 && (64..128).contains(&o[1]))
-                || (o[0] == 172 && (16..32).contains(&o[1]))
-                || (o[0] == 192 && o[1] == 168)
-        }
-        V6(a) => a.is_loopback() || a.octets()[0] == 0xfd,
-    };
-    match listen.trim().parse::<std::net::SocketAddr>() {
-        Ok(a) if private(a.ip()) => Ok(()),
-        _ => Err(format!(
-            "ORCH_RELAY_ADMIN_LISTEN={listen} must be an IP address and port on loopback or the private network (not 0.0.0.0, not a public address, not a host name)"
-        )),
-    }
+    crate::listen::resolve("ORCH_RELAY_ADMIN_LISTEN", listen).map(|_| ())
 }
 
 pub struct App {
