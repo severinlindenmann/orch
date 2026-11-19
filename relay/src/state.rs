@@ -85,10 +85,6 @@ pub struct App {
     pub upload_inflight: Mutex<HashMap<String, i64>>,
     /// phone id -> (window start, calls in window) for `POST /v1/phone/invitations/redeem`
     pub redeem_rate: Mutex<HashMap<String, (i64, u32)>>,
-    /// Open long-polls per notebook (notebook::MAX_POLLS).
-    pub notebook_polls: Mutex<HashMap<String, u32>>,
-    /// Sends per notebook and minute (notebook::PER_MINUTE): (window start, count).
-    pub notebook_rate: Mutex<HashMap<String, (i64, u32)>>,
     /// webhook id -> (window start, accepted calls in window); see `webhook_admit`
     pub webhook_rate: Mutex<HashMap<String, (i64, u32)>>,
     /// webhook id -> (UTC day number, accepted payload bytes that day)
@@ -168,8 +164,6 @@ impl App {
             speaker: Mutex::new(Arc::new(Aura::default())),
             transcribe_rate: Mutex::new(HashMap::new()),
             redeem_rate: Mutex::new(HashMap::new()),
-            notebook_polls: Mutex::new(HashMap::new()),
-            notebook_rate: Mutex::new(HashMap::new()),
             upload_slots: tokio::sync::Semaphore::new(4),
             upload_wait_ms: 5_000.into(),
             upload_idle_ms: 20_000.into(),
