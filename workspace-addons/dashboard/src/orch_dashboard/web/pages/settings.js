@@ -807,9 +807,73 @@ function aboutPanel() {
     line('Installed', h('div', {className:'stack'}, h('div', {className:'row'}, settingsText('strong', {'data-key':'update-installed'}, have?.label || (info ? 'orch' : '…')), buildLine(info, phase)?.[0]), ...(buildLine(info, phase) || []).slice(1))),
     line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))),
     autoUpdateCard(info),
+    toolsCard(),
     // About sits with the version (ORCH-89: it was under General)
     snapshot ? null : h('div', {className:'stack', 'data-key':'settings-about-orch'}, h('h2', {className:'set-sub'}, 'About'), h('div', {className:'card'},
       h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Style guide'), h('div', {className:'grow set-ctl'}, h('a', {className:'btn outline sm', href:'/styleguide', target:'_blank', rel:'noopener', 'data-key':'settings-style-guide'}, 'Open the style guide'))))));
+}
+// ---- Tools (ORCH-589): the helper tools and the other tools this workspace uses, newest version, what's new and
+// one Update button each. Data: GET /api/tool-updates (orch keeps the answers 6 hours; Check now asks again).
+// Update runs `orch tools update <name>` in the background; while it runs the card asks again every 3 seconds.
+const toolUi = {data:null, loading:false, starting:null, reason:'', timer:null, clicked:new Set()};
+function toolLoad(refresh = false) {
+  if (toolUi.loading || (toolUi.data && !refresh)) return;
+  toolUi.loading = true;
+  fetch('/api/tool-updates' + (refresh === true ? '?refresh=1' : ''), {cache:'no-store'}).then(r => r.ok ? r.json() : null).catch(() => null).then(data => {
+    toolUi.loading = false;
+    if (data && typeof data === 'object' && Array.isArray(data.tools)) toolUi.data = data;
+    else if (!toolUi.data || toolUi.data.failed) toolUi.data = {tools:[], failed:true};  // keep what was shown; else say it failed
+    const running = toolUi.data.job?.status === 'running';
+    // while an update runs, ask again every 3 s from orch's kept answers (no outside question each time)
+    if (running || toolUi.starting) { clearTimeout(toolUi.timer); toolUi.timer = setTimeout(() => toolLoad('poll'), 3000); }
+    if (!running && toolUi.data.job?.name === toolUi.starting) toolUi.starting = null;
+    if (route().kind === 'settings') render();
+  });
+}
+async function toolStart(name) {
+  toolUi.starting = name; toolUi.clicked.add(name); toolUi.reason = ''; render();
+  let res = null;
+  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'tools.update', args:{name}})}); } catch (e) { /* shown below */ }
+  if (!res || res.status !== 202) { toolUi.starting = null; toolUi.reason = res ? (await res.text()).slice(0, 200) : 'It did not start.'; render(); return; }
+  setTimeout(() => toolLoad('poll'), 1500);
+}
+function toolRow(t, job) {
+  const running = (job?.status === 'running' && job.name === t.name) || toolUi.starting === t.name;
+  const busy = job?.status === 'running' || !!toolUi.starting;  // one update at a time: the other buttons wait
+  // the result of an update started from this page (an older one from another day is not news)
+  const finished = job && job.name === t.name && toolUi.clicked.has(t.name) && (job.status === 'done' || job.status === 'failed') ? job : null;
+  const notes = array(t.notes);
+  const body = [
+    h('div', {className:'row'}, t.update ? h('span', {className:'badge', 'data-key':'tool-ready'}, 'Update available')
+        : settingsText('strong', {}, t.compare === 'current' ? 'Up to date' : t.installed ? 'Installed' : 'Version unknown'),
+      settingsText('span', {className:'meta', 'data-key':'tool-installed'}, t.installed ? (t.update ? t.installed + ' \u2192 ' + t.newest : t.installed) : '')),
+    t.update && notes.length ? h('div', {className:'stack', 'data-key':'tool-notes'}, notes.map(n => h('div', {className:'stack'},
+      settingsText('h3', {}, 'What\u2019s new in ' + n.version),
+      h('ul', {className:'upd-changes'}, array(n.lines).map(x => settingsText('li', {}, x))))),
+      t.more || t.notes_url ? h('p', {className:'meta'}, t.more ? 'And ' + t.more + ' more. ' : '', t.notes_url ? h('a', {href:t.notes_url, target:'_blank', rel:'noopener noreferrer'}, 'All notes') : null) : null) : null,
+    running ? settingsText('p', {className:'meta', role:'status', 'data-key':'tool-updating'}, 'Updating\u2026 You can leave this page.')
+      : t.can_update && !snapshot && !busy ? h('div', {className:'row'}, (() => { const b = button('Update to ' + t.newest, 'outline sm', () => toolStart(t.name)); b.dataset.key = 'tool-update'; return b; })(),
+        t.helper ? settingsText('span', {className:'meta'}, 'Helpers working now keep going; they use the new version from their next start.') : null)
+      : t.update && t.manual ? settingsText('p', {className:'meta', 'data-key':'tool-manual'}, t.manual) : null,
+    finished && !running ? settingsText('p', {className:finished.status === 'failed' ? 'bad' : 'upd-done', role:'status', 'data-key':'tool-result'}, finished.say || '') : null,
+    t.error ? settingsText('p', {className:'meta', 'data-key':'tool-error'}, t.last_good_at && t.newest ? 'Could not check right now. This is from ' + fmtAgo(t.last_good_at) + '.' : 'Could not check for a newer version right now.') : null];
+  return h('div', {className:'card-row name-row', 'data-key':'tool-' + t.name}, h('span', {className:'set-label'}, t.label), h('div', {className:'grow set-ctl'}, h('div', {className:'stack'}, body)));
+}
+function fmtAgo(at) { const ago = window.DashHelpers?.ago; const d = new Date(at); return ago && !isNaN(d) ? ago(at, Date.now()) : isNaN(d) ? String(at) : d.toLocaleString([], {dateStyle:'medium', timeStyle:'short'}); }
+function toolsCard() {
+  if (settingsTab === 'about') toolLoad();
+  const data = toolUi.data, tools = array(data?.tools);
+  if (data && !tools.length && !data.failed) return null;  // no tool orch can check here: nothing to show
+  const checked = tools.map(t => t.checked_at).filter(Boolean).sort()[0];
+  return h('div', {className:'stack', 'data-key':'settings-tools'}, h('h2', {className:'set-sub'}, 'Tools'),
+    h('div', {className:'card'},
+      !data ? h('div', {className:'card-row'}, settingsText('p', {className:'meta', 'data-key':'tools-loading'}, 'Checking your tools for newer versions\u2026'))
+        : data.failed ? h('div', {className:'card-row'}, settingsText('p', {className:'meta', 'data-key':'tools-unknown'}, 'Could not check your tools right now.'))
+        : tools.map(t => toolRow(t, data.job)),
+      toolUi.reason ? h('div', {className:'card-row'}, settingsText('p', {className:'bad', role:'alert', 'data-key':'tools-failed'}, 'The update did not start: ' + clean(toolUi.reason))) : null,
+      data && !snapshot ? h('div', {className:'card-row'}, h('div', {className:'row'},
+        checked ? settingsText('span', {className:'meta', 'data-key':'tools-checked'}, 'Checked ' + fmtAgo(checked)) : null,
+        (() => { const b = button(toolUi.loading ? 'Checking\u2026' : 'Check now', 'outline sm', () => { toolLoad(true); render(); }); b.dataset.key = 'tools-check'; b.disabled = toolUi.loading; return b; })())) : null));
 }
 // Update automatically (off until the person turns it on): one switch. A development build follows its own branch, said plainly.
 function autoUpdateCard(info) {
