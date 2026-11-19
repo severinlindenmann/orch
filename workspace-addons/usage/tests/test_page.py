@@ -306,5 +306,11 @@ def test_the_page_draws_the_daily_prepare_limit_under_today(cli, fake_switcher, 
     js = (Path(page.__file__).parent / "web" / "usage.js").read_text(encoding="utf-8")
     assert "if (m.prepare) parts.push(prepareLine(m.prepare));" in js
     assert js.index("parts.push(today(m.spread))") < js.index("parts.push(prepareLine(m.prepare))")
-    for words in ("Preparing new tickets: ", "Change in Settings", "/#settings/helper", " in the last 24 hours", "full until "):
+    for words in (
+        "Preparing new tickets: ",
+        "Change in Settings",
+        "/#settings/helper",
+        " in the last 24 hours",
+        "full until ",
+    ):
         assert words in js

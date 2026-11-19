@@ -323,7 +323,9 @@ def test_a_full_prepare_limit_says_when_the_next_ticket_can_be_prepared(ws):
     (ws / ".orch" / "config.toml").write_text("[workflow]\nprepare_daily_limit = 2\n")
     (run / "prepare-starts.json").write_text(json.dumps({"starts": [now - 600]}))
     assert "free_at" not in prepare_use(ws, now)
-    (run / "prepare-starts.json").write_text(json.dumps({"starts": [now - 30 * 3600, now - 3600, now - 7200, now - 60]}))
+    (run / "prepare-starts.json").write_text(
+        json.dumps({"starts": [now - 30 * 3600, now - 3600, now - 7200, now - 60]})
+    )
     got = prepare_use(ws, now)
     assert got["used"] == 3
     assert datetime.fromisoformat(got["free_at"]) == datetime.fromtimestamp(int(now - 3600 + 24 * 3600), UTC)

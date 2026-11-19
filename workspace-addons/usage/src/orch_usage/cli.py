@@ -325,7 +325,9 @@ def prepare_use(root: Path, now: float | None = None) -> dict:
     out = {"on": wf.get("prepare_on_save", True) is True, "used": len(day), "limit": limit}
     if limit and len(day) >= limit:
         # full: the next ticket can be prepared once enough of these are older than a day (ORCH-811)
-        out["free_at"] = datetime.fromtimestamp(day[len(day) - limit] + 24 * 3600, UTC).isoformat(timespec="seconds")
+        out["free_at"] = datetime.fromtimestamp(day[len(day) - limit] + 24 * 3600, UTC).isoformat(
+            timespec="seconds"
+        )
     return out
 
 
