@@ -4,14 +4,13 @@
 // wraps: when the row is too narrow it folds step by step into counts (kit .lbar, data-fold). The dashboard names no
 // add-on: the live page is found by its live_session capability (pages/live.js).
 //
-// Data: the live sessions API (pages/livesessions.js, window.LiveSessions; ORCH-359). Pinning is not stored by orch
-// yet (the wall builds it): until then the pinned ids are read from this browser only (LIVEBAR_PINS).
+// Data: the live sessions API (pages/livesessions.js, window.LiveSessions; ORCH-359). Pins and own names are kept by
+// orch for the workspace (window.LiveSessions.pins, ORCH-361).
 //
 // Mount: the bar is one element (#live-bar). It goes into the dashboard's keep place ([data-keep], the mount point that
 // outlives page changes) when there is one, else at the end of .shell-body; LiveBar.mount(host) moves it anywhere else
 // and it stays the same element (its open list included). With the layer (window.LiveLayer.open) a chip opens its
 // session there; the layer's orch:live-layer event marks the open ones; LiveBar.end(fn) fills the right end.
-const LIVEBAR_PINS = 'orch.live.pins';
 const LIVEBAR_LISTS = {
   wait: {sym:'◆', word:'need you', head:'Needs you'},
   pin: {sym:'', word:'pinned', head:'Pinned'},
@@ -52,10 +51,11 @@ function liveFocusVerb(t, run, helperState) {
   if (o) return {run:'Watch', idle:'Open', queue:'In line'}[o.s];
   return ['done', 'dropped', 'superseded'].includes(t.status) ? '' : 'Start';
 }
-// Which sessions a list (or a chip group) holds. Needs you wins over pinned; pinned is taken out of the counts.
+// Which sessions a list (or a chip group) holds. Needs you wins over pinned; pinned is taken out of the counts. More
+// (the last fold, where pinned has no chip or count of its own) holds everything that does not need you, pinned too.
 function liveBarIn(o, l) {
   const w = o.s === 'wait';
-  return l === 'wait' ? w : l === 'pin' ? o.pin && !w : !w && !o.pin && (l === 'more' || o.s === l);
+  return l === 'wait' ? w : l === 'pin' ? o.pin && !w : l === 'more' ? !w : !w && !o.pin && o.s === l;
 }
 // The open session without a ticket of a kind (state.sessions), or null: New goes to it instead of a second one.
 function liveBarNewOpen(sessions, kind) {
@@ -85,17 +85,19 @@ if (typeof module === 'object' && module.exports) {
     const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0, menu:false, busy:''};
     const liveAddon = () => array(state?.addons).find(a => a.page?.live_session === true) || null;
     const sessions = () => window.LiveSessions?.list || [];
-    const pins = () => { try { return JSON.parse(localStorage.getItem(LIVEBAR_PINS) || '[]'); } catch (e) { return []; } };
+    const groups = () => window.LiveSessions?.groups || [];
+    const pins = () => window.LiveSessions?.pins || [];  // kept by orch for the workspace (ORCH-361)
     const phone = () => window.matchMedia('(max-width: 720px)').matches;
     const link = (a, o) => '#addon/' + encodeURIComponent(a.name) + '/t/' + encodeURIComponent(o.id);
-    const label = o => o.key || o.title;
+    const label = o => o.name || o.key || o.title;  // a chip shows the session's own name when it has one (draft D)
     const needTotal = () => { try { return typeof needsYouTotal === 'function' ? needsYouTotal() : 0; } catch (e) { return 0; } };
     const sym = (s, text) => h('span', {className:'lbar-sym', 'data-s':s, 'aria-hidden':'true'}, text);
 
     function chip(a, o) {
-      return h('a', {className:'lbar-chip', href:link(a, o), 'data-s':o.s, 'data-key':'lbar-chip-' + o.id, 'data-lbar-open':o.id,
-        'aria-current':bar.panes.includes(o.id) ? 'true' : null, title:o.title + ' · ' + o.word},
-        sym(o.s, LIVEBAR_LISTS[o.s].sym), h('span', {}, label(o)));
+      const open = (o.members || [o.id]).some(id => bar.panes.includes(id));
+      return h('a', {className:'lbar-chip', href:link(a, o), 'data-s':o.s, 'data-key':'lbar-chip-' + (o.group || o.id), 'data-lbar-open':o.id,
+        'aria-current':open ? 'true' : null, title:o.title + ' · ' + (o.group ? o.line : o.word)},
+        sym(o.s, LIVEBAR_LISTS[o.s].sym), h('span', {}, label(o)), o.group ? h('span', {className:'lbar-n', 'aria-label':o.line}, String(o.n)) : null);
     }
     function count(all, l, compact) {
       const n = all.filter(o => liveBarIn(o, l)).length;
@@ -129,7 +131,7 @@ if (typeof module === 'object' && module.exports) {
       const list = all.filter(o => liveBarIn(o, bar.list) && (!q || (o.key + ' ' + o.title).toLowerCase().includes(q)));
       return list.length ? list.map(o => h('a', {className:'lbar-row', href:link(a, o), 'data-key':'lbar-row-' + o.id, 'data-lbar-open':o.id},
         h('span', {className:'lbar-st', 'data-s':o.s}, h('span', {className:'lbar-sym', 'aria-hidden':'true'}, LIVEBAR_LISTS[o.s].sym), o.word),
-        h('span', {className:'lbar-key'}, o.key), h('span', {className:'lbar-rn'}, o.title)))
+        h('span', {className:'lbar-key'}, o.key), h('span', {className:'lbar-rn'}, o.group ? o.title + ' · ' + o.line : o.title)))
         : [h('p', {className:'meta'}, 'No session matches.')];
     }
     function pop(a, all) {
@@ -187,7 +189,7 @@ if (typeof module === 'object' && module.exports) {
       const made = r.ok ? liveBarNewOpen(state.sessions, kind) : null;
       bar.menu = !made && !r.ok;
       if (made) {
-        try { const p = pins(); if (!p.includes(made.id)) localStorage.setItem(LIVEBAR_PINS, JSON.stringify([...p, made.id])); } catch (e) { /* private window */ }
+        // a session without a ticket is pinned by orch until it is unpinned (sessionprefs, ORCH-361)
         window.dispatchEvent(new CustomEvent('orch:live-pins', {detail:{key:made.id, pinned:true}}));
         await window.LiveSessions?.refresh?.();  // the bar and the panes read the sessions API: show it now
       }
@@ -217,7 +219,7 @@ if (typeof module === 'object' && module.exports) {
       }
       window.LiveSessions?.sync();
       if (!window.LiveSessions?.ready && !bar.el) return;  // no "All calm" flash before the first answer
-      const all = liveBarModel(sessions(), pins());
+      const all = liveBarModel(sessions(), pins(), groups());
       const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, bar.list, bar.menu, bar.busy, bar.panes, bar.docked, phone(), window.innerWidth, needTotal()]);
       if (!force && sig === bar.sig && bar.el?.parentNode === host) return;
       bar.sig = sig;
@@ -272,7 +274,7 @@ if (typeof module === 'object' && module.exports) {
       if (!e.target.matches?.('[data-lbar-q]') || !bar.el?.contains(e.target)) return;
       bar.q = e.target.value;
       const a = liveAddon(), box = bar.el.querySelector('[data-lbar-rows]');
-      if (a && box) box.replaceChildren(...rows(a, liveBarModel(sessions(), pins())));
+      if (a && box) box.replaceChildren(...rows(a, liveBarModel(sessions(), pins(), groups())));
     });
     document.addEventListener('keydown', e => {
       if (e.key !== 'Escape' || !bar.el?.contains(document.activeElement)) return;

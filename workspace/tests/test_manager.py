@@ -63,6 +63,7 @@ def test_the_manager_takes_no_slot_and_never_waits_in_line(proj, run, monkeypatc
     _live(proj, mid, "working", 1)
     assert mid not in [r["ticket"] for r in runs_live.live_all(proj)]
     monkeypatch.setattr(runs_live, "_full", lambda root: 1)  # every slot is taken
+    monkeypatch.setattr(runs_live, "_pressure", lambda root: None)  # the runner's real load must not hold it
     other = json.loads(run("ticket", "new", "Make a report", "--json", "--by", "human:t")[1])["id"]
     with pytest.raises(runs.Busy):
         runs_live.start_live(proj, other, "human:t", "claude", fresh=False, take_over=False, busy_text="x")

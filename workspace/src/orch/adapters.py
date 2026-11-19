@@ -269,11 +269,13 @@ def permission_args(
 ) -> list[str]:
     """The tool's flags for the workspace's permission mode (ask | auto | full), from the adapter's
     `permissions`. An agent without that data (a generic command) gets none: it ignores the mode.
-    Codex maps every mode to workspace-write + approval never (exec cannot ask): ask/auto/full never widen it
-    beyond that. orch only narrows: a personal config (CODEX_HOME or ~/.codex config.toml, active profile)
-    that sets read-only, or cannot be read safely, gets no flags; a personal approval_policy other than
-    never is kept. System/managed config and a project .codex/config.toml are not read: codex applies
-    them itself.
+    Codex (exec cannot ask: approval never) gets workspace-write at ask and auto: this folder and the ticket
+    store, no network. At full it runs without its sandbox (danger-full-access), like claude's full, so a dev
+    helper can make its worktree, write test homes and reach GitHub (ORCH-604, owner's choice); only a person
+    can raise the mode (config.set_permissions). orch only narrows: a personal config (CODEX_HOME or
+    ~/.codex config.toml, active profile) that sets read-only, or cannot be read safely, gets no flags; a
+    personal approval_policy other than never is kept. System/managed config and a project
+    .codex/config.toml are not read: codex applies them itself.
     person: the result of person_state (read once per start); read here when left out.
     An entry may depend on the installed tool: `if_help_has` (its --help text), else `else`."""
     a = load(name, root)
@@ -363,13 +365,16 @@ def person_state(rule) -> dict:
 def permission_note(
     name: str, root: Path | None = None, mode: str | None = None, person: Mapping | None = None
 ):
-    """One line for the run start when the person's own setting keeps the tool stricter than orch's mode."""
+    """One line for the run start: `say` when the person's own setting keeps the tool stricter than orch's
+    mode, else the entry's `note` (what the tool cannot reach at this mode: codex's sandbox), else None."""
     table = load(name, root).get("permissions") or {}
     entry = table.get(mode or config.permissions(root))
-    if not (isinstance(entry, dict) and entry.get("say")):
+    if not (isinstance(entry, dict) and (entry.get("say") or entry.get("note"))):
         return None
     st = person if person is not None else person_state(entry.get("unless_config"))
-    return entry["say"] if st["strict"] else None
+    if st["strict"] and entry.get("say"):
+        return entry["say"]
+    return entry.get("note") or None
 
 
 def person_for(name: str, root: Path | None = None, mode: str | None = None) -> dict | None:
@@ -479,6 +484,7 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
     try:
         reminder = reminder_settings.hook_command(name)
         recorder = reminder_settings.record_hook_command() if rec else ""
+        combined = reminder_settings.record_hook_command(name) if rec else ""
     except ValueError:
         return None  # an interpreter path no shell can carry safely: no orch hooks, the run goes on
     if not reminder_settings.can_import_cached():
@@ -489,12 +495,19 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
         return {"matcher": matcher, **g} if matcher is not None else g
 
     hooks: dict[str, list] = {event: [group(reminder)] for event in rh}
+    steps = a.get("step_hooks") or {}
+    # One process per tool event (ORCH-634): where the record hook runs on an event, it also runs the tool's
+    # guard (before a call) and step notice (after one) itself (`orch record hook --with <tool>`); they were
+    # two more Python starts per tool call. Events without a record hook (Windows) keep their own commands.
     for event in rec:  # every tool ("*"); its own group next to any other on the same event
-        hooks.setdefault(event, []).append(group(recorder, "*"))
+        both = event in guard or event in steps
+        hooks.setdefault(event, []).append(group(combined if both else recorder, "*"))
     for event, matcher in guard.items():  # the protected-machines guard: only the shell tool, before it runs
-        hooks.setdefault(event, []).append(group(reminder_settings.guard_hook_command(name), matcher))
-    for event in a.get("step_hooks") or {}:  # after each tool step: a one-step run hears of waiting input
-        hooks.setdefault(event, []).append(group(reminder, "*"))
+        if event not in rec:
+            hooks.setdefault(event, []).append(group(reminder_settings.guard_hook_command(name), matcher))
+    for event in steps:  # after each tool step: a one-step run hears of waiting input
+        if event not in rec:
+            hooks.setdefault(event, []).append(group(reminder, "*"))
     return {"hooks": hooks}
 
 

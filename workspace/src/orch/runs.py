@@ -413,6 +413,22 @@ def human_waiting(root: Path, tid: str) -> list[dict]:
     return out
 
 
+def human_sent(root: Path, tid: str) -> list[dict]:
+    """The messages a person wrote to the ticket's helper, read or not, oldest first (the last 200 read ones
+    are kept for dedupe): what the chat of a session shows as theirs after a reload. The same allowlist as
+    human_waiting; a run's start prompt, a slot request, an answer or an agent's line is never in it."""
+    out = []
+    for i in _pending_read(root, tid):
+        if i.get("via") in ("start", "slots") or i.get("kind") != "message":
+            continue
+        if _human_author(i.get("by", ""), i.get("via"), i.get("kind"), i.get("phone")) and i.get("human") in (
+            True,
+            None,
+        ):
+            out.append(i)
+    return out
+
+
 def _drop_start_prompts_locked(root: Path, tid: str) -> None:
     """A live run's first prompt waits in the pending file until the tool is up. When that run ends before
     it went in, it is removed: the next start writes its own prompt from the ticket (no nested prompt)."""
@@ -1131,7 +1147,27 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
         f"Files you make for this ticket (reports, exports, drafts) go in the folder printed by "
         f"orch ticket artifacts-dir {tid}, unless the person asked for a file in the project itself.",
     ]
-    if ticket.get("title_auto"):  # the title is only the first words of what the person wrote
+    new = not tickets.tidied(root, ticket)
+    tidy_cmd = (
+        "fix typos and write a short clear title, a description (what this is about and why, 1 to 3 "
+        "sentences, from their note), and a done-when line (what must be true when it is done; when they "
+        "wrote one, keep it). Fill the owner and due date only where the person's text says them. "
+        "Also estimate the helper time in minutes and the cost in dollars at list price for the whole "
+        "ticket (shown on the ticket, next to what it really took): "
+        f'orch ticket tidy {tid} "<short clear title>" --description "<what and why>" '
+        '--done-when "<one plain line>" --estimate-minutes <n> --estimate-cost <dollars> '
+        "[--owner <name>] [--due YYYY-MM-DD]. "
+        "Their original title stays in the history. The steps come next, as tasks. "
+        "Do this before you add tasks."
+    )
+    if ticket.get("title_auto") and new:  # ORCH-737: a placeholder title gets the whole tidy, in one step
+        out.insert(
+            1,
+            "The title above is only a placeholder (the first words of what the person wrote). FIRST read "
+            f"their text (the note, and any files in .orch/tickets/{tid}/artifacts/), then tidy this new "
+            "ticket, directly, do not ask anyone, so the person does not have to write it: " + tidy_cmd,
+        )
+    elif ticket.get("title_auto"):  # tidied before, the title still a placeholder: only the title is left
         out.insert(
             1,
             "The title above is only a placeholder (the first words of what the person wrote). FIRST read "
@@ -1141,21 +1177,11 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
             '--description "<what this is about>". Do this before you add tasks. It only works while the '
             "title is a placeholder: a title a person wrote is never changed.",
         )
-    elif not tickets.tidied(root, ticket) and not ticket.get("checklist"):  # first pickup of a new ticket
+    elif new and not ticket.get("checklist"):  # first pickup of a new ticket
         out.insert(
             1,
             "FIRST tidy this new ticket, directly, do not ask anyone, so the person does not have to "
-            "write it: "
-            "fix typos and write a short clear title, a description (what this is about and why, 1 to 3 "
-            "sentences, from their note), and a done-when line (what must be true when it is done; when they "
-            "wrote one, keep it). Fill the owner and due date only where the person's text says them: "
-            "Also estimate the helper time in minutes and the cost in dollars at list price for the whole "
-            "ticket (shown on the ticket, next to what it really took): "
-            f'orch ticket tidy {tid} "<short clear title>" --description "<what and why>" '
-            '--done-when "<one plain line>" --estimate-minutes <n> --estimate-cost <dollars> '
-            "[--owner <name>] [--due YYYY-MM-DD]. "
-            "Their original title stays in the history. The steps come next, as tasks. "
-            "Do this before you add tasks.",
+            "write it: " + tidy_cmd,
         )
     out[1:1] = (
         _plan_first_plan(ticket) + _epic_plan(ticket, root) + _done_when_plan(ticket)
@@ -1329,6 +1355,7 @@ def plan(
         argv and binary and argv[0] == binary and not shutil.which(binary)
     ):  # not on the PATH of a clean start: use where it really is
         argv = [adapters.find_binary(binary) or binary, *argv[1:]]
+    perm_note = adapters.permission_note(name, root, None, person)
     return {
         "agent": name,
         "adapter": a["adapter"],
@@ -1342,8 +1369,8 @@ def plan(
         "prompt": v["prompt"],
         "item_ids": [i["id"] for i in items],
         "fresh_why": cold_note,
-        "note": " ".join(n for n in (cold_note, adapters.permission_note(name, root, None, person)) if n)
-        or None,
+        "note": " ".join(n for n in (cold_note, perm_note) if n) or None,
+        "permission_note": perm_note,
     }
 
 
@@ -1411,9 +1438,14 @@ def start(
     text: str | None = None,
     agent: str | None = None,
     priority: str = "normal",
+    credit: dict | None = None,
+    over_limit: bool = False,
 ) -> dict:
     """Start (or continue) the agent on a ticket. mode None = live in tmux when the agent and the machine can,
-    else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent."""
+    else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent.
+    credit: run on an API key ({"account", "key", "why"}, keystart.py): one step at a time, the key given only
+    to the helper, the reason and the spend on the ticket.
+    over_limit: start even when the helper limit is reached (a red develop must not wait, ORCH-699)."""
     from orch import runs_live, worktrees
 
     tickets.load(root, tid)  # an unknown ticket is refused before anything is planned or spawned
@@ -1429,6 +1461,13 @@ def start(
     a = adapters.load(name, root)
     adapters.check_start_folder(name, root)  # live or oneshot, any agent: before anything is claimed
     notes = []
+    if credit is not None:
+        from orch import keystart
+
+        credit = keystart.check(root, name, credit)  # three plain strings; refused before anything is claimed
+        if mode == "live":
+            notes.append("A start on an API key works one step at a time; it does not open a live session.")
+        mode = "oneshot"
     live_ok = runs_live.available(a)
     if mode is None and any(i.get("live_retry") for i in undelivered(root, tid)):
         mode = "oneshot"  # a live session did not take this input (check_submit): one step at a time now
@@ -1455,6 +1494,7 @@ def start(
             take_over=take_over,
             busy_text=text or f"{by} asked for more work on this ticket.",
             priority=priority,
+            over_limit=over_limit,
         )
         r["notes"] = notes + r.get("notes", []) + ([notice] if notice else [])
         return r
@@ -1476,12 +1516,21 @@ def start(
     )
     notes += copy_notes
     try:
+        if (
+            credit is not None
+        ):  # on the run record before the wrapper starts: names and words only, never a value
+            set_process_fields(root, tid, rec["run"], credit=credit)
+            with contextlib.suppress(Exception):
+                tickets.log(root, tid, keystart.start_line(credit), by)
         p = plan(root, tid, fresh=fresh, mode=mode, allow=allow, agent=name)
         if p.get("note"):
             notes.append(p["note"])
         if p.get("fresh_why"):
             with contextlib.suppress(Exception):
                 tickets.log(root, tid, p["fresh_why"], "orch")
+        if p.get("permission_note"):  # the dashboard's Start shows the ticket history, not these notes
+            with contextlib.suppress(Exception):
+                tickets.log(root, tid, p["permission_note"], "orch")
         log_rel = f".orch/run/logs/{tid}-{rec['run']}.log"
         (root / log_rel).parent.mkdir(parents=True, exist_ok=True)
         cmd = procs.orch_python_argv("run", "_wrap", rec["run"], "--ticket", tid, "--agent", name)
@@ -1565,14 +1614,50 @@ def _run_turn(
     on_proc=None,
     watchdog: float | None = None,
     flags: dict | None = None,
+    key: dict | None = None,
 ):
     """One agent process. Returns (exit code, the output of this turn). watchdog: an agent that wrote no
     output within that many seconds is hung: its process tree is ended (kill_tree: SIGTERM, then SIGKILL)
-    and flags["hung"] is set."""
+    and flags["hung"] is set. key: a run on an API key (wrap: root, run, tid, name, credit, turns): the key is
+    handed to this process only (keystart.handoff), and the turn's spend is written before and after it."""
     log.parent.mkdir(parents=True, exist_ok=True)
     start = log.stat().st_size if log.exists() else 0
+    hand = None
+    secret = None
     with open_log(log) as out:
         try:
+            pass_fds: tuple = ()
+            if key is not None:
+                from orch import keystart
+
+                try:
+                    hand = keystart.handoff(
+                        key["root"],
+                        key["run"],
+                        key["tid"],
+                        key["name"],
+                        key["credit"],
+                        env,
+                        argv[0] if argv else "",
+                    )
+                except Refused as e:
+                    said = f"orch could not hand the API key to the helper: {e}\n"
+                    out.write(said.encode())
+                    return 1, said
+                env, pass_fds, secret = hand.env, hand.pass_fds, hand.secret
+                key["n"] = key.get("n", 0) + 1
+                key["row"] = f"{key['run']}:{key['n']}"
+                try:  # unknown until the turn says otherwise; a paid step that cannot be counted never starts
+                    keystart.write_spend(key["root"], key["row"], key["tid"], key["credit"], None)
+                except OSError:
+                    hand.close()
+                    hand.forget()
+                    key["row"] = None
+                    said = (
+                        "orch could not write down the spend of this step, so it did not start the helper.\n"
+                    )
+                    out.write(said.encode())
+                    return 1, said
             proc = subprocess.Popen(
                 argv,
                 cwd=root,
@@ -1581,11 +1666,21 @@ def _run_turn(
                 stdout=out,
                 stderr=subprocess.STDOUT,
                 start_new_session=os.name != "nt",  # its own group: stop can end it with its helpers
+                **({"pass_fds": pass_fds} if pass_fds else {}),
             )
+            if hand is not None:
+                hand.after_spawn()  # the value into the pipe, both ends closed here
         except OSError as e:
+            if hand is not None:
+                hand.close()
             said = f"orch could not start the agent: {e}\n"
             out.write(said.encode())
             return 127, said
+        finally:
+            if hand is not None:
+                hand.close()
+                hand.forget()
+            env = {}  # nothing below needs it; a key in it does not stay around in this frame
         if on_proc:
             on_proc(proc)
         if on_started:
@@ -1606,9 +1701,23 @@ def _run_turn(
                     break
                 time.sleep(0.2)
         rc = proc.wait()
+    if key is not None:
+        from orch import keystart
+
+        keystart.scrub_log(log, start, secret)
+        secret = None
     with open(log, "rb") as f:
         f.seek(start)
-        return rc, f.read().decode("utf-8", "replace")
+        text = f.read().decode("utf-8", "replace")
+    if key is not None and key.get("row"):
+        spent = keystart.turn_spend(key["name"], text, key["root"])
+        with contextlib.suppress(OSError):
+            keystart.write_spend(
+                key["root"], key["row"], key["tid"], key["credit"], spent["usd"], spent["tokens"]
+            )
+        key.setdefault("turns", []).append(spent)
+        key["row"] = None
+    return rc, text
 
 
 def _record_turn(
@@ -1722,6 +1831,13 @@ def wrap(
         current["proc"] = proc
         set_process_fields(root, tid, run, agent_pid=proc.pid, agent_pid_started=pid_started(proc.pid))
 
+    credit = rec.get("credit") if isinstance(rec.get("credit"), dict) else None
+    key = None
+    if credit is not None:  # a run on an API key (keystart.py): the key goes to each turn's process only
+        from orch import keystart
+
+        keystart.no_core_dumps()
+        key = {"root": root, "run": run, "tid": tid, "name": name, "credit": credit, "turns": []}
     # only an agent that streams its steps is expected to say something at once; others may work quietly
     streams = adapters.caps(name, root).get("stream") and mode == "oneshot"
     watch = start_watchdog_seconds() if streams else None
@@ -1747,6 +1863,7 @@ def wrap(
                 on_proc,
                 watch,
                 flags,
+                key,
             )
         )
         if flags.get("hung"):  # no sign of life: stop it and start fresh once (its session was never saved)
@@ -1756,13 +1873,13 @@ def wrap(
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session, resumed = p["argv"], p["stdin"], p["session"], False
             flags.clear()
-            rc, out = collected(_run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags))
+            rc, out = collected(_run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags, key))
         elif resumed and rc != 0 and adapters.session_missing(name, out, root):
             # only "that session does not exist" starts fresh; the input of this turn goes in with it
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session = p["argv"], p["stdin"], p["session"]
             flags.clear()
-            rc, out = collected(_run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags))
+            rc, out = collected(_run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags, key))
         if flags.get("hung"):  # the last try hung too: no further try; this turn's input waits for the next
             again = [i["id"] for i in turn_items if i.get("via") != "start"]  # a start prompt is made anew
             if undeliver(root, tid, again):
@@ -1801,6 +1918,9 @@ def wrap(
                     tickets.log(root, tid, limitstop.stopped_text(hit), "agent:helper-watcher")
         drain = turns <= MAX_DRAIN_TURNS and not flags.get("hung") and brake.paused(root) is None
         if release(root, tid, run, keep_if_pending=drain)["released"]:
+            if key is not None and key["turns"]:  # what the run cost on its credit, or that it is unknown
+                with contextlib.suppress(Exception):
+                    tickets.log(root, tid, keystart.end_line(credit, key["turns"]), f"agent:{name}")
             # ended without finishing or asking: not Working any more (anything still waiting stays queued)
             settle(root, tid, f"agent:{name}", ignore_input=True)
             return 0 if rc == 0 else rc
