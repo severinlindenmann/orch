@@ -352,7 +352,9 @@ def test_a_pull_request_red_on_top_of_its_base_leaves_the_queue(ws):
     r.run()
     row = store.read(ws)[0]
     assert states(ws) == {1: "out"} and len(calls) == 1 and "queue group was red" in row["why"]
-    assert row["red_head"]  # the commit it was dropped on: the Pull requests page keeps "checks failed" for it
+    assert row[
+        "red_head"
+    ]  # the commit it was dropped on: the Pull requests page keeps "checks failed" for it
     assert gh.closed == [calls[0]]  # its group pull request is closed, the branch deleted
 
 

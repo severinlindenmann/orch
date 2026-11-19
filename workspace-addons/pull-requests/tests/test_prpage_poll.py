@@ -170,7 +170,9 @@ def test_queue_dropped_pull_request_stays_failed_until_a_new_commit(prws):
     data = poll.load(prws)
     poll.read(prws, {"acme/app": [1]}, data, FakeGitHub({"acme/app": [gql_pr(1, sha="a" * 40)]}))
     assert data["prs"][PR.format(1)]["status"] == "checks failed"
-    poll.read(prws, {"acme/app": [1]}, data, FakeGitHub({"acme/app": [gql_pr(1, sha="b" * 40)]}))  # new commit
+    poll.read(
+        prws, {"acme/app": [1]}, data, FakeGitHub({"acme/app": [gql_pr(1, sha="b" * 40)]})
+    )  # new commit
     assert data["prs"][PR.format(1)]["status"] == "ready to merge"
 
 
