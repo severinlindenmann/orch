@@ -156,7 +156,8 @@ function liveGroupKey(panes) {
 const liveMsgDraft = new Map();
 const liveMsgBusy = new Set();
 function liveMsgBox(sess) {
-  if (!sess || sess.kind || !sess.running || snapshot) return null;
+  // a helper without a ticket (Manager, empty or chat helper) gets one too (ORCH-817); a plain terminal has no helper
+  if (!sess || sess.kind === 'terminal' || !sess.running || snapshot) return null;
   const g = liveGroupOf(liveGroups(), sess.id), id = 'live-msg-' + sess.id, busy = liveMsgBusy.has(sess.id);
   return h('form', {className:'live-msg', 'data-live-msg':sess.id, 'data-key':'live-msg'},
     h('label', {className:'live-to', for:id, 'data-key':'live-msg-to'}, liveMsgTo(sess, g)),

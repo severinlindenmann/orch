@@ -126,7 +126,7 @@ module.exports = {
     must(!(await bmenu.locator('[data-key="live-end-stop"]').count()), 'a plain terminal offers Stop');
     await shot('bar-chip-menu', bmenu);
     await bmenu.locator('[data-key="live-end-end"]').click();
-    await page.locator('#live-bar [data-key="live-end-ask"]').getByText('The terminal closes.').waitFor();
+    await page.locator('#live-bar [data-key="live-end-ask"]').getByText('The terminal closes. Its output is not kept.').waitFor();
     await act('session.end', () => page.locator('#live-bar [data-key="live-end-yes"]').click());
     const after = JSON.parse(orch('session', 'list', '--json')).sessions.find(s => s.kind === 'terminal');
     must(after && !after.open, 'orch still lists the plain terminal as open after End session');

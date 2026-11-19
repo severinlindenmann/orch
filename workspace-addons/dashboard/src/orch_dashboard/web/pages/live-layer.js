@@ -366,8 +366,8 @@ function livePaneBody(key, sess, label) {
 function liveEndedBody(sess, label) {
   return h('div', {className:'live-ended'},
     h('h3', {}, label + ' has ended'),
-    h('p', {className:'meta'}, 'Its conversation is kept. Start it again to go on where it stopped, or reopen an earlier conversation.'),
-    h('div', {className:'row'}, h('button', {type:'button', className:'btn outline sm', 'data-live-again':sess.kind, 'data-key':'live-start-again'}, 'Start again')),
+    h('p', {className:'meta'}, 'Its conversation is kept. Continue where it stopped, or reopen an earlier conversation.'),
+    h('div', {className:'row'}, h('button', {type:'button', className:'btn outline sm', 'data-live-again':sess.kind, 'data-key':'live-start-again'}, 'Continue')),
     typeof liveHistBody === 'function' ? liveHistBody(sess) : null);
 }
 document.addEventListener('click', async e => {
@@ -376,7 +376,7 @@ document.addEventListener('click', async e => {
   b.disabled = true;
   const r = await act('session.new', {kind:b.dataset.liveAgain}, {quiet:true});
   b.disabled = false;
-  window.orch?.toast?.(r.ok ? 'Started again. It goes on with the same conversation.' : r.text || 'Could not start it again.', r.ok ? 'ok' : 'error');
+  window.orch?.toast?.(r.ok ? 'It goes on with the same conversation.' : r.text || 'Could not start it again.', r.ok ? 'ok' : 'error');
 });
 // The waiting question of a ticket's pane: its words, one button per option and a field for an own answer, so it is
 // answered where it is shown (ORCH-675). Written only when the question changes, so a typed answer stays.

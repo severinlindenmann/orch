@@ -32,8 +32,8 @@ function liveEndModel(s) {
 function liveEndWords(name, kind) {
   const who = String(name || '').trim() || (kind === 'terminal' ? 'the plain terminal' : 'this session');
   return kind === 'terminal'
-    ? {ask:'End ' + who + '?', why:'The terminal closes.', done:'Plain terminal closed.'}
-    : {ask:'End ' + who + '?', why:'The helper stops for good. Its conversation is kept in History, where you can reopen it.',
+    ? {ask:'End ' + who + '?', why:'The terminal closes. Its output is not kept.', done:'Plain terminal closed.'}
+    : {ask:'End ' + who + '?', why:'It stops now. Its conversation is kept: continue it later, or reopen it from History.',
       done:who.charAt(0).toUpperCase() + who.slice(1) + ' ended. Its conversation is in History.'};
 }
 // The note an idle helper's pane shows instead of an empty box: what is going on, what to type, a way out.

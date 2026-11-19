@@ -53,8 +53,8 @@ test('a helper whose login changed counts as hung even while it says working', (
 });
 
 test('the one question before End, in plain words; the terminal keeps nothing', () => {
-  assert.deepEqual(liveEndWords('Manager', 'manager'), {ask:'End Manager?', why:'The helper stops for good. Its conversation is kept in History, where you can reopen it.', done:'Manager ended. Its conversation is in History.'});
-  assert.deepEqual(liveEndWords('', 'terminal'), {ask:'End the plain terminal?', why:'The terminal closes.', done:'Plain terminal closed.'});
+  assert.deepEqual(liveEndWords('Manager', 'manager'), {ask:'End Manager?', why:'It stops now. Its conversation is kept: continue it later, or reopen it from History.', done:'Manager ended. Its conversation is in History.'});
+  assert.deepEqual(liveEndWords('', 'terminal'), {ask:'End the plain terminal?', why:'The terminal closes. Its output is not kept.', done:'Plain terminal closed.'});
   assert.equal(liveEndWords('', '').ask, 'End this session?');
 });
 

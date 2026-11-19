@@ -367,7 +367,7 @@
   }
   function endBtn(s) { return live(s) ? pmBtn(s, 'end', I.power, 'End session of ' + s.k) : ''; }
   function endQ(s) {
-    return '<div class="mw-endq" role="group" aria-label="End ' + esc(nm(s)) + '?"><p><strong>End ' + esc(nm(s)) + '?</strong></p><p class="meta">' + (s.kind === 'shell' ? 'The terminal closes.' : 'The helper stops for good. Its conversation is kept in History, where you can reopen it.') + '</p><div class="mw-endb">' + btn('btn danger sm', 'endok', 'End session', { 'data-k': s.k }) + btn('btn ghost sm', 'endno', 'Keep it', { 'data-k': s.k }) + '</div></div>';
+    return '<div class="mw-endq" role="group" aria-label="End ' + esc(nm(s)) + '?"><p><strong>End ' + esc(nm(s)) + '?</strong></p><p class="meta">' + (s.kind === 'shell' ? 'The terminal closes. Its output is not kept.' : 'It stops now. Its conversation is kept: continue it later, or reopen it from History.') + '</p><div class="mw-endb">' + btn('btn danger sm', 'endok', 'End session', { 'data-k': s.k }) + btn('btn ghost sm', 'endno', 'Keep it', { 'data-k': s.k }) + '</div></div>';
   }
   function sessItems(s, where) {
     if (!live(s)) return '';
