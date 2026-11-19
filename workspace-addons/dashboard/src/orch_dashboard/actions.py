@@ -636,6 +636,14 @@ def _release_merge_set(a):
     return ["config", "set", "workflow.release_merge", "on" if a["on"] else "off"], [], []
 
 
+def _prepare_set(a):
+    """Settings > Prepare tickets when I save: `orch config set workflow.prepare_on_save` (ORCH-741)."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "workflow.prepare_on_save", "on" if a["on"] else "off"], [], []
+
+
 def _live_set(a):
     """Settings > Helper > Helpers at once: null = no limit, else 2 to 10; `orch config set workspace.live_max`."""
     _only(a, ("max",))
@@ -835,8 +843,13 @@ def _chat_make_ticket(a):
 
 def _run_start(a):
     """Start a helper on the ticket: continue its last conversation, or fresh; the Start choice (ORCH-362) can
-    name the tool (`--agent`, a name from `orch agents`); orch refuses a tool it does not know."""
-    _only(a, ("ticket", "fresh", "take_over", "agent"))
+    name the tool (`--agent`, a name from `orch agents`); orch refuses a tool it does not know.
+    prepare: Save without starting (ORCH-738) only prepares the ticket; it goes alone, with no other flag."""
+    _only(a, ("ticket", "fresh", "take_over", "agent", "prepare"))
+    if _flag(a.get("prepare")):
+        if any(a.get(k) is not None for k in ("fresh", "take_over", "agent")):
+            raise BadRequest("Prepare goes alone: no tool, fresh start or take-over with it.")
+        return ["run", "start", _tid(a.get("ticket"))], ["--prepare"], []
     flags = (["--fresh"] if _flag(a.get("fresh")) else []) + (
         ["--take-over"] if _flag(a.get("take_over")) else []
     )
@@ -1220,6 +1233,7 @@ OPS = {
     "workflow.set": _workflow_set,
     "reviewer.set": _reviewer_set,
     "release_merge.set": _release_merge_set,
+    "prepare.set": _prepare_set,
     "live.set": _live_set,
     "diag.set": _diag_set,
     "typing.set": _typing_set,
@@ -1671,6 +1685,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             "workflow.set",
             "reviewer.set",
             "release_merge.set",
+            "prepare.set",
             "live.set",
             "copies.set",
             "copies.clean",
