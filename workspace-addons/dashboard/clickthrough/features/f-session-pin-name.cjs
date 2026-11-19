@@ -1,7 +1,7 @@
 // Pin and rename a session in the new Focus (draft D, ORCH-361): pin a working session on the wall, open it, click its
 // name in the pane header, type a new one and press Enter; reload: it is still pinned and named. The seeded home has
 // no live-session add-on and no running helper (not-yet.json: add-ons are not installed here), so the page's state is
-// told the add-on and the Preview switch are on, and the sessions list stands in for two seeded tickets. The clicks go
+// told the add-on is on, and the sessions list stands in for two seeded tickets. The clicks go
 // to the real server, which keeps pins and names in the workspace; the stand-in list reads that file, as the real
 // sessions API does, so what shows after the reload is what the server really kept.
 const fs = require('node:fs');
@@ -21,7 +21,6 @@ module.exports = {
       const into = st && (st.delta ? st.set : st);
       if (st && !st.unchanged && into) {
         if (!st.delta || 'addons' in into) into.addons = [...(into.addons || []).filter(a => a.name !== live.name), live];
-        if (!st.delta || 'settings' in into) into.settings = { ...(into.settings || {}), focus_preview_on: true };
       }
       return st;
     };
