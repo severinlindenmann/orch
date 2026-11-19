@@ -54,6 +54,7 @@ OUT_MAX = 64 * 1024  # bytes of output read; the rest is dropped
 TAIL_LINES = 20  # lines of output shown on the card and given to the helper
 SAFE_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin")
 OK_LABEL = "I ran it"
+UNCHECKED = "orch did not check this command. Read it before you run it in your terminal."
 
 PERSON_REFUSAL = (
     "Only the signed-in person runs this: click Run it now on the card in the dashboard. "
@@ -247,11 +248,9 @@ def parse(root: Path, command, changes=None, undo=None, *, login: bool = False) 
             spec["undo"] = undo_words
         return spec
     if not _other_op(argv):  # shown with Copy only: the person runs it in their own terminal
+        # no helper words on it: orch did not check this command, and the card says so (UNCHECKED)
+        _line(changes, "changes"), _line(undo, "undo")  # still checked as one plain line each
         spec.update({"class": "copy", "exe": None})
-        if _line(changes, "changes"):
-            spec["changes"] = _line(changes, "changes")
-        if _line(undo, "undo"):
-            spec["undo"] = _line(undo, "undo")
         return spec
     if not _line(changes, "changes"):
         _refuse("Say in one line what it changes (--changes).")

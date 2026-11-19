@@ -115,8 +115,10 @@ def test_an_allowed_program_needs_its_change_line(tk, run):
 )  # fmt: skip
 def test_any_other_command_is_copy_only(tk, run, person_grant, command):
     root, tid = tk
-    q = _card(run, tid, command)
-    assert q["card"]["run"]["class"] == "copy" and q["card"]["run"]["exe"] is None
+    q = _card(run, tid, command, "--changes", "Makes everything faster", "--undo", "Nothing to undo")
+    spec = q["card"]["run"]
+    assert spec["class"] == "copy" and spec["exe"] is None
+    assert "changes" not in spec and "undo" not in spec  # no helper words on a command orch did not check
     person_grant(root)
     code, out, err = _run_card(run, root, tid, q["id"], "--confirmed")
     assert code == 2 and "your own terminal" in out + err
