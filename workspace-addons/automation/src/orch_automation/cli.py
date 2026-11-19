@@ -403,7 +403,7 @@ def _run(args, root: Path) -> int:
             when_changed=args.when_changed,
         )
         if res.get("until"):
-            text = f"{args.ticket} wakes once at {res['until']}."
+            text = f"{args.ticket} wakes once at {local_text(res['until']) or res['until']}."
         elif res["recurring"]:
             text = f"{args.ticket} repeats: {cron_human(res['cron'], plain.zone(res['tz']), local=plain.zone(res['tz']))} ({res['tz']})."
             if res.get("script"):
