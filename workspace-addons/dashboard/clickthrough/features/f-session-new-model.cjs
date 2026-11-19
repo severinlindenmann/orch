@@ -1,7 +1,7 @@
 // The Empty helper's model in the live bar's New menu (ORCH-710, draft D feature 12): the menu says what the Empty
 // helper runs on, the usual model preselected; the person picks Haiku and starts it. The click is real: the server
 // runs this checkout's `orch session new empty --model haiku` in the demo workspace (a stand-in helper). orch then
-// lists the Empty helper on Haiku and its pane opens (the model line of a running pane: tests/live_model.test.js;
+// lists the Empty helper on Haiku and its pane opens, found by the session and not by its title (the model line of a running pane: tests/live_model.test.js;
 // the stand-in helper ends by itself within seconds, so it is not waited for here). The session is closed again at the end.
 // The demo's stand-in tools take no model: first the menu says so; then the page's state marks them as taking one
 // (as orch says for a tool it passes the model to), so the picker shows.
@@ -58,8 +58,10 @@ module.exports = {
     await menu.locator('[data-lbar-model]').selectOption('haiku');
     await act('session.new', () => menu.locator('[data-lbar-kind="empty"]').click());
     const listed = JSON.parse(orch('session', 'list', '--json'));
-    must(listed.sessions.some(s => s.kind === 'empty' && s.model === 'haiku'), 'orch does not list the Empty helper on Haiku');
-    await page.locator('#live-dock .live-pane .live-pt', { hasText: 'Empty helper' }).first().waitFor({ timeout: 20000 });
+    const empty = listed.sessions.find(s => s.kind === 'empty' && s.model === 'haiku');
+    must(empty, 'orch does not list the Empty helper on Haiku');
+    // By the session, not by its title: the stand-in helper may already have ended (the pane then says so).
+    await page.locator(`#live-dock .live-pane[data-session="${empty.id}"]`).waitFor({ timeout: 20000 });
     await shoot('empty-pane');
     orch('session', 'close', 'empty');
   },
