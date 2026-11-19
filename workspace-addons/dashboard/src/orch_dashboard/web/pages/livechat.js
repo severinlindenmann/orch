@@ -30,7 +30,7 @@ function liveChatWho(by) {
 const LIVE_CHAT_STATUS = {review:'Review', done:'Done', active:'Working', todo:'To do', ready:'To do', blocked:'Blocked'};
 function liveChatEvent(e) {
   const text = String(e.text || '').trim(), by = String(e.by || '');
-  if (/^(?:Claude|Codex|Gemini|The agent) started$/i.test(text) || /^Automation started an agent run/i.test(text)) return 'The helper started';
+  if (/^(?:[A-Z][a-z]+|The agent) started$/.test(text) || /^Automation started an agent run/i.test(text)) return 'The helper started';
   if (/finished the work and sent it to /i.test(text)) return 'The helper finished and sent it for review';
   if (/^The agent stopped before the work was finished/i.test(text)) return 'The helper stopped before the work was finished';
   if (/^Sent the helper on\b/i.test(text)) return 'The helper was sent on: it had stopped with open steps';
