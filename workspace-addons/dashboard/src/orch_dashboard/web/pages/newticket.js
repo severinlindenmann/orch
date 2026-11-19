@@ -332,6 +332,9 @@ function ticketForm(t) {
   actions.append(submit);
   if (plain) actions.prepend(plain);
   const startNow = async () => {
+    // Save without starting prepares the ticket in the background (ORCH-738): no word on screen when it cannot
+    // run now; the ticket then says "Not prepared yet" and Start still works.
+    if (!t && !startAfter && created) { Promise.resolve(act('run.start', {ticket:created.id, prepare:true}, {quiet:true})).catch(() => {}); return; }
     if (t || !startAfter || !created) return;
     const run = await act('run.start', {ticket:created.id});
     window.orch.toast(run.ok ? 'Helper started' : 'The ticket was created, but the helper did not start: ' + run.text, run.ok ? 'ok' : 'error');
