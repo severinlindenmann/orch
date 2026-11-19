@@ -1448,12 +1448,16 @@ def _run_last(t: dict, q: dict, card: dict) -> dict:
         return {}
     from orch import runcard
 
-    ext = t.get("ext") if isinstance(t.get("ext"), dict) else {}
-    rows = ext.get("runcard") if isinstance(ext.get("runcard"), dict) else {}
+    rows = t.get("run_attempts") if isinstance(t.get("run_attempts"), dict) else {}
     last = rows.get(q["id"]) if isinstance(rows.get(q["id"]), dict) else None
     out: dict = {"phone_run": runcard.phone_ok(q)}
     if last and last.get("ok") is False:
-        out["run_last"] = {k: last.get(k) for k in ("at", "by", "exit", "output", "error")}
+        out["run_last"] = {
+            "at": last.get("at"),
+            "exit": last.get("exit") if isinstance(last.get("exit"), int) else None,
+            "output": str(last.get("output") or "")[-4000:],
+            "error": runcard.error_words(last.get("reason"), last.get("exit"), card.get("run")),
+        }
     return out
 
 

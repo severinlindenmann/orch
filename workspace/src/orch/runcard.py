@@ -64,21 +64,26 @@ CHANGED = "The card changed after you saw it. Look at it again, then run it."
 
 _CONTROL = re.compile(r"[\x00-\x1f\x7f​-‏‪-‮⁦-⁩﻿]")
 _SHELL = set(";|&<>`$\\")
-_NO_PROGRAM = frozenset(
-    {"sudo", "su", "doas", "env", "xargs", "eval", "exec", "nohup", "time", "command", "builtin", "nice",
-     "timeout", "watch", "script", "open", "osascript", "launchctl", "crontab", "ssh", "scp", "rm", "dd",
-     "chmod", "chown", "curl", "wget", "git", "find", "tar", "rsync", "xcrun", "vi", "vim", "nvim", "nano",
-     "emacs", "less", "more", "man", "ssh-agent", "gpg", "screen", "tmux", "parallel", "busybox", "jq"}
-)  # fmt: skip
-# arguments that make an allowed program start another one or run given code
-_SPAWN_ARG = re.compile(
-    r"^(-c|-e|--exec(=.*)?|-exec(dir)?|-ok(dir)?|--to-command(=.*)?|--rsh(=.*)?|-e.+|--eval(=.*)?|"
-    r"--command(=.*)?|--run(=.*)?|--use-compress-program(=.*)?|--checkpoint-action(=.*)?|--shell(=.*)?)$"
-)
-_INTERPRETERS = re.compile(
-    r"^(sh|bash|zsh|fish|dash|ksh|csh|tcsh|python[0-9.]*|node|nodejs|ruby|perl[0-9.]*|php|lua|tclsh|pwsh|"
-    r"powershell|deno|bun|npx|uvx|pipx|awk|gawk|sed|make)$"
-)
+# The only non-orch commands a card runs (with the person's confirm): exact shapes, plain names, no flags.
+# Every other command still gets a card, with Copy only: the person runs it in their own terminal.
+_PKG = re.compile(r"^[a-z0-9][a-z0-9@._+-]{0,60}(/[a-z0-9][a-z0-9@._+-]{0,60}){0,2}$")
+OTHER_OPS: dict[tuple[str, ...], int] = {
+    ("brew", "install"): 1,
+    ("brew", "uninstall"): 1,
+    ("brew", "upgrade"): 1,
+}
+NAMES_MAX = 5  # plain names after the shape; the number is the fewest it needs
+
+
+def _other_op(argv: list[str]) -> bool:
+    """True when the command is one of OTHER_OPS followed by plain names only (no flags, no paths)."""
+    for shape, least in OTHER_OPS.items():
+        names = argv[len(shape) :]
+        if tuple(argv[: len(shape)]) == shape and least <= len(names) <= NAMES_MAX:
+            return all(_PKG.fullmatch(n) for n in names)
+    return False
+
+
 LOGINS = (
     ("codex", "login"), ("gh", "auth", "login"), ("gh", "auth", "refresh"), ("claude", "login"),
     ("claude", "setup-token"), ("az", "login"), ("gcloud", "auth", "login"), ("databricks", "auth", "login"),
@@ -125,7 +130,10 @@ def _orch_op(argv: list[str]) -> dict:
             _refuse(f"{key} takes {' or '.join(rule['values'])}.")
         if "pattern" in rule and not rule["pattern"].fullmatch(value):
             _refuse(f"{key} does not take that value.")
-        return {"verb": "config.set", "key": key, "value": value}
+        op = {"verb": "config.set", "key": key, "value": value}
+        if "pattern" in rule:  # the value it had when asked: the undo is built from it, never typed
+            op["before"] = None
+        return op
     check_name = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
     if len(rest) == 3 and rest[:2] == ["checks", "run"] and check_name.fullmatch(rest[2]):
         return {"verb": "checks.run", "name": rest[2]}
@@ -142,9 +150,9 @@ def op_words(root: Path | None, op: dict) -> tuple[str, str | None]:
         if "values" in rule:
             other = "off" if op["value"] == "on" else "on"
             return rule[op["value"]], f"orch config set {op['key']} {other}"
-        before = _current(root, op["key"]) if root is not None else None
-        undo = f"orch config set {op['key']} {before}" if before else None
-        return rule["set"].format(value=op["value"]), undo
+        before = op.get("before")
+        ok = isinstance(before, str) and rule["pattern"].fullmatch(before)
+        return rule["set"].format(value=op["value"]), f"orch config set {op['key']} {before}" if ok else None
     if op["verb"] == "checks.run":
         return f"Runs the check {op['name']} once now; nothing else changes", None
     return "Shows which logins work; nothing changes", None
@@ -231,15 +239,20 @@ def parse(root: Path, command, changes=None, undo=None, *, login: bool = False) 
         if prog != "orch":
             _refuse("Run orch by its name: orch ...")
         op = _orch_op(argv)
+        if "before" in op:
+            op["before"] = _current(root, op["key"])
         words, undo_words = op_words(root, op)
         spec.update({"class": "orch", "exe": None, "op": op, "changes": words})
         if undo_words:
             spec["undo"] = undo_words
         return spec
-    if base in _NO_PROGRAM or _INTERPRETERS.match(base):
-        _refuse(f"A card does not run {base}. Ask the person to do this step in their own terminal.")
-    if any(_SPAWN_ARG.match(a) or "!" in a for a in argv[1:]):
-        _refuse("The command starts another program or runs given code. Ask the person to run it themselves.")
+    if not _other_op(argv):  # shown with Copy only: the person runs it in their own terminal
+        spec.update({"class": "copy", "exe": None})
+        if _line(changes, "changes"):
+            spec["changes"] = _line(changes, "changes")
+        if _line(undo, "undo"):
+            spec["undo"] = _line(undo, "undo")
+        return spec
     if not _line(changes, "changes"):
         _refuse("Say in one line what it changes (--changes).")
     spec.update({"class": "other", "exe": _resolve(root, prog), "changes": _line(changes, "changes")})
@@ -277,15 +290,16 @@ def check_spec(root: Path | None, spec) -> dict:
         _refuse("This card was made under older rules. Ask the helper to make it again.")
     again = parse(root, spec.get("command"), spec.get("changes"), spec.get("undo"),
                   login=spec.get("class") == "login")  # fmt: skip
-    keys = ("v", "command", "argv", "cwd", "class", "exe", "op")
-    if any(again.get(k) != spec.get(k) for k in keys):
-        _refuse("This card does not match its command any more. Ask the helper to make it again.")
-    shown = ["changes"]  # the words on the card are bound too, not only what runs
-    if spec.get("class") == "other" or (
-        spec.get("class") == "orch" and "values" in CONFIG_OPS.get((spec.get("op") or {}).get("key"), {})
-    ):
-        shown.append("undo")  # an on/off undo is fixed; a list setting's undo is the value it had when asked
-    if any(again.get(k) != spec.get(k) for k in shown):
+    op, op2 = spec.get("op"), again.get("op")
+    if isinstance(op, dict) and isinstance(op2, dict) and "before" in op2:
+        op2 = {**op2, "before": op.get("before")}  # the value it had when asked; checked through the words
+        again = {**again, "op": op2}
+        again["changes"], undo = op_words(root, op2)
+        again.pop("undo", None)
+        if undo:
+            again["undo"] = undo
+    keys = ("v", "command", "argv", "cwd", "class", "exe", "op", "changes", "undo")  # what runs and is shown
+    if any(again.get(k) != spec.get(k) for k in keys) or set(spec) - {*keys}:
         _refuse("This card does not match its command any more. Ask the helper to make it again.")
     return spec
 
@@ -454,6 +468,8 @@ def run(
             _refuse("The phone runs only orch's own commands. Run this one at your computer.")
         if spec["class"] == "login":
             _refuse("This one signs you in, so it needs a terminal: copy it and run it in your terminal.")
+        if spec["class"] == "copy":
+            _refuse("This command runs in your own terminal: copy it and run it there.")
         if spec["class"] == "other" and not confirmed:
             _refuse("This is not an orch command: confirm it first (it runs exactly as shown).")
     except Refused as e:
@@ -465,18 +481,17 @@ def run(
     with _Lock(root, tid, qid):
         code, out, secs = _exec(argv, Path(spec["cwd"]), timeout)
     out = masked(root, out)
-    ok, why = code == 0, None
+    ok, reason = code == 0, None
     if code is None:
-        why = "It took longer than 2 minutes and was stopped. It may have run partly."
+        reason = "timeout"
     elif code != 0:
-        why = f"It ended with exit code {code}. Nothing was marked as done."
+        reason = "exit"
     elif spec["class"] == "orch" and spec["op"]["verb"] == "config.set":
-        now = _current(root, spec["op"]["key"])
-        if now != spec["op"]["value"]:
-            key, want = spec["op"]["key"], spec["op"]["value"]
-            ok, why = False, f"It ran, but {key} is {now or 'unknown'}, not {want}."
+        if _current(root, spec["op"]["key"]) != spec["op"]["value"]:
+            ok, reason = False, "unchanged"
+    why = error_words(reason, code, spec)
     tail = _tail(out)
-    attempt.update(exit=code, secs=round(secs, 1), ok=ok, output=tail)
+    attempt.update(exit=code, secs=round(secs, 1), ok=ok, output=tail, reason=reason)
     _log(root, attempt)
     with contextlib.suppress(Refused, OSError):
         tickets.note_history(root, tid, by, f"Ran the card's command ({'ok' if ok else 'failed'}): "
@@ -495,12 +510,31 @@ def run(
     return {"ok": True, "exit": code, "output": tail, "answered": True}
 
 
+def error_words(reason: str | None, code, spec: dict | None = None) -> str | None:
+    """The card's error line, always built by orch from the reason code (never stored text)."""
+    if reason == "timeout":
+        return "It took longer than 2 minutes and was stopped. It may have run partly."
+    if reason == "exit":
+        n = code if isinstance(code, int) else "?"
+        return f"It ended with exit code {n}. Nothing was marked as done."
+    if reason == "unchanged":
+        key = ((spec or {}).get("op") or {}).get("key") or "the setting"
+        return f"It ran, but {key} did not change. Nothing was marked as done."
+    return None
+
+
 def _save_attempt(root: Path, tid: str, qid: str, attempt: dict, why: str | None) -> None:
-    """The last attempt per card, beside the question (not in it: the card's digest stays what was shown)."""
+    """The last try per card, on the ticket beside the question (not in it: the card's digest stays what was
+    shown) and outside the add-on data a helper may write with `orch ext set`. The error line is rebuilt from
+    the reason code when it is shown."""
     from orch import tickets
 
-    row = {k: attempt.get(k) for k in ("at", "by", "exit", "secs", "ok", "output")}
-    if why:
-        row["error"] = why
+    row = {k: attempt.get(k) for k in ("at", "by", "exit", "secs", "ok", "output", "reason")}
+
+    def op(t):
+        runs = t.get("run_attempts") if isinstance(t.get("run_attempts"), dict) else {}
+        runs[qid] = row
+        t["run_attempts"] = runs
+
     with contextlib.suppress(Refused, OSError, ValueError):
-        tickets.ext_set(root, tid, "runcard", json.dumps({qid: row}, ensure_ascii=False), attempt["by"])
+        tickets.apply_op(root, tid, op, by=attempt["by"])

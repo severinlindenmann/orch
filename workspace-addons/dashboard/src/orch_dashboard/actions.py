@@ -1665,7 +1665,12 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         out = json.loads(r.stdout)
     except ValueError:
         pass
-    if op == "card.run" and r.returncode in (0, 1) and isinstance(out, dict) and isinstance(out.get("ok"), bool):
+    if (
+        op == "card.run"
+        and r.returncode in (0, 1)
+        and isinstance(out, dict)
+        and isinstance(out.get("ok"), bool)
+    ):
         forget_static()  # it ran (or ran and failed: exit 1): the page shows what it printed either way
         return 200, "", out
     if op == "config.agent.test" and isinstance(out, dict) and isinstance(out.get("ok"), bool):
