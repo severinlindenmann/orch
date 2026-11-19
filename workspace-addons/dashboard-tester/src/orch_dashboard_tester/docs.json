@@ -1,0 +1,64 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "dashboard-tester",
+   "icon": "eye",
+   "title": "Dashboard tester",
+   "one": "Once a day it opens every page, without clicking, and reports what is broken.",
+   "steps": [
+    {
+     "who": "you",
+     "text": "You set it up and press Allow this script"
+    },
+    {
+     "who": "orch",
+     "text": "Every morning at 06:30 it opens every page",
+     "detail": "At three widths: laptop, big screen, phone."
+    },
+    {
+     "who": "orch",
+     "text": "Looks for errors, slow pages, cut-off layouts, wrong words"
+    },
+    {
+     "who": "orch",
+     "text": "Already known on an open ticket?",
+     "branch": [
+      {
+       "if": "Yes",
+       "then": "Skipped"
+      },
+      {
+       "if": "No",
+       "then": "A problem report, at most 3 a day"
+      }
+     ],
+     "end": true
+    }
+   ],
+   "good": [
+    "A helper cannot start it; only your daily repeat can."
+   ],
+   "related": [
+    "automation"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch shot <page>",
+      "pictures of a page, no keychain window"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/dash-tester/",
+      "its runs and pictures"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  }
+ ]
+}
