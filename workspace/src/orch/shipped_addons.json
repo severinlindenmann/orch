@@ -444,6 +444,50 @@
   "ticket_view": [],
   "version": "0.1.0"
  },
+ "skills": {
+  "acts": {
+   "off": {
+    "summary": "Turn one skill, rules file or connected service off in this workspace",
+    "who": "people",
+    "writes": []
+   },
+   "on": {
+    "summary": "Turn one skill, rules file or connected service on again in this workspace",
+    "who": "people",
+    "writes": []
+   }
+  },
+  "agents_block": "skills/orch-skills/AGENTS-block.md",
+  "background": true,
+  "dashboard": {
+   "icon": "list",
+   "label": "Skills",
+   "order": 32
+  },
+  "description": "Everything your helpers get here: skills, instructions, connected services and logins, and what is turned off.",
+  "gitignore": [
+   ".orch/addons/skills/",
+   ".orch/skills-off.json"
+  ],
+  "name": "skills",
+  "needs": false,
+  "orch_api": 1,
+  "page": {
+   "label": "Open Skills",
+   "path": "/"
+  },
+  "recommended": false,
+  "requires": [],
+  "run": "orch_skills",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "skill": "skills/orch-skills",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
+ },
  "sync": {
   "acts": {},
   "agents_block": "skills/orch-sync/AGENTS-block.md",
