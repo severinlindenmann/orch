@@ -224,18 +224,50 @@ fn head_key_ok(k: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
+/// True when the text after a key's colon holds no value (empty or only a comment): a map follows.
+fn head_empty(raw: &str) -> bool {
+    let v = raw.trim();
+    v.is_empty() || v.starts_with('#')
+}
+
+/// One quoted value: the text inside the quotes, when what follows the closing quote is empty or a comment.
+fn head_quoted(v: &str, q: char) -> Option<String> {
+    let mut out = String::new();
+    let mut it = v[1..].char_indices().peekable();
+    while let Some((i, c)) = it.next() {
+        if q == '"' && c == '\\' {
+            match it.next() {
+                Some((_, '"')) => out.push('"'),
+                Some((_, '\\')) => out.push('\\'),
+                Some((_, o)) => {
+                    out.push('\\');
+                    out.push(o);
+                }
+                None => return None,
+            }
+        } else if c == q {
+            if q == '\'' && it.peek().map(|p| p.1) == Some('\'') {
+                it.next();
+                out.push('\'');
+                continue;
+            }
+            return head_empty(&v[1 + i + 1..]).then_some(out);
+        } else {
+            out.push(c);
+        }
+    }
+    None
+}
+
 fn head_value(raw: &str) -> Option<String> {
     let v = raw.trim();
-    let out = if let Some(inner) = v.strip_prefix('"') {
-        let inner = inner.strip_suffix('"')?;
-        inner.replace("\\\"", "\"").replace("\\\\", "\\")
-    } else if let Some(inner) = v.strip_prefix('\'') {
-        inner.strip_suffix('\'')?.replace("''", "'")
+    let out = if v.starts_with(['"', '\'']) {
+        head_quoted(v, v.chars().next()?)?
     } else {
         if v.starts_with(['[', '{', '&', '*', '!', '|', '>']) {
             return None;
         }
-        match v.find(" #") {
+        match v.find(" #").or_else(|| v.find("\t#")) {
             Some(i) => v[..i].trim_end().to_string(),
             None => v.to_string(),
         }
@@ -275,19 +307,20 @@ pub fn skill_header(files: &Value) -> Value {
         };
         let k = k.trim();
         if indent == 0 {
-            in_meta = k == "metadata" && v.trim().is_empty();
+            in_meta = k == "metadata" && head_empty(v);
             meta_indent = 0;
             if !in_meta && matches!(k, "name" | "description") {
                 if let Some(v) = head_value(v) {
                     out.insert(k.to_string(), v.into());
                 }
             }
-        } else if in_meta && head_key_ok(k) && meta.len() < META_MAX {
-            // only the first level of metadata: a deeper line belongs to a nested map, which is skipped
+        } else if in_meta {
+            // only the first level of metadata (its indent is set by the first line, readable key or not):
+            // a deeper line belongs to a nested map, which is skipped
             if meta_indent == 0 {
                 meta_indent = indent;
             }
-            if indent != meta_indent || v.trim().is_empty() {
+            if indent != meta_indent || head_empty(v) || !head_key_ok(k) || meta.len() >= META_MAX {
                 continue;
             }
             if let Some(v) = head_value(v) {
@@ -338,6 +371,15 @@ mod tests {
         // nested and list values, bad keys and top-level extras are left out; metadata ends at the next top-level key
         assert_eq!(h, json!({"name": "x", "metadata": {"ok": "v"}}));
         assert_eq!(shown_version(&h, 3), "3");
+        let h = head(
+            "---\nname: \"x\" # the name\nmetadata: # what it needs\n  bad key!:\n    platforms: windows\n  platforms: 'linux' \
+             # only here\n  owner: \"A \\\"B\\\"\" # quoted\n  note: it's a#tag\n  odd: \"open\n---\n",
+        );
+        // comments after a value or a map key are dropped; a nested line under a skipped key stays out
+        assert_eq!(
+            h,
+            json!({"name": "x", "metadata": {"platforms": "linux", "owner": "A \"B\"", "note": "it's a#tag"}})
+        );
         let long = format!("---\nmetadata:\n  owner: {}\n---\n", "a".repeat(2000));
         assert_eq!(head(&long), json!({}));
     }
