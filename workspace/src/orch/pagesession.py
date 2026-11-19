@@ -44,6 +44,26 @@ SIGNIN_PREFIX = "Sign in to "  # session.js shows the sign-in notice for a refus
 VOUCH_HEADER = "X-Orch-Person"  # the dashboard's word to an add-on page behind it: the person sent this
 SESSION_LIFE = 30 * 24 * 3600  # seconds a page session lasts (cookie Max-Age and the kept session file)
 REVOKED_MSG = "Someone else tried to use this sign-in link. Open the dashboard again from orch."
+# A page server started from a helper session never signs anyone in (see PageSession.active). Say so, and how
+# to get a page you can use: a start by the person restarts it (restart_watch_only).
+WATCH_ONLY_MSG = (
+    "A helper started this page, so it is watch-only. "
+    "Run orch start in your own terminal, then open it again."
+)
+
+
+def started_watch_only(env: dict[str, str]) -> bool:
+    """True when a page server started with `env` will be watch-only (an agent tool in it), the rule of
+    PageSession.active. The starter writes it into the server's run record."""
+    from orch import adapters
+
+    return adapters.detect_env(env) is not None
+
+
+def restart_watch_only(record: dict | None) -> bool:
+    """True when a running page server should be started again: its run record says it is watch-only and
+    this start is a person's (no agent tool here). A helper's start never restarts it."""
+    return isinstance(record, dict) and record.get("watch_only") is True and tickets.agent_tool() is None
 
 
 def argv0(orch_bin: str | None) -> list[str]:
