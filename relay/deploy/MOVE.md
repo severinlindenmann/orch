@@ -4,7 +4,7 @@ Runbook for the move from the Infomaniak VPS (`orch-dev`) to the Hostinger VPS (
 public `2.24.146.133`, private network `hostinger-vps.netbird.cloud` / `100.71.225.229` on 19 Nov).
 Owner decision 19 Nov 2026. Today the public side of `relay.severin.io` and `publish.severin.io` goes through the
 NetBird Cloud reverse proxy (both names point to `eu1.netbird.services`). That proxy goes away, so on the new server
-both names are public directly: Caddy on 80/443 with its own TLS certificates. The admin pages stay on the private
+both names are public directly: Caddy on 80/443 with its own TLS. The admin pages stay on the private
 network only.
 
 Production rule: nothing in this file is tried out on `orch-dev`. On `orch-dev` only the read-only inventory (step 0),
@@ -79,7 +79,7 @@ ssh key (root, KVM 4 Frankfurt)").
    `publish/deploy/install.sh <bin> 100.71.225.229` (with `ORCH_PUBLISH_ENGINE_SOCKET` set to the socket path). Both make fresh keys and tokens,
    which the old ones replace on move day. Then stop both again (`systemctl stop orch-relay orch-publish`).
 5. Copy `relay/deploy/relay.caddy` and `publish/deploy/publish.caddy` into `/etc/caddy/sites/`, `caddy validate`,
-   `systemctl reload caddy`. Certificates can only be issued once DNS points here, so Caddy retries until move day;
+   `systemctl reload caddy`. Caddy can only set up HTTPS once DNS points here, so Caddy retries until move day;
    that is expected.
 6. The relay master key. Check that Proton holds the relay master key and that it matches the server
    (`sha256sum /etc/orch-relay/master.key` on `orch-dev`, compare with the Proton copy; never print the key). If Proton
@@ -112,15 +112,15 @@ All times are from the moment the old services stop.
 4. (10 min) Start on the new server: `systemctl start orch-relay orch-publish`; `curl -s localhost:8103/health` and
    `localhost:8102/health` say `ok`; admin pages answer on `http://<private IP>:8412/admin` and `:8411`; the publish
    log has no "cannot listen" line (the private-app listener came up); the counts match step 1. The public side can
-   only be checked after the DNS switch (no certificate before).
+   only be checked after the DNS switch (no HTTPS before).
 5. (11 min) DNS at Namecheap (Management does it, on your message): replace both CNAMEs with A records to the new public IP (and AAAA if the server has IPv6),
-   TTL 60. Caddy gets both certificates within a minute of the first request that reaches it.
+   TTL 60. Caddy sets up HTTPS for both within a minute of the first request that reaches it.
 6. (12-15 min) Clients pick up the new address as the old answer runs out (60 s TTL; some resolvers keep it longer).
 7. Keep the two reverse-proxy services in NetBird Cloud until the roll back window is over (roll back needs them).
 
 ## Checks after the switch
 
-- `https://relay.severin.io/health` and `https://publish.severin.io/health` say `ok`, with a valid certificate
+- `https://relay.severin.io/health` and `https://publish.severin.io/health` say `ok`, over HTTPS that the browser trusts
   (plain `curl`, no `-k`).
 - Admin pages and private apps from the private network only: from outside, `curl -m 5 http://2.24.146.133:8412/health`
   (and `:8411`, `:8410`) must time out.
