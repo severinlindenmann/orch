@@ -218,7 +218,13 @@ def pr(s: dict, args: list[str]) -> int:
             print("Head branch was modified. Review and try the merge again.", file=sys.stderr)
             return 1
         base = sha_of(s, f"refs/heads/{p['base']}")
-        tree = git(s, "merge-tree", "--write-tree", "--no-messages", base, h, ok=(0, 1)).splitlines()[0]
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        got = subprocess.run(["git", f"--git-dir={s['git']}", "merge-tree", "--write-tree", "--no-messages", base, h],
+                             capture_output=True, text=True, env=env)  # fmt: skip
+        if got.returncode != 0:  # a conflict: GitHub refuses the merge and changes nothing
+            print("Pull request is not mergeable: the merge commit cannot be cleanly created.", file=sys.stderr)
+            return 1
+        tree = got.stdout.splitlines()[0]
         new = git(s, "commit-tree", tree, "-p", base, "-p", h, "-m", f"Merge pull request #{p['number']}")
         git(s, "update-ref", f"refs/heads/{p['base']}", new)
         p.update(state="MERGED", merged_head=h, merge_commit=new,

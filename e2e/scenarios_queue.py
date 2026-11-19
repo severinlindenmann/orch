@@ -10,6 +10,7 @@ relay, with a wrong commit refused and a "problems" verdict putting a card on th
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import fake_github as fg
@@ -38,10 +39,11 @@ def mq1(e):
     """Merge queue end to end against a fake GitHub: add, list, remove, audit, a group of one, a group, a red group
     split, a dropped pull request waking its helper; release keeper dry run and a security review start."""
     home = Path(e.env["HOME"])
-    fg.setup(home, "bot", fakebin=e.bin)
-    e.env["FAKE_GH_STATE"] = str(home / "fakegh" / "state.json")
-    e.env["FAKE_GH_CHECK_SECS"] = "3"
-    helper = e.bin / "claude"
+    fakes = e.tmp / "queue-fakes"  # first on the PATH: before the harness's claude stub and a real gh
+    fg.setup(home, "bot", fakebin=fakes)
+    e.path = os.pathsep.join([str(fakes), e.path])
+    e.env.update(PATH=e.path, FAKE_GH_STATE=str(home / "fakegh" / "state.json"), FAKE_GH_CHECK_SECS="3")
+    helper = fakes / "claude"
     helper.write_text(FAKE_HELPER, encoding="utf-8")
     helper.chmod(0o755)
     ws = e.ws("Queue")
