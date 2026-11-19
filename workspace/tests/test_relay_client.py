@@ -358,13 +358,40 @@ def test_refresh_installs_and_removes_shared_skills(proj, run, rel, ghome, monke
     assert not (s / "credentials.json").exists()  # the admin's keys are not in the workspace
     assert keystore.get_value(proj, "DB_URL") == "pg://db.example/x"
     assert json.loads((s / "mcp.json").read_text()) == {"mcpServers": {"sql": {"command": "x"}}}
-    assert json.loads((s / "shared.json").read_text()) == {"version": 7, "skills": ["acme-sql"]}
+    assert json.loads((s / "shared.json").read_text()) == {"version": 7, "skills": ["acme-sql"], "skill_versions": {}}
     assert not (proj / ".orch/tmp-refresh").exists()
     rel.snapshot.update(version=8, skills=[], credentials={})
     run("relay", "refresh")
     assert not d.exists()
     assert (proj / ".agents/skills/orch/SKILL.md").exists()  # core skills untouched
     assert json.loads((s / "shared.json").read_text())["version"] == 8
+
+
+def test_refresh_skips_a_skill_for_another_platform_and_says_why(proj, run, rel, monkeypatch):
+    from orch import relay
+
+    connect(run, rel)
+    monkeypatch.setattr(relay, "_this_platform", lambda: "linux")
+    mac = skill_snapshot({"SKILL.md": b"---\nname: acme-sql\n---\n"})
+    mac["header"] = {"name": "acme-sql", "metadata": {"platforms": "macos, Windows", "version": "1.2.0"}}
+    mac["shown_version"] = "1.2.0"
+    anywhere = dict(skill_snapshot({"SKILL.md": b"x"}), name="notes", shown_version="3")
+    odd = dict(skill_snapshot({"SKILL.md": b"x"}), name="odd", header={"metadata": {"platforms": "beos"}})
+    rel.snapshot.update(version=5, skills=[mac, anywhere, odd])
+    code, out, err = run("relay", "refresh")
+    assert code == 0, err
+    assert "Skipped: skill acme-sql: made for macOS, Windows, not Linux" in out
+    assert not (proj / ".agents/skills/acme-sql").exists()
+    # no platform named, or only words orch does not know: shared as before
+    assert (proj / ".agents/skills/notes/SKILL.md").exists() and (proj / ".agents/skills/odd/SKILL.md").exists()
+    shared = json.loads((proj / ".orch/secrets/shared.json").read_text())
+    assert shared["skills"] == ["notes", "odd"] and shared["skill_versions"] == {"notes": "3"}
+    monkeypatch.setattr(relay, "_this_platform", lambda: "macos")
+    code, out, _ = run("relay", "refresh")
+    assert code == 0 and "Skipped" not in out
+    assert (proj / ".agents/skills/acme-sql/SKILL.md").exists()
+    shared = json.loads((proj / ".orch/secrets/shared.json").read_text())
+    assert shared["skill_versions"] == {"acme-sql": "1.2.0", "notes": "3"}
 
 
 def test_refresh_rejects_unsafe_paths_and_keeps_rest(proj, run, rel):

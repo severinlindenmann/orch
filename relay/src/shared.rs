@@ -26,6 +26,11 @@ pub fn valid_name(kind: &str, n: &str) -> bool {
     !n.is_empty() && n.len() <= 64 && n.chars().all(ok) && (kind != "skills" || !n.starts_with('.'))
 }
 
+/// Open one sealed item (null when it cannot be opened).
+pub fn open_item(key: &Key, kind: &str, name: &str, blob: &[u8]) -> Value {
+    dec(key, kind, name, blob)
+}
+
 fn dec(key: &Key, kind: &str, name: &str, blob: &[u8]) -> Value {
     crypto::open(key, &aad(kind, name), blob)
         .and_then(|b| serde_json::from_slice(&b).ok())
@@ -254,6 +259,7 @@ pub fn skill_header(files: &Value) -> Value {
     let mut out = Map::new();
     let mut meta = Map::new();
     let mut in_meta = false;
+    let mut meta_indent = 0;
     let mut size = 0;
     for line in lines {
         size += line.len() + 1;
@@ -263,19 +269,27 @@ pub fn skill_header(files: &Value) -> Value {
         if line.trim().is_empty() || line.trim_start().starts_with('#') {
             continue;
         }
-        let indented = line.starts_with([' ', '\t']);
+        let indent = line.len() - line.trim_start().len();
         let Some((k, v)) = line.trim().split_once(':') else {
             continue;
         };
         let k = k.trim();
-        if !indented {
+        if indent == 0 {
             in_meta = k == "metadata" && v.trim().is_empty();
+            meta_indent = 0;
             if !in_meta && matches!(k, "name" | "description") {
                 if let Some(v) = head_value(v) {
                     out.insert(k.to_string(), v.into());
                 }
             }
         } else if in_meta && head_key_ok(k) && meta.len() < META_MAX {
+            // only the first level of metadata: a deeper line belongs to a nested map, which is skipped
+            if meta_indent == 0 {
+                meta_indent = indent;
+            }
+            if indent != meta_indent || v.trim().is_empty() {
+                continue;
+            }
             if let Some(v) = head_value(v) {
                 meta.insert(k.to_string(), v.into());
             }
@@ -285,4 +299,46 @@ pub fn skill_header(files: &Value) -> Value {
         out.insert("metadata".into(), Value::Object(meta));
     }
     Value::Object(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn head(text: &str) -> Value {
+        skill_header(&json!({"SKILL.md": B64.encode(text)}))
+    }
+
+    #[test]
+    fn reads_the_flat_header() {
+        let h = head(
+            "---\nname: github\ndescription: \"GitHub work. Use when a PR: \\\"x\\\"\"\nlicense: MIT\n\
+             metadata:\n  version: \"1.2.0\"\n  owner: Severin # who\n  status: 'draft'\n  platforms: \"macos, windows\"\n\
+             ---\nbody: not header\n",
+        );
+        assert_eq!(h["name"], "github");
+        assert_eq!(h["description"], "GitHub work. Use when a PR: \"x\"");
+        assert_eq!(
+            h["metadata"],
+            json!({"version": "1.2.0", "owner": "Severin", "status": "draft", "platforms": "macos, windows"})
+        );
+        assert!(h.get("license").is_none() && h.get("body").is_none());
+        assert_eq!(shown_version(&h, 7), "1.2.0");
+    }
+
+    #[test]
+    fn skips_what_it_cannot_read() {
+        assert_eq!(head("no header\nname: x\n"), json!({}));
+        assert_eq!(skill_header(&json!({})), json!({}));
+        assert_eq!(skill_header(&Value::Null), json!({}));
+        let h = head(
+            "---\nname: x\nmetadata:\n  nested:\n    deep: a\n  list: [a, b]\n  bad key!: v\n  ok: \"v\"\n\
+             status: draft\n---\n",
+        );
+        // nested and list values, bad keys and top-level extras are left out; metadata ends at the next top-level key
+        assert_eq!(h, json!({"name": "x", "metadata": {"ok": "v"}}));
+        assert_eq!(shown_version(&h, 3), "3");
+        let long = format!("---\nmetadata:\n  owner: {}\n---\n", "a".repeat(2000));
+        assert_eq!(head(&long), json!({}));
+    }
 }

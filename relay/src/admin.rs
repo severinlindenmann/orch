@@ -671,9 +671,18 @@ async fn get_shared(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value
         c.prepare(sql)?.query_map([], |r| r.get(0))?.collect()
     };
     let skills: Vec<Value> = c
-        .prepare("SELECT name,version FROM skills ORDER BY name")?
+        .prepare("SELECT name,version,head,CASE WHEN head IS NULL THEN files END FROM skills ORDER BY name")?
         .query_map([], |r| {
-            Ok(json!({"name": r.get::<_, String>(0)?, "version": r.get::<_, i64>(1)?}))
+            let (name, ver) = (r.get::<_, String>(0)?, r.get::<_, i64>(1)?);
+            // the parsed header (shared::skill_header): sealed apart, so the list never opens the files,
+            // except for a skill saved before the header was kept
+            let header = match (r.get::<_, Option<Vec<u8>>>(2)?, r.get::<_, Option<Vec<u8>>>(3)?) {
+                (Some(h), _) => shared::open_item(&app.key, "skillhead", &name, &h),
+                (None, Some(f)) => shared::skill_header(&shared::open_item(&app.key, "skills", &name, &f)),
+                _ => json!({}),
+            };
+            Ok(json!({"name": name, "version": ver, "shown_version": shared::shown_version(&header, ver),
+                "header": header}))
         })?
         .collect::<Result<_, _>>()?;
     let mut assign: BTreeMap<String, Value> = BTreeMap::new();
