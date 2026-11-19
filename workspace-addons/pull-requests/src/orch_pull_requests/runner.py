@@ -516,7 +516,8 @@ class Runner:
         directly when it may be, else it leaves the queue and a person merges it."""
         base = e.get("base") or ""
         if e.get("lone") or e.get("proof") or e.get("red") or not settings.merge_alone(self.root):
-            self.on_base(e, why)  # merge_alone off, or its group was red (ORCH-909): its light checks never ran what failed
+            # merge_alone off, or its group was red (ORCH-909): its light checks never ran what failed
+            self.on_base(e, why)
             return
         marked: list[str] = []
         o = None
