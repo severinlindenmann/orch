@@ -959,7 +959,10 @@ class World:
                 runs.start(self.root, t["id"], BY, priority=priority, over_limit=over_limit)
             return str(t.get("key") or t["id"])
 
-        return self.act(f"ticket:{title}", go) or (None if self.sim is None else "t_sim")
+        got = self.act(f"ticket:{title}", go)
+        if isinstance(got, str) and got.startswith("not opened"):
+            self.did[-1] += " failed"  # act lists a step before it runs: no "opened" for a refusal
+        return got or (None if self.sim is None else "t_sim")
 
     def record_deployed(self, parts: list[str], sha: str, by: str) -> None:
         def go():
