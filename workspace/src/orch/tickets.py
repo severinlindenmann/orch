@@ -3707,7 +3707,8 @@ def _claims_ran(q: dict, text: str, decision: dict | None) -> bool:
     if not (isinstance(card, dict) and card.get("kind") == "run"):
         return False
     if isinstance(decision, dict):
-        return decision.get("action") in ("approve", "use", "use_with_changes")
+        said = " ".join(str(decision.get("summary") or text).split()).casefold()
+        return decision.get("action") in ("approve", "use", "use_with_changes") or "ran it" in said
 
     def norm(v: str) -> str:
         return " ".join(v.split()).casefold()

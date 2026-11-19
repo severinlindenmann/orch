@@ -68,7 +68,9 @@ _CONTROL = re.compile(r"[\x00-\x1f\x7f​-‏‪-‮⁦-⁩﻿]")
 _SHELL = set(";|&<>`$\\")
 # The only non-orch commands a card runs (with the person's confirm): exact shapes, plain names, no flags.
 # Every other command still gets a card, with Copy only: the person runs it in their own terminal.
-_PKG = re.compile(r"^[a-z0-9][a-z0-9@._+-]{0,60}(/[a-z0-9][a-z0-9@._+-]{0,60}){0,2}$")
+_PKG = re.compile(
+    r"^[a-z0-9][a-z0-9@._+-]{0,60}$"
+)  # no tap/owner/name: that would fetch code from any repository
 OTHER_OPS: dict[tuple[str, ...], int] = {
     ("brew", "install"): 1,
     ("brew", "uninstall"): 1,
@@ -120,10 +122,7 @@ def _refuse(msg: str):
 
 def _orch_op(argv: list[str]) -> dict:
     """The typed operation an `orch ...` command is, or Refused. Exact shapes only: no extra flags."""
-    allowed = (
-        "orch config set <setting> <value> (for " + ", ".join(CONFIG_OPS) + "), orch checks run <name>, "
-        "orch logins status"
-    )
+    allowed = "orch config set <setting> <value> (for " + ", ".join(CONFIG_OPS) + "), orch logins status"
     rest = argv[1:]
     if len(rest) == 4 and rest[:2] == ["config", "set"] and rest[2] in CONFIG_OPS:
         key, value = rest[2], rest[3]
@@ -136,9 +135,6 @@ def _orch_op(argv: list[str]) -> dict:
         if "pattern" in rule:  # the value it had when asked: the undo is built from it, never typed
             op["before"] = None
         return op
-    check_name = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
-    if len(rest) == 3 and rest[:2] == ["checks", "run"] and check_name.fullmatch(rest[2]):
-        return {"verb": "checks.run", "name": rest[2]}
     if rest == ["logins", "status"]:
         return {"verb": "logins.status"}
     _refuse(f"This orch command cannot run from a card. A card runs only: {allowed}.")
@@ -155,8 +151,6 @@ def op_words(root: Path | None, op: dict) -> tuple[str, str | None]:
         before = op.get("before")
         ok = isinstance(before, str) and rule["pattern"].fullmatch(before)
         return rule["set"].format(value=op["value"]), f"orch config set {op['key']} {before}" if ok else None
-    if op["verb"] == "checks.run":
-        return f"Runs the check {op['name']} once now; nothing else changes", None
     return "Shows which logins work; nothing changes", None
 
 
@@ -253,12 +247,25 @@ def parse(root: Path, command, changes=None, undo=None, *, login: bool = False) 
         _line(changes, "changes"), _line(undo, "undo")  # still checked as one plain line each
         spec.update({"class": "copy", "exe": None})
         return spec
-    if not _line(changes, "changes"):
-        _refuse("Say in one line what it changes (--changes).")
-    spec.update({"class": "other", "exe": _resolve(root, prog), "changes": _line(changes, "changes")})
-    if _line(undo, "undo"):
-        spec["undo"] = _line(undo, "undo")
+    _line(changes, "changes"), _line(undo, "undo")  # orch writes the words for an allowed shape
+    words, undo_words = other_words(argv)
+    spec.update({"class": "other", "exe": _resolve(root, prog), "changes": words})
+    if undo_words:
+        spec["undo"] = undo_words
     return spec
+
+
+def other_words(argv: list[str]) -> tuple[str, str | None]:
+    """orch's own words for an allowed non-orch shape: what it changes and how to undo it."""
+    if tuple(argv[:2]) == ("brew", "install"):
+        names = argv[2:]
+        return f"Installs {', '.join(names)} with Homebrew", "brew uninstall " + " ".join(names)
+    if tuple(argv[:2]) == ("brew", "uninstall"):
+        names = argv[2:]
+        return f"Removes {', '.join(names)} (installed with Homebrew)", "brew install " + " ".join(names)
+    if tuple(argv[:2]) == ("brew", "upgrade"):
+        return f"Updates {', '.join(argv[2:])} to the newest version with Homebrew", None
+    return "Runs " + " ".join(argv), None  # a shape a test adds (runcard.OTHER_OPS)
 
 
 def _no_secret(root: Path, text: str) -> None:

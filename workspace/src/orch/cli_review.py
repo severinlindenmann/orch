@@ -229,8 +229,10 @@ def build_run_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
     if len(args.option) > 1:
         raise Refused('A run card has one other answer besides I ran it: --option "Leave it off for now".')
     no_label = " ".join((args.option[0] if args.option else "Not now").split())
-    if not no_label or len(no_label) > 40 or no_label.casefold() == runcard.OK_LABEL.casefold():
-        raise Refused("The other answer is a short words like Leave it off for now.")
+    if not no_label or len(no_label) > 40:
+        raise Refused("The other answer is a few words like Leave it off for now.")
+    if re.search(r"\b(ran|run|done|did)\b", re.sub(r"[^a-z ]", " ", no_label.casefold())):
+        raise Refused("The other answer must not sound like it ran (say e.g. Leave it off for now).")
     if args.suggest is not None and args.suggest not in SUGGEST_VERDICTS:
         raise Refused("On this card --suggest is ok (run it) or no (the other answer).")
     title = args.text.strip().splitlines()[0][:200] if args.text.strip() else "Run this command"

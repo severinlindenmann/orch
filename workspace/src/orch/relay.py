@@ -1709,11 +1709,11 @@ def _apply_verdict(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]
     if v["digest"] != asked_digest or now != asked_digest:
         line("A phone answer was not used: what you saw has changed since")
         return result({"result": "changed"}, f"not applied to {tid}: the card changed")
+    run_card = not is_review and isinstance(q.get("card"), dict) and q["card"].get("kind") == "run"
+    if run_card and v["verdict"] == "ok":  # ORCH-848: Run it now on the phone (no reservation: a run locks)
+        return _apply_run(root, tid, q, asked_digest, by, via, result, line)
     if not is_review:  # reserved first: a crash after the write is told apart from a computer answer
         _set_asked(root, qmid, vpending=answer_id)
-    run_card = not is_review and isinstance(q.get("card"), dict) and q["card"].get("kind") == "run"
-    if run_card and v["verdict"] == "ok":  # ORCH-848: Run it now on the phone
-        return _apply_run(root, tid, q, asked_digest, by, via, result, line)
     try:
         out = review.decide(
             root,

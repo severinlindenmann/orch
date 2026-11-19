@@ -82,6 +82,7 @@ def test_the_helper_cannot_put_its_own_words_on_an_orch_card(tk, run):
         ("orch config set workflow.reviewer maybe", "takes on or off"),
         ("orch config set workflow.reviewer on --by human:x", "cannot run from a card"),
         ("orch ticket new hello", "cannot run from a card"),
+        ("orch checks run lint", "cannot run from a card"),
         ("/tmp/orch config set workflow.reviewer on", "by its name"),
         ("orch config set workflow.reviewer on; rm -rf ~", "no shell operators"),
         ("orch config set workflow.reviewer on && true", "no shell operators"),
@@ -103,19 +104,24 @@ def test_refused_when_the_card_is_made(tk, run, command, words):
 
 
 @POSIX
-def test_an_allowed_program_needs_its_change_line(tk, run):
+def test_an_allowed_program_gets_orchs_own_words(tk, run):
     _root, tid = tk
-    code, out, err = _ask(run, tid, "true")
-    assert code == 2 and "what it changes" in out + err
-    q = _card(run, tid, "true", "--changes", "Nothing", "--undo", "Nothing to undo")
-    assert q["card"]["run"]["class"] == "other" and q["card"]["run"]["exe"].endswith("/true")
+    q = _card(run, tid, "true", "--changes", "Makes everything faster", "--undo", "Nothing")
+    spec = q["card"]["run"]
+    assert spec["class"] == "other" and spec["exe"].endswith("/true")
+    assert spec["changes"] == "Runs true" and "undo" not in spec  # never the helper's words
+
+
+def test_brew_words_come_from_orch():
+    assert runcard.other_words(["brew", "install", "gh", "jq"]) == ("Installs gh, jq with Homebrew",
+                                                                     "brew uninstall gh jq")  # fmt: skip
 
 
 @pytest.mark.parametrize(
     "command",
     ["sudo true", "env true", "bash -c true", "python3 -c 'print(1)'", "git -c core.pager=x log",
      "find . -exec true", "echo -e hi", "echo a!b", "echo ../x", "no-such-program-848",
-     "brew install --HEAD x",
+     "brew install --HEAD x", "brew install attacker/tap/jq",
      "brew tap x/y", "npm install -g x"],
 )  # fmt: skip
 def test_any_other_command_is_copy_only(tk, run, person_grant, command):
@@ -473,7 +479,9 @@ def test_an_orch_py_in_the_workspace_never_runs(tk, run, person_grant):
     assert not mark.exists()
 
 
-@pytest.mark.parametrize("label", [" I ran it ", "I  ran it", "i ran IT"])
+@pytest.mark.parametrize(
+    "label", [" I ran it ", "I  ran it", "i ran IT", "I ran it.", "Ran it ✓", "Done", "Did it"]
+)
 def test_i_ran_it_cannot_be_the_other_answer(tk, run, label):
     _root, tid = tk
     code, out, err = _ask(run, tid, "orch config set workflow.reviewer_look on", "--option", label)
@@ -502,3 +510,11 @@ def test_no_other_answer_while_it_runs(tk, run):
             Path(root), tid, q["id"], "no", by=ME, via="dashboard", digest=_digest(root, tid, q["id"])
         )
     assert _q(root, tid, q["id"])["answer"] is None
+
+
+def test_a_typed_comment_saying_it_ran_is_refused(tk, run):
+    root, tid = tk
+    q = _card(run, tid, "orch config set workflow.reviewer_look on", "--option", "Leave it off for now")
+    with pytest.raises(Refused):
+        review.decide(Path(root), tid, q["id"], "talk", None, {"words": {"text": "I ran it"}}, by=ME,
+                      via="dashboard", digest=_digest(root, tid, q["id"]))  # fmt: skip
