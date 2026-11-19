@@ -413,6 +413,22 @@ def human_waiting(root: Path, tid: str) -> list[dict]:
     return out
 
 
+def human_sent(root: Path, tid: str) -> list[dict]:
+    """The messages a person wrote to the ticket's helper, read or not, oldest first (the last 200 read ones
+    are kept for dedupe): what the chat of a session shows as theirs after a reload. The same allowlist as
+    human_waiting; a run's start prompt, a slot request, an answer or an agent's line is never in it."""
+    out = []
+    for i in _pending_read(root, tid):
+        if i.get("via") in ("start", "slots") or i.get("kind") != "message":
+            continue
+        if _human_author(i.get("by", ""), i.get("via"), i.get("kind"), i.get("phone")) and i.get("human") in (
+            True,
+            None,
+        ):
+            out.append(i)
+    return out
+
+
 def _drop_start_prompts_locked(root: Path, tid: str) -> None:
     """A live run's first prompt waits in the pending file until the tool is up. When that run ends before
     it went in, it is removed: the next start writes its own prompt from the ticket (no nested prompt)."""
