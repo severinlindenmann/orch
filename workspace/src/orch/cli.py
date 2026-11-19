@@ -1907,6 +1907,10 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
         return protected.hook_main(argv, watchdog)
     if argv[:1] == ["work-check"] and "--hook" in argv:  # a tool's hook: no parser, no error may reach it
         return workcheck.hook_main(argv, watchdog)
+    if argv[:1] == ["notebook"]:  # the app on the person's notebook: no workspace folder, not in --help
+        from orch import cli_notebook
+
+        return cli_notebook.main(argv[1:])
     show_all = "--help-all" in argv
     argv = ["--help" if a == "--help-all" else a for a in argv]
     want_json = "--json" in argv

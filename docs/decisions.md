@@ -62,3 +62,7 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
   check, no console error) on a seeded demo workspace with the real server; a new action or page brings its
   click-through in the same pull request. The feature list is read from the code, so the `dashboard` CI job names a
   feature without one, and `page-smoke` runs them all on every dashboard pull request.
+- 2026-11-18 (ORCH-649, owner picked ORCH-605 draft A): The notebook (the small orch app on the person's notebook) is
+  its own kind of relay device, never a phone: one per workspace, added only on the relay admin page (Notebooks) with
+  a one-time line run on the notebook. Requests wait in the relay while it sleeps; only text crosses (no files); the
+  notebook runs only the commands its ways in list, and the workspace checks every answer again.
