@@ -4,7 +4,8 @@
 Git for Windows refuses a path longer than 260 characters unless core.longpaths is on, and then leaves the checkout
 half-done. The clone folder counts too (C:\\Users\\<name>\\OneDrive - <company>\\Documents\\... easily takes 100), so a
 path inside the repository may be at most MAX_LEN characters. This check also fails on names Windows cannot hold:
-  - a reserved device name as a part (CON, PRN, AUX, NUL, COM1-9, LPT1-9, also with an extension: aux.txt),
+  - a reserved device name as a part (CON, PRN, AUX, NUL, COM1-9, LPT1-9, COM and LPT with ¹ ² ³; also with an
+    extension: aux.txt),
   - a part that ends in a dot or a space,
   - one of < > : " | ? * \\ or a control character,
   - two paths that differ only in upper and lower case (one of them is lost on Windows and macOS).
@@ -19,7 +20,7 @@ import sys
 from pathlib import Path
 
 MAX_LEN = 120
-RESERVED = re.compile(r"^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$", re.IGNORECASE)
+RESERVED = re.compile(r"^(con|prn|aux|nul|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3]) *(\..*)?$", re.IGNORECASE)
 BAD_CHARS = re.compile(r'[<>:"|?*\\\x00-\x1f]')
 
 
@@ -50,8 +51,8 @@ def problems(paths: list[str]) -> list[str]:
 
 
 def files(repo: Path) -> list[str]:
-    listed = subprocess.run(["git", "-C", str(repo), "ls-files", "-z"], capture_output=True, text=True, check=True)
-    return [n for n in listed.stdout.split("\0") if n]
+    listed = subprocess.run(["git", "-C", str(repo), "ls-files", "-z"], capture_output=True, check=True)
+    return [n for n in listed.stdout.decode("utf-8").split("\0") if n]
 
 
 def main(argv=None) -> int:

@@ -1,5 +1,6 @@
 """Every path checks out on Windows without core.longpaths (ORCH-872): planted samples and the real repo."""
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,6 +16,9 @@ import check_windows_paths as cwp  # noqa: E402
     ("docs/con", "reserved"),
     ("docs/AUX.txt", "reserved"),
     ("lpt1/readme.md", "reserved"),
+    ("docs/COM\u00b9.txt", "reserved"),
+    ("docs/lpt\u00b2.log", "reserved"),
+    ("docs/NUL .txt", "reserved"),
     ("docs/notes.", "dot or a space"),
     ("docs/trailing /a.md", "dot or a space"),
     ("docs/what?.md", "character"),
@@ -42,6 +46,13 @@ def test_case_clash_is_caught_once():
 ])
 def test_fine_path_passes(path):
     assert cwp.problems([path]) == []
+
+
+def test_files_reads_utf8_names(tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "Sch\u00f6n-\u00fcbersicht.md").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
+    assert cwp.files(tmp_path) == ["Sch\u00f6n-\u00fcbersicht.md"]
 
 
 def test_repository_checks_out_on_windows():
