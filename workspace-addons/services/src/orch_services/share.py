@@ -139,12 +139,12 @@ def check_folder(raw: str) -> Path:
         raise Refused(
             "That folder is too wide to share (the home folder or above it). Give the folder to share."
         )
-    if (real / ".orch").exists() or any(q.name == ".orch" for q in (real, *real.parents)):
+    if share_server.private_path(str(real)):
+        raise Refused("That folder is private (a dot folder such as .orch or .ssh) and is never shared.")
+    if (real / ".orch").exists():
         raise Refused(
             "A workspace's .orch folder holds private files and is never shared. Give another folder."
         )
-    if any(q.name == ".ssh" or q.name == ".gnupg" for q in (real, *real.parents)):
-        raise Refused("That folder holds keys and is never shared. Give another folder.")
     return real
 
 

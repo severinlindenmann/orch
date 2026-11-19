@@ -69,16 +69,17 @@ high, at most 1000 ports), `share_name` (required: the name other computers use 
 `share_skip = [ports]` (kept for something else, never used even when free right now; the workspace's own
 `[dashboard] listen_port` is skipped by itself), `share_check` (the address the link check goes through, default
 127.0.0.1). Not set up: refused with the line to set it.
-The folder must exist; refused: the home folder or above it, a filesystem root, anything in or holding a `.orch`
-folder, anything in `.ssh` or `.gnupg`. The port is the first of the range that is not kept, not the port of
+The folder must exist; refused: the home folder or above it, a filesystem root, a folder holding a `.orch` folder, and
+any folder that lies in a dot folder (any case; the server refuses such a folder at start too). The port is the first of the range that is not kept, not the port of
 another service of this workspace, and free for 127.0.0.1: a test bind without address sharing (no SO_REUSEADDR;
 SO_EXCLUSIVEADDRUSE on Windows) works. So a listener on 127.0.0.1 or on every address (0.0.0.0, dual-stack `[::]`)
 holds the port, and one on another single address (a forwarder) does not. `--port N` must be in the range, not
 kept and free. The service runs `<this python> -I -m orch_services.share_server --dir <folder> --port N --mark M`
 on the ticket (record `port` and `share: {dir, mark}`, schema): it binds 127.0.0.1 only with the same exclusive
 bind, answers GET and HEAD with the folder's files (405 for anything else; 404 for a path, or the index page of a
-folder, whose real location is outside the folder or on a private folder at any depth: `.orch`, `.ssh`, `.gnupg`,
-`.git`, `.env`, `.aws`, `.netrc`; those are also left out of the folder list) and adds `X-Orch-Share: M` to every answer. The link check asks `http://<share_check>:N/`
+folder, whose real location is outside the folder or private at any depth: every dot name (`.orch`, `.ssh`, `.git`,
+`.env*`, `.npmrc`, ...) and key-like files (`*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.kdbx`, `id_rsa*`, `id_ed25519*`, ...),
+any case; those are also left out of the folder list; files are opened by the real path that was checked) and adds `X-Orch-Share: M` to every answer. The link check asks `http://<share_check>:N/`
 without proxies or redirects for up to 10 s and passes only on 200 with that mark; another server's answer or a
 server that stopped fails it. A failed check removes only the service this call made and tries the next port (3
 ports at most; one with `--port`), then refuses with what answered ("Nothing was left running"). When the service tool refuses to stop or remove it, the

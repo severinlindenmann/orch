@@ -21,7 +21,20 @@ from pathlib import Path
 
 HEADER = "X-Orch-Share"
 HOST = "127.0.0.1"
-PRIVATE = {".orch", ".ssh", ".gnupg", ".git", ".env", ".aws", ".netrc"}  # never served, at any depth
+KEY_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".kdbx")
+KEY_PREFIXES = ("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519")
+
+
+def private(name: str) -> bool:
+    """A file or folder name that is never served, at any depth: every dot name (.orch, .ssh, .git, .env*, .npmrc,
+    ...) and files that look like keys."""
+    n = name.lower()
+    return n.startswith(".") or n.endswith(KEY_SUFFIXES) or n.startswith(KEY_PREFIXES)
+
+
+def private_path(path: str) -> bool:
+    """Any part of this absolute path is private (the shared folder itself must not lie in one)."""
+    return any(private(part) for part in Path(path).parts[1:])
 
 
 def exclusive(sock: socket.socket) -> None:
@@ -61,7 +74,12 @@ class Handler(SimpleHTTPRequestHandler):
         except ValueError:  # another drive on Windows
             return False
         rel = os.path.relpath(real, self.root)
-        return not any(part.lower() in PRIVATE for part in Path(rel).parts)
+        return rel == "." or not any(private(part) for part in Path(rel).parts)
+
+    def translate_path(self, path: str) -> str:
+        """The real place of the file (links followed), the same path _allowed checked: what is opened is
+        what was checked."""
+        return os.path.realpath(super().translate_path(path))
 
     def send_head(self):
         """Only files that really lie inside the shared folder: a link that leads out of it (to the home folder,
@@ -113,6 +131,8 @@ class Handler(SimpleHTTPRequestHandler):
 
 def make(folder: Path, port: int, mark: str) -> Server:
     root = os.path.realpath(folder)
+    if private_path(root):
+        raise ValueError(f"{folder} lies in a private folder and is never shared.")
     handler = type("ShareHandler", (Handler,), {"mark": mark, "root": root})
     return Server((HOST, port), partial(handler, directory=root))
 
@@ -129,6 +149,9 @@ def main(argv=None) -> int:
         return 2
     try:
         srv = make(folder, a.port, a.mark)
+    except ValueError as e:
+        sys.stderr.write(f"{e}\n")
+        return 2
     except OSError as e:
         sys.stderr.write(f"Port {a.port} is taken ({e.strerror or e}).\n")
         return 3

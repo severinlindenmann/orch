@@ -343,7 +343,7 @@ def test_wide_or_private_folders_are_refused(cli, ws, fake, base, tmp_path, monk
         (tmp_path, "too wide"),
         (ws, ".orch"),
         (ws / ".orch", ".orch"),
-        (tmp_path / "home" / ".ssh", "keys"),
+        (tmp_path / "home" / ".ssh", "private"),
         (tmp_path / "missing", "does not exist"),
     ]:
         code, out = jrun(cli, "share", str(p), "--ticket", "DM1-12")
@@ -509,3 +509,42 @@ def test_a_share_that_cannot_be_stopped_keeps_its_record(cli, ws, fake, base, fo
     code, out = jrun(cli, "share", str(folder), "--ticket", "DM1-12")
     assert code == 2 and "could not be stopped" in out["error"] and "orch services remove" in out["error"]
     assert len(list((ws / ".orch/addons/services/services").glob("*.json"))) == 1
+
+
+# ---- after the security review: every dot name and key files, in any case; the server checks the folder too
+
+
+def test_dot_names_and_key_files_are_never_served_or_listed(base, folder):
+    for name in (".env.local", ".npmrc", "id_rsa", "id_ed25519.pub", "server.PEM", "tls.key"):
+        (folder / name).write_text("private", encoding="utf-8")
+    (folder / "page.html").write_text("ok", encoding="utf-8")
+    srv = _serve(folder, base)
+    try:
+        for name in (".env.local", ".npmrc", "id_rsa", "id_ed25519.pub", "server.PEM", "tls.key"):
+            assert _code(f"http://127.0.0.1:{base}/{name}") == 404, name
+        status, _, listing = _get(f"http://127.0.0.1:{base}/")
+        assert status == 200  # index.html
+        (folder / "index.html").unlink()
+        status, _, listing = _get(f"http://127.0.0.1:{base}/")
+        assert status == 200 and "page.html" in listing
+        assert not any(n in listing for n in (".env", ".npmrc", "id_rsa", "id_ed25519", ".PEM", "tls.key"))
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_a_folder_in_a_dot_folder_is_refused_in_any_case(cli, fake, base, tmp_path):
+    for parts in ((".Orch", "x"), (".SSH",), (".config", "site")):
+        d = tmp_path.joinpath(*parts)
+        d.mkdir(parents=True)
+        code, out = jrun(cli, "share", str(d), "--ticket", "DM1-12")
+        assert code == 2 and "private" in out["error"], parts
+
+
+def test_the_server_itself_refuses_a_private_folder(base, tmp_path):
+    from orch_services import share_server
+
+    d = tmp_path / ".ssh"
+    d.mkdir()
+    with pytest.raises(ValueError):
+        share_server.make(d, base, "m")
