@@ -33,7 +33,7 @@ const LIVEBAR_NEW = [
 // The model comes from orch (state.sessions, the core's next pick); before the first Empty helper exists it is the one
 // orch picks for it (core modelpick.EMPTY_HELPER; tests/test_sessions_data.py keeps the two the same).
 const LIVEBAR_MODELS = [['sonnet', 'Sonnet'], ['opus', 'Opus'], ['haiku', 'Haiku'], ['fable', 'Fable']];
-const LIVEBAR_EMPTY_MODEL = 'opus';
+const LIVEBAR_EMPTY_MODEL = 'sonnet';
 // {name, label} of the model the Empty helper starts on, or null when the usual tool has no model choice.
 function liveBarNewModel(sessions, agents) {
   const tools = (Array.isArray(agents) ? agents : []).filter(a => a && typeof a.name === 'string' && a.found !== false);

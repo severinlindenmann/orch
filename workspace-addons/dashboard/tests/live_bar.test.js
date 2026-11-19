@@ -140,7 +140,7 @@ test('the bar says All calm only when nothing waits on the person (ORCH-464)', (
 
 test('the Empty helper says the model it starts on and sends the pick only when it is another (ORCH-710)', () => {
   const agents = [{name:'claude', label:'Claude Code', models:true, chosen:true}, {name:'codex', models:false}];
-  assert.deepEqual(bar.liveBarNewModel([], agents), {name:bar.LIVEBAR_EMPTY_MODEL, label:'Opus'}, 'none made yet: orch\'s pick');
+  assert.deepEqual(bar.liveBarNewModel([], agents), {name:bar.LIVEBAR_EMPTY_MODEL, label:'Sonnet'}, 'none made yet: orch\'s pick');
   assert.deepEqual(bar.liveBarNewModel([{id:'t_emp', kind:'empty', model:'haiku'}], agents), {name:'haiku', label:'Haiku'});
   assert.equal(bar.liveBarNewModel([], [{name:'codex', models:false, chosen:true}]), null, 'a tool with no model choice: no picker');
   assert.equal(bar.liveBarNewOwnModel([{name:'codex', models:false, chosen:true}]), true, '... it says the tool uses its own');

@@ -33,6 +33,8 @@ def empty_prompt(ticket: dict, news: str = "") -> str:
         "make its ticket first (orch ticket list, orch ticket new) and track the steps there.",
         "Ask before anything the orch skill's ask list names (cannot be undone, costs money, production, "
         "deletes real data, visible outside).",
+        f"You start on a small model. When the person's work turns hard here (design, security, several "
+        f'parts), move up first: orch ticket model {tid} up --why "<what makes it hard>".',
     ]
     if news:
         out.append("New since you last looked:\n" + news)

@@ -54,9 +54,9 @@ UP_PREFIX = "Model moved up to Opus"
 # A role that makes routine tickets with long instructions of its own sets this field to "small".
 HINT = "model_hint"
 # The Empty helper (sessions.py) has no task yet, so no rule can tell how hard its work is: it starts on
-# this one, shown in the New menu where the person can pick another (ORCH-710). The page's first guess
-# (livebar.js LIVEBAR_EMPTY_MODEL) is the same.
-EMPTY_HELPER = "opus"
+# Sonnet and moves up to Opus when the work turns hard (owner 19 Nov, ORCH-710). The New menu shows it and
+# the person can pick another; the page's first guess (livebar.js LIVEBAR_EMPTY_MODEL) is the same.
+EMPTY_HELPER = "sonnet"
 
 
 def _report(ticket: dict) -> bool:
@@ -81,7 +81,7 @@ def pick(ticket: dict) -> tuple[str, str]:
     if ticket.get(HINT) == "small":  # orch's own routine ticket (Reviewer second look, daily review)
         return "sonnet", "orch's own routine check; it moves up when it turns hard"
     if ticket.get("session") == "empty":
-        return EMPTY_HELPER, "the Empty helper has no task yet; pick another model in the New menu"
+        return EMPTY_HELPER, "the Empty helper has no task yet; it moves up when the work turns hard"
     text = _text(ticket)
     hard = _HARD.search(text)
     if hard:

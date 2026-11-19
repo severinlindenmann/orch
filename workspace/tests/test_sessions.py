@@ -141,6 +141,21 @@ def test_the_empty_helper_works_in_the_workspace_and_says_its_role(proj, monkeyp
     text = sessions.empty_prompt(tickets.load(proj, tid), "- human:t: hello")
     assert tid in text and "without a task" in text
     assert "hello" in text and "never finish it" in text
+    assert f"orch ticket model {tid} up" in text  # ORCH-710: it starts small and moves up when it turns hard
+
+
+def test_the_empty_helper_starts_on_sonnet_and_moves_up_to_opus(proj):
+    """ORCH-710 (owner 19 Nov): Sonnet by default; moved up it stays on Opus for its next starts."""
+    from orch import modelpick
+
+    tid = tickets.ensure_session(proj, "empty", "human:t")
+    assert modelpick.pick(tickets.load(proj, tid)) == (
+        "sonnet",
+        "the Empty helper has no task yet; it moves up when the work turns hard",
+    )
+    assert tickets.pick_model(proj, tid, "orch") == "sonnet"
+    t, moved = tickets.move_up(proj, tid, "the person asked for a new page design", "agent:claude")
+    assert moved and sessions.one(proj, "empty")["model"] == "opus"
 
 
 def test_the_watcher_never_nudges_the_empty_helper(proj, monkeypatch):
