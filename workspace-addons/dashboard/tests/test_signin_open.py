@@ -1,5 +1,5 @@
-"""Signing in to the dashboard (report r-1119-1255-ws): a second workspace keeps its port over a restart (so the
-browser keeps its sign-in), `orch dashboard open` signs the browser in, and the bookmark link names a real address."""
+"""The dashboard sign-in (report r-1119-1255-ws): a second workspace keeps its port over a restart (so the
+browser keeps its sign-in), `orch dashboard open` opens the page with a sign-in, and the bookmark link names a real address."""
 
 import errno
 import json
