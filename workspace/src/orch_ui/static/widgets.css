@@ -39,6 +39,13 @@
 .stat-tile .stat-value{font-size:28px;line-height:36px;font-weight:600;font-variant-numeric:tabular-nums}
 .stat-tile .stat-delta{font-size:13px;line-height:18px;color:var(--text-muted)}.stat-delta.up{color:var(--success)}.stat-delta.down{color:var(--danger)}
 .stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+/* Stat tiles in four columns (two on a phone), each with a pill, a note and a 7-day line (ORCH-660, Usage Today) */
+.stat-row.four{grid-template-columns:repeat(4,minmax(0,1fr))}.stat-row.four .stat-tile{align-content:start}.stat-tile>.pill{justify-self:start}
+@media(max-width:720px){.stat-row.four{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* 7-day line (UI.spark): a small line of numbers, coloured by data-tone 1..7 */
+.spark{display:block;width:100%;height:var(--s5);margin-top:var(--s1);color:var(--text-faint);overflow:visible}
+.spark polyline{fill:none;stroke:currentColor;stroke-width:var(--space-0);stroke-linejoin:round;stroke-linecap:round}
+.spark[data-tone="1"]{color:var(--brand)}.spark[data-tone="2"]{color:var(--success)}.spark[data-tone="3"]{color:var(--info)}.spark[data-tone="4"]{color:var(--warning)}.spark[data-tone="5"]{color:var(--chart-4)}.spark[data-tone="6"]{color:var(--brand-strong)}.spark[data-tone="7"]{color:var(--text-muted)}
 
 /* Progress with label */
 .progress-labeled{display:grid;gap:4px}.progress-labeled .progress-text{display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted)}
@@ -1046,6 +1053,7 @@ button.live-pt:hover{color:var(--brand)}
 .live-pb[data-live-body]{align-items:stretch;justify-content:flex-start;gap:var(--s3);padding:var(--s3) var(--s4);color:var(--text);text-align:left}
 .live-pb[data-live-body]>.btn{align-self:flex-start}
 .live-now{margin:0;font-weight:600;overflow-wrap:anywhere}
+.live-ask{display:grid;gap:var(--s2);margin:var(--s2) 0}.live-ask-q{margin:0;font-weight:600;overflow-wrap:anywhere}.live-ask-opts,.live-ask-line{display:flex;flex-wrap:wrap;gap:var(--s2)}.live-ask-line .input{flex:1;min-width:0}
 .live-lines{flex:1 1 auto;min-height:var(--s8);margin:0;padding:var(--s2) var(--s3);overflow:auto;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text)}
 .live-meta{margin:0}
 /* the History tab of a pane (ORCH-363): the earlier sessions of the ticket, newest first, each with Reopen */
@@ -1290,6 +1298,16 @@ body:has(.swipe-actions:not([hidden])) .ui-toasts{top:calc(var(--s4) + 56px);bot
 .swipe-preview:has(>.doc):not(:has(.doc-rows)){background:linear-gradient(transparent,var(--ink) 70%) 0 100%/100% 32px no-repeat local,linear-gradient(transparent,color-mix(in srgb,var(--text) 22%,transparent)) 0 100%/100% 16px no-repeat scroll,var(--ink)}
 /* a toast never covers the comment sheet's buttons: while a sheet is open it shows at the top (ORCH-422 look check) */
 body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:auto}
+/* A choice card that fills its grid cell: a two-line .live-opt, pressed when in use (Usage "How work is spread", ORCH-657) */
+.live-opt.tall{align-items:flex-start;height:100%;padding:var(--s4)}
+.live-opt.tall .live-opt-t{gap:var(--s1)}
+.live-opt.tall[aria-pressed=true]{background:var(--surface-2)}
+/* A number stepper: − value + ; the value is an <output> (ORCH-657) */
+.num-step{display:inline-flex;align-items:center;gap:var(--s1)}
+.num-step output{min-width:var(--s9);text-align:center;font-variant-numeric:tabular-nums;font-weight:500}
+.settings-row .ctl{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:var(--s2)}
+.settings-row .ctl select{width:auto}
+@media(max-width:600px){.settings-row .ctl{justify-content:flex-start}}
 
 /* ---- Live groups (ORCH-345, draft A on draft D): an epic or a factory order on the new live page. ONE tree (.gtree)
    in three modes: preview (the small tree on a wall tile), tree (the switcher beside a pane: main helper, its tickets

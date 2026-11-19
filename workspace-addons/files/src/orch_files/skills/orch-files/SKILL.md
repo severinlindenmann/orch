@@ -9,6 +9,10 @@ their ticket). It searches names and the text inside files with one index in `.o
 files again that changed. Private files (secret-looking names, key files, environment files) are found by name
 only; their content is never read or shown.
 
+## When to use
+- You need a file in this workspace and know part of its name or words inside it.
+- A person asks where a file is, or asks for the Files page.
+
 ## Recipes
 
 **Find a file** (any helper, no page needed)
@@ -36,6 +40,8 @@ Plain words and the day: `<what>-<yyyy-mm-dd>.<ext>` (`price-check-2026-11-18.md
 `-v2`, `-v3` (`catalogue-draft-v2.pdf`): Files stacks them into one card. Give a file a title when you attach it as
 evidence (`orch check done ... --file <path> --title "<short name>"`): Files shows that title.
 
-## Not here
-- Sharing a file by link: the publish skill.
-- Changing, moving or deleting files: Files only reads.
+## Rules
+- Search with `orch files search` before you walk folders by hand; it needs no AI call.
+- Files only reads: it never changes, moves or deletes a file.
+- Never show or quote the content of a private file; Files finds it by name only.
+- Sharing a file by link is the publish skill; files outside this workspace folder are not here.

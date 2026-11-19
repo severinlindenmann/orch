@@ -69,7 +69,7 @@ test('push uses a 50 ms debounce and changes polling only while live', () => {
   const streams = [], intervals = [], timeouts = new Map();
   let refreshed = 0, nextTimer = 0;
   const ctx = {
-    main:{replaceChildren(node) { assert.equal(node, 'loading'); }}, skeletonFor:() => 'loading', hashKind:() => 'home', paintUpdated() {}, location:{hash:''}, document:{querySelector:() => null, getElementById:() => null, addEventListener() {}, visibilityState:'visible'}, navigator:{},
+    main:{replaceChildren(node) { assert.equal(node, 'loading'); }}, skeletonFor:() => 'loading', hashKind:() => 'home', startNav() {}, paintUpdated() {}, location:{hash:''}, document:{querySelector:() => null, getElementById:() => null, addEventListener() {}, visibilityState:'visible'}, navigator:{},
     snapshot:false, window:{addEventListener() {}, get EventSource() { return ctx.EventSource; }}, refresh:() => { refreshed++; },
     setInterval:(_, ms) => { intervals.push(ms); return intervals.length; }, clearInterval() {},
     setTimeout:(fn, ms) => { assert.equal(ms, 50); timeouts.set(++nextTimer, fn); return nextTimer; }, clearTimeout:id => timeouts.delete(id),
