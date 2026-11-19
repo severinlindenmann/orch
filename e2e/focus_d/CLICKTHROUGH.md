@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-27 steps: 17 ready (the script clicks them), 10 pending (not built yet).
+28 steps: 18 ready (the script clicks them), 10 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -475,4 +475,23 @@ Do:
 Must be seen:
 
 - A new model applies from the next fresh start and says so.
+
+## 28. An epic and its helpers in one place
+
+- Part: layer
+- State: ready, clicked by the script
+- Pictures: `fd-28-groups-1280.png`, `fd-28-groups-1920.png`, `fd-28-groups-390.png`
+
+Do:
+
+1. Open Focus while an epic has a main helper and helpers on its tickets.
+2. Click the epic's tile.
+3. Click another helper in the list beside the session, then write it a message.
+
+Must be seen:
+
+- The epic is one tile with its helpers counted ("3 helpers · 2 small helpers"), orange while one of them needs you.
+- The click opens the helper that needs you, with the main helper, every helper, the small helpers (watch only) and Earlier sessions beside it.
+- A click on a helper shows it in the same pane; the message box says who gets the message.
+- On a phone the list is one line that scrolls inside itself.
 

@@ -1,4 +1,4 @@
-"""orch usage list|history|limit|period|order|on|off|end|switching|act|run|start|stop|status
+"""orch usage list|needs|seen|history|limit|period|order|on|off|end|share|switching|act|run|start|stop|status
 (store: store.py; readers: readers/; early switching: switching.py; background process: service.py)."""
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from . import share as share_mod
 from . import store, switching
 from .readers import credit_reader, cswap
 from .store import PERIOD_WORDS, Refused
@@ -122,6 +123,163 @@ def parse_time(text: str, now: datetime | None = None) -> str:
     if when <= now:
         raise Refused(f"{text} has already passed. Pick a time in the future.")
     return when.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# ---------------------------------------------------------------- share words (ORCH-657)
+
+_KIND_IN = {
+    "lead": "lead",
+    "leads": "lead",
+    "code": "code",
+    "coding": "code",
+    "review": "reviews",
+    "reviews": "reviews",
+    "challenge": "reviews",
+    "challenges": "reviews",
+    "build": "builds",
+    "builds": "builds",
+    "script": "scripts",
+    "scripts": "scripts",
+    "helper": "helpers",
+    "helpers": "helpers",
+}
+_AHEAD_IN = {
+    "api": "api",
+    "credit": "api",
+    "api-credit": "api",
+    "apicredit": "api",
+    "tool": "tool",
+    "helper-tool": "tool",
+    "both": "both",
+    "api-then-tool": "both",
+    "none": "none",
+    "no": "none",
+    "subscriptions": "none",
+    "subscription": "none",
+    "stay": "none",
+}
+
+
+def parse_pct(text: str) -> int:
+    t = (text or "").strip().replace(" ", "").rstrip("%")
+    if not t.isdigit() or not share_mod.MIN_PCT <= int(t) <= share_mod.MAX_PCT:
+        raise Refused(f"'{text}' is not a percent of the week. Write a whole number from 10 to 100, like 70.")
+    return int(t)
+
+
+def parse_day(text: str) -> str:
+    t = (text or "").strip().lower()
+    hits = [d for d in share_mod.DAYS if len(t) >= 2 and d.startswith(t)]
+    if len(hits) != 1:
+        raise Refused(f"'{text}' is not a weekday. Write it like wed or wednesday.")
+    return hits[0]
+
+
+def parse_kinds(text: str) -> list[str]:
+    t = (text or "").strip().lower()
+    if t in ("none", "nothing", "no", ""):
+        return []
+    out = []
+    for w in re.split(r"[,\s]+|\band\b", t):
+        if not w:
+            continue
+        k = _KIND_IN.get(w)
+        if not k:
+            raise Refused(f"'{w}' is not a kind of work. Use " + ", ".join(store.KINDS) + ", or none.")
+        if k not in out:
+            out.append(k)
+    return out
+
+
+def parse_one_in(text: str) -> int:
+    t = re.sub(r"\s+", " ", (text or "").strip().lower())
+    if t in ("none", "no", "0", "never"):
+        return 0
+    if t in ("all", "1", "every", "1 in 1", "one in 1"):
+        return 1
+    m = re.fullmatch(r"(?:(?:1|one) in )?(\d{1,2})", t)
+    if not m or not 2 <= int(m.group(1)) <= share_mod.MAX_ONE_IN:
+        raise Refused(
+            f"'{text}' is not a share of Code tickets. Write 'one in 4' (2 to {share_mod.MAX_ONE_IN}), all or none."
+        )
+    return int(m.group(1))
+
+
+def parse_ahead(text: str) -> str:
+    a = _AHEAD_IN.get((text or "").strip().lower().replace(" ", "-"))
+    if not a:
+        raise Refused(
+            f"'{text}' is not a choice. Use api, tool (the helper tool), both (API credit, then the helper tool) or none."
+        )
+    return a
+
+
+def parse_dollars(text: str) -> float:
+    t = (text or "").strip().replace(" ", "").lower()
+    if t in ("none", "no", "0", "$0"):
+        return 0
+    t = t.removeprefix("$").removesuffix("$")
+    try:
+        v = float(t)
+    except ValueError:
+        raise Refused(f"'{text}' is not an amount. Write dollars a day like 10 or $10.") from None
+    if not (math.isfinite(v) and 0 <= v <= share_mod.MAX_DOLLARS):
+        raise Refused(f"Dollars a day are from 0 to {share_mod.MAX_DOLLARS}.")
+    return int(v) if v.is_integer() else round(v, 2)
+
+
+def _share_cmd(args, root: Path) -> int:
+    changes: dict = {}
+    if args.week is not None:
+        changes["week_pct"] = parse_pct(args.week)
+    if args.day is not None:
+        changes["by_day"] = parse_day(args.day)
+    if args.api is not None:
+        changes["api_for"] = parse_kinds(args.api)
+    if args.tool is not None:
+        changes["tool_one_in"] = parse_one_in(args.tool)
+    if args.ahead is not None:
+        changes["when_ahead"] = parse_ahead(args.ahead)
+    if args.dollars is not None:
+        changes["day_dollars"] = parse_dollars(args.dollars)
+    preset = args.preset.strip().lower() if args.preset else None
+    if args.clear and (changes or preset or args.order):
+        raise Refused("--clear removes the share; it does not go with other changes.")
+    changed = False
+    names = [n.strip() for n in (args.order or "").split(",") if n.strip()]
+    if names:  # check the order before anything is saved, so a refused command changes nothing
+        gather(root)
+        known = store.load(root)["accounts"]
+        ids = [store.find(known, n)["id"] for n in names]
+        if len(set(ids)) != len(ids):
+            raise Refused("An account is named twice in --order. Name each one once.")
+    if changes or preset or args.clear:
+        who = _actor(args.by)
+        changed = share_mod.apply(root, who, changes, preset=preset, clear=args.clear)["changed"]
+    if names:
+        who = _actor(args.by)
+        with store.change(root) as (accounts, rows):
+            picked = [store.find(accounts, i) for i in ids]
+            for place, a in enumerate(picked, 1):
+                store.set_order(accounts, a, rows, who, place)
+            changed = changed or bool(rows)
+    view = share_mod.view(root, gather(root)["accounts"])
+    view["changed"] = changed
+    did = bool(changes or preset or args.clear or args.order)
+    nxt = (
+        (SAVED if changed else "Already like that. Nothing changed.")
+        if did
+        else (
+            "Change it: orch usage share --preset even|save|sub, or --week 70 --day wed --api reviews,scripts "
+            "--tool 'one in 4' --ahead api --dollars 10"
+        )
+    )
+    view["next"] = nxt
+    lines = [view["sentence"], *view["counts"], *[f"Warning: {w}" for w in view["warnings"]]]
+    if view["preset"]:
+        lines.insert(0, f"Ready-made spread: {share_mod.PRESETS[view['preset']]['name']}.")
+    lines.append(nxt)
+    return _emit(args, view, "\n".join(lines))
 
 
 # ---------------------------------------------------------------- reading use
@@ -271,7 +429,9 @@ def run(args) -> int:
         return 0
     if cmd == "history":
         rows = store.history(root)
-        if args.account:
+        if args.account and args.account.strip().lower() in (share_mod.ACCOUNT, share_mod.LABEL.lower()):
+            rows = [r for r in rows if r.get("account") == share_mod.ACCOUNT]
+        elif args.account:
             acc = store.find(store.load(root)["accounts"], args.account)
             rows = [r for r in rows if r.get("account") == acc["id"]]
         if args.json:
@@ -288,6 +448,24 @@ def run(args) -> int:
 
     if cmd in ("run", "start", "stop", "status", "switching"):
         return _loop_cmd(args, root)
+    if cmd == "needs":
+        from . import switching
+
+        rows = switching.needs_rows(root)
+        return _emit(
+            args, rows, "\n".join(f"{r['title']}: {r['text']}" for r in rows) or "Nothing needs you here."
+        )
+    if cmd == "seen":
+        from . import switching
+
+        changed = switching.mark_seen(root, _actor(args.by), args.warning, args.since)
+        return _emit(
+            args,
+            {"warning": args.warning, "changed": changed},
+            "Hidden until it comes back." if changed else "Already hidden until it comes back.",
+        )
+    if cmd == "share":
+        return _share_cmd(args, root)
 
     who = _actor(args.by)
     end = parse_time(args.end) if getattr(args, "end", None) else None
@@ -457,6 +635,11 @@ def main(argv=None) -> int:
         return s
 
     p("list")
+    p("needs")
+    s = p("seen")
+    s.add_argument("warning", choices=("all-at-limit", "switch-failed"))
+    s.add_argument("--since")
+    s.add_argument("--by")
     s = p("history")
     s.add_argument("--account")
     s = p("limit")
@@ -484,6 +667,17 @@ def main(argv=None) -> int:
     s = p("end")
     s.add_argument("account")
     s.add_argument("when")
+    s.add_argument("--by")
+    s = p("share", help="How helper work is spread: read it back, or change it")
+    s.add_argument("--preset", help="save, even or sub: a ready-made spread")
+    s.add_argument("--week", help="at most this %% of a subscription's week ...")
+    s.add_argument("--day", help="... by the end of this weekday (wed)")
+    s.add_argument("--api", help="kinds of work on API credit: reviews,scripts or none")
+    s.add_argument("--tool", help="Code tickets on the helper tool: 'one in 4', all or none")
+    s.add_argument("--ahead", help="a subscription ahead of its pace: api, tool, both or none")
+    s.add_argument("--dollars", help="dollars a day on API credit while ahead")
+    s.add_argument("--order", help="all or the first accounts in order: 'Personal 1, Company'")
+    s.add_argument("--clear", action="store_true", help="remove the share")
     s.add_argument("--by")
     s = p("switching")
     s.add_argument("state", choices=("on", "off"))

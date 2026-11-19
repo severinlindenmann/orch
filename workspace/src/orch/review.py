@@ -17,7 +17,7 @@ import os
 import re
 from pathlib import Path
 
-from orch import history, safefile, tickets
+from orch import history, ownerpick, safefile, tickets
 from orch.tickets import Refused
 
 KINDS = ("draft", "check", "link", "choice", "plan")
@@ -954,8 +954,7 @@ def _checks_chips(ticket: dict) -> list[dict]:
 
 def accept_blocked(ticket: dict) -> str:
     """Why Looks good is off on this Check result, with what to press (ORCH-548, owner 18 Nov: open steps and
-    an
-    open question stop it, like the ticket page's Looks good since ORCH-250); "" when nothing stops it."""
+    an open question stop it, like the ticket page's Looks good since ORCH-250); "" when nothing stops it."""
     steps = sum(
         1
         for c in ticket.get("checklist") or []
@@ -983,11 +982,29 @@ def accept_blocked(ticket: dict) -> str:
     return " ".join(out)
 
 
-def _accept_then(ticket: dict, root: Path | None) -> str:
-    """What Looks good does (the card's "If you approve"), with what does not stop it said in the same line
-    (ORCH-548): a pull request not merged yet, the Reviewer's second look still to come. Only the pull
-    request's
-    number, never its changing GitHub state, so the card (and its digest) changes only when it is merged."""
+# What each button of a Check card does, in the card's own words (ORCH-585: the person could not tell
+# whether Looks good also starts follow-up work). Looks good only closes the ticket (tickets.accept_review);
+# Send back adds the note as a task and starts a helper on it (tickets.ask_for_changes). The record keeps
+# the first part (the line without its Send back ending).
+CHECK_DONE = "The ticket is done. Nothing else starts: no new ticket, no more work."
+CHECK_DONE_UNCOVERED = (
+    "The ticket is done as it is. The missing part is dropped: no new ticket is made for it."
+)
+_CHECK_SEND_BACK = (
+    " To change something, press Send back and say what; a helper then works on it in this ticket."
+)
+_CHECK_SEND_BACK_UNCOVERED = (
+    " To get it done, press Send back and say what is missing; a helper then works on it in this ticket."
+)
+CHECK_THEN = CHECK_DONE + _CHECK_SEND_BACK
+CHECK_THEN_UNCOVERED = CHECK_DONE_UNCOVERED + _CHECK_SEND_BACK_UNCOVERED
+
+
+def _accept_then(ticket: dict, root: Path | None, uncovered: bool) -> str:
+    """What Looks good does (the card's "If you approve", ORCH-585), with what does not stop it said in the
+    same line (ORCH-548): a pull request not merged yet, the Reviewer's second look still to come. Only the
+    pull request's number, never its changing GitHub state, so the card (and its digest) changes only when it
+    is merged."""
     prs = []
     for r in ticket.get("refs") or []:
         if (
@@ -998,26 +1015,29 @@ def _accept_then(ticket: dict, root: Path | None) -> str:
             m = _PR_NUMBER.search(str(r.get("url") or ""))
             if m and f"#{m.group(1)}" not in prs:
                 prs.append(f"#{m.group(1)}")
-    line = "The ticket is done"
+    done = CHECK_DONE_UNCOVERED if uncovered else CHECK_DONE
     if prs:
-        line += (
-            f", although pull request {prs[0]} is not merged yet"
-            if len(prs) == 1
-            else (f", although pull requests {', '.join(prs[:5])} are not merged yet")
+        head, rest = done.split(". ", 1)
+        done = (
+            head
+            + (
+                f", although pull request {prs[0]} is not merged yet"
+                if len(prs) == 1
+                else f", although pull requests {', '.join(prs[:5])} are not merged yet"
+            )
+            + ". "
+            + rest
         )
-    line += "."
     if root is not None:
-        from orch import (
-            lookreview,
-        )  # imported here: it reads the run folder (runs), not needed for every card
+        from orch import lookreview  # here: it reads the run folder, not needed for every card
 
         try:
             waits = ticket["id"] in lookreview.read_state(root)["line"]
         except (OSError, ValueError, KeyError):
             waits = False
         if waits:
-            line += " The Reviewer's second look is not needed then."
-    return line
+            done += " The Reviewer's second look is not needed then."
+    return done + (_CHECK_SEND_BACK_UNCOVERED if uncovered else _CHECK_SEND_BACK)
 
 
 def check_card(ticket: dict, root: Path | None = None) -> dict:
@@ -1049,7 +1069,7 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
         "kind": "check",
         "title": ticket.get("title", ticket["id"]),
         "why": "The helper says this is ready for your check.",
-        "then": _accept_then(ticket, root),
+        "then": _accept_then(ticket, root, bool(uncovered)),
         "ok_label": "Looks good",
     }
     if uncovered:
@@ -1095,18 +1115,22 @@ def decide(
     digest: str | None = None,
     phone: str | None = None,
     pid: str | None = None,
+    person: bool = False,
 ) -> dict:
     """One swipe. key is a question id (q3) or "review" (a ticket in Review). Returns the decision entry
-    (the answered question). The person's own checks (human: author, not an agent) stay in tickets."""
+    (the answered question). The person's own checks (human: author, not an agent) stay in tickets.
+    person: a signed-in person on the dashboard or a paired phone; a draft card, and the Check of a ticket
+    that carries one, take nothing else (ORCH-582, orch/ownerpick.py)."""
     ticket = tickets.load(root, tid)
     if key == "review":
         if picked is not None:
             raise BadVerdict("A Check result has no options to pick.")
-        return _decide_check(root, ticket, verdict, note, by, via, digest, phone, pid)
+        return _decide_check(root, ticket, verdict, note, by, via, digest, phone, pid, person)
     q = _find(ticket, key)
     tickets.refuse_if_taken_back(q)
     if q.get("answer") is not None:
         raise Refused(f"{key} is already answered. Use change to answer again.")
+    ownerpick.refuse_card(q, person)  # before a merge or anything else is tried
     card = _card_of(q)
     d = _decision(q, card, verdict, picked, note)
     if digest is not None and tickets.question_digest(q) != digest:  # before a merge, not only at the write
@@ -1116,7 +1140,15 @@ def decide(
     except _merge_failed() as e:  # GitHub said no: the helper gets the reason and fixes it
         d = _send_back_after_failed_merge(card, str(e))
     _, out = tickets.answer(
-        root, tid, key, _plain_answer(q, d), by, via, expected_question_digest=digest, decision=d
+        root,
+        tid,
+        key,
+        _plain_answer(q, d),
+        by,
+        via,
+        expected_question_digest=digest,
+        decision=d,
+        person=person,
     )
     return out
 
@@ -1313,10 +1345,12 @@ def _decide_check(
     digest: str | None,
     phone: str | None = None,
     pid: str | None = None,
+    person: bool = False,
 ) -> dict:
     tid = ticket["id"]
     if not by.startswith("human:"):  # a verdict on a Check result is a person's (label check)
         raise Refused("Only a person can decide this. Ask the human to do it themselves.")
+    ownerpick.refuse_ticket(ticket, person)  # ORCH-582: a ticket with a draft is accepted only by a person
     if verdict not in VERDICTS:
         raise Refused(f"verdict is one of {', '.join(VERDICTS)}.")
     if ticket.get("status") != "review":
@@ -1329,7 +1363,7 @@ def _decide_check(
         raise Refused(card["blocked"])
     if verdict == "ok":
         d = _bare("approve", card["ok_label"], [], n)
-        tickets.accept_review(root, tid, by, via)
+        tickets.accept_review(root, tid, by, via, person=person)
     else:
         changes = _what_changes(n)
         if not changes:
@@ -1345,7 +1379,7 @@ def _decide_check(
         "card": card,
         "decision": d,
     }
-    return tickets.record_answered(root, tid, entry, by, via)
+    return tickets.record_answered(root, tid, entry, by, via, person=person)
 
 
 def change(
@@ -1359,6 +1393,7 @@ def change(
     by: str,
     via: str,
     digest: str | None = None,
+    person: bool = False,
 ) -> dict:
     """Answer an answered card again: a NEW entry (same card and shown) with decision.replaces = qid; the old
     entry only gets decision.replaced_by. Nothing is overwritten."""
@@ -1371,6 +1406,7 @@ def change(
         raise Refused("A Check result is final. Reopen the ticket to look at it again.")
     if digest is not None and tickets.question_digest(old) != digest:
         raise Refused(f"{qid} changed after it was shown. Look at the question again, then answer.")
+    ownerpick.refuse_card(old, person)
     card = _card_of(old)
     d = _decision(old, card, verdict, picked, note)
     if merge_url(old) and (old.get("decision") or {}).get("action") == "approve":
@@ -1384,7 +1420,7 @@ def change(
     }
     entry["answer"] = _plain_answer(old, d)
     entry["decision"] = d
-    return tickets.record_answered(root, tid, entry, by, via, replaces=qid)
+    return tickets.record_answered(root, tid, entry, by, via, replaces=qid, person=person)
 
 
 # ---------------------------------------------------------------- the stack
@@ -1521,6 +1557,11 @@ def applies_now_block(ticket: dict, root: Path | None = None) -> str:
             "none_of_these": "None of the options.",
         }.get(d.get("action"), d.get("summary", ""))
         then = card.get("then")
+        if card.get("kind") == "check" and isinstance(then, str):
+            # what happened, not the other button
+            for tail in (_CHECK_SEND_BACK, _CHECK_SEND_BACK_UNCOVERED):
+                if then.endswith(tail):
+                    then = then[: -len(tail)]
         if d.get("action") == "send_back" and card.get("kind") == "check":
             then = "The helper makes a new version."  # not the card's "The ticket is done."
         lines.append(
