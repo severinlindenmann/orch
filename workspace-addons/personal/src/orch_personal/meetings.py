@@ -330,9 +330,11 @@ def delete(root: Path, mid: str) -> dict:
     return m
 
 
-def set_summary(root: Path, mid: str, summary: str, steps: list[dict], by: str) -> dict:
+def set_summary(root: Path, mid: str, summary: str, steps: list[dict], by: str, guard=None) -> dict:
     with _locked(root):
         m = load(root, mid)
+        if guard:
+            guard(m)
         m["summary"] = _clean(summary, 8000)
         m["summary_by"] = by
         m["steps"] = _numbered([s for s in (_step(x) for x in steps[:MAX_STEPS]) if s], m.get("steps"))

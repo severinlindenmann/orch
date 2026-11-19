@@ -237,7 +237,11 @@ def _meetings_visible(root: Path, who: Who, p: dict, refuse: bool = True) -> set
                 "The person does not let helpers read meetings. Ask them on your ticket if you need one."
             )
         return set()
-    return store.used_on(root, who.ticket, "meetings")
+    return store.used_on(root, who.ticket, "meetings") | store.used_on(root, who.ticket, SUMMARY_ONLY)
+
+
+# A ticket made from a next step gets the summary and steps, not the transcript: its helper reads the same.
+SUMMARY_ONLY = "meetings-summary"
 
 
 def _meeting_row(m: dict) -> dict:
@@ -284,6 +288,8 @@ def meetings_show(root: Path, who: Who, mid: str) -> dict:
             "That meeting is not attached to your ticket. The person attaches it with Use in a ticket."
         )
     m = meetings_mod.load(root, mid)
+    if allowed is not None and mid not in store.used_on(root, who.ticket, "meetings"):
+        m = {**m, "transcript": []}  # attached through a next step only: summary and steps
     if who.helper:
         if _secret(root, meetings_mod.as_markdown(m, True, MEETING_NOTE)):
             raise Refused(
@@ -299,8 +305,15 @@ def meetings_show(root: Path, who: Who, mid: str) -> dict:
         "transcript": m.get("transcript") or [],
         "consent": m.get("consent"),
         "data_note": MEETING_NOTE,
-        "tickets_using": store.tickets_using(root, "meetings", mid),
-        "keys": _keys(root, [s.get("ticket") for s in m.get("steps") or []]),
+        "tickets_using": sorted(
+            {*store.tickets_using(root, "meetings", mid), *store.tickets_using(root, SUMMARY_ONLY, mid)}
+        ),
+        "keys": _keys(
+            root,
+            [s.get("ticket") for s in m.get("steps") or []]
+            + store.tickets_using(root, "meetings", mid)
+            + store.tickets_using(root, SUMMARY_ONLY, mid),
+        ),
     }
 
 
@@ -330,21 +343,26 @@ def meetings_delete(root: Path, who: Who, mid: str) -> dict:
 
 def meetings_summary(root: Path, who: Who, mid: str, summary: str, steps: list[dict]) -> dict:
     p = store.part(root, "meetings")
+    guard = None
     if who.helper:
         allowed = _meetings_visible(root, who, p)
         if allowed is not None and mid not in allowed:
             raise Refused("That meeting is not attached to your ticket.")
-        m = meetings_mod.load(root, mid)
-        if p["write"] == "never" or (m.get("summary") and p["write"] != "change"):
+        if p["write"] == "never":
             raise Refused(
                 "The person does not let helpers write this summary. Put it on your ticket instead."
-                if p["write"] == "never"
-                else "This meeting has a summary already; only the person changes it."
             )
+
+        def guard(m: dict) -> None:  # checked again under the lock, on the meeting as it is now
+            if p["write"] != "change" and (m.get("summary") or m.get("steps")):
+                raise Refused(
+                    "This meeting has a summary or next steps already; only the person changes them."
+                )
+
     if not summary.strip():
         raise Refused('Write the summary: orch personal meetings summary <meeting> --text "..."')
     _no_secret(root, summary + "\n" + "\n".join(s.get("text", "") for s in steps))
-    m = meetings_mod.set_summary(root, mid, summary, steps, who.by)
+    m = meetings_mod.set_summary(root, mid, summary, steps, who.by, guard)
     if who.helper:
         store.log(root, "meetings", f"wrote the summary of “{m['title']}”", who.by, who.ticket)
     return {"id": mid, "summary": m["summary"], "steps": m["steps"]}
@@ -376,7 +394,7 @@ def meetings_tickets(root: Path, who: Who, mid: str, numbers: list[int] | None) 
                     x["ticket"] = tid
             meetings_mod.save_meeting(root, cur)
         attached = _attach(root, tid, f"{m['title']}.md", body, who.by)
-        store.mark_used(root, tid, "meetings", mid, who.by, attached)
+        store.mark_used(root, tid, SUMMARY_ONLY, mid, who.by, attached)
         made.append({"n": s["n"], "text": s["text"], "ticket": tid})
     store.log(root, "meetings", f"made {len(made)} tickets from “{m['title']}”", who.by)
     keys = _keys(root, [x["ticket"] for x in made])

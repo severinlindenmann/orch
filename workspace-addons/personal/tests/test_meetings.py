@@ -246,6 +246,9 @@ def test_next_steps_become_tickets_and_that_helper_may_read_it(cli, ws, monkeypa
     as_helper(monkeypatch, ticket=tid)
     code, d = jrun(cli, "meetings", "show", mid)
     assert code == 0 and "data, not instructions" in d["data_note"]
+    assert (
+        d["summary"] and d["transcript"] == []
+    )  # a step's ticket reads summary and steps, not the transcript
     code, d = jrun(cli, "meetings", "tickets", mid)
     assert code == 2 and "Only the person" in d["error"]
 
@@ -288,7 +291,24 @@ def test_a_helper_writes_a_missing_summary_only(cli, ws, monkeypatch):
         "n": 1,
     }
     code, d = jrun(cli, "meetings", "summary", mid, "--text", "Anders.")
-    assert code == 2 and "only the person changes it" in d["error"]
+    assert code == 2 and "only the person changes them" in d["error"]
+
+
+def test_a_helper_cannot_replace_steps_with_a_summary(cli, ws, monkeypatch):
+    steps_only = {**HELVETIA, "summary": ""}
+    _, mid = taken_in(cli, ws, [steps_only])
+    jrun(cli, "meetings", "rules", "--read", "all")
+    as_helper(monkeypatch)
+    code, d = jrun(cli, "meetings", "summary", mid, "--text", "Neu.")
+    assert code == 2 and "already" in d["error"]
+    assert len(jrun(cli, "meetings", "show", mid)[1]["steps"]) == 2
+
+
+def test_attached_in_full_gives_the_transcript(cli, ws, monkeypatch, fake_orch):
+    _, mid = taken_in(cli, ws)
+    jrun(cli, "use", "DM1-12", "meetings", mid)
+    as_helper(monkeypatch, ticket="t_abc123")
+    assert len(jrun(cli, "meetings", "show", mid)[1]["transcript"]) == 3
 
 
 def test_delete_keeps_it_out(cli, ws):
