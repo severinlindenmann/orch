@@ -326,7 +326,7 @@ def test_a_credit_counted_down_to_zero_is_refused(ws, tmp_path):
     ]
     _one_credit(ws, tmp_path, rows, left={"value": 5, "at": "2026-11-19T00:00:00Z"})
     assert (
-        asking.left_now(store.load(ws)["accounts"][0], AT) == 0.0
+        asking.left_now(ws, store.load(ws)["accounts"][0], AT) == 0.0
     )  # 5 - 4 - 1; the $50 before does not count
     assert asking.ask(ws, "reviews", "openai", at=AT)["go"] is False
 
@@ -334,7 +334,7 @@ def test_a_credit_counted_down_to_zero_is_refused(ws, tmp_path):
 def test_a_credit_past_its_end_is_refused_with_a_fixed_clock(ws, tmp_path):
     _one_credit(ws, tmp_path, credit_ends="2026-11-20T12:00:00Z")
     a = store.load(ws)["accounts"][0]
-    assert asking.stopped(a, datetime(2026, 11, 20, 11, 59, tzinfo=UTC)) is None  # a minute before: goes
+    assert asking.stopped(ws, a, datetime(2026, 11, 20, 11, 59, tzinfo=UTC)) is None  # a minute before: goes
     ans = asking.ask(ws, "reviews", "openai", at=AT)  # AT is the end itself
     assert ans["go"] is False and ans["why"].startswith("OpenAI credit ended on ")
     later = datetime(2026, 12, 1, tzinfo=UTC)
@@ -371,3 +371,31 @@ def test_a_stopped_credit_through_the_cli_is_exit_3(cli, ws, tmp_path, monkeypat
     _one_credit(ws, tmp_path, left={"value": 0, "at": "2026-11-18T18:00:00Z"})
     code, ans = _ask(cli, monkeypatch, "reviews", "--provider", "openai")
     assert code == 3 and ans["go"] is False and "nothing left" in ans["why"]
+
+
+def test_the_real_setters_refuse_and_bring_back(ws, tmp_path):
+    """With ORCH-626's commands: reported spend counts down to 0, an end stops it, remove refuses and the skill's
+    own list never brings it back; restore does."""
+    from orch_usage import left
+
+    log = _one_credit(ws, tmp_path)
+    with store.change(ws) as (accounts, rows):
+        store.set_left(accounts[0], rows, "human:owner", 2.0, at="2026-11-19T00:00:00Z")
+    a = store.load(ws)["accounts"][0]
+    left.record(ws, a, 1.5, "agent:skill", at="2026-11-19T10:00:00Z")
+    assert asking.ask(ws, "reviews", "openai", at=AT)["left"] == 0.5
+    left.record(ws, a, 0.5, "agent:skill", at="2026-11-19T11:00:00Z")
+    assert "nothing left" in asking.ask(ws, "reviews", "openai", at=AT)["why"]
+    with store.change(ws) as (accounts, rows):
+        store.set_left(accounts[0], rows, "human:owner", 50.0, at="2026-11-20T00:00:00Z")
+        store.set_credit_end(accounts[0], rows, "human:owner", "2026-11-20T06:00:00Z")
+    assert asking.ask(ws, "reviews", "openai", at=AT)["why"].startswith("OpenAI credit ended on ")
+    with store.change(ws) as (accounts, rows):
+        store.set_credit_end(accounts[0], rows, "human:owner", None)
+        store.remove_account(accounts, accounts[0], rows, "human:owner")
+    known = [store.check_known(k) for k in openai_known(log)]
+    ans = asking.ask(ws, "reviews", "openai", known=known, at=AT)
+    assert ans["go"] is False and "was removed" in ans["why"]
+    with store.change(ws) as (accounts, rows):
+        store.restore_account(accounts[0], rows, "human:owner")
+    assert asking.ask(ws, "reviews", "openai", at=AT)["go"] is True

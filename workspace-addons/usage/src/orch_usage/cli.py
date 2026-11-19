@@ -1,4 +1,4 @@
-"""orch usage list|history|limit|period|order|on|off|end|for|model|together|add|remove|ask|switching|act|run|start|
+"""orch usage list|history|limit|period|order|on|off|end|left|spent|for|model|together|add|remove|restore|ask|switching|act|run|start|
 stop|status
 (store: store.py; readers: readers/; early switching: switching.py; background process: service.py)."""
 
@@ -14,8 +14,8 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import routing, store
-from .readers import credit_reader, cswap
+from . import left, routing, store
+from .readers import cswap
 from .store import PERIOD_WORDS, Refused
 
 SAVED = "Saved. It is in the history (orch usage history)."
@@ -78,6 +78,41 @@ def parse_value(text: str) -> tuple[float | None, str | None]:
     if not (v > 0 and math.isfinite(v)):
         raise Refused("A limit is a number above 0. To take a limit away, write none.")
     return (int(v) if v.is_integer() else round(v, 4)), unit
+
+
+def parse_money(text: str, *, allow_none: bool = True) -> float | None:
+    """'$74', '74', '74.50', '0' -> dollars; 'none' -> None (take the amount away). Never a percent."""
+    t = (text or "").strip().replace(" ", "").replace(",", "")
+    if allow_none and t.lower() in ("none", "unset", "no"):
+        return None
+    if t.endswith("%"):
+        raise Refused("An API credit counts in dollars, like $74, not in %.")
+    t = t.removeprefix("$").removesuffix("$")
+    try:
+        v = float(t)
+    except ValueError:
+        raise Refused(f"'{text}' is not an amount. Write it like $74 or 0.") from None
+    if not (math.isfinite(v) and v >= 0):
+        raise Refused("An amount is a number of dollars, 0 or more.")
+    return int(v) if v.is_integer() else round(v, 6)
+
+
+def find_credit(accounts: list[dict], ref: str, provider: str | None = None) -> dict:
+    """An API credit or helper tool by its label, id or the name its credit skill uses (`main`, `key-1`)."""
+    money = [a for a in accounts if a["type"] in store.MONEY_TYPES]
+    if provider:
+        money = [a for a in money if a.get("provider") == provider.strip().lower()]
+    try:
+        return store.find(money, ref)
+    except Refused:
+        hits = [a for a in money if a.get("source", {}).get("name") == (ref or "").strip()]
+        if len(hits) == 1:
+            return hits[0]
+        if hits:
+            raise Refused(
+                f"More than one credit uses the name '{ref}'. Add --provider, or use its label from orch usage list."
+            ) from None
+        raise
 
 
 _PERIOD_IN = {
@@ -181,10 +216,10 @@ def gather(root: Path) -> dict:
                 row["active"] = False
                 row["missing"] = found is not None
         else:
-            reader = credit_reader(src.get("reader", "none")) or credit_reader("none")
             for lim in a["rule"]["limits"] or [{"period": "month"}]:
-                c = reader(src, _period_start(lim["period"], lim, at))
+                c = left.credit_use(root, a, _period_start(lim["period"], lim, at))
                 use[lim["period"]] = asdict(c)
+            row["credit"] = left.view(root, a, at)
         row["use"] = use
         out.append(row)
     if d["unreadable"]:
@@ -194,7 +229,7 @@ def gather(root: Path) -> dict:
     together = []
     for t in d["together"]:
         lim = t["limit"]
-        spent = routing.together_spent(d["accounts"], t, at)
+        spent = routing.together_spent(d["accounts"], t, at, root)
         row = {
             "provider": t["provider"],
             "label": store.together_label(t["provider"]),
@@ -278,16 +313,29 @@ def run(args) -> int:
             print(json.dumps(data, ensure_ascii=False))
             return 0
         lines = []
+        gone = [r["label"] for r in data["accounts"] if r.get("removed")]
         for r in data["accounts"]:
+            if r.get("removed"):
+                continue
             state = "on" if r["on"] else "off"
             if r.get("active"):
                 state += ", in use"
+            if r.get("credit_ends"):
+                ended = store.to_time(r["credit_ends"]) <= datetime.now(UTC)
+                state += f", {'ended' if ended else 'ends'} {_local(r['credit_ends'])}"
             lines.append(f"{r['order']}. {r['label']} ({state}): {_rule_text(r['rule'])}")
-            use = _use_text(r)
+            credit = left.text(r["credit"]) if r.get("credit") else ""
+            use = (
+                _use_text(r) if r["rule"]["limits"] or not credit else ""
+            )  # no limit: the credit line says it
             if use:
                 lines.append(f"   {use}")
+            if credit:
+                lines.append(f"   {credit}")
         if not lines:
             lines = ["No accounts yet."]
+        if gone:
+            lines.append(f"Removed: {', '.join(gone)} (bring one back: orch usage restore <name>)")
         for t in data["together"]:
             lim = t["limit"]
             spent = f"${t['spent']:g} spent, " if t["spent"] is not None else ""
@@ -296,7 +344,9 @@ def run(args) -> int:
                 f"{store.fmt_value(lim['value'], '$')} per {PERIOD_WORDS[lim['period']]}"
             )
         lines += [f"Warning: {w}" for w in data["warnings"]]
-        lines.append("Next: orch usage limit <account> <number>  (or for / period / order / on / off / end)")
+        lines.append(
+            "Next: orch usage limit <account> <number>  (or for / period / order / on / off / end / left)"
+        )
         print("\n".join(lines))
         return 0
     if cmd == "history":
@@ -352,8 +402,8 @@ def run(args) -> int:
         if args.json:
             print(json.dumps(ans, ensure_ascii=False))
         elif ans["go"] and ans.get("account"):
-            left = f" (${ans['left']:g} left)" if ans.get("left") is not None else ""
-            print(f"Use {ans['account']}{left}.")
+            room = f" (${ans['left']:g} left)" if ans.get("left") is not None else ""
+            print(f"Use {ans['account']}{room}.")
         elif ans["go"]:
             print("Nothing is set for this kind of work in Usage: go ahead as usual.")
         else:
@@ -366,6 +416,19 @@ def run(args) -> int:
         return 0
 
     who = _actor(args.by)
+    if cmd == "spent":  # a credit skill reports what one call cost; the amount left counts down from it
+        a = find_credit(store.load(root)["accounts"], args.account, args.provider)
+        amount = parse_money(args.amount, allow_none=False)
+        if not amount:
+            raise Refused("Say what was spent as an amount above 0, like 0.42.")
+        left.record(root, a, amount, who)
+        v = left.view(root, a)
+        line = left.text(v)
+        return _emit(
+            args,
+            {"account": a["label"], "spent": amount, "credit": v},
+            f"{a['label']}: {left.money(amount)} written down." + (f"\n{line}" if line else ""),
+        )
     end = parse_time(args.end) if getattr(args, "end", None) else None
     if cmd in ("add", "together"):
         return _whole_file_cmd(args, root, who)
@@ -403,26 +466,48 @@ def run(args) -> int:
             store.remove_account(accounts, a, rows, who)
         elif cmd in ("on", "off"):
             store.set_on(a, rows, who, cmd == "on")
+        elif cmd == "left":
+            store.set_left(a, rows, who, parse_money(args.amount))
         elif cmd == "end":
             when = None if args.when.strip().lower() in ("none", "never", "no") else parse_time(args.when)
-            store.set_end(a, rows, who, when)
+            if (
+                a["type"] in store.MONEY_TYPES
+            ):  # an API credit or helper tool itself ends (asking refuses it then)
+                store.set_credit_end(a, rows, who, when)
+            else:
+                store.set_end(a, rows, who, when)
+        elif cmd == "restore":
+            store.restore_account(a, rows, who)
         else:
             raise Refused(f"Unknown command {cmd}.")
         changed = bool(rows)
         result = {k: v for k, v in a.items() if k != "source"}
     if cmd == "remove":
+        back = f'Bring it back: orch usage restore "{result["label"]}"'
         return _emit(
             args,
-            {"removed": result["label"], "changed": True, "next": SAVED},
-            f"{result['label']} is no longer listed. Its history stays.\n{SAVED}",
+            {"removed": result["label"], "changed": changed, "next": f"{SAVED} {back}"},
+            f"{result['label']} is removed and not used. Its history stays.\n{back}\n{SAVED}",
+        )
+    if cmd == "left":
+        a = store.find(store.load(root)["accounts"], result["id"])
+        v = left.view(root, a)
+        line = left.text(v) or f"{result['label']}: no amount left set."
+        return _emit(
+            args, {"account": result, "credit": v, "changed": changed, "next": SAVED}, f"{line}\n{SAVED}"
         )
     nxt = SAVED if changed else "Already like that. Nothing changed."
-    if changed and cmd in ("limit", "period", "end", "for", "model", "order") and result["rule"].get("ends"):
+    credit_end = cmd == "end" and result["type"] in store.MONEY_TYPES
+    rule_cmd = cmd in ("limit", "period", "end", "for", "model", "order")
+    if changed and rule_cmd and not credit_end and result["rule"].get("ends"):
         nxt = SAVED + " The rule falls back to the one before it when it ends."
+    ends = f", ends {_local(result['credit_ends'])}" if result.get("credit_ends") else ""
+    if credit_end and changed:
+        nxt = SAVED + (" From then on it is not used." if ends else "")
     return _emit(
         args,
         {"account": result, "changed": changed, "next": nxt},
-        f"{result['label']}: {_rule_text(result['rule'])}, {'on' if result['on'] else 'off'}, "
+        f"{result['label']}: {_rule_text(result['rule'])}, {'on' if result['on'] else 'off'}{ends}, "
         f"place {result['order']}.\n{nxt}",
     )
 
@@ -451,8 +536,12 @@ def _whole_file_cmd(args, root: Path, who: str) -> int:
                 tool=args.tool,
                 first=args.first,
             )
+            if args.left is not None:
+                store.set_left(a, rows, who, parse_money(args.left))
             result = {k: v for k, v in a.items() if k != "source"}
             text = f"{a['label']} added: {_rule_text(a['rule'])}, place {a['order']}."
+            if a.get("left"):
+                text += f" Left: {left.money(a['left']['value'])}."
             data: dict = {"account": result}
         else:
             value, unit = parse_value(args.value)
@@ -654,9 +743,22 @@ def main(argv=None) -> int:
     s.add_argument("--resets", help="the day the month starts again, e.g. 2026-11-17")
     s.add_argument("--tool", help="the helper tool it runs, as named in Settings")
     s.add_argument("--first", action="store_true", help="use it first")
+    s.add_argument("--left", help="what is left on it now, as read at the provider, e.g. $74")
+    s.add_argument("--by")
+    s = p("left")
+    s.add_argument("account")
+    s.add_argument("amount", help="what is left now, as read at the provider: $74, 0, or none")
+    s.add_argument("--by")
+    s = p("spent")
+    s.add_argument("account", help="the credit's label, or the name its credit skill uses")
+    s.add_argument("amount", help="what one call or job cost, in dollars: 0.42")
+    s.add_argument("--provider", help="anthropic or openai, when two credits share a name")
     s.add_argument("--by")
     s = p("remove")
     s.add_argument("account")
+    s.add_argument("--by")
+    s = p("restore")
+    s.add_argument("account", help="a removed API credit or helper tool")
     s.add_argument("--by")
     for name in ("on", "off"):
         s = p(name)

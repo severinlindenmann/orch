@@ -31,8 +31,8 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import store, switching
-from .readers import credit_reader, cswap
+from . import left, store, switching
+from .readers import cswap
 
 REVIEW_ROLES = ("reviewer", "checker", "challenger", "critic", "review", "challenge")
 CODE_ROLES = ("builder", "coder", "developer", "implementer", "fixer", "code")
@@ -70,30 +70,28 @@ def held(root: Path) -> dict:
     return {k: v for k, v in data.items() if k in store.KINDS and isinstance(v, dict)}
 
 
-def together_spent(accounts: list[dict], t: dict, at: datetime) -> float | None:
+def together_spent(accounts: list[dict], t: dict, at: datetime, root: Path | None = None) -> float | None:
     """Dollars spent over every money account of the provider in the limit's period; None when none can be read."""
     from .cli import _period_start
 
     lim = t["limit"]
     total = None
     for m in store.money_accounts(accounts, t["provider"]):
-        src = m.get("source", {})
-        reader = credit_reader(src.get("reader", "none")) or credit_reader("none")
-        c = reader(src, _period_start(lim["period"], lim, at))
+        c = left.credit_use(root, m, _period_start(lim["period"], lim, at))
         if c.spent is not None:
             total = round((total or 0.0) + c.spent, 4)
     return total
 
 
 def _together_room(
-    a: dict, at: datetime, accounts: list[dict], together: list[dict]
+    a: dict, at: datetime, accounts: list[dict], together: list[dict], root: Path | None = None
 ) -> tuple[bool, str, str | None]:
     if a["type"] not in store.MONEY_TYPES:
         return True, "", None
     for t in together:
         if t["provider"] != a.get("provider"):
             continue
-        spent = together_spent(accounts, t, at)
+        spent = together_spent(accounts, t, at, root)
         lim = t["limit"]
         if spent is not None and spent >= lim["value"]:
             word = store.PERIOD_WORDS[lim["period"]]
@@ -106,21 +104,23 @@ def _together_room(
 
 
 def _credit_room(
-    a: dict, at: datetime, accounts: list[dict] | None = None, together: list[dict] | None = None
+    a: dict,
+    at: datetime,
+    accounts: list[dict] | None = None,
+    together: list[dict] | None = None,
+    root: Path | None = None,
 ) -> tuple[bool, str, str | None]:
     """(room, why when not, next start) for an API key or helper tool. Unknown spend = room."""
     from .cli import _period_start
 
     if together:
-        room = _together_room(a, at, accounts or [a], together)
+        room = _together_room(a, at, accounts or [a], together, root)
         if not room[0]:
             return room
-    src = a.get("source", {})
-    reader = credit_reader(src.get("reader", "none")) or credit_reader("none")
     for lim in a["rule"]["limits"]:
         if lim.get("unit") != "$":
             continue
-        c = reader(src, _period_start(lim["period"], lim, at))
+        c = left.credit_use(root, a, _period_start(lim["period"], lim, at))
         if c.spent is not None and c.spent >= lim["value"]:
             word = store.PERIOD_WORDS[lim["period"]]
             return (
@@ -240,7 +240,14 @@ def decide(root: Path, req: dict, at: datetime | None = None, switch=switching._
         store.expire(accounts, rows, at)
     doc = store.load(root)
     accounts = doc["accounts"]
-    allowed = [a for a in accounts if a["on"] and (not a["rule"].get("for") or kind in a["rule"]["for"])]
+    allowed = [
+        a
+        for a in accounts
+        if a["on"]
+        and not a.get("removed")
+        and not (a.get("credit_ends") and store.to_time(a["credit_ends"]) <= at)  # the credit itself ended
+        and (not a["rule"].get("for") or kind in a["rule"]["for"])
+    ]
     usable = []
     for a in allowed:
         tool = a.get("tool")
@@ -262,7 +269,7 @@ def decide(root: Path, req: dict, at: datetime | None = None, switch=switching._
             if ok:
                 return _go(root, kind, a, req, at, sub=c, found=subs.found, switch=switch)
         else:
-            ok, why, wake = _credit_room(a, at, accounts, doc["together"])
+            ok, why, wake = _credit_room(a, at, accounts, doc["together"], root)
             if ok:
                 return _go(root, kind, a, req, at)  # its helper tool runs on this credit, not a subscription
         reasons.append(why)

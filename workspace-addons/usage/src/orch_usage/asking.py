@@ -27,21 +27,20 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import routing, store, switching
-from .readers import credit_reader, cswap
+from . import left, routing, store, switching
+from .left import credit_use
+from .readers import cswap
 
 
-def _left(a: dict, at: datetime) -> float | None:
+def _left(a: dict, at: datetime, root: Path | None = None) -> float | None:
     """Dollars left under the tightest $ limit, when the spend can be read."""
     from .cli import _period_start
 
-    src = a.get("source", {})
-    reader = credit_reader(src.get("reader", "none")) or credit_reader("none")
     left = None
     for lim in a["rule"]["limits"]:
         if lim.get("unit") != "$":
             continue
-        c = reader(src, _period_start(lim["period"], lim, at))
+        c = credit_use(root, a, _period_start(lim["period"], lim, at))
         if c.spent is None:
             continue
         x = round(max(0.0, lim["value"] - c.spent), 4)
@@ -49,23 +48,15 @@ def _left(a: dict, at: datetime) -> float | None:
     return left
 
 
-def left_now(a: dict, at: datetime) -> float | None:
-    """Dollars left on a credit: what the person set (`left`: {value, at}) minus what was spent since. None when not set
-    yet (calls go ahead and are counted). Spend that cannot be read counts as none."""
-    left = a.get("left")
-    if not isinstance(left, dict) or not isinstance(left.get("value"), (int, float)):
+def left_now(root: Path | None, a: dict, at: datetime) -> float | None:
+    """Dollars left on a credit: what the person set (`left`: {value, at}) minus what was spent since, from its spend
+    log and from `orch usage spent` reports (left.view). None when not set yet (calls go ahead and are counted)."""
+    if not isinstance(a.get("left"), dict):
         return None
-    try:
-        since = store.to_time(str(left.get("at")))
-    except ValueError:
-        return None
-    src = a.get("source", {})
-    reader = credit_reader(src.get("reader", "none")) or credit_reader("none")
-    spent = reader(src, store.utc_text(since)).spent if since <= at else 0.0
-    return round(float(left["value"]) - (spent or 0.0), 4)
+    return left.view(root, a, at)["left"]
 
 
-def stopped(a: dict, at: datetime) -> str | None:
+def stopped(root: Path | None, a: dict, at: datetime) -> str | None:
     """Why an API credit may not be spent now, in one plain sentence; None when it may."""
     label = a["label"]
     if a.get("removed"):
@@ -80,8 +71,8 @@ def stopped(a: dict, at: datetime) -> str | None:
             end = None
         if end is not None and end <= at:
             return f"{label} ended on {routing._words_time(store.utc_text(end))}."
-    left = left_now(a, at)
-    if left is not None and left <= 0:
+    rest = left_now(root, a, at)
+    if rest is not None and rest <= 0:
         return f"{label} has nothing left. Set what is left on the Usage page."
     return None
 
@@ -151,12 +142,12 @@ def ask(
             if r:
                 wakes.append(r)
         elif a["type"] == "api-key":
-            stop = stopped(a, at)
+            stop = stopped(root, a, at)
             if stop:
                 stop_first = stop_first or not reasons
                 reasons.append(stop)
                 continue
-            room, why, nxt = routing._credit_room(a, at, accounts, doc["together"])
+            room, why, nxt = routing._credit_room(a, at, accounts, doc["together"], root)
             if room:
                 return _go(root, kind, a, provider, at, accounts, doc["together"])
             reasons.append(why)
@@ -194,13 +185,13 @@ def _go(
         nm = a.get("source", {}).get("name")
         if isinstance(nm, str):
             out["name"] = nm
-        left = _left(a, at)
-        own = left_now(a, at)  # what the person set, counted down
+        left = _left(a, at, root)
+        own = left_now(root, a, at)  # what the person set, counted down
         if own is not None:
             left = own if left is None else min(left, own)
         for t in together or []:  # a limit over every account of the provider leaves less
             if t["provider"] == a.get("provider"):
-                spent = routing.together_spent(accounts or [a], t, at)
+                spent = routing.together_spent(accounts or [a], t, at, root)
                 if spent is not None:
                     x = round(max(0.0, t["limit"]["value"] - spent), 4)
                     left = x if left is None else min(left, x)
