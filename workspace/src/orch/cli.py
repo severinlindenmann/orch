@@ -43,6 +43,7 @@ from orch import (
     mobile_mode,
     net,
     nextstep,
+    ownerpick,
     refs,
     relay,
     review,
@@ -199,6 +200,17 @@ def _check_lines(root: Path | None, t: dict, c: dict, open_q: list[dict]) -> lis
     return out
 
 
+def _person_only_review_off(args) -> None:
+    """ORCH-424: only a person turns Human review needed off (it lets work be accepted without them). An agent
+    in the environment counts as an agent whatever --by says (same rule as the Reviewer switches)."""
+    who = tickets.current_actor(getattr(args, "by", None))
+    if tickets.agent_tool() or not who.startswith("human:"):
+        raise Refused(
+            "Only a person turns Human review needed off: on the ticket page, or orch ticket edit "
+            "<ticket> --human-review no in their own terminal."
+        )
+
+
 def _lookup(root: Path | None, tid: str) -> dict | None:
     if root is None:
         return None
@@ -243,6 +255,7 @@ def _show(t: dict, root: Path) -> str:
     if modelpick.label(t):
         reason = modelpick.why(t)
         extra.append(f"Model: {modelpick.label(t)}" + (f": {reason}" if reason else ""))
+    extra.append("Human review needed: " + ("yes" if tickets.human_review(t) else "no"))  # ORCH-424
     if extra:
         out.append("  ".join(extra))
     if t.get("note"):
@@ -514,6 +527,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         help="a release: the epics and tickets that ship together go under it (--parent)",
     )
     x.add_argument(
+        "--human-review",
+        choices=("yes", "no"),
+        help="Human review needed (default yes; no while the Auto Reviewer is on); only a person says no",
+    )
+    x.add_argument(
         "--ext",
         action="append",
         default=[],
@@ -552,6 +570,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     x.add_argument(
         "--release", choices=("yes", "no"), help="yes marks it as a release, no takes the mark off"
+    )
+    x.add_argument(
+        "--human-review",
+        choices=("yes", "no"),
+        help="Human review needed: yes (nothing is accepted without a person) or no (only a person says no)",
     )
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
     x = t.add_parser("order", parents=[common], help="the order of the tickets in one board lane")
@@ -1081,6 +1104,8 @@ def run(args: argparse.Namespace) -> None:
     ):
         pass
     elif cmd == "ticket" and sub == "new":
+        if args.human_review == "no":
+            _person_only_review_off(args)
         t = tickets.create(
             root,
             args.title,
@@ -1092,6 +1117,7 @@ def run(args: argparse.Namespace) -> None:
             plan_first=args.plan_first,
             epic=args.epic,
             release=args.release,
+            human_review=None if args.human_review is None else args.human_review == "yes",
         )
         part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
@@ -1129,7 +1155,10 @@ def run(args: argparse.Namespace) -> None:
         who, person = _status_who(root, args, args.id, json.dumps({"status": args.status}), by())
         looked = _looked_at_this(root, args, args.id, args.status, person)
         hint = tickets.recheck_hint(root, args.id, args.status, who)
-        t = tickets.set_status(root, args.id, args.status, who, superseded_by=args.superseded_by)
+        granted = ownerpick.person_granted(root, who)  # ORCH-582: always used up; a draft's Done needs it
+        t = tickets.set_status(
+            root, args.id, args.status, who, superseded_by=args.superseded_by, person=person and granted
+        )
         warn = _child_warning(root, t)
         shown = _with_notice(t, warn, looked)
         if not hint and who.startswith("agent:"):
@@ -1147,16 +1176,29 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "edit":
         keys = ("owner", "due", "note", "done_when")
         fields = {k: getattr(args, k) for k in keys if getattr(args, k) is not None}
-        if args.title is None and not fields and args.parent is None and args.release is None:
+        if (
+            args.title is None
+            and not fields
+            and args.parent is None
+            and args.release is None
+            and args.human_review is None
+        ):
             raise Refused(
-                "Say what to change: --title, --owner, --due, --note, --done-when, --parent or --release."
+                "Say what to change: --title, --owner, --due, --note, --done-when, --parent, --release "
+                "or --human-review."
             )
+        if args.human_review == "no":
+            _person_only_review_off(args)
         if args.parent is not None:  # first, so a refused parent changes nothing else
             t = tickets.set_parent(root, args.id, args.parent, by(), args.if_revision)
             if args.if_revision is not None and t.get("revision") != args.if_revision:
                 args.if_revision = t.get("revision")  # our own write: the other fields follow it
         if args.release is not None:
             t = tickets.set_release(root, args.id, args.release == "yes", by(), args.if_revision)
+            if args.if_revision is not None and t.get("revision") != args.if_revision:
+                args.if_revision = t.get("revision")  # our own write: the other changes follow it
+        if args.human_review is not None:
+            t = tickets.set_human_review(root, args.id, args.human_review == "yes", by(), args.if_revision)
             if args.if_revision is not None and t.get("revision") != args.if_revision:
                 args.if_revision = t.get("revision")  # our own write: the other changes follow it
         if args.title is not None or fields:
@@ -1266,7 +1308,8 @@ def run(args: argparse.Namespace) -> None:
         except (ValueError, AttributeError):
             status = None
         looked = _looked_at_this(root, args, args.id, status, person)
-        t = tickets.patch(root, args.id, args.if_revision, args.data, who)
+        granted = ownerpick.person_granted(root, who)  # ORCH-582: always used up; a draft's Done needs it
+        t = tickets.patch(root, args.id, args.if_revision, args.data, who, person=person and granted)
         warn = _child_warning(root, t)
         shown = _with_notice(t, warn, looked)
         _out(
@@ -1458,8 +1501,18 @@ def run(args: argparse.Namespace) -> None:
         who = tickets.acting_by(args)
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
+        # ORCH-582: a draft is answered only with the signed-in dashboard's one-time person grant
+        granted = ownerpick.person_granted(root, who)  # always used up, so no child inherits it
+        person = ownerpick.is_draft_card(shown_q) and granted
         t, q = tickets.answer(
-            root, args.id, args.question, args.answer, who, args.via, expected_question_digest=shown_digest
+            root,
+            args.id,
+            args.question,
+            args.answer,
+            who,
+            args.via,
+            expected_question_digest=shown_digest,
+            person=person,
         )
         with contextlib.suppress(
             Refused

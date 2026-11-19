@@ -23,8 +23,9 @@ Full list with thresholds and how to check: `references/CHECKLIST.md`. Sources a
    while `tokens.css` is dark only), one set per state touched (loaded, loading, empty, error, stale, long content),
    one with keyboard focus on the main action, and a before/after pair around the main click.
    Tool: `orch shot <url or html file> --width 1280,1920,390 --out <folder>` (keychain-safe browser, one picture per
-   width). Never start Chromium yourself; if you must script Playwright, launch with
-   `args: ['--use-mock-keychain', '--password-store=basic']`. Pictures go on the ticket as evidence
+   width). Never start Chromium yourself; a script in the repository launches only through
+   `e2e/headless.cjs` / `e2e/headless.py` (they add the keychain options; CI check `headless-launch`), a
+   throwaway script outside it with `args: ['--use-mock-keychain', '--password-store=basic']`. Pictures go on the ticket as evidence
    (`orch check done ... --file`), never into git.
    **Dashboard pull request: take no pictures of the product yourself.** CI (job `dash-shots`) takes the changed
    pages at 1280, 1920 and 390 on sample tickets; put them on the card with

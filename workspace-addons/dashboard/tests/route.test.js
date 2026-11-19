@@ -46,9 +46,10 @@ test('livePreviewOn reads the one setting: on only when it is exactly true, neve
   for (const s of [{settings:{focus_preview_on:false}}, {settings:{}}, {}, null, {settings:{focus_preview_on:'true'}}]) assert.equal(on(s), false);
   assert.equal(on({settings:{focus_preview_on:true}}, true), false);
 });
-test('the new live page is an empty shell with the Preview tag, the add-on\'s own name and a way back', () => {
+test('the new live page is the wall with the Preview tag, the add-on\'s own name and a way back', () => {
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, kids:kids.flat(Infinity).filter(Boolean)});
-  const ctx = {h, fragment:(...k) => h('frag', {}, ...k), heading:(t, sub, o) => h('header', {}, h('h1', {}, t), o?.actions), addonLabel:a => a?.dashboard?.label, addons:() => [LIVE], encodeURIComponent};
+  const ctx = {h, fragment:(...k) => h('frag', {}, ...k), heading:(t, sub, o) => h('header', {}, h('h1', {}, t), o?.actions), addonLabel:a => a?.dashboard?.label, addons:() => [LIVE], encodeURIComponent,
+    window:{}, liveWall:() => h('div', {'data-key':'live-wall'})};
   vm.createContext(ctx); vm.runInContext(liveSource, ctx);
   const all = n => [n, ...(n.kids || []).flatMap(k => typeof k === 'object' ? all(k) : [])];
   const text = n => all(n).flatMap(x => (x.kids || []).filter(k => typeof k === 'string')).join(' ');
@@ -56,7 +57,7 @@ test('the new live page is an empty shell with the Preview tag, the add-on\'s ow
   assert.equal(ctx.livePageOf('automation'), null);
   const page = ctx.liveNextPage({kind:'live', id:'focus', path:''}), key = k => all(page).find(x => x.attrs?.['data-key'] === k);
   assert.equal(text(key('live-next-tag')), 'Preview');
-  assert.match(text(key('live-next')), /The new Focus is being built; your helpers’ sessions will show here\./);
+  assert.ok(all(key('live-next')).some(x => x.attrs?.['data-key'] === 'live-wall'), 'the wall fills the page (pages/livewall.js)');
   assert.equal(text(key('live-next-off')), 'Back to today’s Focus');
   assert.equal(key('live-next-off').attrs.href, '#settings/addons/focus');
   assert.equal(all(page).filter(x => x.tag === 'iframe').length, 0, 'not today\'s page');

@@ -158,6 +158,18 @@ def needs_session(op) -> bool:
     return isinstance(op, str) and op not in FREE_OPS
 
 
+def turns_review_off(op, args) -> bool:
+    """ORCH-424: a ticket.new or ticket.edit that turns Human review needed off (also for a ticket inside an epic).
+    It lets work be accepted without the person, so it needs the page session even though the op is free."""
+    if op not in ("ticket.new", "ticket.edit") or not isinstance(args, dict):
+        return False
+    steps = args.get("steps") if isinstance(args.get("steps"), list) else []
+    # anything but true counts as off here, so the check never reads a value differently from the command
+    return any(
+        isinstance(x, dict) and "human_review" in x and x["human_review"] is not True for x in [args, *steps]
+    )
+
+
 def _tid(v) -> str:
     if not isinstance(v, str) or not TID.fullmatch(v):
         raise BadRequest("That is not a ticket id.")
@@ -291,9 +303,15 @@ def _ticket_new(a):
             "plan_first",
             "epic",
             "steps",
+            "human_review",
         ),
     )
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
+    # ORCH-424: the Human review needed box; sent only when the person changed it from the workspace default
+    if "human_review" in a:
+        if not isinstance(a["human_review"], bool):
+            raise BadRequest("human_review is true or false.")
+        flags.append(f"--human-review={'yes' if a['human_review'] else 'no'}")
     if _flag(a.get("title_auto")):  # the title is a placeholder: the agent writes the real one
         flags.append("--title-auto")
     if _flag(a.get("plan_first")):
@@ -435,8 +453,26 @@ def _ticket_changes(a):
 
 
 def _ticket_edit(a):
-    _only(a, ("ticket", "title", "owner", "due", "note", "done_when", "parent", "release", "if_revision"))
+    _only(
+        a,
+        (
+            "ticket",
+            "title",
+            "owner",
+            "due",
+            "note",
+            "done_when",
+            "parent",
+            "release",
+            "human_review",
+            "if_revision",
+        ),
+    )
     flags = []
+    if "human_review" in a:  # ORCH-424: the Human review needed switch on the ticket page
+        if not isinstance(a["human_review"], bool):
+            raise BadRequest("human_review is true or false.")
+        flags.append(f"--human-review={'yes' if a['human_review'] else 'no'}")
     if "parent" in a:  # ORCH-156: "Part of": put the ticket under an epic, or None to take it out
         flags.append(f"--parent={_tid(a['parent']) if a['parent'] else ''}")
     if "release" in a:  # ORCH-37: the Release switch on the ticket page (true marks it, false takes it off)
@@ -1472,9 +1508,13 @@ def epic_new(root: Path, orch_bin: str | None, args: dict, session: bool) -> tup
     if not isinstance(epic_id, str) or not TID.fullmatch(epic_id):
         return 422, "The epic was made, but its address could not be read. Reload before trying again.", None
     made, failed = [], []
+    # ORCH-424: the tickets inside follow the epic's Human review needed choice unless one says its own
+    same = {"human_review": rest["human_review"]} if "human_review" in rest else {}
     for index, step in enumerate(steps):
         try:
-            st, msg, child = run_op(root, orch_bin, "ticket.new", {**step, "parent": epic_id}, session)
+            st, msg, child = run_op(
+                root, orch_bin, "ticket.new", {**same, **step, "parent": epic_id}, session
+            )
         except (BadRequest, Unavailable) as e:
             st, msg, child = 422, str(e), None
         if st == 200:
@@ -1502,6 +1542,22 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             return 200, "", {"people": people.choose(root, args.get("name"), add=op == "person.add")}
         except people.BadName as e:
             raise BadRequest(str(e)) from None
+    if op in (
+        "session.pin",
+        "session.name",
+    ):  # the live page: pin or name a session, kept in the workspace (ORCH-361)
+        from . import sessionprefs
+
+        if not isinstance(args, dict):
+            raise BadRequest("The arguments must be an object.")
+        if not session:  # watch-only: pins and names are the person's clicks
+            raise NeedsPerson(SIGNIN)
+        try:
+            if op == "session.pin":
+                return 200, "", {"prefs": sessionprefs.set_pin(root, args.get("session"), args.get("pinned"))}
+            return 200, "", {"prefs": sessionprefs.set_name(root, args.get("session"), args.get("name"))}
+        except sessionprefs.BadPref as e:
+            raise BadRequest(str(e)) from None
     if op == "update.note.dismiss":  # Home: "Got it" on the note after an automatic update; nothing runs
         if not session:
             raise NeedsPerson(SIGNIN)
@@ -1509,6 +1565,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
 
         update.dismiss_auto_note()
         return 200, "", None
+    if orch_bin == SELF and turns_review_off(op, args) and not session:  # ORCH-424: only the signed-in person
+        raise NeedsPerson(SIGNIN)
     if op == "ticket.new" and isinstance(args, dict) and "steps" in args:
         return epic_new(root, orch_bin, args, session)
     argv = build_argv(op, args, root)
@@ -1700,6 +1758,8 @@ def _logins_cancel(a):
 PERSON_GRANT_OPS = frozenset(
     {"logins.renew", "logins.status", "logins.cancel", "logins.code", "logins.replace"}
 )
+# a signed-in answer may pick a draft, and a signed-in Done may finish a ticket that carries one (ORCH-582)
+DRAFT_GRANT_OPS = frozenset({"answer", "review.answer", "ticket.patch"})
 
 
 def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> tuple[dict, tuple[int, ...]]:
@@ -1720,6 +1780,15 @@ def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> tuple[dict
         except Exception:  # noqa: BLE001  no guarded orch home here: nothing to renew from this page
             raise Unavailable("orch cannot renew logins in this workspace.") from None
         fds = () if fd is None else (fd,)
+    elif op in DRAFT_GRANT_OPS and session:
+        # ORCH-582: a draft (and the Check of a ticket with one) is answered only by a signed-in person; the
+        # core takes nothing else as proof, whatever --by or --via say. Without a session: no grant, and the
+        # core refuses a draft (other cards answer as before).
+        from orch import renew
+
+        with contextlib.suppress(Exception):  # no guarded orch home: drafts stay unanswerable from here
+            fd = renew.hand_over(env, renew.GRANT_ENV, renew.grant(root))
+            fds = () if fd is None else (fd,)
     return env, fds
 
 

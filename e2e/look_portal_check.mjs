@@ -1,8 +1,9 @@
 // Playwright check of the admin portals (LOOK-5): pick an icon before connect -> badge shows;
 // after the workspace chose its own look -> picker gone, 409 text shown. Usage: node look_portal_check.mjs <kind relay|publish> <adminUrl> <token> <wsId> <wsName> <workspaceTokenForPatch> <publicUrl>
+import headless from './headless.cjs'; // the keychain options (ORCH-615)
 const { chromium } = await import(process.env.PW_DIR + "/playwright/index.mjs");
 const [kind, base, token, id, name, wtok, pub] = process.argv.slice(2);
-const b = await chromium.launch();
+const b = await headless.launch(chromium);
 const ctx = await b.newContext();
 await ctx.addInitScript((t) => { try { sessionStorage.setItem("orch_admin", t); } catch (e) {} }, token);
 const page = await ctx.newPage();

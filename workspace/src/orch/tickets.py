@@ -20,7 +20,7 @@ import unicodedata
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from orch import config, diag, history, net, procs, saferead, syncgate, term
+from orch import config, diag, history, net, ownerpick, procs, saferead, syncgate, term
 from orch.errors import Refused
 from orch.session_ids import SESSION_ID_RE as SESSION_ID_RE
 from orch.session_ids import valid_session_id
@@ -996,8 +996,11 @@ def create(
     plan_first: bool = False,
     epic: bool = False,
     release: bool = False,
+    human_review: bool | None = None,
 ) -> dict:
-    """`title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
+    """`human_review`: the Human review needed switch (ORCH-424); None = the workspace default (on, or off
+    while the Auto Reviewer is on: config.auto_reviewer_on).
+    `title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
     writes the real one (`orch ticket title`). The flag clears when anyone sets the title.
     tid lets callers persist a reserved id before this write."""
     if tid is not None:
@@ -1040,6 +1043,11 @@ def create(
         release
     ):  # ORCH-37: a release holds the epics and tickets that ship together (set_release changes it later)
         ticket["release"] = True
+    if human_review is None:
+        human_review = not config.auto_reviewer_on(root)
+    if not human_review:  # ORCH-424: stored only when off; no field = on (also every older ticket)
+        ticket["human_review"] = False
+        add_history(ticket, by, HUMAN_REVIEW_OFF, at=t)
     for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
@@ -1268,11 +1276,23 @@ GENERAL_REFUSED = (
 )  # finish, reopen, Working; waiting and ready stay
 
 
-def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str, str]:
+DRAFT_TO_CHECK = "a ticket with a draft, mockup or design waits for the owner's Check"
+
+
+def _finish_status(root: Path, ticket: dict, status: str, by: str, person: bool = False) -> tuple[str, str]:
+    """person: a signed-in person (the dashboard's one-time grant); only then does a ticket that carries a
+    draft become Done (ORCH-582). An agent's Done goes to Review instead, also with agents may finish on."""
     if hidden_kind(ticket) and status in GENERAL_REFUSED:  # the ONE status guard (agent, person, wrapper)
         raise Refused(_hidden_refusal(ticket))
     if agent_tool():  # an agent in the environment counts as an agent whatever --by says
         by = "agent:" + str(agent_tool())
+    if status == "done" and ticket["status"] != "done" and ownerpick.carries_draft(ticket):
+        if by.startswith("agent:"):
+            _check_not_too_early(root, ticket)
+            _check_can_finish(ticket)
+            add_history(ticket, by, f"{by} finished the work and sent it to Check: {DRAFT_TO_CHECK}")
+            return "review", by
+        ownerpick.refuse_ticket(ticket, person)
     if status in ("done", "review") and by.startswith("agent:") and ticket["status"] != status:
         _check_not_too_early(root, ticket)
     if status == "done" and by.startswith("agent:"):
@@ -1298,11 +1318,12 @@ def note_history(root: Path, tid: str, by: str, text: str, via: str | None = Non
     apply_op(root, tid, lambda ticket: add_history(ticket, by, text, via), by=by)
 
 
-def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
+def accept_review(root: Path, tid: str, by: str, via: str = "phone", *, person: bool = False) -> dict:
     """A person accepts a ticket in Review: Review -> Done, like the dashboard's Accept. Refused for an agent
     (an agent in the environment, or any `by` that is not human:) and when the ticket is not in Review, so a
     second accept is refused. The relay's phone path calls it for an answer to the current review question
-    (relay._apply_review_answer)."""
+    (relay._apply_review_answer). person: a signed-in person or a paired phone; a ticket that carries a draft
+    is accepted only then, checked under the ticket's lock (ORCH-582)."""
     if not by.startswith("human:") or agent_tool():
         raise Refused("Only a person can accept.")
 
@@ -1311,6 +1332,7 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
             raise Refused(_hidden_refusal(ticket))
         if ticket["status"] != "review":
             raise Refused("This ticket is not waiting for your review.")
+        ownerpick.refuse_ticket(ticket, person)
         ticket["status"] = "done"
         ticket["waiting_on"] = None
         add_history(ticket, by, "Status review -> done", via)
@@ -1347,6 +1369,9 @@ def accept_for_owner(root: Path, tid: str, reasons: str) -> dict:
             raise Refused(_hidden_refusal(ticket))
         if ticket["status"] != "review":
             raise Refused("This ticket is not in Review.")
+        ownerpick.refuse_ticket(
+            ticket, person=False
+        )  # ORCH-582: a draft is the owner's, never the Reviewer's
         _check_can_finish(ticket)
         if _open_questions(ticket):
             raise Refused("A question on this ticket still waits for an answer.")
@@ -1383,6 +1408,7 @@ def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str) -> d
             raise Refused(f"{qid} is already answered.")
         if question_digest(q) != digest:
             raise Refused(f"{qid} changed after the Reviewer looked at it.")
+        ownerpick.refuse_card(q, person=False)  # ORCH-582: said first, in its own words
         if q.get("card") is not None or q.get("action") is not None or q.get("kind") not in (None, "plain"):
             raise Refused(f"{qid} waits for the owner.")
         rec = q.get("recommended")
@@ -1631,7 +1657,9 @@ def _keep_superseded(ticket: dict, status: str, other: str | None, given: bool) 
             ticket.pop("superseded_by", None)
 
 
-def set_status(root: Path, tid: str, status: str, by: str, superseded_by: str | None = None) -> dict:
+def set_status(
+    root: Path, tid: str, status: str, by: str, superseded_by: str | None = None, *, person: bool = False
+) -> dict:
     if status not in STATUSES:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
     if superseded_by is not None and status != "dropped":
@@ -1639,7 +1667,7 @@ def set_status(root: Path, tid: str, status: str, by: str, superseded_by: str | 
     other = superseded_value(root, tid, superseded_by) if superseded_by is not None else None
 
     def op(ticket):
-        target, actor = _finish_status(root, ticket, status, by)
+        target, actor = _finish_status(root, ticket, status, by, person)
         _keep_superseded(ticket, target, other, superseded_by is not None)
         if other and target == "dropped":
             add_history(ticket, actor, f"Superseded by {other}")
@@ -1663,7 +1691,16 @@ def set_status(root: Path, tid: str, status: str, by: str, superseded_by: str | 
 
 
 # orch writes these itself
-PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "release", "description", "description_by", "model")
+PROTECTED_FIELDS = (
+    "title_auto",
+    "plan_first",
+    "epic",
+    "release",
+    "human_review",
+    "description",
+    "description_by",
+    "model",
+)
 
 
 DUE_MSG = "due must be a date like 2026-11-10 or a time like 18:30."
@@ -1924,6 +1961,34 @@ def set_release(root: Path, tid: str, on: bool, by: str, if_revision: int | None
     return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 
 
+def human_review(ticket: dict) -> bool:
+    """ORCH-424: the Human review needed switch. On unless a person turned it off (the field is False only
+    then), so a ticket made before the switch existed counts as on. While it is on, nothing on the ticket is
+    accepted without a person."""
+    return ticket.get("human_review") is not False
+
+
+HUMAN_REVIEW_ON = "Human review needed: on"
+HUMAN_REVIEW_OFF = "Human review needed: off"
+
+
+def set_human_review(root: Path, tid: str, on: bool, by: str, if_revision: int | None = None) -> dict:
+    """ORCH-424: turn the Human review needed switch on or off. Who may turn it off is checked by the caller
+    (only a person: `orch ticket edit --human-review no`, the dashboard, a paired phone)."""
+    me = load(root, tid)
+    if human_review(me) == on:
+        return me  # nothing changes: no write, no history line
+
+    def op(ticket):
+        if on:
+            ticket.pop("human_review", None)
+        else:
+            ticket["human_review"] = False
+        add_history(ticket, by, HUMAN_REVIEW_ON if on else HUMAN_REVIEW_OFF)
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+
+
 PARENT_DEPTH = 50  # a parent chain longer than this is broken data: never followed further
 
 
@@ -2059,12 +2124,22 @@ def create_from_input(
     parent: str | None = None,
     fields: dict | None = None,
     ext: dict[str, dict] | None = None,
+    human_review: bool | None = None,
 ) -> dict:
     """THE way a ticket is made from what a person wrote or said (dashboard paste box, phone text, Open
     agent): the title is the first words (a placeholder, flag `title_auto`, when the text is long or has
     several lines)
     and the agent writes the real title and the description first (runs.fresh_prompt, `orch ticket title`)."""
-    return create(root, placeholder_title(text), by, parent, ext, fields, title_auto=needs_agent_title(text))
+    return create(
+        root,
+        placeholder_title(text),
+        by,
+        parent,
+        ext,
+        fields,
+        title_auto=needs_agent_title(text),
+        human_review=human_review,
+    )
 
 
 def set_auto_title(root: Path, tid: str, title: str, by: str, description: str | None = None) -> dict:
@@ -3532,8 +3607,11 @@ def answer(
     *,
     expected_question_digest: str | None = None,
     decision: dict | None = None,
+    person: bool = False,
 ) -> tuple[dict, dict]:
     """decision: the Review stack's structured answer (orch/review.py); `answer` is then its plain summary.
+    person: a signed-in person on the dashboard (a one-time person grant) or a paired phone; only then is a
+    draft card answered (ORCH-582, orch/ownerpick.py), whatever `by` and `via` say.
     expected_question_digest: question_digest of the question as the person was shown it; the answer is
     refused when the question is no longer that one, or could not be encoded. None: not checked (a caller that
     kept no digest, e.g. a relay record from before digests)."""
@@ -3556,6 +3634,7 @@ def answer(
             raise Refused(
                 "This card waits for the owner. Ask with orch review add and wait with orch review wait."
             )
+        ownerpick.refuse_card(q, person and str(by).startswith("human:"))
         if decision is None and isinstance(q.get("action"), dict) and "merge" in q["action"]:
             raise Refused(f"{qid} merges a pull request: answer it on the card (Merge or Not now).")
         if expected_question_digest is not None and (
@@ -3600,7 +3679,7 @@ def mark_question_sent(root: Path, tid: str, qid: str, by: str = "orch") -> None
 
 
 def record_answered(
-    root: Path, tid: str, entry: dict, by: str, via: str, *, replaces: str | None = None
+    root: Path, tid: str, entry: dict, by: str, via: str, *, replaces: str | None = None, person: bool = False
 ) -> dict:
     """Append one already-answered questions[] entry (a Review stack decision that was not an open question:
     a Check result, or a changed answer). Nothing is overwritten: with `replaces` the old entry only gets
@@ -3613,6 +3692,7 @@ def record_answered(
         raise Refused(
             "This card waits for the owner. Ask with orch review add and wait with orch review wait."
         )
+    ownerpick.refuse_card(entry, person and str(by).startswith("human:"))
 
     def op(ticket):
         old = None
@@ -3694,7 +3774,7 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
     return apply_op(root, tid, op2, by=by)[0]
 
 
-def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
+def patch(root: Path, tid: str, if_revision: int, data: str, by: str, *, person: bool = False) -> dict:
     """Atomic change of several fields; refused (exit 2 + current values) when `revision` changed."""
     try:
         obj = json.loads(data)
@@ -3738,7 +3818,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
             raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
         actor = by
         if "status" in obj:
-            status, actor = _finish_status(root, ticket, status, by)
+            status, actor = _finish_status(root, ticket, status, by, person)
             if status in ("open", "ready") and not actor.startswith("agent:"):
                 ticket.pop("started", None)
         for k in ("owner", "due", "note", "done_when", "summary"):

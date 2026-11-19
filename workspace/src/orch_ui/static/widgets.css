@@ -1037,6 +1037,8 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-pt{flex:1 1 0;min-width:0;overflow:hidden;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
 button.live-pt{min-height:32px;padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;font-weight:600;text-align:left;cursor:pointer}
 button.live-pt:hover{color:var(--brand)}
+.live-ren{display:flex;flex:1 1 0;gap:var(--s2);align-items:center;min-width:0}
+.live-ren .input{flex:1 1 0;min-width:0}
 .live-ctl{position:relative;display:flex;flex:none;gap:var(--s1);align-items:center}
 .live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0}
 .live-pb{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:var(--s2);min-height:0;padding:var(--s5);overflow:auto;color:var(--text-muted);text-align:center}
@@ -1044,6 +1046,7 @@ button.live-pt:hover{color:var(--brand)}
 .live-pb[data-live-body]{align-items:stretch;justify-content:flex-start;gap:var(--s3);padding:var(--s3) var(--s4);color:var(--text);text-align:left}
 .live-pb[data-live-body]>.btn{align-self:flex-start}
 .live-now{margin:0;font-weight:600;overflow-wrap:anywhere}
+.live-ask{display:grid;gap:var(--s2);margin:var(--s2) 0}.live-ask-q{margin:0;font-weight:600;overflow-wrap:anywhere}.live-ask-opts,.live-ask-line{display:flex;flex-wrap:wrap;gap:var(--s2)}.live-ask-line .input{flex:1;min-width:0}
 .live-lines{flex:1 1 auto;min-height:var(--s8);margin:0;padding:var(--s2) var(--s3);overflow:auto;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text)}
 .live-meta{margin:0}
 /* the History tab of a pane (ORCH-363): the earlier sessions of the ticket, newest first, each with Reopen */
@@ -1166,6 +1169,74 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 @media(prefers-reduced-motion:reduce){.lbar-chip,.lbar-cnt{transition:none}}
 .lbar-pop.lbar-sample{position:relative;left:auto;bottom:auto;z-index:auto;box-shadow:none}
 
+/* ---- Live wall (draft D, ORCH-360): every session of the workspace in bands on the new live page. A summary line, a
+   filter, then bands that fold away (Pinned, Needs you and working, In line, Idle and no session). Needs-you tiles are
+   orange and come first; a working tile shows one sentence and a peek of its last lines. In line and idle are one
+   line each. From 12 sessions (data-many) a long band scrolls inside itself; at 1100 px and wider the bands sit side by
+   side: pinned beside needs you and working, in line beside idle. Tokens only. ---- */
+.wall{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4)}
+.wall-tools{order:-1;display:flex;gap:var(--s2);align-items:center}
+.wall-tools .input{max-width:360px}
+.wall-body{display:contents}
+.wall-sum{order:-2;display:grid;gap:var(--s1)}
+.wall-sum>.meta{margin:0}
+.wall-hero{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s4);margin:0}
+.wall-hero .wall-st{font-size:var(--fs-4);line-height:28px;font-weight:600}
+.wall-st{display:inline-flex;align-items:center;gap:var(--s1);font-size:var(--fs-meta);line-height:16px;font-weight:600;color:var(--text-muted);white-space:nowrap}
+.wall-st[data-s=needs-you]{color:var(--needs-you)}
+.wall-st[data-s=working]{color:var(--working)}
+.wall-sym{font-family:var(--font-mono)}
+.wall-key{font-family:var(--font-mono);font-size:var(--fs-meta);color:var(--text-muted);white-space:nowrap}
+.wall-bands{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4);align-items:start}
+.wall-band{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s2);min-width:0}
+.wall-bh{margin:0;font-size:var(--fs-body);line-height:20px;letter-spacing:0;color:var(--text-muted)}
+.wall-bt{display:inline-flex;gap:var(--s2);align-items:center;min-height:var(--s6);padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;letter-spacing:inherit;cursor:pointer}
+.wall-bt:hover{color:var(--text)}
+.wall-chev{width:12px;color:var(--text-faint)}
+.wall-none{margin:0}
+.wall-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,264px),1fr));gap:var(--s3);align-content:start}
+.wall-tile{display:flex;flex-direction:column;gap:var(--s2);min-width:0;padding:var(--s3);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);transition:border-color var(--dur-base) var(--ease-out),transform var(--dur-base) var(--ease-out)}
+.wall-tile:hover{border-color:var(--border-strong)}
+.wall-tile[data-s=needs-you]{border-color:var(--needs-you);background:var(--warning-soft)}
+.wall-open{display:flex;flex-direction:column;gap:var(--s1);flex:1;min-width:0;width:100%;padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.wall-open:active{transform:scale(.99)}
+.wall-th{display:flex;gap:var(--s2);align-items:center;justify-content:space-between}
+.wall-tt{font-weight:600;overflow-wrap:anywhere}
+.wall-now{color:var(--text);overflow-wrap:anywhere}
+.wall-tile[data-s=needs-you] .wall-now{font-weight:600}
+.wall-peek{display:block;height:56px;margin-top:var(--s1);padding:var(--s1) var(--s2);border-radius:var(--r1);background:var(--sidebar);color:var(--text-muted);font-family:var(--font-mono);font-size:var(--fs-meta);line-height:16px;white-space:pre;overflow:hidden;overflow-wrap:normal}
+.wall-meta{display:flex;flex-wrap:wrap;gap:0 var(--s3);align-items:center}
+.wall-foot{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;min-height:var(--s7)}
+.wall-steps{display:inline-flex;gap:var(--s2);align-items:center}
+.wall-steps .progress{width:60px}
+.wall-steps .meta{margin:0}
+.wall-tk{display:inline-flex;align-items:center;min-height:var(--s6);font-size:var(--fs-meta);color:var(--brand);white-space:nowrap}
+.wall-lines{display:grid;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);overflow:hidden;container-type:inline-size}
+.wall-line{display:flex;gap:var(--s2);align-items:center;min-height:var(--touch);padding:var(--s1) var(--s3)}
+.wall-line+.wall-line{border-top:1px solid var(--border)}
+.wall-line:hover{background:var(--surface-2)}
+.wall-lopen{display:flex;gap:var(--s1) var(--s3);align-items:center;flex:1;min-width:0;min-height:var(--s7);padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.wall-line .wall-tt{white-space:nowrap}
+.wall-lnow{flex:1;min-width:0;overflow:hidden;font-size:var(--fs-meta);line-height:16px;color:var(--text-muted);white-space:nowrap;text-overflow:ellipsis}
+.wall-lmeta{display:flex;gap:var(--s2);align-items:center;white-space:nowrap}
+.wall-bands[data-many] [data-many]{max-height:360px;overflow:auto;overscroll-behavior:contain}
+@container (max-width:900px){.wall-lmeta{display:none}}
+@container (max-width:560px){.wall-line .wall-tt{white-space:normal}.wall-lnow{display:none}}
+@media(min-width:1100px){
+  .wall-bands{grid-template-columns:repeat(6,minmax(0,1fr))}
+  .wall-band{grid-column:1/-1}
+  .wall-bands:has([data-band=pin]) .wall-band:is([data-band=pin]){grid-column:span 2}
+  .wall-bands:has([data-band=pin]) .wall-band:is([data-band=need]){grid-column:span 4}
+  .wall-bands:has([data-band=queue]) .wall-band:is([data-band=queue],[data-band=idle]){grid-column:span 3}
+}
+@media(max-width:720px){
+  .wall-tools .input{max-width:none}
+  .wall-tiles{grid-template-columns:minmax(0,1fr)}
+  .wall-bands[data-many] [data-many]{max-height:none}
+  .wall-lopen{flex-wrap:wrap}
+  .wall-lnow{flex-basis:100%;white-space:normal}
+}
+@media(prefers-reduced-motion:reduce){.wall-tile,.wall-open{transition:none}.wall-open:active{transform:none}}
 /* Review on a short screen (ORCH-420, owner's picture at 1144x755 and the 1280x800 walk): toasts sit top right while the
    answer buttons are on screen, so they never cover them; file tiles get smaller so the words box keeps its room; and a
    words box with more below shows a soft edge at the bottom (it scrolls), never a line cut in half. */
@@ -1220,3 +1291,73 @@ body:has(.swipe-actions:not([hidden])) .ui-toasts{top:calc(var(--s4) + 56px);bot
 .swipe-preview:has(>.doc):not(:has(.doc-rows)){background:linear-gradient(transparent,var(--ink) 70%) 0 100%/100% 32px no-repeat local,linear-gradient(transparent,color-mix(in srgb,var(--text) 22%,transparent)) 0 100%/100% 16px no-repeat scroll,var(--ink)}
 /* a toast never covers the comment sheet's buttons: while a sheet is open it shows at the top (ORCH-422 look check) */
 body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:auto}
+/* A choice card that fills its grid cell: a two-line .live-opt, pressed when in use (Usage "How work is spread", ORCH-657) */
+.live-opt.tall{align-items:flex-start;height:100%;padding:var(--s4)}
+.live-opt.tall .live-opt-t{gap:var(--s1)}
+.live-opt.tall[aria-pressed=true]{background:var(--surface-2)}
+/* A number stepper: − value + ; the value is an <output> (ORCH-657) */
+.num-step{display:inline-flex;align-items:center;gap:var(--s1)}
+.num-step output{min-width:var(--s9);text-align:center;font-variant-numeric:tabular-nums;font-weight:500}
+.settings-row .ctl{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:var(--s2)}
+.settings-row .ctl select{width:auto}
+@media(max-width:600px){.settings-row .ctl{justify-content:flex-start}}
+
+/* ---- Live groups (ORCH-345, draft A on draft D): an epic or a factory order on the new live page. ONE tree (.gtree)
+   in three modes: preview (the small tree on a wall tile), tree (the switcher beside a pane: main helper, its tickets
+   indented, small helpers with a dashed guide and tag, earlier sessions) and strip (the same rows in one line that
+   scrolls inside itself: a narrow pane, a split, a phone). The selected row has a brand edge; a helper that needs you
+   is orange. The message box of a pane names who receives it (.live-msg). The bar's group chip carries the helper
+   count (.lbar-n). Tokens only. ---- */
+.gtree{display:flex;flex-direction:column;gap:var(--s1);min-width:0}
+.gtree-h{display:grid;gap:2px;margin:0;padding:0 var(--s2) var(--s1)}
+.gtree-gt{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gtree-h .meta{font-size:var(--fs-meta);line-height:16px}
+.gtree-list{display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none}
+.gtree-list>li{position:relative;min-width:0;padding-left:calc(var(--s4) * var(--gd, 0))}
+.gtree-list>li[data-depth="1"]{--gd:1}
+.gtree-list>li[data-depth="2"]{--gd:2}
+.gtree-list>li[data-depth="3"],.gtree-list>li[data-depth="4"]{--gd:3}
+.gtree-list>li:not([data-depth="0"])::before{content:"";position:absolute;top:0;bottom:0;left:calc(var(--s4) * var(--gd) - var(--s2));border-left:1px solid var(--border-strong)}
+.gtree-list>li[data-small]::before{border-left-style:dashed}
+.gtree-row{display:flex;gap:var(--s2);align-items:flex-start;width:100%;min-width:0;min-height:var(--s7);padding:var(--s1) var(--s2);border:0;border-radius:var(--r1);background:none;color:var(--text);font:inherit;font-size:var(--fs-meta);line-height:16px;text-align:left;cursor:pointer;transition:background var(--dur-fast) ease}
+button.gtree-row:hover{background:var(--surface-2)}
+.gtree-row[aria-current=true]{background:var(--surface-3);box-shadow:inset 2px 0 0 var(--brand);font-weight:600}
+.gtree-row[aria-pressed=true]{background:var(--surface-3)}
+.gtree-sym{flex:none;width:12px;font-family:var(--font-mono);color:var(--text-faint)}
+.gtree-b{display:flex;flex:1 1 auto;flex-direction:column;gap:2px;min-width:0}
+.gtree-m{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s2);align-items:center;min-width:0}
+.gtree-row[data-s=working] .gtree-sym{color:var(--working)}
+.gtree-row[data-s=needs-you]{color:var(--needs-you)}
+.gtree-row[data-s=needs-you] .gtree-sym{color:var(--needs-you)}
+.gtree-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gtree-w{color:var(--text-muted);white-space:nowrap}
+.gtree-row[data-s=needs-you] .gtree-w{color:var(--needs-you);font-weight:600}
+.gtree-tag{flex:none;font-size:var(--fs-meta)}
+.gtree-tag[data-small]{border-style:dashed;background:none}
+.gtree-row[data-s=small]{color:var(--text-muted)}
+.gtree[data-mode=preview]{gap:0;margin-top:var(--s1);padding:var(--s1) var(--s2);border-radius:var(--r1);background:var(--sidebar)}
+.gtree[data-mode=preview] .gtree-t{flex:1 1 auto}
+.gtree[data-mode=preview] .gtree-row{align-items:center;min-height:0;padding:2px 0 2px calc(var(--s3) * var(--gd, 0));cursor:inherit}
+.gtree[data-mode=preview] .gtree-row[data-depth="1"]{--gd:1}
+.gtree[data-mode=preview] .gtree-row[data-depth="2"]{--gd:2}
+.gtree[data-mode=strip]{gap:var(--s1);padding:var(--s1) var(--s2);border-bottom:1px solid var(--border)}
+.gtree[data-mode=strip] .gtree-h{display:none}
+.gtree[data-mode=strip] .gtree-list{flex-direction:row;gap:var(--s1);overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin}
+.gtree[data-mode=strip] .gtree-list>li{flex:none;padding-left:0}
+.gtree[data-mode=strip] .gtree-list>li::before{display:none}
+.gtree[data-mode=strip] .gtree-row{align-items:center;max-width:calc(var(--s9) * 3);border:1px solid var(--border)}
+.gtree[data-mode=strip] .gtree-b,.gtree[data-mode=strip] .gtree-m{flex-direction:row;flex-wrap:nowrap;align-items:center;gap:var(--s2)}
+.gtree[data-mode=strip] li[data-small] .gtree-row{border-style:dashed}
+.gtree[data-mode=strip] .gtree-tag:not([data-small]){display:none}
+/* the pane of a group: the switcher on the left, the session on the right; narrow (split, right, phone): the strip on top */
+.live-gwrap{display:grid;grid-template-columns:minmax(200px,280px) minmax(0,1fr);flex:1;min-height:0}
+.live-gwrap>.gtree{padding:var(--s3) var(--s2);overflow:auto;border-right:1px solid var(--border);background:var(--sidebar)}
+.live-pane[data-narrow] .live-gwrap{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+.live-pane[data-narrow] .live-gwrap>.gtree{padding:var(--s1) var(--s2);border-right:0;overflow:visible}
+.live-gwrap>.live-pb{min-width:0}
+.live-msg{display:grid;gap:var(--s1);margin-top:auto;padding-top:var(--s2);border-top:1px solid var(--border)}
+.live-to{font-size:var(--fs-meta);line-height:16px;color:var(--text-muted)}
+.live-msg-row{display:flex;gap:var(--s2);align-items:flex-end;min-width:0}
+.live-msg-row .input{flex:1;min-width:0;min-height:var(--touch);max-height:calc(var(--s8) * 3);resize:vertical}
+.lbar-n{min-width:16px;padding:0 var(--s1);border-radius:var(--r1);background:var(--surface-3);color:var(--text-muted);font-variant-numeric:tabular-nums;text-align:center}
+@media(prefers-reduced-motion:reduce){.gtree-row{transition:none}}

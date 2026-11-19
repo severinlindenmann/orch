@@ -57,11 +57,12 @@ TYPES = {
     ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml",
 }  # fmt: skip
 KIT_FILES = ("frame.js", "tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
-             "question-card.js", "evidence.js", "widgets.css", "widgets.js")  # fmt: skip
+             "question-card.js", "evidence.js", "widgets.css", "widgets.js", "start-choice-state.js", "start-choice.js")  # fmt: skip
 WEB_FILES = (
     "index.html",
     "compose.js",
     "focus.js",
+    "start.js",
     "store.js",
     "jobs.js",
     "session.js",
