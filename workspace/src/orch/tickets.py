@@ -2332,7 +2332,8 @@ def changed_since_prepare(root: Path, ticket: dict, agent: str | None = None) ->
     old_files = set(seen.get("files") or [])
     new_files = [f for f in _artifact_names(root, ticket["id"]) if f not in old_files]
     if new_files:
-        out.append("New files: " + ", ".join(new_files[:20]) + (" …" if len(new_files) > 20 else ""))
+        shown = ", ".join(_short(f, 200) for f in new_files[:20])  # a name is one plain line, never more
+        out.append("New files: " + shown + (" …" if len(new_files) > 20 else ""))
     lines = history.lines(root, ticket)
     start = seen.get("lines")
     if not isinstance(start, int) or isinstance(start, bool) or not 0 <= start <= len(lines):
@@ -2351,6 +2352,38 @@ def changed_since_prepare(root: Path, ticket: dict, agent: str | None = None) ->
     if said:
         out.append("Written on the ticket since:\n" + "\n".join(f"  - {s}" for s in said[-10:]))
     return out
+
+
+def worked_since_prepare(root: Path, ticket: dict, agent: str | None) -> bool:
+    """True once the helper (agent:<name>) wrote on the ticket after Prepare ended: the first Start after
+    Prepare is over, so later runs are not told again that preparing ended or what changed (ORCH-739)."""
+    p = ticket.get("prepare") if isinstance(ticket.get("prepare"), dict) else {}
+    if not agent or not p.get("state"):
+        return False
+    lines = history.lines(root, ticket)
+    seen = p.get("seen") if isinstance(p.get("seen"), dict) else {}
+    start = seen.get("lines")
+    if isinstance(start, int) and not isinstance(start, bool) and 0 <= start <= len(lines):
+        after = lines[start:]
+    else:  # Not prepared yet (no position kept): by time, strictly after
+        since = str(p.get("at") or "")
+        after = [h for h in lines if isinstance(h, dict) and str(h.get("at") or "") > since]
+    since = str(p.get("at") or "")
+    if any(  # a step started or finished since Prepare ended (starting one writes no history line;
+        # Prepare itself starts and finishes none, so the same second counts)
+        isinstance(c, dict)
+        and (c.get("state") == "doing" or c.get("done"))
+        and str(c.get("at") or "") >= since
+        for c in ticket.get("checklist") or []
+    ):
+        return True
+    return any(
+        isinstance(h, dict)
+        and h.get("by") == agent
+        and not _START_NOISE.match(str(h.get("text") or ""))
+        and not str(h.get("text") or "").startswith(NOT_PREPARED)
+        for h in after
+    )
 
 
 def prepare_state(root: Path, ticket: dict) -> dict | None:

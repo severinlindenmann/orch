@@ -1267,8 +1267,14 @@ def prepare_prompt(ticket: dict, items: list[dict], root: Path) -> str:
     return "\n\n".join(out)[:12000]
 
 
+CHANGES_MAX = 3000  # the list of what changed since Prepare never crowds out the new input after it
+
+
 def _changes_text(changes: list[str]) -> str:
-    return "\n".join(c if c.startswith("Written on") else f"- {c}" for c in changes)
+    text = "\n".join(c if c.startswith("Written on") else f"- {c}" for c in changes)
+    if len(text) <= CHANGES_MAX:
+        return text
+    return text[: CHANGES_MAX - 60].rsplit("\n", 1)[0] + "\n- … more changes: see orch ticket show"
 
 
 def _prepared_start_plan(ticket: dict, root: Path | None = None, agent: str | None = None) -> list[str]:
@@ -1277,6 +1283,9 @@ def _prepared_start_plan(ticket: dict, root: Path | None = None, agent: str | No
     p = ticket.get("prepare") if isinstance(ticket.get("prepare"), dict) else {}
     if not p.get("state") or ticket.get("status") == "open":  # also after a Prepare that did not finish
         return []
+    label = f"agent:{agent}" if agent else None
+    if root is not None and tickets.worked_since_prepare(root, ticket, label):
+        return []  # only the first Start after Prepare: later runs go on as usual
     changes = (
         tickets.changed_since_prepare(root, ticket, f"agent:{agent}" if agent else None)
         if root is not None
@@ -1308,6 +1317,8 @@ def _prepared_fresh_plan(ticket: dict, root: Path, agent: str | None = None) -> 
     p = ticket.get("prepare") if isinstance(ticket.get("prepare"), dict) else {}
     if p.get("state") != "prepared" or ticket.get("status") == "open":
         return []
+    if tickets.worked_since_prepare(root, ticket, f"agent:{agent}" if agent else None):
+        return []  # the work already began after Prepare: a fresh start reads the ticket as usual
     out = [
         "This ticket was prepared earlier by a helper whose conversation is not available now: its title, "
         "description, done-when, estimate and suggested steps are on the ticket. Read them (orch ticket "
