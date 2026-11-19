@@ -88,6 +88,11 @@ def test_the_helper_cannot_put_its_own_words_on_an_orch_card(tk, run):
         ("x" * 301, "at most 300"),
         ("no-such-program-848", "not installed"),
         ("echo AKIAIOSFODNN7EXAMPLE", "password or key"),
+        ("git -c core.pager=x log", "does not run git"),
+        ("find . -exec true", "does not run find"),
+        ("ls -c", "starts another program"),
+        ("ls -exec", "starts another program"),
+        ("ls a!b", "starts another program"),
     ],
 )
 def test_refused_when_the_card_is_made(tk, run, command, words):
@@ -346,3 +351,17 @@ def test_a_refusal_is_logged(tk, run):
         runcard.run(Path(root), tid, q["id"], _digest(root, tid, q["id"]), by=ME, person=False)
     row = json.loads((Path(root) / ".orch" / "logs" / "card-runs.jsonl").read_text().splitlines()[-1])
     assert "signed-in person" in row["refused"]
+
+
+def test_hand_edited_words_on_an_orch_card_are_refused(tk, run, person_grant):
+    root, tid = tk
+    q = _card(run, tid, "orch config set workflow.release_merge on")
+
+    def words(t):
+        next(x for x in t["questions"] if x["id"] == q["id"])["card"]["run"]["changes"] = "Nothing happens"
+
+    tickets.apply_op(Path(root), tid, words, by="agent:x")
+    person_grant(root)
+    code, out, err = _run_card(run, root, tid, q["id"])
+    assert code == 2 and "does not match its command" in out + err
+    assert _q(root, tid, q["id"])["answer"] is None

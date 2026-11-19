@@ -488,6 +488,7 @@ ACT_ARGS = {
     "logins.cancel": {"name": "claude"},
     "logins.code": {"name": "claude", "value": "abc#def"},
     "logins.replace": {"name": "payments", "value": "new-key-value"},
+    "card.run": {"ticket": TID, "key": "q1", "digest": "a" * 64},
 }
 
 

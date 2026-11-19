@@ -1442,6 +1442,21 @@ def change(
 ABOUT_MAX = 120
 
 
+def _run_last(t: dict, q: dict, card: dict) -> dict:
+    """A run card's last failed try (ORCH-848: its error stays on the card) and whether a phone may run it."""
+    if card.get("kind") != "run":
+        return {}
+    from orch import runcard
+
+    ext = t.get("ext") if isinstance(t.get("ext"), dict) else {}
+    rows = ext.get("runcard") if isinstance(ext.get("runcard"), dict) else {}
+    last = rows.get(q["id"]) if isinstance(rows.get(q["id"]), dict) else None
+    out: dict = {"phone_run": runcard.phone_ok(q)}
+    if last and last.get("ok") is False:
+        out["run_last"] = {k: last.get(k) for k in ("at", "by", "exit", "output", "error")}
+    return out
+
+
 def stack(root: Path) -> list[dict]:
     """Everything waiting for a person's swipe: card questions, plain open questions (as options cards) and
     tickets in Review (as Check cards), grouped by ticket (the round whose oldest card waited longest first),
@@ -1485,6 +1500,7 @@ def stack(root: Path) -> list[dict]:
                         "text": q.get("text") or "",
                         **({"links": q["links"]} if isinstance(q.get("links"), list) else {}),
                         **({"group": q["group"]} if isinstance(q.get("group"), str) else {}),
+                        **_run_last(t, q, card),
                     }
                 )
         if t.get("status") == "review":

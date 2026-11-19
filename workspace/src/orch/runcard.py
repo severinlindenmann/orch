@@ -67,8 +67,14 @@ _SHELL = set(";|&<>`$\\")
 _NO_PROGRAM = frozenset(
     {"sudo", "su", "doas", "env", "xargs", "eval", "exec", "nohup", "time", "command", "builtin", "nice",
      "timeout", "watch", "script", "open", "osascript", "launchctl", "crontab", "ssh", "scp", "rm", "dd",
-     "chmod", "chown", "curl", "wget"}
+     "chmod", "chown", "curl", "wget", "git", "find", "tar", "rsync", "xcrun", "vi", "vim", "nvim", "nano",
+     "emacs", "less", "more", "man", "ssh-agent", "gpg", "screen", "tmux", "parallel", "busybox", "jq"}
 )  # fmt: skip
+# arguments that make an allowed program start another one or run given code
+_SPAWN_ARG = re.compile(
+    r"^(-c|-e|--exec(=.*)?|-exec(dir)?|-ok(dir)?|--to-command(=.*)?|--rsh(=.*)?|-e.+|--eval(=.*)?|"
+    r"--command(=.*)?|--run(=.*)?|--use-compress-program(=.*)?|--checkpoint-action(=.*)?|--shell(=.*)?)$"
+)
 _INTERPRETERS = re.compile(
     r"^(sh|bash|zsh|fish|dash|ksh|csh|tcsh|python[0-9.]*|node|nodejs|ruby|perl[0-9.]*|php|lua|tclsh|pwsh|"
     r"powershell|deno|bun|npx|uvx|pipx|awk|gawk|sed|make)$"
@@ -232,6 +238,8 @@ def parse(root: Path, command, changes=None, undo=None, *, login: bool = False) 
         return spec
     if base in _NO_PROGRAM or _INTERPRETERS.match(base):
         _refuse(f"A card does not run {base}. Ask the person to do this step in their own terminal.")
+    if any(_SPAWN_ARG.match(a) or "!" in a for a in argv[1:]):
+        _refuse("The command starts another program or runs given code. Ask the person to run it themselves.")
     if not _line(changes, "changes"):
         _refuse("Say in one line what it changes (--changes).")
     spec.update({"class": "other", "exe": _resolve(root, prog), "changes": _line(changes, "changes")})
@@ -272,7 +280,12 @@ def check_spec(root: Path | None, spec) -> dict:
     keys = ("v", "command", "argv", "cwd", "class", "exe", "op")
     if any(again.get(k) != spec.get(k) for k in keys):
         _refuse("This card does not match its command any more. Ask the helper to make it again.")
-    if spec.get("class") == "other" and again.get("changes") != spec.get("changes"):
+    shown = ["changes"]  # the words on the card are bound too, not only what runs
+    if spec.get("class") == "other" or (
+        spec.get("class") == "orch" and "values" in CONFIG_OPS.get((spec.get("op") or {}).get("key"), {})
+    ):
+        shown.append("undo")  # an on/off undo is fixed; a list setting's undo is the value it had when asked
+    if any(again.get(k) != spec.get(k) for k in shown):
         _refuse("This card does not match its command any more. Ask the helper to make it again.")
     return spec
 
