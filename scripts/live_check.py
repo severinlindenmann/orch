@@ -130,42 +130,36 @@ def admin_open_private(host: str, port: int) -> str:
     return f"http://{host}:{port}/admin answered 200"
 
 
-def outside_result(repo: str, now: dt.datetime | None = None, runner=subprocess.run) -> str:
-    """The newest run of the outside job (GitHub Actions) must be green and recent."""
-    p = runner(
-        [
-            "gh",
-            "run",
-            "list",
-            "--repo",
-            repo,
-            "--workflow",
-            "live-check.yml",
-            "--status",
-            "completed",
-            "--limit",
-            "1",
-            "--json",
-            "conclusion,status,createdAt,url",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=60,
+def github_runs(repo: str) -> tuple[int, dict]:
+    """Newest finished run of live-check.yml through GitHub's REST API (public repo: no login)."""
+    url = f"https://api.github.com/repos/{repo}/actions/workflows/live-check.yml/runs?status=completed&per_page=1"
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "orch-live-check", "Accept": "application/vnd.github+json"}
     )
-    if p.returncode != 0 and "not found on the default branch" in p.stderr:
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, {}
+
+
+def outside_result(repo: str, now: dt.datetime | None = None, fetch=github_runs) -> str:
+    """The newest finished run of the outside job (GitHub Actions) must be green and recent."""
+    code, data = fetch(repo)
+    if code == 404:
         raise Skip("the outside job (live-check.yml) is not on the default branch yet")
-    if p.returncode != 0:
-        raise AssertionError(f"gh run list failed: {p.stderr.strip()[:200]}")
-    runs = json.loads(p.stdout or "[]")
+    if code != 200:
+        raise AssertionError(f"GitHub answered {code} for the outside runs")
+    runs = data.get("workflow_runs") or []
     if not runs:
         raise Skip("no finished outside run yet (live-check.yml)")
     r = runs[0]
-    started = dt.datetime.fromisoformat(r["createdAt"])
+    started = dt.datetime.fromisoformat(r["created_at"])
     age_h = ((now or dt.datetime.now(dt.UTC)) - started).total_seconds() / 3600
     if r["conclusion"] != "success":
-        raise AssertionError(f"outside run {r['conclusion']}: {r['url']}")
+        raise AssertionError(f"outside run {r['conclusion']}: {r['html_url']}")
     if age_h > OUTSIDE_MAX_AGE_H:
-        raise AssertionError(f"newest outside run is {age_h:.1f} h old: {r['url']}")
+        raise AssertionError(f"newest outside run is {age_h:.1f} h old: {r['html_url']}")
     return f"outside run passed {age_h:.1f} h ago"
 
 

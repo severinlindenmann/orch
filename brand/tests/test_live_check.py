@@ -8,7 +8,6 @@ import http.server
 import importlib.util
 import json
 import socket
-import subprocess
 import threading
 from pathlib import Path
 
@@ -87,37 +86,28 @@ def test_admin_ports_closed(monkeypatch):
         lc.admin_ports_closed("192.0.2.1")
 
 
-def gh(stdout="", rc=0, stderr=""):
-    return lambda *a, **k: subprocess.CompletedProcess(a, rc, stdout, stderr)
+def gh(conclusion="success", created="2026-11-19T21:17:00Z", code=200, runs=True):
+    data = {
+        "workflow_runs": [{"conclusion": conclusion, "created_at": created, "html_url": "u"}] if runs else []
+    }
+    return lambda repo: (code, data if code == 200 else {})
 
 
 NOW = dt.datetime(2026, 11, 19, 22, 0, tzinfo=dt.UTC)
 
 
-def run_json(conclusion, created="2026-11-19T21:17:00Z", status="completed"):
-    return json.dumps([{"conclusion": conclusion, "status": status, "createdAt": created, "url": "u"}])
-
-
 def test_outside_result():
-    assert "passed" in lc.outside_result("r", NOW, gh(run_json("success")))
+    assert "passed" in lc.outside_result("r", NOW, gh())
     with pytest.raises(AssertionError, match="failure"):
-        lc.outside_result("r", NOW, gh(run_json("failure")))
+        lc.outside_result("r", NOW, gh("failure"))
     with pytest.raises(AssertionError, match="old"):
-        lc.outside_result("r", NOW, gh(run_json("success", "2026-11-19T10:00:00Z")))
-    calls = []
-
-    def runner(cmd, **k):
-        calls.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0, run_json("success"), "")
-
-    lc.outside_result("r", NOW, runner)
-    assert "--status" in calls[0] and calls[0][calls[0].index("--status") + 1] == "completed"
-    with pytest.raises(lc.Skip):
-        lc.outside_result(
-            "r", NOW, gh(rc=1, stderr="HTTP 404: workflow live-check.yml not found on the default branch")
-        )
-    with pytest.raises(AssertionError, match="gh run list failed"):
-        lc.outside_result("r", NOW, gh(rc=1, stderr="HTTP 401"))
+        lc.outside_result("r", NOW, gh(created="2026-11-19T10:00:00Z"))
+    with pytest.raises(lc.Skip, match="default branch"):
+        lc.outside_result("r", NOW, gh(code=404))
+    with pytest.raises(lc.Skip, match="no finished"):
+        lc.outside_result("r", NOW, gh(runs=False))
+    with pytest.raises(AssertionError, match="403"):
+        lc.outside_result("r", NOW, gh(code=403))
 
 
 def test_round_trips_skip_when_not_set_up():
