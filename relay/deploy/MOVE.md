@@ -41,13 +41,17 @@ private network). Update bookmarks and the e2e harness (`e2e/main.py`, `e2e/full
 Compare the live setup with this file; anything new goes into the table above before the move.
 
 ```sh
-ssh orch-dev-root 'systemctl cat orch-relay orch-publish; ls /etc/systemd/system/orch-publish.service.d/ 2>/dev/null;
+ssh orch-dev-root 'systemctl cat orch-relay orch-publish | sed -E "s/^(Environment=\"?[A-Za-z_]+)=.*/\1=<hidden>/";
+  ls /etc/systemd/system/orch-publish.service.d/ 2>/dev/null;
   sed -E "s/=.*//" /etc/orch-relay/env /etc/orch-publish/env; ls -la /etc/orch-relay /etc/orch-publish;
   du -sh /var/lib/orch-relay /var/lib/orch-publish /srv/orch-publish 2>/dev/null; ss -ltnp;
   command -v kiri && kiri --version; caddy version 2>/dev/null; ufw status numbered'
 ```
 
-Only setting names are printed, never values.
+Only setting names are printed, never values. If `ORCH_PUBLISH_APPS_DIR` (or an older `PUBLISH_APPS_DIR`) points
+outside `/var/lib/orch-publish`, keep the same path on the new server and add a drop-in
+`orch-publish.service.d/apps-dir.conf` with `[Service]` `ReadWritePaths=<that folder>`: the service may write only
+inside its data folder otherwise. Note the sandbox mode (`ORCH_PUBLISH_SANDBOX`): the stop on move day depends on it.
 
 ## Day before: prepare the new server (no downtime)
 
@@ -62,8 +66,10 @@ Only setting names are printed, never values.
 5. Copy the release binaries (same release as production) and run `relay/deploy/install.sh <bin> <private IP>` and
    `publish/deploy/install.sh <bin> <private IP>`. Both make fresh secrets: they are replaced by the old ones on move
    day. Then stop both services again (`systemctl stop orch-relay orch-publish`).
-6. Put `relay/deploy/Caddyfile` into `/etc/caddy/Caddyfile`, `caddy validate`, reload. Certificates can only be
-   issued once DNS points here, so Caddy retries until move day; that is expected.
+6. Put `relay/deploy/Caddyfile` into `/etc/caddy/Caddyfile`, replace `PUBLIC_IP` with the public address(es) (IPv4,
+   and IPv6 if the server has one), `caddy validate`, reload. Caddy must not listen on the private address: publish
+   needs `<private IP>:80` for private apps (check `ss -ltnp 'sport = :80'`). Certificates can only be issued once DNS
+   points here, so Caddy retries until move day; that is expected.
 7. Master key: check that Proton holds the relay master key and that it matches the server
    (`sha256sum /etc/orch-relay/master.key` on `orch-dev`, compare with the Proton copy; never print the key). If Proton
    has none, store it now. Without the same master key every stored message, secret and webhook is unreadable.
@@ -75,7 +81,12 @@ Only setting names are printed, never values.
 
 All times are from the moment the old services stop.
 
-1. (0 min) Stop on the old server: `systemctl stop orch-relay orch-publish`. From now on nothing is written there.
+1. (0 min) Before the stop, note the counts for the last check (`SELECT count(*)` of workspaces, phones, messages in
+   `relay.db`; files and apps in `publish.db`). Stop on the old server: `systemctl stop orch-relay orch-publish`.
+   Published apps keep running on their own, so stop them too, or they write their data during the copy:
+   container mode: `docker -H unix:///run/kiri/docker.sock ps -q --filter label=orch.publish.app | xargs -r docker -H unix:///run/kiri/docker.sock stop`,
+   then the same `ps` must list nothing; systemd mode: `systemctl stop 'orch-app@*'` and `systemctl list-units 'orch-app*'`
+   shows none running. From now on nothing is written there.
 2. (1 min) Consistent copies: `sqlite3 /var/lib/orch-relay/relay.db ".backup /var/lib/orch-relay/move.db"` and the same
    for `publish.db`, then `PRAGMA integrity_check` on both copies.
 3. (2-10 min) Copy, server to server through the laptop (no key on either server for the other):
@@ -84,16 +95,18 @@ All times are from the moment the old services stop.
    `scp -3 -r` (or `rsync -a` through the laptop). Put `move.db` back as `relay.db` /
    `publish.db`. Owners `orch-relay:` / `orch-publish:`, keys 0600.
 4. (10 min) Start on the new server: `systemctl start orch-relay orch-publish`; `curl -s localhost:8103/health` and
-   `localhost:8102/health` say `ok`; admin pages answer on `http://<private IP>:8412/admin` and `:8411`.
-   Check the public side before DNS moves: `curl --resolve relay.severin.io:443:<new public IP> -k https://relay.severin.io/health`.
+   `localhost:8102/health` say `ok`; admin pages answer on `http://<private IP>:8412/admin` and `:8411`; the publish
+   log has no "cannot listen" line (the private-app listener came up); the counts match step 1. The public side can
+   only be checked after the DNS switch (no certificate before).
 5. (11 min) DNS at Namecheap: replace both CNAMEs with A records to the new public IP (and AAAA if the server has IPv6),
    TTL 60. Caddy gets both certificates within a minute of the first request that reaches it.
 6. (12-15 min) Clients pick up the new address as the old answer runs out (60 s TTL; some resolvers keep it longer).
-7. Remove the two reverse-proxy services in NetBird Cloud once the checks pass.
+7. Keep the two reverse-proxy services in NetBird Cloud until the roll back window is over (roll back needs them).
 
 ## Checks after the switch
 
-- `https://relay.severin.io/health` and `https://publish.severin.io/health` say `ok`, with a valid certificate.
+- `https://relay.severin.io/health` and `https://publish.severin.io/health` say `ok`, with a valid certificate
+  (plain `curl`, no `-k`).
 - Admin pages from the private network only: the public IP on 8411/8412 must not answer
   (`curl -m 5 http://<public IP>:8412/health` times out).
 - A workspace: `orch relay inbox` works, a message to another workspace arrives.
@@ -103,20 +116,19 @@ All times are from the moment the old services stop.
 - Each published app answers. Container images are built again on the first visit (first start takes a few
   minutes per app with build steps); open each app once after the switch to warm it.
 - Private-reach apps open on the new private address.
-- Counts match the old server: workspaces, phones, messages, files, apps (compare `SELECT count(*)` before step 1 and
-  after step 4).
 
 ## Roll back
 
 Until the checks pass, the old server keeps its data untouched (it was only stopped).
 
-1. Namecheap: CNAMEs back to `eu1.netbird.services` (TTL still 60).
+1. Namecheap: CNAMEs back to `eu1.netbird.services` (TTL still 60). The NetBird Cloud proxy services must still exist
+   (move-day step 7).
 2. Old server: `systemctl start orch-relay orch-publish`.
 3. New server: `systemctl stop orch-relay orch-publish`.
 
 Messages and files written on the new server between the switch and the roll back are lost in a roll back; keep the
-window short and decide within 30 minutes. After a week without problems, delete the data on the old server (it
-becomes the self-hosted NetBird server).
+window short and decide within 30 minutes. After a week without problems, remove the NetBird Cloud proxy services and
+delete the data on the old server (it becomes the self-hosted NetBird server).
 
 ## Downtime estimate
 

@@ -1,12 +1,15 @@
 #!/bin/sh
 # First install on the server (run as root): user, folders, admin token, settings, service.
 # Usage: ./install.sh <path-to-orch-publish-binary> <private-ip>
-# Apps run as containers on the Kiri engine: install Kiri and run `kiri host-access orch-publish` first
-# (docs/publish.md, "Container mode: host setup").
+# Apps run as containers on the Kiri engine: install Kiri and its firewall rules first
+# (docs/publish.md, "Container mode: host setup"); this script gives the publish user the engine.
 set -eu
 BIN="$1"; IP="$2"
 id orch-publish >/dev/null 2>&1 || useradd --system --home /var/lib/orch-publish --shell /usr/sbin/nologin orch-publish
 install -d -o orch-publish -g orch-publish -m 0750 /var/lib/orch-publish /etc/orch-publish
+command -v kiri >/dev/null || { echo "Install Kiri first (docs/publish.md, Container mode: host setup)." >&2; exit 1; }
+kiri host-access orch-publish
+runuser -u orch-publish -- docker -H unix:///run/kiri/docker.sock info >/dev/null || { echo "orch-publish cannot reach the Kiri engine." >&2; exit 1; }
 install -m 0755 "$BIN" /usr/local/bin/orch-publish
 [ -f /etc/orch-publish/admin-token ] || head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n' > /etc/orch-publish/admin-token
 [ -f /etc/orch-publish/env ] || cat > /etc/orch-publish/env <<EOF
