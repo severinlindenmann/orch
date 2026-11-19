@@ -846,6 +846,104 @@ async function split(page, dash, width) {
   await noSideways(page);
 }
 
+// Step 33. Permission mode of a session without a ticket (ORCH-818). Like step 15 the test dashboard has no orch to
+// start helpers, so the step answers session.new like the core does (`orch session new <kind> --permission-mode <m>`,
+// tested in workspace/tests/test_sessionmode.py) and the next state carries state.session_modes as the server builds
+// it (data.load_session_modes). Everything else is the real page: the New menu's Permissions row, the pane's line.
+async function permModes(page, dash, width) {
+  // FD_SHOTS=<folder>: also pictures of the warning and the pane's line (for the ticket), not only the end
+  const extra = async name => process.env.FD_SHOTS && (await page.waitForTimeout(600), page.screenshot({ path: require('node:path').join(process.env.FD_SHOTS, `fd-33-${name}-${width}.png`) }));
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  const id = 't_ntmanag01', calls = [];
+  const LABEL = { ask: 'Default', edits: 'Accept edits', auto: 'Auto', full: 'Bypass permissions' };
+  const ws = { top: 'full', warned: false, remembered: 'auto', running: null };
+  const rank = m => ['ask', 'edits', 'auto', 'full'].indexOf(m);
+  const modes = () => Object.fromEntries(['manager', 'empty', 'chat'].map(k => {
+    const cur = k === 'manager' && rank(ws.remembered) <= rank(ws.top) ? ws.remembered : ws.top;
+    const run = k === 'manager' ? ws.running : null;
+    return [k, { current: cur, label: LABEL[cur], full_warned: ws.warned, running: run, running_label: run ? LABEL[run] : null,
+      choices: Object.keys(LABEL).map(m => ({ mode: m, label: LABEL[m], allowed: rank(m) <= rank(ws.top) })) }];
+  }));
+  let last = null;
+  const dress = st => {
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true };
+    st.sessions = ws.running ? [{ id, kind: 'manager', title: 'Manager', open: true }] : [];
+    st.runs = { ...(st.runs || {}) };
+    if (ws.running) st.runs[id] = { running: true, helper: { state: 'idle' }, claim: { agent: 'agent:claude' } };
+    st.session_modes = modes();
+    st.rev = 'pm-' + calls.length + '-' + ws.top + '-' + ws.warned;
+    last = st;
+    return st;
+  };
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    route.fulfill({ response: res, json: st.unchanged && last ? dress({ ...last }) : dress(st) });
+  });
+  await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { lines: 8, age_ms: 0, sessions: ws.running ? [{
+    id, key: '', title: 'Manager', kind: 'manager', status: 'idle', word: 'Idle', detail: '', waiting_on: [], question: null, lines: [],
+    tool: 'Claude Code', model: null, mode: 'live', opened_at: null, open_seconds: null, idle_seconds: null, closes_in_seconds: null,
+    last_at: null, pinned: true, name: null }] : [] } }));
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (body.op !== 'session.new') return route.continue();
+    calls.push([body.args.kind, body.args.permissions || '']);
+    const m = body.args.permissions;
+    if (m && rank(m) > rank(ws.top)) return route.fulfill({ status: 422, body: 'Bypass permissions is not allowed in this workspace.' });
+    if (m) { ws.remembered = m; if (m === 'full') ws.warned = true; }
+    ws.running = m || ws.remembered;
+    route.fulfill({ json: dress({ ...last }) });
+  });
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.waitForSelector('#live-bar [data-lbar-new]', { timeout: 10000 });
+  const openMenu = async () => {
+    await page.click('#live-bar [data-lbar-new]');
+    await page.waitForSelector('#live-bar [data-key="lbar-perm"]', { timeout: 5000 });
+  };
+  // the New menu has the tool's four modes; nothing picked: the Manager says it starts in its own (Auto)
+  await openMenu();
+  const segs = await page.$$eval('#live-bar [data-lbar-perm]', els => els.map(el => el.innerText.trim()));
+  if (segs.join('|') !== 'Default|Accept edits|Auto|Bypass permissions') throw new Error(`the Permissions row has ${segs.join(', ')}`);
+  const mgr = () => page.textContent('#live-bar [data-lbar-kind="manager"]');
+  if (!/Auto/.test(await mgr())) throw new Error(`the Manager does not say its mode: ${await mgr()}`);
+  // Bypass permissions: one plain warning the first time, the Manager says it starts so
+  await page.click('#live-bar [data-lbar-perm="full"]');
+  await page.waitForSelector('#live-bar [data-key="lbar-perm-warn"]', { timeout: 3000 });
+  await extra('warning');
+  if (!/Bypass permissions/.test(await mgr())) throw new Error(`the Manager does not say Bypass permissions: ${await mgr()}`);
+  await page.click('#live-bar [data-lbar-kind="manager"]');
+  await page.waitForSelector(`#live-dock .live-pane[data-session="${id}"] [data-key="live-perm"]`, { timeout: 10000 });
+  if (JSON.stringify(calls[0]) !== '["manager","full"]') throw new Error(`the start sent ${JSON.stringify(calls[0])}`);
+  const line = () => page.textContent(`#live-dock .live-pane[data-session="${id}"] [data-key="live-perm"]`);
+  if ((await line()).trim() !== 'Permissions: Bypass permissions') throw new Error(`the pane says "${(await line()).trim()}"`);
+  await extra('pane');
+  // the pane goes on in another mode (the same conversation): Auto
+  await page.click(`#live-dock .live-pane[data-session="${id}"] [data-key="live-perm"]`);
+  await page.waitForSelector('#live-dock [data-key="live-perm-menu"]', { timeout: 3000 });
+  const now = await page.textContent('#live-dock [data-live-perm="full"]');
+  if (!/\(now\)/.test(now)) throw new Error(`the menu does not mark the mode in use: ${now}`);
+  await extra('pane-menu');
+  await page.click('#live-dock [data-live-perm="auto"]');
+  await page.waitForFunction(() => /Permissions: Auto$/.test(document.querySelector('#live-dock [data-key="live-perm"]')?.textContent.trim() || ''), null, { timeout: 5000 });
+  if (JSON.stringify(calls[1]) !== '["manager","auto"]') throw new Error(`the restart sent ${JSON.stringify(calls[1])}`);
+  // a workspace that does not allow Bypass permissions: the segment is off and says why
+  ws.top = 'auto'; ws.warned = false;
+  await page.reload();
+  await mainHasText(page);
+  await page.locator('#live-dock [data-key="live-min"]:visible').first().click().catch(() => {});
+  await page.waitForSelector('#live-bar [data-lbar-new]', { timeout: 10000 });
+  await openMenu();
+  const off = await page.$eval('#live-bar [data-lbar-perm="full"]', el => [el.disabled, el.title]);
+  if (!off[0] || !/Not allowed in this workspace/.test(off[1])) throw new Error(`Bypass permissions is not off: ${off}`);
+  await page.click('#live-bar [data-lbar-perm="edits"]');
+  await page.waitForSelector('#live-bar [data-lbar-perm="edits"][aria-pressed="true"]', { timeout: 3000 });
+}
+
 // Step 15. Sessions without a ticket (ORCH-364). The test dashboard has no orch to start helpers, so the step answers
 // the one start call (session.new) like the server does: the core makes the session (`orch session new <kind>`, tested
 // in workspace/tests/test_sessions.py) and the next state lists it in state.sessions, a helper with its run; the live
@@ -1836,6 +1934,19 @@ const STEPS = [
       await ended(page, dash);
     },
     draft: { q: '?page=focus&cur=ORCH-235&view=zoom&ask=1' },
+  },
+  {
+    n: 33, pic: 'fd-33-permissions', area: 'sessions', title: 'Start the Manager in a chosen permission mode', feature: [6],
+    do: ['Open the New menu in the bar and pick Bypass permissions in its Permissions row.', 'Start the Manager.',
+      'In its pane press "Permissions: Bypass permissions" and pick Auto.', 'In a workspace that allows at most Auto, open the New menu.'],
+    see: ['The row shows the tool\'s modes: Default, Accept edits, Auto, Bypass permissions.',
+      'Bypass permissions shows one plain warning the first time; the Manager starts in it and its pane says "Permissions: Bypass permissions".',
+      'Auto ends the session and goes on with the same conversation; the pane says "Permissions: Auto".',
+      'Bypass permissions is off when the workspace does not allow it and says why.'],
+    async run({ page, dash, width }) {
+      await permModes(page, dash, width);
+    },
+    draft: { q: '?page=focus&menu=new' },
   },
 ];
 
