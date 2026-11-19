@@ -50,8 +50,8 @@ def ticket_rows(
             t = tickets.load(root, r["id"])  # only the listed tickets are read in full
         except (Refused, OSError):
             continue  # changed into something unlistable meanwhile: a listing never stalls on a bad file
-        if tickets.is_hidden(t) or t.get("status") not in tickets.STATUS_WORDS:
-            continue
+        if tickets.is_hidden(t) or not _picked([t], status, all_):
+            continue  # hidden, or its status changed since the index row: filter on the file itself
         t = visible(root, t)
         t["children"] = dict(kids.get(t["id"]) or ticketindex.no_children())
         if quiet := tickets.quiet_since(t):
