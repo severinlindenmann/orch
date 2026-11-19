@@ -63,6 +63,14 @@ def to_time(text: str) -> datetime:
     return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 
 
+def local_text(at: str) -> str:
+    """A stored UTC time in this computer's local time with its zone, minutes only ('2026-11-20 18:00 CET')."""
+    try:
+        return to_time(at).astimezone().strftime("%Y-%m-%d %H:%M %Z").strip()
+    except (ValueError, TypeError):
+        return str(at)[:16].replace("T", " ")
+
+
 def valid_actor(who: str) -> bool:
     return who == USAGE or bool(_ACTOR.fullmatch(who))
 
@@ -455,9 +463,7 @@ def set_end(a: dict, rows: list[dict], who: str, end: str | None, said: str = ""
         return
     a["rule"]["ends"] = end
     if a["rule"] != old:
-        rows.append(
-            _line(who, f"rule ends {said}" if said else "rule ends", a, old, copy.deepcopy(a["rule"]))
-        )
+        rows.append(_line(who, f"rule ends {said or local_text(end)}", a, old, copy.deepcopy(a["rule"])))
 
 
 def set_on(a: dict, rows: list[dict], who: str, on: bool) -> None:

@@ -360,11 +360,8 @@ def gather(root: Path) -> dict:
 
 
 def _local(at: str) -> str:
-    """A stored UTC time in this computer's local time, minutes only."""
-    try:
-        return store.to_time(at).astimezone().strftime("%Y-%m-%d %H:%M")
-    except (ValueError, TypeError):
-        return at[:16].replace("T", " ")
+    """A stored UTC time in this computer's local time with its zone, minutes only."""
+    return store.local_text(at)
 
 
 def _rule_text(rule: dict, tz=None) -> str:
@@ -615,7 +612,7 @@ def _loop_cmd(args, root: Path) -> int:
             f"\nWarning: {w}" for w in (switching._read(switching.memory_path(root)).get("alerts") or [])
         )
         if last:
-            line += f"\nLast look {last.get('at', '')[:16].replace('T', ' ')} UTC: {last.get('did')} ({last.get('why')})."
+            line += f"\nLast look {_local(last.get('at', ''))}: {last.get('did')} ({last.get('why')})."
         print(json.dumps(data, ensure_ascii=False) if args.json else line)
         return 0 if pid else 1
     # switching on|off

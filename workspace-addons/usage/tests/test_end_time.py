@@ -67,7 +67,7 @@ def test_local_and_words():
     assert (
         when.local("2026-11-19T23:00:00Z", ZURICH) == "2026-11-19"
     )  # midnight after it: the end of that day
-    assert when.words("2026-11-19T07:00:00Z", ZURICH) == "19 Nov 2026, 08:00"
+    assert when.words("2026-11-19T07:00:00Z", ZURICH) == "19 Nov 2026, 08:00 CET"
     assert when.words("2026-11-19T23:00:00Z", ZURICH) == "at the end of 19 Nov 2026"
 
 
@@ -98,10 +98,10 @@ def _seed(cli):
 def test_command_sets_an_end_with_a_time_and_the_history_names_it(cli, fake_switcher, zurich):
     _seed(cli)
     code, out, _ = cli("end", "TEAMCO", "tomorrow 08:00", "--by", "human:owner")
-    assert code == 0 and "(ends 19 Nov 2026, 08:00)" in out
+    assert code == 0 and "(ends 19 Nov 2026, 08:00 CET)" in out
     a = store.find(store.load(zurich)["accounts"], "TEAMCO")
     assert a["rule"]["ends"] == "2026-11-19T07:00:00Z"
-    assert store.history(zurich)[0]["what"] == "rule ends 19 Nov 2026, 08:00"
+    assert store.history(zurich)[0]["what"] == "rule ends 19 Nov 2026, 08:00 CET"
 
 
 def test_command_end_at_its_next_reset(cli, fake_switcher, zurich):
@@ -109,7 +109,7 @@ def test_command_end_at_its_next_reset(cli, fake_switcher, zurich):
     _seed(cli)
     code, d = jrun(cli, "end", "TEAMCO", "reset", "--by", "human:owner")
     assert code == 0 and d["account"]["rule"]["ends"] == "2026-11-19T06:59:00Z"
-    assert store.history(zurich)[0]["what"] == "rule ends 19 Nov 2026, 07:59"
+    assert store.history(zurich)[0]["what"] == "rule ends 19 Nov 2026, 07:59 CET"
 
 
 def test_a_click_with_a_time_and_at_reset(cli, fake_switcher, zurich):
@@ -161,9 +161,9 @@ def test_the_rule_ends_at_that_minute(cli, fake_switcher, zurich):
     line = store.history(zurich)[0]
     assert (line["who"], line["what"], line["at"]) == (
         "usage",
-        "rule ended 19 Nov 2026, 07:59",
+        "rule ended 19 Nov 2026, 07:59 CET",
         "2026-11-19T06:59:00Z",
     )
     assert page.history_rows(zurich, datetime(2026, 11, 19, 7, tzinfo=UTC))[0]["text"] == (
-        "TEAMCO: rule ended 19 Nov 2026, 07:59"
+        "TEAMCO: rule ended 19 Nov 2026, 07:59 CET"
     )

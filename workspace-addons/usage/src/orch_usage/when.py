@@ -125,10 +125,10 @@ def local(at: str, tz: tzinfo | None) -> str:
 
 
 def words(at: str, tz: tzinfo | None) -> str:
-    """For the history and the command line, in the kit's date format: '19 Nov 2026, 08:00' or
-    'at the end of 19 Nov 2026'."""
+    """For the history and the command line, in the kit's date format with the zone (ORCH-619):
+    '19 Nov 2026, 08:00 CET' or 'at the end of 19 Nov 2026'."""
     t = to_utc(at).astimezone(tz)
     if (t.hour, t.minute) == (0, 0):
         d = t - timedelta(days=1)
         return f"at the end of {d.day} {d:%b %Y}"
-    return f"{t.day} {t:%b %Y, %H:%M}"
+    return f"{t.day} {t:%b %Y, %H:%M %Z}".strip()

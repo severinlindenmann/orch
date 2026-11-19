@@ -272,3 +272,16 @@ def test_plain_history_shows_local_time(cli, fake_switcher, ws):
     row = store.history(ws)[-1]
     local = store.to_time(row["at"]).astimezone().strftime("%Y-%m-%d %H:%M")
     assert local in text
+
+
+def test_end_shows_local_time_with_zone_and_the_history_line_has_the_date(cli, fake_switcher, ws):
+    """ORCH-619: no UTC in the words; the 'rule ends' line carries the end date, local, with its zone."""
+    _seed(cli)
+    jrun(cli, "limit", "TEAMCO", "50", "--period", "week")
+    jrun(cli, "end", "TEAMCO", "2099-01-01T10:00")
+    ends = store.find(store.load(ws)["accounts"], "TEAMCO")["rule"]["ends"]
+    t = store.to_time(ends).astimezone()
+    local = f"{t.day} {t:%b %Y, %H:%M %Z}".strip()  # the kit's date format with the zone (ORCH-599)
+    assert store.history(ws)[0]["what"] == f"rule ends {local}"
+    _, text, _ = cli("history")
+    assert f"rule ends {local}" in text
