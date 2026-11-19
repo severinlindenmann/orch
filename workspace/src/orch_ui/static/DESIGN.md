@@ -24,6 +24,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `icons.js` | One icon set, `icon('check', 16)`. |
 | `preview.css`, `fileviewer.*`, `evidence.js`, `blocks.*` | File and result previews, viewer, proof, blocks. |
 | `results.css`, `results.js` (17 Nov, ORCH-263) | Result widgets, look from Focus draft D: `UI.result(item, {size: 'sm' \| 'lg', state})` for the 16 kinds (Markdown, text and logs, code, JSON and YAML, table, web page, PDF, picture, video, audio, chart, change, pull request link, archive, plain link, unknown file), each loaded, empty, loading, error and too big; `UI.resultOverlay(list, i)` the big overlay (← → between results, × Close, Esc, a click outside). `UI.result.kindOf(name)` picks the kind. No fetching: the page hands in the content. Gallery: Result widgets. |
+| `term.css`, `term.js` (19 Nov, ORCH-744) | The helper's real screen, `UI.term({label, onKeys, onSize})`: watching only by default, **Let me type** switch, Copy, a paste with a line end asks once, the screen follows its box while typing. Gallery: Terminal. |
 | `question-card*.js`, `composer.*` | Question card, chat composer (`UI.composer`: words, pasted screenshots, picked or dropped files; `voice:true` adds Record, `UI.voiceRecorder`, words only from on-device speech to text; `send:false` inside the Review comment sheet, ORCH-422). |
 | `gallery.html`, `gallery.js`, `gallery.css`, `state-controls.js`, `samples/` | The living style guide, its fixtures, and the Loaded / Loading / Empty / Error switcher the mockup pages use. |
 | `mockup.css` | Mockup-only layout, linked only by the dashboard mockup pages (merged from the former per-draft sheets, #795 D1). Every rule is scoped with `body.mk-<draft>`; not for product pages, no new rules (R6.2). |
@@ -335,6 +336,17 @@ carry a tag. The selected row is `aria-current` (brand edge), a helper that need
 A helper that needs you turns the whole tile orange. The pane's message box (`.live-msg`) starts with `.live-to`:
 "Message to: Write the texts (ORCH-301). Only this helper gets it." In the bar the group is one chip with the helper
 count (`.lbar-n`), the same number as its tile.
+
+### Terminal (ORCH-744)
+`.term` is the helper's real screen wherever a page shows it (the new Focus pane in Terminal view, dashboard
+`pages/liveterm.js`). One line on top says what you can do now ("Watching · select text to copy it", "Typing: your
+keys go to the helper · Shift+Tab stops", "Watching only · typing is off in Settings"), then **Let me type** (a
+`.switch`, shown only when the workspace allows typing) and Copy (the selection, else the whole screen). Typing on
+gives the box a brand edge and the screen a blinking cursor (still with reduced motion). Keys go out only while typing
+is on; a paste with a line end shows `.term-ask` ("Paste 3 lines into the helper's screen?" Paste / Cancel) first.
+Screen text goes in with `textContent` only; colours are `t-c0`..`t-c15` / `t-g0`..`t-g15` on tokens; a program's
+links, clipboard writes and title changes are dropped. While watching the screen keeps the helper's size and scrolls;
+while typing it follows its box. States: loading (skeleton), live, typing off, closed, no screen (one sentence why).
 
 ## Loading, errors and performance
 

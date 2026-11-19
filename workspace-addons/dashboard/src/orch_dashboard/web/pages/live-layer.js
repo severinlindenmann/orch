@@ -403,6 +403,7 @@ function liveLayerFill() {
     const m = live && kind !== 'terminal' ? liveMeta(live).join(' · ') : '';
     if (meta.textContent !== m) meta.textContent = m;
     meta.hidden = !m;
+    if (typeof liveTermApply === 'function') liveTermApply(body, live);  // the real screen (pages/liveterm.js)
   }
 }
 // The layer's part of the bar: Open (when only the bar shows), Place with its menu, and in full screen the way out.

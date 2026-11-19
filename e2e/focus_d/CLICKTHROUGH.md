@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-32 steps: 23 ready (the script clicks them), 9 pending (not built yet).
+32 steps: 24 ready (the script clicks them), 8 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -386,19 +386,25 @@ Must be seen:
 ## 22. A real terminal: type, select, copy and paste
 
 - Part: terminal (draft D feature 5)
-- State: pending, waits for: Terminal in the browser, after the security review and the owner's choice (Terminal stage)
+- State: ready, clicked by the script
 - Pictures: `fd-22-terminal-1280.png`, `fd-22-terminal-1920.png`, `fd-22-terminal-390.png`
 
 Do:
 
 1. Switch a session to Terminal.
-2. Click in it and type a command, select text, copy it, paste it back.
+2. Press a key: nothing is sent (watching only).
+3. Turn on Let me type, type a command and press Enter.
+4. Paste two lines, then Cancel.
+5. Select text and copy it.
 
 Must be seen:
 
-- It behaves like the Terminal app: typing, selection, copy and paste.
-- Copy all copies the screen text.
-- It can only be reached from this computer.
+- The helper's real screen with its colours; it starts watching only.
+- Keys go to the helper only after Let me type.
+- A paste with a line end asks first.
+- Selecting and copying works like on any page; Copy copies the selection or the screen.
+- While typing the screen follows the size of its pane.
+- It can only be reached from this computer (the bridge, ORCH-743).
 
 ## 23. Opening, zooming, pinning and splitting animate
 

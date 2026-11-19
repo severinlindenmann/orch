@@ -348,6 +348,68 @@ async function livePreview(page) {
     body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
 }
 
+// Step 22: the terminal view (ORCH-744). The screen comes from GET /api/term (the bridge, ORCH-743); here it is fake
+// data, and keys and sizes are only recorded. Watching only first: keys and a paste send nothing; Let me type turns
+// typing on; a paste with a line end asks first; Ctrl+C with a selection copies instead of stopping the helper.
+const TERM_SCREEN = ['\x1b[1m⏺ \x1b[0mRunning the tests for the export.', '  \x1b[32m✔\x1b[0m counts skills per day \x1b[2m(41 ms)\x1b[0m',
+  '  \x1b[32m✔\x1b[0m empty workspace shows zero', '  \x1b[31m✖\x1b[0m week view adds up to the day view', '',
+  '\x1b[7m> \x1b[0m'].join('\n');
+async function terminalView(page, dash, width) {
+  const keys = [], sizes = [];
+  await livePreview(page);
+  await page.route(/\/api\/term(\?.*)?$/, route => route.fulfill({ json: { state: 'live', screen: TERM_SCREEN, cx: 2, cy: 5,
+    cols: 80, rows: 24, cursor: true, scrolled: false, waiting_input: false, typing_allowed: true } }));
+  await page.route('**/api/term/keys', route => { keys.push(route.request().postDataJSON()); route.fulfill({ json: {} }); });
+  await page.route('**/api/term/size', route => { sizes.push(route.request().postDataJSON()); route.fulfill({ json: {} }); });
+  await page.addInitScript(() => { try { Object.keys(localStorage).filter(k => k.indexOf('orch.live.') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.click('[data-key="live-open"]');
+  await page.waitForSelector('[data-key="live-pane"]', { timeout: 5000 });
+  // Chat | Terminal: in the header, or in More when the pane is narrow (no switch yet: the pane shows the terminal)
+  if (await page.$('[data-key="live-view-term"]')) await page.click('[data-key="live-view-term"]');
+  else if (await page.$('[data-key="live-pane-more"]')) {
+    await page.click('[data-key="live-pane-more"]');
+    const item = await page.$('[data-key="live-more-view"]');
+    if (item && /terminal/i.test(await item.textContent())) await item.click(); else await page.keyboard.press('Escape');
+  }
+  await page.waitForSelector('.live-pane .term[data-state="live"]', { timeout: 5000 });
+  const screen = '.live-pane .term-screen';
+  if (!/week view adds up/.test(await page.textContent(screen))) throw new Error('the terminal does not show the helper\'s screen');
+  if (await page.$eval('.live-pane .term', el => el.dataset.typing) !== 'off') throw new Error('the terminal did not start watching only');
+  // watching only: a key and a paste send nothing
+  await page.click(screen);
+  await page.keyboard.type('x');
+  await page.$eval(screen, el => { const d = new DataTransfer(); d.setData('text/plain', 'ls'); el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: d, bubbles: true, cancelable: true })); });
+  await page.waitForTimeout(150);
+  if (keys.length) throw new Error('keys went out while watching only');
+  // Let me type, then a command
+  await page.click('.live-pane [data-key="term-type"]');
+  if (await page.$eval('.live-pane .term', el => el.dataset.typing) !== 'on') throw new Error('Let me type did not turn typing on');
+  await page.keyboard.type('ls');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(200);
+  const sent = keys.flatMap(k => k.items);
+  if (JSON.stringify(sent) !== JSON.stringify([{ t: 'ls' }, { k: 'Enter' }])) throw new Error(`typing sent ${JSON.stringify(sent)}`);
+  // a paste with a line end asks first; Cancel sends nothing
+  await page.$eval(screen, el => { const d = new DataTransfer(); d.setData('text/plain', 'echo one\necho two\n'); el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: d, bubbles: true, cancelable: true })); });
+  await page.waitForSelector('.live-pane .term-ask:not([hidden])', { timeout: 2000 });
+  if (!/2 lines/.test(await page.textContent('.live-pane .term-ask'))) throw new Error('the paste question does not say how many lines');
+  await page.click('.live-pane [data-key="term-paste-no"]');
+  // select text and press Ctrl+C: it copies, nothing goes to the helper
+  await page.$eval(screen, el => { const r = document.createRange(); r.selectNodeContents(el.querySelector('.t-ln')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); });
+  await page.keyboard.press('Control+c');
+  await page.waitForTimeout(150);
+  if (keys.length !== 1) throw new Error(`a paste that was cancelled or Ctrl+C with a selection went out: ${JSON.stringify(keys.slice(1))}`);
+  // the screen follows its box while typing (desktop: the pane is a different size than 80 x 24)
+  await page.waitForTimeout(400);
+  if (width > 720 && !sizes.length) throw new Error('no new size went to the helper while typing');
+  if (sizes.some(z => !(z.cols >= 20 && z.cols <= 500 && z.rows >= 5 && z.rows <= 200))) throw new Error(`a size out of range: ${JSON.stringify(sizes)}`);
+  await page.evaluate(() => getSelection().removeAllRanges());
+  await page.click(screen);
+  await noSideways(page);
+}
+
 // Step 10: the layer in every place, kept across a page change and a reload.
 async function layer(page, dash, width) {
   const phone = width <= 720;
@@ -1650,10 +1712,14 @@ const STEPS = [
   },
   {
     n: 22, pic: 'fd-22-terminal', area: 'terminal', title: 'A real terminal: type, select, copy and paste', feature: [5],
-    waits: T.terminal,
-    do: ['Switch a session to Terminal.', 'Click in it and type a command, select text, copy it, paste it back.'],
-    see: ['It behaves like the Terminal app: typing, selection, copy and paste.', 'Copy all copies the screen text.',
-      'It can only be reached from this computer.'],
+    do: ['Switch a session to Terminal.', 'Press a key: nothing is sent (watching only).', 'Turn on Let me type, type a command and press Enter.',
+      'Paste two lines, then Cancel.', 'Select text and copy it.'],
+    see: ['The helper\'s real screen with its colours; it starts watching only.', 'Keys go to the helper only after Let me type.',
+      'A paste with a line end asks first.', 'Selecting and copying works like on any page; Copy copies the selection or the screen.',
+      'While typing the screen follows the size of its pane.', 'It can only be reached from this computer (the bridge, ORCH-743).'],
+    async run({ page, dash, width }) {
+      await terminalView(page, dash, width);
+    },
     draft: { q: '?page=focus&cur=ORCH-232&view=zoom&term=1' },
   },
   {
