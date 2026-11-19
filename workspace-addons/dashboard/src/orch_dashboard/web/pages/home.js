@@ -432,13 +432,13 @@ function clearOldButton() {
   };
   return b;
 }
-function attentionSummary(groups, failed, results, changes, stuck = [], hidden = 0) {
+function attentionSummary(groups, failed, results, changes, stuck = [], hidden = 0, questions = null) {
   // the parts before "also" add up to the number in the title (questions + results); what is listed but not counted
   // (failed starts, notes without a question, changes to add) follows "also", so title, subtitle and rows agree (ORCH-184)
-  // questions = the one number minus the results (every open question counts, also a same-worded one on two tickets)
+  // questions = every open question (also a same-worded one on two tickets)
   // stuck = the rows of work that stopped (listed first, counted on Home, said with their mark: Stuck or Idle); hidden =
   // results shown as one of them instead
-  const questionsAsked = Math.max(0, needsYouTotal() - results), other = groups.filter(g => !g.row.answer?.question && !isHelperRow(g.row)).length + failed.length;
+  const questionsAsked = questions ?? needsToday().questions, other = groups.filter(g => !g.row.answer?.question && !isHelperRow(g.row)).length + failed.length;
   const part = (n, one, many) => n ? n + ' ' + (n === 1 ? one : many) : null;
   const idle = stuck.filter(r => r.kind === 'helper:idle').length;
   const counted = [part(stuck.length - idle, 'stuck ticket', 'stuck tickets'), part(idle, 'idle helper', 'idle helpers'), part(questionsAsked, 'question', 'questions'), part(results - hidden, 'result to check', 'results to check')].filter(Boolean).join(' · ');
@@ -485,12 +485,18 @@ function needsToday() {
   const review = all.filter(t => t.status === 'review');  // each result to check is one row and one count, like the Review page cards
   const changes = all.filter(t => t.bring_back?.state === 'waiting');
   const asked = groups.length + failed.length, results = review;
-  // what helpers need: a login that runs out soon is a row of Home's list and counts in Home's title only (as drawn: the
-  // menu badges count questions and results, which the Review page holds); the stopped ones are the banner
+  // what helpers need: a login that runs out soon is a row of Home's list; the stopped ones are the banner
   const logins = loginWarnings();
-  return {needs, notices, failed, groups, review, changes, asked, logins, count:window.DashHelpers.needsYouCount(needs, results)};
+  // Work that stopped (stuck tickets, a pull request left open, an idle helper) is part of THE number, so Home, the
+  // top bar, Menu, the Focus bar and the wall say the same (ORCH-705). A ticket the Reviewer was not sure about is that
+  // row, not also a result to check.
+  const stuck = groups.filter(g => isHelperRow(g.row)), unsure = new Set(stuck.filter(g => g.row.kind === 'reviewer:unsure').map(g => g.row.ticket));
+  const hiddenResults = review.filter(t => unsure.has(t.id)).length, questions = window.DashHelpers.needsYouCount(needs);
+  return {needs, notices, failed, groups, review, changes, asked, logins, stuck, unsure, hiddenResults, questions,
+    count:questions + review.length + stuck.length - hiddenResults};
 }
-// The one needs-you number: the Review menu entry, Menu, top bar, Home, Review and Tickets headers all read it.
+// The one needs-you number (questions, results to check and work that stopped): the Review menu entry, Menu, top bar,
+// Home, Review and Tickets headers, the Focus bar and the wall all read it.
 function needsYouTotal() { return state ? needsToday().count : 0; }
 // When the oldest of exactly those needs came (the top bar's "longest wait"): a question row since it was asked, a
 // result since its ticket moved to Review. A dropped ticket's old question is no need, so it never counts (ORCH-407).
@@ -664,12 +670,8 @@ function lineBanner() {
 // Home: what needs the person first, as ONE list: the oldest question with its answers, then one row per further
 // question, result to check and change to add (one button each); the notes that need no answer are one quiet line.
 function home() {
-  const {needs, notices, failed, groups:groupedNeeds, review, changes, logins, count:counted} = needsToday(), all = tickets();
-  // Work that stopped (stuck tickets, a pull request left open, an idle helper) is listed first and counted on Home: in
-  // the title and the Needs you pill. A ticket the Reviewer was not sure about is that row, not also a result to check.
-  const stuck = groupedNeeds.filter(g => isHelperRow(g.row)), unsure = new Set(stuck.filter(g => g.row.kind === 'reviewer:unsure').map(g => g.row.ticket));
-  const hiddenResults = review.filter(t => unsure.has(t.id)).length;
-  const needCount = counted + stuck.length - hiddenResults;  // the menu badges keep THE number (questions and results): the Review page holds those
+  // Work that stopped (stuck tickets, a pull request left open, an idle helper) is listed first and is part of THE number
+  const {needs, notices, failed, groups:groupedNeeds, review, changes, logins, stuck, unsure, hiddenResults, questions, count:needCount} = needsToday(), all = tickets();
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
   // a ticket waiting for review is the person's "Check result" row, never an idle helper with Stop (ORCH-407); its
   // left-over session is closed by orch run tend
@@ -679,13 +681,13 @@ function home() {
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
   const banner = [loginBanner(logins.stopped), lineBanner(), backgroundBanner(), autoUpdateNote()], changedCard = whatChangedCard(changedList(all));
-  // The number counts open questions and results to check only (ORCH-63); the list below also holds failed starts,
+  // The number counts open questions, results to check and work that stopped; the list below also holds failed starts,
   // changes to add and add-on rows, so it shows whenever it has anything, with or without a number.
   const anyNeeds = groupedNeeds.length + failed.length + review.length + changes.length + logins.soon.length > 0;
   // a login that stopped working needs the person too: it counts in the title (never "Nothing needs you" / "All clear")
   const shownCount = needCount;
   const title = shownCount ? shownCount + (shownCount === 1 ? ' thing needs you' : ' things need you') : anyNeeds || logins.stopped.length ? 'Things to look at' : 'Nothing needs you';
-  const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}), summary = attentionSummary(groupedNeeds, failed, review.length, changes.length, stuck.map(g => g.row), hiddenResults);
+  const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}), summary = attentionSummary(groupedNeeds, failed, review.length, changes.length, stuck.map(g => g.row), hiddenResults, questions);
   const head = heading(title, summary ? today + ' · ' + summary : today, {
     actions:h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →'))});
   const notes = notices.length ? [notesLine(notices), ...(notesOpen ? notices.map(row => needRow(row, newest)) : [])] : [];
