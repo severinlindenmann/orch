@@ -137,3 +137,15 @@ test('the bar says All calm only when nothing waits on the person (ORCH-464)', (
   assert.ok(src.includes("liveBarNeedText(needTotal(), need.length)"), 'the wide bar reads the one needs-you number');
   assert.ok(src.includes("'data-key':'lbar-cnt-need'"), 'the phone bar shows the number, linked to Review');
 });
+
+test('the Empty helper says the model it starts on and sends the pick only when it is another (ORCH-710)', () => {
+  const agents = [{name:'claude', label:'Claude Code', models:true, chosen:true}, {name:'codex', models:false}];
+  assert.deepEqual(bar.liveBarNewModel([], agents), {name:bar.LIVEBAR_EMPTY_MODEL, label:'Opus'}, 'none made yet: orch\'s pick');
+  assert.deepEqual(bar.liveBarNewModel([{id:'t_emp', kind:'empty', model:'haiku'}], agents), {name:'haiku', label:'Haiku'});
+  assert.equal(bar.liveBarNewModel([], [{name:'codex', models:false, chosen:true}]), null, 'a tool with no model choice: no step');
+  const usual = {name:'opus', label:'Opus'};
+  assert.deepEqual(bar.liveBarNewArgs('empty', 'sonnet', usual), {kind:'empty', model:'sonnet'});
+  assert.deepEqual(bar.liveBarNewArgs('empty', 'opus', usual), {kind:'empty'}, 'the usual one stays orch\'s pick');
+  assert.deepEqual(bar.liveBarNewArgs('chat', 'sonnet', usual), {kind:'chat'});
+  assert.deepEqual(bar.LIVEBAR_MODELS.map(m => m[0]), ['sonnet', 'opus', 'haiku', 'fable']);
+});

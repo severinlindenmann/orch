@@ -71,6 +71,39 @@ def test_new_starts_each_helper_live_through_one_path(proj, fake_start, monkeypa
         sessions.new(proj, "ticket", "human:t")
 
 
+def test_the_empty_helper_says_its_model_and_starts_on_the_persons_pick(proj, fake_start, run):
+    """ORCH-710: the New menu shows the model the Empty helper starts on and the person can pick another."""
+    from orch import modelpick
+
+    tid = tickets.ensure_session(proj, "empty", "human:t")
+    first = sessions.one(proj, "empty")
+    assert (
+        first["model"]
+        == tickets.next_model(tickets.load(proj, tid))
+        == modelpick.pick(tickets.load(proj, tid))[0]
+    )
+    d = sessions.new(proj, "empty", "human:t", model="haiku")
+    assert d["started"] and d["model"] == "haiku"
+    m = tickets.load(proj, tid)["model"]
+    assert m["name"] == "haiku" and modelpick.by_person(tickets.load(proj, tid))
+    assert sessions.listing(proj)[0]["model"] == "haiku"
+    with pytest.raises(Refused, match="Only the Empty helper takes a model"):
+        sessions.new(proj, "chat", "human:t", model="opus")
+
+
+def test_the_usual_pick_stays_orchs_choice(proj, fake_start):
+    tid = tickets.ensure_session(proj, "empty", "human:t")
+    usual = sessions.one(proj, "empty")["model"]
+    sessions.new(proj, "empty", "human:t", model=usual)
+    assert "model" not in tickets.load(proj, tid)  # same as orch's pick: no person's choice is written
+
+
+def test_cli_session_new_takes_a_model(proj, run, monkeypatch):
+    monkeypatch.setattr(runs, "start", lambda root, tid, by, **kw: {"run": "r_x", "notes": []})
+    code, out, _ = run("session", "new", "empty", "--model", "sonnet", "--json")
+    assert code == 0 and json.loads(out)["model"] == "sonnet"
+
+
 def test_the_plain_terminal_is_a_placeholder_open_until_closed(proj, fake_start):
     d = sessions.new(proj, "terminal", "human:t")
     assert (
