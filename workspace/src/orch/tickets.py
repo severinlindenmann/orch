@@ -2266,6 +2266,7 @@ def tidy(
         if tidied(root, ticket):
             raise Refused("This ticket was already tidied.")
         old = str(ticket.get("title") or "")
+        was_auto = bool(ticket.get("title_auto"))
         edited = any(  # someone renamed it after it was created: that title is theirs, tidy leaves it
             re.fullmatch(
                 r"Title changed(?: \(was: .* \| now: .*\))?",
@@ -2278,6 +2279,8 @@ def tidy(
             ticket["title"] = title
             ticket.pop("title_auto", None)
             add_history(ticket, by, TIDY_LINE + old[:200])
+        elif was_auto and not edited:  # the helper kept the placeholder's words: now they are its title
+            ticket.pop("title_auto", None)
         filled = [k for k in sorted(fields) if not ticket.get(k)]
         for k in filled:
             _set_field(ticket, k, fields[k])
@@ -2287,6 +2290,8 @@ def tidy(
         if wrote:
             ticket["description"] = description
             ticket["description_by"] = by[:100]
+            if was_auto and ticket.get("note") == LONG_NOTE:  # only the placeholder note goes (as `title`)
+                ticket.pop("note", None)
             add_history(ticket, by, f"Description written by {by[:100]}")
         estimated = bool(est and not ticket.get("estimate"))
         if estimated:
