@@ -85,7 +85,7 @@ def listing(root: Path) -> list[dict]:
 def new(root: Path, kind: str, by: str, model: str | None = None) -> dict:
     """Start (or go to) the session without a ticket of this kind: {id, kind, title, running, open, started,
     notes}. Already on: nothing new starts (started False). model: the person's pick for the Empty helper
-    (haiku, sonnet, opus, fable), set before it starts (ORCH-710); a running one switches like any ticket."""
+    (haiku, sonnet, opus, fable), set before it starts (ORCH-710); one already running keeps its model."""
     if kind not in KINDS:
         raise Refused(f"No such session without a ticket: {kind}. Choose one of: {', '.join(KINDS)}.")
     if model and kind != "empty":
@@ -105,9 +105,11 @@ def new(root: Path, kind: str, by: str, model: str | None = None) -> dict:
         tid = (
             tickets.ensure_general(root, by) if kind == "chat" else tickets.ensure_session(root, "empty", by)
         )
-        if model and model != start_model(root, tid):
+        on = runs.running(root, tid)
+        # the pick is for the start; a running one keeps its model (its pane's model line switches it)
+        if model and not on and model != start_model(root, tid):
             tickets.set_model(root, tid, model, by)
-        if not runs.running(root, tid):
+        if not on:
             r = runs.start(root, tid, by, mode="live")
             started, notes = True, list(r.get("notes") or [])
     return {**(one(root, kind) or {}), "started": started, "notes": notes}

@@ -216,13 +216,13 @@ if (typeof module === 'object' && module.exports) {
       if (open) { bar.menu = false; paint(true); openSession(a, open.id); return; }
       const usual = kind === 'empty' ? liveBarNewModel(state.sessions, state?.settings?.agents) : null;
       if (usual && !fromMenu) {  // a button at the top of the live page: the menu shows the model first (ORCH-710)
-        bar.menu = true; bar.list = ''; bar.q = ''; paint(true);
+        bar.menu = true; bar.model = ''; bar.list = ''; bar.q = ''; paint(true);
         bar.el?.querySelector('[data-lbar-model]')?.focus();
         return;
       }
       bar.busy = kind; paint(true);
       const r = await act('session.new', liveBarNewArgs(kind, bar.model, usual));
-      bar.busy = '';
+      bar.busy = ''; bar.model = '';
       const made = r.ok ? liveBarNewOpen(state.sessions, kind) : null;
       bar.menu = !made && !r.ok;
       if (made) {
@@ -304,7 +304,7 @@ if (typeof module === 'object' && module.exports) {
       if (k && bar.el?.contains(k)) { startNew(k.dataset.lbarKind, true); return; }
       // (a New button at the top of the live page opens this menu at the Empty helper's model: that click keeps it open)
       if (bar.menu && !bar.el?.querySelector('[data-key="lbar-new-wrap"]')?.contains(e.target) && !e.target.closest?.('[data-live-new]')) {
-        bar.menu = false; paint(true);
+        bar.menu = false; bar.model = ''; paint(true);
       }
       const b = e.target.closest?.('[data-lbar-list]');
       if (b && bar.el?.contains(b)) { toggle(b.dataset.lbarList); return; }
@@ -323,7 +323,7 @@ if (typeof module === 'object' && module.exports) {
     });
     document.addEventListener('keydown', e => {
       if (e.key !== 'Escape' || !bar.el?.contains(document.activeElement)) return;
-      if (bar.menu) { e.stopPropagation(); bar.menu = false; paint(true); bar.el?.querySelector('[data-lbar-new]')?.focus(); }
+      if (bar.menu) { e.stopPropagation(); bar.menu = false; bar.model = ''; paint(true); bar.el?.querySelector('[data-lbar-new]')?.focus(); }
       else if (bar.list) { e.stopPropagation(); close(true); }
     }, true);
     // the layer says which sessions are open ({mode, panes: ticket ids}); their chips are marked current

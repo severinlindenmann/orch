@@ -87,6 +87,10 @@ def test_the_empty_helper_says_its_model_and_starts_on_the_persons_pick(proj, fa
     m = tickets.load(proj, tid)["model"]
     assert m["name"] == "haiku" and modelpick.by_person(tickets.load(proj, tid))
     assert sessions.listing(proj)[0]["model"] == "haiku"
+    again = sessions.new(
+        proj, "empty", "human:t", model="opus"
+    )  # already running: goes to it, model unchanged
+    assert again["started"] is False and tickets.load(proj, tid)["model"]["name"] == "haiku"
     with pytest.raises(Refused, match="Only the Empty helper takes a model"):
         sessions.new(proj, "chat", "human:t", model="opus")
 
