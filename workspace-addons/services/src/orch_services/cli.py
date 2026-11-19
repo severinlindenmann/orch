@@ -448,7 +448,9 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
         spec = _spec(root, rec, wid, strict=False)
         drv.uninstall(spec)
         store.delete(root, sid)
-        nxt = f"Removed {rec['name']}. Its log stays in .orch/addons/services/logs/{sid}.log."
+        moved = store.retire_log(root, sid)
+        where = moved.relative_to(root).as_posix() if moved else f".orch/addons/services/logs/{sid}.log"
+        nxt = f"Removed {rec['name']}. Its log stays in {where}."
         return _emit(args, {"removed": sid, "next": nxt}, nxt)
     spec = _spec(root, rec, wid, strict=verb != "stop")
     getattr(drv, verb)(spec)

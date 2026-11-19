@@ -9,6 +9,7 @@ import json
 import os
 import re
 import secrets
+import time
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
@@ -40,6 +41,30 @@ def logs_dir(root: Path) -> Path:
 
 def log_path(root: Path, sid: str) -> Path:
     return logs_dir(root) / f"{sid}.log"
+
+
+def retire_log(root: Path, sid: str) -> Path | None:
+    """Move a removed service's log to logs/removed/<id>-<UTC time>.log, so a new service with the same id starts
+    with an empty log instead of showing the old one's last lines. Returns where it went; None when there was no
+    log or it could not be moved (then it stays where it was)."""
+    src = log_path(root, sid)
+    if not src.is_file():
+        return None
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    dest = logs_dir(root) / "removed" / f"{sid}-{stamp}.log"
+    n = 1
+    while dest.exists():
+        n += 1
+        dest = dest.with_name(f"{sid}-{stamp}-{n}.log")
+    for attempt in range(5):  # Windows: the stopped program may hold the file for a moment
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(src, dest)
+            return dest
+        except OSError:
+            if attempt < 4:
+                time.sleep(0.2)
+    return None
 
 
 def state_path(root: Path, sid: str) -> Path:

@@ -13,6 +13,7 @@ processes are skipped, because without the folder there is no way to tell a work
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import plistlib
 import re
@@ -341,11 +342,18 @@ def _processes(root: Path, skip: set[int]) -> list[dict]:
         p = rows[p]["ppid"]
     mine.add(os.getpid())
 
+    # orch's own add-on servers by the pids orch recorded for them (the command line alone can mislead, e.g. a
+    # program path with a space in it), and the services orch keeps: neither they nor what they started are found.
+    # A recorded add-on pid counts only while its command line still names orch: after a crash or a restart the
+    # number can belong to another program.
+    addons = _addon_pids()
+
     def from_orch(pid: int) -> bool:
         seen = set()
         while pid in rows and pid not in seen:
             seen.add(pid)
-            if _is_orch(rows[pid]["argv"]):
+            argv = rows[pid]["argv"]
+            if pid in skip or _is_orch(argv) or (pid in addons and "orch" in " ".join(argv).lower()):
                 return True
             pid = rows[pid]["ppid"]
         return False
@@ -353,7 +361,7 @@ def _processes(root: Path, skip: set[int]) -> list[dict]:
     cand = [
         pid
         for pid, r in rows.items()
-        if pid not in mine and pid not in skip and r["tty"] in ("?", "??", "-") and not from_orch(pid)
+        if pid not in mine and r["tty"] in ("?", "??", "-") and not from_orch(pid)
     ]
     if sys.platform.startswith("linux"):
         cwds = {pid: c for pid in cand if (c := _cwd_linux(pid))}
@@ -401,6 +409,19 @@ def scan(root: Path) -> list[dict]:
     items = units + _processes(root, pids | _record_pids(root))
     items.sort(key=lambda i: (i["name"].lower(), i["id"]))
     return items
+
+
+def _addon_pids() -> set[int]:
+    """Pids of orch's own add-on servers (every workspace) as orch recorded them when it started them. Read only."""
+    try:
+        from orch import services as core
+
+        data = json.loads(core.running_path().read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - no core or no file: nothing recorded, the command line check still runs
+        return set()
+    if not isinstance(data, list):
+        return set()
+    return {e["pid"] for e in data if isinstance(e, dict) and isinstance(e.get("pid"), int) and e["pid"] > 0}
 
 
 def _record_pids(root: Path) -> set[int]:

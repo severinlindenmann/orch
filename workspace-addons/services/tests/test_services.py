@@ -61,7 +61,10 @@ def test_add_is_stopped_until_started_and_the_whole_cycle_works(cli, ws, fake):
     assert code == 0 and out["removed"] == "web"
     assert "web" not in fake.entries and not fake.entry_path(spec).exists()
     assert not (ws / ".orch/addons/services/services/web.json").exists()
-    assert log.read_text(encoding="utf-8") == "serving\n"  # the log stays
+    assert not log.exists()  # r-1119-1255-ws-3: a new service with this id must not show the old lines
+    kept = list((ws / ".orch/addons/services/logs/removed").glob("web-*.log"))
+    assert len(kept) == 1 and kept[0].read_text(encoding="utf-8") == "serving\n"  # the log stays, aside
+    assert "logs/removed/web-" in out["next"]
     assert [c[0] for c in fake.calls] == ["install", "start", "stop", "restart", "auto", "auto", "uninstall"]
 
 
@@ -341,3 +344,12 @@ def test_add_says_why_when_the_stored_keys_cannot_be_read(cli, monkeypatch):
     assert out["error"] == (
         "Could not compare the command with this workspace's stored keys: This is a test install outside the test folder."
     )
+
+
+def test_a_new_service_with_a_removed_ones_id_starts_with_an_empty_log(cli, ws, fake):
+    _add(cli)
+    log = ws / ".orch/addons/services/logs/web.log"
+    log.write_text("/bin/sh: old/run.sh: Operation not permitted\n", encoding="utf-8")
+    assert jrun(cli, "remove", "web")[0] == 0
+    _add(cli)
+    assert jrun(cli, "log", "web")[1]["lines"] == []
