@@ -30,17 +30,33 @@ def test_preset_then_parts_by_command(cli, no_switcher, ws):
     assert code == 0 and d["changed"] and d["preset"] == "even"
     assert d["sentence"] == (
         "Use the subscriptions first, up to 70 % of their week by Wednesday; run Reviews and Scripts on API credit "
-        "and one in 4 Code tickets on Codex; when a subscription is ahead of that pace, send new starts to API credit "
+        "and one in 4 Code tickets on the helper tool; when a subscription is ahead of that pace, send new starts to API credit "
         "for up to $10 a day."
     )
     code, d = jrun(
-        cli, "share", "--week", "60%", "--day", "thu", "--api", "review, scripts and helpers",
-        "--codex", "one in 3", "--dollars", "$20", "--by", ME,
+        cli,
+        "share",
+        "--week",
+        "60%",
+        "--day",
+        "thu",
+        "--api",
+        "review, scripts and helpers",
+        "--tool",
+        "one in 3",
+        "--dollars",
+        "$20",
+        "--by",
+        ME,
     )
     assert code == 0 and d["preset"] is None
     assert d["share"] == {
-        "week_pct": 60, "by_day": "thursday", "api_for": ["reviews", "scripts", "helpers"],
-        "codex_one_in": 3, "when_ahead": "api", "day_dollars": 20,
+        "week_pct": 60,
+        "by_day": "thursday",
+        "api_for": ["reviews", "scripts", "helpers"],
+        "tool_one_in": 3,
+        "when_ahead": "api",
+        "day_dollars": 20,
     }
     saved = json.loads((ws / ".orch/addons/usage/share.json").read_text())
     assert saved["schema"] == share.SCHEMA and saved["share"] == d["share"]
@@ -48,13 +64,16 @@ def test_preset_then_parts_by_command(cli, no_switcher, ws):
 
 def test_every_change_is_one_history_line_with_before_and_after(cli, no_switcher, ws):
     jrun(cli, "share", "--preset", "even", "--by", ME)
-    jrun(cli, "share", "--codex", "all", "--by", ME)
-    code, d = jrun(cli, "share", "--codex", "all", "--by", ME)  # already like that
+    jrun(cli, "share", "--tool", "all", "--by", ME)
+    code, d = jrun(cli, "share", "--tool", "all", "--by", ME)  # already like that
     assert code == 0 and d["changed"] is False
     rows = _share_rows(ws)
     assert len(rows) == 2
-    assert rows[0]["what"] == "all Code tickets on Codex (was one in 4 Code tickets on Codex)"
-    assert rows[0]["before"]["codex_one_in"] == 4 and rows[0]["after"]["codex_one_in"] == 1
+    assert (
+        rows[0]["what"]
+        == "all Code tickets on the helper tool (was one in 4 Code tickets on the helper tool)"
+    )
+    assert rows[0]["before"]["tool_one_in"] == 4 and rows[0]["after"]["tool_one_in"] == 1
     assert rows[1]["what"].startswith("Even spread: Use the subscriptions first")
     assert all(r["who"] == ME and r["label"] == share.LABEL for r in rows)
     code, d = jrun(cli, "history", "--account", "share")
@@ -66,10 +85,10 @@ def test_every_change_is_one_history_line_with_before_and_after(cli, no_switcher
 @pytest.mark.parametrize(
     ("argv", "words"),
     [
-        (["--api", "code", "--codex", "all"], "Pick one of the two"),
+        (["--api", "code", "--tool", "all"], "Pick one of the two"),
         (["--api", "lead,code,reviews,builds,scripts,helpers"], "nothing starts on the subscriptions"),
         (["--ahead", "api", "--dollars", "0"], "$0 a day"),
-        (["--ahead", "codex", "--dollars", "10"], "Dollars a day only count"),
+        (["--ahead", "tool", "--dollars", "10"], "Dollars a day only count"),
         (["--week", "100"], "never ahead of its pace"),
     ],
 )
@@ -81,9 +100,9 @@ def test_a_share_that_contradicts_itself_is_refused(cli, no_switcher, ws, argv, 
     assert len(_share_rows(ws)) == 1
 
 
-def test_choosing_codex_or_none_drops_the_dollars_and_api_brings_them_back(cli, no_switcher, ws):
+def test_choosing_the_tool_or_none_drops_the_dollars_and_api_brings_them_back(cli, no_switcher, ws):
     jrun(cli, "share", "--preset", "even", "--by", ME)
-    assert jrun(cli, "share", "--ahead", "codex", "--by", ME)[1]["share"]["day_dollars"] == 0
+    assert jrun(cli, "share", "--ahead", "tool", "--by", ME)[1]["share"]["day_dollars"] == 0
     d = jrun(cli, "share", "--ahead", "api", "--by", ME)[1]
     assert d["share"]["day_dollars"] == 10
     d = jrun(cli, "share", "--ahead", "none", "--week", "100", "--by", ME)[1]
@@ -96,7 +115,7 @@ def test_choosing_codex_or_none_drops_the_dollars_and_api_brings_them_back(cli, 
         (["--week", "5"], "from 10 to 100"),
         (["--day", "someday"], "not a weekday"),
         (["--api", "dishes"], "not a kind of work"),
-        (["--codex", "one in 40"], "not a share of Code tickets"),
+        (["--tool", "one in 40"], "not a share of Code tickets"),
         (["--ahead", "moon"], "not a choice"),
         (["--dollars", "lots"], "not an amount"),
         (["--preset", "best"], "no ready-made spread"),
@@ -129,7 +148,7 @@ def test_sentence_names_accounts_in_order_and_warns_when_a_source_is_missing():
     assert "subscriptions first (Personal 1, then Company)" in text and "Old" not in text
     assert "on API credit (Claude API key 1, then OpenAI API)" in text
     assert share.warnings(s, accounts) == [
-        "Codex is not on in Usage yet. Until it is, work set for Codex stays on the subscriptions."
+        "No helper tool is on in Usage yet. Until one is, work set for it stays on the subscriptions."
     ]
     assert share.warnings(s, accounts + [{"label": "Codex", "type": "helper-tool", "on": True}]) == []
 
@@ -151,7 +170,7 @@ def test_order_by_command_moves_accounts_and_is_in_the_history(cli, fake_switche
         ("week:70:wednesday", ["share", "--week", "70", "--day", "wednesday"]),
         ("api:reviews,scripts", ["share", "--api", "reviews,scripts"]),
         ("api:none", ["share", "--api", "none"]),
-        ("codex:4", ["share", "--codex", "4"]),
+        ("tool:4", ["share", "--tool", "4"]),
         ("ahead:both:20", ["share", "--ahead", "both", "--dollars", "20"]),
         ("clear", ["share", "--clear"]),
     ],
@@ -160,7 +179,7 @@ def test_page_clicks_become_the_share_command(ws, target, words):
     assert acts.argv_for(ws, "share", target, "human:Some Person") == [*words, "--by", "human:Some_Person"]
 
 
-@pytest.mark.parametrize("target", ["preset:all", "week:70:wed", "api:reviews;rm", "codex:", "ahead:api", "x"])
+@pytest.mark.parametrize("target", ["preset:all", "week:70:wed", "api:reviews;rm", "tool:", "ahead:api", "x"])
 def test_page_clicks_of_another_shape_are_refused(ws, target):
     with pytest.raises(Refused):
         acts.argv_for(ws, "share", target, None)
@@ -176,7 +195,9 @@ def test_page_click_refusal_and_page_model(cli, no_switcher, ws):
 
     m = page.build(cli_mod.gather(ws), ws)
     assert m["share"]["preset"] == "even" and m["share"]["sentence"].startswith("Use the subscriptions first")
-    assert any(r["text"].startswith("How work is spread: Even spread") and r["who"] == "You" for r in m["history"])
+    assert any(
+        r["text"].startswith("How work is spread: Even spread") and r["who"] == "You" for r in m["history"]
+    )
 
 
 def test_a_broken_share_file_is_reported_not_used(cli, no_switcher, ws):
@@ -190,7 +211,7 @@ def test_a_broken_share_file_is_reported_not_used(cli, no_switcher, ws):
 
 def test_a_refused_order_saves_nothing_else(cli, fake_switcher, ws):
     jrun(cli, "list")
-    code, d = jrun(cli, "share", "--preset", "save", "--order", "nobody", "--by", ME)
+    code, _d = jrun(cli, "share", "--preset", "save", "--order", "nobody", "--by", ME)
     assert code == 2 and share.load(ws) is None and not _share_rows(ws)
 
 
@@ -210,3 +231,15 @@ def test_a_newer_share_format_is_never_overwritten(cli, no_switcher, ws):
     code, v = jrun(cli, "share", "--preset", "even", "--by", ME)
     assert code == 2 and "newer orch" in v["error"]
     assert "orch.usage-share/2" in (d / "share.json").read_text()
+
+
+def test_the_helper_tool_is_named_by_its_account_label(ws):
+    rows = [
+        {"label": "Personal 1", "type": "subscription", "on": True},
+        {"label": "Second helper", "type": "helper-tool", "on": True},
+    ]
+    share.apply(ws, ME, {}, preset="even")
+    v = share.view(ws, rows)
+    assert "one in 4 Code tickets on Second helper" in v["sentence"] and v["tool"] == "Second helper"
+    assert "one in 4 Code tickets on Second helper" in v["presets"][1]["what"]
+    assert "{tool}" not in json.dumps(v)

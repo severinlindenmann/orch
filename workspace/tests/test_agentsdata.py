@@ -61,6 +61,7 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
         "login.json",
         "readonly.json",
         "reminder.json",
+        "updates.json",  # ORCH-589: read by toolupdates.py, not a fragment
     }
 
 

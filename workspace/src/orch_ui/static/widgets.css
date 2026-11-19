@@ -1053,7 +1053,8 @@ button.live-pt:hover{color:var(--brand)}
 .live-pb[data-live-body]{align-items:stretch;justify-content:flex-start;gap:var(--s3);padding:var(--s3) var(--s4);color:var(--text);text-align:left}
 .live-pb[data-live-body]>.btn{align-self:flex-start}
 .live-now{margin:0;font-weight:600;overflow-wrap:anywhere}
-.live-lines{flex:1 1 auto;min-height:var(--s8);margin:0;padding:var(--s2) var(--s3);overflow:auto;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text)}
+.live-ask{display:grid;gap:var(--s2);margin:var(--s2) 0}.live-ask-q{margin:0;font-weight:600;overflow-wrap:anywhere}.live-ask-opts,.live-ask-line{display:flex;flex-wrap:wrap;gap:var(--s2)}.live-ask-line .input{flex:1;min-width:0}
+.live-lines{flex:1 0 auto;min-height:var(--s8);margin:0;padding:var(--s2) var(--s3);overflow:auto;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text)}
 .live-meta{margin:0}
 /* the History tab of a pane (ORCH-363): the earlier sessions of the ticket, newest first, each with Reopen */
 .live-pb.live-pb-hist{align-items:stretch;justify-content:flex-start;padding:var(--s4);text-align:left;color:var(--text)}
@@ -1307,3 +1308,63 @@ body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:
 .settings-row .ctl{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:var(--s2)}
 .settings-row .ctl select{width:auto}
 @media(max-width:600px){.settings-row .ctl{justify-content:flex-start}}
+
+/* ---- Live groups (ORCH-345, draft A on draft D): an epic or a factory order on the new live page. ONE tree (.gtree)
+   in three modes: preview (the small tree on a wall tile), tree (the switcher beside a pane: main helper, its tickets
+   indented, small helpers with a dashed guide and tag, earlier sessions) and strip (the same rows in one line that
+   scrolls inside itself: a narrow pane, a split, a phone). The selected row has a brand edge; a helper that needs you
+   is orange. The message box of a pane names who receives it (.live-msg). The bar's group chip carries the helper
+   count (.lbar-n). Tokens only. ---- */
+.gtree{display:flex;flex-direction:column;gap:var(--s1);min-width:0}
+.gtree-h{display:grid;gap:2px;margin:0;padding:0 var(--s2) var(--s1)}
+.gtree-gt{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gtree-h .meta{font-size:var(--fs-meta);line-height:16px}
+.gtree-list{display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none}
+.gtree-list>li{position:relative;min-width:0;padding-left:calc(var(--s4) * var(--gd, 0))}
+.gtree-list>li[data-depth="1"]{--gd:1}
+.gtree-list>li[data-depth="2"]{--gd:2}
+.gtree-list>li[data-depth="3"],.gtree-list>li[data-depth="4"]{--gd:3}
+.gtree-list>li:not([data-depth="0"])::before{content:"";position:absolute;top:0;bottom:0;left:calc(var(--s4) * var(--gd) - var(--s2));border-left:1px solid var(--border-strong)}
+.gtree-list>li[data-small]::before{border-left-style:dashed}
+.gtree-row{display:flex;gap:var(--s2);align-items:flex-start;width:100%;min-width:0;min-height:var(--s7);padding:var(--s1) var(--s2);border:0;border-radius:var(--r1);background:none;color:var(--text);font:inherit;font-size:var(--fs-meta);line-height:16px;text-align:left;cursor:pointer;transition:background var(--dur-fast) ease}
+button.gtree-row:hover{background:var(--surface-2)}
+.gtree-row[aria-current=true]{background:var(--surface-3);box-shadow:inset 2px 0 0 var(--brand);font-weight:600}
+.gtree-row[aria-pressed=true]{background:var(--surface-3)}
+.gtree-sym{flex:none;width:12px;font-family:var(--font-mono);color:var(--text-faint)}
+.gtree-b{display:flex;flex:1 1 auto;flex-direction:column;gap:2px;min-width:0}
+.gtree-m{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s2);align-items:center;min-width:0}
+.gtree-row[data-s=working] .gtree-sym{color:var(--working)}
+.gtree-row[data-s=needs-you]{color:var(--needs-you)}
+.gtree-row[data-s=needs-you] .gtree-sym{color:var(--needs-you)}
+.gtree-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gtree-w{color:var(--text-muted);white-space:nowrap}
+.gtree-row[data-s=needs-you] .gtree-w{color:var(--needs-you);font-weight:600}
+.gtree-tag{flex:none;font-size:var(--fs-meta)}
+.gtree-tag[data-small]{border-style:dashed;background:none}
+.gtree-row[data-s=small]{color:var(--text-muted)}
+.gtree[data-mode=preview]{gap:0;margin-top:var(--s1);padding:var(--s1) var(--s2);border-radius:var(--r1);background:var(--sidebar)}
+.gtree[data-mode=preview] .gtree-t{flex:1 1 auto}
+.gtree[data-mode=preview] .gtree-row{align-items:center;min-height:0;padding:2px 0 2px calc(var(--s3) * var(--gd, 0));cursor:inherit}
+.gtree[data-mode=preview] .gtree-row[data-depth="1"]{--gd:1}
+.gtree[data-mode=preview] .gtree-row[data-depth="2"]{--gd:2}
+.gtree[data-mode=strip]{gap:var(--s1);padding:var(--s1) var(--s2);border-bottom:1px solid var(--border)}
+.gtree[data-mode=strip] .gtree-h{display:none}
+.gtree[data-mode=strip] .gtree-list{flex-direction:row;gap:var(--s1);overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin}
+.gtree[data-mode=strip] .gtree-list>li{flex:none;padding-left:0}
+.gtree[data-mode=strip] .gtree-list>li::before{display:none}
+.gtree[data-mode=strip] .gtree-row{align-items:center;max-width:calc(var(--s9) * 3);border:1px solid var(--border)}
+.gtree[data-mode=strip] .gtree-b,.gtree[data-mode=strip] .gtree-m{flex-direction:row;flex-wrap:nowrap;align-items:center;gap:var(--s2)}
+.gtree[data-mode=strip] li[data-small] .gtree-row{border-style:dashed}
+.gtree[data-mode=strip] .gtree-tag:not([data-small]){display:none}
+/* the pane of a group: the switcher on the left, the session on the right; narrow (split, right, phone): the strip on top */
+.live-gwrap{display:grid;grid-template-columns:minmax(200px,280px) minmax(0,1fr);flex:1;min-height:0}
+.live-gwrap>.gtree{padding:var(--s3) var(--s2);overflow:auto;border-right:1px solid var(--border);background:var(--sidebar)}
+.live-pane[data-narrow] .live-gwrap{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+.live-pane[data-narrow] .live-gwrap>.gtree{padding:var(--s1) var(--s2);border-right:0;overflow:visible}
+.live-gwrap>.live-pb{min-width:0}
+.live-msg{display:grid;gap:var(--s1);margin-top:auto;padding-top:var(--s2);border-top:1px solid var(--border)}
+.live-to{font-size:var(--fs-meta);line-height:16px;color:var(--text-muted)}
+.live-msg-row{display:flex;gap:var(--s2);align-items:flex-end;min-width:0}
+.live-msg-row .input{flex:1;min-width:0;min-height:var(--touch);max-height:calc(var(--s8) * 3);resize:vertical}
+.lbar-n{min-width:16px;padding:0 var(--s1);border-radius:var(--r1);background:var(--surface-3);color:var(--text-muted);font-variant-numeric:tabular-nums;text-align:center}
+@media(prefers-reduced-motion:reduce){.gtree-row{transition:none}}

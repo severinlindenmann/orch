@@ -18,8 +18,8 @@ function reviewPlainCard(c) {
 function reviewAnswered() { return array(state?.review?.answered); }
 // The cards of the stack: every open question (an add-on's own too, e.g. Factory's Start?) and every result to check.
 function reviewCount() { return reviewCards().length; }
-// The subtitle shows THE needs-you number (needsYouTotal: open questions plus results to check, exactly what this page
-// shows as cards; the Review menu entry and the top bar show the same one, ORCH-63).
+// The subtitle shows THE needs-you number (needsYouTotal: open questions, results to check and work that stopped; the
+// Review menu entry, the top bar, Home and the live bar show the same one, ORCH-63, ORCH-705).
 function reviewSubtitle() {
   // A card put off on Home ("Later today") is not in the one number, but it is still a card here: the subtitle never
   // says "Nothing waits" above a Waiting tab with cards in it (ORCH-420, owner's picture 18 Nov).
@@ -35,6 +35,45 @@ function reviewWord(answer) {
   if (answer.verdict === 'no') return it.preview?.type === 'options' ? 'None' : it.kind === 'check' ? 'Sent back' : "Don't do";
   return 'Sent back';
 }
+// ORCH-548: Looks good on a Check card waits 6 s for Undo, then its save takes seconds more (3 s in the middle,
+// 18 s at worst on a busy workspace). Meanwhile the ticket shows Done on every page, with one line that it is being
+// saved (ticket.js); Undo or a refusal reads the whole state again, so the page shows what really is.
+const acceptSaving = new Map();  // ticket id -> when Looks good was given
+function acceptTicketOf(it) {
+  const m = REVIEW_ID.exec(String(it?.id || ''));
+  return m && m[3] ? m[3] : null;  // only a Check card (core:review:<ticket>) moves a ticket to Done
+}
+// Called by accept() in app.js on every new state: a ticket whose Looks good is still being saved stays Done.
+function acceptOverlay(next) {
+  if (!Array.isArray(next?.tickets) || !next.tickets.some(t => t && (acceptSaving.has(t.id) || t.accept_saving))) return next;
+  return {...next, tickets:next.tickets.map(t => {
+    if (!t) return t;
+    if (acceptSaving.has(t.id)) return t.status === 'review' ? {...t, status:'done', accept_saving:true, accept_was:'review'} : t;
+    if (!t.accept_saving) return t;
+    const {accept_saving, ...rest} = t;  // accept_was stays until the server's state replaces the ticket
+    return rest;
+  })};
+}
+function acceptHold(it, verdict) {
+  const tid = acceptTicketOf(it);
+  if (!tid || verdict !== 'ok' || snapshot) return;
+  acceptSaving.set(tid, Date.now());
+  if (state) state = acceptOverlay(state);
+  render();
+}
+function acceptRelease(it, saved) {
+  const tid = acceptTicketOf(it);
+  if (!tid || !acceptSaving.delete(tid)) return;
+  if (saved) { if (state) state = acceptOverlay(state); render(); return; }  // the answer's own state already says Done
+  // Undo or a refusal: back to Check at once, then the server's whole state (its revision is cleared, so the page
+  // takes it even when nothing changed on the server: the Done was only the page's own)
+  if (state) state = {...acceptOverlay(state), rev:''};
+  if (state) state.tickets = state.tickets.map(t => t && t.id === tid && t.status === 'done' && !t.accept_saving && t.accept_was ? {...t, status:t.accept_was} : t);
+  render();
+  wantFull = true;
+  refresh();
+}
+
 // What the page's api needs, from the dashboard: state in, one signed click out, files through /api/file.
 function reviewApi() {
   return {
@@ -56,7 +95,7 @@ function reviewApi() {
     get box() { return snapshot || typeof FEEDBACK_BOX === 'undefined' ? null : FEEDBACK_BOX; },
     attach: async ({ticket, files}) => {
       if (snapshot || typeof ticket !== 'string') return {ok:false, error:{code:'refused', message:'Files cannot be added here.'}};
-      const r = await ticketAttachFiles(ticket, files);
+      const r = await ticketAttachFiles(ticket, files, true);  // the feedback folder: the card being answered stays the same
       return r.ok ? r : {ok:false, error:{code:'error', message:String(r.text || 'The files could not be added.').slice(0, 300)}};
     },
     // "Add note" on the Comment sheet: the words (and files) go to the ticket's helper (queued if none is running); no verdict, the card stays.
@@ -68,6 +107,8 @@ function reviewApi() {
       const r = await act('run.send', {ticket, text:ticketTalkText(text, kept.names)});
       return r.ok ? {ok:true} : {ok:false, error:{code:'error', message:String(r.text || 'Could not save the note.').slice(0, 300)}};
     },
+    hold: (it, verdict) => acceptHold(it, verdict),
+    release: it => acceptRelease(it, false),
     answer: async ({id, digest, verdict, picked, note}) => {
       const m = REVIEW_ID.exec(String(id || ''));
       if (!m) return {ok:false, error:{code:'not_found', message:'That card is not here any more.'}};
@@ -75,7 +116,7 @@ function reviewApi() {
       if (picked) args.picked = picked;
       if (note) args.note = note;
       const r = await act('review.answer', args);
-      if (r.ok) return {ok:true};
+      if (r.ok) { acceptRelease({id}, true); return {ok:true}; }
       if (r.status === 403) return {ok:false, error:{code:'needs_person', message:r.text}};
       try {
         const body = JSON.parse(r.text);

@@ -30,7 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
 
-from orch import history, review, runs, safefile
+from orch import history, review, runs, safefile, tickets
 from orch.errors import Refused
 
 DEFAULT_PORT = 8432
@@ -369,13 +369,29 @@ def _actor() -> str:
     return f"human:{who or 'user'}"
 
 
-def _child(argv: list[str], root: Path, env: dict):
+def _child(argv: list[str], root: Path, env: dict, fds: tuple[int, ...] = ()):
     import subprocess
 
     return subprocess.run(
         [sys.executable, "-I", "-P", "-m", "orch", *argv],
         cwd=root, env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL,
+        **({"pass_fds": fds} if fds else {}),
     )  # fmt: skip
+
+
+def _person_grant(root: Path, env: dict) -> tuple[int, ...]:
+    """ORCH-582: the signed-in page hands its one answer a one-time person grant, so a draft can be picked
+    here (as on the dashboard). Never when this server runs under an agent tool: a helper's page picks no
+    draft."""
+    if tickets.agent_tool():
+        return ()
+    from orch import renew
+
+    try:
+        fd = renew.hand_over(env, renew.GRANT_ENV, renew.grant(root))
+    except Exception:  # noqa: BLE001 - no guarded orch home: drafts stay unanswerable here
+        return ()
+    return () if fd is None else (fd,)
 
 
 def run_answer(root: Path, argv: list[str]) -> tuple[int, dict]:
@@ -389,12 +405,17 @@ def run_answer(root: Path, argv: list[str]) -> tuple[int, dict]:
         env = {**human_environ(os.environ), "ORCH_ROOT": str(root), "ORCH_VIA": "page"}
     except Exception:  # noqa: BLE001 - cannot tell whose environment this is: refuse
         return 1, _err("refused", "orch could not check who is acting here.")
+    fds = _person_grant(root, env)
     try:
-        r = _child(argv, root, env)
+        r = _child(argv, root, env, fds)
     except subprocess.TimeoutExpired:
         return 1, _err("busy", "That took too long. Please try again.")
     except OSError:
         return 1, _err("refused", "The orch command could not be started.")
+    finally:
+        for fd in fds:
+            with contextlib.suppress(OSError):
+                os.close(fd)
     if r.returncode == 0:
         return 0, {"ok": True}
     try:

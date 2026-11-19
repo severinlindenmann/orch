@@ -6,8 +6,8 @@ One small file next to accounts.json, schema `orch.usage-share/1`:
         "week_pct": 70,                 # at most this % of a subscription's week used ...
         "by_day": "wednesday",          # ... by the end of this weekday (day 3 of the 7 days of that week)
         "api_for": ["reviews", "scripts"],  # these kinds of work run on API credit
-        "codex_one_in": 4,              # 0 = no Code tickets on Codex, 1 = all, N = one in N
-        "when_ahead": "api",            # a subscription ahead of that pace: new starts go to api | codex | both | none
+        "tool_one_in": 4,              # Code tickets on the helper tool: 0 = none, 1 = all, N = one in N
+        "when_ahead": "api",            # a subscription ahead of that pace: new starts go to api | tool | both | none
         "day_dollars": 10}}             # ... for up to this many dollars a day (only with api or both)
 
 The order of the accounts is the order Usage already keeps (`orch usage order`); the share reads it back.
@@ -31,7 +31,11 @@ SCHEMA = "orch.usage-share/1"
 ACCOUNT = "share"  # the history lines of the share carry this instead of an account id
 LABEL = "How work is spread"
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
-AHEAD = ("api", "codex", "both", "none")
+AHEAD = ("api", "tool", "both", "none")
+# The helper tool's name is never in this code: words carry TOOL and `fill` puts in the label of the first helper tool
+# account that is on (its name as the person sees it in Usage), or "the helper tool".
+TOOL = "{tool}"
+TOOL_FALLBACK = "the helper tool"
 KIND_WORDS = {
     "lead": "Lead",
     "code": "Code",
@@ -42,8 +46,8 @@ KIND_WORDS = {
 }
 AHEAD_WORDS = {
     "api": "API credit",
-    "codex": "Codex",
-    "both": "API credit, then Codex",
+    "tool": TOOL,
+    "both": f"API credit, then {TOOL}",
     "none": "the subscriptions",
 }
 MIN_PCT, MAX_PCT = 10, 100
@@ -54,24 +58,24 @@ MAX_DOLLARS = 1000
 PRESETS = {
     "save": {
         "name": "Save the subscription",
-        "what": "API credit and Codex take a big share, so the subscriptions last all week.",
+        "what": "API credit and {tool} take a big share, so the subscriptions last all week.",
         "share": {
             "week_pct": 50,
             "by_day": "wednesday",
             "api_for": ["reviews", "scripts", "helpers"],
-            "codex_one_in": 2,
+            "tool_one_in": 2,
             "when_ahead": "both",
             "day_dollars": 20,
         },
     },
     "even": {
         "name": "Even spread",
-        "what": "Reviews and Scripts on API credit, one in 4 Code tickets on Codex.",
+        "what": "Reviews and Scripts on API credit, one in 4 Code tickets on {tool}.",
         "share": {
             "week_pct": 70,
             "by_day": "wednesday",
             "api_for": ["reviews", "scripts"],
-            "codex_one_in": 4,
+            "tool_one_in": 4,
             "when_ahead": "api",
             "day_dollars": 10,
         },
@@ -83,7 +87,7 @@ PRESETS = {
             "week_pct": 90,
             "by_day": "friday",
             "api_for": [],
-            "codex_one_in": 0,
+            "tool_one_in": 0,
             "when_ahead": "api",
             "day_dollars": 5,
         },
@@ -96,6 +100,18 @@ def path(root: Path) -> Path:
     return store.usage_dir(root) / "share.json"
 
 
+def tool_name(accounts: list[dict]) -> str:
+    """The helper tool as the person sees it in Usage: the first helper tool account that is on."""
+    for a in accounts:
+        if a.get("type") == "helper-tool" and a.get("on", True) and str(a.get("label", "")).strip():
+            return a["label"].strip()
+    return TOOL_FALLBACK
+
+
+def fill(text: str, tool: str) -> str:
+    return text.replace(TOOL, tool)
+
+
 # ---------------------------------------------------------------- checking
 
 
@@ -103,7 +119,7 @@ def _shape_ok(s) -> bool:
     """The file's own shape: right fields and types. Contradictions are `problems`, not shape."""
     if not isinstance(s, dict) or set(s) != set(FIELDS):
         return False
-    pct, one_in, dollars = s["week_pct"], s["codex_one_in"], s["day_dollars"]
+    pct, one_in, dollars = s["week_pct"], s["tool_one_in"], s["day_dollars"]
     if not isinstance(pct, int) or isinstance(pct, bool) or not MIN_PCT <= pct <= MAX_PCT:
         return False
     if not isinstance(one_in, int) or isinstance(one_in, bool) or not 0 <= one_in <= MAX_ONE_IN:
@@ -127,18 +143,17 @@ def problems(s: dict) -> list[str]:
             "Every kind of work is on API credit, so nothing starts on the subscriptions first. "
             "Leave at least one kind on the subscriptions."
         )
-    if "code" in s["api_for"] and s["codex_one_in"] == 1:
-        out.append("Code is on API credit and all Code tickets are on Codex. Pick one of the two.")
+    if "code" in s["api_for"] and s["tool_one_in"] == 1:
+        out.append("Code is on API credit and all Code tickets are on {tool}. Pick one of the two.")
     if ahead in ("api", "both") and dollars <= 0:
         out.append(
-            "New starts cannot go to API credit with $0 a day. Raise the dollars a day, or send them to Codex."
+            "New starts cannot go to API credit with $0 a day. Raise the dollars a day, or send them to {tool}."
         )
-    if ahead in ("codex", "none") and dollars > 0:
+    if ahead in ("tool", "none") and dollars > 0:
         out.append(
             "Dollars a day only count when new starts go to API credit; "
-            + ("they go to Codex. " if ahead == "codex" else "they stay on the subscriptions. ")
-            + 
-"Set the dollars to 0 or send them to API credit."
+            + ("they go to {tool}. " if ahead == "tool" else "they stay on the subscriptions. ")
+            + "Set the dollars to 0 or send them to API credit."
         )
     if s["week_pct"] == MAX_PCT and ahead != "none":
         out.append(
@@ -213,10 +228,10 @@ def apply(root: Path, who: str, changes: dict | None, preset: str | None = None,
             else:
                 base = copy.deepcopy(old) if old else copy.deepcopy(PRESETS["even"]["share"])
             changes = dict(changes or {})
-            # dollars a day belong to "API credit": choosing Codex or nothing without naming dollars sets them to 0;
+            # dollars a day belong to "API credit": choosing the helper tool or nothing without naming dollars sets them to 0;
             # choosing API credit again without naming dollars brings back a day limit that is not 0
             if "when_ahead" in changes and "day_dollars" not in changes:
-                if changes["when_ahead"] in ("codex", "none"):
+                if changes["when_ahead"] in ("tool", "none"):
                     changes["day_dollars"] = 0
                 elif base["day_dollars"] <= 0:
                     changes["day_dollars"] = PRESETS["even"]["share"]["day_dollars"]
@@ -227,12 +242,14 @@ def apply(root: Path, who: str, changes: dict | None, preset: str | None = None,
                 raise Refused("That share cannot be saved. Run `orch usage share` to see it, then try again.")
             bad = problems(base)
             if bad:
-                raise Refused(" ".join(bad))
+                raise Refused(fill(" ".join(bad), tool_name(store.load(root)["accounts"])))
             new = base
         if new == old:
             return {"share": old, "changed": False}
         _write(root, new)
-        store._append_history(root, [history_line(who, old, new, preset)])
+        line = history_line(who, old, new, preset)
+        line["what"] = fill(line["what"], tool_name(store.load(root)["accounts"]))
+        store._append_history(root, [line])
         return {"share": new, "changed": True}
 
 
@@ -274,17 +291,19 @@ def sentence(s: dict | None, accounts: list[dict] | None = None) -> str:
     subs = [a["label"] for a in accounts if a.get("type") == "subscription"]
     apis = [a["label"] for a in accounts if a.get("type") == "api-key"]
     api_part = (
-        f"run {kinds_words(s['api_for'])} on API credit{_chain(apis)}" if s["api_for"] else "run nothing on API credit"
+        f"run {kinds_words(s['api_for'])} on API credit{_chain(apis)}"
+        if s["api_for"]
+        else "run nothing on API credit"
     )
-    codex_part = f"{one_in_words(s['codex_one_in'])} Code tickets on Codex"
+    tool_part = f"{one_in_words(s['tool_one_in'])} Code tickets on {TOOL}"
     text = (
         f"Use the subscriptions first{_chain(subs)}, up to {s['week_pct']} % of their week by {day_word(s['by_day'])}; "
-        f"{api_part} and {codex_part}; "
+        f"{api_part} and {tool_part}; "
     )
     if s["when_ahead"] == "none" or s["week_pct"] == MAX_PCT:
         text += "new starts stay on the subscriptions even when one is ahead of that pace."
-    elif s["when_ahead"] == "codex":
-        text += "when a subscription is ahead of that pace, send new starts to Codex."
+    elif s["when_ahead"] == "tool":
+        text += "when a subscription is ahead of that pace, send new starts to {tool}."
     else:
         text += (
             f"when a subscription is ahead of that pace, send new starts to {AHEAD_WORDS[s['when_ahead']]} "
@@ -302,16 +321,18 @@ def counts(s: dict | None, resets: dict[str, str] | None = None) -> list[str]:
     if resets:
         resets_part = " (" + "; ".join(f"{k}: {v}" for k, v in resets.items()) + ")"
     out = [
-        f"{s['week_pct']} % counts how much of a subscription's week is used. By {day_word(s['by_day'])} means after "
-        f"{day_no} of the 7 days of that subscription's own week; each week starts again at its own reset{resets_part}."
-    ]
-    if s["codex_one_in"] > 1:
-        out.append(
-            f"One in {s['codex_one_in']} counts helper starts of Code tickets: every {s['codex_one_in']}th Code start "
-            "goes to Codex. The count starts again every day at midnight, this computer's time."
+        (
+            f"{s['week_pct']} % counts how much of a subscription's week is used. By {day_word(s['by_day'])} means after "
+            f"{day_no} of the 7 days of that subscription's own week; each week starts again at its own reset{resets_part}."
         )
-    elif s["codex_one_in"] == 1:
-        out.append("All Code ticket starts go to Codex.")
+    ]
+    if s["tool_one_in"] > 1:
+        out.append(
+            f"One in {s['tool_one_in']} counts helper starts of Code tickets: every {s['tool_one_in']}th Code start "
+            "goes to {tool}. The count starts again every day at midnight, this computer's time."
+        )
+    elif s["tool_one_in"] == 1:
+        out.append("All Code ticket starts go to {tool}.")
     if s["when_ahead"] in ("api", "both") and s["week_pct"] < MAX_PCT:
         out.append(
             f"{money(s['day_dollars'])} a day counts dollars spent on API credit for new starts while a subscription "
@@ -325,8 +346,8 @@ def _part_words(field: str, s: dict) -> str:
         return f"up to {s['week_pct']} % of the week by {day_word(s['by_day'])}"
     if field == "api_for":
         return f"{kinds_words(s['api_for'])} on API credit"
-    if field == "codex_one_in":
-        return f"{one_in_words(s['codex_one_in'])} Code tickets on Codex"
+    if field == "tool_one_in":
+        return f"{one_in_words(s['tool_one_in'])} Code tickets on {TOOL}"
     if s["when_ahead"] in ("api", "both"):
         return f"when ahead: {AHEAD_WORDS[s['when_ahead']]} up to {money(s['day_dollars'])} a day"
     if s["when_ahead"] == "none":
@@ -342,7 +363,7 @@ def history_line(who: str, old: dict | None, new: dict | None, preset: str | Non
     elif old is None:
         what = sentence(new)
     else:
-        groups = [("week_pct", "by_day"), ("api_for",), ("codex_one_in",), ("when_ahead", "day_dollars")]
+        groups = [("week_pct", "by_day"), ("api_for",), ("tool_one_in",), ("when_ahead", "day_dollars")]
         parts = [
             f"{_part_words(g[0], new)} (was {_part_words(g[0], old)})"
             for g in groups
@@ -376,13 +397,15 @@ def warnings(s: dict | None, accounts: list[dict]) -> list[str]:
     on = [a for a in accounts if a.get("on", True)]
     out = []
     has_api = any(a.get("type") == "api-key" for a in on)
-    has_codex = any(a.get("type") == "helper-tool" and "codex" in a.get("label", "").lower() for a in on)
+    has_tool = any(a.get("type") == "helper-tool" and True for a in on)
     if not has_api and (s["api_for"] or s["when_ahead"] in ("api", "both")):
         out.append(
             "No API credit is on in Usage yet. Until one is, work set for API credit stays on the subscriptions."
         )
-    if not has_codex and (s["codex_one_in"] > 0 or s["when_ahead"] in ("codex", "both")):
-        out.append("Codex is not on in Usage yet. Until it is, work set for Codex stays on the subscriptions.")
+    if not has_tool and (s["tool_one_in"] > 0 or s["when_ahead"] in ("tool", "both")):
+        out.append(
+            "No helper tool is on in Usage yet. Until one is, work set for it stays on the subscriptions."
+        )
     return out
 
 
@@ -396,7 +419,7 @@ def week_resets(rows: list[dict]) -> dict[str, str]:
         if not at:
             continue
         try:
-            when = datetime.fromisoformat(str(at).replace("Z", "+00:00")).astimezone()
+            when = datetime.fromisoformat(str(at)).astimezone()
         except ValueError:
             continue
         out[r["label"]] = when.strftime("%a %H:%M")
@@ -407,18 +430,25 @@ def view(root: Path, rows: list[dict]) -> dict:
     """The share read back for the command and the page: the sentence, what each number counts, open points,
     the order of the accounts and the ready-made spreads. `rows`: accounts with their use (cli.gather)."""
     s = load(root)
+    tool = tool_name(rows)
     notes = warnings(s, rows)
     if unreadable(root):
-        notes.insert(0, "The share file .orch/addons/usage/share.json could not be read; the next change replaces it.")
+        notes.insert(
+            0, "The share file .orch/addons/usage/share.json could not be read; the next change replaces it."
+        )
     return {
         "share": s,
         "preset": preset_of(s),
-        "sentence": sentence(s, rows),
-        "counts": counts(s, week_resets(rows)),
+        "sentence": fill(sentence(s, rows), tool),
+        "counts": [fill(c, tool) for c in counts(s, week_resets(rows))],
         "warnings": notes,
-        "problems": problems(s) if s else [],
+        "problems": [fill(x, tool) for x in problems(s)] if s else [],
+        "tool": tool,
         "order": [r["label"] for r in rows],
-        "presets": [{"id": k, "name": p["name"], "what": p["what"], "share": p["share"]} for k, p in PRESETS.items()],
+        "presets": [
+            {"id": k, "name": p["name"], "what": fill(p["what"], tool), "share": p["share"]}
+            for k, p in PRESETS.items()
+        ],
         "kinds": [{"id": k, "label": KIND_WORDS[k]} for k in KINDS],
         "days": list(DAYS),
     }

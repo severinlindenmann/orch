@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-27 steps: 17 ready (the script clicks them), 10 pending (not built yet).
+32 steps: 23 ready (the script clicks them), 9 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -90,7 +90,8 @@ Must be seen:
 
 - The tile is orange and first after the pinned ones.
 - Its sentence is the question.
-- Nothing can be answered on the wall itself; after the answer the tile turns back to Working.
+- Nothing can be answered on the wall itself; the layer shows the question with its options and a field for an own answer.
+- One click on an option answers it; the question leaves the pane and the tile turns back to Working.
 
 ## 6. Focus button on a ticket and Open ticket on a session
 
@@ -288,13 +289,15 @@ Do:
 
 1. Open a session that needs you from the bar.
 2. Look at the pane: what it does now, its last lines and the line under them.
-3. Open the model choice of a working session and pick another model.
+3. Press Stop in the pane; open an idle session and read its Stop button.
+4. Open the model choice of a working session and pick another model.
 
 Must be seen:
 
 - The open question, the last lines of its screen, then tool and model (for example "Helper · Opus").
 - How long it is open and how long it stays (warm while it works, or when it closes for being idle).
 - All of it stays current while you look; the keyboard place does not jump.
+- Stop in the pane stops its helper; an idle helper's button says Stop idle helper.
 - A new model applies when the helper finishes its current step (or at its next start) and says so.
 
 ## 17. Chat: messages with the results inside
@@ -432,7 +435,7 @@ Must be seen:
 ## 25. Phone width: one session at a time
 
 - Part: phone width (draft D feature 7)
-- State: pending, waits for: The layer: bottom, right, full screen (crew task layer)
+- State: ready, clicked by the script
 - Pictures: `fd-25-phone-1280.png`, `fd-25-phone-1920.png`, `fd-25-phone-390.png`
 
 Do:
@@ -475,4 +478,86 @@ Do:
 Must be seen:
 
 - A new model applies from the next fresh start and says so.
+
+## 28. An epic and its helpers in one place
+
+- Part: layer
+- State: ready, clicked by the script
+- Pictures: `fd-28-groups-1280.png`, `fd-28-groups-1920.png`, `fd-28-groups-390.png`
+
+Do:
+
+1. Open Focus while an epic has a main helper and helpers on its tickets.
+2. Click the epic's tile.
+3. Click another helper in the list beside the session, then write it a message.
+
+Must be seen:
+
+- The epic is one tile with its helpers counted ("3 helpers · 2 small helpers"), orange while one of them needs you.
+- The click opens the helper that needs you, with the main helper, every helper, the small helpers (watch only) and Earlier sessions beside it.
+- A click on a helper shows it in the same pane; the message box says who gets the message.
+- On a phone the list is one line that scrolls inside itself.
+
+## 29. The address of a ticket opens its session
+
+- Part: layer (draft D feature 3)
+- State: ready, clicked by the script
+- Pictures: `fd-29-address-1280.png`, `fd-29-address-1920.png`, `fd-29-address-390.png`
+
+Do:
+
+1. Open the address of a ticket's session (#addon/focus/t/<ticket>) in a new tab.
+2. Open the address of a ticket that does not exist.
+
+Must be seen:
+
+- The wall shows with that session open in the layer, the keyboard in its pane.
+- An unknown ticket shows the wall, opens nothing and says "There is no ticket with this address."
+
+## 30. Keyboard only: wall, layer and back to the bar
+
+- Part: wall (draft D feature 8)
+- State: ready, clicked by the script
+- Pictures: `fd-30-keyboard-1280.png`, `fd-30-keyboard-1920.png`, `fd-30-keyboard-390.png`
+
+Do:
+
+1. Without a mouse, press Tab until a tile is marked, then Enter.
+2. Press Esc until the layer is back in the bar.
+
+Must be seen:
+
+- Enter opens the session in the layer with the keyboard in it.
+- Each Esc goes back one step; at the end the keyboard is on the bar.
+
+## 31. Two tabs: a pin and a name show in both
+
+- Part: sessions (draft D feature 11)
+- State: ready, clicked by the script
+- Pictures: `fd-31-two-tabs-1280.png`, `fd-31-two-tabs-1920.png`, `fd-31-two-tabs-390.png`
+
+Do:
+
+1. Open Focus in two tabs.
+2. In one, pin a session and give it a name.
+
+Must be seen:
+
+- The other tab shows the pin and the name within a few seconds, without a reload.
+
+## 32. A session that ends while it is open
+
+- Part: sessions (draft D feature 4)
+- State: ready, clicked by the script
+- Pictures: `fd-32-ended-1280.png`, `fd-32-ended-1920.png`, `fd-32-ended-390.png`
+
+Do:
+
+1. Open a working session in the layer.
+2. Let its helper stop.
+
+Must be seen:
+
+- Its tile leaves Working and says No session.
+- Its pane offers the Start choice.
 

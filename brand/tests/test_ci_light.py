@@ -39,6 +39,13 @@ def test_words_and_style_always_run():
     assert names(steps) == ["brand: words, tokens, CI time limits", "style rules"]
 
 
+def test_a_workspace_or_addon_change_checks_the_generated_files():
+    for f in ("workspace/src/orch/store.py", "workspace-addons/sync/src/orch_sync/orch-addon.toml"):
+        steps = light.plan([f], TEXTS, ADDONS)
+        assert "generated files are current (shipped_addons.json)" in names(steps)
+    assert "generated files are current (shipped_addons.json)" not in names(light.plan(["docs/x.md"], TEXTS, ADDONS))
+
+
 def test_a_changed_module_runs_the_tests_that_import_it_and_no_others():
     steps = light.plan(["workspace/src/orch/store.py"], TEXTS, ADDONS)
     cmd = steps[-1]["cmd"]
