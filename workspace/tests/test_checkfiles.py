@@ -47,6 +47,11 @@ def _write(proj, name, doc):
     (d / f"{name}.json").write_text(json.dumps(doc), encoding="utf-8")
 
 
+def _ok(proj, name):
+    """The person approves the content they were shown (its short hash, as orch checks list prints it)."""
+    return checkfiles.approve(proj, name, "human:Ann", checkfiles.short(checkfiles.digest(proj, name)))
+
+
 def _warnings(rows):
     return [r for r in rows if r["state"] != "works"]
 
@@ -89,15 +94,17 @@ def test_a_new_check_file_runs_only_once_approved(proj, databricks):
     _write(proj, "db-dev", doc)
     rows = health.overview(proj, NOW)
     assert databricks == []  # nothing ran
-    assert rows[0]["approve"] == "new" and rows[0]["sign_in"] == "orch checks approve db-dev"
-    checkfiles.approve(proj, "db-dev", "human:Ann")
+    assert rows[0]["approve"] == "new" and rows[0]["sign_in"] == (
+        f"orch checks approve db-dev --hash {checkfiles.short(checkfiles.digest(proj, 'db-dev'))}"
+    )
+    _ok(proj, "db-dev")
     rows = health.overview(proj, NOW)
     assert rows[0]["state"] == "works" and not rows[0].get("approve") and len(databricks) == 1
 
 
 def test_a_changed_check_file_must_be_approved_again(proj, databricks):
     _write(proj, "db-dev", {"command": ["databricks", "current-user", "me", "--profile", "dev"]})
-    checkfiles.approve(proj, "db-dev", "human:Ann")
+    _ok(proj, "db-dev")
     _write(proj, "db-dev", {"command": ["databricks", "current-user", "me", "--profile", "other"]})
     rows = health.overview(proj, NOW)
     assert rows[0]["approve"] == "changed" and databricks == []
@@ -107,7 +114,7 @@ def test_a_changed_check_file_must_be_approved_again(proj, databricks):
 def test_a_changed_script_must_be_approved_again(proj):
     _write(proj, "api", {"script": "api.py"})
     (checkfiles.folder(proj) / "api.py").write_text("print(1)\n")
-    checkfiles.approve(proj, "api", "human:Ann")
+    _ok(proj, "api")
     assert [r["name"] for r in checkfiles.recipes(proj)] == ["api"]
     (checkfiles.folder(proj) / "api.py").write_text("print(2)\n")
     assert checkfiles.recipes(proj) == []
@@ -127,9 +134,67 @@ def test_an_agent_cannot_approve(proj, monkeypatch, env):
         checkfiles.approve(proj, "x", "agent:claude")
 
 
+def test_approve_without_the_hash_shows_what_it_runs_and_approves_nothing(proj):
+    _write(proj, "x", {"script": "x.py", "key": "api-key"})
+    (checkfiles.folder(proj) / "x.py").write_text("print(1)\n")
+    h = checkfiles.short(checkfiles.digest(proj, "x"))
+    with pytest.raises(Refused) as e:
+        checkfiles.approve(proj, "x", "human:Ann")
+    assert "the script .orch/checks/x.py, given the key api-key" in str(e.value)
+    assert f"orch checks approve x --hash {h}" in str(e.value)
+    with pytest.raises(Refused):
+        checkfiles.approve(proj, "x", "human:Ann", h[:6])  # too short to bind the content
+    assert checkfiles.recipes(proj) == []
+
+
+def test_a_file_changed_after_the_person_looked_is_refused(proj):
+    """The race of the security review (ORCH-538): the person reads the file and its hash, a helper swaps
+    the file or its script before they press approve; approve must not take the new content."""
+    _write(proj, "x", {"script": "x.py"})
+    (checkfiles.folder(proj) / "x.py").write_text("print('fine')\n")
+    seen = checkfiles.short(checkfiles.digest(proj, "x"))
+    (checkfiles.folder(proj) / "x.py").write_text("print('bad')\n")  # swapped in between
+    with pytest.raises(Refused, match="changed since you looked"):
+        checkfiles.approve(proj, "x", "human:Ann", seen)
+    _write(proj, "x", {"script": "y.py", "key": "admin"})
+    (checkfiles.folder(proj) / "y.py").write_text("print('bad')\n")
+    with pytest.raises(Refused, match="changed since you looked"):
+        checkfiles.approve(proj, "x", "human:Ann", seen)
+    assert checkfiles.recipes(proj) == [] and "x" not in checkfiles._approved(proj)
+
+
+def test_a_file_swapped_while_orch_adds_a_template_is_not_approved(proj, monkeypatch, databricks):
+    """The race of the security review (ORCH-538): a helper replaces the file orch just wrote from a template
+    (with a script that gets a key) before orch records it; only orch's own bytes may count as approved."""
+    real = checkfiles._write
+
+    def racing(root, name, doc):
+        raw = real(root, name, doc)
+        _write(root, name, {"script": "evil.py", "key": "admin"})
+        (checkfiles.folder(root) / "evil.py").write_text("print('evil')\n")
+        return raw
+
+    monkeypatch.setattr(checkfiles, "_write", racing)
+    checkfiles.add_from_template(proj, "databricks", "dev")
+    e = next(x for x in checkfiles.entries(proj) if x["name"] == "databricks-dev")
+    assert e["status"] == "changed" and checkfiles.recipes(proj) == []
+
+
+def test_an_added_template_is_approved_as_written(proj, databricks):
+    r = checkfiles.add_from_template(proj, "databricks", "dev")
+    assert [x["name"] for x in checkfiles.recipes(proj)] == ["databricks-dev"]
+    assert r["v"] == checkfiles.digest(proj, "databricks-dev")[:16]
+
+
+def test_a_badly_named_check_file_is_never_shown(proj):
+    _write(proj, "bad\x1b[2Jname", {"command": ["xtool", "status"]})
+    _write(proj, "Upper", {"command": ["xtool", "status"]})
+    assert checkfiles.entries(proj) == [] and checkfiles.waiting_rows(proj) == []
+
+
 def test_what_was_approved_lives_in_the_guarded_home_not_in_the_project(proj):
     _write(proj, "x", {"command": ["xtool", "status"]})
-    checkfiles.approve(proj, "x", "human:Ann")
+    _ok(proj, "x")
     assert keystore.record_read(proj, "checks")["approved"]["x"] == checkfiles.digest(proj, "x")
     assert sorted(p.name for p in checkfiles.folder(proj).iterdir()) == ["x.json"]
 
@@ -153,7 +218,7 @@ def test_a_bad_check_file_never_runs_and_cannot_be_approved(proj, doc):
     assert checkfiles.recipes(proj) == []
     assert checkfiles.waiting_rows(proj)[0]["approve"] == "broken"
     with pytest.raises(Refused):
-        checkfiles.approve(proj, "bad", "human:Ann")
+        _ok(proj, "bad")
 
 
 def test_files_starting_with_underscore_never_run(proj):
@@ -190,7 +255,7 @@ def test_interval_scheduling(proj, databricks):
         proj, "fast", {"command": ["databricks", "current-user", "me", "--profile", "b"], "interval": "5m"}
     )
     for n in ("slow", "fast"):
-        checkfiles.approve(proj, n, "human:Ann")
+        _ok(proj, n)
     doc = health.check(proj, NOW)
     assert len(databricks) == 2 and doc["next_at"] == "2026-11-18T12:05:00Z"
     assert not health.due(proj, (NOW + timedelta(minutes=4)).timestamp())
@@ -211,7 +276,7 @@ def test_a_timeout_counts_as_unreachable_and_uses_the_check_s_own_limit(proj, mo
 
     monkeypatch.setattr(health.subprocess, "run", fake)
     _write(proj, "slow", {"command": ["slowtool", "status"], "timeout": "20s"})
-    checkfiles.approve(proj, "slow", "human:Ann")
+    _ok(proj, "slow")
     rows = health.overview(proj, NOW)
     assert rows[0]["state"] == "unreachable" and seen == [20]
 
@@ -220,7 +285,7 @@ def test_a_missing_tool_counts_as_unreachable(proj, databricks):
     _write(proj, "gone", {"command": ["nothere", "status"]})
     _write(proj, "needs", {"command": ["databricks", "current-user", "me"], "requires": ["jq"]})
     for n in ("gone", "needs"):
-        checkfiles.approve(proj, n, "human:Ann")
+        _ok(proj, n)
     rows = {r["name"]: r["state"] for r in health.overview(proj, NOW)}
     assert rows == {"gone": "unreachable", "needs": "unreachable"} and databricks == []
 
@@ -235,7 +300,7 @@ def test_a_script_check_gets_its_key_as_a_variable_only(proj, monkeypatch):
         "key = os.read(int(fd), 4096).decode() if fd else os.environ.get('ORCH_CHECK_KEY')\n"
         "sys.exit(0 if key == 'tok-12345678' else 3)\n"
     )
-    checkfiles.approve(proj, "api", "human:Ann")
+    _ok(proj, "api")
     r = checkfiles.recipes(proj)[0]
     with checkfiles.prepared(proj, r) as (argv, env, fds):
         assert argv[:2] == [sys.executable, "-I"] and "tok-12345678" not in json.dumps(argv)
@@ -251,7 +316,7 @@ def test_a_script_swapped_once_approved_does_not_run(proj, monkeypatch):
     monkeypatch.setattr(health, "helper_recipes", lambda: [])
     _write(proj, "api", {"script": "api.py"})
     (checkfiles.folder(proj) / "api.py").write_text("import sys; sys.exit(0)\n")
-    checkfiles.approve(proj, "api", "human:Ann")
+    _ok(proj, "api")
     r = checkfiles.recipes(proj)[0]  # approved when it was read ...
     (checkfiles.folder(proj) / "api.py").write_text("import sys; sys.exit(0)  # other\n")  # ... then swapped
     with checkfiles.prepared(proj, r) as (argv, _, _):
@@ -269,7 +334,7 @@ def test_a_linked_or_huge_script_is_never_read(proj, tmp_path):
     (checkfiles.folder(proj) / "huge.py").write_bytes(b"#" * (checkfiles._FILE_MAX + 1))
     for n in ("linked", "huge"):
         assert checkfiles._load(proj, n)[2] is None
-        checkfiles.approve(proj, n, "human:Ann")
+        _ok(proj, n)
     assert all(health.run_one(proj, r) == (None, None, False) for r in checkfiles.recipes(proj))
 
 
@@ -278,7 +343,7 @@ def test_phone_rows_skip_checks_that_wait_and_treat_tool_as_login(proj, databric
 
     _write(proj, "waits", {"command": ["databricks", "x"]})
     _write(proj, "cli", {"command": ["databricks", "y"], "kind": "tool"})
-    checkfiles.approve(proj, "cli", "human:Ann")
+    _ok(proj, "cli")
     items = health.check(proj, NOW)["items"]
     got = phone_alerts.known(proj, items)
     assert [(x["name"], x["kind"]) for x in got] == [("cli", "login")]
@@ -300,9 +365,13 @@ def test_checks_command(proj, run, databricks):
     assert code == 0 and "databricks auth login --profile pilatus_hub_sbox" in out
     _write(proj, "own", {"label": "Own", "command": ["databricks", "current-user", "me"]})
     code, out, _ = run("checks", "list")
-    assert "own (Own): new, waits until you approve it: orch checks approve own" in out
+    h = checkfiles.short(checkfiles.digest(proj, "own"))
+    assert f"own (Own): new, runs databricks current-user me (content {h}), " in out
+    assert f"waits until you approve it: orch checks approve own --hash {h}" in out
     assert "databricks-pilatus-hub-sbox (Databricks pilatus_hub_sbox): renew" in out
-    code, out, _ = run("checks", "approve", "own")
+    code, out, err = run("checks", "approve", "own")
+    assert code == 2 and f"--hash {h}" in err
+    code, out, _ = run("checks", "approve", "own", "--hash", h)
     assert code == 0 and "Approved own. The Own login works." in out
     code, out, _ = run("checks", "run", "own")
     assert code == 0 and out.startswith("The Own login works.")
