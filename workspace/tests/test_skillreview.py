@@ -1,5 +1,5 @@
-"""Skill format step 5 (ORCH-536): a passed review-by date opens one ticket without an AI call, and a skill that
-needs a skill which is not here is warned about."""
+"""Skill format step 5 (ORCH-536): a passed review-by date opens one ticket without an AI call, and a
+skill that needs a skill which is not here is warned about."""
 
 import json
 from datetime import date
@@ -62,6 +62,12 @@ def test_a_new_date_later_opens_a_new_ticket(ws):
     )
     assert skillreview.review_due(ws, today=TODAY)["opened"] == []  # not due yet
     assert [r["date"] for r in skillreview.review_due(ws, today=date(2027, 6, 2))["opened"]] == ["2027-06-01"]
+    assert len(reminders(ws)) == 2
+    # the old date comes back: it had its ticket already
+    (d / "SKILL.md").write_text(
+        (d / "SKILL.md").read_text(encoding="utf-8").replace("2027-06-01", "2027-03-01"), encoding="utf-8"
+    )
+    assert skillreview.review_due(ws, today=date(2027, 6, 2))["opened"] == []
     assert len(reminders(ws)) == 2
 
 

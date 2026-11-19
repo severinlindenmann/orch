@@ -1,11 +1,11 @@
 """Two default skill header fields that need more than one skill to act on (skill format, ORCH-531 step 5).
 
-`metadata.review-by: "YYYY-MM-DD"`: when the date has passed, `orch skill review-due` (run by the automation loop,
-no AI) opens one ticket "Look at the skill <name> again" for the skill's owner. One ticket per skill and date: what
-was opened is kept in `.orch/skill-reviews.json`, so a new date later opens a new ticket and the same date never a
-second one (also when an older date comes back). No helper is started on it; it waits on the list for a person. Only the workspace's own skills count:
-orch's skills have no date, and a skill shared over the relay belongs to the admin's workspace, which gets the
-reminder there.
+`metadata.review-by: "YYYY-MM-DD"`: when the date has passed, `orch skill review-due` (run by the automation
+loop, no AI) opens one ticket "Look at the skill <name> again" for the skill's owner. One ticket per skill and
+date: what was opened is kept in `.orch/skill-reviews.json`, so a new date later opens a new ticket and the
+same date never a second one (also when an older date comes back). No helper is started on it; it waits on the
+list for a person. Only the workspace's own skills count: orch's skills have no date, and a skill shared over
+the relay belongs to the admin's workspace, which gets the reminder there.
 
 `metadata.requires-skills: "a, b"`: `orch skill check` warns when a needed skill is not in this workspace (any
 source counts: orch, add-on, workspace or relay). The relay asks for the needed skills when the admin shares a
@@ -52,8 +52,8 @@ def needed(entry: dict) -> list[str]:
 
 
 def check_needed_skills(entries: list[dict], root: Path | None = None) -> list[dict]:
-    """A warning per needed skill that is not here. With root, every skill of the workspace counts (also when only
-    some are checked); without it (folders checked by path) only the checked ones."""
+    """A warning per needed skill that is not here. With root, every skill of the workspace counts (also
+    when only some are checked); without it (folders checked by path) only the checked ones."""
     every = skillmeta.list_skills(root) if root is not None else entries
     have = {e.get("name") for e in [*every, *entries] if isinstance(e, dict)}
     out = []
@@ -117,8 +117,8 @@ def _note(name: str, d: date, owner: str | None) -> str:
 
 
 def review_due(root: Path, *, today: date | None = None, dry_run: bool = False) -> dict:
-    """One pass, no AI: a ticket for each workspace skill whose review-by date has passed and has no ticket yet.
-    Returns {"opened": [{skill, date, ticket, key, title}], "waiting": [{skill, date}]} ("waiting" = not due)."""
+    """One pass, no AI: a ticket for each workspace skill whose review-by date has passed and has no ticket
+    yet. Returns {"opened": [{skill, date, ticket, key, title}], "waiting": [{skill, date}]} (not due yet)."""
     today = today or date.today()
     try:
         with relay.locked(root, wait=2.0, name=LOCK):  # one pass at a time: a date never makes two tickets

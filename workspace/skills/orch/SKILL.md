@@ -320,11 +320,14 @@ puts them on the card, every page at each width.
     orch skill list --json                # every skill here with its parsed header, where it came from, or why it cannot be read
     orch skill show <name> --json         # one skill: header and what the check says
     orch skill check [<name>...]          # exit 2 when a header is broken; --path <folder> checks a skill folder anywhere
+    orch skill review-due                 # a ticket for each skill whose review-by date has passed (no AI; runs by itself every hour)
 
 A skill header keeps the six standard fields (name, description, license, compatibility, allowed-tools, metadata).
 Everything else goes under `metadata`, one level deep, each value text in quotes; a list is one line with commas:
 `requires: "gh, git"`. orch knows `status` (draft, active, deprecated, retired), `platforms` (macos, windows, linux),
-`owner`, `requires` and `replaced-by`; a workspace may add its own keys. Run `orch skill check` after you change a skill.
+`owner`, `requires`, `replaced-by`, `review-by` (a date like "2027-03-01": when it passes, the owner gets a ticket to
+look at the skill again) and `requires-skills` (skills it needs; the check warns when one is not here); a workspace
+may add its own keys. Run `orch skill check` after you change a skill.
 
 ## Rules
 - orch's permission mode (ask, auto, full) never widens Codex beyond writing in this workspace; a stricter personal Codex setting (read-only) stays.
