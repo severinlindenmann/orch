@@ -267,17 +267,22 @@ _GITHUB_ZIP = re.compile(
 
 
 def spec(subdir: str) -> str:
-    """What uv installs. GitHub sources come as a zip download, so no git is needed: Windows PCs often have
-    none, and their users may not be allowed to install it. Other hosts keep git."""
+    """What uv installs, named for a remote source. GitHub sources come as a zip download, so no git is
+    needed: Windows PCs often have none, and their users may not be allowed to install it. Other hosts keep
+    git."""
     r = repo()
     if _is_local(r):
         return str((Path(r) / subdir).resolve())
     r = r.removesuffix(".git")
     if any(c.isspace() or c in "\"'#?" for c in r):
         raise Refused(f"'{r}' is not a repository address orch can install from (check ORCH_REPO).")
+    # Named ("orch-x @ url"): core and add-ons share one zip and differ only in #subdirectory, and uv 0.12
+    # keys an unnamed URL without it, so every --with add-on was taken for orch-workspace (ORCH-871). Each
+    # package is named orch-<folder> (test_builtin_package_names_match_spec).
+    name = f"orch-{subdir.rstrip('/').rsplit('/', 1)[-1]}"
     if r.startswith("https://github.com/"):
-        return f"{r}/archive/{ref()}.zip#subdirectory={subdir}"
-    return f"git+{r}@{ref()}#subdirectory={subdir}"
+        return f"{name} @ {r}/archive/{ref()}.zip#subdirectory={subdir}"
+    return f"{name} @ git+{r}@{ref()}#subdirectory={subdir}"
 
 
 def real_home() -> Path:
