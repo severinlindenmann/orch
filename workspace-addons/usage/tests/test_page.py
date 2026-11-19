@@ -1,11 +1,11 @@
 """The Usage page: its model (GET /api/page), the clicks (`orch usage act`) and the page server's fence."""
 
 import json
-from datetime import UTC, datetime, timedelta
 import re
 import threading
 import urllib.error
 import urllib.request
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from conftest import jrun, switcher_data
@@ -260,8 +260,13 @@ def test_many_switches_in_a_short_while_give_one_warning(ws):
     now = datetime(2026, 11, 18, 18, 0, tzinfo=UTC)
     assert page.switch_flapping(ws, now) is None
     rows = [
-        {"at": (now - timedelta(minutes=10 * i)).strftime("%Y-%m-%dT%H:%M:%SZ"), "who": store.USAGE, "what": "switched to x",
-         "label": "x", "account": None}
+        {
+            "at": (now - timedelta(minutes=10 * i)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "who": store.USAGE,
+            "what": "switched to x",
+            "label": "x",
+            "account": None,
+        }
         for i in range(8)
     ]
     store.usage_dir(ws).mkdir(parents=True, exist_ok=True)
