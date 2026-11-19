@@ -6,12 +6,16 @@ ticket, so runs, slots, the idle close and `orch run attach` treat it like any h
 - manager: the always-on Manager (manager.py), started when it is not on.
 - empty: a helper with no ticket and no task yet (tickets.ensure_session "empty"). A normal helper for
   slots and the idle close; it works in the workspace folder and waits for the person's first message.
-- terminal: a plain terminal placeholder (tickets.ensure_session "terminal"): no process until the
-  terminal stage of the new Focus; it shows open until it is closed (`orch session close terminal`).
+- terminal: a plain terminal (tickets.ensure_session "terminal"): the person's login shell in the workspace
+  folder, on orch's own tmux server under the hidden ticket's id (the dashboard's terminal bridge shows it).
+  No helper and no slot; it shows open until it is closed (`orch session close terminal`), which ends the
+  shell. Without tmux (Windows, or not installed) it stays a placeholder.
 One of each per workspace: a second New of the same kind goes to the one that is there."""
 
 from __future__ import annotations
 
+import os
+import shutil
 from pathlib import Path
 
 from orch import manager, runs, runs_live, tickets
@@ -54,15 +58,64 @@ def _closed(root: Path, tid: str) -> bool:
         return True
 
 
+def _login_shell() -> str:
+    """The person's own shell ($SHELL, else the account's), an absolute path that runs; else /bin/sh."""
+    cands = [os.environ.get("SHELL") or ""]
+    try:
+        import pwd
+
+        cands.append(pwd.getpwuid(os.getuid()).pw_shell)
+    except (ImportError, KeyError, OSError):
+        pass
+    for c in cands:
+        if c and os.path.isabs(c) and os.access(c, os.X_OK):
+            return c
+    return "/bin/sh"
+
+
+def shell_on(root: Path, tid: str) -> bool:
+    """The plain terminal's shell runs (its tmux session is there)."""
+    return os.name != "nt" and runs_live.session_exists(root, tid)
+
+
+def start_shell(root: Path, tid: str) -> bool:
+    """Start the plain terminal's shell (a login shell in the workspace folder, 200 x 50 like a helper's
+    session) unless it runs. False: this machine has no tmux, or tmux could not start it."""
+    if os.name == "nt" or not shutil.which("tmux"):
+        return False
+    if runs_live.session_exists(root, tid):
+        return True
+    r = runs_live.tmux(
+        root, "new-session", "-d", "-x", "200", "-y", "50", "-s", tid, "-c", str(root),
+        "-e", f"ORCH_ROOT={root}", "--", _login_shell(), "-l",
+    )  # fmt: skip
+    return r.returncode == 0
+
+
+def stop_shell(root: Path, tid: str) -> bool:
+    """End the plain terminal's shell; True when one was running."""
+    if not shell_on(root, tid):
+        return False
+    return runs_live.tmux(root, "kill-session", "-t", runs_live.target(tid)).returncode == 0
+
+
 def one(root: Path, kind: str) -> dict | None:
     """{id, kind, title, running, open} of a session without a ticket, None when it was never made.
-    open: a helper whose session is on, or the plain terminal until it is closed."""
+    open: a helper whose session is on, or the plain terminal until it is closed. The plain terminal also
+    says whether its shell runs (shell) and, when it does, its tmux session (tmux: {socket, session}, as a
+    live run's claim names it)."""
     tid = _id(root, kind)
     if tid is None:
         return None
     on = runs.running(root, tid) if kind != "terminal" else False
     is_open = on if kind != "terminal" else not _closed(root, tid)
-    return {"id": tid, "kind": kind, "title": TITLES[kind], "running": on, "open": is_open}
+    out = {"id": tid, "kind": kind, "title": TITLES[kind], "running": on, "open": is_open}
+    if kind == "terminal":
+        sh = is_open and shell_on(root, tid)
+        out["shell"] = sh
+        if sh:
+            out["tmux"] = {"socket": runs_live.socket_name(root), "session": tid}
+    return out
 
 
 def listing(root: Path) -> list[dict]:
@@ -86,6 +139,8 @@ def new(root: Path, kind: str, by: str) -> dict:
         started = made or _closed(root, tid)
         if not made and started:
             tickets.apply_op(root, tid, lambda t: t.pop("closed_at", None), by=by)
+        if not shell_on(root, tid):  # also after a restart of this computer: the shell comes back
+            started = start_shell(root, tid) or started
     else:
         tid = (
             tickets.ensure_general(root, by) if kind == "chat" else tickets.ensure_session(root, "empty", by)
@@ -98,7 +153,8 @@ def new(root: Path, kind: str, by: str) -> dict:
 
 def close(root: Path, kind: str, by: str) -> dict:
     """End the session without a ticket of this kind: a helper's session stops (its conversation is kept,
-    the next New resumes it); the plain terminal placeholder closes. Not there or not on: nothing happens."""
+    the next New resumes it); the plain terminal closes and its shell ends. Not there or not on: nothing
+    happens."""
     if kind not in KINDS:
         raise Refused(f"No such session without a ticket: {kind}. Choose one of: {', '.join(KINDS)}.")
     tid = _id(root, kind)
@@ -107,6 +163,7 @@ def close(root: Path, kind: str, by: str) -> dict:
         if not _closed(root, tid):
             tickets.apply_op(root, tid, lambda t: t.__setitem__("closed_at", tickets.now()), by=by)
             closed = True
+        closed = stop_shell(root, tid) or closed
     elif tid and runs.running(root, tid):
         closed = bool(runs_live.stop(root, tid, hold=True))
     return {**(one(root, kind) or {"kind": kind, "title": TITLES[kind]}), "closed": closed}
