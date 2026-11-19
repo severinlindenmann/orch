@@ -186,6 +186,9 @@ def test_rules_mode_runs_only_the_whole_tree_checks_whatever_changed():
         "workspace: ruff",
         "rule tests over the whole tree",
     ]
+    assert steps[-1]["cmd"].startswith("ORCH_TEST_GUARD=warn uv run pytest")
+    light_rules = next(s for s in light.plan(["workspace/x.md"], TEXTS, ADDONS) if s["name"].startswith("rule"))
+    assert "ORCH_TEST_GUARD" not in light_rules["cmd"]  # CI keeps the hard guard
 
 
 def test_the_page_library_runs_the_dashboard_suite():

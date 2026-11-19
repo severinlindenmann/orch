@@ -97,5 +97,35 @@ class Git:
         got = self.run("config", "--get", "user.email", ok=(0, 1))
         return bool(got.stdout.strip())
 
+    def export(self, sha: str, dest: Path, timeout: int = 600) -> None:
+        """The files of commit sha into dest, as a plain folder with no link back to this copy (precheck.py): code
+        in it can never write this copy's hooks or config. Missing file contents are fetched as git reads them."""
+        import tarfile
+        import tempfile
+
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update(GIT_TERMINAL_PROMPT="0", LC_ALL="C")
+        with tempfile.TemporaryFile() as tar:
+            try:
+                got = subprocess.run(
+                    [self.git, *self.cred, f"--git-dir={self.dir}", "archive", "--format=tar", sha],
+                    stdout=tar, stderr=subprocess.PIPE, timeout=timeout, stdin=subprocess.DEVNULL, env=env,
+                    check=False,
+                )  # fmt: skip
+            except subprocess.TimeoutExpired:
+                raise Refused("git archive did not finish in time.") from None
+            except OSError:
+                raise Refused(NO_GIT) from None
+            if got.returncode != 0:
+                why = (got.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+                raise Refused(f"git archive failed: {(why or ['no reason'])[0][:200]}")
+            tar.seek(0)
+            dest.mkdir(parents=True, exist_ok=True)
+            with tarfile.open(fileobj=tar) as t:
+                if hasattr(tarfile, "data_filter"):  # no paths outside dest, no device files
+                    t.extractall(dest, filter="data")
+                else:  # pragma: no cover - Python 3.11 before 3.11.4
+                    t.extractall(dest)  # a tar git itself wrote from a commit tree
+
     def push(self, sha: str, branch: str) -> None:
         self.run("push", "-q", "origin", f"{sha}:refs/heads/{branch}", timeout=600)

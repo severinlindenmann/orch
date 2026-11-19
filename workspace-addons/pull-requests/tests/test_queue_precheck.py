@@ -141,9 +141,12 @@ def test_the_precheck_runs_the_command_in_a_copy_of_the_group_commit(tmp_path):
     (origin / "rule.txt").write_text("green\n")
     subprocess.run(["git", "-C", str(origin), "add", "."], check=True, env=env)
     subprocess.run(["git", "-C", str(origin), "commit", "-qm", "x"], check=True, env=env)
-    git = Git(tmp_path / "queue", "o/r", url=str(origin))
+    git = Git(tmp_path / "queue", "o/r", url=origin.as_uri())
     git.prepare()
-    git.run("fetch", "-q", "origin", "+refs/heads/develop:refs/queue/base")
+    subprocess.run(["git", "-C", str(origin), "config", "uploadpack.allowFilter", "true"], check=True)
+    git.run(
+        "fetch", "-q", "--filter=blob:none", "origin", "+refs/heads/develop:refs/queue/base"
+    )  # as fetch() does
     sha = git.run("rev-parse", "refs/queue/base").stdout.strip()
     py = f'"{sys.executable}"'
     green = precheck.run(
@@ -156,4 +159,6 @@ def test_the_precheck_runs_the_command_in_a_copy_of_the_group_commit(tmp_path):
         f"{py} -c \"import os; print('FAILED x', os.environ['ORCH_HOME_STRICT']); raise SystemExit(3)\"",
     )
     assert red.ok is False and "FAILED x 1" in red.tail
-    assert git.run("worktree", "list").stdout.count("\n") == 1  # only the bare copy itself
+    assert git.run("worktree", "list").stdout.count("\n") == 1  # no copy linked to the queue's git folder
+    seen = precheck.run(git, sha, f"{py} -c \"import os; raise SystemExit(os.path.exists('.git'))\"")
+    assert seen.ok is True  # a plain folder: the code cannot reach the queue's hooks or config

@@ -6,11 +6,13 @@ but each one cost a 16 minute group run and a split. With a precheck the queue r
 tree first; when it is red, each member is checked on its own on top of the same base, and a member that is red
 alone leaves the queue at once with the failing lines.
 
-The command is the person's setting, never read from the repository, and runs in a throw-away copy of the group
-commit (`git worktree add` of the queue's bare copy) with a throw-away home: HOME, USERPROFILE and ORCH_HOME point
-into that folder and ORCH_HOME_STRICT=1, so the orch of this computer is never touched. Only PATH, the language
-and uv's own cache and Python folders are kept from this computer's environment. Trouble (no copy, no command, too
-slow) is never red: the group run decides then.
+The command is the person's setting, never read from the repository, and runs in a plain throw-away folder of
+the group commit's files (`git archive`, no link back to the queue's git copy, so the code can never plant a hook
+or config there) with a throw-away home: HOME, USERPROFILE and ORCH_HOME point into that folder and
+ORCH_HOME_STRICT=1, so the orch of this computer is never touched by accident. Only PATH, the language and uv's own
+cache and Python folders are kept from this computer's environment (shared for speed, as every local test run
+here shares them). It is no sandbox against hostile code: it runs only pull requests the queue takes, i.e. of its
+own login and never from a fork. Trouble (no copy, no command, too slow) is never red: the group run decides then.
 """
 
 from __future__ import annotations
@@ -62,11 +64,9 @@ def run(git, sha: str, command: str, timeout: int = TIMEOUT_SECS) -> Result:
     tmp = Path(tempfile.mkdtemp(prefix="orch-precheck-"))
     src, home = tmp / "src", tmp / "home"
     home.mkdir()
-    added = False
     try:
         try:
-            git.run("worktree", "add", "--detach", "-f", str(src), sha, timeout=timeout)
-            added = True
+            git.export(sha, src, timeout=timeout)
         except Refused as e:
             return Result(None, f"no copy of the group commit: {e}")
         try:
@@ -80,13 +80,4 @@ def run(git, sha: str, command: str, timeout: int = TIMEOUT_SECS) -> Result:
             return Result(None, f"the precheck did not start: {e}")
         return Result(got.returncode == 0, _tail((got.stdout or "") + "\n" + (got.stderr or "")))
     finally:
-        if added:
-            try:
-                git.run("worktree", "remove", "--force", str(src), ok=(0, 128))
-            except Refused:
-                pass
         shutil.rmtree(tmp, ignore_errors=True)
-        try:
-            git.run("worktree", "prune", ok=(0, 128))
-        except Refused:
-            pass
