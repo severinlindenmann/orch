@@ -26,8 +26,13 @@ module.exports = {
 
     await open('#home');
     await until(s => s.settings?.focus_preview_on === true && (s.tickets || []).some(t => t.id === tid), 'the Preview on and the ticket there');
-    // the layer remembers its open panes per browser: open the ticket's pane as a person who had it open
-    await page.evaluate(id => localStorage.setItem('orch.live.layer', JSON.stringify({ mode: 'bottom', last: 'bottom', back: 'bottom', panes: [id], cur: id })), tid);
+    // the layer remembers its open panes per workspace in this browser (orch.live.layer.<workspace>, issue 1351): open
+    // the ticket's pane as a person who had it open, and drop what earlier click-throughs left
+    await page.evaluate(id => {
+      Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k));
+      const ws = String((typeof state === 'object' && state && state.workspace) || '');
+      localStorage.setItem(ws ? 'orch.live.layer.' + ws : 'orch.live.layer', JSON.stringify({ mode: 'bottom', last: 'bottom', back: 'bottom', panes: [id], cur: id }));
+    }, tid);
     await reload();
     const hist = page.locator('#live-dock [data-key="live-history"]').first();
     await hist.waitFor({ timeout: 30000 }).catch(async () => { throw new Error('no History button on the ticket pane:\n' + (await page.locator('#live-dock').innerText().catch(() => '(no live dock)')).slice(0, 400)); });
@@ -48,6 +53,6 @@ module.exports = {
     try { orchAsPerson('run', 'stop', tid); } catch (e) { /* the stand-in already ended */ }
     orchAsPerson('config', 'set', 'focus.preview', 'off');
     await addonOff('focus');
-    await page.evaluate(() => localStorage.removeItem('orch.live.layer'));
+    await page.evaluate(() => Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)));
   },
 };

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -101,6 +102,16 @@ def plan(files: list[str], texts: dict[str, str], addons: set[str]) -> list[dict
         {"name": "brand: words, tokens, CI time limits", "cwd": ".", "cmd": "python -m pytest -q brand/tests"},
         {"name": "style rules", "cwd": ".", "cmd": "python scripts/check_style.py"},
     ]
+    if any(f.startswith(("workspace/", "workspace-addons/")) for f in files):
+        # generated files (ORCH-699): two pull requests that are each fine can leave one out of date together
+        steps.append(
+            {
+                "name": "generated files are current (shipped_addons.json)",
+                "cwd": "workspace",
+                "cmd": "uv run python ../scripts/gen_shipped_addons.py --check"
+                " || { echo 'run: python3 scripts/gen_shipped_addons.py and commit the result'; exit 1; }",
+            }
+        )
     if any(f.startswith("workspace/") for f in files):
         steps += [
             {
@@ -141,6 +152,14 @@ def plan(files: list[str], texts: dict[str, str], addons: set[str]) -> list[dict
     return steps
 
 
+def step_env(base: dict[str, str]) -> dict[str, str]:
+    """The environment of every step: uv runs the tests with its own Python (in the runner user's home), never the
+    job's setup-python one in /opt/hostedtoolcache. That folder is writable by a group the runner user is not in, so
+    `orch secret exec` refuses its interpreter (secretrun._check_chain) and test_cli_secret.py goes red whenever a
+    pull request picks it (#1566). The full workspace job never installs that Python, so it never saw this."""
+    return {**base, "UV_PYTHON_PREFERENCE": "only-managed"}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--base", default="origin/develop")
@@ -153,7 +172,8 @@ def main(argv: list[str] | None = None) -> int:
     for s in steps:
         print(f"::group::{s['name']}", flush=True)
         print(f"$ (cd {s['cwd']} && {s['cmd']})", flush=True)
-        got = subprocess.run(s["cmd"], check=False, shell=True, cwd=ROOT / s["cwd"])
+        env = step_env(dict(os.environ))
+        got = subprocess.run(s["cmd"], check=False, shell=True, cwd=ROOT / s["cwd"], env=env)
         print("::endgroup::", flush=True)
         if got.returncode != 0:
             print(f"::error title=Light check red::{s['name']}", flush=True)
