@@ -175,6 +175,7 @@ def read(root: Path, frm: dt.date, days: int = 7) -> dict:
         else:
             raw = _run_reader(root, "read", frm, days)
         ans = clean(raw)
+        ans["events"] = [e for e in ans["events"] if _in_window(e, ans["zone"], frm, days)]
     except Refused as e:
         _status(root, "stopped", str(e))
         raise
@@ -183,6 +184,16 @@ def read(root: Path, frm: dt.date, days: int = 7) -> dict:
         raise Refused(permission_words(ans["status"]))
     _status(root, "works", None)
     return ans
+
+
+def _in_window(e: dict, zone: ZoneInfo, frm: dt.date, days: int) -> bool:
+    """Only what overlaps the asked days: a source that answers with more never widens what is shown."""
+    end_day = frm + dt.timedelta(days=days)
+    if e["all_day"]:
+        return e["start"] < end_day and e["end"] > frm
+    lo = dt.datetime.combine(frm, dt.time.min, zone)
+    hi = dt.datetime.combine(end_day, dt.time.min, zone)
+    return e["start"] < hi and e["end"] > lo
 
 
 def permission_words(status: str) -> str:

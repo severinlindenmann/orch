@@ -20,7 +20,9 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs
 
-from . import api, store
+from . import api
+from . import calendar as cal_mod
+from . import store
 from .store import Refused
 
 DEFAULT_PORT = 8433
@@ -44,7 +46,22 @@ TYPES = {"html": "text/html; charset=utf-8", "css": "text/css; charset=utf-8", "
 PREFIX = re.compile(r"/addon/[a-z][a-z0-9-]{1,31}")
 CSP = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'"
 FROM_DASHBOARD = "Open Personal from the dashboard: orch start, then Add-ons > Personal."
-OPS = ("add", "remove", "folder", "rules", "use", "way_on", "way_off", "way_check")
+OPS = (
+    "add",
+    "remove",
+    "folder",
+    "rules",
+    "use",
+    "way_on",
+    "way_off",
+    "way_check",
+    "cal_level",
+    "cal_moves",
+    "cal_allow",
+    "cal_check",
+    "cal_accept",
+    "cal_decline",
+)
 
 
 def _web(name: str) -> bytes:
@@ -141,7 +158,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self._vouched():
                 return self._send(403, FROM_DASHBOARD.encode())
             return self._api_get(path, parse_qs(query))
-        if path in ("/", "/notes", "/parts"):  # the screens: one page, the path picks the first screen
+        if path in ("/", "/notes", "/calendar", "/parts"):  # the screens: one page, the path picks the first screen
             prefix = self.headers.get("X-Forwarded-Prefix") or ""
             prefix = prefix if PREFIX.fullmatch(prefix) else ""
             return self._send(200, _web("index.html").replace(b"__P__", prefix.encode()), TYPES["html"])
@@ -171,6 +188,21 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/rules":
                 s = store.settings(self.root)["parts"].get("notes")
                 return self._json({"notes": s, "read": store.READ_WORDS, "write": store.WRITE_WORDS})
+            if path == "/api/calendar":
+                p = store.settings(self.root)["parts"].get("calendar")
+                if not p or not p["on"]:
+                    return self._json({"on": False})
+                frm = one("from") or None
+                days = 1 if one("days") == "1" else 7
+                return self._json(
+                    {
+                        "on": True,
+                        "state": cal_mod.state(self.root),
+                        "week": api.calendar_week(self.root, who, frm, days),
+                        "levels": cal_mod.LEVEL_WORDS,
+                        "moves_words": cal_mod.MOVES_WORDS,
+                    }
+                )
             if path == "/api/tickets":
                 return self._json({"tickets": _open_tickets(self.root)})
         except Refused as e:
@@ -236,6 +268,16 @@ def _act(root: Path, op: str, args: dict):
         return api.way_turn(root, who, _s(args, "way"), op == "way_on")
     if op == "way_check":
         return api.way_check(root, who, _s(args, "way"))
+    if op == "cal_level":
+        return api.calendar_rule(root, who, _s(args, "id"), _s(args, "level"), None)
+    if op == "cal_moves":
+        return api.calendar_rule(root, who, None, None, _s(args, "moves"))
+    if op == "cal_allow":
+        return api.calendar_allow(root, who)
+    if op == "cal_check":
+        return api.calendar_check(root, who)
+    if op in ("cal_accept", "cal_decline"):
+        return api.calendar_answer(root, who, _s(args, "id"), op == "cal_accept")
     if op == "use":
         ticket = _s(args, "ticket")
         if (
