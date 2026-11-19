@@ -29,7 +29,10 @@
                   changes:[str], words:{text, voice:[{text,secs}]}, pins:[{n,on,x,y,text}], summary, replaces, replaced_by}}
      answer({id, digest, verdict:'ok'|'no'|'talk', picked, note}) -> Promise<{ok, error?:{code,message}}>
                   note = {text, pins:[{n,on,x,y,text}]} when the person wrote words or marked spots
-     note({id, ticket, text}) -> Promise<{ok, error?}>   optional: "Add note" on the Comment sheet; saves words on the ticket, the card stays
+     note({id, ticket, text, files}) -> Promise<{ok, error?}>   optional: "Add note" on the Comment sheet; saves words (and files) on the ticket, the card stays
+     attach({ticket, files}) -> Promise<{ok, names?, error?}>   optional (ORCH-422): puts the Comment sheet's screenshots, files and
+                  voice notes on the ticket before Send back is saved; its names are added to the note. api.box = the
+                  sheet's UI.composer options (accept, maxFiles, maxBytes, voice). files = [{name, size, type, url (data URL)}]
      fileUrl(card, ref) -> string       URL of one reviewed file of that card or entry
    A rejected stack()/answered() with error.code 'needs_person' (or 401/403) shows the plain sign-in state. */
 (()=>{'use strict';const UI=window.UI=window.UI||{};
@@ -52,7 +55,7 @@ const mapPreview=(p,c,api)=>{if(!p||typeof p!=='object')return {type:'doc'};cons
  if(q.type==='compare'){q.before=mapPreview(p.before,c,api);q.after=mapPreview(p.after,c,api)}
  if(q.type==='options'){q.options=(p.options||[]).map(op=>Object.assign({},op,{preview:op.preview?mapPreview(op.preview,c,api):undefined,suggested:!!(op.suggested||(c&&c.recommended&&c.recommended===op.id))}));if(p.before)q.before=mapPreview(p.before,c,api)}
  return q};
-const mapFiles=(fs,c,api)=>(Array.isArray(fs)?fs:[]).filter(f=>f&&typeof f.ref==='string'&&typeof f.name==='string'&&f.name).slice(0,6)
+const mapFiles=(fs,c,api)=>(Array.isArray(fs)?fs:[]).filter(f=>f&&typeof f.ref==='string'&&typeof f.name==='string'&&f.name).slice(0,24)/* the card shows 5 and a "+N more" tile (ORCH-421) */
  .map(f=>({label:f.name.slice(0,80),type:f.type==='img'||f.type==='page'?f.type:'file',src:api.fileUrl(c,f.ref)||''})).filter(f=>f.src);
 const safeOpen=u=>typeof u==='string'&&/^https?:\/\//i.test(u)?u:undefined;
 const mapCard=(c,api,now)=>{const k=c.card||{},kd=KIND[k.kind]||[k.kind||'Review','file'];
@@ -148,7 +151,7 @@ UI.answerRecord=(e,o)=>{o=o||{};const d=e.decision||{},k=e.card||{},c=el('articl
  if(lines.length){const b=el('div','decision-words');lines.forEach(x=>b.append(el('p','',x)));c.append(b)}
  const f=el('div','decision-foot'),first=Object.keys((e.shown||{}).files||{})[0];
  if(o.fileUrl&&first){const a=el('a','btn ghost sm','View reviewed version');a.href=o.fileUrl(e,'reviewed/'+(((e.shown||{}).copy||'').replace(/^reviewed\//,'').replace(/\/$/,''))+'/'+first);a.target='_blank';a.rel='noopener';f.append(a)}
- f.append(el('span','',d.replaced_by?'Replaced by a later answer.':d.replaces?'Replaces your earlier answer.':'Kept exactly as you saw it.'));
+ f.append(el('span','',d.replaced_by?'Replaced by a later answer.':d.replaces?'Replaces your earlier answer.':d.action==='send_back'&&(e.card||{}).kind==='check'?'Your note went to the helper for a new version.':'Kept exactly as you saw it.'));
  if(d.replaced_by)c.classList.add('replaced');
  c.append(f);return c};
 
@@ -196,7 +199,8 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  /* answers go to orch; a failed one brings the card back */
  const send=(it,verdict,note)=>{const body={id:it.id,digest:it.digest,verdict,picked:null,note:null};
   if(note&&note.picked)body.picked=note.picked;else if(note&&note.about&&note.about!=='all')body.picked=note.about;
-  const w=note&&note.changes;if(w&&(w.text||(w.pins||[]).length))body.note={text:w.text||'',pins:(w.pins||[]).map((p,i)=>({n:p.n||i+1,on:p.on||'',x:p.x,y:p.y,text:p.text}))};
+  const w=note&&note.changes,files=w&&Array.isArray(w.files)?w.files:[];if(w&&(w.text||(w.pins||[]).length||files.length))body.note={text:w.text||'',pins:(w.pins||[]).map((p,i)=>({n:p.n||i+1,on:p.on||'',x:p.x,y:p.y,text:p.text}))};
+  if(files.length)Object.defineProperty(body,'files',{value:files,enumerable:false});/* uploaded at save time (after Undo), never sent with the answer */
   gone.add(sig(it));
   /* held for o.hold ms first: Undo in that time takes the answer back for real (nothing was saved); leaving the page
      or a newer answer saves it at once */
@@ -204,8 +208,12 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  const flushOne=k=>{const h=held.get(k);if(!h)return;held.delete(k);clearTimeout(h.t);post(h.it,h.body);if(deck&&deck.syncUndo)deck.syncUndo()};
  const flushAll=()=>[...held.keys()].forEach(flushOne);
  const unhold=it=>{const h=held.get(it.id);if(!h)return false;held.delete(it.id);clearTimeout(h.t);gone.delete(sig(h.it));return true};
+ const named=(text,names)=>{const n=names.length,line='I added '+(n===1?'a file':n+' files')+' to this ticket: '+names.join(', ')+'.';return text?text+'\n\n'+line+' Read '+(n===1?'it':'them')+' first.':line+' Read '+(n===1?'it':'them')+' and carry on.'};
+ const upload=(it,body)=>{const files=body.files;if(!files||!files.length||!api.attach)return Promise.resolve({ok:true});
+  return Promise.resolve().then(()=>api.attach({ticket:it.ticketId,files})).then(r=>{if(!r||!r.ok)return r||{ok:false};
+   const names=Array.isArray(r.names)&&r.names.length?r.names:files.map(f=>f.name);body.note={...(body.note||{text:'',pins:[]}),text:named((body.note&&body.note.text)||'',names)};return {ok:true}})};
  const post=(it,body)=>{
-  Promise.resolve().then(()=>api.answer(body)).catch(()=>({ok:false,error:{code:'error',message:'Could not reach orch.'}})).then(res=>{
+  upload(it,body).then(up=>up&&up.ok?api.answer(body):{ok:false,error:(up&&up.error)||{code:'error',message:'The files could not be added. Your answer is waiting again.'}}).catch(()=>({ok:false,error:{code:'error',message:'Could not reach orch.'}})).then(res=>{
    if(res&&res.ok){if(view==='answered')drawAnswered();return}
    gone.delete(sig(it));const code=res&&res.error&&res.error.code;
    if(code==='changed')UI.toast('This card changed. Showing the new version.');
@@ -214,7 +222,7 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
    dirty=true;load(true)})};
  const build=(items,start,later,pins)=>{deckEl.replaceChildren();
   flushAll();/* a new deck has no Undo for the old one's answers: save them now */
-  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,onDecide:send,onNote:api.note?(it,text)=>api.note({id:it.id,ticket:it.ticketId,text}):undefined,canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
+  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,onDecide:send,onNote:api.note?(it,text,files)=>api.note({id:it.id,ticket:it.ticketId,text,files:files||[]}):undefined,...(api.attach&&api.box?{attach:api.box}:{}),canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
   waitCount(items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck);
   const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body))deckEl.focus({preventScroll:true})};
  const apply=(cards,force)=>{const items=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it)));

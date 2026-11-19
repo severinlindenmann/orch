@@ -38,6 +38,7 @@ NOW = "2026-11-16T09:30:00Z"
 
 
 def out(obj):
+    sys.stdout.reconfigure(encoding="utf-8", newline="\n")  # Windows would write the console code page
     sys.stdout.write(json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n")
     sys.stdout.flush()
 
@@ -48,7 +49,7 @@ def fail(msg, code="invalid"):
 
 
 def load(rel):
-    return json.loads((CONTRACTS / rel).read_text())
+    return json.loads((CONTRACTS / rel).read_text(encoding="utf-8"))
 
 
 def take_flags(argv, valued, bools=()):
@@ -251,7 +252,7 @@ def job(argv, scenario):
         pass
     state_dir = os.environ.get("ORCH_FAKE_STATE")
     sf = Path(state_dir) / "job.json" if state_dir else None
-    st = json.loads(sf.read_text()) if sf and sf.exists() else {"seq": 0, "ended": False}
+    st = json.loads(sf.read_text(encoding="utf-8")) if sf and sf.exists() else {"seq": 0, "ended": False}
     if scenario == "empty" and kind != "start" and st["seq"] == 0:
         fail("Refused: this job has not started.", "refused")
     if st["ended"]:

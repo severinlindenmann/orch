@@ -94,6 +94,13 @@ for _e in _STEP_EVENTS:
 SETTINGS = ["--settings", json.dumps({"hooks": _REMINDER}, separators=(",", ":"))]
 
 
+@pytest.fixture(autouse=True)
+def _record_hooks_wired(monkeypatch):
+    """The adapter leaves the record hooks out on Windows (#547, no process-tree reader there); these tests
+    check the wiring itself, so they run it as on POSIX; the Windows test below sets it back."""
+    monkeypatch.setattr(adapters, "_is_windows", lambda: False)
+
+
 def _claude_argvs(root):
     """The snapshots: the permission flags (the adapter's own disallowed-tools list stays)."""
     deny = DENY
@@ -591,7 +598,9 @@ def test_hooks_doc_comes_from_data():
     d = adapters.hooks_doc("claude", "r_8k2m")
     cmds = {k: v[0]["hooks"][0]["command"] for k, v in d["hooks"].items()}
     assert cmds["Stop"] == "orch run event --run r_8k2m --kind idle"
-    run_events = {"SessionStart", "Stop", "Notification", "UserPromptSubmit"}
+    # ORCH-689: a turn ended by an error (usage limit, login changed) fires StopFailure, not Stop: idle too
+    assert cmds["StopFailure"] == "orch run event --run r_8k2m --kind idle"
+    run_events = {"SessionStart", "Stop", "StopFailure", "Notification", "UserPromptSubmit"}
     assert set(cmds) == run_events | set(_RECORD_EVENTS)
     for event in _RECORD_EVENTS:  # the record hook first, every tool; after a step the input notice too
         assert d["hooks"][event] == _REMINDER[event]
@@ -899,6 +908,7 @@ def test_windows_leaves_out_the_record_hooks_but_keeps_the_reminder_hooks(monkey
     assert set(_RECORD_EVENTS) <= set(adapters.reminder_doc("claude")["hooks"])
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="nvm (POSIX) layout and a ':' path list")
 def test_find_binary_looks_in_nvm_when_the_path_is_clean(tmp_path, monkeypatch):
     nvm = tmp_path / ".nvm" / "versions" / "node" / "v22.1.0" / "bin"
     nvm.mkdir(parents=True)

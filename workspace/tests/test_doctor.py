@@ -24,7 +24,11 @@ def test_fresh_init_reports_nothing_wrong(proj, run):
 
 def test_a_missing_skill_link_is_one_problem_with_a_next_step(proj, run):
     assert run("init")[0] == 0
-    (proj / ".agents/skills/orch").unlink()
+    link = proj / ".agents/skills/orch"
+    if link.is_symlink():
+        link.unlink()
+    else:  # Windows has no links here: the skill is a copy of the folder
+        shutil.rmtree(link)
     code, out, _ = run("doctor")
     assert code == 0 and "1 thing to fix." in out
     assert "not linked" in out and "Run: orch init" in out

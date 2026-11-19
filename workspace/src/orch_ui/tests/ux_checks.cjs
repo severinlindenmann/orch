@@ -18,6 +18,8 @@
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
+// Run from the repository only (CI job page-smoke, helpers): the keychain options come from the e2e helper (ORCH-615).
+const headless = require(path.join(__dirname, '..', '..', '..', '..', 'e2e', 'headless.cjs'));
 const { execFileSync } = require('node:child_process');
 
 const STATIC = path.resolve(__dirname, '../static');
@@ -119,7 +121,7 @@ async function run(root, pages) {
   const { chromium } = playwright();
   const srv = await serve(root);
   const base = `http://127.0.0.1:${srv.address().port}/`;
-  const browser = await chromium.launch();
+  const browser = await headless.launch(chromium);
   const problems = [];
   try {
     for (const p of pages) {

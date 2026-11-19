@@ -41,7 +41,7 @@
         "auto": { "args": ["--permission-mode", "auto", "--disallowedTools", "Bash(orch private:*),Bash(orch config agent:*),Bash(*agent-approvals*),Edit(**/agent-approvals.json)"], "if_help_has": "\"auto\"", "else": ["--permission-mode", "acceptEdits", "--disallowedTools", "Bash(orch private:*),Bash(orch config agent:*),Bash(*agent-approvals*),Edit(**/agent-approvals.json)"] },
         "full": ["--dangerously-skip-permissions"]
       },
-      "hooks": { "SessionStart": "orch run event --kind session", "Stop": "orch run event --kind idle", "Notification": "orch run event --kind attention", "UserPromptSubmit": "orch run event --kind working" },
+      "hooks": { "SessionStart": "orch run event --kind session", "Stop": "orch run event --kind idle", "StopFailure": "orch run event --kind idle", "Notification": "orch run event --kind attention", "UserPromptSubmit": "orch run event --kind working" },
       "reminder_hooks": { "SessionStart": "orch work-check --hook claude", "UserPromptSubmit": "orch work-check --hook claude" },
       "guard_hooks": { "PreToolUse": "Bash" },
       "step_hooks": { "PostToolUse": "orch work-check --hook claude", "PostToolUseFailure": "orch work-check --hook claude" },
@@ -59,6 +59,7 @@
         { "file": "{home}/.claude.json", "format": "json", "path": ["projects", "{folder}", "mcpServers"] },
         { "file": "{folder}/.mcp.json", "format": "json", "path": ["mcpServers"] }
       ],
+      "skill_dirs": ["{home}/.claude/skills"],
       "capabilities": { "resume": true, "choose_session_id": true, "interactive_tmux": true, "hooks": true, "stream": true, "permission_retry": true, "subagents": true, "usage": true, "activity": "live" },
       "files": { "instructions_link": { "CLAUDE.local.md": "@AGENTS.md" }, "skills_link": ".claude/skills" }
     },
@@ -79,10 +80,11 @@
       "store_args": { "after": "exec", "args": ["--add-dir", "{store}"] },
       "hooks": null,
       "session": { "id": "from-output", "parse": "codex-exec-json/1", "missing": "no rollout found for thread id", "chat_files": { "dir_env": "CODEX_HOME", "home": ".codex", "glob": "sessions/*/*/*/rollout-*-{session}.jsonl", "lines": "items" } },
-      "login": { "status": ["login", "status"], "how": "Open a terminal on this computer and run: codex login" },
+      "login": { "status": ["login", "status"], "sign_in": "codex login" },
       "mcp_settings": [
         { "file": "{home}/.codex/config.toml", "format": "toml", "path": ["mcp_servers"] }
       ],
+      "skill_dirs": ["{home}/.codex/skills"],
       "capabilities": { "resume": true, "choose_session_id": false, "interactive_tmux": false, "hooks": false, "stream": false, "permission_retry": false, "subagents": false, "usage": false },
       "files": { "instructions": "AGENTS.md" }
     },

@@ -6,12 +6,14 @@
         {"file": "{home}/.claude.json", "format": "json", "path": ["mcpServers"]},
         {"file": "{home}/.claude.json", "format": "json", "path": ["projects", "{folder}", "mcpServers"]},
         {"file": "{folder}/.mcp.json", "format": "json", "path": ["mcpServers"]}
-      ]
+      ],
+      "skill_dirs": ["{home}/.claude/skills"]
     },
     "codex": {
       "mcp_settings": [
         {"file": "{home}/.codex/config.toml", "format": "toml", "path": ["mcp_servers"]}
-      ]
+      ],
+      "skill_dirs": ["{home}/.codex/skills"]
     }
   }
 }

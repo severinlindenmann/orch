@@ -33,7 +33,7 @@ import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from orch import brake, config, ghmerge, history, runs, tickets
+from orch import brake, config, ghmerge, history, ownerpick, runs, tickets
 from orch.errors import Refused
 
 BY = tickets.REVIEWER
@@ -114,10 +114,12 @@ def size_reasons(files: list[dict], added: dict[str, list[str]] | None = None) -
     additions, deletions}]; added: the added lines per file (from the diff), for words and new commands in
     code."""
     counts = {"security": 0, "look": 0, "words": 0, "structure": 0, "concept": 0, "other": 0}
-    n_files = n_lines = 0
+    n_files = n_lines = all_files = all_lines = 0
     for f in files:
         path = str(f.get("path") or "")
         kind = kind_of(path)
+        all_files += 1
+        all_lines += int(f.get("additions") or 0) + int(f.get("deletions") or 0)
         if kind == "test":
             continue
         n_files += 1
@@ -138,7 +140,7 @@ def size_reasons(files: list[dict], added: dict[str, list[str]] | None = None) -
             f"too big for a small fix ({n_files} files, {n_lines} lines; "
             f"small is {MAX_FILES} and {MAX_LINES})"
         )
-    return why, {"files": n_files, "lines": n_lines}
+    return why, {"files": n_files, "lines": n_lines, "all_files": all_files, "all_lines": all_lines}
 
 
 # ------------------------------------------------------------------ facts
@@ -255,6 +257,8 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
     (None = could not be read: wait, look again next pass). Pure apart from reading the ticket's evidence."""
     items = [c for c in ticket.get("checklist") or [] if isinstance(c, dict) and not c.get("wont_do")]
     proof = tickets.proof_state(ticket, root)
+    if ownerpick.carries_draft(ticket):  # ORCH-582: never accepted, sent back or put in line by the Reviewer
+        return {"verdict": "leave", "why": ownerpick.LEFT_WHY, "owner": True}
     if tickets._open_questions(ticket):
         return {"verdict": "leave", "why": "a question on this ticket waits for your answer."}
     gaps = [c["text"] for c in items if not c.get("done") or not c.get("evidence")]
@@ -302,28 +306,39 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
     if open_part:
         return {"verdict": "leave", "why": open_part}
     why: list[str] = []
-    files = lines = 0
+    files = lines = all_files = all_lines = 0
     for f in facts:
         reasons, counts = size_reasons(f["files"], f["added"])
         why += reasons
         files += counts["files"]
         lines += counts["lines"]
+        all_files += counts["all_files"]
+        all_lines += counts["all_lines"]
     if not why and (files > MAX_FILES or lines > MAX_LINES):
         why.append(f"too big for a small fix ({files} files, {lines} lines)")
     if why:
         return {"verdict": "leave", "why": "; ".join(dict.fromkeys(why)) + "."}
-    note = "".join(f" Could not match: {p}" for p in unmatched[:3])
     prs = ", ".join(f"#{f['number']}" for f in facts)
-    checks = sum(f["checks"] for f in facts)
-    done = sum(1 for c in items if c.get("done") and c.get("evidence"))
+    done = _first_sentence(ticket.get("summary"))
+    what = f"{done} " if done else ""
     return {
         "verdict": "accept",
         "why": (
-            f"{'pull request' if len(facts) == 1 else 'pull requests'} {prs} merged, "
-            f"{_n('check', checks)} green, {done} of {len(items)} tasks with evidence, "
-            f"small fix ({_n('file', files)}, {_n('line', lines)})." + note
+            f"{what}{'Pull request' if len(facts) == 1 else 'Pull requests'} {prs} "
+            f"merged with all checks green, every task has evidence and the change is small "
+            f"({_n('file', all_files)}, {_n('line', all_lines)} changed)."
         ),
     }
+
+
+def _first_sentence(text) -> str:
+    t = " ".join(str(text or "").split())
+    if not t:
+        return ""
+    i = t.find(". ")
+    t = t[: i + 1] if i > 0 else t
+    t = t[:160].rstrip()
+    return t if t.endswith((".", "!", "?")) else t + "."
 
 
 def _back_or_leave(why: str, sent_back: int) -> dict:
@@ -406,7 +421,9 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
             continue  # decided already and nothing changed since
         facts = [facts_of(u) for u in pr_urls(root, t)]
         res = decide(root, t, facts, int(mine.get("back") or 0))
-        if look and res["verdict"] == "leave" and tid not in own:  # bigger work: a second look (ORCH-175)
+        if (
+            look and res["verdict"] == "leave" and tid not in own and not res.get("owner")
+        ):  # second look (ORCH-175)
             res = lookreview.triage(t, facts, res, int(mine.get("back") or 0)) or res
         row = {"ticket": tid, "key": t.get("key") or tid, **res, "done": False}
         if res["verdict"] == "wait" or dry_run:
@@ -506,6 +523,8 @@ def routine(root: Path, ticket: dict, q: dict, now: float | None = None) -> tupl
         return False, "a Chat question"
     if q.get("answer") is not None or q.get("taken_back") is not None:
         return False, "already settled"
+    if ownerpick.is_draft_card(q):  # ORCH-582
+        return False, "a draft for you to pick"
     if q.get("card") is not None or q.get("action") is not None:
         return False, "a card for you to see"
     if q.get("kind") not in (None, "plain"):
@@ -618,9 +637,20 @@ def accepted(root: Path, since: str) -> list[dict]:
     return out
 
 
-def accepted_text(rows: list[dict], word: str = "today") -> str:
+def picks_text(picks: list[dict]) -> list[str]:
+    """The morning list's own part for drafts (ORCH-582): what waits for the owner's pick, never mixed with
+    what the Reviewer did."""
+    if not picks:
+        return []
+    out = [f"Waiting for your pick: {_n('draft', len(picks))}"]
+    out += [f"- {r['key']} {r['title']}: {r['card']}" for r in picks]
+    return out
+
+
+def accepted_text(rows: list[dict], word: str = "today", picks: list[dict] | None = None) -> str:
+    tail = picks_text(picks or [])
     if not rows:
-        return f"Nothing was accepted for you {word}."
+        return "\n".join([f"Nothing was accepted for you {word}.", *tail])
     acc = [r for r in rows if not r.get("answer")]
     ans = [r for r in rows if r.get("answer")]
     out = []
@@ -633,4 +663,4 @@ def accepted_text(rows: list[dict], word: str = "today") -> str:
     if ans:
         out.append(f"Answered for you {word}: {_n('question', len(ans))}")
         out += [f"- {r['key']} {r['title']}: {r['why']}" for r in ans]
-    return "\n".join(out)
+    return "\n".join(out + tail)

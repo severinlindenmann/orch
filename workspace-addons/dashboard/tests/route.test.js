@@ -46,9 +46,10 @@ test('livePreviewOn reads the one setting: on only when it is exactly true, neve
   for (const s of [{settings:{focus_preview_on:false}}, {settings:{}}, {}, null, {settings:{focus_preview_on:'true'}}]) assert.equal(on(s), false);
   assert.equal(on({settings:{focus_preview_on:true}}, true), false);
 });
-test('the new live page is an empty shell with the Preview tag, the add-on\'s own name and a way back', () => {
+test('the new live page is the wall with the Preview tag, the add-on\'s own name and a way back', () => {
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, kids:kids.flat(Infinity).filter(Boolean)});
-  const ctx = {h, fragment:(...k) => h('frag', {}, ...k), heading:(t, sub, o) => h('header', {}, h('h1', {}, t), o?.actions), addonLabel:a => a?.dashboard?.label, addons:() => [LIVE], encodeURIComponent};
+  const ctx = {h, fragment:(...k) => h('frag', {}, ...k), heading:(t, sub, o) => h('header', {}, h('h1', {}, t), o?.actions), addonLabel:a => a?.dashboard?.label, addons:() => [LIVE], encodeURIComponent,
+    window:{}, liveWall:() => h('div', {'data-key':'live-wall'})};
   vm.createContext(ctx); vm.runInContext(liveSource, ctx);
   const all = n => [n, ...(n.kids || []).flatMap(k => typeof k === 'object' ? all(k) : [])];
   const text = n => all(n).flatMap(x => (x.kids || []).filter(k => typeof k === 'string')).join(' ');
@@ -56,7 +57,7 @@ test('the new live page is an empty shell with the Preview tag, the add-on\'s ow
   assert.equal(ctx.livePageOf('automation'), null);
   const page = ctx.liveNextPage({kind:'live', id:'focus', path:''}), key = k => all(page).find(x => x.attrs?.['data-key'] === k);
   assert.equal(text(key('live-next-tag')), 'Preview');
-  assert.match(text(key('live-next')), /The new Focus is being built; your helpers’ sessions will show here\./);
+  assert.ok(all(key('live-next')).some(x => x.attrs?.['data-key'] === 'live-wall'), 'the wall fills the page (pages/livewall.js)');
   assert.equal(text(key('live-next-off')), 'Back to today’s Focus');
   assert.equal(key('live-next-off').attrs.href, '#settings/addons/focus');
   assert.equal(all(page).filter(x => x.tag === 'iframe').length, 0, 'not today\'s page');
@@ -161,4 +162,37 @@ test('the phone tab is role=tab and choosing it keeps Settings open at #settings
   assert.equal(ctx.settingsTab, 'phone');
   assert.deepEqual(calls, ['push', 'render']);
   assert.equal(route(ctx.location.hash, []).kind, 'settings');
+});
+// ORCH-465: one ticket's address with Preview on opens that ticket's session in the layer, once per address.
+test('a ticket\'s address with Preview on opens its session in the layer, once, and only a known ticket', () => {
+  const ctx = {state:null, snapshot:false};
+  vm.createContext(ctx); vm.runInContext(liveSource, ctx);
+  const opened = [], layer = {open:(id, into) => opened.push([id, into])}, known = id => id === 't_abc12345';
+  const r = hash => ({kind:'live', id:'focus', path:hash.replace('#addon/focus/', '').replace('#addon/focus', ''), hash});
+  assert.equal(ctx.liveAddressTicket(r('#addon/focus/t/t_abc12345')), 't_abc12345');
+  assert.equal(ctx.liveAddressTicket(r('#addon/focus')), null);
+  assert.equal(ctx.liveAddressTicket({kind:'page', path:'t/t_abc12345'}), null, 'Preview off: today\'s page handles it');
+  assert.equal(ctx.liveOpenFromAddress(r('#addon/focus/t/t_zzz'), layer, known), false, 'not loaded yet');
+  assert.equal(ctx.liveOpenFromAddress(r('#addon/focus/t/t_abc12345'), layer, known), true);
+  assert.equal(ctx.liveOpenFromAddress(r('#addon/focus/t/t_abc12345'), layer, known), false, 'every later render leaves it as the person put it');
+  assert.deepEqual(opened, [['t_abc12345', true]]);
+  ctx.liveOpenFromAddress(r('#addon/focus'), layer, known);
+  assert.equal(ctx.liveOpenFromAddress(r('#addon/focus/t/t_abc12345'), layer, known), true, 'back to the address: opens again');
+  assert.match(source, /liveDockSync\(\);[^\n]*\n\s*if \(typeof liveOpenFromAddress === 'function'\) liveOpenFromAddress\(r\);/, 'render calls it after the layer');
+});
+// ORCH-465: the shown add-on page takes the keyboard after it loaded, unless the person types somewhere else.
+test('the add-on frame takes the keyboard on load, never from a field or an open dialog', () => {
+  const settings = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
+  const fn = settings.slice(settings.indexOf('function frameTakesKeys('), settings.indexOf('function pageFrame('));
+  const ctx = {}; vm.createContext(ctx); vm.runInContext(fn, ctx);
+  const body = {matches:() => false};
+  const frame = {isConnected:true, focused:0, focus() { this.focused++; }};
+  const doc = (active, dialog = null) => ({body, activeElement:active, querySelector:() => dialog});
+  assert.equal(ctx.frameTakesKeys(frame, doc(body)), true);
+  assert.equal(ctx.frameTakesKeys(frame, doc({matches:s => s.includes('input')})), false, 'typing in a field');
+  assert.equal(ctx.frameTakesKeys(frame, doc({matches:() => false})), true, 'a link that was clicked');
+  assert.equal(ctx.frameTakesKeys(frame, doc(body, {})), false, 'a dialog is open');
+  assert.equal(ctx.frameTakesKeys({...frame, isConnected:false}, doc(body)), false);
+  assert.equal(frame.focused, 2);
+  assert.match(settings, /frame\.addEventListener\('load', \(\) => frameTakesKeys\(frame\)\)/);
 });

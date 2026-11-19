@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from . import drivers, store, watch
@@ -192,10 +193,31 @@ def _no_secret(root: Path, rec: dict) -> None:
         from orch import secretscan
     except ImportError:  # the core is always there (python -m under orch); never a silent pass
         raise Refused("Could not check the command for secrets. Update orch and try again.") from None
-    if secretscan.find("\n".join([rec["name"], *rec["command"]]), root):
+    hits = secretscan.find("\n".join([rec["name"], *rec["command"]]), root)
+    if hits and all(h.get("kind") == "stored-key" for h in hits):
+        why = _stored_keys_unreadable(root)
+        if why:  # the comparison could not run: say why instead of blaming a harmless command
+            raise Refused(f"Could not compare the command with this workspace's stored keys: {why}")
+    if hits:
         raise Refused(
             "The name or command holds a secret. Leave it out and read it inside the command with orch secret exec."
         )
+
+
+def _stored_keys_unreadable(root: Path) -> str | None:
+    """The core's own words when the stored keys cannot be read (then every check reports a stored key)."""
+    try:
+        from orch import keystore
+
+        keystore.all_needles(root)
+    except Exception as e:  # noqa: BLE001 - only to say why; the add stays refused either way
+        return _plain_reason(e)
+    return None
+
+
+def _plain_reason(e: Exception) -> str:
+    text = " ".join(str(e).split())[:200]
+    return text if text else "orch could not read them. Try again in a moment."
 
 
 def _masked_command(root: Path, argv: list[str]) -> list[str]:
@@ -315,6 +337,27 @@ def _state(root: Path, drv: drivers.Driver, rec: dict, wid: str) -> dict:
     return _row(root, rec, drv.status(_spec(root, rec, wid, strict=False)))
 
 
+SETTLE_QUIET = 3.0  # seconds a job that is not even launching gets before it counts as stopped
+SETTLE_LAUNCH = 90.0  # seconds a job the platform is still launching gets (slow start under load)
+
+
+def _settle(drv, spec) -> drivers.Status | None:
+    """After a start: wait until the job runs, or is clearly not coming (never launching, or launching too long)."""
+    t0 = time.monotonic()
+    while True:
+        st = drv.status(spec)
+        if st.running:
+            return st
+        limit = SETTLE_LAUNCH if st.starting else SETTLE_QUIET
+        if time.monotonic() - t0 >= limit:
+            return st
+        time.sleep(0.5)
+
+
+def _launching(drv, spec) -> bool:
+    return bool(drv.status(spec).starting)
+
+
 def cmd_add(args, root: Path) -> int:
     sid = store.check_id(args.id)
     if store.exists(root, sid):
@@ -353,12 +396,16 @@ def cmd_add(args, root: Path) -> int:
         drv.start(spec)
         store.mark(root, sid, True)
         watch.note_own_start(root, drv, spec)
+        _settle(drv, spec)
     row = _state(root, drv, rec, wid)
-    nxt = (
-        f"Added {rec['name']}; it is running."
-        if row["state"] == "running"
-        else f"Added {rec['name']}. Start it: orch services start {sid}"
-    )
+    if row["state"] == "running":
+        nxt = f"Added {rec['name']}; it is running."
+    elif args.start and _launching(drv, spec):
+        nxt = f"Added {rec['name']}; it was started and is still starting. Check later: orch services list"
+    elif args.start:
+        nxt = f"Added {rec['name']} and started it, but it did not stay running. Read its log: orch services log {sid}"
+    else:
+        nxt = f"Added {rec['name']}. Start it: orch services start {sid}"
     return _emit_kept(args, drv, {"service": row, "next": nxt}, nxt)
 
 
@@ -408,10 +455,14 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
     store.mark(root, sid, verb != "stop")
     if verb != "stop":
         watch.note_own_start(root, drv, spec)
+    if verb != "stop":
+        _settle(drv, spec)
     row = _state(root, drv, rec, wid)
     words = {"start": "Started", "stop": "Stopped", "restart": "Restarted"}[verb]
     nxt = f"{words} {rec['name']}."
-    if verb != "stop" and row["state"] != "running":
+    if verb != "stop" and row["state"] != "running" and _launching(drv, spec):
+        nxt = f"{rec['name']} is still starting. Check later: orch services list"
+    elif verb != "stop" and row["state"] != "running":
         nxt = f"{rec['name']} did not stay running. Read its log: orch services log {sid}"
     return _emit(args, {"service": row, "next": nxt}, nxt)
 
@@ -499,6 +550,9 @@ def cmd_adopt(args, root: Path, fid: str) -> int:
     if how.get("kind") != drv.name:
         raise Refused(f"{it['name']} cannot be managed on this computer. Run orch services found again.")
     name = store.clean_name(getattr(args, "name", None) or it["name"])
+    _no_secret(
+        root, {"name": name, "command": []}
+    )  # the name shows in list, questions and the page, as with add
     sid = _free_id(root, getattr(args, "id", None), name)
     try:
         command = store.clean_command(it["command"])

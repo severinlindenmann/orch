@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-27 steps: 11 ready (the script clicks them), 16 pending (not built yet).
+28 steps: 18 ready (the script clicks them), 10 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -60,7 +60,7 @@ Must be seen:
 ## 4. The live wall in bands
 
 - Part: wall (draft D feature 1)
-- State: pending, waits for: The wall (crew task wall)
+- State: ready, clicked by the script
 - Pictures: `fd-04-wall-1280.png`, `fd-04-wall-1920.png`, `fd-04-wall-390.png`
 
 Do:
@@ -70,7 +70,7 @@ Do:
 
 Must be seen:
 
-- Bands in this order: Pinned, Needs you, Working, In line, Idle, No session.
+- Bands in this order: Pinned, Needs you and working, In line, Idle and no session.
 - One summary line on top.
 - Each tile says in one plain sentence what its helper does.
 - A working tile adds its newest last line by itself.
@@ -78,7 +78,7 @@ Must be seen:
 ## 5. A session that needs you is an orange tile
 
 - Part: wall (draft D feature 2)
-- State: pending, waits for: The wall (crew task wall)
+- State: ready, clicked by the script
 - Pictures: `fd-05-needs-you-1280.png`, `fd-05-needs-you-1920.png`, `fd-05-needs-you-390.png`
 
 Do:
@@ -113,7 +113,7 @@ Must be seen:
 ## 7. Pin a session and give it your own name
 
 - Part: wall (draft D feature 9)
-- State: pending, waits for: The wall (crew task wall)
+- State: ready, clicked by the script
 - Pictures: `fd-07-pin-name-1280.png`, `fd-07-pin-name-1920.png`, `fd-07-pin-name-390.png`
 
 Do:
@@ -125,11 +125,12 @@ Must be seen:
 
 - The pinned session moves to the Pinned band and gets a chip in the bar.
 - The new name shows on its tile, its pane and its chip.
+- Both stay after a reload; Unpin moves it back.
 
 ## 8. Works with 24 and more sessions
 
 - Part: wall (draft D feature 11)
-- State: pending, waits for: The wall (crew task wall)
+- State: ready, clicked by the script
 - Pictures: `fd-08-many-1280.png`, `fd-08-many-1920.png`, `fd-08-many-390.png`
 
 Do:
@@ -188,7 +189,7 @@ Must be seen:
 ## 11. Zoom and full screen, Esc goes one step back
 
 - Part: layer (draft D feature 8)
-- State: pending, waits for: The layer: bottom, right, full screen (crew task layer)
+- State: ready, clicked by the script
 - Pictures: `fd-11-zoom-1280.png`, `fd-11-zoom-1920.png`, `fd-11-zoom-390.png`
 
 Do:
@@ -199,9 +200,9 @@ Do:
 
 Must be seen:
 
-- The tile grows into a large view.
+- The tile opens large in the layer, the keyboard in it.
 - Full screen keeps only a slim strip of the other sessions.
-- Each Esc goes back one step: full screen, then zoom, then the wall.
+- Each Esc goes back one step: full screen, then the layer, then the wall.
 
 ## 12. Split into two and three sessions with the pane controls
 
@@ -262,18 +263,20 @@ Must be seen:
 ## 15. Sessions without a ticket
 
 - Part: sessions (draft D feature 6)
-- State: pending, waits for: Start choice, earlier sessions and sessions without a ticket (crew tasks of the Wall and sessions stage)
+- State: ready, clicked by the script
 - Pictures: `fd-15-no-ticket-1280.png`, `fd-15-no-ticket-1920.png`, `fd-15-no-ticket-390.png`
 
 Do:
 
 1. Open the New menu in the bar.
 2. Start an Empty helper, a Chat helper, a Plain terminal and the Manager.
+3. Open Focus and press one of the four buttons at its top.
 
 Must be seen:
 
 - The four choices are at the top of Focus and in the New menu.
-- Each new session is pinned by itself.
+- Each new session opens in the layer and is pinned by itself.
+- One that is open already says "Already open: go to it" and is not started twice.
 
 ## 16. Tool, model and open time on every session
 
@@ -472,4 +475,23 @@ Do:
 Must be seen:
 
 - A new model applies from the next fresh start and says so.
+
+## 28. An epic and its helpers in one place
+
+- Part: layer
+- State: ready, clicked by the script
+- Pictures: `fd-28-groups-1280.png`, `fd-28-groups-1920.png`, `fd-28-groups-390.png`
+
+Do:
+
+1. Open Focus while an epic has a main helper and helpers on its tickets.
+2. Click the epic's tile.
+3. Click another helper in the list beside the session, then write it a message.
+
+Must be seen:
+
+- The epic is one tile with its helpers counted ("3 helpers · 2 small helpers"), orange while one of them needs you.
+- The click opens the helper that needs you, with the main helper, every helper, the small helpers (watch only) and Earlier sessions beside it.
+- A click on a helper shows it in the same pane; the message box says who gets the message.
+- On a phone the list is one line that scrolls inside itself.
 

@@ -20,7 +20,7 @@ import unicodedata
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from orch import config, diag, history, net, procs, saferead, syncgate, term
+from orch import config, diag, history, net, ownerpick, procs, saferead, syncgate, term
 from orch.errors import Refused
 from orch.session_ids import SESSION_ID_RE as SESSION_ID_RE
 from orch.session_ids import valid_session_id
@@ -545,10 +545,12 @@ def apply_op(
     expect: tuple[str, object] | None = None,
     if_revision: int | None = None,
     by: str,
+    person_click: bool = False,
 ):
-    """Every attempt leaves one decision event in the debug log (diag.md): ticket.op_applied or
+    """person_click: a person's click on the dashboard or a phone, whatever tool started that server.
+    Every attempt leaves one decision event in the debug log (diag.md): ticket.op_applied or
     ticket.op_refused (actor, op, status and revision before/after, the refusing guard; no ticket text)."""
-    info: dict = {}
+    info: dict = {"person_click": person_click}
     try:
         out = _apply_op(root, tid, fn, expect, if_revision, by, info)
     except BaseException as e:
@@ -602,7 +604,7 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
         was_review = ticket.get("status") == "review"
         wont_before = _wont_view(ticket)
         result = fn(ticket)
-        if agent_tool():
+        if agent_tool() and not info.get("person_click"):
             ids = [c.get("id") for c in ticket.get("checklist") or [] if isinstance(c, dict)]
             if len(ids) != len(set(ids)):
                 raise Refused("Duplicate checklist step ids are not allowed.")
@@ -669,25 +671,30 @@ def save(root: Path, ticket: dict) -> None:
         _write(root, ticket)
 
 
-def list_all(root: Path, include_general: bool = False) -> list[dict]:
+def list_all(root: Path, include_general: bool = False, ext: str | None = None) -> list[dict]:
     """Every ticket by creation time. The hidden General ticket of the phone conversation (flag
     `general: true`) and the hidden Manager ticket (flag `manager: true`) are left out unless include_general:
-    they are not tickets anyone lists, counts or closes."""
+    they are not tickets anyone lists, counts or closes. `ext`: only tickets with add-on data under that name;
+    a file whose text does not name it is not parsed (ORCH-603: an add-on reads its own tickets fast)."""
     d = tickets_dir(root)
     out = []
+    mark = json.dumps(ext) if ext is not None else None
     if d.is_dir():
         for p in sorted(d.glob("t_*.json")):
             try:
-                t = json.loads(
-                    p.read_text(encoding="utf-8")
-                )  # no retry: a listing never stalls on a bad file
+                text = p.read_text(encoding="utf-8")
+                if mark is not None and mark not in text:
+                    continue
+                t = json.loads(text)  # no retry: a listing never stalls on a bad file
             except (OSError, ValueError):
                 continue
             if not isinstance(t, dict) or t.get("id") != p.stem:
                 continue
+            if ext is not None and not (isinstance(t.get("ext"), dict) and ext in t["ext"]):
+                continue
             if _newer_format(t):
                 continue  # a newer orch's file: not shown here, never rewritten
-            if include_general or (t.get("general") is not True and t.get("manager") is not True):
+            if include_general or not is_hidden(t):
                 out.append(t)
     out.sort(key=lambda t: t.get("created_at", ""))
     return out
@@ -713,6 +720,14 @@ def is_manager(root: Path, tid: str) -> bool:
     """True for the hidden Manager ticket: the workspace's always-on helper session (ORCH-147)."""
     try:
         return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("manager") is True
+    except (OSError, ValueError, Refused, AttributeError):
+        return False
+
+
+def is_session(root: Path, tid: str) -> bool:
+    """True for the hidden ticket of a session without a ticket (empty helper, plain terminal; ORCH-364)."""
+    try:
+        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("session") in SESSION_KINDS
     except (OSError, ValueError, Refused, AttributeError):
         return False
 
@@ -747,6 +762,53 @@ def ensure_manager(root: Path, by: str) -> str:
         "manager": True,
         "status": "open",
         "note": MANAGER_NOTE,
+        "created_at": t,
+        "updated_at": t,
+        "checklist": [],
+        "refs": [],
+        "questions": [],
+        "history": [],
+    }
+    add_history(ticket, by, "Created", "cli", at=t)
+    save(root, ticket)
+    harness.protect_local(root)
+    return ticket["id"]
+
+
+# Sessions without a ticket (ORCH-364, draft D): the empty helper and the plain terminal, one of each per
+# workspace, each a hidden ticket like the Manager's (flag session: <kind>, no display key, kept out of git).
+SESSION_KINDS = ("empty", "terminal")
+SESSION_TITLES = {"empty": "Empty helper", "terminal": "Plain terminal"}
+SESSION_NOTES = {
+    "empty": "A helper with no ticket and no task yet: it waits for the person's first message.",
+    "terminal": "A plain terminal in this workspace, no helper.",
+}
+
+
+def session_id(root: Path, kind: str) -> str | None:
+    """The id of this workspace's hidden ticket of a session without a ticket of this kind, or None."""
+    for t in list_all(root, include_general=True):
+        if isinstance(t, dict) and t.get("session") == kind and hidden_kind(t) == kind:
+            return t["id"]
+    return None
+
+
+def ensure_session(root: Path, kind: str, by: str) -> str:
+    """The hidden ticket of a session without a ticket (empty helper or plain terminal), made once."""
+    from orch import harness
+
+    if kind not in SESSION_KINDS:
+        raise Refused(f"No such session without a ticket: {kind}.")
+    if tid := session_id(root, kind):
+        return tid
+    t = now()
+    ticket = {
+        "schema": "orch.ticket/1",
+        "id": new_id(root),
+        "title": SESSION_TITLES[kind],
+        "session": kind,
+        "status": "open",
+        "note": SESSION_NOTES[kind],
         "created_at": t,
         "updated_at": t,
         "checklist": [],
@@ -939,8 +1001,11 @@ def create(
     plan_first: bool = False,
     epic: bool = False,
     release: bool = False,
+    human_review: bool | None = None,
 ) -> dict:
-    """`title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
+    """`human_review`: the Human review needed switch (ORCH-424); None = the workspace default (on, or off
+    while the Auto Reviewer is on: config.auto_reviewer_on).
+    `title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
     writes the real one (`orch ticket title`). The flag clears when anyone sets the title.
     tid lets callers persist a reserved id before this write."""
     if tid is not None:
@@ -983,6 +1048,11 @@ def create(
         release
     ):  # ORCH-37: a release holds the epics and tickets that ship together (set_release changes it later)
         ticket["release"] = True
+    if human_review is None:
+        human_review = not config.auto_reviewer_on(root)
+    if not human_review:  # ORCH-424: stored only when off; no field = on (also every older ticket)
+        ticket["human_review"] = False
+        add_history(ticket, by, HUMAN_REVIEW_OFF, at=t)
     for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
@@ -1170,20 +1240,36 @@ def _check_not_too_early(root: Path, ticket: dict) -> None:
 
 GENERAL_REFUSAL = "The Chat is not a ticket: it is never finished, dropped or reopened."
 MANAGER_REFUSAL = "The Manager is not a ticket: it is never finished, dropped or reopened."
+SESSION_REFUSAL = "A session without a ticket is not a ticket: it is never finished, dropped or reopened."
 
 
 def hidden_kind(ticket: dict) -> str | None:
-    """'general' (Chat) or 'manager' for the two hidden tickets that hold a conversation, never a piece of
-    work: no status moves, never Working. None for every other ticket."""
+    """'general' (Chat), 'manager', or a session without a ticket ('empty' helper, 'terminal'; ORCH-364) for
+    the hidden tickets that hold a conversation, never a piece of work: no status moves, never Working. None
+    for every other ticket."""
     if ticket.get("general") is True:
         return "general"
     if ticket.get("manager") is True:
         return "manager"
+    if ticket.get("session") in SESSION_KINDS:
+        return str(ticket["session"])
     return None
 
 
+def is_hidden(ticket) -> bool:
+    """A hidden ticket (Chat, Manager, a session without a ticket): never in the ticket list."""
+    return isinstance(ticket, dict) and hidden_kind(ticket) is not None
+
+
 def _hidden_refusal(ticket: dict) -> str:
-    return MANAGER_REFUSAL if hidden_kind(ticket) == "manager" else GENERAL_REFUSAL
+    kind = hidden_kind(ticket)
+    return (
+        MANAGER_REFUSAL
+        if kind == "manager"
+        else SESSION_REFUSAL
+        if kind in SESSION_KINDS
+        else GENERAL_REFUSAL
+    )
 
 
 GENERAL_REFUSED = (
@@ -1195,11 +1281,23 @@ GENERAL_REFUSED = (
 )  # finish, reopen, Working; waiting and ready stay
 
 
-def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str, str]:
+DRAFT_TO_CHECK = "a ticket with a draft, mockup or design waits for the owner's Check"
+
+
+def _finish_status(root: Path, ticket: dict, status: str, by: str, person: bool = False) -> tuple[str, str]:
+    """person: a signed-in person (the dashboard's one-time grant); only then does a ticket that carries a
+    draft become Done (ORCH-582). An agent's Done goes to Review instead, also with agents may finish on."""
     if hidden_kind(ticket) and status in GENERAL_REFUSED:  # the ONE status guard (agent, person, wrapper)
         raise Refused(_hidden_refusal(ticket))
     if agent_tool():  # an agent in the environment counts as an agent whatever --by says
         by = "agent:" + str(agent_tool())
+    if status == "done" and ticket["status"] != "done" and ownerpick.carries_draft(ticket):
+        if by.startswith("agent:"):
+            _check_not_too_early(root, ticket)
+            _check_can_finish(ticket)
+            add_history(ticket, by, f"{by} finished the work and sent it to Check: {DRAFT_TO_CHECK}")
+            return "review", by
+        ownerpick.refuse_ticket(ticket, person)
     if status in ("done", "review") and by.startswith("agent:") and ticket["status"] != status:
         _check_not_too_early(root, ticket)
     if status == "done" and by.startswith("agent:"):
@@ -1225,11 +1323,12 @@ def note_history(root: Path, tid: str, by: str, text: str, via: str | None = Non
     apply_op(root, tid, lambda ticket: add_history(ticket, by, text, via), by=by)
 
 
-def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
+def accept_review(root: Path, tid: str, by: str, via: str = "phone", *, person: bool = False) -> dict:
     """A person accepts a ticket in Review: Review -> Done, like the dashboard's Accept. Refused for an agent
     (an agent in the environment, or any `by` that is not human:) and when the ticket is not in Review, so a
     second accept is refused. The relay's phone path calls it for an answer to the current review question
-    (relay._apply_review_answer)."""
+    (relay._apply_review_answer). person: a signed-in person or a paired phone; a ticket that carries a draft
+    is accepted only then, checked under the ticket's lock (ORCH-582)."""
     if not by.startswith("human:") or agent_tool():
         raise Refused("Only a person can accept.")
 
@@ -1238,6 +1337,7 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
             raise Refused(_hidden_refusal(ticket))
         if ticket["status"] != "review":
             raise Refused("This ticket is not waiting for your review.")
+        ownerpick.refuse_ticket(ticket, person)
         ticket["status"] = "done"
         ticket["waiting_on"] = None
         add_history(ticket, by, "Status review -> done", via)
@@ -1274,6 +1374,9 @@ def accept_for_owner(root: Path, tid: str, reasons: str) -> dict:
             raise Refused(_hidden_refusal(ticket))
         if ticket["status"] != "review":
             raise Refused("This ticket is not in Review.")
+        ownerpick.refuse_ticket(
+            ticket, person=False
+        )  # ORCH-582: a draft is the owner's, never the Reviewer's
         _check_can_finish(ticket)
         if _open_questions(ticket):
             raise Refused("A question on this ticket still waits for an answer.")
@@ -1310,6 +1413,7 @@ def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str) -> d
             raise Refused(f"{qid} is already answered.")
         if question_digest(q) != digest:
             raise Refused(f"{qid} changed after the Reviewer looked at it.")
+        ownerpick.refuse_card(q, person=False)  # ORCH-582: said first, in its own words
         if q.get("card") is not None or q.get("action") is not None or q.get("kind") not in (None, "plain"):
             raise Refused(f"{qid} waits for the owner.")
         rec = q.get("recommended")
@@ -1558,7 +1662,9 @@ def _keep_superseded(ticket: dict, status: str, other: str | None, given: bool) 
             ticket.pop("superseded_by", None)
 
 
-def set_status(root: Path, tid: str, status: str, by: str, superseded_by: str | None = None) -> dict:
+def set_status(
+    root: Path, tid: str, status: str, by: str, superseded_by: str | None = None, *, person: bool = False
+) -> dict:
     if status not in STATUSES:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
     if superseded_by is not None and status != "dropped":
@@ -1566,7 +1672,7 @@ def set_status(root: Path, tid: str, status: str, by: str, superseded_by: str | 
     other = superseded_value(root, tid, superseded_by) if superseded_by is not None else None
 
     def op(ticket):
-        target, actor = _finish_status(root, ticket, status, by)
+        target, actor = _finish_status(root, ticket, status, by, person)
         _keep_superseded(ticket, target, other, superseded_by is not None)
         if other and target == "dropped":
             add_history(ticket, actor, f"Superseded by {other}")
@@ -1590,7 +1696,16 @@ def set_status(root: Path, tid: str, status: str, by: str, superseded_by: str | 
 
 
 # orch writes these itself
-PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "release", "description", "description_by", "model")
+PROTECTED_FIELDS = (
+    "title_auto",
+    "plan_first",
+    "epic",
+    "release",
+    "human_review",
+    "description",
+    "description_by",
+    "model",
+)
 
 
 DUE_MSG = "due must be a date like 2026-11-10 or a time like 18:30."
@@ -1851,6 +1966,34 @@ def set_release(root: Path, tid: str, on: bool, by: str, if_revision: int | None
     return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 
 
+def human_review(ticket: dict) -> bool:
+    """ORCH-424: the Human review needed switch. On unless a person turned it off (the field is False only
+    then), so a ticket made before the switch existed counts as on. While it is on, nothing on the ticket is
+    accepted without a person."""
+    return ticket.get("human_review") is not False
+
+
+HUMAN_REVIEW_ON = "Human review needed: on"
+HUMAN_REVIEW_OFF = "Human review needed: off"
+
+
+def set_human_review(root: Path, tid: str, on: bool, by: str, if_revision: int | None = None) -> dict:
+    """ORCH-424: turn the Human review needed switch on or off. Who may turn it off is checked by the caller
+    (only a person: `orch ticket edit --human-review no`, the dashboard, a paired phone)."""
+    me = load(root, tid)
+    if human_review(me) == on:
+        return me  # nothing changes: no write, no history line
+
+    def op(ticket):
+        if on:
+            ticket.pop("human_review", None)
+        else:
+            ticket["human_review"] = False
+        add_history(ticket, by, HUMAN_REVIEW_ON if on else HUMAN_REVIEW_OFF)
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+
+
 PARENT_DEPTH = 50  # a parent chain longer than this is broken data: never followed further
 
 
@@ -1986,12 +2129,22 @@ def create_from_input(
     parent: str | None = None,
     fields: dict | None = None,
     ext: dict[str, dict] | None = None,
+    human_review: bool | None = None,
 ) -> dict:
     """THE way a ticket is made from what a person wrote or said (dashboard paste box, phone text, Open
     agent): the title is the first words (a placeholder, flag `title_auto`, when the text is long or has
     several lines)
     and the agent writes the real title and the description first (runs.fresh_prompt, `orch ticket title`)."""
-    return create(root, placeholder_title(text), by, parent, ext, fields, title_auto=needs_agent_title(text))
+    return create(
+        root,
+        placeholder_title(text),
+        by,
+        parent,
+        ext,
+        fields,
+        title_auto=needs_agent_title(text),
+        human_review=human_review,
+    )
 
 
 def set_auto_title(root: Path, tid: str, title: str, by: str, description: str | None = None) -> dict:
@@ -3459,8 +3612,11 @@ def answer(
     *,
     expected_question_digest: str | None = None,
     decision: dict | None = None,
+    person: bool = False,
 ) -> tuple[dict, dict]:
     """decision: the Review stack's structured answer (orch/review.py); `answer` is then its plain summary.
+    person: a signed-in person on the dashboard (a one-time person grant) or a paired phone; only then is a
+    draft card answered (ORCH-582, orch/ownerpick.py), whatever `by` and `via` say.
     expected_question_digest: question_digest of the question as the person was shown it; the answer is
     refused when the question is no longer that one, or could not be encoded. None: not checked (a caller that
     kept no digest, e.g. a relay record from before digests)."""
@@ -3469,6 +3625,8 @@ def answer(
     if not text.strip():
         raise Refused("An answer needs text.")
     text = text.strip()
+
+    person_click = by.startswith("human:") and (via != "cli" or not agent_tool())
 
     def op(ticket):
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)
@@ -3481,6 +3639,7 @@ def answer(
             raise Refused(
                 "This card waits for the owner. Ask with orch review add and wait with orch review wait."
             )
+        ownerpick.refuse_card(q, person and str(by).startswith("human:"))
         if decision is None and isinstance(q.get("action"), dict) and "merge" in q["action"]:
             raise Refused(f"{qid} merges a pull request: answer it on the card (Merge or Not now).")
         if expected_question_digest is not None and (
@@ -3499,13 +3658,15 @@ def answer(
         _release_wait(root, tid, ticket, qid)
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
         history.created("answers", q)  # the answer point: this question, as answered, is core's own
-        if _is_person(by) and _wont_do_yes(q, ans):
+        # A click on the dashboard or a phone is a person even when that server was started from a helper's
+        # session (its environment then shows an agent tool, which only says who runs the CLI). #1354.
+        if person_click and _wont_do_yes(q, ans):
             item = _item(ticket, q["check"])
             if not item.get("done") and not item.get("wont_do"):
                 _mark_wont_do(ticket, q["check"], by, f"Answered yes to {qid}")
         return q
 
-    return apply_op(root, tid, op, by=by)
+    return apply_op(root, tid, op, by=by, person_click=person_click)
 
 
 def mark_question_sent(root: Path, tid: str, qid: str, by: str = "orch") -> None:
@@ -3523,7 +3684,7 @@ def mark_question_sent(root: Path, tid: str, qid: str, by: str = "orch") -> None
 
 
 def record_answered(
-    root: Path, tid: str, entry: dict, by: str, via: str, *, replaces: str | None = None
+    root: Path, tid: str, entry: dict, by: str, via: str, *, replaces: str | None = None, person: bool = False
 ) -> dict:
     """Append one already-answered questions[] entry (a Review stack decision that was not an open question:
     a Check result, or a changed answer). Nothing is overwritten: with `replaces` the old entry only gets
@@ -3536,6 +3697,7 @@ def record_answered(
         raise Refused(
             "This card waits for the owner. Ask with orch review add and wait with orch review wait."
         )
+    ownerpick.refuse_card(entry, person and str(by).startswith("human:"))
 
     def op(ticket):
         old = None
@@ -3617,7 +3779,7 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
     return apply_op(root, tid, op2, by=by)[0]
 
 
-def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
+def patch(root: Path, tid: str, if_revision: int, data: str, by: str, *, person: bool = False) -> dict:
     """Atomic change of several fields; refused (exit 2 + current values) when `revision` changed."""
     try:
         obj = json.loads(data)
@@ -3661,7 +3823,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
             raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
         actor = by
         if "status" in obj:
-            status, actor = _finish_status(root, ticket, status, by)
+            status, actor = _finish_status(root, ticket, status, by, person)
             if status in ("open", "ready") and not actor.startswith("agent:"):
                 ticket.pop("started", None)
         for k in ("owner", "due", "note", "done_when", "summary"):
@@ -4095,7 +4257,7 @@ def _artifacts_dir_raw(root: Path, tid: str) -> Path:
     return d
 
 
-# What a person may attach to a ticket from the dashboard or the phone: plain text and pictures.
+# What a person may attach to a ticket from the dashboard or the phone: text, pictures and voice recordings.
 # Never a page or a program that runs: html, xml, svg and scripts are not accepted.
 # (The dashboard's actions.py mirrors these limits to refuse early; orch here is the one that decides.)
 ATTACH_TEXT = frozenset({"txt", "md", "csv", "tsv", "json", "log", "yml", "yaml", "toml", "ini"})
@@ -4105,6 +4267,16 @@ ATTACH_IMAGES = {
     "jpeg": (b"\xff\xd8\xff",),
     "gif": (b"GIF87a", b"GIF89a"),
     "webp": (b"RIFF",),
+}
+# A voice note recorded in the browser (ORCH-422): Chrome and Edge record webm, Firefox ogg,
+# Safari mp4 (kept as m4a).
+# Each is checked by its first bytes like a picture; nothing in it runs.
+ATTACH_AUDIO = {
+    "webm": (b"\x1a\x45\xdf\xa3",),
+    "ogg": (b"OggS",),
+    "m4a": (),  # an mp4 box: "ftyp" at byte 4 (checked below)
+    "mp3": (b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"),
+    "wav": (b"RIFF",),
 }
 ATTACH_MAX = 25 * 1024 * 1024  # one attached file: the one limit (dashboard and Focus use it too)
 LONG_TEXT = 1500  # a text longer than this is kept as a file (note.md); the Note stays short
@@ -4120,8 +4292,9 @@ def attach_name(hint) -> str:
     stem, dot, ext = base.rpartition(".")
     ext = ext.lower()
     stem = stem.strip()[:80].strip(". ")
-    if not dot or not stem.strip("._ -") or (ext not in ATTACH_TEXT and ext not in ATTACH_IMAGES):
-        raise Refused("That kind of file cannot be attached. Text files and pictures can.")
+    allowed = ext in ATTACH_TEXT or ext in ATTACH_IMAGES or ext in ATTACH_AUDIO
+    if not dot or not stem.strip("._ -") or not allowed:
+        raise Refused("That kind of file cannot be attached. Text files, pictures and voice recordings can.")
     if stem.split(".")[0].lower() in _WIN_RESERVED:
         stem = "_" + stem
     return stem + "." + ext
@@ -4136,6 +4309,14 @@ def _check_attach(name: str, data) -> str:
     if ext in ATTACH_IMAGES:
         if not data.startswith(ATTACH_IMAGES[ext]) or (ext == "webp" and data[8:12] != b"WEBP"):
             raise Refused("That picture is not what its name says.")
+    elif ext in ATTACH_AUDIO:
+        ok = (
+            data[4:8] == b"ftyp"
+            if ext == "m4a"
+            else data.startswith(ATTACH_AUDIO[ext]) and (ext != "wav" or data[8:12] == b"WAVE")
+        )
+        if not ok:
+            raise Refused("That recording is not what its name says.")
     else:
         if b"\x00" in data:
             raise Refused("That file is not plain text.")

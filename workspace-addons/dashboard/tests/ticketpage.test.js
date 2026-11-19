@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
+const startSource = fs.readFileSync(require('node:path').join(__dirname, '../src/orch_dashboard/web/pages/start.js'), 'utf8');  // the one Start button (ORCH-475)
 const helpers = require('../src/orch_dashboard/web/helpers.js');
 function context(extra = {}) {
   const ctx = {array:v => Array.isArray(v) ? v : [], h:(tag, attrs, ...children) => ({tag, attrs, children}), iconEl:name => name, window:{UI:{...kitState}, DashHelpers:helpers, orch:{toast(){}}}, snapshot:false, changeError:r => r.text, actRetry:(op, args) => ctx.act(op, args()), ...extra};
@@ -49,7 +50,7 @@ test('classic script loads before state and snapshot detail stays read-only insi
     questions:t => (t.questions || []).filter(q => q.answer == null), capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [], ticketOf:() => null,
     statusChip:() => h('span', {}, 'Done'), chip:text => h('span', {}, text), href:id => '#ticket/' + id,
     fetch:() => { throw Error('snapshot fetched'); }};
-  vm.createContext(ctx); vm.runInContext(source, ctx); // No state or snapshot at script load.
+  vm.createContext(ctx); vm.runInContext(source, ctx); vm.runInContext(startSource, ctx); // No state or snapshot at script load.
   ctx.snapshot = true; ctx.state = {};
   for (const status of ['open', 'active', 'waiting', 'review', 'done']) {
     const tree = ctx.detail({id:'t_test', title:'Test', status, questions:[{id:'q1', text:'Choose?', options:['Yes']}]});
@@ -102,27 +103,54 @@ test('Review and bring back opens a dialog with the plain paths and sends the sh
   c.snapshot = true;
   assert.equal(nodes(c.ticketBringBackRow({id:'t_abc123', bring_back:b})).filter(n => n.tag === 'button').length, 0);
 });
-test('Send back on the ticket page opens a real text box: label above, no repeated placeholder, Ctrl+Enter sends (ORCH-183)', async () => {
-  const sent = [];
-  const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), value:'', append(...kids) { this.children.push(...kids); }, replaceChildren(...kids) { this.children = kids; }, focus() {}, click() { this.onclick?.(); }});
-  const c = context({h:node, clean:v => String(v ?? ''), locks:new Set(), render() {}, moveTicket:() => Promise.resolve(), ticketOf:() => ({revision:1}), act:async (op, args) => { sent.push(args.text); return {ok:true}; }});
+test('Send back on the ticket page opens the feedback box: words, screenshots, files and a voice note (ORCH-183, ORCH-422)', async () => {
+  const acts = [];
+  let opts = null;
+  const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), append(...kids) { this.children.push(...kids); }, replaceChildren(...kids) { this.children = kids; }, addEventListener() {}, focus() {}, click() { this.onclick?.(); }});
+  const composer = (box, o) => { opts = o; return {field:{focus() {}}, destroy() {}}; };
+  const c = context({h:node, clean:v => String(v ?? ''), locks:new Set(), render() {}, moveTicket:() => Promise.resolve(), ticketOf:() => ({revision:1}),
+    act:async (op, args) => { acts.push([op, args]); return op === 'ticket.attach' ? {ok:true, state:{attached:{saved:['shot (2).png', 'voice-note-0931.webm'], failed:[]}}} : {ok:true}; }});
+  c.window.UI.composer = composer;
   const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMap(nodes)] : [];
   const editor = c.ticketChangesEditor({id:'t_abc123', status:'review'});
   nodes(editor).find(n => n.tag === 'button' && n.children.includes('Send back')).onclick();
-  const box = nodes(editor).find(n => n.tag === 'textarea'), label = nodes(editor).find(n => n.tag === 'label');
-  assert.ok(box, 'a text box with room for a few lines');
-  assert.equal(box.attrs.rows, 3);
-  assert.equal(box.attrs.placeholder, undefined, 'the label is not repeated inside the box');
-  assert.equal(label.attrs.for, box.attrs.id, 'the label names the box');
-  assert.ok(label.children.includes('What should change?'));
-  const send = nodes(editor).find(n => n.tag === 'button' && n.children.includes('Send back') && n.attrs.className.includes('primary'));
-  box.value = 'Use the new logo'; box.oninput();
-  const key = (k, mods = {}) => box.onkeydown({key:k, preventDefault() {}, ...mods});
-  key('Enter');
-  assert.deepEqual(sent, [], 'Enter makes a new line');
-  key('Enter', {ctrlKey:true}); await new Promise(r => setTimeout(r, 0));
-  assert.deepEqual(sent, ['Use the new logo']);
-  assert.ok(send);
+  assert.ok(opts, 'the shared feedback box opens');
+  assert.equal(opts.sendLabel, 'Send back');
+  assert.equal(opts.voice, true, 'a Record button');
+  for (const kind of ['png', 'webm', 'm4a', 'ogg', 'md']) assert.ok(opts.accept.includes(kind), kind);
+  assert.equal(opts.maxBytes, 25 * 1024 * 1024, 'the same limit as every ticket file');
+  assert.ok(nodes(editor).some(n => n.tag === 'p' && n.children.includes('What should change?')));
+  // words only: one ticket.changes, nothing attached
+  const plain = v => JSON.parse(JSON.stringify(v));
+  assert.deepEqual(plain(await opts.onSend({text:'Use the new logo', files:[]})), {ok:true, text:''});
+  assert.deepEqual(plain(acts), [['ticket.changes', {ticket:'t_abc123', text:'Use the new logo'}]]);
+  // a screenshot and a voice note without words: on the ticket first, then sent back naming orch's own file names
+  acts.length = 0;
+  await opts.onSend({text:'', files:[{name:'shot.png', url:'data:image/png;base64,iVBO'}, {name:'voice-note-0931.webm', url:'data:audio/webm;base64,GkXf'}]});
+  assert.equal(acts[0][0], 'ticket.attach');
+  assert.deepEqual(plain(acts[0][1].files), [{name:'shot.png', data:'iVBO'}, {name:'voice-note-0931.webm', data:'GkXf'}]);
+  assert.equal(acts[1][0], 'ticket.changes');
+  assert.match(acts[1][1].text, /I added 2 files to this ticket: shot \(2\)\.png, voice-note-0931\.webm\./);
+  assert.match(acts[1][1].text, /voice note came without written words/);
+  // a voice note with its words: no "without words" line
+  acts.length = 0;
+  await opts.onSend({text:'Voice note: make the button bigger', files:[{name:'voice-note-0931.webm', url:'data:audio/webm;base64,GkXf'}]});
+  assert.doesNotMatch(acts[1][1].text, /without written words/);
+  assert.match(acts[1][1].text, /^Voice note: make the button bigger/);
+});
+test('A refused file keeps the box open and nothing is sent back (ORCH-422)', async () => {
+  const acts = [];
+  let opts = null;
+  const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), append(...kids) { this.children.push(...kids); }, replaceChildren(...kids) { this.children = kids; }, addEventListener() {}, focus() {}, click() { this.onclick?.(); }});
+  const c = context({h:node, clean:v => String(v ?? ''), locks:new Set(), render() {}, moveTicket:() => Promise.resolve(), ticketOf:() => ({revision:1}),
+    act:async (op, args) => { acts.push(op); return {ok:false, status:400, text:'x.pdf: only text files, pictures and voice recordings can be added.'}; }});
+  c.window.UI.composer = (box, o) => { opts = o; return {field:{focus() {}}, destroy() {}}; };
+  const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMap(nodes)] : [];
+  const editor = c.ticketChangesEditor({id:'t_abc123', status:'review'});
+  nodes(editor).find(n => n.tag === 'button' && n.children.includes('Send back')).onclick();
+  const r = await opts.onSend({text:'see file', files:[{name:'x.pdf', url:'data:application/pdf;base64,JVBE'}]});
+  assert.equal(r.ok, false);
+  assert.deepEqual(acts, ['ticket.attach'], 'not sent back when the files did not land');
 });
 test('Accept shows the reviewed tip and sends the full tip with the Done (B13g)', () => {
   const moves = [];
@@ -165,7 +193,7 @@ test('the review buttons show whenever the status is Review, an open question fi
     surface:v => v, inlineField:() => null, ticketHistoryPanel:() => null, artifactsPanel:() => null, ticketParts:() => null, taskRows:() => null, addTaskRow:() => null, artifactCount:() => 0,
     linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, ticketDoneLine:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false,
     repeatsAddon:() => null, fetch:() => new Promise(() => {})};
-  vm.createContext(ctx); vm.runInContext(source, ctx);
+  vm.createContext(ctx); vm.runInContext(source, ctx); vm.runInContext(startSource, ctx);
   const text = JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[{id:'q1', text:'Which colour?', options:[]}]}));
   assert.match(text, /Looks good/);
   assert.match(text, /Send back/);
@@ -192,7 +220,7 @@ test('Repeat (not Copy ticket) shows in the ticket menu only when the repeats ad
     surface:v => v, inlineField:() => null, ticketHistoryPanel:() => null, artifactsPanel:() => null, ticketParts:() => null, taskRows:() => null, addTaskRow:() => null, artifactCount:() => 0,
     linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, ticketDoneLine:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false,
     repeatsAddon:() => null, fetch:() => new Promise(() => {})};
-  vm.createContext(ctx); vm.runInContext(source, ctx);
+  vm.createContext(ctx); vm.runInContext(source, ctx); vm.runInContext(startSource, ctx);
   const t = {id:'t_test', title:'Test', status:'open', questions:[]};
   assert.doesNotMatch(JSON.stringify(ctx.detail(t)), /Copy ticket|Repeat…/);
   ctx.repeatsAddon = () => 'automation';
@@ -241,7 +269,7 @@ test('next question stays above every tab and Answer scrolls and focuses it', ()
     questions:t => t.questions || [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[],
     main:{querySelector:() => ({scrollIntoView(){scrolled=true;},classList:{add(){},remove(){}},querySelector:() => ({focus(){focused=true;}})})}};
-  vm.createContext(ctx); vm.runInContext(source,ctx);
+  vm.createContext(ctx); vm.runInContext(source,ctx); vm.runInContext(startSource, ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[{name:'claude',label:'Claude',chosen:true}]}};
   vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;",ctx);
   const nodes = n => typeof n === 'object' && n ? [n,...n.children.flatMap(nodes)] : [];
@@ -272,6 +300,17 @@ test('result preview tiles keep HTML static and bound text excerpts', async () =
   assert.ok(pre);
   assert.ok(pre.children[0].length <= 2048);
   assert.ok(pre.children[0].split('\n').length <= 8);
+});
+
+test('a listed file the server cannot find says it is missing in its preview tile', async () => {
+  const h = (tag, attrs = {}, ...children) => ({tag, attrs, children, append(...kids){this.children.push(...kids);}});
+  const ctx = {h, window:{UI:{...kitState}, DashHelpers:helpers}, snapshot:false, route:() => ({kind:'home'}), render(){}, URL, TextDecoder, fetch:async () => new Response('not found',{status:404})};
+  vm.createContext(ctx);
+  vm.runInContext(source.slice(source.indexOf('const PREVIEW_EXT'),source.indexOf('function loadArtifacts')),ctx);
+  vm.runInContext(source.slice(source.indexOf('const ticketPreviewText'),source.indexOf('function ticketResultCard')),ctx);
+  const tile = ctx.ticketPreviewTile({id:'t_test'},{name:'orders-5000.csv'},'evidence');
+  await new Promise(resolve => setTimeout(resolve,20));
+  assert.match(JSON.stringify(tile), /This file is missing/);
 });
 
 test('task proof chips: only plain evidence files and http(s) links get a chip, and the summary is the task line', () => {
@@ -434,7 +473,7 @@ test('plan-first waiting card answers and edits only unstarted steps', async () 
     questions:t => t.questions || [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[],
     main:{querySelector:() => ({scrollIntoView(){scrolled=true;},classList:{add(){},remove(){}},querySelector:() => ({focus(){focused=true;}})})}};
-  vm.createContext(ctx); vm.runInContext(source,ctx);
+  vm.createContext(ctx); vm.runInContext(source,ctx); vm.runInContext(startSource, ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[{name:'claude',label:'Claude',chosen:true}]}};
   vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;",ctx);
   const nodes = n => typeof n === 'object' && n ? [n,...n.children.flatMap(nodes)] : [];
@@ -573,7 +612,7 @@ test('a file is listed once per list, and Overview chips skip the file already i
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
     questions:() => [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Review'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[], locks:new Set()};
-  vm.createContext(ctx); vm.runInContext(source,ctx);
+  vm.createContext(ctx); vm.runInContext(source,ctx); vm.runInContext(startSource, ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[]}};
   vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;" +
     "artifactData.set('t_dup', {at:Date.now(), data:{files:[{name:'report.pdf', size:10}, {name:'report.pdf', size:10}, {name:'notes.pdf', size:5}]}});", ctx);
@@ -591,7 +630,7 @@ test('a file that is both an artifact and a proof shows once in the Files tab an
   const shot = {type:'file', ref:'.orch/tickets/t_both/evidence/shot.pdf', title:'Shot', at:'2026-11-01T10:00:00Z'};
   const t = {id:'t_both', title:'Both', status:'doing', checklist:[{id:'a', text:'One', done:true, evidence:[shot]}]};
   const ctx = {repeatsAddon:() => null, window:{UI:{...kitState}, DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h, array:v => Array.isArray(v) ? v : []};
-  vm.createContext(ctx); vm.runInContext(source, ctx);
+  vm.createContext(ctx); vm.runInContext(source, ctx); vm.runInContext(startSource, ctx);
   ctx.snapshot = false;
   vm.runInContext("artifactData.set('t_both', {at:Date.now(), data:{files:[{name:'shot.pdf', size:10}]}});", ctx);
   ctx.tt = t;
@@ -679,4 +718,12 @@ test('Answer in the header opens the answer window like the ticket list; without
   assert.deepEqual(log, ['scroll center']);
   assert.equal(focused.length, 1);
   assert.equal(context({needsList:() => [], main:{querySelector:() => null}}).focusTicketAnswer('t_one'), '');
+});
+test('a sent-back ticket says it was sent back, not "Not started" (ORCH-460)', () => {
+  const start = source.indexOf('function ticketStripModel'), end = source.indexOf('\nfunction ', start + 10);
+  const ctx = {questions:() => [], time:x => x, clean:x => x, window:{UI:{ticketState:() => ({pill:'todo', word:'To do'})}, DashHelpers:helpers}};
+  vm.createContext(ctx); vm.runInContext(source.slice(start, end), ctx);
+  const asked = {status:'ready', checklist:[{id:'c1', text:'Add shipping', origin:'change_request', done:false}], history:[]};
+  assert.match(ctx.ticketStripModel(asked, null, true).sentence, /^Sent back\./);
+  assert.match(ctx.ticketStripModel({...asked, checklist:[]}, null, true).sentence, /^Not started\./);
 });
