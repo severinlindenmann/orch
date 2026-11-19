@@ -176,19 +176,41 @@ async function reviewSendBack(a, note) {
   if (r.ok) reviewSentBack.add(a.ticket);
   return r.ok;
 }
+// Undo (ORCH-425): each thing the Reviewer, the Auto Reviewer or Away mode did comes back to you in one click.
+const reviewUndone = new Set();
+// one row per history event: the ticket plus the event's time (an accept, a send-back and a second accept differ)
+function reviewRowKey(a) { return 'review-accepted-' + a.ticket + (a.question ? '-' + a.question : a.back ? '-back' : '') + (a.at ? '-' + String(a.at).replace(/[^0-9]/g, '') : ''); }
+function reviewRowWord(a) {
+  const who = a.auto ? (a.answer ? 'Away mode' : 'Auto Reviewer') : 'Reviewer';
+  return who + ' · ' + (a.answer ? 'Answered' : a.back ? 'Sent back to the helper' : 'Accepted');
+}
+async function reviewUndo(a) {
+  if (snapshot || !a.undo) return false;
+  const args = {ticket:a.ticket};
+  if (a.undo === 'answer' && a.question) args.question = a.question;
+  const r = await act('review.undo', args);
+  window.orch.toast(r.ok ? 'Undone: it waits for you again' : String(r.text || 'Could not undo it.').slice(0, 200), r.ok ? 'ok' : 'error');
+  if (r.ok) { reviewUndone.add(reviewRowKey(a)); render(); }
+  return r.ok;
+}
 function reviewAcceptedRow(a) {
-  const key = 'review-accepted-' + a.ticket;
+  const key = reviewRowKey(a);
   const host = h('div', {'data-key':key});
-  const sent = a.sent_back === true || reviewSentBack.has(a.ticket);
-  const open = sent || snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-key':key + '-send'}, 'Send back');
-  // The reason takes the full card width under the title; Send back sits on its own line below it (the side
-  // column is narrow at 1280).
+  const undone = a.undone === true || reviewUndone.has(key);
+  const sent = !undone && (a.sent_back === true || reviewSentBack.has(a.ticket));
+  const accept = !a.answer && !a.back;
+  const open = !accept || sent || undone || snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-key':key + '-send'}, 'Send back');
+  const undo = !a.undo || undone || snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-key':key + '-undo'}, 'Undo');
+  // The reason takes the full card width under the title; Send back and Undo sit on their own line below it
+  // (the side column is narrow at 1280).
   const head = h('div', {className:'card-row'},
     h('div', {className:'grow'},
       h('a', {href:'#ticket/' + encodeURIComponent(a.ticket)}, clean([a.key, a.title].filter(Boolean).join(' · '))),
+      h('p', {className:'meta'}, reviewRowWord(a)),
       a.why ? h('p', {className:'meta'}, clean(a.why)) : null,
-      sent ? h('p', {className:'meta'}, 'Sent back') : open ? h('div', {}, open) : null));
+      undone ? h('p', {className:'meta'}, 'Undone') : sent ? h('p', {className:'meta'}, 'Sent back') : open || undo ? h('div', {className:'row'}, open, undo) : null));
   host.append(head);
+  if (undo) undo.onclick = () => reviewUndo(a);
   if (open) open.onclick = () => {
     locks.add(key);
     // The feedback box (ORCH-422): words, a pasted screenshot, a file or a voice note.
@@ -221,6 +243,35 @@ function reviewAcceptedCard() {
   if (!rows.length) return null;
   return card('review-accepted', 'Accepted for you', '', rows.map(reviewAcceptedRow));
 }
+// The Auto Reviewer and Away (ORCH-425): two switches on the rail, each saves at once (only a person turns them
+// on; `orch config set workflow.auto_reviewer` / `workflow.away`). Tickets with Human review needed are left alone.
+const reviewSwitchBusy = new Set();
+const REVIEW_SWITCHES = {
+  auto:{op:'auto_reviewer.set', field:'auto_reviewer_on', action:'auto-reviewer-set', title:'Check finished work',
+    meta:'Tickets without Human review needed get a written verdict and are accepted or sent back by themselves.'},
+  away:{op:'away.set', field:'away_on', action:'away-set', title:'Away for the night',
+    meta:"Also answers cards with the helper's recommendation at once. Words, names, money, deploy, delete and keys wait for you."}
+};
+function reviewSwitchRow(key) {
+  const sw = REVIEW_SWITCHES[key], on = state?.settings?.[sw.field] === true;
+  return h('div', {className:'card-row', 'data-key':'review-auto-' + key},
+    h('div', {className:'grow'}, h('h3', {}, sw.title), h('p', {className:'meta'}, sw.meta)),
+    h('button', {type:'button', className:'switch', role:'switch', 'aria-label':sw.title, 'aria-checked':on, 'data-key':'review-switch-' + key, 'data-action':sw.action, disabled:snapshot || reviewSwitchBusy.has(key)}));
+}
+function reviewAutoCard() {
+  if (!state?.settings) return null;
+  return card('review-auto', 'Auto Reviewer', '', [reviewSwitchRow('auto'), reviewSwitchRow('away')]);
+}
+async function reviewSwitch(key) {
+  const sw = REVIEW_SWITCHES[key];
+  if (!sw || snapshot || reviewSwitchBusy.has(key)) return null;
+  reviewSwitchBusy.add(key); render();
+  const r = await act(sw.op, {on:state?.settings?.[sw.field] !== true});
+  reviewSwitchBusy.delete(key);
+  if (!r.ok) window.orch.toast(String(r.text || 'Could not save it.').slice(0, 200), 'error');
+  render();
+  return r;
+}
 function reviewPage() {
   const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':''},
     h('h2', {}, 'All cards'),
@@ -230,7 +281,7 @@ function reviewPage() {
     heading('Review', reviewSubtitle()),
     h('div', {className:'review-layout', 'data-key':'review-layout'},
       h('div', {className:'review-main', 'data-key':'review-main'}, h('div', {'data-review-host':'', 'data-key':'review-host'})),
-      h('div', {className:'stack', 'data-key':'review-rail'}, side, reviewAcceptedCard())));
+      h('div', {className:'stack', 'data-key':'review-rail'}, reviewAutoCard(), side, reviewAcceptedCard())));
 }
 // Mount the kit page once per host (render() calls this after every reconcile; the mounted host is left alone).
 function mountReview(main) {

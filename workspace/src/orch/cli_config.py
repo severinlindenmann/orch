@@ -42,6 +42,7 @@ KEYS = (
     "workflow.agents_may_finish",
     "workflow.reviewer",
     "workflow.auto_reviewer",
+    "workflow.away",
     "workflow.reviewer_answers",
     "workflow.reviewer_look",
     "workflow.release_merge",
@@ -297,6 +298,7 @@ def _config(args, root: Path) -> None:
             "workflow.agents_may_finish": lambda: config.agents_may_finish(root),
             "workflow.reviewer": lambda: config.reviewer_on(root),
             "workflow.auto_reviewer": lambda: config.auto_reviewer_on(root),
+            "workflow.away": lambda: config.away_on(root),
             "workflow.reviewer_answers": lambda: config.reviewer_answers_on(root),
             "workflow.reviewer_look": lambda: config.reviewer_look_on(root),
             "workflow.release_merge": lambda: config.release_merge_on(root),
@@ -412,6 +414,24 @@ def _config(args, root: Path) -> None:
             {"workflow.auto_reviewer": value},
             "Saved: new tickets start with Human review needed "
             + ("off (the Auto Reviewer checks them)." if value else "on."),
+        )
+    elif args.sub == "set" and args.key == "workflow.away":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        who = _actor(args)
+        if args.value == "on" and not who.startswith("human:"):  # answers and accepts for the owner
+            raise Refused("Only the owner turns this on: orch config set in their own terminal.")
+        value = config.set_away(root, args.value == "on", who)
+        _out(
+            args,
+            {"workflow.away": value},
+            "Saved: Away mode is "
+            + (
+                "on: the Auto Reviewer accepts finished work and answers cards with the helper's "
+                "recommendation at once, on tickets without Human review needed."
+                if value
+                else "off."
+            ),
         )
     elif args.sub == "set" and args.key == "workflow.release_merge":
         if args.value not in ("on", "off"):
