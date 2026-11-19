@@ -52,7 +52,7 @@ function markdown() {
     'Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.',
     `${STEPS.length} steps: ${ready} ready (the script clicks them), ${STEPS.length - ready} pending (not built yet).`,
     '',
-    'For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;',
+    'For every step take one picture at each width: ' + SIZES.map(([w]) => w).join(', ') + '. The name is given per step;',
     'the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as',
     '`<name>-<width>-draft.png`.',
     '',
