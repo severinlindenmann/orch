@@ -97,7 +97,7 @@ def as_json(p: subprocess.CompletedProcess):
 def version_name(text: str) -> str:
     """The whole build name from `orch --version` ("orch 3.x (release build)" -> "3.x (release build)")."""
     first = (text.strip().splitlines() or [""])[0].strip()
-    return first[len("orch "):].strip() if first.lower().startswith("orch ") else first
+    return first[len("orch ") :].strip() if first.lower().startswith("orch ") else first
 
 
 class Refused(Exception):

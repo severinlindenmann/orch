@@ -374,5 +374,8 @@ def test_settings_pages_keep_no_text_and_no_report_picture():
 def test_version_name_keeps_the_whole_build_name():
     assert daily.version_name("orch 3.x (release build)\n") == "3.x (release build)"
     assert daily.version_name("orch 16\n") == "16"
-    assert daily.version_name("orch develop 0af5d58e (development build)") == "develop 0af5d58e (development build)"
+    assert (
+        daily.version_name("orch develop 0af5d58e (development build)")
+        == "develop 0af5d58e (development build)"
+    )
     assert daily.version_name("") == ""
