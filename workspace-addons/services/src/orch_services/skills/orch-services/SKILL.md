@@ -51,10 +51,11 @@ the service, Stop stops it, Look into it changes nothing and only notes it on th
 service runs fine again for 10 minutes and then fails again). `list --json` shows `health`, `failing` and the open
 `question` on each service.
 
-To check regularly, the person sets up a repeat once (do not set it up yourself; tell them these two lines):
+Services runs this check by itself every minute while it is on (its regular check starts with `orch start` and when
+Services is turned on); nobody sets up a repeat. See or start it:
 
-    orch automation script add services-check -- orch services check
-    orch automation repeat <ticket> "every 5 minutes" --script services-check
+    orch services status
+    orch services start             # without a service id: the regular check
 
 **Read the log** (the last 20 lines; secrets are shown as ••••••)
 

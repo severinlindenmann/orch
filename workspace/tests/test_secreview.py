@@ -280,6 +280,74 @@ def test_the_limit_holds_and_puts_one_card_instead_of_waiting_silently(tmp_path)
     assert again["lines"][-1] == "waits for every security OK: #2 (security review not started yet)"
 
 
+LONG_FILES = [
+    f"workspace-addons/dashboard/src/orch_dashboard/web/very/long/folder/name/session_{i}.js"
+    for i in range(30)
+]
+
+
+@pytest.mark.parametrize("hits", [[], ["relay/src/subs.rs"], LONG_FILES[:12], LONG_FILES])
+def test_the_review_note_always_fits_the_ticket_note_limit(hits):
+    """ORCH-774: the brief with a full address and commit was 2004 to 2319 characters, every review was
+    refused by the 2000-character note limit and release 35 waited a day."""
+    from orch import tickets
+
+    url, sha = "https://github.com/severinlindenmann/orch/pull/17286", "a2b2c2d" * 5 + "abcde"
+    note = secreview.review_note(17286, url, sha, hits)
+    assert len(note) <= secreview.NOTE_LIMIT
+    assert tickets.clean_field("note", note) == note  # the ticket rule takes it as is
+    assert note.count(url) == 1 and note.count(sha) == 1 and "orch review security 17286 ok" in note
+    if hits:
+        assert hits[0] in note and "need a review" in note
+    if len(hits) > secreview.FILES_SHOWN:
+        assert "more." in note
+
+
+def test_a_refused_review_ticket_is_never_listed_as_done(tmp_path, monkeypatch):
+    from orch import tickets
+
+    monkeypatch.setattr(tickets, "resolve", lambda root, ref: "t_role")
+
+    def refuse(*a, **k):
+        raise Refused("A note is at most 2000 characters; this one has 2025.")
+
+    monkeypatch.setattr(tickets, "create", refuse)
+    cfg = rk.Cfg(None, keeper="ORCH-79", repo="x/y", clone=str(tmp_path), run_dir=tmp_path)
+    w = rk.World(tmp_path, cfg)
+    sec = {"prs": {}, "starts": {W30: 3}}
+    line = secreview._start(w, sec, "ORCH-79", pr(2, ["relay/src/subs.rs"]), ["relay/src/subs.rs"], W30)
+    assert (
+        line
+        == "#2: could not open the security review: A note is at most 2000 characters; this one has 2025."
+    )
+    assert w.did == ["security-review:#2 failed"]
+    assert sec == {"prs": {}, "starts": {W30: 3}}  # a failed try uses none of the limit
+
+
+def test_a_closed_role_ticket_is_named_instead_of_a_refused_limit_card(tmp_path):
+    closed = {"ORCH-79": {"key": "ORCH-79", "status": "done"}}
+    out = go(tmp_path, state=used_up(), ticket=closed)
+    assert out["did"] == []
+    assert (
+        "security limit: #2 wait; the role ticket ORCH-79 is closed, so the keeper cannot put its card "
+        "there: set it back to Working" in out["lines"]
+    )
+    assert "limit_card" not in out["state"]["security"]  # asked again once the ticket is open
+    assert out["lines"][-1] == "waits for every security OK: #2 (security review not started yet)"
+
+
+def test_a_closed_role_ticket_is_named_instead_of_a_refused_problems_card(tmp_path):
+    v = {"2": {"sha": "h2", "verdict": "problems", "line": "token in the log"}}
+    closed = {"ORCH-79": {"key": "ORCH-79", "status": "done"}}
+    out = go(tmp_path, state=entry(), security_verdicts=v, ticket=closed)
+    assert out["did"] == []
+    assert any(
+        "#2: security review found problems; the role ticket ORCH-79 is closed" in x for x in out["lines"]
+    )
+    assert "card_sha" not in out["state"]["security"]["prs"]["2"]
+    assert out["lines"][-1] == "waits for every security OK: #2 (security review found problems)"
+
+
 def test_the_limit_counts_per_release_not_per_day(tmp_path):
     old = {"security": {"prs": {}, "starts": {"after-release-29": 50, "2026-11-18": 8}}}
     out = go(tmp_path, state=old)

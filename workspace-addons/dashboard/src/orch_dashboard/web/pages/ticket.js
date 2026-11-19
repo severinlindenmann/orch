@@ -538,7 +538,7 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
   const title = (typeof file.title === 'string' && file.title.trim().slice(0, 200)) || String(file.name || '').split('/').pop() || 'Result';
   const tile = h('div', {className:'ticket-preview'}, h('span', {className:'ticket-preview-label'}, title));
   if (!snapshot && /\.pdf$/i.test(file.name)) {  // the browser's own PDF view, from the same-origin file endpoint
-    tile.append(h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name), 'aria-label':title},
+    tile.append(h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name, false, file), 'aria-label':title},
       h('p', {className:'meta'}, 'This browser cannot show the PDF here. Open it to read it.')));
     return tile;
   }
@@ -549,7 +549,8 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
     if (live) { tile.classList.add('has-thumb'); tile.append(live); }
     return tile;
   }
-  const url = '/api/file?t=' + encodeURIComponent(t.id) + '&k=' + kind + '&n=' + encodeURIComponent(file.name);
+  const stamp = window.FileViewer?.stampOf ? window.FileViewer.stampOf(file) : '';  // ORCH-524: the version in the link
+  const url = '/api/file?t=' + encodeURIComponent(t.id) + '&k=' + kind + '&n=' + encodeURIComponent(file.name) + (stamp ? '&v=' + encodeURIComponent(stamp) : '');
   const key = url + '|' + (file.mtime || '');
   if (!ticketPreviewText.has(key)) ticketPreviewText.set(key, fetch(url).then(async r => {
     if (r.status === 404) return {missing:true};  // listed, but not on this computer: say so instead of an empty tile
@@ -636,7 +637,10 @@ function ticketShareButton(t, file) {
 }
 // ---- The shared file viewer: name, meta, Open in new tab, Download, Copy link. × Close, Esc and a click outside close it,
 // and the opening control gets the cursor back.
-const fileUrl = (tid, kind, fileName, dl = false) => '/api/file?t=' + encodeURIComponent(tid) + '&k=' + encodeURIComponent(kind) + '&n=' + encodeURIComponent(fileName) + (dl ? '&dl=1' : '');
+// ORCH-524: with the file (its time and size) the link names its version and the browser keeps the picture (kit/fileviewer.js stampOf).
+const fileStamp = file => file && window.FileViewer?.stampOf ? window.FileViewer.stampOf(file) : '';
+const fileUrl = (tid, kind, fileName, dl = false, file = null) => '/api/file?t=' + encodeURIComponent(tid) + '&k=' + encodeURIComponent(kind) + '&n=' + encodeURIComponent(fileName)
+  + (dl ? '&dl=1' : fileStamp(file) ? '&v=' + encodeURIComponent(fileStamp(file)) : '');
 const fileTitle = fileName => clean(window.DashHelpers.plainFileName(fileName) || String(fileName).split('/').pop());
 // The title given when the file was attached; else the file name made readable.
 const oneLineTitle = value => typeof value === 'string' ? clean(value).replace(/\s+/g, ' ').trim().slice(0, 200) : '';
@@ -708,7 +712,7 @@ function ticketFileActions(t, kind, file) {
     kind === 'artifacts' ? ticketShareButton(t, file) : null);
 }
 // ORCH-185: a picture shows itself in its row (the badge stays under it until it has loaded).
-const fileThumbImage = (t, kind, file) => h('img', {src:fileUrl(t.id, kind, file.name), alt:'', loading:'lazy'});
+const fileThumbImage = (t, kind, file) => h('img', {src:fileUrl(t.id, kind, file.name, false, file), alt:'', loading:'lazy'});
 function ticketFileRow(t, kind, file) {
   return h('div', {className:'file-row', 'data-key':'file-' + kind + '-' + file.name},
     (picture => h('span', {className:'file-type' + (picture || shownThumb(t, kind, file) ? ' has-thumb' : ''), 'aria-hidden':'true'}, fileBadge(file.name), picture ? fileThumbImage(t, kind, file) : shownThumb(t, kind, file)))(viewerKind(file.name) === 'image' && !snapshot),
@@ -720,7 +724,7 @@ function ticketFileRow(t, kind, file) {
 function ticketLivePreview(t, file, kind) {
   if (snapshot) return null;
   const type = viewerKind(file.name), title = titleOf(file);
-  if (type === 'pdf') return h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name), 'aria-label':title},
+  if (type === 'pdf') return h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name, false, file), 'aria-label':title},
     h('p', {className:'meta'}, 'This browser cannot show the PDF here. Open it to read it.'));
   if (type === 'page') return h('iframe', {className:'preview-live', sandbox:'allow-scripts', referrerpolicy:'no-referrer', title, loading:'lazy',
     src:'/view/' + encodeURIComponent(t.id) + '/' + encodeURIComponent(kind) + '/' + file.name.split('/').map(encodeURIComponent).join('/')});
@@ -756,7 +760,7 @@ function sortedEntries(list) {
 }
 function fileThumb(t, f) {
   const thumb = h('div', {className:'file-thumb', 'data-kind':f.fileKind});
-  if (f.fileKind === 'image') { thumb.append(h('img', {src:fileUrl(f.tid, f.kind, f.name), alt:'', loading:'lazy'})); return thumb; }
+  if (f.fileKind === 'image') { thumb.append(h('img', {src:fileUrl(f.tid, f.kind, f.name, false, f), alt:'', loading:'lazy'})); return thumb; }
   if (['md', 'text', 'code', 'table'].includes(f.fileKind) && !(f.size > 2 * 1048576)) {  // size unknown: still draw the capped snippet
     const p = ticketPreviewTile(t, {name:f.name, mtime:f.mtime}, f.kind);
     p.classList.add('file-snippet'); thumb.append(p); return thumb;
@@ -968,7 +972,8 @@ const PHONE_IMG = /\.(png|jpe?g|gif|webp)$/i;
 function phoneEntry(tid, entry) {
   const p = window.DashHelpers.phoneParts(entry.text, tid);
   if (!p) return null;
-  const src = (n, dl) => '/api/file?t=' + encodeURIComponent(tid) + '&k=files&n=' + encodeURIComponent(n) + (dl ? '&dl=1' : '');
+  // a phone file is written once, when its text arrives: the text's time names its version (ORCH-524)
+  const src = (n, dl) => fileUrl(tid, 'files', n, dl, entry.at ? {mtime:String(entry.at)} : null);
   const body = p.parts.map(x => {
     if (x.type === 'voice') return h('p', {className:'phone-voice'}, iconEl('play'), x.transcript ? '“' + clean(x.transcript) + '”' : 'Voice message (nothing could be understood)', x.lang ? h('span', {className:'meta'}, ' · ' + clean(x.lang)) : null);
     if (x.type === 'sound') return snapshot ? h('p', {className:'meta'}, 'Voice recording') : h('audio', {className:'phone-audio', controls:true, preload:'none', src:src(x.name)});
@@ -1191,24 +1196,24 @@ async function ticketTalkSend(tid, message) {
   const partial = r => ({ok:false, dropFiles:files.length > 0, text:(files.length ? 'The files are on the ticket, but the helper was not told: ' : '') + talkFailed(r)});
   if (t.status === 'review') {  // the same call as Send back: Ready, the note queued, a helper starts from it
     const back = await act('ticket.changes', {ticket:tid, text});
-    return back.ok ? {ok:true, text:'Sent back to the helper with your note.'} : partial(back);
+    return back.ok ? {ok:true, said:text, text:'Sent back to the helper with your note.'} : partial(back);
   }
   const sent = await act('run.send', {ticket:tid, text});
   if (!sent.ok) return partial(sent);
   const r = sent.state?.send_result;
   const delivered = !!r && Number.isInteger(r.delivered) && r.delivered > 0;
   if (!delivered && !(r && typeof r.id === 'string' && r.id)) return partial({status:200, text:'orch did not confirm that your message was saved.'});
-  if (delivered) return {ok:true, text:'Sent. The helper reads it now.'};
-  if (r.state !== 'none') return {ok:true, text:'Sent. The helper reads it when it finishes what it is doing.'};
+  if (delivered) return {ok:true, said:text, text:'Sent. The helper reads it now.'};
+  if (r.state !== 'none') return {ok:true, said:text, text:'Sent. The helper reads it when it finishes what it is doing.'};
   // nothing on the ticket: start a helper, it reads this first. Through the one starter (ORCH-475): Starting… until it
   // runs, one run for a double click, and the way the person picked in the Start choice (else the usual start).
   const ops = talkStartOps.get(tid) || [['run.start', {ticket:tid}]];
   talkStartOps.delete(tid);
   const starter = window.UI?.startStarter;
   const started = starter ? await starter.start(tid, ops) : await act('run.start', {ticket:tid});
-  if (started.again) return {ok:true, text:'Sent. The helper is starting and reads it first.'};
-  if (started.queued) return {ok:true, text:'Sent. The ticket waits in line for a free helper place; the helper reads it first.'};
-  return started.ok ? {ok:true, text:'Sent. A helper starts and reads it first.'} : {ok:true, text:'Saved on the ticket. Start the helper to go on.'};
+  if (started.again) return {ok:true, said:text, text:'Sent. The helper is starting and reads it first.'};
+  if (started.queued) return {ok:true, said:text, text:'Sent. The ticket waits in line for a free helper place; the helper reads it first.'};
+  return started.ok ? {ok:true, said:text, text:'Sent. A helper starts and reads it first.'} : {ok:true, said:text, text:'Saved on the ticket. Start the helper to go on.'};
 }
 // The helper's screen as plain text: colours and cursor codes dropped (the kit's dock shows text only).
 function talkScreenText(screen) { return String(screen || '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\x1b[@-_]/g, '').replace(/\s+$/, ''); }
