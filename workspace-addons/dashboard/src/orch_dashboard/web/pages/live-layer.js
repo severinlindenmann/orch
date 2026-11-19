@@ -292,6 +292,19 @@ function liveMoreMenu(key, label, where, pinned) {
     phone ? null : liveOpt('right', 'dock-right', 'On the right', where === 'right'),
     sess && !sess.kind ? h('a', {className:'live-opt', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-more-ticket', 'data-live-ticket':''}, liveIc('ticket'), h('span', {}, 'Open ticket')) : null);
 }
+// ORCH-679: Stop in the pane itself, the same run.stop the ticket page has; an idle or stuck helper says so.
+function liveStopLabel(sess) {
+  const t = (Array.isArray(state?.tickets) ? state.tickets : []).find(x => x.id === sess.id), h2 = t ? window.DashHelpers?.helperState?.(state?.runs?.[sess.id], t) : null;
+  return h2 && ['idle', 'stuck'].includes(h2.state) ? 'Stop idle helper' : 'Stop';
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest?.('#live-dock [data-live-stop]');
+  if (!b || b.disabled) return;
+  b.disabled = true;
+  const r = await act('run.stop', {ticket:b.dataset.liveStop});
+  b.disabled = false;
+  window.orch?.toast?.(r.ok ? 'Helper stopped.' : r.text || 'Could not stop the helper.', r.ok ? 'ok' : 'error');
+});
 function livePane(key, where, s, o) {
   const sess = liveLayerSession(key), name = liveLayerName(), n = o.n;
   const title = sess ? sess.title : 'This session has ended', label = sess?.key || title, on = key === s.cur;
@@ -335,6 +348,7 @@ function livePaneBody(key, sess, label) {
       sess.kind ? null : h('div', {className:'live-ask', 'data-live-ask':'', hidden:true}),
       h('pre', {className:'live-lines', 'data-live-lines':'', 'aria-label':'Last lines of ' + label, tabindex:'0', hidden:true}),
       h('p', {className:'meta live-meta', 'data-live-meta':''}),
+      sess.kind || !sess.running ? null : h('button', {type:'button', className:'btn outline sm', 'data-key':'live-stop', 'data-live-stop':sess.id}, liveStopLabel(sess)),
       sess.kind ? null : h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket', 'data-live-ticket':'', 'aria-label':'Open ticket ' + label}, 'Open ticket'),
       typeof liveMsgBox === 'function' ? liveMsgBox(sess) : null)
       : h('div', {className:'live-pb'}, h('p', {}, 'This session is no longer in the list.'));
@@ -438,7 +452,7 @@ function liveLayerView(s, where) {
 // keyboard place and any open menu stay).
 function liveLayerPaint() {
   const host = liveDockHost(), s = liveLayerModel(), where = liveLayerWhere(s, liveLayerPhone());
-  const shown = s.panes.map(liveLayerSession).map(x => x && [x.key, x.title, x.running, x.pill?.textContent || '']);
+  const shown = s.panes.map(liveLayerSession).map(x => x && [x.key, x.title, x.running, x.pill?.textContent || '', x.running && !x.kind ? liveStopLabel(x) : '']);
   const v = s.panes.length && where !== 'bar' && where !== 'side' ? liveLayerView(s, where) : null;
   const key = JSON.stringify([where, s.menu, s.panes, s.cur, shown, liveRen, v && [v.narrow, v.pins.filter(k => s.panes.includes(k)), !!v.next], liveLayerName(), liveLayerPage()?.name, typeof liveHistKey === 'function' ? liveHistKey() : null, typeof window.liveStartKey === 'function' ? window.liveStartKey() : null, typeof window.liveModelKey === 'function' ? window.liveModelKey(s.panes) : null, typeof liveGroupKey === 'function' ? liveGroupKey(s.panes) : null]);
   host.dataset.mode = where;
