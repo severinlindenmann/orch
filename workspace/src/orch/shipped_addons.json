@@ -149,7 +149,7 @@
    {
     "field": "eta",
     "format": "time",
-    "label": "ETA"
+    "label": "Ready around"
    }
   ],
   "version": "0.1.0"
