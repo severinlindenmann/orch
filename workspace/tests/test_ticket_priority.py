@@ -1,5 +1,5 @@
-"""ORCH-813: a priority on every ticket (high, normal, low). Higher priority tickets start first when helpers wait
-for a free slot."""
+"""ORCH-813: a priority on every ticket (high, normal, low). Higher priority tickets start first when helpers
+wait for a free slot."""
 
 import json
 
@@ -53,6 +53,21 @@ def test_same_priority_again_writes_nothing(proj, new_ticket):
     rev = read(proj, tid)["revision"]
     tickets.set_priority(proj, tid, "low", "human:tester")
     assert read(proj, tid)["revision"] == rev
+
+
+def test_same_priority_with_a_stale_revision_is_refused(proj, run, new_ticket):
+    tid = new_ticket("Spring campaign")
+    tickets.set_priority(proj, tid, "high", "human:tester")
+    stale = read(proj, tid)["revision"]
+    run("ticket", "edit", tid, "--note", "changed meanwhile", "--by", "human:tester")
+    with pytest.raises(tickets.Conflict):
+        tickets.set_priority(proj, tid, "high", "human:tester", if_revision=stale)
+    code, _, _ = run(
+        "ticket", "edit", tid, "--priority", "high", "--title", "Overwrite", "--if-revision", str(stale),
+        "--by", "human:tester",
+    )  # fmt: skip
+    assert code != 0
+    assert read(proj, tid)["title"] == "Spring campaign"
 
 
 def test_unknown_priority_is_refused(proj, new_ticket):

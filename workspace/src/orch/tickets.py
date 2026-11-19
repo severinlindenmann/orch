@@ -2017,7 +2017,7 @@ PRIORITIES = ("high", "normal", "low")  # ORCH-813: the order waiting tickets st
 
 
 def priority(ticket: dict) -> str:
-    """ORCH-813: the ticket's priority, high, normal or low. No field means normal (also every older ticket)."""
+    """ORCH-813: the ticket's priority, high, normal or low. No field means normal (older tickets too)."""
     p = ticket.get("priority")
     return p if p in PRIORITIES else "normal"
 
@@ -2028,10 +2028,12 @@ def set_priority(root: Path, tid: str, value: str, by: str, if_revision: int | N
     if value not in PRIORITIES:
         raise Refused("The priority is high, normal or low.")
     me = load(root, tid)
-    if priority(me) == value:
-        return me  # nothing changes: no write, no history line
+    if priority(me) == value and (if_revision is None or me.get("revision") == if_revision):
+        return me  # nothing changes: no write, no history line (a stale revision is still refused below)
 
     def op(ticket):
+        if priority(ticket) == value:
+            return
         if value == "normal":
             ticket.pop("priority", None)
         else:
