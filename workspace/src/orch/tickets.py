@@ -2326,6 +2326,29 @@ def set_model(root: Path, tid: str, name: str, by: str) -> dict:
     return apply_op(root, tid, op, by=by)[0]
 
 
+def _kept_model(ticket: dict) -> str | None:
+    """The model that stays as it is: a person's choice, or Opus once a helper ran on it (never down by
+    itself: a ticket picked or moved up to Opus does not drop to Sonnet in the middle of its work)."""
+    from orch import modelpick
+
+    cur = modelpick.chosen(ticket)
+    if not cur:
+        return None
+    if modelpick.by_person(ticket) or cur["name"] == modelpick.pick(ticket)[0]:
+        return cur["name"]
+    if cur["name"] == "opus" and (cur.get("up") or ticket.get("sessions")):
+        return "opus"
+    return None
+
+
+def next_model(ticket: dict) -> str:
+    """The model the next start runs on, read only (pick_model without writing): what a page shows before
+    the person starts a helper (the Empty helper's New menu, ORCH-710)."""
+    from orch import modelpick
+
+    return _kept_model(ticket) or modelpick.pick(ticket)[0]
+
+
 def pick_model(root: Path, tid: str, by: str) -> str:
     """Before a start: keep a person's choice, else let orch pick from the ticket as it is now (a history line
     only when the pick changes). Returns the model name."""
@@ -2333,20 +2356,8 @@ def pick_model(root: Path, tid: str, by: str) -> str:
 
     out: dict = {}
 
-    def keep(ticket) -> str | None:
-        """The model that stays as it is: a person's choice, or Opus once a helper ran on it (never down by
-        itself: a ticket picked or moved up to Opus does not drop to Sonnet in the middle of its work)."""
-        cur = modelpick.chosen(ticket)
-        if not cur:
-            return None
-        if modelpick.by_person(ticket) or cur["name"] == modelpick.pick(ticket)[0]:
-            return cur["name"]
-        if cur["name"] == "opus" and (cur.get("up") or ticket.get("sessions")):
-            return "opus"
-        return None
-
     def op(ticket):
-        kept = keep(ticket)
+        kept = _kept_model(ticket)
         if kept:
             out["name"] = kept
             return
@@ -2355,7 +2366,7 @@ def pick_model(root: Path, tid: str, by: str) -> str:
         ticket["model"] = {"name": name, "by": modelpick.BY_ORCH, "why": why[:200]}
         add_history(ticket, by, f"Model picked: {modelpick.LABELS[name]} ({why[:200]})")
 
-    kept = keep(load(root, tid))
+    kept = _kept_model(load(root, tid))
     if kept:
         return kept  # nothing to write
     apply_op(root, tid, op, by=by)
