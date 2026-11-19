@@ -34,6 +34,9 @@
     const n = lineCount(t);
     return n === 1 ? 'Paste 1 line and press Enter in the helper’s screen?' : 'Paste ' + n + ' lines into the helper’s screen?';
   }
+  /* Pasted text before it goes in: no control characters but tab and line ends (an escape could end the bracketed
+     paste early and act as keys, Ctrl+C as a stop), and so no paste markers either. */
+  const cleanPaste = text => String(text || '').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, '');
   /* base64 from the bridge -> the bytes xterm writes (it decodes UTF-8 itself, also across two messages) */
   function bytes(b64) {
     try {
@@ -222,11 +225,11 @@
        program asked for that) */
     root.addEventListener('paste', e => {
       if (!screen.contains(e.target)) return;
-      const t = (e.clipboardData && e.clipboardData.getData('text')) || '';
-      if (!typing) { e.preventDefault(); e.stopPropagation(); return; }
+      const t = cleanPaste((e.clipboardData && e.clipboardData.getData('text')) || '');
+      e.preventDefault(); e.stopPropagation();  // every paste goes in cleaned, never as the browser hands it to xterm
+      if (!typing || !t) return;
       const q = pasteAsk(t);
-      if (!q) return;  // one line: xterm pastes it itself
-      e.preventDefault(); e.stopPropagation();
+      if (!q) { xt.paste(t); return; }
       held = t; askText.textContent = q; ask.hidden = false; askGo.focus();
     }, true);
     const unask = () => { held = null; ask.hidden = true; if (typing && xt) xt.focus(); };
@@ -279,7 +282,7 @@
       dispose() { setTyping(false); if (watcher) watcher.disconnect(); if (xt) { xt.dispose(); xt = null; } }
     };
   }
-  term.pasteAsk = pasteAsk; term.lineCount = lineCount; term.bytes = bytes; term.clamp = clamp; term.WORDS = WORDS;
+  term.pasteAsk = pasteAsk; term.cleanPaste = cleanPaste; term.lineCount = lineCount; term.bytes = bytes; term.clamp = clamp; term.WORDS = WORDS;
   UI.term = term;
   if (typeof module === 'object' && module.exports) module.exports = term;
 })();

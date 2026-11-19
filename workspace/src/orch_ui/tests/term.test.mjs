@@ -169,8 +169,8 @@ test('a paste with a line end asks once; Cancel sends nothing, Paste hands it to
   await wait(40);
   assert.deepEqual(xt.pasted, ['echo hi\n']);
   assert.deepEqual(sent, ['echo hi\n']);
-  const one = ui.el.fire('paste', {target: xt.textarea, clipboardData: {getData: () => 'plain'}});
-  assert.ok(!one.defaultPrevented, 'one line without a line end: xterm pastes it itself');
+  ui.el.fire('paste', {target: xt.textarea, clipboardData: {getData: () => 'plain'}});
+  assert.equal(xt.pasted.at(-1), 'plain', 'one line without a line end goes in without asking');
 });
 
 test('nothing typed before typing was turned off goes out later', async () => {
@@ -289,4 +289,13 @@ test('a size that did not go out is tried again', async () => {
   ui.setTyping(false); ui.setTyping(true);
   await wait(20);
   assert.equal(sizes.length, 2, 'the failed size was sent again');
+});
+
+test('a paste never carries control characters: no early end of the bracketed paste, no Ctrl+C inside', () => {
+  assert.equal(T.cleanPaste('ok\x1b[201~rm -rf x\x03\tend\r\n'), 'ok[201~rm -rf x\tend\r\n');
+  const {ui, xt} = live();
+  ui.setTyping(true);
+  const p = ui.el.fire('paste', {target: xt.textarea, clipboardData: {getData: () => 'a\x1b[201~b'}});
+  assert.ok(p.defaultPrevented, 'the browser\'s own paste never reaches xterm');
+  assert.equal(xt.pasted.at(-1), 'a[201~b');
 });
