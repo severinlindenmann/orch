@@ -62,6 +62,11 @@ def dispatch(args, root: Path) -> bool:
             addons.add(root, args.name, args.yes, args.project_only)
         if args.project_only:
             _out(args, {"ok": True}, f"{args.name} is turned on in this workspace.")
+        if not args.json:
+            from orch import harness
+
+            if (w := harness.git_visible_warning(root)) is not None:
+                print(w)
     elif sub == "remove":
         addons.remove(root, args.name, args.purge)
         _out(args, {"ok": True}, f"{args.name} is turned off in this workspace.")
