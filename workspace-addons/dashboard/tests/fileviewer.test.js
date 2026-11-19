@@ -23,6 +23,16 @@ test('the file URL always carries ticket, folder and name encoded, and download 
   assert.ok(V.urlOf(f, true).endsWith('&dl=1'));
 });
 
+test('ORCH-524: a file with its time and size gets a link that names its version; a download does not', () => {
+  const f = {tid: 't_abc123', kind: 'artifacts', name: 'shot.png', mtime: '2026-11-18T10:00:00Z', size: 102404};
+  assert.equal(V.stampOf(f), '2026-11-18T10:00:00Z~102404');
+  assert.equal(V.urlOf(f), '/api/file?t=t_abc123&k=artifacts&n=shot.png&v=2026-11-18T10%3A00%3A00Z~102404');
+  assert.equal(V.urlOf({...f, mtime: '2026-11-18T10:05:00Z'}) === V.urlOf(f), false);  // a new version: a new link
+  assert.ok(V.urlOf(f, true).endsWith('&dl=1') && !V.urlOf(f, true).includes('&v='));
+  assert.equal(V.stampOf({mtime: 'x'.repeat(100)}).length, 64);  // the server keeps only short stamps
+  assert.equal(V.stampOf({}), '');
+});
+
 test('csv parsing keeps quoted commas, quotes and line breaks in one cell', () => {
   const {columns, rows} = V.parseDelimited('name,note\r\n"Smith, A","said ""hi"""\n"two\nlines",x\n', ',');
   assert.equal(JSON.stringify(columns), JSON.stringify(['name', 'note']));
