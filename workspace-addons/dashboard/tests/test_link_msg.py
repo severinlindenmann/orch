@@ -30,4 +30,4 @@ def test_agent_restart_of_remote_dashboard_warns(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(cli.service, "stop", lambda root: "stopped")
     (tmp_path / ".orch").mkdir()
     cli.main(["--dir", str(tmp_path), "stop", "--json"])
-    assert "cannot sign them in" in capsys.readouterr().out
+    assert "locked out" in capsys.readouterr().out
