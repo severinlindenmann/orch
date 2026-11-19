@@ -1071,8 +1071,15 @@ def test_addons_install_from_where_orch_came_from(proj, monkeypatch, uv_calls):
     args = uv_calls[0]
     assert all(isinstance(a, str) for a in args)
     zip_ = "https://github.com/someone/orch/archive/develop.zip"
-    assert args[:5] == ["tool", "install", "--reinstall", "--refresh", f"{zip_}#subdirectory=workspace"]
-    assert args[5:] == [
+    assert args[:6] == [
+        "tool",
+        "install",
+        "--reinstall",
+        "--refresh",
+        "--no-sources",
+        f"{zip_}#subdirectory=workspace",
+    ]
+    assert args[6:] == [
         "--with",
         f"{zip_}#subdirectory=workspace-addons/dashboard",
         "--with",
@@ -1080,6 +1087,23 @@ def test_addons_install_from_where_orch_came_from(proj, monkeypatch, uv_calls):
     ]
     monkeypatch.setenv("ORCH_REF", "v1")  # an explicit override still wins
     assert addons.spec("workspace").endswith("/archive/v1.zip#subdirectory=workspace")
+
+
+def test_addon_sources_table_never_replaces_the_core(proj, monkeypatch, uv_calls, tmp_path):
+    """ORCH-690: the sync add-on's pyproject points orch-workspace at an editable checkout folder
+    ([tool.uv.sources]). uv honoured it on a checkout install, so `orch addon add sync` swapped the core
+    for an editable one; _install_origin() can not read that, and the next add-on add reinstalled core and
+    add-ons from main. orch's own reinstall must ignore every add-on's sources table."""
+    repo = tmp_path / "checkout"
+    (repo / "workspace").mkdir(parents=True)
+    (repo / "workspace-addons" / "sync").mkdir(parents=True)
+    monkeypatch.setattr(addons, "_install_origin", lambda: {"repo": str(repo), "local": True})
+    monkeypatch.setattr(addons, "_same_python", lambda: [])
+    addons._install_tool([{"name": "sync", "source": "built-in", "version": "0.0.0"}])
+    args = uv_calls[0]
+    assert "--no-sources" in args
+    assert args.index("--no-sources") < args.index(str((repo / "workspace").resolve()))
+    assert args[-1] == str((repo / "workspace-addons" / "sync").resolve())
 
 
 def test_reinstall_keeps_its_python_on_every_platform(monkeypatch, tmp_path):

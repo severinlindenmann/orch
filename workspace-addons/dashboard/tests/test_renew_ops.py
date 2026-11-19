@@ -175,6 +175,10 @@ def test_a_card_answer_carries_a_person_grant_only_with_a_session(ws, monkeypatc
     actions.run_op(ws, SELF, "review.answer", args, session=True)
     assert seen["env"].get(renew.GRANT_ENV + "_FD") or seen["env"].get(renew.GRANT_ENV)
     actions.run_op(
-        ws, SELF, "answer", {"ticket": "t_abcdef", "question": "q1", "answer": "Yes", "digest": "a" * 64}, session=True
+        ws,
+        SELF,
+        "answer",
+        {"ticket": "t_abcdef", "question": "q1", "answer": "Yes", "digest": "a" * 64},
+        session=True,
     )
     assert seen["env"].get(renew.GRANT_ENV + "_FD") or seen["env"].get(renew.GRANT_ENV)

@@ -253,7 +253,8 @@
       }
       menu.addEventListener('toggle', () => { isOpen = menu.open; });
       menu.append(sum);
-      const pop = el('div', 'menu-pop start-pop');
+      /* a panel of choices (tool picker, Start buttons), not a menu: its buttons stay buttons however the page draws it (ORCH-555) */
+      const pop = attr(el('div', 'menu-pop start-pop'), {role: 'group', 'aria-label': 'Start choice'});
       if (isOpen && !busyNow) pop.append(body());
       menu.addEventListener('toggle', () => { if (menu.open && !pop.firstChild) pop.append(body()); });
       menu.append(pop);

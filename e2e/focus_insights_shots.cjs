@@ -18,6 +18,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
+const headless = require('./headless.cjs'); // the keychain options (ORCH-615)
 
 const REPO = path.resolve(__dirname, '..');
 const WIDTHS = [[1280, 900], [390, 844]];
@@ -148,7 +149,7 @@ async function main() {
   const wanted = SCREENS.filter(x => !only || only.includes(x.name));
   const servers = { focus: await start() };
   Object.assign(servers, await startExtra(wanted));
-  const browser = await chromium.launch();
+  const browser = await headless.launch(chromium);
   let failed = 0;
   try {
     for (const s of wanted) {
