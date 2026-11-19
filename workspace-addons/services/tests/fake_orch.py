@@ -67,6 +67,8 @@ elif args[0] == "ask":
         "recommended": rec,
         "answer": None,
     }
+    if "--kind" in args:
+        q["kind"] = args[args.index("--kind") + 1]
     t["questions"].append(q)
     save(t)
     result = q

@@ -30,6 +30,7 @@ LIMIT = 3  # failures in the window that make a service failing
 PORT_TIMEOUT = 0.5
 OPTIONS = ("Restart", "Stop", "Look into it")
 BY = "agent:services"
+QUESTION_KIND = "services:health"
 MAX_EVENTS = 20
 
 
@@ -327,6 +328,8 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
             *(x for o in OPTIONS for x in ("--option", o)),
             "--recommend",
             "Restart",
+            "--kind",
+            QUESTION_KIND,  # an add-on's own question: Services picks up the answer, no helper is started
             write=True,
         )
         q = q.get("question", q) if isinstance(q, dict) else {}

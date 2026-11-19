@@ -497,9 +497,21 @@ def _rows(text: str, n: int) -> tuple[list[str], str | None]:
     raw = text.rstrip("\n").split("\n")
     rows = [runs_live.clean(_ANSI.sub("", ln)).rstrip() for ln in raw]
     hint = _suggestion(raw, rows)
+    rows = [r for r in rows if not _is_frame(r)]
     while rows and not rows[-1].strip():
         rows.pop()
     return rows[-n:], hint
+
+
+_RULE = re.compile(r"^[\s\u2500-\u257f\-=_~]{3,}$")  # a row of box lines or dashes
+_EMPTY_PROMPT = re.compile(r"^\s*[>\u276f\u203a]\s*$")
+_FOOTER = re.compile(r"^\s*(\? for shortcuts|\u23f5\u23f5)")
+
+
+def _is_frame(row: str) -> bool:
+    """The tool's own prompt frame (rows of rules, an empty prompt, the shortcut footer) says nothing about
+    the work, and fills the last lines of a narrow or short view. Typed or suggested prompt text stays."""
+    return bool(_RULE.match(row) or _EMPTY_PROMPT.match(row) or _FOOTER.match(row))
 
 
 _TAIL_MARK = "@@orch-tail "
