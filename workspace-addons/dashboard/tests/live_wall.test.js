@@ -45,6 +45,9 @@ test('the summary line reads right: "1 needs you", "3 need you", "Nobody needs y
   const many = [...one, sess('d', 'D', 'needs-you'), sess('e', 'E', 'needs-you'), sess('f', 'F', 'in-line'), sess('g', 'G', 'closed')];
   assert.deepEqual(wall.liveWallSummary(many).map(p => p.text), ['3 need you', '1 working', '1 in line', '1 idle']);
   assert.deepEqual(wall.liveWallSummary([sess('b', 'B', 'working')]).map(p => [p.s, p.text]), [['', 'Nobody needs you'], ['working', '1 working']]);
+  // ORCH-674: the wall reads the same one number as the live bar (results to check count too)
+  assert.deepEqual(wall.liveWallSummary([sess('b', 'B', 'working')], 2).map(p => [p.s, p.text]), [['needs-you', '2 need you'], ['working', '1 working']]);
+  assert.equal(wall.liveWallSummary(many, 1)[0].text, '3 need you');
   assert.equal(wall.liveWallSessions(1), '1 session');
   assert.equal(wall.liveWallSessions(24), '24 sessions');
   assert.equal(wall.liveWallSessions(0), '0 sessions');

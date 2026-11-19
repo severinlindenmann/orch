@@ -1412,11 +1412,13 @@ def start(
     agent: str | None = None,
     priority: str = "normal",
     credit: dict | None = None,
+    over_limit: bool = False,
 ) -> dict:
     """Start (or continue) the agent on a ticket. mode None = live in tmux when the agent and the machine can,
     else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent.
     credit: run on an API key ({"account", "key", "why"}, keystart.py): one step at a time, the key given only
-    to the helper, the reason and the spend on the ticket."""
+    to the helper, the reason and the spend on the ticket.
+    over_limit: start even when the helper limit is reached (a red develop must not wait, ORCH-699)."""
     from orch import runs_live, worktrees
 
     tickets.load(root, tid)  # an unknown ticket is refused before anything is planned or spawned
@@ -1465,6 +1467,7 @@ def start(
             take_over=take_over,
             busy_text=text or f"{by} asked for more work on this ticket.",
             priority=priority,
+            over_limit=over_limit,
         )
         r["notes"] = notes + r.get("notes", []) + ([notice] if notice else [])
         return r
