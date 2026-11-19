@@ -2468,11 +2468,17 @@ def _next_id(items: list[dict], prefix: str) -> str:
 
 
 def _item(ticket: dict, cid: str) -> dict:
+    """The task named `cid`. A plain number N is the task c<N> (checks are named c1, c2, ...)."""
+    cid = str(cid)
+    ids = [c["id"] for c in ticket["checklist"]]
+    if cid not in ids and cid.isdigit() and f"c{int(cid)}" in ids:
+        cid = f"c{int(cid)}"
     item = next((c for c in ticket["checklist"] if c["id"] == cid), None)
     if item is None:
+        have = f" This ticket has {ids[0]}..{ids[-1]}." if ids else " This ticket has no checks yet."
         raise Refused(
-            f"Ticket {ticket['id']} has no check {cid}. "
-            f"Run `orch ticket show {ticket['id']}` to see its checks."
+            f"Ticket {ticket['id']} has no check {cid}. Checks are named c1, c2, ...{have} "
+            f"Run `orch ticket show {ticket['id']}` to see them."
         )
     return item
 
@@ -2675,7 +2681,7 @@ def check_done(
         if proved:
             item["proves"] = list(dict.fromkeys([*item.get("proves", []), *proved]))
         _clear_doing(item)
-        add_history(t, by, f"Check {cid} done")
+        add_history(t, by, f"Check {item['id']} done")
         return item
 
     return apply_op(root, tid, op, by=by)

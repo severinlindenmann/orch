@@ -59,6 +59,19 @@ def test_no_temp_files_left(proj, new_ticket, run):
     assert names == [f"{tid}.json"]
 
 
+def test_check_plain_number_is_the_task_at_that_place(proj, run, new_ticket):
+    """ORCH-864: `check done <id> 1` is c1; a wrong number says tasks are named c1, c2, ... and the range."""
+    tid = new_ticket()
+    for step in ("one", "two"):
+        assert run("check", "add", tid, step)[0] == 0
+    code, _, _ = run("check", "done", tid, "2", "--note", "ran it")
+    assert code == 0
+    t = read(proj, tid)
+    assert [c["done"] for c in t["checklist"]] == [False, True]
+    code, _, err = run("check", "done", tid, "99", "--note", "ran it")
+    assert code == 2 and "named c1, c2" in err and "c1..c2" in err
+
+
 def test_check_done_needs_evidence(proj, run, new_ticket, validate):
     tid = new_ticket()
     assert run("check", "add", tid, "Implement")[0] == 0
