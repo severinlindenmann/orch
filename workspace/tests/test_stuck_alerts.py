@@ -100,8 +100,11 @@ def test_finished_tickets_are_never_stuck(proj, new_ticket, run, child):
 def test_failed_runs_counts_only_the_last_streak():
     ev = [{"type": "command", "exit": 1}, {"type": "command", "exit": 0}, {"type": "note"}]
     assert stuck.failed_runs({"evidence": ev}) == 0
-    ev += [{"type": "command", "exit": 3}, {"type": "command", "ref": "no exit"},
-           {"type": "command", "exit": 1}]
+    ev += [
+        {"type": "command", "exit": 3},
+        {"type": "command", "ref": "no exit"},
+        {"type": "command", "exit": 1},
+    ]
     assert stuck.failed_runs({"evidence": ev}) == 2
 
 
