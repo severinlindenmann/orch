@@ -525,3 +525,47 @@ def r17(e):
     t = e.orchj("Pilatus", "chat", "thread", i["Reports"], "--sync", by=me)
     sides = {m["text"]: m["by"] for m in t["messages"]}
     check(sides.get(text) == "you" and sides.get(back) == i["Reports"], f"sender thread: {sides}")
+
+
+@scenario("R18", local_only=True)
+def r18(e):
+    """The relay admin page like a person (ORCH-895): sign in with the token form, make a group with two workspaces,
+    allow one way under Who can do what, make a phone code for one workspace; the admin API and a phone pairing with
+    that code show the result. Every page also at 390 wide without sideways scrolling. Browser half: relay_admin.cjs."""
+    import secrets as _s
+
+    from scenarios_look import browser_half
+
+    names = {}
+    for n in ("R18-Alp", "R18-Bern"):
+        r = e.rel.admin.call("POST", "/admin/api/workspaces", {"name": e.label(n), "description": f"{n} test", "tags": ["r18"]})
+        check(r.status == 201, f"admin add {n}: {r}")
+        names[n] = r.json()["id"]
+        e.cleanup.append(lambda i=r.json()["id"]: e.rel.admin.call("DELETE", f"/admin/api/workspaces/{i}"))
+    a, b = (e.label(n) for n in names)
+    group = "R18 " + _s.token_hex(2)
+    tok = e.tmp / "r18-admin-token"
+    tok.write_text(e.rel.admin.token)
+    tok.chmod(0o600)
+    got = browser_half(e, "relay_admin.cjs", e.rel.admin_url, str(tok), a, b, group, os.environ.get("E2E_SHOTS", ""))
+    tok.unlink()
+    check(got.get("signedIn") and got.get("groupDone") and got.get("ruleSaved"), f"browser steps: {got}")
+    check(not got["errors"], f"script errors on the admin page: {got['errors'][:3]}")
+    wide = [r for r, h in got["narrow"].items() if h]
+    check(not wide, f"admin pages scroll sideways at 390: {wide}")
+    groups = (e.rel.admin.call("GET", "/admin/api/groups").json() or {})
+    items = groups.get("items", groups) if isinstance(groups, dict) else groups
+    mine = [g for g in items if g.get("name") == group]
+    check(len(mine) == 1, f"group {group} not in the admin API: {str(groups)[:300]}")
+    members = set(mine[0].get("members") or [m.get("id") for m in mine[0].get("workspaces", [])])
+    check(set(names.values()) <= members, f"group members {members}")
+    rules = (e.rel.admin.call("GET", "/admin/api/rules").json() or {}).get("rules", [])
+    check(any(x["from"] == names["R18-Alp"] and x["to"] == names["R18-Bern"] and x.get("text") for x in rules),
+          f"no saved rule {a} -> {b}: {rules[-3:]}")
+    code = got.get("pairLink", "").partition("code=")[2]
+    check(code.startswith("pc_"), f"phone code link: {got.get('pairLink')}")
+    p = http("POST", e.rel.url + "/v1/phone/pair", None, {"code": code, "name": "R18 phone"})
+    check(p.status == 201, f"pair with the page's code: {p}")
+    e.cleanup.append(lambda i=p.json()["phone_id"]: e.rel.admin.call("DELETE", f"/admin/api/phones/{i}"))
+    check([w["id"] for w in p.json()["workspaces"]] == [names["R18-Alp"]], f"phone reaches {p.json()['workspaces']}")
+    return "group, rule and phone code made on the page; admin pages at 390"
