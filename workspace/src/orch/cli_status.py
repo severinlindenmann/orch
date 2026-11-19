@@ -215,8 +215,6 @@ def _services_cmd(args, root: Path) -> None:
 def _with_known(ws: list) -> list:
     """Add the person's other known workspaces (consent records) that run nothing, so the switcher can list
     them as "Not running". Only folders that still exist and hold .orch; de-duplicated by resolved path."""
-    from orch import addons
-
     try:
         known = addons._registered_workspaces(None)
     except Exception:
