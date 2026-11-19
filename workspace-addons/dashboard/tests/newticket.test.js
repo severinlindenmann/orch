@@ -218,7 +218,9 @@ test('one Start button; Save without starting is a text link; neither sends plan
     if (label === 'Start') { await node.click(); await s.form.fire('submit'); } else { assert.equal(node.className, 'new-ticket-link'); await node.click(); }
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(s.calls[0].args.plan_first, undefined);
-    assert.equal(s.calls.length, label === 'Start' ? 2 : 1);
+    assert.equal(s.calls.length, 2);
+    // ORCH-738: Start starts the helper; Save without starting only prepares the ticket
+    assert.equal(JSON.stringify(s.calls[1]), JSON.stringify({op:'run.start', args:label === 'Start' ? {ticket:'new'} : {ticket:'new', prepare:true}}));
   }
 });
 
