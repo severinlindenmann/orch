@@ -1511,7 +1511,7 @@ def load_runs(
     from .events import Revisions
 
     if not some:
-        signature = Revisions(root).signature()
+        signature = Revisions(root).fingerprint()
         if _RUN_SIGNATURES.get(str(root)) != signature:
             fresh = True
             _RUN_SIGNATURES[str(root)] = signature

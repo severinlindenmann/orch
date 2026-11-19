@@ -149,11 +149,11 @@ def test_mobile_mode_state_file_changes_the_event_revision(ws):
     from orch_dashboard.events import Revisions
 
     r = Revisions(ws)
-    before = r.signature()
+    before = r.fingerprint()
     f = ws / ".orch" / "run" / "mobile-mode.json"
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text('{"on": true}')
-    assert r.signature() != before
+    assert r.fingerprint() != before
 
 
 def test_mobile_mode_tint_tracks_state_and_banner_keeps_end_time():
@@ -207,13 +207,13 @@ def test_settings_files_change_the_event_revision(ws, tmp_path, monkeypatch):
 
     monkeypatch.setattr(addons, "home", lambda root=None: tmp_path / "orchhome")
     r = Revisions(ws)
-    before = r.signature()
+    before = r.fingerprint()
     cfg = ws / ".orch" / "config.toml"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text('[agents.e2e-git]\ncommand = "true 1"\n')
-    after_cfg = r.signature()
+    after_cfg = r.fingerprint()
     assert after_cfg != before
     approvals = tmp_path / "orchhome" / "agent-approvals.json"
     approvals.parent.mkdir(parents=True, exist_ok=True)
     approvals.write_text("[]")
-    assert r.signature() != after_cfg
+    assert r.fingerprint() != after_cfg

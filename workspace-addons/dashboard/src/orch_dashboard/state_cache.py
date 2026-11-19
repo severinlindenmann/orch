@@ -47,7 +47,7 @@ class StateCache:
 
     def _signature(self):
         try:
-            return self.revisions.signature() if self.revisions is not None else None
+            return self.revisions.fingerprint() if self.revisions is not None else None
         except OSError:
             return None
 

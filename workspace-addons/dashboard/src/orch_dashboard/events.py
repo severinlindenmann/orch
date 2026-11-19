@@ -30,7 +30,7 @@ class Revisions:
         # when the new copy is ready (told at the change itself, every page asked while the copy was old)
         self.on_change = None
 
-    def signature(self):
+    def fingerprint(self):
         rows = []
         # one level of .json files (ticket artifacts are not state): one scandir pass, a few dozen ms at 10,000
         # tickets where a walk with a stat per path took a quarter second (ORCH-522)
@@ -78,7 +78,7 @@ class Revisions:
         with self.condition:
             if self.thread is not None and self.seen and not self.closed:
                 return self.seen
-        return self.signature()
+        return self.fingerprint()
 
     def settings_files(self):
         files = [
@@ -94,7 +94,7 @@ class Revisions:
         return files
 
     def join(self):
-        first = self.signature()  # the folder walk happens outside the lock
+        first = self.fingerprint()  # the folder walk happens outside the lock
         with self.condition:
             if self.closed or self.clients >= 20:
                 return False
@@ -115,7 +115,7 @@ class Revisions:
     def watch(self):
         while True:
             began = time.monotonic()
-            rev = self.signature()  # the folder walk happens outside the lock; the lock only publishes
+            rev = self.fingerprint()  # the folder walk happens outside the lock; the lock only publishes
             rest = max(0.25, REST_FACTOR * (time.monotonic() - began))
             changed = None
             with self.condition:

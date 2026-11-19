@@ -22,7 +22,7 @@ def _touch(path, text):
 def test_caches_a_build_writes_itself_are_no_change(tmp_path):
     root = _ws(tmp_path)
     rev = Revisions(root)
-    before = rev.signature()
+    before = rev.fingerprint()
     run = root / ".orch" / "run"
     # every build wrote these (a "last seen" time, the ticket index, add-on needs): each write started the next build
     _touch(run / "last-seen.json", json.dumps({"focus": "2026-11-19T01:00:00Z"}))
@@ -30,13 +30,13 @@ def test_caches_a_build_writes_itself_are_no_change(tmp_path):
     _touch(run / "pull-checks.json", "{}")
     _touch(run / "usage-cache.json", "{}")
     _touch(run / "needs-cache" / "focus.json", "[]")
-    assert rev.signature() == before
+    assert rev.fingerprint() == before
 
 
 def test_tickets_runs_and_chat_still_count(tmp_path):
     root = _ws(tmp_path)
     rev = Revisions(root)
-    seen = {rev.signature()}
+    seen = {rev.fingerprint()}
     for path, text in (
         (root / ".orch" / "tickets" / "t_aaaaaa.json", '{"id": "t_aaaaaa", "title": "changed"}'),
         (root / ".orch" / "tickets" / "t_bbbbbb.json", '{"id": "t_bbbbbb"}'),
@@ -45,7 +45,7 @@ def test_tickets_runs_and_chat_still_count(tmp_path):
         (root / ".orch" / "inbox" / "m1.json", "{}"),
     ):
         _touch(path, text)
-        sig = rev.signature()
+        sig = rev.fingerprint()
         assert sig not in seen, path
         seen.add(sig)
 
@@ -53,11 +53,11 @@ def test_tickets_runs_and_chat_still_count(tmp_path):
 def test_ticket_artifacts_are_no_change(tmp_path):
     root = _ws(tmp_path)
     rev = Revisions(root)
-    before = rev.signature()
+    before = rev.fingerprint()
     art = root / ".orch" / "tickets" / "t_aaaaaa" / "artifacts"
     art.mkdir(parents=True)
     (art / "report.json").write_text("{}")
-    assert rev.signature() == before
+    assert rev.fingerprint() == before
 
 
 def test_a_page_request_uses_the_watchers_last_look(tmp_path):
@@ -65,12 +65,12 @@ def test_a_page_request_uses_the_watchers_last_look(tmp_path):
     looks = []
 
     class Counted(Revisions):
-        def signature(self):
+        def fingerprint(self):
             looks.append(1)
-            return super().signature()
+            return super().fingerprint()
 
     rev = Counted(root)
-    assert rev.current() == rev.signature()  # no watcher: a new look each time
+    assert rev.current() == rev.fingerprint()  # no watcher: a new look each time
     assert len(looks) == 2
     assert rev.join()
     try:
