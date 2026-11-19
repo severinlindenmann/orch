@@ -1524,3 +1524,21 @@ def test_focus_page_is_the_live_session_page_and_live_session_must_be_a_flag():
     assert "live_session" not in (addons.folder_manifest(base / "workspace-addons" / "factory")["page"])
     schema = json.loads((base / "contracts" / "addon-manifest.schema.json").read_text())
     assert schema["properties"]["page"]["properties"]["live_session"]["type"] == "boolean"
+
+
+def test_long_addon_names_keep_a_space_before_the_text(proj, run, monkeypatch):
+    """Release 35 check: 'dashboard-testerLooks at ...' - a name longer than the column ran into the text."""
+    rows = [
+        {"name": "dashboard-tester", "installed": True, "active": True, "description": "Looks at every page"},
+        {"name": "sync", "installed": True, "active": False, "description": "Keeps a copy"},
+        {"name": "pull-requests", "installed": False, "active": False, "description": "Shows pull requests"},
+    ]
+    monkeypatch.setattr(addons, "listing", lambda root: rows)
+    code, out, _ = run("addon", "list")
+    assert code == 0
+    assert "dashboard-tester  on    Looks at every page" in out
+    assert "pull-requests     Shows pull requests" in out
+    # the columns stay lined up for the short names too
+    lines = out.splitlines()
+    assert lines[0].index("on ") == lines[1].index("off ") == 20
+    assert addons.name_width(["sync"]) == 12 and addons.name_width(["dashboard-tester"]) == 18
