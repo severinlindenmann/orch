@@ -101,3 +101,11 @@ test('the look is the kit component: tokens only, orange needs-you tiles, a gall
   assert.match(fs.readFileSync(path.join(KIT, 'gallery.html'), 'utf8'), /id="live-wall"[\s\S]*class="wall-tile" data-s="needs-you"/);
   assert.match(fs.readFileSync(path.join(KIT, 'DESIGN.md'), 'utf8'), /### Live wall \(ORCH-360\)/);
 });
+
+test('an idle or closed session whose ticket waits for the person lands in Needs you, first (ORCH-790)', () => {
+  const list = [sess('t_a', 'ORCH-1', 'working'), sess('t_b', 'ORCH-2', 'closed', {needs:true}), sess('t_c', 'ORCH-3', 'idle', {needs:true}),
+    sess('t_d', 'ORCH-4', 'idle'), sess('t_e', 'ORCH-5', 'needs-you')];
+  const b = wall.liveWallBands(list, []);
+  assert.deepEqual(keys(b.need), ['ORCH-2', 'ORCH-3', 'ORCH-5', 'ORCH-1']);
+  assert.deepEqual(keys(b.idle), ['ORCH-4']);
+});
