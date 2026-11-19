@@ -1312,7 +1312,7 @@ def run(args: argparse.Namespace) -> None:
         t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est, extra)
         _out(args, t, f'Tidied: "{t["title"]}"')
     elif cmd == "ticket" and sub == "found":
-        raw = sys.stdin.read() if not sys.stdin.isatty() else ""
+        raw = sys.stdin.read() if not term.is_terminal(sys.stdin) else ""
         try:
             data = json.loads(raw) if raw.strip() else None
         except ValueError:
