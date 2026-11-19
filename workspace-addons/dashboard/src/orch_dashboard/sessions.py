@@ -8,7 +8,7 @@ in the core, answered in this process). The lines are kept for a moment, so seve
 
 The shape (the wall builds on it; keep it in step with the PR text):
 
-    {"sessions": [Session, ...], "lines": n, "now": "<ISO time>", "age_ms": <age of the state it was built from>}
+    {"sessions": [Session, ...], "groups": [Group, ...], "lines": n, "now": "<ISO time>", "age_ms": <age of the state it was built from>}
 
     Session = {
       "id": "t_7k3f9q", "key": "ORCH-12", "title": "...",
@@ -23,8 +23,23 @@ The shape (the wall builds on it; keep it in step with the PR text):
       "opened_at": "<ISO>" | null, "open_seconds": int | null,     # when the session opened
       "idle_seconds": int | null, "closes_in_seconds": int | null, # idle close countdown (live sessions)
       "last_at": "<ISO>" | null,                                   # the ticket's last history line
+      "pinned": bool, "name": "<own name>" | null,                 # kept in the workspace (sessionprefs, ORCH-361)
       "kind": "" | "empty" | "chat" | "terminal" | "manager",      # "" = a ticket's; else a session without a
-    }                                                              # ticket (ORCH-364), named by its title
+                                                                   # ticket (ORCH-364), named by its title
+      "parent": "t_..." | null,                                    # the ticket's parent (epic, factory order)
+      "small": [{"what": "<plain words>", "seconds": int | null}],  # small helpers the helper started inside its
+    }                                                              # session (ORCH-345), watch only
+
+Groups (ORCH-345): an epic or a factory order whose tree has a session. One Group per top ticket of a parent chain:
+
+    Group = {
+      "id": "t_..." (the top ticket), "key": "ORCH-261", "title": "...", "kind": "factory" | "epic",
+      "members": [Member, ...],                                    # the top ticket first, then its open sub-tickets
+    }                                                              # depth first, by key number
+    Member = {"id", "key", "title", "depth": 0.., "main": bool,    # main = the top ticket (the main helper)
+              "status", "word", "small": [...]}                    # as in Session; "closed" = no session yet
+
+A group is listed when two or more of its members have a session (in line counts), or one has small helpers.
 
 A session without a ticket is listed only while it is open; a plain terminal has no helper and shows as idle,
 word "Open", until it is closed.
@@ -39,6 +54,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from . import sessionprefs
 from .data import run_orch
 
 LINES = 8  # the last lines a tile or a pane shows by default
@@ -143,6 +159,9 @@ def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> 
         status, word = "in-line", "In line"
     else:
         status, word = "closed", "No session"
+    if status in ("idle", "closed") and ticket.get("status") == "review":
+        # ORCH-674: a quiet session whose result waits for the person reads Check, as its ticket does everywhere else
+        word = "Check"
     waits = [
         {"kind": str(w.get("kind") or ""), "what": " ".join(str(w.get("what") or "").split())[:200]}
         for w in run.get("waiting_on") or []
@@ -150,6 +169,11 @@ def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> 
     ]
     if alive and isinstance(run.get("hold"), str) and run["hold"]:
         waits.append({"kind": "hold", "what": run["hold"]})
+    small = [
+        {"what": _small_name(w), "seconds": _int(w.get("seconds"))}
+        for w in run.get("waiting_on") or []
+        if isinstance(w, dict) and w.get("subagent") is True
+    ]
     last = run.get("last_activity") if isinstance(run.get("last_activity"), dict) else {}
     warmth = ticket.get("warmth") if isinstance(ticket.get("warmth"), dict) else {}
     return {
@@ -171,7 +195,102 @@ def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> 
         "closes_in_seconds": _int(warmth.get("seconds_left")) if alive else None,
         "last_at": last.get("at") if isinstance(last.get("at"), str) else None,
         "kind": "",
+        "parent": ticket.get("parent")
+        if isinstance(ticket.get("parent"), str) and ticket.get("parent")
+        else None,
+        "small": small if alive else [],
     }
+
+
+def _small_name(w: dict) -> str:
+    """The plain name of a small helper from its waiting_on row (runwatch: label "helper: <what>")."""
+    label = w.get("label") if isinstance(w.get("label"), str) else ""
+    name = label[len("helper: ") :] if label.startswith("helper: ") else label or str(w.get("what") or "")
+    return " ".join(name.split())[:120] or "Small helper"
+
+
+GROUP_DEPTH = 8  # parent chains longer than this are cut (and a loop in them is never followed)
+_OPEN = ("done", "dropped", "superseded")
+
+
+def _top(tid: str, by_id: dict) -> str:
+    """The top ticket of a parent chain; in a loop the smallest id of the loop, so every member finds the same one."""
+    chain = [tid]
+    for _ in range(GROUP_DEPTH):
+        p = by_id.get(chain[-1], {}).get("parent")
+        if not isinstance(p, str) or p not in by_id:
+            break
+        if p in chain:
+            return min(chain[chain.index(p) :])
+        chain.append(p)
+    return chain[-1]
+
+
+def _members(top: dict, kids: dict[str, list[dict]], by_sess: dict[str, dict]) -> list[dict]:
+    """The top ticket, then its sub-tickets depth first (by key number): open ones and any with a session."""
+    out: list[dict] = []
+    stack: list[tuple[dict, int]] = [(top, 0)]
+    seen: set[str] = set()
+    while stack:
+        t, depth = stack.pop()
+        tid = t["id"]
+        if tid in seen or depth > GROUP_DEPTH:
+            continue
+        seen.add(tid)
+        s = by_sess.get(tid)
+        if depth == 0 or s or t.get("status") not in _OPEN:
+            out.append(
+                {
+                    "id": tid,
+                    "key": t.get("key") if isinstance(t.get("key"), str) else "",
+                    "title": " ".join(str(t.get("title") or "").split()) or "Untitled",
+                    "depth": depth,
+                    "main": depth == 0,
+                    "status": s["status"] if s else "closed",
+                    "word": s["word"] if s else "No session",
+                    "small": list(s.get("small") or []) if s else [],
+                }
+            )
+        stack.extend((k, depth + 1) for k in sorted(kids.get(tid, []), key=_key_number, reverse=True))
+    return out
+
+
+def groups(state: dict, sessions: list[dict]) -> list[dict]:
+    """The epics and factory orders with sessions in their tree (see the module text), in the sessions' order of
+    their first member."""
+    tickets = [t for t in state.get("tickets") or [] if isinstance(t, dict) and isinstance(t.get("id"), str)]
+    by_id = {t["id"]: t for t in tickets}
+    kids: dict[str, list[dict]] = {}
+    for t in tickets:
+        p = t.get("parent")
+        if isinstance(p, str) and p in by_id and p != t["id"]:
+            kids.setdefault(p, []).append(t)
+    by_sess = {s["id"]: s for s in sessions if not s.get("kind")}
+    tops: list[str] = []
+    for s in sessions:
+        if s.get("kind") or s["id"] not in by_id:
+            continue
+        top = _top(s["id"], by_id)
+        if top in kids and top not in tops:
+            tops.append(top)
+    out = []
+    for top in tops:
+        members = _members(by_id[top], kids, by_sess)
+        with_session = [m for m in members if m["status"] != "closed"]
+        if len(with_session) < 2 and not any(m["small"] for m in members):
+            continue
+        t = by_id[top]
+        fac = (t.get("ext") or {}).get("factory") if isinstance(t.get("ext"), dict) else None
+        out.append(
+            {
+                "id": top,
+                "key": t.get("key") if isinstance(t.get("key"), str) else "",
+                "title": " ".join(str(t.get("title") or "").split()) or "Untitled",
+                "kind": "factory" if isinstance(fac, dict) and fac.get("role") == "order" else "epic",
+                "members": members,
+            }
+        )
+    return out
 
 
 def no_ticket(x: dict, run: dict | None, tool_of) -> dict | None:
@@ -233,8 +352,10 @@ def build(root: Path, orch_bin: str | None, state: dict, lines: int = LINES) -> 
 
 def answer(root: Path, orch_bin: str | None, state: dict, age: float, lines: int = LINES) -> dict:
     n = max(1, min(int(lines), LINES_MAX))
+    sessions = sessionprefs.apply(root, build(root, orch_bin, state, n))
     return {
-        "sessions": build(root, orch_bin, state, n),
+        "sessions": sessions,
+        "groups": groups(state, sessions),
         "lines": n,
         "now": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "age_ms": int(age * 1000),

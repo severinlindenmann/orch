@@ -187,3 +187,22 @@ def test_in_place_edit_with_time_set_back_is_seen(proj, run):
     os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))
     assert p.stat().st_size == st.st_size and p.stat().st_mtime_ns == st.st_mtime_ns
     assert ticketindex.rows(proj)[0]["title"] == t["title"]
+
+
+def test_no_write_keeps_the_index_file_as_it_was(proj, run):
+    """`orch diag` reads without writing: inside no_write the rows are fresh but the index file stays."""
+    assert run("init")[0] == 0
+    a = _new(run, "Invoice export")
+    ticketindex.rows(proj)
+    before = ticketindex.index_path(proj).read_bytes()
+    f = proj / ".orch" / "tickets" / f"{a}.json"
+    t = json.loads(f.read_text(encoding="utf-8"))
+    t["title"] = "Invoice export, by hand"
+    f.write_text(json.dumps(t), encoding="utf-8")
+    with ticketindex.no_write():
+        assert [r["title"] for r in ticketindex.rows(proj)] == ["Invoice export, by hand"]
+    assert ticketindex.index_path(proj).read_bytes() == before
+    ticketindex.index_path(proj).unlink()
+    with ticketindex.no_write():
+        assert len(ticketindex.rows(proj)) == 1
+    assert not ticketindex.index_path(proj).exists()

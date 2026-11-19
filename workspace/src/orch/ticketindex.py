@@ -13,6 +13,8 @@ A row holds what the lists need (`orch ticket list`, `orch needs`, the dashboard
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import os
 import re
@@ -22,11 +24,23 @@ from pathlib import Path
 
 from orch import procs
 
-VERSION = 2  # a row gained fields: an index of another version is rebuilt
+VERSION = 3  # a row or entry changed shape: an index of another version is rebuilt
 NOTE_HEAD = 200
 _FILE_RE = re.compile(r"^(t_.*)\.json$", re.S)  # as tickets.list_all globs: t_*.json
 _NEWER_RE = re.compile(r"orch\.ticket/(\d+)$")
 _CLOSED = ("done", "dropped")
+_NO_WRITE: contextvars.ContextVar[bool] = contextvars.ContextVar("ticketindex_no_write", default=False)
+
+
+@contextlib.contextmanager
+def no_write():
+    """Inside: the index is brought up to date in memory only, never written (`orch diag` reads a workspace
+    without changing a byte of it)."""
+    token = _NO_WRITE.set(True)
+    try:
+        yield
+    finally:
+        _NO_WRITE.reset(token)
 
 
 def index_path(root: Path) -> Path:
@@ -158,7 +172,7 @@ def _write_index(root: Path, files: dict) -> None:
 
 
 def _fresh(root: Path) -> dict:
-    """{id: {"sig", "row", "sync"}} of every ticket file, the index first brought up to date."""
+    """{id: {"sig", "row", "traced"}} of every ticket file, the index first brought up to date."""
     d = root / ".orch" / "tickets"
     old = _read_index(root)
     files: dict = {}
@@ -179,15 +193,15 @@ def _fresh(root: Path) -> dict:
             continue
         tid = m.group(1)
         was = old.get(tid)
-        if isinstance(was, dict) and was.get("sig") == sig and isinstance(was.get("sync"), bool):
+        if isinstance(was, dict) and was.get("sig") == sig and isinstance(was.get("traced"), bool):
             row = was.get("row", False)
             if row is None or (isinstance(row, dict) and row.get("id") == tid):
                 files[tid] = was
                 continue
         changed = True
         row, sync = _parse(Path(e.path), tid, sig[1])
-        files[tid] = {"sig": sig, "row": row, "sync": sync}
-    if changed or set(files) != set(old):
+        files[tid] = {"sig": sig, "row": row, "traced": sync}
+    if (changed or set(files) != set(old)) and not _NO_WRITE.get():
         _write_index(root, files)
     return files
 
@@ -203,7 +217,7 @@ def rows(root: Path, include_hidden: bool = False) -> list[dict]:
 
 def any_shows_sync(root: Path) -> bool:
     """history.tickets_show_sync from the index: some ticket file carries sync's own traces."""
-    return any(f.get("sync") for f in _fresh(root).values())
+    return any(f.get("traced") for f in _fresh(root).values())
 
 
 def counts(root: Path) -> dict:

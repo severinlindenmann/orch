@@ -277,8 +277,8 @@
   }
   /* A helper's changes waiting to be added: shown as "Changes to add" from the ticket, not as a second row. */
   const isBringBack = row => !!row && row.kind === 'copies:bring-back';
-  /* The one "Needs you" number (Review menu entry, top bar, Home heading, Review page, Tickets pill, Focus): the open
-     questions plus the results to check, the same things the Review page shows as cards (owner, 16 Nov, ORCH-63).
+  /* The open questions plus the results to check, the same things the Review page shows as cards (owner, 16 Nov,
+     ORCH-63). The dashboard's one "Needs you" number (needsYouTotal) adds the rows of work that stopped (ORCH-705).
      One per question (a ticket with two open questions counts two); a ticket that only waits for another ticket, a
      failed start, a helper idle at its prompt and other rows without a question are shown on Home but not counted.
      results is a number or a list. */

@@ -23,6 +23,10 @@ ALLOW = {
         "pull-requests": "ORCH-450: `orch ref wait --merge` refuses merges past the merge queue only while "
         "the queue add-on is on; follow-up like #837 (a manifest key instead of the name)",
     },
+    "orch/tend.py": {
+        "pull-requests": "ORCH-568: the helper watcher reads the merge queue file, so a helper waiting on "
+        "a queued pull request is not nudged; follow-up like #837 (a manifest key instead of the name)",
+    },
     "orch/cli_chat.py": {"sync": "core `orch chat sync` command; not the add-on"},
     "orch/config.py": {"focus": _FOLLOW_UP, "insights": _FOLLOW_UP},
     "orch/history.py": {"sync": _FOLLOW_UP},
@@ -37,6 +41,7 @@ ALLOW = {
     "orch/cli_record.py": {"usage": _TOKENS},
     "orch/collect_claude.py": {"usage": _TOKENS},
     "orch/collect_execjson.py": {"usage": _TOKENS},
+    "orch/keystart.py": {"usage": _TOKENS},
     "orch/record.py": {"usage": _TOKENS},
     "orch/usage.py": {"usage": _TOKENS},
     "orch/cli_look.py": {"services": _KEY},

@@ -14,6 +14,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const headless = require('./headless.cjs'); // the keychain options (ORCH-615)
 
 const PW = process.env.PW_DIR || path.join(os.homedir(), 'orch-dev', 'e2e', 'dashboard', 'node_modules');
 const OUT = process.env.SHOTS_DIR || path.join(os.tmpdir(), 'dash-page-health');
@@ -136,7 +137,7 @@ test('page health: every main page at 1280, 1920 and 390 px', {timeout: 300_000}
   const never = neverList();
   assert.ok(never.length > 20, 'never-list read from docs/wording.md');
   const problems = [];
-  const browser = await chromium.launch({args: ['--use-mock-keychain', '--password-store=basic']});
+  const browser = await headless.launch(chromium);
   try {
     for (const vp of WIDTHS) {
       const context = await browser.newContext({viewport: {width: vp.width, height: vp.height}});

@@ -46,9 +46,10 @@ test('livePreviewOn reads the one setting: on only when it is exactly true, neve
   for (const s of [{settings:{focus_preview_on:false}}, {settings:{}}, {}, null, {settings:{focus_preview_on:'true'}}]) assert.equal(on(s), false);
   assert.equal(on({settings:{focus_preview_on:true}}, true), false);
 });
-test('the new live page is an empty shell with the Preview tag, the add-on\'s own name and a way back', () => {
+test('the new live page is the wall with the Preview tag, the add-on\'s own name and a way back', () => {
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, kids:kids.flat(Infinity).filter(Boolean)});
-  const ctx = {h, fragment:(...k) => h('frag', {}, ...k), heading:(t, sub, o) => h('header', {}, h('h1', {}, t), o?.actions), addonLabel:a => a?.dashboard?.label, addons:() => [LIVE], encodeURIComponent};
+  const ctx = {h, fragment:(...k) => h('frag', {}, ...k), heading:(t, sub, o) => h('header', {}, h('h1', {}, t), o?.actions), addonLabel:a => a?.dashboard?.label, addons:() => [LIVE], encodeURIComponent,
+    window:{}, liveWall:() => h('div', {'data-key':'live-wall'})};
   vm.createContext(ctx); vm.runInContext(liveSource, ctx);
   const all = n => [n, ...(n.kids || []).flatMap(k => typeof k === 'object' ? all(k) : [])];
   const text = n => all(n).flatMap(x => (x.kids || []).filter(k => typeof k === 'string')).join(' ');
@@ -56,7 +57,7 @@ test('the new live page is an empty shell with the Preview tag, the add-on\'s ow
   assert.equal(ctx.livePageOf('automation'), null);
   const page = ctx.liveNextPage({kind:'live', id:'focus', path:''}), key = k => all(page).find(x => x.attrs?.['data-key'] === k);
   assert.equal(text(key('live-next-tag')), 'Preview');
-  assert.match(text(key('live-next')), /The new Focus is being built; your helpers’ sessions will show here\./);
+  assert.ok(all(key('live-next')).some(x => x.attrs?.['data-key'] === 'live-wall'), 'the wall fills the page (pages/livewall.js)');
   assert.equal(text(key('live-next-off')), 'Back to today’s Focus');
   assert.equal(key('live-next-off').attrs.href, '#settings/addons/focus');
   assert.equal(all(page).filter(x => x.tag === 'iframe').length, 0, 'not today\'s page');
@@ -194,4 +195,32 @@ test('the add-on frame takes the keyboard on load, never from a field or an open
   assert.equal(ctx.frameTakesKeys({...frame, isConnected:false}, doc(body)), false);
   assert.equal(frame.focused, 2);
   assert.match(settings, /frame\.addEventListener\('load', \(\) => frameTakesKeys\(frame\)\)/);
+});
+// ORCH-677: an address of a ticket that does not exist says so, once; the pane keeps the keyboard through a repaint.
+test('an unknown ticket address says so once, once the tickets are loaded', () => {
+  const ctx = {state:{tickets:[{id:'t_abc12345'}]}, snapshot:false};
+  vm.createContext(ctx); vm.runInContext(liveSource, ctx);
+  const said = [], say = t => said.push(t), layer = {open() {}}, known = id => id === 't_abc12345';
+  const r = hash => ({kind:'live', id:'focus', path:hash.replace('#addon/focus/', ''), hash});
+  assert.equal(ctx.liveOpenFromAddress(r('#addon/focus/t/t_zzz'), layer, known, say), false);
+  assert.equal(ctx.liveOpenFromAddress(r('#addon/focus/t/t_zzz'), layer, known, say), false);
+  assert.deepEqual(said, ['There is no ticket with this address.']);
+  ctx.state = {tickets:[]};
+  assert.equal(ctx.liveOpenFromAddress(r('#addon/focus/t/t_yyy'), layer, known, say), false, 'tickets not loaded yet: no word');
+  assert.equal(said.length, 1);
+});
+test('the layer puts the keyboard back into the pane after a repaint, until the person acts', () => {
+  const layerSrc = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/live-layer.js'), 'utf8');
+  const fn = layerSrc.slice(layerSrc.indexOf('let liveLayerWant'), layerSrc.indexOf('for (const type of'));
+  const calls = [];
+  const pane = {focused:0, contains:n => n === inner, querySelector:() => null, focus() { this.focused++; }}, inner = {};
+  const body = {}, doc = {body, activeElement:body, querySelector:() => pane};
+  const ctx = {document:doc, Date}; vm.createContext(ctx); vm.runInContext(fn + '; this.api = {take:liveLayerTake, want:v => { liveLayerWant = v; }, get w() { return liveLayerWant; }};', ctx);
+  ctx.api.want({id:'t_a', until:Date.now() + 5000});
+  ctx.api.take(); assert.equal(pane.focused, 1);
+  doc.activeElement = inner; ctx.api.take(); assert.equal(pane.focused, 1, 'already inside');
+  doc.activeElement = body; ctx.api.take(); assert.equal(pane.focused, 2, 'dropped by a repaint: back');
+  ctx.api.want({id:'t_a', until:Date.now() - 1}); ctx.api.take(); assert.equal(pane.focused, 2); assert.equal(ctx.api.w, null, 'expired');
+  assert.match(layerSrc, /tabindex:'-1', 'aria-label'/, 'the pane can take the keyboard');
+  assert.match(layerSrc, /liveLayerPad\(\);\n  liveLayerTake\(\);/, 'every paint');
 });
