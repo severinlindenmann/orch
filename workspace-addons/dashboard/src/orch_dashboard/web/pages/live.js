@@ -1,5 +1,5 @@
 'use strict';
-// Focus (draft D, ORCH-261; the only Focus since ORCH-816): the addresses of the add-on whose page has live sessions
+// The live page (draft D, ORCH-261; the only one since ORCH-816): the addresses of the add-on whose page has live sessions
 // show this page: the wall of every session (pages/livewall.js), with the bar and the layer under every page. Never in
 // a shared copy (it has no live sessions). The dashboard names no add-on: the page is found by its live_session capability.
 function liveFocusOn() {
