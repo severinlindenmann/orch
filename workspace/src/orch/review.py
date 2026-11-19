@@ -20,7 +20,7 @@ from pathlib import Path
 from orch import history, ownerpick, safefile, tickets
 from orch.tickets import Refused
 
-KINDS = ("draft", "check", "link", "choice", "plan")
+KINDS = ("draft", "check", "link", "choice", "plan", "run")
 PREVIEW_TYPES = ("page", "img", "doc", "table", "compare", "options")
 VERDICTS = ("ok", "no", "talk")
 ACTIONS = ("approve", "use", "use_with_changes", "send_back", "dont", "none_of_these")
@@ -330,6 +330,13 @@ def validate_card(card) -> dict:
         raise Refused("A choice or link card needs a preview.")
     if card["kind"] == "choice" and (not pv or pv.get("type") != "options"):
         raise Refused("A choice card needs an options preview.")
+    if card["kind"] == "run":  # ORCH-848: the command, as orch parsed it (runcard.check_spec at run time)
+        if not isinstance(card.get("run"), dict):
+            raise Refused("A run card needs its command (orch ask --run).")
+        out["run"] = card["run"]
+        out["no_label"] = _text(card.get("no_label"), "no_label", 40)
+    elif card.get("run") is not None:
+        raise Refused("Only a run card carries a command.")
     return {k: v for k, v in out.items() if v is not None}
 
 
@@ -1134,6 +1141,10 @@ def decide(
         raise Refused(f"{key} is already answered. Use change to answer again.")
     ownerpick.refuse_card(q, person)  # before a merge or anything else is tried
     card = _card_of(q)
+    if card.get("kind") == "run" and verdict == "ok":  # ORCH-848: only the run itself answers I ran it
+        from orch import runcard
+
+        raise Refused(runcard.OK_REFUSAL)
     d = _decision(q, card, verdict, picked, note)
     if digest is not None and tickets.question_digest(q) != digest:  # before a merge, not only at the write
         raise Refused(f"{key} changed after it was shown. Look at the question again, then answer.")

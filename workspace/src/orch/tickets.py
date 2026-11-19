@@ -3637,8 +3637,11 @@ def answer(
     expected_question_digest: str | None = None,
     decision: dict | None = None,
     person: bool = False,
+    ran: bool = False,
 ) -> tuple[dict, dict]:
-    """decision: the Review stack's structured answer (orch/review.py); `answer` is then its plain summary.
+    """ran: only orch.runcard.run sets it, after it ran a run card's command for the person (ORCH-848); a
+    run card's "I ran it" (or any yes) is refused without it, from every other caller.
+    decision: the Review stack's structured answer (orch/review.py); `answer` is then its plain summary.
     person: a signed-in person on the dashboard (a one-time person grant) or a paired phone; only then is a
     draft card answered (ORCH-582, orch/ownerpick.py), whatever `by` and `via` say.
     expected_question_digest: question_digest of the question as the person was shown it; the answer is
@@ -3664,6 +3667,10 @@ def answer(
                 "This card waits for the owner. Ask with orch review add and wait with orch review wait."
             )
         ownerpick.refuse_card(q, person and str(by).startswith("human:"))
+        if not ran and _claims_ran(q, text, decision):
+            from orch import runcard
+
+            raise Refused(runcard.OK_REFUSAL)
         if decision is None and isinstance(q.get("action"), dict) and "merge" in q["action"]:
             raise Refused(f"{qid} merges a pull request: answer it on the card (Merge or Not now).")
         if expected_question_digest is not None and (
@@ -3691,6 +3698,20 @@ def answer(
         return q
 
     return apply_op(root, tid, op, by=by, person_click=person_click)
+
+
+def _claims_ran(q: dict, text: str, decision: dict | None) -> bool:
+    """A run card (ORCH-848) answered yes in any form other than the run itself: "I ran it", an approve or
+    use decision, or anything that is not one of its other answers (no_label, its options)."""
+    card = q.get("card")
+    if not (isinstance(card, dict) and card.get("kind") == "run"):
+        return False
+    if isinstance(decision, dict):
+        return decision.get("action") in ("approve", "use", "use_with_changes")
+    others = [o.casefold() for o in (q.get("options") or []) if isinstance(o, str)]
+    if isinstance(card.get("no_label"), str):
+        others.append(card["no_label"].casefold())
+    return text.strip().casefold() not in others
 
 
 def mark_question_sent(root: Path, tid: str, qid: str, by: str = "orch") -> None:
