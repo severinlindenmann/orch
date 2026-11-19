@@ -100,12 +100,19 @@ function loadFullTicket(ref) {
     .catch(() => { fullMissing.add(key); return null; })
     .finally(() => { fullLoading.delete(key); if (typeof render === 'function') render(); });
 }
+const fullAsked = new Map();  // ticket id -> the live row's updated_at it was read again for (once per change, also when that read fails)
+const PART_FIELDS = ['children', 'parts_done', 'parts_total'];
 const ticketOf = id => {
   const row = array(state?.tickets).find(t => sameTicket(t, id));
   if (row && !row.slim) return row;
   const full = row ? fullTickets.get(row.id) : [...fullTickets.values()].find(t => sameTicket(t, id));
   if (!full) return row;
-  if (row && String(row.updated_at || '') > String(full.updated_at || '')) loadFullTicket(row.id);  // changed since: read again, show the last whole copy meanwhile
+  if (row) {
+    const at = String(row.updated_at || '');
+    if (at > String(full.updated_at || '') && fullAsked.get(row.id) !== at) { fullAsked.set(row.id, at); loadFullTicket(row.id); }  // changed since: read again once, show the last whole copy meanwhile
+    // its parts are counted at every build, also when only a part changed (the ticket's own time stays): the live row's count
+    for (const k of PART_FIELDS) if (k in row) full[k] = row[k];
+  }
   return full;
 };
 const href = id => '#ticket/' + encodeURIComponent(id);

@@ -51,3 +51,28 @@ test('a shared copy never reads', () => {
   assert.equal(c.loadFullTicket('t_a'), null);
   assert.equal(c.log.urls.length, 0);
 });
+test('a failed read for a newer row is not tried again on every redraw', async () => {
+  const c = setup([{id:'t_a', slim:true, updated_at:'2026-11-18T10:00:00Z'}],
+    {'/api/ticket/t_a': {ticket:{id:'t_a', updated_at:'2026-11-18T10:00:00Z', v:1}}});
+  await c.loadFullTicket('t_a');
+  c.fetch = async url => { c.log.urls.push(url); return {ok:false, status:500}; };  // the server fails from now on
+  c.render = () => { c.log.renders++; c.ticketOf('t_a'); };  // a redraw asks again, as the page does
+  c.state.tickets = [{id:'t_a', slim:true, updated_at:'2026-11-18T11:00:00Z'}];
+  c.ticketOf('t_a');
+  await idle(30);
+  assert.equal(c.log.urls.length, 2, 'one read for the newer row, not one per redraw');
+  c.state.tickets = [{id:'t_a', slim:true, updated_at:'2026-11-18T12:00:00Z'}];  // the next change reads again
+  c.ticketOf('t_a');
+  await idle(30);
+  assert.equal(c.log.urls.length, 3);
+});
+test('the parts counted at the last build show on the kept whole copy', async () => {
+  const c = setup([{id:'t_a', slim:true, updated_at:'2026-11-18T10:00:00Z', parts_done:0, parts_total:2, children:['t_b', 't_c']}],
+    {'/api/ticket/t_a': {ticket:{id:'t_a', updated_at:'2026-11-18T10:00:00Z', parts_done:0, parts_total:2, children:['t_b', 't_c'], v:1}}});
+  await c.loadFullTicket('t_a');
+  c.state.tickets = [{id:'t_a', slim:true, updated_at:'2026-11-18T10:00:00Z', parts_done:1, parts_total:2, children:['t_b', 't_c']}];  // a part finished
+  const t = c.ticketOf('t_a');
+  assert.equal(t.v, 1);
+  assert.equal(t.parts_done, 1);
+  assert.equal(c.log.urls.length, 1, 'the ticket itself did not change: not read again');
+});
