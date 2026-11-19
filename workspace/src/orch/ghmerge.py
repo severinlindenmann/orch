@@ -247,28 +247,33 @@ def summary(url: str, head: str) -> dict | None:
 # trigger. The label is words on the card only: the owner still clicks Merge.
 WORKFLOW_DIR = ".github/workflows/"
 ACTIONS_DIR = ".github/actions/"
-SECRET = re.compile(
-    r"\bsecrets\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[|\))|\bsecrets['\"]?\s*:\s*['\"]?(inherit)\b"
+SECRET = re.compile(  # GitHub's expressions ignore case: ${{ SECRETS.KEY }} is a secret too
+    r"\bsecrets\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[|\))|\bsecrets['\"]?\s*:\s*['\"]?(inherit)\b", re.I
 )
 PERMISSION = re.compile(r"\bpermissions['\"]?\s*:|:\s*['\"]?write\b|\bwrite-all\b")
 WRITES = re.compile(r":\s*['\"]?write\b|\bwrite-all\b")
-DECLARES_PERMISSIONS = re.compile(r"^\s*['\"]?permissions['\"]?\s*:", re.M)
+TOP_PERMISSIONS = re.compile(r"^['\"]?permissions['\"]?\s*:", re.M)  # at the top: for every job
 USES = re.compile(r"\buses['\"]?\s*:\s*['\"]?([^\s'\",}\]#]+)")
-TOKEN = re.compile(r"\b(github\s*\.\s*token)\b|\b([A-Z][A-Z0-9_]*TOKEN)\b|\b(id-token)\b")
-GITHUB_OWN_TOKEN = ("GITHUB_TOKEN", "github.token")  # read-only when the workflow only reads
+TOKEN = re.compile(r"\b(github\s*(?:\.\s*token\b|\[\s*['\"]token))|\b(\w*token\w*)\b", re.I)
 _FETCH = r"\b(?:curl|wget)\b"
-_SHELL = r"(?:sudo\s+(?:-\S+\s+)*)?(?:\S*/)?(?:(?:ba|z|da|k)?sh|python3?|perl|ruby|node)\b"
-PIPE_SHELL = re.compile(
-    rf"{_FETCH}[^|#]*\|\s*{_SHELL}|\b(?:ba|z)?sh\s+<\(\s*{_FETCH}|\b(?:ba|z)?sh\s+-c\s+['\"]?\$\(\s*{_FETCH}"
+_RUNNER = r"(?:(?:sudo|env|command|exec|nohup|xargs|time)\b(?:\s+-\S+)*\s+)*"
+_SHELL = rf"{_RUNNER}['\"]?(?:\S*/)?(?:(?:ba|z|da|k|fi)?sh|python\d?(?:\.\d+)?|perl|ruby|node|pwsh|iex)\b"
+PIPE_SHELL = re.compile(  # a pipe anywhere after the download: | tee x | bash, | env bash, | "bash"
+    rf"{_FETCH}.*\|\s*{_SHELL}|\b(?:ba|z)?sh\s+<\(\s*{_FETCH}|\b(?:ba|z)?sh\s+-c\s+['\"]?\$\(\s*{_FETCH}",
+    re.I,
 )
+ESCAPES = re.compile(r"\\[uUx]|!!")  # YAML escapes and tags could hide a word from these line checks
+SAFE_NAME = re.compile(r"[A-Za-z0-9._/-]+")  # a workflow name read whole (never a query in the address)
+COMPARE_MAX = 300  # GitHub's compare lists at most this many files: more could hide a workflow
 OWN_ACTIONS = ("./", "actions/", "github/")
 RISKY_TRIGGERS = ("pull_request_target", "workflow_run")
 MAX_FINDINGS = 6
 MAX_LINES = 30  # what a card's diff box holds (review.DOC_EXTRA "diff")
 MAX_WHOLE = 10  # changed workflows read whole at the checked commit for the "Safe to merge" label
 SAFE_WORDS = (
-    "Safe to merge: every changed workflow declares what its jobs may do and only reads, and no added line "
-    "touches secrets, permissions, tokens, outside actions, risky triggers or downloads run in a shell."
+    "Safe to merge: every changed workflow says at its top that its jobs only read, and no added line "
+    "reads a secret or token, gives more rights, uses an outside action, runs on a risky trigger or runs a "
+    "download in a shell."
 )
 
 
@@ -292,12 +297,12 @@ def line_risks(text: str) -> list[tuple[str, str, bool]]:
     "Safe to merge" label)]. Comments count too: a word too many is cheaper than one missed."""
     out: list[tuple[str, str, bool]] = []
     for m in SECRET.finditer(text):
-        if m[1] != "GITHUB_TOKEN":
+        if (m[1] or "").upper() != "GITHUB_TOKEN":  # named below as a token
             out.append(("passes all secrets on" if m[2] else f"reads a secret ({m[1] or 'all secrets'})",
                         "secret", True))  # fmt: skip
-    for m in TOKEN.finditer(text):
-        name = re.sub(r"\s+", "", m[1]) if m[1] else (m[2] or m[3])
-        out.append((f"uses a token ({name})", "token", name not in GITHUB_OWN_TOKEN))
+    for m in TOKEN.finditer(text):  # GitHub's own token too: it can still send out what the job reads
+        name = "github.token" if m[1] else m[2]
+        out.append((f"uses a token ({name[:60]})", "token", True))
     if PERMISSION.search(text):
         # a line that only narrows rights (contents: read) leaves the label to the whole-file check
         out.append(
@@ -316,14 +321,15 @@ def line_risks(text: str) -> list[tuple[str, str, bool]]:
 
 
 def whole_is_read_only(text) -> bool:
-    """A whole workflow file (at the checked commit) whose jobs can only read: it says its permissions, none
-    of them writes, it reads no secret but GitHub's own token, runs on no risky trigger, pipes no download
-    into a shell. Lines, not YAML, like the rest of the check."""
-    if not isinstance(text, str) or not DECLARES_PERMISSIONS.search(text):
+    """A whole workflow file (at the checked commit) whose jobs can only read: it says its permissions at the
+    top, none of them writes, it reads no secret but GitHub's own token, runs on no risky trigger, pipes no
+    download into a shell (lines joined where they go on), and has no escape or tag that could hide a word.
+    Lines, not YAML, like the rest of the check: when in doubt it is not read-only."""
+    if not isinstance(text, str) or not TOP_PERMISSIONS.search(text) or ESCAPES.search(text):
         return False
-    if WRITES.search(text) or PIPE_SHELL.search(text):
+    if WRITES.search(text) or PIPE_SHELL.search(re.sub(r"\\\s*\n", " ", text)):
         return False
-    if any(m[1] != "GITHUB_TOKEN" for m in SECRET.finditer(text)):
+    if any((m[1] or "").upper() != "GITHUB_TOKEN" for m in SECRET.finditer(text)):
         return False
     return not any(re.search(rf"\b{t}\b", text) for t in RISKY_TRIGGERS)
 
@@ -365,8 +371,8 @@ def check_workflows(files: list, whole: dict | None = None) -> dict | None:
             say(f"changes an action the workflows run: {name[:80]}")
             blocked = True
         shown.append({"name": name, "add": int(f.get("additions") or 0), "del": int(f.get("deletions") or 0)})
-        if f.get("status") != "removed" and not whole_is_read_only(whole.get(name)):
-            blocked = True
+        if f.get("status") == "removed" or not whole_is_read_only(whole.get(name)):
+            blocked = True  # a removed workflow may have been a check: the owner looks
         patch = f.get("patch")
         if not isinstance(patch, str):
             if f.get("status") != "removed":
@@ -377,7 +383,10 @@ def check_workflows(files: list, whole: dict | None = None) -> dict | None:
             if line.startswith(("+++", "---")) or not line.startswith(("+", "-")):
                 continue
             text = line[1:]
-            row: dict = {"op": line[0], "text": text.rstrip()[:200], "file": name[:120]}
+            shown_text = text.rstrip()
+            if len(shown_text) > 200:  # both ends: what makes a long line risky is often at its end
+                shown_text = shown_text[:120] + " … " + shown_text[-77:]
+            row: dict = {"op": line[0], "text": shown_text, "file": name[:120]}
             if line[0] == "+":
                 risks = line_risks(text)
                 for words, _mark, blocks in risks:
@@ -410,9 +419,11 @@ def _whole_texts(read, gh: str, repo: str, head: str, files: list) -> dict:
         for f in files
         if isinstance(f, dict) and is_workflow(f.get("filename")) and f.get("status") != "removed"
     ]
-    if len(names) > MAX_WHOLE:
+    if len(names) > MAX_WHOLE or len(files) >= COMPARE_MAX:
         return out
     for name in names:
+        if not SAFE_NAME.fullmatch(str(name)):
+            continue  # not read, so not safe
         path = f"repos/{repo}/contents/{name}?ref={head}"
         r = read(gh, ["api", path, "-H", "Accept: application/vnd.github.raw"], 20)
         if r.returncode == 0:
