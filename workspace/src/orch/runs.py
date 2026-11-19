@@ -1329,6 +1329,7 @@ def plan(
         argv and binary and argv[0] == binary and not shutil.which(binary)
     ):  # not on the PATH of a clean start: use where it really is
         argv = [adapters.find_binary(binary) or binary, *argv[1:]]
+    perm_note = adapters.permission_note(name, root, None, person)
     return {
         "agent": name,
         "adapter": a["adapter"],
@@ -1342,8 +1343,8 @@ def plan(
         "prompt": v["prompt"],
         "item_ids": [i["id"] for i in items],
         "fresh_why": cold_note,
-        "note": " ".join(n for n in (cold_note, adapters.permission_note(name, root, None, person)) if n)
-        or None,
+        "note": " ".join(n for n in (cold_note, perm_note) if n) or None,
+        "permission_note": perm_note,
     }
 
 
@@ -1501,6 +1502,9 @@ def start(
         if p.get("fresh_why"):
             with contextlib.suppress(Exception):
                 tickets.log(root, tid, p["fresh_why"], "orch")
+        if p.get("permission_note"):  # the dashboard's Start shows the ticket history, not these notes
+            with contextlib.suppress(Exception):
+                tickets.log(root, tid, p["permission_note"], "orch")
         log_rel = f".orch/run/logs/{tid}-{rec['run']}.log"
         (root / log_rel).parent.mkdir(parents=True, exist_ok=True)
         cmd = procs.orch_python_argv("run", "_wrap", rec["run"], "--ticket", tid, "--agent", name)
