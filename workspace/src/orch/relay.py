@@ -3436,7 +3436,9 @@ def _platform_refusal(sk: dict) -> str | None:
     here = _this_platform()
     if not known or here in known:
         return None
-    return f"made for {', '.join(PLATFORM_WORDS[w] for w in dict.fromkeys(known))}, not {PLATFORM_WORDS[here]}"
+    return (
+        f"made for {', '.join(PLATFORM_WORDS[w] for w in dict.fromkeys(known))}, not {PLATFORM_WORDS[here]}"
+    )
 
 
 def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:
@@ -3479,7 +3481,9 @@ def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:
     if not isinstance(mcp, dict) or not isinstance(cred, dict):
         raise Refused("The snapshot has bad MCP or credentials. Nothing changed.")
     net.write_json(stage / "mcp.json", {"mcpServers": mcp}, True)
-    net.write_json(stage / "shared.json", {"version": snap["version"], "skills": names, "skill_versions": versions})
+    net.write_json(
+        stage / "shared.json", {"version": snap["version"], "skills": names, "skill_versions": versions}
+    )
     ws = snap.get("workspaces")
     if not isinstance(ws, dict) or not isinstance(ws.get("workspaces"), list):
         raise Refused("The snapshot has no workspace directory. Nothing changed.")

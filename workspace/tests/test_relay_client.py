@@ -358,7 +358,11 @@ def test_refresh_installs_and_removes_shared_skills(proj, run, rel, ghome, monke
     assert not (s / "credentials.json").exists()  # the admin's keys are not in the workspace
     assert keystore.get_value(proj, "DB_URL") == "pg://db.example/x"
     assert json.loads((s / "mcp.json").read_text()) == {"mcpServers": {"sql": {"command": "x"}}}
-    assert json.loads((s / "shared.json").read_text()) == {"version": 7, "skills": ["acme-sql"], "skill_versions": {}}
+    assert json.loads((s / "shared.json").read_text()) == {
+        "version": 7,
+        "skills": ["acme-sql"],
+        "skill_versions": {},
+    }
     assert not (proj / ".orch/tmp-refresh").exists()
     rel.snapshot.update(version=8, skills=[], credentials={})
     run("relay", "refresh")
@@ -383,7 +387,9 @@ def test_refresh_skips_a_skill_for_another_platform_and_says_why(proj, run, rel,
     assert "Skipped: skill acme-sql: made for macOS, Windows, not Linux" in out
     assert not (proj / ".agents/skills/acme-sql").exists()
     # no platform named, or only words orch does not know: shared as before
-    assert (proj / ".agents/skills/notes/SKILL.md").exists() and (proj / ".agents/skills/odd/SKILL.md").exists()
+    assert (proj / ".agents/skills/notes/SKILL.md").exists() and (
+        proj / ".agents/skills/odd/SKILL.md"
+    ).exists()
     shared = json.loads((proj / ".orch/secrets/shared.json").read_text())
     assert shared["skills"] == ["notes", "odd"] and shared["skill_versions"] == {"notes": "3"}
     monkeypatch.setattr(relay, "_this_platform", lambda: "macos")
