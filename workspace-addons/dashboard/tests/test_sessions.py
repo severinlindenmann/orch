@@ -308,4 +308,6 @@ def test_a_quiet_session_whose_ticket_asks_or_waits_for_a_result_needs_the_perso
     assert sessions.session(ask, {"running": False}, False, None)["needs"] is True
     assert sessions.session(_t(21, status="review"), _run("idle", "Idle"), False, None)["needs"] is True
     assert sessions.session(_t(22), {"running": False}, False, None)["needs"] is False
-    assert sessions.session(_t(23, status="review"), _run("you", "Waits for you"), False, None)["needs"] is False
+    assert (
+        sessions.session(_t(23, status="review"), _run("you", "Waits for you"), False, None)["needs"] is False
+    )
