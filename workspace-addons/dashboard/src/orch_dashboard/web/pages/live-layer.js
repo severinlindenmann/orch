@@ -302,7 +302,7 @@ function livePane(key, where, s, o) {
   const besideWhy = o.total >= LIVE_MAX ? 'Three sessions is the most' : o.next ? 'Add a session beside this one' : 'No other session is live';
   const group = sess && !sess.kind && typeof liveGroupOf === 'function' ? liveGroupOf(liveGroups(), sess.id) : null;
   return h('section', {className:'live-pane', 'data-key':'live-pane', 'data-session':key, 'data-on':on && n > 1 ? '' : null,
-    'data-new':o.fresh ? '' : null, 'data-group':group ? '' : null, 'data-narrow':o.narrow ? '' : null, 'aria-label':(sess?.key ? sess.key + ', ' : '') + title},
+    'data-new':o.fresh ? '' : null, 'data-group':group ? '' : null, 'data-narrow':o.narrow ? '' : null, tabindex:'-1', 'aria-label':(sess?.key ? sess.key + ', ' : '') + title},
     h('header', {className:'live-ph'},
       o.narrow ? null : sess?.pill || null,
       sess?.key ? h('span', {className:'key'}, sess.key) : null,
@@ -472,7 +472,22 @@ function liveLayerPaint() {
   document.body.dataset.liveLayer = where;
   liveLayerInert(where === 'full');
   liveLayerPad();
+  liveLayerTake();
 }
+// The keyboard goes into a pane a ticket's button or address opened (ORCH-677). The pane is drawn again when its live
+// data or Start choice arrives and that drops the keyboard to the page, so every paint puts it back until the person
+// presses a key or clicks somewhere (or 5 seconds pass).
+let liveLayerWant = null;
+function liveLayerTake() {
+  if (!liveLayerWant) return;
+  if (Date.now() > liveLayerWant.until) { liveLayerWant = null; return; }
+  const pane = document.querySelector('#live-dock .live-pane[data-session="' + String(liveLayerWant.id).replace(/["\\]/g, '') + '"]');
+  if (!pane) return;
+  const a = document.activeElement;
+  if (a && a !== document.body && pane.contains(a)) return;
+  (pane.querySelector('[data-key="live-open-ticket"]') || pane).focus({preventScroll:true});
+}
+for (const type of ['keydown', 'pointerdown']) document.addEventListener(type, () => { liveLayerWant = null; }, true);
 // Full screen covers the page: the page behind leaves the Tab order and the screen reader (inert), so the keyboard
 // cannot wander into what is not shown (ORCH-340). Dialogs and live regions stay usable; only what this set is undone.
 function liveLayerInert(on) {
@@ -522,7 +537,8 @@ window.addEventListener('orch:live-sessions', () => { if (document.getElementByI
 window.LiveLayer = {
   open(key, into = false) {  // the bar marks chips by ticket id; a ticket's session button moves the keyboard into the pane
     const id = liveLayerSession(key)?.id || key;
-    liveLayerDo({type:'open', key:id}, into ? liveSel(id, 'live-open-ticket') : undefined);
+    liveLayerDo({type:'open', key:id});
+    if (into) { liveLayerWant = {id, until:Date.now() + 5000}; liveLayerTake(); }
   },
   place(mode) { liveLayerDo({type:'place', mode}); },
   beside(key) { liveLayerDo({type:liveLayerPhone() ? 'open' : 'beside', key:liveLayerSession(key)?.id || key}); },  // a wall tile's Add beside
