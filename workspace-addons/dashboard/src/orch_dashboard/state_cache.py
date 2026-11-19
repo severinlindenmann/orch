@@ -51,6 +51,16 @@ class StateCache:
         except OSError:
             return None
 
+    def _current(self):
+        """For a page request: the watcher's last look when it runs (no folder walk per request), else a new one."""
+        look = getattr(self.revisions, "current", None)
+        if look is None:
+            return self._signature()
+        try:
+            return look()
+        except OSError:
+            return None
+
     def _build(self):
         sig = self._signature()  # taken before the read: a change during the build makes the copy stale
         return load_state(self.root, orch_bin=self.orch_bin, with_settings=True), sig
@@ -91,7 +101,7 @@ class StateCache:
             served = self._served()
             stale = served[1] >= (MAX_AGE if self.revisions is None else SAFETY_AGE)
             busy = self.busy
-        if stale or (not busy and self.revisions is not None and self._signature() != self.sig):
+        if stale or (not busy and self.revisions is not None and self._current() != self.sig):
             # Changed or old: build in the background and answer with the copy now. With an open event stream the
             # page is told when the new copy is ready; without one its next poll gets it.
             self.kick()
