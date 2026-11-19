@@ -572,7 +572,8 @@ function busyOff(busy) {
 async function act(op, args, opts = {}) {
   if (snapshot) return {ok:false, status:0, text:'This is a shared copy.'};
   const busy = busyOn();
-  const before = op === 'run.start' ? ticketOf(args.ticket)?.status : null;
+  // Prepare (Save without starting, ORCH-738) keeps the ticket in Backlog: it is never shown as Working at once
+  const before = op === 'run.start' && !args.prepare ? ticketOf(args.ticket)?.status : null;
   let succeeded = false, queued = false;
   if (before) { starting.add(args.ticket); state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:'active'} : t); render(); }
   writing++;
@@ -935,6 +936,7 @@ main.addEventListener('click', async event => {
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
   if (action === 'reviewer-set') { await reviewerSwitch(); return; }
   if (action === 'release-merge-set') { await releaseMergeSwitch(); return; }
+  if (action === 'prepare-set') { await prepareSwitch(); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
   if (action === 'auto-update-note-ok') { const r = await act('update.note.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
