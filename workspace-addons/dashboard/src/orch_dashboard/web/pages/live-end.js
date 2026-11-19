@@ -9,8 +9,8 @@
 
 // --- the model (plain data, tested in tests/live_end.test.js) ---
 const LIVE_END_KINDS = ['empty', 'chat', 'terminal', 'manager'];
-// A helper whose screen says its login changed or ran out: it stopped and waits for a new sign-in.
-const LIVE_END_LOGIN = /\/login\b|login (?:has )?(?:changed|expired)|not logged in|invalid api key|please (?:log|sign) in/i;
+// A helper whose screen says its login changed or ran out: it stopped and waits for a new login.
+const LIVE_END_LOGIN = /\/login\b|login (?:has )?(?:changed|expired)|not logged in|invalid api key|please (?:log in|sign in)/i;
 function liveEndLogin(lines) {
   return (Array.isArray(lines) ? lines : []).slice(-8).some(l => LIVE_END_LOGIN.test(String(l || '')));
 }
