@@ -211,6 +211,21 @@ def test_open_sessions_without_a_ticket_join_the_list_by_their_title(tmp_path, s
     assert got["t_sess0001"]["kind"] == ""
 
 
+def test_the_step_it_works_on_is_the_live_line_when_the_helper_says_nothing(tmp_path, screens):
+    """ORCH-463: a helper with no detail showed only 'Working'; the step marked with orch check start fills the line."""
+    steps = [
+        {"id": "c1", "text": "Read the report", "done": True, "state": "doing"},
+        {"id": "c2", "text": "Skipped", "done": False, "state": "doing", "wont_do": True},
+        {"id": "c3", "text": "Put  words on\nthe buttons", "done": False, "state": "doing"},
+    ]
+    st = {"tickets": [_t(1, checklist=steps), _t(2, checklist=steps)], "runs": {"t_sess0001": _run()}}
+    got = {s["key"]: s for s in sessions.build(tmp_path, "orch", st, 2)}
+    assert got["ORCH-1"]["step"] == "Put words on the buttons"
+    assert "ORCH-2" not in got or got["ORCH-2"]["step"] == ""  # no helper: no step
+    plain = sessions.session(_t(3, checklist=[{"id": "c1", "text": "x", "done": False}]), _run(), False, None)
+    assert plain["step"] == ""
+
+
 # --- ORCH-345: groups of an epic or a factory order, small helpers inside a session ---
 
 

@@ -17,7 +17,8 @@ function liveDur(seconds) {
   if (m < 60) return m + ' min';
   return Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '');
 }
-// What the session does now, in one plain sentence: the open question, else the core's detail, else what it waits on.
+// What the session does now, in one plain sentence: the open question, else the core's detail, else what it waits on,
+// else the step it works on (ORCH-463: a helper that said nothing showed only 'Working').
 function liveNow(s) {
   if (!s) return '';
   if (s.status === 'needs-you') return s.question || s.detail || 'Waits for you.';
@@ -26,6 +27,7 @@ function liveNow(s) {
   const w = Array.isArray(s.waiting_on) ? s.waiting_on.filter(x => x && x.what && x.kind !== 'person') : [];
   if (s.detail) return s.detail;
   if (w.length) return 'Waiting for ' + w.map(x => x.what).join(', ');
+  if (typeof s.step === 'string' && s.step) return 'Working on: ' + s.step;
   return s.word || '';
 }
 // "Tool · Model", or one of them, or ''
