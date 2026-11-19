@@ -286,7 +286,7 @@ def test_claude_live_hooks_session_idle_close_and_resume(proj, run, lab, tmp_pat
     hooks = proj / ".orch" / "run" / f"hooks-{r['run']}.json"
     assert oct(hooks.stat().st_mode & 0o777) == "0o600"
     cmds = {k: v[0]["hooks"][0]["command"] for k, v in json.loads(hooks.read_text())["hooks"].items()}
-    assert cmds["Stop"] == f"orch run event --run {r['run']} --kind idle"
+    assert cmds["Stop"] == cmds["StopFailure"] == f"orch run event --run {r['run']} --kind idle"
     _until(lambda: calls.exists() and calls.read_text().strip(), what="claude argv")
     line = calls.read_text().strip()  # the fake joins argv with spaces; the allow rules contain spaces
     argv = line.split()
@@ -646,6 +646,37 @@ def _notice(proj, run_id, payload):
         [sys.executable, "-m", "orch", "run", "event", "--run", run_id, "--kind", "attention"],
         input=json.dumps(payload), text=True, cwd=proj, capture_output=True,
     )  # fmt: skip
+
+
+@needs_tmux
+def test_claude_turn_ended_by_an_error_counts_as_stopped(proj, run, lab, tmp_path, monkeypatch):
+    """ORCH-689 (report r-1118-2325-ws): a turn ended by a usage limit or a login that changed fires Claude's
+    StopFailure hook instead of Stop. orch must read it as stopped: before, the run stayed "working" for hours
+    and `orch run send` waited for a Stop that never came."""
+    calls, typed = _fake_claude(tmp_path, monkeypatch)
+    _claude_live(proj)
+    tid = _ticket(run)
+    r = json.loads(run("run", "start", tid, "--json")[1])
+    hooks = json.loads((proj / ".orch" / "run" / f"hooks-{r['run']}.json").read_text())["hooks"]
+    run("run", "event", "--run", r["run"], "--kind", "session")
+    _until(lambda: _notices(typed, tid) == 1, what="notice typed")
+    assert "Do the thing" in _take(run, tid, proj)
+    run("run", "event", "--run", r["run"], "--kind", "working")  # the helper works; then the login changes
+    run("run", "send", tid, "Carry on")
+    time.sleep(0.5)
+    assert _notices(typed, tid) == 1 and len(runs.undelivered(proj, tid)) == 1  # still busy: it waits
+    # the tool runs the hook command orch wrote for StopFailure, with its error payload on stdin
+    cmd = hooks["StopFailure"][0]["hooks"][0]["command"].split()
+    assert cmd[:2] == ["orch", "run"]
+    proc = subprocess.run(
+        [sys.executable, "-m", "orch", *cmd[1:]],
+        input=json.dumps({"hook_event_name": "StopFailure", "error": "authentication_failed"}),
+        text=True, cwd=proj, capture_output=True,
+    )  # fmt: skip
+    assert proc.returncode == 0 and proc.stderr == ""
+    # read as idle: the waiting message goes in at once (and the run is working on it again)
+    _until(lambda: _notices(typed, tid) == 2, what="the waiting message goes in")
+    assert "Carry on" in _take(run, tid, proj)
 
 
 @needs_tmux

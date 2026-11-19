@@ -43,6 +43,7 @@ from orch import (
     mobile_mode,
     net,
     nextstep,
+    ownerpick,
     refs,
     relay,
     review,
@@ -1152,7 +1153,10 @@ def run(args: argparse.Namespace) -> None:
         who, person = _status_who(root, args, args.id, json.dumps({"status": args.status}), by())
         looked = _looked_at_this(root, args, args.id, args.status, person)
         hint = tickets.recheck_hint(root, args.id, args.status, who)
-        t = tickets.set_status(root, args.id, args.status, who, superseded_by=args.superseded_by)
+        granted = ownerpick.person_granted(root, who)  # ORCH-582: always used up; a draft's Done needs it
+        t = tickets.set_status(
+            root, args.id, args.status, who, superseded_by=args.superseded_by, person=person and granted
+        )
         warn = _child_warning(root, t)
         shown = _with_notice(t, warn, looked)
         if not hint and who.startswith("agent:"):
@@ -1302,7 +1306,8 @@ def run(args: argparse.Namespace) -> None:
         except (ValueError, AttributeError):
             status = None
         looked = _looked_at_this(root, args, args.id, status, person)
-        t = tickets.patch(root, args.id, args.if_revision, args.data, who)
+        granted = ownerpick.person_granted(root, who)  # ORCH-582: always used up; a draft's Done needs it
+        t = tickets.patch(root, args.id, args.if_revision, args.data, who, person=person and granted)
         warn = _child_warning(root, t)
         shown = _with_notice(t, warn, looked)
         _out(
@@ -1494,8 +1499,18 @@ def run(args: argparse.Namespace) -> None:
         who = tickets.acting_by(args)
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
+        # ORCH-582: a draft is answered only with the signed-in dashboard's one-time person grant
+        granted = ownerpick.person_granted(root, who)  # always used up, so no child inherits it
+        person = ownerpick.is_draft_card(shown_q) and granted
         t, q = tickets.answer(
-            root, args.id, args.question, args.answer, who, args.via, expected_question_digest=shown_digest
+            root,
+            args.id,
+            args.question,
+            args.answer,
+            who,
+            args.via,
+            expected_question_digest=shown_digest,
+            person=person,
         )
         with contextlib.suppress(
             Refused

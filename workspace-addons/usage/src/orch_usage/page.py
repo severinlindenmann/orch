@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import spread, store, switching
+from . import share, spread, store, switching
 from .store import PERIOD_WORDS
 
 HISTORY_DAYS = 30
@@ -116,4 +116,5 @@ def build(data: dict, root: Path) -> dict:
         "accounts": accounts,
         "spread": spread.build(root, accounts),
         "history": history_rows(root),
+        "share": share.view(root, data["accounts"]),
     }
