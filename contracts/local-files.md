@@ -154,6 +154,12 @@ prompt = "stdin"            # optional: the task goes on stdin instead of the co
   validate.py and adapters.py). A user `command` is split with shlex and `{prompt}` replaced as one item; its options are the user's.
 - A ticket's sessions live in the ticket (`ticket.sessions[] {agent, id, host, last_used}`), keyed by this agent name and the
   host; the run record (`.orch/run/tickets/`) holds only the claim.
+- A start on an API key (`orch run start --credit-keyname NAME --credit-account LABEL --credit-why TEXT`, keystart.py)
+  keeps only the key's NAME, the credit's label and the reason on the run record and the ticket. The wrapper reads the
+  value from the key store before each step and hands it to that helper process alone, as the adapter's `api_key` says
+  (a pipe, or the process environment), never in argv or a file; it always runs one step at a time. Spend per step goes
+  to `.orch/run/helper-spend.jsonl` (`{t, id: "<run>:<step>", account, ticket, usd}`, usd null = unknown; the last row
+  of an id counts), which the Usage add-on's spend-log reader counts.
 
 ## AGENTS.md block
 

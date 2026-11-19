@@ -1732,6 +1732,7 @@ def _apply_verdict(root: Path, msg: dict, asked: dict, final: bool = False) -> t
             via=via,
             digest=asked_digest,
             phone=frm,
+            person=True,  # a paired phone, checked above (ORCH-582: may answer a draft)
             pid="p_" + answer_id[2:],
         )
     except review.BadVerdict as e:
@@ -1835,7 +1836,7 @@ def _apply_review_answer(root: Path, msg: dict, asked: dict, final: bool = False
         return f"not applied to {tid}: not the current review", None
     try:
         if ans.casefold() == "accept":
-            tickets.accept_review(root, tid, by, via)
+            tickets.accept_review(root, tid, by, via, person=True)  # a paired phone, checked above
             return f"accepted {tid} (via {via})", tid
         tickets.ask_for_changes(root, tid, ans, by, via=via, phone=frm, pid="p_" + str(msg["id"])[2:])
         return f"asked for changes on {tid} (via {via})", tid
@@ -2027,6 +2028,7 @@ def _card_plain(root: Path, msg: dict, asked: dict) -> tuple[str, str | None] | 
             by=by,
             via=via,
             digest=asked.get("question_digest"),
+            person=True,  # a paired phone, checked above (ORCH-582: may answer a draft)
         )
     except Refused as e:
         return f"not applied to {asked['ticket']}: {e}", None
@@ -2915,6 +2917,10 @@ def sync_phone_views(root: Path) -> None:
         from orch import phone_alerts
 
         phone_alerts.sync(root)  # tool logins, connections and keys that run out or stopped (ORCH-47)
+    with contextlib.suppress(Refused, OSError, ValueError, TimeoutError):
+        from orch import phone_stuck
+
+        phone_stuck.sync(root)  # stuck tickets, as at the top of dashboard Home (ORCH-426)
 
 
 def _hint_applied(root: Path, m: dict) -> bool:

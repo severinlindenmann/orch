@@ -20,7 +20,7 @@ import unicodedata
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from orch import config, diag, history, net, procs, saferead, syncgate, term
+from orch import config, diag, history, net, ownerpick, procs, saferead, syncgate, term
 from orch.errors import Refused
 from orch.session_ids import SESSION_ID_RE as SESSION_ID_RE
 from orch.session_ids import valid_session_id
@@ -102,7 +102,7 @@ def now() -> str:
 
 
 def parse_time(text: str) -> str:
-    """Any ISO 8601 time -> UTC RFC 3339 ending in Z. Without offset = UTC."""
+    """Any ISO 8601 time -> UTC RFC 3339 ending in Z. Without offset = local time (ORCH-619)."""
     t = text.strip()
     if t.endswith(("Z", "z")):
         t = t[:-1] + "+00:00"
@@ -110,9 +110,7 @@ def parse_time(text: str) -> str:
         dt = datetime.fromisoformat(t)
     except ValueError:
         raise Refused(f"'{text}' is not a time. Use e.g. 2026-11-05T08:00:00+01:00") from None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")  # a naive time is read as local by astimezone
 
 
 def agent_tool() -> str | None:
@@ -671,21 +669,26 @@ def save(root: Path, ticket: dict) -> None:
         _write(root, ticket)
 
 
-def list_all(root: Path, include_general: bool = False) -> list[dict]:
+def list_all(root: Path, include_general: bool = False, ext: str | None = None) -> list[dict]:
     """Every ticket by creation time. The hidden General ticket of the phone conversation (flag
     `general: true`) and the hidden Manager ticket (flag `manager: true`) are left out unless include_general:
-    they are not tickets anyone lists, counts or closes."""
+    they are not tickets anyone lists, counts or closes. `ext`: only tickets with add-on data under that name;
+    a file whose text does not name it is not parsed (ORCH-603: an add-on reads its own tickets fast)."""
     d = tickets_dir(root)
     out = []
+    mark = json.dumps(ext) if ext is not None else None
     if d.is_dir():
         for p in sorted(d.glob("t_*.json")):
             try:
-                t = json.loads(
-                    p.read_text(encoding="utf-8")
-                )  # no retry: a listing never stalls on a bad file
+                text = p.read_text(encoding="utf-8")
+                if mark is not None and mark not in text:
+                    continue
+                t = json.loads(text)  # no retry: a listing never stalls on a bad file
             except (OSError, ValueError):
                 continue
             if not isinstance(t, dict) or t.get("id") != p.stem:
+                continue
+            if ext is not None and not (isinstance(t.get("ext"), dict) and ext in t["ext"]):
                 continue
             if _newer_format(t):
                 continue  # a newer orch's file: not shown here, never rewritten
@@ -1276,19 +1279,50 @@ GENERAL_REFUSED = (
 )  # finish, reopen, Working; waiting and ready stay
 
 
-def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str, str]:
+DRAFT_TO_CHECK = "a ticket with a draft, mockup or design waits for the owner's Check"
+
+
+def _finish_status(root: Path, ticket: dict, status: str, by: str, person: bool = False) -> tuple[str, str]:
+    """person: a signed-in person (the dashboard's one-time grant); only then does a ticket that carries a
+    draft become Done (ORCH-582). An agent's Done goes to Review instead, also with agents may finish on."""
     if hidden_kind(ticket) and status in GENERAL_REFUSED:  # the ONE status guard (agent, person, wrapper)
         raise Refused(_hidden_refusal(ticket))
     if agent_tool():  # an agent in the environment counts as an agent whatever --by says
         by = "agent:" + str(agent_tool())
+    if status == "done" and ticket["status"] != "done" and ownerpick.carries_draft(ticket):
+        if by.startswith("agent:"):
+            _check_not_too_early(root, ticket)
+            _check_can_finish(ticket)
+            add_history(ticket, by, f"{by} finished the work and sent it to Check: {DRAFT_TO_CHECK}")
+            return "review", by
+        ownerpick.refuse_ticket(ticket, person)
     if status in ("done", "review") and by.startswith("agent:") and ticket["status"] != status:
         _check_not_too_early(root, ticket)
+    if status == "waiting" and by.startswith("agent:") and not hidden_kind(ticket):
+        _check_waits_on_something(ticket)
     if status == "done" and by.startswith("agent:"):
         _check_can_finish(ticket)
         if not config.agents_may_finish(root):
             add_history(ticket, by, f"{by} finished the work and sent it to Check")
             return "review", by
     return status, by
+
+
+WAITING_NO_REASON = (
+    "Waiting needs something to wait on, or the person sees Waiting with no reason. "
+    "Blocked or need an answer: "
+    'orch ask {key} "<what blocks you and what you need>" --option <A> --option <B> --recommend <A>. '
+    "Waiting for a time: orch wait {key} --until <time>."
+)
+
+
+def _check_waits_on_something(ticket: dict) -> None:
+    """ORCH-602: an agent moves its ticket to Waiting only with a question, a time or a thing to wait on.
+    A helper blocked by its tool's sandbox set Waiting with only a summary line (ORCH-548, ORCH-549, 18 Nov):
+    the ticket sat in Waiting with no card and no reason shown. A person may still set Waiting by hand."""
+    if ticket.get("waiting_on") or _open_questions(ticket):
+        return
+    raise Refused(WAITING_NO_REASON.format(key=ticket.get("key") or ticket.get("id") or "<id>"))
 
 
 AGENT_FINISH_TEXT = "finished by the agent (agents may finish is on)"
@@ -1306,11 +1340,12 @@ def note_history(root: Path, tid: str, by: str, text: str, via: str | None = Non
     apply_op(root, tid, lambda ticket: add_history(ticket, by, text, via), by=by)
 
 
-def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
+def accept_review(root: Path, tid: str, by: str, via: str = "phone", *, person: bool = False) -> dict:
     """A person accepts a ticket in Review: Review -> Done, like the dashboard's Accept. Refused for an agent
     (an agent in the environment, or any `by` that is not human:) and when the ticket is not in Review, so a
     second accept is refused. The relay's phone path calls it for an answer to the current review question
-    (relay._apply_review_answer)."""
+    (relay._apply_review_answer). person: a signed-in person or a paired phone; a ticket that carries a draft
+    is accepted only then, checked under the ticket's lock (ORCH-582)."""
     if not by.startswith("human:") or agent_tool():
         raise Refused("Only a person can accept.")
 
@@ -1319,6 +1354,7 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
             raise Refused(_hidden_refusal(ticket))
         if ticket["status"] != "review":
             raise Refused("This ticket is not waiting for your review.")
+        ownerpick.refuse_ticket(ticket, person)
         ticket["status"] = "done"
         ticket["waiting_on"] = None
         add_history(ticket, by, "Status review -> done", via)
@@ -1355,6 +1391,9 @@ def accept_for_owner(root: Path, tid: str, reasons: str) -> dict:
             raise Refused(_hidden_refusal(ticket))
         if ticket["status"] != "review":
             raise Refused("This ticket is not in Review.")
+        ownerpick.refuse_ticket(
+            ticket, person=False
+        )  # ORCH-582: a draft is the owner's, never the Reviewer's
         _check_can_finish(ticket)
         if _open_questions(ticket):
             raise Refused("A question on this ticket still waits for an answer.")
@@ -1391,6 +1430,7 @@ def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str) -> d
             raise Refused(f"{qid} is already answered.")
         if question_digest(q) != digest:
             raise Refused(f"{qid} changed after the Reviewer looked at it.")
+        ownerpick.refuse_card(q, person=False)  # ORCH-582: said first, in its own words
         if q.get("card") is not None or q.get("action") is not None or q.get("kind") not in (None, "plain"):
             raise Refused(f"{qid} waits for the owner.")
         rec = q.get("recommended")
@@ -1639,7 +1679,9 @@ def _keep_superseded(ticket: dict, status: str, other: str | None, given: bool) 
             ticket.pop("superseded_by", None)
 
 
-def set_status(root: Path, tid: str, status: str, by: str, superseded_by: str | None = None) -> dict:
+def set_status(
+    root: Path, tid: str, status: str, by: str, superseded_by: str | None = None, *, person: bool = False
+) -> dict:
     if status not in STATUSES:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
     if superseded_by is not None and status != "dropped":
@@ -1647,7 +1689,7 @@ def set_status(root: Path, tid: str, status: str, by: str, superseded_by: str | 
     other = superseded_value(root, tid, superseded_by) if superseded_by is not None else None
 
     def op(ticket):
-        target, actor = _finish_status(root, ticket, status, by)
+        target, actor = _finish_status(root, ticket, status, by, person)
         _keep_superseded(ticket, target, other, superseded_by is not None)
         if other and target == "dropped":
             add_history(ticket, actor, f"Superseded by {other}")
@@ -2222,6 +2264,7 @@ def tidy(
         if tidied(root, ticket):
             raise Refused("This ticket was already tidied.")
         old = str(ticket.get("title") or "")
+        was_auto = bool(ticket.get("title_auto"))
         edited = any(  # someone renamed it after it was created: that title is theirs, tidy leaves it
             re.fullmatch(
                 r"Title changed(?: \(was: .* \| now: .*\))?",
@@ -2234,6 +2277,8 @@ def tidy(
             ticket["title"] = title
             ticket.pop("title_auto", None)
             add_history(ticket, by, TIDY_LINE + old[:200])
+        elif was_auto and not edited:  # the helper kept the placeholder's words: now they are its title
+            ticket.pop("title_auto", None)
         filled = [k for k in sorted(fields) if not ticket.get(k)]
         for k in filled:
             _set_field(ticket, k, fields[k])
@@ -2243,6 +2288,8 @@ def tidy(
         if wrote:
             ticket["description"] = description
             ticket["description_by"] = by[:100]
+            if was_auto and ticket.get("note") == LONG_NOTE:  # only the placeholder note goes (as `title`)
+                ticket.pop("note", None)
             add_history(ticket, by, f"Description written by {by[:100]}")
         estimated = bool(est and not ticket.get("estimate"))
         if estimated:
@@ -3587,8 +3634,11 @@ def answer(
     *,
     expected_question_digest: str | None = None,
     decision: dict | None = None,
+    person: bool = False,
 ) -> tuple[dict, dict]:
     """decision: the Review stack's structured answer (orch/review.py); `answer` is then its plain summary.
+    person: a signed-in person on the dashboard (a one-time person grant) or a paired phone; only then is a
+    draft card answered (ORCH-582, orch/ownerpick.py), whatever `by` and `via` say.
     expected_question_digest: question_digest of the question as the person was shown it; the answer is
     refused when the question is no longer that one, or could not be encoded. None: not checked (a caller that
     kept no digest, e.g. a relay record from before digests)."""
@@ -3611,6 +3661,7 @@ def answer(
             raise Refused(
                 "This card waits for the owner. Ask with orch review add and wait with orch review wait."
             )
+        ownerpick.refuse_card(q, person and str(by).startswith("human:"))
         if decision is None and isinstance(q.get("action"), dict) and "merge" in q["action"]:
             raise Refused(f"{qid} merges a pull request: answer it on the card (Merge or Not now).")
         if expected_question_digest is not None and (
@@ -3655,7 +3706,7 @@ def mark_question_sent(root: Path, tid: str, qid: str, by: str = "orch") -> None
 
 
 def record_answered(
-    root: Path, tid: str, entry: dict, by: str, via: str, *, replaces: str | None = None
+    root: Path, tid: str, entry: dict, by: str, via: str, *, replaces: str | None = None, person: bool = False
 ) -> dict:
     """Append one already-answered questions[] entry (a Review stack decision that was not an open question:
     a Check result, or a changed answer). Nothing is overwritten: with `replaces` the old entry only gets
@@ -3668,6 +3719,7 @@ def record_answered(
         raise Refused(
             "This card waits for the owner. Ask with orch review add and wait with orch review wait."
         )
+    ownerpick.refuse_card(entry, person and str(by).startswith("human:"))
 
     def op(ticket):
         old = None
@@ -3749,7 +3801,7 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
     return apply_op(root, tid, op2, by=by)[0]
 
 
-def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
+def patch(root: Path, tid: str, if_revision: int, data: str, by: str, *, person: bool = False) -> dict:
     """Atomic change of several fields; refused (exit 2 + current values) when `revision` changed."""
     try:
         obj = json.loads(data)
@@ -3793,7 +3845,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
             raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
         actor = by
         if "status" in obj:
-            status, actor = _finish_status(root, ticket, status, by)
+            status, actor = _finish_status(root, ticket, status, by, person)
             if status in ("open", "ready") and not actor.startswith("agent:"):
                 ticket.pop("started", None)
         for k in ("owner", "due", "note", "done_when", "summary"):
@@ -4213,10 +4265,10 @@ def artifacts_dir(root: Path, tid: str) -> Path:
         return _artifacts_dir_raw(root, tid)
 
 
-def _artifacts_dir_raw(root: Path, tid: str) -> Path:
-    d = artifacts_path(root, tid)
+def _artifacts_dir_raw(root: Path, tid: str, sub: tuple = ()) -> Path:
+    d = artifacts_path(root, tid).joinpath(*sub)
     cur = root / ".orch"
-    for part in ("tickets", tid, "artifacts"):
+    for part in ("tickets", tid, "artifacts", *sub):
         cur = cur / part
         if cur.is_symlink():
             raise Refused("The artifacts folder of this ticket is a link. orch will not use it.")
@@ -4297,13 +4349,13 @@ def _check_attach(name: str, data) -> str:
     return ext
 
 
-def _open_artifacts_fd(root: Path, tid: str) -> int:
+def _open_artifacts_fd(root: Path, tid: str, sub: tuple = ()) -> int:
     """A handle on .orch/tickets/<id>/artifacts (created), every folder opened from the workspace root with
     O_NOFOLLOW|O_DIRECTORY: a folder swapped for a link meanwhile is refused, never followed."""
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
     try:
-        for part in (".orch", "tickets", tid, "artifacts"):
+        for part in (".orch", "tickets", tid, "artifacts", *sub):
             try:
                 nxt = os.open(part, flags, dir_fd=fd)
             except FileNotFoundError:
@@ -4319,17 +4371,27 @@ def _open_artifacts_fd(root: Path, tid: str) -> int:
         ) from None
 
 
-def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | None = None) -> dict:
+# A person's feedback files (screenshots, files, voice notes sent with an answer on Review) go in this
+# sub-folder of the artifacts: the Files tab lists them, but a Check card shows only the helper's own result
+# files, so adding feedback never makes the card being answered look changed (ORCH-420 follow-up).
+FEEDBACK_DIR = "feedback"
+
+
+def attach(
+    root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | None = None, folder: str | None = None
+) -> dict:
     """The file is written under gate -> ticket lock; the history line (its own lock) comes after.
     Keep `data` as a file in .orch/tickets/<id>/artifacts/ (name picked by attach_name; a clash gets
     ' (2)', ' (3)' ...; created with O_EXCL, no link followed on the file or any folder). Text must be UTF-8
     without NUL bytes, a picture must start with its type's signature. One history line says what was
     attached. `exact` (an allowed file name made by orch itself): that name or nothing, an existing file
     means it was done before (returned with existed=True, nothing written)."""
+    if folder not in (None, FEEDBACK_DIR):
+        raise Refused("That folder is not allowed.")
     ticket_path(root, tid)
     with _locked(root, tid):
         _refuse_closed_agent(root, tid, by)  # before the file is written
-        res = _attach_write(root, tid, hint, data, exact)
+        res = _attach_write(root, tid, hint, data, exact, (folder,) if folder else ())
     text = f"Attached {res['name']}"
     if res.get("existed"):
         # done before: only the history line may be missing (an earlier call was refused as busy after the
@@ -4349,7 +4411,7 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
     return res
 
 
-def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None) -> dict:
+def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None, sub: tuple = ()) -> dict:
     load(root, tid)  # the id has the shape of a ticket id and the ticket exists
     name = attach_name(exact or hint)
     if exact and name != exact:
@@ -4358,7 +4420,7 @@ def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None) ->
     stem = name[: -len(ext) - 1]
     wflags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     if hasattr(os, "O_DIRECTORY") and os.open in os.supports_dir_fd:
-        dfd = _open_artifacts_fd(root, tid)
+        dfd = _open_artifacts_fd(root, tid, sub)
         opener = lambda n: os.open(n, wflags, 0o644, dir_fd=dfd)  # noqa: E731
         remove = lambda n: os.unlink(n, dir_fd=dfd)  # noqa: E731
         linker = lambda a, b: os.link(a, b, src_dir_fd=dfd, dst_dir_fd=dfd, **_nofollow_link())  # noqa: E731
@@ -4366,7 +4428,7 @@ def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None) ->
         names = lambda: os.listdir(dfd)  # noqa: E731
         close = lambda: os.close(dfd)  # noqa: E731
     else:  # Windows: no handles on folders; the folders are checked one by one
-        d0 = _artifacts_dir_raw(root, tid)
+        d0 = _artifacts_dir_raw(root, tid, sub)
         opener = lambda n: os.open(d0 / n, wflags, 0o644)  # noqa: E731
         remove = lambda n: (d0 / n).unlink()  # noqa: E731
         linker = lambda a, b: os.link(d0 / a, d0 / b, **_nofollow_link())  # noqa: E731
@@ -4396,9 +4458,9 @@ def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None) ->
                 except FileExistsError:
                     if exact:
                         return {
-                            "name": final,
+                            "name": "/".join((*sub, final)),
                             "size": len(data),
-                            "path": _art_rel(tid, final),
+                            "path": _art_rel(tid, "/".join((*sub, final))),
                             "existed": True,
                         }
                     continue
@@ -4410,7 +4472,8 @@ def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None) ->
                 remove(tmp)
     finally:
         close()
-    return {"name": final, "size": len(data), "path": _art_rel(tid, final)}
+    shown = "/".join((*sub, final))
+    return {"name": shown, "size": len(data), "path": _art_rel(tid, shown)}
 
 
 def _nofollow_link() -> dict:

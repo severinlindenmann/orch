@@ -616,7 +616,9 @@ def test_deploy_ticket_says_how_to_write_down_the_deploy(tmp_path, capsys, monke
     monkeypatch.setattr(
         rk.World,
         "new_ticket",
-        lambda self, parent, title, note, dw, priority="high": seen.update(note=note) or "t_sim",
+        lambda self, parent, title, note, dw, priority="high", over_limit=False: (
+            seen.update(note=note) or "t_sim"
+        ),
     )
     t = {
         "questions": [
@@ -733,7 +735,9 @@ def test_deploy_go_hands_the_helper_the_prepared_program(tmp_path, capsys, monke
     monkeypatch.setattr(
         rk.World,
         "new_ticket",
-        lambda self, parent, title, note, dw, priority="high": seen.update(note=note) or "t_sim",
+        lambda self, parent, title, note, dw, priority="high", over_limit=False: (
+            seen.update(note=note) or "t_sim"
+        ),
     )
     t = {
         "questions": [
@@ -1143,7 +1147,9 @@ def test_a_red_check_without_an_exception_gets_no_card_and_says_how_to_record_on
     monkeypatch.setattr(
         rk.World,
         "new_ticket",
-        lambda self, parent, title, note, dw, priority="high": seen.update(title=title, note=note) or "t_sim",
+        lambda self, parent, title, note, dw, priority="high", over_limit=False: (
+            seen.update(title=title, note=note) or "t_sim"
+        ),
     )
     out = go(tmp_path, state={"release": gate()}, open_release={"number": 9031}, prs=pr(checks=red_mac()))
     assert "card:release 31" not in out["did"]
@@ -1350,7 +1356,9 @@ def test_walks_start_at_the_cut_with_the_commit_in_the_note(tmp_path, monkeypatc
     monkeypatch.setattr(
         rk.World,
         "new_ticket",
-        lambda self, parent, title, note, dw, priority="high": notes.append((title, note)) or "t_sim",
+        lambda self, parent, title, note, dw, priority="high", over_limit=False: (
+            notes.append((title, note)) or "t_sim"
+        ),
     )
     out = go_walks(
         tmp_path,
