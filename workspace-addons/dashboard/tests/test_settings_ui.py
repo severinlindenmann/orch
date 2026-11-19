@@ -278,7 +278,9 @@ def test_settings_pull_requests_only_with_github_remote_or_addon(ws, monkeypatch
     assert data.load_settings(ws, "orch")["pull_requests"] is True
     rows[0]["active"] = False
     (ws / ".git").mkdir(exist_ok=True)
-    (ws / ".git" / "config").write_text('[remote "origin"]\n\turl = git@github.com:me/repo.git\n', encoding="utf-8")
+    (ws / ".git" / "config").write_text(
+        '[remote "origin"]\n\turl = git@github.com:me/repo.git\n', encoding="utf-8"
+    )
     assert data.load_settings(ws, "orch")["pull_requests"] is True
 
 
