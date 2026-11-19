@@ -142,7 +142,10 @@ test('the Empty helper says the model it starts on and sends the pick only when 
   const agents = [{name:'claude', label:'Claude Code', models:true, chosen:true}, {name:'codex', models:false}];
   assert.deepEqual(bar.liveBarNewModel([], agents), {name:bar.LIVEBAR_EMPTY_MODEL, label:'Opus'}, 'none made yet: orch\'s pick');
   assert.deepEqual(bar.liveBarNewModel([{id:'t_emp', kind:'empty', model:'haiku'}], agents), {name:'haiku', label:'Haiku'});
-  assert.equal(bar.liveBarNewModel([], [{name:'codex', models:false, chosen:true}]), null, 'a tool with no model choice: no step');
+  assert.equal(bar.liveBarNewModel([], [{name:'codex', models:false, chosen:true}]), null, 'a tool with no model choice: no picker');
+  assert.equal(bar.liveBarNewOwnModel([{name:'codex', models:false, chosen:true}]), true, '... it says the tool uses its own');
+  assert.equal(bar.liveBarNewOwnModel(agents), false);
+  assert.equal(bar.liveBarNewOwnModel([]), false, 'no tool: nothing to say');
   const usual = {name:'opus', label:'Opus'};
   assert.deepEqual(bar.liveBarNewArgs('empty', 'sonnet', usual), {kind:'empty', model:'sonnet'});
   assert.deepEqual(bar.liveBarNewArgs('empty', 'opus', usual), {kind:'empty'}, 'the usual one stays orch\'s pick');
