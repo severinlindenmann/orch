@@ -42,6 +42,21 @@ class Up(BaseHTTPRequestHandler):
         self._reply(b"{}")
 
 
+@pytest.fixture(autouse=True)
+def _frame_tables(monkeypatch):
+    """No shipped add-on page makes dashboard calls any more: the frame-pass tables are empty. These tests use an
+    add-on named "focus" as a stand-in that does, to keep the pass machinery tested."""
+    from orch_dashboard import framepass
+
+    ops = frozenset(
+        {"answer", "ticket.patch", "run.send", "check.wont_do", "check.reopen", "check.edit", "check.remove"}
+    )
+    roots = ("/api/act", "/api/events", "/api/term", "/api/term/keys")
+    monkeypatch.setattr(framepass, "FRAME_ROOT", {"focus": roots})
+    monkeypatch.setattr(framepass, "ALL_ROOT_PATHS", frozenset(roots))
+    monkeypatch.setattr(framepass, "FRAME_OPS", {"focus": ops})
+
+
 LAST = {}  # the stack fixture's dashboard server and workspace (a test may give it a page session)
 
 
@@ -766,14 +781,17 @@ def test_the_file_pass_is_taken_off_however_its_name_is_written(stack, monkeypat
     assert call(base + "/addon/focus/api/x?q=orch-frame", headers={"Sec-Fetch-Site": "same-origin"})[0] == 200
 
 
-def test_only_focus_makes_dashboard_calls_from_its_frame():
+def test_the_shipped_tables_give_no_add_on_page_a_dashboard_call(monkeypatch):
+    import importlib
+
     from orch_dashboard import framepass
 
-    assert set(framepass.FRAME_ROOT) == {"focus"}  # Insights and Factory get no dashboard call at all
-    assert "/api/frame-pass" not in framepass.ALL_ROOT_PATHS and "/session" not in framepass.ALL_ROOT_PATHS
+    monkeypatch.undo()  # the autouse stand-in tables
+    fresh = importlib.reload(framepass)
+    assert fresh.FRAME_ROOT == {} and fresh.FRAME_OPS == {} and not fresh.ALL_ROOT_PATHS
 
 
-# ORCH-186 review M1: a Focus pass runs only Focus's own list of the person's actions.
+# ORCH-186 review M1: a page's pass runs only its own list of the person's actions.
 def _act_with_pass(base, p, op, args, origin="null"):
     h = {**FRAME, "Content-Type": "application/json", "X-Orch-Frame": p, "X-Orch-Op": op}
     if origin is None:

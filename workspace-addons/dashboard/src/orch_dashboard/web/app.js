@@ -312,8 +312,8 @@ function accept(next) {
 }
 function route() {
   const r = pageRoute();
-  // The live-session add-on's addresses show Focus (pages/live.js)
-  return r.kind === 'page' && typeof liveFocusOn === 'function' && liveFocusOn() && livePageOf(r.id) ? {...r, kind:'live'} : r;
+  // The live-session add-on's addresses show the live page (pages/live.js); it has no page of its own to embed
+  return r.kind === 'page' && typeof livePageOf === 'function' && livePageOf(r.id) ? {...r, kind:'live'} : r;
 }
 function pageRoute() {
   const full = location.hash || '#home', query = full.indexOf('?'), hash = query < 0 ? full : full.slice(0, query) || '#home';
@@ -445,7 +445,7 @@ function render(arrived = new Set()) {
     throw err;
   }
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
-  if (typeof liveDockSync === 'function') liveDockSync();  // the layer of Focus, outside main
+  if (typeof liveDockSync === 'function') liveDockSync();  // the layer of the live page, outside main
   if (typeof liveOpenFromAddress === 'function') liveOpenFromAddress(r);  // a ticket's address opens its session (ORCH-465)
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'ticket') mountTicketTalk(main);

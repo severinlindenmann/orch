@@ -1,4 +1,4 @@
-"""#539: every route of the page servers (dashboard, Focus, Insights) that acts with the page
+"""#539: every route of the page servers (dashboard, Insights) that acts with the page
 session goes through the ONE rule, PageSession.authed / can_act (cookie + page secret). This test enumerates
 the gate calls of each server by AST, so a new route that checks the cookie some other way, or a new gate in
 an unexpected handler, fails here and must be added to the list on purpose."""
@@ -11,7 +11,6 @@ import pytest
 ADDONS = Path(__file__).resolve().parents[2] / "workspace-addons"
 SERVERS = {
     "dashboard": ADDONS / "dashboard/src/orch_dashboard/server.py",
-    "focus": ADDONS / "focus/src/orch_focus/server.py",
     "insights": ADDONS / "insights/src/orch_insights/server.py",
 }
 # (enclosing method, gate) pairs: the complete list of places a server asks the session.
@@ -19,12 +18,6 @@ EXPECTED = {
     "dashboard": {
         ("_can_act", "can_act"),  # /api/act (every op, update.start), update status, typing, report, vouching
         ("_signed_in", "cookie_ok"),  # READS under a host name that is not this computer's (a proxy in front)
-        ("_session_post", "launch"),
-    },
-    "focus": {
-        ("_area_op", "can_act"),  # area.accept / area.remove
-        ("do_POST", "can_act"),  # /api/act
-        ("_fence", "cookie_ok"),  # any host name once signed in
         ("_session_post", "launch"),
     },
     "insights": {

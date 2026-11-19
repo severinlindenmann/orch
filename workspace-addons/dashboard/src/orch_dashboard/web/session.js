@@ -63,7 +63,8 @@
   // The app must NOT start (and fetch, and read a one-time notice) while the page is only a bootstrap: stop loading the
   // rest of the page, hand the token over, and reload; everything starts after the reload with the session.
   if (window.stop) window.stop();
-  history.replaceState(null, "", location.pathname + location.search);
+  // the page address before the token stays (a live page address of one ticket, then #launch=...)
+  history.replaceState(null, "", location.pathname + location.search + (location.hash || "").replace(/[#&]launch=[A-Za-z0-9_-]+$/, ""));
   realFetch("/session", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -1250,8 +1250,8 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
             or ("label" in pg and not _text_ok(pg["label"], 24))
         ):
             raise _bad("[page] has a path that starts with / (and an optional label, live_session)")
-        if not bg:
-            raise _bad("[page] needs background = true")
+        if not bg and pg.get("live_session") is not True:
+            raise _bad("[page] needs background = true (or live_session = true: the dashboard draws it)")
     if any(r["format"] == "open-page" for r in tv) and pg is None:
         raise _bad("an open-page row needs a [page]")
     m["dir"] = base
@@ -2520,6 +2520,14 @@ def _restart_updated(root: Path | None = None) -> list[str]:
     from orch import services
 
     registered = _registered_workspaces(root)
+    retired: list[str] = []
+    for ws in sorted({e["workspace"] for e in services.running()}):
+        if Path(ws).resolve() in registered:
+            try:
+                with services.locked():
+                    retired += services._retire(Path(ws))
+            except Exception:  # noqa: BLE001 - one workspace must not stop the update
+                pass
     by_ws: dict[str, dict[str, int]] = {}
     recorded: dict[str, dict[str, dict]] = {}  # workspace -> add-on -> recorded launch environment
     skipped: list[str] = []
@@ -2540,7 +2548,7 @@ def _restart_updated(root: Path | None = None) -> list[str]:
                 f"{RESTART_BY_HAND} {e['workspace']}"
             )
     if not by_ws:
-        return skipped
+        return retired + skipped
     import signal
     import threading
 
@@ -2578,7 +2586,7 @@ def _restart_updated(root: Path | None = None) -> list[str]:
     finally:
         if old_hup is not None:
             signal.signal(signal.SIGHUP, old_hup)
-    return ([f"Restarted: {', '.join(done)}"] if done else []) + bad + skipped
+    return retired + ([f"Restarted: {', '.join(done)}"] if done else []) + bad + skipped
 
 
 def _output_failure_proof() -> None:

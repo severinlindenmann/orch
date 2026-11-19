@@ -592,9 +592,7 @@ def test_one_name_for_the_ai_and_plain_description_help():
 
 def test_no_waiting_for_your_answer_wording_left():
     """Same words as the phone: the chip and badge say "Needs you" / "N need you"."""
-    for f in list(WEBDIR.glob("*.js")) + list(
-        (WEBDIR.parent.parent.parent.parent / "focus/src/orch_focus/web").glob("*.js")
-    ):
+    for f in WEBDIR.glob("*.js"):
         text = f.read_text().lower()
         assert "waiting for your answer" not in text and "waiting on you" not in text, f.name
 
@@ -605,9 +603,7 @@ def test_no_bare_waiting_status_label_left():
     import re
 
     lane_words = ("['blocked', 'Waiting']", "lane === 'blocked' ? 'Waiting'")
-    for f in list(WEBDIR.glob("*.js")) + list(
-        (WEBDIR.parent.parent.parent.parent / "focus/src/orch_focus/web").glob("*.js")
-    ):
+    for f in WEBDIR.glob("*.js"):
         text = f.read_text()
         for word in lane_words:
             text = text.replace(word, "")

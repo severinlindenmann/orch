@@ -166,8 +166,8 @@ test('status chip, shared folder line, copy line and agent bar all follow each n
   assert.equal(p.count('ticket-kicker'), 1);
 });
 
-test('a working ticket: one header line, one Watch live, Stop and the commands in the menu (ORCH-70, report r-1116-1748)', async () => {
-  const live = {addons:[{name:'focus', page:{path:'/', live_session:true}}], services:[{addon:'focus', running:true}],
+test('a working ticket: one header line, no old Watch live, Stop and the commands in the menu (ORCH-70, report r-1116-1748)', async () => {
+  const live = {addons:[{name:'focus', page:{path:'/', live_session:true}}],
     runs:{t_x:{running:true, age_seconds:3120, claim:{agent:'claude', mode:'live'}}}};
   const p = page(state(ticket({status:'active', key:'ORCH-56'}), live));
   await tick(); await tick();
@@ -176,10 +176,10 @@ test('a working ticket: one header line, one Watch live, Stop and the commands i
   assert.match(line.textContent, /^ORCH-56·Working·.+·52 min$/, 'number, state, helper, minutes');
   assert.equal(p.count('agent-bar'), 0, 'no helper bar');
   assert.equal(p.count('live-session'), 0, 'no Live session card');
-  assert.equal(p.count('watch-live') + p.count('live-open'), 1, 'Watch live once on the page');
+  assert.equal(p.count('watch-live') + p.count('live-open'), 0, 'no link to an old Focus page: the header\'s Focus button (pages/live-layer.js) opens the session');
   const menu = p.main.querySelector('[data-key="ticket-menu-t_x"]');
   assert.ok(menu && menu.querySelector('[data-key="ticket-stop"]'), 'Stop sits in the menu');
-  assert.equal(p.count('ticket-stop'), 1, 'Stop once, not next to Watch live');
+  assert.equal(p.count('ticket-stop'), 1, 'Stop once');
   assert.ok(menu.querySelector('[data-key="live-copy-watch"]') && menu.querySelector('[data-key="live-copy-take"]'), 'the two commands too');
   assert.doesNotMatch(p.text(), /Owner/, 'no empty Owner row while a helper works');
   // the top bar paints outside this fake page: New ticket is always an outline (B2, one filled button per view)

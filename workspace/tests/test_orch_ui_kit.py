@@ -15,7 +15,6 @@ def _links(html: str, prefix: str) -> list[str]:
 def test_every_kit_file_a_page_links_exists_in_the_master():
     pages = {
         "dashboard": (ADDONS / "dashboard/src/orch_dashboard/web/index.html", "kit/"),
-        "focus": (ADDONS / "focus/src/orch_focus/web/index.html", "__P__/kit/"),
         "insights": (ADDONS / "insights/src/orch_insights/web/index.html", "__P__/kit/"),
         "factory": (ADDONS / "factory/src/orch_factory/web/index.html", "__P__/kit/"),
         "usage": (ADDONS / "usage/src/orch_usage/web/index.html", "__P__/kit/"),
@@ -29,7 +28,6 @@ def test_every_kit_file_a_page_links_exists_in_the_master():
 
 def test_add_on_servers_serve_what_their_pages_link():
     for name, mod in (
-        ("focus", "orch_focus"),
         ("insights", "orch_insights"),
         ("factory", "orch_factory"),
         ("usage", "orch_usage"),
