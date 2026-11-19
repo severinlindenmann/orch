@@ -1,6 +1,6 @@
 /* gallery.html: the terminal section (term.js, UI.term). Demo screens only, nothing here is product data and no key
-   leaves the page: typing into the demo writes the keys under it. States: watching, typing, loading, typing off by
-   setting, closed. */
+   leaves the page: typing into the demo shows what would be sent under it. States: watching, typing, loading, typing
+   off by setting, closed. */
 (() => {
   'use strict';
   const q = s => document.querySelector(s);
@@ -14,23 +14,25 @@
     E + '33m⏺ ' + E + '0mFixing the week total next.',
     '',
     E + '7m> ' + E + '0m'
-  ].join('\n');
-  const live = (more) => Object.assign({state: 'live', screen: SCREEN, cx: 2, cy: 7, cols: 80, rows: 24, cursor: true, typing_allowed: true}, more || {});
-  function demo(where, snap, after) {
+  ].join('\r\n');
+  const b64 = s => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+  function demo(where, allowed, after) {
     const host = q(where);
     if (!host || !window.UI || !window.UI.term) return;
     const said = document.createElement('p');
     said.className = 'meta';
-    const ui = window.UI.term({label: 'ORCH-228', onKeys: async items => { said.textContent = 'Would send: ' + JSON.stringify(items); return {ok: true}; }, onSize: () => {}});
+    const ui = window.UI.term({label: 'ORCH-228', onInput: async data => { said.textContent = 'Would send: ' + JSON.stringify(data); return {ok: true}; }, onSize: () => {}});
     host.append(ui.el, said);
-    if (snap) ui.update(snap); else ui.show('loading');
+    if (allowed === null) { ui.show('loading'); return; }
+    ui.hello({typing_allowed: allowed});
+    ui.screen({cols: 64, rows: 9, data: b64(SCREEN)});
     if (after) after(ui);
   }
   document.addEventListener('DOMContentLoaded', () => {
-    demo('#term-watch', live());
-    demo('#term-typing', live(), ui => ui.setTyping(true));
+    demo('#term-watch', true);
+    demo('#term-typing', true, ui => ui.setTyping(true));
     demo('#term-loading', null);
-    demo('#term-off', live({typing_allowed: false}));
-    demo('#term-closed', live(), ui => ui.update({state: 'none'}));
+    demo('#term-off', false);
+    demo('#term-closed', true, ui => ui.end('none'));
   });
 })();
