@@ -87,6 +87,10 @@ def test_crlf_header_reads_the_same(tmp_path):
         ("name: a\ndescription: x\n  stray: y\n", "indented"),
         ('name: a\ndescription: "open\n', "end"),
         ("name: a\ndescription: Use it: when asked\n", "colon"),
+        ('name: a\ndescription: "say \\q"\n', "escape"),
+        ('name: a\ndescription: "say \\u00"\n', "escape"),
+        ("name: a\ndescription: x\nmetadata: {}\n  owner: orch\n", "indented"),
+        ("name: a\ndescription: x\nmetadata:\n  owner: # nobody\n", "text value"),
     ],
 )
 def test_refuses_what_it_does_not_read(tmp_path, header, says):
@@ -278,3 +282,21 @@ def test_text_answers_end_with_a_next_line(proj, capsys):
     workspace(proj)
     code, out = run(capsys, "check", "orch")
     assert code == 0 and out.strip().splitlines()[-1].startswith("Next: ")
+
+
+def test_escapes_read_like_yaml(tmp_path):
+    folder = skill(tmp_path, "a", 'name: a\ndescription: "\\u0041\\x42 \\"c\\""\n')
+    assert skillmeta.read_header(folder)["description"] == 'AB "c"'
+
+
+def test_a_comment_only_value_is_empty(tmp_path):
+    folder = skill(tmp_path, "a", "name: a\ndescription: # a comment that is long enough\n")
+    assert skillmeta.read_header(folder)["description"] == ""
+    assert "description" in [x["field"] for x in skillmeta.check_skill(folder)]
+
+
+@pytest.mark.parametrize("value", ["123", "0x10", ".inf", ".nan", "2026-11-19"])
+def test_values_that_yaml_reads_as_not_text(tmp_path, value):
+    folder = skill(tmp_path, "s", f"name: s\ndescription: {value}\nmetadata:\n  version: {value}\n")
+    errors = {x["field"] for x in skillmeta.check_skill(folder) if x["level"] == "error"}
+    assert {"description", "metadata.version"} <= errors
