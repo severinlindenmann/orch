@@ -33,6 +33,19 @@ def _bind_again(root: Path, port: int, wait: float = 15.0, listen=None):
         time.sleep(0.1)
 
 
+def _running_elsewhere(root: Path) -> dict | None:
+    """This workspace's background dashboard when it is another process (a self-update restart is the same
+    pid and must bind its own port again)."""
+    try:
+        rec = service._record(root)
+        if not rec or rec.get("pid") == os.getpid():  # nothing recorded, or our own record: leave it alone
+            return None
+        cur = service.running(root)
+    except (RuntimeError, OSError):
+        return None
+    return cur if cur and cur.get("pid") != os.getpid() else None
+
+
 def _orch_bin() -> str | None:
     """This Python's own orch (`-I -m orch`), never ORCH_BIN or PATH (H1). Without an importable orch (a
     stand-alone or test install) the old ORCH_BIN is all there is, and there is no key to protect either."""
@@ -90,18 +103,33 @@ def main(argv: list[str] | None = None) -> int:
         print(write_snapshot(root, Path(args.out), args.with_addons))
         return 0
     port = getattr(args, "port", DEFAULT_PORT)
+    if not getattr(args, "auto_port", False) and not getattr(args, "ready_file", None):
+        cur = _running_elsewhere(root)
+        if cur:  # a person typed `orch dashboard` while the background one runs: its link, no traceback
+            print(f"The dashboard already runs for {root.name}: {service.url(cur['port'])}")
+            return 0
     listen, why = _listen(root)
     try:
-        srv = make_server(root, port, orch_bin=_orch_bin(), remote=listen)
+        try:
+            srv = make_server(root, port, orch_bin=_orch_bin(), remote=listen)
+        except OSError as e:
+            if getattr(args, "auto_port", False):
+                srv = make_server(root, 0, orch_bin=_orch_bin(), remote=listen)  # another workspace has 8420
+            elif e.errno == errno.EADDRINUSE:
+                srv = _bind_again(
+                    root, port, listen=listen
+                )  # a self-update restart keeps its port (see _bind_again)
+            else:
+                raise
     except OSError as e:
-        if getattr(args, "auto_port", False):
-            srv = make_server(root, 0, orch_bin=_orch_bin(), remote=listen)  # another workspace has 8420
-        elif e.errno == errno.EADDRINUSE:
-            srv = _bind_again(
-                root, port, listen=listen
-            )  # a self-update restart keeps its port (see _bind_again)
-        else:
+        if e.errno != errno.EADDRINUSE:
             raise
+        print(
+            f"Port {port} is taken by another program. Start the dashboard in the background with "
+            f"orch start, or pick another port: orch dashboard serve --port <number>",
+            file=sys.stderr,
+        )
+        return 1
     if getattr(args, "ready_file", None):
         service.write_ready(Path(args.ready_file), srv.server_address[1])
     print(f"orch dashboard for {root.name}: http://127.0.0.1:{srv.server_address[1]}  (Ctrl+C to stop)")

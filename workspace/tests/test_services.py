@@ -319,6 +319,12 @@ def test_start_never_calls_a_stopped_addon_running():
     assert "off here" in cli_status._service_line({"addon": "sync", "running": False, "idle": True})
     assert "not running" in cli_status._service_line({"addon": "sync", "running": False})
     assert "running (pid 5)" in cli_status._service_line({"addon": "sync", "running": True, "pid": 5})
+    rows = [
+        {"addon": "dashboard-tester", "running": True, "pid": 5},
+        {"addon": "sync", "running": True, "pid": 6},
+    ]
+    lines = [cli_status._service_line(r, cli_status._width(rows)) for r in rows]  # ORCH-632: no glued names
+    assert "dashboard-tester  running" in lines[0] and lines[0].index("running") == lines[1].index("running")
 
 
 def test_ago_words():
