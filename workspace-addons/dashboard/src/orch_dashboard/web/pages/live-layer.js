@@ -148,6 +148,11 @@ function liveAskModel(t) {
   const options = Array.isArray(q.options) ? q.options.filter(o => typeof o === 'string' && o.trim()).slice(0, 6) : [];
   return {id:q.id, digest:q.digest, text:String(q.text || ''), options, plain:q.kind == null};
 }
+// The pane's "now" line steps back while its question box shows the question it would repeat (ORCH-708): a helper
+// that needs you says so in that box, once, with its options under it.
+function liveNowRepeats(asking, live) {
+  return !!asking && live?.status === 'needs-you';
+}
 // --- the page ---
 let liveLayer = null;
 let liveLayerPainted = '';
@@ -393,6 +398,7 @@ function liveLayerFill() {
     if (now.textContent !== text) now.textContent = text;
     const askBox = body.querySelector('[data-live-ask]');
     if (askBox) liveAskFill(askBox, body.dataset.liveBody);
+    now.hidden = liveNowRepeats(askBox && !askBox.hidden, live);
     const lines = live && Array.isArray(live.lines) ? live.lines.join('\n') : '';
     if (pre.textContent !== lines) {
       const end = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 8;  // following the end: keep following it

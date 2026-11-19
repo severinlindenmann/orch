@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerSort, liveAskModel, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerSort, liveAskModel, liveNowRepeats, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -277,4 +277,14 @@ test('the pane shows the waiting question with its options and answers it there 
   assert.equal(liveAskModel({}), null);
   assert.equal(liveAskModel({questions:[{id:'q3', kind:'plan', text:'Plan?'}]}).plain, false);
   assert.match(source, /liveAskFill[^]*?act\('answer', \{ticket:id, question:q\.id, digest:q\.digest/, 'the answer is the same op a question card sends');
+});
+
+test('the waiting question shows once: the now line steps back while the question box shows it (ORCH-708)', () => {
+  const {liveNowRepeats} = load();
+  assert.equal(liveNowRepeats(true, {status:'needs-you', question:'Which room size should I book?'}), true);
+  assert.equal(liveNowRepeats(false, {status:'needs-you', detail:'Claude wants a login.'}), false, 'no question box: the now line says why it waits');
+  assert.equal(liveNowRepeats(true, {status:'working', detail:'Running the tests'}), false, 'working: the now line says what it does');
+  assert.equal(liveNowRepeats(true, null), false);
+  assert.match(source, /liveAskFill\(askBox, body\.dataset\.liveBody\);\s*now\.hidden = liveNowRepeats\(askBox && !askBox\.hidden, live\)/,
+    'the fill hides the now line after the question box is written');
 });
