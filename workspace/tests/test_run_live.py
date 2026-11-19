@@ -155,6 +155,8 @@ def test_live_start_pastes_the_prompt_and_input_only_when_idle(proj, run, lab):
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(rec)
     pane = runs_live.tmux(proj, "display-message", "-p", "-t", runs_live.target(tid), "#{pane_pid}")
     assert rec["mode"] == "live" and rec["pid"] == int(pane.stdout.strip())  # the claim's pid is the pane pid
+    # ORCH-707: orch's own server passes focus events on, so the tool shows no tmux tip about them
+    assert runs_live.tmux(proj, "show-options", "-gv", "focus-events").stdout.strip() == "on"
     # the agent says it is ready by itself (`orch run done`): the prompt goes in once
     _until(lambda: _lines(lab, "input"), what="first prompt")
     assert "Do the thing" in _lines(lab, "input")[0]
