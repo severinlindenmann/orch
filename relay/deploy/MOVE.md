@@ -76,12 +76,12 @@ ssh key (root, KVM 4 Frankfurt)").
    exist in kiri-lite or the publish user cannot reach the engine: then give the user the socket's group by hand.
 3. `apt install sqlite3`.
 4. Copy the release binaries (same release as production) and run `relay/deploy/install.sh <bin> 100.71.225.229` and
-   `ORCH_PUBLISH_ENGINE_SOCKET=<socket> publish/deploy/install.sh <bin> 100.71.225.229`. Both make fresh secrets: they
-   are replaced by the old ones on move day. Then stop both again (`systemctl stop orch-relay orch-publish`).
+   `publish/deploy/install.sh <bin> 100.71.225.229` (with `ORCH_PUBLISH_ENGINE_SOCKET` set to the socket path). Both make fresh keys and tokens,
+   which the old ones replace on move day. Then stop both again (`systemctl stop orch-relay orch-publish`).
 5. Copy `relay/deploy/relay.caddy` and `publish/deploy/publish.caddy` into `/etc/caddy/sites/`, `caddy validate`,
    `systemctl reload caddy`. Certificates can only be issued once DNS points here, so Caddy retries until move day;
    that is expected.
-6. Master key: check that Proton holds the relay master key and that it matches the server
+6. The relay master key. Check that Proton holds the relay master key and that it matches the server
    (`sha256sum /etc/orch-relay/master.key` on `orch-dev`, compare with the Proton copy; never print the key). If Proton
    has none, store it now. Without the same master key every stored message, secret and webhook is unreadable.
 7. Tell the users (workspaces, phone) the time window.
