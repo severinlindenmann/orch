@@ -60,3 +60,30 @@ def test_spend_log_sums_one_account_since_a_time(tmp_path):
 def test_credit_readers_never_raise_for_a_missing_source(tmp_path):
     assert spend_log.read({"path": str(tmp_path / "nope.jsonl")}, None).spent is None
     assert credit.READERS["none"]({}, None).note
+
+
+def test_spend_log_counts_a_helper_step_once_and_unknown_spend_as_unknown(tmp_path):
+    """orch's own helper runs on a key (keystart.py): a row with usd null before the step, the reported dollars
+    after it; the last row of an id counts, and a step that never reported stays unknown, never 0."""
+    log = tmp_path / "helper-spend.jsonl"
+    rows = [
+        {"t": "2026-11-18T10:00:00Z", "id": "r_a:1", "account": "OpenAI credit", "usd": None},
+        {"t": "2026-11-18T10:05:00Z", "id": "r_a:1", "account": "OpenAI credit", "usd": 0.4},
+        {"t": "2026-11-18T11:00:00Z", "id": "r_b:1", "account": "OpenAI credit", "usd": None},
+        {"t": "2026-11-18T11:00:00Z", "id": "r_c:1", "account": "Claude credit", "usd": 2},
+        {"t": "2026-11-18T12:00:00Z", "account": "OpenAI credit", "usd": 0.1},
+    ]
+    log.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    use = spend_log.read({"path": str(log), "name": "OpenAI credit"}, None)
+    assert use.spent == 0.5
+    assert use.note == "1 helper step did not report its spend (unknown)"
+    assert spend_log.read({"path": str(log), "name": "Claude credit"}, None).note is None
+
+
+def test_spend_log_with_only_unknown_steps_is_unknown_not_zero(tmp_path):
+    log = tmp_path / "helper-spend.jsonl"
+    log.write_text(
+        json.dumps({"t": "2026-11-18T10:00:00Z", "id": "r_a:1", "account": "A", "usd": None}), "utf-8"
+    )
+    use = spend_log.read({"path": str(log), "name": "A"}, None)
+    assert use.spent is None and use.note.startswith("1 helper step")

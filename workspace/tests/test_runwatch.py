@@ -520,3 +520,42 @@ def test_run_screen_several_tickets_cli_and_in_process(proj, new_ticket, run, mo
     want = {"screens": {a: {"lines": [f"last of {a}"]}, b: {"lines": [f"last of {b}"]}}}
     assert json.loads(out) == want
     assert reads.answer(proj, ["run", "screen", a, b, "--lines", "1", "--json"]) == want
+
+
+def test_rows_drop_the_prompt_frame():
+    rule = "\u2500" * 40
+    text = "\n".join(["did the work", "ran 3 tests", "", rule, "\u276f ", rule, "  ? for shortcuts", ""])
+    rows, hint = runwatch._rows(text, 40)
+    assert rows == ["did the work", "ran 3 tests"]
+    assert hint is None
+
+
+def test_rows_keep_typed_prompt_text():
+    rule = "\u2500" * 40
+    rows, _ = runwatch._rows("\n".join(["work", rule, "\u276f fix it", rule]), 40)
+    assert rows == ["work", "\u276f fix it"]
+
+
+def test_rows_drop_status_rows_under_the_prompt_box():
+    rule = "\u2500" * 40
+    text = "\n".join(
+        [
+            "did the work",
+            "",
+            "",
+            "",
+            rule,
+            "\u276f ",
+            rule,
+            "  Opus 5.5 \u00b7 week 21%",
+            "  \u23f5\u23f5 auto mode on",
+        ]
+    )
+    rows, _ = runwatch._rows(text, 8)
+    assert rows == ["did the work"]
+
+
+def test_rows_keep_rows_after_a_lone_rule():
+    rule = "\u2500" * 40
+    rows, _ = runwatch._rows("\n".join(["step one", rule, "step two", "", "", "step three"]), 8)
+    assert rows == ["step one", "step two", "", "step three"]

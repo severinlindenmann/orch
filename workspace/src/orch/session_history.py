@@ -21,6 +21,15 @@ MAX_TURNS = 400  # turns returned for one session
 MAX_TEXT = 4000  # characters kept of one turn
 MAX_BYTES = 20 * 1024 * 1024  # a larger file is not read
 _SKIP_START = ("<system-reminder", "<command-", "<local-command", "Caveat:", "<user-prompt-submit-hook")
+# what orch types (or the tool writes) as a "user" line by itself: its notices, the task text of a start, the
+# summary after the conversation was compacted. Never a person's words, so never a session's title.
+ORCH_TYPED = (
+    "Your task for orch ticket ",
+    "New input on orch ticket ",
+    "Work on orch ticket ",
+    "This session is being continued from a previous conversation",
+)
+TITLE_MAX = 100
 
 
 def _text(content) -> str:
@@ -101,7 +110,6 @@ def sessions(ticket: dict, environ: dict | None = None, root: Path | None = None
         if not valid_session_id(sid) or not isinstance(agent, str):
             continue
         h = read(agent, sid, environ, root)
-        first = next((t["text"] for t in h["turns"] if t["role"] == "user"), "")
         out.append(
             {
                 "agent": agent,
@@ -109,7 +117,7 @@ def sessions(ticket: dict, environ: dict | None = None, root: Path | None = None
                 "id": sid,
                 "host": s.get("host"),
                 "last_used": s.get("last_used"),
-                "title": " ".join(first.split())[:100],
+                "title": _title(h["turns"], ticket, h["more"]),
                 "turns": len(h["turns"]),
                 "readable": h["found"],
                 "current": bool(s.get("current")),
@@ -119,6 +127,51 @@ def sessions(ticket: dict, environ: dict | None = None, root: Path | None = None
         )
     out.sort(key=lambda x: x.get("last_used") or "", reverse=True)
     return out
+
+
+def _one_line(text: str) -> str:
+    return " ".join(str(text or "").split())[:TITLE_MAX]
+
+
+def _sec(at) -> str:
+    """An ISO time cut to the second, so the tool's '...:43.065Z' and orch's '...:43Z' compare as text."""
+    return at[:19] if isinstance(at, str) and len(at) >= 19 else ""
+
+
+def _title(turns: list[dict], ticket: dict, more: bool = False) -> str:
+    """A plain line for what a session did (ORCH-678): the first thing a person wrote in it; for a helper
+    session, which only ever gets orch's own notices, the steps of the ticket it finished (or started) while
+    the session ran (the newest one), else the ticket's title. Never orch's notice text with its ticket id
+    and command."""
+    person = next(
+        (t["text"] for t in turns if t["role"] == "user" and not t["text"].startswith(ORCH_TYPED)), ""
+    )
+    if person:
+        return _one_line(person)
+    plain = _one_line(ticket.get("title") or "")
+    times = [_sec(t.get("at")) for t in turns if _sec(t.get("at"))]
+    if not times:
+        return plain
+    lo, hi = min(times), max(times)
+    if more:  # only the first MAX_TURNS were read: the session went on after the last one we have
+        hi = "~"
+    done, doing = [], []
+    for c in ticket.get("checklist") or []:
+        if not isinstance(c, dict) or not str(c.get("text") or "").strip():
+            continue
+        if c.get("done"):
+            # evidence of this session only: a step proved again later still belongs to this one
+            ats = [
+                a
+                for e in c.get("evidence") or []
+                if isinstance(e, dict) and lo <= (a := _sec(e.get("at"))) <= hi
+            ]
+            if ats:
+                done.append((max(ats), c["text"]))
+        elif c.get("state") == "doing" and lo <= _sec(c.get("at")) <= hi:
+            doing.append(c["text"])
+    steps = [t for _, t in sorted(done)] or doing
+    return _one_line(steps[-1]) if steps else plain
 
 
 def _label(agent: str, root: Path | None) -> str:
