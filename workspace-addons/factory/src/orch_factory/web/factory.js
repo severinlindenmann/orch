@@ -546,6 +546,22 @@
   }
   const mayDecide = {routine: 'Routine improvements', taste: 'Taste decisions within your house rules'};
   const alwaysAsks = ['Shipping: the final Ship stop.', 'Anything that cannot be undone.', 'Scope changes and budget beyond the limits.', 'New connections or credentials.', 'Anything touching another workspace.', 'Creating, renewing or widening Autopilot.'];
+  // The proposal's Time + budget card: only the rows that have a value (never "$—" or "Ready around —"). Your time is
+  // in the summary line above, so the card does not say it again (report r-1119-2059).
+  function timeBudget(time, b) {
+    const has = v => v !== null && v !== undefined && v !== '';
+    const rows = [], first = [];
+    if (has(time.active_min)) first.push('~' + duration(time.active_min) + ' active');
+    if (has(b.api_usd_target)) first.push('AI cost about $' + text(b.api_usd_target));
+    if (first.length) rows.push(['p', first.join(' · ')]);
+    if (has(time.eta_from) || has(time.eta_to)) rows.push(['p', 'Ready around ' + whenRange(time.eta_from, time.eta_to)]);
+    if (has(b.preset)) rows.push(['meta', 'Budget · ' + capital(b.preset)]);
+    const limit = has(b.active_min_cap) ? 'Time limit (active time): ' + duration(b.active_min_cap) + '.' : '';
+    const target = has(b.api_usd_target) ? 'AI cost is a target, not a limit.' : '';
+    if (limit || target) rows.push(['meta', [limit, target].filter(Boolean).join(' ')]);
+    if (!rows.length) rows.push(['meta', 'Time and budget are not planned yet.']);
+    return rows;
+  }
   function proposal(order) {
     const data = order.proposal;
     view.append(heading(data?.title || order.title, data?.kind === 'autopilot' ? 'Autopilot proposal · ' + text(data.goal) : 'Run proposal · review the whole run before answering', orderLink(order)));
@@ -563,15 +579,14 @@
     }
     const time = data.time || {}, b = data.budget || {};
     view.append(p(data.goal));
-    const summary = ['~' + duration(time.active_min)];
+    const summary = [];
+    if (time.active_min != null) summary.push('~' + duration(time.active_min));
     if (b.api_usd_target != null) summary.push('AI cost about $' + text(b.api_usd_target));
     if (time.owner_min != null) summary.push("you're needed ~" + time.owner_min + ' min');
     if (time.eta_from || time.eta_to) summary.push('ready around ' + whenRange(time.eta_from, time.eta_to));
-    view.append(node('p', summary.join(' · '), 'f-summary'));
+    if (summary.length) view.append(node('p', summary.join(' · '), 'f-summary'));
     view.append(group('f-three', card('Stages', line(data.line)),
-      card('Time + budget', p('~' + duration(time.active_min) + ' active · AI cost about $' + text(b.api_usd_target)),
-        p('Ready around ' + whenRange(time.eta_from, time.eta_to)), meta('Budget · ' + capital(b.preset)),
-        meta('Time limit (active time): ' + duration(b.active_min_cap) + '. AI cost is a target, not a limit.'), meta('Your time: about ' + text(time.owner_min) + ' min.')),
+      card('Time + budget', ...timeBudget(time, b).map(([kind, words]) => kind === 'p' ? p(words) : meta(words))),
       card('Team + what it needs', crewPlan(data.crew), list(array(data.needs).map(n => (n.ready ? '✓ Ready · ' : 'Needs you · ') + text(n.what) + (!n.ready && n.fix ? ' — ' + n.fix : '')), 'No additional needs recorded.'))));
     for (const h of array(order.handover)) {
       const tiles = group('actions', ...array(h.files).map(f => badge(f.split('/').pop())));
