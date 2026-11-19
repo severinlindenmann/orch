@@ -1166,7 +1166,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _voice_words(self):
         """POST /api/voice/words (ORCH-696): the sound of the message box's microphone in, its words out, through
-        the connected relay (voice.py). The person's own dashboard session only, as typing; nothing is sent on."""
+        the connected speech service (voice.py). The person's own dashboard session only, as typing; nothing is sent on."""
         why = self._fence()
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
