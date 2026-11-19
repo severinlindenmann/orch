@@ -1725,6 +1725,17 @@ function ticketResultsCard(t) {
     notes.map(n => ticketCompletionNote(n, t)),
     all.length ? (t.status === 'done' ? ticketResultFrame(t, all[0].kind, all[0].file) : ticketFileRow(t, all[0].kind, all[0].file)) : null, all.slice(1, 4).map(x => ticketFileRow(t, x.kind, x.file)), files.length ? headerProof(t) : null);
 }
+// Preview on (the new live page): the ticket's results as the same widgets as on the live wall (ORCH-697, draft D), the notes of its
+// finished steps above them; a click opens the big overlay. Off: the Result card above, as before.
+function ticketWidgets(t) {
+  return !snapshot && typeof livePreviewOn === 'function' && livePreviewOn() && typeof resultsHost === 'function' && !!window.UI?.result;
+}
+function ticketWidgetsCard(t) {
+  const notes = t.status === 'review' ? [] : completionNotes(t);
+  return h('section', {className:'card results', 'data-key':'results-widgets'}, h('div', {className:'section-head'}, h('h2', {}, 'Results')),
+    notes.map(n => ticketCompletionNote(n, t)),
+    resultsHost(t.id, {key:'ticket-results-' + t.id, empty:'Nothing yet. Pictures, pages and tables show up here.'}));
+}
 // A change you asked for: what you asked, and that new changes wait for your approval.
 function ticketRequestCard(t) {
   const open = openChanges(t);
@@ -1905,7 +1916,7 @@ function detail(t) {
     // also without a note: the screenshots, files and voice notes a person sent with Send back or Add note (ORCH-422)
     note || inputFiles(t).length ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note, inputFiles(t).map(f => ticketFileRow(t, 'artifacts', f))) : null,
     working && helperLive ? sharedFolderLine(t) : null,
-    t.status !== 'review' ? ticketResultsCard(t) : null,
+    ticketWidgets(t) ? ticketWidgetsCard(t) : t.status !== 'review' ? ticketResultsCard(t) : null,
     ticketHelperDid(t),
     ticketOutcomeCard(t),
     planQ || ['review', 'done'].includes(t.status) ? null : ticketProgress(t, run),

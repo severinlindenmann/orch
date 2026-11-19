@@ -44,6 +44,22 @@ TEXT = {
     "jsonl",
     "cfg",
     "conf",
+    # what the result widgets read as text too (ORCH-697): a change, more code, a program's output
+    "diff",
+    "patch",
+    "out",
+    "rs",
+    "go",
+    "rb",
+    "java",
+    "swift",
+    "kt",
+    "c",
+    "h",
+    "cpp",
+    "tsx",
+    "jsx",
+    "mjs",
 }
 AUDIO = {
     "m4a": "audio/mp4",
