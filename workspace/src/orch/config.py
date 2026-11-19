@@ -1004,12 +1004,14 @@ def _headers(lines: list[str]) -> list[tuple[int, str]]:
     return out
 
 
-# Settings orch no longer has. A config file that still names one reads without error (nothing looks at it) and
-# loses it on the next save. [focus] preview: the old switch between the old and the new Focus (ORCH-816).
+# Settings orch no longer has. A config file that still names one reads without error (nothing looks at it)
+# and loses it on the next save. [focus] preview: the old switch between the old and the new Focus (ORCH-816).
 RETIRED_KEYS = (("focus", "preview"),)
 
 
 def _drop_retired(lines: list[str]) -> list[str]:
+    """`lines` without the one-line assignments of RETIRED_KEYS. Kept as it was unless the result reads as
+    exactly the same settings minus those keys (a value over several lines, or words inside a text, stay)."""
     heads = _headers(lines)
     drop: set[int] = set()
     for n, (i, name) in enumerate(heads):
@@ -1018,12 +1020,23 @@ def _drop_retired(lines: list[str]) -> list[str]:
             if name == table:
                 key_re = re.compile(rf"^\s*{re.escape(key)}\s*=")
                 drop.update(j for j in range(i + 1, end) if key_re.match(lines[j]))
-    return [x for j, x in enumerate(lines) if j not in drop]
+    if not drop:
+        return lines
+    out = [x for j, x in enumerate(lines) if j not in drop]
+    try:
+        want = tomllib.loads("".join(lines))
+        for table, key in RETIRED_KEYS:
+            if isinstance(want.get(table), dict):
+                want[table].pop(key, None)
+        return out if tomllib.loads("".join(out)) == want else lines
+    except tomllib.TOMLDecodeError:
+        return lines
 
 
 def set_key(root: Path, table: str, key: str, value: str | int | bool | None) -> None:
     """Set `key = "value"` inside [table], creating the table (and file) when needed.
-    `None` removes the key (and writes nothing when there is none). A retired key (RETIRED_KEYS) goes on the way."""
+    `None` removes the key (and writes nothing when there is none). A retired key (RETIRED_KEYS) goes on the
+    way."""
     p = path(root)
     lines = _drop_retired(p.read_text(encoding="utf-8").splitlines(keepends=True) if p.is_file() else [])
     if value is None and not any(re.match(rf"^\s*{re.escape(key)}\s*=", x) for x in lines):

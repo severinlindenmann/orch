@@ -283,8 +283,9 @@ def test_reserved_config(proj, section, key, default, valid):
 
 
 def test_the_retired_focus_preview_key_reads_without_error_and_goes_on_the_next_save(proj, run):
-    """ORCH-816: the new Focus is the only Focus; the old switch is no setting any more. A config file that still
-    has it is read as before, `orch config` does not know the key, and the next save drops it (other keys stay)."""
+    """ORCH-816: the new Focus is the only Focus; the old switch is no setting any more. A config file that
+    still has it is read as before, `orch config` does not know the key, and the next save drops it (other
+    keys stay)."""
     (proj / ".orch").mkdir(exist_ok=True)
     cfg = proj / ".orch" / "config.toml"
     cfg.write_text("[focus]\npreview = true\nsession_typing = false\n\n[workflow]\nreviewer = true\n")
@@ -301,6 +302,11 @@ def test_the_retired_focus_preview_key_reads_without_error_and_goes_on_the_next_
     cfg.write_text("[focus]\npreview = false\n[workflow]\nreviewer = true\n")
     config.set_key(proj, "workflow", "reviewer", False)
     assert "preview" not in cfg.read_text() and "[focus]" in cfg.read_text()
+    tricky = '[focus]\npreview = [\n  true,\n]\nnote = """\npreview = 1\n"""\n[workflow]\nreviewer = true\n'
+    # a value over several lines, or the words inside a text: left alone, the file stays valid
+    cfg.write_text(tricky)
+    config.set_key(proj, "workflow", "reviewer", False)
+    assert cfg.read_text() == tricky.replace("reviewer = true", "reviewer = false")
 
 
 def test_focus_session_typing_is_a_plain_setting(proj, run):
