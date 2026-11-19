@@ -368,6 +368,56 @@ def test_a_running_release_goes_on_while_a_review_runs(tmp_path):
     assert out["lines"][-1].startswith("release 31: waits for the Merge")
 
 
+# ------------------------------------------------ a fix pull request ends a problems hold (ORCH-789)
+
+FIX = change(3, ["relay/src/subs.rs"])
+
+
+def _fix_state(**kw3):
+    st = entry(card_sha="h2", qid="q7")
+    st["security"]["prs"]["3"] = {"sha": "h3", "tid": "t_sec3", "key": "SEC-3", **kw3}
+    return st
+
+
+def test_a_merged_fix_with_a_security_ok_ends_the_problems_hold(tmp_path):
+    v = {
+        "2": {"sha": "h2", "verdict": "problems", "line": "race", "fixed_by": 3},
+        "3": {"sha": "h3", "verdict": "ok", "line": "fine"},
+    }
+    out = go(tmp_path, changes=[SAFE, RELAY, FIX], state=_fix_state(), security_verdicts=v)
+    assert not any("waits for every security OK" in x for x in out["lines"])
+    assert any(d.startswith("dispatch:") for d in out["did"])  # the normal cut path starts
+
+
+def test_a_fix_without_its_own_ok_still_holds_and_says_why(tmp_path):
+    v = {
+        "2": {"sha": "h2", "verdict": "problems", "line": "race", "fixed_by": 3},
+        "3": {"sha": "h3", "verdict": "problems", "line": "still racy"},
+    }
+    out = go(tmp_path, changes=[SAFE, RELAY, FIX], state=_fix_state(card_sha="h3"), security_verdicts=v)
+    assert "#2 (security review found problems; its fix #3 has no security OK yet)" in out["lines"][-1]
+
+
+def test_a_fix_not_merged_in_this_release_still_holds(tmp_path):
+    v = {"2": {"sha": "h2", "verdict": "problems", "line": "race", "fixed_by": 3}}
+    out = go(tmp_path, state=entry(card_sha="h2", qid="q7"), security_verdicts=v)
+    assert out["lines"][-1] == (
+        "waits for every security OK: #2 (security review found problems; "
+        "its fix #3 is not merged in this release with a security review)"
+    )
+
+
+def test_an_ok_for_an_older_head_of_the_fix_does_not_count(tmp_path):
+    v = {
+        "2": {"sha": "h2", "verdict": "problems", "line": "race", "fixed_by": 3},
+        "3": {"sha": "old", "verdict": "ok", "line": "fine"},
+    }
+    st = _fix_state()
+    st["security"]["prs"]["3"]["sha"] = "old"
+    out = go(tmp_path, changes=[SAFE, RELAY, FIX], state=st, security_verdicts=v, open_reviews=["t_sec3"])
+    assert "#2 (security review found problems; its fix #3 has no security OK yet)" in out["lines"][-1]
+
+
 # ---------------------------------------------------------------- the verdict command
 
 
@@ -407,6 +457,49 @@ def test_only_the_review_helper_of_that_pull_request_records_it(tmp_path, monkey
         secreview.verdict(root, 5, "ok", "fine", "human:owner", "h2")
     with pytest.raises(Refused, match="one line"):
         secreview.verdict(root, 2, "ok", "   ", "human:owner", "h2")
+
+
+H2 = "a2b2c2d" + "0" * 33
+
+
+def test_a_person_links_the_fix_of_a_problems_finding(tmp_path, monkeypatch):
+    from orch import tickets, worktrees
+
+    root = tmp_path / "ws"
+    (root / ".orch").mkdir(parents=True)
+    _keeper_state(root, entry(sha=H2))
+    monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: None)
+    monkeypatch.setattr(tickets, "log", lambda *a, **k: {})
+    with pytest.raises(Refused, match="no problems verdict"):
+        secreview.link_fix(root, 2, 3, "human:owner")
+    secreview.verdict(root, 2, "problems", "race in subs", "human:owner", H2[:7])
+    with pytest.raises(Refused, match="not the same one"):
+        secreview.link_fix(root, 2, 2, "human:owner")
+    res = secreview.link_fix(root, 2, 3, "human:owner")
+    assert res["fixed_by"] == 3
+    got = secreview.read_verdicts(root)["2"]
+    assert got["verdict"] == "problems" and got["fixed_by"] == 3 and got["line"] == "race in subs"
+
+
+def test_a_recheck_under_the_review_ticket_may_record_but_another_helper_may_not(tmp_path, monkeypatch):
+    from orch import tickets, worktrees
+
+    root = tmp_path / "ws"
+    (root / ".orch").mkdir(parents=True)
+    _keeper_state(root, entry(sha=H2))
+    parents = {"t_recheck": "t_sec2", "t_deeper": "t_recheck", "t_other": "t_role"}
+    monkeypatch.setattr(tickets, "load", lambda r, t: {"id": t, "parent": parents.get(t)})
+    monkeypatch.setattr(tickets, "log", lambda *a, **k: {})
+    monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: "t_other")
+    with pytest.raises(Refused, match="sub-ticket of its review ticket \\(SEC-2\\)"):
+        secreview.verdict(root, 2, "problems", "race", "agent:claude", H2[:7])
+    monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: "t_deeper")
+    secreview.verdict(root, 2, "problems", "race", "agent:claude", H2[:7])
+    monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: "t_other")
+    with pytest.raises(Refused, match="Only the security review helper"):
+        secreview.link_fix(root, 2, 3, "agent:claude")
+    monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: "t_recheck")
+    assert secreview.link_fix(root, 2, 3, "agent:claude")["fixed_by"] == 3
 
 
 # ---------------------------------------------------------------- reading the release from git
