@@ -122,7 +122,7 @@ test('login and copy cards: Copy only, no Run it now, their own line', () => {
   const l = UI.runCard(item('login', {command: 'codex login'}), {primary: true});
   assert.equal(l.dataset.state, 'login');
   assert.equal(l.byAct('run'), undefined);
-  assert.match(l.textContent, /This signs you in: run it in your terminal\./);
+  assert.match(l.textContent, /This is a sign-in: run it in your terminal\./);
   assert.ok(l.btns().includes('Copy'));
   const c = UI.runCard(item('copy', {command: 'git log -5', changes: 'x', undo: 'y'}), {});
   assert.equal(c.byAct('run'), undefined);

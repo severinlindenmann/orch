@@ -88,7 +88,7 @@ async function runCardClick({ticket, key, digest, confirmed}) {
   return {ok:false, error:String(r.text || 'Could not run it.').slice(0, 300)};
 }
 // The Run it now card of a question on Home and the ticket page (outlined button; Review has the filled one). The other
-// answer goes through the same signed answer as Review's (op review.answer, verdict no).
+// answer goes through the same answer as Review's (op review.answer, verdict no).
 function runCardNode(ticketId, q) {
   if (!window.UI?.runCard || !q?.card || q.card.kind !== 'run' || !q.card.run) return null;
   const card = q.card, key = String(q.id || '');

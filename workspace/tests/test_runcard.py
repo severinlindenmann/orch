@@ -533,10 +533,10 @@ def test_a_typed_comment_saying_it_ran_is_refused(tk, run):
 
 def test_login_is_only_for_a_sign_in_and_carries_orchs_words(tk, run):
     _root, tid = tk
-    code, out, err = _ask(run, tid, "brew uninstall git", "--login", "--changes", "Signs you in to GitHub")
+    code, out, err = _ask(run, tid, "brew uninstall git", "--login", "--changes", "Logs you in to GitHub")
     assert code == 2 and "sign-in command" in out + err
     q = _card(run, tid, "gh auth login", "--changes", "Deletes nothing")
-    assert q["card"]["run"]["changes"] == "Signs you in again"
+    assert q["card"]["run"]["changes"] == "Sign in again"
 
 
 def test_an_answer_changed_later_never_says_it_ran(tk, run):

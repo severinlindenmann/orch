@@ -60,7 +60,7 @@ UI.runCard=(item,o)=>{o=o||{};item=item||{};const r=item.run||{},cmd=String(r.co
   body.push(box);
   if(st==='waiting')body.push(el('p','meta run-where','Runs in '+cwd));
   if(st==='phone')body.push(el('p','run-help','The phone runs only orch’s own commands. Run this one at your computer.'));
-  if(st==='login')body.push(el('p','run-help','This signs you in: run it in your terminal.'));
+  if(st==='login')body.push(el('p','run-help','This is a sign-in: run it in your terminal.'));
   if(st==='copy')body.push(el('p','meta run-unchecked','orch did not check this command. Read it before you run it in your terminal.'));
   if(st==='confirm'){const k=el('div','banner attn run-confirm'),g=el('div','grow'),p=el('p','','It runs exactly this, in '+cwd+': '),code=el('code','run-code',cmd);p.append(code);
    g.append(el('strong','','This is not an orch command'),p);const a=el('div','run-row'),c=btn('outline sm','Cancel',()=>setSt('waiting','[data-act="run"]')),g2=btn('primary sm','Run it now',()=>run(true));c.dataset.act='cancel';g2.dataset.act='confirmed';a.append(c,g2);k.append(g,a);body.push(k)}

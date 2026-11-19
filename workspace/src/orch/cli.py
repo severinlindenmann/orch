@@ -796,7 +796,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     g.add_argument("--changes", metavar="LINE", help="with --run (not an orch command): what it changes")
     g.add_argument("--undo", metavar="LINE", help="with --run (not an orch command): how to undo it")
     g.add_argument(
-        "--login", action="store_true", help="with --run: it signs the person in (needs a terminal)"
+        "--login", action="store_true", help="with --run: a sign-in for the person (needs a terminal)"
     )
     g.add_argument("--then", help="what happens after the answer (needed with a card)")
     g.add_argument("--why", help="why this is asked (one line)")

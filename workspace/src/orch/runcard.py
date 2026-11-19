@@ -232,7 +232,7 @@ def parse(root: Path, command, changes=None, undo=None, *, login: bool = False) 
         _refuse("--login is for a sign-in command such as codex login or gh auth login.")
     if _login(argv):  # orch's own words, never the helper's
         _line(changes, "changes"), _line(undo, "undo")
-        spec.update({"class": "login", "exe": None, "changes": "Signs you in again"})
+        spec.update({"class": "login", "exe": None, "changes": "Sign in again"})
         return spec
     if base == "orch":
         if prog != "orch":
@@ -534,7 +534,7 @@ def _checked(
     if via == "phone" and not (PHONE_RUN and spec["class"] == "orch"):
         _refuse("The phone runs only orch's own commands. Run this one at your computer.")
     if spec["class"] == "login":
-        _refuse("This one signs you in, so it needs a terminal: copy it and run it in your terminal.")
+        _refuse("This one is a sign-in, so it needs a terminal: copy it and run it in your terminal.")
     if spec["class"] == "copy":
         _refuse("This command runs in your own terminal: copy it and run it there.")
     if spec["class"] == "other" and not confirmed:
