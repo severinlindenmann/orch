@@ -143,6 +143,9 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("session.new", {"kind": "ticket"}),
         ("session.new", {"kind": "empty", "ticket": "t_abcdef"}),
         ("session.new", {}),
+        ("session.new", {"kind": "chat", "model": "opus"}),  # ORCH-710: only the Empty helper takes a model
+        ("session.new", {"kind": "empty", "model": "auto"}),
+        ("session.new", {"kind": "empty", "model": "gpt"}),
         ("addon.start", {"name": "x"}),
         (
             "pull.merge",
@@ -319,6 +322,10 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
         ({"op": "session.new", "args": {"kind": "empty"}}, ["session", "new", "empty", *common]),
         ({"op": "session.new", "args": {"kind": "terminal"}}, ["session", "new", "terminal", *common]),
+        (  # ORCH-710: the Empty helper starts on the model the person picked in the New menu
+            {"op": "session.new", "args": {"kind": "empty", "model": "sonnet"}},
+            ["session", "new", "empty", "--model", "sonnet", *common],
+        ),
         (
             {
                 "op": "pull.merge",
