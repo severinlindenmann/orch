@@ -293,7 +293,7 @@ def known_recipes() -> list[dict]:
 def recipes(root: Path) -> list[dict]:
     """Helper tools first, then the workspace's own (orch logins add), then its approved check files; a
     later name never replaces an earlier one. The known tools run only as check files the workspace added
-    (ORCH-833): a tool set up somewhere on this computer is not a sign this workspace uses it."""
+    (ORCH-833): a tool set up somewhere on this computer does not mean this workspace uses it."""
     from orch import checkfiles
 
     out, taken = [], set()

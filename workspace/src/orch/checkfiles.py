@@ -3,7 +3,7 @@
 Each workspace says which tools, logins, connections and keys it depends on, how to test each one, how often,
 and what to tell the person when a test fails. Nothing is checked unless the workspace asks for it: the
 built-in list (known_checks.json) never runs by itself; it is a library of templates (`orch checks add
-databricks --profile X`). A tool set up somewhere on this computer is not a sign this workspace uses it
+databricks --profile X`). A tool set up somewhere on this computer does not mean this workspace uses it
 (ORCH-833): the setup task asks the person which ones it uses, and a workspace without the folder is shown
 a notice naming the tools found here.
 
