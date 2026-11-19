@@ -500,13 +500,17 @@ def test_orchs_own_background_pages_are_never_found(cli, mac, tools, ws):
     assert found["process:962"]["name"] == "watcher.py"  # an interpreter shows the script, also as Python
 
 
-def test_orchs_add_on_servers_are_never_found_by_their_recorded_pid(cli, mac, tools, ws):
+def test_orchs_add_on_servers_are_never_found_by_their_recorded_pid(
+    cli, mac, tools, ws, monkeypatch, tmp_path
+):
     # r-1119-1255-ws-3: a program path with a space splits in `ps`, so the command line alone cannot tell orch's own
     # servers; the pids orch recorded when it started them can.
     from orch import services as core
 
-    p = core.running_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
+    p = (
+        tmp_path / "running.json"
+    )  # the core's record of running add-ons (its home is not set up in this test)
+    monkeypatch.setattr(core, "running_path", lambda: p)
     p.write_text(
         json.dumps([{"workspace": str(ws), "addon": "focus", "pid": 965, "url": None}]), encoding="utf-8"
     )
