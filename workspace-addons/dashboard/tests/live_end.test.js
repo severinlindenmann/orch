@@ -71,6 +71,12 @@ test('End asks once; Start again ends then starts; a closed terminal pane goes a
   assert.match(source, /m\.kind === 'terminal' && typeof liveLayerDo === 'function'\) liveLayerDo\(\{type:'close', key:id\}\)/);
 });
 
+test('a choice in a narrow pane\'s More closes More first; the pane header follows a login change', () => {
+  assert.match(source, /b\.closest\('#live-dock'\)[\s\S]{0,160}const menu = liveLayerModel\(\)\.menu;\n\s+if \(menu\) liveLayerDo\(\{type:'menu', menu\}\);/);
+  const layer = fs.readFileSync(path.join(web, 'pages/live-layer.js'), 'utf8');
+  assert.match(layer, /\(m => \[m\.busy, m\.hung\]\)\(liveEndModel\(x\.live\)\)/);
+});
+
 test('the pane, the wall and the bar all use it, and the page loads it before the layer', () => {
   const index = fs.readFileSync(path.join(web, 'index.html'), 'utf8');
   const at = index.indexOf('pages/live-end.js');

@@ -139,6 +139,11 @@ if (typeof module === 'object' && module.exports) {
     }
     if (b.disabled) return;
     e.preventDefault(); e.stopPropagation();
+    // from a narrow pane's More: More closes, the question opens under the header in its place
+    if (b.closest('#live-dock') && typeof liveLayerModel === 'function' && typeof liveLayerDo === 'function') {
+      const menu = liveLayerModel().menu;
+      if (menu) liveLayerDo({type:'menu', menu});
+    }
     const id = b.dataset.id, s = liveEndOf(id), m = liveEndModel(s), what = b.dataset.liveEnd;
     if (what === 'menu' || what === 'ask') {
       const where = b.dataset.where || 'pane:' + id;
