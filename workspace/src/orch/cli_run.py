@@ -580,6 +580,9 @@ def dispatch(args, root: Path) -> bool:
             if args.priority not in (None, "low") or args.mode not in (None, "oneshot"):
                 raise Refused("--prepare always runs one step at a time, in the low-priority line.")
             r = runs.start(root, tid, by, agent=agent, prepare=True)
+            if r.get("skipped"):  # a guard said no, without an AI call (ORCH-741)
+                _out(args, r, f"Not prepared: {r['skipped']}. The ticket stays as it is; Start still works.")
+                return True
             _out(
                 args,
                 r,

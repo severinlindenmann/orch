@@ -636,6 +636,14 @@ def _release_merge_set(a):
     return ["config", "set", "workflow.release_merge", "on" if a["on"] else "off"], [], []
 
 
+def _prepare_set(a):
+    """Settings > Prepare tickets when I save: `orch config set workflow.prepare_on_save` (ORCH-741)."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "workflow.prepare_on_save", "on" if a["on"] else "off"], [], []
+
+
 def _live_set(a):
     """Settings > Helper > Helpers at once: null = no limit, else 2 to 10; `orch config set workspace.live_max`."""
     _only(a, ("max",))
@@ -1225,6 +1233,7 @@ OPS = {
     "workflow.set": _workflow_set,
     "reviewer.set": _reviewer_set,
     "release_merge.set": _release_merge_set,
+    "prepare.set": _prepare_set,
     "live.set": _live_set,
     "diag.set": _diag_set,
     "typing.set": _typing_set,
@@ -1676,6 +1685,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             "workflow.set",
             "reviewer.set",
             "release_merge.set",
+            "prepare.set",
             "live.set",
             "copies.set",
             "copies.clean",

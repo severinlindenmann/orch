@@ -284,3 +284,27 @@ def test_end_shows_local_time_with_zone_and_the_history_line_has_the_date(cli, f
     assert store.history(ws)[0]["what"] == f"rule ends {local}"
     _, text, _ = cli("history")
     assert f"rule ends {local}" in text
+
+
+def test_usage_shows_how_many_tickets_were_prepared_of_the_daily_limit(cli, fake_switcher, ws):
+    """ORCH-741: the daily Prepare limit per workspace is shown in Usage (orch core counts and enforces it)."""
+    import time
+
+    from orch_usage.cli import PREPARE_DEFAULT_LIMIT, prepare_use
+
+    assert prepare_use(ws) == {"on": True, "used": 0, "limit": PREPARE_DEFAULT_LIMIT}
+    now = time.time()
+    run = ws / ".orch" / "run"
+    run.mkdir(parents=True, exist_ok=True)
+    (run / "prepare-starts.json").write_text(json.dumps({"starts": [now - 25 * 3600, now - 60, now - 5]}))
+    (ws / ".orch" / "config.toml").write_text("[workflow]\nprepare_daily_limit = 12\n")
+    assert prepare_use(ws, now) == {"on": True, "used": 2, "limit": 12}
+    code, d = jrun(cli, "list")
+    assert code == 0 and d["prepare"] == {"on": True, "used": 2, "limit": 12}
+    code, out, _ = cli("list")
+    assert "Preparing tickets on Save: 2 of 12 in the last 24 hours" in out
+    (ws / ".orch" / "config.toml").write_text(
+        "[workflow]\nprepare_on_save = false\nprepare_daily_limit = -3\n"
+    )
+    assert prepare_use(ws, now) == {"on": False, "used": 2, "limit": PREPARE_DEFAULT_LIMIT}
+    assert "Preparing tickets on Save: off" in cli("list")[1]

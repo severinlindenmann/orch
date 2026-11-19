@@ -1644,13 +1644,18 @@ def start_prepare(root: Path, tid: str, by: str, *, agent: str | None = None) ->
     ticket is filled), in the low-priority line behind work a person started, the ticket stays in Backlog.
     When it cannot run now it waits in line (Busy, pending); when it cannot run at all the ticket stays as
     saved with "Not prepared yet" (Refused), and Start still works."""
-    from orch import runs_live
+    from orch import prepare, runs_live
 
     ticket = tickets.load(root, tid)
     if ticket.get("status") != "open" or ticket.get("started") or tickets.hidden_kind(ticket):
         raise Refused("Only a ticket in Backlog that no helper started yet can be prepared.")
     if running(root, tid):
         raise Refused("A helper already works on this ticket.")
+    why = prepare.skip_reason(root, ticket)  # the guards, no AI call (ORCH-741)
+    if why:
+        _drop_prepare_slot(root, tid)
+        return {"ticket": tid, "prepare": True, "skipped": why}
+    counted: float | None = None
     try:
         brake.check_start(root, tid, runs_live.AUTOMATION_BY)  # counted like an automatic start (R8.6)
         hit = runs_live._full(root)
@@ -1665,15 +1670,37 @@ def start_prepare(root: Path, tid: str, by: str, *, agent: str | None = None) ->
             raise Busy(
                 f"{runs_live.ref(root, tid)} is prepared when a helper is free: {why}", {"pending": True}
             )
+        counted = time.time()
+        if not prepare.take(root, counted):  # the daily limit per workspace (ORCH-741)
+            counted = None
+            _drop_prepare_slot(root, tid)
+            tickets.set_prepare(root, tid, "not_prepared", "orch", why=prepare.LIMIT_WHY)
+            return {"ticket": tid, "prepare": True, "skipped": prepare.LIMIT_WHY}
         r = start(root, tid, by, mode="oneshot", agent=agent, priority="low", _prepare=True)
     except Busy:
+        if counted is not None:
+            prepare.give_back(root, counted)
         raise
     except Exception as e:
+        if counted is not None:
+            prepare.give_back(root, counted)
         with contextlib.suppress(Exception):
             tickets.set_prepare(root, tid, "not_prepared", "orch", why=str(e) or e.__class__.__name__)
         raise
     r["prepare"] = True
     return r
+
+
+def _drop_prepare_slot(root: Path, tid: str) -> None:
+    """A prepare run that will not happen gives up its place in line (a person's queued Start stays)."""
+    with contextlib.suppress(Exception), locked(root, tid):
+        items = _pending_read(root, tid)
+        keep = [
+            i for i in items
+            if i.get("delivered_at") or i.get("via") != "slots" or not i.get("prepare")
+        ]  # fmt: skip
+        if len(keep) != len(items):
+            _pending_write(root, tid, keep)
 
 
 def _start_pressed(root: Path, tid: str) -> str | None:

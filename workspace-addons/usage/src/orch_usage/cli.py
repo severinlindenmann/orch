@@ -298,6 +298,42 @@ def _period_start(period: str, lim: dict, at: datetime) -> str | None:
     return lim.get("since")
 
 
+PREPARE_DEFAULT_LIMIT = 30  # = orch.config.DEFAULT_PREPARE_DAILY_LIMIT (this add-on does not import orch)
+
+
+def prepare_use(root: Path, now: float | None = None) -> dict:
+    """Preparing tickets on Save (ORCH-741): {"on", "used" in the last 24 hours, "limit" per day}. Read from
+    the files orch core writes (.orch/config.toml [workflow], .orch/run/prepare-starts.json)."""
+    import time
+    import tomllib
+
+    now = time.time() if now is None else now
+    try:
+        wf = tomllib.loads((root / ".orch" / "config.toml").read_text(encoding="utf-8")).get("workflow", {})
+    except (OSError, ValueError):
+        wf = {}
+    wf = wf if isinstance(wf, dict) else {}
+    lim = wf.get("prepare_daily_limit")
+    ok = isinstance(lim, int) and not isinstance(lim, bool) and 0 <= lim <= 1000
+    try:
+        starts = json.loads((root / ".orch" / "run" / "prepare-starts.json").read_text(encoding="utf-8"))
+        starts = starts.get("starts") if isinstance(starts, dict) else []
+    except (OSError, ValueError):
+        starts = []
+    used = sum(1 for x in starts or [] if isinstance(x, (int, float)) and 0 <= now - x < 24 * 3600)
+    return {
+        "on": wf.get("prepare_on_save", True) is True,
+        "used": used,
+        "limit": lim if ok else PREPARE_DEFAULT_LIMIT,
+    }
+
+
+def prepare_text(p: dict) -> str:
+    if not p["on"]:
+        return "Preparing tickets on Save: off (Settings)"
+    return f"Preparing tickets on Save: {p['used']} of {p['limit']} in the last 24 hours"
+
+
 def gather(root: Path) -> dict:
     """Sync what the readers see, let ended rules fall back, and return accounts with their use."""
     warnings: list[str] = []
@@ -343,7 +379,12 @@ def gather(root: Path) -> dict:
         )
     mem = switching._read(switching.memory_path(root))  # what the loop's last look found (ORCH-620)
     warnings += [w for w in mem.get("alerts") or [] if isinstance(w, str)]
-    return {"accounts": out, "switcher": found is not None, "warnings": warnings}
+    return {
+        "accounts": out,
+        "switcher": found is not None,
+        "warnings": warnings,
+        "prepare": prepare_use(root),
+    }
 
 
 # ---------------------------------------------------------------- output
@@ -424,6 +465,7 @@ def run(args) -> int:
                 lines.append(f"   {use}")
         if not lines:
             lines = ["No accounts yet."]
+        lines.append(prepare_text(data["prepare"]))
         lines += [f"Warning: {w}" for w in data["warnings"]]
         lines.append("Next: orch usage limit <account> <number>  (or period / order / on / off / end)")
         print("\n".join(lines))

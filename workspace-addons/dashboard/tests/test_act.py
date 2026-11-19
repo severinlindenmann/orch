@@ -1047,6 +1047,20 @@ def test_release_merge_switch_is_one_config_set_by_a_human():
         build_argv("release_merge.set", {"on": "yes"})
 
 
+def test_prepare_switch_is_one_config_set_by_a_human():
+    """Settings > Prepare tickets when I save (ORCH-741)."""
+    from orch_dashboard.actions import build_argv
+
+    for on in (True, False):
+        argv = build_argv("prepare.set", {"on": on})
+        assert argv[:4] == ["config", "set", "workflow.prepare_on_save", "on" if on else "off"]
+        assert argv[argv.index("--by") + 1].startswith("human:")
+    with pytest.raises(actions.BadRequest):
+        build_argv("prepare.set", {"on": "yes"})
+    with pytest.raises(actions.BadRequest):
+        build_argv("prepare.set", {"on": True, "limit": 5})
+
+
 def test_browser_actions_do_not_inherit_the_servers_agent_identity(ws, monkeypatch):
     from orch.adapters import detect_env
 

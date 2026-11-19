@@ -1689,6 +1689,14 @@ def set_status(
     if superseded_by is not None and status != "dropped":
         raise Refused("--superseded-by goes with the status dropped (Won't do).")
     other = superseded_value(root, tid, superseded_by) if superseded_by is not None else None
+    if (agent_tool() or by.startswith("agent:")) and not person:
+        from orch import prepare
+
+        if prepare.running_prepare(root, tid):  # Prepare only fills the ticket (ORCH-741)
+            raise Refused(
+                "This ticket is being prepared: Prepare never changes its status. It stays in Backlog "
+                "until a person starts it."
+            )
 
     def op(ticket):
         target, actor = _finish_status(root, ticket, status, by, person)
