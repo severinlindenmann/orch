@@ -118,8 +118,14 @@ def add_parsers(sub, common) -> None:
             x.add_argument(
                 "--priority",
                 choices=runs_live.PRIORITIES,
-                default="normal",
+                default=None,
                 help="when every slot is taken: where it waits in line (default normal)",
+            )
+            x.add_argument(
+                "--prepare",
+                action="store_true",
+                help="only prepare the ticket (title, description, done-when, estimate, steps), no work: it "
+                "stays in Backlog, marked Prepared, and a later start continues that conversation",
             )
             x.add_argument(
                 "--credit-keyname",
@@ -584,6 +590,18 @@ def dispatch(args, root: Path) -> bool:
         _out(args, p, "\n".join(p["argv"]))
     elif sub == "start":
         agent = args.agent
+        if args.prepare:
+            if args.reopen or args.credit_keyname or args.take_over or args.allow or args.text:
+                raise Refused("--prepare takes only --agent: it is always a fresh, one-step run.")
+            if args.priority not in (None, "low") or args.mode not in (None, "oneshot"):
+                raise Refused("--prepare always runs one step at a time, in the low-priority line.")
+            r = runs.start(root, tid, by, agent=agent, prepare=True)
+            _out(
+                args,
+                r,
+                f"Preparing the ticket ({r['agent']}); it stays in Backlog. Run {r['run']}. Log: {r['log']}",
+            )
+            return True
         if args.reopen:
             if args.fresh:
                 raise Refused("Pick one: --fresh starts without a conversation, --session continues one.")
@@ -601,7 +619,7 @@ def dispatch(args, root: Path) -> bool:
             mode=args.mode,
             text=args.text,
             agent=agent,
-            priority=args.priority,
+            priority=args.priority or "normal",
             credit=_credit(args),
         )
         for note in r["notes"]:
