@@ -256,6 +256,8 @@ def _show(t: dict, root: Path) -> str:
     if modelpick.label(t):
         reason = modelpick.why(t)
         extra.append(f"Model: {modelpick.label(t)}" + (f": {reason}" if reason else ""))
+    if tickets.kind(t):  # ORCH-645
+        extra.append(f"Kind: {tickets.KINDS[tickets.kind(t)]}")
     extra.append("Human review needed: " + ("yes" if tickets.human_review(t) else "no"))  # ORCH-424
     if extra:
         out.append("  ".join(extra))
@@ -650,6 +652,18 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--description", help="what it is about and why, 1 to 3 sentences (the agent's own field)")
     x.add_argument("--estimate-minutes", type=int, help="your estimate of the helper time, in whole minutes")
     x.add_argument("--estimate-cost", type=float, help="your estimate of the cost in dollars at list price")
+    x.add_argument(
+        "--kind",
+        choices=("bug", "small_bug", "feature", "small_feature", "draft", "other"),
+        help="what kind of work it is (draft = drafts, mockups, designs, look changes)",
+    )
+    x = t.add_parser(
+        "kind",
+        parents=[common],
+        help="what kind of work a ticket is: bug, small_bug, feature, small_feature, draft or other",
+    )
+    x.add_argument("id")
+    x.add_argument("name", choices=("bug", "small_bug", "feature", "small_feature", "draft", "other"))
     x = t.add_parser(
         "model",
         parents=[common],
@@ -1278,8 +1292,11 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "tidy":
         fields = {k: getattr(args, k) for k in ("owner", "due", "done_when") if getattr(args, k)}
         est = {"minutes": args.estimate_minutes, "cost": args.estimate_cost}
-        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est)
+        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est, args.kind)
         _out(args, t, f'Tidied: "{t["title"]}"')
+    elif cmd == "ticket" and sub == "kind":
+        t = tickets.set_kind(root, args.id, args.name, by())
+        _out(args, t, f"Kind: {tickets.KINDS[tickets.kind(t)]}")
     elif cmd == "ticket" and sub == "model" and args.name == "up":
         from orch import modelpick
         from orch import runs_live as _live

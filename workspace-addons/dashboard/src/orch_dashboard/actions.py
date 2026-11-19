@@ -628,6 +628,28 @@ def _reviewer_set(a):
     return ["config", "set", "workflow.reviewer", "on" if a["on"] else "off"], [], []
 
 
+REVIEWER_KINDS = ("bug", "small_bug", "feature", "small_feature", "other")  # never draft (ORCH-645)
+TICKET_KINDS = ("bug", "small_bug", "feature", "small_feature", "draft", "other")
+
+
+def _reviewer_kinds(a):
+    """Settings > Accept small finished work for me > kinds: `orch config set workflow.reviewer_kinds`
+    (only a person; draft is refused by orch itself)."""
+    _only(a, ("kinds",))
+    kinds = a.get("kinds")
+    if not isinstance(kinds, list) or any(k not in REVIEWER_KINDS for k in kinds):
+        raise BadRequest("Pick kinds from: Bug, Small bug, New feature, Small feature, Other.")
+    return ["config", "set", "workflow.reviewer_kinds", ",".join(dict.fromkeys(kinds)) or "none"], [], []
+
+
+def _ticket_kind(a):
+    """What kind of work a ticket is (ORCH-645): `orch ticket kind`."""
+    _only(a, ("ticket", "kind"))
+    if a.get("kind") not in TICKET_KINDS:
+        raise BadRequest("Pick a kind: Bug, Small bug, New feature, Small feature, Draft or design, Other.")
+    return ["ticket", "kind", _tid(a.get("ticket")), a["kind"]], [], []
+
+
 def _release_merge_set(a):
     """Settings > Merge releases without my click: `orch config set workflow.release_merge` (only a person)."""
     _only(a, ("on",))
@@ -1183,6 +1205,7 @@ OPS = {
     "ticket.edit": _ticket_edit,
     "ticket.order": _ticket_order,
     "ticket.model": _ticket_model,
+    "ticket.kind": _ticket_kind,
     "log": _log,
     "chat.say": _chat_say,
     "chat.make_ticket": _chat_make_ticket,
@@ -1219,6 +1242,7 @@ OPS = {
     "ref.rm": _ref_rm,
     "workflow.set": _workflow_set,
     "reviewer.set": _reviewer_set,
+    "reviewer.kinds": _reviewer_kinds,
     "release_merge.set": _release_merge_set,
     "live.set": _live_set,
     "diag.set": _diag_set,
@@ -1670,6 +1694,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             "workspace.set",
             "workflow.set",
             "reviewer.set",
+            "reviewer.kinds",
             "release_merge.set",
             "live.set",
             "copies.set",
