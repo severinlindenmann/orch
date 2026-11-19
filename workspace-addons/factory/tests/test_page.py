@@ -975,6 +975,22 @@ def test_needs_lists_the_stage_review_with_the_commands_that_answer_it(ws, run):
     assert run("needs") == []
 
 
+def test_needs_reads_only_the_factory_tickets(ws, run):
+    """ORCH-603: at 10,000 tickets a full ticket list took 43 s and needs gave no answer in its 2 s: needs asks
+    core only for the tickets with Factory's data (orders, crew); an older core without that falls back."""
+    order, _ = started(ws, run)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    _built(ws, tid)
+    (ws / "no-full-list").touch()
+    (row,) = run("needs")
+    assert row["id"] == f"factory:review:{order}:build" and row["tickets"] == [tid]
+    (ws / "no-full-list").unlink()
+    (ws / "old-core").touch()
+    (row,) = run("needs")
+    assert row["id"] == f"factory:review:{order}:build"
+
+
 def test_a_review_without_proof_says_nothing_was_recorded(ws, run, srv):
     order, _ = started(ws, run)
     run("next", order)

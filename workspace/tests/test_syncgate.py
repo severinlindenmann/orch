@@ -238,7 +238,7 @@ def test_concurrent_writers_all_wait_for_gate_and_land(proj, other):
     while time.monotonic() < deadline:
         assert not landed
         time.sleep(0.02)
-    syncgate.gate_path(proj).unlink()
+    procs.unlink(syncgate.gate_path(proj))  # Windows: the waiting writers read it; plain unlink fails
     for t in ths:
         t.join(20)
     assert not errors and sorted(landed) == list(range(n))

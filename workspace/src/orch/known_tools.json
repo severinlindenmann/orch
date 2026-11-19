@@ -1,0 +1,39 @@
+{
+  "_doc": "How orch finds the newest version, the update notes and the update of a tool (toolupdates.py). Keyed by the tool's command name; the helper tools' recipes are in agents/updates.json. latest/notes: npm | pypi | github (releases; tag_prefix) | github_file (o/r/branch/path, '## x.y.z' sections) | brew / cask (Homebrew API). installs: how orch recognises an install from the real path of the command; the first that matches is used, none: the person updates it themselves.",
+  "tools": {
+    "gh": {
+      "label": "GitHub CLI",
+      "latest": {
+        "github": "cli/cli",
+        "tag_prefix": "v"
+      },
+      "notes": {
+        "github": "cli/cli",
+        "tag_prefix": "v"
+      },
+      "installs": [
+        {
+          "via": "brew",
+          "formula": "gh"
+        }
+      ]
+    },
+    "databricks": {
+      "label": "Databricks CLI",
+      "latest": {
+        "github": "databricks/cli",
+        "tag_prefix": "v"
+      },
+      "notes": {
+        "github": "databricks/cli",
+        "tag_prefix": "v"
+      },
+      "installs": [
+        {
+          "via": "brew",
+          "formula": "databricks"
+        }
+      ]
+    }
+  }
+}
