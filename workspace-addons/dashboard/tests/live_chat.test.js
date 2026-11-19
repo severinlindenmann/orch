@@ -112,8 +112,9 @@ test('Chat or Terminal is kept per browser; chat is the default and broken data 
   assert.deepEqual(plain(C.liveViewRead(null)), {});
 });
 
-test('the page loads the chat before the layer that uses it', () => {
+test('the page loads the chat before the layer that uses it and the server serves it', () => {
   const html = fs.readFileSync(path.join(web, 'index.html'), 'utf8');
   const chat = html.indexOf('pages/livechat.js'), layer = html.indexOf('pages/live-layer.js');
   assert.ok(chat > 0 && chat < layer);
+  assert.match(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/server.py'), 'utf8'), /\|livechat[|)]/, 'the server serves it');
 });
