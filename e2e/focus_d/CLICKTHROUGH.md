@@ -102,13 +102,15 @@ Must be seen:
 Do:
 
 1. Open Tickets and press the Focus button of a row.
-2. Open a ticket page and press its Focus button.
-3. In the session press Open ticket, also from full screen.
+2. Press Answer on a waiting row and answer with the keyboard, then Esc.
+3. Open a ticket page and press its Focus button.
+4. In the session press Open ticket, also from full screen.
 
 Must be seen:
 
 - Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.
 - The session opens in the layer and the page stays.
+- After the answer the keyboard stays in the session; Esc steps back to the bar.
 - Open ticket goes back to the same ticket page; the session stays open.
 
 ## 7. Pin a session and give it your own name
