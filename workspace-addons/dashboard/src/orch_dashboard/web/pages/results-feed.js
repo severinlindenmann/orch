@@ -77,9 +77,9 @@ function resultsLinkItem(url, ref = {}, ev = {}) {
   const pr = RESULTS_PR.exec(url), title = resultsStr(ref.title) || resultsStr(ev.title);
   if (pr) {
     const issue = pr[2] === 'issues', status = resultsStr(ref.status);
-    const word = (issue ? 'Issue ' : 'Pull request ') + pr[3];
-    return {type:'pr', name:word, title:title && !/^(Issue|Pull request) #?\d+$/.test(title) ? title : '', status, href:url,
-      meta:(issue ? 'Issue' : 'Pull request') + (status ? ' · ' + status : ''), checks:resultsArr(ref.checks).filter(c => c && c.name),
+    const word = (issue ? 'GitHub issue ' : 'Pull request ') + pr[3];  // docs/wording.md: never "issue" alone
+    return {type:'pr', name:word, title:title && !/^(GitHub issue|issue|Pull request) #?\d+$/i.test(title) ? title : '', status, href:url,
+      meta:(issue ? 'GitHub issue' : 'Pull request') + (status ? ' · ' + status : ''), checks:resultsArr(ref.checks).filter(c => c && c.name),
       key:'url:' + url.replace(/[#?].*$/, ''), at:ref.at || ev.at || ''};
   }
   let host = url;

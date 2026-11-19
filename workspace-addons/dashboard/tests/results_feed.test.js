@@ -93,8 +93,8 @@ test('files the person attached themselves are not results; files of other ticke
   assert.equal(items[1].src, '/api/file?t=t_abcdef&k=evidence&n=shot.png');
 });
 
-test('an issue link is an issue, a plain address a link, never a script address', () => {
-  assert.equal(F.resultsLinkItem('https://github.com/o/r/issues/7').name, 'Issue 7');
+test('a GitHub issue link says GitHub issue, a plain address a link, never a script address', () => {
+  assert.equal(F.resultsLinkItem('https://github.com/o/r/issues/7').name, 'GitHub issue 7');
   assert.equal(F.resultsLinkItem('https://example.com/a').type, 'link');
   const t = {id: 't_abcdef', refs: [{kind: 'url', url: 'javascript:alert(1)'}, {kind: 'url', url: 'http://plain.example.com'}], checklist: []};
   assert.deepEqual(F.resultsItems(t, null), [], 'only https addresses');
