@@ -151,11 +151,12 @@ def test_add_needs_then_and_a_ticket(tk, run):
     assert code == 2
 
 
-def test_answer_ok_resumes_helper_and_records(tk, run, monkeypatch):
+def test_answer_ok_resumes_helper_and_records(tk, run, monkeypatch, person_grant):
     root, tid = tk
     q = _draft(run, tid)
     seen = []
     monkeypatch.setattr("orch.runs_live.pass_answer", lambda *a, **k: seen.append((a, k)))
+    person_grant(root)  # a signed-in page (ORCH-582: only a person picks a draft)
     code, out, err = run(
         "review", "answer", tid, q["id"], "--verdict", "ok", "--digest", _digest(root, tid, q["id"]),
         "--via", "page", "--by", ME, "--json",
@@ -168,10 +169,11 @@ def test_answer_ok_resumes_helper_and_records(tk, run, monkeypatch):
     assert json.loads(out)["cards"] == []
 
 
-def test_answer_talk_with_note_and_answered_list(tk, run):
+def test_answer_talk_with_note_and_answered_list(tk, run, person_grant):
     root, tid = tk
     q = _draft(run, tid)
     note = json.dumps({"changes": ["Shorter title."], "pins": [{"n": 1, "on": "title", "text": "here"}]})
+    person_grant(root)
     code, out, err = run(
         "review", "answer", tid, q["id"], "--verdict", "talk", "--note", note, "--by", ME, "--json"
     )
@@ -293,11 +295,12 @@ def test_answer_check_send_back_needs_note(tk, run):
     assert tickets.load(root, tid)["status"] not in ("review", "done")
 
 
-def test_ticket_show_lists_what_applies_now_and_the_answers(tk, run):
+def test_ticket_show_lists_what_applies_now_and_the_answers(tk, run, person_grant):
     root, tid = tk
     q = _draft(run, tid)
     code, out, _ = run("ticket", "show", tid)
     assert "Needs an answer" in out and "What applies now" not in out
+    person_grant(root)
     run("review", "answer", tid, q["id"], "--verdict", "ok", "--by", ME)
     code, out, _ = run("ticket", "show", tid)
     assert "What applies now" in out and "Build it" in out and "Answered q1:" in out
@@ -312,12 +315,13 @@ def test_ticket_show_plain_answer_is_listed(tk, run):
     assert "Answered q1: Ship it? - Yes" in out and "What applies now" not in out
 
 
-def test_wait_returns_the_answer_and_times_out(tk, run, monkeypatch):
+def test_wait_returns_the_answer_and_times_out(tk, run, monkeypatch, person_grant):
     root, tid = tk
     q = _draft(run, tid)
     monkeypatch.setattr("orch.cli_review.time.sleep", lambda s: None)
     code, out, err = run("review", "wait", tid, "--timeout", "0", "--json")
     assert code == 2 and json.loads(out)["code"] == "busy"
+    person_grant(root)
     run("review", "answer", tid, q["id"], "--verdict", "ok", "--via", "phone", "--by", ME)
     code, out, _ = run("review", "wait", tid)
     assert code == 0 and "(pat, phone," in out
@@ -333,7 +337,7 @@ def test_wait_polls_until_answered(tk, run, monkeypatch):
     def fake_sleep(_s):
         calls.append(1)
         if len(calls) == 2:
-            tickets.answer(root, tid, q["id"], "Yes", ME, "cli")
+            tickets.answer(root, tid, q["id"], "Yes", ME, "cli", person=True)
 
     monkeypatch.setattr("orch.cli_review.time.sleep", fake_sleep)
     code, out, _ = run("review", "wait", tid, q["id"])
@@ -420,11 +424,12 @@ def test_the_phone_card_leaves_out_the_today_picture():
     assert "before" not in wire["preview"] and wire["preview"]["options"][0]["preview"]["src"] == {"file": 0}
 
 
-def test_a_typed_comment_from_the_page_is_kept_with_the_answer(tk, run):
+def test_a_typed_comment_from_the_page_is_kept_with_the_answer(tk, run, person_grant):
     # the dashboard turns the page's {text, pins} into {words: {text}, pins} (actions._review_answer)
     root, tid = tk
     q = _draft(run, tid)
     note = json.dumps({"words": {"text": "Make the rows taller."}, "pins": []})
+    person_grant(root)  # the signed-in dashboard hands its call a person grant (ORCH-582)
     code, out, err = run(
         "review",
         "answer",
