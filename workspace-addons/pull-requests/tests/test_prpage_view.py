@@ -143,6 +143,16 @@ def test_the_queue_shows_its_groups_per_project_and_each_row_its_place(prws):
     assert table["meta"] == "5 open · 2 repositories"
 
 
+def test_a_queued_pull_request_with_failed_checks_is_in_the_queue_not_failed(prws):
+    add_ticket(prws, "t_aaaaa1", [{"url": PR.format(1)}])
+    poll.once(prws, fetch=FakeGitHub({"acme/app": [gql_pr(1, merge="BLOCKED", checks=fail_run("lint"))]}))
+    _queue(prws, 1, ticket="t_aaaaa1")
+    v = valid(view.build(prws, running=True, queue_alive=True))
+    (table,) = [b for b in v["blocks"] if b["type"] == "table"]
+    assert table["rows"][0]["cells"]["state"] == "1st in line"
+    assert "failed" not in table["rows"][0].get("subtitle", "").lower()
+
+
 def test_an_empty_queue_still_says_where_it_is(prws):
     (prws / ".orch" / "config.toml").write_text("[pull_requests]\nmax_group = 10\n", encoding="utf-8")
     add_ticket(prws, "t_aaaaa1", [{"url": PR.format(1)}])
