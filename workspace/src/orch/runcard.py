@@ -39,12 +39,12 @@ import shlex
 import shutil
 import signal
 import subprocess
-import sys
 import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from orch import agentsdata, procs
 from orch.errors import Refused
 
 POLICY = 1  # bump when the rules below change: a card made under older rules is refused at run time
@@ -89,10 +89,17 @@ def _other_op(argv: list[str]) -> bool:
     return False
 
 
+# Sign-in commands a card may type into the Focus terminal. Helper tools' own ones come from the built-in
+# adapter data (agents/login.json "card"), never from a workspace override.
 LOGINS = (
-    ("codex", "login"), ("gh", "auth", "login"), ("gh", "auth", "refresh"), ("claude", "login"),
-    ("claude", "setup-token"), ("az", "login"), ("gcloud", "auth", "login"), ("databricks", "auth", "login"),
-    ("orch", "logins", "renew"), ("npm", "login"), ("docker", "login"),
+    ("gh", "auth", "login"), ("gh", "auth", "refresh"), ("az", "login"), ("gcloud", "auth", "login"),
+    ("databricks", "auth", "login"), ("orch", "logins", "renew"), ("npm", "login"), ("docker", "login"),
+    *(
+        (a["detect"]["binary"], *argv)
+        for a in agentsdata.load()["adapters"].values()
+        if (a.get("detect") or {}).get("binary")
+        for argv in (a.get("login") or {}).get("card", ())
+    ),
 )  # fmt: skip
 
 _ONOFF = ("on", "off")
@@ -229,7 +236,7 @@ def parse(root: Path, command, changes=None, undo=None, *, login: bool = False) 
     base = prog.rsplit("/", 1)[-1]
     spec: dict = {"v": POLICY, "command": command, "argv": argv, "cwd": str(root.resolve())}
     if login and not _login(argv):
-        _refuse("--login is for a sign-in command such as codex login or gh auth login.")
+        _refuse("--login is for a sign-in command such as gh auth login.")
     if _login(argv):  # orch's own words, never the helper's
         _line(changes, "changes"), _line(undo, "undo")
         spec.update({"class": "login", "exe": None, "changes": "Sign in again"})
@@ -319,7 +326,7 @@ def check_spec(root: Path | None, spec) -> dict:
 
 def _orch_argv() -> list[str]:
     """This orch, by absolute path (never the PATH a helper may have changed)."""
-    return [sys.executable, "-I", "-m", "orch"]  # -I: no orch.py of the workspace folder, no PYTHON* settings
+    return procs.orch_python_argv()  # -I -P: no orch.py of the workspace folder, no PYTHON* settings
 
 
 def _env(root: Path) -> dict:
