@@ -456,3 +456,34 @@ def test_two_typing_requests_never_mix(helper, monkeypatch):
     [t.join() for t in ts]
     assert "".join(sent) in ("aaaaabbbbb", "bbbbbaaaaa")
     del termbridge._WATCHES[(SOCK[0], TID)]
+
+
+def test_a_late_answer_goes_to_its_own_read_not_the_next():
+    """A screen read that timed out stays owed: its late blocks are taken by it, the next read gets its own."""
+    import io
+
+    w = termbridge.Watch("orch-00000000", TID)
+    w.pane = "%0"
+    old = {"done": threading.Event(), "at": None, "blocks": [], "open": 0}
+    new = {"done": threading.Event(), "at": None, "blocks": [], "open": 0}
+    w._owed = [old, new]
+    meta = b"@@orch 0 0 80 24 0 1 1" + b" 0" * len(termbridge._FLAGS)
+
+    class Proc:
+        stdin = io.BytesIO()
+        stdout = io.BytesIO(
+            b"%begin 1 10 0\n%end 1 10 0\n"  # attach's own block: nobody's
+            b"%begin 1 11 1\nOLD SCREEN\n%end 1 11 1\n%begin 1 12 1\n" + meta + b"\n%end 1 12 1\n"
+            b"%output %0 between\\015\\012\n"
+            b"%begin 1 13 1\nNEW SCREEN\n%end 1 13 1\n%begin 1 14 1\n" + meta + b"\n%end 1 14 1\n"
+        )
+
+        def wait(self, timeout=None):
+            return 0
+
+    w.proc = Proc()
+    w._read()
+    assert old["blocks"][0] == (True, b"OLD SCREEN") and old["at"] == 0
+    assert new["blocks"][0] == (True, b"NEW SCREEN") and new["at"] == 1  # after the output it must not repeat
+    assert new["done"].is_set() and w._owed == []
+    assert termbridge.draw(b"x", b"@@orch 1 2") is None  # reads it cannot understand: no screen

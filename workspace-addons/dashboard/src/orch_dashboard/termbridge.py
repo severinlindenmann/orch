@@ -132,8 +132,8 @@ class Watch:
         self.size = (0, 0)
         self.proc: subprocess.Popen | None = None
         self.typing = threading.Lock()  # one typing request at a time
-        self._asking = threading.Lock()  # one screen read at a time
-        self._ask: dict | None = None  # the screen read under way: {done, at, blocks}
+        self._asking = threading.Lock()  # one screen read written at a time
+        self._owed: list[dict] = []  # screen reads waiting for their two answer blocks, oldest first
 
     def start(self) -> bool:
         """Attach the control client; False when the session is gone or tmux cannot."""
@@ -173,29 +173,22 @@ class Watch:
 
     def _read(self) -> None:
         out = self.proc.stdout if self.proc else None
-        block: tuple[list[bytes], bool, list[bytes]] | None = None  # (begin's time and number, ours, lines)
+        block = None  # (begin's time and number, the request it answers or None, lines)
         try:
             for raw in iter(out.readline, b"") if out else ():
                 line = raw.removesuffix(b"\n")
                 if block is not None:
                     word = line.split(b" ")
                     if word[0] in (b"%end", b"%error") and word[1:3] == block[0]:
-                        if block[1] and self._ask is not None:
-                            self._ask["blocks"].append((word[0] == b"%end", b"\n".join(block[2])))
-                            if len(self._ask["blocks"]) == 2:
-                                self._ask["done"].set()
+                        self._answered(block[1], word[0] == b"%end", b"\n".join(block[2]))
                         block = None
                     else:
                         block[2].append(line)
                 elif line.startswith(b"%begin "):
                     word = line.split(b" ")
-                    ours = word[3:4] == [b"1"]  # 1: a command this client sent (attach's own block says 0)
-                    block = (word[1:3], ours, [])
-                    if ours and self._ask is not None and self._ask["at"] is None:
-                        with self.cond:
-                            self._ask["at"] = (
-                                self.seq
-                            )  # the capture sees everything up to here, nothing after
+                    # 1: a command this client sent (attach's own block says 0); tmux answers them in order
+                    req = self._for_block() if word[3:4] == [b"1"] else None
+                    block = (word[1:3], req, [])
                 elif line.startswith(b"%output "):
                     _, pane, data = (line.split(b" ", 2) + [b""])[:3]
                     if pane.decode(errors="replace") == self.pane:
@@ -210,6 +203,27 @@ class Watch:
             pass
         self.close()
 
+    def _for_block(self) -> dict | None:
+        """The oldest screen read still owed an answer block; its first block marks where the capture stands."""
+        with self.cond:
+            req = next((r for r in self._owed if len(r["blocks"]) + r["open"] < 2), None)
+            if req is not None:
+                req["open"] += 1
+                if req["at"] is None:
+                    req["at"] = self.seq  # the capture sees everything up to here, nothing after
+            return req
+
+    def _answered(self, req: dict | None, ok: bool, text: bytes) -> None:
+        if req is None:
+            return
+        with self.cond:
+            req["open"] -= 1
+            req["blocks"].append((ok, text))
+            if len(req["blocks"]) == 2:
+                if req in self._owed:
+                    self._owed.remove(req)  # a read that timed out is still taken off here, by its own blocks
+                req["done"].set()
+
     def resized(self) -> None:
         """Read the pane's size again; tell the pages when it changed."""
         try:
@@ -223,26 +237,28 @@ class Watch:
 
     def screen(self) -> tuple[dict, int] | None:
         """(the screen to draw, the seq it shows everything up to). None: the session is gone or did not answer."""
-        with self._asking:
-            ask = {"done": threading.Event(), "at": None, "blocks": []}
-            self._ask = ask
+        req = {"done": threading.Event(), "at": None, "blocks": [], "open": 0}
+        with self._asking:  # one line written at a time, in the order of self._owed
+            if self.ended or self.proc is None or self.proc.stdin is None:
+                return None
+            with self.cond:
+                self._owed.append(req)
             try:
-                if self.ended or self.proc is None or self.proc.stdin is None:
-                    return None
                 self.proc.stdin.write(screen_cmd(self.pane))
                 self.proc.stdin.flush()
-                if not ask["done"].wait(termsession.TIMEOUT):
-                    return None
             except (OSError, ValueError):
+                with self.cond:
+                    self._owed.remove(req)
                 return None
-            finally:
-                self._ask = None
-        (ok1, capture), (ok2, meta) = ask["blocks"]
-        snap = draw(capture, meta) if ok1 and ok2 and ask["at"] is not None else None
+        if not req["done"].wait(termsession.TIMEOUT):
+            return None  # stays owed: its late blocks still go to it, never to the next read
+        with self.cond:
+            (ok1, capture), (ok2, meta), at = *req["blocks"], req["at"]
+        snap = draw(capture, meta) if ok1 and ok2 and at is not None else None
         if snap is None:
             return None
         self.size = (snap["cols"], snap["rows"])
-        return snap, ask["at"]
+        return snap, at
 
     def since(self, seq: int) -> tuple[list[tuple[int, str, bytes]], bool]:
         """What came after seq, and whether the page fell so far behind that it needs the screen again."""
