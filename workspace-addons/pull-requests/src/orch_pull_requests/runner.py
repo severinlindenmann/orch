@@ -645,8 +645,9 @@ class Runner:
 
     def precheck(self, git, start: str, sha: str, inside: list[dict], heads: dict[str, str]) -> list[dict]:
         """The quick checks on the merged tree before the group is pushed (setting precheck, ORCH-545). Green, not
-        set or trouble: []. Red: each member on its own on top of start; those red alone leave the queue now with
-        the failing lines and are returned. Red only together: [] (the group run and its split decide)."""
+        set or trouble: []. Red: the base (start) alone first; red there too (a broken command, a red base) blames
+        nobody: []. Else each member on its own on top of start; those red alone leave the queue now with the
+        failing lines and are returned. Red only together: [] (the group run and its split decide)."""
         cmd = settings.precheck(self.root)
         if not cmd:
             return []
@@ -654,6 +655,12 @@ class Runner:
         if got.ok is not False:
             if got.ok is None:
                 self.log(f"The precheck did not run ({got.tail}); the group run decides.")
+            return []
+        # red on the base itself (a broken command, or a base already red in it): nobody in the group is blamed
+        if self.pre(git, start, cmd).ok is not True:
+            self.log(
+                "The precheck is red on the base itself; the group run decides. Look at the precheck setting."
+            )
             return []
         if len(inside) == 1:
             bad = [(inside[0], got)]

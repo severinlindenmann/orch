@@ -23,8 +23,16 @@ steps are marked `continue-on-error`, so its check stays green and only a warnin
 A pull request into develop on its own runs one **light** job (`scripts/ci_light.py`, about 5 minutes): words and
 style, ruff, the workspace tests that import the modules it changed (or a quarter of the suite as a sample when it
 changes what all tests share, a module no test imports, or more than a quarter of the suite), the rule tests that
-read the whole tree (`RULE_TESTS`: tool names, CLI seams, skills and history lint, next-step hints; about 15 s; they
-made most red queue groups on 18-19 Nov) and the suites of the add-ons it changed. The full set runs **once per merge queue group** (`orch-queue/…`) on top of develop, whatever
+read the whole tree (`RULE_TESTS` plus every file named `test_no_*`, `test_*_lint`, `test_*_seams`, `test_*_scan_doors`,
+`test_*names*` or `test_spawn_argv`, and the node ids in `RULE_NODES`; about 25 s; they made most red queue groups on
+18-19 Nov), the suites of the add-ons it changed, the click-throughs it changed and the Focus/Insights page smoke
+when those add-ons change. A new rule test runs on every pull request by its file name alone.
+
+Before a group is pushed the merge queue runs `python scripts/ci_light.py --rules` (the whole-tree checks above that
+take seconds) on the group's merged tree on this computer (setting `[pull_requests] precheck = "uv run --project
+workspace python scripts/ci_light.py --rules"`, about 35 s). Red: the base alone first (red there too = a broken
+setting, nobody blamed), then each member on its own; a member red alone leaves the queue at once with the failing
+lines, instead of after a 16 minute group run. The full set runs **once per merge queue group** (`orch-queue/…`) on top of develop, whatever
 files the group touches. A push to develop whose files equal a green queue group (`scripts/ci_proven.py`: a merge
 commit with the tree of its second parent, and a green `ci` run of that parent on an `orch-queue/` branch) runs no
 suite again. Contracts, publish, relay, mobile and the dashboard pictures still follow their paths on a pull request.

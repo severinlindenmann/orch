@@ -24,6 +24,11 @@ class TreeGit(FakeGit):
         super().__init__()
         self.trees = {}
 
+    def fetch(self, base, nums):
+        got = super().fetch(base, nums)
+        self.trees[got["base"]] = ()
+        return got
+
     def build(self, base_sha, heads):
         _, inc, con = super().build(base_sha, heads)
         sha = f"{len(self.trees):040x}"
@@ -39,7 +44,7 @@ def _setup(ws, members, cfg='precheck = "rules"\n'):
     return {n: {"files": (f"workspace-addons/sync/src/orch_sync/m{n}.py",)} for n in members}
 
 
-def _pre(git, bad=(), together=False, trouble=False):
+def _pre(git, bad=(), together=False, trouble=False, broken=False):
     seen = []
 
     def run(g, sha, cmd):
@@ -47,6 +52,8 @@ def _pre(git, bad=(), together=False, trouble=False):
         seen.append((members, cmd))
         if trouble:
             return Result(None, "could not run")
+        if broken:
+            return Result(False, "ci_light.py: error: unrecognized arguments: --rules")
         red = any(m in bad for m in members) or (together and len(members) > 1)
         return Result(
             not red, "FAILED tests/test_adapters.py::test_no_tool_names_outside_the_adapter" if red else ""
@@ -65,9 +72,8 @@ def test_a_member_red_in_the_precheck_leaves_at_once_and_the_rest_runs_once(ws):
     r.run()
     assert [gh.groups[c] for c in calls] == [[n for n in TEN if n != 7]]  # one group run, without #7
     assert states(ws) == {**{n: "merged" for n in TEN if n != 7}, 7: "out"}
-    assert (
-        seen[0] == (tuple(TEN), "rules") and len(seen) == 1 + len(TEN) + 1
-    )  # group, each alone, group again
+    assert seen[0] == (tuple(TEN), "rules") and seen[1] == ((), "rules")  # the group, then the base alone
+    assert len(seen) == 2 + len(TEN) + 1  # group, base, each alone, the group again
     row = store.find(store.read(ws), url(7))
     assert "precheck" in row["why"] and "test_no_tool_names_outside_the_adapter" in row["why"]
     assert any("#7 left the queue before the group run" in x for x in lines)
@@ -103,7 +109,24 @@ def test_a_lone_pull_request_red_in_the_precheck_never_gets_a_group_run(ws):
     r, calls = make(ws, gh, git)
     r.pre = pre
     r.run()
-    assert calls == [] and git.pushed == [] and states(ws) == {5: "out"} and len(seen) == 1
+    assert calls == [] and git.pushed == [] and states(ws) == {5: "out"} and len(seen) == 2  # it, the base
+
+
+def test_a_precheck_red_on_the_base_itself_blames_nobody(ws):
+    """19 Nov try: a command develop does not know yet is red everywhere; it must never empty the queue."""
+    gh, git = FakeGitHub(_setup(ws, [1, 2, 3])), TreeGit()
+    pre, seen = _pre(git, broken=True)
+    lines = []
+    r, calls = make(ws, gh, git, log=lines.append)
+    r.pre = pre
+    r.run()
+    assert [gh.groups[c] for c in calls] == [[1, 2, 3]] and states(ws) == {
+        1: "merged",
+        2: "merged",
+        3: "merged",
+    }
+    assert [m for m, _ in seen] == [(1, 2, 3), ()]
+    assert any("red on the base itself" in x for x in lines)
 
 
 def test_no_setting_no_precheck(ws):
@@ -160,5 +183,6 @@ def test_the_precheck_runs_the_command_in_a_copy_of_the_group_commit(tmp_path):
     )
     assert red.ok is False and "FAILED x 1" in red.tail
     assert git.run("worktree", "list").stdout.count("\n") == 1  # no copy linked to the queue's git folder
-    seen = precheck.run(git, sha, f"{py} -c \"import os; raise SystemExit(os.path.exists('.git'))\"")
-    assert seen.ok is True  # a plain folder: the code cannot reach the queue's hooks or config
+    probe = "import subprocess; print(subprocess.run(['git', 'rev-parse', '--git-dir', 'HEAD:rule.txt'], capture_output=True, text=True).stdout)"
+    seen = precheck.run(git, sha, f'{py} -c "{probe}"')
+    assert seen.ok is True and seen.tail.splitlines()[0] == ".git"  # its own repository, not the queue's copy

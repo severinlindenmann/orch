@@ -7,8 +7,8 @@ tree first; when it is red, each member is checked on its own on top of the same
 alone leaves the queue at once with the failing lines.
 
 The command is the person's setting, never read from the repository, and runs in a plain throw-away folder of
-the group commit's files (`git archive`, no link back to the queue's git copy, so the code can never plant a hook
-or config there) with a throw-away home: HOME, USERPROFILE and ORCH_HOME point into that folder and
+the group commit's files (`git archive`, then a fresh repository of its own with them as one commit: no link back
+to the queue's git copy, so the code can never plant a hook or config there) with a throw-away home: HOME, USERPROFILE and ORCH_HOME point into that folder and
 ORCH_HOME_STRICT=1, so the orch of this computer is never touched by accident. Only PATH, the language and uv's own
 cache and Python folders are kept from this computer's environment (shared for speed, as every local test run
 here shares them). It is no sandbox against hostile code: it runs only pull requests the queue takes, i.e. of its
@@ -59,14 +59,43 @@ def _tail(text: str) -> str:
     return "\n".join(lines[-TAIL_LINES:])[-TAIL_CHARS:]
 
 
+def own_repo(git_exe: str, src: Path, home: Path, timeout: int = TIMEOUT_SECS) -> None:
+    """A fresh git repository of its own in src with the files as one commit: checks that ask git (ls-files, diff)
+    work, and nothing in it points back to the queue's copy."""
+    e = env(home)
+    e.update(
+        GIT_AUTHOR_NAME="orch precheck", GIT_AUTHOR_EMAIL="precheck@orch.invalid", GIT_TERMINAL_PROMPT="0"
+    )
+    e.update(GIT_COMMITTER_NAME="orch precheck", GIT_COMMITTER_EMAIL="precheck@orch.invalid", LC_ALL="C")
+    for args in (
+        ["init", "-q"],
+        ["add", "-A"],
+        ["commit", "-q", "--no-verify", "--no-gpg-sign", "-m", "precheck"],
+    ):
+        try:
+            got = subprocess.run(
+                [git_exe, "-c", "core.hooksPath=", *args], cwd=src, env=e, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, check=False,
+            )  # fmt: skip
+        except (subprocess.TimeoutExpired, OSError):
+            raise Refused(f"git {args[0]} did not finish") from None
+        if got.returncode != 0:
+            raise Refused(f"git {args[0]} failed: {(got.stderr or got.stdout).strip()[:200]}")
+
+
 def run(git, sha: str, command: str, timeout: int = TIMEOUT_SECS) -> Result:
     """Run command in a copy of commit sha. ok True = exit 0, False = any other exit, None = it could not run."""
-    tmp = Path(tempfile.mkdtemp(prefix="orch-precheck-"))
+    # next to the queue's git copy, not in the system temp folder: some checks treat a home or Python there as
+    # special (test_adapters: an orch home in temp makes Codex writable), so they would be red only here
+    where = Path(git.dir).parent.parent / "precheck"
+    where.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix="run-", dir=where))
     src, home = tmp / "src", tmp / "home"
     home.mkdir()
     try:
         try:
             git.export(sha, src, timeout=timeout)
+            own_repo(git.git, src, home, timeout)
         except Refused as e:
             return Result(None, f"no copy of the group commit: {e}")
         try:
