@@ -40,6 +40,19 @@ The person sees and changes the same on the Usage page of the dashboard; its cli
 
 When a rule ends it falls back to the rule before its last change, and the history says so.
 
+**How work is spread** (the share; change it only when the person asks)
+
+    orch usage share                               # read it back as one sentence, with what each number counts
+    orch usage share --preset even                 # save | even | sub: a ready-made spread
+    orch usage share --week 70 --day wed           # at most 70 % of a subscription's week by the end of Wednesday
+    orch usage share --api reviews,scripts         # kinds of work on API credit (or none)
+    orch usage share --tool "one in 4"             # Code tickets on the helper tool: one in N, all or none
+    orch usage share --ahead api --dollars 10      # a subscription ahead of its pace: api, tool, both or none
+    orch usage share --order "Personal 1, Company" # the accounts in order
+    orch usage share --clear                       # no share: accounts in order, one after the other
+
+A share that contradicts itself is refused with the reason; every change is one line in the history.
+
 **Switching early** (subscriptions, through the account switcher)
 
     orch usage status                              # running? switching on or off? the last look

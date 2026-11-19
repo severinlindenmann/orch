@@ -36,6 +36,10 @@ TRUST_SPAN_SECONDS = 300  # a lower pace replaces a higher remembered one only w
 PACE_FORGET_MINUTES = 30  # a remembered pace older than this is dropped
 RETRY_MINUTES = 10  # a failed switch to the same account is tried again (and written down) after this
 WINDOW_OF = {"5h": "5h", "week": "week"}  # rule period -> switcher window
+# ORCH-642: a window the account's rule sets no limit for: switch early at this percent (the account still counts
+# as having room up to 100 %). Without it an account with only a weekly limit was left only AT 100 % of its
+# 5 hours, after every helper had stopped on it.
+DEFAULT_EARLY = {"5h": 90.0, "week": 100.0}
 SWITCH_TIMEOUT = 30
 BACK_MINUTES = (
     10  # an account switched away from and active again within this is "another program switched back"
@@ -280,15 +284,16 @@ class Choice:
     why: str = ""
 
 
-def _limits(a: dict) -> list[tuple[str, float]]:
-    """(window, percent) pairs of the account's rule; a subscription can never go past 100 %."""
+def _limits(a: dict) -> list[tuple[str, float, float]]:
+    """(window, switch at, full at) per window: the account's rule (both the same), else DEFAULT_EARLY and 100 %
+    (a subscription can never go past 100 %)."""
     out = [
-        (WINDOW_OF[x["period"]], float(x["value"]))
+        (WINDOW_OF[x["period"]], float(x["value"]), float(x["value"]))
         for x in a["rule"]["limits"]
         if x.get("unit") == "%" and x.get("period") in WINDOW_OF
     ]
-    seen = {w for w, _ in out}
-    out += [(w, 100.0) for w in ("5h", "week") if w not in seen]
+    seen = {w for w, _, _ in out}
+    out += [(w, DEFAULT_EARLY[w], 100.0) for w in ("5h", "week") if w not in seen]
     return out
 
 
@@ -298,7 +303,7 @@ def judge(a: dict, use: SubscriptionUse, pace: dict[str, float], ahead: float) -
         return Candidate(a, use, False, False, "turned off in the account switcher")
     if not any(w.pct is not None for w in use.windows.values()):
         return Candidate(a, use, False, False, "use unknown")
-    for window, limit in _limits(a):
+    for window, limit, full in _limits(a):
         w = use.windows.get(window)
         word = store.PERIOD_WORDS[window]
         if w is None:
@@ -310,9 +315,12 @@ def judge(a: dict, use: SubscriptionUse, pace: dict[str, float], ahead: float) -
                 under = good = False  # a limit Usage cannot check counts as reached
                 why = why or f"{word} use unknown"
             continue
-        if w.pct >= limit:
+        if w.pct >= full:
             under = good = False
-            why = why or f"{word} {w.pct:g}% of {limit:g}%"
+            why = why or f"{word} {w.pct:g}% of {full:g}%"
+        elif w.pct >= limit:
+            good = False  # past the early switch, not full: left when another has room, else kept
+            why = why or f"{word} {w.pct:g}%, switches early at {limit:g}%"
         elif w.pct + pace.get(window, 0.0) * ahead >= limit:
             good = False
             why = why or f"{word} {w.pct:g}% of {limit:g}%, reached in under {ahead:g} min at this pace"

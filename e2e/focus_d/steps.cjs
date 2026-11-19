@@ -1119,6 +1119,105 @@ async function zoom(page, dash, width) {
   await noSideways(page);
 }
 
+// Step 28 (ORCH-345): an epic with its helpers, as one group. The state gets the epic "Autumn newsletter" and its four
+// sub-tickets (parent chain), the live sessions API answers with their sessions and the group (sessions.py `groups`):
+// the main helper and "Write the texts" work (two small helpers inside), "Build the mail page" needs you, "Check the
+// links" is in line, "Send a test to the team" has no session yet. One other session works outside the group.
+const GROUP = [
+  ['ORCH-300', 'Autumn newsletter', 'working', 0], ['ORCH-301', 'Write the texts', 'working', 1],
+  ['ORCH-302', 'Build the mail page', 'needs-you', 1], ['ORCH-303', 'Send a test to the team', 'closed', 1],
+  ['ORCH-304', 'Check the links', 'in-line', 1], ['ORCH-12', 'Tidy the release notes', 'working', -1],
+];
+const GWORD = { working: 'Working', 'needs-you': 'Waits for you', 'in-line': 'In line', closed: 'No session' };
+const GRANK = { 'needs-you': 0, working: 1, 'in-line': 2 };
+const gid = key => 't_grp' + key.slice(5);
+const SMALL = [{ what: 'Draft intro', seconds: 180 }, { what: 'Draft offers', seconds: 60 }];
+async function groupState(page) {
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  const HELPER = { working: 'working', 'needs-you': 'you' };
+  await page.addInitScript(() => {
+    try {
+      if (sessionStorage.getItem('grp') !== '1') {
+        localStorage.setItem('orch.live.layer', '{}');
+        localStorage.setItem('orch.live.pins', '[]');
+        sessionStorage.setItem('grp', '1');
+      }
+    } catch (e) { /* none */ }
+  });
+  // the dashboard's own state with the group's tickets and runs on top (also the answer to a send: the page takes it whole)
+  const shape = st => {
+    const base = (st.tickets || [])[0] || {};
+    const extra = GROUP.map(([key, title, , depth]) => ({ ...base, id: gid(key), key, title, status: 'active', questions: [], checks: [],
+      sessions: [], parent: depth === 1 ? gid('ORCH-300') : null }));
+    st.tickets = [...(st.tickets || []).filter(t => !String(t.id).startsWith('t_grp')), ...extra];
+    st.runs = { ...(st.runs || {}) };
+    GROUP.forEach(([key, , s]) => {
+      if (s === 'in-line') st.runs[gid(key)] = { running: false, hold: 'Waits for a free place' };
+      else if (s !== 'closed') st.runs[gid(key)] = { running: true, helper: { state: HELPER[s] }, claim: { agent: 'agent:claude' } };
+    });
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true,
+      addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
+    return st;
+  };
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    route.fulfill({ response: res, json: shape(await res.json()) });
+  });
+  const sessions = GROUP.filter(([, , s]) => s !== 'closed').map(([key, title, s]) => ({ id: gid(key), key, title, status: s, word: GWORD[s],
+    detail: s === 'working' ? 'Writing the offers section' : '', waiting_on: [], question: s === 'needs-you' ? 'Which header picture for the mail page?' : null,
+    lines: s === 'working' ? ['⏺ ' + title + ': step 2 of 4'] : [], tool: s === 'in-line' ? null : 'Claude Code', model: 'Opus', mode: s === 'in-line' ? null : 'live',
+    opened_at: null, open_seconds: s === 'in-line' ? null : 1500, idle_seconds: null, closes_in_seconds: null, last_at: null, kind: '',
+    parent: key === 'ORCH-300' || key === 'ORCH-12' ? null : gid('ORCH-300'), small: key === 'ORCH-301' ? SMALL : [] }))
+    .sort((a, b) => GRANK[a.status] - GRANK[b.status]);
+  const group = { id: gid('ORCH-300'), key: 'ORCH-300', title: 'Autumn newsletter', kind: 'epic',
+    members: GROUP.filter(([, , , d]) => d >= 0).map(([key, title, s, depth]) => ({ id: gid(key), key, title, depth, main: depth === 0,
+      status: s, word: GWORD[s], small: key === 'ORCH-301' ? SMALL : [] })) };
+  await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { sessions, groups: [group], lines: 8, age_ms: 0 } }));
+  await page.route(/\/api\/act$/, async route => {
+    const r = await route.fetch({ url: new URL('/api/state', route.request().url()).href, method: 'GET' });
+    await route.fulfill({ json: shape(await r.json()) });
+  });
+}
+// The epic is one orange tile; a click opens the helper that needs you with the group beside it; a click on a row swaps
+// the session in that pane and the message box names who receives it; small helpers are watch only.
+async function groups(page, dash, width) {
+  await groupState(page);
+  await page.goto(dash + '/#addon/focus');
+  const tile = `[data-key="live-wall"] [data-tile="${gid('ORCH-300')}"]`;
+  await page.waitForSelector(tile, { timeout: 15000 });
+  const t = await page.textContent(tile);
+  for (const w of ['Autumn newsletter', '3 helpers', '2 small helpers', '1 needs you', 'Build the mail page']) if (!t.includes(w)) throw new Error(`the group tile misses "${w}": ${t}`);
+  if (await page.getAttribute(tile, 'data-s') !== 'needs-you') throw new Error('one helper needs you, but the group tile is not orange');
+  for (const k of ['ORCH-301', 'ORCH-302', 'ORCH-304']) if (await page.$(`[data-key="live-wall"] [data-tile="${gid(k)}"]`)) throw new Error(`${k} has its own tile beside its group`);
+  await page.click(`${tile} [data-wall-open]`);
+  const pane = `#live-dock .live-pane[data-session="${gid('ORCH-302')}"]`;
+  await page.waitForSelector(`${pane} [data-key="live-group"]`, { timeout: 10000 });
+  const rows = await page.textContent(`${pane} [data-key="live-group"]`);
+  for (const w of ['Main helper', 'Write the texts', 'Draft intro', 'Small helper', 'watch only', 'Send a test to the team', 'Check the links', 'Earlier sessions']) if (!rows.includes(w)) throw new Error(`the switcher misses "${w}"`);
+  await page.click(`${pane} [data-key="live-group-${gid('ORCH-301')}"]`);
+  const next = `#live-dock .live-pane[data-session="${gid('ORCH-301')}"]`;
+  await page.waitForSelector(`${next} [data-key="live-msg-to"]`, { timeout: 10000 });
+  const to = (await page.textContent(`${next} [data-key="live-msg-to"]`)).trim();
+  if (to !== 'Message to: Write the texts (ORCH-301). Only this helper gets it.') throw new Error('the message box says: ' + to);
+  if (await page.getAttribute(`${next} [data-key="live-group-${gid('ORCH-301')}"]`, 'aria-current') !== 'true') throw new Error('the shown helper is not marked in the switcher');
+  if ((await page.$$('#live-dock .live-pane')).length !== 1) throw new Error('the swap opened a second pane');
+  await page.fill(`${next} [data-live-msg-text]`, 'Use the short intro.');
+  const sent = page.waitForRequest(r => r.url().endsWith('/api/act') && r.method() === 'POST' && (r.postData() || '').includes('run.send'));
+  await page.click(`${next} [data-key="live-msg-send"]`);
+  const body = (await sent).postData() || '';
+  if (!body.includes(gid('ORCH-301')) || !body.includes('Use the short intro.')) throw new Error('the message did not go to Write the texts: ' + body.slice(0, 200));
+  await page.click(`${next} [data-key="live-group-${gid('ORCH-300')}"]`);
+  const main = `#live-dock .live-pane[data-session="${gid('ORCH-300')}"] [data-key="live-msg-to"]`;
+  await page.waitForSelector(main, { timeout: 10000 });
+  if (!(await page.textContent(main)).includes('the main helper')) throw new Error('the main helper is not named in its message box');
+  if (width <= 720 && await page.getAttribute('#live-dock [data-key="live-group"]', 'data-mode') !== 'strip') throw new Error('on a phone the switcher is not a strip');
+  await noSideways(page);
+}
+
 const STEPS = [
   {
     n: 1, pic: 'fd-01-dashboard', area: 'start', title: 'The dashboard opens', feature: [],
@@ -1406,6 +1505,19 @@ const STEPS = [
     do: ['Open the model choice of a running session.'],
     see: ['A new model applies from the next fresh start and says so.'],
     draft: { q: '?page=focus&cur=ORCH-247&view=zoom&pm=ORCH-247:model' },
+  },
+  {
+    n: 28, pic: 'fd-28-groups', area: 'layer', title: 'An epic and its helpers in one place', feature: [],
+    do: ['Open Focus while an epic has a main helper and helpers on its tickets.', 'Click the epic\'s tile.',
+      'Click another helper in the list beside the session, then write it a message.'],
+    see: ['The epic is one tile with its helpers counted ("3 helpers · 2 small helpers"), orange while one of them needs you.',
+      'The click opens the helper that needs you, with the main helper, every helper, the small helpers (watch only) and Earlier sessions beside it.',
+      'A click on a helper shows it in the same pane; the message box says who gets the message.',
+      'On a phone the list is one line that scrolls inside itself.'],
+    async run({ page, dash, width }) {
+      await groups(page, dash, width);
+    },
+    draft: { q: '?page=focus&cur=ORCH-228&view=zoom' },
   },
 ];
 

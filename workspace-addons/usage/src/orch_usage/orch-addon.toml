@@ -52,3 +52,7 @@ who = "people"
 [acts.seen]
 summary = "Got it: hide a Usage warning until it clears and comes back"
 who = "people"
+
+[acts.share]
+summary = "Change how helper work is spread over subscriptions, API credit and helper tools"
+who = "people"

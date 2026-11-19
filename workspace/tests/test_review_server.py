@@ -4,6 +4,7 @@ import contextlib
 import http.client
 import io
 import json
+import os
 import subprocess
 import threading
 import time
@@ -32,10 +33,13 @@ def ws(proj, monkeypatch):
 
     seen = []
 
-    def in_process(argv, cwd, env):
-        seen.append({"argv": list(argv), "env": dict(env)})
+    def in_process(argv, cwd, env, fds=()):
+        seen.append({"argv": list(argv), "env": dict(env), "fds": fds})
         out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        grant = {
+            k: v for k, v in env.items() if k.startswith("ORCH_PERSON_GRANT")
+        }  # the page's grant (ORCH-582)
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), _env(grant):
             code = cli.main(list(argv))
         return subprocess.CompletedProcess(argv, code, out.getvalue(), err.getvalue())
 
@@ -53,6 +57,20 @@ def ws(proj, monkeypatch):
 
 
 ws_seen: dict = {}
+
+
+@contextlib.contextmanager
+def _env(extra: dict):
+    old = {k: os.environ.get(k) for k in extra}
+    os.environ.update(extra)
+    try:
+        yield
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 def _add_card(root, run_cli, title="Block"):
@@ -506,3 +524,17 @@ def test_talk_answer_with_text_only_note_is_recorded(srv, ws, card):
     assert st == 200 and json.loads(out) == {"ok": True}, out
     q = tickets.load(ws, tid)["questions"][0]
     assert q["answer"] is not None and "Move the title up." in q["answer"]
+
+
+def test_a_refused_post_reads_its_body_first():
+    # Windows resets a socket closed with unread bytes: the caller then saw an aborted connection, not the 403
+    sent = []
+    h = review_server.Handler.__new__(review_server.Handler)
+    h.headers = {"Content-Length": "11"}
+    h.rfile = io.BytesIO(b'{"token":1}rest')
+    h._text = lambda code, text: sent.append((code, h.rfile.tell()))
+    h._refuse(403, "no")
+    assert sent == [(403, 11)]
+    h.headers, h.rfile = {"Content-Length": str(review_server.MAX_BODY + 1)}, io.BytesIO(b"x")
+    h._refuse(403, "no")  # a body over the limit is not read
+    assert sent[-1] == (403, 0)
