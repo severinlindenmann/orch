@@ -1,4 +1,4 @@
-"""How helper work is spread (ORCH-657): the owner's share, kept in .orch/addons/usage/share.json.
+"""How helper work is spread (ORCH-657): the owner's share, kept in share.json in the Usage folder of this computer (computer.py).
 
 One small file next to accounts.json, schema `orch.usage-share/1`:
 
@@ -97,7 +97,7 @@ FIELDS = tuple(PRESETS["even"]["share"])
 
 
 def path(root: Path) -> Path:
-    return store.usage_dir(root) / "share.json"
+    return store.ensure(root) / "share.json"
 
 
 def tool_name(accounts: list[dict]) -> str:
@@ -195,7 +195,7 @@ def newer_format(root: Path) -> bool:
 
 
 def _write(root: Path, s: dict | None) -> None:
-    d = store.usage_dir(root)
+    d = store.ensure(root)
     d.mkdir(parents=True, exist_ok=True)
     if s is None:
         path(root).unlink(missing_ok=True)
@@ -434,7 +434,7 @@ def view(root: Path, rows: list[dict]) -> dict:
     notes = warnings(s, rows)
     if unreadable(root):
         notes.insert(
-            0, "The share file .orch/addons/usage/share.json could not be read; the next change replaces it."
+            0, "The share file share.json in the Usage folder could not be read; the next change replaces it."
         )
     return {
         "share": s,

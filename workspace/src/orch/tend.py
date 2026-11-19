@@ -436,6 +436,41 @@ def _carry(root: Path, row: dict, now: float) -> str:
     return "Sent the helper on: the account was switched while it waited at the usage limit." + later
 
 
+SWITCH_KEY = "computer-switch"
+
+
+def _computer_switch(root: Path, state: dict, now: float) -> list[dict]:
+    """ORCH-943: another workspace's Usage (or this one's) switched the account on this computer. The logins
+    belong to the computer, so the new account has room for every workspace: lift the limit hold here, and
+    each noted ticket gets one line saying who switched. Sessions that stopped with "login changed" are
+    carried on by plan()."""
+    row = limitstop.computer_switch()
+    n = row.get("n")
+    if not isinstance(n, int):
+        return []
+    seen = (state.get(SWITCH_KEY) or {}).get("n")
+    state[SWITCH_KEY] = {"n": n}
+    if seen == n:
+        return []
+    if seen is None:  # the first look here: only a switch from the last minutes counts
+        at = _ts(row.get("at") if isinstance(row.get("at"), str) else None)
+        if at is None or now - at > limitstop.COMPUTER_SWITCH_FRESH:
+            return []
+    noted = list((limitstop.read(root).get("tickets") or {}).keys())
+    if not noted:
+        return []
+    limitstop.lift(root, now)
+    line = limitstop.computer_switched_text(row)
+    out = []
+    for tid in noted:
+        with contextlib.suppress(Exception):
+            tickets.log(root, tid, line, BY)
+        out.append(
+            {"ticket": tid, "key": runs_live.ref(root, tid), "action": "switched", "done": True, "text": line}
+        )
+    return out
+
+
 def _resume(root: Path, row: dict) -> str:
     """Start a ticket again after the usage limit reset (ending its session first when it still sits at the
     limit). Returns the history line, or "" when its session could not be ended (the next pass tries
@@ -461,9 +496,11 @@ def run(root: Path, dry_run: bool = False, now: float | None = None) -> dict:
     now = time.time() if now is None else now
     if brake.paused(root) is not None:
         return {"paused": True, "actions": [], "queue": queue(root)}
-    rows = plan(root, now)
     state = _read_state(root)
     done = []
+    if not dry_run:
+        done += _computer_switch(root, state, now)
+    rows = plan(root, now)
     for row in rows:
         tid, action = row["ticket"], row["action"]
         public = {k: row[k] for k in ("ticket", "key", "action", "idle_seconds") if k in row}
@@ -580,6 +617,7 @@ WORDS = {
     "limit": "held until the usage limit resets",
     "resume": "started again (the usage limit reset)",
     "carry": "sent on (the account was switched at the usage limit)",
+    "switched": "no longer held (the account was switched on this computer)",
 }
 
 
