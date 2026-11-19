@@ -137,11 +137,11 @@
       if (typeof Fit === 'function') { fit = new Fit(); xt.loadAddon(fit); }
       try { xt.open(host); } catch (e) { xt.dispose(); xt = null; state = 'nogl'; words(); return false; }
       xt.onData(d => { if (typing) { out += d; schedule(); } });  // watching: xterm takes no input at all (disableStdin)
-      xt.attachCustomKeyEventHandler(keyGate);
+      xt.attachCustomKeyEventHandler(keyFilter);
       return true;
     }
     /* keys xterm must leave alone: Shift+Tab stops typing; Ctrl+C or Cmd+C with a selection copies it; other Cmd keys */
-    function keyGate(e) {
+    function keyFilter(e) {
       if (e.type !== 'keydown') return true;
       if (typing && e.key === 'Tab' && e.shiftKey) { e.preventDefault(); setTyping(false); return false; }
       const k = String(e.key || '').toLowerCase();

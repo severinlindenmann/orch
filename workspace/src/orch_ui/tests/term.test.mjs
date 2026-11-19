@@ -36,7 +36,7 @@ class FakeTerminal {
   loadAddon(a) { a.term = this; }
   open(host) { this.host = host; this.textarea = new Node_('textarea'); host.append(this.textarea); }
   onData(f) { this.data = f; }
-  attachCustomKeyEventHandler(f) { this.gate = f; }
+  attachCustomKeyEventHandler(f) { this.keys = f; }
   reset() { this.written = []; }
   resize(c, r) { this.sizes.push([c, r]); }
   write(b) { this.written.push(Buffer.from(b).toString('utf8')); }
@@ -110,7 +110,7 @@ test('watching only by default: keys and pastes send nothing until Let me type i
   await wait(40);
   assert.deepEqual(sent, ['ls\r'], 'typed data goes out in one request');
   const stop = {type: 'keydown', key: 'Tab', shiftKey: true, preventDefault() {}};
-  assert.equal(xt.gate(stop), false);
+  assert.equal(xt.keys(stop), false);
   assert.equal(ui.typing(), false, 'Shift+Tab stops typing');
   assert.equal(xt.options.disableStdin, true);
 });
@@ -119,12 +119,12 @@ test('Ctrl+C or Cmd+C with a selection copies it and is not sent; without a sele
   const {ui, xt} = live();
   ui.setTyping(true);
   xt.sel = 'hello';
-  assert.equal(xt.gate({type: 'keydown', key: 'c', ctrlKey: true, preventDefault() {}}), false);
-  assert.equal(xt.gate({type: 'keydown', key: 'c', metaKey: true, preventDefault() {}}), false);
+  assert.equal(xt.keys({type: 'keydown', key: 'c', ctrlKey: true, preventDefault() {}}), false);
+  assert.equal(xt.keys({type: 'keydown', key: 'c', metaKey: true, preventDefault() {}}), false);
   assert.deepEqual(copied.slice(-2), ['hello', 'hello']);
   xt.sel = '';
-  assert.equal(xt.gate({type: 'keydown', key: 'c', ctrlKey: true, preventDefault() {}}), true);
-  assert.equal(xt.gate({type: 'keydown', key: 'v', metaKey: true, preventDefault() {}}), false, 'Cmd keys stay with the browser');
+  assert.equal(xt.keys({type: 'keydown', key: 'c', ctrlKey: true, preventDefault() {}}), true);
+  assert.equal(xt.keys({type: 'keydown', key: 'v', metaKey: true, preventDefault() {}}), false, 'Cmd keys stay with the browser');
 });
 
 test('Copy copies the selection, or the whole screen', async () => {
