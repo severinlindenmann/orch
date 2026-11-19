@@ -71,11 +71,11 @@ def own_repo(git_exe: str, src: Path, home: Path, timeout: int = TIMEOUT_SECS) -
     for args in (
         ["init", "-q"],
         ["add", "-A"],
-        ["commit", "-q", "--no-verify", "--no-gpg-sign", "-m", "precheck"],
+        ["commit", "-q", "--no-verify", "-m", "precheck"],
     ):
         try:
             got = subprocess.run(
-                [git_exe, "-c", "core.hooksPath=", *args], cwd=src, env=e, capture_output=True, text=True,
+                [git_exe, "-c", "core.hooksPath=", "-c", "commit.gpgsign=false", *args], cwd=src, env=e, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, check=False,
             )  # fmt: skip
         except (subprocess.TimeoutExpired, OSError):
@@ -118,7 +118,7 @@ def _shell(command: str, cwd: Path, environ: dict[str, str], timeout: int) -> tu
 def run(git, sha: str, command: str, timeout: int = TIMEOUT_SECS) -> Result:
     """Run command in a copy of commit sha. ok True = exit 0, False = any other exit, None = it could not run."""
     # next to the queue's git copy, not in the system temp folder: some checks treat a home or Python there as
-    # special (test_adapters: an orch home in temp makes Codex writable), so they would be red only here
+    # special (test_adapters: an orch home in temp makes the agent tool writable), so they would be red only here
     where = Path(git.dir).parent.parent / "precheck"
     where.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix="run-", dir=where))
