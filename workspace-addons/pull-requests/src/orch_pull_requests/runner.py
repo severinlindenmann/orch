@@ -914,7 +914,8 @@ class Runner:
 
     # -- the ticket --------------------------------------------------------------------------------------
     def finish(self, e: dict, state: str, line: str, status: str) -> None:
-        store.set_state(self.root, e["url"], state, line)
+        extra = {"red_head": e["head"]} if state == OUT and status == "checks failed" and e.get("head") else {}
+        store.set_state(self.root, e["url"], state, line, **extra)
         self.log(line)
         tid = e.get("ticket")
         if not tid:
