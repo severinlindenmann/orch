@@ -42,6 +42,7 @@ ADMIN_PATHS = ["/admin", "/admin/", "/admin/api/workspaces"]
 MIN_CERT_DAYS = 14
 OUTSIDE_MAX_AGE_H = 3
 TIMEOUT = 8
+RETRY_S = 5
 
 
 def check(name: str, fn: Callable[[], str]) -> dict:
@@ -58,13 +59,24 @@ class Skip(Exception):
     pass
 
 
+def fetch(req: urllib.request.Request, timeout: float, tries: int = 2) -> tuple[int, bytes]:
+    """Status and start of the body. A network error is tried once more, so one lost packet
+    does not alert the owner; an HTTP answer is final."""
+    for n in range(tries):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.status, r.read(1 << 20)
+        except urllib.error.HTTPError as e:
+            return e.code, b""
+        except OSError:
+            if n == tries - 1:
+                raise
+            time.sleep(RETRY_S)
+    raise AssertionError("unreachable")
+
+
 def http_status(url: str, timeout: float = TIMEOUT) -> tuple[int, bytes]:
-    req = urllib.request.Request(url, headers={"User-Agent": "orch-live-check"})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status, r.read(4096)
-    except urllib.error.HTTPError as e:
-        return e.code, b""
+    return fetch(urllib.request.Request(url, headers={"User-Agent": "orch-live-check"}), timeout)
 
 
 def health(base: str) -> str:
@@ -137,10 +149,10 @@ def github_runs(repo: str) -> tuple[int, dict]:
         url, headers={"User-Agent": "orch-live-check", "Accept": "application/vnd.github+json"}
     )
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            return r.status, json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        return e.code, {}
+        code, body = fetch(req, 20)
+    except OSError as e:
+        raise Skip(f"GitHub not reachable just now ({e})") from e
+    return code, json.loads(body) if code == 200 else {}
 
 
 def outside_result(repo: str, now: dt.datetime | None = None, fetch=github_runs) -> str:

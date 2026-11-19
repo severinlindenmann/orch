@@ -35,6 +35,11 @@ def serve(routes: dict[str, tuple[int, bytes]]):
     return s, f"http://127.0.0.1:{s.server_address[1]}"
 
 
+@pytest.fixture(autouse=True)
+def no_retry_wait(monkeypatch):
+    monkeypatch.setattr(lc, "RETRY_S", 0)
+
+
 @pytest.fixture
 def site():
     servers = []
@@ -195,3 +200,36 @@ def test_publish_round_trip(monkeypatch):
     with pytest.raises(AssertionError, match="blob"):
         lc.publish_round_trip("ws")
     assert state["deleted"]  # deleted even when the fetch failed
+
+
+def test_network_error_is_tried_once_more(monkeypatch):
+    calls = []
+
+    class Resp:
+        status = 200
+
+        def read(self, n):
+            return b"ok"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+    def urlopen(req, timeout):
+        calls.append(1)
+        if len(calls) == 1:
+            raise TimeoutError("lost")
+        return Resp()
+
+    monkeypatch.setattr(lc.urllib.request, "urlopen", urlopen)
+    assert lc.http_status("http://x/health") == (200, b"ok")
+    calls.clear()
+    monkeypatch.setattr(
+        lc.urllib.request, "urlopen", lambda req, timeout: (_ for _ in ()).throw(OSError("down"))
+    )
+    with pytest.raises(OSError):
+        lc.http_status("http://x/health")
+    with pytest.raises(lc.Skip, match="GitHub not reachable"):
+        lc.github_runs("r")
