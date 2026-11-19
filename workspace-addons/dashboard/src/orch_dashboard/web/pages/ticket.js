@@ -1189,24 +1189,24 @@ async function ticketTalkSend(tid, message) {
   const partial = r => ({ok:false, dropFiles:files.length > 0, text:(files.length ? 'The files are on the ticket, but the helper was not told: ' : '') + talkFailed(r)});
   if (t.status === 'review') {  // the same call as Send back: Ready, the note queued, a helper starts from it
     const back = await act('ticket.changes', {ticket:tid, text});
-    return back.ok ? {ok:true, text:'Sent back to the helper with your note.'} : partial(back);
+    return back.ok ? {ok:true, said:text, text:'Sent back to the helper with your note.'} : partial(back);
   }
   const sent = await act('run.send', {ticket:tid, text});
   if (!sent.ok) return partial(sent);
   const r = sent.state?.send_result;
   const delivered = !!r && Number.isInteger(r.delivered) && r.delivered > 0;
   if (!delivered && !(r && typeof r.id === 'string' && r.id)) return partial({status:200, text:'orch did not confirm that your message was saved.'});
-  if (delivered) return {ok:true, text:'Sent. The helper reads it now.'};
-  if (r.state !== 'none') return {ok:true, text:'Sent. The helper reads it when it finishes what it is doing.'};
+  if (delivered) return {ok:true, said:text, text:'Sent. The helper reads it now.'};
+  if (r.state !== 'none') return {ok:true, said:text, text:'Sent. The helper reads it when it finishes what it is doing.'};
   // nothing on the ticket: start a helper, it reads this first. Through the one starter (ORCH-475): Starting… until it
   // runs, one run for a double click, and the way the person picked in the Start choice (else the usual start).
   const ops = talkStartOps.get(tid) || [['run.start', {ticket:tid}]];
   talkStartOps.delete(tid);
   const starter = window.UI?.startStarter;
   const started = starter ? await starter.start(tid, ops) : await act('run.start', {ticket:tid});
-  if (started.again) return {ok:true, text:'Sent. The helper is starting and reads it first.'};
-  if (started.queued) return {ok:true, text:'Sent. The ticket waits in line for a free helper place; the helper reads it first.'};
-  return started.ok ? {ok:true, text:'Sent. A helper starts and reads it first.'} : {ok:true, text:'Saved on the ticket. Start the helper to go on.'};
+  if (started.again) return {ok:true, said:text, text:'Sent. The helper is starting and reads it first.'};
+  if (started.queued) return {ok:true, said:text, text:'Sent. The ticket waits in line for a free helper place; the helper reads it first.'};
+  return started.ok ? {ok:true, said:text, text:'Sent. A helper starts and reads it first.'} : {ok:true, said:text, text:'Saved on the ticket. Start the helper to go on.'};
 }
 // The helper's screen as plain text: colours and cursor codes dropped (the kit's dock shows text only).
 function talkScreenText(screen) { return String(screen || '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\x1b[@-_]/g, '').replace(/\s+$/, ''); }

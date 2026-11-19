@@ -4,6 +4,7 @@
 //   node e2e/focus_d/clickthrough.cjs [--out DIR]               ready steps in the real dashboard, pending ones listed
 //   node e2e/focus_d/clickthrough.cjs --target draft [--repo P] the reference pictures of every step in the draft D mockup
 //   node e2e/focus_d/clickthrough.cjs --only 1,2,9               only these step numbers
+//   node e2e/focus_d/clickthrough.cjs --only 18 --video          also a recording of each step: <out>/<picture>-<width>.webm
 //   node e2e/focus_d/clickthrough.cjs --list                     print the click-through, no browser
 //   node e2e/focus_d/clickthrough.cjs --write-md                 write e2e/focus_d/CLICKTHROUGH.md from the steps
 //
@@ -35,6 +36,7 @@ function args(argv) {
     else if (a === '--out') o.out = path.resolve(argv[++i].replace(/^~/, os.homedir()));
     else if (a === '--repo') o.repo = path.resolve(argv[++i].replace(/^~/, os.homedir()));
     else if (a === '--only') o.only = new Set(argv[++i].split(',').map(Number));
+    else if (a === '--video') o.video = true;
     else throw new Error(`unknown option ${a}`);
   }
   if (!['dashboard', 'draft'].includes(o.target)) throw new Error(`--target is dashboard or draft, not ${o.target}`);
@@ -132,7 +134,11 @@ async function runOne(ctx, step, [w, h], o, urls) {
     await page.screenshot({ path: path.join(o.out, shot(step, w, o.target === 'draft')), fullPage: false });
   } catch (e) {
     problems.push(String(e.message).split('\n')[0]);
-  } finally { await page.close(); }
+  } finally {
+    await page.close();
+    // --video: the page's recording lands beside its picture once the page is closed
+    if (o.video && page.video()) await page.video().saveAs(path.join(o.out, shot(step, w, o.target === 'draft').replace(/\.png$/, '.webm'))).catch(() => {});
+  }
   return problems;
 }
 
@@ -168,7 +174,7 @@ async function main() {
     }
     const { chromium } = playwright();
     profile = fs.mkdtempSync(path.join(os.tmpdir(), 'focus-d-prof-'));
-    browser = await headless.launchPersistent(chromium, profile);
+    browser = await headless.launchPersistent(chromium, profile, o.video ? { recordVideo: { dir: path.join(profile, 'video'), size: { width: 1280, height: 800 } } } : undefined);
     for (const s of steps) {
       if (!todo.includes(s)) {
         const why = s.waits ? `waits for: ${s.waits}` : 'not in draft D, today\'s page only';
