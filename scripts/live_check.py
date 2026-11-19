@@ -36,7 +36,11 @@ from pathlib import Path
 
 RELAY = "https://relay.severin.io"
 PUBLISH = "https://publish.severin.io"
-PRIVATE_HOST = "hostinger-vps.nb.severin.io"
+# private DNS names of the admin pages (zone internal.severin.io, only on the private network)
+ADMIN_HOSTS = {
+    "publish admin": "publish-admin.internal.severin.io",
+    "relay admin": "relay-admin.internal.severin.io",
+}
 ADMIN_PORTS = {"publish private apps": 8410, "publish admin": 8411, "relay admin": 8412}
 ADMIN_PATHS = ["/admin", "/admin/", "/admin/api/workspaces"]
 MIN_CERT_DAYS = 14
@@ -248,13 +252,17 @@ def run(a: argparse.Namespace) -> dict:
         checks.append(
             check(
                 "publish admin open over the private network",
-                lambda: admin_open_private(a.private_host, ADMIN_PORTS["publish admin"]),
+                lambda: admin_open_private(
+                    a.private_host or ADMIN_HOSTS["publish admin"], ADMIN_PORTS["publish admin"]
+                ),
             )
         )
         checks.append(
             check(
                 "relay admin open over the private network",
-                lambda: admin_open_private(a.private_host, ADMIN_PORTS["relay admin"]),
+                lambda: admin_open_private(
+                    a.private_host or ADMIN_HOSTS["relay admin"], ADMIN_PORTS["relay admin"]
+                ),
             )
         )
         if a.outside_from:
@@ -290,7 +298,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--where", choices=["inside", "outside"], required=True)
     ap.add_argument("--relay", default=RELAY)
     ap.add_argument("--publish", default=PUBLISH)
-    ap.add_argument("--private-host", default=PRIVATE_HOST)
+    ap.add_argument(
+        "--private-host", default="", help="one host for both admin pages (default: their private names)"
+    )
     ap.add_argument("--outside-from", default="", help="GitHub repo whose live-check.yml runs outside")
     ap.add_argument("--relay-a", default="", help="folder of the check workspace that sends")
     ap.add_argument("--relay-b", default="", help="folder of the check workspace that receives")

@@ -11,7 +11,7 @@ plain program (no AI) and uses only the Python standard library.
 | TLS valid for at least 14 more days | outside and inside |
 | `/admin`, `/admin/` and `/admin/api/workspaces` answer 404 on the public sites | outside and inside |
 | Admin ports 8410-8412 closed on the server's public address | outside only (GitHub Actions) |
-| Admin pages answer 200 over the private network | inside only |
+| Admin pages answer 200 over the private network (relay-admin / publish-admin.internal.severin.io) | inside only |
 | Newest outside run is green and at most 3 hours old | inside, with `--outside-from` |
 | A relay message from one check workspace reaches another | inside, with `--relay-a` / `--relay-b` |
 | A tiny file is published, fetched and deleted | inside, with `--publish-ws` |
@@ -78,5 +78,6 @@ to the public listener, which has no admin paths. The live check proves this fro
 2. For publish, put `Restart=on-failure`, `RestartSec=10` and `StartLimitIntervalSec=0` in its unit too, the same as
    `relay/deploy/orch-relay.service`.
 3. `systemctl restart orch-relay orch-publish`, then `journalctl -u orch-relay -n 5` shows `admin on <private IP>:8412`.
-4. Check from a private-network device: `http://<private name>:8412/admin` and `:8411/admin` answer 200, and
+4. Check from a private-network device: `http://relay-admin.internal.severin.io:8412/admin` and
+   `http://publish-admin.internal.severin.io:8411/admin` answer 200 (private DNS names, only on the private network), and
    `python3 scripts/live_check.py --where inside` passes.
