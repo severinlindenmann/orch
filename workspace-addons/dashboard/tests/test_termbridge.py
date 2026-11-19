@@ -175,13 +175,15 @@ class Stream:
         self.conn.close()
 
 
-def post(port, path, body, secret="secret", origin=None):
+def post(port, path, body, secret="secret", origin=None, host=None):
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     h = {
         "Content-Type": "application/json",
         "Origin": origin or f"http://127.0.0.1:{port}",
         "X-Orch-Page": secret,
     }
+    if host:
+        h["Host"] = host
     conn.request("POST", path, json.dumps(body).encode(), h)
     r = conn.getresponse()
     out = (r.status, r.read())
@@ -292,17 +294,26 @@ def test_typing_needs_the_person_the_setting_and_a_page_that_watches(helper, ser
     assert post(port, "/api/term/input", {"ticket": TID, "data": "x"})[0] == 409  # the page left
 
 
-def test_only_this_computer(helper, server, tmp_path):
+def test_the_sign_in_is_the_only_check_also_from_another_computer(helper, server, tmp_path):
+    """R4.1a (owner's answer on ORCH-743): no check of this computer; the port for other computers works signed
+    in, and is refused without the sign-in."""
     typing_on(tmp_path)
     srv = server(remote=True)
     other = srv.remote_server.server_address[1]
-    s = Stream(other)  # the port for other computers, even with this computer's name in Host
-    assert s.resp.status in (401, 403) and not termbridge._WATCHES
-    assert post(other, "/api/term/input", {"ticket": TID, "data": "x"})[0] == 403
-    assert post(other, "/api/term/size", {"ticket": TID, "cols": 90, "rows": 20})[0] == 403
+    s = Stream(other, host="my-machine.example:80")
+    assert s.resp.status == 200
+    s.next("screen")
+    far = "my-machine.example:80"
+    assert (
+        post(other, "/api/term/input", {"ticket": TID, "data": "far\r"}, origin="http://" + far, host=far)[0]
+        == 200
+    )
+    assert wait(lambda: "far" in tm("capture-pane", "-p", "-t", f"={TID}:").stdout)
+    s.close()
+    srv2 = server(Person(False), remote=True)
+    out = Stream(srv2.remote_server.server_address[1], host="my-machine.example:80")
+    assert out.resp.status in (401, 403)
     port = srv.server_address[1]
-    s = Stream(port, host="my-machine.example:80")  # another name, a signed-in page: still refused
-    assert s.resp.status in (401, 403, 421) and not termbridge._WATCHES
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     conn.request("GET", f"/api/term/stream?ticket={TID}", headers={"Sec-Fetch-Site": "cross-site"})
     assert conn.getresponse().status == 403  # another website's page

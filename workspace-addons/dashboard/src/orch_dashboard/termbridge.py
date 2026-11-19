@@ -1,4 +1,4 @@
-"""The terminal bridge (ORCH-743): a live session's real screen in the browser.
+"""The terminal bridge (ORCH-743): a live session's real screen in the browser, wherever the person is signed in.
 
 Watching: ONE tmux control-mode client per session, shared by every page that watches it:
   tmux -L <socket> -C attach-session -f ignore-size -t =<session>:
@@ -21,9 +21,9 @@ follows tmux's own rule again (the option is unset), so a person's own terminal 
 reach a session a page watches right now (its names were checked when the watch began), never a name from the
 request.
 
-Who may (server.py): the stream needs the dashboard's sign-in (its cookie) or a frame pass, from the dashboard's
-own page; typing and resizing need the person's own dashboard session with the typing setting on (watching only
-by default)."""
+Who may (server.py): the sign-in is the only check, from any computer (R4.1a; owner, on ORCH-743). The stream needs
+the dashboard's sign-in (its cookie) or a frame pass, from the dashboard's own page; typing and resizing need the
+person's own dashboard session with the typing setting on (watching only by default)."""
 
 from __future__ import annotations
 

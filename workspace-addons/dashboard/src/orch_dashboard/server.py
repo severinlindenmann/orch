@@ -209,9 +209,6 @@ TYPING_OFF = (
 )
 
 
-TERM_HERE = "The terminal opens only in the dashboard on this computer (http://127.0.0.1)."
-
-
 def _typing_allowed(root) -> bool:
     """The session_typing setting, a plain one (off unless the workspace turned it on)."""
     from orch import config
@@ -805,9 +802,7 @@ class Handler(BaseHTTPRequestHandler):
             )
         if (
             path == "/api/term/stream"
-        ):  # the terminal bridge (ORCH-743): the real screen, live, this computer only
-            if not self._this_computer():
-                return self._send(403, TERM_HERE.encode(), "text/plain; charset=utf-8")
+        ):  # the terminal bridge (ORCH-743): the real screen, live, wherever the person is signed in
             if not (self._frame or self._same_origin()):
                 return self._send(403, b"forbidden", "text/plain")
             if not (self._frame or self._signed_in()):  # a helper's screen or a shell: the sign-in, always
@@ -1190,18 +1185,6 @@ class Handler(BaseHTTPRequestHandler):
         code, text = termsession.keys(self.root, self.orch_bin, str(body["ticket"]), body["items"])
         self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
 
-    def _this_computer(self) -> bool:
-        """The terminal bridge answers only here: the loopback port, a loopback peer and a name of this computer
-        in Host. Never on the port for other computers or under another name, signed in or not (ORCH-743)."""
-        raw = (self.headers.get("Host") or "").strip().lower()
-        host = raw.rsplit("]", 1)[0] + "]" if raw.startswith("[") else raw.split(":", 1)[0]
-        peer = str((getattr(self, "client_address", None) or ("",))[0])
-        return (
-            host in ("127.0.0.1", "localhost", "[::1]")
-            and peer in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
-            and not self._remote()
-        )
-
     def _term_stream(self, query: str):
         """GET /api/term/stream?ticket=<id>: server-sent events of the live session's screen (termbridge.stream),
         after a `hello` that says whether typing is on. A session that is not there: `end` with why."""
@@ -1240,11 +1223,9 @@ class Handler(BaseHTTPRequestHandler):
                 termbridge.leave(w)
 
     def _term_post(self, path: str):
-        """POST /api/term/input {ticket, data} and /api/term/size {ticket, cols, rows}: this computer only, the
-        person's own dashboard session (as /api/term/keys) and the typing setting on; only into a session a page
+        """POST /api/term/input {ticket, data} and /api/term/size {ticket, cols, rows}: the person's own dashboard
+        session (as /api/term/keys; the sign-in is the only check, R4.1a) and the typing setting on; only into a session a page
         of this server watches now (termbridge)."""
-        if not self._this_computer():
-            return self._send(403, TERM_HERE.encode(), "text/plain; charset=utf-8")
         why = self._fence()
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
