@@ -753,4 +753,6 @@ def test_no_github_answer_is_not_up_to_date(proj, run, source):  # noqa: F811
     assert code == 0, err
     assert "up to date" not in out
     assert "could not be looked up" in out
-    assert json.loads((addons.home() / "installed.json").read_text()) == {"sha": None}
+    saved = json.loads((addons.home() / "installed.json").read_text())
+    assert saved["sha"] is None and "release" not in saved
+    assert saved["pending"]["ref"] == "main" and isinstance(saved["pending"]["at"], int)
