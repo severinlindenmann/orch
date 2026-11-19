@@ -443,21 +443,49 @@ FINISHED = ("done", "dropped")
 ANSWERED_MAX = 200  # decided questions in the live state (Review > Answered), newest first
 
 
+_ROWS: dict[str, tuple[str, list[dict]]] = {}  # per workspace: (ticket files' look, their index rows)
+
+
+def _tickets_look(root: Path) -> str | None:
+    """Name, times and size of every ticket file in one scandir pass (tens of ms at 10,000): the index rows of the
+    same look are the same, so they are kept instead of read again (a quarter second each at 10,000)."""
+    rows = []
+    try:
+        with os.scandir(root / ".orch" / "tickets") as it:
+            for e in it:
+                if e.name.endswith(".json"):
+                    try:
+                        st = e.stat(follow_symlinks=False)
+                    except OSError:
+                        continue
+                    rows.append(f"{e.name}\0{st.st_mtime_ns}\0{st.st_ctime_ns}\0{st.st_size}\0{st.st_ino}")
+    except OSError:
+        return None
+    rows.sort()
+    return hashlib.sha256("\n".join(rows).encode()).hexdigest()
+
+
 def _index_rows(root: Path) -> list[dict] | None:
-    """Every ticket's short row from the core's ticket index (ORCH-521), hidden ones left out; None without one."""
+    """Every ticket's short row from the core's ticket index (ORCH-521), hidden ones left out; None without one.
+    Kept while no ticket file changed (the ticket page, a key lookup and a click each asked for all of them)."""
     try:
         from orch import ticketindex
     except ImportError:
         return None
+    look = _tickets_look(root)  # taken before the read: a change during it makes the kept rows stale
+    kept = _ROWS.get(str(root))
+    if look is not None and kept is not None and kept[0] == look:
+        return [dict(r) for r in kept[1]]  # each caller its own rows
     try:
         rows = ticketindex.rows(root)
     except Exception:  # noqa: BLE001 - a broken index: the full read below still answers
         return None
-    return (
-        [r for r in rows if isinstance(r, dict) and isinstance(r.get("id"), str)]
-        if isinstance(rows, list)
-        else None
-    )
+    if not isinstance(rows, list):
+        return None
+    rows = [r for r in rows if isinstance(r, dict) and isinstance(r.get("id"), str)]
+    if look is not None:
+        _ROWS[str(root)] = (look, [dict(r) for r in rows])
+    return rows
 
 
 def _when(value) -> float:

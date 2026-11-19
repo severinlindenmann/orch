@@ -177,3 +177,39 @@ def test_review_answered_is_capped_newest_first(monkeypatch):
     monkeypatch.setattr(data, "run_orch", fake)
     got = data.load_review(None, "x")["answered"]
     assert len(got) == data.ANSWERED_MAX and got[0]["id"] == "q1"
+
+
+def test_index_rows_are_kept_until_a_ticket_file_changes(tmp_path, monkeypatch):
+    """The ticket page, a key lookup and a click each asked the index for every row (a quarter second at 10,000
+    tickets); the rows are kept while no ticket file changed."""
+    import os
+    import sys
+    import types
+
+    reads = []
+
+    def rows(root, include_hidden=False):
+        reads.append(1)
+        return [
+            {"id": f.stem, "status": json.loads(f.read_text())["status"]}
+            for f in sorted((root / ".orch" / "tickets").glob("t_*.json"))
+        ]
+
+    mod = types.ModuleType("orch.ticketindex")
+    mod.rows = rows
+    monkeypatch.setitem(sys.modules, "orch.ticketindex", mod)
+    monkeypatch.setattr(data, "_ROWS", {})
+    _write(tmp_path, "t_aaaaaa", "open", 0)
+    first = data._index_rows(tmp_path)
+    assert data._index_rows(tmp_path) == first and len(reads) == 1
+    data._index_rows(tmp_path)[0]["status"] = "changed by a caller"  # a caller's list is its own copy
+    assert data._index_rows(tmp_path) == first and first[0]["status"] == "open" and len(reads) == 1
+    _write(tmp_path, "t_bbbbbb", "open", 0)  # a new ticket
+    assert [r["id"] for r in data._index_rows(tmp_path)] == ["t_aaaaaa", "t_bbbbbb"] and len(reads) == 2
+    p = tmp_path / ".orch" / "tickets" / "t_aaaaaa.json"
+    t = json.loads(p.read_text())
+    t["status"] = "done"
+    p.write_text(json.dumps(t))
+    st = p.stat()
+    os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 10_000_000))
+    assert data._index_rows(tmp_path)[0]["status"] == "done" and len(reads) == 3
