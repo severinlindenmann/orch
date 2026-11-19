@@ -1380,11 +1380,20 @@ def accepted_by_reviewer(root: Path, ticket: dict) -> bool:
     return False
 
 
-def accept_for_owner(root: Path, tid: str, reasons: str) -> dict:
+def accept_for_owner(
+    root: Path, tid: str, reasons: str, auto: str | None = None, if_revision: int | None = None
+) -> dict:
     """The Reviewer accepts a ticket in Review for the owner (Review -> Done), only while the owner turned it
     on (`workflow.reviewer`), every task is done with evidence and no question waits. The history says who did
-    it and why: a role acting for the owner, not a second approver (R4.1). The owner can send it back."""
-    if not config.reviewer_on(root):
+    it and why: a role acting for the owner, not a second approver (R4.1). The owner can send it back.
+    auto: the Auto Reviewer's point-by-point line (ORCH-425): then its switch or Away mode must be on, the
+    ticket
+    must still be the revision it looked at, and ownerpick.refuse_auto runs inside the write."""
+    from orch import autoreview
+
+    if auto is not None and not autoreview.active(root):
+        raise Refused("The Auto Reviewer is off here. Turn it on on the Review page.")
+    if auto is None and not config.reviewer_on(root):
         raise Refused("The Reviewer is off here. Turn it on: orch config set workflow.reviewer on")
     why = _one_line(reasons)
 
@@ -1396,27 +1405,38 @@ def accept_for_owner(root: Path, tid: str, reasons: str) -> dict:
         ownerpick.refuse_ticket(
             ticket, person=False
         )  # ORCH-582: a draft is the owner's, never the Reviewer's
+        if auto is not None:
+            ownerpick.refuse_auto(ticket)  # Human review needed on: never the Auto Reviewer's
         _check_can_finish(ticket)
         if _open_questions(ticket):
             raise Refused("A question on this ticket still waits for an answer.")
         ticket["status"] = "done"
         ticket["waiting_on"] = None
+        if auto is not None:
+            add_history(ticket, REVIEWER, auto, REVIEWER_VIA)
         add_history(ticket, REVIEWER, "Status review -> done", REVIEWER_VIA)
-        add_history(ticket, REVIEWER, ACCEPTED_LINE + why, REVIEWER_VIA)
+        line = autoreview.AUTO_ACCEPTED_LINE if auto is not None else ACCEPTED_LINE
+        add_history(ticket, REVIEWER, line + why, REVIEWER_VIA)
 
-    return apply_op(root, tid, op, by=REVIEWER)[0]
+    return apply_op(root, tid, op, by=REVIEWER, if_revision=if_revision)[0]
 
 
 ANSWERED_LINE = "Answered for you by the Reviewer: "
 
 
-def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str) -> dict:
+def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str, away: bool = False) -> dict:
     """The Reviewer answers a small, routine question for the owner with the helper's recommended option,
     only while the owner turned it on (`workflow.reviewer_answers`) and only for a plain question (no card, no
     merge, not an add-on's) that is still exactly the one the Reviewer looked at (`digest`). The history says
     who did it and why: a role acting for the owner (R4.1); the owner corrects it with a message on the
-    ticket."""
-    if not config.reviewer_answers_on(root):
+    ticket.
+    away: Away mode (ORCH-425) answers a plain question or a choice or plan card at once; its own rules
+    (autoreview.away_answerable, with ownerpick.refuse_auto) run again inside the write."""
+    from orch import autoreview
+
+    if away and not config.away_on(root):
+        raise Refused("Away mode is off here. Turn it on on the Review page.")
+    if not away and not config.reviewer_answers_on(root):
         raise Refused("The Reviewer does not answer questions here. Turn it on: orch config set "
                       "workflow.reviewer_answers on")  # fmt: skip
     line = _one_line(why)
@@ -1433,20 +1453,112 @@ def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str) -> d
         if question_digest(q) != digest:
             raise Refused(f"{qid} changed after the Reviewer looked at it.")
         ownerpick.refuse_card(q, person=False)  # ORCH-582: said first, in its own words
-        if q.get("card") is not None or q.get("action") is not None or q.get("kind") not in (None, "plain"):
+        if away:
+            autoreview._away_recheck(ticket, q)  # noqa: SLF001 - the same rules on the fresh ticket
+        elif q.get("card") is not None or q.get("action") is not None or q.get("kind") not in (None, "plain"):
             raise Refused(f"{qid} waits for the owner.")
+        if q.get(autoreview.OWNER_ONLY):
+            raise Refused(f"{qid} waits for the owner: they took it back from the Reviewer.")
         rec = q.get("recommended")
         if not rec or rec not in q["options"]:
             raise Refused(f"{qid} has no recommended answer.")
-        q["answer"], q["answered_by"], q["via"] = rec, REVIEWER, REVIEWER_VIA
+        answer = rec
+        # Away mode, a choice card: the same decision a person's pick records
+        if isinstance(q.get("card"), dict):
+            from orch import review
+
+            d = review._decision(q, review._card_of(q), "ok", rec, None)  # noqa: SLF001
+            q["decision"], answer = d, review._plain_answer(q, d)  # noqa: SLF001
+        q["answer"], q["answered_by"], q["via"] = answer, REVIEWER, REVIEWER_VIA
         q["answered_at"] = now()
         _release_wait(root, tid, ticket, qid)
-        add_history(ticket, REVIEWER, f"Answered {qid}: {rec}", REVIEWER_VIA)
-        add_history(ticket, REVIEWER, ANSWERED_LINE + f"{qid} = {rec} ({line})", REVIEWER_VIA)
+        add_history(ticket, REVIEWER, f"Answered {qid}: {answer}", REVIEWER_VIA)
+        said = autoreview.AUTO_ANSWERED_LINE if away else ANSWERED_LINE
+        add_history(ticket, REVIEWER, said + f"{qid} = {answer} ({line})", REVIEWER_VIA)
         history.created("answers", q)
         return q
 
     return apply_op(root, tid, op, by=REVIEWER)[0]
+
+
+def _undo_person(by: str) -> None:
+    if not by.startswith("human:") or agent_tool():
+        raise Refused("Only a person can undo what the Reviewer did.")
+
+
+def undo_reviewer_accept(root: Path, tid: str, by: str) -> dict:
+    """ORCH-425: a person undoes the Reviewer's accept: Done -> Review, with Human review needed on, so
+    neither
+    the Auto Reviewer nor Away mode accepts it again (the plain Reviewer looks at it again only when it
+    changes).
+    Refused when the ticket is no longer Done by the Reviewer's line (a person decided since)."""
+    from orch import autoreview
+
+    _undo_person(by)
+
+    def op(ticket):
+        if not accepted_by_reviewer(root, ticket):
+            raise Refused("This ticket is not Done by the Reviewer any more, so there is nothing to undo.")
+        ticket["status"] = "review"
+        ticket.pop("human_review", None)
+        add_history(ticket, by, "Status done -> review")
+        add_history(ticket, by, autoreview.UNDONE_LINE + "the Reviewer's accept; back in Review for you, "
+                    "with Human review needed on.")  # fmt: skip
+
+    return apply_op(root, tid, op, by=by)[0]
+
+
+def undo_reviewer_send_back(root: Path, tid: str, cid: str, by: str) -> dict:
+    """ORCH-425: a person undoes the Reviewer's send-back before a helper took it: the Reviewer's task goes
+    (the
+    history keeps it), the ticket is in Review again with Human review needed on. The caller took the queued
+    note away (autoreview._undo_send_back)."""
+    from orch import autoreview
+
+    _undo_person(by)
+
+    def op(ticket):
+        item = next((c for c in ticket["checklist"] if c.get("id") == cid), None)
+        was = ticket["status"]
+        if item is None or item.get("done") or was not in ("ready", "open"):
+            raise Refused("A helper already took what the Reviewer asked, so it cannot be undone.")
+        ticket["checklist"] = [c for c in ticket["checklist"] if c.get("id") != cid]
+        ticket["status"] = "review"
+        ticket.pop("human_review", None)
+        add_history(ticket, by, f"Status {was} -> review")
+        what = _one_line(item.get("text"), 120)
+        add_history(ticket, by, autoreview.UNDONE_LINE + f"the Reviewer's send-back ({what}); "
+                    "back in Review for you, with Human review needed on.")  # fmt: skip
+
+    return apply_op(root, tid, op, by=by)[0]
+
+
+def undo_reviewer_answer(root: Path, tid: str, qid: str, by: str) -> dict:
+    """ORCH-425: a person undoes an answer the Reviewer or Away mode gave: the question is open again and
+    marked
+    as the owner's (never answered for them again). What the helper already did with the old answer stays: the
+    caller tells the helper."""
+    from orch import autoreview
+
+    _undo_person(by)
+
+    def op(ticket):
+        q = next((x for x in ticket["questions"] if x["id"] == qid), None)
+        if q is None:
+            raise Refused(f"Ticket {tid} has no question {qid}.")
+        if q.get("answered_by") != REVIEWER or q.get("answer") is None or q.get("taken_back") is not None:
+            raise Refused(f"{qid} was not answered by the Reviewer, so there is nothing to undo.")
+        old = q["answer"]
+        for k in ("answered_at", "decision"):
+            q.pop(k, None)
+        q["answer"] = q["answered_by"] = q["via"] = None
+        q[autoreview.OWNER_ONLY] = True
+        what = _one_line(old, 80)
+        add_history(ticket, by, autoreview.UNDONE_LINE + f"the Reviewer's answer on {qid} ({what}); "
+                    "it waits for you again.")  # fmt: skip
+        return q
+
+    return apply_op(root, tid, op, by=by)[0]
 
 
 RELEASE_KEEPER = "agent:release-keeper"  # merges a green release for the owner (review.tend_releases)
@@ -1497,13 +1609,21 @@ def ask_for_changes(
     via: str | None = None,
     phone: str | None = None,
     pid: str | None = None,
+    guard=None,
+    if_revision: int | None = None,
+    line: str | None = None,
+    extra: str | None = None,
 ) -> dict:
     """A person sends a Review ticket back with a note, in ONE step: the note becomes a task, the ticket is
     Ready (Working only when a run claims it) and the note is queued as the person's own input, so the
     automation host starts exactly one run for it (a person's pending input is what starts runs; #287).
     A ticket the Reviewer accepted for the person (Done) can be sent back the same way.
-    The Reviewer itself (by REVIEWER) sends a Review ticket back once when work is missing (reviewer.py)."""
+    The Reviewer itself (by REVIEWER) sends a Review ticket back once when work is missing (reviewer.py).
+    The Auto Reviewer (ORCH-425) passes `guard` (ownerpick.refuse_auto, run inside the write), the revision it
+    looked at, its own history `line` and its point-by-point line (`extra`)."""
     role = by == REVIEWER
+    if (guard or if_revision is not None or line or extra) and not role:
+        raise Refused("Only the Reviewer sends back this way.")
     if not role and (not by.startswith("human:") or agent_tool()):
         raise Refused("Only a person can ask for changes.")
     note = (text or "").strip()
@@ -1518,13 +1638,17 @@ def ask_for_changes(
     def op(ticket):
         if not may_send_back(ticket):
             raise Refused("This ticket is not waiting for your review.")
+        if guard is not None:
+            guard(ticket)
         item = {"id": _next_id(ticket["checklist"], "c"), "text": note, "done": False, "evidence": []}
         if not role:
             item["origin"] = "change_request"  # structured: the dashboard shows "You asked: <note>"
         ticket["checklist"].append(item)
         ticket["status"] = "ready"  # any wait the ticket has is not this review's: left as it is
-        line = SENT_BACK_LINE if role else "Asked for changes: "
-        add_history(ticket, by, line + note[:200], REVIEWER_VIA if role else via)
+        if extra:
+            add_history(ticket, by, extra, REVIEWER_VIA)
+        said = line or (SENT_BACK_LINE if role else "Asked for changes: ")
+        add_history(ticket, by, said + note[:200], REVIEWER_VIA if role else via)
 
     from orch import runs  # runs imports tickets
 
@@ -1542,7 +1666,7 @@ def ask_for_changes(
         phone=phone,
     )
     try:
-        return apply_op(root, tid, op, by=SYSTEM)[0]
+        return apply_op(root, tid, op, by=SYSTEM, if_revision=if_revision)[0]
     except BaseException:
         runs.pending_discard(root, tid, item["id"])
         raise
@@ -1987,8 +2111,8 @@ def set_release(root: Path, tid: str, on: bool, by: str, if_revision: int | None
 
 def human_review(ticket: dict) -> bool:
     """ORCH-424: the Human review needed switch. On unless a person turned it off (the field is False only
-    then), so a ticket made before the switch existed counts as on. While it is on, nothing on the ticket is
-    accepted without a person."""
+    then), so a ticket made before the switch existed counts as on. While it is on, the Auto Reviewer and Away
+    mode leave the ticket alone (ownerpick.refuse_auto; owner 18 Nov). The plain Reviewer ignores it."""
     return ticket.get("human_review") is not False
 
 
