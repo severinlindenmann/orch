@@ -420,14 +420,14 @@ test('the large view of a words box uses the card\'s own words box when the kit 
 
 // ORCH-848: Run it now cards in the deck
 const runRow = (id, extra = {}) => card(id, {phone_run: true, run_last: {exit: 1, output: 'x', error: 'e'},
-  card: {kind: 'run', title: 'Turn on release walks', ok_label: 'I ran it', no_label: 'Leave it off for now',
-    run: {v: 1, command: 'orch config set github.release_walks on', argv: ['orch'], cwd: '~/w', class: 'orch', exe: 'orch', changes: 'c', undo: 'u'}}, ...extra});
+  card: {kind: 'run', title: 'Turn on the second look', ok_label: 'I ran it', no_label: 'Leave it off for now',
+    run: {v: 1, command: 'orch config set workflow.reviewer_look on', argv: ['orch'], cwd: '~/w', class: 'orch', exe: 'orch', changes: 'c', undo: 'u'}}, ...extra});
 
 test('a run card maps to a Run item with its command, its other answer and the phone flag', () => {
   const {UI} = load();
   const it = UI.review.mapCard(runRow('r'), fakeApi([[]]), NOW);
   assert.equal(it.kind, 'run'); assert.equal(it.kindLabel, 'Run'); assert.equal(it.icon, 'code');
-  assert.equal(it.run.command, 'orch config set github.release_walks on');
+  assert.equal(it.run.command, 'orch config set workflow.reviewer_look on');
   assert.equal(it.noLabel, 'Leave it off for now'); assert.equal(it.okLabel, 'I ran it');
   assert.equal(it.phoneRun, true); assert.equal(it.runLast.exit, 1);
   assert.equal(UI.review.mapCard(card('d'), fakeApi([[]]), NOW).run, undefined);

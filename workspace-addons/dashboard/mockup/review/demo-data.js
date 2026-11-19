@@ -4,9 +4,9 @@
 window.SWIPE_KIT='../../../../workspace/src/orch_ui/static/';
 window.SWIPE_ITEMS=[
  /* Run it now (ORCH-848, owner picked draft A 19 Nov): the question is the title, the command box is the card, its two buttons are the answers. */
- {id:'r1',kind:'run',kindLabel:'Run',icon:'code',ticket:'DT-56',ticketId:'DT-56',ticketTitle:'Turn on release walks',when:'today 14:20',title:'Release walks are ready. Turn them on?',
-  text:'Release walks are ready. Turn them on?',okLabel:'I ran it',noLabel:'Leave it off for now',then:'Release walks run before every release.',phoneRun:true,
-  run:{v:1,command:'orch config set github.release_walks on',cwd:'~/workspace-orch',class:'orch',exe:'orch',changes:'Release walks run before every release',undo:'orch config set github.release_walks off'}},
+ {id:'r1',kind:'run',kindLabel:'Run',icon:'code',ticket:'DT-56',ticketId:'DT-56',ticketTitle:'Turn on the second look',when:'today 14:20',title:'Turn on the Reviewer's second look?',
+  text:'Turn on the Reviewer's second look?',okLabel:'I ran it',noLabel:'Leave it off for now',then:'The Reviewer gives bigger finished work a second look.',phoneRun:true,
+  run:{v:1,command:'orch config set workflow.reviewer_look on',cwd:'~/workspace-orch',class:'orch',exe:'orch',changes:'The Reviewer gives bigger finished work a second look',undo:'orch config set workflow.reviewer_look off'}},
  /* A design review as one set of cards (16 Nov, ORCH-65): the question text on the card, full-page pictures that fit the
     pane on a dark ground with a zoom per side, a marked suggestion, a choice with how it is today. */
  {id:'g1',kind:'draft',kindLabel:'Draft',icon:'page',group:'Home look',ticket:'DT-50',ticketId:'DT-50',ticketTitle:'Home look',when:'today 11:02',title:'Home: one list of what needs you',

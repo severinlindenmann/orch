@@ -31,7 +31,7 @@ function load() {
   return {UI, toasts};
 }
 const item = (cls = 'orch', extra = {}) => ({kind: 'run', no_label: 'Leave it off for now', ok_label: 'I ran it',
-  run: {command: 'orch config set github.release_walks on', cwd: '~/workspace-orch', class: cls, changes: 'Release walks run', undo: 'orch config set github.release_walks off', ...extra}});
+  run: {command: 'orch config set workflow.reviewer_look on', cwd: '~/workspace-orch', class: cls, changes: 'Release walks run', undo: 'orch config set workflow.reviewer_look off', ...extra}});
 const NOW = new Date(2026, 10, 19, 14, 32);
 
 test('waiting: Run it now is filled on Review, outlined elsewhere, and names the folder', () => {
