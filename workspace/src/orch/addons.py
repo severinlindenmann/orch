@@ -1858,8 +1858,15 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
     return 0
 
 
+def name_width(names) -> int:
+    """Width of an add-on name column: at least 12, and always 2 spaces after the longest name."""
+    return max([12, *(len(n) + 2 for n in names)])
+
+
 def help_lines(root: Path) -> list[str]:
-    return [f"  {n:<12}{m['description']}" for n, m in sorted(active_manifests(root).items())]
+    found = sorted(active_manifests(root).items())
+    w = name_width(n for n, _ in found)
+    return [f"  {n:<{w}}{m['description']}" for n, m in found]
 
 
 # ---------------------------------------------------------------- add / remove / uninstall
