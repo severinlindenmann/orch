@@ -313,6 +313,12 @@ def no_ticket(x: dict, run: dict | None, tool_of) -> dict | None:
     return s
 
 
+def _ever_ran(run: dict | None) -> bool:
+    """A helper has worked on this ticket: a run claim is on record, or an agent wrote to it."""
+    run = run if isinstance(run, dict) else {}
+    return isinstance(run.get("claim"), dict) or isinstance(run.get("last_activity"), dict)
+
+
 def build(root: Path, orch_bin: str | None, state: dict, lines: int = LINES) -> list[dict]:
     """Every session of the state, with the last lines of the live ones."""
     n = max(1, min(int(lines), LINES_MAX))
@@ -330,6 +336,8 @@ def build(root: Path, orch_bin: str | None, state: dict, lines: int = LINES) -> 
         s = session(t, run, tid in waiting, tool_label(root, claim.get("agent")))
         if s["status"] == "closed" and t.get("status") == "done":
             continue
+        if s["status"] == "closed" and not _ever_ran(run):
+            continue  # ORCH-701: a ticket no helper ever worked on has no session: no tile, no kept conversation
         out.append(s)
         if s["mode"] == "live":
             live.append(tid)

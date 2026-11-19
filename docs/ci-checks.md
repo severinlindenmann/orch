@@ -22,8 +22,9 @@ steps are marked `continue-on-error`, so its check stays green and only a warnin
 
 A pull request into develop on its own runs one **light** job (`scripts/ci_light.py`, about 5 minutes): words and
 style, ruff, the workspace tests that import the modules it changed (or a quarter of the suite as a sample when it
-changes what all tests share, a module no test imports, or more than a quarter of the suite) and the suites of the
-add-ons it changed. The full set runs **once per merge queue group** (`orch-queue/…`) on top of develop, whatever
+changes what all tests share, a module no test imports, or more than a quarter of the suite), the rule tests that
+read the whole tree (`RULE_TESTS`: tool names, CLI seams, skills and history lint, next-step hints; about 15 s; they
+made most red queue groups on 18-19 Nov) and the suites of the add-ons it changed. The full set runs **once per merge queue group** (`orch-queue/…`) on top of develop, whatever
 files the group touches. A push to develop whose files equal a green queue group (`scripts/ci_proven.py`: a merge
 commit with the tree of its second parent, and a green `ci` run of that parent on an `orch-queue/` branch) runs no
 suite again. Contracts, publish, relay, mobile and the dashboard pictures still follow their paths on a pull request.
