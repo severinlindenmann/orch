@@ -18,7 +18,7 @@ const POSTER = (name, colour) => `<!doctype html><html><body style="background:$
 module.exports = {
   name: 'Review page: every card kind and the draft guard',
   covers: ['page:review', 'review.answer', 'run.send'],
-  async run({ page, open, reload, act, must, text, orch, orchAsPerson, python, until, workspace, home }) {
+  async run({ page, open, reload, act, must, text, orch, orchAsPerson, python, until, workspace, home, standins }) {
     await open('#home');  // the state polls below run in the page
     fs.writeFileSync(path.join(workspace, 'kinds-letter.txt'), 'Dear customer,\nthank you for a great year.\n');
     fs.writeFileSync(path.join(workspace, 'kinds-plan.txt'), 'Summer party: 20 people, Friday 18:00.\n');
@@ -67,9 +67,12 @@ module.exports = {
     // 4. Merge: the stand-in gh merged exactly the shown commit
     await show(merge);
     must(/Exact version/.test(await host().innerText()), 'the merge card does not name the exact version it merges');
+    const log = path.join(home, 'standin-merged');  // shared by every click-through of the run: only what this click adds counts
+    const before = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').length : 0;
     await act('review.answer', () => button(/^\s*Merge/).click());
-    const merged = fs.existsSync(path.join(home, 'standin-merged')) ? fs.readFileSync(path.join(home, 'standin-merged'), 'utf8') : '';
-    must(/standin\/lunch\/pull\/7 .*--match-head-commit c0ffee/.test(merged), 'Merge did not merge pull request 7 at the shown commit: ' + merged.slice(-200));
+    const added = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').slice(before) : '';
+    must(added.includes('https://github.com/standin/lunch/pull/7') && added.includes('--match-head-commit ' + standins.head),
+      'Merge did not merge pull request 7 at the shown commit: ' + added.slice(-200));
 
     // 5. Don't do on the link card
     await show(link);
@@ -84,11 +87,20 @@ module.exports = {
     await words().fill('Ask the bakery for the cake too.');
     await act('run.send', () => page.getByRole('button', { name: 'Add note' }).last().click());
     must(answer(plan) === '[null]', 'Add note answered the plan card; it should stay open');
+    const queued = path.join(workspace, '.orch', 'run', 'pending', plan + '.jsonl');  // the words wait for the plan's helper
+    must(fs.existsSync(queued) && fs.readFileSync(queued, 'utf8').includes('Ask the bakery for the cake too.'), 'the note did not reach the plan ticket\'s helper');
     await show(plan);
     await button(/^\s*Comment/).click();
     await words().fill('Book a room for 40 people, not 20.');
     await act('review.answer', () => page.getByRole('button', { name: 'Send back for changes' }).last().click());
     must(answer(plan) !== '[null]', 'the plan has no answer after Send back');
+
+    // the answers as saved in the ticket files
+    const saved = {draft: answer(draft), choice: answer(choice), merge: answer(merge), link: answer(link), plan: answer(plan)};
+    must(/Approved|Looks good/.test(saved.draft), 'draft saved as ' + saved.draft);
+    must(/Merge/.test(saved.merge), 'merge card saved as ' + saved.merge);
+    must(/Don't do|Do not|No/i.test(saved.link), 'link card saved as ' + saved.link);
+    must(/Book a room for 40 people/.test(saved.plan), 'plan saved without the words: ' + saved.plan);
 
     // 7. the Answered tab names the answers, also after a reload
     await open('#review');
@@ -96,7 +108,8 @@ module.exports = {
     await page.getByRole('tab', { name: /Answered/ }).first().click().catch(() => page.getByText('Answered', { exact: true }).first().click());
     await page.getByText('Use B').first().waitFor({ timeout: 20000 });
     const all = await text();
-    for (const word of ['Use B', 'Merge', "Don't do", 'Sent back for changes', 'Book a room for 40 people']) {
+    for (const word of ['Kinds walk: thank-you letter', 'Kinds walk: shop window poster', 'Kinds walk: lunch menu change',
+      'Kinds walk: price list link', 'Kinds walk: summer party plan', 'Use B', "Don't do", 'Book a room for 40 people']) {
       must(all.includes(word), `the Answered tab does not show "${word}"`);
     }
   },
