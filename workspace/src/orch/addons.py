@@ -2444,6 +2444,12 @@ def _load_snapshot(root: Path, nonce: str | None) -> dict | None:
     return d
 
 
+NO_RELEASE_LOOKUP = (
+    "orch was updated, but the release number could not be looked up (GitHub did not answer). "
+    "It shows again after the next check."
+)
+
+
 def _update_lines(before: dict, found: dict, sha: str | None) -> tuple[list[str], bool]:
     """The lines to print and whether to restart. A restart needs a version change or a changed local
     source; a sha from the network only shows in the text."""
@@ -2466,6 +2472,9 @@ def _update_lines(before: dict, found: dict, sha: str | None) -> tuple[list[str]
         if old is not None and isinstance(new, str) and old != new:
             lines.append(f"Updating {_printable(name)} {_printable(old)} → {_printable(new)}")
             restart = True
+    if sha is None:  # GitHub did not answer: the install ran, so it cannot be called up to date
+        lines.append(NO_RELEASE_LOOKUP)
+        restart = True
     if not lines:
         return ["orch is up to date."], False
     title = _release_title()
@@ -2823,6 +2832,6 @@ def update(
             if entry["name"] in found:
                 entry["version"] = found[entry["name"]]["version"]
         _save_registry(reg)
-        if sha:
-            _save_installed(sha, new_release)
+        # No commit answer: drop the old number so it is not shown for the new code (looked up again later).
+        _save_installed(sha, new_release)
     return done
