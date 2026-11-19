@@ -761,6 +761,13 @@ class Handler(BaseHTTPRequestHandler):
             from . import update
 
             return self._send(200, json.dumps(update.update_info()).encode(), "application/json")
+        if path == "/api/tool-updates":  # the tools' versions and notes: same-origin only, no secrets
+            from . import update
+
+            fresh = (parse_qs(query).get("refresh") or [""])[0] == "1"
+            return self._send(
+                200, json.dumps(update.tool_updates(self.root, refresh=fresh)).encode(), "application/json"
+            )
         if path == "/api/release":  # a finished ticket: is its merged change in the installed release?
             from . import update
 
@@ -1348,6 +1355,19 @@ class Handler(BaseHTTPRequestHandler):
                     actions.human_env(self.root, self.orch_bin),
                     session=self.session,
                     to=to,
+                )
+                return self._send(code, text.encode(), "text/plain; charset=utf-8")
+            if body.get("op") == "tools.update":  # Update on one tool in Settings (a person only)
+                from . import update
+
+                if not session:
+                    raise actions.NeedsPerson(actions.SIGNIN)
+                args = body.get("args") or {}
+                code, text = update.start_tool_update(
+                    self.root,
+                    self.orch_bin,
+                    actions.human_env(self.root, self.orch_bin),
+                    args.get("name") if isinstance(args, dict) else None,
                 )
                 return self._send(code, text.encode(), "text/plain; charset=utf-8")
             if body.get("op") in RESTARTING_OPS and session:
