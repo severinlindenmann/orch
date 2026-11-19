@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-32 steps: 23 ready (the script clicks them), 9 pending (not built yet).
+32 steps: 25 ready (the script clicks them), 7 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -90,7 +90,8 @@ Must be seen:
 
 - The tile is orange and first after the pinned ones.
 - Its sentence is the question.
-- Nothing can be answered on the wall itself; after the answer the tile turns back to Working.
+- Nothing can be answered on the wall itself; the layer shows the question with its options and a field for an own answer.
+- One click on an option answers it; the question leaves the pane and the tile turns back to Working.
 
 ## 6. Focus button on a ticket and Open ticket on a session
 
@@ -101,13 +102,15 @@ Must be seen:
 Do:
 
 1. Open Tickets and press the Focus button of a row.
-2. Open a ticket page and press its Focus button.
-3. In the session press Open ticket, also from full screen.
+2. Press Answer on a waiting row and answer with the keyboard, then Esc.
+3. Open a ticket page and press its Focus button.
+4. In the session press Open ticket, also from full screen.
 
 Must be seen:
 
 - Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.
 - The session opens in the layer and the page stays.
+- After the answer the keyboard stays in the session; Esc steps back to the bar.
 - Open ticket goes back to the same ticket page; the session stays open.
 
 ## 7. Pin a session and give it your own name
@@ -288,46 +291,53 @@ Do:
 
 1. Open a session that needs you from the bar.
 2. Look at the pane: what it does now, its last lines and the line under them.
-3. Open the model choice of a working session and pick another model.
+3. Press Stop in the pane; open an idle session and read its Stop button.
+4. Open the model choice of a working session and pick another model.
 
 Must be seen:
 
 - The open question, the last lines of its screen, then tool and model (for example "Helper · Opus").
 - How long it is open and how long it stays (warm while it works, or when it closes for being idle).
 - All of it stays current while you look; the keyboard place does not jump.
+- Stop in the pane stops its helper; an idle helper's button says Stop idle helper.
 - A new model applies when the helper finishes its current step (or at its next start) and says so.
 
-## 17. Chat: messages with the results inside
+## 17. Chat: messages and ticket events, questions answered inside
 
 - Part: chat (draft D feature 5)
-- State: pending, waits for: Chat (crew tasks of the Chat stage)
+- State: ready, clicked by the script
 - Pictures: `fd-17-chat-1280.png`, `fd-17-chat-1920.png`, `fd-17-chat-390.png`
 
 Do:
 
-1. Open a session in Chat view.
-2. Read the messages and press a result inside one.
+1. Open a session: it opens in Chat.
+2. Answer its waiting question in the orange card and send a message.
+3. Switch to Terminal, reload, switch back to Chat.
 
 Must be seen:
 
-- Plain messages with time; step events between them.
-- Results show as small widgets and open big.
+- Plain messages with time; done steps and other events as lines between them; the pull request inside the message.
+- The waiting question is an orange card above the chat, not a message; once answered it moves into the chat as yours.
+- A sent message shows at once; Terminal shows the last lines and the choice stays after a reload.
 
 ## 18. Files and screenshots in the message box, with a preview before sending
 
 - Part: message box (draft D feature 13)
-- State: pending, waits for: Chat (crew tasks of the Chat stage)
+- State: ready, clicked by the script
 - Pictures: `fd-18-message-box-1280.png`, `fd-18-message-box-1920.png`, `fd-18-message-box-390.png`
 
 Do:
 
 1. Attach a file, paste a screenshot, drop a second file.
 2. Remove one, then send.
+3. Reload the page.
 
 Must be seen:
 
 - Each one shows as a small preview before sending.
 - Removing one takes it out; the sent message carries the rest.
+- The box says its limits in plain words; a file over 25 MB is refused.
+- The sent message and its files stay after a reload.
 
 ## 19. Voice into the message box
 
@@ -508,8 +518,8 @@ Do:
 
 Must be seen:
 
-- The wall shows with that session open in the layer.
-- An unknown ticket shows the wall and opens nothing.
+- The wall shows with that session open in the layer, the keyboard in its pane.
+- An unknown ticket shows the wall, opens nothing and says "There is no ticket with this address."
 
 ## 30. Keyboard only: wall, layer and back to the bar
 

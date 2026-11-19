@@ -348,7 +348,13 @@ def choose(
     active = next((c for c in cands if c.use.active), None)
     good = [c for c in cands if c.good and c.account["id"] not in skip]  # skip: a switch to it just failed
     if good:
-        return Choice(good[0], active, cands, False, "first account under its limits")
+        return Choice(
+            good[0],
+            active,
+            cands,
+            False,
+            f"{good[0].account['label']} is the first account in order that is under its limits",
+        )
     if active and active.under:
         return Choice(active, active, cands, True, "every account is at or near a limit; staying")
     under = [c for c in cands if c.under and c.account["id"] not in skip]
@@ -400,11 +406,14 @@ def _recent_failures(memory: dict, at: datetime) -> dict[str, str]:
     return out
 
 
+ALL_AT_LIMIT_ALERT = "Every account is at or near its limit."
+
+
 def alerts(accounts: list[dict], ch: Choice, failed: dict[str, str]) -> list[str]:
     """What the person should see now (list, status, the page), in plain words; empty when all is well."""
     out = []
     if ch.all_at_limit:
-        out.append("Every account is at or near its limit.")
+        out.append(ALL_AT_LIMIT_ALERT)
     names = {a["id"]: a["label"] for a in accounts}
     for k in failed:
         out.append(f"Could not switch to {names.get(k, k)}; Usage tries the next account in order.")
@@ -473,6 +482,7 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     memory["all_at_limit"] = ch.all_at_limit
 
     t = ch.target
+    why = ch.why
     while t and (ch.active is None or t.use.key != ch.active.use.key):
         before = ch.active.account["label"] if ch.active else None
         if ch.active and not ch.active.good and ch.active.why:
@@ -578,7 +588,7 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
         "active": ch.active.account["id"] if ch.active else None,
         "target": t.account["id"] if t else None,
         "all_at_limit": ch.all_at_limit,
-        "why": ch.why,
+        "why": why,
     }
     with store._lock(root):
         _write(memory_path(root), memory)
@@ -624,7 +634,7 @@ def warning_rows(root: Path, at: datetime | None = None) -> list[dict]:
         if k == "all-at-limit":
             title, tone = "Usage: every account is at or near its limit", "bad"
             text = (
-                "Every account is at or near its limit, so Usage has no account to switch to. Helpers may stop "
+                "Usage has no account to switch to, so helpers may stop "
                 "until a limit resets. Raise a limit or turn on another account in Usage."
             )
         else:
@@ -645,7 +655,7 @@ def warning_rows(root: Path, at: datetime | None = None) -> list[dict]:
                 "text": text[:500],
                 "tone": tone,
                 "since": w["since"],
-                "cli": f"orch usage list   (Got it: orch usage seen {k})",
+                "cli": f"orch usage list; hide it with: orch usage seen {k}",
                 "actions": [
                     {
                         "label": "Got it",

@@ -190,11 +190,14 @@ test('the split and the selected pane are kept per browser, at most three', () =
 
 test('panes fold pin and place into More when narrow, on the right with more than one, and on a phone', () => {
   assert.equal(L.liveLayerNarrow('bottom', 1, 1040, false), false);
-  assert.equal(L.liveLayerNarrow('bottom', 2, 1040, false), false);
+  assert.equal(L.liveLayerNarrow('bottom', 2, 1040, false), true);   // two at 1280 wide: the header with Chat | Terminal does not fit
+  assert.equal(L.liveLayerNarrow('bottom', 2, 1680, false), false);
   assert.equal(L.liveLayerNarrow('bottom', 3, 1040, false), true);
-  assert.equal(L.liveLayerNarrow('bottom', 3, 1680, false), false);
+  assert.equal(L.liveLayerNarrow('bottom', 3, 1680, false), true);   // three at 1920 wide: 560 px each
+  assert.equal(L.liveLayerNarrow('bottom', 3, 2400, false), false);
   assert.equal(L.liveLayerNarrow('right', 2, 760, false), true);
   assert.equal(L.liveLayerNarrow('right', 1, 760, false), false);
+  assert.equal(L.liveLayerNarrow('right', 1, 537, false), true);    // on the right at 1280 wide
   assert.equal(L.liveLayerNarrow('bottom', 1, 390, true), true);
 });
 
@@ -307,4 +310,24 @@ test('the pane shows the waiting question with its options and answers it there 
   assert.equal(liveAskModel({}), null);
   assert.equal(liveAskModel({questions:[{id:'q3', kind:'plan', text:'Plan?'}]}).plain, false);
   assert.match(source, /liveAskFill[^]*?act\('answer', \{ticket:id, question:q\.id, digest:q\.digest/, 'the answer is the same op a question card sends');
+});
+
+test('after an answer in the pane the keyboard stays in the pane, so Esc still steps the layer back (ORCH-709)', () => {
+  const fill = source.slice(source.indexOf('function liveAskFill'), source.indexOf('// The live part of a pane'));
+  assert.match(fill, /const had = box\.contains\(document\.activeElement\);[^]*?box\.focus\([^]*?c\.disabled = true/, 'the keyboard waits on the box before its buttons are disabled');
+  assert.match(fill, /liveLayerWant = \{id, until:[^}]*ask:true\}; liveLayerTake\(\)/, 'and goes back into the pane when the answer is in');
+  const take = source.slice(source.indexOf('function liveLayerTake'), source.indexOf('// Full screen covers the page'));
+  assert.match(take, /\[data-live-ask\]:not\(\[hidden\]\) :is\(button, input\):not\(:disabled\)/, 'the next question\'s first choice first');
+});
+
+// ORCH-706: a helper that waits for an OK on its screen shows its choice in the last lines; in a short pane (the panel
+// at the bottom, a phone) the box was squeezed to two lines. It never shrinks below its lines (the API sends at most
+// a few), the pane body scrolls instead.
+test('the last-lines box never shrinks below its lines in a short pane', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8');
+  const rule = (css.match(/(?:^|\n)\.live-lines\{([^}]*)\}/) || [])[1];
+  assert.ok(rule, 'the .live-lines rule is in widgets.css');
+  const flex = (rule.match(/(?:^|;)flex:([^;]*)/) || [])[1] || '';
+  const shrink = (rule.match(/(?:^|;)flex-shrink:([^;]*)/) || [])[1] || flex.trim().split(/\s+/)[1];
+  assert.equal(String(shrink).trim(), '0', 'flex shrink of .live-lines is 0: ' + rule);
 });

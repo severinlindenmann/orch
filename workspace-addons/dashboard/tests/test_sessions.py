@@ -42,6 +42,7 @@ def _state():
         _t(6, status="dropped"),
         _t(7),
         _t(8),
+        _t(9),  # never had a helper: its status row says nothing ran, so it is no session
     ]
     runs = {
         "t_sess0001": _run(
@@ -49,9 +50,11 @@ def _state():
             detail="Running pytest",
         ),
         "t_sess0002": _run("you", "Waits for you", "Your answer"),
-        "t_sess0003": {"running": False, "pending": 0},
+        # ran before, closed now: a helper wrote to it (kept conversation)
+        "t_sess0003": {"running": False, "pending": 0, "last_activity": {"at": "2026-11-17T19:00:00Z"}},
         "t_sess0004": _run("idle", "Idle", "Nothing running for 5 min", idle_seconds=300),
         "t_sess0005": {"running": False},
+        "t_sess0009": {"running": False, "pending": 0, "last_activity": None, "claim": None},
         "t_sess0007": _run(
             "waiting", "On hold", "Waiting for the pull request checks", live=False, hold="x y"
         ),
@@ -92,6 +95,9 @@ def test_every_session_with_status_waits_lines_tool_model_and_open_time(tmp_path
     assert line["status"] == "in-line" and line["word"] == "In line"
     assert idle["status"] == "idle" and idle["idle_seconds"] == 300
     assert closed["status"] == "closed" and closed["tool"] is None and closed["open_seconds"] is None
+    assert (
+        "ORCH-9" not in got
+    )  # ORCH-701: a ticket that never ran is no session and claims no kept conversation
     # one screen read for every live session, never for a oneshot or a closed one
     assert (
         len(screens) == 1
@@ -303,3 +309,26 @@ def test_a_loop_in_the_parent_chain_is_never_followed(tmp_path, screens):
 def test_the_api_answer_carries_the_groups(tmp_path, screens):
     got = sessions.answer(tmp_path, "orch", _epic_state(), 0.0, 2)
     assert [g["id"] for g in got["groups"]] == ["t_sess0020"]
+
+
+def test_a_quiet_session_whose_result_waits_reads_check_like_its_ticket():
+    """ORCH-674: the tile said Idle while the layer (the ticket's pill) said Check for the same session."""
+    idle = sessions.session(_t(9, status="review"), _run("idle", "Idle"), False, None)
+    assert (idle["status"], idle["word"]) == ("idle", "Check")
+    closed = sessions.session(_t(10, status="review"), {"running": False}, False, None)
+    assert (closed["status"], closed["word"]) == ("closed", "Check")
+    plain = sessions.session(_t(11), _run("idle", "Idle"), False, None)
+    assert plain["word"] == "Idle"
+    asks = sessions.session(_t(12, status="review"), _run("you", "Waits for you"), False, None)
+    assert asks["word"] == "Waits for you"
+
+
+def test_a_quiet_session_whose_ticket_asks_or_waits_for_a_result_needs_the_person():
+    """ORCH-790: the wall said 2 need you while its Needs you band was empty: these two sat under Idle."""
+    ask = _t(20, questions=[{"text": "Which layout?", "answer": None}])
+    assert sessions.session(ask, {"running": False}, False, None)["needs"] is True
+    assert sessions.session(_t(21, status="review"), _run("idle", "Idle"), False, None)["needs"] is True
+    assert sessions.session(_t(22), {"running": False}, False, None)["needs"] is False
+    assert (
+        sessions.session(_t(23, status="review"), _run("you", "Waits for you"), False, None)["needs"] is False
+    )

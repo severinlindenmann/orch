@@ -1,4 +1,4 @@
-"""orch services list|check|found|add|adopt|start|stop|restart|auto|remove|log|act|view (contract: contracts/addons/services/README.md)."""
+"""orch services list|check|found|add|adopt|start|stop|restart|auto|remove|log|act|view|status (contract: contracts/addons/services/README.md)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import drivers, store, watch
+from . import drivers, service, store, watch
 from .store import Refused
 
 MASK = "••••••"
@@ -580,8 +580,9 @@ def cmd_adopt(args, root: Path, fid: str) -> int:
     return _emit_kept(args, drv, {"service": row, "next": nxt}, nxt)
 
 
-def cmd_check(args, root: Path) -> int:
-    """One pass over every service: health, failing, the one question and acting on its answer (no loop)."""
+def check_pass(root: Path) -> tuple[list[dict], list[str], int]:
+    """One pass over every service: health, failing, the one question and acting on its answer (no loop).
+    The caller holds the check lock (service.check_pass)."""
     recs, bad = store.load_all(root)
     drv = _driver()
     wid = _workspace_id(root)
@@ -603,8 +604,39 @@ def cmd_check(args, root: Path) -> int:
         said.append("No services yet.")
     elif not said:
         said.append(f"Checked {len(recs)} service(s); all as expected.")
+    return out, said, bad
+
+
+def cmd_check(args, root: Path) -> int:
+    with service.check_pass(root, wait=service.CHECK_WAIT):
+        out, said, bad = check_pass(root)
     data: dict = {"checked": out, "unreadable": bad}
     return _emit(args, data, "\n".join(said))
+
+
+def cmd_checker(args, root: Path) -> int:
+    """start | stop | status without a service id: the regular check (run by orch start and turning Services on)."""
+    if args.cmd == "start":
+        pid = service.start(root)
+        text = f"The regular check runs: every {service.EVERY_SECS} seconds (pid {pid})."
+        return _emit(args, {"running": True, "pid": pid}, text)
+    if args.cmd == "stop":
+        stopped = service.stop(root)
+        text = "The regular check stopped." if stopped else "The regular check was not running."
+        return _emit(args, {"stopped": stopped}, text)
+    pid = service.running_pid(root)
+    if pid:
+        return _emit(args, {"running": True, "pid": pid}, f"The regular check runs (pid {pid}).")
+    text = "The regular check is off. Start it: orch start (or orch services start)"
+    _emit(args, {"running": False}, text)
+    return 1
+
+
+def _checker_round(root: Path) -> None:
+    _out, said, _bad = check_pass(root)
+    for line in said:
+        if not line.startswith(("Checked ", "No services yet.")):
+            print(f"{store.now()} {line}", flush=True)
 
 
 def run(args) -> int:
@@ -630,6 +662,12 @@ def run(args) -> int:
         return _emit(args, {"found": items}, _found_text(items))
     if cmd == "adopt":
         return cmd_adopt(args, root, args.found_id)
+    if cmd in ("start", "stop") and args.id is None:
+        return cmd_checker(args, root)
+    if cmd == "status":
+        return cmd_checker(args, root)
+    if cmd == "watch":
+        return service.watch(root, lambda: _checker_round(root), log=lambda m: print(m, flush=True))
     if cmd in ("start", "stop", "restart", "remove"):
         return cmd_simple(args, root, cmd, args.id)
     if cmd == "auto":
@@ -686,8 +724,12 @@ def main(argv=None) -> int:
     s.add_argument("--cwd")
     s.add_argument("--auto", action="store_true")
     s.add_argument("--start", action="store_true")
-    for verb in ("start", "stop", "restart", "remove"):
+    for verb in ("start", "stop"):  # without an id: the regular check (orch start runs these)
+        p(verb).add_argument("id", nargs="?")
+    for verb in ("restart", "remove"):
         p(verb).add_argument("id")
+    p("status")
+    sub.add_parser("watch", help=argparse.SUPPRESS)
     s = p("auto")
     s.add_argument("id")
     s.add_argument("value", choices=("on", "off"))

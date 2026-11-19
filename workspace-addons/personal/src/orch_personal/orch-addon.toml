@@ -1,0 +1,20 @@
+schema = "orch.addon/1"
+orch_api = 1
+name = "personal"
+version = "0.1.0"
+description = "Your notes (and next your meetings, calendar, messages and mail) in one place; helpers use only what you allow."
+run = "orch_personal"
+skill = "skills/orch-personal"
+agents_block = "skills/orch-personal/AGENTS-block.md"
+gitignore = [".orch/addons/personal/"]
+background = true
+
+[dashboard]
+label = "Personal"
+icon = "user"
+order = 15
+subtitle = "What needs you, then each part at a glance. Helpers use only what you turned on."
+
+[page]
+path = "/"
+label = "Open Personal"

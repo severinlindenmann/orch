@@ -102,7 +102,7 @@ def now() -> str:
 
 
 def parse_time(text: str) -> str:
-    """Any ISO 8601 time -> UTC RFC 3339 ending in Z. Without offset = UTC."""
+    """Any ISO 8601 time -> UTC RFC 3339 ending in Z. Without offset = local time (ORCH-619)."""
     t = text.strip()
     if t.endswith(("Z", "z")):
         t = t[:-1] + "+00:00"
@@ -110,9 +110,7 @@ def parse_time(text: str) -> str:
         dt = datetime.fromisoformat(t)
     except ValueError:
         raise Refused(f"'{text}' is not a time. Use e.g. 2026-11-05T08:00:00+01:00") from None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")  # a naive time is read as local by astimezone
 
 
 def agent_tool() -> str | None:
@@ -1300,12 +1298,31 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str, person: bool 
         ownerpick.refuse_ticket(ticket, person)
     if status in ("done", "review") and by.startswith("agent:") and ticket["status"] != status:
         _check_not_too_early(root, ticket)
+    if status == "waiting" and by.startswith("agent:") and not hidden_kind(ticket):
+        _check_waits_on_something(ticket)
     if status == "done" and by.startswith("agent:"):
         _check_can_finish(ticket)
         if not config.agents_may_finish(root):
             add_history(ticket, by, f"{by} finished the work and sent it to Check")
             return "review", by
     return status, by
+
+
+WAITING_NO_REASON = (
+    "Waiting needs something to wait on, or the person sees Waiting with no reason. "
+    "Blocked or need an answer: "
+    'orch ask {key} "<what blocks you and what you need>" --option <A> --option <B> --recommend <A>. '
+    "Waiting for a time: orch wait {key} --until <time>."
+)
+
+
+def _check_waits_on_something(ticket: dict) -> None:
+    """ORCH-602: an agent moves its ticket to Waiting only with a question, a time or a thing to wait on.
+    A helper blocked by its tool's sandbox set Waiting with only a summary line (ORCH-548, ORCH-549, 18 Nov):
+    the ticket sat in Waiting with no card and no reason shown. A person may still set Waiting by hand."""
+    if ticket.get("waiting_on") or _open_questions(ticket):
+        return
+    raise Refused(WAITING_NO_REASON.format(key=ticket.get("key") or ticket.get("id") or "<id>"))
 
 
 AGENT_FINISH_TEXT = "finished by the agent (agents may finish is on)"
@@ -2247,6 +2264,7 @@ def tidy(
         if tidied(root, ticket):
             raise Refused("This ticket was already tidied.")
         old = str(ticket.get("title") or "")
+        was_auto = bool(ticket.get("title_auto"))
         edited = any(  # someone renamed it after it was created: that title is theirs, tidy leaves it
             re.fullmatch(
                 r"Title changed(?: \(was: .* \| now: .*\))?",
@@ -2259,6 +2277,8 @@ def tidy(
             ticket["title"] = title
             ticket.pop("title_auto", None)
             add_history(ticket, by, TIDY_LINE + old[:200])
+        elif was_auto and not edited:  # the helper kept the placeholder's words: now they are its title
+            ticket.pop("title_auto", None)
         filled = [k for k in sorted(fields) if not ticket.get(k)]
         for k in filled:
             _set_field(ticket, k, fields[k])
@@ -2268,6 +2288,8 @@ def tidy(
         if wrote:
             ticket["description"] = description
             ticket["description_by"] = by[:100]
+            if was_auto and ticket.get("note") == LONG_NOTE:  # only the placeholder note goes (as `title`)
+                ticket.pop("note", None)
             add_history(ticket, by, f"Description written by {by[:100]}")
         estimated = bool(est and not ticket.get("estimate"))
         if estimated:
