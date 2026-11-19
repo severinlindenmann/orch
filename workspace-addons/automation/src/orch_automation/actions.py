@@ -36,7 +36,7 @@ def _wake_up_used(root: Path, t: dict, result: str, by: str | None) -> None:
     orchcli.call(root, "wait", tid, "--clear", by=by or True)
     if not script_of(t):
         orchcli.call(root, "ticket", "status", tid, "active", by=by or True)
-    orchcli.log(root, tid, "Automation started an agent run (Start now on a wake-up).")
+    orchcli.log(root, tid, "Automation started the helper (Start now on a wake-up).")
 
 
 def act(root: Path, verb: str, target: str, by: str | None = None, value: str | None = None) -> dict:
