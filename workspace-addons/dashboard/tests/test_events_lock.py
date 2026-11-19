@@ -53,3 +53,26 @@ def test_json_rows_reads_like_os_walk(tmp_path):
     names = lambda rows: sorted(os.path.relpath(r[0], tmp_path / "top") for r in rows)
     assert names(nested) == ["a.json", os.path.join("deep", "er", "c.json")]  # not through the symlink
     assert names(flat) == ["a.json"]
+
+
+def test_a_folder_that_fails_while_read_is_skipped(tmp_path, monkeypatch):
+    """A read error in the middle of a folder must not end the watcher (os.walk skipped such a folder too)."""
+    import orch_dashboard.events as mod
+
+    class Broken:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise OSError("folder read failed")
+
+    monkeypatch.setattr(mod.os, "scandir", lambda _p: Broken())
+    rows = []
+    mod.json_rows(tmp_path, True, rows)
+    assert rows == []

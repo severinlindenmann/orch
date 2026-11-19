@@ -23,21 +23,20 @@ def json_rows(folder, nested, rows):
     todo = [str(folder)]
     while todo:
         top = todo.pop()
-        try:
-            it = os.scandir(top)
+        try:  # opening the folder or reading its next entry can fail (os.walk skipped such a folder too)
+            with os.scandir(top) as it:
+                for e in it:
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            if nested:
+                                todo.append(e.path)
+                        elif e.name.endswith(".json"):
+                            st = e.stat(follow_symlinks=False)
+                            rows.append((e.path, st.st_mtime_ns, st.st_size))
+                    except OSError:
+                        pass
         except OSError:
             continue
-        with it:
-            for e in it:
-                try:
-                    if e.is_dir(follow_symlinks=False):
-                        if nested:
-                            todo.append(e.path)
-                    elif e.name.endswith(".json"):
-                        st = e.stat(follow_symlinks=False)
-                        rows.append((e.path, st.st_mtime_ns, st.st_size))
-                except OSError:
-                    pass
 
 
 class Revisions:
