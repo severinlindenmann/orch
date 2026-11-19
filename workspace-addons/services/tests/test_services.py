@@ -111,7 +111,86 @@ def test_start_that_never_comes_up_fails_after_a_short_wait(cli, fake, clock):
     fake.start_dies = True
     code, out = jrun(cli, "start", "web")
     assert code == 0 and "did not stay running" in out["next"]
-    assert clock.t < 10
+    assert 10 <= clock.t < 20  # a few seconds of grace (uv run builds its env first), then the answer
+
+
+def test_a_start_that_stops_names_the_last_log_line(cli, fake, clock, ws):
+    # report r-1119-1255-ws-6: start said only "did not stay running"; the log held the reason
+    _add(cli)
+    fake.name = "launchd"
+    plain = fake.start
+
+    def dies_and_writes(spec):
+        plain(spec)
+        spec.log.parent.mkdir(parents=True, exist_ok=True)
+        spec.log.write_text("shell-init: error\ngetcwd: Operation not permitted\n", encoding="utf-8")
+
+    fake.start, fake.start_dies = dies_and_writes, True
+    code, out = jrun(cli, "start", "web")
+    assert code == 0 and "did not stay running" in out["next"]
+    assert "Its log ends with: getcwd: Operation not permitted" in out["next"]
+    assert "out of Documents, Desktop" in out["next"] and "orch services log web" in out["next"]
+
+
+def test_an_old_log_line_is_not_given_as_the_reason(cli, fake, clock, ws):
+    import os
+
+    _add(cli)
+    log = ws / ".orch/addons/services/logs/web.log"
+    log.write_text("an error from last week\n", encoding="utf-8")
+    os.utime(log, (1_000_000_000, 1_000_000_000))
+    fake.start_dies = True
+    code, out = jrun(cli, "start", "web")
+    assert code == 0 and "did not stay running" in out["next"] and "last week" not in out["next"]
+
+
+@pytest.fixture
+def mac_documents(ws, tmp_path, monkeypatch):
+    """Pretend to be a Mac whose ~/Documents holds the test workspace (a link, so the workspace stays where it is)."""
+    from orch import macfolders
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "Documents").symlink_to(ws.parent, target_is_directory=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(macfolders, "_platform", lambda: "darwin")
+    return home
+
+
+def test_add_is_refused_in_a_mac_protected_folder(cli, fake, ws, mac_documents):
+    # report r-1119-1255-ws-6: add accepted a workspace in ~/Documents and the launchd job died at once
+    fake.name = "launchd"
+    code, out = _add(cli, "web", "--start")
+    assert (
+        code == 2 and "in Documents" in out["error"] and "macOS does not let background jobs" in out["error"]
+    )
+    assert "~/code" in out["error"]
+    assert fake.calls == [] and not (ws / ".orch/addons/services/services/web.json").exists()
+
+
+def test_a_program_in_a_mac_protected_folder_is_refused(cli, fake, ws, tmp_path, monkeypatch):
+    from orch import macfolders
+
+    home = tmp_path / "home"
+    (home / "Desktop").mkdir(parents=True)
+    tool = home / "Desktop" / "serve"
+    tool.write_text("#!/bin/sh\n", encoding="utf-8")
+    tool.chmod(0o755)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(macfolders, "_platform", lambda: "darwin")
+    fake.name = "launchd"
+    code, out = jrun(cli, "add", "Tool", "--id", "tool", "--", str(tool))
+    assert code == 2 and "The program ~/Desktop/serve is in Desktop" in out["error"]
+
+
+def test_start_is_refused_too_and_other_computers_are_not_asked(cli, fake, ws, mac_documents):
+    code, out = _add(cli)  # the fake driver is no launchd: Linux and Windows have no such folders
+    assert code == 0
+    fake.name = "launchd"
+    code, out = jrun(cli, "start", "web")
+    assert code == 2 and "in Documents" in out["error"] and ("start", "web") not in fake.calls
+    code, out = jrun(cli, "stop", "web")  # stopping and removing always work
+    assert code == 0
 
 
 def test_add_with_start_says_it_was_started(cli, fake, clock):

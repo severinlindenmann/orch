@@ -51,8 +51,8 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 | Command | Answer (`--json`) |
 |---|---|
 | `list` | `{"services": [row], "unreadable": n, "note"?}`; row = `id, name, state ("running" \| "stopped" \| "failing"), since (RFC 3339 UTC), auto, made_by, port, command, cwd, pid?, health, failing, question`; `health` = `{"ok", "how": "process alive" \| "answers on its address", "text"}`, `question` = `{ticket, id, title, text}` while one is open, else `null`. Reads only |
-| `check` | `{"checked": [{id, name, health, failing, did?, error?}], "unreadable": n}`: one pass, no loop (see Health check) |
-| `add <name> --id <slug> [--port N] [--ticket ID \| --addon NAME] [--cwd DIR] [--auto] [--start] -- <command...>` | `{"service": row, "next"}`; installed stopped unless `--start` |
+| `check` | `{"checked": [{id, name, health, failing, unhealthy, did?, error?}], "unreadable": n}`: one pass, no loop (see Health check); a service whose health is not ok is named in the text even before it is failing |
+| `add <name> --id <slug> [--port N] [--ticket ID \| --addon NAME] [--cwd DIR] [--auto] [--start] -- <command...>` | `{"service": row, "next"}`; installed stopped unless `--start`. macOS: refused when the working folder or the program lies in Documents, Desktop, Downloads, iCloud Drive or `~/Library/CloudStorage` (launchd jobs may not use them); `start`/`restart` refuse the same. A start that does not stay running within 10 s names the last log line |
 | `start \| stop \| restart <id>` | `{"service": row, "next"}` |
 | `auto <id> on \| off` | `{"service": row, "next"}` |
 | `remove <id>` | `{"removed": id, "next"}`: stops it, removes the platform entry and the record, keeps the log |
@@ -86,7 +86,10 @@ use instead; it is never stopped by orch.
 One pass over every service, no loop and no sleep (R2.6); a person repeats it with the automation add-on
 (`orch automation script add services-check -- orch services check`, then `orch automation repeat <ticket>
 "every 5 minutes" --script services-check`).
-- Health: the process is alive (driver state); with a `port`, a TCP connect to `127.0.0.1:<port>` within 0.5 s.
+- Health: the process is alive (driver state); with a `port`, a TCP connect to `127.0.0.1:<port>` within 0.5 s, and
+  the listener on that port (`lsof -iTCP:<port> -sTCP:LISTEN`) is the driver's pid or one of its child processes;
+  otherwise `"Alive, but another program answers on its address"`. Where the listener cannot be read (Windows, no
+  `lsof`) the connect alone counts.
   A service the person stopped is not checked (`"Stopped, so not checked"`) and never failing.
 - A failure = a failed health check, or a start the platform did by itself since the last pass (driver `runs()`:
   launchd `runs` from `launchctl print`, systemd `NRestarts`; starts through orch move the baseline and do not

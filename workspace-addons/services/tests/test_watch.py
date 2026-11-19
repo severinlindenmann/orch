@@ -2,12 +2,16 @@
 orch CLI (no sleeping, no real ticket)."""
 
 import json
+import shutil
 import socket
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 from conftest import jrun
+
+from orch_services.watch import listeners as REAL_LISTENERS  # the autouse fixture replaces it in every test
 
 T0 = 1_800_000_000.0
 
@@ -368,3 +372,78 @@ def test_one_bad_pass_counts_once_even_when_it_was_also_started_again(
     _crash(fake)
     assert _check(cli)["failing"] is True and len(orch.asks()) == 1
     assert "3 times" in orch.ticket()["questions"][0]["text"]
+
+
+# ---------------------------------------------------------------- who answers on the port (r-1119-1255-ws-6)
+
+
+def test_another_program_on_the_port_is_not_healthy_and_check_says_so(
+    cli, fake, ws, clock, orch, monkeypatch
+):
+    from orch_services import watch
+
+    monkeypatch.setattr(watch, "port_answers", lambda port: True)
+    monkeypatch.setattr(watch, "listeners", lambda port: {9999})
+    monkeypatch.setattr(watch, "parents", lambda: {9999: 1, 4242: 1})
+    _add(cli, "--port", "5173")
+    clock["t"] = T0 + 60
+    res = _check(cli)
+    assert res["health"]["ok"] is False and res["unhealthy"] is True
+    assert res["health"]["text"] == "Alive, but another program answers on its address"
+    code, out, _ = cli("check")
+    assert code == 0 and "all as expected" not in out and "another program answers" in out
+
+
+def test_a_child_of_the_service_listening_is_its_own(cli, fake, ws, clock, orch, monkeypatch):
+    from orch_services import watch
+
+    monkeypatch.setattr(watch, "port_answers", lambda port: True)
+    monkeypatch.setattr(watch, "listeners", lambda port: {5001})
+    monkeypatch.setattr(watch, "parents", lambda: {5001: 5000, 5000: 4242, 4242: 1})  # uv run -> python
+    _add(cli, "--port", "5173")
+    clock["t"] = T0 + 60
+    res = _check(cli)
+    assert res["health"] == {"ok": True, "how": "answers on its address", "text": "Answers on its address"}
+    code, out, _ = cli("check")
+    assert code == 0 and "all as expected" in out
+
+
+def test_no_listener_of_this_account_means_someone_else(monkeypatch):
+    from orch_services import watch
+
+    monkeypatch.setattr(watch, "listeners", lambda port: set())
+    assert watch.owns_port(4242, 5173) is False
+    monkeypatch.setattr(watch, "listeners", lambda port: None)  # cannot tell: the connect alone counts
+    assert watch.owns_port(4242, 5173) is None
+
+
+@pytest.mark.skipif(sys.platform == "win32" or not shutil.which("lsof"), reason="lsof reads listeners")
+def test_owns_port_with_a_real_listener(monkeypatch):
+    import os
+    import socket
+
+    from orch_services import watch
+
+    monkeypatch.setattr(watch, "listeners", REAL_LISTENERS)
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        s.listen()
+        port = s.getsockname()[1]
+        assert os.getpid() in watch.listeners(port)
+        assert watch.owns_port(os.getpid(), port) is True
+        other = subprocess.Popen(["sleep", "30"])  # a process that neither listens nor started this one
+        try:
+            assert watch.owns_port(other.pid, port) is False
+        finally:
+            other.kill()
+            other.wait()
+
+
+def test_only_a_listener_the_probe_reaches_counts():
+    # Codex review: the service on ::1 and another program on 127.0.0.1 must not look healthy
+    from orch_services import watch
+
+    text = "p4242\nn[::1]:5173\np9999\nn127.0.0.1:5173\np7000\nn*:5173\np7001\nn192.168.1.5:5173\nn*:80\n"
+    assert watch.parse_lsof(text, 5173) == {9999, 7000}
+    assert watch.parse_lsof("p1\nn[::]:8000\n", 8000) == {1}
+    assert watch.parse_lsof("", 8000) == set()
