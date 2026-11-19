@@ -153,6 +153,7 @@ def mac_documents(ws, tmp_path, monkeypatch):
     home.mkdir()
     (home / "Documents").symlink_to(ws.parent, target_is_directory=True)
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Path.home() on Windows
     monkeypatch.setattr(macfolders, "_platform", lambda: "darwin")
     return home
 
@@ -177,6 +178,7 @@ def test_a_program_in_a_mac_protected_folder_is_refused(cli, fake, ws, tmp_path,
     tool.write_text("#!/bin/sh\n", encoding="utf-8")
     tool.chmod(0o755)
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Path.home() on Windows
     monkeypatch.setattr(macfolders, "_platform", lambda: "darwin")
     fake.name = "launchd"
     code, out = jrun(cli, "add", "Tool", "--id", "tool", "--", str(tool))

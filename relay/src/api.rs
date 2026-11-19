@@ -56,7 +56,6 @@ pub fn router(app: AppState) -> Router {
         )
         .merge(crate::problems::router())
         .merge(crate::phone::router())
-        .merge(crate::notebook::router())
         .merge(crate::subs::router())
         .merge(icon_routes())
         .fallback(not_found_page)

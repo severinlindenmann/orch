@@ -1,6 +1,6 @@
 """Health check, failing and the one question (`orch services check`).
 
-One pass, no loop and no sleep (R2.6): the automation add-on repeats `orch services check` when the person sets it up.
+One pass, no loop and no sleep: the add-on's regular check (service.py, started by `orch start`) runs it every minute.
 Per service the pass
 - checks its health: the process is alive (driver state) and, with a `port`, the port answers on 127.0.0.1 and the
   program listening there is the service's own process or one it started (another program on the port is no answer);

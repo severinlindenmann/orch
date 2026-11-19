@@ -59,6 +59,7 @@ def test_first_protected_and_shown(home):
 
 def test_doctor_row_only_with_services_on(home, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Path.home() on Windows
     monkeypatch.setattr(macfolders, "_platform", lambda: "darwin")
     assert macfolders.doctor_row(home / "Documents/proj", services_on=False) is None
     assert macfolders.doctor_row(home / "code/proj", services_on=True) is None
@@ -72,6 +73,7 @@ def test_orch_doctor_names_it(proj, run, monkeypatch, tmp_path):
     home.mkdir()
     (home / "Documents").symlink_to(proj.parent, target_is_directory=True)
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Path.home() on Windows
     monkeypatch.setattr(macfolders, "_platform", lambda: "darwin")
     monkeypatch.setattr(addons, "active", lambda root: {"services": {}})
     res = cli_leave.doctor(proj)

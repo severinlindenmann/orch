@@ -54,6 +54,7 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 | `check` | `{"checked": [{id, name, health, failing, unhealthy, did?, error?}], "unreadable": n}`: one pass, no loop (see Health check); a service whose health is not ok is named in the text even before it is failing |
 | `add <name> --id <slug> [--port N] [--ticket ID \| --addon NAME] [--cwd DIR] [--auto] [--start] -- <command...>` | `{"service": row, "next"}`; installed stopped unless `--start`. macOS: refused when the working folder or the program lies in Documents, Desktop, Downloads, iCloud Drive or `~/Library/CloudStorage` (launchd jobs may not use them); `start`/`restart` refuse the same. A start that does not stay running within 10 s names the last log line |
 | `start \| stop \| restart <id>` | `{"service": row, "next"}` |
+| `start \| stop \| status` (no id) | the regular check (see Health check): `{"running": true, "pid"}` \| `{"stopped": bool}` \| `{"running": bool, "pid"?}` (status exits 1 when it does not run); `orch start` / `orch stop` call these |
 | `auto <id> on \| off` | `{"service": row, "next"}` |
 | `remove <id>` | `{"removed": id, "next"}`: stops it, removes the platform entry and the record, keeps the log |
 | `log <id> [--lines N]` (default 20, max 1000) | `{"id", "lines": [...]}`; every line goes through the core secret scan, a hit shows `••••••` in place of the value (the whole line when the value cannot be told apart) |
@@ -83,9 +84,12 @@ has `"forgotten": true` and says so). A bare process cannot be adopted: refused 
 use instead; it is never stopped by orch.
 
 ## Health check and failing (`check`)
-One pass over every service, no loop and no sleep (R2.6); a person repeats it with the automation add-on
-(`orch automation script add services-check -- orch services check`, then `orch automation repeat <ticket>
-"every 5 minutes" --script services-check`).
+One pass over every service, no loop and no sleep. The add-on's background process (`background = true`, started by
+`orch start` and when Services is turned on: `orch services start|stop|status` without a service id) runs this pass
+every minute until Services is turned off, so nobody sets up a repeat. Every pass holds `.orch/addons/services/
+check.lock`: the regular check and a person's `orch services check` never run at the same time (a person's waits up
+to 30 s, then is refused with "Another check runs right now"); the regular check skips a round a person holds. Its
+log: `.orch/addons/services/checker.log` (service names and counts only).
 - Health: the process is alive (driver state); with a `port`, a TCP connect to `127.0.0.1:<port>` within 0.5 s, and
   the listener on that port (`lsof -iTCP:<port> -sTCP:LISTEN`) is the driver's pid or one of its child processes;
   otherwise `"Alive, but another program answers on its address"`. Where the listener cannot be read (Windows, no
