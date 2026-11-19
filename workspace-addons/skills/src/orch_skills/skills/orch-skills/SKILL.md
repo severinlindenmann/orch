@@ -13,9 +13,10 @@ admin, or this computer. The person turns things off and on there; its clicks ru
 
 ## When to use
 - The person asks what helpers get here, or why a helper does not see a skill: `orch skills list`.
-- The person asks to turn something off or on here: `orch skills off <id>` / `orch skills on <id>` (ids from the
-  list, e.g. `skill:orch:orch-hello`).
-- Never turn something off on your own; every change lands in `orch skills history` with who did it.
+- The person asks to turn something off or on here: tell them to use the switch on the Skills page (or run
+  `orch skills off <id>` / `orch skills on <id>` in their own terminal; ids from the list, e.g.
+  `skill:orch:orch-hello`). Only a person can: under a helper tool these commands are refused.
+- Every change lands in `orch skills history` with who did it.
 
 ## What off does
 - orch's own and the admin's shared skills: orch stops linking them here (the files stay).

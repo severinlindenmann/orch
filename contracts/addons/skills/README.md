@@ -7,7 +7,7 @@ Nothing is moved, edited or deleted (edit: ORCH-840, delete and bin: ORCH-841).
 | Command | What |
 |---|---|
 | `orch skills list [--json]` | Every item (schema `orch.skills-page/1`, below), with its id |
-| `orch skills off <id>` / `on <id>` `[--by X] [--json]` | Turn one item off or on here; exit 2 with the reason when it cannot be |
+| `orch skills off <id>` / `on <id>` `[--by X] [--json]` | Turn one item off or on here; only a person (refused under a helper tool or with `--by agent:`); exit 2 with the reason when it cannot be |
 | `orch skills history [--json]` | Who turned what on or off (newest first, last 200) |
 | `orch skills act on|off --by X --json -- <id>` | The page's clicks, run by the dashboard as the person (`[acts.on]`, `[acts.off]`, who = people) |
 | `orch skills start|stop|status|run` | The background process that serves the page (`[page]`, port 8436 or any free one) |
@@ -30,7 +30,9 @@ and for skills `fields` (the header metadata read by `orch.skillmeta`, ORCH-532;
 
 orch records the settings lines it wrote in `.orch/addons/skills/owned.json` and removes only those; a line written by
 hand shows as off and `locked`. One change at a time (`.orch/addons/skills/.lock`). A settings file that is not readable
-JSON or is a link is refused, never overwritten.
+JSON, or reached through a link anywhere on its way, is refused, never overwritten. The settings file is replaced
+only when nobody changed it since orch read it; a recorded line that is gone from the file is forgotten, so a line
+written by hand later is never taken for orch's.
 
 ## Needs a look
 Retired but on; description shorter than 20 characters; a program in `requires` not found; a login in

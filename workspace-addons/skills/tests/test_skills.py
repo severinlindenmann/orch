@@ -193,3 +193,51 @@ def test_the_manifest_is_valid():
 
     m = addons.parse_manifest(Path(__file__).parents[1] / "src/orch_skills/orch-addon.toml")
     assert m["name"] == "skills" and m["background"] is True
+
+
+def test_a_helper_cannot_turn_things_off(ws, monkeypatch, capsys):
+    monkeypatch.setenv("ORCH_RUN", "1")
+    assert cli.main(["--dir", str(ws), "off", "skill:orch:orch-hello", "--by", "human:Anna", "--json"]) == 2
+    assert "Only a person" in json.loads(capsys.readouterr().out)["error"]
+    monkeypatch.delenv("ORCH_RUN")
+    assert (
+        cli.main(["--dir", str(ws), "act", "off", "--by", "agent:claude", "--json", "--", "skill:orch:orch-hello"]) == 2
+    )
+
+
+def test_a_linked_claude_folder_is_refused(ws, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (ws / ".claude").symlink_to(outside) if not (ws / ".claude").exists() else None
+    if not (ws / ".claude").is_symlink():
+        import shutil
+
+        shutil.rmtree(ws / ".claude")
+        (ws / ".claude").symlink_to(outside)
+    with pytest.raises(switches.Refused, match="is a link"):
+        model.turn(ws, "skill:workspace:release-walk", on=False)
+    assert list(outside.iterdir()) == []
+
+
+def test_a_recorded_line_that_is_gone_is_forgotten(ws, monkeypatch):
+    from orch import inventory
+
+    conns = [{"name": "pw", "source": "workspace", "command": "npx", "host": None, "state": "ready", "shadowed": False}]
+    monkeypatch.setattr(inventory, "connections", lambda root, **kw: (conns, {}))
+    model.turn(ws, "service:workspace:pw", on=False)
+    (ws / ".claude/settings.local.json").write_text("{}")  # removed by hand
+    model.turn(ws, "skill:workspace:release-walk", on=False)  # any change forgets the stale record
+    (ws / ".claude/settings.local.json").write_text(
+        json.dumps({"permissions": {"deny": ["mcp__pw__*"]}, "skillOverrides": {"release-walk": "off"}})
+    )
+    with pytest.raises(switches.Refused, match="by hand"):
+        model.turn(ws, "service:workspace:pw", on=True)
+
+
+def test_a_change_by_someone_else_wins(ws):
+    (ws / ".claude").mkdir(exist_ok=True)
+    path = ws / ".claude/settings.local.json"
+    path.write_text("{}")
+    with pytest.raises(switches.Refused, match="changed by someone else"):
+        switches._write(ws, switches.SETTINGS, {"a": 1}, expect=b"{ }")
+    assert path.read_text() == "{}"

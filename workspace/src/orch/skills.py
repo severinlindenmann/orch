@@ -55,6 +55,9 @@ def _unlink_ours(root: Path, where: str, name: str, target: Path) -> None:
         return
     if harness.is_link(dest) and not harness._same(dest, target):
         return
+    if not harness.is_link(dest) and dest.is_dir() and harness._keep_files(dest):
+        harness.skip_note(f"{dest} (an add-on keeps a file in it; turn the add-on off instead)")
+        return  # a copy (no links here) that holds an add-on's own file, e.g. orch-relay's workspaces.json
     harness.unlink_skill(root, where, name)
 
 

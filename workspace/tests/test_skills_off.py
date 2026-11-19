@@ -75,3 +75,16 @@ def test_a_damaged_off_file_hides_nothing(proj, text):
 def test_off_names_skip_unsafe_names(proj):
     _off(proj, ["../etc", "ok-name", 3, ""])
     assert skills.off_names(proj) == {"ok-name"}
+
+
+def test_a_copy_that_holds_an_addon_file_stays(proj, tmp_path):
+    from orch import harness
+
+    skills.install_skill(proj, "orch-relay", _skill(tmp_path, "orch-relay"))
+    copy = proj / ".agents/skills/orch-relay"
+    copy.mkdir(parents=True)
+    (copy / harness.COPY_MARK).write_text("")
+    (copy / "workspaces.json").write_text("{}")
+    _off(proj, ["orch-relay"])
+    skills._unlink_ours(proj, ".agents/skills", "orch-relay", proj / ".orch/harness/skills/orch-relay")
+    assert (copy / "workspaces.json").read_text() == "{}"

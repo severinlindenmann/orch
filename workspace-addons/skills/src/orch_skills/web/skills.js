@@ -156,10 +156,12 @@
   }
 
   function draw() {
-    const u = new URL(location.href);
-    u.searchParams.set('tab', tab);
-    if (filter === 'all') u.searchParams.delete('show'); else u.searchParams.set('show', filter);
-    history.replaceState(null, '', u);
+    try {  // the dashboard's sandboxed frame may refuse; its own history state (the frame channel) is kept
+      const u = new URL(location.href);
+      u.searchParams.set('tab', tab);
+      if (filter === 'all') u.searchParams.delete('show'); else u.searchParams.set('show', filter);
+      history.replaceState(history.state, '', u);
+    } catch (_) { /* the view still draws; only the address does not follow */ }
     $('loaded').replaceChildren(drawTabs(), drawTools(), drawList());
   }
   function show(which) {

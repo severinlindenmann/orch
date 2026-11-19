@@ -6,6 +6,10 @@
    `permissions.deny` ("mcp__<server>__*") and `claudeMdExcludes` (a rules file by its full path). orch writes only
    the entries it records in `.orch/addons/skills/owned.json` and removes only those; everything else in the file
    stays as it is. An entry somebody wrote by hand is shown as off and is not changed by orch.
+
+Every file is reached only through real folders inside the workspace (a link anywhere on the way is refused), is
+replaced through a fresh temporary file next to it, and the settings file is replaced only when nobody changed it
+since it was read (an editor or Claude saving at the same moment wins; orch asks to try again).
 """
 
 from __future__ import annotations
@@ -14,6 +18,7 @@ import contextlib
 import json
 import os
 import re
+import tempfile
 import time
 from pathlib import Path
 
@@ -43,38 +48,66 @@ def _is_link(p: Path) -> bool:
         return False
 
 
-def _read(path: Path, what: str) -> dict:
-    if _is_link(path):
-        raise Refused(f"{what} is a link; orch will not write through it. Nothing was changed.")
+def safe_path(root: Path, rel: Path) -> Path:
+    """root/rel when no part of the way (the folders and the file) is a link; else refused."""
+    p = Path(root)
+    for part in Path(rel).parts:
+        if part in ("", ".", ".."):
+            raise Refused("That path is not inside this workspace.")
+        p = p / part
+        if _is_link(p):
+            raise Refused(f"{p.relative_to(root)} is a link; orch will not write through it. Nothing was changed.")
+    return p
+
+
+def _read(root: Path, rel: Path) -> tuple[dict, bytes | None]:
+    """(object, the exact bytes read or None when missing). A file that is not a JSON object is refused."""
+    path = safe_path(root, rel)
     if not path.exists():
-        return {}
+        return {}, None
     try:
         if path.stat().st_size > MAX_BYTES:
-            raise Refused(f"{what} is too big to change safely. Nothing was changed.")
-        doc = json.loads(path.read_text(encoding="utf-8"))
+            raise Refused(f"{rel} is too big to change safely. Nothing was changed.")
+        raw = path.read_bytes()
+        doc = json.loads(raw.decode("utf-8"))
     except (OSError, UnicodeDecodeError, ValueError):
-        raise Refused(f"{what} is not readable JSON. Fix it first; nothing was changed.") from None
+        raise Refused(f"{rel} is not readable JSON. Fix it first; nothing was changed.") from None
     if not isinstance(doc, dict):
-        raise Refused(f"{what} is not a settings object. Fix it first; nothing was changed.")
-    return doc
+        raise Refused(f"{rel} is not a settings object. Fix it first; nothing was changed.")
+    return doc, raw
 
 
-def _write(path: Path, doc: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+def _write(root: Path, rel: Path, doc: dict, expect: bytes | None | bool = True) -> None:
+    """Replace root/rel through a fresh temporary file. With expect (bytes, or None = must still be missing) the
+    file is replaced only when it still holds exactly that."""
+    path = safe_path(root, rel)
+    parent = path.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    safe_path(root, rel)  # the folders just made are real folders too
+    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+        if expect is not True:
+            now = path.read_bytes() if path.exists() else None
+            if now != expect:
+                raise Refused(f"{rel} was changed by someone else just now. Try again.")
+        os.replace(tmp, path)
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
 
 
 @contextlib.contextmanager
 def _locked(root: Path, wait: float = 5.0):
-    """One change at a time in this workspace (two dashboard tabs, a helper and the page)."""
-    lock = root / LOCK
+    """One change at a time from orch in this workspace (two dashboard tabs, a helper and the page)."""
+    lock = safe_path(root, LOCK)
     lock.parent.mkdir(parents=True, exist_ok=True)
+    safe_path(root, LOCK)
     end = time.monotonic() + wait
     while True:
         try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600)
             break
         except FileExistsError:
             with contextlib.suppress(OSError):
@@ -95,12 +128,6 @@ def _locked(root: Path, wait: float = 5.0):
 # ---- 1. the core's off list -------------------------------------------------------------------------------
 
 
-def off_list(root: Path) -> list[str]:
-    from orch import skills
-
-    return sorted(skills.off_names(root))
-
-
 def set_linked(root: Path, name: str, on: bool) -> bool:
     """Put a skill name on or off the core's off list and let the core relink. True when it changed."""
     from orch import skills
@@ -108,13 +135,12 @@ def set_linked(root: Path, name: str, on: bool) -> bool:
     if name in skills.ALWAYS_ON and not on:
         raise Refused(f"{name} is always on: helpers need it to work tickets.")
     with _locked(root):
-        path = root / skills.OFF_FILE
-        doc = _read(path, ".orch/skills-off.json") if path.exists() else {}
+        doc, raw = _read(root, skills.OFF_FILE)
         names = set(skills.off_names(root)) if doc else set()
         before = set(names)
         (names.discard if on else names.add)(name)
         if names != before:
-            _write(path, {"schema": OFF_SCHEMA, "skills": sorted(names)})
+            _write(root, skills.OFF_FILE, {"schema": OFF_SCHEMA, "skills": sorted(names)}, expect=raw)
     if names == before:
         return False
     skills.apply_agent_files(root)  # links go (or come back) at once; an orch update keeps them that way
@@ -125,8 +151,11 @@ def set_linked(root: Path, name: str, on: bool) -> bool:
 
 
 def _owned(root: Path) -> dict:
-    doc = _read(root / OWNED, ".orch/addons/skills/owned.json")
-    if doc and doc.get("schema") != OWNED_SCHEMA:
+    try:
+        doc, _ = _read(root, OWNED)
+    except Refused:
+        doc = {}
+    if doc.get("schema") != OWNED_SCHEMA:
         doc = {}
     return {k: [v for v in doc.get(k, []) if isinstance(v, str)] for k in KINDS}
 
@@ -144,11 +173,13 @@ def _entries(settings: dict, kind: str) -> list[str]:
 
 
 def claude_state(root: Path) -> dict:
-    """{kind: {entry: "orch" | "hand"}} of what is off in Claude's local settings here (read only, never raises)."""
+    """{kind: {entry: "orch" | "hand"}} of what is off in Claude's local settings here (read only, never raises).
+    A recorded entry that is no longer in the file does not count: a line written by hand later stays "hand"."""
     try:
-        settings, owned = _read(root / SETTINGS, ".claude/settings.local.json"), _owned(root)
+        settings, _ = _read(root, SETTINGS)
     except Refused:
         return {k: {} for k in KINDS}
+    owned = _owned(root)
     return {k: {e: ("orch" if e in owned[k] else "hand") for e in _entries(settings, k)} for k in KINDS}
 
 
@@ -157,8 +188,12 @@ def set_claude(root: Path, kind: str, entry: str, on: bool) -> bool:
     if kind not in KINDS or not entry or len(entry) > 4096:
         raise Refused("That is not something orch can turn off here.")
     with _locked(root):
-        settings = _read(root / SETTINGS, ".claude/settings.local.json")
+        settings, raw = _read(root, SETTINGS)
         owned = _owned(root)
+        stale = {k: [e for e in owned[k] if e not in _entries(settings, k)] for k in KINDS}
+        if any(stale.values()):  # a recorded line somebody removed: forget it, so a later hand-written one stays
+            owned = {k: [e for e in owned[k] if e not in stale[k]] for k in KINDS}
+            _write(root, OWNED, {"schema": OWNED_SCHEMA, **owned})
         present = entry in _entries(settings, kind)
         if on:
             if not present:
@@ -169,14 +204,16 @@ def set_claude(root: Path, kind: str, entry: str, on: bool) -> bool:
                     "Remove the line there to turn it on."
                 )
             _change(settings, kind, entry, add=False)
+            _write(root, SETTINGS, settings, expect=raw)  # the line goes first; its record after
             owned[kind].remove(entry)
+            _write(root, OWNED, {"schema": OWNED_SCHEMA, **owned})
         else:
             if present:
                 return False
+            owned[kind] = sorted(set(owned[kind]) | {entry})
+            _write(root, OWNED, {"schema": OWNED_SCHEMA, **owned})  # the record first: a crash leaves no orphan line
             _change(settings, kind, entry, add=True)
-            owned[kind].append(entry)
-        _write(root / SETTINGS, settings)
-        _write(root / OWNED, {"schema": OWNED_SCHEMA, **{k: sorted(set(v)) for k, v in owned.items()}})
+            _write(root, SETTINGS, settings, expect=raw)
     return True
 
 
@@ -205,9 +242,12 @@ def _change(settings: dict, kind: str, entry: str, add: bool) -> None:
         raise Refused(f"{kind} in .claude/settings.local.json is not a list. Fix it first.")
     if add:
         lst.append(entry)
-    else:
-        lst[:] = [x for x in lst if x != entry]
-        if not lst:
-            (settings["permissions"] if kind == "deny" else settings).pop("deny" if kind == "deny" else kind)
-            if kind == "deny" and not settings["permissions"]:
+        return
+    lst[:] = [x for x in lst if x != entry]
+    if not lst:
+        if kind == "deny":
+            settings["permissions"].pop("deny")
+            if not settings["permissions"]:
                 settings.pop("permissions")
+        else:
+            settings.pop(kind)

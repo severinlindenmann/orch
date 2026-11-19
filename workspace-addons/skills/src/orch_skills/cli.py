@@ -45,11 +45,28 @@ def _actor(explicit: str | None) -> str:
 
 
 def _log(root: Path, who: str, what: str, item: dict) -> None:
-    path = root / HISTORY
+    from .switches import safe_path
+
+    path = safe_path(root, HISTORY)
     path.parent.mkdir(parents=True, exist_ok=True)
+    path = safe_path(root, HISTORY)
     row = {"at": model.now(), "who": who, "what": what, "item": item["id"], "name": item["name"]}
-    with path.open("a", encoding="utf-8") as f:
+    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(fd, "a", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _a_helper_runs_this() -> bool:
+    """Like the core (addons.py, cli_config._actor): a helper tool in the environment counts as a helper,
+    whatever --by says."""
+    if os.environ.get("ORCH_RUN") or os.environ.get("ORCH_AGENT"):
+        return True
+    try:
+        from orch import tickets
+
+        return bool(tickets.agent_tool())
+    except Exception:  # noqa: BLE001  no core to ask: only the environment above
+        return False
 
 
 def _history(root: Path) -> list[dict]:
@@ -97,13 +114,16 @@ def _list_text(data: dict) -> str:
 
 
 def _turn(args, root: Path, on: bool) -> int:
+    who = _actor(args.by)
+    if _a_helper_runs_this() or not who.startswith("human:"):
+        raise Refused("Only a person turns things on or off here. Ask the person to use the switch on the Skills page.")
     target = args.target.strip()
     if not TARGET.fullmatch(target):
         raise Refused("Name the item by its id from orch skills list, e.g. skill:orch:orch-hello.")
     res = model.turn(root, target, on)
     it = res["item"]
     if res["changed"]:
-        _log(root, _actor(args.by), "on" if on else "off", it)
+        _log(root, who, "on" if on else "off", it)
         text = f"{it['name']} is {'on' if on else 'off'} in this workspace." + (
             f" {it['note']}." if it.get("note") else ""
         )
