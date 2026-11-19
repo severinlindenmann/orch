@@ -374,6 +374,8 @@ def set_limit(
     unit = unit or default_unit(a)
     if a["type"] == "subscription" and unit != "%":
         raise Refused("A subscription limit is a percent, for example 90%.")
+    if a["type"] != "subscription" and unit != "$":
+        raise Refused(f"{a['label']} counts dollars, for example $25.")
     if unit == "%" and value is not None and value > 100:
         raise Refused("A percent limit is at most 100%.")
     if period == "until" and value is not None and not until:
