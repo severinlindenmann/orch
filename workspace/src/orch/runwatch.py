@@ -526,7 +526,8 @@ def _rows(text: str, n: int) -> tuple[list[str], str | None]:
     rows = [runs_live.clean(_ANSI.sub("", ln)).rstrip() for ln in raw]
     hint = _suggestion(raw, rows)
     rows = _below_frame_dropped(rows)
-    rows = [r for r in rows if not _is_frame(r)]
+    rows = _banner_dropped(rows)
+    rows = [r for r in rows if not (_is_frame(r) or _is_notice(r) or _is_tip(r))]
     # at most one blank row in a row: padding must not fill a short view
     rows = [r for i, r in enumerate(rows) if r.strip() or (i and rows[i - 1].strip())]
     while rows and not rows[-1].strip():
@@ -557,6 +558,51 @@ def _is_frame(row: str) -> bool:
     """The tool's own prompt frame (rows of rules, an empty prompt, the shortcut footer) says nothing about
     the work, and fills the last lines of a narrow or short view. Typed or suggested prompt text stays."""
     return bool(_RULE.match(row) or _EMPTY_PROMPT.match(row) or _FOOTER.match(row))
+
+
+# ORCH-707: a fresh session starts with the tool's banner (a block-glyph logo or a rounded box beside its
+# name, version and the full folder path), orch's own notice line at the prompt and tool tips. None of it is
+# work, and ids, a path and commands must not reach a person in the last lines.
+_BANNER_START = re.compile(r"^\s*[\u2580-\u259f\u256d]")  # logo block glyphs, or a rounded box top
+_BANNER_ROW = re.compile(r"^\s*[\u2580-\u259f\u256d\u2502\u2570]")  # ... and its sides and bottom
+_VERSION = re.compile(r"\bv\d+\.\d+|\b\d+\.\d+\.\d+\b")
+_NOTICE_ROW = re.compile(
+    r"^\s*(?:[>\u276f\u203a]\s*)?(?:"
+    + "|".join(
+        re.escape(t).replace(re.escape("{tid}"), r"t_[a-z0-9]{6,16}") for t in runs_live._NOTICE.values()
+    )
+    + r")\s*$"
+)
+_TIP = re.compile(r"^[\s\W]*(Tip:|tmux focus-events off\b)")
+
+
+def _banner_dropped(rows: list[str]) -> list[str]:
+    """Drop each run of banner rows (logo block glyphs, or a rounded box) that names a version (v2.1 or
+    1.2.3). A progress bar or a table drawn with straight corners stays."""
+    out: list[str] = []
+    i = 0
+    while i < len(rows):
+        j = i
+        if _BANNER_START.match(rows[i]):
+            j = i + 1
+            while j < len(rows) and _BANNER_ROW.match(rows[j]):
+                j += 1
+        if j > i and any(_VERSION.search(r) for r in rows[i:j]):
+            i = j
+            continue
+        out.extend(rows[i : max(j, i + 1)])
+        i = max(j, i + 1)
+    return out
+
+
+def _is_notice(row: str) -> bool:
+    """orch's own start or new-input notice (runs_live.notice_line), typed at the prompt."""
+    return bool(_NOTICE_ROW.match(row))
+
+
+def _is_tip(row: str) -> bool:
+    """A tool's tip row (for example "Tip: ..." or the terminal focus-events advice)."""
+    return bool(_TIP.search(row))
 
 
 _TAIL_MARK = "@@orch-tail "

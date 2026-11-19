@@ -559,3 +559,58 @@ def test_rows_keep_rows_after_a_lone_rule():
     rule = "\u2500" * 40
     rows, _ = runwatch._rows("\n".join(["step one", rule, "step two", "", "", "step three"]), 8)
     assert rows == ["step one", "step two", "", "step three"]
+
+
+def test_rows_drop_a_fresh_start_banner_notice_and_tips():
+    # ORCH-707: what a new helper's pane holds right after start (report r-1119-0537)
+    rule = "─" * 40
+    text = "\n".join(
+        [
+            " ▐▛███▜▌   Tool v2.1.328",
+            "▝▜█████▛▘  Opus 5.5 · API",
+            "  ▘▘ ▝▝    /Users/someone/ws/Walk",
+            "",
+            "  ⎿  tmux focus-events off · add set -g focus-events on to ~/.tmux.conf",
+            "",
+            "❯ Your task for orch ticket t_aeztli is ready. Read it with: orch run input t_aeztli",
+            "",
+            "✻ Cerebrating…",
+            "",
+            "❯ New input on orch ticket t_aeztli. Read it with: orch run input t_aeztli",
+            "  ※ Tip: Use /memory to keep notes",
+            rule,
+            "❯ ",
+            rule,
+        ]
+    )
+    rows, _ = runwatch._rows(text, 40)
+    assert rows == ["✻ Cerebrating…"]
+
+
+def test_rows_drop_a_boxed_banner_with_a_version():
+    text = "\n".join(
+        [
+            "╭" + "─" * 20 + "╮",
+            "│ >_ Tool (v0.9.1) │",
+            "│ dir: /Users/someone │",
+            "╰" + "─" * 20 + "╯",
+            "",
+            "working",
+        ]
+    )
+    rows, _ = runwatch._rows(text, 40)
+    assert rows == ["working"]
+
+
+def test_rows_keep_work_that_looks_a_little_like_frame():
+    rows = [
+        "\u2502 pkg \u2502 1.2.3 \u2502",
+        "\u2588\u2588\u2588\u2588\u2591\u2591 60.5%",
+        "edited tmux.conf: set -g focus-events on",
+    ]
+    assert runwatch._rows("\n".join(rows), 40)[0] == rows
+
+
+def test_rows_keep_a_progress_bar_and_typed_notice_like_text():
+    rows, _ = runwatch._rows("\n".join(["████░░ 60%", "❯ Your task for orch ticket is ready"]), 40)
+    assert rows == ["████░░ 60%", "❯ Your task for orch ticket is ready"]

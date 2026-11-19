@@ -12,15 +12,16 @@ const LIVE_LAYER_KEY = 'orch.live.layer';
 const LIVE_PLACES = ['bottom', 'right'];
 const LIVE_SIZE = {height:[200, 0.85], width:[320, 0.7]};  // smallest px, largest share of the window
 const LIVE_MAX = 3;  // sessions side by side
-const LIVE_NARROW = 480;  // a pane narrower than this folds pin and place into More (draft D)
+const LIVE_NARROW = 600;  // a pane narrower than this folds pin, place and Chat | Terminal into More (draft D; the full header needs about 600 px)
 
 // --- the model: plain data, no page (tested in tests/live_layer.test.js) ---
 function liveLayerFresh() {
   return {mode:'bar', last:'bottom', back:'bottom', height:null, width:null, panes:[], cur:'', menu:''};
 }
-// Narrow panes: on a phone, on the right with more than one, or when a share of the room is under LIVE_NARROW.
+// Narrow panes: on a phone, on the right with more than one, or when a share of the room is under LIVE_NARROW
+// (one pane on the right at 1280 wide too: its header would push Full screen out of sight).
 function liveLayerNarrow(where, n, room, phone) {
-  return !!phone || (n > 1 && (where === 'right' || room / n < LIVE_NARROW));
+  return !!phone || (n > 1 && where === 'right') || room / Math.max(n, 1) < LIVE_NARROW;
 }
 // Kept per workspace (issue 1351: the dashboards of two workspaces can get the same port, so the same browser store).
 function liveLayerKey(ws) { return ws ? LIVE_LAYER_KEY + '.' + ws : LIVE_LAYER_KEY; }
@@ -287,6 +288,8 @@ function liveMoreMenu(key, label, where, pinned) {
     h('p', {className:'live-pop-h'}, 'More for ' + label),
     item('pin', 'pinned', pinned ? 'Unpin' : 'Pin', {'aria-pressed':String(pinned), 'data-key':'live-pin'}),
     typeof liveHistMenuItem === 'function' ? liveHistMenuItem(key) : null,
+    sess && !sess.kind && typeof liveViewOf === 'function' ? (v => h('button', {type:'button', className:'live-opt', 'data-live':'view', 'data-live-view':v, 'data-session':key, 'data-key':'live-more-view'},
+      liveIc(v === 'term' ? 'code' : 'comment'), h('span', {}, v === 'term' ? 'Show terminal' : 'Show chat')))(liveViewOf(key) === 'term' ? 'chat' : 'term') : null,
     h('p', {className:'live-pop-h'}, 'Where ' + liveLayerName() + ' sits'),
     liveOpt('bottom', 'dock-bottom', 'At the bottom', where === 'bottom'),
     phone ? null : liveOpt('right', 'dock-right', 'On the right', where === 'right'),
@@ -324,6 +327,7 @@ function livePane(key, where, s, o) {
         : sess && liveRen === key ? liveRenForm(key, title)
         : sess?.live ? h('button', {type:'button', className:'live-pt', 'data-live':'rename', 'data-session':key, 'data-key':'live-rename', title:'Click to rename', 'aria-label':'Rename ' + title}, title)
         : h('span', {className:'live-pt', title}, title),
+      o.narrow || typeof liveViewSwitch !== 'function' ? null : liveViewSwitch(sess),
       h('span', {className:'live-ctl'},
         o.narrow || typeof liveHistButton !== 'function' ? null : liveHistButton(sess, label),
         o.narrow ? null : liveBtn('btn icon sm ghost', 'pin', (pinned ? 'Unpin ' : 'Pin ') + label, 'pinned', {'data-session':key, 'aria-pressed':String(pinned), 'data-key':'live-pin'}),
@@ -346,6 +350,7 @@ function livePaneBody(key, sess, label) {
       : sess ? h('div', {className:'live-pb', 'data-live-body':key, 'data-live-kind':sess.kind || null},
       h('p', {className:'live-now', 'data-live-now':''}),
       sess.kind ? null : h('div', {className:'live-ask', 'data-live-ask':'', hidden:true}),
+      typeof liveChatBox === 'function' ? liveChatBox(sess, label) : null,
       h('pre', {className:'live-lines', 'data-live-lines':'', 'aria-label':'Last lines of ' + label, tabindex:'0', hidden:true}),
       h('p', {className:'meta live-meta', 'data-live-meta':''}),
       sess.kind || !sess.running ? null : h('button', {type:'button', className:'btn outline sm', 'data-key':'live-stop', 'data-live-stop':sess.id}, liveStopLabel(sess)),
@@ -393,6 +398,7 @@ function liveLayerFill() {
     if (now.textContent !== text) now.textContent = text;
     const askBox = body.querySelector('[data-live-ask]');
     if (askBox) liveAskFill(askBox, body.dataset.liveBody);
+    now.hidden = !!askBox && !askBox.hidden;  // the question card says it already (ORCH-687)
     const lines = live && Array.isArray(live.lines) ? live.lines.join('\n') : '';
     if (pre.textContent !== lines) {
       const end = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 8;  // following the end: keep following it
@@ -400,6 +406,7 @@ function liveLayerFill() {
       if (end) pre.scrollTop = pre.scrollHeight;
     }
     pre.hidden = !lines;
+    if (typeof liveViewApply === 'function') liveViewApply(body);
     const m = live && kind !== 'terminal' ? liveMeta(live).join(' · ') : '';
     if (meta.textContent !== m) meta.textContent = m;
     meta.hidden = !m;
@@ -608,6 +615,10 @@ document.addEventListener('click', e => {
     if (typeof liveHistOpen === 'object') liveHistOpen.delete(b.dataset.session);
     liveLayerDo({type:'swap', from:b.dataset.session, key:to}, liveSel(to, 'live-group-' + to));
     if (b.dataset.session === to && typeof liveHistOpen === 'object') liveLayerPaint();
+  }
+  else if (act === 'view') {  // Show chat / Show terminal in the More menu: livechat.js switched it; the menu closes
+    const menu = liveLayerModel().menu;
+    if (menu) liveLayerDo({type:'menu', menu}, liveSel(b.dataset.session, 'live-pane-more'));
   }
   else if (act === 'rename') liveRenStart(b.dataset.session);
   else if (act === 'pin') {
