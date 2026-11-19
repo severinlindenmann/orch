@@ -36,7 +36,7 @@ import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from orch import brake, config, ghmerge, history, runs, tickets
+from orch import brake, config, ghmerge, history, ownerpick, runs, tickets
 from orch.errors import Refused
 
 BY = tickets.REVIEWER
@@ -284,10 +284,10 @@ def _decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int =
     (None = could not be read: wait, look again next pass). Pure apart from reading the ticket's evidence."""
     items = [c for c in ticket.get("checklist") or [] if isinstance(c, dict) and not c.get("wont_do")]
     proof = tickets.proof_state(ticket, root)
-    if (
-        tickets.kind(ticket) == "draft"
-    ):  # ORCH-645 / ORCH-582: never accepted by an automation, never sent back
-        return {"verdict": "leave", "why": kind_block(root, ticket)}
+    if ownerpick.carries_draft(ticket):  # ORCH-582: never accepted, sent back or put in line by the Reviewer
+        return {"verdict": "leave", "why": ownerpick.LEFT_WHY, "owner": True}
+    if tickets.kind(ticket) == "draft":  # ORCH-645: never accepted by an automation, never sent back
+        return {"verdict": "leave", "why": kind_block(root, ticket), "owner": True}
     if tickets._open_questions(ticket):
         return {"verdict": "leave", "why": "a question on this ticket waits for your answer."}
     gaps = [c["text"] for c in items if not c.get("done") or not c.get("evidence")]
@@ -442,7 +442,9 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
             continue  # decided already and nothing changed since (the ticket, or the kinds it accepts)
         facts = [facts_of(u) for u in pr_urls(root, t)]
         res = decide(root, t, facts, int(mine.get("back") or 0))
-        if look and res["verdict"] == "leave" and tid not in own:  # bigger work: a second look (ORCH-175)
+        if (
+            look and res["verdict"] == "leave" and tid not in own and not res.get("owner")
+        ):  # second look (ORCH-175)
             res = lookreview.triage(t, facts, res, int(mine.get("back") or 0)) or res
         row = {"ticket": tid, "key": t.get("key") or tid, **res, "done": False}
         if res["verdict"] == "wait" or dry_run:
@@ -542,6 +544,8 @@ def routine(root: Path, ticket: dict, q: dict, now: float | None = None) -> tupl
         return False, "a Chat question"
     if q.get("answer") is not None or q.get("taken_back") is not None:
         return False, "already settled"
+    if ownerpick.is_draft_card(q):  # ORCH-582
+        return False, "a draft for you to pick"
     if q.get("card") is not None or q.get("action") is not None:
         return False, "a card for you to see"
     if q.get("kind") not in (None, "plain"):
@@ -654,9 +658,20 @@ def accepted(root: Path, since: str) -> list[dict]:
     return out
 
 
-def accepted_text(rows: list[dict], word: str = "today") -> str:
+def picks_text(picks: list[dict]) -> list[str]:
+    """The morning list's own part for drafts (ORCH-582): what waits for the owner's pick, never mixed with
+    what the Reviewer did."""
+    if not picks:
+        return []
+    out = [f"Waiting for your pick: {_n('draft', len(picks))}"]
+    out += [f"- {r['key']} {r['title']}: {r['card']}" for r in picks]
+    return out
+
+
+def accepted_text(rows: list[dict], word: str = "today", picks: list[dict] | None = None) -> str:
+    tail = picks_text(picks or [])
     if not rows:
-        return f"Nothing was accepted for you {word}."
+        return "\n".join([f"Nothing was accepted for you {word}.", *tail])
     acc = [r for r in rows if not r.get("answer")]
     ans = [r for r in rows if r.get("answer")]
     out = []
@@ -669,4 +684,4 @@ def accepted_text(rows: list[dict], word: str = "today") -> str:
     if ans:
         out.append(f"Answered for you {word}: {_n('question', len(ans))}")
         out += [f"- {r['key']} {r['title']}: {r['why']}" for r in ans]
-    return "\n".join(out)
+    return "\n".join(out + tail)

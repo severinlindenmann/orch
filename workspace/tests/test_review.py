@@ -69,7 +69,7 @@ def test_card_answer_is_bound_under_sync(tk):
     root, tid = tk
     history.enable_sync(root, adopt=True)
     q = _ask(root, tid, DRAFT)
-    review.decide(root, tid, q["id"], "ok", by=ME, via="cli", digest=tickets.question_digest(q))
+    review.decide(root, tid, q["id"], "ok", by=ME, via="cli", digest=tickets.question_digest(q), person=True)
     shown = history.shown_ticket(root, _raw(root, tid))
     got = shown["questions"][0]
     assert got["answered_by"] == ME and got["decision"]["action"] == "approve"
@@ -109,13 +109,15 @@ def test_answered_twice_and_agents_are_refused(tk):
     root, tid = tk
     q = _ask(root, tid, DRAFT)
     with pytest.raises(Refused):
-        review.decide(root, tid, q["id"], "ok", by="human:x", via="Not A Word")
+        review.decide(root, tid, q["id"], "ok", by="human:x", via="Not A Word", person=True)
     with pytest.raises(Refused):
-        review.decide(root, tid, q["id"], "talk", by=ME, via="cli")  # words alone never approve, no text
-    review.decide(root, tid, q["id"], "no", by=ME, via="cli")
+        review.decide(
+            root, tid, q["id"], "talk", by=ME, via="cli", person=True
+        )  # words alone never approve, no text
+    review.decide(root, tid, q["id"], "no", by=ME, via="cli", person=True)
     assert tickets.load(root, tid)["questions"][0]["answer"] == "Don't do"
     with pytest.raises(Refused):
-        review.decide(root, tid, q["id"], "ok", by=ME, via="cli")
+        review.decide(root, tid, q["id"], "ok", by=ME, via="cli", person=True)
 
 
 def test_stale_digest_is_refused(tk):

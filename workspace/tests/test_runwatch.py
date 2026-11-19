@@ -482,3 +482,17 @@ def test_run_screen_several_tickets_cli_and_in_process(proj, new_ticket, run, mo
     want = {"screens": {a: {"lines": [f"last of {a}"]}, b: {"lines": [f"last of {b}"]}}}
     assert json.loads(out) == want
     assert reads.answer(proj, ["run", "screen", a, b, "--lines", "1", "--json"]) == want
+
+
+def test_rows_drop_the_prompt_frame():
+    rule = "\u2500" * 40
+    text = "\n".join(["did the work", "ran 3 tests", "", rule, "\u276f ", rule, "  ? for shortcuts", ""])
+    rows, hint = runwatch._rows(text, 40)
+    assert rows == ["did the work", "ran 3 tests"]
+    assert hint is None
+
+
+def test_rows_keep_typed_prompt_text():
+    rule = "\u2500" * 40
+    rows, _ = runwatch._rows("\n".join(["work", rule, "\u276f fix it", rule]), 40)
+    assert rows == ["work", "\u276f fix it"]

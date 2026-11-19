@@ -144,6 +144,6 @@ test('the short places line: N of M in use, the full sentence when every place i
   assert.equal(S.placesShort(p(4, 6)), '4 of 6 places in use');
   assert.equal(S.placesShort(p(2, 6, ['t_a'])), '2 of 6 places in use · 1 ticket waits');
   assert.equal(S.placesShort(p(0, null)), '');
-  assert.equal(S.placesShort(p(1, null)), '1 helper working');
+  assert.equal(S.placesShort(p(1, null)), '1 helper open');
   assert.match(S.placesShort(p(6, 6)), /^All 6 helper places are in use\..*waits in line/);
 });

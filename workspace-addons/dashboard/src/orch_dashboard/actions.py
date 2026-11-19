@@ -1783,6 +1783,8 @@ def _logins_cancel(a):
 PERSON_GRANT_OPS = frozenset(
     {"logins.renew", "logins.status", "logins.cancel", "logins.code", "logins.replace"}
 )
+# a signed-in answer may pick a draft, and a signed-in Done may finish a ticket that carries one (ORCH-582)
+DRAFT_GRANT_OPS = frozenset({"answer", "review.answer", "ticket.patch"})
 
 
 def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> tuple[dict, tuple[int, ...]]:
@@ -1803,6 +1805,15 @@ def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> tuple[dict
         except Exception:  # noqa: BLE001  no guarded orch home here: nothing to renew from this page
             raise Unavailable("orch cannot renew logins in this workspace.") from None
         fds = () if fd is None else (fd,)
+    elif op in DRAFT_GRANT_OPS and session:
+        # ORCH-582: a draft (and the Check of a ticket with one) is answered only by a signed-in person; the
+        # core takes nothing else as proof, whatever --by or --via say. Without a session: no grant, and the
+        # core refuses a draft (other cards answer as before).
+        from orch import renew
+
+        with contextlib.suppress(Exception):  # no guarded orch home: drafts stay unanswerable from here
+            fd = renew.hand_over(env, renew.GRANT_ENV, renew.grant(root))
+            fds = () if fd is None else (fd,)
     return env, fds
 
 
