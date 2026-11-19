@@ -312,6 +312,7 @@ def art(ws, act_orch):
     (d / "artifacts" / "pic.svg").write_text("<svg onload=alert(1)/>")
     (d / "artifacts" / "sub" / "a.txt").write_text("deep")
     (d / "artifacts" / "big.txt").write_bytes(b"x" * (2 * 1024 * 1024 + 1))
+    (d / "artifacts" / "bigpic.png").write_bytes(b"\x89PNG" + b"x" * (3 * 1024 * 1024))  # a 3 MB picture still shows
     (d / "evidence" / "proof.txt").write_text("proof")
     (ws / "secret.txt").write_text("outside")
     (d / "artifacts" / "link.txt").symlink_to(ws / "secret.txt")
@@ -412,6 +413,7 @@ def test_files_are_shown_as_text_or_picture_only(art):
     assert _get(art, "/api/file?t=t_other000x&k=evidence&n=proof.txt")[1] == b"proof"
     assert _get(art, q + "pic.svg&dl=1")[2]["Content-Disposition"].startswith("attachment")
     assert _get(art, q + "big.txt")[0] == 413
+    assert _get(art, q + "bigpic.png")[0] == 200  # a picture over 2 MB is shown (up to the 25 MB upload limit)
 
 
 @pytest.mark.parametrize(
