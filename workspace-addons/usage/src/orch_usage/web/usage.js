@@ -179,7 +179,8 @@
       'aria-label': (way === 'up' ? 'Use ' + a.label + ' earlier' : 'Use ' + a.label + ' later'),
       onclick: e => act('order', a.id + ':' + to.order, e.currentTarget)}, way === 'up' ? '↑' : '↓');
     const on = h('input', {className: 'switch', type: 'checkbox', checked: a.on || null, 'aria-label': 'Use ' + a.label});
-    on.addEventListener('change', () => act(on.checked ? 'on' : 'off', a.id, on));
+    const onWord = h('span', {className: 'meta', text: a.on ? 'On' : 'Off'});
+    on.addEventListener('change', () => { onWord.textContent = on.checked ? 'On' : 'Off'; act(on.checked ? 'on' : 'off', a.id, on); });
     const rows = a.limits.map(l => limitRow(a, l, false));
     if (!a.limits.length) rows.push(limitRow(a, null, true));
     const room = a.limits.length && a.limits.length < 2 && a.periods.some(p => !a.limits.some(l => l.period === p));
@@ -193,7 +194,7 @@
         list.length > 1 ? h('div', {className: 'row'}, move('up', list[i - 1]), move('down', list[i + 1])) : null),
       a.bars.length ? a.bars.map(bar) : h('p', {className: 'meta', text: 'No use read yet.'}),
       h('div', {className: 'row between'}, h('div', {className: 'row'}, rows, addLimit),
-        h('label', {className: 'row'}, h('span', {className: 'meta', text: 'On'}), on)),
+        h('label', {className: 'row'}, onWord, on)),
       endRow(a));
   }
 
