@@ -276,3 +276,21 @@ def test_a_start_while_prepare_runs_goes_on_into_the_work_in_the_same_run(proj, 
         len(prompts) == 2 and "Prepare orch ticket" in prompts[0] and "Prepare orch ticket" not in prompts[1]
     )
     assert any(x.endswith("started") for x in _texts(proj, tid))
+
+
+def test_a_start_during_a_prepare_that_failed_stays_queued_for_a_normal_start(proj, run, helper, monkeypatch):
+    helper("nothing")
+    tid = _new(run)
+    real = runs._prepare_end
+
+    def end(root, t, r, rc, by):
+        assert run("run", "start", t, "--mode", "oneshot", "--by", "human:t")[0] == 2
+        real(root, t, r, rc, by)
+
+    monkeypatch.setattr(runs, "_prepare_end", end)
+    rec = runs.claim(proj, tid, "human:t", "fake", "oneshot", prepare=True)
+    p = runs.plan(proj, tid, mode="oneshot", agent="fake", prepare=True)
+    runs.wrap(proj, rec["run"], tid, "fake", p["argv"], stdin=p["stdin"])
+    t = tickets.load(proj, tid)
+    assert t["status"] == "open" and t["prepare"]["state"] == "not_prepared" and not t.get("started")
+    assert runs.undelivered(proj, tid)  # the Start waits for a normal start

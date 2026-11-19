@@ -1677,12 +1677,26 @@ def start_prepare(root: Path, tid: str, by: str, *, agent: str | None = None) ->
 
 
 def _start_pressed(root: Path, tid: str) -> str | None:
-    """Who pressed Start while the prepare run worked (claim's Busy path queued that start), or None."""
+    """Who pressed Start while the prepare run worked (claim's Busy path queued that start), or None. An
+    item written from inside a helper is stored as agent:<tool> whatever it says (_pending_add_locked), so a
+    helper can never pass for a person here."""
     for i in undelivered(root, tid):
         by = str(i.get("by") or "")
         if i.get("kind") == "event" and i.get("via") is None and by.startswith("human:") and len(by) > 6:
             return by
     return None
+
+
+def _prepared_by(root: Path, tid: str, run: str) -> bool:
+    """This run left the ticket Prepared and still in Backlog, not started."""
+    t = tickets.load(root, tid)
+    p = t.get("prepare") if isinstance(t.get("prepare"), dict) else {}
+    return (
+        p.get("state") == "prepared"
+        and p.get("run") == run
+        and t.get("status") == "open"
+        and not t.get("started")
+    )
 
 
 def _prepare_end(root: Path, tid: str, run: str, rc: int, by: str) -> None:
@@ -2052,12 +2066,17 @@ def wrap(
                     tickets.log(root, tid, limitstop.stopped_text(hit), "agent:helper-watcher")
         if rec.get("prepare"):  # marked before the claim goes, so a Start right after sees how it ended
             _prepare_end(root, tid, run, rc, f"agent:{name}")
-            starter = _start_pressed(root, tid)
-            if starter:  # a person pressed Start meanwhile: the same conversation goes on into the work
-                rec["prepare"] = False
-                set_process_fields(root, tid, run, prepare=False)
-                with contextlib.suppress(Exception):
+            starter = _start_pressed(root, tid) if rc == 0 else None
+            # a person pressed Start meanwhile and Prepare ended well: the same conversation goes on into the
+            # work. Anything else (an error, not Working) leaves the Start queued for a normal start.
+            if starter and _prepared_by(root, tid, run):
+                try:
                     tickets.mark_working(root, tid, starter, adapters.load(name, root)["label"])
+                    if tickets.load(root, tid).get("status") == "active":
+                        rec["prepare"] = False
+                        set_process_fields(root, tid, run, prepare=False)
+                except Exception:  # noqa: BLE001 - the Start stays queued; this run ends as a prepare run
+                    pass
         # a prepare run takes no second turn for anything else (an answer waits for the next run)
         drain = (
             turns <= MAX_DRAIN_TURNS and not flags.get("hung") and brake.paused(root) is None
