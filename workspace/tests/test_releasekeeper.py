@@ -1368,3 +1368,11 @@ def test_walks_start_at_the_cut_with_the_commit_in_the_note(tmp_path, monkeypatc
     assert out["state"]["release"]["phase"] == "gate" and len(out["state"]["release"]["walks"]) == 3
     assert [t for t, _ in notes] == [f"Release 31: {k} walk" for k in ("install", "services", "clickthrough")]
     assert f"--commit {DEV[:12]}" in notes[0][1] and "Use the skill release-walk." in notes[0][1]
+
+
+def test_dry_run_text_says_would_not_did():
+    # ORCH-911: a dry run listed "did: security-review:#6" although it wrote nothing
+    res = {"off": False, "paused": False, "lines": ["one line"], "did": ["security-review:#6"]}
+    dry = rk.text(res, dry_run=True)
+    assert "would: security-review:#6" in dry and "did:" not in dry
+    assert "did: security-review:#6" in rk.text(res)

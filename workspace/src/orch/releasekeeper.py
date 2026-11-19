@@ -2052,4 +2052,5 @@ def text(res: dict, dry_run: bool = False) -> str:
     if res.get("paused"):
         return "Automation is paused here: the release keeper did nothing. Turn it back on: orch resume."
     head = ["Dry run, nothing written."] if dry_run else []
-    return "\n".join(head + list(res.get("lines") or []) + [f"  did: {d}" for d in res.get("did") or []])
+    verb = "would" if dry_run else "did"  # act() lists a step before it skips it on a dry run
+    return "\n".join(head + list(res.get("lines") or []) + [f"  {verb}: {d}" for d in res.get("did") or []])
