@@ -350,7 +350,7 @@ def test_a_step_whose_spend_cannot_be_written_does_not_start(ws, run, fakes, mon
     monkeypatch.setattr(keystart, "_record_use", lambda *a: None)
     argv = [adapters.load("claude", ws)["oneshot"]["fresh"][0], "-p"]
     rc, out = runs._run_turn(argv, ws, None, tmp_log := ws / "t.log", {}, key=key)
-    assert rc == 1 and "did not start the agent" in out and not fakes.exists()
+    assert rc == 1 and "did not start the helper" in out and not fakes.exists()
     assert KEY not in tmp_log.read_text()
 
 

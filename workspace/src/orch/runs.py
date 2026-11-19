@@ -1608,7 +1608,7 @@ def _run_turn(
                         argv[0] if argv else "",
                     )
                 except Refused as e:
-                    said = f"orch could not hand the API key to the agent: {e}\n"
+                    said = f"orch could not hand the API key to the helper: {e}\n"
                     out.write(said.encode())
                     return 1, said
                 env, pass_fds, secret = hand.env, hand.pass_fds, hand.secret
@@ -1621,7 +1621,7 @@ def _run_turn(
                     hand.forget()
                     key["row"] = None
                     said = (
-                        "orch could not write down the spend of this step, so it did not start the agent.\n"
+                        "orch could not write down the spend of this step, so it did not start the helper.\n"
                     )
                     out.write(said.encode())
                     return 1, said
