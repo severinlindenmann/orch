@@ -79,8 +79,12 @@ async function runCardClick({ticket, key, digest, confirmed}) {
   const args = {ticket, key, digest};
   if (confirmed) args.confirmed = true;
   const r = await act('card.run', args);
-  if (r.ok) return r.state?.run_result || {ok:false, error:'orch did not say how it went. Look at the ticket before you try again.'};
-  if (r.status === 403) return {ok:false, error:'Sign in to run it: run orch review in your terminal.'};
+  if (r.ok) {
+    const res = r.state?.run_result || {ok:false, error:'orch did not say how it went. Look at the ticket before you try again.'};
+    if (res.ok && window.orch?.toast) window.orch.toast('Ran it. The card is answered.', 'ok');  // Home drops the card at once
+    return res;
+  }
+  if (r.status === 403) return {ok:false, error:String(r.text || 'Sign in to do this.').slice(0, 300)};
   return {ok:false, error:String(r.text || 'Could not run it.').slice(0, 300)};
 }
 // The Run it now card of a question on Home and the ticket page (outlined button; Review has the filled one). The other
@@ -94,7 +98,7 @@ function runCardNode(ticketId, q) {
     no: async () => {
       const r = await act('review.answer', {ticket:ticketId, key, verdict:'no', digest:q.digest});
       if (r.ok) return {ok:true};
-      return {ok:false, error:r.status === 403 ? 'Sign in to answer: run orch review in your terminal.' : String(r.text || 'Could not save your answer.').slice(0, 300)};
+      return {ok:false, error:String(r.text || 'Could not save your answer.').slice(0, 300)};
     }
   });
 }

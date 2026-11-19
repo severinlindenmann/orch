@@ -1442,7 +1442,7 @@ def change(
 ABOUT_MAX = 120
 
 
-def _run_last(t: dict, q: dict, card: dict) -> dict:
+def run_last(t: dict, q: dict, card: dict) -> dict:
     """A run card's last failed try (ORCH-848: its error stays on the card) and whether a phone may run it."""
     if card.get("kind") != "run":
         return {}
@@ -1504,7 +1504,7 @@ def stack(root: Path) -> list[dict]:
                         "text": q.get("text") or "",
                         **({"links": q["links"]} if isinstance(q.get("links"), list) else {}),
                         **({"group": q["group"]} if isinstance(q.get("group"), str) else {}),
-                        **_run_last(t, q, card),
+                        **run_last(t, q, card),
                     }
                 )
         if t.get("status") == "review":
