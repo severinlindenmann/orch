@@ -28,8 +28,19 @@ def _draft(run, tid):
     return json.loads(out)
 
 
+def _choice(run, tid):
+    # a choice without pictures: only a signed-in person answers a draft card (ORCH-582), not a test
+    code, out, err = run(
+        "ask", tid, "Please look: Which?", "--choose", "Which?", "--option", "A=One", "--option", "B=Two",
+        "--then", "x", "--json", "--by", "agent:x",
+    )  # fmt: skip
+    assert code == 0, out + err
+    return json.loads(out)
+
+
 def _answer(run, tid, qid):
-    code, out, err = run("review", "answer", tid, qid, "--verdict", "ok", "--by", ME, "--json")
+    args = ("review", "answer", tid, qid, "--verdict", "ok", "--picked", "A", "--by", ME, "--json")
+    code, out, err = run(*args)
     assert code == 0, out + err
 
 
@@ -81,7 +92,7 @@ def test_stack_reads_only_tickets_that_hold_a_card(proj, run, index):
 def test_newest_answers_with_a_limit_read_few_tickets(proj, run, index):
     ids = [_new(run, f"T{i}") for i in range(4)]
     for tid in ids[:3]:
-        _answer(run, tid, _draft(run, tid)["id"])
+        _answer(run, tid, _choice(run, tid)["id"])
     every = _answered(proj)
     assert len(every) == 3
     index.clear()
