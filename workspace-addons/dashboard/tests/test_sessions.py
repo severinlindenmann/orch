@@ -300,3 +300,12 @@ def test_a_quiet_session_whose_result_waits_reads_check_like_its_ticket():
     assert plain["word"] == "Idle"
     asks = sessions.session(_t(12, status="review"), _run("you", "Waits for you"), False, None)
     assert asks["word"] == "Waits for you"
+
+
+def test_a_quiet_session_whose_ticket_asks_or_waits_for_a_result_needs_the_person():
+    """ORCH-790: the wall said 2 need you while its Needs you band was empty: these two sat under Idle."""
+    ask = _t(20, questions=[{"text": "Which layout?", "answer": None}])
+    assert sessions.session(ask, {"running": False}, False, None)["needs"] is True
+    assert sessions.session(_t(21, status="review"), _run("idle", "Idle"), False, None)["needs"] is True
+    assert sessions.session(_t(22), {"running": False}, False, None)["needs"] is False
+    assert sessions.session(_t(23, status="review"), _run("you", "Waits for you"), False, None)["needs"] is False
