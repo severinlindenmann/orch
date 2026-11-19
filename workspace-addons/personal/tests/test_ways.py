@@ -1,6 +1,7 @@
 """Ways in (ORCH-649): the person's own scripts, run by Personal in the workspace, text only, off until turned on."""
 
 import json
+import os
 import sys
 import time
 
@@ -184,3 +185,40 @@ def test_a_way_in_writes_its_data_outside_its_folder(cli, ws, monkeypatch):
     assert jrun(cli, "ways", "ask", "teams", "unread")[1]["text"] == "ok\n"
     assert jrun(cli, "ways", "ask", "teams", "unread")[0] == 0  # still not changed
     assert (ws / ".orch/addons/personal/ways-data/teams/cache").read_text() == "x"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="links need extra rights on Windows")
+def test_a_link_in_the_folder_cannot_be_turned_on(cli, ws, tmp_path):
+    d = make_way(ws, files={"unread.py": UNREAD})
+    (tmp_path / "elsewhere.py").write_text("print('x')\n", encoding="utf-8")
+    (d / "linked.py").symlink_to(tmp_path / "elsewhere.py")
+    code, r = jrun(cli, "ways", "on", "teams")
+    assert code == 2 and "link" in r["error"]
+
+
+def test_a_way_in_that_was_on_with_a_broken_way_toml_shows_and_can_be_turned_off(cli, ws, monkeypatch):
+    d = make_way(ws, files={"unread.py": UNREAD})
+    jrun(cli, "ways", "on", "teams")
+    (d / "way.toml").write_text("name = [broken\n", encoding="utf-8")
+    w = jrun(cli, "ways")[1]["ways"][0]
+    assert w["way"] == "teams" and w["on"] and w["changed"] and w["status"] == "permission"
+    as_helper(monkeypatch)
+    assert jrun(cli, "ways", "ask", "teams", "unread")[0] == 2
+    for k in ("ORCH_RUN", "ORCH_AGENT", "ORCH_TICKET"):
+        monkeypatch.delenv(k)
+    assert jrun(cli, "ways", "off", "teams")[1]["on"] is False
+
+
+def test_short_output_is_complete_when_a_child_keeps_the_pipe_open(ws):
+    from orch_personal import ways
+
+    script = (
+        "import subprocess, sys\n"
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(20)'])\n"
+        "print('short answer', flush=True)\n"
+    )
+    make_way(ws, files={"unread.py": script})
+    ways.turn(ws, "teams", True)
+    t = time.time()
+    assert ways.ask(ws, "teams", "unread")["text"] == "short answer\n"
+    assert time.time() - t < 10

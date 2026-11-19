@@ -98,25 +98,34 @@ CHANGED = "It changed since you turned it on. Turn it on again if you made the c
 MAX_FILES = 500
 
 
-def fingerprint(where: Path) -> str:
-    """One hash over every file in the way's folder (names and contents; a link counts as its target text). Turning
-    a way in on stores it; any change afterwards (way.toml, a script, a skill file) stops the way in until the person
-    turns it on again, so "on" always means the scripts the person saw."""
-    h = hashlib.sha256()
-    files = sorted(x for x in where.rglob("*") if x.is_symlink() or x.is_file())
-    for f in files[:MAX_FILES]:
-        h.update(f.relative_to(where).as_posix().encode() + b"\0")
-        h.update(os.readlink(f).encode() if f.is_symlink() else f.read_bytes())
-        h.update(b"\0")
-    h.update(str(len(files)).encode())
+def fingerprint(where: Path) -> str | None:
+    """One hash over every file in the way's folder (names and contents). Turning a way in on stores it; any change
+    afterwards (way.toml, a script, a skill file) stops the way in until the person turns it on again, so "on" always
+    means the scripts the person saw. None (cannot be turned on): a link inside the folder (its target could change
+    unseen), more than MAX_FILES files, or a file that cannot be read."""
+    if where.is_symlink() or not where.is_dir():
+        return None
+    h, n = hashlib.sha256(), 0
+    try:
+        for f in sorted(where.rglob("*")):
+            if f.is_symlink():
+                return None
+            if not f.is_file():
+                continue
+            n += 1
+            if n > MAX_FILES:
+                return None
+            h.update(f.relative_to(where).as_posix().encode() + b"\0" + f.read_bytes() + b"\0")
+    except OSError:
+        return None
     return h.hexdigest()
 
 
-def _changed(slug: str, w: dict, s: dict) -> bool:
-    try:
-        return bool(s.get("on")) and s.get("fingerprint") != fingerprint(w["dir"])
-    except OSError:
-        return True
+def _changed(s: dict, where: Path | None) -> bool:
+    if not s.get("on"):
+        return False
+    fp = fingerprint(where) if where is not None else None
+    return fp is None or s.get("fingerprint") != fp
 
 
 # --- saved state ---------------------------------------------------------------------------------------------
@@ -129,8 +138,39 @@ def saved(root: Path) -> dict[str, dict]:
     return {k: v for k, v in raw.items() if SLUG.fullmatch(k) and isinstance(v, dict)}
 
 
+@contextlib.contextmanager
+def _file_lock(root: Path):
+    """ways.json is written by the CLI and the page server: one writer at a time across processes and threads."""
+    f = store.base(root) / "ways.lock"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    with _LOCK, open(f, "a+") as fh:
+        if os.name == "nt":
+            import msvcrt
+
+            while True:
+                try:
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:
+                    continue
+            try:
+                yield
+            finally:
+                fh.seek(0)
+                with contextlib.suppress(OSError):
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
 def _update(root: Path, slug: str, **fields) -> dict:
-    with _LOCK:
+    with _file_lock(root):
         data = saved(root)
         row = {**data.get(slug, {}), **fields}
         data[slug] = row
@@ -140,13 +180,19 @@ def _update(root: Path, slug: str, **fields) -> dict:
 
 def status(root: Path) -> list[dict]:
     """One row per way in: name, part, status (off / permission / stopped / works), checked, last worked."""
-    st = saved(root)
+    st, ways = saved(root), found(root)
+    for (
+        slug,
+        s,
+    ) in st.items():  # turned on, but its way.toml no longer reads: still shown, so it can be turned off
+        if s.get("on") and slug not in ways:
+            ways[slug] = {"name": slug, "part": "", "actions": {}, "selfcheck": None, "dir": None}
     rows = []
-    for slug, w in found(root).items():
+    for slug, w in sorted(ways.items()):
         s = st.get(slug, {})
         on = bool(s.get("on"))
         state = s.get("status") if on and s.get("status") in STATUS else ("stopped" if on else "off")
-        changed = _changed(slug, w, s)
+        changed = _changed(s, w["dir"])
         if changed:
             state = "permission"
         rows.append(
@@ -180,11 +226,33 @@ def _get(root: Path, slug: str) -> dict:
 
 # --- the person turns a way in on and off --------------------------------------------------------------------
 def turn(root: Path, slug: str, on: bool) -> dict:
+    if not on:  # always possible, even when its way.toml no longer reads
+        if slug not in saved(root) and slug not in found(root):
+            raise Refused(f"There is no way in called {slug}. See them: orch personal ways")
+        _update(root, slug, on=False, fingerprint=None)
+        return next(
+            (r for r in status(root) if r["way"] == slug),
+            {
+                "way": slug,
+                "name": slug,
+                "on": False,
+                "status": "off",
+                "words": STATUS_WORDS["off"],
+                "changed": False,
+                "problem": None,
+                "last_worked": None,
+                "actions": [],
+            },
+        )
     w = _get(root, slug)
-    _update(root, slug, on=on, fingerprint=fingerprint(w["dir"]) if on else None)
-    if on:
-        return check(root, slug)
-    return next(r for r in status(root) if r["way"] == slug)
+    fp = fingerprint(w["dir"])
+    if fp is None:
+        raise Refused(
+            f"{w['name']} cannot be turned on: its folder holds a link or more than {MAX_FILES} files. "
+            "Keep only its own files there; what it writes goes to its data folder."
+        )
+    _update(root, slug, on=True, fingerprint=fp)
+    return check(root, slug)
 
 
 # --- running -------------------------------------------------------------------------------------------------
@@ -246,7 +314,7 @@ def run_command(argv: list[str], where: Path, stdin: dict, timeout: float | None
     buf, over = bytearray(), threading.Event()
 
     def read_out():
-        while chunk := p.stdout.read(8192):
+        while chunk := p.stdout.read1(8192):  # read1: what has arrived, not a full 8 KB
             if len(buf) <= MAX_OUT:
                 buf.extend(chunk[: MAX_OUT + 1 - len(buf)])
             if len(buf) > MAX_OUT:
@@ -255,7 +323,7 @@ def run_command(argv: list[str], where: Path, stdin: dict, timeout: float | None
                 return
 
     def drain_err():
-        while p.stderr.read(8192):
+        while p.stderr.read1(8192):
             pass
 
     def feed():  # own thread: a command that never reads its input cannot hold up the time limit
@@ -273,7 +341,8 @@ def run_command(argv: list[str], where: Path, stdin: dict, timeout: float | None
         p.wait()
         return -1, bytes(buf)
     threads[0].join(2)
-    _kill_tree(p)  # children left behind by the command
+    _kill_tree(p)  # children left behind by the command (on Windows only the tree still attached to it)
+    threads[0].join(2)  # with them gone the pipe closes: read what was still on its way
     return (-2 if over.is_set() else code), bytes(buf)
 
 
@@ -309,7 +378,7 @@ def ask(root: Path, slug: str, action: str, values: dict | None = None) -> dict:
     w = _get(root, slug)
     if not saved(root).get(slug, {}).get("on"):
         raise Refused(f"{w['name']} is off. Only the person turns it on: orch personal ways on {slug}")
-    if _changed(slug, w, saved(root).get(slug, {})):
+    if _changed(saved(root).get(slug, {}), w["dir"]):
         raise Refused(f"{w['name']}: {CHANGED} Only the person does that: orch personal ways on {slug}")
     argv = w["actions"].get(action)
     if not argv:
@@ -338,7 +407,7 @@ def check(root: Path, slug: str) -> dict:
     """Run one way in's self-check now (Try again, or the daily look) and save what came out."""
     w = _get(root, slug)
     s = saved(root).get(slug, {})
-    if not s.get("on") or _changed(slug, w, s):  # a changed way in runs nothing until it is turned on again
+    if not s.get("on") or _changed(s, w["dir"]):  # a changed way in runs nothing until it is turned on again
         return next(r for r in status(root) if r["way"] == slug)
     fields: dict = {"checked": store.now()}
     if not w["selfcheck"]:
