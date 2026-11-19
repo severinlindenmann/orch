@@ -259,3 +259,24 @@ def test_a_stopped_service_has_a_quiet_health_line(ws):
     ]
     (item,) = build(ws, (rows, 0, None))["blocks"][0]["groups"][0]["items"]
     assert _facts(item)["Health check"]["tone"] == "neutral"
+
+
+def test_a_running_job_that_does_not_answer_is_amber_in_the_list(ws):
+    # ORCH-641: alive but silent on its address must not show a green Running dot in the list
+    from orch_services.view import build
+
+    def row(sid, ok):
+        return {
+            "id": sid,
+            "name": sid,
+            "state": "running",
+            "since": None,
+            "auto": False,
+            "health": {"ok": ok, "text": "x"},
+        }
+
+    items = build(ws, ([row("hung", False), row("fine", True)], 0, None))["blocks"][0]["groups"][0]["items"]
+    by = {i["id"]: i for i in items}
+    assert by["hung"]["state"] == {"label": "Not answering", "tone": "warn"}
+    assert by["fine"]["state"] == {"label": "Running", "tone": "good"}
+    assert _facts(by["hung"])["State"]["value"] == "Running"  # the panel keeps the plain state

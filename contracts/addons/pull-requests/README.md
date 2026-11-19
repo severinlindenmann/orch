@@ -53,6 +53,10 @@ merges, so sync holds a changed block until a person allows it.
   the base first: for a repository whose pull requests run only a light set of checks of their own while queue
   groups run the full set (orch development, ORCH-545). Anything but true or false means true.
 
+- `overlap` (true/false, default true, ORCH-432): while a group's checks run, the next group is built on top of it and
+  checked at the same time; it merges only after the group before it merged, and when that one does not, its pull
+  requests go back to the front of the line without a try used. `false`: one group at a time.
+
 - `act_on_failed_checks` (true/false, default false): act on failed checks (below). Any other value is off.
 - `queue_when_helper_stops` (true/false, default false, ORCH-433): the Merge when green pass also puts in the
   queue each pull request a ticket records as `ready to merge` when the ticket has no switch, no helper works on

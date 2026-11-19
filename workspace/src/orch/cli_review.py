@@ -10,7 +10,18 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from orch import dashshots, ghmerge, history, nextstep, review, review_server, runs_live, safefile, tickets
+from orch import (
+    dashshots,
+    ghmerge,
+    history,
+    nextstep,
+    ownerpick,
+    review,
+    review_server,
+    runs_live,
+    safefile,
+    tickets,
+)
 from orch.errors import Refused
 
 SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict", "security")
@@ -479,9 +490,24 @@ def _answer(args, root: Path) -> None:
         args.by
     )  # the person chosen in orch (--by human:<name>), else the computer's user
     digest = given or current
+    # ORCH-582: a draft, or the Check of a ticket that carries one, needs the signed-in dashboard's one-time
+    # person grant (a paired phone answers through the relay); never a script or a helper's shell
+    granted = ownerpick.person_granted(root, who)  # always used up, so no child inherits it
+    needs = ownerpick.is_draft_card(q) if q is not None else ownerpick.carries_draft(t)
+    person = needs and granted
     fn = review.change if q is not None and q.get("answer") is not None else review.decide
     entry = _guard(
-        fn, root, tid, key, args.verdict, args.picked, args.note, by=who, via=args.via, digest=digest
+        fn,
+        root,
+        tid,
+        key,
+        args.verdict,
+        args.picked,
+        args.note,
+        by=who,
+        via=args.via,
+        digest=digest,
+        person=person,
     )
     import contextlib
 
@@ -547,12 +573,13 @@ def _accepted(args, root: Path) -> None:
     from orch import relay, reviewer
 
     rows = reviewer.accepted(root, reviewer.since_time(args.since))
+    picks = ownerpick.waiting_rows(root)  # ORCH-582: drafts waiting for the owner, shown on their own
     word = args.since if args.since in ("today", "yesterday") else "since " + args.since
-    text = reviewer.accepted_text(rows, word)
-    data: dict = {"since": args.since, "accepted": rows}
+    text = reviewer.accepted_text(rows, word, picks)
+    data: dict = {"since": args.since, "accepted": rows, "waiting_pick": picks}
     if args.phone:
         data["sent"] = False
-        if rows:  # nothing accepted: no message
+        if rows or picks:  # nothing accepted and no draft waiting: no message
             try:
                 relay.send_text(root, "phones", text, general=True)
                 data["sent"] = True
