@@ -326,7 +326,7 @@ def test_second_use_of_a_link_ends_the_session_and_says_so(live):
 
 
 def test_a_watch_only_server_says_a_helper_started_it_not_that_the_link_was_used(live):
-    """A server started from a helper session never signs in; the words name that cause and the way out."""
+    """A server started from a helper session is watch-only; the words name that cause and the way out."""
     root, port = live
     SERVERS[port].RequestHandlerClass.keywords["session"].active = False
     tok = pagelaunch.write_launch_token(root, "dashboard")
