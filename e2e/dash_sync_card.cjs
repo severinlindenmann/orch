@@ -11,6 +11,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const headless = require('./headless.cjs'); // the keychain options (ORCH-615)
 
 const PW = process.env.PW_DIR || path.join(os.homedir(), 'orch-dev', 'e2e', 'dashboard', 'node_modules');
 const OUT = process.env.SHOTS_DIR || path.join(os.tmpdir(), 'dash-sync-card');
@@ -110,7 +111,7 @@ const noSideways = page => page.evaluate(() => document.documentElement.scrollWi
 test('Sync card: open Settings, pick On this computer only, review, Save, status line; screenshots', {timeout: 180_000}, async () => {
   const {chromium} = require(path.join(PW, 'playwright'));
   fs.mkdirSync(OUT, {recursive: true});
-  const browser = await chromium.launch({args: ['--use-mock-keychain', '--password-store=basic']});
+  const browser = await headless.launch(chromium);
   try {
     // 1. the flow (1440)
     {

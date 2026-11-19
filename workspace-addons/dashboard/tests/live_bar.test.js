@@ -26,7 +26,7 @@ test('sessions by state from the live sessions API: needs you, working, in line,
   assert.deepEqual(keys('run'), ['ORCH-2']);
   assert.deepEqual(keys('queue'), ['ORCH-3']);
   assert.deepEqual(keys('idle'), ['ORCH-4']);
-  assert.deepEqual(keys('more'), ['ORCH-2', 'ORCH-3', 'ORCH-4'], 'More is everything that is not a chip');
+  assert.deepEqual(keys('more'), ['ORCH-5', 'ORCH-2', 'ORCH-3', 'ORCH-4'], 'More (the last fold) is everything that does not need you, pinned too: it has no other place there');
   assert.equal(all.find(o => o.key === 'ORCH-3').word, 'In line');
   assert.equal(all.find(o => o.key === 'ORCH-1').word, 'Needs you');
   assert.equal(all.find(o => o.key === 'ORCH-2').word, 'Working');
@@ -71,7 +71,7 @@ test('plugs into the layer: a chip opens its session there, open ones are marked
   assert.match(src, /window\.LiveLayer\.open\(o\.dataset\.lbarOpen\)/, 'a chip or row opens in the layer when it is there');
   assert.match(src, /!e\.metaKey && !e\.ctrlKey && !e\.shiftKey/, 'a new-tab click stays a link');
   assert.match(src, /addEventListener\('orch:live-layer'/, 'the layer says which sessions are open');
-  assert.match(src, /'aria-current':bar\.panes\.includes\(o\.id\)/);
+  assert.match(src, /\(o\.members \|\| \[o\.id\]\)\.some\(id => bar\.panes\.includes\(id\)\)/, 'a chip is current when its session (or one of its group, ORCH-345) is open');
   assert.match(src, /end\(fn\) \{/, 'the layer puts Open and Place at the right end');
   assert.match(src, /mount\(host, opts = \{\}\)/);
   const css = fs.readFileSync(path.join(KIT, 'widgets.css'), 'utf8');

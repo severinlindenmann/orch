@@ -1724,6 +1724,7 @@ def _apply_verdict(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]
             via=via,
             digest=asked_digest,
             phone=frm,
+            person=True,  # a paired phone, checked above (ORCH-582: may answer a draft)
             pid="p_" + answer_id[2:],
         )
     except review.BadVerdict as e:
@@ -1782,7 +1783,7 @@ def _apply_review_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str |
         return f"not applied to {tid}: not the current review", None
     try:
         if ans.casefold() == "accept":
-            tickets.accept_review(root, tid, by, via)
+            tickets.accept_review(root, tid, by, via, person=True)  # a paired phone, checked above
             return f"accepted {tid} (via {via})", tid
         tickets.ask_for_changes(root, tid, ans, by, via=via, phone=frm, pid="p_" + str(msg["id"])[2:])
         return f"asked for changes on {tid} (via {via})", tid
@@ -1973,6 +1974,7 @@ def _card_plain(root: Path, msg: dict, asked: dict) -> tuple[str, str | None] | 
             by=by,
             via=via,
             digest=asked.get("question_digest"),
+            person=True,  # a paired phone, checked above (ORCH-582: may answer a draft)
         )
     except Refused as e:
         return f"not applied to {asked['ticket']}: {e}", None
@@ -2535,10 +2537,12 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
     if tid is None:
         spoken = body.get("voice", {}).get("transcript", "") if isinstance(body.get("voice"), dict) else ""
         said = str(body.get("text") or spoken or "")
+        # ORCH-424: the person's Human review needed choice on the phone; no field = the workspace default
+        review = body["human_review"] if isinstance(body.get("human_review"), bool) else None
         t = (
-            tickets.create_from_input(root, said, by)
+            tickets.create_from_input(root, said, by, human_review=review)
             if said.strip()
-            else tickets.create(root, _phone_title(root, said, frm), by)
+            else tickets.create(root, _phone_title(root, said, frm), by, human_review=review)
         )
         tid = t["id"]
         tickets.ext_set(root, tid, "relay", json.dumps({"origin": "phone", "from": frm, "message": mid}), by)
@@ -2838,6 +2842,10 @@ def sync_phone_views(root: Path) -> None:
         from orch import phone_alerts
 
         phone_alerts.sync(root)  # tool logins, connections and keys that run out or stopped (ORCH-47)
+    with contextlib.suppress(Refused, OSError, ValueError, TimeoutError):
+        from orch import phone_stuck
+
+        phone_stuck.sync(root)  # stuck tickets, as at the top of dashboard Home (ORCH-426)
 
 
 def _hint_applied(root: Path, m: dict) -> bool:

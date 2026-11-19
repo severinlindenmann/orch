@@ -63,6 +63,14 @@ def to_time(text: str) -> datetime:
     return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 
 
+def local_text(at: str) -> str:
+    """A stored UTC time in this computer's local time with its zone, minutes only ('2026-11-20 18:00 CET')."""
+    try:
+        return to_time(at).astimezone().strftime("%Y-%m-%d %H:%M %Z").strip()
+    except (ValueError, TypeError):
+        return str(at)[:16].replace("T", " ")
+
+
 def valid_actor(who: str) -> bool:
     return who == USAGE or bool(_ACTOR.fullmatch(who))
 
@@ -370,6 +378,10 @@ def set_limit(
         raise Refused("A percent limit is at most 100%.")
     if period == "until" and value is not None and not until:
         raise Refused("Say until when it counts: --until YYYY-MM-DD.")
+    if until and period != "until":
+        raise Refused(
+            "--until only goes with a limit that counts until a date. To make this limit temporary use --end <date>."
+        )
     same = [x for x in limits if x["period"] == period]
     if value is None:
         if not same:
@@ -396,6 +408,10 @@ def set_limit(
 def set_period(
     a: dict, rows: list[dict], who: str, new: str, of: str | None, until: str | None, end: str | None
 ) -> None:
+    if until and new != "until":
+        raise Refused(
+            "--until only goes with a limit that counts until a date. To make this limit temporary use --end <date>."
+        )
     rule = copy.deepcopy(a["rule"])
     limits = rule["limits"]
     if not limits:
@@ -444,7 +460,7 @@ def set_end(a: dict, rows: list[dict], who: str, end: str | None) -> None:
         return
     a["rule"]["ends"] = end
     if a["rule"] != old:
-        rows.append(_line(who, "rule ends", a, old, copy.deepcopy(a["rule"])))
+        rows.append(_line(who, f"rule ends {local_text(end)}", a, old, copy.deepcopy(a["rule"])))
 
 
 def set_on(a: dict, rows: list[dict], who: str, on: bool) -> None:
