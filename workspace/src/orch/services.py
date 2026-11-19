@@ -219,7 +219,7 @@ def _command_line(pid: int) -> str | None:
             )  # fmt: skip
             return r.stdout.strip() or None  # the process list only shows this user's command lines
         r = subprocess.run(
-            ["ps", "-o", "uid=,command=", "-p", str(int(pid))],
+            ["ps", "-ww", "-o", "uid=,command=", "-p", str(int(pid))],  # -ww: never cut short (Linux)
             capture_output=True,
             text=True,
             timeout=5,

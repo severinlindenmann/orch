@@ -393,9 +393,13 @@ def _sleeper(*args):
         "stdin=s.DEVNULL, stdout=s.DEVNULL, stderr=s.DEVNULL, start_new_session=True); "
         "print(p.pid)"
     )
-    return int(
-        subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
-    )
+    pid = int(subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout)
+    import time
+
+    end = time.time() + 10  # until it shows its own command line (not its parent's, before the exec)
+    while time.time() < end and not (services._command_line(pid) or "").endswith(" ".join(args)):
+        time.sleep(0.05)
+    return pid
 
 
 def _gone(pid, seconds=5.0):
