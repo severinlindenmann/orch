@@ -102,7 +102,7 @@ def keys_unreadable_reason(root: Path | None) -> str:
 
         keystore.all_needles(root)
     except Exception as e:  # noqa: BLE001 - only to say why; the caller stays refused either way
-        text = " ".join(str(e).split()).removeprefix("Refused: ")[:300]
+        text = " ".join(str(e).split()).removeprefix("Refused: ")[:1000]
         if text:
             return text
     return "orch could not read them just now. Try again in a moment."

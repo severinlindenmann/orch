@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -9,7 +10,8 @@ from orch import history, nextstep
 
 
 def add_parsers(sub, common) -> None:
-    w = sub.add_parser("workspace", help="this workspace folder")
+    # hidden from help like `orch copy`: a rare step a person takes after a move; every refusal names it
+    w = sub.add_parser("workspace", help=argparse.SUPPRESS)
     wsub = w.add_subparsers(dest="workspace_cmd", metavar="<command>", required=True)
     wsub.add_parser(
         "move-here",

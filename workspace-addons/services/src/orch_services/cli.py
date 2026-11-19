@@ -218,7 +218,7 @@ def _stored_keys_unreadable(root: Path) -> str | None:
 
 
 def _plain_reason(e: Exception) -> str:
-    text = " ".join(str(e).split()).removeprefix("Refused: ")[:300]
+    text = " ".join(str(e).split()).removeprefix("Refused: ")[:1000]
     return text if text else "orch could not read them. Try again in a moment."
 
 
