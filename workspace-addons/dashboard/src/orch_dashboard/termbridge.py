@@ -58,10 +58,12 @@ _FLAGS = (  # (tmux format flag, the sequence that turns the mode on in the page
     ("mouse_sgr_flag", "\x1b[?1006h"),
     ("insert_flag", "\x1b[4h"),
 )
-_META = (
-    "@@orch #{cursor_x} #{cursor_y} #{pane_width} #{pane_height} #{alternate_on} #{cursor_flag} #{wrap_flag}"
+_META = "@@orch #{cursor_x} #{cursor_y} #{pane_width} #{pane_height}"
+# #{?flag,1,0}: a flag this tmux does not know reads 0 instead of nothing (bracket_paste_flag came in tmux 3.7;
+# Ubuntu 24.04 ships 3.4)
+_META += "".join(
+    f" #{{?{f},1,0}}" for f in ("alternate_on", "cursor_flag", "wrap_flag", *(f for f, _ in _FLAGS))
 )
-_META += "".join(f" #{{{f}}}" for f, _ in _FLAGS)
 _OCTAL = re.compile(rb"\\([0-7]{3})")
 _LOCK = threading.Lock()
 _WATCHES: dict[tuple[str, str], Watch] = {}
@@ -182,26 +184,34 @@ class Watch:
                     if word[0] in (b"%end", b"%error") and word[1:3] == block[0]:
                         self._answered(block[1], word[0] == b"%end", b"\n".join(block[2]))
                         block = None
-                    else:
+                    elif not self._notice(
+                        line
+                    ):  # tmux before 3.8 may send notices inside a block (issue 5458)
                         block[2].append(line)
                 elif line.startswith(b"%begin "):
                     word = line.split(b" ")
                     # 1: a command this client sent (attach's own block says 0); tmux answers them in order
                     req = self._for_block() if word[3:4] == [b"1"] else None
                     block = (word[1:3], req, [])
-                elif line.startswith(b"%output "):
-                    _, pane, data = (line.split(b" ", 2) + [b""])[:3]
-                    if pane.decode(errors="replace") == self.pane:
-                        self._push("out", _unescape(data))
-                elif line.startswith(
-                    (b"%layout-change", b"%window-pane-changed", b"%session-window-changed")
-                ):
-                    self.resized()
                 elif line.startswith(b"%exit"):
                     break
+                else:
+                    self._notice(line)
         except (OSError, ValueError):
             pass
         self.close()
+
+    def _notice(self, line: bytes) -> bool:
+        """Act on a pane's output or a size change; False when the line is neither."""
+        if line.startswith(b"%output %"):
+            _, pane, data = (line.split(b" ", 2) + [b""])[:3]
+            if pane.decode(errors="replace") == self.pane:
+                self._push("out", _unescape(data))
+            return True
+        if line.startswith((b"%layout-change @", b"%window-pane-changed @", b"%session-window-changed $")):
+            self.resized()
+            return True
+        return False
 
     def _for_block(self) -> dict | None:
         """The oldest screen read still owed an answer block; its first block marks where the capture stands."""

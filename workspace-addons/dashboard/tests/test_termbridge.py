@@ -207,6 +207,21 @@ def test_unescape_turns_tmux_octal_back_into_bytes():
     assert termbridge._unescape("ä€".encode()) == "ä€".encode()
 
 
+def test_a_flag_an_older_tmux_does_not_know_reads_0(helper):
+    # bracket_paste_flag came in tmux 3.7; CI's Ubuntu ships 3.4, where a bare unknown flag reads nothing
+    out = tm(
+        "display-message", "-p", "-t", f"={TID}:", termbridge._META.replace("bracket_paste", "no_such")
+    ).stdout
+    assert termbridge.draw(b"x\n", out.strip().encode()) is not None
+
+
+def test_a_notice_inside_an_answer_block_is_output_not_screen():
+    w = termbridge.Watch("s", "t")
+    w.pane = "%1"
+    assert w._notice(b"%output %1 hi\\015") and w.chunks[-1][1:] == ("out", b"hi\r")
+    assert not w._notice(b"plain line from capture-pane")
+
+
 def test_a_page_gets_the_screen_then_every_byte_and_typing_reaches_the_helper(helper, server, tmp_path):
     typing_on(tmp_path)
     port = server().server_address[1]
