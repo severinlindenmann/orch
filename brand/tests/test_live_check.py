@@ -123,7 +123,8 @@ def test_round_trips_skip_when_not_set_up():
 
 
 def test_check_turns_errors_into_lines():
-    assert lc.check("x", lambda: "fine")["ok"] is True
+    good = lc.check("x", lambda: "fine")
+    assert good["ok"] is True and isinstance(good["ms"], int) and good["ms"] >= 0
     assert lc.check("x", lambda: (_ for _ in ()).throw(lc.Skip("later")))["ok"] is None
     bad = lc.check("x", lambda: 1 / 0)
     assert bad["ok"] is False and "ZeroDivisionError" in bad["detail"]

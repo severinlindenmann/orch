@@ -46,13 +46,16 @@ RETRY_S = 5
 
 
 def check(name: str, fn: Callable[[], str]) -> dict:
-    """Runs one check. fn returns a detail line or raises; Skip marks a part that is not set up."""
+    """Runs one check. fn returns a detail line or raises; Skip marks a part that is not set up.
+    `ms` is how long the check took."""
+    t = time.monotonic()
     try:
-        return {"name": name, "ok": True, "detail": fn()}
+        r = {"name": name, "ok": True, "detail": fn()}
     except Skip as e:
-        return {"name": name, "ok": None, "detail": str(e)}
+        r = {"name": name, "ok": None, "detail": str(e)}
     except Exception as e:  # noqa: BLE001 - every failure becomes a red line, never a crash
-        return {"name": name, "ok": False, "detail": f"{type(e).__name__}: {e}"[:300]}
+        r = {"name": name, "ok": False, "detail": f"{type(e).__name__}: {e}"[:300]}
+    return {**r, "ms": round((time.monotonic() - t) * 1000)}
 
 
 class Skip(Exception):

@@ -28,8 +28,9 @@ A part that is not set up yet (no check workspaces, the outside job not on the d
 
 ## Result format `orch.livecheck/1`
 
-One JSON file per run. Other workspaces (private network, fernscout.ch) can write the same format, so every
-live check reads the same way.
+One JSON file per run, the same in every workspace that checks a live system: orch (relay and publish, this
+script), Management (private network, inside view) and Fernscout (fernscout.ch). Each writes it into its check
+ticket's files and exits 1 on a failure, so the alert is always the failed script's question on that ticket.
 
 ```json
 {
@@ -41,14 +42,15 @@ live check reads the same way.
   "ok": false,
   "summary": "1 failed: relay TLS",
   "checks": [
-    {"name": "relay health", "ok": true, "detail": "/health answered ok"},
+    {"name": "relay health", "ok": true, "detail": "/health answered ok", "ms": 84},
     {"name": "relay TLS", "ok": false, "detail": "TLS ends in 9 days (less than 14)"},
     {"name": "publish file round trip", "ok": null, "detail": "check workspace not set up (--publish-ws)"}
   ]
 }
 ```
 
-`ok` on a check is `true` (passed), `false` (failed) or `null` (skipped). The run's `ok` is `false` when any check
+`ok` on a check is `true` (passed), `false` (failed) or `null` (skipped). `ms` (optional) is how long the check
+took, in milliseconds. Readers ignore fields they do not know, so a writer may add more. The run's `ok` is `false` when any check
 failed. The program exits 0 when `ok` is `true` and 1 otherwise.
 
 ## Admin pages stay private
