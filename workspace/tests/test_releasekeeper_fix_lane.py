@@ -1,6 +1,7 @@
 """The fix lane of the release keeper (ORCH-552): a merged pull request labelled "fix for release N", N the
 newest release, ships at once as N.1 from main with only that change; no pace, no other work, no walks."""
 
+import os
 import subprocess
 
 import pytest
@@ -115,6 +116,18 @@ def test_a_fix_release_is_never_cut_again_from_develop(tmp_path):
 # ---- the cut itself, with real git: main plus only the fix -------------------------------------------------
 
 
+def _fake_gh(tmp_path):
+    """A `gh` that prints a pull request link; a .cmd on Windows, which cannot start a #!/bin/sh file."""
+    if os.name == "nt":
+        gh = tmp_path / "gh.cmd"
+        gh.write_text("@echo off\r\necho https://github.com/x/y/pull/77\r\n")
+    else:
+        gh = tmp_path / "gh"
+        gh.write_text("#!/bin/sh\necho https://github.com/x/y/pull/77\n")
+        gh.chmod(0o755)
+    return gh
+
+
 def _git(cwd, *a):
     return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
@@ -141,9 +154,7 @@ def test_cut_fix_takes_only_the_fix_onto_main(tmp_path):
     merge = _git(clone, "rev-parse", "HEAD")
     _git(clone, "push", "-q", "origin", "develop")
     _git(clone, "fetch", "-q", "origin")
-    gh = tmp_path / "gh"
-    gh.write_text("#!/bin/sh\necho https://github.com/x/y/pull/77\n")
-    gh.chmod(0o755)
+    gh = _fake_gh(tmp_path)
     w = rk.World(None, cfg(tmp_path, clone=str(clone), bot=None), None)
     w.gh = str(gh)
     got = w.cut_fix(30, 1, dict(FIX, sha=merge, head=_git(clone, "rev-parse", "fix")), "Fix release 30.1")
@@ -226,9 +237,7 @@ def _commit(clone, branch, start, name, text):
 
 
 def _keeper(tmp_path, clone):
-    gh = tmp_path / "gh"
-    gh.write_text("#!/bin/sh\necho https://github.com/x/y/pull/77\n")
-    gh.chmod(0o755)
+    gh = _fake_gh(tmp_path)
     w = rk.World(None, cfg(tmp_path, clone=str(clone), bot=None), None)
     w.gh = str(gh)
     return w
