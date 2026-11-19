@@ -179,8 +179,8 @@ def test_session_stop_interrupts_the_helper_and_never_the_terminal(proj, monkeyp
 
 
 def test_cli_session_stop_and_end_and_run_interrupt(proj, run, monkeypatch):
-    code, out, _ = run("session", "stop", "empty")
-    assert code == 0 and "The Empty helper is not open" in out
+    code, out, err = run("session", "stop", "empty")
+    assert code == 2 and "The Empty helper is not open" in (out + err)
     code, out, err = run("session", "stop", "terminal")
     assert code == 2 and "no step to stop" in (out + err)
     run("session", "new", "terminal")
@@ -196,3 +196,6 @@ def test_cli_session_stop_and_end_and_run_interrupt(proj, run, monkeypatch):
     monkeypatch.setattr(runs_live, "stop", lambda root, t, hold=False: t == tid)
     code, out, _ = run("session", "end", "empty")
     assert code == 0 and "Ended the Empty helper" in out and "History" in out
+    monkeypatch.setattr(runs_live, "session_exists", lambda root, t: False)
+    code, out, err = run("run", "interrupt", tid)
+    assert code == 2 and "no step to stop" in (out + err)

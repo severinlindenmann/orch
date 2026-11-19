@@ -1383,3 +1383,22 @@ button.gtree-row:hover{background:var(--surface-2)}
 .live-msg-row .input{flex:1;min-width:0;min-height:var(--touch);max-height:calc(var(--s8) * 3);resize:vertical}
 .lbar-n{min-width:16px;padding:0 var(--s1);border-radius:var(--r1);background:var(--surface-3);color:var(--text-muted);font-variant-numeric:tabular-nums;text-align:center}
 @media(prefers-reduced-motion:reduce){.gtree-row{transition:none}}
+/* ORCH-817: Stop and End session in the pane header, a wall tile's More and the bar; the idle note of a helper pane */
+.live-end-menu,.live-end-ask{width:min(300px,calc(100vw - var(--s5)))}
+.live-end-ask p{margin:0}
+.live-end-opt{align-items:flex-start;min-height:var(--touch)}
+.live-end-opt .ic-wrap{margin-top:2px}
+.live-end-row{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.live-end-idle{display:grid;flex:none;gap:var(--s2);padding:var(--s3);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2)}
+.live-end-idle p{margin:0}
+.live-end-idle[hidden]{display:none}
+.live-ended{display:grid;gap:var(--s3)}
+.live-ended h3,.live-ended>p{margin:0}
+.wall-foot,.wall-line{position:relative}
+.wall-tile:has(.live-end-menu,.live-end-ask),.wall-line:has(.live-end-menu,.live-end-ask){z-index:7}
+.lbar-rw{display:flex;gap:var(--s1);align-items:center}
+.lbar-rw .lbar-row{flex:1;min-width:0}
+.lbar-endwrap{position:absolute;left:var(--s3);bottom:100%;z-index:6}
+.lbar-endwrap .live-pop{right:auto;left:0}
+.lbar-newrow{display:flex;gap:var(--s1);align-items:stretch}
+.lbar-newrow .live-opt{flex:1;min-width:0}

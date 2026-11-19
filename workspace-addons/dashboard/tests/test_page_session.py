@@ -437,6 +437,8 @@ ACT_ARGS = {
     "session.name": {"session": TID, "name": "Lunch money"},
     "session.new": {"kind": "empty"},
     "run.stop": {"ticket": TID},
+    "run.interrupt": {"ticket": TID},
+    "session.end": {"kind": "empty"},
     "run.send": {"ticket": TID, "text": "x"},
     "pull.merge": {"ticket": TID, "url": "https://github.com/acme/app/pull/12", "head": "a" * 40},
     "run.take_back": {"ticket": TID, "id": "p_abcdef12"},

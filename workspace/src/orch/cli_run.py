@@ -531,13 +531,12 @@ def dispatch(args, root: Path) -> bool:
             else f"Nothing is running on {_name(root, tid)}.",
         )
     elif sub == "interrupt":
-        ok = runs_live.interrupt(root, tid)
+        if not runs_live.interrupt(root, tid):
+            raise Refused(f"No live session on {_name(root, tid)}, so there is no step to stop.")
         _out(
             args,
-            {"interrupted": ok},
-            f"Stopped the current step of {_name(root, tid)}. The session stays; send it a message to go on."
-            if ok
-            else f"No live session on {_name(root, tid)}.",
+            {"interrupted": True},
+            f"Stopped the current step of {_name(root, tid)}. The session stays; send it a message to go on.",
         )
     elif sub == "claim":
         name = args.agent or adapters.detect_env(os.environ) or _chosen_or_generic(root)

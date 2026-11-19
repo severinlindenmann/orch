@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from orch import nextstep, sessions, tickets
+from orch.errors import Refused
 
 
 def add_parsers(sub, common) -> None:
@@ -61,13 +62,9 @@ def dispatch(args, root: Path) -> bool:
     elif args.sub == "stop":
         d = sessions.interrupt(root, args.kind)
         name = d.get("title", args.kind)
-        _out(
-            args,
-            d,
-            f"Stopped the current step of the {name}. It stays open; send it a message to go on."
-            if d.get("interrupted")
-            else f"The {name} is not open.",
-        )
+        if not d.get("interrupted"):
+            raise Refused(f"The {name} is not open, so there is no step to stop.")
+        _out(args, d, f"Stopped the current step of the {name}. It stays open; send it a message to go on.")
     else:
         rows = sessions.listing(root)
         text = (
