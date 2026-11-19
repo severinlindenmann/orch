@@ -16,6 +16,9 @@ def add_parsers(sub, common) -> None:
         "new", parents=[common], help="start a session without a ticket (or go to the one that is on)"
     )
     x.add_argument("kind", choices=sessions.KINDS)
+    x.add_argument(
+        "--model", choices=("haiku", "sonnet", "opus", "fable"), help="the model the Empty helper starts on"
+    )
     s.add_parser("list", parents=[common], help="the sessions without a ticket and whether they are open")
     x = s.add_parser(
         "close", parents=[common], help="end a session without a ticket (a helper's conversation is kept)"
@@ -33,7 +36,7 @@ def dispatch(args, root: Path) -> bool:
         return False
     by = tickets.acting_by(args)
     if args.sub == "new":
-        d = sessions.new(root, args.kind, by)
+        d = sessions.new(root, args.kind, by, model=getattr(args, "model", None))
         for note in d.get("notes") or []:
             print(note, file=sys.stderr)
         name = d.get("title", args.kind)
