@@ -1,0 +1,70 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "factory",
+   "icon": "hammer",
+   "title": "Factory",
+   "one": "A big idea becomes a planned run. You press Start; you judge each stage.",
+   "steps": [
+    {
+     "who": "you",
+     "text": "You describe an idea"
+    },
+    {
+     "who": "helper",
+     "text": "Drafts and polishes the plan, asks what is unclear"
+    },
+    {
+     "who": "helper",
+     "text": "Proposes the whole run: stages, time, cost"
+    },
+    {
+     "who": "you",
+     "text": "Start, Change it or Not now",
+     "detail": "Only your Start counts, and only for exactly that proposal."
+    },
+    {
+     "who": "orch",
+     "text": "Runs stage by stage with a crew of helpers"
+    },
+    {
+     "who": "you",
+     "text": "At each stop: Continue, Send back or Ship it",
+     "end": true
+    }
+   ],
+   "good": [
+    "Autopilot lets the helper decide routine choices for a while; shipping, scope, budget and anything that cannot be undone always come to you."
+   ],
+   "related": [
+    "questions"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch factory idea \"<title>\" --file draft.md",
+      "file an idea"
+     ],
+     [
+      "orch factory propose <order> --file proposal.json",
+      "propose the whole run"
+     ],
+     [
+      "orch factory show <order>",
+      "stage and open questions"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/addons/factory/",
+      "orders and their stops"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  }
+ ]
+}

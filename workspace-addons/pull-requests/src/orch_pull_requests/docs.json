@@ -1,0 +1,82 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "pull-requests",
+   "icon": "merge",
+   "title": "Pull requests and the merge queue",
+   "one": "Ready pull requests are checked together once and merged on green.",
+   "steps": [
+    {
+     "who": "orch",
+     "text": "Shows each linked pull request's checks live on its ticket and board card"
+    },
+    {
+     "who": "helper",
+     "text": "Puts a ready pull request in the queue and finishes",
+     "detail": "It does not wait for the checks."
+    },
+    {
+     "who": "orch",
+     "text": "Takes up to 5 waiting pull requests"
+    },
+    {
+     "who": "orch",
+     "text": "Puts them on one group branch on top of develop"
+    },
+    {
+     "who": "orch",
+     "text": "The checks run once",
+     "decision": true,
+     "branch": [
+      {
+       "if": "Green",
+       "then": "All merge together"
+      },
+      {
+       "if": "Red",
+       "then": "Split: the likely cause goes last, the rest try again"
+      }
+     ]
+    },
+    {
+     "who": "orch",
+     "text": "Writes the result on each ticket",
+     "branch": [
+      {
+       "if": "One left the queue",
+       "then": "Its helper wakes with the reason"
+      }
+     ],
+     "end": true
+    }
+   ],
+   "good": [
+    "Changes to the checks themselves, and merges you press on a card, run alone.",
+    "A pull request that fell behind is checked once on top of develop; nobody updates it by hand."
+   ],
+   "related": [
+    "review"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch pull-requests queue add <url> --ticket <id>",
+      "put it in line"
+     ],
+     [
+      "orch pull-requests queue list",
+      "the line"
+     ],
+     [
+      "orch ticket set <id> pull-requests.merge_when_green on",
+      "queue it by itself once ready"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  }
+ ]
+}

@@ -4,6 +4,7 @@ orch_api = 1
 name = "publish"
 version = "0.1.0"
 description = "Shares files and small apps by private link."
+docs = "docs.json"                         # its pages on the Documentation page (contracts/docs-pages.md)
 run = "orch"
 skill = "skills/orch-publish"
 agents_block = "skills/orch-publish/AGENTS-block.md"

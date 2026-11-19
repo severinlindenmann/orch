@@ -6,6 +6,7 @@ orch_api = 1
 name = "services"
 version = "0.1.0"
 description = "Keep this workspace's background services running and see their state and log."
+docs = "docs.json"                         # its pages on the Documentation page (contracts/docs-pages.md)
 run = "orch_services"
 skill = "skills/orch-services"
 agents_block = "skills/orch-services/AGENTS-block.md"
