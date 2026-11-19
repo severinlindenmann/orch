@@ -241,3 +241,34 @@ def test_a_change_by_someone_else_wins(ws):
     with pytest.raises(switches.Refused, match="changed by someone else"):
         switches._write(ws, switches.SETTINGS, {"a": 1}, expect=b"{ }")
     assert path.read_text() == "{}"
+
+
+def test_a_refused_save_takes_the_record_back(ws, monkeypatch):
+    real = switches._write
+
+    def refuse_settings(root, rel, doc, expect=True):
+        if rel == switches.SETTINGS:
+            raise switches.Refused("changed by someone else just now. Try again.")
+        return real(root, rel, doc, expect)
+
+    monkeypatch.setattr(switches, "_write", refuse_settings)
+    with pytest.raises(switches.Refused):
+        model.turn(ws, "skill:workspace:release-walk", on=False)
+    assert switches._owned(ws)["skillOverrides"] == []
+
+
+def test_a_relay_copy_with_its_file_cannot_be_turned_off(ws, tmp_path):
+    from conftest import _skill
+    from orch import harness, skills
+
+    skills.install_skill(
+        ws, "orch-relay", _skill(tmp_path / "s" / "orch-relay", "orch-relay", "Reach other workspaces.")
+    )
+    link = ws / ".agents/skills/orch-relay"
+    if link.is_symlink():
+        link.unlink()
+    link.mkdir(exist_ok=True)
+    (link / harness.COPY_MARK).write_text("")
+    (link / "workspaces.json").write_text("{}")
+    it = _item(model.build(ws), "skills", "orch-relay")
+    assert it["on"] and not it["can_off"] and "copy" in it["locked"]

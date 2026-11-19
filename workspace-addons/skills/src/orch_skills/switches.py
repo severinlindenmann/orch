@@ -210,10 +210,16 @@ def set_claude(root: Path, kind: str, entry: str, on: bool) -> bool:
         else:
             if present:
                 return False
+            before = list(owned[kind])
             owned[kind] = sorted(set(owned[kind]) | {entry})
             _write(root, OWNED, {"schema": OWNED_SCHEMA, **owned})  # the record first: a crash leaves no orphan line
             _change(settings, kind, entry, add=True)
-            _write(root, SETTINGS, settings, expect=raw)
+            try:
+                _write(root, SETTINGS, settings, expect=raw)
+            except Refused:  # not written: take the record back, so a line someone adds now stays theirs
+                owned[kind] = before
+                _write(root, OWNED, {"schema": OWNED_SCHEMA, **owned})
+                raise
     return True
 
 

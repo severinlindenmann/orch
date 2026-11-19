@@ -145,6 +145,19 @@ def _skill_problems(root: Path, head: dict, meta: dict, keys: set[str]) -> list[
     return out
 
 
+def _kept_copy(root: Path, name: str) -> bool:
+    """A copy of an orch skill (no links on this computer) that holds an add-on's own file: orch keeps it."""
+    try:
+        from orch import harness
+    except ImportError:
+        return False
+    for where in (".agents/skills", ".claude/skills"):
+        p = root / where / name
+        if not _is_link(p) and p.is_dir() and harness._keep_files(p):
+            return True
+    return False
+
+
 def skills(root: Path, account_home: Path | None = None, keys: set[str] | None = None) -> list[dict]:
     from orch import skills as core
 
@@ -170,6 +183,10 @@ def skills(root: Path, account_home: Path | None = None, keys: set[str] | None =
             item["switch"] = "linked"
             if name in core.ALWAYS_ON:
                 item.update(on=True, locked="orch needs it to work tickets; always on")
+            elif item["on"] and _kept_copy(root, name):
+                item["locked"] = (
+                    "On this computer it is a copy that holds its add-on's file; turn the add-on off instead"
+                )
             elif name in claude and claude[name] == "hand":
                 item["locked"] = "Turned off by hand in .claude/settings.local.json"
             # orch's links reach every tool; a shared folder itself stays in .agents/skills, which Codex reads
