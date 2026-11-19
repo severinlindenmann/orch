@@ -19,7 +19,7 @@ Caddy is the one web server on 80/443: each site is one file in `/etc/caddy/site
 
 | | relay | publish |
 |---|---|---|
-| Binary | `/usr/local/bin/orch-relay` (web files built in) | `/usr/local/bin/orch-publish` (web files built in) |
+| Binary | `/opt/orch/bin/orch-relay` (web files built in) | `/opt/orch/bin/orch-publish` (web files built in) |
 | Service | `orch-relay.service` (`relay/deploy/`) | `orch-publish.service` (`publish/deploy/`) |
 | Settings | `/etc/orch-relay/env` | `/etc/orch-publish/env` (+ drop-ins in `orch-publish.service.d/`) |
 | Secrets | `master.key`, `admin-token`, `apns.p8` in `/etc/orch-relay/` | `admin-token` in `/etc/orch-publish/`, `app-cap.key` in the data folder |
@@ -150,3 +150,20 @@ delete the data on the old server (it becomes the self-hosted NetBird server).
 About 15 minutes in which relay and publish do not answer (stop, copy, start and DNS; the copy is the long part and
 grows with the size of `/var/lib/orch-publish`). Plan a 30-minute window. Published apps take a few minutes more on
 their first visit because their containers are built again. Nothing is lost: the old server stops before the copy.
+
+## How the move went (19 Nov 2026)
+
+Done on the Hostinger server `2.24.146.133` (private `100.71.225.229`). Differences from the plan above, for the next move:
+
+- Production keeps binaries in `/opt/orch/bin`, the admin tokens inline in the `env` files (`ORCH_RELAY_ADMIN_TOKEN`,
+  `ORCH_PUBLISH_ADMIN_TOKEN`), the APNs key in `/etc/orch-relay/apns/`, apps in `/srv/orch-publish/apps`
+  (`ORCH_PUBLISH_APPS_DIR`, unit `ReadWritePaths` includes `/srv/orch-publish`), and `DOCKER_CONFIG` in the data
+  folder. The units, `env` files and keys were copied from the old server with `tar` through the laptop, then only
+  the addresses were changed. The engine socket on the new server is `/var/run/docker.sock` (group `kiri`).
+- The private-app address is `http://publish.internal.severin.io:8410` (a record in the private network's own DNS).
+- The relay needs about 5 seconds before it listens; check `/health` in a loop, not once.
+- The DNS was switched by the owner before the data moved. Caddy sites were added right after the copy, and HTTPS
+  worked within seconds. Adding them before DNS points at the server makes Caddy fail HTTPS attempts and back off.
+- Timeline: stop 19:24:33, copy 80 s (463 MB), start 19:25:57, Caddy 19:26. The services themselves were down under
+  2 minutes. Clients that still had the old DNS answer cached (TTL was 1800 s, not lowered) got 502 for up to 30 minutes.
+- Old server: orch-relay and orch-publish stopped, data untouched for a roll back.

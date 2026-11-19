@@ -4,21 +4,22 @@
 # Apps run as containers on the Kiri engine: install Kiri and its firewall rules first
 # (docs/publish.md, "Container mode: host setup"); this script gives the publish user the engine.
 set -eu
-BIN="$1"; IP="$2"; SOCK="${ORCH_PUBLISH_ENGINE_SOCKET:-/run/kiri/docker.sock}"
+BIN="$1"; IP="$2"; SOCK="${ORCH_PUBLISH_ENGINE_SOCKET:-/var/run/docker.sock}"
 id orch-publish >/dev/null 2>&1 || useradd --system --home /var/lib/orch-publish --shell /usr/sbin/nologin orch-publish
-install -d -o orch-publish -g orch-publish -m 0750 /var/lib/orch-publish /etc/orch-publish
+install -d -o orch-publish -g orch-publish -m 0750 /var/lib/orch-publish /etc/orch-publish /srv/orch-publish /srv/orch-publish/apps
 command -v kiri >/dev/null || { echo "Install Kiri first (docs/publish.md, Container mode: host setup)." >&2; exit 1; }
 kiri host-access orch-publish
 runuser -u orch-publish -- docker -H "unix://$SOCK" info >/dev/null || { echo "orch-publish cannot reach the Kiri engine." >&2; exit 1; }
-install -m 0755 "$BIN" /usr/local/bin/orch-publish
+install -d -m 0755 /opt/orch/bin && install -m 0755 "$BIN" /opt/orch/bin/orch-publish
 [ -f /etc/orch-publish/admin-token ] || head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n' > /etc/orch-publish/admin-token
 [ -f /etc/orch-publish/env ] || cat > /etc/orch-publish/env <<EOF
 ORCH_PUBLISH_LISTEN=127.0.0.1:8102
 ORCH_PUBLISH_ADMIN_LISTEN=$IP:8411
 ORCH_PUBLISH_PRIVATE_LISTEN=$IP:8410
-ORCH_PUBLISH_PRIVATE_URL=http://$IP:8410
+ORCH_PUBLISH_PRIVATE_URL=http://publish.internal.severin.io:8410
 ORCH_PUBLISH_ENGINE_SOCKET=$SOCK
 ORCH_PUBLISH_DATA_DIR=/var/lib/orch-publish
+ORCH_PUBLISH_APPS_DIR=/srv/orch-publish/apps
 ORCH_PUBLISH_ADMIN_TOKEN_FILE=/etc/orch-publish/admin-token
 ORCH_PUBLISH_PUBLIC_ORIGIN=https://publish.severin.io
 ORCH_PUBLISH_SANDBOX=container

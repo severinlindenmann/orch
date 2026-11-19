@@ -6,11 +6,11 @@ Wants=network-online.target
 [Service]
 User=orch-publish
 EnvironmentFile=/etc/orch-publish/env
-ExecStart=/usr/local/bin/orch-publish
+ExecStart=/opt/orch/bin/orch-publish
 Restart=on-failure
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/orch-publish
+ReadWritePaths=/var/lib/orch-publish /srv/orch-publish
 
 [Install]
 WantedBy=multi-user.target
