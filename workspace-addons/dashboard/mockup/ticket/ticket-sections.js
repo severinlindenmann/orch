@@ -33,30 +33,51 @@
     previewContent?.querySelectorAll('a, .skeleton').forEach(n=>n.remove());
     const activity=overview.querySelector('.activity-list, #activity');
     const extraActivity=overview.querySelector('.more-activity, .more-history');
-    const activityCount=(activity?.children.length||0)+(extraActivity?.querySelectorAll('li, p').length||0);
+    const activityCount=(activity?.children.length||0)+(extraActivity?[...extraActivity.querySelectorAll('p.meta')].filter(p=>/·/.test(p.textContent)).length:0);
+    const mine=kind==='change'&&!empty?1:0;  // the change page has a file you attached
     const tabs=el('nav','ticket-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Ticket sections');header.after(tabs);
     const panels={Overview:overview};
-    for(const name of ['Steps','Files','Activity']) {
-      const panel=el('section','ticket-tab-panel');panel.id='ticket-'+name.toLowerCase();panel.hidden=true;overview.after(panel);panels[name]=panel;
+    for(const name of ['Tasks','Files','Activity']) {
+      const panel=el('section','ticket-tab-panel stack');panel.id='ticket-'+name.toLowerCase();panel.hidden=true;overview.after(panel);panels[name]=panel;
     }
-    const counts={Steps:empty?0:rows.length,Files:empty?0:files[kind]?1:0,Activity:empty?0:activityCount};
+    const counts={Tasks:empty?0:rows.length,Files:empty?0:(files[kind]?1:0)+mine,Activity:empty?0:activityCount};
     Object.entries(panels).forEach(([name,panel],i)=>{
       const b=el('button','btn ghost',name+(name==='Overview'?'':' '+counts[name]));b.type='button';b.id='tab-'+name.toLowerCase();b.dataset.ticketTab=panel.id;b.setAttribute('role','tab');b.setAttribute('aria-controls',panel.id);b.setAttribute('aria-selected',String(i===0));b.tabIndex=i===0?0:-1;tabs.append(b);
       panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby',b.id);panel.tabIndex=0;
     });
-    panels.Steps.append(el('h2','','Steps'),el('p','muted','Open a step to see its notes, files and links.'));
-    if(!empty)rows.forEach((row,i)=>{
-      const detail=el('details','task-evidence');const summary=el('summary');const title=el('span','grow',taskNames[i]);const note=row.querySelector('.task-note');if(note)title.append(el('span','task-note meta',note.textContent));summary.append(title,el('span','meta',row.querySelector('.task-mark, .tick')?.textContent.trim()==='✓'?'Done':/Skipped|photos from the shop/.test(row.textContent)?'Skipped':'Working'));detail.append(summary);
-      const body=el('div','evidence-body');body.append(el('h3','','Notes'),el('p','muted',notes[kind]?.[i]||'No notes attached yet.'),el('h3','','Files'));
-      if(files[kind]?.tasks.includes(i))body.append(fileButton());else body.append(el('p','meta','No files attached to this task.'));
-      body.append(el('h3','','Links'),el('p','meta','No separate links attached to this step.'));detail.append(body);panels.Steps.append(detail);
-    });
-    if(!counts.Steps)panels.Steps.append(el('p','muted','No steps yet. Steps and their evidence will appear here when the work is planned.'));
-    panels.Files.append(el('h2','','Files'));
-    if(counts.Files){const f=files[kind];const card=el('article','card ticket-file');card.append(el('h3','',f.name),el('p','meta',f.meta),el('p','muted','Evidence for: '+f.tasks.map(i=>taskNames[i]).join(' · ')),fileButton());panels.Files.append(card);}else panels.Files.append(el('p','muted','No files attached. Completion notes appear with their tasks.'));
+    // Draft E (ORCH-778): one head line (one step per task, count, Add a task), then each task with what came out.
+    const state=r=>r.classList.contains('current-task')?'doing':r.querySelector('.task-mark, .tick')?.textContent.trim()==='✓'?'done':/Skipped|photos from the shop/.test(r.textContent)?'skipped':'';
+    const states=empty?[]:rows.map(state), doneN=states.filter(x=>x==='done').length,skipN=states.filter(x=>x==='skipped').length;
+    const head=el('div','tab-head');
+    if(states.length){const bar=el('div','progress-steps');bar.setAttribute('role','progressbar');bar.setAttribute('aria-label','Tasks done');bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax',String(states.length-skipN));bar.setAttribute('aria-valuenow',String(doneN));states.forEach(x=>bar.append(el('span',x)));head.append(bar);}
+    head.append(el('strong','',states.length?doneN+' of '+(states.length-skipN)+' tasks done':'No tasks yet.'));if(skipN)head.append(el('span','meta',skipN+' skipped'));
+    const addBtn=el('button','btn ghost sm','+ Add a task');addBtn.type='button';
+    const addForm=el('form','row add-task');addForm.hidden=!!states.length||kind==='done';const addIn=el('input','input');addIn.placeholder='New task';addIn.setAttribute('aria-label','Add a task');const addGo=el('button','btn outline sm','Add');addForm.append(addIn,addGo);addForm.onsubmit=e=>e.preventDefault();
+    addBtn.onclick=()=>{addForm.hidden=false;addIn.focus();};
+    if(states.length&&kind!=='done')head.append(addBtn);
+    panels.Tasks.append(head,addForm);
+    if(states.length){const list=el('section','card tasks-list');rows.forEach((row,i)=>{
+      const r=el('div','card-row ticket-task-row');const box=el('div','grow');box.append(el('h3',states[i]==='skipped'?'task-wont':'',taskNames[i]));
+      if(states[i]==='done')box.append(el('p','meta task-proof',(notes[kind]?.[i]||'').replace(/^No evidence yet.*$/,'')||'12:26 · Helper'));
+      else if(states[i]==='doing')box.append(el('p','meta task-proof','The helper is on it.'));
+      else if(states[i]==='skipped')box.append(el('p','meta task-note',notes[kind]?.[i]||'Skipped.'));
+      if(states[i]==='done'&&files[kind]?.tasks.includes(i))box.append(fileButton());
+      r.append(el('span',states[i]==='done'?'good':'dot idle',states[i]==='done'?'✓':''),box,el('span','meta task-word',{done:'Done',doing:'Working',skipped:'Skipped'}[states[i]]||'To do'));list.append(r);});
+      panels.Tasks.append(list);}
+    // Draft E: All / Helper / You with counts when both kinds are there (the change page has a file you attached).
+    const helperFiles=counts.Files-mine;
+    if(helperFiles&&mine){const seg=el('div','segmented');seg.setAttribute('role','group');seg.setAttribute('aria-label','Who added it');
+      [['All',counts.Files],['Helper',helperFiles],['You',mine]].forEach(([w,n],j)=>{const b=el('button','btn',w+' ');b.type='button';b.setAttribute('aria-pressed',String(j===0));b.append(el('span','seg-count',String(n)));b.onclick=()=>{seg.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));panels.Files.querySelectorAll('[data-who]').forEach(c=>c.hidden=w!=='All'&&c.dataset.who!==w);};seg.append(b);});
+      const fh=el('div','tab-head');fh.append(seg);panels.Files.append(fh);}
+    if(helperFiles){const f=files[kind];const card=el('article','card ticket-file');card.dataset.who='Helper';card.append(el('h3','',f.name),el('p','meta',f.meta),el('p','muted','Evidence for: '+f.tasks.map(i=>taskNames[i]).join(' · ')),fileButton());panels.Files.append(card);if(mine){const you=el('article','card ticket-file');you.dataset.who='You';you.append(el('h3','','Shipping costs.png'),el('p','meta','Picture · 12:28 today · You'));panels.Files.append(you);}}else panels.Files.append(el('p','muted','No files attached. Completion notes appear with their tasks.'));
     const grid=el('a','btn ghost sm','Browse the full file grid ↗');grid.href='../previews/files.html';panels.Files.append(grid);
-    panels.Activity.append(el('h2','','Activity'));
-    if(!empty && activity){panels.Activity.append(activity.cloneNode(true));if(extraActivity)panels.Activity.append(extraActivity.cloneNode(true));panels.Activity.querySelectorAll('[id]').forEach(n=>n.removeAttribute('id'));}else panels.Activity.append(el('p','muted','No activity yet.'));
+    // Draft E: the master segmented filter with counts; a Phone tag on what came from the phone.
+    if(!empty && activity){const list=activity.cloneNode(true);if(extraActivity)list.append(...[...extraActivity.querySelectorAll('p.meta')].filter(p=>/·/.test(p.textContent)).map(p=>{const d=el('div');const [t,...rest]=p.textContent.split(' · ');d.append(el('time','',t),el('span','',rest.join(' · ')));return d;}));list.removeAttribute('id');
+      const who=d=>/^(You|Anna|Ben)\b/.test(d.textContent.replace(/^\s*\d+:\d+\s*/,''))?'People':/^Helper\b/.test(d.textContent.replace(/^\s*\d+:\d+\s*/,''))?'Helper':'';
+      const items=[...list.children];items.forEach(d=>{d.dataset.who=who(d);if(/phone/i.test(d.textContent)){const tag=el('span','tag','Phone');d.querySelector('span')?.append(' ',tag);}});
+      const seg=el('div','segmented');seg.setAttribute('role','group');seg.setAttribute('aria-label','Show');
+      ['All','People','Helper'].forEach((w,j)=>{const n=items.filter(d=>w==='All'||d.dataset.who===w).length;const b=el('button','btn',w+' ');b.type='button';b.setAttribute('aria-pressed',String(j===0));b.append(el('span','seg-count',String(n)));b.onclick=()=>{seg.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));items.forEach(d=>d.hidden=w!=='All'&&d.dataset.who!==w);};seg.append(b);});
+      const ah=el('div','tab-head');ah.append(seg);panels.Activity.append(ah,list);}else panels.Activity.append(el('p','muted','No activity yet.'));
     // All entry points use the same viewer and the actual ticket file.
     overview.querySelectorAll('a[href="../previews/viewer.html"], .preview-expand, a[href="#open"]').forEach(a=>{a.dataset.ticketPreview='';a.href=files[kind]?.path||'#';});
     overview.querySelectorAll('a[href="#download"]').forEach(a=>{a.href=files[kind].path;a.download='';});
