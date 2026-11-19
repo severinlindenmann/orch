@@ -58,6 +58,16 @@ def _uv_removes_then_fails(env, bindir, message):
         ("error: Executable already exists: orch (use `--force` to overwrite)", "Another program named orch"),
         ("error: Failed to fetch: `https://github.com/x.zip` dns error", "No internet connection to GitHub"),
         ("error: something else", "The reinstall failed"),
+        # ORCH-871: a build error is not "no internet", though uv starts it with "Failed to download"
+        (
+            "  x Failed to download and build `orch-workspace @ https://github.com/x.zip#subdirectory=a`\n"
+            "  -> Package metadata name `orch-automation` does not match given name `orch-workspace`",
+            "The reinstall failed",
+        ),
+        (
+            "error: Failed to download `https://github.com/x.zip`\n  Caused by: error sending request",
+            "No internet connection to GitHub",
+        ),
     ],
 )
 def test_failed_reinstall_keeps_the_old_orch(tmp_path, monkeypatch, message, words):
@@ -374,3 +384,13 @@ def test_an_added_addon_starts_its_service(tmp_path, monkeypatch):
         services, "start", lambda root, only=None, envs=None: [{"addon": "factory", "error": "boom"}]
     )
     assert addons._start_added(tmp_path, ["factory"]) == ["factory did not start: boom"]
+
+
+def test_fetch_failure_matches_whole_words_only():
+    from orch import keepold
+
+    assert keepold.fetch_failure("error: tls handshake eof")
+    assert keepold.fetch_failure("Caused by: dns error: failed to lookup address")
+    assert not keepold.fetch_failure("Failed to download and build `orch-x @ https://github.com/x.zip`")
+    assert not keepold.fetch_failure("no module named settlsx")
+    assert not keepold.fetch_failure(None)
