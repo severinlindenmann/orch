@@ -26,6 +26,7 @@ import time
 from pathlib import Path
 
 from orch import adapters, runs
+from orch.session_history import ORCH_TYPED as _ORCH_TYPED
 
 TAIL_BYTES = (
     16 * 1024 * 1024
@@ -39,14 +40,6 @@ TYPED_KEEP = 20  # the last typed lines kept
 _LAUNCHED = "Async agent launched"
 _NOTICE = "<task-notification>"
 _TOOL_USE_ID = re.compile(r"<tool-use-id>([^<]+)</tool-use-id>")
-# what orch types or the tool writes as a "user" line by itself: its notices, the task text of a start, the
-# summary after the conversation was compacted
-_ORCH_TYPED = (
-    "Your task for orch ticket ",
-    "New input on orch ticket ",
-    "Work on orch ticket ",
-    "This session is being continued from a previous conversation",
-)
 _cache: dict[str, tuple[tuple[int, int], dict]] = {}
 
 
