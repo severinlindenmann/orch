@@ -122,8 +122,77 @@ def test_cli_new_list_close(proj, run, monkeypatch):
     assert code == 0 and "Started the Plain terminal" in out
     d = json.loads(run("session", "list", "--json")[1])
     assert [(r["kind"], r["open"]) for r in d["sessions"]] == [("terminal", True)]
-    code, out, _ = run("session", "close", "terminal")
-    assert code == 0 and "Closed the Plain terminal" in out
+    code, out, _ = run("session", "close", "terminal")  # the older name of end still works
+    assert code == 0 and "Ended the Plain terminal" in out
     monkeypatch.setattr(runs_live, "stop", lambda *a, **k: pytest.fail("nothing runs"))
     code, out, _ = run("session", "close", "empty")
     assert code == 0 and "not open" in out
+
+
+# ORCH-817: Stop (the current step only) and End (the session) for every session, with a ticket or without.
+
+
+def _live(proj, tid, monkeypatch, agent="claude"):
+    rec = runs.claim(proj, tid, "human:t", agent, "live", pid=os.getpid())
+    sent = []
+    monkeypatch.setattr(runs_live, "session_exists", lambda root, t: t == tid)
+    monkeypatch.setattr(runs_live, "tmux", lambda root, *a, **k: sent.append(a))
+    return rec, sent
+
+
+def test_interrupt_sends_the_tools_keys_once_and_keeps_the_session(proj, monkeypatch):
+    tid = tickets.ensure_session(proj, "empty", "human:t")
+    rec, sent = _live(proj, tid, monkeypatch)
+    assert runs_live.interrupt(proj, tid) is True
+    assert sent == [("send-keys", "-t", runs_live.target(tid), "Escape")]  # no kill-session
+    assert runs.read(proj, tid)["run"] == rec["run"]  # the claim and the session stay
+
+
+def test_interrupt_without_a_live_session_does_nothing(proj, monkeypatch):
+    tid = tickets.ensure_session(proj, "empty", "human:t")
+    monkeypatch.setattr(runs_live, "tmux", lambda *a, **k: pytest.fail("nothing is live"))
+    assert runs_live.interrupt(proj, tid) is False
+    runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
+    monkeypatch.setattr(runs_live, "session_exists", lambda root, t: False)
+    assert runs_live.interrupt(proj, tid) is False
+
+
+def test_interrupt_is_refused_for_a_tool_with_no_stop_key(proj, monkeypatch):
+    from orch import adapters
+
+    tid = tickets.ensure_session(proj, "empty", "human:t")
+    _live(proj, tid, monkeypatch)
+    monkeypatch.setattr(adapters, "load", lambda name, root: {"live": {"interrupt_keys": []}})
+    with pytest.raises(Refused, match="End the session"):
+        runs_live.interrupt(proj, tid)
+
+
+def test_session_stop_interrupts_the_helper_and_never_the_terminal(proj, monkeypatch):
+    with pytest.raises(Refused, match="no step to stop"):
+        sessions.interrupt(proj, "terminal")
+    assert sessions.interrupt(proj, "empty")["interrupted"] is False  # never made
+    tid = tickets.ensure_session(proj, "empty", "human:t")
+    _, sent = _live(proj, tid, monkeypatch)
+    monkeypatch.setattr(runs, "running", lambda root, t: t == tid)
+    d = sessions.interrupt(proj, "empty")
+    assert d["interrupted"] and d["open"] and d["id"] == tid and len(sent) == 1
+
+
+def test_cli_session_stop_and_end_and_run_interrupt(proj, run, monkeypatch):
+    code, out, _ = run("session", "stop", "empty")
+    assert code == 0 and "The Empty helper is not open" in out
+    code, out, err = run("session", "stop", "terminal")
+    assert code == 2 and "no step to stop" in (out + err)
+    run("session", "new", "terminal")
+    code, out, _ = run("session", "end", "terminal")
+    assert code == 0 and "Ended the Plain terminal." in out and "History" not in out
+    tid = tickets.ensure_session(proj, "empty", "human:t")
+    _, sent = _live(proj, tid, monkeypatch)
+    monkeypatch.setattr(runs, "running", lambda root, t: t == tid)
+    code, out, _ = run("session", "stop", "empty")
+    assert code == 0 and "Stopped the current step of the Empty helper" in out and len(sent) == 1
+    code, out, _ = run("run", "interrupt", tid)
+    assert code == 0 and "Stopped the current step" in out and len(sent) == 2
+    monkeypatch.setattr(runs_live, "stop", lambda root, t, hold=False: t == tid)
+    code, out, _ = run("session", "end", "empty")
+    assert code == 0 and "Ended the Empty helper" in out and "History" in out
