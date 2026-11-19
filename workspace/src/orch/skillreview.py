@@ -3,7 +3,7 @@
 `metadata.review-by: "YYYY-MM-DD"`: when the date has passed, `orch skill review-due` (run by the automation loop,
 no AI) opens one ticket "Look at the skill <name> again" for the skill's owner. One ticket per skill and date: what
 was opened is kept in `.orch/skill-reviews.json`, so a new date later opens a new ticket and the same date never a
-second one. No helper is started on it; it waits on the list for a person. Only the workspace's own skills count:
+second one (also when an older date comes back). No helper is started on it; it waits on the list for a person. Only the workspace's own skills count:
 orch's skills have no date, and a skill shared over the relay belongs to the admin's workspace, which gets the
 reminder there.
 
@@ -142,7 +142,8 @@ def _pass(root: Path, today: date, dry_run: bool) -> dict:
         if d >= today:
             res["waiting"].append({"skill": name, "date": d.isoformat()})
             continue
-        if (state.get(name) or {}).get("date") == d.isoformat():
+        seen = state.get(name) if isinstance(state.get(name), dict) else {}
+        if d.isoformat() in seen:
             continue  # this date has its ticket already
         owner = (meta.get("owner") or "").strip()[:64] or None
         title = f"Look at the skill {name} again"
@@ -152,7 +153,7 @@ def _pass(root: Path, today: date, dry_run: bool) -> dict:
             if owner:
                 fields["owner"] = owner
             t = tickets.create(root, title, BY, fields=fields)
-            state[name] = {"date": d.isoformat(), "ticket": t["id"]}
+            state[name] = {**seen, d.isoformat(): t["id"]}  # every date that had a ticket: {date: ticket id}
             net.write_json(_path(root), state)  # saved right after the ticket: a date never makes two
             row.update(ticket=t["id"], key=t.get("key"))
         res["opened"].append(row)
