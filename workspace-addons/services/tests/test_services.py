@@ -326,6 +326,26 @@ def test_hidden_words_cannot_slip_past_the_scan(cli, ws, stored_keys):
     assert "gamma-part-55" not in lines and "delta-part-73" not in lines
 
 
+def test_add_says_why_even_when_a_word_also_looks_like_a_secret(cli, monkeypatch):
+    # ORCH-853: a moved workspace (keys bound to the old folder) plus one flagged word said "holds a secret"
+    from orch import keystore, phone_results
+
+    monkeypatch.setattr(phone_results, "value_hider", lambda root: None)
+
+    def refused(root):
+        raise keystore.Refused("Refused: this folder's saved keys still belong to /old/ws (moved).")
+
+    monkeypatch.setattr(keystore, "all_needles", refused)
+    code, out = jrun(
+        cli, "add", "Web", "--id", "web", "--", "python3", "app.py", "password: hunter2-long-value"
+    )
+    assert code == 2
+    assert out["error"] == (
+        "Could not compare the command with this workspace's stored keys: "
+        "this folder's saved keys still belong to /old/ws (moved)."
+    )
+
+
 def test_add_says_why_when_the_stored_keys_cannot_be_read(cli, monkeypatch):
     # ORCH-371 bug 10: a harmless command was refused as "holds a secret" when the key store could not be read
     from orch import keystore, phone_results

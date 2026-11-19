@@ -194,9 +194,11 @@ def _no_secret(root: Path, rec: dict) -> None:
     except ImportError:  # the core is always there (python -m under orch); never a silent pass
         raise Refused("Could not check the command for secrets. Update orch and try again.") from None
     hits = secretscan.find("\n".join([rec["name"], *rec["command"]]), root)
-    if hits and all(h.get("kind") == "stored-key" for h in hits):
+    unreadable = any(h.get("kind") == "keys-unreadable" for h in hits)
+    if unreadable or (hits and all(h.get("kind") == "stored-key" for h in hits)):  # stored-key: an older core
         why = _stored_keys_unreadable(root)
-        if why:  # the comparison could not run: say why instead of blaming a harmless command
+        if why or unreadable:  # the comparison could not run: say why instead of blaming a harmless command
+            why = why or "orch could not read them. Try again in a moment."
             raise Refused(f"Could not compare the command with this workspace's stored keys: {why}")
     if hits:
         raise Refused(
@@ -216,7 +218,7 @@ def _stored_keys_unreadable(root: Path) -> str | None:
 
 
 def _plain_reason(e: Exception) -> str:
-    text = " ".join(str(e).split())[:200]
+    text = " ".join(str(e).split()).removeprefix("Refused: ")[:300]
     return text if text else "orch could not read them. Try again in a moment."
 
 

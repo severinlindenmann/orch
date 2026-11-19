@@ -411,6 +411,39 @@ SECOND_FOLDER = (
     "Put back the workspace id, or ask the owner."
 )
 TRY_AGAIN = "orch could not check the key folders just now. Try again; if it keeps happening, ask the owner."
+MOVE_HERE = "orch workspace move-here"
+MOVED_FROM = (
+    "Refused: this folder's saved keys still belong to {old} (the folder was copied or moved). "
+    "If you moved it here, run this yourself in a terminal in this folder: " + MOVE_HERE
+)
+COPY_OF = (
+    "Refused: this folder is a copy of {old} (copied or moved, and that folder still has the same "
+    "workspace id). Its saved keys stay with {old}."
+)
+
+
+class BoundElsewhere(Refused):
+    """The key folder is bound to another real path (`old`): a move (the old folder is gone or is another
+    workspace now) or a copy (the old folder still carries this workspace id). The words name the way out."""
+
+    def __init__(self, old: str, wid: str | None):
+        self.old = old
+        self.copy = _still_there(old, wid)
+        super().__init__((COPY_OF if self.copy else MOVED_FROM).format(old=old))
+
+
+def _still_there(old: str, wid: str | None) -> bool:
+    """The folder at `old` still exists and still carries this workspace id: a copy, not a move. Cannot be
+    told (no id, an unreadable folder): a copy (fail closed, never re-bound)."""
+    from orch import addons
+
+    if not wid:
+        return True
+    try:
+        p = Path(old)
+        return p.is_dir() and addons.read_local_id(p) == wid
+    except Exception:  # noqa: BLE001 - fail closed
+        return True
 
 
 def _try_again(name: str) -> str:
@@ -531,7 +564,77 @@ def _check_binding(root: Path, d: Path) -> None:
     except OSError:
         same = False
     if not same:
-        raise Refused(BINDING_MISMATCH)
+        raise BoundElsewhere(stored, d.name)
+
+
+def binding_check(root: Path) -> tuple[str, str | None]:
+    """Read-only (writes nothing, heals nothing): (state, old path). state: "here" (the key folder is bound to
+    this folder), "moved", "copy" (old path set for both), "none" (no id or no key folder yet) or "unknown"
+    (could not be told)."""
+    from orch import addons
+
+    try:
+        own = addons.read_local_id(root)
+        if own is None:
+            return "none", None
+        d = guarded_home(root) / "keys" / own
+        if not d.is_dir() or d.is_symlink():
+            return "none", None
+        _check_binding(root, d)
+        return "here", None
+    except BoundElsewhere as e:
+        return ("copy" if e.copy else "moved"), e.old
+    except Exception:  # noqa: BLE001 - a doctor check never raises
+        return "unknown", None
+
+
+def binding_state(root: Path) -> str:
+    """binding_check without the path (doctor checks and problem reports: no folder names)."""
+    return binding_check(root)[0]
+
+
+def move_here(root: Path) -> dict:
+    """Re-bind this workspace's key folder to its new real path after the folder was moved (N17 stays: a copy,
+    a missing or loose binding, or a second folder bound to this path is refused). The caller makes sure a
+    person asked for it. Returns {"moved": bool, "old": path, "new": path, "id": workspace id}."""
+    from orch import addons
+
+    home = guarded_home(root)
+    winacl.no_reparse(home)
+    keys = home / "keys"
+    here = os.path.realpath(root)
+    own = addons.read_local_id(root)
+    if own is None:
+        raise Refused("This folder has no orch workspace id, so there are no saved keys to move.")
+    d = keys / own
+    if not d.is_dir() or d.is_symlink():
+        raise Refused("No saved keys belong to this folder's workspace id, so there is nothing to move.")
+    _check_dir(home)
+    _check_dir(keys)
+    with _folders_lock(keys):  # the same step as "one key folder per path" in key_dir
+        _check_dir(d)
+        f = d / "binding.json"
+        try:
+            stored = json.loads(_read_guarded(f).decode("utf-8")).get("realpath")
+        except (FileNotFoundError, LooseFile, winacl.Unknown):
+            raise Refused(BINDING_MISMATCH) from None  # never bind a folder that has no sound binding
+        except (ValueError, AttributeError):
+            raise Refused("A record in the orch folder is unreadable.") from None
+        if not isinstance(stored, str):
+            raise Refused("A record in the orch folder is unreadable.")
+        try:
+            same = stored == here or os.path.samefile(stored, here)
+        except OSError:
+            same = False
+        if same:
+            return {"moved": False, "old": stored, "new": here, "id": own}
+        if _still_there(stored, own):
+            raise Refused(COPY_OF.format(old=stored))
+        if any(n != own for n in _bound_folders(root, home, own)):
+            raise Refused(SECOND_FOLDER)
+        _write_private(f, json.dumps({"schema": "orch.binding/1", "realpath": here}) + "\n")
+        _BINDINGS.pop(str(f), None)
+    return {"moved": True, "old": stored, "new": here, "id": own}
 
 
 def _write_private(path: Path, text: str, *, private: bool = True) -> None:
