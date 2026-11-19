@@ -106,7 +106,8 @@ def _start_task(data, args) -> str:
 def _record(data, args) -> str:
     c = getattr(args, "check", "<task>")
     if getattr(args, "exit_code", None):  # a failed run is not evidence to close on
-        return f'that run failed: fix it, then run it again: orch check record {_tid(args)} {c} --cmd "<command>" --exit 0'
+        again = f'orch check record {_tid(args)} {c} --cmd "<command>" --exit 0'
+        return f"that run failed: fix it, then run it again: {again}"
     return f'if that is the evidence, close the task: orch check done {_tid(args)} {c} --note "<evidence>"'
 
 
