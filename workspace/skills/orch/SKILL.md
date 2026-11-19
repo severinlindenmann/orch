@@ -203,9 +203,14 @@ waits for a person with `orch needs`.
     orch wait <id> --until 2026-11-06T08:00:00+01:00     # a time (same as orch ticket wait)
     orch wait <id> --on question:q1                      # an answer
     orch wait <id> --on ticket:<other id>                # another ticket
+    orch wait <id> --on pr:<pull request url>            # a pull request the ticket links, until merged or closed
     orch wait <id> --clear                               # stop waiting
 
 orch only records the wait. An add-on may wake the ticket when it is due; if none does, tell the user when to come back.
+Waiting on another ticket or a pull request costs nothing: the helper watcher looks without a helper and starts you
+only once it is finished, merged or closed (a merge-queue throw-out wakes you too, and a red check when the
+pull-requests add-on is set to act on failed checks). Never wait for a
+time just to look whether a pull request merged or a ticket finished: every such wake-up is a whole helper run.
 
 **Sub-tickets**
 

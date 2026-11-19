@@ -28,9 +28,9 @@
           "type": "object",
           "required": ["kind"],
           "properties": {
-            "kind": { "enum": ["time", "ticket", "question", "external"] },
+            "kind": { "enum": ["time", "ticket", "pr", "question", "external"] },
             "until": { "$ref": "#/$defs/time" },
-            "ref": { "type": "string", "minLength": 1, "maxLength": 200, "description": "question: q1 · ticket: t_… · external: ws_…, wh_…, a person, a PR URL, free text · time (optional): what it waits for, as a person wrote it" }
+            "ref": { "type": "string", "minLength": 1, "maxLength": 200, "description": "question: q1 · ticket: t_… · pr: a GitHub pull request URL the ticket links (the helper watcher wakes the ticket once the pull-requests add-on sees it merged or closed) · external: ws_…, wh_…, a person, a PR URL, free text · time (optional): what it waits for, as a person wrote it" }
           },
           "if": { "properties": { "kind": { "const": "time" } } },
           "then": { "required": ["until"] },

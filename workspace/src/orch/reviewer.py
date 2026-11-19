@@ -296,6 +296,13 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
             return {"verdict": "leave", "why": f"pull request {num} was merged before this ticket was made."}
         if f["state"] == "CLOSED":
             return {"verdict": "leave", "why": f"pull request {num} was closed without merging."}
+        if f["state"] != "MERGED" and tickets.in_merge_queue(root, [f.get("url")]):
+            # ORCH-815: sending it back only starts a helper that can do nothing but wait; the queue merges it
+            # or wakes the helper with its reason
+            return {
+                "verdict": "wait",
+                "why": f"pull request {num} is in the merge queue; looked at again later.",
+            }
         if f["state"] != "MERGED":
             missing.append(f"pull request {num} is not merged yet")
         elif not f["green"]:
