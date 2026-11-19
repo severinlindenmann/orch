@@ -592,3 +592,15 @@ def _no_update_info_network(monkeypatch):
     from orch import updateinfo
 
     monkeypatch.setattr(updateinfo, "_fetch_messages", lambda *a, **k: None)
+
+
+@pytest.fixture
+def person_grant(monkeypatch):
+    """ORCH-582: hand the NEXT orch call a one-time person grant, as the signed-in dashboard does (the grant
+    is used up by the call that reads it). Call it with the workspace root right before the call."""
+    from orch import renew
+
+    def _grant(root):
+        monkeypatch.setenv(renew.GRANT_ENV, renew.grant(Path(root)))
+
+    return _grant

@@ -105,7 +105,7 @@ def _child_env(env, orch_bin):
 
 SELF = "orch:self"  # orch.pagesession.SELF: the real server, which runs in the core's own interpreter
 _MISS = object()
-READS = {"process": 0, "here": 0}  # how each read was answered (the timing test counts the processes)
+READS = {"process": 0, "here": 0, "worker": 0}  # how each read was answered (the tests count the processes)
 
 
 def _read_here(orch_bin: str, args: list[str], root: Path):
@@ -166,13 +166,40 @@ def _person_environ(environ) -> dict | None:
         return None
 
 
+def _by_worker(orch_bin: str, args: list[str], root: Path, timeout: float, env: dict):
+    """The real server only: a read orch.reads does not answer goes to this process's read worker (ORCH-634)
+    instead of a new `python -I -P -m orch` per read. _MISS = start the command (an older core, or no worker
+    could answer)."""
+    if orch_bin != SELF or _run is not subprocess.run:  # a test that replaced the process starter: no worker
+        return _MISS
+    try:
+        from orch import readworker
+    except ImportError:
+        return _MISS
+    try:
+        got = readworker.run(root, args, timeout=timeout, environ=env)
+    except Exception:  # noqa: BLE001 - the command gets its chance
+        return _MISS
+    if got is None:
+        return _MISS
+    READS["worker"] += 1
+    code, out = got
+    try:
+        return json.loads(out) if code == 0 else None
+    except ValueError:
+        return None
+
+
 def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
-    READS["process"] += 1
     env = {**os.environ, "ORCH_ROOT": str(root)}
     if tuple(args[:2]) in _PERSON_READS:
         env = _person_environ(env)
         if env is None:
             return None
+    got = _by_worker(orch_bin, args, root, timeout, env)
+    if got is not _MISS:
+        return got
+    READS["process"] += 1
     try:
         r = _run(
             [*_argv0(orch_bin), *args],
@@ -1051,6 +1078,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
     from orch.config import (
         agents_may_finish,
+        auto_reviewer_on,
         copies_max,
         copies_mode,
         copy_setup,
@@ -1076,6 +1104,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     return {
         "agents_may_finish": agents_may_finish(root),
         "release_merge_on": release_merge_on(root),  # Settings: "Merge releases without my click"
+        "auto_reviewer_on": auto_reviewer_on(root),  # ORCH-424: new tickets start without human review
         "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)
         "copies": copies_mode(root),
         "copies_max": copies_max(root),

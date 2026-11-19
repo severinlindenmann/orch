@@ -105,6 +105,50 @@ def test_launch_link_only_on_first_width(tmp_path, monkeypatch):
     assert urls == ["http://h/#launch=tok", "http://h/"]
 
 
+def _hanging_browser(monkeypatch, hangs):
+    """A browser whose first `hangs` page loads never answer (a slow CI machine, ORCH-796)."""
+    pipes = fake_browser(monkeypatch)
+    left = [hangs]
+
+    def launch(cmd):
+        pipe = FakePipe()
+        plain = pipe.call
+
+        def call(method, params=None, session=None, timeout=30):
+            if method == "Page.navigate" and left[0] > 0:
+                left[0] -= 1
+                pipe.calls.append((method, params or {}, session))
+                raise TimeoutError("the browser did not answer in time")
+            return plain(method, params, session, timeout)
+
+        pipe.call = call
+        pipes.append((cmd, pipe))
+        return None, pipe
+
+    monkeypatch.setattr(cli_shot, "_launch", launch)
+    return pipes
+
+
+def test_one_unanswered_browser_call_is_tried_once_more(tmp_path, monkeypatch):
+    pipes = _hanging_browser(monkeypatch, 1)
+    out = cli_shot.shoot("http://h/", [390], tmp_path, "n", None, 1)
+    assert out[0].read_bytes() == b"png"
+    assert [m for m, _, _ in pipes[0][1].calls].count("Page.navigate") == 2
+
+
+def test_a_second_unanswered_call_says_why_no_picture(tmp_path, monkeypatch):
+    _hanging_browser(monkeypatch, 2)
+    with pytest.raises(Refused, match="did not answer in time"):
+        cli_shot.shoot("http://h/", [390], tmp_path, "n", None, 1)
+
+
+def test_a_sign_in_link_is_never_tried_twice(tmp_path, monkeypatch):
+    pipes = _hanging_browser(monkeypatch, 1)
+    with pytest.raises(Refused):
+        cli_shot.shoot("http://h/#launch=tok", [390], tmp_path, "n", None, 1)
+    assert [m for m, _, _ in pipes[0][1].calls].count("Page.navigate") == 1
+
+
 def _has_browser():
     try:
         cli_shot.find_browser()

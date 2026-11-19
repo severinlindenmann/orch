@@ -1,16 +1,18 @@
 """What the Usage page shows (GET /api/page): accounts with their use and rule, switching, the all-at-limit
-warning and the history. Only labels, numbers and times: never a login, token, key or address (R5.2)."""
+warning, the day's spread of helper starts (spread.py) and the history. Only labels, numbers and times: never a login, token, key or address (R5.2)."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import store, switching
+from . import share, spread, store, switching
 from .store import PERIOD_WORDS
 
 HISTORY_DAYS = 30
 HISTORY_MAX = 50
+FLAP_HOURS = 3  # this many switches within this many hours is a back and forth
+FLAP_MIN = 6
 # The page's words for a use window (subscription) or a limit's period (API key, helper tool).
 WINDOW_WORDS = {"5h": "Last 5 hours", "week": "This week", "month": "This month", "until": "Until the date"}
 
@@ -68,15 +70,48 @@ def _bars(row: dict) -> list[dict]:
     return bars
 
 
+def _full_until(row: dict) -> str | None:
+    """When the 5-hour window of an account that has used all of it opens again (None when it is not full)."""
+    u = row.get("use", {}).get("5h") or {}
+    if isinstance(u.get("pct"), (int, float)) and u["pct"] >= 100:
+        return u.get("resets_at") or ""
+    return None
+
+
 def _state(row: dict) -> str:
-    """The pill: in use now, ready, off, or not found by the switcher."""
+    """The pill: in use now, full (the 5-hour window is used up), ready, off, or not found by the switcher."""
     if not row["on"]:
         return "off"
     if row.get("missing"):
         return "missing"
     if row.get("active"):
         return "in-use"
+    if _full_until(row) is not None:
+        return "full"
     return "ready"
+
+
+def switch_flapping(root: Path, at: datetime | None = None) -> dict | None:
+    """One warning when the account was switched many times in a short while (back and forth)."""
+    since = (at or datetime.now(UTC)) - timedelta(hours=FLAP_HOURS)
+    times = []
+    for r in store.history(root, limit=500):
+        what = str(r.get("what") or "")
+        if not what.startswith(("switched to", "another program switched back")):
+            continue
+        try:
+            t = store.to_time(str(r.get("at")))
+        except ValueError:
+            continue
+        if t >= since:
+            times.append(t)
+    if len(times) < FLAP_MIN:
+        return None
+    return {
+        "count": len(times),
+        "from": min(times).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "to": max(times).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
 
 
 def build(data: dict, root: Path) -> dict:
@@ -98,6 +133,7 @@ def build(data: dict, root: Path) -> dict:
                 "periods": list(store.allowed_periods(row)),
                 "unit": store.default_unit(row),
                 "ends": rule.get("ends"),
+                "full_until": _full_until(row),
                 "falls_back": bool(row.get("prev")),
                 "fetched_at": row.get("fetched_at"),
             }
@@ -112,7 +148,10 @@ def build(data: dict, root: Path) -> dict:
         # the loop's last look said no account is good: helpers wait soon
         "all_at_limit": bool(memory.get("all_at_limit")) and len(on_subs) > 0,
         "one_account": len(subs) <= 1,
+        "flapping": switch_flapping(root),
         "warnings": list(data["warnings"]),
         "accounts": accounts,
+        "spread": spread.build(root, accounts),
         "history": history_rows(root),
+        "share": share.view(root, data["accounts"]),
     }

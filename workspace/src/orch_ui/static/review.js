@@ -19,7 +19,7 @@
 
    api (what the page needs; the dashboard passes its own):
      stack()    -> Promise<[card]>      card = one row of `orch review list --json`:
-                  {id, ticket, key, card:{kind,title,why,need,then,ok_label,open,preview}, digest, since,
+                  {id, ticket, key, card:{kind,title,why,need,then,blocked,ok_label,open,preview}, digest, since,
                    text (the question, shown on the card), group (cards that belong together), recommended}
                   card.files: [{name, type:'img'|'page'|'file', ref}] the result's own files (a Check card); api.fileUrl gives their URL
                   answers: [{label, picked}] the card's own answer buttons (the dashboard sets them for a Factory start)
@@ -34,6 +34,9 @@
                   voice notes on the ticket before Send back is saved; its names are added to the note. api.box = the
                   sheet's UI.composer options (accept, maxFiles, maxBytes, voice). files = [{name, size, type, url (data URL)}]
      fileUrl(card, ref) -> string       URL of one reviewed file of that card or entry
+     hold(item, verdict) / release(item)  optional (ORCH-548): an answer was made (it waits o.hold ms for Undo, then
+                  saves) / it was taken back (Undo) or not saved. The dashboard shows a Looks good ticket as Done meanwhile.
+   answer() error code 'decided': the Check result was decided elsewhere; the message says who and when.
    A rejected stack()/answered() with error.code 'needs_person' (or 401/403) shows the plain sign-in state. */
 (()=>{'use strict';const UI=window.UI=window.UI||{};
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};
@@ -60,7 +63,7 @@ const mapFiles=(fs,c,api)=>(Array.isArray(fs)?fs:[]).filter(f=>f&&typeof f.ref==
 const safeOpen=u=>typeof u==='string'&&/^https?:\/\//i.test(u)?u:undefined;
 const mapCard=(c,api,now)=>{const k=c.card||{},kd=KIND[k.kind]||[k.kind||'Review','file'];
  return {id:c.id,kind:k.kind,kindLabel:kd[0],icon:kd[1],ticket:c.ticket_key||(/^(q[0-9]+|review)$/.test(c.key||'')?c.ticket:c.key)||c.ticket,ticketId:c.ticket,ticketTitle:c.ticket_title,about:c.about,task:c.task,when:fmtTime(c.since,now),need:k.need,title:k.title||'Review',
-  why:k.why,okLabel:k.ok_label,then:k.then,open:safeOpen(k.open),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,
+  why:k.why,okLabel:k.ok_label,then:k.then,blocked:typeof k.blocked==='string'?k.blocked:'',open:safeOpen(k.open),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,
   text:typeof c.text==='string'?c.text:'',links:(Array.isArray(c.links)?c.links:[]).map(l=>l&&{label:String(l.label||'').slice(0,60),url:safeOpen(l.url)}).filter(l=>l&&l.label&&l.url).slice(0,5),group:typeof c.group==='string'?c.group:'',files:mapFiles(k.files,c,api),answers:(Array.isArray(c.answers)?c.answers:[]).filter(x=>x&&typeof x.label==='string'&&typeof x.picked==='string'&&x.label&&x.picked).slice(0,4).map(x=>({label:x.label.slice(0,40),picked:x.picked})),suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined}};
 
 /* ---------- Answers: words, pill, record ---------- */
@@ -201,13 +204,13 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
   if(note&&note.picked)body.picked=note.picked;else if(note&&note.about&&note.about!=='all')body.picked=note.about;
   const w=note&&note.changes,files=w&&Array.isArray(w.files)?w.files:[];if(w&&(w.text||(w.pins||[]).length||files.length))body.note={text:w.text||'',pins:(w.pins||[]).map((p,i)=>({n:p.n||i+1,on:p.on||'',x:p.x,y:p.y,text:p.text}))};
   if(files.length)Object.defineProperty(body,'files',{value:files,enumerable:false});/* uploaded at save time (after Undo), never sent with the answer */
-  gone.add(sig(it));
+  gone.add(sig(it));if(api.hold)api.hold(it,verdict);/* ORCH-548: the page shows the outcome at once, not after the save */
   /* held for o.hold ms first: Undo in that time takes the answer back for real (nothing was saved); leaving the page
      or a newer answer saves it at once */
   const k=it.id;if(held.has(k))flushOne(k);held.set(k,{body,it,t:setTimeout(()=>flushOne(k),holdMs)})};
  const flushOne=k=>{const h=held.get(k);if(!h)return;held.delete(k);clearTimeout(h.t);post(h.it,h.body);if(deck&&deck.syncUndo)deck.syncUndo()};
  const flushAll=()=>[...held.keys()].forEach(flushOne);
- const unhold=it=>{const h=held.get(it.id);if(!h)return false;held.delete(it.id);clearTimeout(h.t);gone.delete(sig(h.it));return true};
+ const unhold=it=>{const h=held.get(it.id);if(!h)return false;held.delete(it.id);clearTimeout(h.t);gone.delete(sig(h.it));if(api.release)api.release(h.it);return true};
  const named=(text,names)=>{const n=names.length,line='I added '+(n===1?'a file':n+' files')+' to this ticket: '+names.join(', ')+'.';return text?text+'\n\n'+line+' Read '+(n===1?'it':'them')+' first.':line+' Read '+(n===1?'it':'them')+' and carry on.'};
  const upload=(it,body)=>{const files=body.files;if(!files||!files.length||!api.attach)return Promise.resolve({ok:true});
   return Promise.resolve().then(()=>api.attach({ticket:it.ticketId,files})).then(r=>{if(!r||!r.ok)return r||{ok:false};
@@ -215,7 +218,10 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  const post=(it,body)=>{
   upload(it,body).then(up=>up&&up.ok?api.answer(body):{ok:false,error:(up&&up.error)||{code:'error',message:'The files could not be added. Your answer is waiting again.'}}).catch(()=>({ok:false,error:{code:'error',message:'Could not reach orch.'}})).then(res=>{
    if(res&&res.ok){if(view==='answered')drawAnswered();return}
-   gone.delete(sig(it));const code=res&&res.error&&res.error.code;
+   const code=res&&res.error&&res.error.code;if(api.release)api.release(it);
+   /* decided elsewhere (ORCH-548: the Reviewer, the phone, another tab): say who and when; the card stays answered */
+   if(code==='decided'){UI.toast((res.error.message)||'This was decided already.');load(true);return}
+   gone.delete(sig(it));
    if(code==='changed')UI.toast('This card changed. Showing the new version.');
    else if(code==='needs_person')UI.toast('Sign in to answer: run orch review in your terminal.',null,'error');
    else UI.toast((res&&res.error&&res.error.message)||'Could not save your answer. It is waiting again.',null,'error');

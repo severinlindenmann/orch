@@ -97,6 +97,45 @@ def test_attach_does_not_follow_a_planted_link_in_the_folder(proj, run, tmp_path
     assert victim.read_text() == "keep" and r["name"] == "note (2).md"
 
 
+def test_feedback_files_go_in_their_folder_and_leave_the_check_card_as_it_was(proj, run):
+    # ORCH-420 follow-up: a screenshot sent with Send back must not change the Check card being answered
+    from orch import review
+
+    tid = _new(run)
+    tickets.attach(proj, tid, "result.png", b"\x89PNG\r\n\x1a\n" + b"0" * 20, "agent:x")
+    card = review.check_card(tickets.load(proj, tid), proj)
+    r = tickets.attach(
+        proj, tid, "Screenshot 09-30.png", b"\x89PNG\r\n\x1a\n" + b"1" * 20, "human:t", folder="feedback"
+    )
+    assert r["name"] == "feedback/Screenshot 09-30.png"
+    assert r["path"] == f".orch/tickets/{tid}/artifacts/feedback/Screenshot 09-30.png"
+    t = tickets.load(proj, tid)
+    assert t["history"][-1]["text"] == "Attached feedback/Screenshot 09-30.png"
+    assert review.check_card(t, proj) == card  # the card, and so its fingerprint, did not change
+    assert "feedback/Screenshot 09-30.png" in [f["name"] for f in tickets.artifacts_list(proj, tid)]
+    again = tickets.attach(
+        proj, tid, "Screenshot 09-30.png", b"\x89PNG\r\n\x1a\n2", "human:t", folder="feedback"
+    )
+    assert again["name"] == "feedback/Screenshot 09-30 (2).png"
+    with pytest.raises(Refused):
+        tickets.attach(proj, tid, "x.png", b"\x89PNG\r\n\x1a\n", "human:t", folder="../evil")
+
+
+def test_cli_attach_feedback_flag(proj, run, monkeypatch):
+    import io
+
+    tid = _new(run)
+
+    class In:
+        buffer = io.BytesIO(b"hello")
+
+    monkeypatch.setattr(sys, "stdin", In())
+    code, out, _ = run(
+        "ticket", "attach", tid, "--name", "note.txt", "--feedback", "--by", "human:t", "--json"
+    )
+    assert code == 0 and json.loads(out)["name"] == "feedback/note.txt"
+
+
 def test_cli_attach_reads_stdin(proj, run, monkeypatch):
     import io
 

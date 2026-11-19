@@ -25,7 +25,11 @@ merges, so sync holds a changed block until a person allows it.
   (a group pull request on an `orch-queue/` branch or a member named in its title), checked alone and merged by a
   person (its head carries the mark), past the queue, and not known (GitHub did not say whether the head is marked); and the times the queue stood still: stretches of at
   least 30 minutes with an entry in line (added, not ended) and no merge of any kind, each with the reasons its entries gave.
-  A repository GitHub did not answer for is named, not counted.
+  A repository GitHub did not answer for is named, not counted. Also (ORCH-545): the rounds of checks of each
+  repository in that time (one per commit and event, every workflow together) on pull requests, on queue groups,
+  on pushes and other, and that total per merge; and the minutes from joining the queue to merged of the entries
+  the queue merged (middle and longest). JSON adds `runs` per repository (null: GitHub did not answer) and
+  `waited_minutes`.
 - `orch pull-requests queue remove <url>`: only a waiting entry.
 - `orch pull-requests queue run`: the runner (one per workspace, lock folder `runner.lock`).
 - `orch pull-requests failed-checks on|off|status|tend [--json]`: the failed-checks part (below). `on`/`off` write
@@ -44,6 +48,14 @@ merges, so sync holds a changed block until a person allows it.
   repository): a pull request that changes a file under one of them runs alone in its own queue group.
 - `max_group` (number 1 to 20, default 5): how many pull requests go into one queue group at most. Any other
   value means 5. Read at the start of every round: a change counts without restarting the runner.
+- `merge_alone` (true or false, default true): true = one left alone whose own checks are green and whose files
+  the base did not change is merged on its own checks (below). false = it always runs as a group of one on top of
+  the base first: for a repository whose pull requests run only a light set of checks of their own while queue
+  groups run the full set (orch development, ORCH-545). Anything but true or false means true.
+
+- `overlap` (true/false, default true, ORCH-432): while a group's checks run, the next group is built on top of it and
+  checked at the same time; it merges only after the group before it merged, and when that one does not, its pull
+  requests go back to the front of the line without a try used. `false`: one group at a time.
 
 - `act_on_failed_checks` (true/false, default false): act on failed checks (below). Any other value is off.
 - `queue_when_helper_stops` (true/false, default false, ORCH-433): the Merge when green pass also puts in the
@@ -105,8 +117,11 @@ a workflow under `.github/workflows/` or a CODEOWNERS file (root, `.github/` or 
 one with the core waiter in check-only mode (`run_one(url, False, queue=True)`) and never merged by the queue; its
 group is closed afterwards. Green: its head gets the mark ("Checked green in a queue group on top of <base>"), the
 Merge card is made on its ticket when there is none (the person's click merges it), and the entry ends `out`
-with reference state `owner merges` (nobody woken). Red: it leaves like any red group of one. Red (a check failed): the group is closed and only its members are split in halves
-(recursively). Neither green nor red (GitHub did not answer: branch rules unreadable, no checks or no verdict in
+with reference state `owner merges` (nobody woken). Red: it leaves like any red group of one. Red (a check failed): the group is closed and only its members are split by what
+failed (ORCH-558): the words of the failed checks' names (`addons / dashboard-clickthroughs` -> addons, dashboard,
+clickthroughs; words like test or ubuntu left out) are compared with the words of each member's changed paths;
+the members sharing the most are the suspects. The others run again together first, the suspects after. No member
+shares a word, or all share as many: split in halves. Either way recursively. Neither green nor red (GitHub did not answer: branch rules unreadable, no checks or no verdict in
 time, the pull request unreadable; a failed fetch or push; GitHub did not merge): back to the front with a
 2-minute pause, at most 3 counted tries (no room in the write limit is not counted). A pull request whose
 Merge card appears while it waits or runs (it had none when its round began) leaves the queue. A runner that died leaves entries `running`: the next
