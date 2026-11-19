@@ -180,15 +180,26 @@ under the ticket's Details; set with `orch ticket set <ticket> pull-requests.mer
   its base` · `Has a conflict` · `Draft` · `Not known yet` · `Merged` · `Closed`) of the ticket's newest open pull
   request: read-only fields under Details that store the shown words. A person's Refresh or a helper (no env) reads GitHub first. Checks follow the core waiter's words: only
   SUCCESS passes, SKIPPED is fine, an unexpanded matrix job is left out, anything else finished is a failure.
-- `orch pull-requests view --json`: the page (orch.addon-view/1, read only, no GitHub call; ORCH-432 layout): one
-  list `Merge queue: <repository>` per repository and base branch with something in the queue (meta `into <base> ·
-  groups of up to <max_group>`; a row per group being checked, `Group of <n> · checks running <t>` with its pull
-  requests, and one row `<n> waiting in line · longest <t>` with the next ones; the place counts per repository and
-  base); an empty `Merge queue` list when nothing is queued but pull requests are open; one table `Open pull
-  requests` (Pull request with a note under it, Ticket, State, In line for: what needs someone first, then the queue
-  in its order, then the rest, drafts last; queued pull requests no ticket links still show); a footnote on what
-  the merge queue does; the empty state; and a notice with Start reading when the watcher does not run. Queue
-  entries record `taken` (when their group run started). `orch pull-requests poll [--json]`: one read now.
+- `orch pull-requests view --json`: the page (orch.addon-view/1, read only, no GitHub call; ORCH-746 layout, owner pick
+  B "Queue first"): one `flow` `Merge queue: <repository>` per repository and base branch with something in the queue or
+  finished by it in the last 14 days (title links to the repository's pull requests on GitHub; meta `into <base> · groups
+  of up to <max_group>`), three stages: Being checked (`Group of <n>`, chips of its pull requests, a progress bar of the
+  minutes running against the usual check time of the last 20 groups), In line (`<n> waiting`, chips with their place,
+  paused ones yellow) and Merged lately (`<x> of <y> groups` over the last 12 groups, chips of the last 6 merged, one small
+  bar per group: height its size, green all merged, yellow merged in part, red sent back); every chip opens the pull
+  request on GitHub. A group is the entries claimed together (same `taken`). An empty `Merge queue` list when the queue
+  has nothing at all but pull requests are open. Then two half `chart`s over 14 days (the time zone of this computer):
+  Opened and merged per day (`created_at`/`merged_at` of the linked pull requests, plus what the queue merged that GitHub
+  has not dated yet, each pull request counted once) and How the merge queue went (stacked merged / sent back; taken
+  out by someone does not count as sent back; meta the typical wait today). Then one compact `table` `Open pull
+  requests` with tabs by State (`filter`), the first 15 under All (`fold`): # (opens GitHub), Pull request (opens the
+  ticket, else GitHub), What is going on (the place in line, the queue's reason, failed check names; the short
+  repository name first when there are several), Ticket (opens the ticket), State (one word per kind: Checks failed red,
+  Has a conflict yellow, Being checked, In line, Checks running, Ready to merge green, Draft ...), In line for. Order:
+  what needs someone first, then the queue in its order, then the rest, drafts last; queued pull requests no ticket
+  links still show. A footnote on what the merge queue does; the empty state; and a notice with Start reading when
+  the watcher does not run. Queue entries record `taken` (when their group run started); pull requests keep
+  `created_at` and `merged_at` from GitHub. `orch pull-requests poll [--json]`: one read now.
 
 ## Failed checks (ORCH-167)
 Off until `act_on_failed_checks = true`. The Merge when green watcher runs one pass every minute after its own

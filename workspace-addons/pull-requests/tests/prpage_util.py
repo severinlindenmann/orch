@@ -68,7 +68,10 @@ def calls(root: Path) -> list[dict]:
     return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
 
 
-def gql_pr(n: int, state="OPEN", draft=False, merge="CLEAN", mergeable="MERGEABLE", checks=None, title=None):
+def gql_pr(
+    n: int, state="OPEN", draft=False, merge="CLEAN", mergeable="MERGEABLE", checks=None, title=None,
+    created="2026-11-16T09:00:00Z", merged=None,
+):  # fmt: skip
     """One pull request as GitHub's GraphQL API answers it."""
     if checks is None:
         checks = [{"__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "SUCCESS"}]
@@ -83,6 +86,8 @@ def gql_pr(n: int, state="OPEN", draft=False, merge="CLEAN", mergeable="MERGEABL
         "baseRefName": "develop",
         "headRefName": f"feat/x{n}",
         "updatedAt": "2026-11-17T09:00:00Z",
+        "createdAt": created,
+        "mergedAt": merged,
         "author": {"login": "dev"},
         "commits": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {"nodes": checks}}}}]},
     }

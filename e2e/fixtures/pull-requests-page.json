@@ -263,34 +263,320 @@
   "loaded": {
    "blocks": [
     {
-     "items": [
+     "link": "https://github.com/acme/billing/pulls",
+     "meta": "into develop · groups of up to 5",
+     "stages": [
       {
-       "subtitle": "Show the invoice number on the PDF; Round tax per line, not per invoice",
-       "title": "Group of 2 · checks running 12 min",
-       "tone": "neutral"
+       "active": true,
+       "items": [
+        {
+         "hint": "Show the invoice number on the PDF",
+         "label": "#421",
+         "link": "https://github.com/acme/billing/pull/421"
+        },
+        {
+         "hint": "Round tax per line, not per invoice",
+         "label": "#420",
+         "link": "https://github.com/acme/billing/pull/420"
+        }
+       ],
+       "label": "Being checked",
+       "progress": {
+        "label": "Checks running 12 of about 14 minutes",
+        "max": 14,
+        "value": 12
+       },
+       "text": "checks running 12 min · usually done in about 14 min",
+       "value": "Group of 2"
+      },
+      {
+       "label": "In line",
+       "value": "Nobody waiting"
+      },
+      {
+       "bars": [
+        {
+         "hint": "6 Nov 10:34: group of 2, merged after 14 min",
+         "tone": "good",
+         "value": 2
+        },
+        {
+         "hint": "7 Nov 10:34: group of 3, merged after 14 min",
+         "tone": "good",
+         "value": 3
+        },
+        {
+         "hint": "9 Nov 10:34: group of 1, sent back after 14 min",
+         "tone": "bad",
+         "value": 1
+        },
+        {
+         "hint": "10 Nov 10:34: group of 2, merged after 14 min",
+         "tone": "good",
+         "value": 2
+        },
+        {
+         "hint": "11 Nov 10:34: group of 3, merged after 14 min",
+         "tone": "good",
+         "value": 3
+        },
+        {
+         "hint": "12 Nov 10:34: group of 2, sent back after 14 min",
+         "tone": "bad",
+         "value": 2
+        },
+        {
+         "hint": "13 Nov 10:34: group of 3, merged after 14 min",
+         "tone": "good",
+         "value": 3
+        },
+        {
+         "hint": "14 Nov 10:34: group of 2, merged after 14 min",
+         "tone": "good",
+         "value": 2
+        },
+        {
+         "hint": "15 Nov 10:34: group of 1, merged after 14 min",
+         "tone": "good",
+         "value": 1
+        },
+        {
+         "hint": "16 Nov 10:34: group of 3, merged after 14 min",
+         "tone": "good",
+         "value": 3
+        }
+       ],
+       "bars_label": "8 of the last 10 groups merged all or in part",
+       "items": [
+        {
+         "hint": "#414",
+         "label": "#414",
+         "link": "https://github.com/acme/billing/pull/414",
+         "tone": "good"
+        },
+        {
+         "hint": "#464",
+         "label": "#464",
+         "link": "https://github.com/acme/billing/pull/464",
+         "tone": "good"
+        },
+        {
+         "hint": "#514",
+         "label": "#514",
+         "link": "https://github.com/acme/billing/pull/514",
+         "tone": "good"
+        },
+        {
+         "hint": "#409",
+         "label": "#409",
+         "link": "https://github.com/acme/billing/pull/409",
+         "tone": "good"
+        },
+        {
+         "hint": "#416",
+         "label": "#416",
+         "link": "https://github.com/acme/billing/pull/416",
+         "tone": "good"
+        },
+        {
+         "hint": "#466",
+         "label": "#466",
+         "link": "https://github.com/acme/billing/pull/466",
+         "tone": "good"
+        }
+       ],
+       "label": "Merged lately",
+       "text": "2 sent back · typical wait 34 min",
+       "value": "8 of 10 groups"
       }
      ],
-     "meta": "into develop · groups of up to 5",
      "title": "Merge queue: acme/billing",
-     "type": "list"
+     "type": "flow"
     },
     {
-     "items": [
+     "link": "https://github.com/acme/website/pulls",
+     "meta": "into develop · groups of up to 5",
+     "stages": [
       {
-       "subtitle": "Next: New pricing page",
-       "title": "1 waiting in line · longest 49 min",
-       "tone": "neutral"
+       "label": "Being checked",
+       "text": "The next group starts by itself.",
+       "value": "Nothing right now"
+      },
+      {
+       "items": [
+        {
+         "hint": "New pricing page (paused)",
+         "label": "#88",
+         "link": "https://github.com/acme/website/pull/88",
+         "place": 1,
+         "tone": "warn"
+        }
+       ],
+       "label": "In line",
+       "text": "longest 49 min · 1 paused",
+       "value": "1 waiting"
+      },
+      {
+       "label": "Merged lately",
+       "text": "Merged groups show here.",
+       "value": "Nothing yet"
       }
      ],
-     "meta": "into develop · groups of up to 5",
      "title": "Merge queue: acme/website",
-     "type": "list"
+     "type": "flow"
+    },
+    {
+     "empty": {
+      "text": "Linked pull requests show here by day.",
+      "title": "Nothing in the last two weeks"
+     },
+     "labels": [
+      "4 Nov",
+      "5 Nov",
+      "6 Nov",
+      "7 Nov",
+      "8 Nov",
+      "9 Nov",
+      "10 Nov",
+      "11 Nov",
+      "12 Nov",
+      "13 Nov",
+      "14 Nov",
+      "15 Nov",
+      "16 Nov",
+      "Today"
+     ],
+     "meta": "last 14 days",
+     "series": [
+      {
+       "name": "Opened",
+       "tone": "neutral",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1,
+        0
+       ]
+      },
+      {
+       "name": "Merged",
+       "tone": "good",
+       "values": [
+        0,
+        0,
+        2,
+        3,
+        0,
+        0,
+        2,
+        3,
+        0,
+        3,
+        2,
+        1,
+        3,
+        0
+       ]
+      }
+     ],
+     "span": "half",
+     "title": "Opened and merged per day",
+     "type": "chart"
+    },
+    {
+     "empty": {
+      "text": "Each day shows what it merged and sent back.",
+      "title": "The merge queue has not run lately"
+     },
+     "labels": [
+      "4 Nov",
+      "5 Nov",
+      "6 Nov",
+      "7 Nov",
+      "8 Nov",
+      "9 Nov",
+      "10 Nov",
+      "11 Nov",
+      "12 Nov",
+      "13 Nov",
+      "14 Nov",
+      "15 Nov",
+      "16 Nov",
+      "Today"
+     ],
+     "meta": "last 14 days",
+     "series": [
+      {
+       "name": "Merged",
+       "tone": "good",
+       "values": [
+        0,
+        0,
+        2,
+        3,
+        0,
+        0,
+        2,
+        3,
+        0,
+        3,
+        2,
+        1,
+        3,
+        0
+       ]
+      },
+      {
+       "name": "Sent back",
+       "tone": "bad",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        2,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      }
+     ],
+     "span": "half",
+     "stacked": true,
+     "title": "How the merge queue went",
+     "type": "chart"
     },
     {
      "columns": [
       {
+       "key": "num",
+       "label": "#",
+       "type": "text"
+      },
+      {
        "key": "pr",
        "label": "Pull request",
+       "type": "text"
+      },
+      {
+       "key": "why",
+       "label": "What is going on",
        "type": "text"
       },
       {
@@ -309,67 +595,104 @@
        "type": "duration"
       }
      ],
+     "compact": true,
+     "filter": "state",
+     "fold": 15,
      "meta": "6 open · 2 repositories",
      "rows": [
       {
        "cells": {
         "in_line": null,
+        "num": "#418",
         "pr": "Add CSV export for invoices",
         "state": "Checks failed",
-        "ticket": "BIL-1"
+        "ticket": "BIL-1",
+        "why": "billing · Checks failed: lint. Open the ticket to fix it."
        },
        "link": "t_inv012",
-       "subtitle": "Checks failed: lint. Open the ticket to fix it."
+       "links": {
+        "num": "https://github.com/acme/billing/pull/418",
+        "ticket": "t_inv012"
+       },
+       "tones": {
+        "state": "bad"
+       }
       },
       {
        "cells": {
         "in_line": null,
+        "num": "#417",
         "pr": "Rename customer to client",
         "state": "Has a conflict",
-        "ticket": "BIL-4"
+        "ticket": "BIL-4",
+        "why": "billing · Open the ticket to sort out the conflict."
        },
        "link": "t_ren009",
-       "subtitle": "Open the ticket to sort out the conflict."
+       "links": {
+        "num": "https://github.com/acme/billing/pull/417",
+        "ticket": "t_ren009"
+       },
+       "tones": {
+        "state": "warn"
+       }
       },
       {
        "cells": {
         "in_line": 1740,
+        "num": "#421",
         "pr": "Show the invoice number on the PDF",
         "state": "Being checked",
-        "ticket": "BIL-2"
+        "ticket": "BIL-2",
+        "why": "billing · In the group being checked."
        },
        "link": "t_pdf014",
-       "subtitle": "acme/billing"
+       "links": {
+        "num": "https://github.com/acme/billing/pull/421",
+        "ticket": "t_pdf014"
+       }
       },
       {
        "cells": {
         "in_line": 1560,
+        "num": "#420",
         "pr": "Round tax per line, not per invoice",
         "state": "Being checked",
-        "ticket": "BIL-3"
+        "ticket": "BIL-3",
+        "why": "billing · In the group being checked."
        },
        "link": "t_tax015",
-       "subtitle": "acme/billing"
+       "links": {
+        "num": "https://github.com/acme/billing/pull/420",
+        "ticket": "t_tax015"
+       }
       },
       {
        "cells": {
         "in_line": 2940,
+        "num": "#88",
         "pr": "New pricing page",
-        "state": "1st in line, paused",
-        "ticket": null
+        "state": "In line",
+        "ticket": null,
+        "why": "website · 1st in line, paused. GitHub did not answer; tries again by itself in 6 min."
        },
        "link": "https://github.com/acme/website/pull/88",
-       "subtitle": "GitHub did not answer; tries again by itself in 6 min."
+       "links": {
+        "num": "https://github.com/acme/website/pull/88"
+       }
       },
       {
        "cells": {
         "in_line": null,
+        "num": "#419",
         "pr": "Try a new PDF library",
         "state": "Draft",
-        "ticket": null
+        "ticket": null,
+        "why": "billing · Not checked while it is a draft."
        },
        "link": "https://github.com/acme/billing/pull/419",
-       "subtitle": "Not checked while it is a draft."
+       "links": {
+        "num": "https://github.com/acme/billing/pull/419"
+       }
       }
      ],
      "title": "Open pull requests",
@@ -396,10 +719,157 @@
      "type": "list"
     },
     {
+     "empty": {
+      "text": "Linked pull requests show here by day.",
+      "title": "Nothing in the last two weeks"
+     },
+     "labels": [
+      "4 Nov",
+      "5 Nov",
+      "6 Nov",
+      "7 Nov",
+      "8 Nov",
+      "9 Nov",
+      "10 Nov",
+      "11 Nov",
+      "12 Nov",
+      "13 Nov",
+      "14 Nov",
+      "15 Nov",
+      "16 Nov",
+      "Today"
+     ],
+     "meta": "last 14 days",
+     "series": [
+      {
+       "name": "Opened",
+       "tone": "neutral",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1,
+        0
+       ]
+      },
+      {
+       "name": "Merged",
+       "tone": "good",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      }
+     ],
+     "span": "half",
+     "title": "Opened and merged per day",
+     "type": "chart"
+    },
+    {
+     "empty": {
+      "text": "Each day shows what it merged and sent back.",
+      "title": "The merge queue has not run lately"
+     },
+     "labels": [
+      "4 Nov",
+      "5 Nov",
+      "6 Nov",
+      "7 Nov",
+      "8 Nov",
+      "9 Nov",
+      "10 Nov",
+      "11 Nov",
+      "12 Nov",
+      "13 Nov",
+      "14 Nov",
+      "15 Nov",
+      "16 Nov",
+      "Today"
+     ],
+     "meta": "last 14 days",
+     "series": [
+      {
+       "name": "Merged",
+       "tone": "good",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      {
+       "name": "Sent back",
+       "tone": "bad",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      }
+     ],
+     "span": "half",
+     "stacked": true,
+     "title": "How the merge queue went",
+     "type": "chart"
+    },
+    {
      "columns": [
+      {
+       "key": "num",
+       "label": "#",
+       "type": "text"
+      },
       {
        "key": "pr",
        "label": "Pull request",
+       "type": "text"
+      },
+      {
+       "key": "why",
+       "label": "What is going on",
        "type": "text"
       },
       {
@@ -418,67 +888,110 @@
        "type": "duration"
       }
      ],
+     "compact": true,
+     "filter": "state",
+     "fold": 15,
      "meta": "6 open · 2 repositories",
      "rows": [
       {
        "cells": {
         "in_line": null,
+        "num": "#418",
         "pr": "Add CSV export for invoices",
         "state": "Checks failed",
-        "ticket": "BIL-1"
+        "ticket": "BIL-1",
+        "why": "billing · Checks failed: lint. Open the ticket to fix it."
        },
        "link": "t_inv012",
-       "subtitle": "Checks failed: lint. Open the ticket to fix it."
+       "links": {
+        "num": "https://github.com/acme/billing/pull/418",
+        "ticket": "t_inv012"
+       },
+       "tones": {
+        "state": "bad"
+       }
       },
       {
        "cells": {
         "in_line": null,
+        "num": "#417",
         "pr": "Rename customer to client",
         "state": "Has a conflict",
-        "ticket": "BIL-4"
+        "ticket": "BIL-4",
+        "why": "billing · Open the ticket to sort out the conflict."
        },
        "link": "t_ren009",
-       "subtitle": "Open the ticket to sort out the conflict."
+       "links": {
+        "num": "https://github.com/acme/billing/pull/417",
+        "ticket": "t_ren009"
+       },
+       "tones": {
+        "state": "warn"
+       }
       },
       {
        "cells": {
         "in_line": null,
+        "num": "#420",
         "pr": "Round tax per line, not per invoice",
-        "state": "Checks running (2 left)",
-        "ticket": "BIL-3"
+        "state": "Checks running",
+        "ticket": "BIL-3",
+        "why": "billing · 2 checks left."
        },
        "link": "t_tax015",
-       "subtitle": "acme/billing"
+       "links": {
+        "num": "https://github.com/acme/billing/pull/420",
+        "ticket": "t_tax015"
+       }
       },
       {
        "cells": {
         "in_line": null,
+        "num": "#421",
         "pr": "Show the invoice number on the PDF",
         "state": "Ready to merge",
-        "ticket": "BIL-2"
+        "ticket": "BIL-2",
+        "why": "billing · Not in the merge queue."
        },
        "link": "t_pdf014",
-       "subtitle": "Not in the merge queue."
+       "links": {
+        "num": "https://github.com/acme/billing/pull/421",
+        "ticket": "t_pdf014"
+       },
+       "tones": {
+        "state": "good"
+       }
       },
       {
        "cells": {
         "in_line": null,
+        "num": "#88",
         "pr": "New pricing page",
         "state": "Ready to merge",
-        "ticket": null
+        "ticket": null,
+        "why": "website · Not in the merge queue."
        },
        "link": "https://github.com/acme/website/pull/88",
-       "subtitle": "Not in the merge queue."
+       "links": {
+        "num": "https://github.com/acme/website/pull/88"
+       },
+       "tones": {
+        "state": "good"
+       }
       },
       {
        "cells": {
         "in_line": null,
+        "num": "#419",
         "pr": "Try a new PDF library",
         "state": "Draft",
-        "ticket": null
+        "ticket": null,
+        "why": "billing · Not checked while it is a draft."
        },
        "link": "https://github.com/acme/billing/pull/419",
-       "subtitle": "Not checked while it is a draft."
+       "links": {
+        "num": "https://github.com/acme/billing/pull/419"
+       }
       }
      ],
      "title": "Open pull requests",
