@@ -206,3 +206,17 @@ def test_no_write_keeps_the_index_file_as_it_was(proj, run):
     with ticketindex.no_write():
         assert len(ticketindex.rows(proj)) == 1
     assert not ticketindex.index_path(proj).exists()
+
+
+def test_a_step_that_keeps_failing_is_flagged_in_the_row(proj, run):
+    """`orch needs` reads only flagged tickets in full: a step whose checks keep failing must be flagged."""
+    assert run("init")[0] == 0
+    a = _new(run, "Fix the export")
+    assert run("check", "add", a, "Make the export work")[0] == 0
+    for code in (1, 2):
+        assert run("check", "record", a, "c1", "--cmd", "uv run pytest -q", "--exit", str(code))[0] == 0
+    (r,) = ticketindex.rows(proj)
+    assert r["failing"] is True
+    assert run("check", "record", a, "c1", "--cmd", "uv run pytest -q", "--exit", "0")[0] == 0
+    (r,) = ticketindex.rows(proj)
+    assert r["failing"] is False

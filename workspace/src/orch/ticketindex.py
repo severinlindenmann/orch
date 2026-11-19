@@ -24,7 +24,7 @@ from pathlib import Path
 
 from orch import procs
 
-VERSION = 3  # a row or entry changed shape: an index of another version is rebuilt
+VERSION = 4  # a row or entry changed shape: an index of another version is rebuilt
 NOTE_HEAD = 200
 _FILE_RE = re.compile(r"^(t_.*)\.json$", re.S)  # as tickets.list_all globs: t_*.json
 _NEWER_RE = re.compile(r"orch\.ticket/(\d+)$")
@@ -74,6 +74,16 @@ def _newest(stamps: list[str]) -> str | None:
     return best[1] if best else None
 
 
+def _failing(steps: list[dict]) -> bool:
+    """An open step whose last recorded checks failed often enough to count as stuck (stuck.py)."""
+    from orch import stuck
+
+    return any(
+        not x.get("done") and not x.get("wont_do") and stuck.failed_runs(x) >= stuck.FAILED_RUNS
+        for x in steps
+    )
+
+
 def _row(t: dict) -> dict:
     """The index row of one parsed ticket file."""
     steps = [x for x in t.get("checklist") or [] if isinstance(x, dict)]
@@ -113,6 +123,7 @@ def _row(t: dict) -> dict:
             "wont": sum(1 for x in steps if x.get("wont_do") and not x.get("done")),
             "total": len(steps),
         },
+        "failing": _failing(steps),
         "last_at": _newest(stamps),
         "note_head": note[:NOTE_HEAD] if isinstance(note, str) else None,
     }

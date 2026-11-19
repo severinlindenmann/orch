@@ -80,8 +80,9 @@ def _bring_back_row(tid: str, title: str, back: dict, now: str) -> dict:
 
 def _may_need(r: dict, live: set[str]) -> bool:
     """True when the ticket of index row r could give a row below: a bring-back that waits, or an open ticket
-    with an open question, a wait with an end time, a pull request in Review (stuck.py) or a helper record
-    (an idle helper, stuck.py). Every other ticket gives none, so its file is not read."""
+    with an open question, a wait with an end time, a step that keeps failing (stuck.py), a ticket in Review
+    (stuck.py) or a helper record (an idle helper, stuck.py). Every other ticket gives none, so its file is
+    not read."""
     if r.get("bring_back"):
         return True
     if r.get("status") in OPEN:
@@ -89,6 +90,7 @@ def _may_need(r: dict, live: set[str]) -> bool:
     w = r.get("waiting_on") or {}
     return bool(
         r.get("questions_open")
+        or r.get("failing")  # a step that keeps failing (stuck.py)
         or isinstance(w.get("until"), str)
         or r.get("status") == "review"
         or r["id"] in live
