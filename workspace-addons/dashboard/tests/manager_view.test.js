@@ -89,6 +89,7 @@ test('ticket page: Time · cost puts the first-run estimate beside what it took 
   assert.equal(helpers.costLine({estimate:{minutes:95, cost:3.5}, spend:{seconds:1800, cost:1.1}}),
     'Estimate: about 1 h 35 min · $3.50 — So far: 30 min · $1.10');
   assert.equal(helpers.costLine({estimate:{minutes:40}}), 'Estimate: about 40 min');
+  assert.equal(helpers.costLine({estimate:{minutes:60, minutes_low:30, cost:5, cost_low:2}}), 'Estimate: about 30 min–1 h · $2.00–$5.00');  // ORCH-740
   assert.equal(helpers.costLine({spend:{seconds:600, cost:0.3}}), 'So far: 10 min · $0.30');
   assert.equal(helpers.costLine({estimate:{minutes:'x'}}), '');
   assert.equal(helpers.costLine({}), '');
