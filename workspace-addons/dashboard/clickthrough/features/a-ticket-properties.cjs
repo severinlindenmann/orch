@@ -1,8 +1,8 @@
-// A person makes a ticket, then on its page changes the title, owner, release switch, helper strength and status,
+// A person makes a ticket, then on its page changes the title, owner, release switch, helper strength, kind and status,
 // adds a reference to another ticket and takes it off again; after a reload every change is still there.
 module.exports = {
   name: 'Ticket page: change properties and references',
-  covers: ['page:ticket', 'ticket.edit', 'ticket.model', 'ticket.patch', 'ref.add', 'ref.rm'],
+  covers: ['page:ticket', 'ticket.edit', 'ticket.model', 'ticket.kind', 'ticket.patch', 'ref.add', 'ref.rm'],
   async run({ page, ids, open, reload, act, must, text }) {
     await open('#home');
     await page.getByRole('button', { name: 'New ticket' }).first().click();
@@ -23,6 +23,7 @@ module.exports = {
 
     await act('ticket.edit', () => page.getByRole('switch', { name: 'This ticket is a release' }).click());
     await act('ticket.model', () => page.getByLabel('Helper strength').first().selectOption('opus'));
+    await act('ticket.kind', () => page.getByLabel('Kind', { exact: true }).first().selectOption('small_bug'));
     await page.getByLabel('More ticket actions').click();
     await act('ticket.patch', () => page.getByRole('menuitem', { name: 'Working' }).click());
 
@@ -39,6 +40,7 @@ module.exports = {
     must(t.includes('Plan the team lunch'), 'the reference is not on the ticket after a reload');
     must(await page.getByRole('switch', { name: 'This ticket is a release' }).getAttribute('aria-checked') === 'true', 'the release switch went back off');
     must(await page.getByLabel('Helper strength').first().inputValue() === 'opus', 'the helper strength went back');
+    must(await page.getByLabel('Kind', { exact: true }).first().inputValue() === 'small_bug', 'the kind went back');
     must(await page.getByText('Working', { exact: true }).count() > 0, 'the status Working is gone after a reload');
 
     await act('ref.rm', () => page.getByRole('button', { name: /Remove reference/ }).first().click());

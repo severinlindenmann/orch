@@ -81,6 +81,14 @@
       },
       "additionalProperties": false
     },
+    "kind": {
+      "type": "object", "required": ["name", "by"], "additionalProperties": false,
+      "description": "Optional (ORCH-645). What kind of work the ticket is: bug, small_bug, feature, small_feature, draft (drafts, mockups, designs, look changes) or other. Set by the helper that tidies a new ticket (orch ticket tidy --kind) or later (orch ticket kind); once a person set it (by human:...), only a person changes it. The Reviewer accepts work by itself only for the kinds the workspace lists in workflow.reviewer_kinds; draft never. Older orch versions ignore it.",
+      "properties": {
+        "name": { "enum": ["bug", "small_bug", "feature", "small_feature", "draft", "other"] },
+        "by": { "type": "string", "minLength": 1, "maxLength": 100 }
+      }
+    },
     "plan": {
       "type": "object",
       "additionalProperties": false,
