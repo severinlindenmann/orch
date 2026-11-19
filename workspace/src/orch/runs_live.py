@@ -356,7 +356,7 @@ def busy_words(n: int, ticket: str) -> str:
 # ---------------------------------------------------------------- start
 
 
-PRIORITIES = ("high", "normal", "low")  # the order tickets waiting in line start in (then oldest first)
+PRIORITIES = tickets.PRIORITIES  # the order tickets waiting in line start in (then oldest first)
 
 
 def _queue_for_slot(root: Path, tid: str, by: str, text: str, priority: str = "normal") -> None:
@@ -1830,9 +1830,21 @@ def restart_after_give_up(root: Path, tid: str, name: str) -> dict | None:
     return result
 
 
+def _line_rank(root: Path, tid: str, items: list[dict]) -> int:
+    """ORCH-813: a waiting ticket's place in line. The priority a person set on the ticket, raised by a start
+    that asked for a higher one (orch run start --priority, a red develop). Without one set by a person, the
+    starts decide as before (the highest asked, normal when none asked)."""
+    asked = [_rank(i) for i in items]
+    with contextlib.suppress(Exception):
+        t = tickets.load(root, tid)
+        if t.get("priority") in PRIORITIES:
+            return min([PRIORITIES.index(t["priority"])] + [r for r in asked if r < 1])
+    return min(asked)
+
+
 def waiting_line(root: Path) -> list[tuple[str, str]]:
     """Tickets whose live start waits for a free slot, in the order they start: priority (high, normal,
-    low), then the oldest first. [(ticket id, priority)]"""
+    low; _line_rank), then the oldest first. [(ticket id, priority)]"""
     d = runs.run_dir(root) / "pending"
     waiting = []
     for f in sorted(d.glob("t_*.jsonl")) if d.is_dir() else []:
@@ -1841,7 +1853,7 @@ def waiting_line(root: Path) -> list[tuple[str, str]]:
             continue
         items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]
         if items:
-            rank = min(_rank(i) for i in items)
+            rank = _line_rank(root, tid, items)
             with contextlib.suppress(OSError):
                 waiting.append((rank, items[0]["at"], f.stat().st_mtime_ns, tid))
     return [(w[-1], PRIORITIES[w[0]]) for w in sorted(waiting)]
