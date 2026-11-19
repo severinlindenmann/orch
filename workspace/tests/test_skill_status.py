@@ -108,7 +108,9 @@ def test_deprecated_skill_points_to_its_replacement(proj, tmp_path):
 
 
 def test_deprecated_note_keeps_quotes_and_is_idempotent():
-    text = '---\nname: a\ndescription: "Does x."\nmetadata:\n  status: deprecated\n  replaced-by: b\n---\nbody\n'
+    text = (
+        '---\nname: a\ndescription: "Does x."\nmetadata:\n  status: deprecated\n  replaced-by: b\n---\nbody\n'
+    )
     once = skillstatus.mark_deprecated(text)
     assert 'description: "Old skill, use b instead. Does x."' in once
     assert skillstatus.mark_deprecated(once) == once
@@ -123,7 +125,9 @@ def test_deprecated_without_replacement_and_active_unchanged():
 
 
 def test_deprecated_replacement_cannot_break_the_header():
-    text = '---\nname: a\ndescription: "x"\nmetadata:\n  status: deprecated\n  replaced-by: \'b"\\n: c\'\n---\n'
+    text = (
+        '---\nname: a\ndescription: "x"\nmetadata:\n  status: deprecated\n  replaced-by: \'b"\\n: c\'\n---\n'
+    )
     out = skillstatus.mark_deprecated(text)
     assert skillstatus._parse_header(out)["description"].startswith("Old skill, use bn c instead.")
 
