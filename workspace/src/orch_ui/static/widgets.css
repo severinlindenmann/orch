@@ -1423,7 +1423,7 @@ button.gtree-row:hover{background:var(--surface-2)}
 .flow-stage.t-warn .flow-value{color:var(--warning)}.flow-stage.t-bad .flow-value{color:var(--danger)}.flow-stage.t-good .flow-value{color:var(--success)}
 .flow-text{font-size:var(--fs-1);line-height:var(--s4);color:var(--text-faint)}
 .flow-items{display:flex;flex-wrap:wrap;gap:var(--s1)}
-.flow-chip{font-family:var(--font-mono);text-decoration:none}
+.flow-chip{min-height:var(--s5);font-family:var(--font-mono);text-decoration:none}
 a.flow-chip:hover{border-color:var(--border-strong);text-decoration:underline}
 a.flow-chip:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .flow-place{font-family:var(--font-ui);color:var(--text-faint);margin-right:var(--space-0)}
