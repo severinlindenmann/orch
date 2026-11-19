@@ -167,8 +167,13 @@ def test_an_id_swapped_while_the_question_waits_moves_nothing(moved, acct, perso
         idf.write_text("f" * 32)
         return "y"
 
+    old = os.path.realpath(moved).replace("moved", "ws")
+    home = addons.home()
+    key = hashlib.sha256(old.encode()).hexdigest()[:32]
+    (home / "permissions.json").write_text(json.dumps({key: "full"}))
     with pytest.raises(Refused, match="changed while orch asked"):
         workspace_move.move_here(moved, ask=swap)
+    assert json.loads((home / "permissions.json").read_text()) == {key: "full"}  # no record moved either
 
 
 def test_the_core_step_checks_the_confirmed_id_and_folder(moved):
@@ -217,3 +222,11 @@ def test_a_record_that_cannot_be_moved_stops_before_the_keys_and_a_retry_finishe
     res = workspace_move.move_here(m, ask=_yes)
     assert res["moved"] and "ports.json" not in res["files"]  # moved in the first try already
     assert json.loads((home / "ports.json").read_text()) == {f"{os.path.realpath(m)}\tdashboard": 8790}
+
+
+def test_the_text_says_when_running_services_were_not_updated():
+    from orch import cli_workspace
+
+    res = {"moved": True, "old": "/a", "new": "/b", "files": ["binding.json"], "not_moved": ["running.json"]}
+    assert "running background services" in cli_workspace._text(res)
+    assert "running" not in cli_workspace._text({**res, "not_moved": []})

@@ -151,9 +151,9 @@ def is_person(by: str | None) -> bool:
 
 
 def move_here(root: Path, *, by: str | None = None, ask=input) -> dict:
-    """The whole command: person check, the question with both folders, the records, then the re-bind (checked
-    again under the lock against what the person was asked). A record that cannot be moved stops it before the
-    keys, so running it again finishes the job."""
+    """The whole command: person check, the question with both folders, then (under the folders lock, once
+    the core checked again what the person was asked) the records and the re-bind. A record that cannot be
+    moved stops it before the keys, so running it again finishes the job."""
     from orch import addons
     from orch import home as orch_home
 
@@ -178,13 +178,18 @@ def move_here(root: Path, *, by: str | None = None, ask=input) -> dict:
     if answer.strip().lower() not in ("y", "yes"):
         raise Refused("Nothing was moved.")
     home = addons.home()
-    files, failed = move_records(home, old, new, wid)
-    if failed:
-        raise Refused(
-            f"orch could not update {', '.join(failed)} in your orch folder, so the saved keys were not "
-            "moved. Close other orch windows and run it again."
-        )
-    res = orch_home.move_here(root, expect_id=wid, expect_old=old)
+    files: list[str] = []
+
+    def records() -> None:  # under the folders lock, after the core checked what the person confirmed
+        done, failed = move_records(home, old, new, wid)
+        if failed:
+            raise Refused(
+                f"orch could not update {', '.join(failed)} in your orch folder, so the saved keys were not "
+                "moved. Close other orch windows and run it again."
+            )
+        files.extend(done)
+
+    res = orch_home.move_here(root, expect_id=wid, expect_old=old, before_bind=records)
     out = {"moved": res["moved"], "old": res["old"], "new": res["new"], "files": [*files]}
     if res["moved"]:
         out["files"].insert(0, "binding.json")

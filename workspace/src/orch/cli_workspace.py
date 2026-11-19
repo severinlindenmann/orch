@@ -21,7 +21,13 @@ def add_parsers(sub, common) -> None:
 def _text(res: dict) -> str:
     if not res["moved"]:
         return "Nothing to move: the saved keys already belong to this folder."
-    return f"Moved the saved keys and settings from {res['old']} to {res['new']}."
+    text = f"Moved the saved keys and settings from {res['old']} to {res['new']}."
+    if res.get("not_moved"):
+        text += (
+            " orch could not update its list of running background services; those started in the old folder"
+            " start again the next time you open orch here."
+        )
+    return text
 
 
 def dispatch(args, root: Path) -> bool:

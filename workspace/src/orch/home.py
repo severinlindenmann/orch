@@ -602,11 +602,13 @@ def binding_state(root: Path) -> str:
 CHANGED_WHILE_ASKED = "This folder changed while orch asked, so nothing was moved. Run it again."
 
 
-def move_here(root: Path, expect_id: str, expect_old: str) -> dict:
+def move_here(root: Path, expect_id: str, expect_old: str, before_bind=None) -> dict:
     """Re-bind this workspace's key folder to its new real path after the folder was moved (N17 stays: a copy,
     a missing or loose binding, or a second folder bound to this path is refused). The caller makes sure a
     person asked for it, about exactly `expect_id` bound to `expect_old`: both are checked again under the
-    lock (.local-id is workspace-writable and could be swapped while the question waits).
+    lock (.local-id is workspace-writable and could be swapped while the question waits). `before_bind()` runs
+    under the lock once every check passed, right before the binding is written: a Refused from it leaves the
+    binding as it was (the caller moves its records there, so nothing moves for a folder that changed).
     Returns {"moved": bool, "old": path, "new": path, "id": workspace id}."""
     from orch import addons
 
@@ -649,6 +651,8 @@ def move_here(root: Path, expect_id: str, expect_old: str) -> dict:
             raise Refused(COPY_OF.format(old=stored))
         if any(n != own for n in _bound_folders(root, home, own)):
             raise Refused(SECOND_FOLDER)
+        if before_bind is not None:
+            before_bind()
         _write_private(f, json.dumps({"schema": "orch.binding/1", "realpath": here}) + "\n")
         _BINDINGS.pop(str(f), None)
     return {"moved": True, "old": stored, "new": here, "id": own}
