@@ -901,6 +901,9 @@ def test_agent_may_wait_on_a_question_and_a_person_on_nothing(proj, new_ticket, 
     assert tickets.load(proj, other)["status"] == "waiting"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="time.tzset exists only on Unix; the zone cannot be set here"
+)
 def test_a_wait_time_without_a_zone_is_this_computers_local_time(monkeypatch):
     import time
 
