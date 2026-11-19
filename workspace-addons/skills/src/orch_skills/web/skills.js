@@ -170,7 +170,7 @@
         onclick: e => { d.close(); turn(it, !it.on, e.currentTarget); }}) : null,
         (it.actions || []).map(v => h('button', {className: v === 'remove' ? 'btn danger' : 'btn outline', type: 'button', text: ACT[v],
           onclick: e => { d.close(); other(it, v, e.currentTarget); }}))),
-      it.codex_limit ? h('p', {className: 'meta', text: it.codex_limit + '.'}) : null,
+      it.tool_limit ? h('p', {className: 'meta', text: it.tool_limit + '.'}) : null,
       it.locked ? h('p', {className: 'meta', text: it.locked + '.'}) : null);
     const d = h('dialog', {className: 'sheet', 'aria-label': it.name}, h('div', {className: 'sheet-h'}, h('h2', {text: it.name})), box);
     d.addEventListener('close', () => d.remove(), {once: true});

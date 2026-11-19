@@ -14,7 +14,7 @@ from . import model
 from .switches import Refused
 
 VERBS = ("on", "off")
-OTHER = ("remove", "restore", "check")  # a shared skill out / back; ask Claude about the sign-in state
+OTHER = ("remove", "restore", "check")  # a shared skill out / back; ask the helper tool about the sign-in state
 TARGET = re.compile(r"(skill|instructions|service|login):(orch|workspace|admin|mine):[A-Za-z0-9_.@-]{1,120}")
 HISTORY = Path(".orch") / "addons" / "skills" / "history.jsonl"
 KIND_WORD = {"skills": "Skills", "instructions": "Instructions", "services": "Connected services", "logins": "Logins"}
@@ -251,7 +251,7 @@ def main(argv=None) -> int:
         (
             "remove a shared skill from this workspace",
             "bring a removed shared skill back",
-            "ask Claude which connected services need a sign-in",
+            "ask the helper tool which connected services need a sign-in",
         ),
         strict=True,
     ):

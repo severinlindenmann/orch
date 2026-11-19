@@ -38,5 +38,5 @@ summary = "Bring a removed shared skill back"
 who = "people"
 
 [acts.check]
-summary = "Ask Claude which connected services need a sign-in"
+summary = "Ask the helper tool which connected services need a sign-in"
 who = "people"

@@ -112,7 +112,7 @@
    "problems": [],
    "can_off": true,
    "actions": [],
-   "codex_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it"
+   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it"
   },
   {
    "id": "skill:workspace:weekly-report",
@@ -134,7 +134,7 @@
    "problems": [],
    "can_off": true,
    "actions": [],
-   "codex_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it"
+   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it"
   },
   {
    "id": "skill:workspace:release-check",
@@ -159,7 +159,7 @@
    ],
    "can_off": true,
    "actions": [],
-   "codex_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it"
+   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it"
   },
   {
    "id": "skill:admin:github",
@@ -403,8 +403,8 @@
     "check"
    ],
    "signin_state": "needs-sign-in",
-   "signin": "Needs a sign-in: type /mcp in Claude and sign in there (checked 2026-11-19 09:12)",
-   "codex_limit": "Codex ignores this folder's own settings until you trust this folder in Codex"
+   "signin": "Needs a sign-in. Open Claude Code, type /mcp and sign in to context7 again (checked 2026-11-19 09:12)",
+   "tool_limit": "Codex ignores this folder's own settings until you trust this folder in Codex"
   },
   {
    "id": "service:admin:crm",

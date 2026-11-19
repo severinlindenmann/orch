@@ -15,12 +15,11 @@ import shutil
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from . import codex, shared, signin, switches
+from . import jsonswitch, shared, signin, switches, tomlswitch
+from . import tools as toolsdata
 from .switches import Refused
 
 SCHEMA = "orch.skills-page/1"
-TOOLS = {"claude": "Claude", "codex": "Codex"}
-INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md", "CLAUDE.local.md", "AGENTS.local.md")
 DESC_MIN = 20
 _DESC = re.compile(r"^description:[ \t]*(.*)$", re.MULTILINE)
 _ID_PART = re.compile(r"[^A-Za-z0-9_.@-]")
@@ -73,14 +72,35 @@ def _home(account_home: Path | None) -> Path:
         return Path(os.path.expanduser("~"))
 
 
-def _tools(root: Path) -> list[str]:
-    try:
-        from orch import skills
+def _tools(root: Path) -> dict[str, dict]:
+    return toolsdata.here(root)
 
-        found = [n for n in skills.detected_agents(root) if n in TOOLS]
-    except Exception:  # noqa: BLE001  no core: Claude is the one tool this page can switch
-        found = []
-    return found or ["claude"]
+
+def _fmt(t: dict) -> str:
+    return t["switches"].get("format", "")
+
+
+def _json_states(root: Path, tl: dict) -> dict[str, dict]:
+    return {n: jsonswitch.state(root, n, t) for n, t in tl.items() if _fmt(t) == "json"}
+
+
+def _by_hand(t: dict) -> str:
+    return f"Turned off by hand in {t['switches']['file']}"
+
+
+def _instruction_files(tl: dict) -> list[str]:
+    try:
+        from orch import adapters
+
+        guide = list(adapters.GUIDE_FILES)
+    except Exception:  # noqa: BLE001
+        guide = ["AGENTS.md"]
+    names = [
+        *guide,
+        *(f for t in toolsdata.all_tools().values() for f in t.get("instruction_files", [])),
+        "AGENTS.local.md",
+    ]
+    return list(dict.fromkeys(names))
 
 
 # ---- skills -------------------------------------------------------------------------------------------------
@@ -106,7 +126,8 @@ def _skill_sources(root: Path, account_home: Path | None) -> list[tuple[str, str
     for name, folder in _skill_folders(harness).items():
         found.append(("orch", name, folder))
     seen = set(orch_names)
-    for base in (root / ".agents" / "skills", root / ".claude" / "skills"):
+    links = [t["skills_link"] for t in toolsdata.all_tools().values() if t.get("skills_link")]
+    for base in [root / ".agents" / "skills", *(root / rel for rel in links)]:
         for name, folder in _skill_folders(base).items():
             if name in seen:
                 continue
@@ -152,7 +173,8 @@ def _kept_copy(root: Path, name: str) -> bool:
         from orch import harness
     except ImportError:
         return False
-    for where in (".agents/skills", ".claude/skills"):
+    links = [t["skills_link"] for t in toolsdata.all_tools().values() if t.get("skills_link")]
+    for where in (".agents/skills", *links):
         p = root / where / name
         if not _is_link(p) and p.is_dir() and harness._keep_files(p):
             return True
@@ -163,8 +185,10 @@ def skills(root: Path, account_home: Path | None = None, keys: set[str] | None =
     from orch import skills as core
 
     off = core.off_names(root)
-    claude = switches.claude_state(root)["skillOverrides"]
-    tools = _tools(root)
+    tl = _tools(root)
+    js = _json_states(root, tl)
+    skill_off = {n: js[n].get("skill", {}) for n in js if isinstance(tl[n]["switches"].get("skill"), dict)}
+    home = _home(account_home)
     offered, gone = shared.offered(root), shared.removed(root)
     waiting = shared.newer_waiting(root)
     items = []
@@ -180,9 +204,9 @@ def skills(root: Path, account_home: Path | None = None, keys: set[str] | None =
             "fields": {k: v for k, v in meta.items() if isinstance(v, str)},
             "words": len((head.get("description") or "").split()),
         }
+        hand = [n for n, st in skill_off.items() if st.get(name) == "hand"]
         if where in ("orch", "admin"):
-            linked_off = name in off
-            item["on"] = not linked_off and name not in claude
+            item["on"] = name not in off and not any(name in st for st in skill_off.values())
             item["switch"] = "linked"
             if name in core.ALWAYS_ON:
                 item.update(on=True, locked="orch needs it to work tickets; always on")
@@ -190,27 +214,36 @@ def skills(root: Path, account_home: Path | None = None, keys: set[str] | None =
                 item["locked"] = (
                     "On this computer it is a copy that holds its add-on's file; turn the add-on off instead"
                 )
-            elif name in claude and claude[name] == "hand":
-                item["locked"] = "Turned off by hand in .claude/settings.local.json"
-            # orch's links reach every tool; a shared folder itself stays in .agents/skills, which Codex reads
+            elif hand:
+                item["locked"] = _by_hand(tl[hand[0]])
+            # orch's links reach every tool; a shared folder itself stays in .agents/skills, which a tool without
+            # its own skills folder link reads directly
             item["tools"] = {
-                TOOLS[t]: "off" if not item["on"] and not (where == "admin" and t == "codex") else "on" for t in tools
+                t["label"]: "off" if not item["on"] and not (where == "admin" and not t.get("skills_link")) else "on"
+                for t in tl.values()
             }
         else:
-            item["on"] = name not in claude
-            item["switch"] = "claude"
-            if claude.get(name) == "hand":
-                item["locked"] = "Turned off by hand in .claude/settings.local.json"
-            item["tools"] = {TOOLS[t]: ("off" if (t == "claude" and not item["on"]) else "on") for t in tools}
+            seeing = tl
+            if where == "mine":
+                seeing = {
+                    n: t
+                    for n, t in tl.items()
+                    if any(Path(toolsdata.fill(d, home)) == folder.parent for d in t.get("skill_dirs", []))
+                } or tl
+            item["on"] = not any(name in skill_off.get(n, {}) for n in seeing)
+            item["switch"] = "tool" if any(n in skill_off for n in seeing) else None
+            if hand:
+                item["locked"] = _by_hand(tl[hand[0]])
+            item["tools"] = {t["label"]: ("off" if name in skill_off.get(n, {}) else "on") for n, t in seeing.items()}
+            limits = [t for n, t in seeing.items() if n not in skill_off and t["switches"].get("skill_limit")]
+            if limits and where == "workspace":
+                t = limits[0]
+                item["tool_limit"] = f"{t['label']} {t['switches']['skill_limit']}, so {t['label']} still sees it"
         item["problems"] = _skill_problems(root, head, meta, keys or set()) if item["on"] else []
         if where == "admin":
             item["actions"] = ["remove"]
             if waiting:
                 item["newer"] = "Your admin has newer shared settings; they arrive with the next relay update"
-        elif where == "workspace" and "codex" in tools:
-            item["codex_limit"] = (
-                "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it"
-            )
         items.append(item)
     for name, had in sorted(gone.items()):
         now_v = offered.get(name)
@@ -240,29 +273,38 @@ def skills(root: Path, account_home: Path | None = None, keys: set[str] | None =
 
 
 def instructions(root: Path, account_home: Path | None = None) -> list[dict]:
-    excl = switches.claude_state(root)["claudeMdExcludes"]
-    tools = _tools(root)
+    tl = _tools(root)
+    js = _json_states(root, tl)
+    home = _home(account_home)
+    labels = [t["label"] for t in tl.values()]
     items = []
-    mine = _home(account_home) / ".claude" / "CLAUDE.md"
-    if mine.is_file():
+    for n, t in tl.items():
+        spec = t["switches"].get("rules")
+        if not isinstance(spec, dict) or n not in js:
+            continue
+        mine = Path(toolsdata.fill(spec["file"], home))
+        if not mine.is_file():
+            continue
+        excl = js[n].get("rules", {})
         on = str(mine) not in excl
         it = {
-            "id": item_id("instructions", "mine", "CLAUDE.md"),
+            "id": item_id("instructions", "mine", mine.name),
             "kind": "instructions",
             "name": "Your rules for every project",
-            "file": "~/.claude/CLAUDE.md",
+            "file": spec.get("shown", mine.name),
             "where": "mine",
+            "tool": n,
             "on": on,
-            "switch": "claude",
+            "switch": "tool",
             "words": len(_text(mine).split()),
-            "description": "Your own rules for Claude, read in every folder on this computer.",
-            "tools": {"Claude": "on" if on else "off"},
+            "description": spec.get("words", "").replace("{label}", t["label"]),
+            "tools": {t["label"]: "on" if on else "off"},
             "problems": [],
         }
         if excl.get(str(mine)) == "hand":
-            it["locked"] = "Turned off by hand in .claude/settings.local.json"
+            it["locked"] = _by_hand(t)
         items.append(it)
-    for fn in INSTRUCTION_FILES:
+    for fn in _instruction_files(tl):
         p = root / fn
         if not p.is_file():
             continue
@@ -278,7 +320,7 @@ def instructions(root: Path, account_home: Path | None = None) -> list[dict]:
                 "locked": "Helpers in this workspace always read it",
                 "words": len(text.split()),
                 "description": _first_line(text),
-                "tools": {TOOLS[t]: "on" for t in tools},
+                "tools": {lb: "on" for lb in labels},
                 "problems": [],
             }
         )
@@ -296,7 +338,7 @@ def instructions(root: Path, account_home: Path | None = None) -> list[dict]:
                 "locked": "Written by orch: one block for each add-on that is on. Turn the add-on off to remove its block",
                 "words": len(text.split()),
                 "description": f"{text.count(chr(10) + '## ') + text.startswith('## ')} blocks, one per add-on.",
-                "tools": {TOOLS[t]: "on" for t in tools},
+                "tools": {lb: "on" for lb in labels},
                 "problems": [],
             }
         )
@@ -323,20 +365,34 @@ def services(root: Path, account_home: Path | None = None) -> list[dict]:
         conns, _ = inventory.connections(root, account_home=account_home)
     except Exception:  # noqa: BLE001  no inventory: nothing listed (the page says so)
         conns = []
-    deny = switches.claude_state(root)["deny"]
-    tools = _tools(root)
-    cx = codex.state(root, _home(account_home)) if "codex" in tools else {"trusted": False, "servers": {}}
+    tl = _tools(root)
+    js = _json_states(root, tl)
+    home = _home(account_home)
+    tom = {n: tomlswitch.state(root, n, t, home) for n, t in tl.items() if _fmt(t) == "toml"}
     seen = signin.read(root)
+    check = signin.checker(tl)
+    asker = check[1] if check else None
     items = []
     for c in conns:
         if c.get("shadowed"):
             continue
-        rule = switches.mcp_rule(c["name"])
-        states = {}
-        if "claude" in tools:
-            states["Claude"] = "off" if rule in deny else "on"
-        if c["name"] in cx["servers"]:
-            states["Codex"] = "on" if cx["servers"][c["name"]] == "on" else "off"
+        states, hand, limits = {}, [], []
+        for n, t in tl.items():
+            spec = t["switches"].get("service")
+            if not isinstance(spec, dict):
+                continue
+            if n in js:
+                st = js[n].get("service", {}).get(jsonswitch.render(spec, c["name"]))
+                states[t["label"]] = "off" if st else "on"
+                if st == "hand":
+                    hand.append(t)
+            elif n in tom and c["name"] in tom[n]["service"]:
+                st = tom[n]["service"][c["name"]]
+                states[t["label"]] = "on" if st == "on" else "off"
+                if st == "hand":
+                    hand.append(t)
+                if not tom[n]["trusted"]:
+                    limits.append(t)
         on = all(v == "on" for v in states.values())
         it = {
             "id": item_id("service", WHERE_OF_SOURCE.get(c["source"], "workspace"), c["name"]),
@@ -345,7 +401,7 @@ def services(root: Path, account_home: Path | None = None) -> list[dict]:
             "server": c["name"],
             "where": WHERE_OF_SOURCE.get(c["source"], "workspace"),
             "on": on,
-            "switch": "claude",
+            "switch": "tool" if states else None,
             "description": "Program on this computer: " + c["command"]
             if c.get("command")
             else ("Web service at " + c["host"] if c.get("host") else "Connected service"),
@@ -359,20 +415,21 @@ def services(root: Path, account_home: Path | None = None) -> list[dict]:
             it["signin_state"] = "needs-sign-in" if c.get("state") == "missing-key" else "connected"
         elif c["name"] in seen["servers"]:
             st = seen["servers"][c["name"]]
-            it["signin"], it["signin_state"] = signin.text(st, seen["checked_at"]), st
+            it["signin"], it["signin_state"] = signin.text(st, seen["checked_at"], asker, c["name"]), st
             if st == "needs-sign-in" and on:
-                it["problems"].append("Needs a sign-in in Claude (type /mcp)")
+                it["problems"].append("Needs a sign-in. " + signin.how(asker, c["name"]))
         else:
-            it["signin"] = "Not checked yet. The sign-in itself happens in Claude (type /mcp)"
-        it["actions"] = ["check"]
-        if "Codex" in states and not cx["trusted"]:
-            it["codex_limit"] = "Codex ignores this folder's own settings until you trust this folder in Codex"
-            if "Claude" not in states:
-                it["locked"] = it["codex_limit"]
-        if deny.get(rule) == "hand":
-            it["locked"] = "Turned off by hand in .claude/settings.local.json"
-        elif cx["servers"].get(c["name"]) == "hand":
-            it["locked"] = "Turned off by hand in Codex's settings"
+            it["signin"] = "Not checked yet. The sign-in itself happens in your helper tool, not in orch"
+        it["actions"] = ["check"] if check else []
+        if limits:
+            t = limits[0]
+            it["tool_limit"] = (
+                f"{t['label']} ignores this folder's own settings until you trust this folder in {t['label']}"
+            )
+            if all(lb == t["label"] for lb in states):
+                it["locked"] = it["tool_limit"]
+        if hand:
+            it["locked"] = _by_hand(hand[0])
         items.append(it)
     return items
 
@@ -455,7 +512,7 @@ def build(root: Path, account_home: Path | None = None) -> dict:
     data = {
         "schema": SCHEMA,
         "generated_at": now(),
-        "tools": [TOOLS[t] for t in _tools(root)],
+        "tools": [t["label"] for t in _tools(root).values()],
         "skills": skills(root, account_home, {x["name"] for x in lg}),
         "instructions": instructions(root, account_home),
         "services": services(root, account_home),
@@ -487,31 +544,59 @@ def turn(root: Path, target: str, on: bool, account_home: Path | None = None, wh
         raise Refused(f"{it['name']}: {it['locked']}.")
     if it.get("switch") is None:
         raise Refused(f"{it['name']} cannot be turned off here.")
+    tl = _tools(root)
     if it["kind"] == "skill" and it["switch"] == "linked":
         changed = switches.set_linked(root, it["name"], on)
     elif it["kind"] == "skill":
-        changed = switches.set_claude(root, "skillOverrides", it["name"], on)
-    elif it["kind"] == "service":
         changed = False
-        if "Codex" in it["tools"] and "codex_limit" not in it:  # first: the file most likely to refuse
-            changed = codex.set_mcp(root, it["server"], on)
-        if "Claude" in it["tools"]:
-            try:
-                changed = switches.set_claude(root, "deny", switches.mcp_rule(it["server"]), on) or changed
-            except Refused:
-                if changed:  # put Codex back, so a refusal changes nothing
-                    with contextlib.suppress(Refused, OSError):
-                        codex.set_mcp(root, it["server"], not on)
-                raise
+        for n, t in tl.items():
+            if _fmt(t) == "json" and t["label"] in it["tools"] and isinstance(t["switches"].get("skill"), dict):
+                changed = jsonswitch.set_entry(root, n, t, "skill", it["name"], on) or changed
+    elif it["kind"] == "service":
+        changed = _turn_service(root, tl, it, on)
     elif it["kind"] == "login":
         from orch import cli_secret
 
         changed = cli_secret.set_agents(root, it["name"], on, who)
-    elif it["kind"] == "instructions" and it["where"] == "mine":
-        changed = switches.set_claude(root, "claudeMdExcludes", str(_home(account_home) / ".claude" / "CLAUDE.md"), on)
+    elif it["kind"] == "instructions" and it["where"] == "mine" and it.get("tool") in tl:
+        t = tl[it["tool"]]
+        path = toolsdata.fill(t["switches"]["rules"]["file"], _home(account_home))
+        changed = jsonswitch.set_entry(root, it["tool"], t, "rules", path, on)
     else:
         raise Refused(f"{it['name']} cannot be turned off here.")
     return {"item": find(root, target, account_home), "changed": changed}
+
+
+def _turn_service(root: Path, tl: dict, it: dict, on: bool) -> bool:
+    """Every tool's switch for one service: the TOML ones first (the files most likely to refuse), then the JSON
+    ones; a refusal puts back what was already changed, so a refused click changes nothing."""
+    done: list[tuple[str, dict]] = []
+    changed = False
+    order = sorted(tl.items(), key=lambda nt: _fmt(nt[1]) != "toml")
+    try:
+        for n, t in order:
+            spec = t["switches"].get("service")
+            if not isinstance(spec, dict) or t["label"] not in it["tools"]:
+                continue
+            if _fmt(t) == "toml":
+                if "tool_limit" in it and it["tool_limit"].startswith(t["label"] + " "):
+                    continue
+                c = tomlswitch.set_table(root, n, t, it["server"], on)
+            else:
+                c = jsonswitch.set_entry(root, n, t, "service", jsonswitch.render(spec, it["server"]), on)
+            if c:
+                done.append((n, t))
+            changed = c or changed
+    except Refused:
+        for n, t in done:
+            with contextlib.suppress(Refused, OSError):
+                if _fmt(t) == "toml":
+                    tomlswitch.set_table(root, n, t, it["server"], not on)
+                else:
+                    spec = t["switches"]["service"]
+                    jsonswitch.set_entry(root, n, t, "service", jsonswitch.render(spec, it["server"]), not on)
+        raise
+    return changed
 
 
 def act(root: Path, verb: str, target: str, account_home: Path | None = None) -> dict:
@@ -525,9 +610,13 @@ def act(root: Path, verb: str, target: str, account_home: Path | None = None) ->
     elif verb == "restore":
         text, changed = shared.restore(root, it["name"]), True
     else:
-        doc = signin.check(root, now())
+        check = signin.checker(_tools(root))
+        if not check:
+            raise Refused("No helper tool here can report the sign-in state.")
+        names = [i["server"] for i in services(root, account_home)]
+        doc = signin.check(root, now(), check[1], names)
         changed = True
-        text = f"Checked {len(doc['servers'])} services with Claude."
+        text = f"Checked {len(doc['servers'])} services with {check[1]['label']}."
     try:
         after = find(root, target, account_home)
     except Refused:

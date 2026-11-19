@@ -885,3 +885,31 @@ def describe(name: str, root: Path | None = None) -> str:
         words = ["live session"] if a["capabilities"]["interactive_tmux"] else []
         return ", ".join(["fresh each run"] + words)
     return ", ".join(words) or "fresh each run"
+
+
+def folder_switches() -> dict[str, dict]:
+    """The built-in tools' own per-folder switches (agents/switches.json), for the Skills add-on:
+    {name: {"label", "binary", "switches", "connection_check", "skills_link", "skill_dirs",
+    "instruction_files"}}. Only tools that have switches."""
+    out = {}
+    for name, a in _registry().items():
+        fs = a.get("folder_switches")
+        if not isinstance(fs, dict):
+            continue
+        out[name] = {
+            "label": a["label"],
+            "binary": (a.get("detect") or {}).get("binary"),
+            "switches": copy.deepcopy(fs),
+            "connection_check": copy.deepcopy(a.get("connection_check")),
+            "skills_link": (a.get("files") or {}).get("skills_link"),
+            "skill_dirs": list(a.get("skill_dirs", [])),
+            "instruction_files": sorted(
+                {*((a.get("files") or {}).get("instructions_link") or {})}
+                | (
+                    {a["files"]["instructions"]}
+                    if isinstance((a.get("files") or {}).get("instructions"), str)
+                    else set()
+                )
+            ),
+        }
+    return out

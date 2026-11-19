@@ -7,7 +7,7 @@ import tomllib
 
 import pytest
 
-from orch_skills import cli, codex, model, signin, switches
+from orch_skills import cli, model, switches, tomlswitch, tools
 
 
 def _item(data, kind, name):
@@ -83,16 +83,6 @@ claude.ai Gmail: https://gmail.mcp.claude.com/mcp - ! Needs authentication
 """
 
 
-def test_parse_claude_mcp_list():
-    assert signin.parse(LIST) == {
-        "playwright": "connected",
-        "linear": "needs-sign-in",
-        "broken": "failed",
-        "fresh": "pending",
-        "claude.ai Gmail": "needs-sign-in",
-    }
-
-
 def _conns(monkeypatch, *names, **extra):
     from orch import inventory
 
@@ -128,7 +118,7 @@ def test_check_sign_in_keeps_the_answer_and_shows_it(ws, tmp_path, monkeypatch, 
     )
     out = json.loads(capsys.readouterr().out)
     assert out["item"]["signin_state"] == "needs-sign-in"
-    assert "Needs a sign-in in Claude (type /mcp)" in out["item"]["problems"]
+    assert "Needs a sign-in. Open Claude Code, type /mcp and sign in to linear again." in out["item"]["problems"]
     data = model.build(ws)
     assert _item(data, "services", "playwright")["signin"].startswith("Signed in and working (checked ")
     cache = json.loads((ws / ".orch/addons/skills/signin.json").read_text())
@@ -205,6 +195,10 @@ def test_a_waiting_refresh_hint_says_newer_settings(ws):
     assert "newer" not in _item(model.build(ws), "skills", "github")
 
 
+def CX():
+    return tools.all_tools()["codex"]
+
+
 # ---- Codex --------------------------------------------------------------------------------------------------
 
 
@@ -230,11 +224,11 @@ def test_codex_service_off_and_on_in_a_trusted_folder(ws, with_codex):
     it = model.turn(ws, "service:workspace:playwright", on=False)["item"]
     assert it["tools"] == {"Claude": "off", "Codex": "off"} and not it["on"] and "note" not in it
     text = (ws / ".codex/config.toml").read_text()
-    assert text.startswith('model = "x"  # mine\n') and codex.MARK in text
+    assert text.startswith('model = "x"  # mine\n') and tomlswitch.MARK in text
     assert tomllib.loads(text)["mcp_servers"]["playwright"] == {"enabled": False}
     it = model.turn(ws, "service:workspace:playwright", on=True)["item"]
     assert it["on"] and it["tools"] == {"Claude": "on", "Codex": "on"}
-    assert codex.MARK not in (ws / ".codex/config.toml").read_text()
+    assert tomlswitch.MARK not in (ws / ".codex/config.toml").read_text()
     assert tomllib.loads((ws / ".codex/config.toml").read_text()) == {"model": "x"}
 
 
@@ -242,7 +236,7 @@ def test_codex_untrusted_folder_is_explained_not_written(ws, with_codex):
     (with_codex / "config.toml").write_text('[mcp_servers.playwright]\ncommand = "npx"\n')
     it = model.turn(ws, "service:workspace:playwright", on=False)["item"]
     assert it["tools"] == {"Claude": "off", "Codex": "on"} and it["note"] == "Codex still sees it"
-    assert "until you trust this folder in Codex" in it["codex_limit"]
+    assert "until you trust this folder in Codex" in it["tool_limit"]
     assert not (ws / ".codex/config.toml").exists()
 
 
@@ -250,9 +244,9 @@ def test_codex_a_hand_written_entry_is_left_alone(ws, with_codex):
     (ws / ".codex").mkdir()
     (ws / ".codex/config.toml").write_text("[mcp_servers.playwright]\nenabled = false\n")
     it = _item(model.build(ws), "services", "playwright")
-    assert it["locked"] == "Turned off by hand in Codex's settings" and not it["can_off"]
+    assert it["locked"] == "Turned off by hand in .codex/config.toml" and not it["can_off"]
     with pytest.raises(switches.Refused, match="already list playwright"):
-        codex.set_mcp(ws, "playwright", on=False)
+        tomlswitch.set_table(ws, "codex", CX(), "playwright", on=False)
 
 
 def test_codex_a_service_codex_does_not_have_has_no_codex_row(ws, with_codex, monkeypatch):
@@ -262,7 +256,7 @@ def test_codex_a_service_codex_does_not_have_has_no_codex_row(ws, with_codex, mo
 
 def test_codex_skill_limit_is_said(ws, with_codex):
     assert (
-        "Codex has no switch for one folder's skills" in _item(model.build(ws), "skills", "release-walk")["codex_limit"]
+        "Codex has no switch for one folder's skills" in _item(model.build(ws), "skills", "release-walk")["tool_limit"]
     )
 
 
@@ -270,12 +264,13 @@ def test_codex_broken_folder_file_is_not_overwritten(ws, with_codex):
     (ws / ".codex").mkdir()
     (ws / ".codex/config.toml").write_text("[broken\n")
     with pytest.raises(switches.Refused, match="not readable TOML"):
-        codex.set_mcp(ws, "playwright", on=False)
+        tomlswitch.set_table(ws, "codex", CX(), "playwright", on=False)
     assert (ws / ".codex/config.toml").read_text() == "[broken\n"
 
 
 def test_codex_block_names_are_quoted():
-    assert tomllib.loads(codex.block('a "b".c'))["mcp_servers"] == {'a "b".c': {"enabled": False}}
+    spec = CX()["switches"]["service"]
+    assert tomllib.loads(tomlswitch.block(spec, 'a "b".c'))["mcp_servers"] == {'a "b".c': {"enabled": False}}
 
 
 def test_codex_settings_added_under_orchs_block_are_kept(ws, with_codex):
@@ -292,10 +287,10 @@ def test_codex_settings_added_under_orchs_block_are_kept(ws, with_codex):
 def test_codex_crlf_file_switches_back(ws, with_codex):
     (ws / ".codex").mkdir()
     (ws / ".codex/config.toml").write_bytes(b'model = "x"\r\n')
-    codex.set_mcp(ws, "playwright", on=False)
+    tomlswitch.set_table(ws, "codex", CX(), "playwright", on=False)
     assert b"\r\nenabled = false\r\n" in (ws / ".codex/config.toml").read_bytes()
-    assert codex.state(ws, ws)["servers"]["playwright"] == "orch"
-    assert codex.set_mcp(ws, "playwright", on=True)
+    assert tomlswitch.state(ws, "codex", CX(), ws)["service"]["playwright"] == "orch"
+    assert tomlswitch.set_table(ws, "codex", CX(), "playwright", on=True)
     assert tomllib.loads((ws / ".codex/config.toml").read_bytes().decode()) == {"model": "x"}
 
 
