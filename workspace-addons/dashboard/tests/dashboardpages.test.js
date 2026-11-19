@@ -743,6 +743,18 @@ test('Settings: "Merge releases without my click" is one switch that saves at on
   assert.equal(calls[1], JSON.stringify(['release_merge.set', {on:false}]));
 });
 
+// ORCH-971: a plain folder (no GitHub remote, no pull-requests add-on) does not see the two pull-request switches.
+test('Settings: the pull-request switches show only where the workspace has pull requests, or when one is on (ORCH-971)', () => {
+  const c = context([], {snapshot:false, addons:() => [], render:() => {}, document:{querySelector:() => null}});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
+  const keys = s => [...c.prSwitchCards(s)].filter(Boolean).map(n => n.attrs['data-key']);
+  assert.deepEqual(keys({}), []);
+  assert.deepEqual(keys({pull_requests:false, reviewer_on:false, release_merge_on:false}), []);
+  assert.deepEqual(keys({pull_requests:true}), ['settings-reviewer', 'settings-release-merge']);
+  assert.deepEqual(keys({reviewer_on:true}), ['settings-reviewer']);
+  assert.deepEqual(keys({release_merge_on:true}), ['settings-release-merge']);
+});
+
 // ORCH-58: the number goes before every title in the list and on the board; a search opens a folded group that holds a hit.
 
 test('tickets list: number before the title, and a search hit is visible without opening its group', () => {

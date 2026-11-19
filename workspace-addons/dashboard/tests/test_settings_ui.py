@@ -266,6 +266,22 @@ def test_settings_git_private(ws, monkeypatch):
         )
 
 
+def test_settings_pull_requests_only_with_github_remote_or_addon(ws, monkeypatch):
+    """ORCH-971: the two pull-request switches need a github.com remote or the pull-requests add-on on."""
+    from orch_dashboard import data
+
+    assert data.load_settings(ws, None)["pull_requests"] is False
+    rows = [{"name": "pull-requests", "active": False}]
+    monkeypatch.setattr(data, "run_orch", lambda b, args, r: rows if args[:2] == ["addon", "list"] else None)
+    assert data.load_settings(ws, "orch")["pull_requests"] is False
+    rows[0]["active"] = True
+    assert data.load_settings(ws, "orch")["pull_requests"] is True
+    rows[0]["active"] = False
+    (ws / ".git").mkdir(exist_ok=True)
+    (ws / ".git" / "config").write_text('[remote "origin"]\n\turl = git@github.com:me/repo.git\n', encoding="utf-8")
+    assert data.load_settings(ws, "orch")["pull_requests"] is True
+
+
 def test_settings_pending_carries_every_hashed_field_in_full(ws, monkeypatch):
     from orch_dashboard import data
 
