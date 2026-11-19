@@ -194,7 +194,10 @@ def _finished_groups(rows: list[dict]) -> list[dict]:
     """Groups the queue checked and finished, oldest first: {size, merged, ended, mins, wait, urls}."""
     groups: dict[str, list[dict]] = {}
     for r in rows:
-        if r.get("state") in store.FINISHED and r.get("taken") and _stamp(r.get("ended")):
+        manual = r.get("state") == store.OUT and not _sent_back(
+            r
+        )  # taken out by someone: not how a group went
+        if r.get("state") in store.FINISHED and r.get("taken") and _stamp(r.get("ended")) and not manual:
             groups.setdefault(str(r.get("taken")), []).append(r)  # one check run: claimed together
     out = []
     for members in groups.values():
@@ -514,10 +517,13 @@ def build(
         rows.append((key, row))
     rows.sort(key=lambda kr: kr[0])
     blocks: list[dict] = []
+    # the merge queue first (owner pick B, ORCH-746), then the two charts, then every open pull request; with no open
+    # pull request the queue's recent work and the charts still show when there is any, above the empty state
+    flows = [b for b in queue_blocks(root, data, queue_alive, now, tz) if b["type"] == "flow" or every]
+    charts = chart_blocks(root, data, now, tz)
+    if every or flows or any(v for c in charts for x in c["series"] for v in x["values"]):
+        blocks += flows + charts
     if every:
-        # the merge queue first (owner pick B, ORCH-746), then the two charts, then every open pull request
-        blocks += queue_blocks(root, data, queue_alive, now, tz)
-        blocks += chart_blocks(root, data, now, tz)
         nrepos = len({r.get("repo") for r in every})
         block = {
             "type": "table",

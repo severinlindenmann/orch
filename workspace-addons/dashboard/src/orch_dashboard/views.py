@@ -19,7 +19,18 @@ TIMEOUT = 10.0  # a view that starts other orch commands (Focus with live sessio
 MAX_BYTES = 256 * 1024
 TONES = ("neutral", "good", "warn", "needs-you", "bad")
 BLOCKS = (
-    "stat", "list", "calendar", "timeline", "chips", "table", "footnote", "settings", "radio", "split", "chart", "flow"
+    "stat",
+    "list",
+    "calendar",
+    "timeline",
+    "chips",
+    "table",
+    "footnote",
+    "settings",
+    "radio",
+    "split",
+    "chart",
+    "flow",
 )
 # Same pattern as `link` in contracts/addon-view.schema.json (tests/test_views.py compares them).
 _LINK = re.compile(
@@ -316,7 +327,7 @@ def _chart_ok(b):
             and _text(x.get("name"), 24)
             and _opt(x, "tone", _tone)
             and isinstance(x.get("values"), list)
-            and len(x["values"]) <= 31
+            and len(x["values"]) == len(labels)  # one number per label: a short series is not drawn as zeros
             and all(map(_num, x["values"]))
             for x in series
         )
@@ -348,23 +359,27 @@ def _flow_stage_ok(s):
         and _opt(
             s,
             "progress",
-            lambda p: _keys_only(p, ("value", "max", "label"))
-            and _num(p.get("value"))
-            and _num(p.get("max"))
-            and p["max"] > 0
-            and _text(p.get("label")),
+            lambda p: (
+                _keys_only(p, ("value", "max", "label"))
+                and _num(p.get("value"))
+                and _num(p.get("max"))
+                and p["max"] > 0
+                and _text(p.get("label"))
+            ),
         )
         and _opt(
             s,
             "bars",
-            lambda v: isinstance(v, list)
-            and len(v) <= 24
-            and all(
-                _keys_only(x, ("value", "tone", "hint"))
-                and _num(x.get("value"))
-                and _opt(x, "tone", _tone)
-                and _opt(x, "hint", _text)
-                for x in v
+            lambda v: (
+                isinstance(v, list)
+                and len(v) <= 24
+                and all(
+                    _keys_only(x, ("value", "tone", "hint"))
+                    and _num(x.get("value"))
+                    and _opt(x, "tone", _tone)
+                    and _opt(x, "hint", _text)
+                    for x in v
+                )
             ),
         )
         and _opt(s, "bars_label", _text)

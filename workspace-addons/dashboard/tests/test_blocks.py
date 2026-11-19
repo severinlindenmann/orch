@@ -841,3 +841,12 @@ def test_table_cells_link_on_their_own_and_a_tone_is_a_chip_with_its_word(tmp_pa
     assert state["kids"][0]["cls"] == "chip danger" and state["kids"][0]["text"] == "Checks failed"
     table = next(x for x in walk(tree) if x["tag"] == "table")
     assert table["cls"] == "blk-table data-table compact"
+
+
+def test_a_chart_series_needs_one_number_per_label():
+    from orch_dashboard.views import check_view
+
+    v = _visual()
+    assert check_view(v) is not None
+    v["blocks"][1]["series"][0]["values"] = [7]  # 7 labels, 1 number: refused, not drawn as zeros
+    assert check_view(v) is None

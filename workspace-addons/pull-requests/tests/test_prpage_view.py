@@ -187,14 +187,14 @@ def test_finished_groups_fill_merged_lately_and_the_charts(prws):
             ("merged", "2026-11-19T09:40:00Z", "2026-11-19T10:00:00Z"),  # a group of two, both merged
             ("merged", "2026-11-19T09:40:00Z", "2026-11-19T10:00:00Z"),
             ("out", "2026-11-19T10:10:00Z", "2026-11-19T10:22:00Z"),  # alone, sent back
-            ("out", None, "2026-11-19T10:30:00Z"),  # taken out by someone: no group, not sent back
+            ("out", "2026-11-19T10:25:00Z", "2026-11-19T10:30:00Z"),  # taken out by someone while checked
         ],
         strict=True,
     ):
         r.update(state=state, ended=ended, added="2026-11-19T09:00:00Z")
         if taken:
             r["taken"] = taken
-        r["why"] = "taken out by human:x" if not taken else "checks failed"
+        r["why"] = "taken out by human:x" if r["number"] == 4 else "checks failed"
     (store.folder(prws) / "queue.json").write_text(json.dumps({"entries": rows}), encoding="utf-8")
     v = valid(view.build(prws, running=True, queue_alive=True, now=now, tz=UTC))
     (flow,) = [b for b in v["blocks"] if b["type"] == "flow"]
@@ -211,7 +211,27 @@ def test_finished_groups_fill_merged_lately_and_the_charts(prws):
     assert merged[-1] == 2  # #1 by GitHub's date, #2 by the queue's (counted once each)
     q_merged, q_back = (s["values"] for s in second["series"])
     assert q_merged[-1] == 2 and q_back[-1] == 1  # the one taken out by someone is not "sent back"
+    assert len(done["bars"]) == 2  # nor a group of its own
     assert second["stacked"] and second["meta"] == "typical wait today 1 h 0 min"
+
+
+def test_with_no_open_pull_request_the_queues_recent_work_still_shows(prws):
+    from orch_pull_requests import store
+
+    now = _t("2026-11-19T12:00:00Z")
+    _queue(prws, 1)
+    rows = store.read(prws)
+    rows[0].update(
+        state="merged",
+        added="2026-11-19T09:00:00Z",
+        taken="2026-11-19T09:10:00Z",
+        ended="2026-11-19T09:30:00Z",
+    )
+    (store.folder(prws) / "queue.json").write_text(json.dumps({"entries": rows}), encoding="utf-8")
+    v = valid(view.build(prws, running=True, queue_alive=True, now=now, tz=UTC))
+    assert [b["type"] for b in v["blocks"]] == ["flow", "chart", "chart", "list", "footnote"]
+    assert v["blocks"][0]["stages"][2]["value"] == "1 of 1 groups"
+    assert v["blocks"][3]["empty"]["title"] == "No pull requests yet"
 
 
 def test_an_empty_queue_still_says_where_it_is(prws):
