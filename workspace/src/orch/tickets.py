@@ -102,7 +102,7 @@ def now() -> str:
 
 
 def parse_time(text: str) -> str:
-    """Any ISO 8601 time -> UTC RFC 3339 ending in Z. Without offset = this computer's local time (ORCH-619)."""
+    """Any ISO 8601 time -> UTC RFC 3339 ending in Z. Without offset = local time (ORCH-619)."""
     t = text.strip()
     if t.endswith(("Z", "z")):
         t = t[:-1] + "+00:00"
