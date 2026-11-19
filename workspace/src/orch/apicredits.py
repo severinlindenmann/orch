@@ -9,7 +9,7 @@ The file holds one [[credit]] table per credit:
     label    = "Claude API key 1"             # what the page shows
     provider = "Anthropic"                    # in plain words
     key      = "pass:Agents/Claude API key 1" # WHERE the key lives (pass:<vault>/<item> or orch:<name>), never the key
-    unit     = "$"                            # "$", "tokens" or "calls"
+    unit     = "$"                            # "$", "tokens" or "calls" (Usage counts "$" only for now)
     spend    = "report"                       # or "log:<file next to it>"
     balance  = ""                             # optional: a command that prints the amount left at the provider
 

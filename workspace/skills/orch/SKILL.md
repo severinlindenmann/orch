@@ -322,7 +322,8 @@ Everything else goes under `metadata`, one level deep, each value text in quotes
 A skill that spends on an API adds `api-credits: "api-credits.toml"` under metadata: that file next to SKILL.md has one
 `[[credit]]` table per credit with `name`, `label`, `provider`, `key` (where the key lives, `pass:<vault>/<item>` or
 `orch:<name>`, never the key itself), `unit` (`$`, `tokens` or `calls`), `spend` (`report` or `log:<file>`) and an
-optional `balance` command. The skill check refuses a wrong one.
+optional `balance` command. The skill check refuses a wrong one. Usage counts `$` only for now: a credit in
+`tokens` or `calls` passes the check but is not listed yet.
 
 ## Rules
 - orch's permission mode (ask, auto, full) never widens Codex beyond writing in this workspace; a stricter personal Codex setting (read-only) stays.
