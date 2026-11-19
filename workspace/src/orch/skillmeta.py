@@ -67,7 +67,9 @@ def _scalar(raw: str, where: str) -> tuple[str, bool]:
                     or not re.fullmatch(r"[0-9A-Fa-f]+", digits)
                     or int(digits, 16) > 0x10FFFF
                 ):
-                    raise HeaderError(f"{where}: the escape \\{e} is not read here. Write the character itself.")
+                    raise HeaderError(
+                        f"{where}: the escape \\{e} is not read here. Write the character itself."
+                    )
                 out.append(chr(int(digits, 16)))
                 i += 2 + width
                 continue
@@ -145,7 +147,9 @@ def parse_header(text: str) -> tuple[dict, list[str]]:
                 )
             val, quoted = _scalar(raw, f"Line {n}")
             if not quoted and not val:
-                raise HeaderError(f"Line {n}: metadata {key!r} needs a text value (one level only, no nested map).")
+                raise HeaderError(
+                    f"Line {n}: metadata {key!r} needs a text value (one level only, no nested map)."
+                )
             if not quoted and _reads_as_not_text(val):
                 not_text.append(f"metadata.{key}")
             if key in out["metadata"]:
@@ -278,7 +282,11 @@ def check_skill(skill_dir: Path, *, name: str | None = None, root: Path | None =
         value = meta[key] if path.startswith("metadata.") else head[key]
         label = f"metadata {key!r}" if path.startswith("metadata.") else repr(key)
         out.append(
-            f("error", path, f'{label} is read as a number, a date or yes/no; put it in quotes, like "{value}".')
+            f(
+                "error",
+                path,
+                f'{label} is read as a number, a date or yes/no; put it in quotes, like "{value}".',
+            )
         )
     status = meta.get("status")
     if status is not None and status not in STATUS_WORDS:
