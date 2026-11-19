@@ -933,6 +933,7 @@ main.addEventListener('click', async event => {
   if (action === 'settings-share') { settingsReviewOpen('share', control); return; }
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
   if (action === 'reviewer-set') { await reviewerSwitch(); return; }
+  if (action === 'reviewer-kind') { await reviewerKindToggle(control); return; }
   if (action === 'release-merge-set') { await releaseMergeSwitch(); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }

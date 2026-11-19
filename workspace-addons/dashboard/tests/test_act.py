@@ -1846,3 +1846,22 @@ def test_check_move_argv_and_refusals():
     for bad in ({"after": "--x"}, {"after": None}, {"check": "bad"}, {"extra": 1}):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("check.move", {"ticket": "t_abcdef", "check": "c2", "after": "c3", **bad})
+
+
+def test_ticket_kind_and_reviewer_kinds_build_the_orch_commands():
+    """ORCH-645: a person sets a ticket's kind and which kinds the Reviewer accepts; draft is never offered."""
+    assert actions.build_argv("ticket.kind", {"ticket": "t_abcdef", "kind": "small_bug"})[:4] == [
+        "ticket",
+        "kind",
+        "t_abcdef",
+        "small_bug",
+    ]
+    argv = actions.build_argv("reviewer.kinds", {"kinds": ["bug", "small_feature"]})
+    assert argv[:4] == ["config", "set", "workflow.reviewer_kinds", "bug,small_feature"]
+    assert actions.build_argv("reviewer.kinds", {"kinds": []})[3] == "none"
+    for bad in ({"kinds": ["draft"]}, {"kinds": "bug"}, {"kinds": ["epic"]}):
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("reviewer.kinds", bad)
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("ticket.kind", {"ticket": "t_abcdef", "kind": "huge"})
+    assert actions.needs_session("ticket.kind") and actions.needs_session("reviewer.kinds")
