@@ -1047,6 +1047,30 @@ def test_release_merge_switch_is_one_config_set_by_a_human():
         build_argv("release_merge.set", {"on": "yes"})
 
 
+def test_auto_reviewer_and_away_switches_and_undo_are_orch_calls_by_a_human():
+    """ORCH-425: the Review page's two switches and its Undo."""
+    from orch_dashboard.actions import build_argv
+
+    for op, key in (("auto_reviewer.set", "workflow.auto_reviewer"), ("away.set", "workflow.away")):
+        for on in (True, False):
+            argv = build_argv(op, {"on": on})
+            assert argv[:4] == ["config", "set", key, "on" if on else "off"]
+            assert argv[argv.index("--by") + 1].startswith("human:")
+        with pytest.raises(actions.BadRequest):
+            build_argv(op, {"on": 1})
+    argv = build_argv("review.undo", {"ticket": "t_abcdef"})
+    assert argv[:3] == ["review", "undo", "t_abcdef"] or argv[-1] == "t_abcdef"
+    argv = build_argv("review.undo", {"ticket": "t_abcdef", "question": "q3"})
+    assert "q3" in argv and argv[argv.index("--by") + 1].startswith("human:")
+    for bad in (
+        {"ticket": "t_abcdef", "question": "q3; rm"},
+        {"ticket": "nope"},
+        {"ticket": "t_abcdef", "x": 1},
+    ):
+        with pytest.raises(actions.BadRequest):
+            build_argv("review.undo", bad)
+
+
 def test_browser_actions_do_not_inherit_the_servers_agent_identity(ws, monkeypatch):
     from orch.adapters import detect_env
 
