@@ -281,3 +281,15 @@ test('the pane shows the waiting question with its options and answers it there 
   assert.equal(liveAskModel({questions:[{id:'q3', kind:'plan', text:'Plan?'}]}).plain, false);
   assert.match(source, /liveAskFill[^]*?act\('answer', \{ticket:id, question:q\.id, digest:q\.digest/, 'the answer is the same op a question card sends');
 });
+
+// ORCH-706: a helper that waits for an OK on its screen shows its choice in the last lines; in a short pane (the panel
+// at the bottom, a phone) the box was squeezed to two lines. It never shrinks below its lines (the API sends at most
+// a few), the pane body scrolls instead.
+test('the last-lines box never shrinks below its lines in a short pane', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8');
+  const rule = (css.match(/(?:^|\n)\.live-lines\{([^}]*)\}/) || [])[1];
+  assert.ok(rule, 'the .live-lines rule is in widgets.css');
+  const flex = (rule.match(/(?:^|;)flex:([^;]*)/) || [])[1] || '';
+  const shrink = (rule.match(/(?:^|;)flex-shrink:([^;]*)/) || [])[1] || flex.trim().split(/\s+/)[1];
+  assert.equal(String(shrink).trim(), '0', 'flex shrink of .live-lines is 0: ' + rule);
+});

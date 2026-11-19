@@ -90,7 +90,8 @@ Must be seen:
 
 - The tile is orange and first after the pinned ones.
 - Its sentence is the question.
-- Nothing can be answered on the wall itself; after the answer the tile turns back to Working.
+- Nothing can be answered on the wall itself; the layer shows the question with its options and a field for an own answer.
+- One click on an option answers it; the question leaves the pane and the tile turns back to Working.
 
 ## 6. Focus button on a ticket and Open ticket on a session
 
@@ -288,13 +289,15 @@ Do:
 
 1. Open a session that needs you from the bar.
 2. Look at the pane: what it does now, its last lines and the line under them.
-3. Open the model choice of a working session and pick another model.
+3. Press Stop in the pane; open an idle session and read its Stop button.
+4. Open the model choice of a working session and pick another model.
 
 Must be seen:
 
 - The open question, the last lines of its screen, then tool and model (for example "Helper · Opus").
 - How long it is open and how long it stays (warm while it works, or when it closes for being idle).
 - All of it stays current while you look; the keyboard place does not jump.
+- Stop in the pane stops its helper; an idle helper's button says Stop idle helper.
 - A new model applies when the helper finishes its current step (or at its next start) and says so.
 
 ## 17. Chat: messages and ticket events, questions answered inside
@@ -510,8 +513,8 @@ Do:
 
 Must be seen:
 
-- The wall shows with that session open in the layer.
-- An unknown ticket shows the wall and opens nothing.
+- The wall shows with that session open in the layer, the keyboard in its pane.
+- An unknown ticket shows the wall, opens nothing and says "There is no ticket with this address."
 
 ## 30. Keyboard only: wall, layer and back to the bar
 
