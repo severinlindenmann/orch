@@ -12,7 +12,7 @@ const source = fs.readFileSync(path.join(web, 'pages/livechat.js'), 'utf8');
 const model = source.slice(0, source.indexOf('// --- the page ---'));
 const ctx = {};
 vm.createContext(ctx);
-vm.runInContext(model + '\nthis.api = {liveChatModel, liveViewRead, liveViewWrite, LIVE_CHAT_MAX, LIVE_CHAT_TEXT, LIVE_VIEW_KEY};', ctx);
+vm.runInContext(model + '\nthis.api = {liveChatModel, liveChatSplit, liveChatMine, liveViewRead, liveViewWrite, LIVE_CHAT_MAX, LIVE_CHAT_TEXT, LIVE_VIEW_KEY};', ctx);
 const C = ctx.api;
 const plain = x => JSON.parse(JSON.stringify(x));
 
@@ -117,4 +117,37 @@ test('the page loads the chat before the layer that uses it and the server serve
   const chat = html.indexOf('pages/livechat.js'), layer = html.indexOf('pages/live-layer.js');
   assert.ok(chat > 0 && chat < layer);
   assert.match(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/server.py'), 'utf8'), /\|livechat[|)]/, 'the server serves it');
+});
+
+// ORCH-695: what the person sent stays after a reload (orch's run status sent_input), with the files it carried.
+test('a sent message comes back from orch after a reload, with its files apart from its words', () => {
+  const run = {sent_input: [
+    {id: 'p_1', text: 'Please also try a PDF.', at: '2026-11-19T15:00:00Z', by: 'human:lume', read: true},
+    {id: 'p_2', text: 'Here are two\n\nI added 2 files to this ticket: shot-1402.png, notes.md. Read them first.', at: '2026-11-19T15:05:00Z', by: 'human:lume', read: false},
+    {id: 'p_3', text: 'I added a file to this ticket: only.png. Read it and carry on.', at: '2026-11-19T15:06:00Z', by: 'human:anna'}]};
+  const rows = plain(C.liveChatModel({}, 'human:lume', C.liveChatMine(run, [])));
+  assert.deepEqual(rows.map(r => [r.w, r.text, r.files || [], r.who || '']), [
+    ['y', 'Please also try a PDF.', [], ''],
+    ['y', 'Here are two', ['shot-1402.png', 'notes.md'], ''],
+    ['y', '', ['only.png'], 'Anna']]);
+});
+
+test('what this page just sent shows until orch lists the same words, never twice', () => {
+  const local = [{text: 'Please also try a PDF.', at: '2026-11-19T15:00:01Z'}, {text: 'Not listed yet', at: '2026-11-19T15:01:00Z'}];
+  assert.equal(C.liveChatMine({}, local).length, 2);
+  const both = C.liveChatMine({sent_input: [{id: 'p_1', text: 'Please also try a PDF.', at: '2026-11-19T15:00:00Z', by: 'human:lume'}]}, local);
+  assert.deepEqual(plain(both).map(m => m.text), ['Please also try a PDF.', 'Not listed yet']);
+  assert.equal(C.liveChatMine({sent_input: 'broken'}, null).length, 0);
+});
+
+test('only orch\'s own file line is split off; other words stay as they are', () => {
+  assert.deepEqual(plain(C.liveChatSplit('I added a file to this ticket.')), {text: 'I added a file to this ticket.', files: []});
+  assert.deepEqual(plain(C.liveChatSplit('Long one\n\nI added 3 files to this ticket. Read them first.')), {text: 'Long one\n\nI added 3 files to this ticket. Read them first.', files: []});
+  assert.deepEqual(plain(C.liveChatSplit('Voice\n\nI added a file to this ticket: v.webm. The voice note came without written words. Read it first.')), {text: 'Voice', files: ['v.webm']});
+});
+
+test('a Chat line a person wrote shows once, though orch also queued it for the helper', () => {
+  const msg = {id: 'p_123456', by: 'human:lume', text: 'Please check the draft', at: '2026-11-19T12:00:00Z'};
+  const rows = C.liveChatModel({history: [{...msg, chat_message: true}]}, 'human:lume', C.liveChatMine({sent_input: [msg]}, []));
+  assert.equal(rows.length, 1);
 });
