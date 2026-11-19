@@ -295,8 +295,8 @@ def test_typing_needs_the_person_the_setting_and_a_page_that_watches(helper, ser
 
 
 def test_the_sign_in_is_the_only_check_also_from_another_computer(helper, server, tmp_path):
-    """R4.1a (owner's answer on ORCH-743): no check of this computer; the port for other computers works signed
-    in, and is refused without the sign-in."""
+    """R4.1a (owner's answer on ORCH-743): no check of this computer; the port for other computers works
+    after the sign-in, and is refused without it."""
     typing_on(tmp_path)
     srv = server(remote=True)
     other = srv.remote_server.server_address[1]
