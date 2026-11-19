@@ -241,6 +241,9 @@ def _show(t: dict, root: Path) -> str:
     out.append(f"Status: {tickets.status_word(t)}" + (f" - {_progress(t)}" if _progress(t) else ""))
     if t["status"] == "dropped" and t.get("superseded_by"):
         out.append(f"Replaced by: {_ticket_name(root, t['superseded_by'])}")
+    prep = tickets.prepare_state(root, t)  # Save without starting (ORCH-738)
+    if prep:
+        out.append(prep["words"] + (f": {prep['why']}" if prep.get("why") else ""))
     if n and d == n:
         out.append(
             f"✓ All done · {_progress(t)}"

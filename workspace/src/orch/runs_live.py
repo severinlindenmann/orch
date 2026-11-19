@@ -359,21 +359,34 @@ def busy_words(n: int, ticket: str) -> str:
 PRIORITIES = ("high", "normal", "low")  # the order tickets waiting in line start in (then oldest first)
 
 
-def _queue_for_slot(root: Path, tid: str, by: str, text: str, priority: str = "normal") -> None:
-    """Put the ticket in line for a free slot. Queued again: the line keeps one place, the higher priority."""
+def _queue_for_slot(
+    root: Path, tid: str, by: str, text: str, priority: str = "normal", prepare: bool = False
+) -> None:
+    """Put the ticket in line for a free slot. Queued again: the line keeps one place, the higher priority.
+    prepare: the place is for a prepare-only run (ORCH-738); a real start queued meanwhile makes it one for
+    the work (a person's Start always wins over Prepare)."""
     with runs.locked(root, tid):
         items = runs._pending_read(root, tid)
         mine = [i for i in items if i.get("via") == "slots" and not i.get("delivered_at")]
         want = PRIORITIES.index(priority)
+        made = False
         if mine:
             want = min([_rank(i) for i in mine] + [want])  # queued again: never lower
         else:
             item = runs._pending_add_locked(root, tid, by, "event", text, "slots", None)
             items = runs._pending_read(root, tid)
             mine = [i for i in items if i["id"] == item["id"]]
-        if any(_rank(i) != want or (want != 1 and "priority" not in i) for i in mine):
-            for i in mine:
-                i["priority"] = PRIORITIES[want]
+            made = True
+        changed = False
+        for i in mine:
+            if made and prepare and not i.get("prepare"):
+                i["prepare"], changed = True, True
+            elif not prepare and i.get("prepare"):
+                i.pop("prepare")
+                changed = True
+            if _rank(i) != want or (want != 1 and "priority" not in i):
+                i["priority"], changed = PRIORITIES[want], True
+        if changed:
             runs._pending_write(root, tid, items)
 
 
@@ -1856,8 +1869,12 @@ def start_waiting(root: Path) -> list[str]:
             continue
         if _status(root, tid) in ("done", "dropped"):
             continue  # a Done ticket never gets a run by itself (ORCH-247); the person starts it by hand
+        prepare = all(i.get("prepare") for i in items)  # Save without starting (ORCH-738)
         with contextlib.suppress(Exception):
-            runs.start(root, tid, items[0]["by"], mode="live")
+            if prepare:
+                runs.start(root, tid, items[0]["by"], prepare=True)
+            else:
+                runs.start(root, tid, items[0]["by"], mode="live")
             started.append(tid)
     return started
 
