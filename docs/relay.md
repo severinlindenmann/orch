@@ -82,7 +82,7 @@ relay/
   web/{portal.html, style.css}
   onboarding/{onboarding.sh, onboarding.ps1}   (the orch-relay skill lives in workspace/skills/;
   its SKILL.md says: read inbox at session start; before handing work over, read workspaces.json next to it)
-  deploy/{Caddyfile, orch-relay.service, install.sh}
+  deploy/{relay.caddy, orch-relay.service, install.sh, MOVE.md}
   tests/
 ```
 
@@ -116,7 +116,7 @@ Those workspaces can send the phone text and questions (`orch relay send ph_… 
 
 ## Deploy
 Built by the `relay` CI job (artifact `orch-relay-linux-x86_64`), copied to the server and `systemctl restart orch-relay`, check `/health`.
-First install: `deploy/install.sh` (user, folders, master key, admin token, service; Caddy route in `deploy/Caddyfile`). Same server as publish.
+First install: `deploy/install.sh` (user, folders, master key, admin token, service; Caddy site in `deploy/relay.caddy`). Same server as publish.
 Moving to a new server: `deploy/MOVE.md`.
 
 ## Groups

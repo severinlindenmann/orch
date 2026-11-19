@@ -21,4 +21,4 @@ chown orch-relay:orch-relay /etc/orch-relay/master.key /etc/orch-relay/admin-tok
 chmod 0600 /etc/orch-relay/master.key /etc/orch-relay/admin-token
 install -m 0644 "$(dirname "$0")/orch-relay.service" /etc/systemd/system/orch-relay.service
 systemctl daemon-reload && systemctl enable --now orch-relay
-echo "Add the Caddyfile route (deploy/Caddyfile), then: curl -s localhost:8103/health"
+echo "Add the Caddy site (deploy/relay.caddy into /etc/caddy/sites/), then: curl -s localhost:8103/health"
