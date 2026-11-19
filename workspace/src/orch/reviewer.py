@@ -371,6 +371,18 @@ def _write_state(root: Path, state: dict) -> None:
         runs._atomic(_state_path(root), json.dumps(state, indent=1) + "\n")
 
 
+LEFT_MAX = 300
+
+
+def remember_left(mine: dict, verdict: str, why: str) -> None:
+    """Keep why the Reviewer left a ticket for the person (the Reviewer was not sure), so Needs you can list
+    it as stuck (stuck.py, ORCH-426); any other verdict forgets it."""
+    if verdict == "leave":
+        mine["left"] = " ".join(str(why or "").split())[:LEFT_MAX]
+    else:
+        mine.pop("left", None)
+
+
 def _send_back(root: Path, tid: str, why: str) -> dict:
     note = f"The Reviewer found work missing: {why}. Finish it and send the ticket to Review again."
     t = tickets.ask_for_changes(root, tid, note, BY)
@@ -432,6 +444,7 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
             actions.append(row)
             continue
         mine["rev"] = after.get("revision")
+        remember_left(mine, res["verdict"], res["why"])
         state[tid] = mine
         row["done"] = True
         actions.append(row)

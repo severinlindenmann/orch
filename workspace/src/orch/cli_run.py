@@ -121,6 +121,17 @@ def add_parsers(sub, common) -> None:
                 default="normal",
                 help="when every slot is taken: where it waits in line (default normal)",
             )
+            x.add_argument(
+                "--credit-keyname",
+                metavar="NAME",
+                help="run on an API key: the NAME of a key in this workspace's key store (never the key)",
+            )
+            x.add_argument(
+                "--credit-account", metavar="LABEL", help="with --credit-keyname: the credit's name"
+            )
+            x.add_argument(
+                "--credit-why", metavar="TEXT", help="with --credit-keyname: why it runs there, one line"
+            )
         if name == "screen":
             x.add_argument(
                 "--lines",
@@ -591,6 +602,7 @@ def dispatch(args, root: Path) -> bool:
             text=args.text,
             agent=agent,
             priority=args.priority,
+            credit=_credit(args),
         )
         for note in r["notes"]:
             print(note, file=sys.stderr)
@@ -603,6 +615,20 @@ def dispatch(args, root: Path) -> bool:
             + (f" See it: orch run attach {runs_live.ref(root, tid)}" if r["mode"] == "live" else ""),
         )
     return True
+
+
+def _credit(args) -> dict | None:
+    """--credit-keyname/--credit-account/--credit-why as runs.start's credit (keystart.py checks it)."""
+    name, account, why = args.credit_keyname, args.credit_account, args.credit_why
+    if name is None:
+        if account is not None or why is not None:
+            raise Refused("--credit-account and --credit-why go with --credit-keyname (the key's name).")
+        return None
+    if args.reopen:
+        raise Refused(
+            "Pick one: --session continues a conversation as it was, --credit-keyname starts on a key."
+        )
+    return {"key": name, "account": account or "", "why": why or ""}
 
 
 def after_command(args, root: Path, stdout_is_json: bool) -> None:
