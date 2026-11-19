@@ -18,7 +18,7 @@ from . import page, picker, spread
 from . import share as share_mod
 
 CODEX_PROVIDERS = ("openai",)
-# The owner's share speaks of Codex (ORCH-657); the picker only knows helper tools by their registry name.
+# The picker only knows helper tools by their registry name; a share without a helper tool account falls back to this.
 CODEX = "codex"
 TOOL_LABELS = {"claude": "Claude Code", CODEX: "Codex"}
 
@@ -110,23 +110,33 @@ def from_rows(rows: list[dict]) -> list[dict]:
     return [source(r) for r in sorted(rows, key=lambda r: r.get("order", 0))]
 
 
+def _share_tool(rows: list[dict]) -> str:
+    """The helper tool the share means: the first helper tool account that is on, in Usage's order (as the share's
+    words name it, share.tool_name), as the picker knows it (its registry name)."""
+    for r in sorted(rows, key=lambda r: r.get("order", 0)):
+        if r.get("type") == "helper-tool" and r.get("on", True):
+            return tool_of(r)
+    return CODEX
+
+
 def picker_share(s: dict | None, rows: list[dict]) -> dict:
     """The owner's share in the picker's words. No share: the accounts in their order, one after the other."""
     order = [r["id"] for r in sorted(rows, key=lambda r: r.get("order", 0))]
     if s is None:
         return {"order": order}
+    tool = _share_tool(rows)
     out = {"order": order, "credit_kinds": list(s.get("api_for") or [])}
-    if int(s.get("codex_one_in") or 0) > 0:
-        out["one_in"] = {"tool": CODEX, "every": int(s["codex_one_in"])}
+    if int(s.get("tool_one_in") or 0) > 0:
+        out["one_in"] = {"tool": tool, "every": int(s["tool_one_in"])}
     pct, day = s.get("week_pct"), s.get("by_day")
     if isinstance(pct, int) and pct < share_mod.MAX_PCT and day in share_mod.DAYS:
         out["week"] = {picker.DAYS[share_mod.DAYS.index(day)]: pct}
         ahead = s.get("when_ahead")
-        if ahead in ("api", "both", "codex"):
-            out["ahead_to"] = "tool" if ahead == "codex" else ahead
-            out["ahead_dollars_day"] = s.get("day_dollars") if ahead != "codex" else None
+        if ahead in ("api", "both", "tool"):
+            out["ahead_to"] = ahead
+            out["ahead_dollars_day"] = s.get("day_dollars") if ahead != "tool" else None
             if ahead != "api":
-                out["ahead_tool"] = CODEX
+                out["ahead_tool"] = tool
     return out
 
 

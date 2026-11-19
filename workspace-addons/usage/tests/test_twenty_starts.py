@@ -177,7 +177,7 @@ def test_a_source_at_its_limit_is_skipped_and_nothing_left_makes_the_start_wait(
 def test_the_share_in_the_pickers_words():
     rows = [{"id": "b", "order": 2}, {"id": "a", "order": 1}]
     assert sources.picker_share(None, rows) == {"order": ["a", "b"]}
-    s = {"week_pct": 70, "by_day": "wednesday", "api_for": ["reviews"], "codex_one_in": 4, "when_ahead": "codex",
+    s = {"week_pct": 70, "by_day": "wednesday", "api_for": ["reviews"], "tool_one_in": 4, "when_ahead": "tool",
          "day_dollars": 0}  # fmt: skip
     assert sources.picker_share(s, rows) == {
         "order": ["a", "b"],
@@ -190,6 +190,11 @@ def test_the_share_in_the_pickers_words():
     }
     assert "week" not in sources.picker_share({**s, "week_pct": 100}, rows)
     assert "ahead_to" not in sources.picker_share({**s, "when_ahead": "none"}, rows)
+    # the helper tool is the first helper tool account that is on, as the share's words name it
+    tools = [*rows, {"id": "x", "order": 3, "type": "helper-tool", "tool": "codex", "on": False},
+             {"id": "y", "order": 4, "type": "helper-tool", "tool": "claude"}]  # fmt: skip
+    got = sources.picker_share(s, tools)
+    assert got["one_in"]["tool"] == "claude" and got["ahead_tool"] == "claude"
 
 
 def test_ahead_goes_where_the_share_says_and_a_subscription_ahead_of_its_own_week_waits_its_turn(tmp_path):
@@ -211,7 +216,7 @@ def test_ahead_goes_where_the_share_says_and_a_subscription_ahead_of_its_own_wee
     assert p.source == "s2" and "First is ahead of its week (80% used" in p.why  # the one on pace goes first
     both_ahead = [{**s, "week_used": 90.0} if s["type"] == "subscription" else s for s in subs]
     p = picker.pick(tmp_path, {"start": "x2", "kind": "lead"}, share, both_ahead, at)
-    assert p.source == "c1" and "ahead of the week" in p.why  # when_ahead codex: no dollar cap
+    assert p.source == "c1" and "ahead of the week" in p.why  # when_ahead tool: no dollar cap
     p = picker.pick(tmp_path, {"start": "x3", "kind": "lead"}, {**share, "ahead_to": "api", "ahead_dollars_day": 10},
                     both_ahead, at)  # fmt: skip
     assert p.source == "k1" and "of $10 for that used today" in p.why
