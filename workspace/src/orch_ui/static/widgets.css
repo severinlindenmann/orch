@@ -1054,7 +1054,7 @@ button.live-pt:hover{color:var(--brand)}
 .live-pb[data-live-body]>.btn{align-self:flex-start}
 .live-now{margin:0;font-weight:600;overflow-wrap:anywhere}
 .live-ask{display:grid;gap:var(--s2);margin:var(--s2) 0}.live-ask-q{margin:0;font-weight:600;overflow-wrap:anywhere}.live-ask-opts,.live-ask-line{display:flex;flex-wrap:wrap;gap:var(--s2)}.live-ask-line .input{flex:1;min-width:0}
-.live-lines{flex:1 1 auto;min-height:var(--s8);margin:0;padding:var(--s2) var(--s3);overflow:auto;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text)}
+.live-lines{flex:1 0 auto;min-height:var(--s8);margin:0;padding:var(--s2) var(--s3);overflow:auto;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text)}
 .live-meta{margin:0}
 /* the History tab of a pane (ORCH-363): the earlier sessions of the ticket, newest first, each with Reopen */
 .live-pb.live-pb-hist{align-items:stretch;justify-content:flex-start;padding:var(--s4);text-align:left;color:var(--text)}
