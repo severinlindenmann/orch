@@ -81,8 +81,8 @@ test('a done task whose newest check run failed says so on the Tasks tab (ORCH-9
   const a = src.indexOf('const taskCheckFailed'), b = src.indexOf('const taskWord');
   const c = vm.createContext({});
   vm.runInContext(src.slice(a, b), c);
-  const t = {proof:{per_item:{c1:'failed', c2:'passed'}}};
-  assert.equal(c.taskCheckFailed(t, {id:'c1', done:true}), true);
-  assert.equal(c.taskCheckFailed(t, {id:'c2', done:true}), false);
-  assert.equal(c.taskCheckFailed({}, {id:'c1'}), false);
+  const f = vm.runInContext('taskCheckFailed', c), t = {proof:{per_item:{c1:'failed', c2:'passed'}}};
+  assert.equal(f(t, {id:'c1', done:true}), true);
+  assert.equal(f(t, {id:'c2', done:true}), false);
+  assert.equal(f({}, {id:'c1'}), false);
 });
