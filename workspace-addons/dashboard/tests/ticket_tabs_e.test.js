@@ -32,7 +32,7 @@ function page(t, files = []) {
 
 const checklist = () => [
   {id:'c1', text:'Make the cards smaller', done:true, summary:'Cards are 40% smaller on a phone', evidence:[{type:'pr', ref:'https://github.com/o/r/pull/1412', at:'2026-11-19T08:00:00Z', by:'agent:claude'}]},
-  {id:'c2', text:'Check the layouts at phone width', done:false, state:'doing'},
+  {id:'c2', text:'Check the layouts at phone width', done:false, state:'doing', evidence:[{type:'pr', ref:'https://github.com/o/r/pull/1413', at:'2026-11-19T09:00:00Z'}]},
   {id:'c3', text:'Check the board on a phone once it is in', done:false},
   {id:'c4', text:'Old idea', done:false, wont_do:true, reason:'Not needed'}];
 
@@ -44,9 +44,9 @@ test('Tasks: a stepped bar, "N of M tasks done" and Add a task on one line; the 
   assert.ok(head, 'the head line');
   const bar = nodes(head).find(n => n.attrs.className === 'progress-steps');
   assert.deepEqual(bar.children.map(s => s.attrs.className ?? null), ['done', 'doing', null, 'skipped'], 'one step per task');
-  assert.equal(bar.attrs['aria-valuenow'], '2');
-  assert.equal(bar.attrs['aria-valuemax'], '4');
-  assert.match(text(head), /2 of 4 tasks done/);
+  assert.equal(bar.attrs['aria-valuenow'], '1');
+  assert.equal(bar.attrs['aria-valuemax'], '3');
+  assert.match(text(head), /1 of 3 tasks done1 skipped/, 'the skipped task is named, not counted as done');
   const add = byKey(tree, 'tasks-add-t_tasks');
   assert.ok(add && nodes(head).includes(add), 'Add a task sits on the same line');
   assert.equal(byKey(tree, 'add-form'), undefined, 'the add box waits for the click');
@@ -64,6 +64,7 @@ test('Tasks: a done task shows what came out; the task the helper is on says so;
   const row = id => byKey(tree, 'task-' + id);
   assert.ok(nodes(row('c1')).some(n => n.attrs.className === 'task-proofs row'), 'the pull request opens from the done task');
   assert.match(text(row('c2')), /The helper is on it\./);
+  assert.ok(nodes(row('c2')).some(n => n.attrs.className === 'task-proofs row'), 'a draft pull request opens before the task is done');
   assert.ok(!nodes(row('c3')).some(n => /task-proof/.test(n.attrs.className || '')), 'nothing under a task still to do');
   assert.doesNotMatch(text(row('c3')), /Not started yet/);
 });
@@ -110,15 +111,17 @@ test('Activity: the master segmented filter with counts, and a Phone tag on what
   const t = {id:'t_act', title:'Act', status:'active', checklist:[], history:[
     {by:'human:lume', text:'Created', at:'2026-11-16T09:12:00Z', via:'dashboard'},
     {by:'agent:claude', text:'Drafted the plan', at:'2026-11-16T09:31:00Z'},
-    {by:'human:lume', text:'Edited title', at:'2026-11-17T08:45:00Z', via:'phone'}]};
+    {by:'human:lume', text:'Edited title', at:'2026-11-17T08:45:00Z', via:'phone'},
+    {by:'human:lume', text:'Edited due', at:'2026-11-17T08:50:00Z', via:'phone'}]};
   const ctx = page(t);
   let tree = nodes(ctx.detail(t));
   const head = byKey(tree, 'history-head');
   const seg = nodes(head).find(n => n.attrs.className === 'segmented');
   assert.ok(seg, 'the master segmented control');
-  assert.deepEqual(seg.children.map(b => text(b)), ['All 3', 'People 2', 'Helper 1']);
-  const tags = tree.filter(n => n.attrs['data-key'] === 'history-phone');
-  assert.equal(tags.length, 1, 'one entry came from the phone');
+  assert.deepEqual(seg.children.map(b => text(b)), ['All 4', 'People 3', 'Helper 1']);
+  const tags = tree.filter(n => n.attrs.className === 'tag');
+  assert.equal(tags.length, 2, 'two entries came from the phone');
+  assert.ok(tags.every(n => n.attrs['data-key'] == null), 'no shared redraw key on the tags');
   assert.equal(tags[0].attrs.className, 'tag');
   assert.deepEqual(tags[0].children, ['Phone']);
   byKey(tree, 'history-show-Helper').onclick();

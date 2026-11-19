@@ -47,12 +47,12 @@
     });
     // Draft E (ORCH-778): one head line (one step per task, count, Add a task), then each task with what came out.
     const state=r=>r.classList.contains('current-task')?'doing':r.querySelector('.task-mark, .tick')?.textContent.trim()==='✓'?'done':/Skipped|photos from the shop/.test(r.textContent)?'skipped':'';
-    const states=empty?[]:rows.map(state), doneN=states.filter(x=>x==='done'||x==='skipped').length;
+    const states=empty?[]:rows.map(state), doneN=states.filter(x=>x==='done').length,skipN=states.filter(x=>x==='skipped').length;
     const head=el('div','tab-head');
-    if(states.length){const bar=el('div','progress-steps');bar.setAttribute('role','progressbar');bar.setAttribute('aria-label','Tasks done');bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax',String(states.length));bar.setAttribute('aria-valuenow',String(doneN));states.forEach(x=>bar.append(el('span',x)));head.append(bar);}
-    head.append(el('strong','',states.length?doneN+' of '+states.length+' tasks done':'No tasks yet.'));
+    if(states.length){const bar=el('div','progress-steps');bar.setAttribute('role','progressbar');bar.setAttribute('aria-label','Tasks done');bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax',String(states.length-skipN));bar.setAttribute('aria-valuenow',String(doneN));states.forEach(x=>bar.append(el('span',x)));head.append(bar);}
+    head.append(el('strong','',states.length?doneN+' of '+(states.length-skipN)+' tasks done':'No tasks yet.'));if(skipN)head.append(el('span','meta',skipN+' skipped'));
     const addBtn=el('button','btn ghost sm','+ Add a task');addBtn.type='button';
-    const addForm=el('form','row add-task');addForm.hidden=!!states.length||kind==='done';const addIn=el('input','input');addIn.placeholder='+ Add task';addIn.setAttribute('aria-label','Add a task');const addGo=el('button','btn outline sm','Add');addForm.append(addIn,addGo);addForm.onsubmit=e=>e.preventDefault();
+    const addForm=el('form','row add-task');addForm.hidden=!!states.length||kind==='done';const addIn=el('input','input');addIn.placeholder='New task';addIn.setAttribute('aria-label','Add a task');const addGo=el('button','btn outline sm','Add');addForm.append(addIn,addGo);addForm.onsubmit=e=>e.preventDefault();
     addBtn.onclick=()=>{addForm.hidden=false;addIn.focus();};
     if(states.length&&kind!=='done')head.append(addBtn);
     panels.Tasks.append(head,addForm);

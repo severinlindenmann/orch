@@ -899,7 +899,7 @@ function taskRows(t) {
         change ? h('p', {className:'meta preserve-lines task-asked'}, 'You asked: ' + clean(change.asked)) : null,
         task.wont_do ? h('p', {className:'meta task-note'}, task.reason ? 'Skipped: ' + clean(task.reason) : 'Skipped. No reason was given.') : null,
         ticketTaskLine(t, task, doing),
-        task.done && !task.wont_do ? taskProofChips(t, task) : null), h('span', {className:'meta task-word'}, taskWord(task)), menu);
+        taskProofChips(t, task)), h('span', {className:'meta task-word'}, taskWord(task)), menu);
   });
 }
 // ORCH-236: a task can be renamed, moved up or down and removed from its "..." menu (orch check edit / move / remove;
@@ -932,14 +932,14 @@ function taskEditRow(t, task, i) {
     after?.id ? ticketButton('Move down', 'ghost sm', () => taskAct('check.move', {ticket:t.id, check:task.id, after:after.id}), {'data-key':'task-down-' + task.id}) : null,
     ticketButton('Remove', 'ghost sm', () => { taskMenus.delete(t.id + ':' + task.id); locks.delete('task-menu-' + task.id); taskAct('check.remove', {ticket:t.id, check:task.id}).then(r => { if (r.ok) window.orch.toast('Removed. It stays in the Activity.', 'ok'); }); }, {'data-key':'task-remove-' + task.id}));
 }
-// Draft E (ORCH-778): one line under a task. A done task says what came out (its summary or the last evidence), with
-// the time and who; the task the helper is on says so; a task still to do shows nothing.
+// Draft E (ORCH-778): one line under a task. A done task says what came out (its summary or the last evidence) and
+// when; the task the helper is on says so; a task still to do shows nothing.
 function ticketTaskLine(t, task, doing) {
   if (task.wont_do) return null;
   if (task.done) {
     const ev = array(task.evidence).slice(-1)[0];
     const outcome = window.DashHelpers.outcome(task), said = clean(window.DashHelpers.cleanOutcome(task.summary)) || (outcome === 'Completed.' ? '' : clean(outcome));
-    const line = [said, ev?.at ? window.DashHelpers.stamp(ev.at, Date.now()) : '', ev?.by ? ticketActor(ev.by) : ''].filter(Boolean).join(' · ');
+    const line = [said, ev?.at ? window.DashHelpers.stamp(ev.at, Date.now()) : ''].filter(Boolean).join(' · ');
     return line ? h('p', {className:'meta task-proof', 'data-key':'task-result-' + (task.id || '')}, line) : null;
   }
   if (!doing) return null;
@@ -949,17 +949,18 @@ function ticketTaskLine(t, task, doing) {
 // "+ Add a task" (it opens the add box under the line; a ticket without tasks shows the box at once). Then the tasks.
 const taskAddOpen = new Set();
 function ticketTaskBar(list) {
-  const done = list.filter(window.DashHelpers.resolved).length;
-  return h('div', {className:'progress-steps', role:'progressbar', 'aria-label':'Tasks done', 'aria-valuemin':'0', 'aria-valuemax':String(list.length), 'aria-valuenow':String(done), 'data-key':'tasks-bar'},
+  const done = list.filter(c => c.done && !c.wont_do).length, open = list.filter(c => !c.wont_do).length;
+  return h('div', {className:'progress-steps', role:'progressbar', 'aria-label':'Tasks done', 'aria-valuemin':'0', 'aria-valuemax':String(open), 'aria-valuenow':String(done), 'data-key':'tasks-bar'},
     list.map(c => h('span', {className:c.wont_do ? 'skipped' : c.done ? 'done' : c.state === 'doing' ? 'doing' : null})));
 }
 function ticketTasksPanel(t) {
-  const list = array(t.checklist), total = list.length, done = list.filter(window.DashHelpers.resolved).length;
+  // the count leaves skipped tasks out and names them (owner words: "7 of 9 tasks done"); the bar still shows them
+  const list = array(t.checklist), total = list.length, skipped = list.filter(c => c.wont_do).length, done = list.filter(c => c.done && !c.wont_do).length;
   const canAdd = !snapshot && t.status !== 'done', open = canAdd && (!total || taskAddOpen.has(t.id) || locks.has('add-task-tasks-' + t.id));
   const add = canAdd && total ? ticketButton([iconEl('plus'), 'Add a task'], 'ghost sm', () => { taskAddOpen.add(t.id); render(); setTimeout(() => document.querySelector('[data-key="add-task-tasks-' + t.id + '"] input')?.focus(), 0); },
     {'aria-expanded':String(open), 'data-key':'tasks-add-' + t.id}) : null;
   return [h('div', {className:'tab-head', 'data-key':'tasks-head'}, total ? ticketTaskBar(list) : null,
-    h('strong', {}, total ? done + ' of ' + total + ' tasks done' : 'No tasks yet.'), add),
+    h('strong', {}, total ? done + ' of ' + (total - skipped) + ' tasks done' : 'No tasks yet.'), skipped ? h('span', {className:'meta'}, skipped + ' skipped') : null, add),
   open ? addTaskRow(t, 'tasks') : null,
   total ? h('section', {className:'card tasks-list', 'data-key':'tasks'}, taskRows(t)) : null];
 }
@@ -968,7 +969,7 @@ function addTaskRow(t, scope) {
   if (snapshot) return null;
   const key = 'add-task-' + scope + '-' + t.id;
   const input = el('input', 'input');
-  Object.assign(input, {type:'text', placeholder:'+ Add task', maxLength:500, name:'task'});
+  Object.assign(input, {type:'text', placeholder:'New task', maxLength:500, name:'task'});
   input.setAttribute('aria-label', 'Add a task');
   const form = el('form', 'row add-task');
   form.dataset.key = key;
@@ -1158,7 +1159,7 @@ function ticketHistoryPanel(t) {
     const day = ticketHistoryDay(entry.at);
     if (!groups.has(day)) groups.set(day, []);
     groups.get(day).push(h('div', {className:'ticket-event'}, entry.via === 'phone' ? phoneEntry(t.id, entry) : null,
-      h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · '), entry.via === 'phone' ? [' ', h('span', {className:'tag', 'data-key':'history-phone'}, 'Phone')] : null),
+      h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · '), entry.via === 'phone' ? [' ', h('span', {className:'tag'}, 'Phone')] : null),
       (change => change ? h('p', {className:'meta ticket-change'}, 'Was: ' + clean(change.was) + '  →  Now: ' + clean(change.now)) : null)(window.DashHelpers.historyChange(entry)), h('time', {className:'meta', datetime:entry.at}, time(entry.at))));
   }
   // Draft E (ORCH-778): the master segmented control, each choice with its count (the entries it would show).
