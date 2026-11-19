@@ -102,6 +102,16 @@ def plan(files: list[str], texts: dict[str, str], addons: set[str]) -> list[dict
         {"name": "brand: words, tokens, CI time limits", "cwd": ".", "cmd": "python -m pytest -q brand/tests"},
         {"name": "style rules", "cwd": ".", "cmd": "python scripts/check_style.py"},
     ]
+    if any(f.startswith(("workspace/", "workspace-addons/")) for f in files):
+        # generated files (ORCH-699): two pull requests that are each fine can leave one out of date together
+        steps.append(
+            {
+                "name": "generated files are current (shipped_addons.json)",
+                "cwd": "workspace",
+                "cmd": "uv run python ../scripts/gen_shipped_addons.py --check"
+                " || { echo 'run: python3 scripts/gen_shipped_addons.py and commit the result'; exit 1; }",
+            }
+        )
     if any(f.startswith("workspace/") for f in files):
         steps += [
             {

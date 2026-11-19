@@ -598,7 +598,9 @@ def test_hooks_doc_comes_from_data():
     d = adapters.hooks_doc("claude", "r_8k2m")
     cmds = {k: v[0]["hooks"][0]["command"] for k, v in d["hooks"].items()}
     assert cmds["Stop"] == "orch run event --run r_8k2m --kind idle"
-    run_events = {"SessionStart", "Stop", "Notification", "UserPromptSubmit"}
+    # ORCH-689: a turn ended by an error (usage limit, login changed) fires StopFailure, not Stop: idle too
+    assert cmds["StopFailure"] == "orch run event --run r_8k2m --kind idle"
+    run_events = {"SessionStart", "Stop", "StopFailure", "Notification", "UserPromptSubmit"}
     assert set(cmds) == run_events | set(_RECORD_EVENTS)
     for event in _RECORD_EVENTS:  # the record hook first, every tool; after a step the input notice too
         assert d["hooks"][event] == _REMINDER[event]

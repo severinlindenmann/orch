@@ -137,7 +137,7 @@ if (typeof module === 'object' && module.exports) {
       if (store.busy || !on() || document.visibilityState === 'hidden') return;
       store.busy = true;
       try {
-        const r = await fetch('api/sessions?lines=' + LIVE_SESSIONS_LINES, {cache:'no-store', credentials:'same-origin'});
+        const r = await fetch('api/sessions?lines=' + LIVE_SESSIONS_LINES, {cache:'no-cache', credentials:'same-origin'});
         const body = r.ok ? await r.json() : null;
         const list = Array.isArray(body?.sessions) ? body.sessions.filter(x => x && typeof x.id === 'string') : null;
         if (list) {
