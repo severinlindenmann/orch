@@ -68,7 +68,7 @@ window.SWIPE_ITEMS=[
   preview:{type:'table',cols:['Topic','People','Of 48'],rows:[['Friendly team','40','83 %'],['Sunday opening','29','60 %'],['Waiting time','6','13 %'],['Prices','5','10 %'],['Oat milk','3','6 %'],['Music','2','4 %']]}},
  {id:'d7',kind:'check',kindLabel:'Check result',icon:'check',ticket:'DT-47',ticketId:'DT-47',ticketTitle:'Opening hours page',when:'today 09:15',need:'Done when is not fully covered',title:'New opening hours on the website',
   why:'The helper says this is ready for your check.',okLabel:'Looks good',open:'https://example.com/pull/12',
-  then:'The ticket is done as it is. The missing part is dropped: no new ticket is made for it. To get it done, press Send back and say what is missing; a helper then works on it in this ticket.',
+  then:'The ticket is done as it is, although pull request #12 is not merged yet. The missing part is dropped: no new ticket is made for it. To get it done, press Send back and say what is missing; a helper then works on it in this ticket.',
   files:[{label:'Opening hours page',type:'page',src:window.SWIPE_KIT+'samples/sample-page.html'},{label:'Door poster',type:'img',src:window.SWIPE_KIT+'demo-image.svg'},{label:'Shop window photo 1',type:'img',src:window.SWIPE_KIT+'demo-image.svg'},{label:'Shop window photo 2',type:'img',src:window.SWIPE_KIT+'demo-image.svg'},{label:'Shop window photo 3',type:'img',src:window.SWIPE_KIT+'demo-image.svg'},{label:'Shop window photo 4',type:'img',src:window.SWIPE_KIT+'demo-image.svg'},{label:'Shop window photo 5',type:'img',src:window.SWIPE_KIT+'demo-image.svg'},{label:'Shop window photo 6',type:'img',src:window.SWIPE_KIT+'demo-image.svg'}],/* the result's own files (ORCH-183); eight: 5 tiles and "+3 more" (ORCH-421) */
   preview:{type:'doc',heading:'What was done',paras:['In short: Sunday 9–13 is on the website and the Google entry.','No task covers: “the poster at the door shows it”','What to do: send it back and say which part is missing, or approve it if that part does not matter.'],
    steps:['Done: Change the hours on the website — Page now says Sunday 9:00 – 13:00 · Ran: page check (all links fine) · PR #12','Done: Update the Google entry — Saved; Google shows the new hours']}},
@@ -76,6 +76,10 @@ window.SWIPE_ITEMS=[
   why:'The helper says this is ready for your check.',okLabel:'Looks good',
   then:'The ticket is done. Nothing else starts: no new ticket, no more work. To change something, press Send back and say what; a helper then works on it in this ticket.',
   preview:{type:'doc',heading:'What was done',paras:['In short: The supplier delivers oat milk from Monday, 12 cartons a week.','Done when: The supplier confirmed a weekly oat milk order','Part of: DT-38 Customer survey']}},
+ {id:'d9',kind:'check',kindLabel:'Check result',icon:'check',ticket:'DT-49',ticketId:'DT-49',ticketTitle:'Lunch plan',when:'today 09:24',need:'Looks good is off',title:'Lunch plan for Friday',
+  why:'The helper says this is ready for your check.',okLabel:'Looks good',
+  then:'The ticket is done. Nothing else starts: no new ticket, no more work. To change something, press Send back and say what; a helper then works on it in this ticket.',blocked:'1 step is not finished. Send it back to get it done.',/* ORCH-548: Looks good is off and says why */
+  preview:{type:'doc',progress:{done:1,total:2},steps:['Done: Ask the team what they want','Open: Book the table']}},
  {id:'d6',kind:'draft',kindLabel:'Draft',icon:'image',ticket:'DT-29',ticketId:'DT-29',ticketTitle:'Invoice export',task:'d6',about:'Design the export screen',when:'Thu 16:20',title:'Invoice export screen',
   why:'New screen for the October export.',okLabel:'Build it',
   then:'The helper builds the screen. You check it before it is used.',

@@ -230,7 +230,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   syncWords();live.textContent=id?'Picked '+id:'Nothing picked'};
  const sugOf=it=>it&&it.suggest&&!isOpt(it)?it.suggest:null;
  const syncWords=()=>{const it=items[idx];if(!it)return;[[okBtn,'ok'],[noBtn,'no']].forEach(([b,v])=>{b.classList.toggle('suggested',sugOf(it)===v);b.querySelector('.act-sug')?.remove();if(sugOf(it)===v)b.append(el('span','opt-sug act-sug','Suggested'))});okBtn.querySelector('.act-word').textContent=okWord(it);noBtn.querySelector('.act-word').textContent=noWord(it);
-  okBtn.classList.toggle('wait',okWord(it)==='Pick one');talkBtn.hidden=sendsBack(it);
+  okBtn.classList.toggle('wait',okWord(it)==='Pick one'||!!it.blocked);okBtn.setAttribute('aria-disabled',String(!!it.blocked));talkBtn.hidden=sendsBack(it);
   const own=ownAnswers(it);[noBtn,okBtn].forEach(b=>{b.hidden=!!own});if(own)talkBtn.hidden=true;ownRow.hidden=!own;
   ownRow.replaceChildren(...(own||[]).map(a=>{const b=mk('own',null,a.label,null,()=>answerOwn(a));b.dataset.picked=a.picked;return b}));
   const st=cur&&cur.querySelector('.swipe-stamp.right');if(st)st.textContent=okWord(it)==='Pick one'?'Pick one first':okWord(it)};
@@ -249,7 +249,8 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   (pins[it.id]||[]).forEach((pn,i)=>pv.append(pinEl(pn,i)));}
   const fl=filesRow(it);
   const ft=el('footer','swipe-foot');
-  if(it.then){const t=el('span','swipe-then');t.append(el('b','',(isOpt(it)?'If you pick one: ':'If you approve: ')),it.then);ft.append(t)}
+  if(it.blocked){const t=el('span','swipe-then');t.append(el('b','','Looks good is off: '),it.blocked);ft.append(t)}
+  else if(it.then){const t=el('span','swipe-then');t.append(el('b','',(isOpt(it)?'If you pick one: ':'If you approve: ')),it.then);ft.append(t)}
   const row=el('div','swipe-foot-row');
   row.append(el('span','grow'));const pc=(pins[it.id]||[]).length;if(pc){const s=el('span','swipe-pins');s.append(ic('pin',14),pc+(pc===1?' spot marked':' spots marked'));row.append(s)}
   (it.links||[]).forEach(l=>{const a=el('a','btn ghost sm swipe-link');a.href=l.url;a.target='_blank';a.rel='noopener';a.append(ic('link',14),l.label);a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)});/* the helper's links: a mockup, a reference */
@@ -305,6 +306,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(ownAnswers(it)&&verdict!=='later')return;/* its own buttons answer it */
   if(verdict==='talk'||(verdict==='no'&&sendsBack(it)))return openComment();/* a Check sent back always says what should change */
   if(verdict==='ok'&&isOpt(it)&&!picked[it.id])return nudge(c,'Tap the option you want first.');
+  if(verdict==='ok'&&it.blocked)return nudge(c,it.blocked);/* ORCH-548: Looks good is off; the card says why and what to press */
   busy=true;c.classList.add('leaving');/* a short fade, no swipe */
   setTimeout(()=>{busy=false;verdict==='later'?defer(it):commit(verdict,isOpt(it)&&verdict==='ok'?{picked:picked[it.id]}:null)},120)};
  const defer=it=>{later.add(it.id);done.push({item:it,verdict:'later',idx,laterOnly:true});const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length;
