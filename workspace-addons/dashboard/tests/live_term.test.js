@@ -42,17 +42,18 @@ function load() {
 }
 const body = (id, more = {}) => {
   const pre = new N();
-  const b = new N({dataset: {liveBody: id, ...(more.dataset || {})}, sel: {'[data-live-lines]': pre, ...(more.sel || {})}});
+  const b = new N({dataset: {liveBody: id, liveView: 'term', ...(more.dataset || {})}, sel: {'[data-live-lines]': pre, ...(more.sel || {})}});
   b.append(pre); b.attached = true;
   return {b, pre};
 };
 
-test('a ticket pane shows the terminal in Terminal view, or when it has no chat view; never for a session without a ticket', () => {
+test('a ticket pane shows the terminal only in Terminal view; the plain terminal always, other sessions without a ticket never', () => {
   const {api} = load();
-  assert.equal(api.liveTermWanted(body('t_a').b), true, 'no chat view: the terminal');
+  assert.equal(api.liveTermWanted(body('t_a', {dataset: {liveView: undefined}}).b), false, 'no Terminal chosen: the pane keeps its last lines');
   assert.equal(api.liveTermWanted(body('t_a', {dataset: {liveView: 'chat'}, sel: {'[data-live-chat]': new N()}}).b), false);
   assert.equal(api.liveTermWanted(body('t_a', {dataset: {liveView: 'term'}, sel: {'[data-live-chat]': new N()}}).b), true);
-  assert.equal(api.liveTermWanted(body('s_1', {dataset: {liveKind: 'terminal'}}).b), false);
+  assert.equal(api.liveTermWanted(body('t_term01', {dataset: {liveKind: 'terminal'}}).b), true, 'the plain terminal');
+  assert.equal(api.liveTermWanted(body('t_mgr001', {dataset: {liveKind: 'manager'}}).b), false);
 });
 
 test('no live helper: no terminal; a live one: one terminal and one stream per session, the last lines hidden', () => {
@@ -66,6 +67,13 @@ test('no live helper: no terminal; a live one: one terminal and one stream per s
   assert.equal(made[0].el.parentNode, b);
   assert.equal(pre.hidden, true);
   assert.deepEqual(streams.map(x => x.url), ['/api/term/stream?ticket=t_a']);
+});
+
+test('the plain terminal opens its stream without a live helper', () => {
+  const {api, streams} = load();
+  const {b} = body('t_term01', {dataset: {liveKind: 'terminal'}});
+  api.liveTermApply(b, null);
+  assert.deepEqual(streams.map(x => x.url), ['/api/term/stream?ticket=t_term01']);
 });
 
 test('the bridge\'s events go to the terminal; an end closes the stream and it opens again only later', () => {

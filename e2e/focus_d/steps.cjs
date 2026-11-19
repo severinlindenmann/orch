@@ -378,16 +378,45 @@ async function terminalView(page, dash, width) {
   await mainHasText(page);
   await page.click('[data-key="live-open"]');
   await page.waitForSelector('[data-key="live-pane"]', { timeout: 5000 });
-  // Chat | Terminal: in the header, or in More when the pane is narrow (no switch yet: the pane shows the terminal)
+  // a ticket's pane shows the terminal in Terminal view (Chat | Terminal: in the header, or in More when the pane is
+  // narrow); before that switch is on develop, the plain terminal session shows it (it has no chat view)
+  let pane = '.live-pane';
   if (await page.$('[data-key="live-view-term"]')) await page.click('[data-key="live-view-term"]');
-  else if (await page.$('[data-key="live-pane-more"]')) {
-    await page.click('[data-key="live-pane-more"]');
-    const item = await page.$('[data-key="live-more-view"]');
-    if (item && /terminal/i.test(await item.textContent())) await item.click(); else await page.keyboard.press('Escape');
+  else if (await page.$('[data-key="live-pane-more"]') && await (async () => { await page.click('[data-key="live-pane-more"]'); return !!await page.$('[data-key="live-more-view"]'); })()) await page.click('[data-key="live-more-view"]');
+  else {
+    await page.keyboard.press('Escape').catch(() => {});
+    const id = 't_ntterm001', made = [];
+    let last = null;
+    const dress = st => { st.sessions = made.map(() => ({ id, kind: 'terminal', title: 'Plain terminal', open: true })); st.rev = 'pt-' + made.length; last = st; return st; };
+    await page.route(/\/api\/state(\?.*)?$/, async route => {
+      const res = await route.fetch();
+      if (res.status() !== 200) return route.fulfill({ response: res });
+      const st = await res.json();
+      st.addons = [...(st.addons || []).filter(a => a.name !== 'focus'), { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+        description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true }, dashboard: { label: 'Focus', icon: 'target', order: 20 } }];
+      st.settings = { ...(st.settings || {}), focus_preview_on: true };
+      route.fulfill({ response: res, json: st.unchanged && last ? dress({ ...last }) : dress(st) });
+    });
+    await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { lines: 8, age_ms: 0, sessions: made.map(() => ({ id, key: '', title: 'Plain terminal',
+      kind: 'terminal', status: 'idle', word: 'Open', detail: '', waiting_on: [], question: null, lines: [], tool: null, model: null, mode: null,
+      opened_at: null, open_seconds: null, idle_seconds: null, closes_in_seconds: null, last_at: null, pinned: true, name: null })) } }));
+    await page.route('**/api/act', async route => {
+      const body = route.request().postDataJSON();
+      if (body.op !== 'session.new' || body.args.kind !== 'terminal') return route.continue();
+      made.push(id);
+      route.fulfill({ json: dress({ ...last }) });
+    });
+    await page.reload();  // the page reads the dressed state from the start
+    await mainHasText(page);
+    await page.waitForSelector('#live-bar [data-lbar-new]', { timeout: 10000 });
+    await page.click('#live-bar [data-lbar-new]');
+    await page.click('#live-bar [data-lbar-kind="terminal"]');
+    pane = `#live-dock .live-pane[data-session="${id}"]`;
+    await page.waitForSelector(pane, { timeout: 10000 });
   }
-  await page.waitForSelector('.live-pane .term[data-state="live"] .xterm canvas', { timeout: 5000 });
+  await page.waitForSelector(pane + ' .term[data-state="live"] .xterm canvas', { timeout: 5000 });
   if (!(await page.evaluate(() => window.termStreams || [])).some(u => /\/api\/term\/stream\?ticket=t_/.test(u))) throw new Error('the pane did not open the bridge stream');
-  const term = '.live-pane .term', box = '.live-pane .term .xterm-screen';
+  const term = pane + ' .term', box = pane + ' .term .xterm-screen';
   if (await page.$eval(term, el => el.dataset.typing) !== 'off') throw new Error('the terminal did not start watching only');
   // the screen text, read back through Copy (the screen is drawn on a canvas)
   await page.click(term + ' [data-key="term-copy"]');
@@ -874,6 +903,9 @@ async function noTicket(page, dash, width) {
     detail: '', waiting_on: [], question: null, lines: [], tool: kind === 'terminal' ? null : 'Claude Code', model: null,
     mode: kind === 'terminal' ? null : 'live', opened_at: null, open_seconds: null, idle_seconds: null, closes_in_seconds: null, last_at: null,
     pinned: true, name: null })) } }));  // orch pins a session without a ticket until it is unpinned (ORCH-361)
+  // the plain terminal opens the bridge stream (ORCH-743/744); here it answers that the screen is not there
+  await page.route(/\/api\/term\/stream(\?.*)?$/, route => route.fulfill({ status: 200, contentType: 'text/event-stream',
+    body: 'retry: 600000\n\nevent: hello\ndata: {"typing_allowed": false}\n\nevent: end\ndata: {"state": "none"}\n\n' }));
   await page.route('**/api/act', async route => {
     const body = route.request().postDataJSON();
     if (body.op !== 'session.new') return route.continue();

@@ -6,7 +6,8 @@
    again (the workspace setting and the sign-in). Select and copy like in the Terminal app; Copy copies the selection
    or the whole screen; a paste with a line end asks once. While typing the helper's screen follows the size of its
    box (onSize); while watching it keeps the helper's own size and scrolls.
-     UI.term({label, onInput(data) -> Promise<{ok, status, text}>, onSize({cols, rows}), onTyping(on)})  -> handle
+     UI.term({label, plain, onInput(data) -> Promise<{ok, status, text}>, onSize({cols, rows}), onTyping(on)})  -> handle
+       plain                              true for a plain terminal (no helper): the words say "this terminal"
        handle.el                          the element to put in the page
        handle.hello({typing_allowed})     the bridge's first word: may this workspace type at all
        handle.screen({cols, rows, data})  the whole screen (data: base64 terminal bytes), first and after a gap
@@ -28,11 +29,11 @@
   /* Lines in a paste (a line end at the very end counts as Enter, not as a line); 0 for no text. */
   const lineCount = text => { const t = String(text || '').replace(/\r\n?/g, '\n'); return t ? t.replace(/\n$/, '').split('\n').length : 0; };
   /* What a paste with a line end asks first; '' = it goes in without asking (no line end in it). */
-  function pasteAsk(text) {
-    const t = String(text || '').replace(/\r\n?/g, '\n');
+  function pasteAsk(text, where) {
+    const t = String(text || '').replace(/\r\n?/g, '\n'), w = where || 'the helper’s screen';
     if (!t.includes('\n')) return '';
     const n = lineCount(t);
-    return n === 1 ? 'Paste 1 line and press Enter in the helper’s screen?' : 'Paste ' + n + ' lines into the helper’s screen?';
+    return n === 1 ? 'Paste 1 line and press Enter in ' + w + '?' : 'Paste ' + n + ' lines into ' + w + '?';
   }
   /* Pasted text before it goes in: no control characters but tab and line ends (an escape could end the bracketed
      paste early and act as keys, Ctrl+C as a stop), and so no paste markers either. */
@@ -68,6 +69,7 @@
   const WORDS = {
     watch: 'Watching · select text to copy it',
     type: 'Typing: your keys go to the helper · Shift+Tab stops',
+    typePlain: 'Typing: your keys go to this terminal · Shift+Tab stops',
     off: 'Watching only · typing is off in Settings',
     loading: 'Connecting to the helper’s screen…',
     error: 'The screen stopped updating. orch keeps trying; the helper keeps working.',
@@ -153,7 +155,7 @@
       return true;
     }
     function words() {
-      const w = !live ? WORDS[state] || WORDS.none : typing ? WORDS.type : allowed && canType ? WORDS.watch : WORDS.off;
+      const w = !live ? WORDS[state] || WORDS.none : typing ? (o.plain ? WORDS.typePlain : WORDS.type) : allowed && canType ? WORDS.watch : WORDS.off;
       if (say.textContent !== w) say.textContent = w;
       swRow.hidden = !(live && allowed && canType);
       sw.setAttribute('aria-checked', String(typing));
@@ -228,7 +230,7 @@
       const t = cleanPaste((e.clipboardData && e.clipboardData.getData('text')) || '');
       e.preventDefault(); e.stopPropagation();  // every paste goes in cleaned, never as the browser hands it to xterm
       if (!typing || !t) return;
-      const q = pasteAsk(t);
+      const q = pasteAsk(t, o.plain ? 'this terminal' : '');
       if (!q) { xt.paste(t); return; }
       held = t; askText.textContent = q; ask.hidden = false; askGo.focus();
     }, true);

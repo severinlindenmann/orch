@@ -299,3 +299,10 @@ test('a paste never carries control characters: no early end of the bracketed pa
   assert.ok(p.defaultPrevented, 'the browser\'s own paste never reaches xterm');
   assert.equal(xt.pasted.at(-1), 'a[201~b');
 });
+
+test('a plain terminal says this terminal, not the helper', () => {
+  assert.match(T.pasteAsk('a\nb', 'this terminal'), /2 lines into this terminal\?/);
+  const ui = T({label: 'Plain terminal', plain: true, onInput: async () => ({ok: true})});
+  ui.hello({typing_allowed: true}); ui.screen(SCREEN); ui.setTyping(true);
+  assert.match(byClass(ui.el, 'term-say').textContent, /go to this terminal/);
+});

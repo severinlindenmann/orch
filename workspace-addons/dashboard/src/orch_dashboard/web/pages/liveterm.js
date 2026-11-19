@@ -12,11 +12,13 @@ const LIVE_TERM_KEEP = 30000;      // ms a terminal no pane shows is kept (a pan
 const LIVE_TERM_RETRY = 5000;      // ms before a stream that closed is opened again
 const liveTerms = new Map();       // session id -> {ui, es, seen, ended, retry}
 
-// Whether a pane body shows the terminal: a ticket's pane when its view is Terminal (pages/livechat.js), or always
-// when there is no chat view in it. A session without a ticket has no stream of its own here yet.
+// Whether a pane body shows the terminal: a ticket's pane when the person chose Terminal (Chat | Terminal,
+// pages/livechat.js; Chat comes first as in draft D, and the bridge serves only a few pages at once), and the plain
+// terminal always (the bridge streams it under its session id). Other sessions without a ticket keep their own view.
 function liveTermWanted(body) {
-  if (!body || body.dataset.liveKind) return false;
-  return body.dataset.liveView === 'term' || !body.querySelector('[data-live-chat]');
+  if (!body) return false;
+  if (body.dataset.liveKind) return body.dataset.liveKind === 'terminal';
+  return body.dataset.liveView === 'term';
 }
 // The answer of a POST in the shape UI.term wants: {ok, status, text}.
 async function liveTermPost(path, payload) {
@@ -33,11 +35,11 @@ function liveTermSay(r) {
   else window.orch?.toast?.(r.text.slice(0, 120) || 'The screen did not take that. Try again.', 'error');
 }
 const liveTermJSON = s => { try { return JSON.parse(s); } catch (e) { return null; } };
-function liveTermFor(id, label) {
+function liveTermFor(id, label, plain) {
   let t = liveTerms.get(id);
   if (t) return t;
   const ui = window.UI.term({
-    label,
+    label, plain,
     onInput: async data => { const r = await liveTermPost('/api/term/input', {ticket:id, data}); if (!r.ok) liveTermSay(r); return r; },
     onSize: size => liveTermPost('/api/term/size', {ticket:id, cols:size.cols, rows:size.rows}),
   });
@@ -71,7 +73,7 @@ function liveTermClose(t, wait) {
 // element moves into a body the layer drew again.
 function liveTermApply(body, live) {
   if (typeof window !== 'object' || !window.UI?.term) return;
-  const id = body.dataset.liveBody, on = !!live && liveTermWanted(body);
+  const id = body.dataset.liveBody, plain = body.dataset.liveKind === 'terminal', on = (plain || !!live) && liveTermWanted(body);
   const pre = body.querySelector('[data-live-lines]');
   if (!on) {
     const t = liveTerms.get(id);
@@ -80,7 +82,7 @@ function liveTermApply(body, live) {
     return;
   }
   const label = body.closest('.live-pane')?.querySelector('.live-pt')?.textContent || 'the helper';
-  const t = liveTermFor(id, label);
+  const t = liveTermFor(id, label, plain);
   t.seen = Date.now();
   if (t.ui.el.parentNode !== body) {
     if (pre) pre.after(t.ui.el); else body.append(t.ui.el);
