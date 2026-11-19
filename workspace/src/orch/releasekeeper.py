@@ -669,7 +669,9 @@ class World:
 
     def fixes(self) -> list[dict]:
         """Recently merged pull requests into develop labelled "fix for release N": {number, release, sha,
-        title, url} (sha = the merge commit on develop)."""
+        head, title, url}. sha = the commit GitHub says merged it: a merge-queue group's merge commit
+        when it was merged inside a group, so never shipped as a whole; head = the pull request's own last
+        commit, the one that was reviewed (ORCH-786)."""
         if self.sim is not None:
             return list(self.sim.get("fixes") or [])
         rows = self._gh_json(
@@ -685,19 +687,21 @@ class World:
                 "--limit",
                 "30",
                 "--json",
-                "number,title,url,labels,mergeCommit",
+                "number,title,url,labels,mergeCommit,headRefOid",
             ]
         )
         out = []
         for r in rows or []:
             n = fix_target(r.get("labels"))
             sha = str((r.get("mergeCommit") or {}).get("oid") or "")
-            if n is not None and re.fullmatch(r"[0-9a-f]{40}", sha):
+            head = str(r.get("headRefOid") or "")
+            if n is not None and re.fullmatch(r"[0-9a-f]{40}", sha) and re.fullmatch(r"[0-9a-f]{40}", head):
                 out.append(
                     {
                         "number": int(r["number"]),
                         "release": n,
                         "sha": sha,
+                        "head": head,
                         "title": r.get("title") or "",
                         "url": r.get("url") or "",
                     }  # fmt: skip
@@ -1131,11 +1135,64 @@ class World:
             }
         return got
 
+    def fix_range(self, fix: dict, cwd: str | Path) -> tuple[str, str]:
+        """(base, head): the fix pull request's own change is `git diff base head`, nothing else (ORCH-786):
+        from where its reviewed head meets develop as it was before the merge, to that head. The same for a
+        merge commit (alone or a merge-queue group's) and a squash: never the merged commit's own content.
+        Refused when the head is not known or was not what got merged."""
+        sha, head = str(fix.get("sha") or ""), str(fix.get("head") or "")
+        num = fix.get("number")
+        if not (re.fullmatch(r"[0-9a-f]{40}", sha) and re.fullmatch(r"[0-9a-f]{40}", head)):
+            raise Refused(f"the fix #{num} has no known merged commit and head")
+
+        def git(*a: str, timeout: int = 120) -> subprocess.CompletedProcess:
+            return self._run(["git", "-C", str(cwd), *a], timeout=timeout)
+
+        parents = git("rev-list", "--parents", "-n", "1", sha).stdout.split()[1:]
+        if not parents:
+            raise Refused(f"the fix #{num}'s merged commit {sha[:8]} is not known here")
+        if git("cat-file", "-e", f"{head}^{{commit}}").returncode != 0 and isinstance(num, int):
+            git("fetch", "-q", "origin", f"refs/pull/{num}/head", timeout=180)  # a squashed branch is gone
+        if git("cat-file", "-e", f"{head}^{{commit}}").returncode != 0:
+            raise Refused(f"the fix #{num}'s reviewed head {head[:8]} is not known here")
+        before = parents[0]
+        if git("merge-base", "--is-ancestor", head, sha).returncode != 0 and len(parents) != 1:
+            raise Refused(
+                f"the fix #{num}'s own commits cannot be told apart in {sha[:8]} (its head is not in it)"
+            )
+        if git("merge-base", "--is-ancestor", head, before).returncode == 0:
+            raise Refused(f"the fix #{num} was in develop before {sha[:8]}: nothing of its own")
+        base = git("merge-base", head, before).stdout.strip()
+        if not base:
+            raise Refused(f"the fix #{num} shares no history with develop")
+        return base, head
+
+    def fix_files(self, fix: dict) -> list[str] | None:
+        """Every path the fix's own change touches (a rename as both names), from git; None when unknown."""
+        if self.sim is not None:
+            got = fix.get("files")
+            return None if got is None else [str(f.get("path") if isinstance(f, dict) else f) for f in got]
+        try:
+            base, top = self.fix_range(fix, self.cfg.clone)
+        except Refused:
+            return None
+        r = self._run(
+            ["git", "-C", str(self.cfg.clone), "diff", "-z", "--name-only", "--no-renames", base, top]
+        )
+        return [x for x in r.stdout.split("\0") if x] if r.returncode == 0 else None
+
     def cut_fix(self, n: int, k: int, fix: dict, body: str) -> dict | None:
-        """Release n.k: a branch from main with ONLY the fix's change on top (cherry-pick of its merge commit
-        on develop), pushed, and a pull request into main. Returns {number, url, wt, branch, sha}."""
+        """Release n.k: a branch from main with ONLY the fix pull request's own change on top, pushed, and a
+        pull request into main. Returns {number, url, wt, branch, sha}.
+
+        Its own change is what the pull request itself shows: from where its last commit (head, the one that
+        was reviewed) meets develop as it was before the merge, to that head. Never the merge commit as a
+        whole: a merge-queue group merge commit holds the other pull requests of the group too (ORCH-786)."""
         br = f"release/part{n}.{k}-{now().astimezone().strftime('%m%d')}"
         wt = (self.cfg.worktrees or Path(".")) / f"release-{n}.{k}"
+
+        def git(*a: str) -> subprocess.CompletedProcess:
+            return self._run(["git", "-C", str(wt), *a])
 
         def go():
             self.bot_ok()
@@ -1147,20 +1204,32 @@ class World:
             )
             if r.returncode != 0:
                 raise Refused(f"git worktree: {(r.stderr or r.stdout).strip()[:200]}")
-            parents = self._run(
-                ["git", "-C", str(wt), "rev-list", "--parents", "-n", "1", fix["sha"]]
-            ).stdout.split()
-            pick = ["cherry-pick", "-x", *(["--mainline", "1"] if len(parents) > 2 else []), fix["sha"]]
-            r = self._run(["git", "-C", str(wt), *pick])
+            base, tip = self.fix_range(fix, wt)
+            patch = (wt.parent / f".release-{n}.{k}.patch").resolve()
+            try:
+                r = git("diff", "--binary", "--no-color", "--no-ext-diff", f"--output={patch}", base, tip)
+                if r.returncode != 0 or not patch.is_file() or not patch.stat().st_size:
+                    raise Refused(f"the fix #{fix['number']} has no change of its own")
+                r = git("apply", "--3way", "--index", str(patch))
+            finally:
+                patch.unlink(missing_ok=True)
             if r.returncode != 0:
-                self._run(["git", "-C", str(wt), "cherry-pick", "--abort"])
+                git("reset", "-q", "--hard", "origin/main")
                 raise Refused(
                     f"the fix #{fix['number']} does not apply on main as it is: "
                     f"{(r.stderr or r.stdout).strip()[:160]}"
                 )
+            msg = (
+                f"Fix #{fix['number']}: {_short(fix.get('title') or 'fix', TITLE_MAX)}\n\n"
+                f"Only the change of pull request #{fix['number']} ({base[:12]}..{tip[:12]}), "
+                f"taken by the release keeper for fix release {n}.{k}."
+            )
+            r = git("commit", "-q", "--no-verify", "-m", msg)
+            if r.returncode != 0:
+                raise Refused(f"commit: {(r.stderr or r.stdout).strip()[:200]}")
             if not self.secret_free(body):
                 raise Refused("the release text looks like it holds a secret: stop")
-            head = self._run(["git", "-C", str(wt), "rev-parse", "HEAD"]).stdout.strip()
+            top = git("rev-parse", "HEAD").stdout.strip()
             r = self._run(["git", "-C", str(wt), "push", "-q", "-u", "origin", br], timeout=300)
             if r.returncode != 0:
                 raise Refused(f"push: {(r.stderr or r.stdout).strip()[:200]}")
@@ -1189,7 +1258,7 @@ class World:
                 "url": url,
                 "wt": str(wt),
                 "branch": br,
-                "sha": head,
+                "sha": top,
             }
 
         got = self.act(f"cut:release {n}.{k} with #{fix['number']}", go)
@@ -1767,13 +1836,46 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
 
 
 def _other_change(hold: str, fix: dict) -> bool:
-    """A security hold that names another pull request or another commit than the fix (only those cannot
-    hold a fix release, which ships the fix alone). Any other hold (the check could not run ...) counts."""
+    """A security hold that names another pull request or another commit than the fix: the fix release ships
+    only the fix pull request's own change (cut_fix), so those cannot hold it. A hold on a merge-queue group
+    names the group, and the group's other pull requests are not shipped. Any other hold (the check could not
+    run, a commit of the fix itself or its merge commit ...) counts."""
     m = re.match(r"^#(\d+) \(", hold) or re.match(r"^([0-9a-f]{7,40}) \(", hold)
     if not m:
         return False
     v = m[1]
-    return v != str(fix["number"]) if hold.startswith("#") else not fix["sha"].startswith(v)
+    if hold.startswith("#"):
+        return v != str(fix["number"])
+    return not any(str(fix.get(k) or "").startswith(v) for k in ("sha", "head"))
+
+
+def _own_review_hold(w: World, st: dict, fix: dict) -> tuple[str | None, list[str]]:
+    """(hold, lines) for the fix pull request's own security review, for the head it was merged with. A fix
+    merged inside a merge-queue group has no hold of its own in the release's list (that names the group), so
+    it is checked here, over exactly the files the fix release ships: when one is a watched path, only an OK
+    for that head lets it ship. A missing review is started here (ORCH-786)."""
+    n, head = str(fix["number"]), str(fix.get("head") or "")
+    files = w.fix_files(fix)
+    if files is None:
+        return f"#{n} (its own changed files are not known)", []
+    hits = secreview.matched(files, secreview.patterns(w.cfg.security_paths))
+    if not hits:
+        return None, []
+    sec = st.get("security") if isinstance(st.get("security"), dict) else {}
+    sec.setdefault("prs", {})
+    st["security"] = sec
+    e = sec["prs"].get(n)
+    lines: list[str] = []
+    if not isinstance(e, dict) or (e.get("sha") != head and not secreview._open(w, e.get("tid"))):
+        pr = {"number": int(n), "title": fix.get("title"), "url": fix.get("url"), "headRefOid": head}
+        lines.append(secreview._start(w, sec, w.cfg.role or "", pr, hits, secreview._window(w)))
+        e = sec["prs"].get(n)
+    if not isinstance(e, dict) or not head or e.get("sha") != head:
+        return f"#{n} (no security review of its merged head yet)", lines
+    got = secreview._effective(e, (w.security_verdicts() or {}).get(n))
+    if got in secreview.OK:
+        return None, lines
+    return f"#{n} (security review " + ("found problems)" if got == "problems" else "has no OK yet)"), lines
 
 
 def fix_lane(w: World, st: dict, hold: str | None, sec_holds: list[str] | None = None) -> list[str]:
@@ -1803,6 +1905,10 @@ def fix_lane(w: World, st: dict, hold: str | None, sec_holds: list[str] | None =
         return out + [f"fix #{todo[0]['number']} for release {newest} waits: on hold: {hold}"]
     fix = sorted(todo, key=lambda f: f["number"])[0]
     mine = [x for x in sec_holds or [] if not _other_change(x, fix)]  # fail closed: unknown holds count
+    own, started = _own_review_hold(w, st, fix)
+    out += started
+    if own and own not in mine:
+        mine.append(own)
     if mine:  # the same rule as every release: no cut before the security OK of what it ships
         return out + [
             f"fix #{fix['number']} for release {newest} waits for its security OK: " + ", ".join(mine)
