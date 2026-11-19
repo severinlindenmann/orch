@@ -105,7 +105,8 @@
     fill.style.setProperty('--value', pct + '%');
     return h('div', {className: 'progress-labeled'},
       h('div', {className: 'progress-text'},
-        h('span', {}, b.label + ' · ' + head + ' ', b.limit != null ? h('span', {className: 'meta', text: 'of ' + amount(b.limit, b.limit_unit)}) : null),
+        h('span', {}, b.label + ' · ' + head + ' ', b.limit != null ? h('span', {className: 'meta', text: 'of ' + amount(b.limit, b.limit_unit)})
+          : b.early != null ? h('span', {className: 'meta', text: 'switches at ' + num(b.early) + '% (default)'}) : null),
         h('span', {text: right})),
       h('div', {className: 'progress', role: 'progressbar', 'aria-label': b.label, 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round(pct))}, fill));
   }
