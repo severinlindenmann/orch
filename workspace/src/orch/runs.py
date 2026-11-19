@@ -1676,6 +1676,15 @@ def start_prepare(root: Path, tid: str, by: str, *, agent: str | None = None) ->
     return r
 
 
+def _start_pressed(root: Path, tid: str) -> str | None:
+    """Who pressed Start while the prepare run worked (claim's Busy path queued that start), or None."""
+    for i in undelivered(root, tid):
+        by = str(i.get("by") or "")
+        if i.get("kind") == "event" and i.get("via") is None and by.startswith("human:") and len(by) > 6:
+            return by
+    return None
+
+
 def _prepare_end(root: Path, tid: str, run: str, rc: int, by: str) -> None:
     """The prepare run ended: Prepared when the ticket is filled (description, done-when, estimate), else Not
     prepared yet with the reason. Its conversation stays recorded on the ticket for Start (wrap did that)."""
@@ -1989,13 +1998,19 @@ def wrap(
             with contextlib.suppress(Exception):
                 said = f"The agent showed no sign of life for {round(watch)} seconds. orch stopped it and "
                 tickets.log(root, tid, said + "started it again fresh.", "orch")
-            p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
+            p = plan(
+                root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items,
+                prepare=bool(rec.get("prepare")),
+            )  # fmt: skip
             argv, stdin, new_session, resumed = p["argv"], p["stdin"], p["session"], False
             flags.clear()
             rc, out = collected(_run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags, key))
         elif resumed and rc != 0 and adapters.session_missing(name, out, root):
             # only "that session does not exist" starts fresh; the input of this turn goes in with it
-            p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
+            p = plan(
+                root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items,
+                prepare=bool(rec.get("prepare")),
+            )  # fmt: skip
             argv, stdin, new_session = p["argv"], p["stdin"], p["session"]
             flags.clear()
             rc, out = collected(_run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags, key))
@@ -2035,13 +2050,19 @@ def wrap(
                 hit = limitstop.from_output(out, why)
                 if hit is not None and limitstop.note(root, tid, hit):
                     tickets.log(root, tid, limitstop.stopped_text(hit), "agent:helper-watcher")
-        # a prepare run takes no second turn: what came in meanwhile (a Start, an answer) waits for the next
+        if rec.get("prepare"):  # marked before the claim goes, so a Start right after sees how it ended
+            _prepare_end(root, tid, run, rc, f"agent:{name}")
+            starter = _start_pressed(root, tid)
+            if starter:  # a person pressed Start meanwhile: the same conversation goes on into the work
+                rec["prepare"] = False
+                set_process_fields(root, tid, run, prepare=False)
+                with contextlib.suppress(Exception):
+                    tickets.mark_working(root, tid, starter, adapters.load(name, root)["label"])
+        # a prepare run takes no second turn for anything else (an answer waits for the next run)
         drain = (
             turns <= MAX_DRAIN_TURNS and not flags.get("hung") and brake.paused(root) is None
             and not rec.get("prepare")
         )  # fmt: skip
-        if rec.get("prepare"):  # marked before the claim goes, so a Start right after sees how it ended
-            _prepare_end(root, tid, run, rc, f"agent:{name}")
         if release(root, tid, run, keep_if_pending=drain)["released"]:
             if key is not None and key["turns"]:  # what the run cost on its credit, or that it is unknown
                 with contextlib.suppress(Exception):

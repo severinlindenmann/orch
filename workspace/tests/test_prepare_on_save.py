@@ -28,7 +28,7 @@ orch = shlex.split(os.environ["ORCH_CMD"])
 tid = os.environ["ORCH_TICKET"]
 if how == "fail":
     sys.exit(3)
-if how == "tidy":
+if how == "tidy" and "Prepare orch ticket" in " ".join(args):  # a later turn is the work: nothing here
     subprocess.run(orch + ["ticket", "tidy", tid, "Monthly sales report", "--description",
         "Make the monthly sales report for the team.", "--done-when", "The report is in the shared folder",
         "--estimate-minutes", "30", "--estimate-cost", "2"], check=True, capture_output=True)
@@ -253,3 +253,26 @@ def test_a_ticket_moved_out_of_backlog_before_the_claim_is_not_prepared(proj, ne
     with pytest.raises(Exception, match="Backlog"):
         runs.claim(proj, tid, "human:t", "fake", "oneshot", prepare=True)
     assert runs.read(proj, tid) is None
+
+
+def test_a_start_while_prepare_runs_goes_on_into_the_work_in_the_same_run(proj, run, helper, monkeypatch):
+    log = helper("tidy")
+    tid = _new(run)
+    real = runs._prepare_end
+
+    def slow_end(root, t, r, rc, by):  # the person presses Start just before the prepare run ends
+        code, out, _ = run("run", "start", t, "--mode", "oneshot", "--by", "human:t", "--json")
+        assert code == 2 and json.loads(out)["pending"] is True
+        real(root, t, r, rc, by)
+
+    monkeypatch.setattr(runs, "_prepare_end", slow_end)
+    rec = runs.claim(proj, tid, "human:t", "fake", "oneshot", prepare=True)
+    p = runs.plan(proj, tid, mode="oneshot", agent="fake", prepare=True)
+    assert runs.wrap(proj, rec["run"], tid, "fake", p["argv"], stdin=p["stdin"]) == 0
+    t = tickets.load(proj, tid)
+    assert t["prepare"]["state"] == "prepared" and t["started"] is True
+    prompts = [x for x in log.read_text(encoding="utf-8").splitlines() if x.startswith("prompt:")]
+    assert (
+        len(prompts) == 2 and "Prepare orch ticket" in prompts[0] and "Prepare orch ticket" not in prompts[1]
+    )
+    assert any(x.endswith("started") for x in _texts(proj, tid))
