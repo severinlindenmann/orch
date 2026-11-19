@@ -61,6 +61,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import blame, settings, store
+from . import precheck as prechecks
 from .store import FINISHED, MERGED, OUT, RUNNING, WAITING, Refused
 
 MAX_GROUP = settings.DEFAULT_MAX_GROUP  # the setting max_group wins (settings.max_group)
@@ -114,6 +115,7 @@ class Runner:
         sleep=time.sleep,
         wake=None,
         ask=None,
+        precheck=None,
     ):
         from orch import ghlimit, prwait
 
@@ -127,6 +129,7 @@ class Runner:
         self.take = take or ghlimit.take
         self.wake = wake or _wake
         self.ask = ask or _ask_merge
+        self.pre = precheck or prechecks.run
         self.me: str | None = None
         self.red_checks: frozenset[str] = frozenset()  # failed check names of the last red group
         self._red: dict[tuple[str, str], tuple[float, frozenset[str]]] = {}
@@ -623,7 +626,12 @@ class Runner:
             for e in inside:
                 self.alone(e)
         else:
-            red = self._check_group(repo, base, sha, inside, alone)
+            out = self.precheck(git, start, sha, inside, heads)
+            if out:  # red on its own in the quick checks: left the queue; the others are built again
+                left = [e for e in inside if e not in out]
+                red = self.group(left, alone) if left else []
+            else:
+                red = self._check_group(repo, base, sha, inside, alone)
         for e in apart:
             if ahead is not None:  # it conflicts with the group before it: a round of its own, no try used
                 why = f"it conflicted with the group {ahead.url} before it; waits again"
@@ -634,6 +642,48 @@ class Runner:
             else:  # conflicts with the group: in a group of its own, after it
                 self.alone(e, "it conflicted with other pull requests in the merge queue")
         return red
+
+    def precheck(self, git, start: str, sha: str, inside: list[dict], heads: dict[str, str]) -> list[dict]:
+        """The quick checks on the merged tree before the group is pushed (setting precheck, ORCH-545). Green, not
+        set or trouble: []. Red: each member on its own on top of start; those red alone leave the queue now with
+        the failing lines and are returned. Red only together: [] (the group run and its split decide)."""
+        cmd = settings.precheck(self.root)
+        if not cmd:
+            return []
+        got = self.pre(git, sha, cmd)
+        if got.ok is not False:
+            if got.ok is None:
+                self.log(f"The precheck did not run ({got.tail}); the group run decides.")
+            return []
+        if len(inside) == 1:
+            bad = [(inside[0], got)]
+        else:
+            bad = []
+            for e in inside:
+                try:
+                    one, included, _ = git.build(start, [(e["number"], heads[str(e["number"])])])
+                except Refused:
+                    continue
+                if included and (own := self.pre(git, one, cmd)).ok is False:
+                    bad.append((e, own))
+            if not bad:
+                self.log("The precheck was red only for the group together; the group run decides.")
+                return []
+        for e, r in bad:
+            base = e.get("base") or ""
+            line = (
+                f"The quick checks of the merge queue (precheck) failed for {e['url']} on top of {base}, before "
+                f"its group run: fix it, push, then add it to the merge queue again."
+            )
+            if r.tail:
+                line += " What failed: " + " | ".join(r.tail.splitlines())
+            self.finish(e, OUT, line, "checks failed")
+        self.log(
+            "Precheck red: "
+            + ", ".join(f"#{e['number']}" for e, _ in bad)
+            + " left the queue before the group run."
+        )
+        return [e for e, _ in bad]
 
     def _check_group(
         self, repo: str, base: str, sha: str, inside: list[dict], alone: bool = False

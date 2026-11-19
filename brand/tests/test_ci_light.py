@@ -115,6 +115,79 @@ def test_every_rule_test_exists():
     assert set(light.RULE_TESTS) <= have
 
 
+def test_every_rule_node_exists():
+    for node in light.RULE_NODES:
+        f, name = node.split("::")
+        assert f"def {name}(" in (ROOT / "workspace" / "tests" / f).read_text(encoding="utf-8"), node
+
+
+def test_a_new_rule_test_runs_by_its_name_alone():
+    """Owner 19 Nov: test_spawn_argv and others were never on the hand list, so their red reached queue groups."""
+    texts = {**TEXTS, "test_spawn_argv.py": "", "test_no_new_thing.py": "", "test_words_lint.py": "",
+             "test_relay_secret_scan.py": "", "test_secret_scan_doors.py": "", "test_storage.py": ""}  # fmt: skip
+    got = light.rule_tests(texts)
+    for t in (
+        "test_spawn_argv.py",
+        "test_no_new_thing.py",
+        "test_words_lint.py",
+        "test_secret_scan_doors.py",
+    ):
+        assert t in got
+    assert "test_relay_secret_scan.py" not in got and "test_storage.py" not in got
+    assert list(light.RULE_TESTS) == got[: len(light.RULE_TESTS)]
+    assert light.RULE_NODES[0] in got
+    rules = next(s for s in light.plan(["workspace-addons/sync/x.py"], texts, ADDONS) if s["name"].startswith("rule"))
+    assert "tests/test_spawn_argv.py" in rules["cmd"] and f"tests/{light.RULE_NODES[0]}" in rules["cmd"]
+
+
+def test_the_real_tree_runs_spawn_argv_and_history_lint():
+    got = light.rule_tests(light.test_texts())
+    assert {
+        "test_spawn_argv.py",
+        "test_history_lint.py",
+        "test_core_names_no_addon.py",
+        "test_skills_lint.py",
+    } <= set(got)
+
+
+def test_a_changed_click_through_runs_itself_in_a_browser():
+    f = "workspace-addons/dashboard/clickthrough/features/f-links.cjs"
+    steps = light.plan([f], TEXTS, ADDONS)
+    assert "headless Chromium for the page tests" in names(steps)
+    click = next(s for s in steps if s["name"].startswith("dashboard: the 1 click-through"))
+    assert click["cmd"].endswith("run.cjs --only f-links")
+    assert names(steps).index("headless Chromium for the page tests") < names(steps).index(click["name"])
+    gone = "workspace-addons/dashboard/clickthrough/features/zz-deleted.cjs"
+    assert not any(n.startswith("dashboard: the") for n in names(light.plan([gone], TEXTS, ADDONS)))
+
+
+def test_a_focus_or_insights_change_loads_their_pages():
+    for f in (
+        "workspace-addons/focus/src/x.py",
+        "workspace-addons/insights/web/a.js",
+        "e2e/focus_insights_smoke.cjs",
+    ):
+        assert "Focus and Insights pages load in a browser" in names(light.plan([f], TEXTS, ADDONS)), f
+    steps = light.plan(["workspace/src/orch/store.py"], TEXTS, ADDONS)
+    assert "headless Chromium for the page tests" not in names(steps)
+
+
+def test_the_browser_version_is_the_page_jobs_one():
+    addons = (ROOT / ".github" / "workflows" / "addons.yml").read_text(encoding="utf-8")
+    assert f"playwright@{light.PLAYWRIGHT}" in addons
+
+
+def test_rules_mode_runs_only_the_whole_tree_checks_whatever_changed():
+    steps = light.rules_plan(TEXTS)
+    assert names(steps) == [
+        "brand: words, tokens, CI time limits",
+        "style rules",
+        "generated files are current (shipped_addons.json)",
+        "workspace: ruff",
+        "rule tests over the whole tree",
+    ]
+
+
 def test_the_page_library_runs_the_dashboard_suite():
     steps = light.plan(["workspace/src/orch_ui/static/widgets.js"], TEXTS, ADDONS)
     assert "add-on dashboard" in names(steps)
