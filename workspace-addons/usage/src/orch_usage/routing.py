@@ -243,9 +243,7 @@ def decide(root: Path, req: dict, at: datetime | None = None, switch=switching._
     allowed = [
         a
         for a in accounts
-        if a["on"]
-        and not a.get("removed")
-        and not (a.get("credit_ends") and store.to_time(a["credit_ends"]) <= at)  # the credit itself ended
+        if not store.closed(a, at)  # removed, off or past its own end: the same check as `orch usage ask`
         and (not a["rule"].get("for") or kind in a["rule"]["for"])
     ]
     usable = []

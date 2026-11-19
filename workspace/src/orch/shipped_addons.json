@@ -499,6 +499,11 @@
     "who": "people",
     "writes": []
    },
+   "left": {
+    "summary": "Say what is left on an API credit now, as read at the provider",
+    "who": "people",
+    "writes": []
+   },
    "limit": {
     "summary": "Set or remove one limit of an account",
     "who": "people",
@@ -531,6 +536,11 @@
    },
    "remove": {
     "summary": "Take an API credit or helper tool off the list",
+    "who": "people",
+    "writes": []
+   },
+   "restore": {
+    "summary": "Bring back an API credit or helper tool that was removed",
     "who": "people",
     "writes": []
    },

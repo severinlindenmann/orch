@@ -389,7 +389,8 @@ def sync_found(accounts: list[dict], rows: list[dict], found, provider: str, rea
 
 
 PROVIDERS = ("anthropic", "openai")  # API credits Usage can count for skills (Anthropic API, OpenAI)
-_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,31}")
+# a credit skill's name for a credit; a declared one is <skill or add-on>/<name> (ORCH-600 format)
+_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}(/[A-Za-z0-9][A-Za-z0-9_.-]{0,31})?")
 _SECRETISH = re.compile(
     r"@|sk-|key-[A-Za-z0-9_-]{8,}|[A-Za-z0-9_\-]{32,}"
 )  # a key; a name like key-1 is fine
@@ -428,6 +429,95 @@ def check_known(k) -> dict:
         "first": k.get("first") is True,
         "unnamed": k.get("unnamed") is True,
     }
+
+
+def provider_slug(words: str) -> str:
+    """A provider in plain words ("OpenAI", "Weatherly") as the short name Usage keeps ("openai", "weatherly")."""
+    slug = re.sub(r"[^a-z0-9]+", "-", (words or "").strip().lower()).strip("-")[:32].strip("-")
+    return slug if _PROVIDER.fullmatch(slug) else "other"
+
+
+def sync_declared(accounts: list[dict], rows: list[dict], credits: list[dict]) -> None:
+    """Add the API credits skills and add-ons declare (orch.apicredits.declared, ORCH-625) that Usage does not list
+    yet: on, last in order, no limits; one history line each. No code per provider: a new skill that declares a
+    credit shows up by itself. Only the label, the provider, the full name (<skill>/<name>), the declaring skill and,
+    for spend = "log:<file>", where its spend log is; never `key` or `balance`.
+
+    A credit already listed is kept as the person set it (also a removed one: it stays removed). One a person added
+    by hand with the same label (or a credit skill told Usage with `--known`) is linked to the declaration instead of
+    listed twice. Only credits counted in dollars: Usage counts money (tokens and calls are not counted yet)."""
+    for c in credits:
+        if not isinstance(c, dict) or c.get("unit") != "$":
+            continue
+        full, label, owner = c.get("credit"), (c.get("label") or "").strip(), c.get("owner")
+        if not isinstance(full, str) or not _NAME.fullmatch(full) or _SECRETISH.search(full):
+            continue
+        if not label or len(label) > 64 or _SECRETISH.search(label):
+            continue
+        provider = provider_slug(c.get("provider") or "")
+        src = {"reader": "none", "name": full}
+        if isinstance(owner, str):
+            src["skill"] = owner
+        spend = c.get("spend") or ""
+        if isinstance(spend, str) and spend.startswith("log:") and isinstance(c.get("file"), str):
+            src.update(reader="spend-log", path=str(Path(c["file"]).parent / spend[4:]))
+        money = [a for a in accounts if a["type"] in MONEY_TYPES]
+        if any(a.get("source", {}).get("name") == full for a in money):
+            continue
+        short = full.split("/", 1)[1]
+        have = next(
+            (
+                a
+                for a in money
+                if a["label"].lower() == label.lower()
+                or (
+                    a.get("provider") == provider
+                    and a.get("source", {}).get("name") == short
+                    and not a.get("source", {}).get("skill")
+                )
+            ),
+            None,
+        )
+        if have:
+            old = have.get("source", {})
+            if old.get("reader", "none") != "none" and src["reader"] == "none":
+                src.update({k: old[k] for k in ("reader", "path", "unnamed") if k in old})
+            have["source"] = src
+            rows.append(_line(USAGE, "credit declared", have, {"name": old.get("name")}, {"name": full}))
+            continue
+        a = {
+            "id": new_id(accounts),
+            "label": label,
+            "type": "api-key",
+            "provider": provider,
+            "source": src,
+            "on": True,
+            "order": len(accounts) + 1,
+            "rule": empty_rule(),
+            "prev": None,
+        }
+        accounts.append(a)
+        _renumber(accounts)
+        rows.append(_line(USAGE, "credit declared", a, None, {"label": label, "order": a["order"]}))
+
+
+def closed(a: dict, at: datetime) -> str | None:
+    """Why an account may not be used at all now, in one plain sentence: removed, switched off or past its own end
+    (`credit_ends`). None when it is open. One check for `orch usage ask` and helper starts (routing.decide)."""
+    label = a["label"]
+    if a.get("removed"):
+        return f"{label} was removed. Bring it back on the Usage page."
+    if not a.get("on"):
+        return f"{label} is switched off. Turn it on on the Usage page."
+    ends = a.get("credit_ends")
+    if ends:
+        try:
+            end = to_time(str(ends))
+        except ValueError:
+            return None
+        if end <= at:
+            return f"{label} ended on {end.astimezone().strftime('%a %d %b %H:%M')}."
+    return None
 
 
 def credit_of(accounts: list[dict], provider: str, name: str) -> dict | None:
@@ -772,7 +862,7 @@ PROVIDER_WORDS = {"anthropic": "Anthropic", "openai": "OpenAI"}
 
 
 def provider_words(provider: str) -> str:
-    return PROVIDER_WORDS.get(provider, provider)
+    return PROVIDER_WORDS.get(provider) or provider[:1].upper() + provider[1:]  # a declared one: "weatherly"
 
 
 def together_label(provider: str) -> str:

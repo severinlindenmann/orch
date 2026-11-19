@@ -183,6 +183,20 @@ def _period_start(period: str, lim: dict, at: datetime) -> str | None:
     return lim.get("since")
 
 
+def declared(root: Path) -> list[dict]:
+    """The API credits skills and add-ons declare (orch core reader, ORCH-625). Empty when this orch has no reader
+    or it fails: a declaration never breaks the list. Only labels, providers, names and paths come back; the
+    reader never resolves a key."""
+    try:
+        from orch import apicredits
+    except ImportError:
+        return []
+    try:
+        return apicredits.declared(root)["credits"]
+    except Exception:  # noqa: BLE001 - a broken skill folder must not take the Usage list down
+        return []
+
+
 def gather(root: Path) -> dict:
     """Sync what the readers see, let ended rules fall back, and return accounts with their use."""
     warnings: list[str] = []
@@ -197,6 +211,7 @@ def gather(root: Path) -> dict:
         store.expire(accounts, rows)
         if found:
             store.sync_found(accounts, rows, found, provider="anthropic", reader="cswap")
+        store.sync_declared(accounts, rows, declared(root))
     d = store.load(root)
     by_key = {f.key: f for f in (found or [])}
     at = datetime.now(UTC)

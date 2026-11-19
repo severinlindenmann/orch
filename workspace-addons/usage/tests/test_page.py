@@ -5,7 +5,6 @@ import re
 import threading
 import urllib.error
 import urllib.request
-from pathlib import Path
 
 import pytest
 from conftest import jrun, switcher_data

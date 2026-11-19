@@ -1,6 +1,6 @@
 ---
 name: orch-usage
-description: Use when the person asks how far a subscription or API credit is used, which account is in use, whether Usage switches by itself, or asks to change an account's limit, the period it counts over, its order, to turn it on or off, to make a rule temporary, to set one limit over several accounts, which model a kind of work may use, or to add or remove an API credit or helper tool, or to set what is left on an API credit. Usage keeps only labels, names, numbers, rules and a history, never a login or key. Not for buying or topping up credit.
+description: Use when the person asks how far a subscription or API credit is used, which account is in use, whether Usage switches by itself, or asks to change an account's limit, period, order, on/off or a temporary rule, one limit over several accounts, which model a kind of work may use, to add or remove an API credit or helper tool, or to set what is left on one. Usage keeps only labels, names, numbers, rules and a history, never a login or key. Not for buying or topping up credit.
 metadata:
   owner: "orch"
   status: "active"
