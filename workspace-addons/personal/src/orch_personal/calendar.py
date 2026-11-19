@@ -25,6 +25,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -86,7 +87,7 @@ def build_app(root: Path) -> Path:
     exe = app / "Contents" / "MacOS" / "orch-calendar"
     if exe.is_file() and stamp.is_file() and stamp.read_text(encoding="utf-8").strip() == want:
         return app
-    if os.uname().sysname != "Darwin":
+    if sys.platform != "darwin":
         raise Refused(NOT_MAC)
     swiftc = shutil.which("swiftc")
     if not swiftc:
@@ -133,7 +134,7 @@ def _run_reader(root: Path, mode: str, frm: dt.date | None = None, days: int = 7
         args += ["--from", frm.isoformat(), "--days", str(days)]
     fake = os.environ.get("ORCH_PERSONAL_CALENDAR_READER")  # tests, and a reader the person built by hand
     if fake:
-        cmd = [fake, *args]
+        cmd = [sys.executable, fake, *args] if fake.endswith(".py") else [fake, *args]
     else:
         app = build_app(root)
         cmd = ["/usr/bin/open", "-W", "-n", *([] if mode == "request" else ["-g"]), str(app), "--args", *args]
@@ -272,7 +273,10 @@ def clean(raw) -> dict:
                 }
             )
     events = []
-    for e in (raw.get("events") or [])[:MAX_EVENTS]:
+    listed = raw.get("events") or []
+    # an answer cut at the limit is shown, but never used to say a time is free
+    complete = len(listed) < MAX_EVENTS and not str(raw.get("error") or "").startswith("More than")
+    for e in listed[:MAX_EVENTS]:
         if not isinstance(e, dict) or e.get("cal") not in seen:
             continue
         all_day = e.get("all_day") is True
@@ -300,6 +304,7 @@ def clean(raw) -> dict:
         "calendars": cals,
         "events": events,
         "note": _s(raw.get("error"), 200) or None,
+        "complete": complete,
     }
 
 
@@ -427,9 +432,15 @@ def free_times(ans: dict, lv: dict[str, str], frm: dt.date, days: int, minutes: 
     zone = ans["zone"]
     busy = []
     for e in ans["events"]:
-        if lv.get(e["cal"], "nothing") == "nothing" or e["declined"] or e["all_day"]:
+        if lv.get(e["cal"], "nothing") == "nothing" or e["declined"] or e["availability"] == "free":
             continue
-        if e["availability"] == "free":
+        if e["all_day"]:  # a busy all-day event (an absence) blocks its whole days
+            busy.append(
+                (
+                    dt.datetime.combine(e["start"], dt.time.min, zone),
+                    dt.datetime.combine(e["end"], dt.time.min, zone),
+                )
+            )
             continue
         busy.append((e["start"].astimezone(zone), e["end"].astimezone(zone)))
     busy.sort()

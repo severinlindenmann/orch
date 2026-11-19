@@ -260,6 +260,8 @@
   const weekNo = s => { const d = dayOf(s); d.setUTCDate(d.getUTCDate() + 3 - (d.getUTCDay() + 6) % 7);
     const y = new Date(Date.UTC(d.getUTCFullYear(), 0, 4)); return 1 + Math.round(((d - y) / DAY - 3 + (y.getUTCDay() + 6) % 7) / 7); };
   let calFrom = null, calHidden = new Set();
+  // a timed event is on day d when it starts that day, or started before and runs past its midnight
+  const onDay = (e, d) => e.start.slice(0, 10) === d || (e.start.slice(0, 10) < d && (e.end.slice(0, 10) > d || (e.end.slice(0, 10) === d && mins(e.end) > 0)));
 
   async function calAct(op, args, ok) {
     try { const r = await act(op, args); say(ok || (r && r.words ? 'Calendar: ' + r.words : 'Saved.')); today = null; route(); }
@@ -284,9 +286,9 @@
   function calWeek(w, cals) {
     const days = [...Array(7)].map((_, i) => addDays(w.from, i));
     const todayIso = iso(new Date());
-    const timed = w.events.filter(e => !e.all_day && e.start.slice(0, 10) >= w.from);
+    const timed = w.events.filter(e => !e.all_day);
     let lo = 8, hi = 18;
-    timed.forEach(e => { lo = Math.min(lo, Math.floor(mins(e.start) / 60));
+    timed.forEach(e => { if (e.start.slice(0, 10) >= w.from) lo = Math.min(lo, Math.floor(mins(e.start) / 60));
       hi = Math.max(hi, e.end.slice(0, 10) > e.start.slice(0, 10) ? 24 : Math.ceil(mins(e.end) / 60)); });
     const grid = el('div', 'cal-week');
     grid.style.setProperty('--rows', String((hi - lo) * 4));
@@ -307,8 +309,10 @@
       const lanes = [], placed = [];
       let cluster = [], clusterEnd = -1;
       const close = () => { const k = Math.max(...cluster.map(x => x.lane)) + 1; cluster.forEach(x => { x.k = k; }); cluster = []; };
-      timed.filter(e => e.start.slice(0, 10) === d).forEach(e => {
-        const s = mins(e.start), end = e.end.slice(0, 10) > d ? hi * 60 : Math.max(mins(e.end), s + 15);
+      timed.filter(e => onDay(e, d)).forEach(e => {
+        // an event over midnight shows on each day it covers, cut to that day
+        const s = e.start.slice(0, 10) === d ? mins(e.start) : lo * 60;
+        const end = e.end.slice(0, 10) > d ? hi * 60 : Math.max(mins(e.end), s + 15);
         if (s >= clusterEnd && cluster.length) { close(); lanes.length = 0; }
         let lane = lanes.findIndex(x => x <= s); if (lane < 0) { lane = lanes.length; lanes.push(0); } lanes[lane] = end;
         clusterEnd = Math.max(clusterEnd, end);
@@ -331,12 +335,12 @@
     // phone: one list per day
     const list = el('div', 'cal-days');
     for (const d of days) {
-      const evs = w.events.filter(e => e.all_day ? e.start <= d && e.end > d : e.start.slice(0, 10) === d);
+      const evs = w.events.filter(e => e.all_day ? e.start <= d && e.end > d : onDay(e, d));
       if (!evs.length) continue;
       const card = el('section', 'card');
       card.append(el('div', 'card-h', el('h2', null, fmtDay(d, {weekday: 'short', day: 'numeric', month: 'short'})), d === todayIso ? el('span', 'badge working', 'Today') : null));
       evs.forEach(e => { const c = cals[e.cal] || {};
-        const row = el('div', 'list-row', el('span', 'when meta', e.all_day ? 'All day' : hm(e.start) + '–' + hm(e.end)),
+        const row = el('div', 'list-row', el('span', 'when meta', e.all_day ? 'All day' : (e.start.slice(0, 10) === d ? hm(e.start) : '') + '–' + (e.end.slice(0, 10) === d ? hm(e.end) : '')),
           el('div', 'grow', el('strong', null, e.title || 'Busy'), el('p', 'meta', c.title || '')), el('span', 'cal-dot cal-' + (c.color % 6)));
         row.dataset.cal = e.cal; card.append(row); });
       list.append(card);

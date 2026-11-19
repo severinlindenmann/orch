@@ -422,17 +422,22 @@ def calendar_week(root: Path, who: Who, frm: str | None = None, days: int = 7) -
     """A helper gets each event only as far as its calendar's rule allows; the person gets everything."""
     day = cal_mod.parse_day(frm)
     if who.helper:
-        lv = cal_mod.levels(root)
-        if not any(v != "nothing" for v in lv.values()):
-            raise Refused(
-                "The person shares no calendar with helpers. Ask them on your ticket if you need their times."
-            )
-        out = cal_mod.for_helper(cal_mod.read(root, day, days), lv)
+        _shared_or_refuse(root)
+        ans = cal_mod.read(root, day, days)
+        lv = cal_mod.levels(root)  # read again after the source answered: a rule narrowed meanwhile applies
+        out = cal_mod.for_helper(ans, lv)
         shared = ", ".join(f"{c['title']} ({c['uses'].lower()})" for c in out["calendars"]) or "no calendar"
         what = f"read {days} day{'s' if days != 1 else ''} from {day}: {shared}"
         store.log(root, "calendar", what, who.by, who.ticket)
         return out
     return cal_mod.for_owner(root, day, days)
+
+
+def _shared_or_refuse(root: Path) -> None:
+    if not any(v != "nothing" for v in cal_mod.levels(root).values()):
+        raise Refused(
+            "The person shares no calendar with helpers. Ask them on your ticket if you need their times."
+        )
 
 
 def calendar_today(root: Path, who: Who) -> dict:
@@ -443,12 +448,16 @@ def calendar_free(root: Path, who: Who, frm: str | None, days: int, minutes: int
     day = cal_mod.parse_day(frm)
     if not 5 <= minutes <= 600:
         raise Refused("Ask for 5 to 600 minutes.")
-    lv = cal_mod.levels(root)
-    if who.helper and not any(v != "nothing" for v in lv.values()):
-        raise Refused("The person shares no calendar with helpers. Ask them on your ticket for a time.")
-    if not who.helper:
-        lv = {k: "titles" for k in lv} | {c["id"]: "titles" for c in cal_mod.read(root, day, 1)["calendars"]}
+    if who.helper:
+        _shared_or_refuse(root)
     ans = cal_mod.read(root, day, days)
+    if not ans["complete"]:
+        raise Refused(
+            "Your calendars hold too many events in this time to find free times; ask for fewer days."
+        )
+    lv = cal_mod.levels(root)  # after the read, so a rule narrowed meanwhile applies
+    if not who.helper:
+        lv = {c["id"]: "titles" for c in ans["calendars"]}
     slots = cal_mod.free_times(ans, lv, day, days, minutes)
     if who.helper:
         store.log(root, "calendar", f"looked for free times from {day}", who.by, who.ticket)

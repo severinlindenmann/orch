@@ -2,7 +2,6 @@
 
 import json
 import os
-import stat
 import sys
 from pathlib import Path
 
@@ -86,17 +85,15 @@ def reader(tmp_path, monkeypatch):
     data = tmp_path / "reader.json"
     calls = tmp_path / "calls.txt"
     data.write_text(json.dumps(answer()), encoding="utf-8")
-    script = tmp_path / "fake-reader"
+    script = tmp_path / "fake_reader.py"  # run with this Python: works on Windows too
     script.write_text(
-        f"#!{sys.executable}\n"
-        "import sys, json\n"
+        "import sys\n"
         "a = sys.argv[1:]\n"
         f"open({str(calls)!r}, 'a').write(' '.join(a[2:]) + '\\n')\n"
         "out = a[a.index('--out') + 1]\n"
         f"open(out, 'w').write(open({str(data)!r}).read())\n",
         encoding="utf-8",
     )
-    script.chmod(script.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("ORCH_PERSONAL_CALENDAR_READER", str(script))
     cal._OWNER_CACHE.clear()
     monkeypatch.setattr(cal, "_now", lambda: cal.dt.datetime(2026, 11, 18, 7, 0, tzinfo=cal.dt.UTC))
@@ -219,6 +216,51 @@ def test_free_times_count_busy_only_and_skip_free_and_all_day(added):
     assert "calendars helpers may use" in d["note"]  # never "you are free"
 
 
+def test_rule_narrowed_during_a_read_applies(added, monkeypatch):
+    api.calendar_rule(added, person(), "Work", "titles", None)
+    real = cal.read
+
+    def slow_read(root, frm, days=7):
+        ans = real(root, frm, days)
+        cal.set_level(root, WORK, "nothing")  # the person closes Work while the source is answering
+        return ans
+
+    monkeypatch.setattr(cal, "read", slow_read)
+    d = api.calendar_week(added, helper(), "2026-11-16", 7)
+    assert d["events"] == [] and "Helvetia" not in json.dumps(d)
+
+
+def test_busy_all_day_blocks_free_times(added, reader):
+    a = answer(
+        events=[
+            {
+                "cal": WORK,
+                "start": "2026-11-19",
+                "end": "2026-11-20",
+                "all_day": True,
+                "title": "Ferien",
+                "people": [],
+                "declined": False,
+                "availability": "busy",
+            }
+        ]
+    )
+    reader(a)
+    api.calendar_rule(added, person(), "Work", "busy", None)
+    assert api.calendar_free(added, helper(), "2026-11-19", 2, 60)["slots"] == [
+        {"start": "2026-11-20T08:00+01:00", "end": "2026-11-20T18:00+01:00"}
+    ]
+
+
+def test_cut_answer_is_never_used_for_free_times(added, reader):
+    a = answer()
+    a["error"] = "More than 2000 events; only the first 2000 are shown."
+    reader(a)
+    api.calendar_rule(added, person(), "Work", "busy", None)
+    with pytest.raises(store.Refused, match="too many events"):
+        api.calendar_free(added, helper(), "2026-11-19", 1, 60)
+
+
 def test_suggest_lands_in_needs_you_and_opens_only_on_the_persons_click(added):
     api.calendar_rule(added, person(), "Work", "titles", None)
     s = api.calendar_suggest(added, helper(), "Offerte Helvetia durchgehen", "2026-11-19T15:00+01:00", 60)
@@ -320,8 +362,8 @@ def test_calendar_way_in_feeds_calendar_and_helpers_cannot_ask_it_directly(added
     (w / "read.py").write_text("print(open('answer.json').read())\n", encoding="utf-8")
     (w / "way.toml").write_text(
         'name = "Outlook calendar"\npart = "calendar"\n'
-        f'selfcheck = ["{sys.executable}", "-c", "pass"]\n'
-        f'[actions]\nread = ["{sys.executable}", "read.py"]\n',
+        f"selfcheck = ['{sys.executable}', '-c', 'pass']\n"  # literal strings: Windows paths need no escapes
+        f"[actions]\nread = ['{sys.executable}', 'read.py']\n",
         encoding="utf-8",
     )
     api.way_turn(added, person(), "outlook-calendar", True)
