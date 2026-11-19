@@ -140,16 +140,18 @@ def build(data: dict, root: Path) -> dict:
         )
     subs = [a for a in accounts if a["type"] == "subscription"]
     on_subs = [a for a in subs if a["on"]]
+    all_at_limit = bool(memory.get("all_at_limit")) and len(on_subs) > 0
     return {
         "schema": "orch.usage-page/1",
         "at": store.now(),
         "switcher": bool(data["switcher"]),
         "switching": switching.switching_on(root),
         # the loop's last look said no account is good: helpers wait soon
-        "all_at_limit": bool(memory.get("all_at_limit")) and len(on_subs) > 0,
+        "all_at_limit": all_at_limit,
         "one_account": len(subs) <= 1,
         "flapping": switch_flapping(root),
-        "warnings": list(data["warnings"]),
+        # the page draws its own banner for "every account is at its limit": no second box with the same sentence
+        "warnings": [w for w in data["warnings"] if not (all_at_limit and w == switching.ALL_AT_LIMIT_ALERT)],
         "accounts": accounts,
         "spread": spread.build(root, accounts),
         "history": history_rows(root),
