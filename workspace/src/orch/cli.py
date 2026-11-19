@@ -263,6 +263,9 @@ def _show(t: dict, root: Path) -> str:
         out.append(f"Note: {t['note']}")
     if t.get("done_when"):
         out.append(f"Done when: {t['done_when']}")
+    if t.get("estimate"):
+        out.append(f"Estimate: {tickets.estimate_words(t['estimate'])}")
+    out.extend(tickets.prepare_lines(t, root))
     if t.get("status") == "done" and t.get("outcome"):
         for k, label in (("changed", "Changed"), ("why", "Why"), ("not_included", "Not included")):
             if t["outcome"].get(k):
@@ -648,8 +651,32 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--due", metavar="DAY[ HH:MM]|HH:MM")
     x.add_argument("--done-when", dest="done_when")
     x.add_argument("--description", help="what it is about and why, 1 to 3 sentences (the agent's own field)")
-    x.add_argument("--estimate-minutes", type=int, help="your estimate of the helper time, in whole minutes")
-    x.add_argument("--estimate-cost", type=float, help="your estimate of the cost in dollars at list price")
+    x.add_argument(
+        "--estimate-minutes", help="your estimate of the helper time in whole minutes: 45, or a range 30-60"
+    )
+    x.add_argument(
+        "--estimate-cost", help="your estimate of the cost in dollars at list price: 3, or a range 2-5"
+    )
+    x.add_argument("--asked-by", dest="asked_by", help="who asked for the work, e.g. the sender of the email")
+    x.add_argument(
+        "--maybe-same", dest="maybe_same", metavar="TICKET", help="a ticket that looks like the same work"
+    )
+    x.add_argument(
+        "--needs-ok",
+        dest="needs_ok",
+        help="what the plan will need the person's OK for (production, money...)",
+    )
+    x = t.add_parser(
+        "found",
+        parents=[common],
+        help="write the ticket's What I found part (JSON from stdin): the sources read, key facts and the "
+        "sources that could not be opened",
+    )
+    x.add_argument("id")
+    x = t.add_parser(
+        "prepared", parents=[common], help="end Prepare: one history line of what was read and filled"
+    )
+    x.add_argument("id")
     x = t.add_parser(
         "model",
         parents=[common],
@@ -1277,9 +1304,33 @@ def run(args: argparse.Namespace) -> None:
         _out(args, t, f'Title written: "{t["title"]}"')
     elif cmd == "ticket" and sub == "tidy":
         fields = {k: getattr(args, k) for k in ("owner", "due", "done_when") if getattr(args, k)}
-        est = {"minutes": args.estimate_minutes, "cost": args.estimate_cost}
-        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est)
+        est = {
+            "minutes": tickets.parse_range(args.estimate_minutes, "minutes"),
+            "cost": tickets.parse_range(args.estimate_cost, "cost"),
+        }
+        extra = {k: getattr(args, k) for k in tickets.PREPARE_FIELDS if getattr(args, k)}
+        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est, extra)
         _out(args, t, f'Tidied: "{t["title"]}"')
+    elif cmd == "ticket" and sub == "found":
+        raw = sys.stdin.read() if not sys.stdin.isatty() else ""
+        try:
+            data = json.loads(raw) if raw.strip() else None
+        except ValueError:
+            raise Refused(
+                'What I found is read as JSON from stdin: {"sources": [{"name": ..., "link": ..., '
+                '"lines": ...}], "facts": [...]}. This was not valid JSON.'
+            ) from None
+        if data is None:
+            raise Refused(f"Pipe the What I found JSON in: orch ticket found {args.id} < found.json")
+        t = tickets.set_found(root, args.id, data, by())
+        _out(
+            args,
+            t,
+            f"What I found: {tickets.sources_words(t['found'])}.",
+        )
+    elif cmd == "ticket" and sub == "prepared":
+        t = tickets.prepared(root, args.id, by())
+        _out(args, t, history.lines(root, t)[-1].get("text", "Prepared"))
     elif cmd == "ticket" and sub == "model" and args.name == "up":
         from orch import modelpick
         from orch import runs_live as _live
