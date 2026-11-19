@@ -320,12 +320,13 @@ def prepare_use(root: Path, now: float | None = None) -> dict:
         starts = starts.get("starts") if isinstance(starts, dict) else []
     except (OSError, ValueError):
         starts = []
-    used = sum(1 for x in starts or [] if isinstance(x, (int, float)) and 0 <= now - x < 24 * 3600)
-    return {
-        "on": wf.get("prepare_on_save", True) is True,
-        "used": used,
-        "limit": lim if ok else PREPARE_DEFAULT_LIMIT,
-    }
+    day = sorted(x for x in starts or [] if isinstance(x, (int, float)) and 0 <= now - x < 24 * 3600)
+    limit = lim if ok else PREPARE_DEFAULT_LIMIT
+    out = {"on": wf.get("prepare_on_save", True) is True, "used": len(day), "limit": limit}
+    if limit and len(day) >= limit:
+        # full: the next ticket can be prepared once enough of these are older than a day (ORCH-811)
+        out["free_at"] = datetime.fromtimestamp(day[len(day) - limit] + 24 * 3600, UTC).isoformat(timespec="seconds")
+    return out
 
 
 def prepare_text(p: dict) -> str:
