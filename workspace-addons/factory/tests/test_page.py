@@ -1049,7 +1049,7 @@ def test_the_next_stage_says_it_is_starting(ws, run, srv, monkeypatch):
 
 def test_no_eta_or_due_line_without_a_time():
     js = _page_js()
-    assert "...(o.eta ? [meta('ETA ' + when(o.eta))] : [])" in js
+    assert "...(o.eta ? [meta('Ready around ' + when(o.eta))] : [])" in js
     assert "...(order.due ? [meta('Due ' + when(order.due))] : [])" in js
 
 

@@ -27,7 +27,7 @@ format = "text"
 
 [[ticket_view]]
 field = "eta"
-label = "ETA"
+label = "Ready around"
 format = "time"
 
 [acts.idea]

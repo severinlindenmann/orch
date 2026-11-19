@@ -14,7 +14,7 @@ const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMa
 const words = n => nodes(n).flatMap(x => x.children || []).filter(x => typeof x === 'string').join(' ');
 
 // The shape render.start_text writes (workspace-addons/factory/src/orch_factory/render.py).
-const TEXT = "Start 'Services: see and manage background jobs'? ~10 h · target $4 · you're needed for ~15 min. " +
+const TEXT = "Start 'Services: see and manage background jobs'? ~10 h · AI cost about $4 · you're needed for ~15 min. " +
   "Goal: See the workspace's background jobs in the dashboard and start, stop or restart each with one click. " +
   "Done means: The owner has seen the mockup; The Services tab lists the five examples. Pauses: mockup, ship. " +
   "Tasks: Mockup of the Services tab (designer); The add-on with its commands (builder). Team: designer claude, builder claude. " +

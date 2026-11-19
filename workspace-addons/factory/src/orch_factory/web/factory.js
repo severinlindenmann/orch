@@ -506,7 +506,7 @@
     const running = orders.filter(o => o.phase === 'started');
     section(primary, 'Running', running, o => o.kind === 'autopilot'
       ? card(o.title, meta('Autopilot order'), p('Routine pauses answered by your agent · Putting it live still asks you'), tail(link('What it decided', '#/autopilot')))
-      : card(o.title, stages(o), ...waitNote(o), ...startingNote(o), budget(o), ...(o.eta ? [meta('ETA ' + when(o.eta))] : []), tail(orderLink(o))));
+      : card(o.title, stages(o), ...waitNote(o), ...startingNote(o), budget(o), ...(o.eta ? [meta('Ready around ' + when(o.eta))] : []), tail(orderLink(o))));
     // The summary contract has no shipped timestamp. Do not infer a week from due dates.
     const shipped = orders.filter(o => o.phase === 'shipped');
     section(secondary, 'Shipped', shipped, o => card('✓ ' + text(o.title), badge('Shipped'), tail(orderLink(o))));
@@ -564,13 +564,13 @@
     const time = data.time || {}, b = data.budget || {};
     view.append(p(data.goal));
     const summary = ['~' + duration(time.active_min)];
-    if (b.api_usd_target != null) summary.push('target $' + text(b.api_usd_target));
+    if (b.api_usd_target != null) summary.push('AI cost about $' + text(b.api_usd_target));
     if (time.owner_min != null) summary.push("you're needed ~" + time.owner_min + ' min');
-    if (time.eta_from || time.eta_to) summary.push('ETA ' + whenRange(time.eta_from, time.eta_to));
+    if (time.eta_from || time.eta_to) summary.push('ready around ' + whenRange(time.eta_from, time.eta_to));
     view.append(node('p', summary.join(' · '), 'f-summary'));
     view.append(group('f-three', card('Stages', line(data.line)),
-      card('Time + budget', p('~' + duration(time.active_min) + ' active · API target $' + text(b.api_usd_target)),
-        p('ETA ' + whenRange(time.eta_from, time.eta_to)), meta('Budget preset · ' + capital(b.preset)),
+      card('Time + budget', p('~' + duration(time.active_min) + ' active · AI cost about $' + text(b.api_usd_target)),
+        p('Ready around ' + whenRange(time.eta_from, time.eta_to)), meta('Budget · ' + capital(b.preset)),
         meta('Time limit (active time): ' + duration(b.active_min_cap) + '. AI cost is a target, not a limit.'), meta('Your time: about ' + text(time.owner_min) + ' min.')),
       card('Team + what it needs', crewPlan(data.crew), list(array(data.needs).map(n => (n.ready ? '✓ Ready · ' : 'Needs you · ') + text(n.what) + (!n.ready && n.fix ? ' — ' + n.fix : '')), 'No additional needs recorded.'))));
     for (const h of array(order.handover)) {
@@ -579,7 +579,7 @@
         p('They get: this brief' + (array(h.files).length ? ' and ' + plural(array(h.files).length, 'file', 'files') + ':' : '')), ...(array(h.files).length ? [tiles] : []),
         meta(text(h.name) + '’s time is not counted here. Everything else stays here, and ' + text(h.name) + ' allows it on their side.')));
     }
-    view.append(group('grid-2', card('Done means', list(data.done_means)), card('Won’t do', list(data.wont_do), node('h3','What Ship does'), p(data.ship?.does), meta('Undo: ' + text(data.ship?.undo)))));
+    view.append(group('grid-2', card('Done means', list(data.done_means)), card('Won’t do', list(data.wont_do), node('h3','What putting it live does'), p(data.ship?.does), meta('Undo: ' + text(data.ship?.undo)))));
     const assumptions = card('Assumptions');
     for (const a of array(data.assumptions)) assumptions.append(group('row', ...(a.uncertain ? [badge('Unsure')] : []), p(a.text)));
     if (!array(data.assumptions).length) assumptions.append(meta('No assumptions recorded.'));
@@ -610,7 +610,7 @@
   const statusWord = {open: 'open', todo: 'not started', doing: 'working', active: 'working', waiting: 'waiting', done: 'done', blocked: 'blocked'};
   function orderPage(order) {
     const phase = order.phase === 'started' ? (waitWords(order) ? 'Waiting' : 'Running') : capital(order.phase);
-    view.append(heading(order.title, [phase, order.stage ? 'Stage: ' + stageName(order, order.stage) : '', order.eta ? 'ETA ' + when(order.eta) : ''].filter(Boolean).join(' · '), orderLink(order, 'Read proposal', '/proposal')));
+    view.append(heading(order.title, [phase, order.stage ? 'Stage: ' + stageName(order, order.stage) : '', order.eta ? 'Ready around ' + when(order.eta) : ''].filter(Boolean).join(' · '), orderLink(order, 'Read proposal', '/proposal')));
     if (order.kind === 'autopilot') {
       view.append(card('Autopilot order', p('Routine pauses answered by your agent · Putting it live still asks you'),
         group('actions', link('What it decided', '#/autopilot'), ticket(order.id, 'Open order ticket', false))));

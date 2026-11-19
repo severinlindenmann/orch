@@ -49,15 +49,26 @@ START_LABELS = {
     "crew": "Team",
     "cap": "Time limit",
     "ship": "Goes live",
+    "cost": "AI cost about",
 }
+# "cost" was not a label before ORCH-478: every earlier set gets the word it said then ("target"), nothing else changes.
 EARLIER_START_LABELS = (
-    {"stops": "Stops", "steps": "Steps", "crew": "Crew", "cap": "Cap", "ship": "Ship"},  # up to release 32
+    {"stops": "Stops", "steps": "Steps", "crew": "Crew", "cap": "Cap", "ship": "Ship", "cost": "target"},  # up to release 32
     {  # until the owner's word list (ORCH-300)
         "stops": "I will pause at",
         "steps": "Steps",
         "crew": "Who works on it",
         "cap": "Time limit",
         "ship": "What goes live",
+        "cost": "target",
+    },
+    {  # until ORCH-478 (AI cost instead of target)
+        "stops": "Pauses",
+        "steps": "Tasks",
+        "crew": "Team",
+        "cap": "Time limit",
+        "ship": "Goes live",
+        "cost": "target",
     },
 )
 
@@ -67,7 +78,7 @@ def start_text(p, n, labels=None):
     w = labels or START_LABELS
     head = [f"Start '{clean(p['title'])}'? ~{minutes(p['time']['active_min'])}"]
     if "api_usd_target" in p["budget"]:
-        head.append(f"target ${p['budget']['api_usd_target']:g}")
+        head.append(f"{w['cost']} ${p['budget']['api_usd_target']:g}")
     if "owner_min" in p["time"]:
         head.append(f"you're needed for ~{p['time']['owner_min']} min")
     segments = [
