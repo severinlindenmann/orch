@@ -1310,7 +1310,7 @@ async function addonAct(control) {
     if (!result.ok && /^No helper is set yet/.test(result.text || '')) {   // one click to the place that fixes it
       const {d, actions} = dialog('No helper is set yet', 'dialog');
       d.append(el('p', '', 'Choose a helper first, then start again.'));
-      actions.append(button('Open Helper settings', 'primary', async () => { await window.orch.close(d); location.hash = '#settings/agent'; }));
+      actions.append(button('Open Helper settings', 'primary', async () => { await window.orch.close(d); location.hash = '#settings/helper'; }));
       d.append(actions); window.orch.open(d);
     } else if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
     else if (control.closest('.blk-split')) {   // list and panel: say what happened, in the add-on's own words
