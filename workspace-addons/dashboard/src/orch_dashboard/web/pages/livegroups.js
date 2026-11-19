@@ -188,6 +188,7 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
     // only what was sent is cleared: words typed while it was on its way stay in the box
     const sent = r.ok && String(liveMsgDraft.get(id) || '').trim() === text;
     if (sent) liveMsgDraft.delete(id);
+    if (r.ok && typeof liveChatNote === 'function') { liveChatNote(id, text); if (typeof liveLayerFill === 'function') liveLayerFill(); }  // shows in the chat at once
     const box = document.querySelector(`#live-dock [data-live-msg-text="${id.replace(/["\\]/g, '')}"]`);
     if (box && sent) box.value = '';
     if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
