@@ -56,6 +56,13 @@ ALLOW = {
 }
 
 
+# Words that are an add-on's name AND an ordinary data key all over the core, allowed in every core file.
+EVERYWHERE = {
+    "skills": "plain data key 'skills' (skill folders, lists and manifest field everywhere in orch), not the "
+    "Skills add-on (ORCH-834)",
+}
+
+
 def test_addon_folder_listing_is_found():
     assert {"automation", "dashboard", "sync"} <= set(ADDONS)
 
@@ -78,7 +85,7 @@ def test_core_has_no_addon_name_literals():
         rel = f.relative_to(ROOT / "workspace/src").as_posix()
         for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in names:
-                if node.value not in ALLOW.get(rel, {}):
+                if node.value not in ALLOW.get(rel, {}) and node.value not in EVERYWHERE:
                     bad.append(f"{rel}:{node.lineno} {node.value!r}")
     assert not bad, (
         "core names an add-on (R1.2); move it into the add-on or allowlist it with a reason:\n"

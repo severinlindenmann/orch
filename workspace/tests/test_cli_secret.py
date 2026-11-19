@@ -1888,3 +1888,22 @@ def test_scan_finds_a_stored_key_value_and_a_password_line(ws, run, store, monke
 def test_scan_refuses_more_than_1_mb(ws, run, monkeypatch):
     code, out, _ = _scan(run, monkeypatch, "a" * 1_000_001, "--json")
     assert code == 2 and json.loads(out)["code"] == "too_large"
+
+
+# ----------------------------------------------------------- set_agents (the Skills page's Logins switch)
+
+
+def test_set_agents_switches_the_profile_flag_and_records_it(store, events):
+    from orch import cli_secret
+
+    assert cli_secret.set_agents(store, "plain", True, "human:anna") is True
+    assert keystore.read_profiles(store)["plain"]["agents_may_env"] is True
+    assert cli_secret.set_agents(store, "plain", True, "human:anna") is False  # already on: nothing written
+    assert cli_secret.set_agents(store, "plain", False, "human:anna") is True
+    assert keystore.read_profiles(store)["plain"].get("agents_may_env") is not True  # off is not stored
+    assert [e["action"] for e in events if e["kind"] == "secret.change"] == [
+        "profile.agents_enable",
+        "profile.agents_disable",
+    ]
+    with pytest.raises(Refused, match="no profile named nope"):
+        cli_secret.set_agents(store, "nope", True, "human:anna")

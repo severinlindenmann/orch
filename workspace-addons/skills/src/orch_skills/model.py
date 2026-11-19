@@ -8,13 +8,14 @@ and what needs a look. Names and short texts only: never a key, an environment v
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from . import switches
+from . import codex, shared, signin, switches
 from .switches import Refused
 
 SCHEMA = "orch.skills-page/1"
@@ -164,6 +165,8 @@ def skills(root: Path, account_home: Path | None = None, keys: set[str] | None =
     off = core.off_names(root)
     claude = switches.claude_state(root)["skillOverrides"]
     tools = _tools(root)
+    offered, gone = shared.offered(root), shared.removed(root)
+    waiting = shared.newer_waiting(root)
     items = []
     for where, name, folder in _skill_sources(root, account_home):
         head = _header(folder)
@@ -200,6 +203,35 @@ def skills(root: Path, account_home: Path | None = None, keys: set[str] | None =
                 item["locked"] = "Turned off by hand in .claude/settings.local.json"
             item["tools"] = {TOOLS[t]: ("off" if (t == "claude" and not item["on"]) else "on") for t in tools}
         item["problems"] = _skill_problems(root, head, meta, keys or set()) if item["on"] else []
+        if where == "admin":
+            item["actions"] = ["remove"]
+            if waiting:
+                item["newer"] = "Your admin has newer shared settings; they arrive with the next relay update"
+        elif where == "workspace" and "codex" in tools:
+            item["codex_limit"] = (
+                "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it"
+            )
+        items.append(item)
+    for name, had in sorted(gone.items()):
+        now_v = offered.get(name)
+        item = {
+            "id": item_id("skill", "admin", name),
+            "kind": "skill",
+            "name": name,
+            "where": "admin",
+            "on": False,
+            "removed": True,
+            "locked": "Removed from this workspace; relay updates do not bring it back",
+            "description": "Removed here. Your admin still has it.",
+            "fields": {},
+            "tools": {},
+            "problems": [],
+            "actions": ["restore"],
+        }
+        if now_v is not None and now_v > had:
+            item["newer"] = "Your admin has a newer version than the one you removed"
+        elif now_v is None and offered:
+            item["description"] = "Removed here. Your admin no longer shares it with this workspace."
         items.append(item)
     return items
 
@@ -293,12 +325,19 @@ def services(root: Path, account_home: Path | None = None) -> list[dict]:
         conns = []
     deny = switches.claude_state(root)["deny"]
     tools = _tools(root)
+    cx = codex.state(root, _home(account_home)) if "codex" in tools else {"trusted": False, "servers": {}}
+    seen = signin.read(root)
     items = []
     for c in conns:
         if c.get("shadowed"):
             continue
         rule = switches.mcp_rule(c["name"])
-        on = rule not in deny
+        states = {}
+        if "claude" in tools:
+            states["Claude"] = "off" if rule in deny else "on"
+        if c["name"] in cx["servers"]:
+            states["Codex"] = "on" if cx["servers"][c["name"]] == "on" else "off"
+        on = all(v == "on" for v in states.values())
         it = {
             "id": item_id("service", WHERE_OF_SOURCE.get(c["source"], "workspace"), c["name"]),
             "kind": "service",
@@ -310,16 +349,50 @@ def services(root: Path, account_home: Path | None = None) -> list[dict]:
             "description": "Program on this computer: " + c["command"]
             if c.get("command")
             else ("Web service at " + c["host"] if c.get("host") else "Connected service"),
-            "tools": {TOOLS[t]: ("off" if t == "claude" and not on else "on") for t in tools},
+            "tools": states,
             "problems": ["Its login is not stored here"] if c.get("state") == "missing-key" and on else [],
         }
+        if c.get("profile"):
+            it["signin"] = (
+                "Its login is not stored here" if c.get("state") == "missing-key" else "Its login is stored here"
+            )
+            it["signin_state"] = "needs-sign-in" if c.get("state") == "missing-key" else "connected"
+        elif c["name"] in seen["servers"]:
+            st = seen["servers"][c["name"]]
+            it["signin"], it["signin_state"] = signin.text(st, seen["checked_at"]), st
+            if st == "needs-sign-in" and on:
+                it["problems"].append("Needs a sign-in in Claude (type /mcp)")
+        else:
+            it["signin"] = "Not checked yet. The sign-in itself happens in Claude (type /mcp)"
+        it["actions"] = ["check"]
+        if "Codex" in states and not cx["trusted"]:
+            it["codex_limit"] = "Codex ignores this folder's own settings until you trust this folder in Codex"
+            if "Claude" not in states:
+                it["locked"] = it["codex_limit"]
         if deny.get(rule) == "hand":
             it["locked"] = "Turned off by hand in .claude/settings.local.json"
+        elif cx["servers"].get(c["name"]) == "hand":
+            it["locked"] = "Turned off by hand in Codex's settings"
         items.append(it)
     return items
 
 
+PER_WORKSPACE = "This switch counts for this workspace only; your other workspaces keep their own"
+
+
+def _profiles(root: Path) -> dict:
+    try:
+        from orch import keystore
+
+        got = keystore.read_profiles(root)
+    except Exception:  # noqa: BLE001  no key store or a damaged profiles file: none (orch secret list says why)
+        return {}
+    return {n: p for n, p in got.items() if isinstance(n, str) and isinstance(p, dict)}
+
+
 def logins(root: Path) -> list[dict]:
+    """One row per key profile (what helpers get: on = helpers may use it with any command, the switch of
+    `orch secret profile agents-enable|agents-disable`, kept per workspace), then keys no profile uses."""
     try:
         from orch import inventory
 
@@ -327,20 +400,53 @@ def logins(root: Path) -> list[dict]:
     except Exception:  # noqa: BLE001
         keys = []
     kind = {"token": "Key", "password": "Password", "key-file": "Key file", "json": "Key file"}
-    return [
-        {
-            "id": item_id("login", "admin" if k["source"] == "admin" else "workspace", k["name"]),
-            "kind": "login",
-            "name": k["name"],
-            "where": "admin" if k["source"] == "admin" else "workspace",
-            "on": True,
-            "locked": "Turning a login off for helpers comes in a later version",
-            "description": kind.get(k["type"], "Key") + ". Helpers see only its name, never the secret.",
-            "tools": {},
-            "problems": [],
-        }
-        for k in keys
-    ]
+    used: set[str] = set()
+    items = []
+    for name, prof in sorted(_profiles(root).items()):
+        names = sorted(
+            {v for sect in ("env", "files") if isinstance(prof.get(sect), dict) for v in prof[sect].values()}
+        )
+        used |= set(names)
+        run = prof.get("run") if isinstance(prof.get("run"), list) else []
+        prog = Path(str(run[0])).name if run else ""
+        on = prof.get("agents_may_env") is True
+        items.append(
+            {
+                "id": item_id("login", "workspace", name),
+                "kind": "login",
+                "name": name,
+                "where": "workspace",
+                "on": on,
+                "switch": "profile",
+                "description": "Uses " + (", ".join(names) or "no key") + ". Helpers never see the secret.",
+                "off_means": (
+                    f"Off: helpers can use it only through its own command ({prog})"
+                    if prog
+                    else "Off: helpers cannot use it; you still can"
+                ),
+                "on_means": "On: helpers may use it with any command",
+                "scope": PER_WORKSPACE,
+                "tools": {},
+                "problems": [],
+            }
+        )
+    for k in keys:
+        if k["name"] in used:
+            continue
+        items.append(
+            {
+                "id": item_id("login", "admin" if k["source"] == "admin" else "workspace", "key-" + k["name"]),
+                "kind": "login",
+                "name": k["name"],
+                "where": "admin" if k["source"] == "admin" else "workspace",
+                "on": False,
+                "locked": "No key profile uses this key, so helpers cannot use it. A profile makes it usable",
+                "description": kind.get(k["type"], "Key") + ". Not given to helpers.",
+                "tools": {},
+                "problems": [],
+            }
+        )
+    return items
 
 
 def build(root: Path, account_home: Path | None = None) -> dict:
@@ -361,6 +467,7 @@ def build(root: Path, account_home: Path | None = None) -> dict:
             seen = [t for t, s in it.get("tools", {}).items() if s == "on"]
             if not it["on"] and seen:
                 it["note"] = " and ".join(seen) + (" still sees it" if len(seen) == 1 else " still see it")
+            it.setdefault("actions", [])
     return data
 
 
@@ -373,7 +480,7 @@ def find(root: Path, target: str, account_home: Path | None = None) -> dict:
     raise Refused("That item is not here any more. Reload the page and try again.")
 
 
-def turn(root: Path, target: str, on: bool, account_home: Path | None = None) -> dict:
+def turn(root: Path, target: str, on: bool, account_home: Path | None = None, who: str = "") -> dict:
     """Turn one item off or on here. Returns {"item", "changed"}; refuses what cannot be switched."""
     it = find(root, target, account_home)
     if it.get("locked"):
@@ -385,9 +492,44 @@ def turn(root: Path, target: str, on: bool, account_home: Path | None = None) ->
     elif it["kind"] == "skill":
         changed = switches.set_claude(root, "skillOverrides", it["name"], on)
     elif it["kind"] == "service":
-        changed = switches.set_claude(root, "deny", switches.mcp_rule(it["server"]), on)
+        changed = False
+        if "Codex" in it["tools"] and "codex_limit" not in it:  # first: the file most likely to refuse
+            changed = codex.set_mcp(root, it["server"], on)
+        if "Claude" in it["tools"]:
+            try:
+                changed = switches.set_claude(root, "deny", switches.mcp_rule(it["server"]), on) or changed
+            except Refused:
+                if changed:  # put Codex back, so a refusal changes nothing
+                    with contextlib.suppress(Refused, OSError):
+                        codex.set_mcp(root, it["server"], not on)
+                raise
+    elif it["kind"] == "login":
+        from orch import cli_secret
+
+        changed = cli_secret.set_agents(root, it["name"], on, who)
     elif it["kind"] == "instructions" and it["where"] == "mine":
         changed = switches.set_claude(root, "claudeMdExcludes", str(_home(account_home) / ".claude" / "CLAUDE.md"), on)
     else:
         raise Refused(f"{it['name']} cannot be turned off here.")
     return {"item": find(root, target, account_home), "changed": changed}
+
+
+def act(root: Path, verb: str, target: str, account_home: Path | None = None) -> dict:
+    """The page's other clicks: remove / restore a shared skill, check the services' sign-in."""
+    it = find(root, target, account_home)
+    if verb not in it.get("actions", []):
+        raise Refused(f"{it['name']}: that is not possible here.")
+    if verb == "remove":
+        changed = shared.remove(root, it["name"])
+        text = f"{it['name']} is removed from this workspace. Relay updates no longer bring it back."
+    elif verb == "restore":
+        text, changed = shared.restore(root, it["name"]), True
+    else:
+        doc = signin.check(root, now())
+        changed = True
+        text = f"Checked {len(doc['servers'])} services with Claude."
+    try:
+        after = find(root, target, account_home)
+    except Refused:
+        after = {**it, "gone": True}
+    return {"item": after, "changed": changed, "next": text}

@@ -14,6 +14,7 @@ from . import model
 from .switches import Refused
 
 VERBS = ("on", "off")
+OTHER = ("remove", "restore", "check")  # a shared skill out / back; ask Claude about the sign-in state
 TARGET = re.compile(r"(skill|instructions|service|login):(orch|workspace|admin|mine):[A-Za-z0-9_.@-]{1,120}")
 HISTORY = Path(".orch") / "addons" / "skills" / "history.jsonl"
 KIND_WORD = {"skills": "Skills", "instructions": "Instructions", "services": "Connected services", "logins": "Logins"}
@@ -120,7 +121,7 @@ def _turn(args, root: Path, on: bool) -> int:
     target = args.target.strip()
     if not TARGET.fullmatch(target):
         raise Refused("Name the item by its id from orch skills list, e.g. skill:orch:orch-hello.")
-    res = model.turn(root, target, on)
+    res = model.turn(root, target, on, who=who)
     it = res["item"]
     if res["changed"]:
         _log(root, who, "on" if on else "off", it)
@@ -131,6 +132,19 @@ def _turn(args, root: Path, on: bool) -> int:
     else:
         text = f"{it['name']} was already {'on' if on else 'off'}. Nothing changed."
     return _emit(args, {"item": it, "changed": res["changed"], "next": text}, text)
+
+
+def _other(args, root: Path) -> int:
+    target = args.target.strip()
+    if not TARGET.fullmatch(target):
+        raise Refused("Name the item by its id from orch skills list, e.g. skill:admin:team-style.")
+    who = _actor(args.by)
+    if args.cmd != "check" and (_a_helper_runs_this() or not who.startswith("human:")):
+        raise Refused("Only a person removes or brings back a shared skill. Ask the person to use the Skills page.")
+    res = model.act(root, args.cmd, target)
+    if res["changed"] and args.cmd != "check":
+        _log(root, who, args.cmd, res["item"])
+    return _emit(args, res, res["next"])
 
 
 def _loop(args, root: Path) -> int:
@@ -203,12 +217,16 @@ def run(args) -> int:
     if args.cmd == "history":
         rows = _history(root)
         text = "\n".join(
-            f"{r.get('at')}  {r.get('name')}: turned {r.get('what')} (by {str(r.get('who', '')).split(':', 1)[-1]})"
+            f"{r.get('at')}  {r.get('name')}: "
+            + ({"remove": "removed", "restore": "brought back"}.get(r.get("what"), f"turned {r.get('what')}"))
+            + f" (by {str(r.get('who', '')).split(':', 1)[-1]})"
             for r in rows
         )
         return _emit(args, {"history": rows}, text or "No changes yet.")
     if args.cmd in ("on", "off"):
         return _turn(args, root, args.cmd == "on")
+    if args.cmd in OTHER:
+        return _other(args, root)
     return _loop(args, root)
 
 
@@ -228,6 +246,18 @@ def main(argv=None) -> int:
         s = p(name, help=f"turn one item {name} in this workspace")
         s.add_argument("target")
         s.add_argument("--by")
+    for name, words in zip(
+        OTHER,
+        (
+            "remove a shared skill from this workspace",
+            "bring a removed shared skill back",
+            "ask Claude which connected services need a sign-in",
+        ),
+        strict=True,
+    ):
+        s = p(name, help=words)
+        s.add_argument("target")
+        s.add_argument("--by")
     s = p("act", help=argparse.SUPPRESS)
     s.add_argument("verb")
     s.add_argument("target")
@@ -240,7 +270,7 @@ def main(argv=None) -> int:
     args.json = bool(getattr(args, "json", False)) or "--json" in (argv if argv is not None else sys.argv)
     try:
         if args.cmd == "act":  # the page's clicks, run by the dashboard as the person
-            if args.verb not in VERBS:
+            if args.verb not in VERBS + OTHER:
                 raise Refused(f"Skills has no '{args.verb}' action.")
             if not TARGET.fullmatch(args.target or ""):
                 raise Refused("That is not something Skills can change. Reload the page and try again.")

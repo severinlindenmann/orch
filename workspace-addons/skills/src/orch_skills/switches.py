@@ -29,6 +29,7 @@ OWNED = Path(".orch") / "addons" / "skills" / "owned.json"
 LOCK = Path(".orch") / "addons" / "skills" / ".lock"
 MAX_BYTES = 1024 * 1024
 KINDS = ("skillOverrides", "deny", "claudeMdExcludes")
+OWNED_KINDS = (*KINDS, "codexMcp")  # codexMcp: services orch turned off in this folder's .codex/config.toml
 
 
 class Refused(Exception):
@@ -77,17 +78,17 @@ def _read(root: Path, rel: Path) -> tuple[dict, bytes | None]:
     return doc, raw
 
 
-def _write(root: Path, rel: Path, doc: dict, expect: bytes | None | bool = True) -> None:
-    """Replace root/rel through a fresh temporary file. With expect (bytes, or None = must still be missing) the
-    file is replaced only when it still holds exactly that."""
+def _write(root: Path, rel: Path, doc: dict | str, expect: bytes | None | bool = True) -> None:
+    """Replace root/rel through a fresh temporary file (an object as JSON, a str as it is). With expect (bytes, or
+    None = must still be missing) the file is replaced only when it still holds exactly that."""
     path = safe_path(root, rel)
     parent = path.parent
     parent.mkdir(parents=True, exist_ok=True)
     safe_path(root, rel)  # the folders just made are real folders too
     fd, tmp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=parent)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+        with os.fdopen(fd, "w", encoding="utf-8", newline="" if isinstance(doc, str) else None) as f:
+            f.write(doc if isinstance(doc, str) else json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
         if expect is not True:
             now = path.read_bytes() if path.exists() else None
             if now != expect:
@@ -157,7 +158,11 @@ def _owned(root: Path) -> dict:
         doc = {}
     if doc.get("schema") != OWNED_SCHEMA:
         doc = {}
-    return {k: [v for v in doc.get(k, []) if isinstance(v, str)] for k in KINDS}
+    return {k: [v for v in doc.get(k, []) if isinstance(v, str)] for k in OWNED_KINDS}
+
+
+def save_owned(root: Path, owned: dict) -> None:
+    _write(root, OWNED, {"schema": OWNED_SCHEMA, **{k: owned.get(k, []) for k in OWNED_KINDS}})
 
 
 def _entries(settings: dict, kind: str) -> list[str]:
@@ -192,8 +197,8 @@ def set_claude(root: Path, kind: str, entry: str, on: bool) -> bool:
         owned = _owned(root)
         stale = {k: [e for e in owned[k] if e not in _entries(settings, k)] for k in KINDS}
         if any(stale.values()):  # a recorded line somebody removed: forget it, so a later hand-written one stays
-            owned = {k: [e for e in owned[k] if e not in stale[k]] for k in KINDS}
-            _write(root, OWNED, {"schema": OWNED_SCHEMA, **owned})
+            owned = {**owned, **{k: [e for e in owned[k] if e not in stale[k]] for k in KINDS}}
+            save_owned(root, owned)
         present = entry in _entries(settings, kind)
         if on:
             if not present:
@@ -206,19 +211,19 @@ def set_claude(root: Path, kind: str, entry: str, on: bool) -> bool:
             _change(settings, kind, entry, add=False)
             _write(root, SETTINGS, settings, expect=raw)  # the line goes first; its record after
             owned[kind].remove(entry)
-            _write(root, OWNED, {"schema": OWNED_SCHEMA, **owned})
+            save_owned(root, owned)
         else:
             if present:
                 return False
             before = list(owned[kind])
             owned[kind] = sorted(set(owned[kind]) | {entry})
-            _write(root, OWNED, {"schema": OWNED_SCHEMA, **owned})  # the record first: a crash leaves no orphan line
+            save_owned(root, owned)  # the record first: a crash leaves no orphan line
             _change(settings, kind, entry, add=True)
             try:
                 _write(root, SETTINGS, settings, expect=raw)
             except Refused:  # not written: take the record back, so a line someone adds now stays theirs
                 owned[kind] = before
-                _write(root, OWNED, {"schema": OWNED_SCHEMA, **owned})
+                save_owned(root, owned)
                 raise
     return True
 

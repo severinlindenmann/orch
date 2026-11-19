@@ -1,6 +1,6 @@
 ---
 name: orch-skills
-description: Use when the person asks which skills, instruction files, connected services or logins the helpers get in this workspace, why a helper does not see a skill, or asks to turn one off or on here. Off is for this workspace only and never deletes anything. Not for writing or editing a skill (do that in its files) and not for usage counts (that is Insights).
+description: Use when the person asks which skills, instruction files, connected services or logins the helpers get in this workspace, why a helper does not see a skill, whether a connected service needs a sign-in, or asks to turn one off or on here or to remove a skill the admin shares. Off is for this workspace only. Not for writing or editing a skill (do that in its files) and not for usage counts (that is Insights).
 metadata:
   owner: "orch"
   status: "active"
@@ -12,15 +12,27 @@ instructions, connected services and logins, each from one place: comes with orc
 admin, or this computer. The person turns things off and on there; its clicks run these commands.
 
 ## When to use
-- The person asks what helpers get here, or why a helper does not see a skill: `orch skills list`.
-- The person asks to turn something off or on here: tell them to use the switch on the Skills page (or run
-  `orch skills off <id>` / `orch skills on <id>` in their own terminal; ids from the list, e.g.
-  `skill:orch:orch-hello`). Only a person can: under a helper tool these commands are refused.
-- Every change lands in `orch skills history` with who did it.
+- The person asks what helpers get here, or why a helper does not see a skill.
+- The person asks to turn something off or on here, or to remove a skill the admin shares.
+- The person asks whether a connected service is signed in.
 
-## What off does
-- orch's own and the admin's shared skills: orch stops linking them here (the files stay).
-- This workspace's and this computer's skills, connected services and the rules file in your home: Claude's own
-  switches in `.claude/settings.local.json` (orch writes and removes only its own lines).
-- A line "Codex still sees it" means that tool has no such switch yet.
-- The main orch skill, the workspace's instruction files and logins cannot be turned off here.
+## Recipes
+
+    orch skills list                      # everything, with ids (e.g. skill:orch:orch-hello) and what needs a look
+    orch skills off <id>                  # the person, in their own terminal (or the switch on the page)
+    orch skills on <id>
+    orch skills remove skill:admin:<name> # a shared skill out of this workspace; relay updates skip it
+    orch skills restore skill:admin:<name>
+    orch skills check service:<where>:<name>   # ask the helper tool once which services need a sign-in
+    orch skills history                   # who changed what
+
+## Rules
+- Only a person turns things off or on, removes or brings back: under a helper tool these commands are refused.
+  Tell the person to use the Skills page.
+- orch's own and the admin's shared skills: off means orch stops linking them here (the files stay).
+- Other skills, services and your rules file: the helper tool's own per-folder switches (orch writes and removes
+  only its own lines). "still sees it" on a row means that tool has no such switch; the panel says why.
+- Logins are key profiles: off means helpers may use it only through its own command (or not at all). The switch
+  counts for this workspace only.
+- The sign-in itself happens in the helper tool (`/mcp`); orch only shows the state.
+- The main orch skill and the workspace's instruction files cannot be turned off here.

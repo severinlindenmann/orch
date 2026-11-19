@@ -67,12 +67,25 @@
     else say(r.error || 'That could not be saved. Nothing was changed.', 'error');
     await load(true);
   }
+  const ACT = {remove: 'Remove from here', restore: 'Get it back', check: 'Check sign-in'};
+  async function other(it, verb, control) {
+    if (!embedded) { say('Open Skills from the dashboard to change it.', 'error'); return load(); }
+    if (busy) return;
+    busy = true;
+    if (control) { control.disabled = true; control.textContent = verb === 'check' ? 'Checking…' : control.textContent; }
+    const r = await askDashboard(verb, it.id);
+    busy = false;
+    if (r.ok) say(r.answer?.next || 'Done.');
+    else say(r.error || 'That did not work. Nothing was changed.', 'error');
+    await load(true);
+  }
 
   // ---- drawing ----
   const items = k => (model && model[k]) || [];
   const needs = it => (it.problems || []).length > 0;
   function badge(it) {
     if (needs(it)) return h('span', {className: 'badge needs', text: 'Needs a look'});
+    if (it.removed) return h('span', {className: 'badge paused', text: it.newer ? 'Newer version' : 'Removed'});
     if (!it.on) return h('span', {className: 'badge paused', text: 'Off'});
     const st = it.fields?.status;
     if (st === 'draft') return h('span', {className: 'badge dashed', text: 'Draft'});
@@ -88,7 +101,9 @@
   }
   function line(it) {
     if (needs(it)) return it.problems.join(' · ');
+    if (it.newer) return it.newer;
     if (it.note) return it.note;
+    if (it.kind === 'service' && it.signin_state) return it.signin;
     return it.description || '';
   }
   function rows() {
@@ -141,13 +156,21 @@
     const box = h('div', {className: 'stack'},
       h('div', {className: 'row'}, badge(it), h('span', {className: 'meta', text: WHERE[it.where] || ''})),
       needs(it) ? h('div', {className: 'banner warn', role: 'status'}, it.problems.map(p => h('p', {text: p}))) : null,
-      it.kind === 'login' ? null : [h('p', {className: 'eyebrow', text: 'What helpers see'}), sees],
-      facts([['File', it.file], ['Words', it.words ? String(it.words) : ''],
+      it.newer ? h('div', {className: 'banner info', role: 'status'}, h('p', {text: it.newer + '.'})) : null,
+      it.kind === 'login' ? (it.switch ? h('div', {className: 'stack'},
+        h('p', {text: it.on ? it.on_means + '.' : it.off_means + '.'}),
+        h('p', {className: 'meta', text: (it.on ? it.off_means : it.on_means) + '.'}),
+        h('p', {className: 'meta', text: it.scope + '.'})) : null)
+        : it.removed ? null : [h('p', {className: 'eyebrow', text: 'What helpers see'}), sees],
+      facts([['File', it.file], ['Words', it.words ? String(it.words) : ''], ['Sign-in', it.signin],
         ...tools.map(([t, s]) => [t, s === 'on' ? 'Sees it' : 'Off here']),
         ...FIELDS.map(([k, label]) => [label, k === 'status' ? (STATUS[f[k]] || f[k]) : k === 'platforms' && f[k] ? f[k].split(',').map(x => PLATFORM[x.trim()] || x.trim()).join(', ') : f[k]]),
         ...Object.entries(f).filter(([k]) => !FIELDS.some(x => x[0] === k))]),
       h('div', {className: 'row'}, it.can_off ? h('button', {className: 'btn outline', type: 'button', text: it.on ? 'Turn off' : 'Turn on',
-        onclick: e => { d.close(); turn(it, !it.on, e.currentTarget); }}) : null),
+        onclick: e => { d.close(); turn(it, !it.on, e.currentTarget); }}) : null,
+        (it.actions || []).map(v => h('button', {className: v === 'remove' ? 'btn danger' : 'btn outline', type: 'button', text: ACT[v],
+          onclick: e => { d.close(); other(it, v, e.currentTarget); }}))),
+      it.codex_limit ? h('p', {className: 'meta', text: it.codex_limit + '.'}) : null,
       it.locked ? h('p', {className: 'meta', text: it.locked + '.'}) : null);
     const d = h('dialog', {className: 'sheet', 'aria-label': it.name}, h('div', {className: 'sheet-h'}, h('h2', {text: it.name})), box);
     d.addEventListener('close', () => d.remove(), {once: true});
