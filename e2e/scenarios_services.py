@@ -47,11 +47,13 @@ def svc1(e):
         check((bus / "bus").exists(), "no user bus: turn on linger for the CI user first")
         linux = {"HOME": str(_real_home()), "XDG_RUNTIME_DIR": str(bus), "DBUS_SESSION_BUS_ADDRESS": f"unix:path={bus}/bus"}
     ws = e.ws("Services")
+    # before the add-ons: `addon add dashboard` already starts the dashboard, and a dashboard started without the
+    # user's bus says "the service manager of your account is not running" (orch start keeps it as it is)
+    saved = {k: e.env.get(k) for k in linux}
+    e.env.update(linux)
     for a in ("dashboard", "automation", "services"):
         rc, out, err = e.addon_add(ws, a)
         check(rc == 0, f"addon add {a}: {(err or out)[-300:]}")
-    saved = {k: e.env.get(k) for k in linux}
-    e.env.update(linux)
     tid = e.orchj(ws, "ticket", "new", "Preview the site")["id"]
     port = free_port(set())
     web = ["services", "add", "Web preview", "--id", IDS[0], "--port", str(port), "--ticket", tid, "--auto", "--start",
