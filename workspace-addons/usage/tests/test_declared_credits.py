@@ -87,7 +87,11 @@ def test_a_credit_added_by_hand_is_linked_not_listed_twice(cli, ws, no_switcher,
     rows = [x for x in d["accounts"] if x["label"] == "Weatherly forecast credit"]
     assert len(rows) == 1 and rows[0]["skill"] == "weather-api-credit"
     a = store.find(store.load(ws)["accounts"], "Weatherly forecast credit")
-    assert a["source"]["name"] == "weather-api-credit/forecast" and a["left"]["value"] == 50
+    assert a["source"]["name"] == "forecast"  # its own name stays: spend logs and --known find it by that
+    assert a["source"]["declared"] == "weather-api-credit/forecast" and a["left"]["value"] == 50
+    assert jrun(cli, "spent", "weather-api-credit/forecast", "5")[0] == 0  # the declared name works too
+    ans = asking.ask(ws, "scripts", name="weather-api-credit/forecast")
+    assert ans["go"] and ans["left"] == 45 and ans["name"] == "weather-api-credit/forecast"
 
 
 def test_a_removed_credit_stays_removed(cli, ws, no_switcher, monkeypatch):
@@ -150,3 +154,33 @@ def test_a_skill_asking_by_name_never_holds_the_whole_kind_of_work(cli, ws, no_s
     assert not routing.held(ws)  # only this credit is refused; helpers doing Scripts go on
     whats = [r["what"] for r in store.history(ws)]
     assert not [w for w in whats if "waits" in w or "room again" in w.lower()]
+
+
+def test_linking_keeps_the_spend_its_log_counted_and_known_adds_no_twin(ws, tmp_path):
+    log = tmp_path / "spend.jsonl"
+    log.write_text('{"t": "2026-11-19T00:00:00Z", "account": "main", "usd": 8}\n')
+    accounts, rows = [], []
+    k = store.check_known({"name": "main", "label": "Shared credit", "log": str(log)})
+    store.sync_known(accounts, rows, "openai", [k])
+    from orch_usage.readers import spend_log
+
+    before = spend_log.read(accounts[0]["source"], None).spent
+    store.sync_declared(accounts, rows, [_decl(name="main", label="Shared credit", provider="OpenAI")])
+    assert len(accounts) == 1 and accounts[0]["source"]["declared"] == "weather-api-credit/main"
+    assert spend_log.read(accounts[0]["source"], None).spent == before == 8
+    store.sync_known(
+        accounts, rows, "openai", [k]
+    )  # the skill still tells Usage its credit by the short name
+    assert len(accounts) == 1
+
+
+def test_one_label_in_two_skills_stays_two_credits(ws):
+    accounts, rows = [], []
+    a, b = (
+        _decl(name="one", label="Shared"),
+        {**_decl(name="one", label="Shared"), "credit": "other-skill/one"},
+    )
+    store.sync_declared(accounts, rows, [a, b])
+    store.sync_declared(accounts, rows, [a, b])
+    assert len(accounts) == 2  # the second is listed on its own (same label, already linked to the first)
+    assert len(rows) == 2  # one line each, nothing on the second sync

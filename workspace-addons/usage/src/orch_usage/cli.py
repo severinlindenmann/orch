@@ -105,7 +105,7 @@ def find_credit(accounts: list[dict], ref: str, provider: str | None = None) -> 
     try:
         return store.find(money, ref)
     except Refused:
-        hits = [a for a in money if a.get("source", {}).get("name") == (ref or "").strip()]
+        hits = [a for a in money if (ref or "").strip() in store.credit_names(a)]
         if len(hits) == 1:
             return hits[0]
         if hits:

@@ -105,7 +105,7 @@ def ask(
     if provider is not None:
         allowed = [a for a in allowed if a["type"] == "api-key" and a.get("provider") == provider]
     if name is not None:
-        allowed = [a for a in allowed if a.get("source", {}).get("name") == name]
+        allowed = [a for a in allowed if name in store.credit_names(a)]
     if not allowed:
         if not spends:
             routing._room_again(root, kind, at)
@@ -132,7 +132,7 @@ def ask(
             pace = memory.get("pace") if isinstance(memory.get("pace"), dict) else {}
             c = switching.judge(a, f, pace, float(switching.config(root)["ahead_minutes"]))
             if c.good or (c.under and f.active):
-                return _go(root, kind, a, provider, at, accounts, doc["together"], spends)
+                return _go(root, kind, a, provider, at, accounts, doc["together"], spends, name)
             reasons.append(f"{a['label']}: {c.why}" if c.why else a["label"])
             r = routing._sub_resets(c)
             if r:
@@ -145,7 +145,7 @@ def ask(
                 continue
             room, why, nxt = routing._credit_room(a, at, accounts, doc["together"], root)
             if room:
-                return _go(root, kind, a, provider, at, accounts, doc["together"], spends)
+                return _go(root, kind, a, provider, at, accounts, doc["together"], spends, name)
             reasons.append(why)
             if nxt:
                 wakes.append(nxt)
@@ -173,13 +173,14 @@ def _go(
     accounts: list[dict] | None = None,
     together: list[dict] | None = None,
     spends: bool = False,
+    asked: str | None = None,
 ) -> dict:
     if provider is None and not spends:
         routing._room_again(root, kind, at)
     out: dict = {"go": True, "account": a["label"][:64]}
     if a["type"] == "api-key":
         out["provider"] = a.get("provider") or ""
-        nm = a.get("source", {}).get("name")
+        nm = asked or a.get("source", {}).get("name")  # the name the skill asked with, else the one it uses
         if isinstance(nm, str):
             out["name"] = nm
         left = _left(a, at, root)

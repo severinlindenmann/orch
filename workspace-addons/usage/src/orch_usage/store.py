@@ -445,7 +445,8 @@ def sync_declared(accounts: list[dict], rows: list[dict], credits: list[dict]) -
 
     A credit already listed is kept as the person set it (also a removed one: it stays removed). One a person added
     by hand with the same label (or a credit skill told Usage with `--known`) is linked to the declaration instead of
-    listed twice. Only credits counted in dollars: Usage counts money (tokens and calls are not counted yet)."""
+    listed twice (same provider, not yet linked); it keeps its own name and answers to the declared one too. Only
+    credits counted in dollars: Usage counts money (tokens and calls are not counted yet)."""
     for c in credits:
         if not isinstance(c, dict) or c.get("unit") != "$":
             continue
@@ -462,28 +463,30 @@ def sync_declared(accounts: list[dict], rows: list[dict], credits: list[dict]) -
         if isinstance(spend, str) and spend.startswith("log:") and isinstance(c.get("file"), str):
             src.update(reader="spend-log", path=str(Path(c["file"]).parent / spend[4:]))
         money = [a for a in accounts if a["type"] in MONEY_TYPES]
-        if any(a.get("source", {}).get("name") == full for a in money):
+        if any(full in credit_names(a) for a in money):
             continue
         short = full.split("/", 1)[1]
         have = next(
             (
                 a
                 for a in money
-                if a["label"].lower() == label.lower()
-                or (
-                    a.get("provider") == provider
-                    and a.get("source", {}).get("name") == short
-                    and not a.get("source", {}).get("skill")
-                )
+                if a.get("provider") == provider
+                and not a.get("source", {}).get("declared")
+                and "/" not in str(a.get("source", {}).get("name") or "")
+                and (a["label"].lower() == label.lower() or a.get("source", {}).get("name") == short)
             ),
             None,
         )
         if have:
-            old = have.get("source", {})
-            if old.get("reader", "none") != "none" and src["reader"] == "none":
-                src.update({k: old[k] for k in ("reader", "path", "unnamed") if k in old})
-            have["source"] = src
-            rows.append(_line(USAGE, "credit declared", have, {"name": old.get("name")}, {"name": full}))
+            # keep its own name: its spend log and a skill's `--known` still find it by that; the declaration is
+            # an extra name it answers to
+            old = have.setdefault("source", {})
+            old["declared"] = full
+            if isinstance(owner, str):
+                old["skill"] = owner
+            if old.get("reader", "none") == "none" and src["reader"] == "spend-log":
+                old.update(reader="spend-log", path=src["path"])
+            rows.append(_line(USAGE, "credit declared", have, None, {"name": full}))
             continue
         a = {
             "id": new_id(accounts),
@@ -499,6 +502,12 @@ def sync_declared(accounts: list[dict], rows: list[dict], credits: list[dict]) -
         accounts.append(a)
         _renumber(accounts)
         rows.append(_line(USAGE, "credit declared", a, None, {"label": label, "order": a["order"]}))
+
+
+def credit_names(a: dict) -> set[str]:
+    """The names a credit answers to (ask --name, spent): the one its skill uses and the declared <skill>/<name>."""
+    src = a.get("source", {})
+    return {n for n in (src.get("name"), src.get("declared")) if isinstance(n, str) and n}
 
 
 def closed(a: dict, at: datetime) -> str | None:
