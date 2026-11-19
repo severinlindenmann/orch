@@ -9,7 +9,7 @@ import pytest
 from fakes import WS
 from test_relay_client import msg
 
-from orch import phone_view, review, runs, tickets
+from orch import phone_view, relay, review, runs, tickets
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 PHONE = "ph_iphone0001"
@@ -524,3 +524,27 @@ def test_a_file_that_never_comes_is_named_and_the_answer_still_counts(
     t = status(run, tid)
     assert t["status"] == "ready"
     assert "Photo screen.jpg: could not be downloaded." in t["checklist"][-1]["text"]
+
+
+def test_the_file_line_never_cuts_the_persons_words():
+    """Codex review: a 2,000-character note lost its end to the file line; now the short line is used."""
+    saved = ["Photo: .orch/tickets/t_x/files/screen.jpg", "File: .orch/tickets/t_x/files/offer.pdf"]
+    own = "x" * 1900 + " Do not publish."
+    out = relay._note_with_files({"words": {"text": own}}, saved)
+    text = out["words"]["text"]
+    assert text.startswith(own) and len(text) <= relay.NOTE_WORDS_MAX
+    assert text.endswith("I added 2 files from the phone to this ticket's files. Read them first.")
+    short = relay._note_with_files({"words": {"text": "Bigger logo"}}, saved)["words"]["text"]
+    assert "screen.jpg" in short and "offer.pdf" in short  # names when they fit
+
+
+def test_the_file_line_reaches_the_helper_with_twenty_changes():
+    """Codex review: at 20 changes the line was only in words, which the helper's task does not read."""
+    changes = [f"change {i}" for i in range(relay.NOTE_CHANGES_MAX)]
+    out = relay._note_with_files({"changes": changes}, ["Photo: .orch/tickets/t_x/files/screen.jpg"])
+    assert len(out["changes"]) == relay.NOTE_CHANGES_MAX
+    assert out["changes"][:-1] == changes[:-1]
+    assert out["changes"][-1].startswith("change 19 I added a file to this ticket from the phone: ")
+    assert all(len(c) <= relay.NOTE_CHANGE_MAX for c in out["changes"])
+    few = relay._note_with_files({"changes": ["a"]}, ["Photo: p.jpg"])["changes"]
+    assert few == ["a", "I added a file to this ticket from the phone: Photo: p.jpg. Read it first."]

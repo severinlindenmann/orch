@@ -1783,20 +1783,32 @@ def _verdict_files(root: Path, tid: str, answer_id: str, v: dict, final: bool) -
 
 def _note_with_files(note, saved: list[str]) -> dict:
     """The person's note with one line naming the files they added (as the dashboard's Send back does), at the
-    end of their words and, when they listed changes, as one more change: the helper reads it either way."""
+    end of their words and, when they listed changes, as one more change: the helper reads it either way.
+    Their own words are kept whole: when the line with every file name does not fit the note's limits, a short
+    line without the names is used (the files are in the ticket's files folder). Only a note already at the
+    limits gives up its last characters for the short line."""
     n = len(saved)
-    line = f"I added {'a file' if n == 1 else f'{n} files'} to this ticket from the phone: {'; '.join(saved)}"
-    line = line.rstrip(".") + (". Read it first." if n == 1 else ". Read them first.")
+    read = ". Read it first." if n == 1 else ". Read them first."
+    full = f"I added {'a file' if n == 1 else f'{n} files'} to this ticket from the phone: {'; '.join(saved)}"
+    full = full.rstrip(".") + read
+    short = f"I added {'a file' if n == 1 else f'{n} files'} from the phone to this ticket's files{read}"
+
+    def joined(own: str, limit: int, sep: str) -> str:
+        for line in (full, short):
+            if len(own) + len(sep) + len(line) <= limit or (not own and len(line) <= limit):
+                return f"{own}{sep}{line}" if own else line
+        return f"{own[: max(0, limit - len(short) - len(sep))].rstrip()}{sep}{short}"[:limit]
+
     note = dict(note) if isinstance(note, dict) else {}
     words = dict(note["words"]) if isinstance(note.get("words"), dict) else {}
-    own = str(words.get("text") or "").strip()
-    room = NOTE_WORDS_MAX - len(line) - 2
-    own = own[: max(0, room)].rstrip()
-    words["text"] = (f"{own}\n\n{line}" if own else line)[:NOTE_WORDS_MAX]
+    words["text"] = joined(str(words.get("text") or "").strip(), NOTE_WORDS_MAX, "\n\n")
     note["words"] = words
     changes = note.get("changes")
-    if isinstance(changes, list) and changes and len(changes) < NOTE_CHANGES_MAX:
-        note["changes"] = [*changes, line[:NOTE_CHANGE_MAX]]
+    if isinstance(changes, list) and changes:
+        if len(changes) < NOTE_CHANGES_MAX:
+            note["changes"] = [*changes, joined("", NOTE_CHANGE_MAX, "")]
+        else:  # no room for one more change: the line goes with the last one
+            note["changes"] = [*changes[:-1], joined(str(changes[-1]).strip(), NOTE_CHANGE_MAX, " ")]
     return note
 
 
