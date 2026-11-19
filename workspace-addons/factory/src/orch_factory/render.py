@@ -147,7 +147,8 @@ def stop_options(s):
     return SHIP_OPTIONS if s["stage"] == "ship" else STOP_OPTIONS
 
 
-TAG_WORDS = {"taste": "your call", "cant-undo": "can't be undone"}  # routine says nothing: it is the plain case
+# routine says nothing: it is the plain case
+TAG_WORDS = {"taste": "your call", "cant-undo": "can't be undone"}
 
 
 def stop_text(s, n):
