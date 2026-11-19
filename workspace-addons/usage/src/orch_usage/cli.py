@@ -32,6 +32,18 @@ def _root(start: str) -> Path:
     raise Refused("No orch workspace here. Run orch init first, or go to your workspace folder.")
 
 
+def _helper_run() -> bool:
+    """Is this command run by a helper (inside an orch run or a helper tool), whatever --by says?"""
+    if os.environ.get("ORCH_RUN") or os.environ.get("ORCH_AGENT"):
+        return True
+    try:
+        from orch import tickets
+
+        return bool(tickets.agent_tool())
+    except Exception:  # noqa: BLE001 - no core to ask: the environment said no
+        return False
+
+
 def _actor(explicit: str | None) -> str:
     if explicit:
         if not store.valid_actor(explicit) or explicit == store.USAGE:
@@ -647,6 +659,8 @@ def _switcher_cmd(args, root: Path) -> int:
             {"changed": changed, "switcher": v},
             (SAVED + " " if changed else "Already like that. ") + (v["words"]["tag"] + "."),
         )
+    if _helper_run():  # a helper may name a person with --by; the take-over is the person's own click
+        raise Refused("Only a person can move account switching to another workspace.")
     changed = computer.take_over(root, shared, who)
     text = (
         "This workspace switches the accounts now. The other workspace follows from its next look (within a minute)."

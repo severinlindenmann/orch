@@ -441,7 +441,9 @@ def _use_words(c: Candidate) -> str:
 def following(root: Path, shared: Path) -> str | None:
     """The name of the workspace whose Usage loop switches the accounts now, when it is not this one."""
     o = computer.owner(shared)
-    if o.get("running") and o.get("workspace") != computer.key(root):
+    if o.get("workspace") in (None, computer.key(root)):
+        return None
+    if o.get("running") or computer.just_taken(o, shared):  # a person just moved it there: never in between
         return o.get("name") or "another workspace"
     return None
 
@@ -746,6 +748,14 @@ def run_forever(root: Path, once: bool = False, clock=None, sleep=None, log=prin
                             else f"{who or 'Another workspace'} switches the accounts; following."
                         )
                     was = mine
+                    if (
+                        not mine
+                    ):  # only the switcher's loop looks and switches; a follower only says it is here
+                        computer.note_workspace(root, shared)
+                        if once:
+                            return
+                        sleep(config(root)["every_seconds"])
+                        continue
                 r = look(root, clock())
                 if r["did"] not in ("stay", "nothing", "follow"):
                     log(f"{r['at']} {r['did']}: {r.get('active')} -> {r.get('target')}")

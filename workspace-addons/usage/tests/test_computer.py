@@ -5,7 +5,6 @@ it, and 100 rounds of both loops never swap the account back and forth. A second
 import itertools
 import json
 import os
-import signal
 import subprocess
 import sys
 import threading
@@ -237,7 +236,7 @@ def test_a_dead_owner_frees_the_switcher_at_once(two):
     try:
         assert p.stdout.readline().strip() == "held"
         assert b.hold() is False and computer.owner(sd)["running"] is True
-        p.send_signal(signal.SIGKILL)
+        p.kill()  # like a crash: no clean exit
         p.wait(10)
         assert computer.owner(sd)["running"] is False
         assert b.hold() is True  # no waiting for a timeout
@@ -307,3 +306,42 @@ def test_two_loops_in_100_rounds_never_swap_the_account_back_and_forth(two, swit
             assert (i2 - i1) * 30 >= switching.BACK_MINUTES * 60, f"back to {a2} after {(i2 - i1) * 30} s"
     flips = [r for r in store.history(two["a"]) if r["what"].startswith("another program switched back")]
     assert flips == []
+
+
+def test_a_helper_cannot_take_over_even_naming_a_person(two, monkeypatch):
+    monkeypatch.setenv("ORCH_RUN", "r_test")
+    code, d = jrun(two["run_b"], "take-over", "--by", "human:owner")
+    assert code == 2 and "Only a person" in d["error"]
+
+
+def test_a_loop_that_lost_the_switcher_does_not_look(two, switcher):
+    seed(two["run_a"])
+    jrun(two["run_a"], "switching", "on", "--by", "human:owner")
+    sd = shared(two["a"])
+    a = computer.Switcher(two["a"], sd)
+    try:
+        assert a.hold()
+        computer.note_workspace(two["b"], sd)
+        computer.take_over(two["b"], sd, "human:owner")
+        a.release()  # ws let go; fernscout has not picked the lock up yet
+        logs, on = [], iter([True, False])
+        switching.run_forever(two["a"], once=True, log=logs.append, active=lambda r: next(on))
+        assert switcher.changes() == []  # no look, no switch in between
+        assert switching.look(two["a"], at(0))["did"] == "follow"  # a single look follows too
+    finally:
+        a.release()
+
+
+def test_a_linked_or_broken_old_file_is_not_taken_over(two, tmp_path):
+    loc = computer.local_dir(two["b"])
+    loc.mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere.json"
+    elsewhere.write_text(json.dumps({"schema": store.SCHEMA, "accounts": []}))
+    (loc / "accounts.json").symlink_to(elsewhere)
+    (loc / "share.json").write_text("{}")
+    store.load(two["b"])
+    assert not (shared(two["b"]) / "accounts.json").exists()
+    bad = computer.local_dir(two["a"])
+    bad.mkdir(parents=True)
+    (bad / "accounts.json").write_text(json.dumps({"schema": store.SCHEMA, "accounts": [{"id": "nope"}]}))
+    assert store.load(two["a"])["accounts"] == []

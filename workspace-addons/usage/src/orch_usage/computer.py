@@ -196,17 +196,17 @@ def _merge_history(old: Path, new: Path, name: str) -> None:
 def _merge_accounts(old: dict, new: dict, name: str) -> tuple[dict, list[str]]:
     """Accounts already kept for the computer win; accounts only this workspace had are added at the end.
     Returns (accounts file, plain notes of what was not taken)."""
-    if not isinstance(new.get("accounts"), list) or not new["accounts"]:
-        return old, []
-    accounts = list(new["accounts"])
+    accounts = [a for a in new.get("accounts") or [] if isinstance(a, dict)]
     notes = []
     by_source = {
         (a.get("source") or {}).get("key") or a.get("label"): a for a in accounts if isinstance(a, dict)
     }
     ids = {a.get("id") for a in accounts if isinstance(a, dict)}
+    from .store import _check_account
+
     for a in old.get("accounts") or []:
-        if not isinstance(a, dict):
-            continue
+        if not isinstance(a, dict) or not _check_account(a):
+            continue  # a row Usage would not read itself is not taken over
         k = (a.get("source") or {}).get("key") or a.get("label")
         mine = by_source.get(k)
         if mine is not None:
@@ -230,7 +230,7 @@ def import_local(root: Path, shared: Path) -> bool:
     loc = local_dir(root)
     if not loc.is_dir() or (loc / MOVED).exists() or loc.resolve() == shared.resolve():
         return False
-    present = [n for n in SHARED_FILES if (loc / n).is_file()]
+    present = [n for n in SHARED_FILES if (loc / n).is_file() and not (loc / n).is_symlink()]
     if not present:
         return False
     shared.mkdir(parents=True, exist_ok=True)
@@ -240,6 +240,11 @@ def import_local(root: Path, shared: Path) -> bool:
         src, dst = loc / n, shared / n
         if n == "history.jsonl":
             _merge_history(src, dst, name)
+        elif not dst.exists() and n == "accounts.json":
+            from .store import SCHEMA
+
+            merged, notes = _merge_accounts(_read(src), {"schema": SCHEMA, "accounts": []}, name)
+            _write(dst, merged)
         elif not dst.exists():
             shutil.copyfile(src, dst)
         elif n == "accounts.json":
@@ -333,31 +338,48 @@ class Switcher:
         if not _try_lock(f):
             f.close()
             return False  # another workspace's loop holds it
-        # the lock was free: its last holder is gone (or let go after a take-over)
-        if cur.get("workspace") not in (None, me) and cur.get("taken"):
-            try:
-                fresh = datetime.now(UTC) - _when(cur["since"]) < timedelta(seconds=TAKE_OVER_GRACE_SECONDS)
-            except (KeyError, TypeError, ValueError):
-                fresh = False
-            if fresh and cur["workspace"] in workspaces(self.shared):
+        # the lock was free: its last holder is gone (or let go after a take-over). Decide and write under the
+        # switch lock, so a person's take-over at the same moment is never overwritten.
+        try:
+            with held(self.shared / "switch.lock", wait=5):
+                cur = self.owner()
+                if cur.get("workspace") not in (None, me) and just_taken(cur, self.shared):
+                    _unlock(f)
+                    return False  # a person just gave it to that workspace: it picks the lock up itself
+                self._f = f
+                if cur.get("workspace") != me:
+                    prev = cur.get("name")
+                    _write(
+                        self.shared / "switcher.json",
+                        {"workspace": me, "name": label(self.root), "since": now()},
+                    )
+                    _history(
+                        self.shared,
+                        self.root,
+                        f"{label(self.root)} switches the accounts now"
+                        + (f" ({prev} stopped)" if prev and not cur.get("taken") else ""),
+                    )
+        except Exception:
+            if self._f is None:
                 _unlock(f)
-                return False  # a person just gave it to that workspace: it picks the lock up itself
-        self._f = f
-        if cur.get("workspace") != me:
-            prev = cur.get("name")
-            _write(self.shared / "switcher.json", {"workspace": me, "name": label(self.root), "since": now()})
-            _history(
-                self.shared,
-                self.root,
-                f"{label(self.root)} switches the accounts now"
-                + (f" ({prev} stopped)" if prev and not cur.get("taken") else ""),
-            )
+            raise
         return True
 
     def release(self) -> None:
         if self._f is not None:
             _unlock(self._f)
             self._f = None
+
+
+def just_taken(cur: dict, shared: Path) -> bool:
+    """A person moved switching to cur["workspace"] within the grace time, and that workspace's Usage is known."""
+    if not cur.get("taken"):
+        return False
+    try:
+        fresh = datetime.now(UTC) - _when(cur["since"]) < timedelta(seconds=TAKE_OVER_GRACE_SECONDS)
+    except (KeyError, TypeError, ValueError):
+        return False
+    return fresh and cur.get("workspace") in workspaces(shared)
 
 
 def owner(shared: Path) -> dict:

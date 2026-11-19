@@ -409,3 +409,16 @@ def test_an_old_switch_seen_for_the_first_time_does_not_lift(proj, new_ticket, s
     _computer_switch(5)  # a new one counts
     tend.run(proj)
     assert limitstop.active(proj) is None
+
+
+def test_a_hold_noted_after_the_switch_stays(proj, new_ticket, starts):
+    """The new account reached its own limit after the switch: only the helper held before it starts again."""
+    old, new = new_ticket(), new_ticket("Later")
+    t = time.time()
+    limitstop.note(proj, old, {"until": t + 3600}, t - 120)
+    _computer_switch(1, at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t - 60)))
+    limitstop.note(proj, new, {"until": t + 3600}, t - 10)
+    tend.run(proj)
+    assert [s[0] for s in starts] == [old]
+    assert limitstop.active(proj) is not None
+    assert list(limitstop.read(proj)["tickets"]) == [new]
