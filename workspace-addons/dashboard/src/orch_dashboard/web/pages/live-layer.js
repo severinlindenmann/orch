@@ -12,15 +12,16 @@ const LIVE_LAYER_KEY = 'orch.live.layer';
 const LIVE_PLACES = ['bottom', 'right'];
 const LIVE_SIZE = {height:[200, 0.85], width:[320, 0.7]};  // smallest px, largest share of the window
 const LIVE_MAX = 3;  // sessions side by side
-const LIVE_NARROW = 480;  // a pane narrower than this folds pin and place into More (draft D)
+const LIVE_NARROW = 600;  // a pane narrower than this folds pin, place and Chat | Terminal into More (draft D; the full header needs about 600 px)
 
 // --- the model: plain data, no page (tested in tests/live_layer.test.js) ---
 function liveLayerFresh() {
   return {mode:'bar', last:'bottom', back:'bottom', height:null, width:null, panes:[], cur:'', menu:''};
 }
-// Narrow panes: on a phone, on the right with more than one, or when a share of the room is under LIVE_NARROW.
+// Narrow panes: on a phone, on the right with more than one, or when a share of the room is under LIVE_NARROW
+// (one pane on the right at 1280 wide too: its header would push Full screen out of sight).
 function liveLayerNarrow(where, n, room, phone) {
-  return !!phone || (n > 1 && (where === 'right' || room / n < LIVE_NARROW));
+  return !!phone || (n > 1 && where === 'right') || room / Math.max(n, 1) < LIVE_NARROW;
 }
 // Kept per workspace (issue 1351: the dashboards of two workspaces can get the same port, so the same browser store).
 function liveLayerKey(ws) { return ws ? LIVE_LAYER_KEY + '.' + ws : LIVE_LAYER_KEY; }
@@ -294,6 +295,19 @@ function liveMoreMenu(key, label, where, pinned) {
     phone ? null : liveOpt('right', 'dock-right', 'On the right', where === 'right'),
     sess && !sess.kind ? h('a', {className:'live-opt', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-more-ticket', 'data-live-ticket':''}, liveIc('ticket'), h('span', {}, 'Open ticket')) : null);
 }
+// ORCH-679: Stop in the pane itself, the same run.stop the ticket page has; an idle or stuck helper says so.
+function liveStopLabel(sess) {
+  const t = (Array.isArray(state?.tickets) ? state.tickets : []).find(x => x.id === sess.id), h2 = t ? window.DashHelpers?.helperState?.(state?.runs?.[sess.id], t) : null;
+  return h2 && ['idle', 'stuck'].includes(h2.state) ? 'Stop idle helper' : 'Stop';
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest?.('#live-dock [data-live-stop]');
+  if (!b || b.disabled) return;
+  b.disabled = true;
+  const r = await act('run.stop', {ticket:b.dataset.liveStop});
+  b.disabled = false;
+  window.orch?.toast?.(r.ok ? 'Helper stopped.' : r.text || 'Could not stop the helper.', r.ok ? 'ok' : 'error');
+});
 function livePane(key, where, s, o) {
   const sess = liveLayerSession(key), name = liveLayerName(), n = o.n;
   const title = sess ? sess.title : 'This session has ended', label = sess?.key || title, on = key === s.cur;
@@ -304,7 +318,7 @@ function livePane(key, where, s, o) {
   const besideWhy = o.total >= LIVE_MAX ? 'Three sessions is the most' : o.next ? 'Add a session beside this one' : 'No other session is live';
   const group = sess && !sess.kind && typeof liveGroupOf === 'function' ? liveGroupOf(liveGroups(), sess.id) : null;
   return h('section', {className:'live-pane', 'data-key':'live-pane', 'data-session':key, 'data-on':on && n > 1 ? '' : null,
-    'data-new':o.fresh ? '' : null, 'data-group':group ? '' : null, 'data-narrow':o.narrow ? '' : null, 'aria-label':(sess?.key ? sess.key + ', ' : '') + title},
+    'data-new':o.fresh ? '' : null, 'data-group':group ? '' : null, 'data-narrow':o.narrow ? '' : null, tabindex:'-1', 'aria-label':(sess?.key ? sess.key + ', ' : '') + title},
     h('header', {className:'live-ph'},
       o.narrow ? null : sess?.pill || null,
       sess?.key ? h('span', {className:'key'}, sess.key) : null,
@@ -339,6 +353,7 @@ function livePaneBody(key, sess, label) {
       typeof liveChatBox === 'function' ? liveChatBox(sess, label) : null,
       h('pre', {className:'live-lines', 'data-live-lines':'', 'aria-label':'Last lines of ' + label, tabindex:'0', hidden:true}),
       h('p', {className:'meta live-meta', 'data-live-meta':''}),
+      sess.kind || !sess.running ? null : h('button', {type:'button', className:'btn outline sm', 'data-key':'live-stop', 'data-live-stop':sess.id}, liveStopLabel(sess)),
       sess.kind ? null : h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket', 'data-live-ticket':'', 'aria-label':'Open ticket ' + label}, 'Open ticket'),
       typeof liveMsgBox === 'function' ? liveMsgBox(sess) : null)
       : h('div', {className:'live-pb'}, h('p', {}, 'This session is no longer in the list.'));
@@ -444,7 +459,7 @@ function liveLayerView(s, where) {
 // keyboard place and any open menu stay).
 function liveLayerPaint() {
   const host = liveDockHost(), s = liveLayerModel(), where = liveLayerWhere(s, liveLayerPhone());
-  const shown = s.panes.map(liveLayerSession).map(x => x && [x.key, x.title, x.running, x.pill?.textContent || '']);
+  const shown = s.panes.map(liveLayerSession).map(x => x && [x.key, x.title, x.running, x.pill?.textContent || '', x.running && !x.kind ? liveStopLabel(x) : '']);
   const v = s.panes.length && where !== 'bar' && where !== 'side' ? liveLayerView(s, where) : null;
   const key = JSON.stringify([where, s.menu, s.panes, s.cur, shown, liveRen, v && [v.narrow, v.pins.filter(k => s.panes.includes(k)), !!v.next], liveLayerName(), liveLayerPage()?.name, typeof liveHistKey === 'function' ? liveHistKey() : null, typeof window.liveStartKey === 'function' ? window.liveStartKey() : null, typeof window.liveModelKey === 'function' ? window.liveModelKey(s.panes) : null, typeof liveGroupKey === 'function' ? liveGroupKey(s.panes) : null]);
   host.dataset.mode = where;
@@ -478,7 +493,22 @@ function liveLayerPaint() {
   document.body.dataset.liveLayer = where;
   liveLayerInert(where === 'full');
   liveLayerPad();
+  liveLayerTake();
 }
+// The keyboard goes into a pane a ticket's button or address opened (ORCH-677). The pane is drawn again when its live
+// data or Start choice arrives and that drops the keyboard to the page, so every paint puts it back until the person
+// presses a key or clicks somewhere (or 5 seconds pass).
+let liveLayerWant = null;
+function liveLayerTake() {
+  if (!liveLayerWant) return;
+  if (Date.now() > liveLayerWant.until) { liveLayerWant = null; return; }
+  const pane = document.querySelector('#live-dock .live-pane[data-session="' + String(liveLayerWant.id).replace(/["\\]/g, '') + '"]');
+  if (!pane) return;
+  const a = document.activeElement;
+  if (a && a !== document.body && pane.contains(a)) return;
+  (pane.querySelector('[data-key="live-open-ticket"]') || pane).focus({preventScroll:true});
+}
+for (const type of ['keydown', 'pointerdown']) document.addEventListener(type, () => { liveLayerWant = null; }, true);
 // Full screen covers the page: the page behind leaves the Tab order and the screen reader (inert), so the keyboard
 // cannot wander into what is not shown (ORCH-340). Dialogs and live regions stay usable; only what this set is undone.
 function liveLayerInert(on) {
@@ -528,7 +558,8 @@ window.addEventListener('orch:live-sessions', () => { if (document.getElementByI
 window.LiveLayer = {
   open(key, into = false) {  // the bar marks chips by ticket id; a ticket's session button moves the keyboard into the pane
     const id = liveLayerSession(key)?.id || key;
-    liveLayerDo({type:'open', key:id}, into ? liveSel(id, 'live-open-ticket') : undefined);
+    liveLayerDo({type:'open', key:id});
+    if (into) { liveLayerWant = {id, until:Date.now() + 5000}; liveLayerTake(); }
   },
   place(mode) { liveLayerDo({type:'place', mode}); },
   beside(key) { liveLayerDo({type:liveLayerPhone() ? 'open' : 'beside', key:liveLayerSession(key)?.id || key}); },  // a wall tile's Add beside

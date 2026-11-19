@@ -497,10 +497,27 @@ def _rows(text: str, n: int) -> tuple[list[str], str | None]:
     raw = text.rstrip("\n").split("\n")
     rows = [runs_live.clean(_ANSI.sub("", ln)).rstrip() for ln in raw]
     hint = _suggestion(raw, rows)
+    rows = _below_frame_dropped(rows)
     rows = [r for r in rows if not _is_frame(r)]
+    # at most one blank row in a row: padding must not fill a short view
+    rows = [r for i, r in enumerate(rows) if r.strip() or (i and rows[i - 1].strip())]
     while rows and not rows[-1].strip():
         rows.pop()
     return rows[-n:], hint
+
+
+_PROMPT = re.compile(r"^\s*[>\u276f\u203a]")
+
+
+def _below_frame_dropped(rows: list[str]) -> list[str]:
+    """The tool's status rows under its prompt box (model, usage, mode, shortcuts) are frame, not work.
+    Only when the box is found (a rule, a prompt row, a rule) are the rows under it dropped."""
+    rules = [i for i, r in enumerate(rows) if _RULE.match(r)]
+    for b in reversed(rules):
+        a = next((i for i in reversed(rules) if i < b), None)
+        if a is not None and _PROMPT.match(rows[a + 1]) and b - a <= 12:
+            return rows[: b + 1]
+    return rows
 
 
 _RULE = re.compile(r"^[\s\u2500-\u257f\-=_~]{3,}$")  # a row of box lines or dashes

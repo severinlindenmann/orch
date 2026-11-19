@@ -131,6 +131,9 @@ def test_stale_digest_is_refused(tk):
 # 4. check cards
 def _in_review(root, tid):
     tickets.check_add(root, tid, "Write it", "agent:claude")
+    tickets.check_done(
+        root, tid, "c1", ['{"type":"note","ref":"wrote it"}'], "agent:claude"
+    )  # open: Looks good is off
     tickets.set_status(root, tid, "review", "agent:claude")
 
 
@@ -146,6 +149,29 @@ def test_check_approve_makes_ticket_done(tk):
         e["card"]["kind"] == "check" and e["decision"]["action"] == "approve" and e["answer"] == "Looks good"
     )
     assert t["questions"][-1]["answered_by"] == ME
+
+
+def test_check_card_says_what_each_button_does(tk):
+    """ORCH-585: the card says Looks good starts nothing more, and what Send back does; the record keeps
+    only what happened."""
+    root, tid = tk
+    _in_review(root, tid)
+    then = review.check_card(tickets.load(root, tid), root)["then"]
+    assert "no new ticket" in then and "press Send back" in then
+    review.decide(root, tid, "review", "ok", by=ME, via="cli")
+    block = review.applies_now_block(tickets.load(root, tid), root)
+    assert "Looks good. The ticket is done. Nothing else starts" in block
+    assert "press Send back" not in block
+
+
+def test_check_card_with_uncovered_done_when_says_nothing_is_made(tk):
+    root, tid = tk
+    _in_review(root, tid)
+    t = tickets.load(root, tid)
+    t["done_when"] = "A part no task covers."
+    card = review.check_card(t, root)
+    assert card.get("need") == "Done when is not fully covered"
+    assert card["then"].startswith("The ticket is done as it is. The missing part is dropped")
 
 
 def test_check_verdict_needs_a_person(tk):

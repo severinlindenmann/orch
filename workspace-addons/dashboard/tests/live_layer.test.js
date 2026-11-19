@@ -190,11 +190,14 @@ test('the split and the selected pane are kept per browser, at most three', () =
 
 test('panes fold pin and place into More when narrow, on the right with more than one, and on a phone', () => {
   assert.equal(L.liveLayerNarrow('bottom', 1, 1040, false), false);
-  assert.equal(L.liveLayerNarrow('bottom', 2, 1040, false), false);
+  assert.equal(L.liveLayerNarrow('bottom', 2, 1040, false), true);   // two at 1280 wide: the header with Chat | Terminal does not fit
+  assert.equal(L.liveLayerNarrow('bottom', 2, 1680, false), false);
   assert.equal(L.liveLayerNarrow('bottom', 3, 1040, false), true);
-  assert.equal(L.liveLayerNarrow('bottom', 3, 1680, false), false);
+  assert.equal(L.liveLayerNarrow('bottom', 3, 1680, false), true);   // three at 1920 wide: 560 px each
+  assert.equal(L.liveLayerNarrow('bottom', 3, 2400, false), false);
   assert.equal(L.liveLayerNarrow('right', 2, 760, false), true);
   assert.equal(L.liveLayerNarrow('right', 1, 760, false), false);
+  assert.equal(L.liveLayerNarrow('right', 1, 537, false), true);    // on the right at 1280 wide
   assert.equal(L.liveLayerNarrow('bottom', 1, 390, true), true);
 });
 
@@ -260,6 +263,13 @@ test('a drag ends when the grip loses the pointer (a repaint mid-drag), and keep
 test('a window resize draws the layer again only across the phone width', () => {
   assert.doesNotMatch(page, /addEventListener\('resize', \(\) => \{ if \(document\.getElementById\('live-dock'\)\) \{ liveLayerPainted = ''/);
   assert.match(page, /if \(now !== phone\)/);
+});
+
+test('ORCH-679: a running helper has Stop in its pane (run.stop, "Stop idle helper" when idle); no helper, no Stop', () => {
+  assert.match(source, /sess\.kind \|\| !sess\.running \? null : h\('button'[^\n]*'data-live-stop':sess\.id\}, liveStopLabel\(sess\)\)/);
+  assert.match(source, /\['idle', 'stuck'\]\.includes\(h2\.state\) \? 'Stop idle helper' : 'Stop'/);
+  assert.match(source, /#live-dock \[data-live-stop\][\s\S]{0,200}act\('run\.stop', \{ticket:b\.dataset\.liveStop\}\)/);
+  assert.match(source, /x\.running && !x\.kind \? liveStopLabel\(x\) : ''/);  // the dock repaints when idle turns into working
 });
 
 test('the pane shows the waiting question with its options and answers it there (ORCH-675)', () => {
