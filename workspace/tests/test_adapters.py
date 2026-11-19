@@ -232,7 +232,7 @@ BAD_CODEX = (
 SANDBOX = ["-c", 'sandbox_mode="workspace-write"', "-c", 'approval_policy="never"']
 
 
-FULL = ["-c", 'sandbox_mode="danger-full-access"', "-c", 'approval_policy="never"']
+FULL = ["-c", 'sandbox_mode="danger-full-access"', *SANDBOX[2:]]  # the same "never ask" pair as below full
 CODEX = {"ask": SANDBOX, "auto": SANDBOX, "full": FULL}
 REACH_NOTE = (
     "Codex can change files only in this folder and has no network at this permission level: "
