@@ -1132,7 +1132,7 @@ function ticketHistoryPanel(t) {
 // own messages. Rules in full: ORCH-777 artifact history-event-rules.md. The Activity tab keeps every line.
 const OVERVIEW_FIRST = 5, OVERVIEW_STEP = 20, OVERVIEW_SNAPSHOT = 50, FILE_GROUP_MS = 10 * 60000, REQUEST_MS = 2 * 60000;
 const overviewOpen = new Map();  // ticket id -> how many entries a person revealed (Infinity = Show all); resets on reload
-const timeOf = v => { const n = typeof v === 'string' || typeof v === 'number' ? Date.parse(v) : NaN; return Number.isFinite(n) ? n : null; };
+const timeOf = v => { const n = typeof v === 'number' ? v : typeof v === 'string' ? Date.parse(v) : NaN; return Number.isFinite(n) ? n : null; };
 const QUESTION_LINE = /^(?:Asked|Answered) (q\d+)\b/, ATTACHED_LINE = /^Attached (.+)$/, TASK_DONE_LINE = /^Check (c\d+) done\b/;
 const isPerson = e => /^human:/.test(String(e?.by || ''));
 // The lines that tell the story; a line no rule knows shows when a person wrote it (helper and orch lines stay on Activity).
@@ -1168,7 +1168,7 @@ function overviewEntries(t, files = []) {
   const shownQ = new Set(), openQ = new Set();
   array(t.questions).forEach((q, idx) => {
     if (!q || !q.id) return;
-    if (q.answer == null && !q.taken_back) { openQ.add(q.id); return; }
+    if (q.answer == null && !q.taken_back) { if (t.status !== 'done') openQ.add(q.id); return; }  // a Done ticket shows no open question on top
     shownQ.add(q.id);
     out.push({kind:'answer', at:timeOf(q.answered_at) ?? timeOf(q.at) ?? timeOf(q.asked_at), rank:0, idx, q});
   });
@@ -1187,7 +1187,7 @@ function overviewEntries(t, files = []) {
     const found = [];
     array(task?.evidence).forEach(ev => {
       const file = evidenceFile(t, ev), key = file && 'evidence/' + file.name;
-      if (!file || owned.has(key)) return;
+      if (!file || owned.has(key) || owned.has('artifacts/' + file.name)) return;  // a file a person attached, used as evidence
       owned.add(key); found.push({file, at:timeOf(ev.at)});
     });
     if (!found.length) continue;
@@ -1276,13 +1276,7 @@ function overviewEarlier(id) {
   if (more) overviewOpen.set(id, shown + more.n);
   render();
 }
-function overviewJump(t) {
-  const target = document.getElementById('ticket-request-' + t.id);
-  if (!target) return;
-  target.scrollIntoView({block:'start', behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'});
-  target.focus({preventScroll:true});
-}
-function overviewHistory(t, entries, hasRequest) {
+function overviewHistory(t, entries) {
   if (!entries.length) return null;
   const limit = snapshot ? OVERVIEW_SNAPSHOT : (overviewOpen.get(t.id) ?? OVERVIEW_FIRST), shown = entries.slice(0, limit), more = overviewMore(entries, limit);
   const days = [];
@@ -1290,16 +1284,15 @@ function overviewHistory(t, entries, hasRequest) {
   const tail = !more ? null : snapshot ? h('p', {className:'meta history-more', 'data-key':'history-more'}, more.hidden + (more.hidden === 1 ? ' earlier entry is' : ' earlier entries are') + ' on the Activity tab.')
     : h('div', {className:'history-more', 'data-key':'history-more'},
       ticketButton('Show earlier · ' + more.day + ', ' + more.n + ' more', 'ghost sm', () => overviewEarlier(t.id), {'data-key':'history-earlier'}),
-      more.n < more.hidden ? ticketButton('Show all', 'ghost sm', () => { overviewOpen.set(t.id, Infinity); render(); }, {'data-key':'history-all'}) : null,
-      hasRequest ? ticketButton('What you asked', 'ghost sm', () => overviewJump(t), {'data-key':'history-jump'}) : null);
+      more.n < more.hidden ? ticketButton('Show all', 'ghost sm', () => { overviewOpen.set(t.id, Infinity); render(); }, {'data-key':'history-all'}) : null);
   return h('section', {className:'history-list', 'aria-label':'History', 'data-key':'history-' + t.id},
     days.map(d => h('section', {className:'history-day'}, h('h3', {className:'history-day-h'}, d.day), d.rows)), tail);
 }
 // What you asked: the person's note (editable in place), the description a helper wrote, and the files that came with it.
-// Always the last block of the Overview, right under the history, so it never folds away.
+// Always the last block of the Overview, right under the history and its Show earlier line, so it never folds away.
 function overviewRequest(t, note, files) {
   if (!note && !t.description && !files.length) return null;
-  return h('section', {className:'card asked', id:'ticket-request-' + t.id, tabindex:'-1', 'data-key':'brief'},
+  return h('section', {className:'card asked', 'data-key':'brief'},
     h('div', {className:'section-head'}, h('h2', {}, 'What you asked'), overviewCreated(t) != null ? h('span', {className:'meta'}, localStamp(new Date(overviewCreated(t)).toISOString())) : null),
     note,
     t.description ? h('div', {className:'stack', 'data-key':'description'}, h('p', {className:'preserve-lines'}, linkRefs(t, t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
@@ -2153,7 +2146,7 @@ function detail(t) {
     // ORCH-777: the one-line write box, the history newest first, and what you asked always last
     ticketTalkCard(t),
     window.UI?.appliesNow && ticketReviewAnswers(t).length ? window.UI.appliesNow(ticketReviewAnswers(t), {fileUrl:(typeof reviewApi === 'function' ? reviewApi() : null)?.fileUrl || (() => ''), now:new Date(), showTicket:false}) : null,
-    overviewHistory(t, story.entries, !!request),
+    overviewHistory(t, story.entries),
     request];
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id},
     parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, (parent.release ? 'Part of the release ' : parent.epic ? 'Part of the epic ' : 'Sub-ticket of ') + partName(parent)) : null,

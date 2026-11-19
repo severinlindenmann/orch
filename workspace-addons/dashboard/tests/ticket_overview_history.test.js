@@ -97,7 +97,7 @@ test('undated entries come last in the order written; a future time sorts on top
   assert.equal(run(c, 'overviewDay(x)', {x:r.entries[5]}), 'Earlier');
 });
 
-test('first view shows 5 entries; Show earlier reveals one day (at most 20); Show all everything; the jump to the request is there', () => {
+test('first view shows 5 entries; Show earlier reveals one day (at most 20); Show all everything', () => {
   const c = context();
   const day = (d, n) => Array.from({length:n}, (_, i) => ({at:`2026-11-${d}T${String(10 + (i % 10)).padStart(2, '0')}:${String(i).padStart(2, '0')}:00Z`, by:'human:pat', text:'Note ' + d + '-' + i}));
   const t = {id:'t_long', history:[...day('18', 3), ...day('17', 4), ...day('16', 30)]};
@@ -108,20 +108,20 @@ test('first view shows 5 entries; Show earlier reveals one day (at most 20); Sho
   more = run(c, 'overviewMore(list, 7)', {list:all});
   assert.equal(more.n, 20, 'a day of 30 reveals 20 at a time');
   assert.equal(run(c, 'overviewMore(list, 37)', {list:all}), null);
-  const node = run(c, 'overviewHistory(t, list, true)', {list:all});
+  const node = run(c, 'overviewHistory(t, list)', {list:all});
   assert.equal(find(node, n => n.attrs?.['data-key'] === 'history-earlier') != null, true);
   assert.equal(find(node, n => n.attrs?.['data-key'] === 'history-all') != null, true);
-  assert.equal(find(node, n => n.attrs?.['data-key'] === 'history-jump') != null, true);
+  assert.equal(find(node, n => n.attrs?.['data-key'] === 'history-jump'), null, 'the request is right under this line: no jump link');
   assert.equal((text(node).match(/Note /g) || []).length, 5);
   run(c, 'overviewOpen.set("t_long", Infinity)');
-  assert.equal((text(run(c, 'overviewHistory(t, list, false)', {list:all})).match(/Note /g) || []).length, 37);
-  assert.equal(find(run(c, 'overviewHistory(t, list, false)', {list:all.slice(0, 5)}), n => n.attrs?.['data-key'] === 'history-more'), null);
+  assert.equal((text(run(c, 'overviewHistory(t, list)', {list:all})).match(/Note /g) || []).length, 37);
+  assert.equal(find(run(c, 'overviewHistory(t, list)', {list:all.slice(0, 5)}), n => n.attrs?.['data-key'] === 'history-more'), null);
 });
 
 test('a read-only copy shows 50 entries and says where the rest are; no buttons', () => {
   const c = context({snapshot:true});
   const t = {id:'t_snap', history:Array.from({length:60}, (_, i) => ({at:new Date(Date.UTC(2026, 10, 18, 0, i)).toISOString(), by:'human:pat', text:'Line ' + i}))};
-  const node = run(c, 'overviewHistory(t, overviewEntries(t).entries, true)', {t});
+  const node = run(c, 'overviewHistory(t, overviewEntries(t).entries)', {t});
   assert.match(text(node), /10 earlier entries are on the Activity tab/);
   assert.equal(find(node, n => n.attrs?.['data-key'] === 'history-earlier'), null);
 });
@@ -131,7 +131,6 @@ test('the request block: note, the helper-written description and the request fi
   assert.equal(run(c, 'overviewRequest(t, null, [])', {t:{id:'t'}}), null);
   const node = run(c, 'overviewRequest(t, "NOTE", [])', {t:{id:'t', description:'What this is about', description_by:'agent:claude', created_at:T0}});
   assert.match(text(node), /What you asked.*NOTE.*What this is about.*Written by/);
-  assert.equal(node.attrs.id, 'ticket-request-t');
 });
 
 test('the Overview order in detail(): write box, history, then the request last; the old cards are gone', () => {
@@ -139,4 +138,16 @@ test('the Overview order in detail(): write box, history, then the request last;
   const at = s => { const i = body.indexOf(s); assert.ok(i > 0, s); return i; };
   assert.ok(at('ticketTalkCard(t)') < at('overviewHistory(t, story.entries') && at('overviewHistory(t, story.entries') < at('    request];'));
   assert.doesNotMatch(body, /Earlier answers|'What was asked'/);
+});
+
+test('review fixes: a person file used as evidence shows once; a Done ticket keeps an unanswered question line; times as numbers', () => {
+  const c = context();
+  const t = {id:'t_one', status:'done', created_at:T0, history:[{at:'2026-11-18T08:00:00Z', by:'human:pat', text:'Attached plan.png'}, {at:'2026-11-18T09:00:00Z', by:'agent:claude', text:'Check c1 done'},
+    {at:'2026-11-18T10:00:00Z', by:'human:pat', text:'Asked q3, by hand'}],
+    checklist:[{id:'c1', text:'Use it', evidence:[{type:'file', ref:'.orch/tickets/t_one/evidence/plan.png', at:'2026-11-18T09:00:00Z'}]}], questions:[{id:'q3', text:'Still open?', answer:null}]};
+  const r = entries(c, t, [{name:'plan.png', mtime:'2026-11-18T08:00:00Z'}]);
+  assert.deepEqual(kinds(r), ['event:Asked q3, by hand', 'event:Check c1 done', 'attached:plan.png']);
+  assert.equal(r.entries[1].files.length, 0);
+  assert.equal(run(c, 'timeOf(1763460000000)'), 1763460000000);
+  assert.equal(run(c, 'timeOf(null)'), null);
 });
