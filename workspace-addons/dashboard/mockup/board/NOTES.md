@@ -125,6 +125,7 @@ Save without starting shows "Saving…" on the button at once and then opens the
   needed). Owner (17 Nov): not only open tickets, also backlog, running and other lanes, by choice. Shown only while tickets exist, never on a shared copy; a second click while a Triage ticket is open
   says so in a notice.
 - Owner 17 Nov (more compact, draft B picked): count and Start triage on one line, the lanes as tick boxes in two columns, one short line under (master `.menu-pop-wide`).
+- Owner 18 Nov (ORCH-1096): Start triage turns into the kit's busy button (spinner + "Starting…") and the menu stays open while orch opens the ticket (about a second); then the new Triage ticket opens at once and the helper starts there ("Getting started…"), as with New ticket. No more grey button and a 30-second wait.
 
 
 ## Manager view (ORCH-189, owner approved 17 Nov)

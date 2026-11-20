@@ -1497,8 +1497,12 @@ def act_reply(body: dict, extra) -> dict:
             "delivered": dlv if type(dlv) is int and dlv > 0 else 0,
             "state": st[:20] if isinstance(st, str) else None,
         }
-    if body.get("op") == "ticket.new" and isinstance(extra, dict) and isinstance(extra.get("id"), str):
-        # the new ticket's id: the New ticket window opens it by id, never by guessing from the title
+    if (
+        body.get("op") in ("ticket.new", "triage.start")
+        and isinstance(extra, dict)
+        and isinstance(extra.get("id"), str)
+    ):
+        # the new ticket's id: New ticket and Triage open it by id, never by guessing from the title
         reply["created"] = {"id": extra["id"][:40]}
     steps = extra.get("steps") if body.get("op") == "ticket.new" and isinstance(extra, dict) else None
     if isinstance(steps, dict):  # ORCH-185: the tickets of an epic made in the same request, by position

@@ -509,6 +509,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument(
         "--start", action="store_true", help="open a Triage ticket with the list and start one helper on it"
     )
+    x.add_argument("--no-run", action="store_true", help="with --start: open the ticket, start no helper yet")
     x.add_argument(
         "--lanes",
         help="lanes to go through, e.g. backlog,todo,working,needs-you,waiting,check,done,wont-do,superseded "
@@ -1099,8 +1100,16 @@ def run(args: argparse.Namespace) -> None:
         from orch import triage
 
         if args.start:
-            r = triage.start(root, tickets.acting_by(args), lanes=triage.parse_lanes(args.lanes))
-            how = "a helper started on it" if r["started"] else f"it waits for a helper ({r['why']})"
+            r = triage.start(
+                root, tickets.acting_by(args), lanes=triage.parse_lanes(args.lanes), run=not args.no_run
+            )
+            how = (
+                "a helper started on it"
+                if r["started"]
+                else "start a helper on it when you are ready"
+                if args.no_run
+                else f"it waits for a helper ({r['why']})"
+            )
             _out(
                 args,
                 r,
