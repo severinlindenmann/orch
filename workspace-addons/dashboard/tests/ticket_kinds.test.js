@@ -36,17 +36,17 @@ function listCtx(items = ALL) {
   vm.createContext(c); vm.runInContext(listSrc, c); return c;
 }
 
-test('kindTag: a badge "Epic" or "Release", nothing for a plain ticket', () => {
+test('kindTag: a chip "Epic" or "Release", nothing for a plain ticket', () => {
   assert.equal(helpers.kindWord({release:true, epic:true}), 'Release');
   assert.equal(helpers.kindWord({epic:true}), 'Epic');
   assert.equal(helpers.kindWord({}), '');
   assert.equal(helpers.kindTag({id:'x'}, h), null);
   const tag = helpers.kindTag({epic:true}, h)[1];
-  assert.equal(tag.attrs.className, 'badge kind');
+  assert.equal(tag.attrs.className, 'chip kind');
   assert.equal(text(tag), 'Epic');
 });
 
-test('list row: the epic row carries an "Epic" badge, a plain ticket none', () => {
+test('list row: the epic row carries an "Epic" chip, a plain ticket none', () => {
   const c = listCtx();
   const table = c.ticketTable(ALL);
   const row = key => nodes(table).find(n => n.attrs?.['data-key'] === key);

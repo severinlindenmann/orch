@@ -758,9 +758,9 @@
   const ticketKey = t => t && typeof t.key === 'string' ? t.key.trim() : '';
   const keyTag = (t, make) => { const k = ticketKey(t); return k ? [make('span', {className:'key'}, k), ' '] : null; };
   // ORCH-906 (owner picked it, 20 Nov): an epic or a release says so wherever the ticket shows, not only on its board
-  // card. `make` is the page's h(); the result is [' ', <span class="badge kind">Epic</span>] or null for a plain ticket.
+  // card. `make` is the page's h(); the result is [' ', <span class="chip kind">Epic</span>] or null for a plain ticket.
   const kindWord = t => t && t.release ? 'Release' : t && t.epic ? 'Epic' : '';
-  const kindTag = (t, make) => { const w = kindWord(t); return w ? [' ', make('span', {className:'badge kind', 'data-key':'kind-' + w.toLowerCase()}, w)] : null; };
+  const kindTag = (t, make) => { const w = kindWord(t); return w ? [' ', make('span', {className:'chip kind', 'data-key':'kind-' + w.toLowerCase()}, w)] : null; };
   // "x of y tasks": one pattern for every task counter (owner, 17 Nov: the to-do lines are "tasks" everywhere).
   const stepsText = (done, total) => (Number(done) || 0) + ' of ' + (Number(total) || 0) + (Number(total) === 1 ? ' task' : ' tasks');
   // Topbar freshness: when /api/state last answered. Under a minute is "just now".
