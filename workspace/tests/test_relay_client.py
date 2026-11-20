@@ -162,6 +162,17 @@ def test_send_file_and_receive_download(proj, run, rel):
     assert run("relay", "download", "m_file000000000001")[0] == 2
 
 
+def test_send_file_as_a_reply(proj, run, rel):
+    """--reply-to goes with --file (ORCH-1026): the file answers the message; --update still does not."""
+    connect(run, rel)
+    (proj / "rows.csv").write_bytes(b"a,b\n")
+    code, _, err = run("relay", "send", PEER, "--file", "rows.csv", "--reply-to", "m_text000000000001")
+    assert code == 0, err
+    assert rel.sent[-1]["type"] == "file" and rel.sent[-1]["reply_to"] == "m_text000000000001"
+    code, _, err = run("relay", "send", PEER, "--file", "rows.csv", "--update", "result")
+    assert code == 2 and "--update and --speak go with a text, not a file." in err
+
+
 def test_answer_from_phone_updates_ticket(proj, run, new_ticket, rel):
     connect(run, rel)
     tid = new_ticket()

@@ -1789,7 +1789,16 @@ def prep_line(part: str, p: dict) -> str:
     if not p.get("ready"):
         return f"The {part} server is not prepared ({p.get('why') or 'unknown'}); the helper fetches it."
     needs = "; ".join(p.get("needs") or []) or "no new settings or data changes"
-    return f"The {part} server is fetched and checked ({needs})."
+    line = f"The {part} server is fetched and checked ({needs})."
+    if not p.get(
+        "prod"
+    ):  # after the 19 Nov server move the deploy host pointed at the stopped server, unnoticed
+        line += (
+            f" Production's {part} program could not be read over ssh: check that the deploy host and key "
+            "settings (github.release_deploy_host, github.release_deploy_key) point at the server that runs "
+            "it now."
+        )
+    return line
 
 
 def helper_steps(prep: dict, script: str | None = None) -> str:

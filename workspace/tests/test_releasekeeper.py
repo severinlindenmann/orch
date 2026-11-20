@@ -730,6 +730,26 @@ def test_a_build_not_for_linux_is_not_prepared(tmp_path, capsys):
     assert "not prepared" in rk.prep_line("relay", p)
 
 
+def test_deploy_card_says_when_production_could_not_be_read(tmp_path, capsys):
+    """ORCH-1026: after the server move the deploy host was silently wrong (production read as unknown)."""
+    out = go(
+        tmp_path,
+        capsys,
+        state={"release": gate(phase="card")},
+        open_release=None,
+        prs=pr("MERGED"),
+        changed=["relay/src/main.rs"],
+        built=BUILT,
+        fetched=FETCHED,
+        prod_sha={},
+    )
+    p = out["state"]["deploy"]["prep"]["relay"]
+    assert p["ready"] and p["prod"] is None
+    line = rk.prep_line("relay", p)
+    assert line.startswith("The relay server is fetched and checked (")
+    assert "Production's relay program could not be read over ssh" in line and "release_deploy_host" in line
+
+
 def test_deploy_go_hands_the_helper_the_prepared_program(tmp_path, capsys, monkeypatch):
     seen = {}
     monkeypatch.setattr(
