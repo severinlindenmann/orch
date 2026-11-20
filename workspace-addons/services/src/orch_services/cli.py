@@ -388,6 +388,7 @@ def cmd_add(args, root: Path) -> int:
     spec = _spec(root, rec, wid)
     store.save(root, rec)
     store.logs_dir(root).mkdir(parents=True, exist_ok=True)
+    store.log_path(root, sid).unlink(missing_ok=True)  # a new service starts with an empty log (ORCH-847)
     try:
         drv.install(spec)
     except Refused:
@@ -450,7 +451,8 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
         spec = _spec(root, rec, wid, strict=False)
         drv.uninstall(spec)
         store.delete(root, sid)
-        nxt = f"Removed {rec['name']}. Its log stays in .orch/addons/services/logs/{sid}.log."
+        store.log_path(root, sid).unlink(missing_ok=True)  # the log goes with the service (ORCH-847)
+        nxt = f"Removed {rec['name']} and its log."
         return _emit(args, {"removed": sid, "next": nxt}, nxt)
     spec = _spec(root, rec, wid, strict=verb != "stop")
     getattr(drv, verb)(spec)
