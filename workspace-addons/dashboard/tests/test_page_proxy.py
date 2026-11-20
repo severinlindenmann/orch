@@ -547,6 +547,18 @@ def test_the_dashboard_page_gets_a_pass_for_a_shipped_page_only(stack, monkeypat
     assert _mint(base, headers={"X-Orch-Page": "secret", "X-Orch-Frame": p})[0] == 403
 
 
+def test_a_pass_says_how_long_it_lives_and_which_dashboard_run_made_it(stack, monkeypatch):
+    # ORCH-1008: the page drops a kept pass that ran out or that a restarted dashboard forgot, so the add-on
+    # page's first call never answers 401
+    base, _ = stack
+    _with_person(monkeypatch)
+    got = json.loads(_mint(base, headers={"X-Orch-Page": "secret"})[1])
+    from orch_dashboard import framepass
+
+    assert got["life"] == framepass.LIFE
+    assert got["boot"] and got["boot"] == LAST["srv"].act_ids.boot
+
+
 def test_a_pass_works_for_its_own_addon_from_any_computer_and_is_readable_by_the_frame(stack, monkeypatch):
     from orch import pagesession
 

@@ -105,6 +105,11 @@ class FramePasses:
             self._passes[_digest(file)] = (addon, False, tag, now + self._life, "file")
         return header, file
 
+    @property
+    def life(self) -> float:
+        """Seconds a pass lives: the dashboard page asks for new ones before it opens a page with an old one."""
+        return self._life
+
     def check(self, value: str | None, tag: str, kind: str) -> tuple[str, bool] | None:
         """(add-on, may act) for a live pass of this kind, session and address, else None."""
         if kind not in KINDS or not isinstance(value, str) or not PASS_RE.fullmatch(value):

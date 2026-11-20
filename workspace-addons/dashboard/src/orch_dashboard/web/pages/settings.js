@@ -1046,13 +1046,26 @@ function pageStopped(r) {
 // the frame address's fragment (kit/frame.js takes it out at once); one orch did not ship gets no pass.
 const SHIPPED_SANDBOX = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
 const framePasses = new Map(), framePassAsks = new Map(), framePassFailed = new Map(), frameFresh = new Map();
+// A kept pass is used only while the server still knows it: before it runs out (a minute to spare) and while the
+// dashboard that made it still runs (serverBoot from /api/state). An old one would make the add-on page's first call
+// answer 401 (ORCH-1008). A page already showing in the frame keeps its pass (a new one would load it again).
+const FRAME_PASS_SPARE = 60000;
+function framePassOld(p, name) {
+  let boot = null;
+  try { boot = typeof serverBoot === 'string' ? serverBoot : null; } catch (_) { boot = null; }  // app.js, loaded later
+  if (!(Date.now() > p.until || (p.boot && boot && boot !== p.boot))) return false;
+  return !(frameShown()?.getAttribute('src') || '').startsWith('/addon/' + name + '/');
+}
 function framePass(name) {
+  if (framePasses.has(name) && framePassOld(framePasses.get(name), name)) framePasses.delete(name);
   if (framePasses.has(name)) return framePasses.get(name);
   if (framePassAsks.has(name) || Date.now() - (framePassFailed.get(name) || 0) < 10000) return null;
+  const asked = Date.now();
   framePassAsks.set(name, fetch('/api/frame-pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({addon:name})})
     .then(r => r.ok ? r.json() : null)
     .then(j => {
-      if (j && typeof j.pass === 'string' && typeof j.file === 'string') framePasses.set(name, {pass:j.pass, file:j.file, chan:frameChanNew()});
+      const life = j && Number.isFinite(j.life) && j.life > 0 ? j.life * 1000 : 900000;
+      if (j && typeof j.pass === 'string' && typeof j.file === 'string') framePasses.set(name, {pass:j.pass, file:j.file, chan:frameChanNew(), until:asked + Math.max(life - FRAME_PASS_SPARE, life / 2), boot:typeof j.boot === 'string' ? j.boot : null});
       else framePassFailed.set(name, Date.now());
     })
     .catch(() => framePassFailed.set(name, Date.now()))
