@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-32 steps: 25 ready (the script clicks them), 7 pending (not built yet).
+32 steps: 27 ready (the script clicks them), 5 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -357,7 +357,7 @@ Must be seen:
 ## 20. All 16 result widgets, small and big
 
 - Part: 16 widgets (draft D feature 10)
-- State: pending, waits for: Result widgets and big overlay in the style guide (ORCH-263)
+- State: ready, clicked by the script
 - Pictures: `fd-20-widgets-1280.png`, `fd-20-widgets-1920.png`, `fd-20-widgets-390.png`
 
 Do:
@@ -371,21 +371,24 @@ Must be seen:
 - Each opens big in an overlay; arrows step through, Esc closes and gives the focus back.
 - Empty, loading and error look like the style guide states.
 
-## 21. The same widgets on a ticket page
+## 21. The same widgets on a tile, in the chat and on a ticket page
 
 - Part: 16 widgets (draft D feature 10)
-- State: pending, waits for: Result widgets and big overlay in the style guide (ORCH-263)
+- State: ready, clicked by the script
 - Pictures: `fd-21-widgets-ticket-1280.png`, `fd-21-widgets-ticket-1920.png`, `fd-21-widgets-ticket-390.png`
 
 Do:
 
-1. Open a ticket with results.
-2. Open one result big.
+1. Open Focus and look at the tile of a ticket with results; open its result big.
+2. Open the session: each finished step carries its results inside its message; open one big.
+3. Open the ticket page and open one result big.
 
 Must be seen:
 
-- The ticket shows the same widgets as Focus.
-- The big overlay is the same one.
+- The tile shows the newest result small and how many more there are.
+- The chat shows the files, check runs and pull request of a step inside that step's message.
+- The ticket page shows every result of the ticket as the same widgets as Focus, all 16 kinds from its real files, evidence and links.
+- The big overlay is the same one everywhere: arrows step through, Esc closes and gives the focus back.
 
 ## 22. A real terminal: type, select, copy and paste
 
