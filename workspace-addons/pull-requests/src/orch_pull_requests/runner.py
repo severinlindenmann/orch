@@ -671,7 +671,7 @@ class Runner:
         store.change_group(self.root, repo, branch, url=url)
         self.log(f"Group {url}: " + ", ".join(f"#{e['number']}" for e in inside))
         for e in inside:
-            store.set_state(self.root, e["url"], RUNNING, f"in the group {url}", group=url)
+            store.set_state(self.root, e["url"], RUNNING, f"in the group {url}", group=url, taken=store.now())  # clock restarts per group
         if len(inside) == 1 and inside[0].get("proof"):
             return self._proof(repo, base, url, inside[0])
         if self._ahead is not None:

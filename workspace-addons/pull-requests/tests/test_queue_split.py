@@ -110,3 +110,25 @@ def test_merge_alone_is_on_by_default_and_reads_only_true_or_false(ws):
     (ws / ".orch").mkdir(exist_ok=True)
     (ws / ".orch" / "config.toml").write_text('[pull_requests]\nmerge_alone = "no"\n')
     assert settings.merge_alone(ws) is True
+
+
+def test_the_checks_clock_restarts_when_a_smaller_group_is_opened(ws, monkeypatch):
+    """ORCH-914: after a red split the member's 'checks running' time counts from its new group, not the first."""
+    for n in range(1, 5):
+        store.add(ws, url(n), None, "agent:t", login="bot")
+    ticks = iter(f"2026-11-19T10:{m:02d}:00Z" for m in range(60))
+    monkeypatch.setattr(store, "now", lambda: next(ticks))
+    seen = {}
+    real = store.set_state
+
+    def spy(root, u, state, why, **extra):
+        if "group" in extra and extra["group"]:
+            seen.setdefault(u, []).append(extra.get("taken"))
+        return real(root, u, state, why, **extra)
+
+    monkeypatch.setattr(store, "set_state", spy)
+    gh = NamedChecks({n: {} for n in range(1, 5)}, frozenset({"clock / suites"}))
+    r, _calls = make(ws, gh, FakeGit(), red_on_base={3})
+    r.run()
+    assert len(seen[url(1)]) >= 2 and None not in seen[url(1)]
+    assert len(set(seen[url(1)])) == len(seen[url(1)])  # a new start time for every group it was in
