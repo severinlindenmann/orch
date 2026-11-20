@@ -323,14 +323,21 @@ def _is_orch(argv: list[str]) -> bool:
     return False
 
 
-def _same_command(argv: list[str], managed: set[tuple[str, ...]]) -> bool:
+def _same_command(argv: list[str], managed: frozenset[str]) -> bool:
     """The process runs a managed service's own command: exactly, or behind its interpreter (a script with a
-    shebang shows in ps as `/bin/bash /path/crash.sh`)."""
-    t = tuple(argv)
-    return t in managed or (len(t) > 1 and _interpreter(Path(t[0]).name) and t[1:] in managed)
+    shebang shows in ps as `/bin/sh /path/crash.sh`, or `/bin/sh -e /path/crash.sh` with a shebang flag).
+    ps joins the words with spaces, so whole command lines are compared (a path may hold a space)."""
+    if " ".join(argv) in managed:
+        return True
+    if len(argv) < 2 or not _interpreter(Path(argv[0]).name):
+        return False
+    i = 1
+    while i < len(argv) - 1 and argv[i].startswith("-"):
+        i += 1
+    return " ".join(argv[i:]) in managed
 
 
-def _processes(root: Path, skip: set[int], managed: frozenset[tuple[str, ...]] = frozenset()) -> list[dict]:
+def _processes(root: Path, skip: set[int], managed: frozenset[str] = frozenset()) -> list[dict]:
     cp = _tool(["ps", "-ww", "-U", str(os.getuid()), "-o", "pid=,ppid=,tty=,lstart=,command="])
     if not cp or cp.returncode != 0:
         return []
@@ -413,14 +420,14 @@ def scan(root: Path) -> list[dict]:
     return items
 
 
-def _managed(root: Path) -> tuple[set[int], frozenset[tuple[str, ...]]]:
+def _managed(root: Path) -> tuple[set[int], frozenset[str]]:
     """The services orch keeps (made or adopted): their main pids and the commands they run. Their processes,
     and what those start, are not found again, also while launchd brings a crashing one back with a new pid."""
     from . import drivers
     from .cli import _spec, _workspace_id
 
     pids: set[int] = set()
-    argvs: set[tuple[str, ...]] = set()
+    argvs: set[str] = set()  # whole command lines, as ps shows them
     recs, _bad = store.load_all(root)
     if not recs:
         return pids, frozenset()
@@ -435,8 +442,11 @@ def _managed(root: Path) -> tuple[set[int], frozenset[tuple[str, ...]]]:
             spec = _spec(root, r, wid, strict=False)
         except Refused:
             continue
-        if not spec.external:  # an adopted job's words are only shown; its pid still counts below
-            argvs.add(tuple(spec.argv))
+        # The command counts only while the person wants the service running (started, or starts by itself): a
+        # stopped service's command run by hand is not orch's. An adopted job's words are only shown.
+        wanted = store.read_state(root, r["id"]).get("running") is True or bool(r.get("auto"))
+        if wanted and not spec.external:
+            argvs.add(" ".join(spec.argv))
         try:
             st = drv.status(spec)
         except Refused:

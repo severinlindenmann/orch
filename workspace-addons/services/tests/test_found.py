@@ -505,17 +505,26 @@ def test_a_managed_services_own_processes_are_never_found(cli, mac, tools, ws):
     # ORCH-935 point 4: launchd brings a crashing service back with a new pid that orch has not seen yet, and the
     # service's own children (sleep) have other pids again; Found listed them as "Running, not managed".
     (ws / "crash.sh").write_text("#!/bin/sh\necho boom\nsleep 5\nexit 1\n", encoding="utf-8")
-    code, out = jrun(cli, "add", "Crashy job", "--id", "crash", "--", "sh", "crash.sh")
+    code, out = jrun(cli, "add", "Crashy job", "--id", "crash", "--start", "--", "sh", "crash.sh")
     assert code == 0, out
+    (ws / "run.sh").write_text("#!/bin/sh -e\nsleep 5\n", encoding="utf-8")
+    (ws / "run.sh").chmod(0o755)
+    assert jrun(cli, "add", "Runner", "--id", "runner", "--start", "--", "./run.sh")[0] == 0
+    assert (
+        jrun(cli, "add", "Worker", "--id", "worker", "--", "/usr/bin/python3", "worker.py")[0] == 0
+    )  # stopped
     sh = shutil.which("sh")  # launchd runs the full path the plist names
     tools.set(
         ps=[
             {"pid": 970, "ppid": 1, "tty": "??", "argv": [sh, "crash.sh"]},  # started again after a crash
             {"pid": 971, "ppid": 970, "tty": "??", "argv": ["sleep", "5"]},  # what the service started
+            {"pid": 972, "ppid": 1, "tty": "??", "argv": ["/bin/sh", "-e", str((ws / "run.sh").resolve())]},
             {"pid": 973, "ppid": 1, "tty": "??", "argv": ["/usr/bin/python3", "other.py"]},
+            {"pid": 974, "ppid": 1, "tty": "??", "argv": ["/usr/bin/python3", "worker.py"]},
         ],
-        lsof={"970": str(ws), "971": str(ws), "973": str(ws)},
+        lsof={str(n): str(ws) for n in (970, 971, 972, 973, 974)},
     )
     found = {i["id"] for i in jrun(cli, "found")[1]["found"]}
-    assert "process:970" not in found and "process:971" not in found
+    assert not {"process:970", "process:971", "process:972"} & found  # a shebang with a flag too
     assert "process:973" in found  # a program orch does not keep still shows
+    assert "process:974" in found  # so does a stopped service's command started by hand
