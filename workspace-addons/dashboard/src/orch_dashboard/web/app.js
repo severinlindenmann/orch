@@ -264,6 +264,7 @@ function sync(target, source) {
   if (target.nodeType === 3) { if (target.data !== source.data) target.data = source.data; return; }
   if (target.nodeType !== 1) return;
   if (locks.has(target.dataset.key) || mounts.has(target) || target.id === 'addon-body' || target.classList.contains('fv-pthumb')) return;  // a live thumbnail keeps its frame
+  if (target.dataset.resultsHost !== undefined && target.dataset.resultsHost === source.dataset?.resultsHost) return;  // result widgets fill themselves (pages/results-feed.js)
   for (const attr of [...target.attributes]) {
     if (attr.name === 'open' && target.tagName === 'DETAILS') continue;
     if (target.classList.contains('ui-native-select') && ['class', 'tabindex', 'aria-hidden'].includes(attr.name)) continue;  // set by kit/select.js
@@ -447,6 +448,7 @@ function render(arrived = new Set()) {
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
   if (typeof liveDockSync === 'function') liveDockSync();  // the layer of the live page, outside main
   if (typeof liveOpenFromAddress === 'function') liveOpenFromAddress(r);  // a ticket's address opens its session (ORCH-465)
+  if (typeof resultsFillAll === 'function') resultsFillAll(document);  // result widgets on tiles, in chat and on the ticket page
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'ticket') mountTicketTalk(main);
   if (typeof startMount === 'function') startMount(main);  // every Start button (pages/start.js)
