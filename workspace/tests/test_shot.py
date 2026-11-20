@@ -196,3 +196,64 @@ def _bar_width(png: bytes) -> int:
         prev = p
         px.append(p)
     return sum(1 for p in px if p[0] < 30 and p[1] < 30 and p[2] < 30)
+
+
+def _exe(path: Path) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\n")
+    path.chmod(0o755)
+    return str(path)
+
+
+@pytest.fixture
+def no_browser(tmp_path, monkeypatch):
+    """A computer with no browser at all: empty HOME, empty apps folder, nothing on the PATH."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # what expanduser reads on Windows
+    monkeypatch.delenv("ORCH_SHOT_BROWSER", raising=False)
+    monkeypatch.setattr(cli_shot, "_APPS", str(tmp_path / "Applications"))
+    monkeypatch.setattr(cli_shot.shutil, "which", lambda n: None)
+    return tmp_path
+
+
+def test_no_browser_is_refused(no_browser):
+    with pytest.raises(Refused, match="Edge or Brave"):
+        cli_shot.find_browser()
+
+
+@pytest.mark.parametrize(
+    "where",
+    [
+        # report r-1119-1255-ws-8: newer Playwright unpacks Chrome for Testing, not Chromium.app
+        "home/Library/Caches/ms-playwright/chromium-1248/chrome-mac-arm64/Google Chrome for Testing.app/"
+        "Contents/MacOS/Google Chrome for Testing",
+        "home/Library/Caches/ms-playwright/chromium-1187/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+        "home/.cache/ms-playwright/chromium-1248/chrome-linux64/chrome",
+        "Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        "Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+    ],
+)
+def test_finds_each_kind_of_browser(no_browser, where):
+    exe = _exe(no_browser / where)
+    assert cli_shot.find_browser() == exe
+
+
+def test_newest_playwright_first(no_browser):
+    base = no_browser / "home/Library/Caches/ms-playwright"
+    _exe(base / "chromium-999/chrome-mac/Chromium.app/Contents/MacOS/Chromium")
+    new = _exe(base / "chromium-1248/chrome-mac/Chromium.app/Contents/MacOS/Chromium")
+    assert cli_shot.find_browser() == new
+
+
+def test_chrome_before_edge(no_browser):
+    chrome = _exe(no_browser / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+    _exe(no_browser / "Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge")
+    assert cli_shot.find_browser() == chrome
+
+
+def test_edge_or_brave_on_the_path(no_browser, monkeypatch):
+    brave = "/usr/bin/brave-browser"
+    monkeypatch.setattr(cli_shot.shutil, "which", lambda n: brave if n == "brave-browser" else None)
+    assert cli_shot.find_browser() == "/usr/bin/brave-browser"

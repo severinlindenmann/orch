@@ -28,6 +28,10 @@ ALLOW = {
         "a queued pull request is not nudged; follow-up like #837 (a manifest key instead of the name)",
     },
     "orch/cli_chat.py": {"sync": "core `orch chat sync` command; not the add-on"},
+    "orch/people.py": {
+        "dashboard": "r-1119-1255-ws-8: the names list stays where the dashboard kept it "
+        "(.orch/run/dashboard/people.json) so no name is lost; a folder name, not the package"
+    },
     "orch/config.py": {"focus": _FOLLOW_UP, "insights": _FOLLOW_UP},
     "orch/history.py": {"sync": _FOLLOW_UP},
     "orch/chat.py": {"automation": _FOLLOW_UP},
