@@ -15,6 +15,9 @@ Each keeper pass (no AI call while nothing is new):
            kept in its own file (security-verdicts.json), so the keeper never writes over it.
   card     a "problems" verdict puts one card on the role ticket: keep waiting for the fix (recommended) or
            release anyway. Only a person's answer counts.
+  fix      `orch review security <N> fixed-by <M>` links the pull request that fixes the finding (ORCH-789).
+           #N then counts as fixed once #M is merged in the same release with a security OK for its merged
+           commit. Only a person or #N's review helper links it; #M still needs its own OK.
   hold     before a cut: every matched pull request in the release needs an OK (or the owner's "Release
            anyway") for the head that was merged. Anything else holds the release with one line why. A
            failed GitHub read stops the pass (the keeper never cuts on a read it could not make).
@@ -194,6 +197,48 @@ def _keeper_entry(root: Path, n: int) -> dict | None:
     return e if isinstance(e, dict) else None
 
 
+def _may_record(root: Path, n: int, e: dict) -> None:
+    """A person or the review helper of pull request #n. Not a sub-ticket of the review ticket: any helper can
+    put its own ticket under another one, so that would let any helper clear a finding (ORCH-789)."""
+    from orch import worktrees
+
+    nobody = (
+        "Only the security review helper of this pull request or a person records its verdict or its fix. "
+        f"Ask the person: orch review security {n} fixed-by <fix pull request>."
+    )
+    try:
+        me = worktrees._agent_ticket(root)
+    except Refused:
+        raise Refused(nobody) from None
+    if me is not None and me != e.get("tid"):
+        raise Refused(nobody)
+
+
+def ticket_result(root: Path | None, ticket: dict) -> dict | None:
+    """ORCH-826: the result of a "Security review: pull request #N" ticket for the commit it was started on:
+    {"ok": True|False, "line", "what"} once a verdict is recorded, else None (no verdict yet, not a security
+    review, or the pull request moved on and a newer review owns it). The Reviewer accepts an ok for the
+    owner; only a problem stays on the owner's list, and its card leads with it."""
+    if root is None or not str(ticket.get("title") or "").startswith(TITLE.split("#")[0]):
+        return None
+    from orch import releasekeeper
+
+    try:
+        prs = (releasekeeper.read_state(releasekeeper.Cfg(root)).get("security") or {}).get("prs") or {}
+    except (OSError, ValueError, Refused):
+        return None
+    for n, e in prs.items() if isinstance(prs, dict) else ():
+        if not isinstance(e, dict) or e.get("tid") != ticket.get("id"):
+            continue
+        v = read_verdicts(root).get(str(n))
+        word = _effective(e, v)
+        if word is None:
+            return None
+        line = "you said release anyway" if word == "owner-ok" else str((v or {}).get("line") or "")
+        return {"ok": word in OK, "line": line, "what": f"the security review of pull request #{n}"}
+    return None
+
+
 def verdict(root: Path, n: int, word: str, line: str, by: str, sha: str = "") -> dict:
     """`orch review security <n> ok|problems "<line>" --sha <commit>`: the review helper of that pull request,
     or a person. The verdict holds only for the commit the review was started on and names the one it read."""
@@ -205,15 +250,9 @@ def verdict(root: Path, n: int, word: str, line: str, by: str, sha: str = "") ->
     e = _keeper_entry(root, n)
     if not e or not e.get("sha"):
         raise Refused(f"Pull request #{n} is not waiting for a security review.")
-    from orch import secretscan, worktrees
+    from orch import secretscan
 
-    nobody = "Only the security review helper of this pull request or a person records its verdict."
-    try:
-        me = worktrees._agent_ticket(root)
-    except Refused:
-        raise Refused(nobody) from None
-    if me is not None and me != e.get("tid"):
-        raise Refused(nobody)
+    _may_record(root, n, e)
     given = str(sha or "").strip().lower()
     if len(given) < 7 or not re.fullmatch(r"[0-9a-f]+", given) or not str(e["sha"]).startswith(given):
         raise Refused(
@@ -229,6 +268,28 @@ def verdict(root: Path, n: int, word: str, line: str, by: str, sha: str = "") ->
     with contextlib.suppress(Refused, OSError, ValueError):
         if e.get("tid"):
             tickets.log(root, e["tid"], f"Security verdict for pull request #{n}: {word}: {why}", by)
+    return {"pr": n, **rec}
+
+
+def link_fix(root: Path, n: int, fix: int, by: str) -> dict:
+    """`orch review security <n> fixed-by <m>`: pull request #m fixes what the review of #n found. The hold on
+    #n ends by itself once #m is merged in the same release with a security OK for its merged commit."""
+    if fix <= 0 or fix == n:
+        raise Refused("Give the number of the pull request that fixes it, not the same one.")
+    e = _keeper_entry(root, n)
+    if not e or not e.get("sha"):
+        raise Refused(f"Pull request #{n} is not waiting for a security review.")
+    _may_record(root, n, e)
+    data = read_verdicts(root)
+    rec = data.get(str(n))
+    if not rec or rec.get("sha") != e["sha"] or rec.get("verdict") != "problems":
+        raise Refused(f"Pull request #{n} has no problems verdict to fix.")
+    rec = {**rec, "fixed_by": int(fix), "fixed_by_by": by, "fixed_at": tickets.now()}
+    data[str(n)] = rec
+    _write_verdicts(root, data)
+    with contextlib.suppress(Refused, OSError, ValueError):
+        if e.get("tid"):
+            tickets.log(root, e["tid"], f"Security finding of pull request #{n}: fixed by #{fix}", by)
     return {"pr": n, **rec}
 
 
@@ -273,6 +334,23 @@ def _effective(e: dict, v: dict | None) -> str | None:
     if v and v.get("sha") == e.get("sha") and v.get("verdict") in VERDICTS:
         return str(v["verdict"])
     return None
+
+
+def _fix(sec: dict, verdicts: dict, v: dict | None, heads: dict[int, str]) -> tuple[int | None, str]:
+    """(m, "") when the linked fix #m is merged in this release with a security OK for its merged commit;
+    (None, why) when a fix is linked but does not count yet; (None, "") when no fix is linked."""
+    try:
+        m = int((v or {}).get("fixed_by") or 0)
+    except (TypeError, ValueError):
+        m = 0
+    if m <= 0:
+        return None, ""
+    if not heads.get(m):
+        return None, f"its fix #{m} is not merged in this release with a security review"
+    fe = sec["prs"].get(str(m))
+    if not fe or fe.get("sha") != heads[m] or _effective(fe, verdicts.get(str(m))) not in OK:
+        return None, f"its fix #{m} has no security OK yet"
+    return m, ""
 
 
 def review_note(n: int, url: str, sha: str, hits: list[str]) -> str:
@@ -500,6 +578,7 @@ def tend(w, st: dict, role: str) -> tuple[list[str], list[str]]:
     lines: list[str] = _limit_answered(w, sec, role, window)
     waiting: dict[str, str] = {}  # merged pull requests the limit holds back: {number: merged head}
     merged, holds = _merged_rows(w, pats)
+    heads = {int(p["number"]): str(p.get("headRefOid") or "") for p in merged}
     rows = [(p, True) for p in merged]
     rows += [(p, False) for p in w.open_prs() if not p.get("isDraft")]
     for pr, is_merged in rows:
@@ -533,6 +612,13 @@ def tend(w, st: dict, role: str) -> tuple[list[str], list[str]]:
                     holds.append(f"#{n} (security review not started)")
                 continue
         got = _effective(e, verdicts.get(str(n)))
+        fix, why_not = (
+            _fix(sec, verdicts, verdicts.get(str(n)), heads)
+            if got == "problems" and is_merged
+            else (None, "")
+        )
+        if fix:
+            got = "fixed"  # counts like an OK, quietly
         if got == "problems":
             lines += _card(w, sec, role, n, e, verdicts.get(str(n)) or {})
             got = _effective(e, verdicts.get(str(n)))
@@ -540,8 +626,10 @@ def tend(w, st: dict, role: str) -> tuple[list[str], list[str]]:
             continue
         if e.get("sha") != head:
             holds.append(f"#{n} (security review of its last change still running)")
-        elif got in OK:
+        elif got in OK or got == "fixed":
             continue
+        elif got == "problems" and why_not:
+            holds.append(f"#{n} (security review found problems; {why_not})")
         elif got == "problems":
             holds.append(f"#{n} (security review found problems)")
         else:
