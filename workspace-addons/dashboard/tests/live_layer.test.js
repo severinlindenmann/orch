@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerSort, liveAskModel, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerCompact, liveLayerSort, liveAskModel, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -265,10 +265,40 @@ test('a window resize draws the layer again only across the phone width', () => 
   assert.match(page, /if \(now !== phone\)/);
 });
 
+// ORCH-463: words on the pane buttons, full titles in the split, Add beside asks which session.
+test('a split, narrow or small pane is compact: its title gets a row of its own', () => {
+  assert.equal(L.liveLayerCompact('bottom', 1, 1680, false), false, 'one roomy pane: one row');
+  assert.equal(L.liveLayerCompact('bottom', 1, 1040, false), true, 'one pane at 1280 wide: the title gets its row');
+  assert.equal(L.liveLayerCompact('bottom', 2, 1280, false), true, 'every split');
+  assert.equal(L.liveLayerCompact('bottom', 1, 800, false), true, 'a small single pane');
+  assert.equal(L.liveLayerCompact('bottom', 1, 390, true), true, 'a phone');
+});
+
+test('every pane button carries its word, and Add beside opens a choice instead of taking the first session', () => {
+  const pane = source.slice(source.indexOf('function livePane('), source.indexOf('// The live part of a pane'));
+  for (const w of ['Pin', 'Add beside', 'Place', 'Full screen', 'Leave full screen', 'Minimise', 'Close', 'More']) assert.match(pane, new RegExp(`'${w}'`), w);
+  assert.doesNotMatch(pane, /liveBtn\('btn icon/, 'no icon-only button left in a pane');
+  assert.match(pane, /livePaneBtn\('menu', besideWhy, 'plus', 'Add beside', \{'data-menu':besideMenu/);
+  assert.match(source, /act === 'beside-pick'\) liveLayerDo\(\{type:'beside', key:b\.dataset\.session\}/);
+  assert.doesNotMatch(source, /act === 'beside'\)/, 'no click adds a session unasked');
+  const menu = source.slice(source.indexOf('function liveBesideMenu('), source.indexOf('// The More menu'));
+  assert.match(menu, /'data-live':'beside-pick'/);
+  assert.match(menu, /others\.map\(/);
+});
+
+test('a button with a word is named by the word unless its label starts with it', () => {
+  const body = source.slice(source.indexOf('function liveBtn('), source.indexOf('// A pane\'s button'));
+  const ctx = {h:(tag, attrs) => attrs, liveIc:() => null};
+  vm.createContext(ctx); vm.runInContext(body + '\nthis.f = liveBtn;', ctx);
+  assert.equal(ctx.f('b', 'pin', 'Pin ORCH-1', 'g', {}, 'Pin')['aria-label'], 'Pin ORCH-1');
+  assert.equal(ctx.f('b', 'x', 'Where it sits', 'g', {}, 'Bottom')['aria-label'], null);
+  assert.equal(ctx.f('b', 'x', 'Where it sits', 'g')['aria-label'], 'Where it sits');
+});
+
 test('ORCH-817: every pane has Stop and End session in its header (More when narrow); the old body Stop is gone', () => {
   assert.doesNotMatch(source, /data-live-stop/);
-  assert.match(source, /\.\.\.\(sess \? liveEndHere\(key, label, o\.narrow\) : \[\]\)/);
-  assert.match(source, /narrow \? \[window\.liveEndOpenAt\?\.\('pane'\) === key \? window\.liveEndMenu\(key, 'pane:' \+ key\) : null\] : window\.liveEndButtons\(key, label\)/);
+  assert.match(source, /\.\.\.\(sess \? liveEndHere\(key, label, compact\) : \[\]\)/);
+  assert.match(source, /compact \? \[window\.liveEndOpenAt\?\.\('pane'\) === key \? window\.liveEndMenu\(key, 'pane:' \+ key\) : null\] : window\.liveEndButtons\(key, label\)/);
   assert.match(source, /sess && typeof window\.liveEndMenu === 'function' \? liveMoreEnd\(key\) : null/);
   assert.match(source, /typeof window\.liveEndKey === 'function' \? window\.liveEndKey\(\) : null\]\);/, 'the dock repaints when a Stop or End menu opens');
 });

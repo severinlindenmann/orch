@@ -67,11 +67,11 @@ if (typeof module === 'object' && module.exports) {
     if (!m.on) return [];
     const where = 'pane:' + id;
     return [
-      m.stop ? h('button', {type:'button', className:'btn icon sm ghost', 'data-live-end':'stop', 'data-id':id, 'data-key':'live-stop',
+      m.stop ? h('button', {type:'button', className:'btn sm ghost live-pbtn', 'data-live-end':'stop', 'data-id':id, 'data-key':'live-stop',
         disabled:!m.busy || liveEnd.busy === id, 'aria-label':'Stop the current step of ' + label,
-        title:m.busy ? 'Stop: ends the current step, the session stays' : 'Nothing is running right now'}, ic('stop')) : null,
-      h('button', {type:'button', className:'btn icon sm ghost', 'data-live-end':'ask', 'data-where':where, 'data-id':id, 'data-key':'live-end',
-        'aria-expanded':String(liveEnd.open === where), 'aria-label':'End session of ' + label, title:'End session'}, ic('power')),
+        title:m.busy ? 'Stop: ends the current step, the session stays' : 'Nothing is running right now'}, ic('stop'), h('span', {className:'live-word'}, 'Stop')) : null,
+      h('button', {type:'button', className:'btn sm ghost live-pbtn', 'data-live-end':'ask', 'data-where':where, 'data-id':id, 'data-key':'live-end',
+        'aria-expanded':String(liveEnd.open === where), 'aria-label':'End session of ' + label, title:'End session'}, ic('power'), h('span', {className:'live-word'}, 'End session')),
       liveEnd.open === where ? liveEndMenu(id, where) : null];
   };
   // The More button of a tile or a bar row, and the menu it opens.
