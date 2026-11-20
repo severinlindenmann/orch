@@ -267,7 +267,7 @@
       "description": "The command of a run card (ORCH-848/860, relay-api.md 'Run cards on the phone'): what the phone shows, never what runs. The computer runs only the command it stored and checks again at run time (runcard.check_spec, the question digest the phone echoes). No folder, program path or argv on the wire. phone = this phone may offer Run it now; true only for orch's own commands (class orch). Every other class shows the command with Copy and one line why, in the phone's own words.",
       "type": "object", "additionalProperties": false, "required": ["command", "class", "phone"],
       "properties": {
-        "command": { "type": "string", "minLength": 1, "maxLength": 300, "allOf": [{ "pattern": "^[^\u0000-\u001f\u007f​-‏‪-‮⁦-⁩﻿;|&<>`$\\\\]*$" }, { "pattern": "\\S" }], "description": "One line as the helper gave it (runcard.COMMAND_MAX): no control, zero-width or bidi characters, no shell operator (; | & < > $ ` backslash)." },
+        "command": { "type": "string", "minLength": 1, "maxLength": 300, "pattern": "\\S", "not": { "pattern": "[^ -~]|[;|&<>`$\\\\]" }, "description": "One line as the helper gave it (runcard.COMMAND_MAX): printable ASCII only (no control, invisible, line-separator or look-alike character), no shell operator (; | & < > $ ` backslash). Checked as a search for a forbidden character, not an anchored match, so no regex engine lets a trailing newline through. A command outside this goes to the phone without its card (the plain question)." },
         "class": { "enum": ["orch", "other", "login", "copy"], "description": "orch = one of orch's own operations (runcard.CONFIG_OPS, logins status); other = an allowed program the computer runs after one more confirm; login = a sign-in that needs a terminal; copy = a command orch did not check, run by the person in their own terminal." },
         "changes": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 200, "description": "What it changes, in orch's own words (never the helper's)." },
         "undo": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 300, "description": "How to undo it, in orch's own words." },
@@ -293,7 +293,7 @@
         "no_label": { "enum": ["Not now", "Leave it off for now", "Leave it as it is", "Skip it", "Do it later"], "description": "A run card's other answer (left swipe = verdict no): one of orch's own fixed words (runcard.NO_LABELS), never a helper's, so it cannot look like the run's own answer." }
       },
       "allOf": [
-        { "if": { "properties": { "kind": { "const": "run" } } }, "then": { "required": ["run", "no_label"] }, "else": { "not": { "anyOf": [{ "required": ["run"] }, { "required": ["no_label"] }] } } },
+        { "if": { "properties": { "kind": { "const": "run" } } }, "then": { "required": ["run", "no_label"], "properties": { "ok_label": { "const": "I ran it" } } }, "else": { "not": { "anyOf": [{ "required": ["run"] }, { "required": ["no_label"] }] } } },
         { "if": { "properties": { "kind": { "enum": ["choice", "link"] } } }, "then": { "required": ["preview"] } },
         { "if": { "properties": { "kind": { "const": "choice" } } }, "then": { "properties": { "preview": { "properties": { "type": { "const": "options" } } } } } }
       ]

@@ -473,8 +473,9 @@ _RUN_NO = (
     "Skip it",
     "Do it later",
 )  # runcard.NO_LABELS
-# one line, no control, zero-width or bidi character, no shell operator (runcard._CONTROL, runcard._SHELL)
-_RUN_CMD_BAD = re.compile("[\x00-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff;|&<>`$\\\\]")
+# printable ASCII only, no shell operator (runcard._SHELL): a search for a bad character, not anchored
+_RUN_CMD_BAD = re.compile(r"[^ -~]|[;|&<>`$\\]")
+_RUN_OK = "I ran it"  # runcard.OK_LABEL: a run card's yes is orch's own words, never a look-alike of its no
 _LIMITS = {"title": 200, "why": 500, "need": 200, "then": 500, "ok_label": 40, "open": 500}
 _WHY = ("too_large", "held_back")
 
@@ -635,7 +636,7 @@ def _check_wire_run(card: dict) -> None:
     _only(run, _RUN_KEYS, "card.run")
     cmd = run.get("command")
     if not isinstance(cmd, str) or not cmd.strip() or len(cmd) > 300 or _RUN_CMD_BAD.search(cmd):
-        raise Refused("card.run.command: one plain line of at most 300 characters, no shell operators.")
+        raise Refused("card.run.command: one line of plain ASCII, at most 300 characters, no shell operator.")
     if run.get("class") not in _RUN_CLASSES:
         raise Refused("card.run.class is not a class.")
     if not isinstance(run.get("phone"), bool):
@@ -645,6 +646,8 @@ def _check_wire_run(card: dict) -> None:
     for k, n in (("changes", 200), ("undo", 300)):
         if k in run:
             _wtext(run[k], f"card.run.{k}", n)
+    if card.get("ok_label", _RUN_OK) != _RUN_OK:
+        raise Refused("A run card's yes is I ran it.")
     if card.get("no_label") not in _RUN_NO:
         raise Refused("A run card's other answer is one of orch's own words.")
 
