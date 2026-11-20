@@ -234,7 +234,12 @@ def test_a_page_gets_the_screen_then_every_byte_and_typing_reaches_the_helper(he
     port = server().server_address[1]
     s = Stream(port)
     assert s.resp.status == 200 and s.resp.getheader("Content-Type") == "text/event-stream"
-    assert json.loads(s.next("hello")[1]) == {"typing_allowed": True}
+    hello = json.loads(s.next("hello")[1])
+    assert (
+        hello["typing_allowed"] is True
+        and len(hello["page"]) >= 16
+        and set(hello) == {"typing_allowed", "page"}
+    )
     snap = json.loads(s.next("screen")[1])
     assert (snap["cols"], snap["rows"]) == (80, 24)
     assert b"hello-from-helper" in base64.b64decode(snap["data"])
@@ -298,7 +303,7 @@ def test_resize_changes_the_window_and_every_page_hears_it(helper, server, tmp_p
 def test_typing_needs_the_person_the_setting_and_a_page_that_watches(helper, server, tmp_path):
     port = server().server_address[1]
     s = Stream(port)
-    assert json.loads(s.next("hello")[1]) == {"typing_allowed": False}  # watching only by default
+    assert json.loads(s.next("hello")[1])["typing_allowed"] is False  # watching only by default
     s.next("screen")
     code, body = post(port, "/api/term/input", {"ticket": TID, "data": "x"})
     assert code == 403 and b"Typing into the helper's screen is off" in body
@@ -588,3 +593,76 @@ def test_no_add_on_frame_may_watch_or_type_into_the_terminal():
     from orch_dashboard import framepass
 
     assert not framepass.ALL_ROOT_PATHS & {"/api/term/stream", "/api/term/input", "/api/term/size"}
+
+
+def size_now() -> str:
+    return tm("display-message", "-p", "-t", f"={TID}:", "#{window_width}x#{window_height}").stdout.strip()
+
+
+def test_one_page_types_at_a_time_and_the_other_hears_it(helper, server, tmp_path):
+    """ORCH-883: two tabs on one session; turning typing on in B stops A, and A's keys no longer go in."""
+    typing_on(tmp_path)
+    port = server().server_address[1]
+    a, b = Stream(port), Stream(port)
+    pa, pb = (json.loads(x.next("hello")[1])["page"] for x in (a, b))
+    a.next("screen"), b.next("screen")
+    assert pa != pb
+    assert post(port, "/api/term/typing", {"ticket": TID, "page": pa, "on": True}) == (200, b"{}")
+    assert json.loads(a.next("typing")[1]) == {"by": "you"} and json.loads(b.next("typing")[1]) == {
+        "by": "other"
+    }
+    assert post(port, "/api/term/input", {"ticket": TID, "data": "from-a\r", "page": pa}) == (200, b"{}")
+    assert post(port, "/api/term/input", {"ticket": TID, "data": "x", "page": pb})[0] == 409
+    assert (
+        post(port, "/api/term/input", {"ticket": TID, "data": "x"})[0] == 409
+    )  # no page: not the one typing
+    assert post(port, "/api/term/size", {"ticket": TID, "cols": 90, "rows": 20, "page": pb})[0] == 409
+    assert post(port, "/api/term/typing", {"ticket": TID, "page": pb, "on": True}) == (200, b"{}")
+    assert json.loads(a.next("typing")[1]) == {"by": "other"} and json.loads(b.next("typing")[1]) == {
+        "by": "you"
+    }
+    code, body = post(port, "/api/term/input", {"ticket": TID, "data": "late-a", "page": pa})
+    assert code == 409 and b"Another page is typing" in body
+    assert post(port, "/api/term/input", {"ticket": TID, "data": "from-b\r", "page": pb}) == (200, b"{}")
+    assert a.until(b"from-b") and b"late-a" not in a.seen
+    c = Stream(port)  # a page that joins now hears who types
+    c.next("screen")
+    assert json.loads(c.next("typing")[1]) == {"by": "other"}
+    c.close()
+    assert (
+        post(port, "/api/term/typing", {"ticket": TID, "page": "made-up", "on": True})[0] == 409
+    )  # no such stream
+    # B leaves: nobody types, A may take it again
+    b.close()
+    assert json.loads(a.next("typing", timeout=8)[1]) == {"by": "none"}
+    assert post(port, "/api/term/input", {"ticket": TID, "data": "again-a\r", "page": pa}) == (200, b"{}")
+    for bad in ({"page": "", "on": True}, {"page": pa, "on": 1}, {"page": pa}, {"page": 5, "on": True}):
+        assert post(port, "/api/term/typing", {"ticket": TID, **bad})[0] == 400
+    assert post(port, "/api/term/typing", {"ticket": "t_other0002", "page": pa, "on": True})[0] == 409
+    a.close()
+
+
+def test_the_helpers_window_gets_its_own_size_back_when_typing_ends(helper, server, tmp_path):
+    """ORCH-881: a page that typed in a small pane resized the helper to 60x8; typing off gives back 80x24."""
+    typing_on(tmp_path)
+    port = server().server_address[1]
+    s = Stream(port)
+    page = json.loads(s.next("hello")[1])["page"]
+    s.next("screen")
+    assert post(port, "/api/term/typing", {"ticket": TID, "page": page, "on": True})[0] == 200
+    assert post(port, "/api/term/size", {"ticket": TID, "cols": 60, "rows": 8, "page": page}) == (200, b"{}")
+    assert post(port, "/api/term/size", {"ticket": TID, "cols": 70, "rows": 9, "page": page}) == (200, b"{}")
+    assert size_now() == "70x9"
+    typing_on(tmp_path, False)  # the setting went off meanwhile: giving the typing back still works
+    assert post(port, "/api/term/typing", {"ticket": TID, "page": page, "on": True})[0] == 403
+    assert post(port, "/api/term/typing", {"ticket": TID, "page": page, "on": False}) == (200, b"{}")
+    assert wait(lambda: size_now() == "80x24")
+    typing_on(tmp_path)
+    sizes = [json.loads(s.next("size")[1]) for _ in range(3)]  # every page hears the size it is given back
+    assert sizes[-1] == {"cols": 80, "rows": 24}
+    # typing again and leaving without turning it off: the size comes back too
+    assert post(port, "/api/term/typing", {"ticket": TID, "page": page, "on": True})[0] == 200
+    assert post(port, "/api/term/size", {"ticket": TID, "cols": 50, "rows": 6, "page": page})[0] == 200
+    assert size_now() == "50x6"
+    s.close()
+    assert wait(lambda: size_now() == "80x24", timeout=8)

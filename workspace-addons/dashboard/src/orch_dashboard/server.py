@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import re
+import secrets
 import sys
 import threading
 import time
@@ -1191,7 +1192,9 @@ class Handler(BaseHTTPRequestHandler):
         from . import termbridge
 
         tid = (parse_qs(query).get("ticket") or [""])[0]
-        w = termbridge.join(self.root, self.orch_bin, tid)
+        # this stream's id: the one page that types is named by it (ORCH-883)
+        page = secrets.token_urlsafe(12)
+        w = termbridge.join(self.root, self.orch_bin, tid, page)
         if w == "busy":
             return self._send(503, b"Too many open terminals.", "text/plain")
 
@@ -1213,20 +1216,21 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             # the setting only, as /api/term says it: a stream cannot carry the page secret, typing checks it
             write(
-                f"event: hello\ndata: {json.dumps({'typing_allowed': _typing_allowed(self.root)})}\n\n".encode()
+                f"event: hello\ndata: {json.dumps({'typing_allowed': _typing_allowed(self.root), 'page': page})}\n\n".encode()
             )
             if isinstance(w, str):
                 write(f"event: end\ndata: {json.dumps({'state': w})}\n\n".encode())
                 return
-            termbridge.stream(w, write, gone)
+            termbridge.stream(w, write, gone, page=page)
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
         finally:
             if not isinstance(w, str):
-                termbridge.leave(w)
+                termbridge.leave(w, page)
 
     def _term_post(self, path: str):
-        """POST /api/term/input {ticket, data} and /api/term/size {ticket, cols, rows}: the person's own dashboard
+        """POST /api/term/input {ticket, data, page?}, /api/term/size {ticket, cols, rows, page?} and /api/term/typing
+        {ticket, page, on} (one page types at a time, ORCH-883; page: the id its stream's hello gave): the person's own dashboard
         session (as /api/term/keys; the sign-in is the only check, R4.1a) and the typing setting on; only into a session a page
         of this server watches now (termbridge)."""
         why = self._fence()
@@ -1240,22 +1244,39 @@ class Handler(BaseHTTPRequestHandler):
             return self._refuse_type()
         from . import termbridge
 
-        want = {"ticket", "data"} if path.endswith("/input") else {"ticket", "cols", "rows"}
+        want = (
+            {"ticket", "data"}
+            if path.endswith("/input")
+            else {"ticket", "page", "on"}
+            if path.endswith("/typing")
+            else {"ticket", "cols", "rows"}
+        )
         try:
             n = int(self.headers.get("Content-Length") or "")
             if not 0 < n <= termbridge.MAX_INPUT * 6 + 1024:  # a long paste, every character escaped in JSON
                 raise ValueError
             body = json.loads(self.rfile.read(n))
-            if not isinstance(body, dict) or set(body) != want or not isinstance(body["ticket"], str):
+            if (
+                not isinstance(body, dict)
+                or set(body) - {"page"} != want - {"page"}
+                or not want <= set(body)
+                or not isinstance(body["ticket"], str)
+                or not isinstance(body.get("page", ""), str)
+            ):
                 raise ValueError
         except (ValueError, RecursionError, OSError):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
-        if not _typing_allowed(self.root):  # the setting is checked here, not only hidden in the page
+        off = path.endswith("/typing") and body.get("on") is False  # giving the typing back: always
+        if not off and not _typing_allowed(
+            self.root
+        ):  # the setting is checked here, not only hidden in the page
             return self._send(403, TYPING_OFF.encode(), "text/plain; charset=utf-8")
         if path.endswith("/input"):
-            code, text = termbridge.type_text(body["ticket"], body["data"])
+            code, text = termbridge.type_text(body["ticket"], body["data"], body.get("page"))
+        elif path.endswith("/typing"):
+            code, text = termbridge.claim(body["ticket"], body["page"], body["on"])
         else:
-            code, text = termbridge.resize(body["ticket"], body["cols"], body["rows"])
+            code, text = termbridge.resize(body["ticket"], body["cols"], body["rows"], body.get("page"))
         self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
 
     def _standing_link(self, sent: str):
@@ -1316,7 +1337,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._session_post()
         if path == "/api/term/keys":
             return self._term_keys()
-        if path in ("/api/term/input", "/api/term/size"):
+        if path in ("/api/term/input", "/api/term/size", "/api/term/typing"):
             return self._term_post(path)
         if path in ("/api/diag", "/api/diag/report", "/api/diag/open", "/api/diag/share"):
             return self._diag_post(path)
