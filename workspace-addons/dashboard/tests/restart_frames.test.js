@@ -45,8 +45,8 @@ function passEnv() {
   const forget = /function framesForget\(\) \{[\s\S]*?\n\}\n/.exec(src)[0];
   const env = {calls:0, renders:0, ok:false};
   const fetch = () => { env.calls++; return env.ok ? Promise.resolve({ok:true, json:() => ({pass:'p'.repeat(43), file:'f'.repeat(43)})}) : Promise.reject(new Error('down')); };
-  env.api = new Function('fetch', 'render', 'frameChanNew', 'let frameKeep = {id:"insights"};\n' + maps + '\n' + fp + '\n' + forget +
-    '\nreturn {framePass, framesForget, framePasses, kept: () => frameKeep, asks: framePassAsks};')(fetch, () => { env.renders++; }, () => 'c'.repeat(32));
+  env.api = new Function('fetch', 'render', 'frameChanNew', 'frameRetries', 'let frameKeep = {id:"insights"};\n' + maps + '\n' + fp + '\n' + forget +
+    '\nreturn {framePass, framesForget, framePasses, kept: () => frameKeep, asks: framePassAsks};')(fetch, () => { env.renders++; }, () => 'c'.repeat(32), new Map());
   env.settle = () => Promise.all([...env.api.asks.values()]);
   return env;
 }
@@ -78,4 +78,44 @@ test('the old pass is dropped after a restart, so the frame address changes and 
   assert.equal(env.api.framePass('insights'), null);
   await env.settle();
   assert.equal(env.api.framePass('insights').pass, 'p'.repeat(43));
+});
+
+// The starting page's message: the dashboard page opens a new frame, only for the shown frame, at most FRAME_RETRIES.
+function retryEnv() {
+  const src = read('../src/orch_dashboard/web/pages/settings.js');
+  const chunk = /const FRAME_RETRY_MS = [\s\S]*?\n\}\);\n/.exec(src)[0];
+  const env = {listener:null, timers:[], replaced:0, hash:'#addon/insights'};
+  env.frame = {isConnected:true, contentWindow:{}, replaceWith:() => { env.replaced++; }};
+  new Function('globalThis', 'snapshot', 'frameShown', 'route', 'pageFrame', 'setTimeout', chunk)(
+    {addEventListener:(n, f) => { if (n === 'message') env.listener = f; }}, false, () => env.frame,
+    () => ({kind:'page', id:'insights', path:'', hash:env.hash}), () => ({}), f => env.timers.push(f));
+  env.send = (data, opts = {}) => env.listener({origin:opts.origin || 'null', source:opts.source || env.frame.contentWindow, data});
+  env.tick = () => { const t = env.timers.splice(0); t.forEach(f => f()); };
+  return env;
+}
+
+test('the starting page makes the dashboard open a new frame in a moment', () => {
+  const env = retryEnv();
+  env.send({orch:'frame-starting'});
+  assert.equal(env.replaced, 0);  // not at once
+  env.tick();
+  assert.equal(env.replaced, 1);
+});
+
+test('only the shown frame asks, and nothing happens once the person moved on', () => {
+  const env = retryEnv();
+  env.send({orch:'frame-starting'}, {source:{}});  // another window
+  env.send({orch:'frame-starting'}, {origin:'http://evil.example'});
+  env.send({orch:'frame-go'});
+  assert.equal(env.timers.length, 0);
+  env.send({orch:'frame-starting'});
+  env.hash = '#addon/focus';  // another page now
+  env.tick();
+  assert.equal(env.replaced, 0);
+});
+
+test('the frame is opened again at most 30 times for one address', () => {
+  const env = retryEnv();
+  for (let i = 0; i < 40; i++) { env.send({orch:'frame-starting'}); env.tick(); }
+  assert.equal(env.replaced, 30);
 });

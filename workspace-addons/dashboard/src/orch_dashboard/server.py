@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -183,11 +184,18 @@ def page_asset(name: str) -> bytes:
 
 
 _PORTS: dict[tuple[str, str], tuple[float, int | None, object]] = {}
-STARTING_RETRY = 2  # seconds: an add-on page whose service is (re)starting is asked for again this often
+STARTING_RETRY = 2  # seconds: the dashboard page opens a (re)starting add-on page again after this (pages/settings.js)
+# The page a frame gets while its add-on's service is (re)starting (ORCH-1055). Its one script tells the dashboard
+# page, which opens the frame again: a reload from inside the sandboxed frame would be cross-site and refused.
+STARTING_SCRIPT = b"parent.postMessage({orch:'frame-starting'},'*')"
 STARTING_PAGE = (
-    b'<!doctype html><html lang="en"><head><meta charset="utf-8">'
-    b'<meta http-equiv="refresh" content="2"><title>Starting</title></head>'
-    b"<body><p>One moment: this page is starting.</p></body></html>"
+    b'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Starting</title></head>'
+    b"<body><p>One moment: this page is starting.</p><script>" + STARTING_SCRIPT + b"</script></body></html>"
+)
+STARTING_CSP = (
+    "default-src 'none'; script-src 'sha256-"
+    + base64.b64encode(hashlib.sha256(STARTING_SCRIPT).digest()).decode()
+    + "'; frame-ancestors 'self'"
 )
 PORT_KEEP = 60.0  # seconds a running add-on's port is remembered: `orch status` costs about 0.2 s
 # Files a browser may keep for a minute: an add-on page's own styles, scripts and pictures (never its pages or data)
@@ -644,15 +652,13 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, b"not found", "text/plain")
 
     def _send_starting(self):
-        """503 with a page that reloads itself after STARTING_RETRY seconds (no script: the frame is sandboxed).
-        The reload keeps the frame's address, so the frame pass in its fragment comes along."""
+        """503 with the starting page (STARTING_PAGE): the dashboard page opens the frame again in a moment."""
         return self._send(
             503,
             STARTING_PAGE,
             "text/html; charset=utf-8",
-            {"Retry-After": str(STARTING_RETRY), "Refresh": str(STARTING_RETRY)},
-            # no CSP sandbox: without allow-scripts it would stop the refresh; the frame's own sandbox applies
-            csp="default-src 'none'; frame-ancestors 'self'",
+            {"Retry-After": str(STARTING_RETRY)},
+            csp=STARTING_CSP,
         )
 
     def _proxy(self, method: str, name: str, rest: str, query: str, cross: bool = False):

@@ -874,12 +874,18 @@ def test_orch1055_a_restarting_addon_page_loads_itself_again_in_its_frame(stack)
     base, _port = stack
     _not_running(LAST["ws"], "viewer")
     code, body, headers = call(base + "/addon/viewer/", headers=IN_FRAME)
-    assert code == 503
-    assert b'http-equiv="refresh"' in body and headers["Refresh"] == "2" and headers["Retry-After"] == "2"
-    assert headers["Content-Type"].startswith("text/html")
+    assert code == 503 and headers["Retry-After"] == "2"
+    assert headers["Content-Type"].startswith("text/html") and headers["Cache-Control"] == "no-store"
+    # its one script tells the dashboard page to open the frame again (a reload from inside would be cross-site)
+    import base64
+    import hashlib
+
+    script = re.search(rb"<script>(.*?)</script>", body).group(1)
+    assert script == b"parent.postMessage({orch:'frame-starting'},'*')"
+    digest = base64.b64encode(hashlib.sha256(script).digest()).decode()
     csp = headers["Content-Security-Policy"]
-    assert "default-src 'none'" in csp and "sandbox" not in csp  # a CSP sandbox would stop the refresh
-    assert headers["Cache-Control"] == "no-store"
+    assert csp == f"default-src 'none'; script-src 'sha256-{digest}'; frame-ancestors 'self'"
+    assert body.count(b"<script") == 1
 
 
 def test_orch1055_only_the_frame_itself_gets_the_page_that_loads_again(stack):
