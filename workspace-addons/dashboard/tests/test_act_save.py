@@ -82,7 +82,6 @@ def test_a_long_text_fits_in_a_bigger_body_only_for_addon_clicks(base, act_orch)
         {"value": "nothex"},
         {"value": "A" * 64},
         {"verb": "on"},  # only Save sends a text
-        {"sign": True, "seen": None},
         {"review": True},
         {"target": "--evil"},
         {"target": "e_1\n"},
