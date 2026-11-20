@@ -624,6 +624,15 @@ def _at(iso) -> float | None:
         return None
 
 
+_ANSWERED_RAW = re.compile(r"q\d+ = (?P<ans>.*?)(?: \(routine: [^()]*\))?\s*", re.S)
+
+
+def _answered_words(raw: str) -> str:
+    """'q3 = Morning (routine: a plain question ...)' (the history line) as plain words: 'answered "Morning"'."""
+    m = _ANSWERED_RAW.fullmatch(raw.strip())
+    return f'answered "{m.group("ans")}"' if m and m.group("ans") else "answered " + raw
+
+
 def accepted(root: Path, since: str) -> list[dict]:
     """Tickets the Reviewer accepted for the owner since `since` (ISO), newest first: {ticket, key, title, at,
     why, sent_back} (sent_back: the owner sent it back since)."""
@@ -644,7 +653,7 @@ def accepted(root: Path, since: str) -> list[dict]:
                         "key": t.get("key") or t["id"],
                         "title": t.get("title") or "",
                         "at": h.get("at"),
-                        "why": "answered " + txt[len(tickets.ANSWERED_LINE) :],
+                        "why": _answered_words(txt[len(tickets.ANSWERED_LINE) :]),
                         "sent_back": False,
                         "answer": True,
                     }
