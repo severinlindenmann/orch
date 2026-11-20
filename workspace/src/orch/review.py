@@ -772,6 +772,32 @@ def _card_of(q: dict) -> dict:
     }
 
 
+def _with_plan(card: dict, q: dict, ticket: dict, all_tickets: list[dict]) -> dict:
+    """The "Plan ready" question of a Show-plan-first ticket is a plain options card; show the plan on it
+    (goal, what is not included, the steps) so the person can decide from the card alone. Render only: the
+    question and its digest stay as they are."""
+    from orch import runs  # runs imports review lazily; no cycle at call time
+
+    if not str(q.get("text", "")).startswith(runs.PLAN_READY):
+        return card
+    plan = ticket.get("plan") if isinstance(ticket.get("plan"), dict) else {}
+    steps = [
+        str(k.get("title", "")).strip()
+        for k in sorted(
+            (k for k in all_tickets if k.get("parent") == ticket.get("id")),
+            key=lambda k: (str(k.get("created_at", "")), str(k.get("key", ""))),
+        )
+    ]
+    parts = [f"What this is about: {ticket.get('title', '')}"]
+    if plan.get("goal"):
+        parts.append(f"Goal: {plan['goal']}")
+    if plan.get("not_included"):
+        parts.append(f"Not included: {plan['not_included']}")
+    if steps:
+        parts.append("Steps: " + "; ".join(f"{i}. {x}" for i, x in enumerate(steps, 1) if x))
+    return {**card, "why": _clip(" ".join(parts), _LIMITS["why"])}
+
+
 def _option_ids(q: dict, card: dict) -> list[str]:
     pv = card.get("preview") or {}
     if card.get("kind") == "choice" and pv.get("type") == "options":
@@ -1458,7 +1484,8 @@ def stack(root: Path) -> list[dict]:
 
     out = []
     order = {}  # ticket id -> {task id: position in its checklist}
-    for t in history.shown_json(root, tickets.list_all(root)):
+    all_tickets = history.shown_json(root, tickets.list_all(root))
+    for t in all_tickets:
         if t.get("general") is True or not isinstance(t.get("id"), str):
             continue
         base = {"ticket": t["id"], "ticket_key": t.get("key"), "ticket_title": t.get("title", t["id"])}
@@ -1473,6 +1500,8 @@ def stack(root: Path) -> list[dict]:
                 if q.get("answer") is not None:
                     continue  # every open question is a card, an add-on's own too (Factory's Start?, ORCH-63)
                 card = q["card"] if isinstance(q.get("card"), dict) else _card_of(q)
+                if "card" not in q:
+                    card = _with_plan(card, q, t, all_tickets)
                 task = tasks.get(q.get("check"))
                 about = _clip(task[1], ABOUT_MAX) if task and isinstance(task[1], str) else ""
                 out.append(
