@@ -413,7 +413,7 @@ def others(root: Path) -> int:
     """How many plain programs run in this workspace folder (shown as one line, never as items)."""
     if not (sys.platform == "darwin" or sys.platform.startswith("linux")):
         return 0
-    units, pids = _launchd(root) if sys.platform == "darwin" else _systemd(root)
+    _units, pids = _launchd(root) if sys.platform == "darwin" else _systemd(root)
     return len(_processes(root, pids | _record_pids(root)))
 
 

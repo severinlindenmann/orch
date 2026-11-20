@@ -521,7 +521,11 @@ def _log_lines(root: Path, rec: dict, n: int) -> list[str]:
 
 
 def _found_text(items: list[dict], others: int = 0) -> str:
-    extra = f"{others} other program{'s' if others != 1 else ''} run{'' if others != 1 else 's'} here." if others else ""
+    extra = (
+        f"{others} other program{'s' if others != 1 else ''} run{'' if others != 1 else 's'} here."
+        if others
+        else ""
+    )
     if not items:
         base = "Nothing found: orch sees no other background jobs of your account on this computer."
         return f"{base} {extra}" if extra else base

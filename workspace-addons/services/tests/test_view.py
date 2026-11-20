@@ -287,7 +287,12 @@ def test_a_plain_program_in_found_has_no_manage_button(ws):
     from orch_services.view import build
 
     found = [
-        {"id": "process:4242", "name": "Python http.server", "running": True, "what": "A program started by hand"},
+        {
+            "id": "process:4242",
+            "name": "Python http.server",
+            "running": True,
+            "what": "A program started by hand",
+        },
         {"id": "old-test-page", "name": "Old test page", "running": True},
     ]
     view = build(ws, ([], 0, None), found=found)
