@@ -6,7 +6,9 @@ calendar starts at Nothing.
 
 How it reaches Outlook is one command in fetch.json, next to this file:
 
-    {"fetch": ["<program>", "<arg>", ...]}
+    {"fetch": ["<program>", "<arg>", ...]}       e.g. {"fetch": ["python3", "./fetch_outlook.py"]}
+
+("./x" is a file in this folder.) It runs in Personal's data folder for this way in, never in this folder.
 
 It gets {"start": "<ISO time>", "end": "<ISO time>", "zone": "<IANA zone>"} on stdin and prints the Outlook calendars
 with their events as Microsoft Graph returns them (calendarView), in one JSON object:
@@ -21,10 +23,13 @@ Plain Python 3.9+ standard library (the Mac's own python3).
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 try:
@@ -87,7 +92,13 @@ def graph_time(v, all_day: bool) -> str | None:
     if all_day:
         return raw[:10]
     try:
-        t = dt.datetime.fromisoformat(raw[:26].rstrip("Z"))  # Graph gives 7 decimals; Python 3.9 reads 6
+        # Graph gives 7 decimals and sometimes Z; Python 3.9 reads at most 6 and no Z. The offset is kept.
+        m = re.fullmatch(r"(\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?)(?:\.(\d+))?(Z|[+-]\d\d:\d\d)?", raw.strip())
+        if not m:
+            return None
+        frac = f".{(m.group(2) + '000000')[:6]}" if m.group(2) else ""
+        off = "+00:00" if m.group(3) == "Z" else (m.group(3) or "")
+        t = dt.datetime.fromisoformat(m.group(1) + frac + off)
     except ValueError:
         return None
     if t.tzinfo is None:
@@ -116,7 +127,8 @@ def convert(graph: dict, zone: str, now: str | None = None) -> dict:
     for c in graph["calendars"]:
         if not isinstance(c, dict) or not isinstance(c.get("id"), str) or not c["id"]:
             continue
-        cid = "outlook:" + c["id"][:190]
+        raw_id = c["id"]  # opaque: a long id is hashed, never cut, so two calendars never share one rule
+        cid = "outlook:" + (raw_id if len(raw_id) <= 190 else hashlib.sha256(raw_id.encode()).hexdigest())
         if cid in seen:
             continue
         seen.add(cid)
@@ -172,9 +184,19 @@ def fetch_command(here: Path) -> list[str]:
     argv = cfg.get("fetch") if isinstance(cfg, dict) else None
     if not argv or not isinstance(argv, list) or not all(isinstance(a, str) and a for a in argv):
         raise Stop("The Outlook way in is not set up yet: fetch.json needs the command that reads Outlook.")
-    if "/" in argv[0] and not os.path.isabs(argv[0]):
-        argv = [str((here / argv[0]).resolve()), *argv[1:]]
-    return argv
+    # "./x" (program or argument) means a file in this folder; the command itself runs in the data folder
+    first = argv[0]
+    if "/" in first and not os.path.isabs(first):
+        first = str((here / first).resolve())
+    return [first, *(str((here / a).resolve()) if a.startswith("./") else a for a in argv[1:])]
+
+
+def work_dir(here: Path) -> Path:
+    """Where the fetch command runs: Personal's data folder for this way in (outside the checked folder)."""
+    d = os.environ.get("ORCH_PERSONAL_WAY_DATA")
+    if d and Path(d).is_dir():
+        return Path(d)
+    return Path(tempfile.gettempdir())
 
 
 def window(values: dict, zone: str) -> tuple[dt.datetime, dt.datetime]:
@@ -197,7 +219,14 @@ def read(values: dict, here: Path) -> dict:
     ask = json.dumps({"start": start.isoformat(), "end": end.isoformat(), "zone": zone})
     try:
         p = subprocess.run(
-            argv, check=False, input=ask, capture_output=True, text=True, timeout=FETCH_TIMEOUT, cwd=here
+            argv,
+            check=False,
+            input=ask,
+            capture_output=True,
+            text=True,
+            timeout=FETCH_TIMEOUT,
+            cwd=work_dir(here),  # never this folder: a file written here would stop the way in
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
         )
     except subprocess.TimeoutExpired:
         raise Stop(f"Outlook did not answer within {FETCH_TIMEOUT} seconds.") from None

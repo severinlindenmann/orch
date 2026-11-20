@@ -587,3 +587,42 @@ def test_outlook_way_is_added_off_and_feeds_calendar_with_the_same_rules(added, 
     api.calendar_rule(added, person(), "Calendar", "titles", None)
     d = json.dumps(api.calendar_week(added, helper(), "2026-11-16", 7))
     assert "Kundentermin Helvetia Logistik" in d and "Anna Keller" in d and "example.ch" not in d
+
+
+def test_outlook_times_keep_their_offset_and_long_ids_are_never_cut():
+    r = _outlook_read()
+    t = r.graph_time
+    assert t({"dateTime": "2026-11-19T08:00:00.123456+02:00", "timeZone": "UTC"}, False) == (
+        "2026-11-19T08:00:00.123456+02:00"
+    )
+    assert (
+        t({"dateTime": "2026-11-19T08:00:00.5Z", "timeZone": "Mars"}, False)
+        == "2026-11-19T08:00:00.500000+00:00"
+    )
+    assert t({"dateTime": "2026-11-19T08:00:00", "timeZone": "Europe/Zurich"}, False).endswith("+01:00")
+    assert t({"dateTime": "19.11.2026 08:00", "timeZone": "UTC"}, False) is None
+    a, b = "A" * 190 + "1", "A" * 190 + "2"
+    raw = r.convert({"calendars": [{"id": a, "events": []}, {"id": b, "events": []}]}, "UTC")
+    ids = [c["id"] for c in raw["calendars"]]
+    assert len(set(ids)) == 2 and all(len(i) <= 200 for i in ids)
+
+
+def test_outlook_fetch_runs_outside_the_way_folder(tmp_path, monkeypatch):
+    r = _outlook_read()
+    way, data = tmp_path / "way", tmp_path / "data"
+    way.mkdir()
+    data.mkdir()
+    (way / "helper.py").write_text("ANSWER = {'calendars': []}\n", encoding="utf-8")
+    (way / "fetch_outlook.py").write_text(
+        "import json, os, sys\nsys.path.insert(0, os.path.dirname(__file__))\nimport helper\n"
+        "open('made-here.txt', 'w').write('x')\nprint(json.dumps(helper.ANSWER))\n",
+        encoding="utf-8",
+    )
+    (way / "fetch.json").write_text(
+        json.dumps({"fetch": [sys.executable, "./fetch_outlook.py"]}), encoding="utf-8"
+    )
+    before = sorted(f.name for f in way.iterdir())
+    monkeypatch.setenv("ORCH_PERSONAL_WAY_DATA", str(data))
+    assert r.read({"from": "2026-11-16", "days": 7}, way)["calendars"] == []
+    assert sorted(f.name for f in way.iterdir()) == before  # no __pycache__, no file written into the way in
+    assert (data / "made-here.txt").exists()
