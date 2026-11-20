@@ -351,3 +351,12 @@ test('the heading counts helpers like Home: the same helper rows and words, not 
   assert.match(head, /Your helper · 2 working · 1 on hold · 1 idle/);
   assert.doesNotMatch(head, /15/);
 });
+
+test('the welcome block is never scrolled to the bottom (phone width cut the icon and Today line)', () => {
+  const c = context();
+  const log = state => ({scrollTop:50, scrollHeight:900, clientHeight:400, textContent:'x', querySelector:() => state ? {} : null});
+  const welcome = log(true); c.chatFollowLog(welcome);
+  assert.equal(welcome.scrollTop, 0);
+  const messages = log(false); c.chatFollowLog(messages);
+  assert.equal(messages.scrollTop, 900);
+});
