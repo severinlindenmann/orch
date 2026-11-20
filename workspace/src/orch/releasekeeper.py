@@ -960,7 +960,10 @@ class World:
                 runs.start(self.root, t["id"], BY, priority=priority, over_limit=over_limit)
             return str(t.get("key") or t["id"])
 
-        return self.act(f"ticket:{title}", go) or (None if self.sim is None else "t_sim")
+        got = self.act(f"ticket:{title}", go)
+        if isinstance(got, str) and got.startswith("not opened"):
+            self.did[-1] += " failed"  # act lists a step before it runs: no "opened" for a refusal
+        return got or (None if self.sim is None else "t_sim")
 
     def record_deployed(self, parts: list[str], sha: str, by: str) -> None:
         def go():
@@ -2142,4 +2145,5 @@ def text(res: dict, dry_run: bool = False) -> str:
     if res.get("paused"):
         return "Automation is paused here: the release keeper did nothing. Turn it back on: orch resume."
     head = ["Dry run, nothing written."] if dry_run else []
-    return "\n".join(head + list(res.get("lines") or []) + [f"  did: {d}" for d in res.get("did") or []])
+    verb = "would" if dry_run else "did"  # act() lists a step before it skips it on a dry run
+    return "\n".join(head + list(res.get("lines") or []) + [f"  {verb}: {d}" for d in res.get("did") or []])

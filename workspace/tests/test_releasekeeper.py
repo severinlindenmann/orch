@@ -1519,3 +1519,23 @@ def test_a_local_branch_that_was_there_before_is_kept(real_clone):
     with pytest.raises(Refused, match="git worktree"):
         w.cut(35, sha, "Release 35")
     assert br in _git("branch", "--list", "release/*", cwd=clone)
+
+
+def test_dry_run_text_says_would_not_did():
+    # ORCH-911: a dry run listed "did: security-review:#6" although it wrote nothing
+    res = {"off": False, "paused": False, "lines": ["one line"], "did": ["security-review:#6"]}
+    dry = rk.text(res, dry_run=True)
+    assert "would: security-review:#6" in dry and "did:" not in dry
+    assert "did: security-review:#6" in rk.text(res)
+
+
+def test_refused_ticket_is_listed_as_failed(tmp_path, monkeypatch):
+    # ORCH-911 review: a ticket the keeper could not open must not count as opened for the Next line
+    def refuse(*a, **k):
+        raise Refused("no such parent")
+
+    monkeypatch.setattr(tickets, "resolve", refuse)
+    w = rk.World.__new__(rk.World)
+    w.root, w.sim, w.dry, w.did = tmp_path, None, False, []
+    assert w.new_ticket("ORCH-1", "Develop is red", "n", "d").startswith("not opened")
+    assert w.did == ["ticket:Develop is red failed"]
