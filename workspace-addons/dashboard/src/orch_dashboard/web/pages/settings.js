@@ -86,7 +86,7 @@ function helperNeedsCard() {
     return h('div', {className:'setting-row', 'data-key':key, 'data-state':item.state},
       h('div', {className:'row-label'}, settingsText('span', {}, D.needListName(item)), settingsText('p', {className:'meta'}, D.needKindWord(item))),
       h('div', {className:'row-value'}, h('span', {className:'badge ' + st.tone}, st.word), stops ? settingsText('p', {className:'meta'}, stops) : null,
-        (typeof loginHowText === 'function' ? loginHowText(item) : '') ? settingsText('p', {className:'meta', 'data-key':key + '-how'}, (typeof loginHowText === 'function' ? loginHowText(item) : '')) : null),
+        typeof loginHow === 'function' ? loginHow(item, key + '-how') : D.needHow(item) ? settingsText('p', {className:'meta', 'data-key':key + '-how'}, D.needHow(item)) : null),
       h('div', {className:'row-action'}, action));
   });
   return h('section', {className:'card', id:'needs', 'data-key':'settings-needs'},
@@ -308,6 +308,15 @@ async function syncAct(verb, target, extra = {}) {
   const answer = result.ok && result.state?.act_answer?.addon === SYNC ? result.state.act_answer.answer : null;
   return {...result, answer};
 }
+// The card's status is a read, not a click (ORCH-413): GET with the rights of /api/state, so a page opened without a
+// signed-in session shows the setting and sends no click that is refused (no 'Sign in to do this' banner).
+async function syncRead() {
+  try {
+    const res = await fetch('/api/addon-read?addon=' + SYNC + '&verb=status', {cache:'no-store'});
+    const answer = res.ok ? await res.json() : null;
+    return {ok:res.ok, answer:answer && typeof answer === 'object' && !Array.isArray(answer) ? answer : null};
+  } catch (_) { return {ok:false, answer:null}; }
+}
 // The Sync card lives in Settings › General and on the Sync page itself (#addon/sync): both change settings in place.
 const syncPageOpen = () => { const r = route(); return r.kind === 'settings' || (r.kind === 'addon' && r.id === SYNC); };
 async function syncLoad() {
@@ -317,7 +326,7 @@ async function syncLoad() {
   if (!syncPageOpen()) return;  // the page was left: it loads again when Settings or the Sync page opens
   syncUi.loading = true;
   try {
-    const result = await syncAct('status', SYNC);
+    const result = await syncRead();
     if (result.answer && typeof result.answer.shown === 'string') {
       syncUi.card = result.answer;
       // just turned on here: "On this computer only" is offered, the person saves it in the review line
@@ -609,8 +618,6 @@ function addonDetailPage(addon) {
       fragment(switchBusy(addon), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':label + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off')), 'addon-detail-switch'),
     addon.page?.live_session === true && addon.active && typeof state.settings?.typing_on === 'boolean' ? row('Typing', h('div', {}, settingsText('p', {}, 'Let me type into the helper\u2019s screen'), settingsText('p', {className:'meta'}, 'When on, you can click the helper\u2019s live screen and type into it.')),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.typing_on, 'aria-label':'Let me type into the helper\u2019s screen', 'data-action':'session-typing', 'data-key':'addon-detail-typing', disabled:snapshot || settingsBusy.has('session-typing')}, state.settings.typing_on ? 'On' : 'Off'), 'addon-detail-typing-row') : null,
-    addon.page?.live_session === true && addon.active && typeof state.settings?.focus_preview_on === 'boolean' ? row('Preview', h('div', {}, settingsText('p', {}, 'Try the new ' + label), settingsText('p', {className:'meta'}, 'Still being built. Turn it off to go back to today\u2019s ' + label + '.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.focus_preview_on, 'aria-label':'Try the new ' + label, 'data-action':'live-preview', 'data-key':'addon-detail-live-preview', disabled:snapshot || settingsBusy.has('live-preview')}, state.settings.focus_preview_on ? 'On' : 'Off'), 'addon-detail-live-preview-row') : null,
     addon.active && d ? row('Connection', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), null, 'addon-detail-connection') : null,
     links && shown !== null ? row('Shared pages', settingsText('p', {}, 'Show workspace name and icon'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on shared pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
@@ -764,7 +771,8 @@ function aboutPanel() {
     body = [
       // A build from a branch (no release number, a commit) is a normal case, not an error: say what it is, skip the check.
       !newest && have?.sha && !have.release && info.ref ? settingsText('p', {className:'meta', 'data-key':'update-branch'}, 'This is a development build, so there is no release to compare it with. Update checks are skipped.')
-        : !newest ? settingsText('p', {className:'meta', 'data-key':'update-unknown'}, 'Could not check for a newer version right now.')
+        : !newest ? h('div', {className:'row'}, settingsText('p', {className:'meta', 'data-key':'update-unknown'}, 'Could not check for a newer version right now.'),
+          snapshot ? null : updButton('Check again', 'update-check-again', () => { updUi.info = null; updLoad(true); render(); }))
         : ready ? h('div', {className:'upd-ready'}, settingsText('strong', {}, updNum(newest.release) || newest.label), settingsText('span', {className:'meta'}, ' is ready to install'))
         : settingsText('p', {className:'meta', 'data-key':'update-current'}, 'You have the newest version.'),
       ready && array(info.changes).length ? h('div', {className:'stack', 'data-key':'update-changes'}, h('h3', {}, 'What changed'), h('ul', {className:'upd-changes'}, array(info.changes).map(c => settingsText('li', {}, c)))) : null,
@@ -775,9 +783,73 @@ function aboutPanel() {
     line('Installed', h('div', {className:'stack'}, h('div', {className:'row'}, settingsText('strong', {'data-key':'update-installed'}, have?.label || (info ? 'orch' : '…')), buildLine(info, phase)?.[0]), ...(buildLine(info, phase) || []).slice(1))),
     line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))),
     autoUpdateCard(info),
+    toolsCard(),
     // About sits with the version (ORCH-89: it was under General)
     snapshot ? null : h('div', {className:'stack', 'data-key':'settings-about-orch'}, h('h2', {className:'set-sub'}, 'About'), h('div', {className:'card'},
       h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Style guide'), h('div', {className:'grow set-ctl'}, h('a', {className:'btn outline sm', href:'/styleguide', target:'_blank', rel:'noopener', 'data-key':'settings-style-guide'}, 'Open the style guide'))))));
+}
+// ---- Tools (ORCH-589): the helper tools and the other tools this workspace uses, newest version, what's new and
+// one Update button each. Data: GET /api/tool-updates (orch keeps the answers 6 hours; Check now asks again).
+// Update runs `orch tools update <name>` in the background; while it runs the card asks again every 3 seconds.
+const toolUi = {data:null, loading:false, starting:null, reason:'', timer:null, clicked:new Set()};
+function toolLoad(refresh = false) {
+  if (toolUi.loading || (toolUi.data && !refresh)) return;
+  toolUi.loading = true;
+  fetch('/api/tool-updates' + (refresh === true ? '?refresh=1' : ''), {cache:'no-store'}).then(r => r.ok ? r.json() : null).catch(() => null).then(data => {
+    toolUi.loading = false;
+    if (data && typeof data === 'object' && Array.isArray(data.tools)) toolUi.data = data;
+    else if (!toolUi.data || toolUi.data.failed) toolUi.data = {tools:[], failed:true};  // keep what was shown; else say it failed
+    const running = toolUi.data.job?.status === 'running';
+    // while an update runs, ask again every 3 s from orch's kept answers (no outside question each time)
+    if (running || toolUi.starting) { clearTimeout(toolUi.timer); toolUi.timer = setTimeout(() => toolLoad('poll'), 3000); }
+    if (!running && toolUi.data.job?.name === toolUi.starting) toolUi.starting = null;
+    if (route().kind === 'settings') render();
+  });
+}
+async function toolStart(name) {
+  toolUi.starting = name; toolUi.clicked.add(name); toolUi.reason = ''; render();
+  let res = null;
+  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'tools.update', args:{name}})}); } catch (e) { /* shown below */ }
+  if (!res || res.status !== 202) { toolUi.starting = null; toolUi.reason = res ? (await res.text()).slice(0, 200) : 'It did not start.'; render(); return; }
+  setTimeout(() => toolLoad('poll'), 1500);
+}
+function toolRow(t, job) {
+  const running = (job?.status === 'running' && job.name === t.name) || toolUi.starting === t.name;
+  const busy = job?.status === 'running' || !!toolUi.starting;  // one update at a time: the other buttons wait
+  // the result of an update started from this page (an older one from another day is not news)
+  const finished = job && job.name === t.name && toolUi.clicked.has(t.name) && (job.status === 'done' || job.status === 'failed') ? job : null;
+  const notes = array(t.notes);
+  const body = [
+    h('div', {className:'row'}, t.update ? h('span', {className:'badge', 'data-key':'tool-ready'}, 'Update available')
+        : settingsText('strong', {}, t.compare === 'current' ? 'Up to date' : t.installed ? 'Installed' : 'Version unknown'),
+      settingsText('span', {className:'meta', 'data-key':'tool-installed'}, t.installed ? (t.update ? t.installed + ' \u2192 ' + t.newest : t.installed) : '')),
+    t.update && notes.length ? h('div', {className:'stack', 'data-key':'tool-notes'}, notes.map(n => h('div', {className:'stack'},
+      settingsText('h3', {}, 'What\u2019s new in ' + n.version),
+      h('ul', {className:'upd-changes'}, array(n.lines).map(x => settingsText('li', {}, x))))),
+      t.more || t.notes_url ? h('p', {className:'meta'}, t.more ? 'And ' + t.more + ' more. ' : '', t.notes_url ? h('a', {href:t.notes_url, target:'_blank', rel:'noopener noreferrer'}, 'All notes') : null) : null) : null,
+    running ? settingsText('p', {className:'meta', role:'status', 'data-key':'tool-updating'}, 'Updating\u2026 You can leave this page.')
+      : t.can_update && !snapshot && !busy ? h('div', {className:'row'}, (() => { const b = button('Update to ' + t.newest, 'outline sm', () => toolStart(t.name)); b.dataset.key = 'tool-update'; return b; })(),
+        t.helper ? settingsText('span', {className:'meta'}, 'Helpers working now keep going; they use the new version from their next start.') : null)
+      : t.update && t.manual ? settingsText('p', {className:'meta', 'data-key':'tool-manual'}, t.manual) : null,
+    finished && !running ? settingsText('p', {className:finished.status === 'failed' ? 'bad' : 'upd-done', role:'status', 'data-key':'tool-result'}, finished.say || '') : null,
+    t.error ? settingsText('p', {className:'meta', 'data-key':'tool-error'}, t.last_good_at && t.newest ? 'Could not check right now. This is from ' + fmtAgo(t.last_good_at) + '.' : 'Could not check for a newer version right now.') : null];
+  return h('div', {className:'card-row name-row', 'data-key':'tool-' + t.name}, h('span', {className:'set-label'}, t.label), h('div', {className:'grow set-ctl'}, h('div', {className:'stack'}, body)));
+}
+function fmtAgo(at) { const ago = window.DashHelpers?.ago; const d = new Date(at); return ago && !isNaN(d) ? ago(at, Date.now()) : isNaN(d) ? String(at) : d.toLocaleString([], {dateStyle:'medium', timeStyle:'short'}); }
+function toolsCard() {
+  if (settingsTab === 'about') toolLoad();
+  const data = toolUi.data, tools = array(data?.tools);
+  if (data && !tools.length && !data.failed) return null;  // no tool orch can check here: nothing to show
+  const checked = tools.map(t => t.checked_at).filter(Boolean).sort()[0];
+  return h('div', {className:'stack', 'data-key':'settings-tools'}, h('h2', {className:'set-sub'}, 'Tools'),
+    h('div', {className:'card'},
+      !data ? h('div', {className:'card-row'}, settingsText('p', {className:'meta', 'data-key':'tools-loading'}, 'Checking your tools for newer versions\u2026'))
+        : data.failed ? h('div', {className:'card-row'}, settingsText('p', {className:'meta', 'data-key':'tools-unknown'}, 'Could not check your tools right now.'))
+        : tools.map(t => toolRow(t, data.job)),
+      toolUi.reason ? h('div', {className:'card-row'}, settingsText('p', {className:'bad', role:'alert', 'data-key':'tools-failed'}, 'The update did not start: ' + clean(toolUi.reason))) : null,
+      data && !snapshot ? h('div', {className:'card-row'}, h('div', {className:'row'},
+        checked ? settingsText('span', {className:'meta', 'data-key':'tools-checked'}, 'Checked ' + fmtAgo(checked)) : null,
+        (() => { const b = button(toolUi.loading ? 'Checking\u2026' : 'Check now', 'outline sm', () => { toolLoad(true); render(); }); b.dataset.key = 'tools-check'; b.disabled = toolUi.loading; return b; })())) : null));
 }
 // Update automatically (off until the person turns it on): one switch. A development build follows its own branch, said plainly.
 function autoUpdateCard(info) {
@@ -996,6 +1068,15 @@ const frameEntry = path => /^[A-Za-z0-9_\/-]{0,300}$/.test(path) && !/^(api|page
 // Only while that same frame is still on screen: a new frame (back from another page) opens at the address's place.
 let frameKeep = null;
 const frameShown = () => document.querySelector('iframe.embed[data-key="embed"]');
+// The shown add-on page takes the keyboard once it has loaded, so its own keys (such as 1 to 4) work without a click
+// first (ORCH-465); never while the person types in a field of the dashboard or a dialog is open.
+function frameTakesKeys(frame, doc = document) {
+  const a = doc.activeElement;
+  if (!frame.isConnected || doc.querySelector('dialog[open]')) return false;
+  if (a && a !== doc.body && a !== frame && a.matches?.('input,textarea,select,[contenteditable],[contenteditable] *')) return false;
+  frame.focus({preventScroll:true});
+  return true;
+}
 function pageFrame(r) {
   const stopped = pageStopped(r);
   if (stopped) return stopped;
@@ -1006,6 +1087,7 @@ function pageFrame(r) {
   if (!kept) frameKeep = null;
   const src = kept || (entry ? base + '#orch-frame=' + p.pass + '&orch-file=' + p.file + '&orch-chan=' + p.chan + (r.inner ? '&' + r.inner : '') : base + (r.inner ? '#' + r.inner : ''));
   const frame = h('iframe', {className:'embed' + (shellAddons.has(r.id) ? ' embed-shell' : ''), 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', sandbox:shipped ? SHIPPED_SANDBOX : 'allow-scripts'});  // allow alone: both log a warning (ORCH-186)
+  frame.addEventListener('load', () => frameTakesKeys(frame));
   // A skeleton shows until the add-on page has painted, then goes (no blank frame on add-on switch).
   const skeleton = framesLoaded.has(src) ? null : skeletonFor('page'), done = () => { framesLoaded.add(src); document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove()); };
   if (skeleton) { skeleton.dataset.key = 'embed-skeleton'; frame.addEventListener('load', done, {once:true}); frame.classList.add('embed-loading'); frame.addEventListener('load', () => frame.classList.remove('embed-loading'), {once:true}); }

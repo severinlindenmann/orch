@@ -99,6 +99,7 @@ def test_no_subprocess_in_module():
     assert "import subprocess" not in inspect.getsource(winacl)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="checks the POSIX path; Windows runs the real rights code here")
 def test_posix_is_a_no_op(tmp_path, monkeypatch):
     monkeypatch.setattr(winacl, "_read_dacl", lambda p: pytest.fail("api on POSIX"))
     monkeypatch.setattr(winacl, "_write_dacl", lambda *a: pytest.fail("api on POSIX"))
@@ -274,6 +275,7 @@ def test_file_check_hook_is_registered_and_fails_closed(win, tmp_path):
     assert winacl.file_check(tmp_path / "k") == "acl"  # a link in place of the file
 
 
+@pytest.mark.skipif(os.name == "nt", reason="checks the POSIX path; Windows runs the real rights code here")
 def test_file_check_is_a_no_op_on_posix(tmp_path):
     assert winacl.file_check(tmp_path) is None
 
@@ -414,12 +416,15 @@ def test_a_loose_or_unreadable_binding_refuses_without_a_reset(tws, monkeypatch)
         with pytest.raises(Refused, match="copied or moved"):
             key_file(tws, create=False)
     assert sorted(p.name for p in d.iterdir()) == before  # nothing written, nothing reset
+    if os.name == "nt":
+        return  # a file mode does not loosen Windows rights, so the loose-file half is POSIX only
     os.chmod(d / "binding.json", 0o644)  # a loose binding file
     with pytest.raises(Refused, match="copied or moved"):
         key_file(tws, create=False)
     assert sorted(p.name for p in d.iterdir()) == before
 
 
+@pytest.mark.skipif(os.name == "nt", reason="checks the POSIX path; Windows runs the real rights code here")
 def test_posix_read_none_is_still_a_loose_file(tws, monkeypatch):
     key = key_file(tws)
     _read_fails_once(monkeypatch)
@@ -543,6 +548,7 @@ def test_public_like_cwd_stays_untouched_through_keys(win, tws, tmp_path, monkey
     assert os.path.realpath(shared) not in writes and os.path.realpath(tws) not in writes
 
 
+@pytest.mark.skipif(os.name == "nt", reason="checks the POSIX path; Windows runs the real rights code here")
 def test_scope_is_a_no_op_on_posix(tmp_path, monkeypatch):
     monkeypatch.setattr(winacl, "_homes", set())
     winacl.check_scope(tmp_path)  # POSIX: modes and lstat do the job; nothing to refuse here

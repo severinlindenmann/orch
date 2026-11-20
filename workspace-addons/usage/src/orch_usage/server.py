@@ -20,6 +20,7 @@ from pathlib import Path
 DEFAULT_PORT = 8432
 NONCE_ENV = "ORCH_USAGE_NONCE"
 KIT_FILES = (
+    "frame.js",
     "tokens.css",
     "components.css",
     "motion.css",
@@ -28,6 +29,7 @@ KIT_FILES = (
     "overlay.js",
     "components.js",
     "date.js",
+    "widgets.js",
 )
 WEB_FILES = ("index.html", "usage.js")
 TYPES = {"html": "text/html; charset=utf-8", "css": "text/css; charset=utf-8", "js": "text/javascript"}

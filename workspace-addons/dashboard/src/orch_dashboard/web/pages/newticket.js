@@ -285,7 +285,7 @@ function ticketForm(t) {
     if (window.UI?.date) window.UI.date(dueInput, dueToggle, null, {time:true});
     const options = el('div', 'new-ticket-options'); options.append(...(noHelperRow ? [] : [helperBox]), dueBox); fields.append(options);
     const doneLabel = el('label', '', 'Done when (optional)');
-    const done = el('textarea', 'input'); done.name = 'done_when'; done.id = 'field-' + serial + '-done_when';
+    const done = el('textarea', 'input new-ticket-text'); done.name = 'done_when'; done.id = 'field-' + serial + '-done_when';
     done.rows = 2; done.maxLength = 2000; done.placeholder = 'What should be true when it is done? Say it in your own words.';
     doneLabel.htmlFor = done.id; doneLabel.append(done); fields.append(doneLabel); inputs.done_when = done; doneWrap = doneLabel;
   }
@@ -313,12 +313,19 @@ function ticketForm(t) {
   const submit = el('button', 'btn primary', t ? 'Save changes' : 'Start'); submit.type = 'submit';
   let startAfter = !t;
   // One main button (Start) and Cancel; the plan choice is a plain box, "Create without starting" a text link.
-  let planBox = null;
+  let planBox = null, reviewBox = null;
+  const reviewDefault = !(typeof state !== 'undefined' && state && state.settings?.auto_reviewer_on === true);
   if (!t) {
     const planLabel = el('label', 'new-ticket-check');
     planBox = el('input'); planBox.type = 'checkbox'; planBox.name = 'plan_first';
     planLabel.append(planBox, el('span', '', 'Show me the plan first'), el('span', 'meta', 'The helper waits for your OK before work starts.'));
-    if (doneWrap && typeof fields.insertBefore === 'function' && doneWrap.parentNode === fields) fields.insertBefore(planLabel, doneWrap); else fields.append(planLabel);
+    // ORCH-424: ticked unless the Auto Reviewer is on (owner: it then checks every new ticket unless they tick it).
+    const reviewLabel = el('label', 'new-ticket-check');
+    reviewBox = el('input'); reviewBox.type = 'checkbox'; reviewBox.name = 'human_review'; reviewBox.checked = reviewDefault;
+    reviewLabel.append(reviewBox, el('span', '', 'Human review needed'), el('span', 'meta', 'Nothing is accepted without you.'));
+    for (const box of [planLabel, reviewLabel]) {
+      if (doneWrap && typeof fields.insertBefore === 'function' && doneWrap.parentNode === fields) fields.insertBefore(box, doneWrap); else fields.append(box);
+    }
   }
   const plain = t ? null : button('Save without starting', 'new-ticket-link', () => { startAfter = false; form.requestSubmit(); });
   if (plain) submit.addEventListener('click', () => { if (!created) startAfter = true; });  // a retry keeps the first choice
@@ -330,7 +337,7 @@ function ticketForm(t) {
     window.orch.toast(run.ok ? 'Helper started' : 'The ticket was created, but the helper did not start: ' + run.text, run.ok ? 'ok' : 'error');
   };
   form.append(fields, error, reload, actions); d.append(form);
-  let created = null, creationUnresolved = false, epicMade = false, epicProblems = [], togetherDone = false;
+  let created = null, newActIdOnce = null, creationUnresolved = false, epicMade = false, epicProblems = [], togetherDone = false;
   // Cmd+Enter (Ctrl+Enter) saves from any field, like the Save button.
   form.addEventListener('keydown', event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.defaultPrevented) { event.preventDefault(); form.requestSubmit(); } });
   form.addEventListener('submit', async event => {
@@ -375,7 +382,7 @@ function ticketForm(t) {
         const previous = new Set(tickets().map(t => t.id));
         const planFirst = startAfter && !!planBox?.checked;
         const epic = epicMade = steps.some(step => ticketStepArgs(step.input.value, step.files, 'x'));
-        const args = {...base, ...(planFirst ? {plan_first:true} : {}), ...(epic ? {epic:true} : {}), ...Object.fromEntries(['owner', 'due', 'done_when'].filter(k => values[k]).map(k => [k, values[k]]))};
+        const args = {...base, ...(planFirst ? {plan_first:true} : {}), ...(epic ? {epic:true} : {}), ...(reviewBox && reviewBox.checked !== reviewDefault ? {human_review:reviewBox.checked} : {}), ...Object.fromEntries(['owner', 'due', 'done_when'].filter(k => values[k]).map(k => [k, values[k]]))};
         // ORCH-185: the epic and its tickets go in ONE request (all checked before anything is made) when they fit; a
         // bigger set (many pictures) still goes one ticket at a time, as before.
         const filled = epic ? steps.filter(step => ticketStepArgs(step.input.value, step.files, 'x')) : [];
@@ -385,7 +392,10 @@ function ticketForm(t) {
           error.textContent = 'This is too big to send at once (over 4.9 MB). Remove a file or shorten the text.' + (longText ? ' The long text is kept as the note.md chip.' : '');
           submit.disabled = false; idle(); return;
         }
-        result = await act('ticket.new', args);  // one write, one history line
+        // One id for this ticket until it is made (ORCH-580): a Retry after a lost answer, or a second press, gets
+        // the ticket that was made instead of a second one.
+        newActIdOnce = newActIdOnce || window.orchActId?.();
+        result = await act('ticket.new', args, {id:newActIdOnce});  // one write, one history line
         if (result.ok) {
           if (result.state?.attached?.failed?.length) window.orch.toast('The ticket was created. Not saved: ' + result.state.attached.failed.join(', '), 'error');
           if (args.steps && result.state?.steps) {  // the tickets inside came with the same answer
@@ -411,7 +421,9 @@ function ticketForm(t) {
         for (const step of togetherDone ? [] : [...steps]) {
           const args = ticketStepArgs(step.input.value, step.files, created.id, values.owner);
           if (!args) continue;
-          const made = await act('ticket.new', args);
+          if (reviewBox && reviewBox.checked !== reviewDefault) args.human_review = reviewBox.checked;  // ORCH-424: like the epic above
+          step.actId = step.actId || window.orchActId?.();  // the same id when the button is pressed again
+          const made = await act('ticket.new', args, {id:step.actId});
           if (made.ok) {
             if (made.state?.attached?.failed?.length) window.orch.toast('Ticket ' + (steps.indexOf(step) + 1) + ' was created. Not saved: ' + made.state.attached.failed.join(', '), 'error');
             step.remove.click();

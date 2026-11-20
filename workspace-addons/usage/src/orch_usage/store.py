@@ -63,6 +63,14 @@ def to_time(text: str) -> datetime:
     return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 
 
+def local_text(at: str) -> str:
+    """A stored UTC time in this computer's local time with its zone, minutes only ('2026-11-20 18:00 CET')."""
+    try:
+        return to_time(at).astimezone().strftime("%Y-%m-%d %H:%M %Z").strip()
+    except (ValueError, TypeError):
+        return str(at)[:16].replace("T", " ")
+
+
 def valid_actor(who: str) -> bool:
     return who == USAGE or bool(_ACTOR.fullmatch(who))
 
@@ -214,9 +222,9 @@ def _append_history(root: Path, rows: list[dict]) -> None:
         f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
 
 
-def _line(who: str, what: str, account: dict, before, after) -> dict:
+def _line(who: str, what: str, account: dict, before, after, at: datetime | None = None) -> dict:
     return {
-        "at": now(),
+        "at": at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ") if at else now(),
         "who": who,
         "what": what,
         "account": account["id"],
@@ -277,8 +285,9 @@ def find(accounts: list[dict], ref: str) -> dict:
     raise Refused(f"More than one account matches '{ref}'. Use its full name or id from `orch usage list`.")
 
 
-def expire(accounts: list[dict], rows: list[dict], at: datetime | None = None) -> None:
-    """A temporary rule whose end has passed falls back to the rule before it."""
+def expire(accounts: list[dict], rows: list[dict], at: datetime | None = None, say=None) -> None:
+    """A temporary rule whose end has passed (to the minute: an end of 07:59 acts from 07:59:00) falls back to the
+    rule before it. `say(ends)`: the end in the workspace's words for the history line (when.words)."""
     at = at or datetime.now(UTC)
     for a in accounts:
         ends = a["rule"].get("ends")
@@ -287,7 +296,8 @@ def expire(accounts: list[dict], rows: list[dict], at: datetime | None = None) -
             a["rule"] = copy.deepcopy(a["prev"]) if a.get("prev") else empty_rule()
             a["rule"]["ends"] = None
             a["prev"] = None
-            rows.append(_line(USAGE, "rule ended", a, old, copy.deepcopy(a["rule"])))
+            what = f"rule ended {say(ends)}" if say else "rule ended"
+            rows.append(_line(USAGE, what, a, old, copy.deepcopy(a["rule"]), at=at))
 
 
 def sync_found(accounts: list[dict], rows: list[dict], found, provider: str, reader: str) -> None:
@@ -370,6 +380,10 @@ def set_limit(
         raise Refused("A percent limit is at most 100%.")
     if period == "until" and value is not None and not until:
         raise Refused("Say until when it counts: --until YYYY-MM-DD.")
+    if until and period != "until":
+        raise Refused(
+            "--until only goes with a limit that counts until a date. To make this limit temporary use --end <date>."
+        )
     same = [x for x in limits if x["period"] == period]
     if value is None:
         if not same:
@@ -396,6 +410,10 @@ def set_limit(
 def set_period(
     a: dict, rows: list[dict], who: str, new: str, of: str | None, until: str | None, end: str | None
 ) -> None:
+    if until and new != "until":
+        raise Refused(
+            "--until only goes with a limit that counts until a date. To make this limit temporary use --end <date>."
+        )
     rule = copy.deepcopy(a["rule"])
     limits = rule["limits"]
     if not limits:
@@ -433,8 +451,9 @@ def set_period(
     _rule_change(a, rows, who, f"counts over {PERIOD_WORDS[new]}", rule, end)
 
 
-def set_end(a: dict, rows: list[dict], who: str, end: str | None) -> None:
-    """End the current rule at a time; it then falls back to the rule before its last change. None: no end."""
+def set_end(a: dict, rows: list[dict], who: str, end: str | None, said: str = "") -> None:
+    """End the current rule at a time; it then falls back to the rule before its last change. None: no end.
+    `said`: the end in the workspace's words for the history line ('2026-11-19 08:00')."""
     old = copy.deepcopy(a["rule"])
     if end is None:
         if not old.get("ends"):
@@ -444,7 +463,7 @@ def set_end(a: dict, rows: list[dict], who: str, end: str | None) -> None:
         return
     a["rule"]["ends"] = end
     if a["rule"] != old:
-        rows.append(_line(who, "rule ends", a, old, copy.deepcopy(a["rule"])))
+        rows.append(_line(who, f"rule ends {said or local_text(end)}", a, old, copy.deepcopy(a["rule"])))
 
 
 def set_on(a: dict, rows: list[dict], who: str, on: bool) -> None:

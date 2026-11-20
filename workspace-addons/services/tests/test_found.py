@@ -43,7 +43,8 @@ if tool == "launchctl":
     elif verb == "bootstrap":
         d = plistlib.loads(Path(target).read_bytes())
         j = jobs.setdefault(d["Label"], {{}})
-        j.update(loaded=True, running=True, pid=j.get("pid", 5000) + 1)
+        run = bool(d.get("RunAtLoad") or d.get("KeepAlive"))  # like launchd: loading alone starts nothing
+        j.update(loaded=True, running=run, pid=j.get("pid", 5000) + 1)
     elif verb == "bootout":
         jobs.get(label, {{}}).update(loaded=False, running=False)
     elif verb == "kickstart":
@@ -138,6 +139,10 @@ def tools(tmp_path, monkeypatch, ws):
 
 
 def _platform(monkeypatch, name):
+    # The secret scan imports urllib.request (phone_view -> net) on first use; imported under a faked darwin on
+    # Linux it fails on _scproxy and the scan fails closed (every name masked). Import it on the real platform.
+    import orch.phone_view  # noqa: F401
+
     from orch_services import drivers
     from orch_services.drivers.launchd import Launchd
     from orch_services.drivers.systemd import Systemd
@@ -424,3 +429,72 @@ def test_a_ticket_key_resolves_even_when_the_core_cannot_be_asked(ws, monkeypatc
 
     monkeypatch.setattr(tickets, "resolve", broken)
     assert cli._ticket_key(ws, "dm1-12") == "DM1-12"
+
+
+def test_adopt_refuses_a_name_with_a_secret_and_found_masks_names_and_descriptions(cli, linux, tools, ws):
+    # review ORCH-378: adopt saved --name without the secret check add has; a unit description was shown as is
+    st = tools.read()
+    st["systemd"]["notes-sync.service"]["desc"] = f"Sync with key {TOKEN}"
+    tools.set(systemd=st["systemd"])
+    code, out = jrun(cli, "found")
+    assert code == 0 and TOKEN not in json.dumps(out)
+    assert out["found"][0]["what"] == "••••••"
+    code, out = jrun(cli, "adopt", "systemd:notes-sync.service", "--name", f"Notes {TOKEN}")
+    assert code == 2 and "secret" in out["error"] and TOKEN not in json.dumps(out)
+    assert not (ws / ".orch/addons/services/services").is_dir() or not list(
+        (ws / ".orch/addons/services/services").iterdir()
+    )
+
+
+def test_adopt_takes_the_page_id_of_a_found_job_with_capitals(cli, mac, tools, ws):
+    # review ORCH-378: the page gives a label with capitals a hashed id; Manage with orch must still find the job
+    from orch_services.found import page_id
+    from orch_services.view import build
+
+    mac["agents"].joinpath("ch.Example.Forwarder.plist").write_bytes(
+        plistlib.dumps({"Label": "ch.Example.Forwarder", "ProgramArguments": ["/usr/local/bin/fwd"]})
+    )
+    found = jrun(cli, "found")[1]["found"]
+    view = build(ws, ([], 0, None), found=found)
+    vid = page_id("launchd:ch.Example.Forwarder")
+    items = {i["id"]: i for i in view["blocks"][0]["groups"][-1]["items"]}
+    fwd = items[vid]
+    assert fwd["id"] == vid and vid.startswith("found-")
+    assert fwd["panel"]["buttons"][0]["action"]["args"] == {"verb": "adopt", "target": vid}
+    code, out = jrun(cli, "act", "adopt", "--", vid)
+    assert code == 0, out
+    rec = json.loads((ws / ".orch/addons/services/services" / f"{out['service']['id']}.json").read_text())
+    assert rec["adopted"]["entry"] == "ch.Example.Forwarder"
+    code, out = jrun(cli, "adopt", "found-000000000000")
+    assert code == 2 and "no found service" in out["error"]
+
+
+def test_start_on_a_taken_over_job_without_run_at_load_really_runs_it(cli, mac, tools, ws):
+    # ORCH-371 bug 3: bootstrap only loads such a job; start answered "did not stay running"
+    assert jrun(cli, "adopt", "launchd:com.example.backup")[0] == 0
+    target = f"gui/{os.getuid()}/com.example.backup"
+    tools.clear()
+    code, out = jrun(cli, "start", "backup")
+    assert code == 0 and out["service"]["state"] == "running", out
+    assert ["launchctl", "kickstart", target] in tools.calls()
+
+
+def test_orchs_own_background_pages_are_never_found(cli, mac, tools, ws):
+    # ORCH-371 bug 2: orch starts its pages as `Python -P -m orch_dashboard ...` (macOS framework Python)
+    py = "/opt/homebrew/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
+    tools.set(
+        ps=[
+            {
+                "pid": 960,
+                "ppid": 1,
+                "tty": "??",
+                "argv": [py, "-P", "-m", "orch_dashboard", "--dir", str(ws)],
+            },
+            {"pid": 961, "ppid": 1, "tty": "??", "argv": [py, "-P", "-m", "orch_automation", "run"]},
+            {"pid": 962, "ppid": 1, "tty": "??", "argv": [py, "-P", "watcher.py"]},
+        ],
+        lsof={"960": str(ws), "961": str(ws), "962": str(ws)},
+    )
+    found = {i["id"]: i for i in jrun(cli, "found")[1]["found"]}
+    assert "process:960" not in found and "process:961" not in found
+    assert found["process:962"]["name"] == "watcher.py"  # an interpreter shows the script, also as Python

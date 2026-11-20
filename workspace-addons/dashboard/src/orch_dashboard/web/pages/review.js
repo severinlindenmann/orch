@@ -3,6 +3,15 @@
 // "All cards" list beside it on a wide screen. The cards and the decisions come with the state (state.review, from
 // `orch review list`); an answer is a plain click (op review.answer).
 const REVIEW_ID = /^core:(?:q:(t_[a-z0-9]{6,16}):(q[0-9]{1,4})|review:(t_[a-z0-9]{6,16}))$/;
+// ORCH-524: a Check result's file as the ticket lists it (its time and size, when known here), so its link names
+// its version and the browser keeps the picture; unknown: a plain link that asks again by content hash.
+function reviewFileStamp(tid, kind, name) {
+  const t = array(state?.tickets).find(x => x?.id === tid);
+  if (!t || !window.FileViewer?.stampOf || typeof evidenceFile !== 'function' || typeof allArtifactFiles !== 'function') return '';
+  const files = kind === 'evidence' ? array(t.checklist).flatMap(task => array(task.evidence).map(ev => evidenceFile(t, ev)).filter(Boolean)) : allArtifactFiles(t);
+  const stamp = window.FileViewer.stampOf(files.find(file => file.name === name));
+  return stamp ? '&v=' + encodeURIComponent(stamp) : '';
+}
 function reviewCards() { return array(state?.review?.cards).map(reviewPlainCard); }
 // A Factory proposal reads like Home's card (ORCH-183): its title as the question, the goal and the time in two short
 // lines, not the whole frozen proposal (that stays on the ticket). Any other card is left as it is.
@@ -18,10 +27,12 @@ function reviewPlainCard(c) {
 function reviewAnswered() { return array(state?.review?.answered); }
 // The cards of the stack: every open question (an add-on's own too, e.g. Factory's Start?) and every result to check.
 function reviewCount() { return reviewCards().length; }
-// The subtitle shows THE needs-you number (needsYouTotal: open questions plus results to check, exactly what this page
-// shows as cards; the Review menu entry and the top bar show the same one, ORCH-63).
+// The subtitle shows THE needs-you number (needsYouTotal: open questions, results to check and work that stopped; the
+// Review menu entry, the top bar, Home and the live bar show the same one, ORCH-63, ORCH-705).
 function reviewSubtitle() {
-  const n = typeof needsYouTotal === 'function' ? needsYouTotal() : reviewCount();
+  // A card put off on Home ("Later today") is not in the one number, but it is still a card here: the subtitle never
+  // says "Nothing waits" above a Waiting tab with cards in it (ORCH-420, owner's picture 18 Nov).
+  const n = (typeof needsYouTotal === 'function' ? needsYouTotal() : 0) || reviewCount();
   return n ? n + (n === 1 ? ' thing waits' : ' things wait') + ' on you, most urgent first.' : 'Nothing waits for you.';
 }
 // The words the "All cards" list shows for an answered card (the same as the deck's own summary).
@@ -33,6 +44,45 @@ function reviewWord(answer) {
   if (answer.verdict === 'no') return it.preview?.type === 'options' ? 'None' : it.kind === 'check' ? 'Sent back' : "Don't do";
   return 'Sent back';
 }
+// ORCH-548: Looks good on a Check card waits 6 s for Undo, then its save takes seconds more (3 s in the middle,
+// 18 s at worst on a busy workspace). Meanwhile the ticket shows Done on every page, with one line that it is being
+// saved (ticket.js); Undo or a refusal reads the whole state again, so the page shows what really is.
+const acceptSaving = new Map();  // ticket id -> when Looks good was given
+function acceptTicketOf(it) {
+  const m = REVIEW_ID.exec(String(it?.id || ''));
+  return m && m[3] ? m[3] : null;  // only a Check card (core:review:<ticket>) moves a ticket to Done
+}
+// Called by accept() in app.js on every new state: a ticket whose Looks good is still being saved stays Done.
+function acceptOverlay(next) {
+  if (!Array.isArray(next?.tickets) || !next.tickets.some(t => t && (acceptSaving.has(t.id) || t.accept_saving))) return next;
+  return {...next, tickets:next.tickets.map(t => {
+    if (!t) return t;
+    if (acceptSaving.has(t.id)) return t.status === 'review' ? {...t, status:'done', accept_saving:true, accept_was:'review'} : t;
+    if (!t.accept_saving) return t;
+    const {accept_saving, ...rest} = t;  // accept_was stays until the server's state replaces the ticket
+    return rest;
+  })};
+}
+function acceptHold(it, verdict) {
+  const tid = acceptTicketOf(it);
+  if (!tid || verdict !== 'ok' || snapshot) return;
+  acceptSaving.set(tid, Date.now());
+  if (state) state = acceptOverlay(state);
+  render();
+}
+function acceptRelease(it, saved) {
+  const tid = acceptTicketOf(it);
+  if (!tid || !acceptSaving.delete(tid)) return;
+  if (saved) { if (state) state = acceptOverlay(state); render(); return; }  // the answer's own state already says Done
+  // Undo or a refusal: back to Check at once, then the server's whole state (its revision is cleared, so the page
+  // takes it even when nothing changed on the server: the Done was only the page's own)
+  if (state) state = {...acceptOverlay(state), rev:''};
+  if (state) state.tickets = state.tickets.map(t => t && t.id === tid && t.status === 'done' && !t.accept_saving && t.accept_was ? {...t, status:t.accept_was} : t);
+  render();
+  wantFull = true;
+  refresh();
+}
+
 // What the page's api needs, from the dashboard: state in, one signed click out, files through /api/file.
 function reviewApi() {
   return {
@@ -48,14 +98,26 @@ function reviewApi() {
       if (!f || f[2].split('/').some(p => p === '..' || p === '.' || p.startsWith('.'))) return '';
       return /\.html?$/i.test(f[2])
         ? '/view/' + encodeURIComponent(c.ticket) + '/' + f[1] + '/' + f[2].split('/').map(encodeURIComponent).join('/')
-        : '/api/file?t=' + encodeURIComponent(c.ticket) + '&k=' + f[1] + '&n=' + encodeURIComponent(f[2]);
+        : '/api/file?t=' + encodeURIComponent(c.ticket) + '&k=' + f[1] + '&n=' + encodeURIComponent(f[2]) + reviewFileStamp(c.ticket, f[1], f[2]);
     },
-    // "Add note" on the Comment sheet: the words go to the ticket's helper (queued if none is running); no verdict, the card stays.
-    note: async ({ticket, text}) => {
-      if (snapshot || typeof ticket !== 'string' || !String(text || '').trim()) return {ok:false, error:{code:'refused', message:'Write your note first.'}};
-      const r = await act('run.send', {ticket, text:String(text).trim()});
+    // The Comment sheet's box (ORCH-422): screenshots, files and voice notes land on the ticket before the answer or note.
+    get box() { return snapshot || typeof FEEDBACK_BOX === 'undefined' ? null : FEEDBACK_BOX; },
+    attach: async ({ticket, files}) => {
+      if (snapshot || typeof ticket !== 'string') return {ok:false, error:{code:'refused', message:'Files cannot be added here.'}};
+      const r = await ticketAttachFiles(ticket, files, true);  // the feedback folder: the card being answered stays the same
+      return r.ok ? r : {ok:false, error:{code:'error', message:String(r.text || 'The files could not be added.').slice(0, 300)}};
+    },
+    // "Add note" on the Comment sheet: the words (and files) go to the ticket's helper (queued if none is running); no verdict, the card stays.
+    note: async ({ticket, text, files}) => {
+      const list = array(files);
+      if (snapshot || typeof ticket !== 'string' || (!String(text || '').trim() && !list.length)) return {ok:false, error:{code:'refused', message:'Write your note first.'}};
+      const kept = await ticketAttachFiles(ticket, list);
+      if (!kept.ok) return {ok:false, error:{code:'error', message:String(kept.text || 'The files could not be added.').slice(0, 300)}};
+      const r = await act('run.send', {ticket, text:ticketTalkText(text, kept.names)});
       return r.ok ? {ok:true} : {ok:false, error:{code:'error', message:String(r.text || 'Could not save the note.').slice(0, 300)}};
     },
+    hold: (it, verdict) => acceptHold(it, verdict),
+    release: it => acceptRelease(it, false),
     answer: async ({id, digest, verdict, picked, note}) => {
       const m = REVIEW_ID.exec(String(id || ''));
       if (!m) return {ok:false, error:{code:'not_found', message:'That card is not here any more.'}};
@@ -63,7 +125,7 @@ function reviewApi() {
       if (picked) args.picked = picked;
       if (note) args.note = note;
       const r = await act('review.answer', args);
-      if (r.ok) return {ok:true};
+      if (r.ok) { acceptRelease({id}, true); return {ok:true}; }
       if (r.status === 403) return {ok:false, error:{code:'needs_person', message:r.text}};
       try {
         const body = JSON.parse(r.text);
@@ -99,7 +161,9 @@ function reviewDrawSide(queue, deck) {
     const sec = el('div', 'review-group');
     sec.setAttribute('role', 'list');
     sec.setAttribute('aria-label', name || 'Cards');
-    if (!one || name) {
+    // a set of one card under a heading of its own ticket says the same thing twice (ORCH-420): no heading then,
+    // unless the helper grouped it on purpose
+    if ((!one || name) && (rows.length > 1 || deck.items[rows[0]]?.group)) {
       const left = rows.filter(i => !deck.answers[deck.items[i].id]).length;
       const head = el('h3', 'review-group-head');
       head.append(el('span', '', name || 'Cards'), el('span', 'meta', left ? left + ' of ' + rows.length + ' waiting' : 'All ' + rows.length + ' answered'));
@@ -136,26 +200,28 @@ function reviewAcceptedRow(a) {
   host.append(head);
   if (open) open.onclick = () => {
     locks.add(key);
-    let busy = false;
-    const input = h('input', {type:'text', className:'input', placeholder:'What should change?', 'aria-label':'What should change?'});
-    const close = () => { if (busy) return; locks.delete(key); host.replaceChildren(head); open.focus(); };
-    const send = h('button', {type:'button', className:'btn primary sm', disabled:true}, 'Send back');
-    const cancel = h('button', {type:'button', className:'btn ghost icon', 'aria-label':'Cancel'}, iconEl('x'));
-    send.onclick = async () => {
-      if (!input.value.trim() || busy) return;
-      busy = true; send.disabled = input.disabled = cancel.disabled = true;
-      let ok = false;
-      try { ok = await reviewSendBack(a, input.value); } finally { busy = false; input.disabled = cancel.disabled = false; send.disabled = !input.value.trim(); }
-      if (ok) { locks.delete(key); render(); }
-    };
+    // The feedback box (ORCH-422): words, a pasted screenshot, a file or a voice note.
+    const box = h('div', {id:key + '-box'});
+    let comp = null, busy = false;
+    const close = () => { if (busy) return; comp?.destroy?.(); locks.delete(key); host.replaceChildren(head); open.focus(); };
+    const cancel = h('button', {type:'button', className:'btn ghost sm'}, 'Cancel');
     cancel.onclick = close;
-    input.oninput = () => { send.disabled = busy || !input.value.trim(); };
-    input.onkeydown = e => {
-      if (e.key === 'Escape') { e.preventDefault(); close(); }
-      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send.click(); }
-    };
-    host.replaceChildren(head, h('div', {className:'ticket-ask-line'}, input, send, cancel));
-    input.focus();
+    host.replaceChildren(head, box, h('div', {className:'row'}, cancel));
+    if (!window.UI?.composer || typeof FEEDBACK_BOX === 'undefined') return;
+    comp = window.UI.composer(box, {...FEEDBACK_BOX, label:'What should change?', placeholder:'What should change?', sendLabel:'Send back', interrupt:false, hint:'',
+      emptyError:'Write what should change, or add a file or a voice note.', dropTarget:host, dropLabel:'Drop to send back with this', sendingText:'Sending…',
+      onSend:async message => {
+        busy = true;
+        try {
+          const kept = await ticketAttachFiles(a.ticket, message.files);
+          if (!kept.ok) return kept;
+          const ok = await reviewSendBack(a, ticketTalkText(message.text, kept.names));
+          if (ok) { busy = false; locks.delete(key); render(); return {ok:true, text:''}; }
+          return {ok:false, dropFiles:kept.names.length > 0, text:'It was not sent back. Try again.'};
+        } finally { busy = false; }
+      }});
+    box.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); close(); } });
+    comp.field.focus();
   };
   return host;
 }

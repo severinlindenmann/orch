@@ -59,6 +59,19 @@ def test_no_temp_files_left(proj, new_ticket, run):
     assert names == [f"{tid}.json"]
 
 
+def test_check_plain_number_is_the_task_at_that_place(proj, run, new_ticket):
+    """ORCH-864: `check done <id> 1` is c1; a wrong number says tasks are named c1, c2, ... and the range."""
+    tid = new_ticket()
+    for step in ("one", "two"):
+        assert run("check", "add", tid, step)[0] == 0
+    code, _, _ = run("check", "done", tid, "2", "--note", "ran it")
+    assert code == 0
+    t = read(proj, tid)
+    assert [c["done"] for c in t["checklist"]] == [False, True]
+    code, _, err = run("check", "done", tid, "99", "--note", "ran it")
+    assert code == 2 and "named c1, c2" in err and "c1..c2" in err
+
+
 def test_check_done_needs_evidence(proj, run, new_ticket, validate):
     tid = new_ticket()
     assert run("check", "add", tid, "Implement")[0] == 0
@@ -672,6 +685,9 @@ def test_closed_without_a_live_run_or_from_inside_its_own_run_stops_nothing(
     assert stopped == []  # a one-shot run ends by itself (its copy waits for it)
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="the process-tree reader of record_hook has no Windows version yet (#547)"
+)
 def test_closed_from_inside_the_runs_process_tree_stops_nothing(proj, new_ticket, stopped):
     """No ORCH_TICKET, but this process is the run's own (its pid is an ancestor): not stopped from within."""
     tid = new_ticket()
@@ -874,3 +890,44 @@ def test_a_wait_until_a_date_keeps_what_it_waits_for(proj, new_ticket, validate)
     assert blank == {"kind": "time", "until": "2030-01-01T08:00:00Z"}
     with pytest.raises(Refused):
         tickets.waiting_value("time", "x" * 201, "2030-01-01T08:00:00Z")
+
+
+@pytest.mark.parametrize("actor,env_agent", [("agent:codex", None), ("human:me", "codex")])
+def test_agent_cannot_wait_on_nothing(proj, new_ticket, monkeypatch, actor, env_agent):
+    """ORCH-602: a helper blocked by its sandbox set Waiting with only a summary: no card, no reason shown."""
+    monkeypatch.setattr(tickets, "agent_tool", lambda: env_agent)
+    tid = new_ticket()
+    with pytest.raises(tickets.Refused, match="orch ask"):
+        tickets.set_status(proj, tid, "waiting", actor)
+    assert tickets.load(proj, tid)["status"] != "waiting"
+
+
+def test_agent_may_wait_on_a_question_and_a_person_on_nothing(proj, new_ticket, monkeypatch):
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    tid = new_ticket()
+    tickets.set_status(proj, tid, "waiting", "human:me")  # a person keeps it waiting by hand
+    assert tickets.load(proj, tid)["status"] == "waiting"
+    other = new_ticket()
+    tickets.ask(proj, other, "Which folder?", ["A", "B"], "A", "agent:codex")
+    tickets.set_status(proj, other, "waiting", "agent:codex")
+    assert tickets.load(proj, other)["status"] == "waiting"
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="time.tzset exists only on Unix; the zone cannot be set here"
+)
+def test_a_wait_time_without_a_zone_is_this_computers_local_time(monkeypatch):
+    import time
+
+    from orch import tickets
+
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    time.tzset()
+    try:
+        assert tickets.parse_time("2026-11-20 08:00") == "2026-11-20T07:00:00Z"
+        assert tickets.parse_time("2026-11-20T08:00:00") == "2026-11-20T07:00:00Z"
+        assert tickets.parse_time("2026-11-20T08:00:00Z") == "2026-11-20T08:00:00Z"
+        assert tickets.parse_time("2026-11-20T08:00:00+02:00") == "2026-11-20T06:00:00Z"
+    finally:
+        monkeypatch.undo()
+        time.tzset()

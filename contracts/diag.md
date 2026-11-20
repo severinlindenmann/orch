@@ -90,6 +90,7 @@ helpers per pass on the new tickets.
 |---|---|
 | `cli.command` | span of one command: `command`, `sub` (a plain second word) |
 | `dashboard.request` | `method`, `path` (no query string) |
+| `dashboard.answer` | `method`, `path`, `status`, `ms`: the answer to every `/api/act` (also a refusal before any op runs) and to every other request answered 400 or higher (`lvl` `info` then, else `debug`) |
 | `ticket.op_applied` | `actor`, `op`, `status_from`, `status_to`, `revision_from`, `revision_to`, `written` |
 | `ticket.op_refused` | `actor`, `op`, `guard` (`closed_ticket`, `conflict`, or the refusal's class), `status`, `expected_revision`, `actual_revision` |
 | `relay.send_failed` | `what`, `reason` (the exception class), `why` (its message, cut at 300, key values hidden) |
@@ -141,8 +142,9 @@ relay is a separate, explicit step of the relay client (relay-api.md, Problems),
   "hung"; a working run quiet over 30 min, a live session at its prompt or on a dialog is left out),
   `waiting_for_permission`, `ticket_op_refused` (3 times in the last hour with the same guard; write conflicts are not
   counted), `hook_lines_missing`, `relay_unreachable`, `clock_skew`, `disk_low`, `diag_dropped` (a problem only for
-  drops in the last hour; older ones of the day are named in the fact). A problem goes away by itself once its cause
-  stops.
+  drops in the last hour; older ones of the day are named in the fact), `workspace_folder_moved` (the workspace folder
+  was moved or copied, so its saved keys still belong to the old folder; from `env.workspace_folder`, the state only,
+  never a folder name; the way out is `orch workspace move-here`). A problem goes away by itself once its cause stops.
 - `report [--ticket T] [--addon A] [--since 2h] [--note ...] [--expected ...] [--content|--no-content]` writes
   `reports/r-<MMDD-HHMM>-<scope>/`: `SUMMARY.md` (< 20 KB, read first: note, window, checks, top errors, last 50 lines,
   gaps), `manifest.json` (`orch.diag-report/1`), `checks.json`, `timeline.jsonl` (sources merged by time, each source in

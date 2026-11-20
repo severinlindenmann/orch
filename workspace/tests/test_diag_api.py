@@ -352,3 +352,38 @@ def test_report_dialog_makes_a_feature_wish(live):
     assert code == 200 and json.loads(out)["about"] == "problem"  # no kind: a problem, as before
     for bad in ({"about": "bug"}, {"about": 1}, {"about": ["feature"]}):
         assert post(port, "/api/diag/report", bad, {"Cookie": ck})[0] == 400, bad
+
+
+def answers(root):
+    return [e for e in events(root) if e["ev"] == "dashboard.answer"]
+
+
+def test_every_act_answer_has_its_status_in_the_log(live):
+    """ORCH-386: a used sign-in link ends the session and /api/act answers 403; the report must show it."""
+    root, port = live
+    tok = pagelaunch.write_launch_token(root, "dashboard")
+    st, ck, body = post(port, "/session", {"token": tok})
+    cookie = ck.split(";")[0]
+    SECRETS[cookie] = json.loads(body)["secret"]
+    ok = post(port, "/api/act", {"op": "person.add", "args": {"name": "Mia"}}, {"Cookie": cookie})
+    assert ok[0] == 200, ok  # a person-only click while signed in
+    assert post(port, "/session", {"token": tok})[0] != 200  # the same link a second time ends the session
+    refused = post(port, "/api/act", {"op": "person.add", "args": {"name": "Mia"}}, {"Cookie": cookie})
+    assert refused[0] == 403
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request("POST", "/api/act", "x", {"Host": f"127.0.0.1:{port}", "Origin": f"http://127.0.0.1:{port}"})
+    assert c.getresponse().status == 415  # refused before any op runs
+    got = [(e["kv"]["path"], e["kv"]["status"], e["lvl"]) for e in answers(root)]
+    acts = [g for g in got if g[0] == "/api/act"]
+    assert acts == [("/api/act", 200, "debug"), ("/api/act", 403, "info"), ("/api/act", 415, "info")], got
+    assert all(isinstance(e["kv"]["ms"], int) for e in answers(root))
+
+
+def test_a_plain_read_answered_200_writes_no_answer_line(live):
+    root, port = live
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request("GET", "/api/state", headers={"Host": f"127.0.0.1:{port}"})
+    c.getresponse().read()
+    c.request("GET", "/nope", headers={"Host": f"127.0.0.1:{port}"})
+    assert c.getresponse().status == 404
+    assert [(e["kv"]["path"], e["kv"]["status"]) for e in answers(root)] == [("/nope", 404)]

@@ -14,9 +14,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from _orch_test_guard import check_real_home, isolated_orch_home  # noqa: F401
 
 FAKE_ORCH = """#!{py}
-import json, sys, os
+import fcntl, json, sys, os
 from pathlib import Path
 root = Path.cwd()
+# Like core: one writer at a time (a lock), and a ticket file is replaced whole (temp file + rename), so a reader in
+# another thread or process never sees it half written (ORCH-489: flaky test_scripts on CI)
+_lock = open(root / "fake-orch.lock", "a")
+fcntl.flock(_lock, fcntl.LOCK_EX)
 args = [a for a in sys.argv[1:] if a != "--json"]
 by = None
 if "--by" in args:
@@ -25,7 +29,10 @@ with open(root / "calls.jsonl", "a") as f:
     f.write(json.dumps({{"args": args, "by": by}}) + "\\n")
 tdir = root / ".orch" / "tickets"
 def load(i): return json.loads((tdir / (i + ".json")).read_text())
-def save(t): (tdir / (t["id"] + ".json")).write_text(json.dumps(t))
+def save(t):  # like core: every write moves the revision on (the --if-revision checks below see it)
+    if isinstance(t.get("revision"), int): t["revision"] += 1
+    p = tdir / (t["id"] + ".json"); tmp = p.with_name(p.name + ".%d.tmp" % os.getpid())
+    tmp.write_text(json.dumps(t)); os.replace(tmp, p)
 def note(t, text): t.setdefault("history", []).append({{"by": by, "text": text}})
 if args[:2] == ["ticket", "list"]:
     print(json.dumps([json.loads(p.read_text()) for p in sorted(tdir.glob("t_*.json"))]))

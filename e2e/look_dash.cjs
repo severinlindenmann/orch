@@ -3,10 +3,11 @@
 // The sign-in link (orch start --print-launch-url) gives the 1280 page a session; without it every click is refused (watch-only).
 // prints one JSON line with what it saw; exit 1 on a failed step.
 const { chromium } = require(require('path').join(process.env.PW_DIR, 'playwright'));
+const headless = require('./headless.cjs'); // the keychain options (ORCH-615)
 const [base, shots, desc, launch] = process.argv.slice(2);
 (async () => {
   const out = {};
-  const b = await chromium.launch();
+  const b = await headless.launch(chromium);
   for (const [w, h] of [[1280, 800], [720, 900]]) {
     const p = await b.newPage({ viewport: { width: w, height: h } });
     const errs = []; p.on('pageerror', e => errs.push(e.message));

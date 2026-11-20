@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from conftest import key_file
 
-from orch import addons
+from orch import addons, winacl
 from orch import home as hp
 from orch.errors import Refused
 
@@ -30,6 +30,17 @@ def tws(tmp_path, monkeypatch):
         if k.startswith("CODEX_"):
             monkeypatch.delenv(k)
     return ws
+
+
+def _loosen(path):
+    """Too open for a secret: a group/other mode on POSIX; on Windows an extra read right for the local Users
+    group (real rights, read by winacl)."""
+    if os.name != "nt":
+        path.chmod(0o644 if path.is_file() else 0o755)
+        return
+    import subprocess
+
+    subprocess.run(["icacls", str(path), "/grant", "*S-1-5-32-545:(R)"], check=True, capture_output=True)
 
 
 # ---------------------------------------------------------------- guarded home
@@ -93,7 +104,10 @@ def test_key_file_rights_and_reuse(tws):
     k = key_file(tws)
     assert len(k) == 32 and key_file(tws) == k
     f = hp.key_dir(tws) / "test.key"
-    assert oct(f.stat().st_mode & 0o777) == "0o600"
+    if os.name == "nt":  # Windows rights are an access list, not a mode
+        assert winacl.file_check(f) is None
+    else:
+        assert oct(f.stat().st_mode & 0o777) == "0o600"
 
 
 def test_keys_folder_symlink_refused_on_read(tws):
@@ -110,10 +124,13 @@ def test_loose_folders_are_tightened_not_refused(tws):
     k = key_file(tws)
     home = tws.parent / "home"
     for d in (home, home / "keys", hp.key_dir(tws)):
-        d.chmod(0o755)
+        _loosen(d)
     assert key_file(tws, create=False) == k  # same key: only the folders were tightened
     for d in (home, home / "keys", hp.key_dir(tws)):
-        assert oct(d.stat().st_mode & 0o777) == "0o700"
+        if os.name == "nt":  # Windows rights are an access list, not a mode
+            winacl.check_private(d)
+        else:
+            assert oct(d.stat().st_mode & 0o777) == "0o700"
 
 
 # ---------------------------------------------------------------- loose secret files: reset
@@ -136,7 +153,7 @@ READERS = {
 def test_loose_secret_file_resets_protection(tws, name):
     key, d, home = _loose_setup(tws)
     path = d / name
-    path.chmod(0o644)  # loose: the content is never trusted
+    _loosen(path)  # loose: the content is never trusted
     with contextlib.suppress(Refused):
         READERS[name](tws)
     if name == "test.key":
@@ -199,6 +216,7 @@ def test_reset_holds_the_key_lock(tws, monkeypatch):
 # ---------------------------------------------------------------- guarded reads go through saferead
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no named pipes in the file system on Windows")
 def test_fifo_in_place_of_a_guarded_file_does_not_hang(tws):
     key = key_file(tws)
     f = hp.key_dir(tws) / "notes.json"
@@ -214,11 +232,12 @@ def test_symlinked_and_oversized_and_hardlinked_files_are_loose(tws):
         f = hp.key_dir(tws) / "test.key"
         f.unlink()
         if kind == "symlink":
-            f.symlink_to(tws / ".orch")
+            # Windows can not replace a folder link by a file, so it gets a file link there
+            f.symlink_to(tws / ".orch" if os.name != "nt" else tws / "elsewhere.txt")
         elif kind == "big":
             hp._write_private(f, "a" * (hp.MAX_READ + 10))
         else:
-            hp._write_private(tws / "other", key.hex())
+            hp._write_private(tws / "other", key.hex(), private=os.name != "nt")  # outside the home
             os.link(tws / "other", f)
         assert key_file(tws) != key, kind  # never read, reset
 
@@ -228,6 +247,8 @@ def test_install_record_read_through_saferead(tmp_path, monkeypatch):
     monkeypatch.setattr(hp.sys, "prefix", str(tmp_path))
     assert hp.install_kind() == "dev"
     (tmp_path / "orch-install.json").unlink()
+    if not hasattr(os, "mkfifo"):
+        return  # no named pipes in the file system on Windows
     os.mkfifo(tmp_path / "orch-install.json")
     assert hp.install_kind() in ("test", "normal")  # a FIFO is no record, and does not hang
 

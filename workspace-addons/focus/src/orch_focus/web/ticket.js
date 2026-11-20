@@ -34,7 +34,8 @@
     root.append(...(INAPP ? [] : [h('header', {class: 'fx-top'}, h('span', {class: 'meta fx-workspace', text: 'Focus'}), h('button', {class: 'btn ghost sm', 'data-act': 'help', text: 'Help'}))]),
       h('main', {class: 'fx-pick'}, h('h1', {text: 'Focus'}), h('p', {class: 'meta fx-sub', text: 'Loading your tickets…'}), skeleton()));
     /* the lists wait for the first Live now answer (at most a few seconds), so nothing moves after they show */
-    const tickets = fetch(P + '/api/tickets').then(r => { if (!r.ok) throw Error(); return r.json(); });
+    /* a call that never answers must not leave the grey bars up for ever (ORCH-398): after TICKETS_WAIT_MS the page says so */
+    const tickets = fetch(P + '/api/tickets', {signal: AbortSignal.timeout(TICKETS_WAIT_MS)}).then(r => { if (!r.ok) throw Error(); return r.json(); });
     /* Focus opens on this start page, the Helpers list first (ORCH-61); the next ticket that needs the person is one
        button below it, never a jump. */
     tickets.then(payload => S.views.livenow.ready(LIVE_WAIT_MS).then(() => payload)).then(payload => {
@@ -85,7 +86,7 @@
         box.append(h('section', {class: 'fx-pick-group fx-group-done'}, h('div', {class: 'row'}, h('h2', {class: 'grow'}, 'Done ', h('span', {class: 'meta', text: '(' + done.length + ')'})), done.length > 5 ? search : null), card));
       }
       S.views.livenow.hideListed();
-    }).catch(() => root.querySelector('.fx-pick').append(h('p', {role: 'alert', text: 'Could not load tickets. Reload to try again.'})));
+    }).catch(() => { const box = root.querySelector('.fx-pick'); box.querySelector('.fx-skel')?.remove(); box.append(h('p', {role: 'alert', text: 'Could not load tickets. Reload to try again.'})); });
     S.views.areas.mount(root.querySelector('.fx-pick'));
     S.views.livenow.mount(root.querySelector('.fx-pick'));
     S.views.jobs.mount(root.querySelector('.fx-pick'));
@@ -119,6 +120,7 @@
   }
 
   const LIVE_WAIT_MS = 4000;
+  const TICKETS_WAIT_MS = 10000;
   /* the page's shape before the tickets arrive, so nothing jumps */
   function skeleton() {
     return h('div', {class: 'fx-skel', 'aria-hidden': 'true'}, [0, 1, 2].map(() => h('div', {class: 'skeleton fx-skel-row'})));
@@ -171,10 +173,15 @@
     els.stopIc = h('span');
     els.stopL = h('span', {class: 'opt', text: 'Pause work'});
     els.stop = h('button', {class: 'btn ghost sm', 'data-act': 'stop', title: 'Pause work or continue (S)', 'aria-label': 'Pause work'}, els.stopIc, els.stopL);
+    els.startHost = h('span', {class: 'fx-start', hidden: true});  /* the one Start button (web/start.js, ORCH-487) */
     els.answer = h('button', {class: 'btn primary sm', 'data-act': 'answer', title: 'Answer the question below', hidden: true, text: 'Answer'});
     /* a fixed list: what does not apply now is greyed out, never removed; desktop-only rows hide on a phone */
     const menuRow = (action, icon, label, cls) => h('button', {type: 'button', 'data-act': action, class: cls || null}, h('span', {icon}), h('span', {text: label}));
     els.fresh = menuRow('fresh', 'plus', 'Start fresh instead', 'fx-risky');
+    els.freshLabel = els.fresh.lastElementChild;
+    els.freshWhy = h('span', {class: 'meta', id: 'fx-fresh-why', hidden: true, text: ''});  /* why it is greyed (ORCH-487) */
+    els.fresh.append(els.freshWhy);
+    els.fresh.setAttribute('aria-describedby', 'fx-fresh-why');
     els.attachBtn = menuRow('attach', 'external', 'Helper’s screen in a terminal');
     els.interruptBtn = menuRow('interrupt', 'pause', 'Interrupt now');
     els.interruptBtn.title = 'Stop what the helper is doing and read the message in the box now';
@@ -195,7 +202,7 @@
     els.mobileTasks = h('button', {class: 'chip fx-mobile-tasks', type: 'button', 'data-act': 'rail', 'aria-controls': 'fx-tasks', 'aria-expanded': 'false'});
     const backToList = h('a', {class: 'btn ghost sm fx-exit', href: (P || '') + '/', target: '_self', title: 'Back to list'}, h('span', {'aria-hidden': 'true', text: '←'}), h('span', {class: 'opt', text: 'Back to list'}));
     const top = h('header', {class: 'fx-top'}, backToList, els.rail, h('div', {class: 'fx-title'}, h('h1', {}, els.title), els.areaChip, h('span', {class: 'fx-key-hidden', hidden: true}, els.key)),
-      els.back, h('div', {class: 'fx-prog'}, els.count, els.prog), els.mobileTasks, h('div', {class: 'fx-tools'}, els.modeBtn, els.fullBtn, els.copyBtn, els.stop, els.more));
+      els.back, h('div', {class: 'fx-prog'}, els.count, els.prog), els.mobileTasks, h('div', {class: 'fx-tools'}, els.modeBtn, els.fullBtn, els.copyBtn, els.stop, els.startHost, els.more));
     /* the status sits in the step bar: Plan · Work · Check · Done, the current step in the accent colour, then the live state */
     els.taskLine = h('span', {class: 'fx-taskline meta', text: ''});
     const stepbar = h('div', {class: 'fx-stepbar'}, els.steps, els.liveWrap, els.taskLine);
@@ -260,7 +267,7 @@
         h('a', {class: 'btn ghost sm', href: P + '/', text: 'All helpers'})), rail);
     /* the ticket page's header line (ORCH-71): ORCH-n · state pill · Step 3 of 4 · 52 min, then the title */
     els.headLine = h('p', {class: 'meta', 'data-key': 'focus-head-line'});
-    const head = h('div', {class: 'fx-chead'}, h('div', {class: 'grow'}, els.headLine, h('h1', {}, els.title)), els.stop, els.more);
+    const head = h('div', {class: 'fx-chead'}, h('div', {class: 'grow'}, els.headLine, h('h1', {}, els.title)), els.stop, els.startHost, els.more);
     stage.prepend(head);
     els.resultEmpty = h('p', {class: 'meta fx-result-empty', text: 'Results appear here as the helper finishes steps.'});
     els.resultHead = h('h2', {text: 'Result so far'});
@@ -294,7 +301,7 @@
     els.tasks.replaceChildren(...checks.flatMap((c, i) => {
       const cls = c.wont_do ? 'wont' : c.done ? 'done' : (c.state === 'doing' ? 'doing' : '');
       const row = h('button', {class: 'fx-task ' + cls, 'data-task': String(i), 'aria-current': String(i === (S.state.sel === 0 && doing >= 0 && !els.tasks.dataset.picked ? doing : S.state.sel))},
-        h('span', {class: 'st', icon: c.done && !c.wont_do ? 'check' : false, text: c.wont_do ? '–' : false}), h('span', {}, h('span', {class: 'tt', text: (c.done && !c.wont_do ? 'Done · ' : '') + c.text}),
+        h('span', {class: 'st', icon: c.done && !c.wont_do ? 'check' : false, text: c.wont_do ? '–' : false}), h('span', {}, h('span', {class: 'tt', text: (c.done && !c.wont_do ? 'Done · ' : '') + (c.origin === 'change_request' ? 'You asked: ' : '') + c.text}),
           h('span', {class: 'sub', text: c.wont_do ? 'Skipped' + (c.reason ? ' · ' + c.reason : '') : [mins(c), evText(c)].filter(Boolean).join(' · ')})));
       row.addEventListener('click', () => { S.views.live.scrollToTask(c.id); S.state.sel = i; els.tasks.dataset.picked = '1'; els.tasks.dataset.k = ''; renderTasks(S.state.view); });
       const reason = c.wont_do && c.reason && h('details', {class: 'fx-task-reason meta'}, h('summary', {text: 'Reason'}), h('span', {text: c.reason}));

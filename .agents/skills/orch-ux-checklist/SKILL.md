@@ -22,8 +22,15 @@ Full list with thresholds and how to check: `references/CHECKLIST.md`. Sources a
 4. **Screenshots** at exactly 1280x800, 1920x1080 and 390x844 (plus 320 for reflow), dark and light (light: n.a.
    while `tokens.css` is dark only), one set per state touched (loaded, loading, empty, error, stale, long content),
    one with keyboard focus on the main action, and a before/after pair around the main click.
-   Tool: `~/orch-dev/scripts/shot.sh <url> <out.png> <w> <h>` (or any headless Chromium with a temporary profile).
-   Pictures go on the ticket as evidence (`orch check done ... --file`), never into git.
+   Tool: `orch shot <url or html file> --width 1280,1920,390 --out <folder>` (keychain-safe browser, one picture per
+   width). Never start Chromium yourself; a script in the repository launches only through
+   `e2e/headless.cjs` / `e2e/headless.py` (they add the keychain options; CI check `headless-launch`), a
+   throwaway script outside it with `args: ['--use-mock-keychain', '--password-store=basic']`. Pictures go on the ticket as evidence
+   (`orch check done ... --file`), never into git.
+   **Dashboard pull request: take no pictures of the product yourself.** CI (job `dash-shots`) takes the changed
+   pages at 1280, 1920 and 390 on sample tickets; put them on the card with
+   `orch ask <id> "<question>" --draft "<title>" --ci-shots <PR url> --then "<what next>"`. Own `orch shot` pictures
+   only for states CI does not show (empty, error, a click pair) and for drafts, which have no pull request yet.
 5. **Run the checklist** below: [auto] items by test/script, [eye] items by looking at every screenshot.
    Answer each yes / no / n.a.; fix every "no" or write why. Automatic in CI today (run them locally too):
    `node workspace/src/orch_ui/tests/ux_checks.cjs` (master gallery at 1280/390/320: sideways scroll, 24 px
@@ -32,7 +39,8 @@ Full list with thresholds and how to check: `references/CHECKLIST.md`. Sources a
    check. `DESIGN.md` "UX/UI checklist" lists which items stay by eye.
 6. **PR body:** `UX checklist: 61 items, N n.a., all others yes` (or the "no" lines with reasons), `Screenshots:`,
    `Mockup: updated <where>`, `Master: <change or none>`, rules touched.
-7. **Visual or flow change → owner review card** in orch with before/after pictures. Never assume the owner agrees.
+7. **Visual or flow change → owner review card** in orch with before/after pictures (`--ci-shots` for a dashboard
+   pull request). Never assume the owner agrees.
 
 ## Owner rules (always win)
 

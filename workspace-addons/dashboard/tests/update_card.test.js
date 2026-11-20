@@ -12,7 +12,8 @@ function node(tag, attrs = {}, children = []) {
     addEventListener(t, fn) { (this.listeners[t] ||= []).push(fn); }};
 }
 const text = n => n == null ? '' : typeof n === 'string' ? n : (n.children || []).map(text).join(' ').replace(/\s+/g, ' ').trim();
-const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
+// the Tools card (ORCH-589) sits in the same panel; these tests look at the orch update only
+const all = (n, f) => !n || typeof n !== 'object' || n.attrs?.['data-key'] === 'settings-tools' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
 function context(info) {
   const posts = [], listeners = {}, store = {};
   const c = vm.createContext({
@@ -22,6 +23,7 @@ function context(info) {
     sessionStorage:{getItem:k => store[k] ?? null, setItem:(k, v) => { store[k] = v; }},
     window:{addEventListener:(name, fn) => { listeners[name] = fn; }},
     fetch:async (url, opt) => url === '/api/update-info' ? {ok:true, json:async () => info}
+      : String(url).startsWith('/api/tool-updates') ? {ok:true, json:async () => ({tools:[]})}
       : (posts.push(JSON.parse(opt.body)), {status:202, text:async () => 'Update started.'}),
   });
   vm.runInContext(block, c);
@@ -48,6 +50,9 @@ test('up to date: no button; unknown newest says so plainly', async () => {
   ({c} = context({installed:{label:'orch 15'}, newest:null, update_available:false, changes:[]}));
   c.aboutPanel(); await new Promise(r => setImmediate(r));
   assert.match(text(c.aboutPanel()), /Could not check for a newer version/);
+  // the error has a next step: Check again reads the install source once more
+  const again = all(c.aboutPanel(), n => n.tag === 'button' && text(n) === 'Check again');
+  assert.equal(again.length, 1); assert.equal(again[0].dataset['key'] ?? again[0].dataset.key, 'update-check-again');
   // a build from a branch: say what it is, no error wording
   ({c} = context({installed:{label:'orch main f093f5c5', sha:'f093f5c5'.padEnd(40, '0'), release:null}, newest:null, update_available:false, changes:[], ref:'main'}));
   c.aboutPanel(); await new Promise(r => setImmediate(r));

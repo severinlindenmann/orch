@@ -1,9 +1,11 @@
 """The Usage page: its model (GET /api/page), the clicks (`orch usage act`) and the page server's fence."""
 
 import json
+import re
 import threading
 import urllib.error
 import urllib.request
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from conftest import jrun, switcher_data
@@ -150,6 +152,16 @@ def test_all_at_limit_and_one_account(cli, fake_switcher, ws):
     assert m["one_account"] is False and {a["state"] for a in m["accounts"][1:]} == {"missing"}
 
 
+def test_every_account_at_limit_is_one_box_not_two(cli, fake_switcher, ws):
+    _seed(cli)
+    switching._write(
+        switching.memory_path(ws), {"all_at_limit": True, "alerts": [switching.ALL_AT_LIMIT_ALERT]}
+    )
+    m = page.build(usage_cli.gather(ws), ws)
+    assert m["all_at_limit"] is True
+    assert switching.ALL_AT_LIMIT_ALERT not in m["warnings"]
+
+
 def test_one_account_only(cli, fake_switcher, ws):
     data = switcher_data()
     data["accounts"] = data["accounts"][:1]
@@ -210,6 +222,16 @@ def test_server_serves_page_model_and_kit_only(served):
     assert _get(served, "/kit/gallery.html")[0] == 404
 
 
+def test_page_loads_the_frame_code_first(served):
+    # The dashboard shows this page in a sandboxed frame (origin "null"): without kit/frame.js first, its fetch of
+    # api/page carries no frame pass and the browser blocks it ("Failed to fetch", ORCH-381 / ORCH-397).
+    code, body, _ = _get(served, "/", {"X-Forwarded-Prefix": "/addon/usage"})
+    scripts = re.findall(rb'<script src="([^"]+)"([^>]*)>', body)
+    assert code == 200 and scripts[0] == (b"/addon/usage/kit/frame.js", b"")  # first, and not deferred
+    code, body, _ = _get(served, "/kit/frame.js")
+    assert code == 200 and b"X-Orch-Frame" in body
+
+
 def test_server_only_reads_and_proves_its_start(served):
     req = urllib.request.Request(f"http://127.0.0.1:{served}/api/page", data=b"{}", method="POST")
     with pytest.raises(urllib.error.HTTPError) as e:
@@ -232,3 +254,46 @@ def test_the_dashboards_exact_command_shape(cli, fake_switcher, ws):
     assert code == 0 and json.loads(out)["account"]["rule"]["limits"] == [
         {"value": 88, "unit": "%", "period": "week"}
     ]
+
+
+def test_a_full_five_hour_window_is_full_not_ready(cli, fake_switcher, ws):
+    _seed(cli)
+    m = page.build(usage_cli.gather(ws), ws)
+    row = {"on": True, "active": False, "use": {"5h": {"pct": 100.0, "resets_at": "2026-11-18T20:00:00Z"}}}
+    assert page._state(row) == "full" and page._full_until(row) == "2026-11-18T20:00:00Z"
+    assert page._state({**row, "use": {"5h": {"pct": 99.0}}}) == "ready"
+    assert page._state({**row, "active": True}) == "in-use"
+    assert all("full_until" in a for a in m["accounts"])
+
+
+def test_many_switches_in_a_short_while_give_one_warning(ws):
+    now = datetime(2026, 11, 18, 18, 0, tzinfo=UTC)
+    assert page.switch_flapping(ws, now) is None
+    rows = [
+        {
+            "at": (now - timedelta(minutes=10 * i)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "who": store.USAGE,
+            "what": "switched to x",
+            "label": "x",
+            "account": None,
+        }
+        for i in range(8)
+    ]
+    store.usage_dir(ws).mkdir(parents=True, exist_ok=True)
+    store._append_history(ws, rows)
+    w = page.switch_flapping(ws, now)
+    assert w and w["count"] == 8
+
+
+def test_until_on_a_week_limit_is_refused_with_a_hint_to_use_end(cli, fake_switcher, ws):
+    _seed(cli)
+    f = ws / ".orch/addons/usage/accounts.json"
+    before = f.read_text()
+    for argv in (
+        ("limit", "first", "90%", "--period", "week", "--until", "2099-02-01"),
+        ("limit", "first", "90%", "--period", "5h", "--until", "2099-02-01"),
+        ("period", "first", "5h", "--of", "week", "--until", "2099-02-01"),
+    ):
+        code, out, err = cli(*argv)
+        assert code == 2 and "--end" in (out + err), argv
+    assert f.read_text() == before

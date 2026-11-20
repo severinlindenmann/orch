@@ -273,7 +273,8 @@ def start(root: Path, by: str, at: datetime | None = None, lanes: tuple[str, ...
         raise Refused("There are no tickets in these lanes to triage.")
     note = NOTE + HOW_NOTE + (CLOSED_NOTE if set(lanes) & set(CLOSED_LANES) else "")
     note += " Lanes picked: " + ", ".join(LANES[x] for x in lanes) + "."
-    day = at.astimezone().strftime("%-d %b")
+    local = at.astimezone()
+    day = f"{local.day} {local:%b}"  # %-d is not understood on Windows
     t = tickets.create(root, f"Triage {day}", by, fields={"note": note, "done_when": DONE_WHEN})
     tid = t["id"]
     _write_state(root, {"ticket": t.get("key") or tid, "at": res["at"]})

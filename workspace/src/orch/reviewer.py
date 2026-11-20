@@ -33,7 +33,7 @@ import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from orch import brake, config, ghmerge, history, runs, tickets
+from orch import brake, config, ghmerge, history, ownerpick, runs, tickets
 from orch.errors import Refused
 
 BY = tickets.REVIEWER
@@ -114,10 +114,12 @@ def size_reasons(files: list[dict], added: dict[str, list[str]] | None = None) -
     additions, deletions}]; added: the added lines per file (from the diff), for words and new commands in
     code."""
     counts = {"security": 0, "look": 0, "words": 0, "structure": 0, "concept": 0, "other": 0}
-    n_files = n_lines = 0
+    n_files = n_lines = all_files = all_lines = 0
     for f in files:
         path = str(f.get("path") or "")
         kind = kind_of(path)
+        all_files += 1
+        all_lines += int(f.get("additions") or 0) + int(f.get("deletions") or 0)
         if kind == "test":
             continue
         n_files += 1
@@ -138,7 +140,7 @@ def size_reasons(files: list[dict], added: dict[str, list[str]] | None = None) -
             f"too big for a small fix ({n_files} files, {n_lines} lines; "
             f"small is {MAX_FILES} and {MAX_LINES})"
         )
-    return why, {"files": n_files, "lines": n_lines}
+    return why, {"files": n_files, "lines": n_lines, "all_files": all_files, "all_lines": all_lines}
 
 
 # ------------------------------------------------------------------ facts
@@ -250,11 +252,31 @@ def part_match(part: str, items: list[dict]) -> tuple[list[str], list[str]]:
     return want, [w for w in want if w in seen]
 
 
+def review_result(root: Path | None, ticket: dict) -> dict | None:
+    """ORCH-826 (owner: "they should rather highlight if something is not good for me to check and not what
+    is good"): the result of a review ticket orch made itself (a security review of a pull request, the
+    Reviewer's second look), {"ok", "line", "what"}, or None (not one, or no result yet). An ok is accepted
+    for the owner like a small fix; a problem stays on the owner's list and its card leads with it."""
+    from orch import lookreview, secreview  # here: both read run files, and lookreview imports this module
+
+    for get in (secreview.ticket_result, lookreview.ticket_result):
+        try:
+            got = get(root, ticket)
+        except (OSError, ValueError, KeyError, TypeError, Refused):
+            got = None
+        if got is not None:
+            got["line"] = " ".join(str(got.get("line") or "").split())[:300] or "no details given"
+            return got
+    return None
+
+
 def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
     """{"verdict": accept | leave | back | wait, "why": one line}. `facts`: pr_facts per linked pull request
     (None = could not be read: wait, look again next pass). Pure apart from reading the ticket's evidence."""
     items = [c for c in ticket.get("checklist") or [] if isinstance(c, dict) and not c.get("wont_do")]
     proof = tickets.proof_state(ticket, root)
+    if ownerpick.carries_draft(ticket):  # ORCH-582: never accepted, sent back or put in line by the Reviewer
+        return {"verdict": "leave", "why": ownerpick.LEFT_WHY, "owner": True}
     if tickets._open_questions(ticket):
         return {"verdict": "leave", "why": "a question on this ticket waits for your answer."}
     gaps = [c["text"] for c in items if not c.get("done") or not c.get("evidence")]
@@ -275,6 +297,12 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
     missing = []
     if gaps:
         missing.append(gaps[0] if len(gaps) == 1 else f"{gaps[0]} (and {len(gaps) - 1} more)")
+    found = review_result(root, ticket)
+    if found is not None and not missing:  # ORCH-826: orch's own review: only a problem is the owner's
+        what = found["what"][:1].upper() + found["what"][1:]
+        if found["ok"]:
+            return {"verdict": "accept", "why": f"{what} found nothing for you: {found['line']}"}
+        return {"verdict": "leave", "why": f"{found['what']} found a problem: {found['line']}", "owner": True}
     if not facts:
         if missing:
             return _back_or_leave("work is missing: " + missing[0], sent_back)
@@ -302,28 +330,39 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
     if open_part:
         return {"verdict": "leave", "why": open_part}
     why: list[str] = []
-    files = lines = 0
+    files = lines = all_files = all_lines = 0
     for f in facts:
         reasons, counts = size_reasons(f["files"], f["added"])
         why += reasons
         files += counts["files"]
         lines += counts["lines"]
+        all_files += counts["all_files"]
+        all_lines += counts["all_lines"]
     if not why and (files > MAX_FILES or lines > MAX_LINES):
         why.append(f"too big for a small fix ({files} files, {lines} lines)")
     if why:
         return {"verdict": "leave", "why": "; ".join(dict.fromkeys(why)) + "."}
-    note = "".join(f" Could not match: {p}" for p in unmatched[:3])
     prs = ", ".join(f"#{f['number']}" for f in facts)
-    checks = sum(f["checks"] for f in facts)
-    done = sum(1 for c in items if c.get("done") and c.get("evidence"))
+    done = _first_sentence(ticket.get("summary"))
+    what = f"{done} " if done else ""
     return {
         "verdict": "accept",
         "why": (
-            f"{'pull request' if len(facts) == 1 else 'pull requests'} {prs} merged, "
-            f"{_n('check', checks)} green, {done} of {len(items)} tasks with evidence, "
-            f"small fix ({_n('file', files)}, {_n('line', lines)})." + note
+            f"{what}{'Pull request' if len(facts) == 1 else 'Pull requests'} {prs} "
+            f"merged with all checks green, every task has evidence and the change is small "
+            f"({_n('file', all_files)}, {_n('line', all_lines)} changed)."
         ),
     }
+
+
+def _first_sentence(text) -> str:
+    t = " ".join(str(text or "").split())
+    if not t:
+        return ""
+    i = t.find(". ")
+    t = t[: i + 1] if i > 0 else t
+    t = t[:160].rstrip()
+    return t if t.endswith((".", "!", "?")) else t + "."
 
 
 def _back_or_leave(why: str, sent_back: int) -> dict:
@@ -354,6 +393,18 @@ def _write_state(root: Path, state: dict) -> None:
     with contextlib.suppress(OSError):
         runs.run_dir(root).mkdir(parents=True, exist_ok=True)
         runs._atomic(_state_path(root), json.dumps(state, indent=1) + "\n")
+
+
+LEFT_MAX = 300
+
+
+def remember_left(mine: dict, verdict: str, why: str) -> None:
+    """Keep why the Reviewer left a ticket for the person (the Reviewer was not sure), so Needs you can list
+    it as stuck (stuck.py, ORCH-426); any other verdict forgets it."""
+    if verdict == "leave":
+        mine["left"] = " ".join(str(why or "").split())[:LEFT_MAX]
+    else:
+        mine.pop("left", None)
 
 
 def _send_back(root: Path, tid: str, why: str) -> dict:
@@ -390,11 +441,14 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
         tid = t["id"]
         in_review.add(tid)
         mine = state.get(tid, {})
-        if mine.get("rev") == t.get("revision"):
-            continue  # decided already and nothing changed since
+        ok_now = bool((review_result(root, t) or {}).get("ok"))
+        if mine.get("rev") == t.get("revision") and not (ok_now and not mine.get("ok")):
+            continue  # decided already and nothing changed since (an ok recorded since: look once more)
         facts = [facts_of(u) for u in pr_urls(root, t)]
         res = decide(root, t, facts, int(mine.get("back") or 0))
-        if look and res["verdict"] == "leave" and tid not in own:  # bigger work: a second look (ORCH-175)
+        if (
+            look and res["verdict"] == "leave" and tid not in own and not res.get("owner")
+        ):  # second look (ORCH-175)
             res = lookreview.triage(t, facts, res, int(mine.get("back") or 0)) or res
         row = {"ticket": tid, "key": t.get("key") or tid, **res, "done": False}
         if res["verdict"] == "wait" or dry_run:
@@ -415,6 +469,9 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
             actions.append(row)
             continue
         mine["rev"] = after.get("revision")
+        if ok_now:
+            mine["ok"] = True
+        remember_left(mine, res["verdict"], res["why"])
         state[tid] = mine
         row["done"] = True
         actions.append(row)
@@ -493,6 +550,8 @@ def routine(root: Path, ticket: dict, q: dict, now: float | None = None) -> tupl
         return False, "a Chat question"
     if q.get("answer") is not None or q.get("taken_back") is not None:
         return False, "already settled"
+    if ownerpick.is_draft_card(q):  # ORCH-582
+        return False, "a draft for you to pick"
     if q.get("card") is not None or q.get("action") is not None:
         return False, "a card for you to see"
     if q.get("kind") not in (None, "plain"):
@@ -605,9 +664,20 @@ def accepted(root: Path, since: str) -> list[dict]:
     return out
 
 
-def accepted_text(rows: list[dict], word: str = "today") -> str:
+def picks_text(picks: list[dict]) -> list[str]:
+    """The morning list's own part for drafts (ORCH-582): what waits for the owner's pick, never mixed with
+    what the Reviewer did."""
+    if not picks:
+        return []
+    out = [f"Waiting for your pick: {_n('draft', len(picks))}"]
+    out += [f"- {r['key']} {r['title']}: {r['card']}" for r in picks]
+    return out
+
+
+def accepted_text(rows: list[dict], word: str = "today", picks: list[dict] | None = None) -> str:
+    tail = picks_text(picks or [])
     if not rows:
-        return f"Nothing was accepted for you {word}."
+        return "\n".join([f"Nothing was accepted for you {word}.", *tail])
     acc = [r for r in rows if not r.get("answer")]
     ans = [r for r in rows if r.get("answer")]
     out = []
@@ -620,4 +690,4 @@ def accepted_text(rows: list[dict], word: str = "today") -> str:
     if ans:
         out.append(f"Answered for you {word}: {_n('question', len(ans))}")
         out += [f"- {r['key']} {r['title']}: {r['why']}" for r in ans]
-    return "\n".join(out)
+    return "\n".join(out + tail)

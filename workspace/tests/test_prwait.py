@@ -31,7 +31,7 @@ REPLAYS = [
     ("second-workflow-stuck", False, "unfinished workflow runs: rules"),
     ("draft", False, "draft"),
     ("no-checks", False, "no checks after"),
-    ("required-check-missing", False, "still waiting"),
+    ("required-check-missing", False, "required check(s) never reported"),
     ("other-repo-skipped", False, "b SKIPPED"),
     ("other-repo-green", True, "all 1 checks SUCCESS"),
     ("release-into-main", True, "the base branch has no required checks: the default branch's passed"),
@@ -341,6 +341,22 @@ def test_queue_mode_merges_without_waiting_for_the_hourly_merge_count_but_counts
     assert pull.counted == [("merge", PR)]
 
 
+def test_stop_ends_the_wait_without_a_verdict_and_never_merges(fake_gh):
+    pulls, merges = fake_gh
+    asked: list[int] = []
+
+    def stop():
+        asked.append(1)
+        return "the group before it was not merged" if len(asked) > 1 else None
+
+    pull = FakePull(PR, _case("pr978-second-run"))
+    o = prwait.run_one(PR, True, src=pull, queue=True, stop=stop)
+    assert o.status == "stopped" and not o.ok and merges == []
+    assert o.verdict.unknown and "the group before it was not merged" in o.line
+    pull = FakePull(PR, _case("pr978-second-run"))  # a stop that never says stop changes nothing
+    assert prwait.run_one(PR, True, src=pull, queue=True, stop=lambda: None).status == "merged"
+
+
 def test_overlap_that_github_cannot_take_in_is_left_to_the_helper(proj, tk, run, fake_gh):
     pulls, merges = fake_gh
     pulls[PR] = FakePull(
@@ -395,6 +411,32 @@ def test_merged_and_closed_refs_are_skipped_by_default(proj, tk, run, fake_gh):
 def test_a_ticket_without_the_pull_request_is_refused(tk, run, fake_gh):
     code, _, err = run("ref", "wait", tk, "https://github.com/acme/app/pull/99")
     assert code == 2 and "orch ref add" in err
+
+
+def test_with_the_merge_queue_on_no_merge_into_its_base_goes_past_it(proj, tk, run, fake_gh, monkeypatch):
+    """ORCH-450: every merge into develop is checked in a queue group, so ref wait --merge refuses it."""
+    from orch import addons
+
+    pulls, merges = fake_gh
+    pulls[PR] = FakePull(PR, _case("pr978-second-run"))
+    monkeypatch.setattr(addons, "active", lambda root: {"pull-requests": {}})
+    code, _, err = run("ref", "wait", tk, "--merge")
+    assert code == 2 and merges == [] and "go through the merge queue" in err
+    assert f"orch pull-requests queue add {PR} --ticket" in err
+    code, _, _ = run("ref", "wait", tk)  # only waiting for the checks stays allowed
+    assert code == 0 and merges == []
+
+
+def test_the_queue_refusal_counts_only_for_the_queues_base_branches(proj, tk, run, fake_gh, monkeypatch):
+    from orch import addons
+
+    pulls, merges = fake_gh
+    pulls[PR] = FakePull(PR, _case("pr978-second-run"))
+    monkeypatch.setattr(addons, "active", lambda root: {"pull-requests": {}})
+    (proj / ".orch" / "config.toml").write_text('[pull_requests]\nbases = ["next"]\n', encoding="utf-8")
+    code, out, _ = run("ref", "wait", tk, "--merge")
+    assert code == 0, out
+    assert merges == [["/fake/gh", "pr", "merge", PR, "--merge", "--match-head-commit", HEAD]]
 
 
 def test_a_persons_merge_card_is_never_merged_here(proj, tk, run, fake_gh, monkeypatch):
@@ -482,7 +524,7 @@ def test_into_main_a_missing_required_check_is_waited_for():
     case = _case("release-into-main")
     case["polls"][0]["checks"] = [c for c in case["polls"][0]["checks"] if c["name"] != case["required"][0]]
     v = prwait.wait(prwait.Replay(case))
-    assert not v.green and "still waiting" in v.why
+    assert not v.green and v.unknown and "never reported: " + case["required"][0] in v.why
 
 
 def test_a_pull_request_moved_to_another_base_while_waiting_is_not_merged(monkeypatch):
@@ -611,3 +653,56 @@ def test_retry_summary_keeps_only_the_window_and_orders_by_count():
     checkretry.record("a/b", "3", "other", "timeout", now=10_000_000.0)
     s = checkretry.summary(30, now=10_000_100.0)
     assert [c["check"] for c in s["checks"]] == ["flaky", "other"] and s["total"] == 3
+
+
+def test_the_wait_says_once_a_minute_what_it_waits_for():
+    """17 Nov: orch ref wait --merge sat 50 minutes without a word (it waited for the hourly merge limit)."""
+    running = [{"name": "build", "state": "PENDING", "bucket": "pending"},
+               {"name": "lint", "state": "SUCCESS", "bucket": "pass"}]  # fmt: skip
+    done = [{"name": "build", "state": "SUCCESS", "bucket": "pass"},
+            {"name": "lint", "state": "SUCCESS", "bucket": "pass"},
+            {"name": "needed", "state": "SUCCESS", "bucket": "pass"}]  # fmt: skip
+    src = prwait.Replay({"required": ["needed"], "polls": [[], running, running, done]})
+    src.url = PR
+    assert prwait.wait(src).green
+    lines = [text for _, text in src.said]
+    assert len(lines) == 3  # one per minute of waiting, none after the verdict
+    assert "to start (none reported yet)" in lines[0]
+    assert "1 of 2 still running (build)" in lines[1] and "required not reported yet: needed" in lines[1]
+    assert all(PR in x for x in lines)
+
+
+def test_a_wait_for_room_in_the_merge_limit_is_said_at_most_once_a_minute(monkeypatch, capsys):
+    from orch import ghlimit
+
+    monkeypatch.setattr(prwait.shutil, "which", lambda name: "/fake/gh")
+
+    def take(kind, what, on_wait=None, **kw):
+        for waited in (0, 20, 40, 60, 80, 100, 120):
+            on_wait(900 - waited, waited)
+        return True
+
+    monkeypatch.setattr(ghlimit, "take", take)
+    monkeypatch.setattr(ghlimit, "status", lambda: [{"kind": "merge", "used": 12, "per_hour": 12}])
+    assert prwait.Live(PR).take("merge", PR)
+    lines = [x for x in capsys.readouterr().err.splitlines() if x.strip()]
+    assert len(lines) == 3  # at 0, 60 and 120 seconds
+    assert f"checks of {PR} passed" in lines[0] and "GitHub limit for merges (12 of 12 this hour" in lines[0]
+    assert "next fits in about 15 min" in lines[0]
+
+
+def test_a_required_check_that_never_comes_is_not_waited_for_an_hour():
+    """18 Nov: a merge queue group's run was cancelled before its final check; nothing ran any more and the
+    wait sat the whole hour for a check that could not come. Then: NOT green, unknown."""
+    v = prwait.wait(prwait.Replay(_case("required-check-missing")))
+    assert not v.green and v.unknown and "never reported" in v.why
+    src = prwait.Replay(_case("required-check-missing"))
+    prwait.wait(src)
+    assert src.t < prwait.NO_CHECKS_SECS + 3 * prwait.POLL_SECS
+
+
+def test_a_missing_required_check_is_waited_for_while_a_run_is_still_open():
+    runs = {"checks": [{"name": "banned-words", "state": "SUCCESS", "bucket": "pass"}],
+            "runs": [{"name": "ci", "status": "queued"}]}  # fmt: skip
+    v = prwait.wait(prwait.Replay({"required": ["needed"], "polls": [runs]}), timeout=1800)
+    assert not v.green and "still waiting" in v.why and "unfinished workflow runs: ci" in v.why
