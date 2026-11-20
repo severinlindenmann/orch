@@ -14,7 +14,8 @@ One pass moves the release one phase on (state: .orch/run/release-keeper.json):
            into main -> its checks. A red run -> one top ticket (a helper starts at once) and the candidate is
            skipped until develop moves.
   gate     the release pull request's checks: green -> the Merge card on the role ticket (orch ask
-           --merge --release) -> card. Red -> one top ticket; when develop moves past it the old pull
+           --merge --release) -> card. Red -> its failed jobs run once more (a flaky test, ORCH-1023); red
+           again -> one top ticket; when develop moves past it the old pull
            request is closed and the release is cut again from scratch.
   card     `orch review tend-releases` merges it when the owner allowed it (workflow.release_merge);
            otherwise the owner clicks Merge. Merged -> installed.
@@ -53,7 +54,7 @@ import re
 import shutil
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from orch import brake, config, runs, secreview, tickets
@@ -311,6 +312,46 @@ def checks_green(rollup, ignore=frozenset()) -> str:
             return "red"
         good += word == "SUCCESS"
     return state if good or state != "green" else "pending"
+
+
+RUN_URL = re.compile(r"/actions/runs/(\d+)")
+
+
+def _newest_failed(rollup, ignore=frozenset()) -> list[dict]:
+    """The failed checks, the newest try of each (not ignored)."""
+    last: dict = {}
+    for n, c in enumerate(rollup or []):
+        name = c.get("name") or c.get("context") or ""
+        if known_name(name, ignore) is not None:
+            continue
+        key, when = (c.get("workflowName"), name or n), str(c.get("startedAt") or "")
+        if key not in last or when >= last[key][0]:
+            last[key] = (when, c)
+    out = []
+    for _, c in last.values():
+        word = c.get("conclusion") if "status" in c else c.get("state")
+        if c.get("status") in (None, "COMPLETED") and word not in PASSED and word not in (None, "PENDING"):
+            out.append(c)
+    return out
+
+
+def failed_runs(rollup, ignore=frozenset()) -> list[str]:
+    """The Actions run ids of the failed checks (newest try of each check counts), for one more try."""
+    out = []
+    for c in _newest_failed(rollup, ignore):
+        m = RUN_URL.search(str(c.get("detailsUrl") or c.get("targetUrl") or ""))
+        if m and m.group(1) not in out:
+            out.append(m.group(1))
+    return out
+
+
+def failed_before(rollup, since: datetime, ignore=frozenset()) -> bool:
+    """A failed check whose newest try started before `since`: the run again has not reported it yet."""
+    for c in _newest_failed(rollup, ignore):
+        started = ts(c.get("startedAt"))
+        if started is None or started < since:
+            return True
+    return False
 
 
 def not_reported(rollup, names) -> list[str]:
@@ -1076,6 +1117,17 @@ class World:
 
         self.act(f"close:release {rel['n']} PR {rel['pr']}", go)
 
+    def rerun_failed(self, run_id: str) -> None:
+        """Run the failed jobs of one Actions run once more (a red release check gets one more try)."""
+
+        def go():
+            self.bot_ok()
+            r = self._run([self.gh, "run", "rerun", str(run_id), "--failed", "--repo", self.cfg.repo])
+            if r.returncode != 0:
+                raise Refused(f"rerun {run_id}: {(r.stderr or r.stdout).strip()[:200]}")
+
+        self.act(f"rerun:{run_id}", go)
+
     def remove_wt(self, wt: str | None) -> None:
         if wt and (self.sim is not None or Path(wt).exists()):
             self.act(f"rmwt:{wt}", lambda: self._git("worktree", "remove", "--force", wt))
@@ -1429,6 +1481,30 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
                 return out + [f"release {rel['n']}: release checks still running"]
             if g == "red":
                 bad = ", ".join(failed_checks(p.get("statusCheckRollup"), ignore)) or "see the pull request"
+                runs = failed_runs(p.get("statusCheckRollup"), ignore)
+                again = rel.get("reran") or {}
+                if runs and not again:  # one more try: a flaky test must not close it (ORCH-1023)
+                    # written before the call: the new try starts after this time at GitHub
+                    rel["reran"] = {"runs": runs, "at": now().isoformat()}
+                    asked = []
+                    for run_id in runs:
+                        try:
+                            w.rerun_failed(run_id)
+                            asked.append(run_id)
+                        except Refused as e:  # refused: no endless retries, the red path below goes on
+                            out.append(f"release {rel['n']}: could not run {run_id} again: {e}")
+                    if asked:
+                        return out + [
+                            f"release {rel['n']}: checks red on {bad}; ran the failed jobs once more"
+                        ]
+                elif again:
+                    since = ts(again.get("at"))
+                    if (
+                        since
+                        and now() - since < timedelta(hours=TEST_TIMEOUT_H)
+                        and failed_before(p.get("statusCheckRollup"), since, ignore)
+                    ):
+                        return out + [f"release {rel['n']}: waits for the failed jobs to finish once more"]
                 if recut(w, st, rel, h, "checks"):
                     return out + [
                         f"release {rel['n']}: checks were red, develop moved and the fix ticket is closed: "

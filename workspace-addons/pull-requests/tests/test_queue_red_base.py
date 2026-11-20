@@ -223,6 +223,36 @@ def test_github_failed_check_names(monkeypatch):
     assert gh.failed_checks("u") == {"lint"} and gh.own_checks_failed("u")
 
 
+def test_a_release_fix_goes_first_on_a_green_base_too(ws, monkeypatch):
+    """ORCH-1023: the fix of a red release (ORCH-1020) waited at the end of a 77-long line while develop was green."""
+    for n in range(1, 6):
+        add(ws, n)
+    add(ws, 6, ticket="t_fix")  # queued without --first (as the helper did)
+    monkeypatch.setattr(runner, "_release_fix", lambda root, tid: tid == "t_fix")
+    gh = RedGitHub({n: {} for n in range(1, 7)}, red=(frozenset(),))  # develop is green
+    monkeypatch.setattr(runner.settings, "max_group", lambda root: 1)
+    r, calls = make(ws, gh, FakeGit())
+    r.run()
+    assert gh.groups[calls[0]] == [6]  # its group ran first
+    assert set(states(ws).values()) == {"merged"}
+
+
+def test_switch_and_add_mark_a_release_fix_first(ws, monkeypatch):
+    from orch_pull_requests import cli
+
+    add(ws, 1)
+    add(ws, 2)
+    monkeypatch.setattr(runner, "_release_fix", lambda root, tid: tid == "t_fix")
+    monkeypatch.setattr(runner, "admit", lambda root, gh, u: {"login": "bot", "base": "develop"})
+    monkeypatch.setattr(cli, "_github", lambda: None)
+    monkeypatch.setattr(cli, "_ticket", lambda root, t, u: t)
+    monkeypatch.setattr(cli, "start_runner", lambda root: None)
+    monkeypatch.chdir(ws)
+    monkeypatch.setattr(cli, "_root", lambda start: ws)
+    assert cli.main(["queue", "add", url(3), "--ticket", "t_fix"]) == 0
+    assert [r["number"] for r in store.waiting(ws)] == [3, 1, 2] and row(ws, 3)["first"]
+
+
 @pytest.fixture(autouse=True)
 def _no_release_keeper(monkeypatch, request):
     if request.node.name != "test_release_keeper_red_ticket_counts_as_the_fix":
