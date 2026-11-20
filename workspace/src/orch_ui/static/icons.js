@@ -49,6 +49,8 @@
     cards: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
     'chevron-down': '<path d="m6 9 6 6 6-6"/>',
     'chevron-right': '<path d="m9 6 6 6-6 6"/>',
+    'chevron-left': '<path d="m15 6-6 6 6 6"/>',
+    calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4m8-4v4"/>',  // the Tickets calendar (ORCH-1081)
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>',
     hammer: '<path d="m14 7 3-3 3 3-3 3M14 7l-9 9a1.5 1.5 0 0 0 0 2l1 1a1.5 1.5 0 0 0 2 0l9-9M11 10l3 3"/>',
