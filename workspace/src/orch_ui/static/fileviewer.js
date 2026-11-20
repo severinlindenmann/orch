@@ -13,7 +13,11 @@
   const kindOf = name => Object.keys(EXT).find(k => EXT[k].test(extOf(name))) || 'other';
   const WORD = {image:'Picture', pdf:'PDF', page:'Website', table:'Table', xlsx:'Spreadsheet', md:'Note', code:'Code', text:'Text',
     audio:'Sound', video:'Video', zip:'Archive', other:'File'};
-  const urlOf = (f, dl) => '/api/file?t=' + encodeURIComponent(f.tid) + '&k=' + encodeURIComponent(f.kind) + '&n=' + encodeURIComponent(f.name) + (dl ? '&dl=1' : '');
+  // ORCH-524: the file's time and size go in the link, so the browser keeps the file and never asks again (the
+  // server says so for a link with `v`); a new version of the file has another time or size and so a new link.
+  const stampOf = f => [f?.mtime || '', Number.isFinite(f?.size) && f.size >= 0 ? String(f.size) : ''].filter(Boolean).join('~').slice(0, 64);
+  const urlOf = (f, dl) => '/api/file?t=' + encodeURIComponent(f.tid) + '&k=' + encodeURIComponent(f.kind) + '&n=' + encodeURIComponent(f.name)
+    + (dl ? '&dl=1' : stampOf(f) ? '&v=' + encodeURIComponent(stampOf(f)) : '');
   const pageUrl = f => '/view/' + encodeURIComponent(f.tid) + '/' + encodeURIComponent(f.kind) + '/' + f.name.split('/').map(encodeURIComponent).join('/');
   const infoUrl = (f, sheet = 0) => '/api/file-info?t=' + encodeURIComponent(f.tid) + '&k=' + encodeURIComponent(f.kind) + '&n=' + encodeURIComponent(f.name) + '&s=' + sheet;
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
@@ -461,5 +465,5 @@
     (d.querySelector('.ui-overlay-close') || d).focus();
     return d;
   }
-  window.FileViewer = {open: show, thumb, kindOf, word: k => WORD[k], urlOf, extOf, parseDelimited, renderMd};
+  window.FileViewer = {open: show, thumb, kindOf, word: k => WORD[k], urlOf, stampOf, extOf, parseDelimited, renderMd};
 })();
