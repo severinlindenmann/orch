@@ -91,7 +91,7 @@ function ticketStepArgs(text, files, parent, owner) {
   const long = text.length > 1500;
   return {...ticketFromText(text, long ? '' : text, long ? text : '', files), parent, ...(owner ? {owner} : {})};
 }
-const ticketTooBig = args => new Blob([JSON.stringify({op:'ticket.new', args})]).size > 4900000;  // the server takes 5 MB per request
+const ticketTooBig = args => new Blob([JSON.stringify({op:'ticket.new', args})]).size > 139 * 1024 * 1024;  // the server takes 140 MB for a new ticket (MAX_BIG_BODY): 100 MB of files as base64 plus the text
 // Helpers the workspace really has: one entry per helper, the default first, never two with the same label.
 function ticketHelpers(settings) {
   const out = [], labels = new Set();
@@ -285,7 +285,7 @@ function ticketForm(t) {
     if (window.UI?.date) window.UI.date(dueInput, dueToggle, null, {time:true});
     const options = el('div', 'new-ticket-options'); options.append(...(noHelperRow ? [] : [helperBox]), dueBox); fields.append(options);
     const doneLabel = el('label', '', 'Done when (optional)');
-    const done = el('textarea', 'input'); done.name = 'done_when'; done.id = 'field-' + serial + '-done_when';
+    const done = el('textarea', 'input new-ticket-text'); done.name = 'done_when'; done.id = 'field-' + serial + '-done_when';
     done.rows = 2; done.maxLength = 2000; done.placeholder = 'What should be true when it is done? Say it in your own words.';
     doneLabel.htmlFor = done.id; doneLabel.append(done); fields.append(doneLabel); inputs.done_when = done; doneWrap = doneLabel;
   }
@@ -377,7 +377,7 @@ function ticketForm(t) {
       }
       // Every ticket is checked before anything is created, so a too-big one never leaves half the tickets behind.
       const bigStep = steps.findIndex(step => ticketTooBig(ticketStepArgs(step.input.value, step.files, 'x', values.owner) || {}));
-      if (bigStep >= 0) { error.textContent = 'Ticket ' + (bigStep + 1) + ' is too big to send at once (over 4.9 MB). Remove a file or shorten its text.'; submit.disabled = false; idle(); return; }
+      if (bigStep >= 0) { error.textContent = 'Ticket ' + (bigStep + 1) + ' is too big to send at once (over 139 MB). Remove a file or shorten its text.'; submit.disabled = false; idle(); return; }
       if (!created) {
         const previous = new Set(tickets().map(t => t.id));
         const planFirst = startAfter && !!planBox?.checked;
@@ -389,7 +389,7 @@ function ticketForm(t) {
         const bodies = filled.map(step => { const {parent, ...body} = ticketStepArgs(step.input.value, step.files, 'x', values.owner); return body; });
         if (epic && !ticketTooBig({...args, steps:bodies})) args.steps = bodies;
         if (ticketTooBig(args)) {
-          error.textContent = 'This is too big to send at once (over 4.9 MB). Remove a file or shorten the text.' + (longText ? ' The long text is kept as the note.md chip.' : '');
+          error.textContent = 'This is too big to send at once (over 139 MB). Remove a file or shorten the text.' + (longText ? ' The long text is kept as the note.md chip.' : '');
           submit.disabled = false; idle(); return;
         }
         // One id for this ticket until it is made (ORCH-580): a Retry after a lost answer, or a second press, gets

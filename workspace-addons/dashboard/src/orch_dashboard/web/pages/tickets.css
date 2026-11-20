@@ -76,6 +76,7 @@
 .view-chip.active{background:var(--accent-soft,var(--surface-3));color:var(--text);border-color:var(--border-strong)}
 .board .kanban-col.col-collapsed{flex:0 0 76px;min-width:76px;max-width:76px;min-height:0;max-height:none}
 .board .kanban-col.col-collapsed .col-head{flex-direction:column;align-items:flex-start;gap:4px}
+.board .kanban-col.col-collapsed .col-head h2{white-space:nowrap}
 .board .kanban-col.col-collapsed .board-none{display:none}
 .ticket-table tr.row-click{cursor:pointer}
 .ticket-table tr.row-click:hover td{background:var(--surface-2)}

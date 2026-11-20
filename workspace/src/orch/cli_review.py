@@ -91,12 +91,21 @@ def add_parsers(sub, common) -> None:
     x = s.add_parser(
         "security",
         parents=[common],
-        help="the security review of one pull request records its verdict (ok or problems)",
+        help="the security review of one pull request records its verdict (ok or problems), or the pull "
+        "request that fixes its finding (fixed-by)",
     )
     x.add_argument("pr", type=int, help="the pull request number")
-    x.add_argument("word", choices=("ok", "problems"), help="ok: nothing High or Medium left; else problems")
-    x.add_argument("why", help="one line: the worst finding, or what was checked")
-    x.add_argument("--sha", required=True, metavar="COMMIT", help="the commit you reviewed (from the brief)")
+    x.add_argument(
+        "word",
+        choices=("ok", "problems", "fixed-by"),
+        help="ok: nothing High or Medium left; else problems; fixed-by <M>: pull request M fixes the finding",
+    )
+    x.add_argument(
+        "why", help="one line: the worst finding, or what was checked; for fixed-by the fix's number"
+    )
+    x.add_argument(
+        "--sha", metavar="COMMIT", help="the commit you reviewed (from the brief); needed for ok and problems"
+    )
     x = s.add_parser(
         "undo", parents=[common], help="undo what the Reviewer, Auto Reviewer or Away mode did on a ticket"
     )
@@ -632,9 +641,22 @@ def _verdict(args, root: Path) -> None:
 def _security(args, root: Path) -> None:
     from orch import secreview
 
-    res = _guard(
-        secreview.verdict, root, args.pr, args.word, args.why, tickets.current_actor(args.by), args.sha
-    )
+    by = tickets.current_actor(args.by)
+    if args.word == "fixed-by":
+        fix = str(args.why or "").strip().lstrip("#")
+        if not fix.isdigit():
+            raise ReviewError(
+                "refused", "Give the number of the pull request that fixes it, e.g. fixed-by 1566."
+            )
+        res = _guard(secreview.link_fix, root, args.pr, int(fix), by)
+        _out(
+            args,
+            res,
+            f"Pull request #{res['pr']}: its finding is fixed by #{res['fixed_by']}. The release waits until "
+            f"#{res['fixed_by']} is merged with a security OK.",
+        )
+        return
+    res = _guard(secreview.verdict, root, args.pr, args.word, args.why, by, args.sha or "")
     words = "OK: the release may include it" if res["verdict"] == "ok" else "problems: releases wait"
     _out(args, res, f"Pull request #{res['pr']}: security review {words}. {res['line']}")
 

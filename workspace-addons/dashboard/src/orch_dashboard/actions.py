@@ -726,16 +726,6 @@ def _typing_set(a):
     return ["config", "set", SESSION_TYPING_KEY, "on" if a["on"] else "off"], [], []
 
 
-def _focus_preview_set(a):
-    """The Preview switch on the live-session add-on's settings page: a plain `orch config set` (core names the key)."""
-    from orch.config import FOCUS_PREVIEW_KEY
-
-    _only(a, ("on",))
-    if type(a.get("on")) is not bool:
-        raise BadRequest("Say on or off.")
-    return ["config", "set", FOCUS_PREVIEW_KEY, "on" if a["on"] else "off"], [], []
-
-
 def _diag_delete(what):
     def build(a):
         _only(a, ())
@@ -1251,7 +1241,6 @@ OPS = {
     "live.set": _live_set,
     "diag.set": _diag_set,
     "typing.set": _typing_set,
-    "focus_preview.set": _focus_preview_set,
     "update.auto": _update_auto,
     "diag.delete_reports": _diag_delete("reports"),
     "copies.set": _copies_set,
