@@ -447,7 +447,9 @@ def test_cli_makes_a_group_and_lists_one_repeat(ws, person, capsys):
     a = tk(ws, "t_grp00006")["ext"]["automation"]
     assert a["group"] == {"watcher": "*/5 * * * *", "reviewer": "*/15 * * * *", "tester": "30 6 * * *"}
     assert "script" not in a and res["group"] == a["group"]
-    assert [r["ticket"] for r in cli.describe(ws)] == ["t_grp00006"]
+    rows = cli.describe(ws)
+    assert {r["ticket"] for r in rows} == {"t_grp00006"}
+    assert [r["kind"] for r in rows].count("repeat") == 1  # one repeat, plus a row per script (own plan)
     bad = ["--dir", str(ws), "repeat", "t_grp00006", "every 5 minutes", "--script", "watcher"]
     assert cli.main([*bad, "--script", "nope=every 15 minutes"]) == 2
     assert cli.main([*bad, "--script", "reviewer=whenever"]) == 2
@@ -502,3 +504,34 @@ def test_a_quiet_group_still_records_its_pass(ws, person):
     assert tk(ws, "t_grp00011")["ext"]["automation"]["last_run"] == "2026-11-04T08:01:00Z"
     assert s.tick(T(8, 2)) == []  # between two passes: not even looked at
     assert tk(ws, "t_grp00011")["ext"]["automation"]["last_run"] == "2026-11-04T08:01:00Z"
+
+
+def test_cli_script_run_without_name_runs_the_whole_group(ws, person, capsys):
+    for n in ("a", "b"):
+        scripts.add(ws, n, py(f"open({str(ws / n)!r}, 'a').write('x')"))
+    group_ticket(ws, "t_grp00020", {"a": "*/5 * * * *", "b": "0 * * * *"})
+    assert cli.main(["--dir", str(ws), "script", "run", "t_grp00020", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "ticket": "t_grp00020",
+        "exit": 0,
+        "scripts": {"a": 0, "b": 0},
+    }
+    assert {r["script"] for r in history_rows(ws)} == {"a", "b"}
+
+
+def test_cli_script_run_of_a_group_fails_when_one_script_fails(ws, person, capsys):
+    scripts.add(ws, "ok", py("pass"))
+    scripts.add(ws, "bad", py("raise SystemExit(3)"))
+    group_ticket(ws, "t_grp00021", {"ok": "*/5 * * * *", "bad": "0 * * * *"})
+    assert cli.main(["--dir", str(ws), "script", "run", "t_grp00021", "--json"]) == 1
+    assert json.loads(capsys.readouterr().out)["scripts"] == {"bad": 3, "ok": 0}
+
+
+def test_list_shows_each_script_of_a_group_with_its_own_plan(ws, person, capsys):
+    group_ticket(ws, "t_grp00022", {"fast": "*/5 * * * *", "slow": "0 6 * * *"})
+    assert cli.main(["--dir", str(ws), "list", "--json"]) == 0
+    rows = json.loads(capsys.readouterr().out)
+    by = {r["script"]: r for r in rows if r["kind"] == "script"}
+    assert by["fast"]["cron"] == "*/5 * * * *" and by["slow"]["cron"] == "0 6 * * *"
+    assert cli.main(["--dir", str(ws), "list"]) == 0
+    assert "script slow" in capsys.readouterr().out
