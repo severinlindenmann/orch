@@ -191,6 +191,24 @@ def test_waiting_on_something_outside_is_reminded_not_ended(proj, run, new_ticke
     assert runs.read(proj, tid) is not None
 
 
+def test_waiting_on_a_pull_request_in_the_merge_queue_is_not_nudged(proj, run, new_ticket, child):
+    url = "https://github.com/o/r/pull/7"
+    qfile = proj / ".orch" / "addons" / "pull-requests" / "queue.json"
+
+    def queue(state):
+        qfile.parent.mkdir(parents=True, exist_ok=True)
+        qfile.write_text(json.dumps({"entries": [{"url": url, "state": state, "ticket": tid}]}))
+
+    tid = new_ticket()
+    run("check", "add", tid, "Open the pull request")
+    assert run("wait", tid, "--on", f"external:{url}")[0] == 0
+    _live(proj, tid, child(), idle_for=21 * 60)
+    queue("waiting")
+    assert tend.run(proj)["actions"] == []
+    queue("out")  # the queue is done with it: the usual reminder
+    assert [a["action"] for a in tend.run(proj)["actions"]] == ["nudge"]
+
+
 def test_a_ticket_waiting_on_a_finished_ticket_is_started_again_once(proj, run, new_ticket, starts):
     other, tid = new_ticket("crew"), new_ticket("lead")
     assert run("wait", tid, "--on", f"ticket:{other}")[0] == 0
@@ -339,6 +357,7 @@ def test_free_slots_start_the_line_in_order_until_full(proj, new_ticket, monkeyp
     _queue(proj, c)
     started = []
     monkeypatch.setattr(runs_live, "_full", lambda root: 4 if len(started) >= 2 else None)
+    monkeypatch.setattr(runs_live, "_held", lambda root, by="agent:tend": None)  # busy CI runner
     monkeypatch.setattr(runs, "start", lambda root, tid, by, **kw: started.append(tid))
     assert runs_live.start_waiting(proj) == [b, c]
     assert started == [b, c]
@@ -351,6 +370,7 @@ def test_a_done_ticket_is_never_started_from_the_line(proj, new_ticket, monkeypa
     tickets.set_status(proj, a, "done", "test")
     started = []
     monkeypatch.setattr(runs_live, "_full", lambda root: None)
+    monkeypatch.setattr(runs_live, "_held", lambda root, by="agent:tend": None)  # busy CI runner
     monkeypatch.setattr(runs, "start", lambda root, tid, by, **kw: started.append(tid))
     assert runs_live.start_waiting(proj) == [b]
     assert started == [b]

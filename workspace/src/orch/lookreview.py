@@ -3,8 +3,9 @@ a check point by point and an accept or send-back, without a person in between.
 
 Stage 1 is a program inside `orch review tend` (no AI, no tokens). For each ticket the small Reviewer leaves:
 
-- **stays with the owner** when a question waits, a security file changed, a pull request was closed or merged
-  before the ticket was made, or it was sent back once already;
+- **stays with the owner** when it carries a draft, mockup or design (ORCH-582), a question waits, a
+  security file changed, a pull request was closed or merged before the ticket was made, or it was sent back
+  once already;
 - **goes back once** when a page, style or picture changed and no task has a picture as evidence;
 - **waits in line for a second look** otherwise (look, words, a new command or setting, rules, too big, no
   pull request, a Done-when part with no task).
@@ -25,7 +26,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from orch import config, runs, tickets
+from orch import config, ownerpick, runs, tickets
 from orch.errors import Refused
 
 BATCH = 5  # tickets per second-look helper
@@ -87,8 +88,8 @@ def triage(ticket: dict, facts: list[dict], res: dict, sent_back: int) -> dict |
     None (stays with the owner), {"verdict": "back", why} or {"verdict": "queue", why}. Pure."""
     from orch import reviewer
 
-    if res.get("verdict") != "leave" or tickets._open_questions(ticket):
-        return None
+    if res.get("verdict") != "leave" or tickets._open_questions(ticket) or ownerpick.carries_draft(ticket):
+        return None  # ORCH-582: a ticket with a draft stays with the owner
     if str(res.get("why") or "").startswith("sent back once already"):
         return None
     kinds: set[str] = set()
@@ -141,6 +142,23 @@ def read_state(root: Path) -> dict:
 def own(root: Path) -> set[str]:
     """The second-look tickets this role opened (they come to Review too, with no pull request)."""
     return set(read_state(root)["mine"])
+
+
+def ticket_result(root: Path | None, ticket: dict) -> dict | None:
+    """ORCH-826: a second-look ticket of this role whose every ticket has a verdict is good news only: what it
+    left for the owner already waits as that ticket's own card. None while a ticket on it still waits, and for
+    any other ticket."""
+    if root is None or not str(ticket.get("title") or "").startswith(TITLE):
+        return None
+    st = read_state(root)
+    tid = ticket.get("id")
+    if tid not in st["mine"]:
+        return None
+    opened = st["open"] or {}
+    if opened.get("ticket") == tid and any(t in st["line"] for t in opened.get("items") or []):
+        return None
+    line = "every ticket it looked at has a verdict; what it left for you waits on its own card"
+    return {"ok": True, "line": line, "what": "the Reviewer's second look"}
 
 
 def _write_state(root: Path, st: dict) -> None:
@@ -274,6 +292,8 @@ def verdict(root: Path, tid: str, word: str, line: str, points: list[str] | None
         raise Refused(nobody)
     if _status(root, tid) != "review":
         raise Refused("This ticket is not in Review.")
+    if word != "leave" and ownerpick.carries_draft(tickets.load(root, tid)):
+        raise Refused(ownerpick.TICKET_REFUSAL + " Leave it for the owner.")
     if pts:
         tickets.log(root, tid, POINTS_LINE + "; ".join(pts), tickets.REVIEWER)
     rst = reviewer._read_state(root)
@@ -292,6 +312,7 @@ def verdict(root: Path, tid: str, word: str, line: str, points: list[str] | None
     else:
         after = tickets.log(root, tid, "Left for you by the Reviewer: second look: " + why, tickets.REVIEWER)
     mine_r["rev"] = after.get("revision")
+    reviewer.remember_left(mine_r, word, "second look: " + why if word == "leave" else why)
     rst[tid] = mine_r
     reviewer._write_state(root, rst)
     st = read_state(root)

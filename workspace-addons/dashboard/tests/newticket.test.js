@@ -120,13 +120,13 @@ test('textarea title takes priority when typed long text follows a pasted note',
   assert.equal(s.calls[0].args.title, 'New title');
   assert.equal(s.calls[0].args.long_text, 'Original\n' + 'a'.repeat(1501) + '\n\nNew title\n' + 'b'.repeat(1501));
 });
-test('a text file that is not UTF-8 is sent as base64, unaltered; a body over 4.9 MB is refused plainly', async () => {
+test('a text file that is not UTF-8 is sent as base64, unaltered; a body over 139 MB is refused plainly', async () => {
   const s = setup();
   await s.drop([{name:'latin.txt', size:3, arrayBuffer:async () => new Uint8Array([0x63, 0xe9, 0x66]).buffer}]);
   await s.form.fire('submit');
   assert.deepEqual(JSON.parse(JSON.stringify(s.calls[0].args.files)), [{name:'latin.txt', data:btoa('c\xe9f')}]);
   const big = setup(); await big.paste('x'.repeat(1501));
-  big.input.value = 'y'.repeat(5000000); await big.input.fire('input');
+  big.input.value = 'y'.repeat(145 * 1024 * 1024); await big.input.fire('input');
   await big.form.fire('submit');
   assert.equal(big.calls.length, 0);
 });
@@ -164,6 +164,36 @@ test('Show me the plan first is a plain box; Start creates a plan-first ticket a
   assert.equal(s.calls[0].args.plan_first, true);
   assert.equal(s.calls[1].op, 'run.start');
   assert.equal(s.calls[1].args.ticket, 'new');
+});
+
+test('Human review needed is ticked by default; unticking it sends human_review false (ORCH-424)', async () => {
+  const s = setup();
+  s.input.value = 'Spring campaign'; await s.input.fire('input');
+  const box = walk(s.d).find(n => n.name === 'human_review');
+  assert.equal(box.type, 'checkbox');
+  assert.equal(box.checked, true);
+  await s.form.fire('submit');
+  assert.equal(s.calls[0].op, 'ticket.new');
+  assert.equal(s.calls[0].args.human_review, undefined);  // on is the default: nothing to send
+  const u = setup();
+  u.input.value = 'Spring campaign'; await u.input.fire('input');
+  walk(u.d).find(n => n.name === 'human_review').checked = false;
+  await u.form.fire('submit');
+  assert.equal(u.calls[0].args.human_review, false);
+});
+
+test('with the Auto Reviewer on, Human review needed starts unticked; ticking it sends human_review true (ORCH-424)', async () => {
+  const s = setupWith({auto_reviewer_on:true});
+  s.input.value = 'Spring campaign'; await s.input.fire('input');
+  const box = walk(s.d).find(n => n.name === 'human_review');
+  assert.equal(box.checked, false);
+  await s.form.fire('submit');
+  assert.equal(s.calls[0].args.human_review, undefined);  // the workspace default: nothing to send
+  const u = setupWith({auto_reviewer_on:true});
+  u.input.value = 'Spring campaign'; await u.input.fire('input');
+  walk(u.d).find(n => n.name === 'human_review').checked = true;
+  await u.form.fire('submit');
+  assert.equal(u.calls[0].args.human_review, true);
 });
 
 test('long typed text moved to a chip on submit shrinks the text box back', async () => {
@@ -362,7 +392,7 @@ test('ORCH-14: Start makes the epic, then one ticket inside it per box with its 
   assert.equal(s.c.location.hash, '#ticket/t_1');
   assert.ok(s.toasts.some(x => x[0] === 'Epic created'));
 });
-test('ORCH-14: a long ticket text is kept as its note.md; a ticket over 4.9 MB is refused before anything is made', async () => {
+test('ORCH-14: a long ticket text is kept as its note.md; a ticket over 139 MB is refused before anything is made', async () => {
   const s = setup();
   s.input.value = 'Main'; await s.input.fire('input');
   await addStepButton(s).click();
@@ -373,7 +403,7 @@ test('ORCH-14: a long ticket text is kept as its note.md; a ticket over 4.9 MB i
   big.input.value = 'Main'; await big.input.fire('input');
   await addStepButton(big).click(); await addStepButton(big).click();
   walk(stepBoxes(big)[0]).find(n => n.tag === 'textarea').value = 'small';
-  walk(stepBoxes(big)[1]).find(n => n.tag === 'textarea').value = 'y'.repeat(5000000);
+  walk(stepBoxes(big)[1]).find(n => n.tag === 'textarea').value = 'y'.repeat(145 * 1024 * 1024);
   await big.form.fire('submit');
   assert.equal(big.calls.length, 0);
   assert.match(walk(big.d).find(n => n.role === 'alert' && n.className === 'bad').textContent, /^Ticket 2 is too big/);

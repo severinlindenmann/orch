@@ -3,6 +3,9 @@
 One line per decision, newest first. Agents never reopen a decision without the owner (AGENTS.md R9.5).
 Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 
+- 2026-11-19 (ORCH-853): A moved workspace folder keeps its saved keys only through `orch workspace move-here`, run by
+  the person in a terminal in the moved folder (never a helper, no `--yes`); a copy (the old folder is still there)
+  is refused. Refusals name the old folder and this command instead of "holds a secret".
 - 2026-11-16 (ORCH-29): No core start check on tickets: `start_requires` (#777) is removed. The person's Factory Start
   only tells the manager agent to go; an agent can start a crew ticket itself.
 - 2026-11-16: `orch uninstall` has no option to delete tickets: it always keeps `.orch/tickets`, `.orch/config.toml`
@@ -62,3 +65,6 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
   check, no console error) on a seeded demo workspace with the real server; a new action or page brings its
   click-through in the same pull request. The feature list is read from the code, so the `dashboard` CI job names a
   feature without one, and `page-smoke` runs them all on every dashboard pull request.
+- 2026-11-19 (ORCH-649, owner): No separate notebook app and no notebook device on the relay. A person's workspace
+  runs on their own notebook, so Personal runs its ways in directly in the workspace there; a team server getting one
+  person's private data is out of scope. The bridge from 18 Nov was removed before any release.

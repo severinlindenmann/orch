@@ -125,6 +125,10 @@ def _service_item(root: Path, r: dict) -> dict:
     word, tone = WORD.get(state, "Stopped"), TONE.get(state, "neutral")
     since = _when(r.get("since"))
     stopped = state == "stopped"
+    h = r.get("health")
+    # alive but not answering on its address: a hung job must not look healthy in the list (ORCH-641)
+    hung = state == "running" and isinstance(h, dict) and h.get("ok") is False
+    list_state = {"label": "Not answering", "tone": "warn"} if hung else {"label": word, "tone": tone}
     main = _btn("Start", "start", sid) if stopped else _btn("Stop", "stop", sid)
     auto = bool(r.get("auto"))
     facts: list[dict] = [
@@ -155,7 +159,7 @@ def _service_item(root: Path, r: dict) -> dict:
     item: dict = {
         "id": sid,
         "title": name,
-        "state": {"label": word, "tone": tone},
+        "state": list_state,
         "action": main,
         "panel": {
             "buttons": [main] if stopped else [main, _btn("Restart", "restart", sid)],

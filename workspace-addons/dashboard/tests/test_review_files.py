@@ -7,7 +7,7 @@ from urllib.parse import quote
 import pytest
 
 from orch_dashboard import ticketfiles
-from orch_dashboard.server import make_server
+from orch_dashboard.server import FILE_KEPT, make_server
 
 SHA = "0123456789ab"
 
@@ -69,6 +69,8 @@ def test_an_unchanged_file_answers_304_with_its_own_sandbox_rule(rv):
         ):
             code, _body, first = get(srv, t, n, k)
             assert code == 200 and first["ETag"]
+            # ORCH-524: a reviewed copy's folder is its content hash, so the browser keeps it; other files ask again
+            assert first["Cache-Control"] == (FILE_KEPT if k == "reviewed" else "private, no-cache"), (k, n)
             code, body, again = get(srv, t, n, k, {"If-None-Match": first["ETag"]})
             assert code == 304 and body == b""
             assert again["Content-Security-Policy"] == first["Content-Security-Policy"], (k, n)

@@ -4,6 +4,7 @@
 //   node e2e/focus_d/clickthrough.cjs [--out DIR]               ready steps in the real dashboard, pending ones listed
 //   node e2e/focus_d/clickthrough.cjs --target draft [--repo P] the reference pictures of every step in the draft D mockup
 //   node e2e/focus_d/clickthrough.cjs --only 1,2,9               only these step numbers
+//   node e2e/focus_d/clickthrough.cjs --only 18 --video          also a recording of each step: <out>/<picture>-<width>.webm
 //   node e2e/focus_d/clickthrough.cjs --list                     print the click-through, no browser
 //   node e2e/focus_d/clickthrough.cjs --write-md                 write e2e/focus_d/CLICKTHROUGH.md from the steps
 //
@@ -17,6 +18,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
+const headless = require('../headless.cjs'); // the keychain options (ORCH-615)
 const { spawn, execFileSync } = require('node:child_process');
 const { STEPS, SIZES } = require('./steps.cjs');
 
@@ -34,6 +36,7 @@ function args(argv) {
     else if (a === '--out') o.out = path.resolve(argv[++i].replace(/^~/, os.homedir()));
     else if (a === '--repo') o.repo = path.resolve(argv[++i].replace(/^~/, os.homedir()));
     else if (a === '--only') o.only = new Set(argv[++i].split(',').map(Number));
+    else if (a === '--video') o.video = true;
     else throw new Error(`unknown option ${a}`);
   }
   if (!['dashboard', 'draft'].includes(o.target)) throw new Error(`--target is dashboard or draft, not ${o.target}`);
@@ -116,8 +119,14 @@ async function runOne(ctx, step, [w, h], o, urls) {
   const problems = [];
   page.on('pageerror', e => problems.push(`page error: ${String(e.message).slice(0, 200)}`));
   // a step may name console lines it causes on purpose (okConsole: a refusal the page shows as a plain message)
+  // a failed address is named, so a "Failed to load resource" console line can be traced to its request
+  page.on('response', r => { if (r.status() >= 400 && !(step.okConsole && step.okConsole.test(`status of ${r.status()}`))) problems.push(`failed request: ${r.status()} ${r.url().replace(/^https?:\/\/[^/]+/, '')}`); });
   page.on('console', m => { if (m.type() === 'error' && !(step.okConsole && step.okConsole.test(m.text()))) problems.push(`console error: ${m.text().slice(0, 200)}`); });
   try {
+    // The steps dress the page's state (/api/state) with their stand-in data. A poll that holds a revision gets only
+    // what changed (ORCH-517), and that answer cannot be dressed: once the test server's own settings move, the page
+    // would take them (Preview off) a few minutes into the run. So the page always asks for the whole state here.
+    // (set on the browser, so a second tab a step opens asks the same way: see main)
     await page.setViewportSize({ width: w, height: h });
     if (step.reduce) await page.emulateMedia({ reducedMotion: 'reduce' });
     if (o.target === 'draft') {
@@ -125,13 +134,17 @@ async function runOne(ctx, step, [w, h], o, urls) {
       await page.waitForSelector('body[data-mw-boot], #mw-page *', { state: 'attached', timeout: 10000 });
       if (step.draft.act) await step.draft.act(page);
     } else {
-      await step.run({ page, dash: urls.dash, focus: urls.focus, width: w });
+      await step.run({ page, dash: urls.dash, width: w });
     }
     await page.waitForTimeout(400); // let any move end before the picture
     await page.screenshot({ path: path.join(o.out, shot(step, w, o.target === 'draft')), fullPage: false });
   } catch (e) {
     problems.push(String(e.message).split('\n')[0]);
-  } finally { await page.close(); }
+  } finally {
+    await page.close();
+    // --video: the page's recording lands beside its picture once the page is closed
+    if (o.video && page.video()) await page.video().saveAs(path.join(o.out, shot(step, w, o.target === 'draft').replace(/\.png$/, '.webm'))).catch(() => {});
+  }
   return problems;
 }
 
@@ -157,17 +170,16 @@ async function main() {
   let browser, profile;
   try {
     if (o.target === 'dashboard' && todo.length) {
-      const needFocus = todo.some(s => s.focus); // steps on today's Focus page need its own server
       servers.push(await serve('workspace-addons/dashboard', 'e2e/focus_insights/dashboard_server.py', 'focus-d-dash'));
       urls.dash = servers[0].base;
-      if (needFocus) {
-        servers.push(await serve('workspace-addons/focus', 'e2e/focus_insights/server.py', 'focus-d-focus'));
-        urls.focus = servers[1].base;
-      }
     }
     const { chromium } = playwright();
     profile = fs.mkdtempSync(path.join(os.tmpdir(), 'focus-d-prof-'));
-    browser = await chromium.launchPersistentContext(profile, { args: ['--use-mock-keychain', '--password-store=basic'] });
+    browser = await headless.launchPersistent(chromium, profile, o.video ? { recordVideo: { dir: path.join(profile, 'video'), size: { width: 1280, height: 800 } } } : undefined);
+    if (o.target !== 'draft') await browser.addInitScript(() => {
+      const f = window.fetch;
+      window.fetch = (u, opts) => f(typeof u === 'string' && u.startsWith('/api/state') ? u.replace(/([?&])have=[^&]*&?/, '$1').replace(/[?&]$/, '') : u, opts);
+    });
     for (const s of steps) {
       if (!todo.includes(s)) {
         const why = s.waits ? `waits for: ${s.waits}` : 'not in draft D, today\'s page only';

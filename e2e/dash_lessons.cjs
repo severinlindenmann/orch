@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const headless = require('./headless.cjs'); // the keychain options (ORCH-615)
 
 const PW = process.env.PW_DIR || path.join(os.homedir(), 'orch-dev', 'e2e', 'dashboard', 'node_modules');
 const OUT = process.env.SHOTS_DIR || path.join(os.tmpdir(), 'dash-lessons');
@@ -29,7 +30,7 @@ test('Lessons: no nav entry, row in Settings, list page, Edit dialog, Delete', {
   state.settings.addons.push({name: 'lessons', label: 'Lessons', description: 'Keeps short notes the next helper should know.', active: true});
   const calls = [];
   let refuse = true;
-  const browser = await chromium.launch({args: ['--use-mock-keychain', '--password-store=basic']});
+  const browser = await headless.launch(chromium);
   try {
     const context = await browser.newContext({viewport: {width: 1280, height: 800}});
     await context.route('**/*', async route => {

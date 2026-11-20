@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerSort, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerCompact, liveLayerSort, liveAskModel, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -50,6 +50,19 @@ test('minimise leaves the bar, closed to the side leaves the edge; both open aga
   s = run(s, [{type:'reopen'}, {type:'place', mode:'full'}, {type:'min'}, {type:'reopen'}]);
   assert.equal(s.mode, 'right', 'minimised from full screen it opens docked, not full');
   assert.equal(L.liveLayerStep(s, {type:'open', key:'t_2'}).mode, 'right', 'opening another session keeps the place');
+});
+
+test('Open ticket steps a bottom or full screen layer down to the bar and leaves a docked one (ORCH-676)', () => {
+  const open = L.liveLayerStep(L.liveLayerFresh(), {type:'open', key:'t_1'});
+  assert.equal(open.mode, 'bottom');
+  assert.equal(L.liveLayerStep(open, {type:'to-ticket'}).mode, 'bar', 'the bottom panel gets out of the way');
+  const full = L.liveLayerStep(open, {type:'place', mode:'full'});
+  assert.equal(L.liveLayerStep(full, {type:'to-ticket'}).mode, 'bar');
+  assert.equal(L.liveLayerStep(L.liveLayerStep(full, {type:'to-ticket'}), {type:'reopen'}).mode, 'bottom', 'it opens again where it was');
+  const right = L.liveLayerStep(open, {type:'place', mode:'right'});
+  assert.equal(L.liveLayerStep(right, {type:'to-ticket'}), right, 'docked beside the page it covers nothing');
+  const bar = L.liveLayerFresh();
+  assert.equal(L.liveLayerStep(bar, {type:'to-ticket'}), bar);
 });
 
 test('closing the last session keeps the bar (or the edge) and forgets the session', () => {
@@ -177,11 +190,14 @@ test('the split and the selected pane are kept per browser, at most three', () =
 
 test('panes fold pin and place into More when narrow, on the right with more than one, and on a phone', () => {
   assert.equal(L.liveLayerNarrow('bottom', 1, 1040, false), false);
-  assert.equal(L.liveLayerNarrow('bottom', 2, 1040, false), false);
+  assert.equal(L.liveLayerNarrow('bottom', 2, 1040, false), true);   // two at 1280 wide: the header with Chat | Terminal does not fit
+  assert.equal(L.liveLayerNarrow('bottom', 2, 1680, false), false);
   assert.equal(L.liveLayerNarrow('bottom', 3, 1040, false), true);
-  assert.equal(L.liveLayerNarrow('bottom', 3, 1680, false), false);
+  assert.equal(L.liveLayerNarrow('bottom', 3, 1680, false), true);   // three at 1920 wide: 560 px each
+  assert.equal(L.liveLayerNarrow('bottom', 3, 2400, false), false);
   assert.equal(L.liveLayerNarrow('right', 2, 760, false), true);
   assert.equal(L.liveLayerNarrow('right', 1, 760, false), false);
+  assert.equal(L.liveLayerNarrow('right', 1, 537, false), true);    // on the right at 1280 wide
   assert.equal(L.liveLayerNarrow('bottom', 1, 390, true), true);
 });
 
@@ -247,4 +263,71 @@ test('a drag ends when the grip loses the pointer (a repaint mid-drag), and keep
 test('a window resize draws the layer again only across the phone width', () => {
   assert.doesNotMatch(page, /addEventListener\('resize', \(\) => \{ if \(document\.getElementById\('live-dock'\)\) \{ liveLayerPainted = ''/);
   assert.match(page, /if \(now !== phone\)/);
+});
+
+// ORCH-463: words on the pane buttons, full titles in the split, Add beside asks which session.
+test('a split, narrow or small pane is compact: its title gets a row of its own', () => {
+  assert.equal(L.liveLayerCompact('bottom', 1, 1680, false), false, 'one roomy pane: one row');
+  assert.equal(L.liveLayerCompact('bottom', 1, 1040, false), true, 'one pane at 1280 wide: the title gets its row');
+  assert.equal(L.liveLayerCompact('bottom', 2, 1280, false), true, 'every split');
+  assert.equal(L.liveLayerCompact('bottom', 1, 800, false), true, 'a small single pane');
+  assert.equal(L.liveLayerCompact('bottom', 1, 390, true), true, 'a phone');
+});
+
+test('every pane button carries its word, and Add beside opens a choice instead of taking the first session', () => {
+  const pane = source.slice(source.indexOf('function livePane('), source.indexOf('// The live part of a pane'));
+  for (const w of ['Pin', 'Add beside', 'Place', 'Full screen', 'Leave full screen', 'Minimise', 'Close', 'More']) assert.match(pane, new RegExp(`'${w}'`), w);
+  assert.doesNotMatch(pane, /liveBtn\('btn icon/, 'no icon-only button left in a pane');
+  assert.match(pane, /livePaneBtn\('menu', besideWhy, 'plus', 'Add beside', \{'data-menu':besideMenu/);
+  assert.match(source, /act === 'beside-pick'\) liveLayerDo\(\{type:'beside', key:b\.dataset\.session\}/);
+  assert.doesNotMatch(source, /act === 'beside'\)/, 'no click adds a session unasked');
+  const menu = source.slice(source.indexOf('function liveBesideMenu('), source.indexOf('// The More menu'));
+  assert.match(menu, /'data-live':'beside-pick'/);
+  assert.match(menu, /others\.map\(/);
+});
+
+test('a button with a word is named by the word unless its label starts with it', () => {
+  const body = source.slice(source.indexOf('function liveBtn('), source.indexOf('// A pane\'s button'));
+  const ctx = {h:(tag, attrs) => attrs, liveIc:() => null};
+  vm.createContext(ctx); vm.runInContext(body + '\nthis.f = liveBtn;', ctx);
+  assert.equal(ctx.f('b', 'pin', 'Pin ORCH-1', 'g', {}, 'Pin')['aria-label'], 'Pin ORCH-1');
+  assert.equal(ctx.f('b', 'x', 'Where it sits', 'g', {}, 'Bottom')['aria-label'], null);
+  assert.equal(ctx.f('b', 'x', 'Where it sits', 'g')['aria-label'], 'Where it sits');
+});
+
+test('ORCH-679: a running helper has Stop in its pane (run.stop, "Stop idle helper" when idle); no helper, no Stop', () => {
+  assert.match(source, /sess\.kind \|\| !sess\.running \? null : h\('button'[^\n]*'data-live-stop':sess\.id\}, liveStopLabel\(sess\)\)/);
+  assert.match(source, /\['idle', 'stuck'\]\.includes\(h2\.state\) \? 'Stop idle helper' : 'Stop'/);
+  assert.match(source, /#live-dock \[data-live-stop\][\s\S]{0,200}act\('run\.stop', \{ticket:b\.dataset\.liveStop\}\)/);
+  assert.match(source, /x\.running && !x\.kind \? liveStopLabel\(x\) : ''/);  // the dock repaints when idle turns into working
+});
+
+test('the pane shows the waiting question with its options and answers it there (ORCH-675)', () => {
+  const {liveAskModel} = load();
+  const t = {questions:[{id:'q1', answer:'x', text:'old'}, {id:'q2', digest:'d', text:'Which banner colour should I use?', options:['Blue', 'Green', '']}]};
+  assert.deepEqual(JSON.parse(JSON.stringify(liveAskModel(t))), {id:'q2', digest:'d', text:'Which banner colour should I use?', options:['Blue', 'Green'], plain:true});
+  assert.equal(liveAskModel({questions:[{id:'q1', answer:'x'}]}), null);
+  assert.equal(liveAskModel({}), null);
+  assert.equal(liveAskModel({questions:[{id:'q3', kind:'plan', text:'Plan?'}]}).plain, false);
+  assert.match(source, /liveAskFill[^]*?act\('answer', \{ticket:id, question:q\.id, digest:q\.digest/, 'the answer is the same op a question card sends');
+});
+
+test('after an answer in the pane the keyboard stays in the pane, so Esc still steps the layer back (ORCH-709)', () => {
+  const fill = source.slice(source.indexOf('function liveAskFill'), source.indexOf('// The live part of a pane'));
+  assert.match(fill, /const had = box\.contains\(document\.activeElement\);[^]*?box\.focus\([^]*?c\.disabled = true/, 'the keyboard waits on the box before its buttons are disabled');
+  assert.match(fill, /liveLayerWant = \{id, until:[^}]*ask:true\}; liveLayerTake\(\)/, 'and goes back into the pane when the answer is in');
+  const take = source.slice(source.indexOf('function liveLayerTake'), source.indexOf('// Full screen covers the page'));
+  assert.match(take, /\[data-live-ask\]:not\(\[hidden\]\) :is\(button, input\):not\(:disabled\)/, 'the next question\'s first choice first');
+});
+
+// ORCH-706: a helper that waits for an OK on its screen shows its choice in the last lines; in a short pane (the panel
+// at the bottom, a phone) the box was squeezed to two lines. It never shrinks below its lines (the API sends at most
+// a few), the pane body scrolls instead.
+test('the last-lines box never shrinks below its lines in a short pane', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8');
+  const rule = (css.match(/(?:^|\n)\.live-lines\{([^}]*)\}/) || [])[1];
+  assert.ok(rule, 'the .live-lines rule is in widgets.css');
+  const flex = (rule.match(/(?:^|;)flex:([^;]*)/) || [])[1] || '';
+  const shrink = (rule.match(/(?:^|;)flex-shrink:([^;]*)/) || [])[1] || flex.trim().split(/\s+/)[1];
+  assert.equal(String(shrink).trim(), '0', 'flex shrink of .live-lines is 0: ' + rule);
 });

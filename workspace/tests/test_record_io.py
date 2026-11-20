@@ -28,6 +28,9 @@ RUN = "r_8k2m01"
 DETAIL = {"input": "hello", "output": "world"}
 LINK = "reparse" if os.name == "nt" else "link"  # Windows sees a symlink as a reparse point first
 CORE = {
+    "_identity",  # ORCH-634: fstat of an fd the core opened (the long-running reader's memory)
+    "_quick",  # ORCH-634: lstat through _path_info of a run file and its pending folder
+    "_quick_dirs",  # ORCH-634: lstat through _path_info of the folders a run file is reached through
     "_io_setup",
     "_try_lock",
     "_release_lock",
@@ -110,6 +113,10 @@ SAFE_ATTRIBUTE_CALLS = {
     "(_json(event) + '\\n').encode",
     "ReadResult.from_error",
     "_ALERTED.add",
+    "_RUN_SEEN.pop",  # ORCH-634: the long-running reader memory (record.read_run_for)
+    "_RUN_SEEN.clear",  # ORCH-634: the long-running reader memory (record.read_run_for)
+    "seen[3].get",  # ORCH-634: the long-running reader memory (record.read_run_for)
+    "_RUN_SEEN.get",  # ORCH-634: the long-running reader memory (record.read_run_for)
     "_CHANGE_VALIDATOR.is_valid",
     "_DETAIL_VALIDATOR.is_valid",
     "_META_VALIDATOR.is_valid",
@@ -257,6 +264,7 @@ ERROR_BOUNDARIES = {
     "lost_in",  # ORCH-189: counts the lost-hook alerts for Insights; never raises, like note_lost
     "_note",
     "read_run",
+    "read_run_for",  # ORCH-634: read_run for a long-running reader; errors go through _report like read_run
     "run_lines",
     "_pending_count",
     "apply_retention",
@@ -1031,9 +1039,29 @@ def test_25_fast_strict_read_and_spool(store, monkeypatch):
     writer.append(event(id="first"))
     sample = event()
     runfile(ws).write_bytes(seal_lines(ws, RUN, [dict(sample, id=f"id{i}") for i in range(3000)]))
-    start = time.monotonic()
-    assert writer.append(event(id="last"))["seq"] == 3001
-    assert time.monotonic() - start < 0.5  # shared CI runners; W2b makes this structural
+    # Measure the work, not the wall time (a loaded shared CI runner took 0.52 s against 0.5 s, ORCH-569):
+    # one append reads the run file once and parses each of its lines once.
+    reads, parsed = [], []
+    real_read, real_plain = record._read_bytes, record._plain_lines
+
+    def counted_read(fd):
+        raw = real_read(fd)
+        reads.append(len(raw))
+        return raw
+
+    def counted_plain(raw, run):
+        parsed.append(len(raw.splitlines()))
+        return real_plain(raw, run)
+
+    size = runfile(ws).stat().st_size
+    with monkeypatch.context() as counting:
+        counting.setattr(record, "_read_bytes", counted_read)
+        counting.setattr(record, "_plain_lines", counted_plain)
+        start = time.monotonic()
+        assert writer.append(event(id="last"))["seq"] == 3001
+        elapsed = time.monotonic() - start
+    assert reads == [size] and parsed == [3000]
+    assert elapsed < 10  # only a backstop for a pathological slowdown, far above any loaded runner
     lock = record.record_dir(ws) / "runs" / (RUN + ".lock")
     lock.touch()
     monkeypatch.setattr(record, "_LOCK_WAIT", 0.01)
