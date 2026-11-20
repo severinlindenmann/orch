@@ -507,6 +507,11 @@ def calendar_source(root: Path, who: Who, source: str) -> dict:
     return cal_mod.set_source(root, source)
 
 
+def calendar_outlook(root: Path, who: Who) -> dict:
+    need_person(who, "add the Outlook calendar way in")
+    return cal_mod.add_outlook_way(root)
+
+
 def calendar_allow(root: Path, who: Who) -> dict:
     need_person(who, "allow calendar access")
     return cal_mod.request_access(root)

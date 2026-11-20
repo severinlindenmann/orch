@@ -365,6 +365,23 @@ def set_moves(root: Path, moves: str) -> dict:
     return {"moves": moves, "words": MOVES_WORDS[moves]}
 
 
+OUTLOOK_WAY = "outlook-calendar"
+
+
+def add_outlook_way(root: Path) -> dict:
+    """Put the Outlook calendar way in (the backup) into the ways folder. It stays off until the person sets its
+    fetch command and turns it on; nothing reads Outlook before that."""
+    dest = ways_mod.folder(root) / OUTLOOK_WAY
+    if dest.exists():
+        raise Refused(f"There is already a way in called {OUTLOOK_WAY}. See it: orch personal ways")
+    src = Path(__file__).parent / "way_templates" / OUTLOOK_WAY
+    dest.mkdir(parents=True)
+    for f in sorted(src.iterdir()):
+        if f.is_file() and f.suffix in (".py", ".toml", ".json", ".md"):
+            shutil.copyfile(f, dest / f.name)
+    return {"way": OUTLOOK_WAY, "dir": str(dest)}
+
+
 def set_source(root: Path, source: str) -> dict:
     data = store.settings(root)
     p = data["parts"].get("calendar")

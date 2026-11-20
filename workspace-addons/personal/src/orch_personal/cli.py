@@ -321,6 +321,15 @@ def _calendar(root: Path, who: api.Who, args) -> int:
             else f"Calendar reads from the way in {d['source'][4:]}. Every calendar starts at nothing.",
             "orch personal calendar calendars",
         )
+    if sub == "outlook":
+        d = api.calendar_outlook(root, who)
+        return _emit(
+            args,
+            d,
+            f"Added the Outlook calendar way in (off). Put the command that reads Outlook into {d['dir']}/fetch.json, "
+            f"then turn it on: orch personal ways on {d['way']}",
+            f"orch personal calendar source way:{d['way']}",
+        )
     if sub == "allow":
         d = api.calendar_allow(root, who)
         return _emit(args, d, f"Calendar: {d['words']}. {d['problem'] or ''}".strip(), "orch personal today")
@@ -455,6 +464,7 @@ def main(argv=None) -> int:
     p(c, "source", help="read from the Calendar app or a calendar way in (person)").add_argument(
         "source", help="app, or way:<name>"
     )
+    p(c, "outlook", help="add the Outlook calendar way in, the backup (person)")
     p(c, "allow", help="allow calendar access once on this Mac (person)")
     p(c, "check", help="try reading the calendar again")
     s = p(c, "suggest", help="suggest an event; the person adds it if it suits them")

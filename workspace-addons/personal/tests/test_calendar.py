@@ -437,3 +437,153 @@ def test_reader_source_reads_only_allowed_fields():
     assert "requestFullAccessToEvents" in src
     plist = (Path(cal.__file__).parent / "calendar_reader" / "Info.plist").read_text()
     assert "NSCalendarsFullAccessUsageDescription" in plist and "LSUIElement" in plist
+
+
+# --- Outlook calendar way in (the backup) -------------------------------------------------------------------
+def _outlook_read():
+    import importlib.util
+
+    f = Path(cal.__file__).parent / "way_templates" / "outlook-calendar" / "read.py"
+    spec = importlib.util.spec_from_file_location("outlook_read", f)
+    mod = importlib.util.module_from_spec(spec)
+    keep, sys.dont_write_bytecode = sys.dont_write_bytecode, True  # no __pycache__ in the shipped template
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.dont_write_bytecode = keep
+    return mod
+
+
+def graph_week():
+    """Two Outlook calendars as Microsoft Graph's calendarView gives them, with fields that must never pass."""
+    person_ = {"emailAddress": {"name": "Anna Keller", "address": "anna@example.ch"}}
+    return {
+        "calendars": [
+            {
+                "id": "AAMk-work",
+                "name": "Calendar",
+                "owner": {"name": "Severin", "address": "s@example.ch"},
+                "canEdit": True,
+                "events": [
+                    {
+                        "subject": "Kundentermin Helvetia Logistik",
+                        "start": {"dateTime": "2026-11-19T08:00:00.0000000", "timeZone": "UTC"},
+                        "end": {"dateTime": "2026-11-19T09:00:00.0000000", "timeZone": "UTC"},
+                        "showAs": "busy",
+                        "organizer": person_,
+                        "attendees": [person_, {"emailAddress": {"name": "x@example.ch"}}],
+                        "body": {"content": "Dial-in secret link"},
+                        "location": {"displayName": "Zurich HQ"},
+                        "onlineMeeting": {"joinUrl": "https://teams.example/join"},
+                        "webLink": "https://outlook.example/e/1",
+                    },
+                    {
+                        "subject": "Workshop",
+                        "start": {"dateTime": "2026-11-20T13:00:00", "timeZone": "W. Europe Standard Time"},
+                        "end": {"dateTime": "2026-11-20T15:00:00", "timeZone": "W. Europe Standard Time"},
+                        "showAs": "oof",
+                    },
+                    {
+                        "subject": "Declined call",
+                        "start": {"dateTime": "2026-11-18T10:00:00", "timeZone": "UTC"},
+                        "end": {"dateTime": "2026-11-18T10:30:00", "timeZone": "UTC"},
+                        "responseStatus": {"response": "declined"},
+                    },
+                    {
+                        "subject": "Cancelled",
+                        "isCancelled": True,
+                        "start": {"dateTime": "2026-11-18T11:00:00", "timeZone": "UTC"},
+                        "end": {"dateTime": "2026-11-18T12:00:00", "timeZone": "UTC"},
+                    },
+                    {
+                        "subject": "No zone",
+                        "start": {"dateTime": "2026-11-18T11:00:00", "timeZone": "Mars/Olympus"},
+                        "end": {"dateTime": "2026-11-18T12:00:00", "timeZone": "Mars/Olympus"},
+                    },
+                    {
+                        "subject": "Holiday",
+                        "isAllDay": True,
+                        "start": {"dateTime": "2026-11-17T00:00:00.0000000", "timeZone": "UTC"},
+                        "end": {"dateTime": "2026-11-18T00:00:00.0000000", "timeZone": "UTC"},
+                        "showAs": "free",
+                    },
+                ],
+            },
+            {"id": "AAMk-team", "name": "Team", "canShare": False, "canEdit": False, "events": []},
+            {"name": "no id"},
+        ]
+    }
+
+
+def test_outlook_answer_becomes_the_reader_shape_without_addresses_or_bodies():
+    r = _outlook_read()
+    raw = r.convert(graph_week(), "Europe/Zurich", now="2026-11-18T07:00:00+00:00")
+    text = json.dumps(raw)
+    for never in (
+        "example.ch",
+        "Dial-in",
+        "Zurich HQ",
+        "teams.example",
+        "outlook.example",
+        "Cancelled",
+        "No zone",
+    ):
+        assert never not in text
+    ans = cal.clean(raw)
+    assert [c["id"] for c in ans["calendars"]] == ["outlook:AAMk-work", "outlook:AAMk-team"]
+    assert ans["calendars"][0]["kind"] == "exchange" and ans["calendars"][1]["shared"] is True
+    by = {e["title"]: e for e in ans["events"]}
+    assert set(by) == {"Kundentermin Helvetia Logistik", "Workshop", "Declined call", "Holiday"}
+    k = by["Kundentermin Helvetia Logistik"]
+    assert k["start"].isoformat() == "2026-11-19T08:00:00+00:00" and k["people"] == ["Anna Keller"]
+    assert by["Workshop"]["start"].utcoffset().total_seconds() == 3600
+    assert by["Workshop"]["availability"] == "unavailable"
+    assert by["Declined call"]["declined"] is True
+    assert by["Holiday"]["all_day"] is True and str(by["Holiday"]["start"]) == "2026-11-17"
+
+
+def test_outlook_way_without_a_fetch_command_says_it_is_not_set_up(tmp_path):
+    r = _outlook_read()
+    (tmp_path / "fetch.json").write_text('{"fetch": []}', encoding="utf-8")
+    with pytest.raises(r.Stop, match="not set up yet"):
+        r.read({"from": "2026-11-16", "days": 7}, tmp_path)
+    with pytest.raises(r.Stop, match="1 to 35"):
+        r.read({"from": "2026-11-16", "days": 90}, tmp_path)
+
+
+def test_outlook_way_is_added_off_and_feeds_calendar_with_the_same_rules(added, tmp_path):
+    from orch_personal import ways
+
+    with pytest.raises(store.Refused, match="Only the person"):
+        api.calendar_outlook(added, helper())
+    d = api.calendar_outlook(added, person())
+    w = Path(d["dir"])
+    assert sorted(f.name for f in w.iterdir()) == ["check.py", "fetch.json", "read.py", "way.toml"]
+    with pytest.raises(store.Refused, match="already"):
+        api.calendar_outlook(added, person())
+    assert not ways.saved(added).get("outlook-calendar", {}).get("on")
+
+    # the person sets the command that reads Outlook (here a stand-in printing Graph's answer)
+    (tmp_path / "graph.json").write_text(json.dumps(graph_week()), encoding="utf-8")
+    (w / "fetch.json").write_text(
+        json.dumps(
+            {"fetch": [sys.executable, "-c", f"print(open({str(tmp_path / 'graph.json')!r}).read())"]}
+        ),
+        encoding="utf-8",
+    )
+    toml = (w / "way.toml").read_text(encoding="utf-8").replace('"python3"', f"'{sys.executable}'")
+    (w / "way.toml").write_text(toml, encoding="utf-8")  # Windows CI has no python3 on PATH
+    api.way_turn(added, person(), "outlook-calendar", True)
+    api.calendar_source(added, person(), "way:outlook-calendar")
+    assert ways.check(added, "outlook-calendar")["status"] == "works"
+    assert sorted(f.name for f in w.iterdir()) == ["check.py", "fetch.json", "read.py", "way.toml"]
+
+    os.environ.pop("ORCH_PERSONAL_CALENDAR_READER")
+    with pytest.raises(store.Refused, match="shares no calendar"):  # every Outlook calendar starts at nothing
+        api.calendar_week(added, helper(), "2026-11-16", 7)
+    api.calendar_rule(added, person(), "Calendar", "busy", None)
+    d = api.calendar_week(added, helper(), "2026-11-16", 7)
+    assert d["events"] and "Kundentermin" not in json.dumps(d) and "Declined" not in json.dumps(d)
+    api.calendar_rule(added, person(), "Calendar", "titles", None)
+    d = json.dumps(api.calendar_week(added, helper(), "2026-11-16", 7))
+    assert "Kundentermin Helvetia Logistik" in d and "Anna Keller" in d and "example.ch" not in d
