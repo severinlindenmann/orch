@@ -1429,6 +1429,28 @@ button.gtree-row:hover{background:var(--surface-2)}
 .live-pane[data-drop]{outline:2px dashed var(--brand);outline-offset:-2px}
 .lbar-n{min-width:16px;padding:0 var(--s1);border-radius:var(--r1);background:var(--surface-3);color:var(--text-muted);font-variant-numeric:tabular-nums;text-align:center}
 @media(prefers-reduced-motion:reduce){.gtree-row{transition:none}}
+/* 19 Nov, ORCH-834 (Skills page, draft A): a list with an on/off switch per row, a row click opens the side panel.
+   .list-tools: the filter and search row above a list. .facts: label and value pairs in a side panel. */
+.list-tools{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--s3);margin:var(--s4) 0}
+.list-tools .input{width:260px;max-width:100%}
+.switch-table th:first-child{width:1%}
+.switch-table td:first-child{white-space:nowrap}
+.switch-table tbody tr{cursor:pointer}
+.switch-table tbody tr:hover td,.switch-table tbody tr:focus-visible td{background:var(--surface-2)}
+.switch-table td .truncate{max-width:52ch}
+.switch-table .nowrap{white-space:nowrap}
+.facts{display:grid;grid-template-columns:120px minmax(0,1fr);gap:var(--s2) var(--s3);margin:0}
+.facts dt{color:var(--text-muted)}
+.facts dd{margin:0;overflow-wrap:anywhere}
+@media(max-width:720px){
+ .list-tools .input{width:100%}
+ .switch-table,.switch-table tbody,.table-wrap .switch-table{display:block;min-width:0}
+ .switch-table thead,.switch-table td:nth-child(3){display:none}
+ .switch-table tr{display:grid;grid-template-columns:var(--s9) minmax(0,1fr);align-items:center;border-top:1px solid var(--border)}
+ .switch-table td{border:0;min-width:0;overflow:hidden}
+ .switch-table td:nth-child(4){grid-column:2;padding-top:0}
+ .switch-table td .truncate{max-width:none}
+}
 /* Side rail that is a sheet on smaller screens (ORCH-581, ticket page draft E). The same element serves both widths, so
    every control exists once: from 1100 px it sits in the page; below, it shows only while [data-open=true], as a sheet
    from the right over a scrim, and a closed rail is out of the tab order. .narrow-only marks what only small screens
@@ -1451,3 +1473,6 @@ button.gtree-row:hover{background:var(--surface-2)}
 }
 @keyframes rail-in{from{transform:translateX(var(--s5));opacity:0}to{transform:none;opacity:1}}
 @media(prefers-reduced-motion:reduce){.rail-sheet{animation:none}}
+/* 20 Nov, ORCH-840 (Skills page: Edit, draft A): .sheet-actions keeps Save and Cancel in view at the foot of a side
+   panel (dialog.sheet, 24px padding) while its form scrolls. */
+.sheet-actions{position:sticky;bottom:calc(-1 * var(--s5));z-index:1;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2);margin:0 calc(-1 * var(--s5)) calc(-1 * var(--s5));padding:var(--s3) var(--s5);background:var(--surface);border-top:1px solid var(--border)}

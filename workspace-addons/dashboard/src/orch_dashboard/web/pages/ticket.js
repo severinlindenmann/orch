@@ -2500,6 +2500,38 @@ async function runEmbedAct(req) {
 }
 addEventListener('message', e => { const req = embedActRequest(e); if (req) runEmbedAct(req); });
 
+// Save in a shipped add-on page's editor (Skills, ORCH-840): the shown page names an opaque item id of ITS add-on,
+// the revision it loaded and the text. Only right after the person's own click (Save), one at a time. The dashboard
+// runs `orch <that add-on> act save --value=<revision> -- <id>` with the text on stdin; the add-on resolves the id,
+// refuses a stale revision and keeps a copy before it writes. The text never goes into this page's DOM.
+const EMBED_SAVE_TARGET = /^e_[0-9a-f]{24}$/, EMBED_SAVE_REV = /^[0-9a-f]{64}$/, EMBED_SAVE_MAX = 160 * 1024;
+function embedSaveRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.save') return null;
+  const shown = shippedFrame(e);
+  if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id)) return null;
+  if (typeof data.target !== 'string' || !EMBED_SAVE_TARGET.test(data.target)) return null;
+  if (typeof data.revision !== 'string' || !EMBED_SAVE_REV.test(data.revision)) return null;
+  if (typeof data.text !== 'string' || !data.text || data.text.includes('\u0000')) return null;
+  return {...shown, id:data.id, target:data.target, revision:data.revision, text:data.text, clicked:personClicked()};
+}
+let embedSaveBusy = false;
+async function runEmbedSave(req) {
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
+  if (!req.clicked) return reply({type:'orch.save.failed', error:NO_CLICK});
+  if (new TextEncoder().encode(req.text).length > EMBED_SAVE_MAX) return reply({type:'orch.save.failed', error:'That is too long to save here.'});
+  if (embedSaveBusy) return reply({type:'orch.save.failed', error:'Still saving. Try again in a moment.'});
+  embedSaveBusy = true;
+  try {
+    const result = await act('addon.act', {addon:req.addon, verb:'save', target:req.target, value:req.revision, text:req.text});
+    const answer = result.ok ? result.state?.act_answer : null;
+    const a = answer && answer.addon === req.addon && answer.answer && typeof answer.answer === 'object' ? answer.answer : null;
+    if (result.ok && a && typeof a.revision === 'string' && EMBED_SAVE_REV.test(a.revision)) reply({type:'orch.save.done', revision:a.revision, changed:a.changed !== false});
+    else reply({type:'orch.save.failed', error:result.ok ? 'orch did not confirm the save. Reload the page and look.' : String(result.text || '').slice(0, 300), stale:result.status === 409});
+  } finally { embedSaveBusy = false; }
+}
+addEventListener('message', e => { const req = embedSaveRequest(e); if (req) runEmbedSave(req); });
+
 // Ask another workspace at a stop (Factory, 816 A): modelled on the idea box. The shown shipped add-on page names a
 // target ("<order>:s<N>:<workspace>:<items>"); the dashboard runs that add-on's `ask` act (a person's click with this
 // page's session) and tells the page whether it went out. Same origin and shipped-frame fences as orch.idea.
