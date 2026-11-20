@@ -57,7 +57,6 @@ SETTINGS_OPS = (
     "release_merge.set",
     "diag.set",
     "typing.set",
-    "focus_preview.set",
     "update.auto",
     "copies.set",
     "mobile.set",

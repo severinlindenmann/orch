@@ -2,7 +2,7 @@
 .ticket-page{display:grid}
 .ticket-page .ticket-columns{display:grid;align-items:start;grid-template-columns:minmax(0,1fr) 248px;gap:24px}
 .ticket-page .ticket-main,.ticket-page .ticket-side{min-width:0}
-.ticket-page :is(button,summary,.ticket-part,.ab-actions a){min-height:44px}
+.ticket-page :is(button:not(.switch),summary,.ticket-part,.ab-actions a){min-height:44px}
 .ticket-page :is(button,summary,a,input,textarea):focus-visible{outline:2px solid var(--brand);outline-offset:3px}
 .ticket-page .btn.icon{min-width:44px}
 .ticket-page .tabs{overflow-x:auto;flex-wrap:nowrap}
@@ -107,7 +107,6 @@
 .ticket-page .ticket-layout{display:grid;grid-template-columns:minmax(0,1fr) 296px;gap:24px;align-items:start}
 .ticket-page .ticket-panel[hidden]{display:none!important}
 .ticket-page .story{display:grid;gap:24px;min-width:0}
-.ticket-page .ticket-side{position:sticky;top:80px}
 .ticket-page .section-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .ticket-page .section-head h2,.ticket-page .properties h2{font-size:14px;line-height:20px;margin:0}
 .ticket-page .card{padding:16px;display:grid;gap:12px}
@@ -143,9 +142,6 @@
 .ticket-page .task-word{white-space:nowrap}
 .ticket-page .property-details,.ticket-page .next-up{margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
 .ticket-page .next-up p{margin:8px 0 0}
-.ticket-page .properties{display:grid;gap:0;padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px}
-.ticket-page .properties dl{margin:12px 0 0}
-.ticket-page .properties dl>div{display:grid;grid-template-columns:80px minmax(0,1fr);gap:8px;padding:12px 0;border-bottom:1px solid var(--border)}
 .ticket-page .properties dd{margin:0;font-size:14px;line-height:20px;min-width:0;overflow-wrap:anywhere}
 .ticket-page .change-request{border-left:3px solid var(--needs-you)}
 .ticket-page .change-request h2,.ticket-page .asked h2,.ticket-page .progress-card h2{font-size:14px;line-height:20px;margin:0}
@@ -154,7 +150,7 @@
 .ticket-page .empty-mark{display:inline-grid;place-items:center;width:32px;height:32px;border-radius:4px;background:var(--surface-3)}
 .ticket-page .ticket-ask-label{font-weight:500}
 @keyframes ticket-reveal{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
-@media(max-width:899px){.ticket-page .ticket-layout{grid-template-columns:minmax(0,1fr)}.ticket-page .ticket-side{position:static}.ticket-page .ticket-heading h1{font-size:24px;line-height:32px}}
+@media(max-width:1099px){.ticket-page .ticket-layout{grid-template-columns:minmax(0,1fr)}}@media(max-width:899px){.ticket-page .ticket-heading h1{font-size:24px;line-height:32px}}
 @media(min-width:1600px){.ticket-page .ticket-layout{grid-template-columns:minmax(0,1fr) 320px;gap:32px}}
 @media(prefers-reduced-motion:reduce){.ticket-page .status-change{animation:none}}
 .ticket-page .ticket-heading h1 .ed-title,.ticket-page .ticket-heading h1 .ed{padding-left:0;margin-left:0;border-color:transparent}
@@ -188,7 +184,7 @@
 @media(min-width:1600px){.ticket-page .file-grid{grid-template-columns:repeat(5,minmax(0,1fr))}.ticket-page .file-thumb{height:132px}}
 @media(max-width:760px){.ticket-page .file-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ticket-page .files-collection[data-view-mode=list] .file-tile{grid-template-columns:1fr;gap:0}.ticket-page .files-collection[data-view-mode=list] .file-context{padding-left:60px}.ticket-page .files-toolbar .files-search{flex-basis:100%}}
 @media(prefers-reduced-motion:reduce){.ticket-page .file-tile{transition:none}}
-.ticket-page .ticket-layout.wide{grid-template-columns:minmax(0,1fr)}.ticket-page .ticket-layout.wide .ticket-side{display:none}
+.ticket-page .ticket-layout.wide{grid-template-columns:minmax(0,1fr)}.ticket-page .ticket-layout.wide .ticket-side:not([data-open=true]){display:none}
 .ticket-page .preview-body.live{max-height:none}
 .ticket-page .preview-body.live:after{content:none}
 .ticket-page .preview-live{display:block;width:100%;height:340px;border:0;background:var(--paper)}
