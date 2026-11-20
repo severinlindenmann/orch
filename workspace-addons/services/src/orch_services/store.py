@@ -9,6 +9,7 @@ import json
 import os
 import re
 import secrets
+import sys
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
@@ -38,8 +39,36 @@ def logs_dir(root: Path) -> Path:
     return base_dir(root) / "logs"
 
 
-def log_path(root: Path, sid: str) -> Path:
+def _platform() -> str:
+    return sys.platform  # a function, so tests on Linux can pretend to be a Mac
+
+
+def log_path(root: Path, sid: str, wid: str | None = None) -> Path:
+    """Where a job writes its log. macOS (with the workspace id): ~/Library/Logs/orch/<workspace id>/, because
+    launchd cannot open a log in a folder macOS protects, such as an external disk (it ends the job with 78 before it
+    starts; report r-1120-0610-services). Elsewhere: in the workspace."""
+    if wid and _platform() == "darwin":
+        return Path.home() / "Library" / "Logs" / "orch" / wid / f"{sid}.log"
     return logs_dir(root) / f"{sid}.log"
+
+
+def read_log_path(root: Path, sid: str, wid: str | None = None) -> Path:
+    """The log to read: the newer of the home log and the workspace log (a job loaded before the logs moved keeps
+    writing the old one until it is started again)."""
+    new, old = log_path(root, sid, wid), logs_dir(root) / f"{sid}.log"
+
+    def mtime(p: Path) -> float:
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return -1.0
+
+    return old if new != old and mtime(old) > mtime(new) else new
+
+
+def home_dir(wid: str) -> Path:
+    """macOS: the folder a job of a workspace on an external disk runs from (launchd cannot start it there)."""
+    return Path.home() / "Library" / "Application Support" / "orch" / wid
 
 
 def state_path(root: Path, sid: str) -> Path:

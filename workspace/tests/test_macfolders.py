@@ -1,6 +1,7 @@
 """macOS folders a background job may not use (report r-1119-1255-ws-6): the check and the doctor row."""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -81,3 +82,37 @@ def test_orch_doctor_names_it(proj, run, monkeypatch, tmp_path):
     assert len(rows) == 1 and rows[0]["ok"] is False, json.dumps(res["checks"])
     monkeypatch.setattr(addons, "active", lambda root: {})
     assert not [r for r in cli_leave.doctor(proj)["checks"] if r["name"] == "services folder"]
+
+
+@pytest.fixture
+def volumes(tmp_path, home, monkeypatch):
+    """A /Volumes folder with one external disk; the home folder is on the Mac's own disk."""
+    vol = tmp_path / "Volumes"
+    (vol / "2TB" / "Management").mkdir(parents=True)
+    (vol / "Macintosh HD").symlink_to(home, target_is_directory=True)  # the start disk is a link, as on a Mac
+    monkeypatch.setattr(macfolders, "VOLUMES", vol)
+    own = macfolders._device(home)
+    monkeypatch.setattr(
+        macfolders, "_device", lambda p: own + 1 if Path(p).resolve().is_relative_to(vol.resolve()) else own
+    )
+    return vol
+
+
+def test_external_disk_on_a_mac(home, volumes):
+    # report r-1120-0610-services: launchd cannot start a job or open its log on /Volumes/<disk>
+    assert macfolders.external_disk(volumes / "2TB" / "Management", home, "darwin") is True
+    gone = volumes / "2TB" / "gone"  # an unmounted disk cannot be read: still external
+    assert macfolders.external_disk(gone, home, "darwin") is True
+    assert macfolders.external_disk(volumes / "Macintosh HD" / "code", home, "darwin") is False
+    assert macfolders.external_disk(home / "code/proj", home, "darwin") is False
+    assert macfolders.external_disk(volumes / "2TB" / "Management", home, "linux") is False
+    assert macfolders.protected(volumes / "2TB" / "Management", home, "darwin") is None  # never refused
+
+
+def test_doctor_notes_an_external_disk_without_a_problem(home, volumes, monkeypatch):
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Path.home() on Windows
+    monkeypatch.setattr(macfolders, "_platform", lambda: "darwin")
+    assert macfolders.doctor_row(volumes / "2TB" / "Management", services_on=False) is None
+    row = macfolders.doctor_row(volumes / "2TB" / "Management", services_on=True)
+    assert row["ok"] is True and "external disk" in row["fact"] and "home folder" in row["fact"]

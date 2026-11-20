@@ -91,20 +91,36 @@ def _program(root: Path, rec: dict, strict: bool = True) -> str:
     return found
 
 
+def _external_disk(path: Path) -> bool:
+    """macOS: the folder lies on an external disk, where launchd cannot start a job (report r-1120-0610-services)."""
+    try:
+        from orch import macfolders
+
+        return bool(macfolders.external_disk(path))
+    except (ImportError, AttributeError):  # an older core: the job starts in the workspace as before
+        return False
+
+
 def _spec(root: Path, rec: dict, wid: str | None = None, strict: bool = True) -> drivers.Spec:
+    wid = wid or _workspace_id(root)
     cwd = (root / rec.get("cwd", ".")).resolve()
-    log = store.log_path(root, rec["id"]).absolute()
+    log = store.log_path(root, rec["id"], wid).absolute()
+    env = {"PATH": os.environ.get("PATH") or "/usr/bin:/bin"}
+    if rec.get("adopted") is None and _external_disk(cwd):
+        # the job runs from a home folder and is told where the workspace is (owner 20 Nov: warn, never refuse)
+        env["ORCH_WORKSPACE"] = str(root.resolve())
+        env["ORCH_SERVICE_DIR"] = str(cwd)
+        cwd = store.home_dir(wid)
     # an adopted service runs from its own entry: its command words are only shown, never looked up
     argv = [_program(root, rec, strict and rec.get("adopted") is None), *rec["command"][1:]]
     for s in (str(cwd), str(log), *argv):
         if "\n" in s or "\r" in s or "\x00" in s:
             raise Refused("A path or word of this service has a line break in it. Fix it and try again.")
-    env = {"PATH": os.environ.get("PATH") or "/usr/bin:/bin"}
     ext = _adopted(rec)
     return drivers.Spec(
         sid=rec["id"],
         name=rec["name"],
-        workspace_id=wid or _workspace_id(root),
+        workspace_id=wid,
         argv=argv,
         cwd=cwd,
         log=log,
@@ -113,6 +129,25 @@ def _spec(root: Path, rec: dict, wid: str | None = None, strict: bool = True) ->
         external=ext["entry"] if ext else None,
         external_path=Path(ext["path"]) if ext and ext.get("path") else None,
     )
+
+
+def _workspace_id_or_none(root: Path) -> str | None:
+    try:
+        return _workspace_id(root)
+    except Refused:
+        return None
+
+
+def _shown_log(root: Path, log: Path) -> str:
+    """A log path as a person writes it: relative to the workspace, or ~/... in the home folder."""
+    try:
+        return log.relative_to(root).as_posix()
+    except ValueError:
+        pass
+    try:
+        return "~/" + log.relative_to(Path.home()).as_posix()
+    except ValueError:
+        return str(log)
 
 
 def _adopted(rec: dict) -> dict | None:
@@ -397,9 +432,44 @@ def _why_stopped(root: Path, drv, spec, since: float) -> str:
     if drv.name == "launchd" and any("Operation not permitted" in ln for ln in lines):
         out += (
             " macOS did not let it use its folder: move the workspace or the program out of Documents, Desktop, "
-            "Downloads and iCloud Drive (for example to ~/code)."
+            "Downloads and iCloud Drive (for example to ~/code), and keep the program off an external disk."
+        )
+    if drv.name == "launchd" and any("No route to host" in ln for ln in lines):
+        out += (
+            " macOS keeps background services off this computer's local network: use the private network address, "
+            "or allow it in System Settings, Privacy & Security, Local Network."
         )
     return out
+
+
+def _no_log_why(drv, spec, since: float) -> str:
+    """launchd ended the job with 78 before it ran and wrote no log: it could not open the log or the folder."""
+    try:
+        written = spec.log.stat().st_mtime >= since - 1
+    except OSError:
+        written = False
+    last = getattr(drv, "last_exit", None)
+    if written or drv.name != "launchd" or last is None or last(spec) != 78:
+        return ""
+    return (
+        " macOS did not let it open its log or its folder, so it never ran. Keep the program off an external disk "
+        "and out of Documents, Desktop, Downloads and iCloud Drive."
+    )
+
+
+def _external_note(drv, spec) -> str | None:
+    """services add on an external disk: what changes for the job (owner 20 Nov: warn, never refuse)."""
+    if drv.name != "launchd" or "ORCH_WORKSPACE" not in spec.env:
+        return None
+    note = (
+        "This workspace is on an external disk, and macOS does not let background services use it. So "
+        f"{spec.name} runs from your home folder: paths in its command count from there, and ORCH_WORKSPACE holds "
+        "the workspace folder. macOS may also keep it off this computer's local network (use the private network "
+        "address)."
+    )
+    if _external_disk(Path(spec.argv[0])):
+        note += f" Its program {spec.argv[0]} is on the external disk too and may be blocked: keep it on this Mac."
+    return note
 
 
 def cmd_add(args, root: Path) -> int:
@@ -430,7 +500,7 @@ def cmd_add(args, root: Path) -> int:
     spec = _spec(root, rec, wid)
     _refuse_protected(drv, spec)
     store.save(root, rec)
-    store.logs_dir(root).mkdir(parents=True, exist_ok=True)
+    spec.log.parent.mkdir(parents=True, exist_ok=True)
     try:
         drv.install(spec)
     except Refused:
@@ -451,17 +521,19 @@ def cmd_add(args, root: Path) -> int:
     elif args.start:
         nxt = (
             f"Added {rec['name']} and started it, but it did not stay running."
-            f"{_why_stopped(root, drv, spec, started)} Read its log: orch services log {sid}"
+            f"{_why_stopped(root, drv, spec, started) or _no_log_why(drv, spec, started)}"
+            f" Read its log: orch services log {sid}"
         )
     else:
         nxt = f"Added {rec['name']}. Start it: orch services start {sid}"
-    return _emit_kept(args, drv, {"service": row, "next": nxt}, nxt)
+    return _emit_kept(args, drv, {"service": row, "next": nxt}, nxt, _external_note(drv, spec))
 
 
-def _emit_kept(args, drv, data: dict, text: str) -> int:
-    """Linux: services keep running after logout (owner 17 Nov, ORCH-328); the one line it says, if any."""
+def _emit_kept(args, drv, data: dict, text: str, note: str | None = None) -> int:
+    """Linux: services keep running after logout (owner 17 Nov, ORCH-328); macOS: a workspace on an external disk.
+    The line it says, if any."""
     keep = getattr(drv, "keep_running", None)
-    line = keep() if keep else None
+    line = " ".join(x for x in (keep() if keep else None, note) if x) or None
     if line:
         data["note"] = line
         text = f"{text}\n{line}"
@@ -497,7 +569,7 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
         spec = _spec(root, rec, wid, strict=False)
         drv.uninstall(spec)
         store.delete(root, sid)
-        nxt = f"Removed {rec['name']}. Its log stays in .orch/addons/services/logs/{sid}.log."
+        nxt = f"Removed {rec['name']}. Its log stays in {_shown_log(root, store.read_log_path(root, sid, wid))}."
         return _emit(args, {"removed": sid, "next": nxt}, nxt)
     spec = _spec(root, rec, wid, strict=verb != "stop")
     if verb != "stop":
@@ -516,7 +588,8 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
         nxt = f"{rec['name']} is still starting. Check later: orch services list"
     elif verb != "stop" and row["state"] != "running":
         nxt = (
-            f"{rec['name']} did not stay running.{_why_stopped(root, drv, spec, started)}"
+            f"{rec['name']} did not stay running."
+            f"{_why_stopped(root, drv, spec, started) or _no_log_why(drv, spec, started)}"
             f" Read its log: orch services log {sid}"
         )
     return _emit(args, {"service": row, "next": nxt}, nxt)
@@ -538,7 +611,7 @@ def cmd_log(args, root: Path) -> int:
 def _log_lines(root: Path, rec: dict, n: int) -> list[str]:
     a = _adopted(rec)
     if rec.get("adopted") is None:
-        return tail_masked(root, store.log_path(root, rec["id"]), n)
+        return tail_masked(root, store.read_log_path(root, rec["id"], _workspace_id_or_none(root)), n)
     if a and a["kind"] == "launchd" and a.get("path"):
         from .found import launchd_log
 

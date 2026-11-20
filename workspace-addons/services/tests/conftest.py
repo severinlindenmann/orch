@@ -43,6 +43,14 @@ def stored_keys(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def neutral_platform(monkeypatch):
+    """Logs stay in the workspace unless a test pretends to be a Mac (the tests run on macOS, Linux and Windows)."""
+    from orch_services import store
+
+    monkeypatch.setattr(store, "_platform", lambda: "linux")
+
+
+@pytest.fixture(autouse=True)
 def no_port_owner(monkeypatch):
     """Who listens on a port is read with lsof; tests say it themselves (the fake service's pid 4242 is no process)."""
     from orch_services import watch
