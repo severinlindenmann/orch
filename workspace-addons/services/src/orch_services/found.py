@@ -145,6 +145,10 @@ def _launchd(root: Path) -> tuple[list[dict], set[int]]:
     items, pids = [], set()
     if not folder.is_dir():
         return items, pids
+    from .drivers.launchd import disabled_labels
+
+    cp = _tool([tool, "print-disabled", domain])
+    off = disabled_labels(cp.stdout) if cp and cp.returncode == 0 else set()
     for p in sorted(folder.glob("*.plist")):
         if p.is_symlink() or not p.is_file():
             continue
@@ -184,7 +188,7 @@ def _launchd(root: Path) -> tuple[list[dict], set[int]]:
                 what,
                 how,
                 argv,
-                d.get("RunAtLoad"),
+                bool(d.get("RunAtLoad")) and label not in off,  # a switched-off label is not loaded at login
             )
         )
     return items, pids

@@ -30,6 +30,13 @@ if tool == "launchctl":
     verb = args[0]
     if verb == "print" and args[1].count("/") == 1:
         sys.exit(0)
+    if verb == "print-disabled":  # like launchd: one line per label that was ever enabled or disabled
+        out("\tdisabled services = {{\n")
+        for n, j in st["launchd"].items():
+            if "disabled" in j:
+                out('\t\t"%s" => %s\n' % (n, "disabled" if j["disabled"] else "enabled"))
+        out("\t}}\n")
+        sys.exit(0)
     target = args[-1]
     label = target.split("/", 2)[-1]
     jobs = st["launchd"]
@@ -305,7 +312,7 @@ def test_found_and_list_never_write_or_change_anything(cli, mac, tools, ws):
         cli(*argv, "--json")
     assert _tree(Path.home(), ws) == before
     verbs = {c[1] for c in tools.calls("launchctl")}
-    assert verbs <= {"print"}, verbs
+    assert verbs <= {"print", "print-disabled"}, verbs
     assert not (ws / ".orch" / "addons").exists()
 
 
@@ -329,7 +336,7 @@ def test_adopt_on_a_mac_manages_the_job_without_touching_it(cli, mac, tools, ws)
     assert code == 0, out
     assert out["service"]["id"] == "web-preview" and out["service"]["state"] == "running"
     assert "not moved, changed or restarted" in out["next"]
-    assert {c[1] for c in tools.calls("launchctl")} <= {"print"}  # adopt itself only reads
+    assert {c[1] for c in tools.calls("launchctl")} <= {"print", "print-disabled"}  # adopt itself only reads
     assert mac["web"].read_bytes() == plist_before
     rec = json.loads((ws / ".orch/addons/services/services/web-preview.json").read_text(encoding="utf-8"))
     assert not [e.message for e in validator(SCHEMA).iter_errors(rec)]
@@ -393,6 +400,47 @@ def test_adopt_on_linux_and_log_from_the_journal(cli, linux, tools, ws):
     assert jrun(cli, "remove", "notes-sync")[1]["forgotten"] is True and unit_file.read_bytes() == before
 
 
+def test_a_job_switched_off_in_launchd_does_not_start_by_itself(cli, mac, tools, ws):
+    """ORCH-1003: RunAtLoad says yes, but `launchctl disable` keeps launchd from loading it at login."""
+    tools.set(
+        launchd={"com.example.web-preview": {"loaded": True, "running": True, "pid": 4321, "disabled": True}}
+    )
+    web = next(i for i in jrun(cli, "found")[1]["found"] if i["id"] == "launchd:com.example.web-preview")
+    assert web["auto"] is False
+    code, out = jrun(cli, "adopt", "launchd:com.example.web-preview")
+    assert code == 0 and out["service"]["auto"] is False
+    assert jrun(cli, "list")[1]["services"][0]["auto"] is False
+    # switched on again in launchd: RunAtLoad counts again
+    jrun(cli, "remove", "web-preview")
+    tools.set(
+        launchd={"com.example.web-preview": {"loaded": True, "running": True, "pid": 4321, "disabled": False}}
+    )
+    web = next(i for i in jrun(cli, "found")[1]["found"] if i["id"] == "launchd:com.example.web-preview")
+    assert web["auto"] is True
+
+
+def test_an_adopted_job_switched_off_later_shows_as_not_starting_by_itself(cli, mac, tools, ws):
+    assert jrun(cli, "adopt", "launchd:com.example.web-preview")[1]["service"]["auto"] is True
+    st = tools.read()
+    st["launchd"]["com.example.web-preview"]["disabled"] = True  # launchctl disable outside orch
+    tools.set(launchd=st["launchd"])
+    assert jrun(cli, "list")[1]["services"][0]["auto"] is False
+    # auto on in orch switches the label on again
+    code, out = jrun(cli, "auto", "web-preview", "on")
+    assert code == 0 and out["service"]["auto"] is True
+    assert ["launchctl", "enable", f"gui/{os.getuid()}/com.example.web-preview"] in tools.calls()
+
+
+def test_disabled_labels_reads_both_forms_of_print_disabled():
+    from orch_services.drivers.launchd import disabled_labels
+
+    new = '\tdisabled services = {\n\t\t"a.off" => disabled\n\t\t"a.on" => enabled\n\t}\n'
+    old = 'disabled services = {\n\t"b.off" => true\n\t"b.on" => false\n}\n'
+    assert disabled_labels(new) == {"a.off"}
+    assert disabled_labels(old) == {"b.off"}
+    assert disabled_labels("") == set()
+
+
 def test_adopt_names_ids_and_refusals(cli, mac, tools, ws):
     code, out = jrun(cli, "adopt", "launchd:com.example.backup", "--name", "Nightly backup")
     assert (
@@ -416,7 +464,7 @@ def test_a_bare_process_is_never_adopted_or_stopped(cli, mac, tools, ws):
     assert code == 2 and "orch services add" in out["error"] and "stop it yourself" in out["error"]
     assert TOKEN not in out["error"]
     assert not (ws / ".orch/addons/services/services").exists()
-    assert {c[1] for c in tools.calls("launchctl")} <= {"print"}
+    assert {c[1] for c in tools.calls("launchctl")} <= {"print", "print-disabled"}
 
 
 def test_a_ticket_key_resolves_even_when_the_core_cannot_be_asked(ws, monkeypatch):
