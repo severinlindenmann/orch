@@ -558,12 +558,13 @@ def _check(r: dict, path: str, last: dict | None) -> dict:
     except (OSError, ValueError, KeyError, AttributeError) as e:
         error = _why(e)
     notes, url, more = [], None, 0
+    notes_error = None
     if r["notes"]:
         try:
             got, url = notes_of(r["notes"], installed, newest)
             notes, more = _cap(got)
-        except (OSError, ValueError, KeyError, AttributeError) as e:
-            error = error or _why(e)
+        except (OSError, ValueError, KeyError, AttributeError):
+            notes_error = "What is new could not be read just now."
             url = None
     if error and last and last.get("newest"):
         newest, notes, more, url = (
@@ -586,6 +587,7 @@ def _check(r: dict, path: str, last: dict | None) -> dict:
             "more": more if upd or not installed else 0,
             "notes_url": url,
             "error": error,
+            "notes_error": notes_error if (upd or not installed) else None,
             "manual": None
             if inst
             else "orch cannot tell how it was installed; update it the way you installed it.",
@@ -596,7 +598,7 @@ def _check(r: dict, path: str, last: dict | None) -> dict:
 
 def _why(e: Exception) -> str:
     if isinstance(e, urllib.error.HTTPError):
-        return f"The update source answered {e.code}."
+        return "The update source did not answer just now."
     if isinstance(e, urllib.error.URLError | TimeoutError | OSError):
         return "The update source could not be reached."
     return "The update source gave an answer orch cannot read."
