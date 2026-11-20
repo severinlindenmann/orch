@@ -457,11 +457,21 @@ class Handler(BaseHTTPRequestHandler):
         frame = getattr(self, "_frame", None)
         if frame is not None:
             return frame[1]
-        if getattr(self, "session", None) is not None and self.session.can_act(
-            self.headers, self._page_port()
-        ):
+        if self._launch_session():
             return True
-        return tokenlogin.current(self, need_page=True) is not None  # a token login (ORCH-1035)
+        # a token login (ORCH-1035) acts only with a picked profile, and then as that profile (this request's thread)
+        person = tokenlogin.person_of(self, tokenlogin.current(self, need_page=True))
+        if person is None:
+            return False
+        actions.REQUEST_PERSON.set(person)
+        return True
+
+    def _launch_session(self) -> bool:
+        """The sign-in link's session (not a token login): only it may vouch for the person to an add-on's own
+        page server, since the vouch cannot carry a token browser's profile yet."""
+        if getattr(self, "session", None) is None:
+            return False
+        return self.session.can_act(self.headers, self._page_port())
 
     def _pass_tag(self) -> str:
         return framepass.pass_tag(
@@ -475,6 +485,10 @@ class Handler(BaseHTTPRequestHandler):
         another add-on or call, another sign-in or address) answers 401 readable by the frame, so the page asks
         the dashboard for new ones."""
         self._frame, self._frame_cors, self._frame_bad = None, False, False
+        # per request, as the frame pass above (ORCH-1035): the token login and the profile of THIS request only
+        self._frame_owner = self._frame_person = None
+        self.__dict__.pop("_tok_cache", None)
+        actions.REQUEST_PERSON.set(None)
         header = self.headers.get(framepass.FRAME_HEADER)
         file = None
         if header is None and query and framepass.FRAME_PARAM in parse_qs(query, keep_blank_values=True):
@@ -510,6 +524,13 @@ class Handler(BaseHTTPRequestHandler):
             ok = path in framepass.FRAME_ROOT.get(hit[0], ())
         else:
             ok = False
+        if ok and passes is not None:  # a pass minted for a token login lives only as long as that login
+            owner = passes.owner(header if header is not None else file)
+            self._frame_owner = owner
+            if owner:
+                alive = tokenlogin.alive(self, owner)
+                ok = alive is not None
+                self._frame_person = tokenlogin.person_of(self, alive) if alive else None
         if ok:
             self._frame, self._frame_cors = hit, True
         else:
@@ -563,6 +584,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, b"not found", "text/plain")
         session = getattr(self, "session", None)
         act = session is not None and session.can_act(self.headers, self._page_port())
+        owner = None
+        if (
+            not act
+        ):  # a token login (ORCH-1035): the pass acts once a profile is picked, and ends with the session
+            tok = tokenlogin.current(self, need_page=True)
+            if tok:
+                owner = tok["sid"]
+                act = tokenlogin.person_of(self, tok) is not None
         raw = (self.headers.get("Host") or "").strip().lower()
         host = raw.rsplit("]", 1)[0] + "]" if raw.startswith("[") else raw.split(":", 1)[0]
         local_read = host in ("127.0.0.1", "localhost", "[::1]") and not self._remote()
@@ -573,7 +602,7 @@ class Handler(BaseHTTPRequestHandler):
         passes = getattr(self.server, "frame_passes", None)
         if passes is None:
             return self._send(503, b"Try again in a moment.", "text/plain")
-        header, file = passes.issue(name, act, self._pass_tag())
+        header, file = passes.issue(name, act, self._pass_tag(), owner)
         self._send(200, json.dumps({"pass": header, "file": file, "act": act}).encode(), "application/json")
 
     def do_OPTIONS(self):
@@ -650,7 +679,14 @@ class Handler(BaseHTTPRequestHandler):
                 q for q in query.split("&") if unquote_plus(q.split("=", 1)[0]) != framepass.FRAME_PARAM
             )
         up = {"Host": f"127.0.0.1:{port}", "X-Forwarded-Prefix": f"/addon/{name}"}
-        if self._can_act():  # the person signed in here: vouch for them to the add-on's own page server
+        frame = getattr(self, "_frame", None)
+        # the person signed in here: vouch for them to the add-on's own page server (a sign-in link's session or its
+        # frame pass; never a token login's, since the vouch cannot carry its profile yet, ORCH-1035)
+        if (
+            (frame[1] and not getattr(self, "_frame_owner", None))
+            if frame is not None
+            else self._launch_session()
+        ):
             from orch.pagesession import VOUCH_HEADER, vouch_key
 
             key = vouch_key(self.root, create=True)
@@ -1313,8 +1349,10 @@ class Handler(BaseHTTPRequestHandler):
         )
         from . import update as _update
 
-        session = self._can_act()
-        launch = self.session is not None and self.session.can_act(self.headers, self._page_port())
+        session = (
+            self._can_act()
+        )  # a token login: only with a picked profile, and then as it (REQUEST_PERSON)
+        launch = self._launch_session()
         tok = None if launch or self._frame is not None else tokenlogin.current(self, need_page=True)
         if tok is not None:  # a token login acts as the profile this browser picked, never as someone else
             if body.get("op") in (
@@ -1322,10 +1360,8 @@ class Handler(BaseHTTPRequestHandler):
                 "person.add",
             ):  # "You: ..." in a token browser: its own profile
                 return self._token_person(body)
-            person = tokenlogin.person_of(self, tok)
-            if person is None:
+            if not session:
                 return self._send(403, tokenlogin.PICK_PROFILE.encode(), "text/plain; charset=utf-8")
-            actions.REQUEST_PERSON.set(person)
         with _update.click():  # no automatic update starts during a person's click (or right after it)
             return self._act_run(body, op_name, session)
 

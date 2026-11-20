@@ -247,6 +247,26 @@ def session(root: Path, cookie, page=None, *, need_page: bool = True) -> dict | 
     return None
 
 
+def alive(root: Path, sid) -> dict | None:
+    """The session `sid` while it and its token still work (for a pass minted from it: an add-on page's frame
+    pass ends when its browser logs out or its token is revoked), else None.
+    `{sid, token, expires, person}`."""
+    if not isinstance(sid, str) or not _SID_RE.fullmatch(sid):
+        return None
+    try:
+        d = _dir(root, create=False)
+    except (Refused, OSError):
+        return None
+    now = _now()
+    s = next((s for s in _load(d, _SESSIONS, "sessions") if s.get("sid") == sid), None)
+    if s is None or (s.get("expires") or 0) <= now:
+        return None
+    t = next((t for t in _load(d, _TOKENS, "tokens") if t.get("id") == s.get("token")), None)
+    if t is None or _state(t, now) != "active":
+        return None
+    return {"sid": sid, "token": t["id"], "expires": s.get("expires"), "person": s.get("person")}
+
+
 def from_headers(root: Path, headers, need_page: bool = True) -> dict | None:
     """The browser session of a request (its Cookie and X-Orch-Page headers), or None. The one place the
     dashboard's token cookie and page key are read from a request."""

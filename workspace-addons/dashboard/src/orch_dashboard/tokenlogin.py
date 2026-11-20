@@ -48,6 +48,12 @@ def current(h, need_page: bool = True) -> dict | None:
     return found
 
 
+def alive(h, sid: str) -> dict | None:
+    """The token login session `sid` while it still works (a frame pass minted from it checks this)."""
+    dl = _dashlogin()
+    return dl.alive(h.root, sid) if dl is not None else None
+
+
 def person_of(h, tok: dict | None) -> str | None:
     """The profile of a token session when it is still in the people list, else None (pick again)."""
     from . import people
@@ -99,11 +105,11 @@ def login_post(h, token) -> None:
     dl = _dashlogin()
     if dl is None:
         return _text(h, 403, "Login with a token is not available in this install.")
-    if _too_many(h):
-        return _text(h, 429, TOO_MANY, {"Retry-After": "60"})
     token = token.strip() if isinstance(token, str) else token
-    s = dl.login(h.root, token)
+    s = dl.login(h.root, token)  # a right token always gets in: wrong tries of others never lock it out
     if not s:
+        if _too_many(h):
+            return _text(h, 429, TOO_MANY, {"Retry-After": "60"})
         _failed(h)
         return _text(h, 403, BAD_TOKEN)
     from . import people

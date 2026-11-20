@@ -470,11 +470,11 @@ UI.profilePicker=o=>{o=o||{};const [g,inner]=shell('Who is using orch?',null);
   const face=el('span','profile-face',add?'+':(String(name).trim()[0]||'?').toUpperCase());face.setAttribute('aria-hidden','true');
   if(!add){b.dataset.c=UI.profileColor(name);b.dataset.profile=name;if(name===o.current)b.setAttribute('aria-current','true')}
   b.append(face,el('span','profile-name',add?'Add profile':name));li.append(b);return [li,b]};
- (o.people||[]).forEach(n=>{const [li,b]=tile(n,false);b.onclick=async()=>{fail(null);b.disabled=true;const why=o.onPick?await o.onPick(n):null;b.disabled=false;fail(why)};list.append(li)});
+ (o.people||[]).forEach(n=>{const [li,b]=tile(n,false);b.onclick=async()=>{fail(null);b.disabled=true;let why=null;try{why=o.onPick?await o.onPick(n):null}catch(_){why='That did not work. Try again.'}finally{b.disabled=false}fail(why)};list.append(li)});
  const addForm=el('form','profiles-add'),inp=el('input','input');inp.name='name';inp.maxLength=40;inp.setAttribute('aria-label','Name of the new profile');inp.placeholder='Name';
  const save=el('button','btn primary','Add');save.type='submit';addForm.append(inp,save);addForm.hidden=true;
  if(o.onAdd&&(o.people||[]).length<(o.max||20)){const [li,b]=tile('',true);b.onclick=()=>{addForm.hidden=false;inp.focus()};list.append(li)}
- addForm.addEventListener('submit',async e=>{e.preventDefault();const v=inp.value.trim();if(!v){inp.focus();return}save.disabled=true;const why=await o.onAdd(v);save.disabled=false;fail(why)});
+ addForm.addEventListener('submit',async e=>{e.preventDefault();const v=inp.value.trim();if(!v){inp.focus();return}save.disabled=true;let why=null;try{why=await o.onAdd(v)}catch(_){why='That did not work. Try again.'}finally{save.disabled=false}fail(why)});
  inner.append(list,addForm,err);
  if(!(o.people||[]).length){addForm.hidden=false;setTimeout(()=>inp.focus(),0)}
  if(o.onLogout){const out=el('button','btn ghost sm','Log out');out.type='button';out.onclick=()=>o.onLogout();inner.append(out)}

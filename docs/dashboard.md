@@ -27,7 +27,8 @@ it off again.
 **Log in with a token** (the login screen): a browser that is not signed in shows "Welcome, log in with your token".
 Make a token in your own terminal on the workspace computer: `orch dashboard token new [--label "Anna's laptop"]`. It
 works for 30 days and is shown only once; paste it on the login screen. That browser then stays logged in until the
-token ends, also across restarts, a new port and a dashboard an agent started. `orch dashboard token list` shows every
+token ends, also across restarts and on a dashboard an agent started. Behind a gateway the address stays the same
+when the dashboard comes back on another port; on a direct address a new port asks for the token once more. `orch dashboard token list` shows every
 token (no secrets), `orch dashboard token revoke <id>` stops one and logs out every browser that used it. For now one
 token works for everyone.
 

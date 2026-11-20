@@ -4,7 +4,7 @@
 // sign-in, so the click-through opens the login screen the way a refused click does (window.orchLogin.showLogin).
 module.exports = {
   name: 'Log in with a token and pick a profile',
-  covers: [],
+  covers: ['session:login', 'session:me', 'session:profile', 'session:logout'],
   async run({ page, open, reload, python, workspace, must, until }) {
     // what `orch dashboard token new|list|revoke` runs (the demo runs the dashboard from source, not as an add-on command)
     const tokens = (what, arg = '') => JSON.parse(python(
@@ -16,7 +16,10 @@ module.exports = {
     must(/^odt_/.test(made.token) && made.state === 'active', 'no working token was made');
     // a browser that never signed in: no cookie, no page key
     await open('#home');
-    await page.context().clearCookies();
+    // the click-throughs share one signed-in browser: keep its sign-in and put it back at the end
+    const ctx = page.context(), cookies = await ctx.cookies();
+    const secret = await page.evaluate(() => localStorage.getItem('orch_page_secret'));
+    await ctx.clearCookies();
     await page.evaluate(() => { localStorage.removeItem('orch_page_secret'); sessionStorage.removeItem('orch_page_secret'); });
     await reload();
     await page.evaluate(() => window.orchLogin.showLogin());
@@ -44,5 +47,8 @@ module.exports = {
     const me = await page.evaluate(async () => (await fetch('/session/me', { cache: 'no-store' })).json());
     must(me.login !== 'token', 'after Log out the browser still has its token login');
     tokens('revoke', made.id);
+    await ctx.clearCookies();
+    await ctx.addCookies(cookies);
+    await page.evaluate(v => localStorage.setItem('orch_page_secret', v || ''), secret);
   },
 };

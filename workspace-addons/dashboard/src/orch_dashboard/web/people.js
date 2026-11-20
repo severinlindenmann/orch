@@ -46,7 +46,8 @@
     busy = true; paint();
     let r;
     if (window.orchLogin?.token()) {  // a token login: this browser's own profile (ORCH-1035)
-      const why = await window.orchLogin.pick(name, op === 'person.add');
+      let why = null;
+      try { why = await window.orchLogin.pick(name, op === 'person.add'); } catch (_) { why = 'That did not work. Try again.'; }
       r = {ok: !why, text: why};
     } else r = await window.orchAct(op, {name});
     busy = false;

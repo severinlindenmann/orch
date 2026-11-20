@@ -165,8 +165,9 @@ def test_too_many_wrong_tokens_wait_a_minute(live):
     token, _ = dashlogin.new_token(root)
     for _ in range(10):
         assert req(port, "POST", "/session", {"login": "nope"})[0] == 403
-    st, _, body = req(port, "POST", "/session", {"login": token})
+    st, _, body = req(port, "POST", "/session", {"login": "nope"})
     assert st == 429 and b"Wait a minute" in body
+    assert req(port, "POST", "/session", {"login": token})[0] == 200  # the right token is never locked out
 
 
 def test_works_on_a_server_an_agent_started_and_after_a_restart_on_another_port(live):
@@ -206,3 +207,29 @@ def test_the_sign_in_link_still_works(live):
         port, "GET", "/session/me", host=f"127.0.0.1:{port}", https=False, cookie=cookie, page=page
     )
     assert st == 200 and json.loads(body)["login"] == "link"
+
+
+def test_without_a_profile_a_token_login_cannot_report_or_type(live):
+    root, start, _ = live
+    port = start()
+    token, _ = dashlogin.new_token(root)
+    _, cookie, page = login(port, token)
+    for path in ("/api/diag/report", "/api/term/keys"):
+        st, _, _ = req(port, "POST", path, {"x": 1}, cookie=cookie, page=page)
+        assert st == 403, path
+
+
+def test_a_frame_pass_of_a_token_login_ends_with_it(live):
+    from orch_dashboard import framepass
+
+    root, _, _ = live
+    token, entry = dashlogin.new_token(root)
+    s = dashlogin.login(root, token)
+    passes = framepass.FramePasses()
+    header, file = passes.issue("focus", True, "tag", s["sid"])
+    assert passes.owner(header) == s["sid"] and passes.owner(file) == s["sid"]
+    assert passes.owner(passes.issue("focus", True, "tag")[0]) is None  # a sign-in link's pass has no owner
+    assert dashlogin.alive(root, s["sid"])["sid"] == s["sid"]
+    dashlogin.revoke_token(root, entry["id"])
+    assert dashlogin.alive(root, s["sid"]) is None
+    assert dashlogin.alive(root, "../etc") is None

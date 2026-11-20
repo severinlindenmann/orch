@@ -154,6 +154,13 @@ function recorder(page, base) {
     const s = /^503 GET ([^?]+)/.exec(line);
     if (s && rec.slowOk.has(s[1])) rec.slow503++;
   });
+  // the login routes (ORCH-1035): a login with a token, how this browser is signed in, its profile, Log out
+  page.on('response', r => {
+    const m = /^\/session(?:\/(me|profile|logout))?$/.exec(r.url().replace(base, '').split('?')[0]);
+    if (!m || r.status() >= 400) return;
+    if (m[1]) rec.pages.add(`session:${m[1]}`);
+    else if (/"login"/.test(r.request().postData() || '')) rec.pages.add('session:login');
+  });
   page.on('pageerror', e => rec.errors.push(`uncaught exception: ${String(e.message).slice(0, 300)}`));
   page.on('console', m => {
     if (m.type() !== 'error') return;

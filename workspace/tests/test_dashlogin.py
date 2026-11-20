@@ -41,7 +41,7 @@ def test_new_token_is_shown_once_and_only_its_hash_is_kept(tws):
     assert entry["expires"] - entry["created"] == 30 * 86400
     tokens_file, _ = _files(tws)
     raw = tokens_file.read_text()
-    assert token not in raw and token.split("_")[2] not in raw
+    assert token not in raw and token.split("_", 2)[2] not in raw
     if sys.platform != "win32":
         assert tokens_file.stat().st_mode & 0o777 == 0o600
     assert [t["id"] for t in dashlogin.list_tokens(tws)] == [entry["id"]]
@@ -143,3 +143,10 @@ def test_cookie_name_is_per_workspace_not_per_port(tws):
     home_mod.key_dir(tws)
     name = dashlogin.cookie_name(tws)
     assert name.startswith("orch_dash_") and name.replace("_", "").isalnum()
+
+
+def test_the_secret_scan_finds_a_login_token(tws):
+    from orch import secretscan
+
+    token, _ = dashlogin.new_token(tws)
+    assert secretscan.find(f"here is the token {token} for you", strict=False)
