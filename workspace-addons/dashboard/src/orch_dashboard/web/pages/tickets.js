@@ -124,7 +124,7 @@ function releaseGroups(items) {
   out.sort((a, b) => a.finished - b.finished || (a.finished ? cmp(b, a) : cmp(a, b)));
   return {groups:out, inRelease:seen};
 }
-const releaseCount = g => g.done + ' of ' + g.total + ' done';
+const releaseCount = g => g.total ? g.done + ' of ' + g.total + ' done' : 'No tickets yet';  // ORCH-906: not '0 of 0 done'
 const releaseFoldSeen = new Set();
 function releaseFolds(groups) {  // a finished release starts folded, once; the person's own fold or unfold then stays
   for (const g of groups) if (!releaseFoldSeen.has(g.status)) { releaseFoldSeen.add(g.status); if (g.finished) foldedGroups.add(g.status); }
@@ -269,7 +269,7 @@ function treeBranch(rows, index, section) {
   const node = h('tr', {className:'ticket-row' + (row.depth ? ' child' : ''), 'data-key':'tree-' + t.id},
     h('td', {className:'ticket-cell'}, h('div', {className:'ticket-line'},
       row.children ? h('button', {type:'button', className:'btn ghost icon sm', 'data-action':'tree', 'data-ticket':t.id, 'aria-expanded':open, 'aria-label':(open ? 'Collapse ' : 'Expand ') + clean(t.title)}, iconEl('down')) : null,
-      h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)), titleTag(t), helper?.chip || (inRelease ? ticketAttentionChip(t, '') : null)), sub),
+      h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)), window.DashHelpers.kindTag(t, h), titleTag(t), helper?.chip || (inRelease ? ticketAttentionChip(t, '') : null)), sub),
     h('td', {className:'due-cell'}, dueCell(t)),
     h('td', {className:'steps'}, stepsCell(t, row)),
     h('td', {className:'numeric spend-cell'}, spendCell(t)),
@@ -301,7 +301,7 @@ function boardCard(t, nested = false, column = '', here = null) {
   const tasks = array(t.checklist), done = tasks.filter(window.DashHelpers.resolved).length;
   const parts = boardChildren(tickets(), t);
   return h('article', {className:'card ticket-card' + (nested ? ' board-child' : ''), 'data-col':column || null, draggable:snapshot ? null : 'true', 'data-ticket':t.id, 'data-key':'card-' + t.id},
-    h('div', {className:'row'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)), titleTag(t)),
+    h('div', {className:'row'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)), parts.length ? null : window.DashHelpers.kindTag(t, h), titleTag(t)),
       snapshot ? null : h('details', {className:'menu', 'data-key':'card-menu-' + t.id}, h('summary', {className:'btn ghost icon sm move-button', 'aria-label':'Move ' + clean(t.title) + ' to another column'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, statusItems(t, 'card', BOARD_MOVES), laneOrderItems(t, column)))),
     ticketAttentionChip(t, column), waitsLine(t), replacedLine(t),
     !nested ? boardParentLine(t) : null,
@@ -624,7 +624,7 @@ function phoneList(visible) {
     const sec = window.UI.shortGroup({key:'short-' + status, title:isRel ? group.title + ' · ' + releaseCount(group) : group.title, icon:isRel ? (group.finished ? 'done' : 'todo') : SHORT_ICON[status], count:group.tickets.length, folded,
       onToggle:() => { if (folded) folds.delete(status); else folds.add(status); render(); },
       rows:cut.map(row => ({key:typeof row.ticket.key === 'string' ? row.ticket.key : '', title:clean(row.ticket.title), href:href(row.ticket.id), child:row.depth > 0,
-        fact:shortFact(row.ticket, isRel ? {...row, parentMissing:false} : row), side:shortSide(row.ticket, row, isRel ? ticketColumn(row.ticket) : status), dataKey:'short-' + row.ticket.id})),
+        fact:[window.DashHelpers.kindWord(row.ticket), shortFact(row.ticket, isRel ? {...row, parentMissing:false} : row)].filter(Boolean).join(' · '), side:shortSide(row.ticket, row, isRel ? ticketColumn(row.ticket) : status), dataKey:'short-' + row.ticket.id})),
       more:cut.length < shownRows.length ? {label:(shownRows.length - cut.length) + ' more', onClick:() => { phoneMore.add(status); render(); }} : null});
     sec.querySelectorAll('.short-row').forEach(rowEl => rowEl.addEventListener('click', e => {
       if (e.target.closest('a,button')) return;
