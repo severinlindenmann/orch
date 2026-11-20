@@ -43,10 +43,11 @@ function passEnv() {
   const maps = /const framePasses = new Map\(\), framePassAsks = new Map\(\), framePassFailed = new Map\(\), frameFresh = new Map\(\);/.exec(src)[0];
   const fp = /function framePass\(name\) \{[\s\S]*?\n\}\n/.exec(src)[0];
   const forget = /function framesForget\(\) \{[\s\S]*?\n\}\n/.exec(src)[0];
-  const env = {calls:0, renders:0, ok:false};
+  const env = {calls:0, renders:0, ok:false, removed:0};
+  env.frame = {remove:() => { env.removed++; env.frame = null; }};
   const fetch = () => { env.calls++; return env.ok ? Promise.resolve({ok:true, json:() => ({pass:'p'.repeat(43), file:'f'.repeat(43)})}) : Promise.reject(new Error('down')); };
-  env.api = new Function('fetch', 'render', 'frameChanNew', 'frameRetries', 'let frameKeep = {id:"insights"};\n' + maps + '\n' + fp + '\n' + forget +
-    '\nreturn {framePass, framesForget, framePasses, kept: () => frameKeep, asks: framePassAsks};')(fetch, () => { env.renders++; }, () => 'c'.repeat(32), new Map());
+  env.api = new Function('fetch', 'render', 'frameChanNew', 'frameRetries', 'frameShown', 'let frameKeep = {id:"insights"};\n' + maps + '\n' + fp + '\n' + forget +
+    '\nreturn {framePass, framesForget, framePasses, kept: () => frameKeep, asks: framePassAsks};')(fetch, () => { env.renders++; }, () => 'c'.repeat(32), new Map(), () => env.frame);
   env.settle = () => Promise.all([...env.api.asks.values()]);
   return env;
 }
@@ -61,6 +62,7 @@ test('a pass asked for while the dashboard was down is asked for again once it i
   env.ok = true;
   env.api.framesForget();  // the new run of the dashboard answered
   assert.equal(env.api.kept(), null);
+  assert.equal(env.removed, 1);  // the shown frame goes: the next drawing makes a new one that loads
   assert.equal(env.api.framePass('insights'), null);
   await env.settle();
   assert.equal(env.calls, 2);

@@ -1145,10 +1145,12 @@ globalThis.addEventListener?.('message', e => {
     frame.replaceWith(pageFrame(route()));
   }, FRAME_RETRY_MS);
 });
-// The dashboard restarted (app.js noteBoot): its passes are gone. Forget ours, and the shown frame's kept address,
-// so the next drawing asks for a new pass and loads the add-on page again (also one that failed while it was down).
+// The dashboard restarted (app.js noteBoot): its passes are gone. Forget ours and the shown frame itself, so the
+// next drawing asks for a new pass and loads the add-on page anew: also one that failed while the dashboard was down
+// (its calls refused), which would wait for its own next refresh. A new element: a new #pass alone loads nothing.
 function framesForget() {
   framePasses.clear(); framePassFailed.clear(); frameFresh.clear(); frameRetries.clear(); frameKeep = null;
+  frameShown()?.remove();
 }
 // A page that is the dashboard's own shell (three columns, no header) says so once; its frame then fills the page.
 const shellAddons = new Set();
