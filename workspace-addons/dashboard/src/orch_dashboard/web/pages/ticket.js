@@ -181,12 +181,11 @@ function refRows(t) {
 }
 function linksCard(t) {
   const rows = referenceRows(t);
-  if (snapshot && !rows.length) return null;
+  if (!rows.length && !adding(t, 'links')) return null;
   const refresh = snapshot ? [] : refreshers(t);
   return h('section', {className:'links-card', 'data-key':'links-card'},
     h('h2', {className:'ref-head'}, 'References', rows.length ? h('span', {}, '· ' + rows.length) : null,
       refresh.map(a => h('button', {type:'button', className:'btn ghost xs', title:'Update titles and state (' + addonLabel(a) + ')', 'data-action':'link-refresh', 'data-addon':a.name, 'data-ticket':t.id, 'data-key':'link-refresh-' + a.name}, iconEl('refresh'), refresh.length > 1 ? addonLabel(a) : 'Refresh'))),
-    rows.length ? null : h('p', {className:'meta'}, 'No links yet.'),
     h('ul', {className:'ref-list'}, refRows(t),
       snapshot ? null : h('li', {'data-key':'add-link-' + t.id}, h('button', {type:'button', className:'ref-row ref-add', 'data-action':'link-add', 'data-ticket':t.id}, iconEl('plus'), h('span', {className:'ref-text'}, 'Add reference')))));
 }
@@ -297,9 +296,10 @@ const fieldText = (f, value) => {
   return typeof value === 'object' ? '' : clean(value);
 };
 function fieldSections(t) {
-  return addons().filter(a => a.ticket_fields && array(a.ticket_fields.fields).some(f => !f.hidden)).map(a => {
+  return addons().filter(a => a.ticket_fields && array(a.ticket_fields.fields).some(f => !f.hidden) && (addonUsed(t, a) || adding(t, 'addon:' + a.name))).map(a => {
     const tf = a.ticket_fields, ext = (t.ext || {})[a.name] || {};
-    const rows = array(tf.fields).filter(f => !f.hidden).map(f => {
+    // a read-only field (filled in by the add-on) shows once it holds something; an editable one always, to change it
+    const rows = array(tf.fields).filter(f => !f.hidden && (!f.read_only || fieldText(f, ext[f.key]) !== '')).map(f => {
       const shown = fieldText(f, ext[f.key]);
       let value;
       if (f.read_only || snapshot) value = h('span', {className:'ed-ro' + (shown ? '' : ' empty-v'), title:f.read_only ? 'Filled in by the ' + addonLabel(a) + ' add-on' : null}, f.read_only && f.key && ext[f.key] && KEY.test(String(ext[f.key])) ? linkStatus(String(ext[f.key])) : shown || '—');
@@ -309,8 +309,8 @@ function fieldSections(t) {
       }
       return h('div', {}, h('dt', {}, clean(f.title)), h('dd', {}, value));
     });
-    return h('section', {className:'card ticket-aside addon-fields', 'data-key':'fields-' + a.name},
-      h('div', {className:'card-h'}, h('h2', {className:'grow'}, clean(tf.section)), h('span', {className:'addon-pill'}, 'add-on')),
+    return h('section', {className:'rail-group addon-fields', 'data-key':'fields-' + a.name},
+      h('div', {className:'rail-sheet-h'}, h('h2', {}, clean(tf.section)), h('span', {className:'addon-pill'}, 'add-on')),
       h('dl', {className:'ticket-details ed-list'}, rows));
   });
 }
@@ -1712,17 +1712,131 @@ function ticketAnswerNodes(t, plainRow) {
   return [window.UI?.appliesNow && list.length ? window.UI.appliesNow(list, o) : null, ...rows].filter(Boolean);
 }
 const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Tasks', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t, 'All').length]];
+// ORCH-581 (owner picked draft E, 19 Nov): Properties shows only what is filled in. Everything empty, and every add-on
+// this ticket has not used yet, comes back from one "+ Add" menu; a pick shows its row and opens its editor. Human
+// review needed always shows (a safety switch, ORCH-424). Below 1100 px the same rail is a sheet behind a
+// Properties button (railOpen), so there is one copy of every control.
+const propsAdding = new Map();  // ticket id -> keys a person picked from + Add (their rows show while still empty)
+const adding = (t, key) => !snapshot && !!propsAdding.get(t.id)?.has(key);
+const hasValue = (t, f) => t[f] != null && String(t[f]).trim() !== '';
+// An add-on is used on a ticket once one of its visible fields holds a value (false and 0 count; '' and [] do not).
+function addonUsed(t, a) {
+  const ext = (t.ext || {})[a.name];
+  if (!ext || typeof ext !== 'object') return false;
+  return array(a.ticket_fields?.fields).some(f => !f.hidden && f.key in ext && fieldText(f, ext[f.key]) !== '');
+}
+const addonEditable = a => array(a.ticket_fields?.fields).some(f => !f.hidden && !f.read_only);
+const repeatsSet = t => addonViewRows(t, false).some(([, , addon]) => addon === repeatsAddon());
 function ticketProperties(t, parent) {
-  const field = (label, value) => h('div', {}, h('dt', {}, label), h('dd', {}, value));
-  const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = window.DashHelpers.doneAt(t);
+  const field = (label, value, key) => h('div', {'data-key':key ? 'prop-' + key + '-' + t.id : null}, h('dt', {}, label), h('dd', {}, value));
+  const done = t.status === 'done';
+  const show = (key, filled) => filled || adding(t, key);
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
-    h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
-    h('dl', {className:'ticket-details ed-list'}, snapshot ? (parent ? field('Part of', h('a', {href:href(parent.id)}, partName(parent))) : null) : field('Part of', partOfField(t, parent)), field('Release', releaseField(t)), field('Human review needed', humanReviewField(t)),
-      ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t), field('Helper strength', modelField(t)),
-      t.created_at ? field('Created', localStamp(t.created_at)) : null,
-      done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
+    h('div', {className:'rail-sheet-h'}, h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
+      snapshot ? null : ticketButton(iconEl('x'), 'ghost icon sm narrow-only', () => railToggle(t, false), {'aria-label':'Close Properties', 'data-key':'props-close-' + t.id})),
+    h('dl', {className:'ticket-details ed-list'},
+      show('partOf', !!parent) ? field('Part of', snapshot ? h('a', {href:href(parent.id)}, partName(parent)) : partOfField(t, parent), 'part-of') : null,
+      show('release', !!t.release) ? field('Release', releaseField(t), 'release') : null,
+      field('Human review needed', humanReviewField(t)),
+      show('owner', hasValue(t, 'owner')) ? field('Owner', inlineField(t, 'owner'), 'owner') : null,
+      show('due', hasValue(t, 'due')) ? field('Due', inlineField(t, 'due'), 'due') : null,
+      show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when') : null,
+      costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t),
+      show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model') : null),
+    propertiesAddMenu(t, parent),
     linksCard(t),
     copyLine(t));
+}
+// Created and updated (or finished) in one quiet line at the foot of the rail.
+function railStamp(t) {
+  const finished = t.status === 'done' ? window.DashHelpers.doneAt(t) : null;
+  const stamp = [t.created_at ? 'Created ' + localStamp(t.created_at) : '',
+    t.status === 'done' ? (finished ? 'finished ' + localStamp(finished) : '') : (t.updated_at ? 'updated ' + localStamp(t.updated_at) : '')].filter(Boolean).join(' · ');
+  return stamp ? h('p', {className:'meta', 'data-key':'ticket-stamp-' + t.id}, stamp) : null;
+}
+// The one place every empty property and every unused add-on comes back (draft E's "+ Add").
+function propertiesAddMenu(t, parent) {
+  if (snapshot) return null;
+  const item = (key, label) => ticketButton(label, 'menu-item', e => propAdd(t, key, e?.currentTarget), {role:'menuitem', 'data-key':'prop-add-' + key + '-' + t.id});
+  const props = [
+    [!parent, 'partOf', 'Part of'], [!hasValue(t, 'owner'), 'owner', 'Owner'], [!hasValue(t, 'due'), 'due', 'Due'],
+    [!hasValue(t, 'done_when'), 'done_when', 'Done when'], [!t.release, 'release', 'Mark as a release'],
+    [!modelChoice(t), 'model', 'Helper strength'], [!referenceRows(t).length, 'links', 'Reference']]
+    .filter(([missing, key]) => missing && !adding(t, key)).map(([, key, label]) => item(key, label));
+  const fromAddons = addons().filter(a => addonEditable(a) && !addonUsed(t, a) && !adding(t, 'addon:' + a.name))
+    .map(a => item('addon:' + a.name, clean(a.ticket_fields.section) || addonLabel(a)));
+  if (repeatsAddon() && !repeatsSet(t)) fromAddons.push(item('repeat', 'Repeat…'));
+  if (!props.length && !fromAddons.length) return null;
+  return h('details', {className:'menu props-add', 'data-key':'props-add-' + t.id},
+    h('summary', {className:'btn ghost xs', 'aria-label':'Add a property'}, iconEl('plus'), 'Add'),
+    h('div', {className:'menu-pop', role:'menu'}, props.length ? [h('p', {className:'eyebrow'}, 'Properties'), props] : null,
+      fromAddons.length ? [h('p', {className:'eyebrow'}, 'From add-ons'), fromAddons] : null));
+}
+// A pick from + Add: Release and Repeat act at once; every other pick shows its row and opens its editor.
+async function propAdd(t, key, trigger) {
+  trigger?.closest('details')?.removeAttribute('open');
+  if (key === 'repeat') return repeatsDialog(t.id, repeatsAddon());
+  if (key === 'release') {
+    const result = await act('ticket.edit', {ticket:t.id, release:true, if_revision:(ticketOf(t.id) || t).revision});
+    if (!result.ok) window.orch.toast(changeError(result), 'error');
+    return;
+  }
+  if (!propsAdding.has(t.id)) propsAdding.set(t.id, new Set());
+  propsAdding.get(t.id).add(key);
+  render();
+  const rail = document.getElementById('ticket-rail-' + t.id) || document;
+  const at = key === 'links' ? '[data-action="link-add"]' : key.startsWith('addon:') ? '[data-action="field"][data-addon="' + CSS.escape(key.slice(6)) + '"]'
+    : key === 'partOf' ? 'select[aria-label="Part of"]' : key === 'model' ? 'select[aria-label="Helper strength"]' : '[data-action="inline"][data-field="' + key + '"]';
+  const target = rail.querySelector(at);
+  if (target?.tagName === 'SELECT') target.focus(); else target?.click();
+}
+// How many filled things the rail holds besides owner and due (those stay in the line under the title when narrow).
+function railCount(t, parent) {
+  const used = addons().filter(a => a.ticket_fields && addonUsed(t, a)).length;
+  return [!!parent, !!t.release, hasValue(t, 'done_when'), !!costValue(t), !!modelChoice(t), referenceRows(t).length > 0].filter(Boolean).length + addonPropertyRows(t).length + used;
+}
+const railOpen = {id:null, trigger:null, keys:false};
+const railNarrow = () => !window.matchMedia || window.matchMedia('(max-width:1099px)').matches;
+function railToggle(t, open, trigger) {
+  if (open && !railOpen.keys) {
+    railOpen.keys = true;
+    document.addEventListener('keydown', railKeys);
+    // wider than the sheet needs: the rail is back in the page, so the sheet closes without moving the keyboard
+    window.matchMedia?.('(min-width:1100px)').addEventListener?.('change', e => { if (e.matches && railOpen.id) { railOpen.id = null; render(); } });
+  }
+  railOpen.id = open ? t.id : null;
+  if (open) railOpen.trigger = trigger?.dataset?.key || null;
+  render();
+  const back = open ? document.querySelector('[data-key="props-close-' + t.id + '"]') : railOpen.trigger && document.querySelector('[data-key="' + CSS.escape(railOpen.trigger) + '"]');
+  back?.focus();
+}
+// While the sheet is open: Esc closes it (the keyboard goes back to Properties) and Tab stays inside it.
+function railKeys(e) {
+  const rail = railOpen.id && railNarrow() ? document.getElementById('ticket-rail-' + railOpen.id) : null;
+  if (!rail) return;
+  if (e.key === 'Escape') { e.preventDefault(); railToggle({id:railOpen.id}, false); return; }
+  if (e.key !== 'Tab') return;
+  const stops = [...rail.querySelectorAll('button, select, input, textarea, summary, a[href], [tabindex="0"]')].filter(n => !n.disabled && n.offsetParent !== null);
+  if (!stops.length) return;
+  const first = stops[0], last = stops[stops.length - 1], at = document.activeElement;
+  if (e.shiftKey ? at === first || !rail.contains(at) : at === last || !rail.contains(at)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+}
+// A click beside the open sheet closes it (narrow screens only).
+function railScrim(t) {
+  const scrim = h('div', {className:'rail-scrim narrow-only', 'aria-hidden':'true', 'data-key':'rail-scrim-' + t.id});
+  scrim.onclick = () => railToggle(t, false);
+  return scrim;
+}
+// Narrow screens only: Properties (with how many things it holds) and the owner / due line under the title.
+function railButton(t) {
+  if (snapshot) return null;
+  const n = railCount(t, window.DashHelpers.parentOf(tickets(), t)), open = railOpen.id === t.id;
+  return ticketButton(['Properties', n ? h('span', {className:'chip'}, String(n)) : null], 'ghost sm narrow-only', e => railToggle(t, !open, e?.currentTarget),
+    {'aria-haspopup':'dialog', 'aria-expanded':String(open), 'aria-controls':'ticket-rail-' + t.id, 'data-key':'props-open-' + t.id});
+}
+function railFacts(t) {
+  const parts = [hasValue(t, 'owner') ? 'Owner ' + name(String(t.owner)) : '', hasValue(t, 'due') ? 'Due ' + dueText(t) : ''].filter(Boolean);
+  return parts.length ? h('p', {className:'t-meta narrow-only', 'data-key':'rail-facts-' + t.id}, parts.join(' · ')) : null;
 }
 
 // A ticket made outside this page (command line, a helper) may not be in the state we hold yet: read the workspace
@@ -1766,6 +1880,7 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
     // the new live page (Preview, draft D feature 3): one session button that opens this ticket's session in the layer
     const focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
     if (focusBtn) actions.push(focusBtn);
+    actions.push(railButton(t));
     if (menu) actions.push(menu);
   }
   const icon = window.UI?.statusIcon ? window.UI.statusIcon(m.pill) : null;
@@ -1773,7 +1888,7 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   return h('section', {className:'strip ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
       m.helper && window.UI?.helperPill ? stripHelperPill(m.helper) : h('span', {className:'pill status-change ' + m.pill, 'data-key':'status-' + t.status + '-' + m.pill}, icon, m.word),
-      h('div', {className:'grow ticket-strip-text'}, h('h1', {className:'t-row'}, window.DashHelpers.keyTag(t, h), inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, m.sentence)),
+      h('div', {className:'grow ticket-strip-text'}, h('h1', {className:'t-row'}, window.DashHelpers.keyTag(t, h), inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, m.sentence), railFacts(t)),
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);
 }
@@ -1794,11 +1909,11 @@ function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
   const sentence = [why, quiet ? quiet + '.' : ''].filter(Boolean).join(' ');
   const live = liveLinkFor(t), focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
   if (focusBtn) focusBtn.className = 'btn primary sm';  // the one filled button while a helper runs, as Watch live was
-  const actions = [focusBtn || (live ? h('a', {className:'btn primary sm', href:live.url, 'data-key':'watch-live'}, 'Watch live') : null), menu].filter(Boolean);
+  const actions = [focusBtn || (live ? h('a', {className:'btn primary sm', href:live.url, 'data-key':'watch-live'}, 'Watch live') : null), railButton(t), menu].filter(Boolean);
   return h('section', {className:'strip strip-plain ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
       h('div', {className:'grow ticket-strip-text'}, kicker, h('h1', {className:'t-title'}, inlineField(t, 'title')),
-        sentence ? h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, sentence) : null),
+        sentence ? h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, sentence) : null, railFacts(t)),
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);
 }
@@ -1882,7 +1997,11 @@ function detail(t) {
         panel('tasks', 'Tasks', card('tasks', 'Tasks', total ? done + ' of ' + total + ' done' : '', [total ? taskRows(t) : emptyRow('No tasks yet.'), t.status === 'done' ? null : addTaskRow(t, 'tasks')])),
         panel('files', 'Files', artifactsPanel(t)),
         panel('activity', 'Activity', ticketHistoryPanel(t))),
-      h('div', {className:'stack ticket-side'}, ticketProperties(t, parent), fieldSections(t)))));
+      // a read-only copy keeps the rail in the page at every width (it has no Properties button)
+      h('div', {className:'stack ticket-side' + (snapshot ? '' : ' rail-sheet'), id:'ticket-rail-' + t.id, 'data-open':String(railOpen.id === t.id), 'aria-label':'Properties', 'data-key':'ticket-rail-' + t.id,
+        role:railOpen.id === t.id ? 'dialog' : null, 'aria-modal':railOpen.id === t.id ? 'true' : null},
+        ticketProperties(t, parent), fieldSections(t), railStamp(t)),
+      snapshot || railOpen.id !== t.id ? null : railScrim(t))));
 }
 
 // ORCH-189: Time · cost, only when the helper estimated it or worked on it (read-only).
