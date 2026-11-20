@@ -1988,7 +1988,8 @@ def run(
     reopened = None
     if t.get("status") == "done" and not dry_run:
         # A person moved the role ticket to Done but its repeat goes on (a repeat survives Done): every
-        # card of this pass would be refused ("This ticket is closed") and nothing reaches Home. Open it again.
+        # card of this pass would be refused ("This ticket is closed") and nothing reaches Home.
+        # Open it again.
         tickets.set_status(root, t["id"], "open", tickets.SYSTEM)
         tickets.log(
             root,
