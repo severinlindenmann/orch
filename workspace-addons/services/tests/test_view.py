@@ -280,3 +280,19 @@ def test_a_running_job_that_does_not_answer_is_amber_in_the_list(ws):
     assert by["hung"]["state"] == {"label": "Not answering", "tone": "warn"}
     assert by["fine"]["state"] == {"label": "Running", "tone": "good"}
     assert _facts(by["hung"])["State"]["value"] == "Running"  # the panel keeps the plain state
+
+
+def test_a_plain_program_in_found_has_no_manage_button(ws):
+    # ORCH-934: adopt refuses a bare process, so the page must not draw a button that can only fail
+    from orch_services.view import build
+
+    found = [
+        {"id": "process:4242", "name": "Python http.server", "running": True, "what": "A program started by hand"},
+        {"id": "old-test-page", "name": "Old test page", "running": True},
+    ]
+    view = build(ws, ([], 0, None), found=found)
+    assert not [e.message for e in validator(VIEW_SCHEMA).iter_errors(view)]
+    (group,) = view["blocks"][0]["groups"]
+    plain, entry = group["items"]
+    assert "buttons" not in plain["panel"] and plain["panel"]["facts"]
+    assert entry["panel"]["buttons"][0]["label"] == "Manage with orch"
