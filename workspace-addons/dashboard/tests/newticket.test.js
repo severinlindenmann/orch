@@ -20,6 +20,7 @@ class Node {
   setCustomValidity(s) { this.validity = s; }
   reportValidity() { return !walk(this).some(n => n.validity || (n.required && !n.value)); }
   focus() {}
+  dispatchEvent(e) { return this.fire(e.type); }
   contains(n) { return walk(this).includes(n); }
   remove() { this.isConnected = false; this.parent.children.splice(this.parent.children.indexOf(this), 1); }
 }
@@ -528,4 +529,75 @@ test('ORCH-185: when one ticket of the epic is not made, the window says which a
   assert.deepEqual(s.calls.map(c => c.op).slice(0, 1), ['ticket.new']);
   assert.equal(s.calls[0].args.parent, 't_epic');
   assert.equal(s.calls[0].args.title, 'Larger buttons');
+});
+
+// ORCH-1037: New ticket is its own page (#new). The form is built into the page's host, and Start shows the starting
+// steps (UI.launch) before the address moves to the new ticket.
+function pageSetup({fail = false, startAfter = true} = {}) {
+  const host = new Node('div'), calls = [], toasts = [], items = [], launches = [];
+  const launch = o => { const l = {o, el:new Node('div', 'launch'), steps:[], finished:'', failed:false}; l.step = i => l.steps.push(i); l.finish = t => { l.finished = t; }; l.fail = () => { l.failed = true; }; launches.push(l); return l; };
+  const c = {Blob, TextDecoder, Uint8Array, btoa, setTimeout, Event, serial:0, locks:new Set(), mounts:new Map(), nodeKey:() => '', clean:x => x,
+    el:(...args) => new Node(...args), document:{body:new Node('body'), activeElement:null, querySelector:() => null}, render:() => {},
+    sizeText:n => n + ' B', URL:{createObjectURL:() => 'blob:test', revokeObjectURL:() => {}},
+    tickets:() => items, ticketOf:() => null, refresh:async () => {}, location:{hash:'#new'}, href:id => '#ticket/' + id,
+    act:async (op, args) => { calls.push({op, args}); if (op === 'ticket.new') { if (fail) return {ok:false, status:500, text:'Disk full'}; items.push({id:'new', title:args.title}); return {ok:true, state:{created:{id:'new'}}}; } return {ok:true}; },
+    window:{DashHelpers:{scrubText:x => x}, matchMedia:() => ({matches:true}), UI:{launch}, orch:{toast:(...x) => toasts.push(x)}}};
+  c.button = (text, cls, fn) => { const b = c.el('button', cls, text); b.type = 'button'; b.addEventListener('click', fn); return b; };
+  c.h = (tag, props, ...kids) => { const n = new Node(tag, props?.className || ''); Object.assign(n.dataset, props || {}); n.append(...kids.filter(Boolean)); return n; };
+  vm.createContext(c);
+  vm.runInContext(source, c);
+  const mounted = c.ticketForm(null, {host});
+  const d = host.children[0], nodes = walk(d), input = nodes.find(n => n.name === 'text'), form = nodes.find(n => n.tag === 'form');
+  return {c, host, d, input, form, mounted, calls, toasts, launches};
+}
+test('ORCH-1037: New ticket is built on its own page, not in a window', () => {
+  const s = pageSetup();
+  assert.equal(s.d.tag, 'section'); assert.match(s.d.className, /new-ticket-on-page/);
+  assert.equal(walk(s.d).find(n => n.tag === 'h1').textContent, 'New ticket');
+  assert.equal(s.c.document.body.children.length, 0);  // nothing opened over the page
+  assert.equal(typeof s.mounted.destroy, 'function');
+});
+test('ORCH-1037: Start shows the starting steps, starts the helper, then opens the new ticket', async () => {
+  const s = pageSetup();
+  s.input.value = 'Plan the autumn newsletter'; await s.input.fire('input');
+  await s.form.fire('submit');
+  assert.deepEqual(s.calls.map(x => x.op), ['ticket.new', 'run.start']);
+  const l = s.launches[0];
+  assert.deepEqual([...l.o.steps], ['Creating the ticket', 'Starting your helper', 'Opening it']);
+  assert.equal(l.o.sub, 'Plan the autumn newsletter');
+  assert.deepEqual([...l.steps], [1, 2]); assert.equal(l.finished, 'Started');
+  assert.equal(s.form.hidden, true);
+  assert.equal(s.c.location.hash, '#ticket/new');
+  assert.deepEqual(s.toasts, []);  // the animation says it; no extra toasts
+});
+test('ORCH-1037: Save without starting skips the helper step', async () => {
+  const s = pageSetup();
+  s.input.value = 'Later'; await s.input.fire('input');
+  s.form.requestSubmit = () => s.form.fire('submit');
+  await walk(s.d).find(n => n.textContent === 'Save without starting').click();
+  await new Promise(done => setTimeout(done, 20));  // the link submits the form without waiting for it
+  assert.deepEqual(s.calls.map(x => x.op), ['ticket.new']);
+  assert.deepEqual([...s.launches[0].o.steps], ['Creating the ticket', 'Opening it']);
+  assert.equal(s.launches[0].finished, 'Saved');
+  assert.equal(s.c.location.hash, '#ticket/new');
+});
+test('ORCH-1037: a refused ticket brings the form back with the reason, the text kept', async () => {
+  const s = pageSetup({fail:true});
+  s.input.value = 'Plan it'; await s.input.fire('input');
+  await s.form.fire('submit');
+  assert.equal(s.launches[0].failed, true);
+  assert.equal(s.form.hidden, false);
+  assert.equal(s.input.value, 'Plan it');
+  assert.ok(walk(s.d).some(n => n.textContent === 'Disk full'));
+  assert.equal(s.c.location.hash, '#new');
+});
+test('ORCH-1037: Cancel goes back to the page it came from; leaving keeps the unsent text', async () => {
+  const s = pageSetup();
+  s.c.location.hash = '#tickets'; s.c.openNewTicket();
+  assert.equal(s.c.location.hash, '#new');
+  s.input.value = 'Half typed';
+  await walk(s.d).find(n => n.textContent === 'Cancel').click();
+  assert.equal(s.c.location.hash, '#tickets');
+  await s.mounted.destroy();
+  assert.equal(vm.runInContext('ticketDraft', s.c).text, 'Half typed');
 });

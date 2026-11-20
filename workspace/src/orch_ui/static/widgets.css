@@ -1444,3 +1444,20 @@ button.gtree-row:hover{background:var(--surface-2)}
 }
 @keyframes rail-in{from{transform:translateX(var(--s5));opacity:0}to{transform:none;opacity:1}}
 @media(prefers-reduced-motion:reduce){.rail-sheet{animation:none}}
+/* Form page (ORCH-1037): one form as its own page (New ticket), a centred column the width of a dialog */
+.form-page{width:100%;max-width:640px;margin:0 auto;padding-top:var(--s5)}
+/* Launch (ORCH-1037, UI.launch): the starting moment after Start, a spinning ring around a breathing dot and the steps */
+.launch{display:grid;justify-items:center;gap:var(--s3);padding:var(--s7) var(--s5);text-align:center;animation:orch-page var(--dur-slow) var(--ease-enter) both}
+.launch-mark{position:relative;width:64px;height:64px;margin-bottom:var(--s2)}
+.launch-ring{position:absolute;inset:0;border-radius:50%;border:3px solid var(--border);border-top-color:var(--brand);animation:orch-spin 900ms linear infinite;transition:border-color var(--dur-settle) var(--ease-move)}
+.launch-core{position:absolute;inset:22px;border-radius:50%;background:var(--brand);animation:launch-breathe 1.4s var(--ease-move) infinite}
+.launch[data-done=true] .launch-ring{border-color:var(--success);animation:none}.launch[data-done=true] .launch-core{background:var(--success);animation:none}
+.launch-title{margin:0}.launch-sub{margin:0;max-width:44ch;overflow-wrap:anywhere}
+.launch-steps{list-style:none;margin:var(--s3) 0 0;padding:0;display:grid;gap:var(--s2);text-align:left}
+.launch-steps li{display:flex;align-items:center;gap:var(--s2);color:var(--text-faint);transition:color var(--dur-base) var(--ease-move)}
+.launch-steps li[data-state=active]{color:var(--text)}.launch-steps li[data-state=done]{color:var(--text-muted)}
+.launch-steps .st{width:18px;height:18px;flex:none}
+.launch-out{animation:launch-out var(--dur-slow) var(--ease-exit) 160ms forwards}
+@keyframes launch-breathe{50%{transform:scale(.7);opacity:.7}}
+@keyframes launch-out{to{opacity:0;transform:translateY(-4px) scale(.98)}}
+@media(prefers-reduced-motion:reduce){.launch,.launch-ring,.launch-core,.launch-out{animation:none}}
