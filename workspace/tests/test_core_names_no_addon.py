@@ -16,8 +16,11 @@ _FOLLOW_UP = "follow-up: core still names this add-on's setting/marker (see #837
 _GONE = "removed by #799"
 _TOKENS = "the record kind 'usage' / the providers' JSON key for token use, not the Usage add-on"
 _KEY = "plain data key 'services' (background add-ons, diagnose, doctor, look), not the add-on"
+_SKILLS = (
+    "the core's own skills (folder, manifest key, relay or key-store kind), not the Skills add-on (ORCH-834)"
+)
 ALLOW = {
-    "orch/addons.py": {"dashboard": _MANIFEST, "services": _KEY},
+    "orch/addons.py": {"skills": _SKILLS, "dashboard": _MANIFEST, "services": _KEY},
     "orch/cli.py": {
         "dashboard": _MANIFEST,
         "pull-requests": "ORCH-450: `orch ref wait --merge` refuses merges past the merge queue only while "
@@ -38,7 +41,7 @@ ALLOW = {
     "orch/pagelaunch.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
     "orch/syncgate.py": {"sync": _GONE},
     "orch/adapters.py": {"usage": _TOKENS},
-    "orch/cli_record.py": {"usage": _TOKENS},
+    "orch/cli_record.py": {"skills": _SKILLS, "usage": _TOKENS},
     "orch/collect_claude.py": {"usage": _TOKENS},
     "orch/collect_execjson.py": {"usage": _TOKENS},
     "orch/keystart.py": {"usage": _TOKENS},
@@ -53,6 +56,14 @@ ALLOW = {
     },
     "orch/look.py": {"services": _KEY},
     "orch/winfinish.py": {"services": _KEY},
+    "orch/skills.py": {"skills": _SKILLS},
+    "orch/skillrender.py": {"skills": _SKILLS},
+    "orch/relay.py": {"skills": _SKILLS},
+    "orch/net.py": {"skills": _SKILLS},
+    "orch/keystore.py": {"skills": _SKILLS},
+    "orch/inventory.py": {"skills": _SKILLS},
+    "orch/harness.py": {"skills": _SKILLS},
+    "orch/cli_secret.py": {"skills": _SKILLS},
 }
 
 

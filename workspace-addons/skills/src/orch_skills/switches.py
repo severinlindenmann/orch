@@ -2,14 +2,15 @@
 
 1. `.orch/skills-off.json` (orch.skills-off/1, read by the core's linking): orch's own skills and the admin's shared
    skills are links orch makes; a name on this list is not linked (the files stay).
-2. Claude Code's own per-folder switches in `.claude/settings.local.json`: `skillOverrides` ("off"),
-   `permissions.deny` ("mcp__<server>__*") and `claudeMdExcludes` (a rules file by its full path). orch writes only
+2. The helper tool's own per-folder switches in its local settings file (adapters.SETTINGS): `skillOverrides`
+   ("off"), `permissions.deny` ("mcp__<server>__*") and the rules-file exclude list (adapters.RULES_EXCLUDES, a
+   rules file by its full path). orch writes only
    the entries it records in `.orch/addons/skills/owned.json` and removes only those; everything else in the file
    stays as it is. An entry somebody wrote by hand is shown as off and is not changed by orch.
 
 Every file is reached only through real folders inside the workspace (a link anywhere on the way is refused), is
 replaced through a fresh temporary file next to it, and the settings file is replaced only when nobody changed it
-since it was read (an editor or Claude saving at the same moment wins; orch asks to try again).
+since it was read (an editor or the helper tool saving at the same moment wins; orch asks to try again).
 """
 
 from __future__ import annotations
@@ -22,13 +23,15 @@ import tempfile
 import time
 from pathlib import Path
 
+from . import adapters
+
 OFF_SCHEMA = "orch.skills-off/1"
 OWNED_SCHEMA = "orch.skills-owned/1"
-SETTINGS = Path(".claude") / "settings.local.json"
+SETTINGS = adapters.SETTINGS
 OWNED = Path(".orch") / "addons" / "skills" / "owned.json"
 LOCK = Path(".orch") / "addons" / "skills" / ".lock"
 MAX_BYTES = 1024 * 1024
-KINDS = ("skillOverrides", "deny", "claudeMdExcludes")
+KINDS = ("skillOverrides", "deny", adapters.RULES_EXCLUDES)
 
 
 class Refused(Exception):
@@ -36,7 +39,7 @@ class Refused(Exception):
 
 
 def mcp_rule(server: str) -> str:
-    """The deny rule for every tool of one MCP server (Claude writes tool names as mcp__<server>__<tool>; letters,
+    """The deny rule for every tool of one MCP server (tool names are written mcp__<server>__<tool>; letters,
     digits, dashes and underscores stay, anything else becomes _)."""
     return "mcp__" + re.sub(r"[^A-Za-z0-9_-]", "_", server) + "__*"
 
@@ -147,7 +150,7 @@ def set_linked(root: Path, name: str, on: bool) -> bool:
     return True
 
 
-# ---- 2. Claude Code's per-folder settings -------------------------------------------------------------------
+# ---- 2. the helper tool's per-folder settings -------------------------------------------------------------------
 
 
 def _owned(root: Path) -> dict:
@@ -168,12 +171,12 @@ def _entries(settings: dict, kind: str) -> list[str]:
         perms = settings.get("permissions")
         deny = perms.get("deny") if isinstance(perms, dict) else None
         return [d for d in deny if isinstance(d, str)] if isinstance(deny, list) else []
-    ex = settings.get("claudeMdExcludes")
+    ex = settings.get(adapters.RULES_EXCLUDES)
     return [e for e in ex if isinstance(e, str)] if isinstance(ex, list) else []
 
 
-def claude_state(root: Path) -> dict:
-    """{kind: {entry: "orch" | "hand"}} of what is off in Claude's local settings here (read only, never raises).
+def tool_state(root: Path) -> dict:
+    """{kind: {entry: "orch" | "hand"}} of what is off in the helper tool's local settings here (read only, never raises).
     A recorded entry that is no longer in the file does not count: a line written by hand later stays "hand"."""
     try:
         settings, _ = _read(root, SETTINGS)
@@ -183,7 +186,7 @@ def claude_state(root: Path) -> dict:
     return {k: {e: ("orch" if e in owned[k] else "hand") for e in _entries(settings, k)} for k in KINDS}
 
 
-def set_claude(root: Path, kind: str, entry: str, on: bool) -> bool:
+def set_tool(root: Path, kind: str, entry: str, on: bool) -> bool:
     """Off: add orch's entry (and record it). On: remove it only when orch wrote it. True when it changed."""
     if kind not in KINDS or not entry or len(entry) > 4096:
         raise Refused("That is not something orch can turn off here.")
@@ -200,7 +203,7 @@ def set_claude(root: Path, kind: str, entry: str, on: bool) -> bool:
                 return False
             if entry not in owned[kind]:
                 raise Refused(
-                    "It was turned off by hand in .claude/settings.local.json; orch leaves that alone. "
+                    f"It was turned off by hand in {adapters.SETTINGS_SHOWN}; orch leaves that alone. "
                     "Remove the line there to turn it on."
                 )
             _change(settings, kind, entry, add=False)
@@ -228,7 +231,7 @@ def _change(settings: dict, kind: str, entry: str, add: bool) -> None:
         ov = settings.get("skillOverrides")
         if not isinstance(ov, dict):
             if ov is not None:
-                raise Refused("skillOverrides in .claude/settings.local.json is not an object. Fix it first.")
+                raise Refused(f"skillOverrides in {adapters.SETTINGS_SHOWN} is not an object. Fix it first.")
             ov = settings["skillOverrides"] = {}
         if add:
             ov[entry] = "off"
@@ -240,12 +243,12 @@ def _change(settings: dict, kind: str, entry: str, add: bool) -> None:
     if kind == "deny":
         perms = settings.setdefault("permissions", {})
         if not isinstance(perms, dict):
-            raise Refused("permissions in .claude/settings.local.json is not an object. Fix it first.")
+            raise Refused(f"permissions in {adapters.SETTINGS_SHOWN} is not an object. Fix it first.")
         lst = perms.setdefault("deny", [])
     else:
-        lst = settings.setdefault("claudeMdExcludes", [])
+        lst = settings.setdefault(adapters.RULES_EXCLUDES, [])
     if not isinstance(lst, list):
-        raise Refused(f"{kind} in .claude/settings.local.json is not a list. Fix it first.")
+        raise Refused(f"{kind} in {adapters.SETTINGS_SHOWN} is not a list. Fix it first.")
     if add:
         lst.append(entry)
         return
