@@ -152,6 +152,16 @@ def test_all_at_limit_and_one_account(cli, fake_switcher, ws):
     assert m["one_account"] is False and {a["state"] for a in m["accounts"][1:]} == {"missing"}
 
 
+def test_every_account_at_limit_is_one_box_not_two(cli, fake_switcher, ws):
+    _seed(cli)
+    switching._write(
+        switching.memory_path(ws), {"all_at_limit": True, "alerts": [switching.ALL_AT_LIMIT_ALERT]}
+    )
+    m = page.build(usage_cli.gather(ws), ws)
+    assert m["all_at_limit"] is True
+    assert switching.ALL_AT_LIMIT_ALERT not in m["warnings"]
+
+
 def test_one_account_only(cli, fake_switcher, ws):
     data = switcher_data()
     data["accounts"] = data["accounts"][:1]
