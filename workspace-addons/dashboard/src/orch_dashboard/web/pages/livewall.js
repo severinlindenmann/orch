@@ -126,6 +126,11 @@ function liveWallPin(s, pinned) {
   return h('button', {type:'button', className:'btn icon sm ghost', 'data-wall-pin':s.id, 'data-key':'wall-pin-' + s.id,
     'aria-pressed':String(pinned), 'aria-label':(pinned ? 'Unpin ' : 'Pin ') + liveWallLabel(s), title:pinned ? 'Unpin' : 'Pin'}, iconEl('pinned'));
 }
+// Stop and End session from the wall (ORCH-817, pages/live-end.js): a More button with its menu on tiles and lines.
+function liveWallEnd(s) {
+  if (typeof window.liveEndMore !== 'function' || s.group) return [];
+  return [window.liveEndMore(s.id, 'tile', liveWallLabel(s)), window.liveEndOpenAt('tile') === s.id ? window.liveEndMenu(s.id, 'tile:' + s.id) : null];
+}
 // A group's tile (ORCH-345): the group's title, its helper counts, the small tree; orange when one helper needs you.
 function liveWallGroupTile(s, pinned) {
   const g = s.group;
@@ -147,7 +152,7 @@ function liveWallTile(s, pinned) {
       h('span', {className:'wall-now', 'data-wall-now':s.id}, liveNow(s)),
       peek ? h('span', {className:'wall-peek', 'data-wall-peek':s.id, 'aria-hidden':'true'}, peek) : null),
     meta.length ? h('span', {className:'wall-meta meta'}, meta.map(x => h('span', {}, x))) : null,
-    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), liveWallTicketLink(s), liveWallPin(s, pinned), liveWallBeside(s)));
+    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), liveWallTicketLink(s), liveWallPin(s, pinned), liveWallBeside(s), ...liveWallEnd(s)));
 }
 function liveWallLine(s, pinned) {
   const meta = [liveTool(s), liveWarm(s)].filter(Boolean), now = liveNow(s);
@@ -156,7 +161,7 @@ function liveWallLine(s, pinned) {
     liveWallOpen(s, 'wall-lopen', liveWallStat(s), h('span', {className:'wall-key'}, s.key || ''), h('span', {className:'wall-tt'}, liveName(s)),
       h('span', {className:'wall-lnow', 'data-wall-now':s.id, 'aria-hidden':said ? null : 'true'}, said || '\u00a0')),
     meta.length ? h('span', {className:'wall-lmeta meta'}, meta.map(x => h('span', {}, x))) : null,
-    liveWallTicketLink(s), liveWallPin(s, pinned));
+    liveWallTicketLink(s), liveWallPin(s, pinned), ...liveWallEnd(s));
 }
 const LIVE_WALL_BANDS = [
   ['pin', 'Pinned', 'Nothing is pinned. Pin a session to keep it here.'],

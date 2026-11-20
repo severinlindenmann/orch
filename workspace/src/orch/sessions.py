@@ -7,7 +7,7 @@ ticket, so runs, slots, the idle close and `orch run attach` treat it like any h
 - empty: a helper with no ticket and no task yet (tickets.ensure_session "empty"). A normal helper for
   slots and the idle close; it works in the workspace folder and waits for the person's first message.
 - terminal: a plain terminal placeholder (tickets.ensure_session "terminal"): no process until the
-  terminal stage of the new Focus; it shows open until it is closed (`orch session close terminal`).
+  terminal stage of the new Focus; it shows open until it is ended (`orch session end terminal`).
 One of each per workspace: a second New of the same kind goes to the one that is there."""
 
 from __future__ import annotations
@@ -110,3 +110,15 @@ def close(root: Path, kind: str, by: str) -> dict:
     elif tid and runs.running(root, tid):
         closed = bool(runs_live.stop(root, tid, hold=True))
     return {**(one(root, kind) or {"kind": kind, "title": TITLES[kind]}), "closed": closed}
+
+
+def interrupt(root: Path, kind: str) -> dict:
+    """Stop only the current step of the session without a ticket of this kind (`orch session stop`,
+    ORCH-817): the session stays open. A plain terminal has no step to stop."""
+    if kind not in KINDS:
+        raise Refused(f"No such session without a ticket: {kind}. Choose one of: {', '.join(KINDS)}.")
+    if kind == "terminal":
+        raise Refused("A plain terminal has no step to stop. End it with: orch session end terminal")
+    tid = _id(root, kind)
+    done = bool(tid and runs.running(root, tid) and runs_live.interrupt(root, tid))
+    return {**(one(root, kind) or {"kind": kind, "title": TITLES[kind]}), "interrupted": done}
