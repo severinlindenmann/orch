@@ -138,6 +138,13 @@ def add_parsers(sub, common) -> None:
         "done", parents=[common], help="mark a message as handled (and get the ticket of an allowed task)"
     )
     x.add_argument("id")
+    x = rel.add_parser(
+        "pickups", parents=[common], help="texts from other workspaces passed on to a ticket, and their runs"
+    )
+    x.add_argument("--waiting", action="store_true", help="only those no helper run has taken yet")
+    x.add_argument("--started", metavar="MESSAGE", help="automation: record the run that took this message")
+    x.add_argument("--run", help="with --started: the run id")
+    x.add_argument("--not-started", help="with --started: why no run could take it (plain words)")
     t = argparse.ArgumentParser(add_help=False)
     t.add_argument("--ticket")
     t.add_argument("--dry-run", action="store_true", help="show what would leave this machine; send nothing")
@@ -698,6 +705,19 @@ def run_relay(args, root: Path, out) -> None:
         if r["ticket"]:
             txt += f" Ticket: {r['ticket']}"
         out(args, r, txt)
+    elif sub == "pickups" and args.started:
+        if not args.run and not args.not_started:
+            raise Refused("Say which run took it (--run <id>) or why none could (--not-started <why>).")
+        r = relay.pickup_started(root, args.started, args.run, args.not_started)
+        out(args, r, f"Recorded for {args.started}.")
+    elif sub == "pickups":
+        rows = relay.pickups(root, args.waiting)
+        lines = []
+        for r in rows:
+            where = "Chat" if r.get("general") else _ticket_word(root, r["ticket"])
+            state = f"run {r['run']}" if r.get("run") else r.get("not_started") or "waits for a helper"
+            lines.append(f"{r['id']}  from {relay.name_of(root, r['from'])}  to {where}  {state}")
+        out(args, rows, "\n".join(lines) or "No messages from other workspaces were passed on.")
     elif sub in ("send", "delegate", "start") and dry:
         with relay.dry_run():
             m = _build_send(root, args, sub, t)
@@ -739,6 +759,13 @@ def run_relay(args, root: Path, out) -> None:
         else:
             relay.webhook_delete(root, args.id)
             out(args, {"ok": True}, f"Deleted webhook {args.id}.")
+
+
+def _ticket_word(root: Path, tid: str) -> str:
+    try:
+        return str(tickets.load(root, tid).get("key") or tid)
+    except (Refused, ValueError, OSError):
+        return tid
 
 
 NOT_SENT = "Not sent yet - the relay can't be reached. It goes out with the next orch relay command."
@@ -859,6 +886,9 @@ def _inbox_line(i: dict, root: Path) -> str:
         from orch import chat_groups
 
         return f"{head}: {chat_groups.prompt_text(m)}{tail}"
+    if i["note"] and i.get("auto") and i.get("applied") and relay.is_peer_text(root, m):
+        # #2051: a workspace's text was passed on to a ticket by itself: what it said, and where it went
+        return f"{head}: {clean_untrusted(str(b.get('text') or ''), 300)} - {i['note']}{tail}"
     if i["note"]:
         return f"{head}: {i['note']}{tail}"
     reply = f' - reply: orch relay send {m["from"]} "<text>"' if m["from"].startswith("ph_") else ""

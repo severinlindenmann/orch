@@ -770,6 +770,51 @@ def test_closed_ticket_refuses_agent_ext_attach_and_attach_file_before_writing(p
     tickets.ext_unset(proj, tid, "demo.a", "human:t")
 
 
+@pytest.mark.parametrize("status", ["done", "dropped"])
+def test_closed_ticket_lets_an_agent_switch_a_repeat_off_and_nothing_else(proj, new_ticket, status):
+    """#2051: `orch automation repeat <t> --off` and `act off|delete` from a helper on a closed ticket:
+    switching
+    the repeat off (recurring false, paused true, removing it or its next start) goes through; switching it on
+    or changing anything else stays refused."""
+    tid = new_ticket()
+    rep = {"recurring": True, "cron": "0 * * * *", "next_run": "2026-11-20T17:00:00Z", "each_run": True}
+    tickets.ext_set(proj, tid, "automation", json.dumps(rep), "human:t")
+    tickets.ext_set(proj, tid, "demo", '{"a": 1}', "human:t")
+    tickets.set_status(proj, tid, status, "human:t")
+    msg = "This ticket is closed, so the agent can't change it."
+    for write in (
+        lambda: tickets.ext_set(proj, tid, "automation", '{"cron": "*/5 * * * *"}', "agent:claude"),
+        lambda: tickets.ext_set(
+            proj, tid, "automation", '{"recurring": false, "agent": "x"}', "agent:claude"
+        ),
+        lambda: tickets.ext_set(proj, tid, "automation", '{"paused": false}', "agent:automation"),
+        lambda: tickets.ext_set(proj, tid, "demo", '{"paused": true}', "agent:claude"),
+        lambda: tickets.ext_unset(proj, tid, "automation.cron", "agent:claude"),
+        lambda: tickets.ext_unset(proj, tid, "demo", "agent:claude"),
+    ):
+        with pytest.raises(Refused, match=msg):
+            write()
+    off = {**rep, "recurring": False}
+    tickets.ext_set(proj, tid, "automation", json.dumps(off), "agent:automation")
+    tickets.ext_set(proj, tid, "automation", '{"paused": true}', "agent:claude")
+    tickets.ext_set(proj, tid, "automation", '{"paused": true}', "agent:claude")  # already off: fine
+    assert tickets.load(proj, tid)["ext"]["automation"]["recurring"] is False
+    tickets.ext_unset(proj, tid, "automation.next_run", "agent:claude")
+    tickets.ext_unset(proj, tid, "automation", "agent:automation")
+    t = tickets.load(proj, tid)
+    assert "automation" not in t["ext"] and t["status"] == status
+
+
+def test_repeat_off_only():
+    cur = {"recurring": True, "paused": False, "cron": "0 * * * *"}
+    assert tickets.repeat_off_only(cur, {**cur, "recurring": False})
+    assert tickets.repeat_off_only(cur, {**cur, "paused": True, "recurring": False})
+    assert tickets.repeat_off_only(cur, dict(cur))
+    assert not tickets.repeat_off_only(cur, {**cur, "recurring": False, "cron": "*/5 * * * *"})
+    assert not tickets.repeat_off_only({**cur, "recurring": False}, {**cur, "recurring": True})
+    assert not tickets.repeat_off_only(cur, {**cur, "paused": 1})
+
+
 def test_agent_ext_attach_and_attach_file_work_on_an_open_ticket(proj, new_ticket):
     tid = new_ticket()
     (proj / "proof.txt").write_text("proof\n")
