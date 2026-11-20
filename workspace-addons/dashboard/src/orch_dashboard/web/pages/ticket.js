@@ -658,7 +658,9 @@ async function copyFileLink(url) {
 const viewerKind = name => window.FileViewer ? window.FileViewer.kindOf(name) : 'other';
 const viewerWord = kind => window.FileViewer ? window.FileViewer.word(kind) : 'File';
 function ticketFileEntries(t) {
-  const entries = ticketFileGroups(t).flatMap(g => g.files.map(file => fileEntry(t, g, file)));
+  // The files the person attached themselves belong in the tab and its count too (their Overview card stays), so "Files 0" never reads as lost files.
+  const mine = inputFiles(t), groups = mine.length ? [...ticketFileGroups(t), {label:'What you asked', kind:'artifacts', files:mine}] : ticketFileGroups(t);
+  const entries = groups.flatMap(g => g.files.map(file => fileEntry(t, g, file)));
   // A web page with its own stylesheet, script and pictures in a folder is ONE website, not four files.
   const sites = new Map(entries.filter(f => f.fileKind === 'page' && f.name.includes('/')).map(f => [f.name.slice(0, f.name.lastIndexOf('/') + 1), f]));
   const parts = new Map();
