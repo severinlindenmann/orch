@@ -60,3 +60,30 @@ def test_phones_and_admin_keep_their_words(tmp_path, monkeypatch):
     monkeypatch.setattr(relay, "refresh", lambda root: (_ for _ in ()).throw(AssertionError("no refresh")))
     assert _line(tmp_path, "phones") == "Message sent to the phones."
     assert _line(tmp_path, "admin") == "Message sent to the admin."
+
+
+def test_refresh_that_still_lacks_it_says_so(tmp_path, monkeypatch):
+    _write_list(tmp_path, [{"id": "ws_other00000", "name": "Home"}])
+    calls = []
+    monkeypatch.setattr(relay, "refresh", lambda root: calls.append(root) or "Updated")
+    assert _line(tmp_path, WS) == f"Message sent to {WS} (its name is not known here yet)."
+    assert len(calls) == 1
+
+
+def test_a_single_phone_is_named_after_a_refresh(tmp_path, monkeypatch):
+    phone = "ph_a1b2c3d4e5"
+    _write_list(tmp_path, [])
+
+    def fake_refresh(root):
+        d = root / ".agents" / "skills" / "orch-relay" / "workspaces.json"
+        d.write_text(json.dumps({"workspaces": [], "phones": [{"id": phone, "name": "My iPhone"}]}))
+
+    monkeypatch.setattr(relay, "refresh", fake_refresh)
+    assert _line(tmp_path, phone) == "Message sent to My iPhone."
+
+
+def test_not_sent_never_refreshes(tmp_path, monkeypatch):
+    _write_list(tmp_path, [])
+    monkeypatch.setattr(relay, "refresh", lambda root: (_ for _ in ()).throw(AssertionError("no refresh")))
+    line = cli_clients._sent_line(tmp_path, {"to": WS, "sent": False}, "Message sent to {}.")
+    assert line == cli_clients.NOT_SENT
