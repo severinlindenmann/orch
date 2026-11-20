@@ -106,6 +106,16 @@ def _is_chat_ticket(root: Path, tid: str) -> bool:
     return isinstance(st, dict) and st.get("ticket") == tid
 
 
+def not_allowed_text(t: dict) -> str:
+    """Plain words for a repeat that is not allowed on this computer, with the one command a person runs to allow it."""
+    from .syncapproval import allow_key
+
+    return (
+        "This repeat came by sync and is not allowed on this computer yet. "
+        f"To allow it, run: orch automation allow {t.get('key') or t['id']} --key {allow_key(t)}"
+    )
+
+
 def sync_refusal(root: Path, tid: str) -> str | None:
     """Plain words when sync is on and this ticket's automation block is not approved on this computer, else None."""
     from .syncapproval import allowed, sync_on
@@ -118,7 +128,7 @@ def sync_refusal(root: Path, tid: str) -> str | None:
         if current is None and not _is_chat_ticket(root, tid):
             return "This synced automation needs local approval."
         if current is not None and not allowed(root, current):
-            return "This synced automation needs local approval."
+            return not_allowed_text(current)
     return None
 
 
