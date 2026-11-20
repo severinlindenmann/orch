@@ -1046,17 +1046,21 @@ function pageStopped(r) {
 // the frame address's fragment (kit/frame.js takes it out at once); one orch did not ship gets no pass.
 const SHIPPED_SANDBOX = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
 const framePasses = new Map(), framePassAsks = new Map(), framePassFailed = new Map(), frameFresh = new Map();
+let frameGen = 0;  // a dashboard restart (framesForget) ends every pass ask still under way: its answer is the old run's
 function framePass(name) {
   if (framePasses.has(name)) return framePasses.get(name);
   if (framePassAsks.has(name) || Date.now() - (framePassFailed.get(name) || 0) < 10000) return null;
-  framePassAsks.set(name, fetch('/api/frame-pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({addon:name})})
+  const gen = frameGen;
+  const ask = fetch('/api/frame-pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({addon:name})})
     .then(r => r.ok ? r.json() : null)
     .then(j => {
+      if (gen !== frameGen) return;
       if (j && typeof j.pass === 'string' && typeof j.file === 'string') framePasses.set(name, {pass:j.pass, file:j.file, chan:frameChanNew()});
       else framePassFailed.set(name, Date.now());
     })
-    .catch(() => framePassFailed.set(name, Date.now()))
-    .finally(() => { framePassAsks.delete(name); if (framePasses.has(name)) render(); }));
+    .catch(() => { if (gen === frameGen) framePassFailed.set(name, Date.now()); })
+    .finally(() => { if (framePassAsks.get(name) === ask) framePassAsks.delete(name); if (gen === frameGen && framePasses.has(name)) render(); });
+  framePassAsks.set(name, ask);
   return null;
 }
 // A per-frame code the page's messages must carry: a document that is navigated into the frame (not the add-on's
@@ -1159,6 +1163,7 @@ globalThis.addEventListener?.('message', e => {
 // next drawing asks for a new pass and loads the add-on page anew: also one that failed while the dashboard was down
 // (its calls refused), which would wait for its own next refresh. A new element: a new #pass alone loads nothing.
 function framesForget() {
+  frameGen++; framePassAsks.clear();
   framePasses.clear(); framePassFailed.clear(); frameFresh.clear(); frameRetries.clear(); frameKeep = null;
   frameShown()?.remove();
 }

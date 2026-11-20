@@ -40,12 +40,18 @@ test('refresh and the click answers both note the run of the dashboard', () => {
 
 function passEnv() {
   const src = read('../src/orch_dashboard/web/pages/settings.js');
-  const maps = /const framePasses = new Map\(\), framePassAsks = new Map\(\), framePassFailed = new Map\(\), frameFresh = new Map\(\);/.exec(src)[0];
+  const maps = /const framePasses = new Map\(\), framePassAsks = new Map\(\), framePassFailed = new Map\(\), frameFresh = new Map\(\);\nlet frameGen = 0;/.exec(src)[0];
   const fp = /function framePass\(name\) \{[\s\S]*?\n\}\n/.exec(src)[0];
   const forget = /function framesForget\(\) \{[\s\S]*?\n\}\n/.exec(src)[0];
   const env = {calls:0, renders:0, ok:false, removed:0};
   env.frame = {remove:() => { env.removed++; env.frame = null; }};
-  const fetch = () => { env.calls++; return env.ok ? Promise.resolve({ok:true, json:() => ({pass:'p'.repeat(43), file:'f'.repeat(43)})}) : Promise.reject(new Error('down')); };
+  env.held = [];  // env.hold = true: the answer waits until released (a request still under way)
+  const fetch = () => {
+    env.calls++;
+    const pass = env.passNext || 'p'.repeat(43);
+    const answer = () => env.ok ? Promise.resolve({ok:true, json:() => ({pass, file:'f'.repeat(43)})}) : Promise.reject(new Error('down'));
+    return env.hold ? new Promise(done => env.held.push(() => done(answer()))).then(r => r) : answer();
+  };
   env.api = new Function('fetch', 'render', 'frameChanNew', 'frameRetries', 'frameShown', 'let frameKeep = {id:"insights"};\n' + maps + '\n' + fp + '\n' + forget +
     '\nreturn {framePass, framesForget, framePasses, kept: () => frameKeep, asks: framePassAsks};')(fetch, () => { env.renders++; }, () => 'c'.repeat(32), new Map(), () => env.frame);
   env.settle = () => Promise.all([...env.api.asks.values()]);
@@ -132,4 +138,18 @@ test('the frame is opened again at most 30 times for one address', () => {
   const env = retryEnv();
   for (let i = 0; i < 40; i++) { env.frame = {...env.frame}; env.send({orch:'frame-starting'}); env.tick(); }  // a new frame each time
   assert.equal(env.replaced, 30);
+});
+
+test('a pass asked of the old run and answered after the restart is not used', async () => {
+  const env = passEnv();
+  env.ok = true; env.hold = true; env.passNext = 'o'.repeat(43);
+  assert.equal(env.api.framePass('insights'), null);  // asked of the old run, still under way
+  env.api.framesForget();  // the new run answered something else first
+  env.hold = false; env.passNext = 'n'.repeat(43);
+  assert.equal(env.api.framePass('insights'), null);  // asked of the new run at once, not waiting for the old ask
+  assert.equal(env.calls, 2);
+  env.held.splice(0).forEach(f => f());  // the old run's answer arrives late
+  await new Promise(done => setTimeout(done, 0));
+  await env.settle();
+  assert.equal(env.api.framePass('insights').pass, 'n'.repeat(43));
 });
