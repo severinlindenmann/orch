@@ -50,9 +50,12 @@ field.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.metaKey||e.ctrlKey||
 return {field,add,clear,files:()=>files.slice(),restore:message=>{field.value=message.text;files=message.files.map(f=>({...f,progress:100}));draw();options.onDraft?.(field.value);field.focus()},
 recorder:voice,destroy(){voice?.destroy();target.removeEventListener('dragenter',onEnter);target.removeEventListener('dragover',onOver);target.removeEventListener('dragleave',onLeave);target.removeEventListener('drop',onDrop);overlay.remove();files.forEach(f=>f.reader?.abort())}};
 };
-/* UI.voiceRecorder({onDone(file, words), onError(message), lang, maxSecs}) -> {button, stop(), destroy()} or null where the
-   browser cannot record (no microphone access, or an http address that is not this computer). One click starts, one stops;
-   it stops by itself after maxSecs (5 minutes). Words only from speech recognition that runs on this computer. */
+/* UI.voiceRecorder({onDone(file, words), onError(message, code), onState(recording, {cancelled, empty}), lang, maxSecs,
+   words}) -> {button, start(), stop(), cancel(), secs(), destroy()} or null where the browser cannot record (no microphone
+   access, or an http address that is not this computer). One click starts, one stops; it stops by itself after maxSecs
+   (5 minutes). Words only from speech recognition that runs on this computer; words:false skips it (a page that gets
+   the words elsewhere, the new Focus message box through the relay: ORCH-696). A page may draw its own controls and
+   call start()/stop()/cancel(): cancel() drops the recording (no onDone). onError's code: 'blocked' or 'none'. */
 const VOICE_TYPES=[['audio/webm;codecs=opus','webm'],['audio/webm','webm'],['audio/ogg;codecs=opus','ogg'],['audio/mp4','m4a']];
 UI.voiceRecorder=(o={})=>{
  const MR=window.MediaRecorder,md=navigator.mediaDevices;if(!MR||!md||!md.getUserMedia)return null;
@@ -60,11 +63,12 @@ UI.voiceRecorder=(o={})=>{
  const icon=n=>(window.icon?window.icon(n,16):'');
  const button=document.createElement('button');button.type='button';button.className='btn sm voice-record';
  const idle=()=>{button.innerHTML=icon('mic')+'<span>Record</span>';button.classList.remove('rec');button.setAttribute('aria-pressed','false');button.title='Record a voice note';button.setAttribute('aria-label','Record a voice note');button.disabled=false};idle();
- let rec=null,stream=null,chunks=[],t0=0,timer=null,speech=null,words=[],gone=false;
+ let rec=null,stream=null,chunks=[],t0=0,timer=null,speech=null,words=[],gone=false,dropped=false,asking=0;
  const secs=()=>Math.max(1,Math.round((Date.now()-t0)/1000)),clock=n=>Math.floor(n/60)+':'+String(n%60).padStart(2,'0');
  const tick=()=>{const n=secs();button.lastChild.textContent='Stop · '+clock(n);if(n>=maxSecs)stop()};
  const release=()=>{clearInterval(timer);timer=null;stream?.getTracks().forEach(t=>t.stop());stream=null;try{speech?.stop()}catch(_){/* already ended */}speech=null};
  async function listen(){  /* speech to words, only on this computer (Chrome's on-device recognition); else none */
+  if(o.words===false)return;
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR||!('processLocally' in SR.prototype)||typeof SR.available!=='function')return;
   if(navigator.webdriver)return;/* a test browser has no on-device speech, and asking it crashed the headless one */
   const lang=o.lang||navigator.language||'en-US';
@@ -73,18 +77,21 @@ UI.voiceRecorder=(o={})=>{
   const r=new SR();r.lang=lang;r.processLocally=true;r.continuous=true;r.interimResults=false;
   r.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++)if(e.results[i].isFinal)words.push(e.results[i][0].transcript.trim())};
   r.onerror=()=>{};try{r.start();speech=r}catch(_){/* no words, the sound file is kept */}}
- async function start(){if(rec||gone)return;button.disabled=true;
-  try{stream=await md.getUserMedia({audio:true})}catch(e){idle();o.onError?.(e&&e.name==='NotAllowedError'?'The microphone is blocked. Allow it for this page in the browser, then record again.':'No microphone was found.');return}
-  if(gone){release();return}
+ async function start(){if(rec||gone||button.disabled)return;button.disabled=true;dropped=false;const ask=++asking;let got;
+  try{got=await md.getUserMedia({audio:true})}catch(e){if(ask!==asking||gone)return;asking=0;idle();const blocked=!!e&&(e.name==='NotAllowedError'||e.name==='SecurityError');o.onError?.(blocked?'The microphone is blocked. Allow it for this page in the browser, then record again.':'No microphone was found.',blocked?'blocked':'none');return}
+  if(ask!==asking||gone){got.getTracks().forEach(t=>t.stop());return}  /* cancelled while the browser asked: cancel() told the page */
+  asking=0;stream=got;
   chunks=[];words=[];try{rec=new MR(stream,{mimeType:kind[0]})}catch(_){rec=new MR(stream)}
   rec.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
-  rec.onstop=()=>{const n=secs(),type=rec.mimeType||kind[0];rec=null;release();idle();if(gone||!chunks.length)return;
+  rec.onstop=()=>{const n=secs(),type=rec.mimeType||kind[0];rec=null;release();idle();if(!gone)o.onState?.(false,{cancelled:dropped,empty:!chunks.length});if(gone||dropped||!chunks.length)return;
    const ext=/mp4/.test(type)?'m4a':/ogg/.test(type)?'ogg':'webm',d=new Date(),name='voice-note-'+String(d.getHours()).padStart(2,'0')+String(d.getMinutes()).padStart(2,'0')+'.'+ext;
    const file=new File(chunks,name,{type:type.split(';')[0]});o.onDone?.(file,words.join(' ').trim(),n)};
   rec.start(1000);t0=Date.now();button.disabled=false;button.classList.add('rec');button.setAttribute('aria-pressed','true');button.title='Stop recording';button.setAttribute('aria-label','Stop recording');
-  button.innerHTML=icon('stop')+'<span></span>';tick();timer=setInterval(tick,500);listen()}
+  button.innerHTML=icon('stop')+'<span></span>';tick();timer=setInterval(tick,500);o.onState?.(true,{});listen()}
  function stop(){if(rec&&rec.state!=='inactive'){try{speech?.stop()}catch(_){/* ended */}setTimeout(()=>{if(rec&&rec.state!=='inactive')rec.stop()},speech?400:0)}}
+ function cancel(){dropped=true;if(rec&&rec.state!=='inactive'){rec.stop();return}
+  if(asking){asking=0;idle();if(!gone)o.onState?.(false,{cancelled:true,empty:true})}}  /* still asking: at once; a microphone granted later is released */
  button.onclick=()=>rec?stop():start();
- return {button,stop,get recording(){return !!rec},destroy(){gone=true;if(rec&&rec.state!=='inactive')rec.stop();release()}};
+ return {button,start,stop,cancel,secs:()=>rec?secs():0,get recording(){return !!rec},destroy(){gone=true;asking=0;if(rec&&rec.state!=='inactive')rec.stop();release()}};
 };
 document.addEventListener('DOMContentLoaded',()=>document.querySelectorAll('[data-composer-demo]').forEach(root=>UI.composer(root,root.dataset.composerDemo==='voice'?{voice:true,accept:[...DEMO_EXT,'webm','ogg','m4a'],attachLabel:'Add file'}:root.dataset.composerDemo==='row'?{layout:'row',interrupt:false,attachLabel:'Add files',sendLabel:'Send',placeholder:'Message the helper',hint:'Paste a screenshot or drop files here · up to 10 files, 25 MB each'}:{})));})();

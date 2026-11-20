@@ -10,7 +10,7 @@
 //
 // Dashboard target: the real dashboard server and today's Focus server, each on fake data in a throw-away home under
 // ~/.orch-test, started with `env -i` (HOME, USERPROFILE and ORCH_HOME in that folder, ORCH_HOME_STRICT=1), so the
-// orch of this computer is never touched. Chromium runs with its own profile and --use-mock-keychain
+// orch of this computer is never touched. Chromium runs without a profile folder, with --use-mock-keychain
 // --password-store=basic (no keychain window). Pictures: <out>/<step picture>-<width>.png (draft: <key>-<width>-draft.png),
 // plus <out>/report.md. Exit 0 = every ready step passed at every width; pending steps never fail the run.
 'use strict';
@@ -167,7 +167,7 @@ async function main() {
   }
   fs.mkdirSync(o.out, { recursive: true });
   const results = [];
-  let browser, profile;
+  let chrome, browser, profile;
   try {
     if (o.target === 'dashboard' && todo.length) {
       servers.push(await serve('workspace-addons/dashboard', 'e2e/focus_insights/dashboard_server.py', 'focus-d-dash'));
@@ -175,7 +175,10 @@ async function main() {
     }
     const { chromium } = playwright();
     profile = fs.mkdtempSync(path.join(os.tmpdir(), 'focus-d-prof-'));
-    browser = await headless.launchPersistent(chromium, profile, o.video ? { recordVideo: { dir: path.join(profile, 'video'), size: { width: 1280, height: 800 } } } : undefined);
+    // a fake microphone that is always allowed (step 19 speaks into the message box with it, ORCH-696)
+    // launch() + newContext(), never a profile folder: with one macOS may show a keychain window (AGENTS.md, 20 Nov)
+    chrome = await headless.launch(chromium, { args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
+    browser = await chrome.newContext(o.video ? { recordVideo: { dir: path.join(profile, 'video'), size: { width: 1280, height: 800 } } } : {});
     if (o.target !== 'draft') await browser.addInitScript(() => {
       const f = window.fetch;
       window.fetch = (u, opts) => f(typeof u === 'string' && u.startsWith('/api/state') ? u.replace(/([?&])have=[^&]*&?/, '$1').replace(/[?&]$/, '') : u, opts);
@@ -196,6 +199,7 @@ async function main() {
     }
   } finally {
     if (browser) await browser.close();
+    if (chrome) await chrome.close();
     servers.forEach(x => x.stop());
     if (profile) fs.rmSync(profile, { recursive: true, force: true });
   }
