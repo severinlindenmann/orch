@@ -38,13 +38,14 @@ def dispatch(args, root: Path) -> bool:
         rows = addons.listing(root)
         have = [r for r in rows if r["installed"]]
         avail = [r for r in rows if not r["installed"]]
+        w = addons.name_width(r["name"] for r in rows)
         text = "\n".join(
-            f"  {r['name']:<12}{'on' if r['active'] else 'off':<6}{r['description']}" for r in have
+            f"  {r['name']:<{w}}{'on' if r['active'] else 'off':<6}{r['description']}" for r in have
         )
         text = text or "No add-ons are installed. Turn one on with: orch addon add <name>"
         if avail:
             text += "\n\nAvailable (not installed yet; add one with: orch addon add <name>)\n" + "\n".join(
-                f"  {r['name']:<12}{r['description']}" for r in avail
+                f"  {r['name']:<{w}}{r['description']}" for r in avail
             )
         _out(args, rows, text)
     elif sub == "add":

@@ -28,9 +28,7 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | something a helper learned here | Lesson (list: Lessons) | `orch lessons`, `l_...` | Memory, Tip |
 | a tool's way in that a helper needs (owner, ORCH-43) | Login / Connection / Key (caption under each name) | - | Token, Credential |
 | list of every login, connection and key (Settings, Helper tab; owner, ORCH-43) | What helpers need | - | Logins and keys, Helper access |
-| the small orch app on the person's notebook, connected on the relay admin page (owner, ORCH-605 draft A) | Notebook / Your notebook | `orch notebook`, `orch relay notebook`, `nb_...` | Laptop, Device, Desktop app |
-| one script on the notebook that reaches one source (Teams, Mail, a folder; owner, ORCH-605) | Way in ("Teams: the way in stopped working") | `ways/<name>/way.toml` | Connector, Integration, Plugin |
-| the notebook has not called the relay for 2 minutes | Asleep ("Notebook asleep, last seen 21:10") | `asleep` | Offline, Down |
+| one script in Personal that reaches one source on the person's own computer (Teams, Mail, a folder; owner, ORCH-605/ORCH-649) | Way in ("Teams: the way in stopped working") | - | Connector, Integration, Plugin |
 | a login, connection or key that is fine | Works | - | Working well |
 | a login that ends in a few days | Runs out soon · <date> | - | Expires, Ends in |
 | a login that stopped working | Needs renewing | - | Expired, Login ended |
