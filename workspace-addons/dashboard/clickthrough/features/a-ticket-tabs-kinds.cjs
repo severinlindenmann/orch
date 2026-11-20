@@ -56,11 +56,16 @@ module.exports = {
     await page.getByText(/Part of the epic/).click();
     await page.waitForFunction(id => location.hash.includes(id), epic, { timeout: 10000 });
 
-    // a release: its switch is on after a reload; a plain ticket's is off
+    // a release: its switch is on after a reload; a plain ticket hides the empty property and offers Release under
+    // + Add (ORCH-581)
     await open('#ticket/' + release);
     await reload();
-    must((await page.getByRole('switch', { name: 'This ticket is a release' }).getAttribute('aria-checked')) === 'true', 'the release switch is off on a release');
+    const sw = page.getByRole('switch', { name: 'This ticket is a release' });
+    await sw.waitFor({ timeout: 30000 });
+    must((await sw.getAttribute('aria-checked')) === 'true', 'the release switch is off on a release');
     await open('#ticket/' + links);
-    must((await page.getByRole('switch', { name: 'This ticket is a release' }).getAttribute('aria-checked')) === 'false', 'the release switch is on on a plain ticket');
+    await page.locator(`[data-key="props-add-${links}"] > summary`).click();
+    await page.locator(`[data-key="prop-add-release-${links}"]`).waitFor({ timeout: 10000 });
+    must(await page.getByRole('switch', { name: 'This ticket is a release' }).count() === 0, 'a plain ticket shows the release switch');
   },
 };
