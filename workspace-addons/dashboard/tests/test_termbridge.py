@@ -5,6 +5,7 @@ import functools
 import http.client
 import json
 import queue
+import re
 import secrets
 import shutil
 import subprocess
@@ -191,6 +192,12 @@ def post(port, path, body, secret="secret", origin=None, host=None):
     return out
 
 
+def _tmux_version() -> tuple[int, int]:
+    out = subprocess.run(["tmux", "-V"], check=False, capture_output=True, text=True).stdout
+    m = re.search(r"(\d+)\.(\d+)", out)
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
 def wait(cond, timeout=5.0):
     end = time.monotonic() + timeout
     while not cond() and time.monotonic() < end:
@@ -205,6 +212,21 @@ def clients():
 def test_unescape_turns_tmux_octal_back_into_bytes():
     assert termbridge._unescape(rb"a\033[1mb\134c\015\012") == b"a\x1b[1mb\\c\r\n"
     assert termbridge._unescape("ä€".encode()) == "ä€".encode()
+
+
+def test_a_flag_an_older_tmux_does_not_know_reads_0(helper):
+    # bracket_paste_flag came in tmux 3.7; CI's Ubuntu ships 3.4, where a bare unknown flag reads nothing
+    out = tm(
+        "display-message", "-p", "-t", f"={TID}:", termbridge._META.replace("bracket_paste", "no_such")
+    ).stdout
+    assert termbridge.draw(b"x\n", out.strip().encode()) is not None
+
+
+def test_a_notice_inside_an_answer_block_is_output_not_screen():
+    w = termbridge.Watch("s", "t")
+    w.pane = "%1"
+    assert w._notice(b"%output %1 hi\\015") and w.chunks[-1][1:] == ("out", b"hi\r")
+    assert not w._notice(b"plain line from capture-pane")
 
 
 def test_a_page_gets_the_screen_then_every_byte_and_typing_reaches_the_helper(helper, server, tmp_path):
@@ -405,13 +427,14 @@ def test_a_page_that_joins_gets_the_modes_the_program_turned_on(helper, server):
         "-c",
         "printf '\\033[?2004h\\033[?1h\\033[?1000hready'; cat",
     )
-    assert wait(
-        lambda: tm("display-message", "-p", "-t", f"={TID}:", "#{bracket_paste_flag}").stdout.strip() == "1"
-    )
+    # wait on the screen, not on bracket_paste_flag: that flag came in tmux 3.7 and CI's Ubuntu ships 3.4
+    assert wait(lambda: "ready" in tm("capture-pane", "-p", "-t", f"={TID}:").stdout)
     port = server().server_address[1]
     s = Stream(port)
     data = base64.b64decode(json.loads(s.next("screen")[1])["data"])
-    assert b"ready" in data and b"\x1b[?2004h" in data and b"\x1b[?1h" in data and b"\x1b[?1000h" in data
+    assert b"ready" in data and b"\x1b[?1h" in data and b"\x1b[?1000h" in data
+    if _tmux_version() >= (3, 7):  # an older tmux cannot tell whether bracketed paste is on
+        assert b"\x1b[?2004h" in data
     assert b"\x1b[?1003h" not in data  # only what is on
     s.close()
 
