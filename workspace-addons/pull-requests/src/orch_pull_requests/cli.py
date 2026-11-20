@@ -127,8 +127,18 @@ def _run(root: Path) -> int:
 
 
 # -- commands ----------------------------------------------------------------------------------------------
-def _show(row: dict) -> str:
-    t = f"  [{row['ticket']}]" if row.get("ticket") else ""
+def _key(root: Path, tid: str) -> str:
+    """The key people use (QE-1) for a ticket id; the id itself when the ticket cannot be read."""
+    try:
+        from orch import tickets
+
+        return str(tickets.load(root, tid).get("key") or tid)
+    except Exception:
+        return tid
+
+
+def _show(row: dict, root: Path | None = None) -> str:
+    t = f"  [{_key(root, row['ticket']) if root else row['ticket']}]" if row.get("ticket") else ""
     return f"{row['state']:8} {row['url']}{t}  {row.get('why') or ''}"
 
 
@@ -379,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
             else:  # what waits, and the last 50 that ended (the file keeps more for the audit)
                 done = [x for x in rows if x.get("state") in FINISHED]
                 shown = done[-50:] + [x for x in rows if x.get("state") not in FINISHED]
-                print("\n".join(_show(x) for x in rows if x in shown))
+                print("\n".join(_show(x, root) for x in rows if x in shown))
             return 0
         if args.sub == "audit":
             from . import audit
@@ -393,8 +403,7 @@ def main(argv: list[str] | None = None) -> int:
             if store.remove(root, args.url, _actor()):
                 print(f"Taken out of the merge queue: {args.url}")
                 return 0
-            print(f"{args.url} does not wait in the merge queue.")
-            return 1
+            raise Refused(f"{args.url} does not wait in the merge queue.")
         from .runner import admit
 
         url = store.canonical(args.url)

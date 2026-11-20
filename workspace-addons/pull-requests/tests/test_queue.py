@@ -488,7 +488,23 @@ def test_add_list_remove_commands(ws, monkeypatch, capsys):
     assert cli.main(["queue", "list", "--json"]) == 0
     assert [r["number"] for r in json.loads(capsys.readouterr().out)["entries"]] == [1, 2]
     assert cli.main(["queue", "remove", url(1)]) == 0
+    assert cli.main(["queue", "remove", url(1)]) == 2  # not in the queue: a refusal, not exit 1
+    assert "does not wait in the merge queue" in capsys.readouterr().err
     assert cli.main(["queue", "add", "not a url"]) == 2
+
+
+def test_list_shows_the_ticket_key(ws, monkeypatch, capsys):
+    from orch import tickets
+
+    monkeypatch.setattr(cli, "start_runner", lambda root: None)
+    monkeypatch.setattr(cli, "_github", lambda: FakeGitHub({1: {}}))
+    monkeypatch.setattr(cli, "_ticket", lambda root, ref, u: "t_abc123")
+    monkeypatch.setattr(tickets, "load", lambda root, tid: {"id": tid, "key": "QE-1"})
+    assert cli.main(["queue", "add", url(1), "--ticket", "t_abc123"]) == 0
+    capsys.readouterr()
+    assert cli.main(["queue", "list"]) == 0
+    out = capsys.readouterr().out
+    assert "[QE-1]" in out and "t_abc123" not in out
 
 
 @pytest.mark.parametrize("platform", ["darwin", "linux", "win32"])
