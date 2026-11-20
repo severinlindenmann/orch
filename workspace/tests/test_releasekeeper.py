@@ -1490,3 +1490,32 @@ def test_a_line_that_also_holds_a_stored_key_shows_no_text(monkeypatch):
     )
     got = rk.secret_lines("Release 35\n- pass: hunter2hunter2", None)
     assert [g["shown"] for g in got] == ["(not shown)", "(not shown)"]
+
+
+def test_a_branch_already_on_github_is_never_deleted_by_a_refused_cut(real_clone, monkeypatch):
+    w, clone, sha, wt = real_clone
+    br = f"release/part35-{rk.now().astimezone().strftime('%m%d')}"
+    _git("push", "-q", "origin", f"{sha}:refs/heads/{br}", cwd=clone)
+    with pytest.raises(Refused, match="on GitHub already"):
+        w.cut(35, sha, "Release 35\n- plain work (#1)")
+    assert br in _git("ls-remote", "--heads", "origin", cwd=clone)
+    assert not wt.exists() and _git("branch", "--list", "release/*", cwd=clone) == ""
+
+
+def test_a_worktree_git_made_before_failing_is_removed(real_clone):
+    w, clone, sha, wt = real_clone
+    hook = clone / ".git" / "hooks" / "post-checkout"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    with pytest.raises(Refused, match="git worktree"):
+        w.cut(35, sha, "Release 35")
+    assert not wt.exists() and _git("branch", "--list", "release/*", cwd=clone) == ""
+
+
+def test_a_local_branch_that_was_there_before_is_kept(real_clone):
+    w, clone, sha, wt = real_clone
+    br = f"release/part35-{rk.now().astimezone().strftime('%m%d')}"
+    _git("branch", br, sha, cwd=clone)
+    with pytest.raises(Refused, match="git worktree"):
+        w.cut(35, sha, "Release 35")
+    assert br in _git("branch", "--list", "release/*", cwd=clone)

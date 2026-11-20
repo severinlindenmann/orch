@@ -1006,6 +1006,7 @@ class World:
         def attempt():
             self.secret_hit = None
             wt.parent.mkdir(parents=True, exist_ok=True)
+            had_branch = self._git("rev-parse", "-q", "--verify", f"refs/heads/{br}").returncode == 0
             for argv in (
                 ["-C", str(self.cfg.clone), "worktree", "add", "-q", str(wt), "-b", br, sha],
                 [
@@ -1022,8 +1023,13 @@ class World:
                 ],
             ):
                 r = self._run(["git", *argv])
-                if argv[2] == "worktree" and r.returncode == 0:
-                    made["wt"] = made["branch"] = True
+                if (
+                    argv[2] == "worktree"
+                ):  # git can make both and still fail (a hook): count what is there now
+                    made["wt"] = wt.exists()
+                    made["branch"] = not had_branch and (
+                        self._git("rev-parse", "-q", "--verify", f"refs/heads/{br}").returncode == 0
+                    )
                 if r.returncode != 0:
                     raise Refused(f"git {argv[2]}: {(r.stderr or r.stdout).strip()[:200]}")
             if self._run(["git", "-C", str(wt), "diff", "--quiet", sha, "HEAD"]).returncode != 0:
@@ -1037,10 +1043,15 @@ class World:
                     f"line {h0['line']} of the release text looks like it holds {h0['words']}{more}: "
                     f"{h0['shown']}"
                 )
+            seen = self._run(["git", "-C", str(wt), "ls-remote", "--heads", "origin", br], timeout=120)
+            if seen.returncode != 0 or seen.stdout.strip():
+                raise Refused(
+                    f"the branch {br} is on GitHub already (or GitHub could not be read): look at it"
+                )
             r = self._run(["git", "-C", str(wt), "push", "-q", "-u", "origin", br], timeout=300)
             if r.returncode != 0:
                 raise Refused(f"push: {(r.stderr or r.stdout).strip()[:200]}")
-            made["pushed"] = True
+            made["pushed"] = True  # only a branch this cut put there (checked just before)
             r = self._run(
                 [
                     self.gh,
@@ -1695,8 +1706,9 @@ def secret_card(w: World, rel: dict, role: str, hit: dict) -> str:
     The keeper tries again every pass; the card only says what to change."""
     q = (
         f"Release {rel['n']} is not cut: line {hit['line']} of its release text looks like it holds "
-        f'{hit["words"]}: "{hit["shown"]}". The line comes from a ticket or pull request title: change '
-        "that title, and the next pass cuts the release by itself."
+        f'{hit["words"]}: "{hit["shown"]}". The line comes from a ticket title, or for a pull request '
+        "without a ticket from its merge commit: change the ticket's title (or link that pull request to a "
+        "ticket with a plain title), and the next pass cuts the release by itself."
     )
     args = [role, q, "--option", "I changed the title", "--option", "Leave it for now"]
     r = w.ask([*args, "--recommend", "I changed the title"]) if not (w.dry or w.sim is not None) else None
