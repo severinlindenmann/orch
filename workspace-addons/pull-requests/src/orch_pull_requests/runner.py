@@ -3,7 +3,7 @@
 One runner per workspace (lock folder `runner.lock`). It first checks which GitHub login gh uses: with the
 setting `[pull_requests] login` it runs only as that login, and it only takes entries added by its own login.
 While pull requests wait, it takes up to `[pull_requests] max_group` (default 5) of one repository and base
-branch, in line order:
+branch, the pull requests of higher priority tickets first (ORCH-813), else in line order:
 
 - several: one group commit (group.py) on top of the base branch on a branch `orch-queue/<base>-<time>`, one
   pull request for it, the core waiter merges that on green with a merge commit. GitHub then marks every
@@ -280,6 +280,8 @@ class Runner:
             rows = [r for r in rows if r["repo"] == follow.repo]
         if not rows:
             return [] if mine else None
+        # ORCH-813: higher priority tickets first, then line order; before the first row picks the repository
+        rows = by_priority(self.root, rows)
         cards = merge_cards(self.root)
         if cards is None:  # tickets unreadable: nothing is merged until it is known who merges what
             self.log("The tickets could not be read; the merge queue waits and tries again.")
@@ -954,6 +956,26 @@ class _Trouble:
 def _names(jobs) -> str:
     names = sorted(str(j) for j in jobs)
     return ", ".join(names[:4]) + (f" and {len(names) - 4} more" if len(names) > 4 else "")
+
+
+def by_priority(root: Path, rows: list[dict]) -> list[dict]:
+    """ORCH-813: waiting entries with the pull requests of higher priority tickets first (high, normal, low; a
+    ticket without one or that cannot be read counts as normal), in line order within each priority."""
+    from orch import tickets
+
+    order = list(tickets.PRIORITIES)
+    seen: dict[str, int] = {}
+
+    def rank(r: dict) -> int:
+        tid = r.get("ticket") or ""
+        if tid not in seen:
+            seen[tid] = order.index("normal")
+            if tid:
+                with contextlib.suppress(Exception):
+                    seen[tid] = order.index(tickets.priority(tickets.load(root, tid)))
+        return seen[tid]
+
+    return sorted(rows, key=rank)
 
 
 def _release_fix(root: Path, tid: str | None) -> bool:
