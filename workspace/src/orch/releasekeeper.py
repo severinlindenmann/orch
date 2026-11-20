@@ -1032,9 +1032,10 @@ class World:
             if hits:
                 self.secret_hit = hits[0]
                 more = f" (and {len(hits) - 1} more)" if len(hits) > 1 else ""
+                h0 = hits[0]
                 raise Refused(
-                    f"line {hits[0]['line']} of the release text looks like it holds {hits[0]['words']}{more}: "
-                    f"{hits[0]['shown']}"
+                    f"line {h0['line']} of the release text looks like it holds {h0['words']}{more}: "
+                    f"{h0['shown']}"
                 )
             r = self._run(["git", "-C", str(wt), "push", "-q", "-u", "origin", br], timeout=300)
             if r.returncode != 0:
@@ -1112,17 +1113,28 @@ class World:
 
 
 def secret_lines(text: str, root: Path | None) -> list[dict]:
-    """Every line of `text` the secret check stops at: {line, kind, words, shown}. `shown` is the line with the
-    value hidden, so a person can find the title it came from; a stored key's line shows no text at all."""
-    from orch import phone_view, secretscan
+    """Every line of `text` the secret check stops at: {line, kind, words, shown}. `shown` is the line with
+    the value hidden, so a person can find the title it came from. Masked per line: a line that also holds a
+    stored key, or a hider that cannot run, shows no text at all (fail closed)."""
+    from orch import phone_results, phone_view, secretscan
 
+    found = secretscan.find(text, root)
+    stored = {f["line"] for f in found if f["kind"] == "stored-key"}
+    hider = phone_results.value_hider(root) if root is not None else None
     rows = text.split("\n")
-    out = []
-    for f in secretscan.find(text, root):
-        raw = rows[f["line"] - 1] if 0 < f["line"] <= len(rows) else ""
-        shown = "(not shown)" if f["kind"] == "stored-key" else phone_view.redact(raw).strip()[:200]
-        out.append({**f, "words": secretscan.WORDS.get(f["kind"], "a secret"), "shown": shown})
-    return out
+
+    def shown(n: int) -> str:
+        if n in stored or not 0 < n <= len(rows) or (root is not None and hider is None):
+            return "(not shown)"
+        try:
+            masked = phone_view.redact(rows[n - 1])
+            masked = hider.hide_text(masked) if hider is not None else masked
+        except Exception:  # noqa: BLE001 - never show a line that could not be masked
+            return "(not shown)"
+        return masked.strip()[:200]
+
+    words = secretscan.WORDS
+    return [{**f, "words": words.get(f["kind"], "a secret"), "shown": shown(f["line"])} for f in found]
 
 
 def is_linux_x86_64(head: bytes) -> bool:

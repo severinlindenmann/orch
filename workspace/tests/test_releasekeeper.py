@@ -1478,3 +1478,15 @@ def test_a_secret_stop_puts_one_card_per_line_on_the_role_ticket(tmp_path, monke
     st["release"]["secret_card"] = None
     rk.cut_now(w, st, {"main": MAIN}, None)  # no role (a dry look): no card
     assert len(asked) == 1
+
+
+def test_a_line_that_also_holds_a_stored_key_shows_no_text(monkeypatch):
+    from orch import secretscan
+
+    monkeypatch.setattr(
+        secretscan,
+        "find",
+        lambda text, root=None: [{"kind": "secret-value", "line": 2}, {"kind": "stored-key", "line": 2}],
+    )
+    got = rk.secret_lines("Release 35\n- pass: hunter2hunter2", None)
+    assert [g["shown"] for g in got] == ["(not shown)", "(not shown)"]
