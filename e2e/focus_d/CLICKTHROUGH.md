@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-32 steps: 25 ready (the script clicks them), 7 pending (not built yet).
+32 steps: 26 ready (the script clicks them), 6 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -339,7 +339,7 @@ Must be seen:
 ## 19. Voice into the message box
 
 - Part: voice (draft D feature 13)
-- State: pending, waits for: Chat (crew tasks of the Chat stage)
+- State: ready, clicked by the script
 - Pictures: `fd-19-voice-1280.png`, `fd-19-voice-1920.png`, `fd-19-voice-390.png`
 
 Do:
@@ -353,6 +353,7 @@ Must be seen:
 - While listening the button says so and Esc cancels.
 - The words land in the box and are never sent by themselves.
 - With the relay off there is no microphone.
+- A blocked microphone or nothing heard is one plain sentence.
 
 ## 20. All 16 result widgets, small and big
 
