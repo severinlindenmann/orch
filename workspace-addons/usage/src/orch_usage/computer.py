@@ -1,4 +1,4 @@
-"""Usage is kept once per computer user (ORCH-943): the Claude and Codex logins belong to the computer user, not to a
+"""Usage is kept once per computer user (ORCH-943): the helper tools' logins belong to the computer user, not to a
 workspace, so two workspaces that each switched by their own rules swapped the account back and forth.
 
 Folder: `<orch tool home>/usage/` (the same home as running.json; ORCH_HOME in tests). It holds what Usage kept per
