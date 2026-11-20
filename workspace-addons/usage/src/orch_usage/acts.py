@@ -7,7 +7,7 @@ the rules, refusals and history lines are the CLI's own:
     period     <account>:<old period>:<new period>[:<YYYY-MM-DD>]
     order      <account>:up | <account>:down | <account>:<place>   (place: 1 is used first)
     on, off    <account>
-    end        <account>:<YYYY-MM-DD> | <account>:none
+    end        <account>:<YYYY-MM-DD>[T<HH:MM>] | <account>:reset | <account>:none   (the workspace's time zone)
     switching  on | off
     switcher   follow | take-over   (another workspace switches the accounts: follow it, or switch from here)
     seen       all-at-limit:<since> | switch-failed:<since>   (Got it on a warning card; since = its start time)
@@ -27,6 +27,7 @@ VERBS = ("limit", "period", "order", "on", "off", "end", "switching", "switcher"
 _ACC = r"a_[a-z0-9]{6}"
 _PERIOD = r"5h|week|month|until"
 _DAY = r"\d{4}-\d\d-\d\d"
+_DAY_TIME = r"\d{4}-\d\d-\d\d(?:T\d\d:\d\d)?"
 _KIND = "|".join(store.KINDS)
 _VALUE = r"none|\$?\d{1,7}(?:\.\d{1,4})?[%$]?"
 PATTERNS = {
@@ -35,7 +36,7 @@ PATTERNS = {
     "order": re.compile(rf"({_ACC}):(up|down|[1-9]\d{{0,2}})"),
     "on": re.compile(rf"({_ACC})"),
     "off": re.compile(rf"({_ACC})"),
-    "end": re.compile(rf"({_ACC}):({_DAY}|none)"),
+    "end": re.compile(rf"({_ACC}):({_DAY_TIME}|reset|none)"),
     "switching": re.compile(r"(on|off)"),
     "switcher": re.compile(r"(follow|take-over)"),
     "seen": re.compile(r"(all-at-limit|switch-failed):(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)"),
