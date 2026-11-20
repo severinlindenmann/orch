@@ -3,6 +3,7 @@
 import json
 import plistlib
 
+import pytest
 from conftest import CONTRACTS, WID, jrun, validator
 
 SCHEMA = CONTRACTS / "addons" / "services" / "service.schema.json"
@@ -67,6 +68,63 @@ def test_add_is_stopped_until_started_and_the_whole_cycle_works(cli, ws, fake):
 def test_add_with_start_runs_at_once(cli, fake):
     code, out = _add(cli, "web", "--start")
     assert code == 0 and out["service"]["state"] == "running" and "running" in out["next"]
+
+
+class _Clock:
+    """A clock the settle wait sleeps on, so a 90 second wait costs no time."""
+
+    def __init__(self):
+        self.t = 0.0
+
+    def monotonic(self):
+        return self.t
+
+    def sleep(self, n):
+        self.t += n
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    c = _Clock()
+    monkeypatch.setattr("orch_services.cli.time.monotonic", c.monotonic)
+    monkeypatch.setattr("orch_services.cli.time.sleep", c.sleep)
+    return c
+
+
+def test_slow_start_is_waited_for(cli, fake, clock):
+    _add(cli)
+    fake.start_polls = 50  # about 25 s of launching
+    code, out = jrun(cli, "start", "web")
+    assert code == 0 and out["service"]["state"] == "running" and out["next"] == "Started Web preview."
+
+
+def test_start_that_is_still_launching_says_so(cli, fake, clock):
+    _add(cli)
+    fake.start_polls = 10_000
+    code, out = jrun(cli, "start", "web")
+    assert code == 0 and "still starting" in out["next"] and "did not stay" not in out["next"]
+    assert clock.t >= 90
+
+
+def test_start_that_never_comes_up_fails_after_a_short_wait(cli, fake, clock):
+    _add(cli)
+    fake.start_dies = True
+    code, out = jrun(cli, "start", "web")
+    assert code == 0 and "did not stay running" in out["next"]
+    assert clock.t < 10
+
+
+def test_add_with_start_says_it_was_started(cli, fake, clock):
+    fake.start_polls = 10_000
+    code, out = _add(cli, "web", "--start")
+    assert code == 0 and "was started and is still starting" in out["next"] and "Start it:" not in out["next"]
+    fake.start_polls, fake.start_dies = 0, True
+    code, out = _add(cli, "api", "--start")
+    assert (
+        code == 0
+        and "started it, but it did not stay running" in out["next"]
+        and "Start it:" not in out["next"]
+    )
 
 
 def test_act_verbs_match_the_commands(cli, fake, ws):
@@ -268,6 +326,26 @@ def test_hidden_words_cannot_slip_past_the_scan(cli, ws, stored_keys):
     assert "gamma-part-55" not in lines and "delta-part-73" not in lines
 
 
+def test_add_says_why_even_when_a_word_also_looks_like_a_secret(cli, monkeypatch):
+    # ORCH-853: a moved workspace (keys bound to the old folder) plus one flagged word said "holds a secret"
+    from orch import keystore, phone_results
+
+    monkeypatch.setattr(phone_results, "value_hider", lambda root: None)
+
+    def refused(root):
+        raise keystore.Refused("Refused: this folder's saved keys still belong to /old/ws (moved).")
+
+    monkeypatch.setattr(keystore, "all_needles", refused)
+    code, out = jrun(
+        cli, "add", "Web", "--id", "web", "--", "python3", "app.py", "password: hunter2-long-value"
+    )
+    assert code == 2
+    assert out["error"] == (
+        "Could not compare the command with this workspace's stored keys, because "
+        "this folder's saved keys still belong to /old/ws (moved)."
+    )
+
+
 def test_add_says_why_when_the_stored_keys_cannot_be_read(cli, monkeypatch):
     # ORCH-371 bug 10: a harmless command was refused as "holds a secret" when the key store could not be read
     from orch import keystore, phone_results
@@ -281,5 +359,5 @@ def test_add_says_why_when_the_stored_keys_cannot_be_read(cli, monkeypatch):
     code, out = jrun(cli, "add", "Web", "--id", "web", "--", "python3", "-m", "http.server")
     assert code == 2
     assert out["error"] == (
-        "Could not compare the command with this workspace's stored keys: This is a test install outside the test folder."
+        "Could not compare the command with this workspace's stored keys, because This is a test install outside the test folder."
     )

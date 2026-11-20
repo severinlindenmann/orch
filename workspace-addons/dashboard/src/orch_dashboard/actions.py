@@ -277,12 +277,13 @@ def _review_answer(a):
 
 def review_error(out, stderr: str, status: int) -> str:
     """The JSON the Review page reads for a refused card: {"ok": false, "error": {"code", "message"}}. The core's
-    codes (changed, too_large, not_found, needs_person, refused) pass through; anything else is "refused"."""
+    codes (changed, too_large, not_found, needs_person, refused, busy, decided) pass through; anything else is
+    "refused". decided (ORCH-548): the Check result was decided elsewhere; the message says who and when."""
     code = out.get("code") if isinstance(out, dict) else None
     msg = out.get("error") if isinstance(out, dict) else None
     if not isinstance(msg, str) or not msg:
         msg = (stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
-    if code not in ("changed", "too_large", "not_found", "needs_person", "refused", "busy"):
+    if code not in ("changed", "too_large", "not_found", "needs_person", "refused", "busy", "decided"):
         code = "refused"
     return json.dumps({"ok": False, "error": {"code": code, "message": msg[:500]}}, ensure_ascii=False)
 
@@ -383,9 +384,11 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
 def _ticket_attach(a):
     """Files added to a ticket that already exists (a ticket page composer): one line in the history, the files go through
     `orch ticket attach` after it (see attachments / run_op)."""
-    _only(a, ("ticket", "files"))
+    _only(a, ("ticket", "files", "feedback"))
     if not isinstance(a.get("files"), list) or not a["files"]:
         raise BadRequest("Choose a file to add.")
+    if a.get("feedback") not in (None, True, False):
+        raise BadRequest("feedback is true or false.")
     return ["log", _tid(a.get("ticket"))], [], ["Added files to the ticket"]
 
 
@@ -696,16 +699,6 @@ def _typing_set(a):
     if type(a.get("on")) is not bool:
         raise BadRequest("Say on or off.")
     return ["config", "set", SESSION_TYPING_KEY, "on" if a["on"] else "off"], [], []
-
-
-def _focus_preview_set(a):
-    """The Preview switch on the live-session add-on's settings page: a plain `orch config set` (core names the key)."""
-    from orch.config import FOCUS_PREVIEW_KEY
-
-    _only(a, ("on",))
-    if type(a.get("on")) is not bool:
-        raise BadRequest("Say on or off.")
-    return ["config", "set", FOCUS_PREVIEW_KEY, "on" if a["on"] else "off"], [], []
 
 
 def _diag_delete(what):
@@ -1220,7 +1213,6 @@ OPS = {
     "live.set": _live_set,
     "diag.set": _diag_set,
     "typing.set": _typing_set,
-    "focus_preview.set": _focus_preview_set,
     "update.auto": _update_auto,
     "diag.delete_reports": _diag_delete("reports"),
     "copies.set": _copies_set,
@@ -1346,14 +1338,26 @@ def _without_agent(environ) -> dict:
         ) from None
 
 
-def _attach_all(root: Path, orch_bin: str, tid: str, files: list[tuple[str, bytes]]) -> dict:
+def _attach_all(
+    root: Path, orch_bin: str, tid: str, files: list[tuple[str, bytes]], feedback: bool = False
+) -> dict:
     """Keep each file with the new ticket through `orch ticket attach` (orch picks the name and checks type,
     content and size). A file that is refused does not undo the ticket: it is listed as failed."""
     saved, failed = [], []
     for hint, raw in files:
         try:
             r = _run(
-                [*argv0(orch_bin), "ticket", "attach", tid, f"--name={hint}", "--by", actor(root), "--json"],
+                [
+                    *argv0(orch_bin),
+                    "ticket",
+                    "attach",
+                    tid,
+                    f"--name={hint}",
+                    *(["--feedback"] if feedback else []),
+                    "--by",
+                    actor(root),
+                    "--json",
+                ],
                 check=False,
                 cwd=root,
                 capture_output=True,
@@ -1674,7 +1678,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         if files and op == "ticket.attach":
             out = {**(out if isinstance(out, dict) else {}), "id": args["ticket"]}
         if files and isinstance(out, dict) and isinstance(out.get("id"), str) and TID.fullmatch(out["id"]):
-            out["attached"] = _attach_all(root, orch_bin, out["id"], files)
+            feedback = op == "ticket.attach" and args.get("feedback") is True
+            out["attached"] = _attach_all(root, orch_bin, out["id"], files, feedback=feedback)
         return 200, "", out if isinstance(out, dict) else None
     if op == "review.answer":  # JSON the page reads: the code decides what it says (changed = look again)
         return 422, review_error(out, r.stderr, r.returncode), None
@@ -1758,6 +1763,8 @@ def _logins_cancel(a):
 PERSON_GRANT_OPS = frozenset(
     {"logins.renew", "logins.status", "logins.cancel", "logins.code", "logins.replace"}
 )
+# a signed-in answer may pick a draft, and a signed-in Done may finish a ticket that carries one (ORCH-582)
+DRAFT_GRANT_OPS = frozenset({"answer", "review.answer", "ticket.patch"})
 
 
 def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> tuple[dict, tuple[int, ...]]:
@@ -1778,6 +1785,15 @@ def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> tuple[dict
         except Exception:  # noqa: BLE001  no guarded orch home here: nothing to renew from this page
             raise Unavailable("orch cannot renew logins in this workspace.") from None
         fds = () if fd is None else (fd,)
+    elif op in DRAFT_GRANT_OPS and session:
+        # ORCH-582: a draft (and the Check of a ticket with one) is answered only by a signed-in person; the
+        # core takes nothing else as proof, whatever --by or --via say. Without a session: no grant, and the
+        # core refuses a draft (other cards answer as before).
+        from orch import renew
+
+        with contextlib.suppress(Exception):  # no guarded orch home: drafts stay unanswerable from here
+            fd = renew.hand_over(env, renew.GRANT_ENV, renew.grant(root))
+            fds = () if fd is None else (fd,)
     return env, fds
 
 

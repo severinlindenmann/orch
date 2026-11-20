@@ -155,6 +155,8 @@ def test_live_start_pastes_the_prompt_and_input_only_when_idle(proj, run, lab):
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(rec)
     pane = runs_live.tmux(proj, "display-message", "-p", "-t", runs_live.target(tid), "#{pane_pid}")
     assert rec["mode"] == "live" and rec["pid"] == int(pane.stdout.strip())  # the claim's pid is the pane pid
+    # ORCH-707: orch's own server passes focus events on, so the tool shows no tmux tip about them
+    assert runs_live.tmux(proj, "show-options", "-gv", "focus-events").stdout.strip() == "on"
     # the agent says it is ready by itself (`orch run done`): the prompt goes in once
     _until(lambda: _lines(lab, "input"), what="first prompt")
     assert "Do the thing" in _lines(lab, "input")[0]
@@ -286,7 +288,7 @@ def test_claude_live_hooks_session_idle_close_and_resume(proj, run, lab, tmp_pat
     hooks = proj / ".orch" / "run" / f"hooks-{r['run']}.json"
     assert oct(hooks.stat().st_mode & 0o777) == "0o600"
     cmds = {k: v[0]["hooks"][0]["command"] for k, v in json.loads(hooks.read_text())["hooks"].items()}
-    assert cmds["Stop"] == f"orch run event --run {r['run']} --kind idle"
+    assert cmds["Stop"] == cmds["StopFailure"] == f"orch run event --run {r['run']} --kind idle"
     _until(lambda: calls.exists() and calls.read_text().strip(), what="claude argv")
     line = calls.read_text().strip()  # the fake joins argv with spaces; the allow rules contain spaces
     argv = line.split()
@@ -376,6 +378,20 @@ def test_a_set_limit_of_four_and_the_fifth_starts_when_one_closes(proj, run, lab
     assert run("run", "stop", ids[0])[0] == 0  # a slot opens: the waiting ticket starts
     rec = _until(lambda: runs.read(proj, ids[4]), what="fifth started")
     assert rec["mode"] == "live" and len(runs_live.live_alive(proj)) == 4
+
+
+@needs_tmux
+def test_an_urgent_start_goes_past_the_limit(proj, run, lab, tmp_path, monkeypatch):
+    """ORCH-699: a red develop's fix ticket starts at once, also when every helper slot is taken."""
+    _fake_claude(tmp_path, monkeypatch)
+    _claude_live(proj)
+    config.set_live_max(proj, "2")
+    a, c, b = _ticket(run, "A"), _ticket(run, "C"), _ticket(run, "B")
+    assert run("run", "start", a)[0] == 0 and run("run", "start", c)[0] == 0
+    with pytest.raises(runs.Busy):
+        runs.start(proj, b, "tester")
+    runs.start(proj, b, "tester", over_limit=True)
+    assert runs.read(proj, b) is not None and len(runs_live.live_alive(proj)) == 3
 
 
 @needs_tmux
@@ -646,6 +662,37 @@ def _notice(proj, run_id, payload):
         [sys.executable, "-m", "orch", "run", "event", "--run", run_id, "--kind", "attention"],
         input=json.dumps(payload), text=True, cwd=proj, capture_output=True,
     )  # fmt: skip
+
+
+@needs_tmux
+def test_claude_turn_ended_by_an_error_counts_as_stopped(proj, run, lab, tmp_path, monkeypatch):
+    """ORCH-689 (report r-1118-2325-ws): a turn ended by a usage limit or a login that changed fires Claude's
+    StopFailure hook instead of Stop. orch must read it as stopped: before, the run stayed "working" for hours
+    and `orch run send` waited for a Stop that never came."""
+    calls, typed = _fake_claude(tmp_path, monkeypatch)
+    _claude_live(proj)
+    tid = _ticket(run)
+    r = json.loads(run("run", "start", tid, "--json")[1])
+    hooks = json.loads((proj / ".orch" / "run" / f"hooks-{r['run']}.json").read_text())["hooks"]
+    run("run", "event", "--run", r["run"], "--kind", "session")
+    _until(lambda: _notices(typed, tid) == 1, what="notice typed")
+    assert "Do the thing" in _take(run, tid, proj)
+    run("run", "event", "--run", r["run"], "--kind", "working")  # the helper works; then the login changes
+    run("run", "send", tid, "Carry on")
+    time.sleep(0.5)
+    assert _notices(typed, tid) == 1 and len(runs.undelivered(proj, tid)) == 1  # still busy: it waits
+    # the tool runs the hook command orch wrote for StopFailure, with its error payload on stdin
+    cmd = hooks["StopFailure"][0]["hooks"][0]["command"].split()
+    assert cmd[:2] == ["orch", "run"]
+    proc = subprocess.run(
+        [sys.executable, "-m", "orch", *cmd[1:]],
+        input=json.dumps({"hook_event_name": "StopFailure", "error": "authentication_failed"}),
+        text=True, cwd=proj, capture_output=True,
+    )  # fmt: skip
+    assert proc.returncode == 0 and proc.stderr == ""
+    # read as idle: the waiting message goes in at once (and the run is working on it again)
+    _until(lambda: _notices(typed, tid) == 2, what="the waiting message goes in")
+    assert "Carry on" in _take(run, tid, proj)
 
 
 @needs_tmux

@@ -1,5 +1,5 @@
 'use strict';
-// The live bar (draft D, ORCH-337): one calm row under every page while the Preview switch is on. Needs-you chips
+// The live bar (draft D, ORCH-337): one calm row under every page. Needs-you chips
 // (orange) and pinned chips first, then quiet counts (working, in line, idle) that open a list with search. It never
 // wraps: when the row is too narrow it folds step by step into counts (kit .lbar, data-fold). The dashboard names no
 // add-on: the live page is found by its live_session capability (pages/live.js).
@@ -32,8 +32,8 @@ const LIVEBAR_NEW = [
 // One row per live session: {id, key, title, s: wait|run|queue|idle, word, pin}, from the live sessions API
 // (pages/livesessions.js, ORCH-359): the same list the panes and the wall read.
 const liveBarModel = typeof liveBarRows === 'function' ? liveBarRows : require('./livesessions.js').liveBarRows;
-// One ticket's session from the dashboard's own state (helpers.js), for the ticket's session button: it shows without
-// the Preview switch, so it does not wait for the live sessions API. Same states as the bar: wait, run, queue, idle.
+// One ticket's session from the dashboard's own state (helpers.js), for the ticket's session button: it shows on its
+// own, so it does not wait for the live sessions API. Same states as the bar: wait, run, queue, idle.
 function liveTicketSession(t, run, helperState) {
   if (!t || !t.id || t.status === 'dropped' || !run) return null;
   const hs = helperState(run, t);
@@ -85,6 +85,7 @@ if (typeof module === 'object' && module.exports) {
     const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0, menu:false, busy:''};
     const liveAddon = () => array(state?.addons).find(a => a.page?.live_session === true) || null;
     const sessions = () => window.LiveSessions?.list || [];
+    const groups = () => window.LiveSessions?.groups || [];
     const pins = () => window.LiveSessions?.pins || [];  // kept by orch for the workspace (ORCH-361)
     const phone = () => window.matchMedia('(max-width: 720px)').matches;
     const link = (a, o) => '#addon/' + encodeURIComponent(a.name) + '/t/' + encodeURIComponent(o.id);
@@ -93,9 +94,10 @@ if (typeof module === 'object' && module.exports) {
     const sym = (s, text) => h('span', {className:'lbar-sym', 'data-s':s, 'aria-hidden':'true'}, text);
 
     function chip(a, o) {
-      return h('a', {className:'lbar-chip', href:link(a, o), 'data-s':o.s, 'data-key':'lbar-chip-' + o.id, 'data-lbar-open':o.id,
-        'aria-current':bar.panes.includes(o.id) ? 'true' : null, title:o.title + ' · ' + o.word},
-        sym(o.s, LIVEBAR_LISTS[o.s].sym), h('span', {}, label(o)));
+      const open = (o.members || [o.id]).some(id => bar.panes.includes(id));
+      return h('a', {className:'lbar-chip', href:link(a, o), 'data-s':o.s, 'data-key':'lbar-chip-' + (o.group || o.id), 'data-lbar-open':o.id,
+        'aria-current':open ? 'true' : null, title:o.title + ' · ' + (o.group ? o.line : o.word)},
+        sym(o.s, LIVEBAR_LISTS[o.s].sym), h('span', {}, label(o)), o.group ? h('span', {className:'lbar-n', 'aria-label':o.line}, String(o.n)) : null);
     }
     function count(all, l, compact) {
       const n = all.filter(o => liveBarIn(o, l)).length;
@@ -129,7 +131,7 @@ if (typeof module === 'object' && module.exports) {
       const list = all.filter(o => liveBarIn(o, bar.list) && (!q || (o.key + ' ' + o.title).toLowerCase().includes(q)));
       return list.length ? list.map(o => h('a', {className:'lbar-row', href:link(a, o), 'data-key':'lbar-row-' + o.id, 'data-lbar-open':o.id},
         h('span', {className:'lbar-st', 'data-s':o.s}, h('span', {className:'lbar-sym', 'aria-hidden':'true'}, LIVEBAR_LISTS[o.s].sym), o.word),
-        h('span', {className:'lbar-key'}, o.key), h('span', {className:'lbar-rn'}, o.title)))
+        h('span', {className:'lbar-key'}, o.key), h('span', {className:'lbar-rn'}, o.group ? o.title + ' · ' + o.line : o.title)))
         : [h('p', {className:'meta'}, 'No session matches.')];
     }
     function pop(a, all) {
@@ -207,7 +209,7 @@ if (typeof module === 'object' && module.exports) {
       }
     }
     function paint(force) {
-      const a = liveAddon(), on = typeof livePreviewOn === 'function' && livePreviewOn() && !!a;
+      const a = liveAddon(), on = typeof liveFocusOn === 'function' && liveFocusOn() && !!a;
       // the place that outlives a page change when the dashboard has one ([data-keep]), else the end of .shell-body
       const host = bar.host?.isConnected ? bar.host : document.querySelector('.shell-body [data-keep]') || document.querySelector('.shell-body');
       if (!on || !host) {
@@ -217,7 +219,7 @@ if (typeof module === 'object' && module.exports) {
       }
       window.LiveSessions?.sync();
       if (!window.LiveSessions?.ready && !bar.el) return;  // no "All calm" flash before the first answer
-      const all = liveBarModel(sessions(), pins());
+      const all = liveBarModel(sessions(), pins(), groups());
       const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, bar.list, bar.menu, bar.busy, bar.panes, bar.docked, phone(), window.innerWidth, needTotal()]);
       if (!force && sig === bar.sig && bar.el?.parentNode === host) return;
       bar.sig = sig;
@@ -272,7 +274,7 @@ if (typeof module === 'object' && module.exports) {
       if (!e.target.matches?.('[data-lbar-q]') || !bar.el?.contains(e.target)) return;
       bar.q = e.target.value;
       const a = liveAddon(), box = bar.el.querySelector('[data-lbar-rows]');
-      if (a && box) box.replaceChildren(...rows(a, liveBarModel(sessions(), pins())));
+      if (a && box) box.replaceChildren(...rows(a, liveBarModel(sessions(), pins(), groups())));
     });
     document.addEventListener('keydown', e => {
       if (e.key !== 'Escape' || !bar.el?.contains(document.activeElement)) return;

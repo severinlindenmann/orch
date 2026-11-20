@@ -112,3 +112,12 @@ test('ORCH-185: a picture shows itself in its row; its viewer says it was attach
   assert.equal(vm.runInContext("fileEntry(t, {kind:'artifacts'}, {name:'hero.png', size:99}).role", c), 'Attached by you');
   assert.equal(vm.runInContext("fileEntry(t, {kind:'artifacts'}, {name:'report.md', size:9}).role", c), 'Result');
 });
+test('files the person attached count in the Files tab and are listed there (ORCH-901)', () => {
+  const c = ctx(), t = {id:'t_two', status:'todo', history:[{by:'human:you', text:'Attached a.png'}, {by:'human:you', text:'Attached b.txt'}]};
+  vm.runInContext("artifactData.set('t_two', {at:Date.now(), data:{files:[{name:'a.png', size:10, mtime:'2026-11-19T09:00:00Z'}, {name:'b.txt', size:5, mtime:'2026-11-19T09:00:00Z'}]}})", c);
+  assert.equal(vm.runInContext('ticketFileCount', c)(t), 2);
+  assert.equal(JSON.stringify(c.ticketFileEntries(t).map(f => f.name).sort()), '["a.png","b.txt"]');
+  assert.equal(c.ticketFileEntries(t)[0].role, 'Attached by you');
+  assert.equal(vm.runInContext('reviewFile', c)({...t, status:'review'}), null, 'the person\'s own file is never shown as the result');
+  assert.doesNotMatch(text(h('div', {}, c.artifactsPanel(t))), /No files attached yet/);
+});

@@ -33,7 +33,7 @@ import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from orch import brake, config, ghmerge, history, runs, tickets
+from orch import brake, config, ghmerge, history, ownerpick, runs, tickets
 from orch.errors import Refused
 
 BY = tickets.REVIEWER
@@ -252,11 +252,31 @@ def part_match(part: str, items: list[dict]) -> tuple[list[str], list[str]]:
     return want, [w for w in want if w in seen]
 
 
+def review_result(root: Path | None, ticket: dict) -> dict | None:
+    """ORCH-826 (owner: "they should rather highlight if something is not good for me to check and not what
+    is good"): the result of a review ticket orch made itself (a security review of a pull request, the
+    Reviewer's second look), {"ok", "line", "what"}, or None (not one, or no result yet). An ok is accepted
+    for the owner like a small fix; a problem stays on the owner's list and its card leads with it."""
+    from orch import lookreview, secreview  # here: both read run files, and lookreview imports this module
+
+    for get in (secreview.ticket_result, lookreview.ticket_result):
+        try:
+            got = get(root, ticket)
+        except (OSError, ValueError, KeyError, TypeError, Refused):
+            got = None
+        if got is not None:
+            got["line"] = " ".join(str(got.get("line") or "").split())[:300] or "no details given"
+            return got
+    return None
+
+
 def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
     """{"verdict": accept | leave | back | wait, "why": one line}. `facts`: pr_facts per linked pull request
     (None = could not be read: wait, look again next pass). Pure apart from reading the ticket's evidence."""
     items = [c for c in ticket.get("checklist") or [] if isinstance(c, dict) and not c.get("wont_do")]
     proof = tickets.proof_state(ticket, root)
+    if ownerpick.carries_draft(ticket):  # ORCH-582: never accepted, sent back or put in line by the Reviewer
+        return {"verdict": "leave", "why": ownerpick.LEFT_WHY, "owner": True}
     if tickets._open_questions(ticket):
         return {"verdict": "leave", "why": "a question on this ticket waits for your answer."}
     gaps = [c["text"] for c in items if not c.get("done") or not c.get("evidence")]
@@ -277,6 +297,12 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
     missing = []
     if gaps:
         missing.append(gaps[0] if len(gaps) == 1 else f"{gaps[0]} (and {len(gaps) - 1} more)")
+    found = review_result(root, ticket)
+    if found is not None and not missing:  # ORCH-826: orch's own review: only a problem is the owner's
+        what = found["what"][:1].upper() + found["what"][1:]
+        if found["ok"]:
+            return {"verdict": "accept", "why": f"{what} found nothing for you: {found['line']}"}
+        return {"verdict": "leave", "why": f"{found['what']} found a problem: {found['line']}", "owner": True}
     if not facts:
         if missing:
             return _back_or_leave("work is missing: " + missing[0], sent_back)
@@ -369,6 +395,18 @@ def _write_state(root: Path, state: dict) -> None:
         runs._atomic(_state_path(root), json.dumps(state, indent=1) + "\n")
 
 
+LEFT_MAX = 300
+
+
+def remember_left(mine: dict, verdict: str, why: str) -> None:
+    """Keep why the Reviewer left a ticket for the person (the Reviewer was not sure), so Needs you can list
+    it as stuck (stuck.py, ORCH-426); any other verdict forgets it."""
+    if verdict == "leave":
+        mine["left"] = " ".join(str(why or "").split())[:LEFT_MAX]
+    else:
+        mine.pop("left", None)
+
+
 def _send_back(root: Path, tid: str, why: str) -> dict:
     note = f"The Reviewer found work missing: {why}. Finish it and send the ticket to Review again."
     t = tickets.ask_for_changes(root, tid, note, BY)
@@ -403,11 +441,14 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
         tid = t["id"]
         in_review.add(tid)
         mine = state.get(tid, {})
-        if mine.get("rev") == t.get("revision"):
-            continue  # decided already and nothing changed since
+        ok_now = bool((review_result(root, t) or {}).get("ok"))
+        if mine.get("rev") == t.get("revision") and not (ok_now and not mine.get("ok")):
+            continue  # decided already and nothing changed since (an ok recorded since: look once more)
         facts = [facts_of(u) for u in pr_urls(root, t)]
         res = decide(root, t, facts, int(mine.get("back") or 0))
-        if look and res["verdict"] == "leave" and tid not in own:  # bigger work: a second look (ORCH-175)
+        if (
+            look and res["verdict"] == "leave" and tid not in own and not res.get("owner")
+        ):  # second look (ORCH-175)
             res = lookreview.triage(t, facts, res, int(mine.get("back") or 0)) or res
         row = {"ticket": tid, "key": t.get("key") or tid, **res, "done": False}
         if res["verdict"] == "wait" or dry_run:
@@ -428,6 +469,9 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
             actions.append(row)
             continue
         mine["rev"] = after.get("revision")
+        if ok_now:
+            mine["ok"] = True
+        remember_left(mine, res["verdict"], res["why"])
         state[tid] = mine
         row["done"] = True
         actions.append(row)
@@ -506,6 +550,8 @@ def routine(root: Path, ticket: dict, q: dict, now: float | None = None) -> tupl
         return False, "a Chat question"
     if q.get("answer") is not None or q.get("taken_back") is not None:
         return False, "already settled"
+    if ownerpick.is_draft_card(q):  # ORCH-582
+        return False, "a draft for you to pick"
     if q.get("card") is not None or q.get("action") is not None:
         return False, "a card for you to see"
     if q.get("kind") not in (None, "plain"):
@@ -618,9 +664,20 @@ def accepted(root: Path, since: str) -> list[dict]:
     return out
 
 
-def accepted_text(rows: list[dict], word: str = "today") -> str:
+def picks_text(picks: list[dict]) -> list[str]:
+    """The morning list's own part for drafts (ORCH-582): what waits for the owner's pick, never mixed with
+    what the Reviewer did."""
+    if not picks:
+        return []
+    out = [f"Waiting for your pick: {_n('draft', len(picks))}"]
+    out += [f"- {r['key']} {r['title']}: {r['card']}" for r in picks]
+    return out
+
+
+def accepted_text(rows: list[dict], word: str = "today", picks: list[dict] | None = None) -> str:
+    tail = picks_text(picks or [])
     if not rows:
-        return f"Nothing was accepted for you {word}."
+        return "\n".join([f"Nothing was accepted for you {word}.", *tail])
     acc = [r for r in rows if not r.get("answer")]
     ans = [r for r in rows if r.get("answer")]
     out = []
@@ -633,4 +690,4 @@ def accepted_text(rows: list[dict], word: str = "today") -> str:
     if ans:
         out.append(f"Answered for you {word}: {_n('question', len(ans))}")
         out += [f"- {r['key']} {r['title']}: {r['why']}" for r in ans]
-    return "\n".join(out)
+    return "\n".join(out + tail)

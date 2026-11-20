@@ -935,7 +935,13 @@ class World:
         self.act(f"dispatch:{workflow}", go)
 
     def new_ticket(
-        self, parent: str, title: str, note: str, done_when: str, priority: str = "high"
+        self,
+        parent: str,
+        title: str,
+        note: str,
+        done_when: str,
+        priority: str = "high",
+        over_limit: bool = False,
     ) -> str | None:
         def go():
             try:
@@ -950,10 +956,13 @@ class World:
             except Refused as e:
                 return f"not opened ({e})"
             with contextlib.suppress(Exception):  # busy, paused or no agent: the ticket waits in line
-                runs.start(self.root, t["id"], BY, priority=priority)
+                runs.start(self.root, t["id"], BY, priority=priority, over_limit=over_limit)
             return str(t.get("key") or t["id"])
 
-        return self.act(f"ticket:{title}", go) or (None if self.sim is None else "t_sim")
+        got = self.act(f"ticket:{title}", go)
+        if isinstance(got, str) and got.startswith("not opened"):
+            self.did[-1] += " failed"  # act lists a step before it runs: no "opened" for a refusal
+        return got or (None if self.sim is None else "t_sim")
 
     def record_deployed(self, parts: list[str], sha: str, by: str) -> None:
         def go():
@@ -1339,7 +1348,7 @@ def red(w: World, st: dict, role: str, title: str, words: str, note: str, done_w
             w.note(cur.get("key") or cur["id"], f"Release keeper: still red. {note[:600]}")
             st["red_logged"] = title
         return [f"red, ticket {cur.get('key') or cur['id']} is open"]
-    tid = w.new_ticket(role, title, note, done_when)
+    tid = w.new_ticket(role, title, note, done_when, over_limit=True)  # a red base starts at once (ORCH-699)
     st["red_logged"] = title
     return [f"red: opened top ticket {tid} ({title})"]
 
@@ -2046,4 +2055,5 @@ def text(res: dict, dry_run: bool = False) -> str:
     if res.get("paused"):
         return "Automation is paused here: the release keeper did nothing. Turn it back on: orch resume."
     head = ["Dry run, nothing written."] if dry_run else []
-    return "\n".join(head + list(res.get("lines") or []) + [f"  did: {d}" for d in res.get("did") or []])
+    verb = "would" if dry_run else "did"  # act() lists a step before it skips it on a dry run
+    return "\n".join(head + list(res.get("lines") or []) + [f"  {verb}: {d}" for d in res.get("did") or []])

@@ -20,16 +20,12 @@ test('#addon/focus is the Focus page; #open/focus/ and #open/focus/t/<id> forwar
   assert.deepEqual({...route('#open/focus/t/t_abc12345', [FOCUS])}, {kind:'page', id:'focus', path:'t/t_abc12345', hash:'#addon/focus/t/t_abc12345'});
   assert.deepEqual({...route('#addon/focus/t/t_abc12345', [FOCUS])}, {kind:'page', id:'focus', path:'t/t_abc12345', hash:'#addon/focus/t/t_abc12345'});
 });
-// ORCH-264: the Preview switch. Off (the default): every address of the live-session add-on is its own page, unchanged.
-// On: the same addresses show the new live page (kind 'live'), with the same path and address. The dashboard names no
-// add-on: the page is found by its live_session capability.
+// Focus (ORCH-261, the only Focus since ORCH-816): the live-session add-on's addresses show the live page (kind 'live'),
+// with the same path and address; a shared copy has no live sessions. The dashboard names no add-on: the page is found
+// by its live_session capability.
 const LIVE = {name:'focus', page:{path:'/', live_session:true}, dashboard:{label:'Focus'}};
-test('the Preview switch turns the live-session add-on\'s addresses into the new page; off they stay as they are', () => {
-  const ctxOf = on => ({livePreviewOn: () => on, livePageOf: id => [LIVE].find(a => a.name === id) || null});
-  for (const extra of [{}, ctxOf(false)]) {
-    assert.equal(route('#addon/focus', [LIVE], extra).kind, 'page');
-    assert.equal(route('#addon/focus/t/t_abc12345', [LIVE], extra).kind, 'page');
-  }
+test('the live-session add-on\'s addresses are Focus; other pages stay as they are', () => {
+  const ctxOf = on => ({liveFocusOn: () => on, livePageOf: id => [LIVE].find(a => a.name === id) || null});
   const on = ctxOf(true);
   assert.deepEqual({...route('#addon/focus', [LIVE, OTHER], on)}, {kind:'live', id:'focus', path:'', hash:'#addon/focus'});
   assert.deepEqual({...route('#open/focus/t/t_abc12345', [LIVE], on)}, {kind:'live', id:'focus', path:'t/t_abc12345', hash:'#addon/focus/t/t_abc12345'});
@@ -40,13 +36,12 @@ test('the Preview switch turns the live-session add-on\'s addresses into the new
   assert.equal(route('#addon/focus/../x', [LIVE], on).kind, 'notfound');
 });
 const liveSource = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/live.js'), 'utf8');
-test('livePreviewOn reads the one setting: on only when it is exactly true, never in a shared copy', () => {
-  const on = (state, snapshot = false) => { const ctx = {state, snapshot}; vm.createContext(ctx); vm.runInContext(liveSource, ctx); return ctx.livePreviewOn(); };
-  assert.equal(on({settings:{focus_preview_on:true}}), true);
-  for (const s of [{settings:{focus_preview_on:false}}, {settings:{}}, {}, null, {settings:{focus_preview_on:'true'}}]) assert.equal(on(s), false);
-  assert.equal(on({settings:{focus_preview_on:true}}, true), false);
+test('liveFocusOn: always, with no setting, never in a shared copy', () => {
+  const on = (state, snapshot = false) => { const ctx = {state, snapshot}; vm.createContext(ctx); vm.runInContext(liveSource, ctx); return ctx.liveFocusOn(); };
+  for (const s of [{settings:{}}, {}, null, {settings:{focus_preview_on:false}}]) assert.equal(on(s), true, 'an old setting changes nothing');
+  assert.equal(on({settings:{}}, true), false);
 });
-test('the new live page is the wall with the Preview tag, the add-on\'s own name and a way back', () => {
+test('the live page is the wall under the add-on\'s own name, with no Preview tag and no way back', () => {
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, kids:kids.flat(Infinity).filter(Boolean)});
   const ctx = {h, fragment:(...k) => h('frag', {}, ...k), heading:(t, sub, o) => h('header', {}, h('h1', {}, t), o?.actions), addonLabel:a => a?.dashboard?.label, addons:() => [LIVE], encodeURIComponent,
     window:{}, liveWall:() => h('div', {'data-key':'live-wall'})};
@@ -56,11 +51,12 @@ test('the new live page is the wall with the Preview tag, the add-on\'s own name
   assert.equal(ctx.livePageOf('focus'), LIVE);
   assert.equal(ctx.livePageOf('automation'), null);
   const page = ctx.liveNextPage({kind:'live', id:'focus', path:''}), key = k => all(page).find(x => x.attrs?.['data-key'] === k);
-  assert.equal(text(key('live-next-tag')), 'Preview');
+  assert.match(text(page), /^Focus/);
+  assert.doesNotMatch(text(page), /Preview|today/);
+  assert.equal(key('live-next-tag'), undefined);
+  assert.equal(key('live-next-off'), undefined);
   assert.ok(all(key('live-next')).some(x => x.attrs?.['data-key'] === 'live-wall'), 'the wall fills the page (pages/livewall.js)');
-  assert.equal(text(key('live-next-off')), 'Back to today’s Focus');
-  assert.equal(key('live-next-off').attrs.href, '#settings/addons/focus');
-  assert.equal(all(page).filter(x => x.tag === 'iframe').length, 0, 'not today\'s page');
+  assert.equal(all(page).filter(x => x.tag === 'iframe').length, 0);
 });
 test('an add-on without a page keeps its own tab; path tricks fall back', () => {
   assert.equal(route('#addon/automation', [FOCUS, OTHER]).kind, 'addon');
@@ -163,15 +159,15 @@ test('the phone tab is role=tab and choosing it keeps Settings open at #settings
   assert.deepEqual(calls, ['push', 'render']);
   assert.equal(route(ctx.location.hash, []).kind, 'settings');
 });
-// ORCH-465: one ticket's address with Preview on opens that ticket's session in the layer, once per address.
-test('a ticket\'s address with Preview on opens its session in the layer, once, and only a known ticket', () => {
+// ORCH-465: one ticket's address opens that ticket's session in the layer, once per address.
+test('a ticket\'s address opens its session in the layer, once, and only a known ticket', () => {
   const ctx = {state:null, snapshot:false};
   vm.createContext(ctx); vm.runInContext(liveSource, ctx);
   const opened = [], layer = {open:(id, into) => opened.push([id, into])}, known = id => id === 't_abc12345';
   const r = hash => ({kind:'live', id:'focus', path:hash.replace('#addon/focus/', '').replace('#addon/focus', ''), hash});
   assert.equal(ctx.liveAddressTicket(r('#addon/focus/t/t_abc12345')), 't_abc12345');
   assert.equal(ctx.liveAddressTicket(r('#addon/focus')), null);
-  assert.equal(ctx.liveAddressTicket({kind:'page', path:'t/t_abc12345'}), null, 'Preview off: today\'s page handles it');
+  assert.equal(ctx.liveAddressTicket({kind:'page', path:'t/t_abc12345'}), null, 'only a Focus address');
   assert.equal(ctx.liveOpenFromAddress(r('#addon/focus/t/t_zzz'), layer, known), false, 'not loaded yet');
   assert.equal(ctx.liveOpenFromAddress(r('#addon/focus/t/t_abc12345'), layer, known), true);
   assert.equal(ctx.liveOpenFromAddress(r('#addon/focus/t/t_abc12345'), layer, known), false, 'every later render leaves it as the person put it');
@@ -195,4 +191,32 @@ test('the add-on frame takes the keyboard on load, never from a field or an open
   assert.equal(ctx.frameTakesKeys({...frame, isConnected:false}, doc(body)), false);
   assert.equal(frame.focused, 2);
   assert.match(settings, /frame\.addEventListener\('load', \(\) => frameTakesKeys\(frame\)\)/);
+});
+// ORCH-677: an address of a ticket that does not exist says so, once; the pane keeps the keyboard through a repaint.
+test('an unknown ticket address says so once, once the tickets are loaded', () => {
+  const ctx = {state:{tickets:[{id:'t_abc12345'}]}, snapshot:false};
+  vm.createContext(ctx); vm.runInContext(liveSource, ctx);
+  const said = [], say = t => said.push(t), layer = {open() {}}, known = id => id === 't_abc12345';
+  const r = hash => ({kind:'live', id:'focus', path:hash.replace('#addon/focus/', ''), hash});
+  assert.equal(ctx.liveOpenFromAddress(r('#addon/focus/t/t_zzz'), layer, known, say), false);
+  assert.equal(ctx.liveOpenFromAddress(r('#addon/focus/t/t_zzz'), layer, known, say), false);
+  assert.deepEqual(said, ['There is no ticket with this address.']);
+  ctx.state = {tickets:[]};
+  assert.equal(ctx.liveOpenFromAddress(r('#addon/focus/t/t_yyy'), layer, known, say), false, 'tickets not loaded yet: no word');
+  assert.equal(said.length, 1);
+});
+test('the layer puts the keyboard back into the pane after a repaint, until the person acts', () => {
+  const layerSrc = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/live-layer.js'), 'utf8');
+  const fn = layerSrc.slice(layerSrc.indexOf('let liveLayerWant'), layerSrc.indexOf('for (const type of'));
+  const calls = [];
+  const pane = {focused:0, contains:n => n === inner, querySelector:() => null, focus() { this.focused++; }}, inner = {};
+  const body = {}, doc = {body, activeElement:body, querySelector:() => pane};
+  const ctx = {document:doc, Date}; vm.createContext(ctx); vm.runInContext(fn + '; this.api = {take:liveLayerTake, want:v => { liveLayerWant = v; }, get w() { return liveLayerWant; }};', ctx);
+  ctx.api.want({id:'t_a', until:Date.now() + 5000});
+  ctx.api.take(); assert.equal(pane.focused, 1);
+  doc.activeElement = inner; ctx.api.take(); assert.equal(pane.focused, 1, 'already inside');
+  doc.activeElement = body; ctx.api.take(); assert.equal(pane.focused, 2, 'dropped by a repaint: back');
+  ctx.api.want({id:'t_a', until:Date.now() - 1}); ctx.api.take(); assert.equal(pane.focused, 2); assert.equal(ctx.api.w, null, 'expired');
+  assert.match(layerSrc, /tabindex:'-1', 'aria-label'/, 'the pane can take the keyboard');
+  assert.match(layerSrc, /liveLayerPad\(\);\n  liveLayerTake\(\);/, 'every paint');
 });

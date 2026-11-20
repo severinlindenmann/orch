@@ -45,6 +45,9 @@ test('the summary line reads right: "1 needs you", "3 need you", "Nobody needs y
   const many = [...one, sess('d', 'D', 'needs-you'), sess('e', 'E', 'needs-you'), sess('f', 'F', 'in-line'), sess('g', 'G', 'closed')];
   assert.deepEqual(wall.liveWallSummary(many).map(p => p.text), ['3 need you', '1 working', '1 in line', '1 idle']);
   assert.deepEqual(wall.liveWallSummary([sess('b', 'B', 'working')]).map(p => [p.s, p.text]), [['', 'Nobody needs you'], ['working', '1 working']]);
+  // ORCH-674: the wall reads the same one number as the live bar (results to check count too)
+  assert.deepEqual(wall.liveWallSummary([sess('b', 'B', 'working')], 2).map(p => [p.s, p.text]), [['needs-you', '2 need you'], ['working', '1 working']]);
+  assert.equal(wall.liveWallSummary(many, 1)[0].text, '3 need you');
   assert.equal(wall.liveWallSessions(1), '1 session');
   assert.equal(wall.liveWallSessions(24), '24 sessions');
   assert.equal(wall.liveWallSessions(0), '0 sessions');
@@ -78,7 +81,7 @@ test('folded bands are kept per workspace in this browser; broken or foreign dat
 test('loaded before app.js after the layer, served as a page module, names no add-on, a tile opens in the layer', () => {
   const index = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8'), at = f => index.indexOf('pages/' + f);
   assert.ok(at('livewall.js') > at('live-layer.js') && at('livewall.js') > at('livesessions.js') && at('livewall.js') < index.indexOf('src="app.js"'));
-  assert.match(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/server.py'), 'utf8'), /\|livewall\)/);
+  assert.match(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/server.py'), 'utf8'), /\|livewall[|)]/);
   const src = fs.readFileSync(path.join(WEB, 'pages/livewall.js'), 'utf8');
   assert.doesNotMatch(src.replace(/\.focus\(/g, ''), /\b(focus|automation|factory|insights|relay)\b/i, 'the wall never names the add-on');
   assert.match(src, /window\.LiveLayer\.open\(open\.dataset\.wallOpen, true\)/, 'zoom: the tile opens in the layer, the keyboard in its pane');
@@ -97,4 +100,12 @@ test('the look is the kit component: tokens only, orange needs-you tiles, a gall
   assert.match(block, /prefers-reduced-motion:reduce/);
   assert.match(fs.readFileSync(path.join(KIT, 'gallery.html'), 'utf8'), /id="live-wall"[\s\S]*class="wall-tile" data-s="needs-you"/);
   assert.match(fs.readFileSync(path.join(KIT, 'DESIGN.md'), 'utf8'), /### Live wall \(ORCH-360\)/);
+});
+
+test('an idle or closed session whose ticket waits for the person lands in Needs you, first (ORCH-790)', () => {
+  const list = [sess('t_a', 'ORCH-1', 'working'), sess('t_b', 'ORCH-2', 'closed', {needs:true}), sess('t_c', 'ORCH-3', 'idle', {needs:true}),
+    sess('t_d', 'ORCH-4', 'idle'), sess('t_e', 'ORCH-5', 'needs-you')];
+  const b = wall.liveWallBands(list, []);
+  assert.deepEqual(keys(b.need), ['ORCH-2', 'ORCH-3', 'ORCH-5', 'ORCH-1']);
+  assert.deepEqual(keys(b.idle), ['ORCH-4']);
 });

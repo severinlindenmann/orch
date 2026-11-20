@@ -71,7 +71,7 @@ test('plugs into the layer: a chip opens its session there, open ones are marked
   assert.match(src, /window\.LiveLayer\.open\(o\.dataset\.lbarOpen\)/, 'a chip or row opens in the layer when it is there');
   assert.match(src, /!e\.metaKey && !e\.ctrlKey && !e\.shiftKey/, 'a new-tab click stays a link');
   assert.match(src, /addEventListener\('orch:live-layer'/, 'the layer says which sessions are open');
-  assert.match(src, /'aria-current':bar\.panes\.includes\(o\.id\)/);
+  assert.match(src, /\(o\.members \|\| \[o\.id\]\)\.some\(id => bar\.panes\.includes\(id\)\)/, 'a chip is current when its session (or one of its group, ORCH-345) is open');
   assert.match(src, /end\(fn\) \{/, 'the layer puts Open and Place at the right end');
   assert.match(src, /mount\(host, opts = \{\}\)/);
   const css = fs.readFileSync(path.join(KIT, 'widgets.css'), 'utf8');
@@ -123,7 +123,7 @@ test('the ticket page and every ticket row use the one Focus button; a pane has 
   assert.match(list, /function ticketRowFocus/);
   assert.match(list, /ticketRowFocus\(t, nextAction\)/, 'the table row');
   assert.match(list, /function shortSide[^]*?liveFocusButton\(t\)/, 'the phone row');
-  assert.match(layer, /function liveFocusButton[^]*?livePreviewOn\(\)/, 'only behind the Preview switch');
+  assert.match(layer, /function liveFocusButton[^]*?liveFocusOn\(\)/, 'only where Focus runs');
   assert.match(layer, /'data-key':'live-open-ticket'/);
   assert.match(layer, /'data-key':'live-more-ticket'/);
 });

@@ -277,8 +277,8 @@
   }
   /* A helper's changes waiting to be added: shown as "Changes to add" from the ticket, not as a second row. */
   const isBringBack = row => !!row && row.kind === 'copies:bring-back';
-  /* The one "Needs you" number (Review menu entry, top bar, Home heading, Review page, Tickets pill, Focus): the open
-     questions plus the results to check, the same things the Review page shows as cards (owner, 16 Nov, ORCH-63).
+  /* The open questions plus the results to check, the same things the Review page shows as cards (owner, 16 Nov,
+     ORCH-63). The dashboard's one "Needs you" number (needsYouTotal) adds the rows of work that stopped (ORCH-705).
      One per question (a ticket with two open questions counts two); a ticket that only waits for another ticket, a
      failed start, a helper idle at its prompt and other rows without a question are shown on Home but not counted.
      results is a number or a list. */
@@ -834,6 +834,20 @@
     if (!state || !d || d.delta !== true || !state.rev || d.base !== state.rev || !Array.isArray(d.keys)) return null;
     const next = {};
     for (const k of d.keys) next[k] = Object.prototype.hasOwnProperty.call(d.set || {}, k) ? d.set[k] : state[k];
+    // ORCH-524: a top-level object (runs, settings) as only its changed entries and fields
+    for (const [k, p] of Object.entries(d.patch && typeof d.patch === 'object' ? d.patch : {})) {
+      const old = state[k];
+      if (!d.keys.includes(k) || !old || typeof old !== 'object' || Array.isArray(old) || !p || typeof p !== 'object') return null;
+      const v = {...old};
+      for (const sk of arr(p.drop)) delete v[sk];
+      Object.assign(v, p.set && typeof p.set === 'object' ? p.set : {});
+      for (const [sk, f] of Object.entries(p.fields && typeof p.fields === 'object' ? p.fields : {})) {
+        const o = v[sk];
+        if (!o || typeof o !== 'object' || Array.isArray(o) || !f || typeof f !== 'object') return null;
+        v[sk] = {...o, ...f};
+      }
+      next[k] = v;
+    }
     const byId = new Map(arr(state.tickets).map(t => [t && t.id, t]));
     for (const id of arr(d.remove)) byId.delete(id);
     for (const row of arr(d.upsert)) {
@@ -849,7 +863,16 @@
       delete t['~drop']; delete t['~append'];
       byId.set(row.id, t);
     }
-    const order = Array.isArray(d.order) ? d.order : arr(state.tickets).map(t => t && t.id).filter(id => byId.has(id));
+    const held = arr(state.tickets).map(t => t && t.id);
+    let order = held.filter(id => byId.has(id));
+    if (Array.isArray(d.order)) {  // ORCH-524: pieces of the held order ([start, count]) and single ids
+      order = [];
+      for (const part of d.order) {
+        if (typeof part === 'string') { order.push(part); continue; }
+        if (!Array.isArray(part) || part.length !== 2 || !Number.isInteger(part[0]) || !Number.isInteger(part[1]) || part[0] < 0 || part[1] < 1 || part[0] + part[1] > held.length) return null;
+        for (let i = part[0]; i < part[0] + part[1]; i++) order.push(held[i]);
+      }
+    }
     if (order.length !== byId.size || order.some(id => !byId.has(id))) return null;
     next.tickets = order.map(id => byId.get(id));
     return next;
