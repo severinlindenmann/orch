@@ -295,6 +295,11 @@ def main() -> int:
         if s not in REGISTRY:
             print(f"unknown scenario {s}; known: {', '.join(sorted(REGISTRY))}")
             return 2
+    if "V3-SIM" in ids and len(ids) > 1:
+        # V3-SIM never ends by itself (it waits for ctl/stop) and sorts before every V3-P*: in a list it would
+        # block the whole run (ORCH-1012, the V3 group hung for 20 minutes)
+        print("V3-SIM is a long-lived harness and runs alone: e2e/run.sh V3-SIM (stop it with ctl/stop)")
+        return 2
     if a.fast:
         ids = [s for s in ids if not REGISTRY[s]["slow"]]
     tmp, repo = Path(a.tmp), Path(a.repo)
