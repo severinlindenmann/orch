@@ -15,7 +15,7 @@ import unicodedata
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import orchcli, scripts
+from . import orchcli, roles, scripts
 from .cron import fmt, is_due, last_due, next_after, parse, valid
 from .orchcli import tickets as read_tickets
 from .plain import daily_or_slower, workspace_tz, zone
@@ -32,6 +32,13 @@ def scheduled(t: dict) -> bool:
 
 
 FAST_FAIL_SECONDS = 10
+TIME_LIMITS = (30, 45, 60, 75, 90, 120, 180)  # minutes a repeat's run may take (ext.automation.time_limit)
+
+
+def time_limit(t: dict | None) -> int | None:
+    """The minutes after which a repeat's run is stopped, or None (no limit)."""
+    v = (((t or {}).get("ext") or {}).get("automation") or {}).get("time_limit")
+    return v if isinstance(v, int) and not isinstance(v, bool) and v in TIME_LIMITS else None
 WAKE_RETRIES, WAKE_RETRY_MINUTES = 3, 5  # a wake-time start that failed: tries after the first, minutes apart
 QUEUED_TRIES = 3  # starts that failed for one waiting input before it is left for a person
 KIND = "automation:failure"
@@ -274,14 +281,17 @@ class Scheduler:
         if note:
             orchcli.log(self.root, tid, note)
         t = orchcli.ticket(self.root, tid)
+        n = None if note or not scheduled(t or {}) else roles.next_number(self.root, tid)
         res = orchcli.run_start(
             self.root,
             tid,
-            BUSY_TEXT if note else f"Automation asked for another run ({reason}).",
+            BUSY_TEXT if note else f"Automation asked for another run ({reason})." + (roles.prompt(tid, n) if n else ""),
             self.agent_of(t),
             mode=None if phone else "oneshot",
         )
         if res["result"] == "started":
+            if n:
+                roles.begin(self.root, tid, fmt(now))
             orchcli.log(self.root, tid, f"Automation started an agent run ({reason}).")
             starts = (load_state(self.root).get(tid, {}).get("starts") or [])[-49:]
             update_state(self.root, tid, starts=[*starts, fmt(datetime.now(UTC))])
@@ -352,8 +362,13 @@ class Scheduler:
             if running is None:
                 continue
             if running:
-                if time.time() - w["t0"] > FAST_FAIL_SECONDS:
-                    del self.watch[tid]
+                # ORCH-827: watched to its end (the role page shows how long each run took); a role's time limit
+                # stops a run that goes on too long, once
+                limit = time_limit(orchcli.ticket(self.root, tid))
+                if limit and not w.get("stopped") and time.time() - w["t0"] > limit * 60:
+                    w["stopped"] = True
+                    orchcli.call(self.root, "run", "stop", tid)
+                    orchcli.log(self.root, tid, f"Stopped after {limit} minutes: the time limit of this repeat.")
                 continue
             del self.watch[tid]
             took = 0
@@ -364,7 +379,7 @@ class Scheduler:
             t = orchcli.ticket(self.root, tid)
             quiet = t is not None and others(t) <= w["hist"]
             failed = took < FAST_FAIL_SECONDS and quiet
-            history(self.root, tid, w["at"], took, 1 if failed else 0)
+            history(self.root, tid, w["at"], took, 1 if failed or w.get("stopped") else 0)
             if failed:
                 self.fail(tid, "the agent stopped within 10 seconds without doing anything")
 
@@ -626,6 +641,7 @@ class Scheduler:
                     if (
                         parse(sched.get("next_run")) or now
                     ) <= now:  # once per interval, not every pass: core's
+                        roles.skipped(self.root, tid, fmt(now))  # the role page shows the skipped run (no cost)
                         nxt = next_after(cron, now, tz)  # health check must not call a waiting repeat stopped
                         if nxt:
                             orchcli.set_ext(self.root, t, next_run=fmt(nxt))

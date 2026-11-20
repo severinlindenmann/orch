@@ -14,7 +14,7 @@ from .cron import fmt, parse
 from .loop import group_of, record_last_run, script_of, start_group, start_script
 from .runner import update_state
 
-VERBS = ("on", "off", "toggle", "run", "delete", "repeat", "copy", "allow-script")
+VERBS = ("on", "off", "toggle", "run", "delete", "repeat", "copy", "allow-script", "limit", "quick")
 KEY = re.compile(r"[0-9a-f]{64}")
 TID = re.compile(r"t_[a-z0-9]{6,16}")
 
@@ -39,12 +39,29 @@ def _wake_up_used(root: Path, t: dict, result: str, by: str | None) -> None:
     orchcli.log(root, tid, "Automation started the helper (Start now on a wake-up).")
 
 
+def _saved(ok: bool, target: str, text: str) -> dict:
+    if not ok:
+        raise Bad("That could not be saved. Try again.")
+    return {"ticket": target, "text": text}
+
+
+def _run_now_helper(root: Path, t: dict, by: str | None, sched: dict) -> dict:
+    """Run now on a helper: a repeat's run gets its number and the result lines, like a planned run."""
+    from . import roles
+
+    n = roles.next_number(root, t["id"]) if sched.get("recurring") is True else None
+    r = orchcli.run_start(root, t["id"], text=("Run now." + roles.prompt(t["id"], n)) if n else None, by=by)
+    if n and r.get("result") == "started":
+        roles.begin(root, t["id"])
+    return r
+
+
 def act(root: Path, verb: str, target: str, by: str | None = None, value: str | None = None) -> dict:
     if verb not in VERBS:
         raise Bad("That is not something automation can do.")
     if not isinstance(target, str) or not TID.fullmatch(target):
         raise Bad("That is not a ticket id.")
-    if value is not None and verb not in ("repeat", "allow-script"):
+    if value is not None and verb not in ("repeat", "allow-script", "limit", "quick"):
         raise Bad("Only repeat takes a time.")
     if verb == "repeat":
         if not isinstance(value, str) or not value.strip() or len(value) > 200 or "\x00" in value:
@@ -87,6 +104,33 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
         except scripts.ScriptError as e:
             raise Bad(str(e)) from None
         return {"ticket": target, "script": name, "allowed": True, "text": "Script allowed."}
+    if verb == "limit":  # ORCH-827 Schedule: "Stops after N minutes" or no limit
+        from .loop import TIME_LIMITS
+
+        if sched.get("recurring") is not True:
+            raise Bad("Only a repeat has a time limit.")
+        if value == "none":
+            ok = orchcli.set_ext(root, t, remove=("time_limit",), by=by)
+            return _saved(ok, target, "No time limit. It counts from the next run.")
+        if not isinstance(value, str) or not value.isdigit() or int(value) not in TIME_LIMITS:
+            raise Bad("The time limit is one of " + ", ".join(map(str, TIME_LIMITS)) + " minutes, or none.")
+        ok = orchcli.set_ext(root, t, by=by, time_limit=int(value))
+        return _saved(ok, target, f"Stops after {value} minutes from the next run.")
+    if verb == "quick":  # ORCH-827 Schedule: Quick check first on or off (keeps the branch it watches)
+        if value not in ("on", "off") or sched.get("recurring") is not True:
+            raise Bad("Quick check is on or off, for a repeat.")
+        if value == "off":
+            if not sched.get("when_changed"):
+                return {"ticket": target, "text": "Quick check is already off."}
+            ok = orchcli.set_ext(
+                root, t, remove=("when_changed",), by=by, when_changed_off=sched["when_changed"]
+            )
+            return _saved(ok, target, "Quick check off: every planned time starts a helper.")
+        back = sched.get("when_changed") or sched.get("when_changed_off")
+        if not back:
+            raise Bad("There is nothing to check yet. A helper sets what to watch with orch automation repeat --when-changed.")
+        ok = orchcli.set_ext(root, t, remove=("when_changed_off",), by=by, when_changed=back)
+        return _saved(ok, target, "Quick check on: a run with nothing new is skipped and costs nothing.")
     if verb == "run":
         group = group_of(t)
         name = script_of(t) or (", ".join(sorted(group)) if group else None)
@@ -95,7 +139,7 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
             if group
             else start_script(root, t, name)
             if name
-            else orchcli.run_start(root, target, by=by)
+            else _run_now_helper(root, t, by, sched)
         )
         if r["result"] == "failed":
             raise Bad(r["reason"])

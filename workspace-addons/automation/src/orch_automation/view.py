@@ -532,9 +532,68 @@ def _runs(root: Path) -> list[dict]:
             r = json.loads(line)
         except ValueError:
             continue
-        if isinstance(r, dict) and parse(r.get("at")) and isinstance(r.get("exit"), int):
+        # a run the quick check skipped started nothing: it is on the role page, not in Recent starts
+        if isinstance(r, dict) and parse(r.get("at")) and isinstance(r.get("exit"), int) and not r.get("skipped"):
             out.append(r)
     return out
+
+
+def files_words(tot: dict) -> str:
+    """Run files nobody opened, in words: "2 unopened, 5 unknown"; "unknown" when nothing is measured."""
+    f = tot["files"]
+    if not any(f.values()):
+        return "none"
+    parts = [f"{f['unopened']} unopened" if f["unopened"] else "", f"{f['unknown']} unknown" if f["unknown"] else ""]
+    return ", ".join(x for x in parts if x) or "all opened"
+
+
+def roles_table(root: Path, tickets: list[dict]) -> dict | None:
+    """One row per repeating ticket that has run: runs, findings, the tickets they became (fixed / open / dropped)
+    and run files nobody opened. The same totals as the role's own ticket page (roles.totals)."""
+    from . import roles
+
+    by_id = {t["id"]: t for t in tickets}
+    rows = []
+    for t in tickets:
+        if ((t.get("ext") or {}).get("automation") or {}).get("recurring") is not True:
+            continue
+        rl = roles.runs(root, t)
+        if not rl:
+            continue
+        tot = roles.totals(root, t, by_id, rl)
+        skipped = tot["by_outcome"].get("skipped", 0)
+        runs_w = f"{tot['runs']}" + (f" ({skipped} skipped)" if skipped else "")
+        if tot["scripts"]:
+            runs_w += " \u00b7 " + ", ".join(f"{k} {v}" for k, v in sorted(tot["scripts"].items()))
+        rows.append(
+            {
+                "cells": {
+                    "role": _name(t),
+                    "runs": clean(runs_w, 120),
+                    "findings": str(tot["findings"]),
+                    "tickets": f"{tot['fixed']} fixed \u00b7 {tot['open']} open \u00b7 {tot['dropped']} dropped"
+                    if tot["tickets"]
+                    else "none",
+                    "files": files_words(tot),
+                },
+                "link": t["id"],
+            }
+        )
+    if not rows:
+        return None
+    return {
+        "type": "table",
+        "title": "What the roles found",
+        "columns": [
+            {"key": "role", "label": "Runs by itself", "type": "text"},
+            {"key": "runs", "label": "Runs", "type": "text"},
+            {"key": "findings", "label": "Findings", "type": "text"},
+            {"key": "tickets", "label": "Their tickets", "type": "text"},
+            {"key": "files", "label": "Files nobody opened", "type": "text"},
+        ],
+        "rows": rows[:20],
+        "more": max(0, len(rows) - 20),
+    }
 
 
 def build(root: Path, now: datetime | None = None) -> dict:
@@ -586,6 +645,9 @@ def build(root: Path, now: datetime | None = None) -> dict:
         }
         # the week strip sits above the stable table, and only with two or more schedules (one needs no calendar)
         blocks += [week, table] if len(sched_rows) >= 2 else [table]
+        found = roles_table(root, tickets)
+        if found:
+            blocks.append(found)
     else:
         blocks.append(
             {

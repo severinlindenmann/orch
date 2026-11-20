@@ -1451,3 +1451,24 @@ button.gtree-row:hover{background:var(--surface-2)}
 }
 @keyframes rail-in{from{transform:translateX(var(--s5));opacity:0}to{transform:none;opacity:1}}
 @media(prefers-reduced-motion:reduce){.rail-sheet{animation:none}}
+/* Role page: a ticket that runs by itself (ORCH-827, draft A2 the owner picked on ORCH-812). Header chip "Runs by
+   itself", the next-run strip with its facts, run rows that open in place, run cards in the chat thread, the orange
+   question card outside a Focus pane and the "Tell it something for the next run" box. */
+.role-strip .strip-h{align-items:center;gap:var(--s3) var(--s6)}
+.role-fact{display:grid;gap:var(--s1);min-width:0}
+.role-page .story-section .section-head{margin-bottom:0}
+.role-run{max-width:min(100%,var(--reading-width));gap:var(--s2)}
+.role-run-row>summary{list-style:none;cursor:pointer}
+.role-run-row>summary::-webkit-details-marker{display:none}
+.role-run-row+.role-run-row{border-top:1px solid var(--border)}
+.role-run-row[open] .role-open{visibility:hidden}
+.role-run-detail{padding-top:0;padding-left:calc(var(--s4) + var(--s5))}
+.role-run-detail ul{margin:0;padding-left:var(--s5)}
+.role-chat>.live-chat{max-height:50vh;margin-bottom:var(--s3)}
+.role-chat>.live-chat>*{flex:none}
+.role-chat .live-ask,.role-chat .ticket-question{margin:0;padding:var(--s3);border:1px solid var(--needs-you);border-radius:var(--r1);background:var(--warning-soft)}
+.role-say{display:flex;gap:var(--s2)}
+.role-say .input{flex:1;min-width:0}
+.role-say-hint{margin-top:var(--s2)}
+.role-more{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s1)}
+@media(max-width:720px){.role-fact.grow{flex-basis:100%}.role-run-detail{padding-left:var(--s4)}}
