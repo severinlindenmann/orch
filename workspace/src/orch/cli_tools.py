@@ -44,6 +44,8 @@ def _notes_text(t: dict) -> str:
     for s in t.get("notes") or []:
         out.append(f"What's new in {s['version']}:")
         out.extend(f"  - {x}" for x in s["lines"])
+    if not out and t.get("notes_error"):
+        out.append(t["notes_error"])
     if t.get("more"):
         out.append(f"  and {t['more']} more")
     if t.get("notes_url"):

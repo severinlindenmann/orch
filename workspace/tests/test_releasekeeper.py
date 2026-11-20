@@ -1368,3 +1368,23 @@ def test_walks_start_at_the_cut_with_the_commit_in_the_note(tmp_path, monkeypatc
     assert out["state"]["release"]["phase"] == "gate" and len(out["state"]["release"]["walks"]) == 3
     assert [t for t, _ in notes] == [f"Release 31: {k} walk" for k in ("install", "services", "clickthrough")]
     assert f"--commit {DEV[:12]}" in notes[0][1] and "Use the skill release-walk." in notes[0][1]
+
+
+def test_dry_run_text_says_would_not_did():
+    # ORCH-911: a dry run listed "did: security-review:#6" although it wrote nothing
+    res = {"off": False, "paused": False, "lines": ["one line"], "did": ["security-review:#6"]}
+    dry = rk.text(res, dry_run=True)
+    assert "would: security-review:#6" in dry and "did:" not in dry
+    assert "did: security-review:#6" in rk.text(res)
+
+
+def test_refused_ticket_is_listed_as_failed(tmp_path, monkeypatch):
+    # ORCH-911 review: a ticket the keeper could not open must not count as opened for the Next line
+    def refuse(*a, **k):
+        raise Refused("no such parent")
+
+    monkeypatch.setattr(tickets, "resolve", refuse)
+    w = rk.World.__new__(rk.World)
+    w.root, w.sim, w.dry, w.did = tmp_path, None, False, []
+    assert w.new_ticket("ORCH-1", "Develop is red", "n", "d").startswith("not opened")
+    assert w.did == ["ticket:Develop is red failed"]

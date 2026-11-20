@@ -12,15 +12,24 @@ instructions, connected services and logins, each from one place: comes with orc
 admin, or this computer. The person turns things off and on there; its clicks run these commands.
 
 ## When to use
-- The person asks what helpers get here, or why a helper does not see a skill: `orch skills list`.
-- The person asks to turn something off or on here: tell them to use the switch on the Skills page (or run
-  `orch skills off <id>` / `orch skills on <id>` in their own terminal; ids from the list, e.g.
-  `skill:orch:orch-hello`). Only a person can: under a helper tool these commands are refused.
-- Every change lands in `orch skills history` with who did it.
+- The person asks what helpers get here, or why a helper does not see a skill.
+- The person asks to turn something off or on here.
+- The person asks who changed what on the Skills page.
 
-## What off does
+## Recipes
+
+    orch skills list                      # everything helpers get here, with ids (add --json for the page's data)
+    orch skills off <id>                  # in the person's own terminal only, e.g. skill:orch:orch-hello
+    orch skills on <id>
+    orch skills history                   # who turned what off or on
+
+Tell the person to use the switch on the Skills page; under a helper tool `on` and `off` are refused.
+
+## Rules
+- Off is for this workspace only and never deletes a file.
 - orch's own and the admin's shared skills: orch stops linking them here (the files stay).
-- This workspace's and this computer's skills, connected services and the rules file in your home: Claude's own
-  switches in `.claude/settings.local.json` (orch writes and removes only its own lines).
-- A line "Codex still sees it" means that tool has no such switch yet.
+- This workspace's and this computer's skills, connected services and the rules file in your home: the helper
+  tool's own per-folder switches in its local settings file (orch writes and removes only its own lines).
+- A line "<tool> still sees it" means that tool has no such switch yet.
 - The main orch skill, the workspace's instruction files and logins cannot be turned off here.
+- Only a person turns things off or on; every change lands in the history with who did it.
