@@ -21,7 +21,7 @@
   const SESSION_LABEL = {
     'signed-in': ['Signed in', 'You can make changes here.'],
     'view-only': ['View only', 'Not signed in on this browser: open the dashboard from orch to make changes.'],
-    'agent': ['View only', 'Started by an agent. Restart with orch start in your terminal.'],
+    'helper': ['View only', 'Started by a helper. Restart with orch start in your terminal.'],
   };
   async function loadSession() {
     try {
@@ -55,7 +55,7 @@
       node('div', {className: 'menu-pop', role: 'menu'}, node('p', {className: 'eyebrow'}, 'You are'), ...items, add));
     root.append(d);
     const label = SESSION_LABEL[sess];
-    if (label) root.append(node('div', {className: 'nav-item meta session-state', role: 'status', 'data-testid': 'session-state', 'data-state': sess, title: label[1]}, node('span', {className: 'chip' + (sess === 'signed-in' ? '' : ' outline')}, label[0]), sess === 'agent' ? node('span', {}, ' ', label[1]) : null));
+    if (label) root.append(node('div', {className: 'nav-item meta session-state', role: 'status', 'data-testid': 'session-state', 'data-state': sess, title: label[1]}, node('span', {className: 'chip' + (sess === 'signed-in' ? '' : ' outline')}, label[0]), sess === 'helper' ? node('span', {}, ' ', label[1]) : null));
     if (adding) d.querySelector('input')?.focus();
   }
 

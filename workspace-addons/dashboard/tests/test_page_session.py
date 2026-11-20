@@ -985,9 +985,9 @@ def get_state(port, cookie=None):
     return r.status, json.loads(r.read())
 
 
-def test_session_state_says_signed_in_view_only_or_agent(live, monkeypatch):
+def test_session_state_says_signed_in_view_only_or_helper(live, monkeypatch):
     root, port = live
     assert get_state(port) == (200, {"state": "view-only"})
     assert get_state(port, session(root, port)) == (200, {"state": "signed-in"})
     monkeypatch.setattr(SERVERS[port].RequestHandlerClass.keywords["session"], "active", False)
-    assert get_state(port) == (200, {"state": "agent"})
+    assert get_state(port) == (200, {"state": "helper"})
