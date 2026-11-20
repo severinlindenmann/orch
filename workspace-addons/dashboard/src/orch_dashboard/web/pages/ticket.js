@@ -2099,7 +2099,18 @@ function inlineField(t, field) {
 async function saveField(t, field, value) {
   const same = o => String(o?.[field] ?? '') === String(t[field] ?? '');
   const result = await actRetry('ticket.edit', () => ({ticket:t.id, [field]:value, if_revision:(ticketOf(t.id) || t).revision}), () => same(ticketOf(t.id)));
-  if (!result.ok) window.orch.toast(changeError(result), 'error');
+  if (result.ok) return;
+  const now = ticketOf(t.id), theirs = now ? String(now[field] ?? '') : '';
+  if (result.status === 409 && now && !same(now) && theirs !== String(value)) {
+    // ORCH-903: someone changed this field while it was being edited: keep what was typed, one click applies it.
+    const shown = v => (field === 'owner' ? name(v) : clean(v)) || 'empty';
+    const mine = () => actRetry('ticket.edit', () => ({ticket:t.id, [field]:value, if_revision:(ticketOf(t.id) || t).revision}), () => true)
+      .then(r => { if (!r.ok) window.orch.toast(changeError(r), 'error'); });
+    mine.label = 'Use mine';
+    window.orch.toast('Someone just changed ' + FIELD_LABEL[field] + ' to "' + shown(theirs) + '". You typed "' + shown(value) + '".', 'error', mine);
+    return;
+  }
+  window.orch.toast(changeError(result), 'error');
 }
 function startInline(control) {
   const t = ticketOf(control.dataset.ticket), field = control.dataset.field, host = control.parentElement;
