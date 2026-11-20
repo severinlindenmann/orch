@@ -300,6 +300,9 @@ def test_every_account_at_its_limit_reaches_the_person_once_as_one_row(cli, swit
         assert _warn_ids(ws, 30 * n) == first
     (row,) = [r for r in switching.needs_rows(ws, at(150)) if r["id"] == first[0]]
     assert row["source"] == "usage" and row["ticket"] is None and row["tone"] == "bad"
+    # the title is not said again in the text, and the hint has no brackets inside brackets
+    assert not row["text"].lower().startswith("every account is at or near")
+    assert "(" not in row["cli"]
     assert (
         row["actions"][0]["verb"] == "seen" and row["actions"][0]["target"] == f"all-at-limit:{row['since']}"
     )
