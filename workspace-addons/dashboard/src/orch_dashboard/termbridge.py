@@ -45,6 +45,7 @@ LINGER = 5.0  # seconds a watch stays open after its last page left (a reload re
 MAX_PAGES = 8  # pages watching at once, all sessions together (each holds one server thread)
 MAX_BUFFER = 512 * 1024  # bytes kept for pages that fall behind; older ones get the screen again
 MAX_INPUT = 64 * 1024  # characters in one typing request (a long paste)
+MAX_NUL = 32  # Ctrl+Space keys in one typing request: each is its own tmux call (ORCH-745)
 PART = 1500  # characters per send-keys call: well inside one tmux message (16 KB) even when all are 4 bytes
 COLS, ROWS = (10, 500), (3, 300)  # the sizes a resize may ask for
 PANE = re.compile(r"%[0-9]{1,9}")
@@ -133,9 +134,15 @@ class Watch:
         self.pane = ""
         self.size = (0, 0)
         self.proc: subprocess.Popen | None = None
-        self.typing = threading.Lock()  # one typing request at a time
+        self.typing = (
+            threading.Lock()
+        )  # one typing, resize or claim at a time (who types is checked under it)
         self._asking = threading.Lock()  # one screen read written at a time
         self._owed: list[dict] = []  # screen reads waiting for their two answer blocks, oldest first
+        self.typer: str | None = None  # the one page that types now (its stream's id), ORCH-883
+        self.plain = False  # the plain terminal's shell: typing into it has its own switch (ORCH-261)
+        self.ids: set[str] = set()  # the ids of the streams open now: only one of them may claim the typing
+        self.own: tuple[int, int] | None = None  # the helper's own size before a page resized it, ORCH-881
 
     def start(self) -> bool:
         """Attach the control client; False when the session is gone or tmux cannot."""
@@ -277,12 +284,39 @@ class Watch:
                 return [], True
             return [c for c in self.chunks if c[0] > seq], False
 
+    def give_back(self) -> None:
+        """Typing ended: the helper's window goes back to the size it had before a page resized it (ORCH-881), so
+        it does not keep drawing a cramped screen for every later viewer."""
+        own, self.own = self.own, None
+        if own is None or not self.pane:
+            return
+        try:
+            _tmux(
+                self.sock, "resize-window", "-t", self.pane, "-x", str(own[0]), "-y", str(own[1]), ";",
+                "set-window-option", "-u", "-t", self.pane, "window-size",
+            )  # fmt: skip
+        except (OSError, subprocess.TimeoutExpired):
+            return
+        self.resized()
+
+    def release(self, page: str) -> None:
+        """This page stops typing (its switch, or it left): nobody types, the window gets its own size back."""
+        with self.typing:
+            if self.typer != page:
+                return
+            self.typer = None
+            self._push("typer", b"")
+            self.give_back()
+
     def close(self) -> None:
         with self.cond:
             if self.ended:
                 return
             self.ended = True
             self.cond.notify_all()
+        with self.typing:
+            self.typer = None
+            self.give_back()  # also when the last page left without turning typing off
         p = self.proc
         if p is not None:
             try:
@@ -305,11 +339,11 @@ def _reap() -> None:
         w.close()
 
 
-def join(root: Path, orch_bin: str | None, tid: str) -> Watch | str:
+def join(root: Path, orch_bin: str | None, tid: str, page: str = "") -> Watch | str:
     """Start watching the ticket's live session, or the plain terminal's shell (or join the watch that is on).
     The reason when there is none: 'none', 'oneshot', 'notmux' (as termsession.ref), 'busy' (too many pages)."""
     _reap()
-    r = termsession.ref(root, orch_bin, tid, plain=True)
+    r, shell = termsession.ref_kind(root, orch_bin, tid, plain=True)
     if isinstance(r, str):
         return r
     if not shutil.which("tmux"):
@@ -322,8 +356,11 @@ def join(root: Path, orch_bin: str | None, tid: str) -> Watch | str:
         if fresh:
             w = Watch(*r)
             _WATCHES[r] = w
+        w.plain = w.plain or shell  # once seen as the plain terminal, its own switch counts (never back)
         w.pages += 1
         _PAGES[0] += 1
+        if page:
+            w.ids.add(page)
     if fresh and not w.start():
         leave(w)
         w.close()
@@ -331,7 +368,11 @@ def join(root: Path, orch_bin: str | None, tid: str) -> Watch | str:
     return w
 
 
-def leave(w: Watch) -> None:
+def leave(w: Watch, page: str | None = None) -> None:
+    if page:
+        with _LOCK:
+            w.ids.discard(page)  # a late claim of this page is refused from now on
+        w.release(page)  # the page that typed left: the next one may type, the window gets its own size
     with _LOCK:
         w.pages = max(0, w.pages - 1)
         _PAGES[0] = max(0, _PAGES[0] - 1)
@@ -351,9 +392,49 @@ def watching(tid: str) -> Watch | None:
     return None
 
 
-def type_text(tid: str, data) -> tuple[int, str]:
+OTHER = "Another page is typing into this screen now."
+
+
+def _refused(w: Watch, may) -> str:
+    """may(plain) -> '' or the refusal text: the typing setting, asked for THIS watch (the plain terminal has its
+    own switch, ORCH-261), under its typing lock so it is the watch that takes the keys."""
+    return may(w.plain) if may is not None else ""
+
+
+def claim(tid: str, page, on, may=None) -> tuple[int, str]:
+    """A page turns its typing on (it becomes the one page that types; the page that typed before hears it and goes
+    back to watching) or off (ORCH-883)."""
+    if not isinstance(page, str) or not 0 < len(page) <= 64 or not isinstance(on, bool):
+        return 400, "That request could not be read."
+    w = watching(tid)
+    if w is None:
+        return 409, "There is no live session to type into."
+    if not on:
+        w.release(page)
+        return 200, "{}"
+    with w.typing:
+        no = _refused(w, may)
+        if no:
+            return 403, no
+        with _LOCK:
+            if (
+                page not in w.ids
+            ):  # only a page whose stream is open now (a claim after it left changes nothing)
+                return 409, "There is no live session to type into."
+        if w.typer != page:
+            w.typer = page
+            w._push("typer", page.encode())
+    return 200, "{}"
+
+
+def _typer_ok(w: Watch, page) -> bool:
+    """Only the page that turned typing on last types or resizes; with nobody typing, any page of the person."""
+    return w.typer is None or page == w.typer
+
+
+def type_text(tid: str, data, page: str | None = None, may=None) -> tuple[int, str]:
     """Send what the page typed (raw terminal input: text, control keys, escape sequences, a bracketed paste)."""
-    if not isinstance(data, str) or not 0 < len(data) <= MAX_INPUT:
+    if not isinstance(data, str) or not 0 < len(data) <= MAX_INPUT or data.count("\x00") > MAX_NUL:
         return 400, "That request could not be read."
     w = watching(tid)
     if w is None:
@@ -365,6 +446,13 @@ def type_text(tid: str, data) -> tuple[int, str]:
         for at in range(0, len(piece), PART):
             calls.append(["-l", "--", termsession._literal(piece[at : at + PART])])
     with w.typing:
+        no = _refused(w, may)
+        if no:
+            return 403, no
+        if not _typer_ok(
+            w, page
+        ):  # checked under the lock: a claim cannot come between the check and the keys
+            return 409, OTHER
         try:
             for args in calls:
                 if _tmux(w.sock, "send-keys", "-t", w.pane, *args).returncode != 0:
@@ -374,7 +462,7 @@ def type_text(tid: str, data) -> tuple[int, str]:
     return 200, "{}"
 
 
-def resize(tid: str, cols, rows) -> tuple[int, str]:
+def resize(tid: str, cols, rows, page: str | None = None, may=None) -> tuple[int, str]:
     """Give the helper's window this size (a page that was made bigger or smaller)."""
     if not all(isinstance(x, int) and not isinstance(x, bool) for x in (cols, rows)):
         return 400, "That request could not be read."
@@ -383,23 +471,32 @@ def resize(tid: str, cols, rows) -> tuple[int, str]:
     w = watching(tid)
     if w is None:
         return 409, "There is no live session to resize."
-    try:
-        r = _tmux(
-            w.sock, "resize-window", "-t", w.pane, "-x", str(cols), "-y", str(rows), ";",
-            "set-window-option", "-u", "-t", w.pane, "window-size",
-        )  # fmt: skip
-    except (OSError, subprocess.TimeoutExpired):
-        return 502, "The session did not answer."
-    if r.returncode != 0:
-        return 502, "The session did not take that."
-    w.resized()
+    with w.typing:  # with the claim and give_back: the saved own size is never one a page made
+        no = _refused(w, may)
+        if no:
+            return 403, no
+        if not _typer_ok(w, page):
+            return 409, OTHER
+        if w.own is None and w.size != (0, 0):
+            w.own = w.size  # given back when typing ends (give_back)
+        try:
+            r = _tmux(
+                w.sock, "resize-window", "-t", w.pane, "-x", str(cols), "-y", str(rows), ";",
+                "set-window-option", "-u", "-t", w.pane, "window-size",
+            )  # fmt: skip
+        except (OSError, subprocess.TimeoutExpired):
+            return 502, "The session did not answer."
+        if r.returncode != 0:
+            return 502, "The session did not take that."
+        w.resized()
     return 200, "{}"
 
 
-def stream(w: Watch, write, gone, ping: float = 15.0) -> None:
+def stream(w: Watch, write, gone, ping: float = 15.0, page: str = "") -> None:
     """Server-sent events to one page until the session ends or the page leaves: `screen` (the whole screen,
-    first and after falling behind), `out` (bytes, base64), `size`, then `end`. write(bytes) sends;
-    gone() says the page closed. Raises what write raises (the server ends the request then)."""
+    first and after falling behind), `out` (bytes, base64), `size`, `typing` {"by": "you" | "other" | "none"} (who
+    types now, ORCH-883), then `end`. write(bytes) sends;
+    gone() says the page closed or may no longer watch (asked about once a turn, also while output flows). Raises what write raises (the server ends the request then)."""
 
     def ev(name: str, data: str) -> None:
         write(f"event: {name}\ndata: {data}\n\n".encode())
@@ -410,6 +507,9 @@ def stream(w: Watch, write, gone, ping: float = 15.0) -> None:
             ev("end", json.dumps({"state": "none"}))
             return None
         ev("screen", json.dumps(got[0]))
+        t = w.typer  # who types now, also for a page that joins (or catches up) after the claim
+        if t:
+            ev("typing", json.dumps({"by": "you" if t == page else "other"}))
         return got[1]
 
     seq = screen()
@@ -424,6 +524,9 @@ def stream(w: Watch, write, gone, ping: float = 15.0) -> None:
         if ended:
             ev("end", json.dumps({"state": "none"}))
             return
+        # asked on every turn, also while output flows: a revoked sign-in ends the stream (ORCH-745)
+        if gone():
+            return
         got, behind = w.since(seq)
         if behind:
             seq = screen()
@@ -433,11 +536,14 @@ def stream(w: Watch, write, gone, ping: float = 15.0) -> None:
             continue
         for s, kind, payload in got:
             seq = s
-            ev("size", payload.decode()) if kind == "size" else ev("out", base64.b64encode(payload).decode())
+            if kind == "size":
+                ev("size", payload.decode())
+            elif kind == "typer":
+                by = "none" if not payload else "you" if payload.decode() == page else "other"
+                ev("typing", json.dumps({"by": by}))
+            else:
+                ev("out", base64.b64encode(payload).decode())
             last = time.monotonic()
-        if not got:
-            if gone():
-                return
-            if time.monotonic() - last >= ping:
-                write(b": ping\n\n")
-                last = time.monotonic()
+        if not got and time.monotonic() - last >= ping:
+            write(b": ping\n\n")
+            last = time.monotonic()
