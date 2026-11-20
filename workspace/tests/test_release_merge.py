@@ -10,6 +10,7 @@ from test_merge_card import HEAD, PR, FakeGh, _q
 from test_merge_card import gh as gh  # noqa: F401  (the fixture)
 
 from orch import brake, ghmerge, review, tickets
+from orch.releasekeeper import ROLLUP_JOBS
 
 GREEN = {"state": "OPEN", "head": HEAD, "green": True}
 
@@ -228,13 +229,14 @@ def test_release_problem(monkeypatch, gh_kw, want):
         assert fake.compared == [f"repos/acme/app/compare/{'b' * 40}...{HEAD}"]
 
 
+ROLL = next(iter(ROLLUP_JOBS))  # the CI roll-up job
 WIN = "workspace / test (windows-latest, 12/16)"
 KNOWN = {"workspace / test (windows-latest)": "ORCH-32, until 2026-11-30"}
 
 
-def _red(*failed, gate="FAILURE"):
+def _red(*failed, roll="FAILURE"):
     return {"state": "OPEN", "head": HEAD, "green": False,
-            "failed": [(n, gate if n == "gate" else "FAILURE") for n in failed]}  # fmt: skip
+            "failed": [(n, roll if n == ROLL else "FAILURE") for n in failed]}  # fmt: skip
 
 
 def _rollup(gh, *failed):
@@ -252,8 +254,8 @@ def test_red_only_in_named_exceptions_merges_by_itself(tk, run, gh):  # noqa: F8
     root, tid = tk
     _ask(run, tid, "--release")
     _on(run)
-    _rollup(gh, "gate", WIN)  # what the merge reads again at GitHub right before it merges
-    res = review.tend_releases(root, checks_of=lambda u: _red("gate", WIN), known_red=KNOWN)
+    _rollup(gh, ROLL, WIN)  # what the merge reads again at GitHub right before it merges
+    res = review.tend_releases(root, checks_of=lambda u: _red(ROLL, WIN), known_red=KNOWN)
     row = res["actions"][0]
     assert row["verdict"] == "merge" and row["done"] is True and gh.merges
     assert f"{WIN} (ORCH-32, until 2026-11-30)" in row["why"]
@@ -264,12 +266,12 @@ def test_red_only_in_named_exceptions_merges_by_itself(tk, run, gh):  # noqa: F8
 @pytest.mark.parametrize(
     ("facts", "known"),
     [
-        (_red("gate", WIN, "workspace / lint"), KNOWN),  # one red check without an exception
-        (_red("gate", WIN), None),  # `orch review tend-releases` alone: no exceptions passed
-        (_red("gate", WIN), {}),
-        (_red("gate"), KNOWN),  # only the roll-up: nothing names why
-        (_red("gate", WIN, gate="CANCELLED"), KNOWN),  # the roll-up itself was cut: not explained by WIN
-        (_red("gate", "workspace / test (windows-latest, arm64)"), KNOWN),  # another matrix axis, not a part
+        (_red(ROLL, WIN, "workspace / lint"), KNOWN),  # one red check without an exception
+        (_red(ROLL, WIN), None),  # `orch review tend-releases` alone: no exceptions passed
+        (_red(ROLL, WIN), {}),
+        (_red(ROLL), KNOWN),  # only the roll-up: nothing names why
+        (_red(ROLL, WIN, roll="CANCELLED"), KNOWN),  # the roll-up itself was cut: not explained by WIN
+        (_red(ROLL, "workspace / test (windows-latest, arm64)"), KNOWN),  # another matrix axis, not a part
         ({"state": "OPEN", "head": HEAD, "green": False, "failed": None}, KNOWN),  # a check still runs
         ({"state": "OPEN", "head": HEAD, "green": False}, KNOWN),
     ],
@@ -288,7 +290,7 @@ def test_named_exceptions_never_pass_the_release_check(tk, run, monkeypatch):
     _ask(run, tid, "--release")
     _on(run)
     monkeypatch.setattr(ghmerge, "release_problem", lambda url, head: "not from a release/ branch")
-    res = review.tend_releases(root, checks_of=lambda u: _red("gate", WIN), known_red=KNOWN)
+    res = review.tend_releases(root, checks_of=lambda u: _red(ROLL, WIN), known_red=KNOWN)
     assert [a["verdict"] for a in res["actions"]] == ["wait"] and not FakeGh.current.merges
 
 
@@ -328,14 +330,14 @@ def test_the_merge_reads_github_again_and_refuses_a_red_check_outside_the_except
     root, tid = tk
     _ask(run, tid, "--release")
     _on(run)
-    _rollup(gh, "gate", WIN, "workspace / lint (2)")
-    res = review.tend_releases(root, checks_of=lambda u: _red("gate", WIN), known_red=KNOWN)
+    _rollup(gh, ROLL, WIN, "workspace / lint (2)")
+    res = review.tend_releases(root, checks_of=lambda u: _red(ROLL, WIN), known_red=KNOWN)
     assert res["actions"][0]["verdict"] == "wait" and "checks have not all passed" in res["actions"][0]["why"]
     assert not gh.merges and _q(root, tid)["answer"] is None
-    _rollup(gh, "gate", WIN)
+    _rollup(gh, ROLL, WIN)
     with pytest.raises(tickets.Refused):
         ghmerge.merge(PR, HEAD)  # no exceptions: a red check stops the merge as before
-    ok = frozenset({("gate", "FAILURE"), (WIN, "FAILURE")})
+    ok = frozenset({(ROLL, "FAILURE"), (WIN, "FAILURE")})
     gh.rollup[1]["conclusion"] = "CANCELLED"  # the roll-up ran again and was cut: no longer what was excused
     with pytest.raises(tickets.Refused):
         ghmerge.merge(PR, HEAD, excused=ok)
@@ -345,5 +347,5 @@ def test_the_merge_reads_github_again_and_refuses_a_red_check_outside_the_except
     gh.rollup = []  # GitHub answers nothing: with exceptions nothing merges
     with pytest.raises(tickets.Refused, match="could not be read"):
         ghmerge.merge(PR, HEAD, excused=ok)
-    _rollup(gh, "gate", WIN)
+    _rollup(gh, ROLL, WIN)
     assert ghmerge.merge(PR, HEAD, excused=ok)["already"] is False and gh.merges
