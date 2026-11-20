@@ -522,3 +522,21 @@ def test_a_proposal_with_several_problems_names_them_all_at_once(ws, run, propos
     assert (
         r["error"].startswith("2 problems") and "stage in the line" in r["error"] and "own name" in r["error"]
     )
+
+
+def test_list_show_next_print_plain_lines_unless_json(ws, run, proposal):
+    """ORCH-959: without --json a person gets plain lines; --json prints the same data as JSON."""
+    order, _ = setup(run, proposal)
+
+    def plain(*args):
+        out = subprocess.run(
+            [sys.executable, "-m", "orch_factory", *args], cwd=ws, capture_output=True, text=True, check=True
+        ).stdout
+        assert not out.lstrip().startswith(("{", "[")), out
+        return out
+
+    assert order in plain("list") and "Booking page" in plain("list")
+    assert f"order: {order}" in plain("show", order)
+    assert f"order: {order}" in plain("next", order) and "step: " in plain("next", order)
+    assert run("list")[0]["order"] == order
+    assert run("show", order)["order"] == order

@@ -381,25 +381,16 @@ def test_shared_links_tab_hidden_until_sharing_is_set_up(monkeypatch):
     assert all(a["dashboard"] for a in out)
 
 
-def test_focus_preview_is_a_plain_setting_the_dashboard_can_switch(ws, monkeypatch):
-    """ORCH-264: the Preview switch for the new Focus is `orch config set focus.preview on|off`, off by default."""
+def test_there_is_no_focus_preview_switch_any_more(ws, monkeypatch):
+    """ORCH-816: the new Focus is the only Focus: no action, no settings op, no state field for the old switch."""
     from orch_dashboard import actions, data, server
 
-    assert actions.build_argv("focus_preview.set", {"on": True})[:4] == [
-        "config",
-        "set",
-        "focus.preview",
-        "on",
-    ]
-    assert actions.build_argv("focus_preview.set", {"on": False})[3] == "off"
-    for bad in ({"on": "yes"}, {}, {"on": True, "x": 1}):
-        with pytest.raises(actions.BadRequest):
-            actions.build_argv("focus_preview.set", bad)
-    assert "focus_preview.set" in server.SETTINGS_OPS
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("focus_preview.set", {"on": True})
+    assert "focus_preview.set" not in server.SETTINGS_OPS
     monkeypatch.setattr(data, "run_orch", lambda b, args, root: [] if args[:2] == ["addon", "list"] else None)
-    assert data.load_settings(ws, "orch")["focus_preview_on"] is False
-    (ws / ".orch" / "config.toml").write_text("[focus]\npreview = true\n")
-    assert data.load_settings(ws, "orch")["focus_preview_on"] is True
+    (ws / ".orch" / "config.toml").write_text("[focus]\npreview = true\n")  # an old file reads without error
+    assert "focus_preview_on" not in data.load_settings(ws, "orch")
 
 
 def test_typing_on_is_a_plain_setting_the_dashboard_can_switch(ws, monkeypatch):

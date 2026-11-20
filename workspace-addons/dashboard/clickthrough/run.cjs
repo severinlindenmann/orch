@@ -29,7 +29,7 @@ const REPO = path.resolve(__dirname, '..', '..', '..');
 let SIZE = { width: 1280, height: 900 };
 /** Add-ons of this checkout the demo home has installed (off until a click-through turns one on, see server.py):
  *  every orch the run starts sees the same ones. */
-const ADDONS = ['focus', 'lessons', 'pull-requests', 'factory', 'sync'];
+const ADDONS = ['focus', 'lessons', 'pull-requests', 'factory', 'sync', 'automation'];
 const UV_RUN = ['uv', 'run', '-q', '--project', path.join(REPO, 'workspace'),
   ...ADDONS.flatMap(n => ['--with-editable', path.join(REPO, 'workspace-addons', n)])];
 /** the env of every process of the run: the throw-away home only; ORCH_REPO = this checkout, so the add-ons
@@ -140,7 +140,7 @@ async function signIn(browser, srv) {
 
 /** Record what the page does: ops sent (with their answer) and the router kinds it showed. */
 function recorder(page, base) {
-  const rec = { ops: [], pages: new Set(), errors: [], refusedOk: new Set(), failed: [], offAddons: new Set(), offViews404: 0 };
+  const rec = { ops: [], pages: new Set(), errors: [], refusedOk: new Set(), failed: [], offAddons: new Set(), offViews404: 0, slowOk: new Set(), slow503: 0 };
   page.on('response', r => {
     if (r.status() < 400) return;
     const line = `${r.status()} ${r.request().method()} ${r.url().replace(base, '')}`;
@@ -149,6 +149,10 @@ function recorder(page, base) {
     // the view of an add-on the click-through itself just turned off (addonOff) may answer 404 once; that is fine
     const m = /^404 GET \/api\/addon\/([^/?]+)$/.exec(line);
     if (m && rec.offAddons.has(decodeURIComponent(m[1]))) rec.offViews404++;
+    // an add-on page's own answer that is still being built the first time says 503 "slow to answer" and the page
+    // shows Try again; a click-through that waits it out names that address (slowOk) and those 503s are not counted
+    const s = /^503 GET ([^?]+)/.exec(line);
+    if (s && rec.slowOk.has(s[1])) rec.slow503++;
   });
   page.on('pageerror', e => rec.errors.push(`uncaught exception: ${String(e.message).slice(0, 300)}`));
   page.on('console', m => {
@@ -157,6 +161,7 @@ function recorder(page, base) {
     // Chromium logs every 4xx answer as a console error; an action a click-through expects to be refused is fine
     if (/Failed to load resource: the server responded with a status of 4\d\d/.test(t) && rec.ops.some(o => o.status >= 400 && rec.refusedOk.has(o.op))) return;
     if (/Failed to load resource: the server responded with a status of 404/.test(t) && rec.offViews404 > 0) { rec.offViews404--; return; }
+    if (/Failed to load resource: the server responded with a status of 503/.test(t) && rec.slow503 > 0) { rec.slow503--; return; }
     // name the address of a failed load (Chromium's line does not)
     rec.errors.push(`console error: ${t.slice(0, 300)}${/Failed to load resource/.test(t) && rec.failed.length ? ` (${rec.failed.at(-1)})` : ''}`);
   });
@@ -283,6 +288,9 @@ function tools(page, srv, rec, shots = null) {
       t.orchAsPerson('addon', 'remove', name);
       return t.until(s => !(s.addons || []).some(a => a.name === name), `${name} off again`);
     },
+    /** the page's own GET at `address` (such as '/addon/factory/api/home') may answer 503 while its first answer is
+     *  still being built (the page says Try again); the click-through waits that out, so those 503s are no error */
+    slowOk(address) { rec.slowOk.add(address); },
     /** with --out: keep pictures of the page now at the UX checklist sizes, <file>-<name>-<w>.png (a state worth
      *  showing in a review), with `el` (a locator) scrolled into view; the window goes back to its size after */
     async shot(name, el = null) {
