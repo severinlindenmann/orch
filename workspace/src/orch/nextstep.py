@@ -312,6 +312,7 @@ HINTS = {
     "skill check": "after you change a skill, run it again: orch skill check",
     "skill list": "orch skill show <name>",
     "skill show": "orch skill check <name>",
+    "skill review-due": "orch ticket list",
 }
 
 

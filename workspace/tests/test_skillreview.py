@@ -98,7 +98,7 @@ def test_review_due_on_the_command_line_needs_no_ai(ws, run, monkeypatch):
     (row,) = json.loads(out)["opened"]
     assert row["skill"] == "github" and row["ticket"]
     code, out, _ = run("skill", "review-due")
-    assert code == 0 and out.strip() == "No skill is due for a look."
+    assert code == 0 and out.splitlines()[0] == "No skill is due for a look."
 
 
 def test_check_warns_about_a_passed_or_unreadable_date(ws):
