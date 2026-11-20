@@ -224,6 +224,26 @@ def test_log_masks_secrets_and_keeps_plain_lines(cli, ws, stored_keys):
     assert out.strip() == "listening on 8000"
 
 
+def test_log_masks_only_the_secret_part_of_a_line(cli, ws, stored_keys):
+    """ORCH-933: a key=value secret hides the value, not the whole line (the rest of the log stays useful)."""
+    _add(cli)
+    stored_keys["MY_TOKEN"] = "zq-stored-value-81723"
+    log = ws / ".orch/addons/services/logs/web.log"
+    written = [
+        "tick 5 password=hunter2isverylong123 TOKEN=abcDEF123456ghiJKL789",
+        "tick 6 API_KEY=hunter2hunter2hunter2 done",
+        "tick 7 all good [hidden]",
+    ]
+    log.write_text("\n".join(written) + "\n", encoding="utf-8")
+    code, out = jrun(cli, "log", "web")
+    assert code == 0
+    assert out["lines"] == [
+        "tick 5 password=•••••• TOKEN=••••••",
+        "tick 6 API_KEY=•••••• done",
+        "tick 7 all good [hidden]",
+    ], out["lines"]
+
+
 def test_view_is_a_valid_page(cli, ws):
     _add(cli, "web", "--start")
     _code, out, _ = cli("view", "--json")

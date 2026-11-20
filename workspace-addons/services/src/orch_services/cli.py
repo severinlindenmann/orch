@@ -239,15 +239,22 @@ def _masked_command(root: Path, argv: list[str]) -> list[str]:
 # ---------------------------------------------------------------- log lines
 
 
+# While masking, a hidden value is the core's own placeholder: the scan knows "password=[hidden]" is already
+# hidden, but reads "password=••••••" as a new value and would hide the whole line (ORCH-933). The •••••• is
+# put in only for display, after every scan.
+HIDDEN = "[hidden]"
+
+
 def _mask_line(line: str, root: Path) -> str:
-    """The line with the secret value replaced by ••••••; the whole line when the value cannot be told apart."""
+    """The line with the secret value replaced by [hidden]; the whole line (MASK) when the value cannot be told
+    apart."""
     from orch import secretscan
 
     out = line
     for _kind, rx in secretscan.PATTERNS:
-        out = rx.sub(MASK, out)
+        out = rx.sub(HIDDEN, out)
     # key=value, key: value, --flag value: keep the name, hide what follows it
-    out = re.sub(r"(?i)([\w.-]*(?:[=:]\s*|\s+--?[\w-]+\s+))(\S+)", lambda m: m.group(1) + MASK, out)
+    out = re.sub(r"(?i)([\w.-]*(?:[=:]\s*|\s+--?[\w-]+\s+))(\S+)", lambda m: m.group(1) + HIDDEN, out)
     try:
         still = secretscan.find(out, root)
     except Exception:  # noqa: BLE001 - never a pass
@@ -295,6 +302,7 @@ def mask_lines(root: Path, got: list[str]) -> list[str]:
             return [MASK for _ in out]
     except Exception:  # noqa: BLE001 - never a pass
         return [MASK for _ in out]
+    out = [ln.replace(HIDDEN, MASK) if (i + 1) in hits else ln for i, ln in enumerate(out)]
     return out
 
 
