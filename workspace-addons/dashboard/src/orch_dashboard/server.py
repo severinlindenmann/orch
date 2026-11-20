@@ -55,6 +55,8 @@ SETTINGS_OPS = (
     "workflow.set",
     "reviewer.set",
     "release_merge.set",
+    "auto_reviewer.set",
+    "away.set",
     "diag.set",
     "typing.set",
     "update.auto",

@@ -326,6 +326,7 @@ HINTS = {
     "review verdict": "orch ticket show <next ticket in the history>  (the next one to look at)",
     "review security": "orch github release --dry-run  (what the release still waits for)",
     "review accepted": "orch needs",
+    "review undo": "orch review accepted  (what is still accepted for you today)",
     "github expert": _expert,
     "github release": _release,
     "look *": "orch ticket list",
