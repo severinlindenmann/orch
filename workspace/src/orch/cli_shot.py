@@ -83,12 +83,13 @@ def find_browser() -> str:
         for p in sorted(glob.glob(os.path.expanduser(c))):
             if os.path.isfile(p) and os.access(p, os.X_OK):
                 return p
-    names = ("chrome", "msedge") if windows else ("google-chrome", "chromium", "chromium-browser")
-    for n in names:
+    if windows:
+        # No PATH search here: on Windows it looks in the current folder first, so a chrome.exe inside a
+        # downloaded project would be started. Chrome and Edge install into the folders above.
+        raise Refused("No Chrome or Edge found. Set ORCH_SHOT_BROWSER to its path.")
+    for n in ("google-chrome", "chromium", "chromium-browser"):
         if w := shutil.which(n):
             return w
-    if windows:
-        raise Refused("No Chrome or Edge found. Set ORCH_SHOT_BROWSER to its path.")
     raise Refused("No Chrome or Chromium found. Set ORCH_SHOT_BROWSER to its path.")
 
 

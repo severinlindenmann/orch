@@ -214,7 +214,7 @@ def _windows(monkeypatch, tmp_path):
         monkeypatch.setenv(var, str(roots[var]))
     monkeypatch.delenv("ORCH_SHOT_BROWSER", raising=False)
     monkeypatch.setattr(cli_shot.os, "name", "nt")
-    monkeypatch.setattr(cli_shot.shutil, "which", lambda n: None)
+    monkeypatch.setattr(cli_shot.shutil, "which", lambda n: str(tmp_path / f"{n}.exe"))  # never asked
     return roots
 
 
@@ -248,6 +248,17 @@ def test_windows_falls_back_to_edge(tmp_path, monkeypatch):
 
 def test_windows_without_a_browser_names_edge(tmp_path, monkeypatch):
     _windows(monkeypatch, tmp_path)
+    with pytest.raises(Refused, match="No Chrome or Edge found"):
+        cli_shot.find_browser()
+
+
+def test_windows_never_takes_a_browser_from_the_current_folder(tmp_path, monkeypatch):
+    # Windows' PATH search looks in the current folder first: a chrome.exe in a downloaded project must
+    # not be started. Only the install folders count.
+    _windows(monkeypatch, tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _exe(tmp_path / "chrome.exe")
+    _exe(tmp_path / "msedge.exe")
     with pytest.raises(Refused, match="No Chrome or Edge found"):
         cli_shot.find_browser()
 
