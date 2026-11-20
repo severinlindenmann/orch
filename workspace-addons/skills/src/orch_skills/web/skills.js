@@ -258,7 +258,10 @@
       if (!dirty()) { say('Nothing changed.'); d.dataset.dirty = ''; d.close(); return; }
       if (!embedded) { banner.replaceChildren(h('p', {text: 'Open Skills from the dashboard to save.'})); banner.hidden = false; return; }
       busy = true; save.disabled = true; save.textContent = 'Saving…'; banner.hidden = true;
+      const fields = Array.from(box.querySelectorAll('input, select, textarea'));
+      for (const f of fields) f.disabled = true;   // nothing typed meanwhile can be lost
       const r = await askSave(item.id, item.revision, JSON.stringify(payload()));
+      for (const f of fields) f.disabled = false;
       busy = false; save.disabled = false; save.textContent = 'Save';
       if (r.ok) {
         d.dataset.dirty = '';

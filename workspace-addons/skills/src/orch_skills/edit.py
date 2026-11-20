@@ -260,8 +260,11 @@ def rewrite_header(text: str, fields: dict) -> str:
     except Exception:  # noqa: BLE001
         raise Refused("This header cannot be read as a form. Edit it as text. Nothing was changed.") from None
     old = _fields_of(head)
-    new = {k: _check_field(k, fields[k]) for k in fields}
-    changed = {k: v for k, v in new.items() if not _same(k, v, old[k])}
+    for k, v in fields.items():
+        if not isinstance(v, str):
+            raise Refused(f"{k} must be text.")
+    # only what the person changed is checked: a value already in the file (a custom state) may stay as it is
+    changed = {k: _check_field(k, v) for k, v in fields.items() if not _same(k, v.strip(), old[k])}
     if not changed:
         return text
     nl = "\r\n" if lines[0].endswith("\r\n") else "\n"

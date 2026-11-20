@@ -495,3 +495,12 @@ def test_the_page_never_draws_text_as_html():
     for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function"):
         assert sink not in js, sink
     assert "orch.save" in js and ".value = value" in js
+
+
+def test_a_custom_value_already_in_the_file_does_not_block_a_body_edit(skill):
+    ws, target, p = skill
+    p.write_text(SKILL.replace('status: "draft"', 'status: "beta"'), newline="")
+    got = _form(ws, target)
+    assert got["fields"]["status"] == "beta"
+    _save(ws, target, got["revision"], {"fields": got["fields"], "body": got["body"] + "\nMore."})
+    assert 'status: "beta"' in p.read_text() and p.read_text().endswith("More.")
