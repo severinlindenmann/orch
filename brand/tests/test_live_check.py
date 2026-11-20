@@ -160,6 +160,7 @@ def test_result_and_exit_code(site, tmp_path, monkeypatch):
     }
     assert [c["ok"] for c in res["checks"] if "round trip" in c["name"]] == [None, None]
     monkeypatch.setattr(lc, "admin_open_private", lambda h, p: "200")
+    monkeypatch.setattr(lc, "admin_gateway", lambda u: "200")
     assert lc.main(["--where", "inside", "--relay", up, "--publish", up, "--out", str(out)]) == 0
     assert json.loads(out.read_text())["summary"] == "All checks passed."
 
@@ -285,3 +286,9 @@ def test_first_header_counts(monkeypatch):
     monkeypatch.setattr(lc.urllib.request, "urlopen", lambda req, timeout: Resp())
     with pytest.raises(AssertionError, match="max-age=0"):
         lc.hsts("https://x")
+
+
+def test_admin_gateway(site):
+    assert "200" in lc.admin_gateway(site({"/admin": (200, b"portal")}) + "/admin")
+    with pytest.raises(AssertionError, match="502"):
+        lc.admin_gateway(site({"/admin": (502, b"")}) + "/admin")

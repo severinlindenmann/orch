@@ -36,10 +36,12 @@ from pathlib import Path
 
 RELAY = "https://relay.severin.io"
 PUBLISH = "https://publish.severin.io"
-# private DNS names of the admin pages (zone internal.severin.io, only on the private network)
-ADMIN_HOSTS = {
-    "publish admin": "publish-admin.internal.severin.io",
-    "relay admin": "relay-admin.internal.severin.io",
+# the server's private name: the admin listeners themselves (direct path, plain http on 8411/8412)
+SERVER_PRIVATE = "hostinger-vps.nb.severin.io"
+# the admin pages as people open them: Management's https gateway on the private network (no port)
+ADMIN_GATEWAY = {
+    "publish admin": "https://publish-admin.internal.severin.io/admin",
+    "relay admin": "https://relay-admin.internal.severin.io/admin",
 }
 ADMIN_PORTS = {"publish private apps": 8410, "publish admin": 8411, "relay admin": 8412}
 ADMIN_PATHS = ["/admin", "/admin/", "/admin/api/workspaces"]
@@ -191,6 +193,13 @@ def github_runs(repo: str) -> tuple[int, dict]:
     return code, json.loads(body) if code == 200 else {}
 
 
+def admin_gateway(url: str) -> str:
+    code, _ = http_status(url)
+    if code != 200:
+        raise AssertionError(f"{url} answered {code}")
+    return f"{url} answered 200"
+
+
 def outside_result(repo: str, now: dt.datetime | None = None, fetch=github_runs) -> str:
     """The newest finished run of the outside job (GitHub Actions) must be green and recent."""
     code, data = fetch(repo)
@@ -284,19 +293,20 @@ def run(a: argparse.Namespace) -> dict:
         checks.append(
             check(
                 "publish admin open over the private network",
-                lambda: admin_open_private(
-                    a.private_host or ADMIN_HOSTS["publish admin"], ADMIN_PORTS["publish admin"]
-                ),
+                lambda: admin_open_private(a.private_host or SERVER_PRIVATE, ADMIN_PORTS["publish admin"]),
             )
         )
         checks.append(
             check(
                 "relay admin open over the private network",
-                lambda: admin_open_private(
-                    a.private_host or ADMIN_HOSTS["relay admin"], ADMIN_PORTS["relay admin"]
-                ),
+                lambda: admin_open_private(a.private_host or SERVER_PRIVATE, ADMIN_PORTS["relay admin"]),
             )
         )
+        if not a.private_host:  # the gateway exists only in production
+            for name, url in ADMIN_GATEWAY.items():
+                checks.append(
+                    check(f"{name} through the private https gateway", lambda u=url: admin_gateway(u))
+                )
         if a.outside_from:
             checks.append(
                 check("check from outside the private network", lambda: outside_result(a.outside_from))
@@ -331,7 +341,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--relay", default=RELAY)
     ap.add_argument("--publish", default=PUBLISH)
     ap.add_argument(
-        "--private-host", default="", help="one host for both admin pages (default: their private names)"
+        "--private-host",
+        default="",
+        help="one host for both admin listeners (default: the server's private name); skips the gateway",
     )
     ap.add_argument("--outside-from", default="", help="GitHub repo whose live-check.yml runs outside")
     ap.add_argument("--relay-a", default="", help="folder of the check workspace that sends")
