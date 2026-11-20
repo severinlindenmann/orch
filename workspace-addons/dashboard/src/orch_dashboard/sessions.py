@@ -1,5 +1,5 @@
 """Live sessions (ORCH-359): one list of every session that the live page (draft D: the wall, the bar and the
-panes) reads, served as GET /api/sessions and polled while the Preview switch is on.
+panes) reads, served as GET /api/sessions and polled while Focus is shown.
 
 Nothing here asks orch anything new. Status, what a session waits on, tool, model and open time come from the
 state the page already polls (the state cache: `orch run status` rows, the tickets and the start line); the
@@ -15,6 +15,7 @@ The shape (the wall builds on it; keep it in step with the PR text):
       "status": "needs-you" | "working" | "in-line" | "idle" | "closed",
       "word": "Waits for you" | "Working" | "Starting" | "On hold" | "Stuck" | "In line" | "Idle" | "No session",
       "detail": "Your answer" | "Running pytest" | "" ...,          # the core's one-line detail
+      "step": "<the step it works on now>" | "",                    # orch check start; the live line when no detail
       "waiting_on": [{"kind": "person"|"time"|"ticket"|"external"|"command"|"hold", "what": "<plain words>"}],
       "question": "<the open question>" | null,                    # what Needs you shows
       "lines": ["<last screen line>", ...],                        # [] when nothing is live or no screen
@@ -139,6 +140,14 @@ def _int(v) -> int | None:
     return v if isinstance(v, int) and not isinstance(v, bool) else None
 
 
+def _step(ticket: dict) -> str:
+    """The step the helper marked it works on now (orch check start), in one line; '' when none (ORCH-463)."""
+    for c in ticket.get("checklist") or []:
+        if isinstance(c, dict) and c.get("state") == "doing" and not c.get("done") and not c.get("wont_do"):
+            return " ".join(str(c.get("text") or c.get("title") or "").split())[:200]
+    return ""
+
+
 def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> dict:
     """One session from the state: the ticket, its `orch run status` row and whether it waits in line."""
     run = run if isinstance(run, dict) else {}
@@ -162,6 +171,11 @@ def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> 
     if status in ("idle", "closed") and ticket.get("status") == "review":
         # ORCH-674: a quiet session whose result waits for the person reads Check, as its ticket does everywhere else
         word = "Check"
+    # ORCH-790: a quiet or closed session whose ticket asks a question or waits for a result still needs the person;
+    # the wall puts it in the Needs you band so the band and the "N need you" count agree.
+    needs = status in ("idle", "closed") and (
+        ticket.get("status") == "review" or _question(ticket) is not None
+    )
     waits = [
         {"kind": str(w.get("kind") or ""), "what": " ".join(str(w.get("what") or "").split())[:200]}
         for w in run.get("waiting_on") or []
@@ -182,8 +196,10 @@ def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> 
         "title": " ".join(str(ticket.get("title") or "").split()) or "Untitled",
         "status": status,
         "word": word,
+        "needs": needs,
         "detail": helper.get("detail") if alive and isinstance(helper.get("detail"), str) else "",
         "waiting_on": waits if alive else [],
+        "step": _step(ticket) if alive else "",
         "question": _question(ticket) if status == "needs-you" else None,
         "lines": [],
         "tool": tool if alive else None,
@@ -313,6 +329,12 @@ def no_ticket(x: dict, run: dict | None, tool_of) -> dict | None:
     return s
 
 
+def _ever_ran(run: dict | None) -> bool:
+    """A helper has worked on this ticket: a run claim is on record, or an agent wrote to it."""
+    run = run if isinstance(run, dict) else {}
+    return isinstance(run.get("claim"), dict) or isinstance(run.get("last_activity"), dict)
+
+
 def build(root: Path, orch_bin: str | None, state: dict, lines: int = LINES) -> list[dict]:
     """Every session of the state, with the last lines of the live ones."""
     n = max(1, min(int(lines), LINES_MAX))
@@ -330,6 +352,8 @@ def build(root: Path, orch_bin: str | None, state: dict, lines: int = LINES) -> 
         s = session(t, run, tid in waiting, tool_label(root, claim.get("agent")))
         if s["status"] == "closed" and t.get("status") == "done":
             continue
+        if s["status"] == "closed" and not _ever_ran(run):
+            continue  # ORCH-701: a ticket no helper ever worked on has no session: no tile, no kept conversation
         out.append(s)
         if s["mode"] == "live":
             live.append(tid)
