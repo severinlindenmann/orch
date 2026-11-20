@@ -355,6 +355,7 @@ def build(root: Path, account_home: Path | None = None) -> dict:
         "services": services(root, account_home),
         "logins": lg,
     }
+    _edit_offers(root, data)
     for kind in ("skills", "instructions", "services", "logins"):
         for it in data[kind]:
             it["can_off"] = it.get("switch") is not None and "locked" not in it
@@ -362,6 +363,35 @@ def build(root: Path, account_home: Path | None = None) -> dict:
             if not it["on"] and seen:
                 it["note"] = " and ".join(seen) + (" still sees it" if len(seen) == 1 else " still see it")
     return data
+
+
+NOT_EDITABLE = {
+    "orch": "Comes with orch; orch keeps it up to date",
+    "admin": "Shared by your admin; ask them to change it",
+    "mine": "Editing your computer's own files comes in a later version",
+}
+
+
+def orch_names(data: dict) -> set[str]:
+    return {it["name"] for it in data["skills"] if it["where"] in ("orch", "admin")}
+
+
+def _edit_offers(root: Path, data: dict) -> None:
+    """Each skill and instruction file says whether Edit works ({"id", "mode"}) or why not ("edit_why")."""
+    from . import edit
+
+    offers = edit.offer(root, orch_names(data))
+    for kind, key in (("skills", "skill"), ("instructions", "instructions")):
+        for it in data[kind]:
+            hit = (
+                offers.get((key, it["name"] if key == "skill" else it.get("file", "")))
+                if it["where"] == "workspace"
+                else None
+            )
+            if hit and "id" in hit:
+                it["edit"] = hit
+            else:
+                it["edit_why"] = (hit or {}).get("why") or NOT_EDITABLE.get(it["where"], "This cannot be edited here")
 
 
 def find(root: Path, target: str, account_home: Path | None = None) -> dict:

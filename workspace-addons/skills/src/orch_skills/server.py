@@ -72,6 +72,11 @@ class PageData:
                 self._at = time.monotonic()
             return self._data
 
+    def orch_names(self) -> set[str]:
+        from . import model
+
+        return model.orch_names(self.get(fresh=True))
+
 
 class Handler(BaseHTTPRequestHandler):
     timeout = 10
@@ -119,6 +124,18 @@ class Handler(BaseHTTPRequestHandler):
                 body = self.data.get(fresh=query == "fresh=1")
             except (Refused, RuntimeError, OSError) as e:
                 return self._send(503, str(e).encode())
+            return self._send(200, json.dumps(body, ensure_ascii=False).encode(), "application/json")
+        if path == "/api/item":  # one editable item's text for the editor (read only; Save is a dashboard click)
+            from . import edit
+            from .model import Refused
+
+            target = query.partition("id=")[2] if query.startswith("id=") else ""
+            if not edit.EDIT_ID.fullmatch(target):
+                return self._send(404, b"not found")
+            try:
+                body = edit.load(self.data.root, target, self.data.orch_names())
+            except (Refused, RuntimeError, OSError) as e:
+                return self._send(409, str(e).encode())
             return self._send(200, json.dumps(body, ensure_ascii=False).encode(), "application/json")
         if path == "/":
             prefix = self.headers.get("X-Forwarded-Prefix") or ""

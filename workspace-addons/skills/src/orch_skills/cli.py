@@ -133,6 +133,36 @@ def _turn(args, root: Path, on: bool) -> int:
     return _emit(args, {"item": it, "changed": res["changed"], "next": text}, text)
 
 
+def _save(args, root: Path) -> int:
+    """`act save --value=<revision> -- <edit id>`, the text as JSON on stdin: only a person, from the page."""
+    from . import edit
+
+    who = _actor(args.by)
+    if _a_helper_runs_this() or not who.startswith("human:"):
+        raise Refused("Only a person edits skills and instructions here, on the Skills page.")
+    doc = edit.read_input(sys.stdin.buffer)
+    names = model.orch_names(model.build(root))
+    try:
+        res = edit.save(root, args.target, args.value or "", doc, who, names)
+    except edit.Stale as e:
+        if args.json:
+            print(json.dumps({"error": str(e), "revision": e.now, "changed_by": "someone else"}, ensure_ascii=False))
+        else:
+            print(f"Refused: {e}", file=sys.stderr)
+        return 2
+    if res["changed"]:
+        try:
+            _log(root, who, "edited", res["item"])
+        except (OSError, Refused):  # the file is saved; a history line that cannot be written must not hide that
+            pass
+        text = (
+            f"Saved {res['item']['name']}. The old version is kept in the bin. Helpers read it from their next start."
+        )
+    else:
+        text = f"Nothing changed in {res['item']['name']}."
+    return _emit(args, {**res, "next": text}, text)
+
+
 def _loop(args, root: Path) -> int:
     from . import server, service
 
@@ -203,7 +233,7 @@ def run(args) -> int:
     if args.cmd == "history":
         rows = _history(root)
         text = "\n".join(
-            f"{r.get('at')}  {r.get('name')}: turned {r.get('what')} (by {str(r.get('who', '')).split(':', 1)[-1]})"
+            f"{r.get('at')}  {r.get('name')}: {'edited' if r.get('what') == 'edited' else 'turned ' + str(r.get('what'))} (by {str(r.get('who', '')).split(':', 1)[-1]})"
             for r in rows
         )
         return _emit(args, {"history": rows}, text or "No changes yet.")
@@ -223,7 +253,7 @@ def main(argv=None) -> int:
         return s
 
     p("list", help="everything helpers get here, with ids")
-    p("history", help="who turned what on or off")
+    p("history", help="who turned what on or off, or edited it")
     for name in VERBS:
         s = p(name, help=f"turn one item {name} in this workspace")
         s.add_argument("target")
@@ -232,6 +262,7 @@ def main(argv=None) -> int:
     s.add_argument("verb")
     s.add_argument("target")
     s.add_argument("--by")
+    s.add_argument("--value", help=argparse.SUPPRESS)
     s = p("run", help=argparse.SUPPRESS)
     s.add_argument("--port", type=int, default=None, help=argparse.SUPPRESS)
     for name in ("start", "stop", "status"):
@@ -239,7 +270,11 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     args.json = bool(getattr(args, "json", False)) or "--json" in (argv if argv is not None else sys.argv)
     try:
+        if args.cmd == "act" and args.verb == "save":  # Edit on the page: the text comes on stdin
+            return _save(args, _root(args.dir))
         if args.cmd == "act":  # the page's clicks, run by the dashboard as the person
+            if args.value is not None:
+                raise Refused(f"Skills' '{args.verb}' takes no value.")
             if args.verb not in VERBS:
                 raise Refused(f"Skills has no '{args.verb}' action.")
             if not TARGET.fullmatch(args.target or ""):
