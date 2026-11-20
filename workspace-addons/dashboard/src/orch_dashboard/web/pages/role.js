@@ -126,6 +126,14 @@ function roleJob(t) {
     short ? h('p', {className:'t-row'}, short) : h('p', {className:'muted'}, 'No job written yet.'),
     full ? h('details', {className:'disclosure'}, h('summary', {}, 'Full instructions'), h('p', {className:'muted preserve-lines'}, full)) : null);
 }
+// One plain line under the last run: what it means for the person (the draft's "Nothing for you to do").
+function roleNextStep(r) {
+  const n = new Set(r.findings.map(f => f.ticket)).size;
+  if (n) return n === 1 ? 'What it found is a ticket now.' : 'What it found is in ' + n + ' tickets now.';
+  if (r.outcome === 'running') return '';
+  if (['failed', 'stopped'].includes(r.outcome)) return 'The next run tries again.';
+  return 'Nothing for you to do.';
+}
 function roleNextStrip(t, sc) {
   const paused = sc?.paused || t.ext?.automation?.paused === true;
   const next = sc?.next?.[0];
@@ -143,8 +151,8 @@ function roleOverview(t, data, openQs) {
       ticketButton('Answer', 'primary sm', () => selectTicketTab(t.id, 'chat'), {'data-key':'role-answer'})) : null,
     roleJob(t),
     h('section', {className:'story-section', 'data-key':'role-last'},
-      h('div', {className:'section-head'}, h('h2', {}, 'Last run'), runs.length ? h('button', {type:'button', className:'btn ghost sm', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':'runs'}, runs.length === 1 ? 'The run' : 'All ' + runs.length + ' runs') : null),
-      last ? roleRunCard(t, last, {primary:true, extra:ticketButton('Open the chat', 'ghost sm', () => selectTicketTab(t.id, 'chat'), {'data-key':'role-open-chat'})})
+      h('div', {className:'section-head'}, h('h2', {}, 'Last run'), runs.length ? h('button', {type:'button', className:'btn ghost sm', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':'runs'}, runs.length === 1 ? 'See it in Runs' : 'All ' + runs.length + ' runs') : null),
+      last ? roleRunCard(t, last, {primary:true, next:roleNextStep(last), extra:ticketButton('Open the chat', 'ghost sm', () => selectTicketTab(t.id, 'chat'), {'data-key':'role-open-chat'})})
         : h('p', {className:'muted'}, data ? 'It has not run yet.' : data === null ? 'The runs can’t be shown right now.' : 'Loading the runs…')),
     roleNextStrip(t, data?.schedule),
     h('p', {className:'meta role-more'}, h('button', {type:'button', className:'btn ghost sm', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':'tasks', 'data-key':'role-to-tasks'}, 'All tasks'), ' · ',
