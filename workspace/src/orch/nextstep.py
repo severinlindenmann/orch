@@ -323,7 +323,11 @@ HINTS = {
     "review link": "orch needs",
     "review tend": "orch review accepted  (what was accepted for you today)",
     "review tend-releases": "orch review list  (what still waits for the owner)",
-    "review verdict": "orch ticket show <next ticket in the history>  (the next one to look at)",
+    "review verdict": lambda d, a: (
+        f"orch ticket show {d['next']['key']}  (the next one waiting for a second look)"
+        if isinstance(d, dict) and isinstance(d.get("next"), dict)
+        else "nothing else waits for a second look; finish your ticket."
+    ),
     "review security": "orch github release --dry-run  (what the release still waits for)",
     "review accepted": "orch needs",
     "github expert": _expert,
