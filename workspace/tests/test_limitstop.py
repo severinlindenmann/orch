@@ -422,3 +422,19 @@ def test_a_hold_noted_after_the_switch_stays(proj, new_ticket, starts):
     assert [s[0] for s in starts] == [old]
     assert limitstop.active(proj) is not None
     assert list(limitstop.read(proj)["tickets"]) == [new]
+
+
+def test_a_login_change_names_the_workspace_that_switched(proj, new_ticket, child, claude_home, starts):
+    """ORCH-948: a workspace without Usage; fernscout switched; the session stopped with 'login changed' is
+    carried on and its ticket says who switched, once."""
+    tid = new_ticket()
+    _live_like_production(proj, tid, child(), "idle", since_s=60)
+    _transcript(proj, claude_home, [_answer(), _notice(LIMIT_NOTICE), _notice(SWITCH_NOTICE)])
+    _computer_switch(1)
+    res = tend.run(proj)
+    assert [a["action"] for a in res["actions"] if a["ticket"] == tid] == ["carry"]
+    assert any("account was switched" in i["text"] for i in runs.undelivered(proj, tid))
+    lines = [h for h in _history(proj, tid) if "Account switched by fernscout" in h]
+    assert len(lines) == 1
+    tend.run(proj)
+    assert len([h for h in _history(proj, tid) if "Account switched by fernscout" in h]) == 1

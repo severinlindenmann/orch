@@ -433,7 +433,17 @@ def _carry(root: Path, row: dict, now: float) -> str:
     limitstop.lift(root, now)
     r = runs_live.send(root, tid, BY, limitstop.switched_text())
     later = "" if r.get("delivered") else " It goes in when the session takes input."
-    return "Sent the helper on: the account was switched while it waited at the usage limit." + later
+    line = "Sent the helper on: the account was switched while it waited at the usage limit."
+    return line + later + _by(now)
+
+
+def _by(now: float) -> str:
+    """ORCH-948: name the workspace that switched, when this computer's switch log has a recent one."""
+    row = limitstop.computer_switch()
+    at = _ts(row.get("at") if isinstance(row.get("at"), str) else None)
+    if at is None or now - at > limitstop.COMPUTER_SWITCH_FRESH:
+        return ""
+    return f" Account switched by {str(row.get('name') or 'another workspace')[:80]}."
 
 
 SWITCH_KEY = "computer-switch"
