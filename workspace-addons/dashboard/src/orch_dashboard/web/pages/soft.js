@@ -1,6 +1,6 @@
 'use strict';
-// Soft page changes (ORCH-336), behind the Preview switch (livePreviewOn, pages/live.js). The dashboard already
-// draws every page from its #address without loading the document again; with Preview on it also:
+// Soft page changes (ORCH-336), wherever the live page runs (liveFocusOn, pages/live.js). The dashboard already
+// draws every page from its #address without loading the document again; it also:
 // - keeps what sits in the keep place (<div id="keep"> in index.html, right after <main> in .shell-body, outside it) across every page change:
 //   nothing here or in render() redraws it, and a page change does not close a dialog that sits in it. The bar and
 //   the layer of the new live page mount there (window.orchKeep.mount(node)),
@@ -11,7 +11,7 @@
 // - falls back to a normal load once when a page cannot be drawn softly.
 // Off, the dashboard behaves exactly as before. Pure helpers take their inputs, so tests run them without a browser.
 const SoftNav = (() => {
-  const on = () => typeof livePreviewOn === 'function' && livePreviewOn();
+  const on = () => typeof liveFocusOn === 'function' && liveFocusOn();
   const keepEl = (doc = document) => doc.getElementById('keep');
   // The dashboard address a click should go to softly ('#tickets'), or null when the browser handles the click.
   function softHash(event, anchor, loc) {
@@ -28,7 +28,7 @@ const SoftNav = (() => {
     if (page(u.pathname) !== page(loc.pathname)) return null;  // another page of this server (style guide, a file)
     return u.hash && u.hash !== '#' ? u.hash : '#home';
   }
-  // A page change closes the open dialogs, except the ones in the keep place while Preview is on.
+  // A page change closes the open dialogs, except the ones in the keep place.
   function dialogsToClose(doc = document, preview = on()) {
     const keep = preview ? keepEl(doc) : null;
     return [...doc.querySelectorAll('dialog[open]')].filter(d => !(keep && keep.contains(d)));
@@ -76,7 +76,7 @@ const SoftNav = (() => {
   return {on, keepEl, softHash, dialogsToClose, entryId, remember, hold, scrollAfterChange, fallBack, said, scrolls, KEEP_SCROLLS};
 })();
 // The one mount place for content that survives a page change (the bar, the layer). It is empty until a later task
-// mounts something; without Preview nothing mounts.
+// mounts something; in a shared copy nothing mounts.
 window.orchKeep = {
   el: () => SoftNav.keepEl(),
   mount(node) { const k = SoftNav.keepEl(); if (k && node && node.parentNode !== k) k.append(node); return node; },
