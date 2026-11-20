@@ -944,7 +944,7 @@ def _addon_act(a):
     if "text" in a or verb == "save":
         # Save of an add-on page's editor (Skills, ORCH-840): the revision the page loaded as the value, the text
         # itself only on stdin (save_input), never in the argv, a log line, the audit or an answer.
-        if verb != "save" or {"sign", "review", "seen"} & set(a):
+        if verb != "save" or set(a) - {"addon", "verb", "target", "value", "text"}:
             raise BadRequest("Only Save sends a text.")
         save_input(a)
         if not (isinstance(a.get("value"), str) and REVISION.fullmatch(a["value"])):
