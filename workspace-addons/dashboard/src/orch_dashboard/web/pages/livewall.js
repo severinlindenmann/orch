@@ -1,5 +1,5 @@
 'use strict';
-// The wall of the new live page (draft D, ORCH-360), behind the Preview switch (pages/live.js). Every session of the
+// The wall of the live page (draft D, ORCH-360; pages/live.js). Every session of the
 // workspace in bands: Pinned, Needs you and working (orange needs-you tiles first), In line, Idle and no session. A
 // working tile shows what its helper does in one sentence and a peek of its last lines, kept current by the live
 // sessions API (pages/livesessions.js, ORCH-359). A filter keeps the matching tiles; a band folds away and stays
@@ -26,11 +26,13 @@ function liveWallBands(sessions, pins, filter, groups) {
   const shown = f ? all.filter(s => s.group ? liveWallGroups.match(s.group, f)
     : [s.key, s.name, s.title, s.word, LIVE_WALL_WORD[s.status]].filter(x => typeof x === 'string' && x).join(' ').toLowerCase().includes(f)) : all;
   const rank = {'needs-you':0, working:1, idle:2, 'in-line':3, closed:4};
-  const sorted = shown.map((s, i) => [s, i]).sort((a, b) => rank[a[0].status] - rank[b[0].status] || a[1] - b[1]).map(x => x[0]);
+  // ORCH-790: an idle or closed session whose ticket waits for the person (`needs`) sorts and lands with needs you
+  const asks = s => s.status === 'needs-you' || ((s.status === 'idle' || s.status === 'closed') && s.needs === true);
+  const sorted = shown.map((s, i) => [s, i]).sort((a, b) => (asks(a[0]) ? 0 : rank[a[0].status]) - (asks(b[0]) ? 0 : rank[b[0].status]) || a[1] - b[1]).map(x => x[0]);
   const pin = sorted.filter(s => pinned.has(s.id)), rest = sorted.filter(s => !pinned.has(s.id));
   return {
-    pin, need:rest.filter(s => s.status === 'needs-you' || s.status === 'working'),
-    queue:rest.filter(s => s.status === 'in-line'), idle:rest.filter(s => s.status === 'idle' || s.status === 'closed'),
+    pin, need:rest.filter(s => asks(s) || s.status === 'working'),
+    queue:rest.filter(s => s.status === 'in-line'), idle:rest.filter(s => !asks(s) && (s.status === 'idle' || s.status === 'closed')),
     total:all.length, shown:shown.length,
   };
 }

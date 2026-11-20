@@ -267,17 +267,22 @@ _GITHUB_ZIP = re.compile(
 
 
 def spec(subdir: str) -> str:
-    """What uv installs. GitHub sources come as a zip download, so no git is needed: Windows PCs often have
-    none, and their users may not be allowed to install it. Other hosts keep git."""
+    """What uv installs, named for a remote source. GitHub sources come as a zip download, so no git is
+    needed: Windows PCs often have none, and their users may not be allowed to install it. Other hosts keep
+    git."""
     r = repo()
     if _is_local(r):
         return str((Path(r) / subdir).resolve())
     r = r.removesuffix(".git")
     if any(c.isspace() or c in "\"'#?" for c in r):
         raise Refused(f"'{r}' is not a repository address orch can install from (check ORCH_REPO).")
+    # Named ("orch-x @ url"): core and add-ons share one zip and differ only in #subdirectory, and uv 0.12
+    # keys an unnamed URL without it, so every --with add-on was taken for orch-workspace (ORCH-871). Each
+    # package is named orch-<folder> (test_builtin_package_names_match_spec).
+    name = f"orch-{subdir.rstrip('/').rsplit('/', 1)[-1]}"
     if r.startswith("https://github.com/"):
-        return f"{r}/archive/{ref()}.zip#subdirectory={subdir}"
-    return f"git+{r}@{ref()}#subdirectory={subdir}"
+        return f"{name} @ {r}/archive/{ref()}.zip#subdirectory={subdir}"
+    return f"{name} @ git+{r}@{ref()}#subdirectory={subdir}"
 
 
 def real_home() -> Path:
@@ -1858,8 +1863,15 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
     return 0
 
 
+def name_width(names) -> int:
+    """Width of an add-on name column: at least 12, and always 2 spaces after the longest name."""
+    return max([12, *(len(n) + 2 for n in names)])
+
+
 def help_lines(root: Path) -> list[str]:
-    return [f"  {n:<12}{m['description']}" for n, m in sorted(active_manifests(root).items())]
+    found = sorted(active_manifests(root).items())
+    w = name_width(n for n, _ in found)
+    return [f"  {n:<{w}}{m['description']}" for n, m in found]
 
 
 # ---------------------------------------------------------------- add / remove / uninstall
