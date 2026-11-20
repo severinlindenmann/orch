@@ -285,7 +285,7 @@ function ticketForm(t) {
     if (window.UI?.date) window.UI.date(dueInput, dueToggle, null, {time:true});
     const options = el('div', 'new-ticket-options'); options.append(...(noHelperRow ? [] : [helperBox]), dueBox); fields.append(options);
     const doneLabel = el('label', '', 'Done when (optional)');
-    const done = el('textarea', 'input'); done.name = 'done_when'; done.id = 'field-' + serial + '-done_when';
+    const done = el('textarea', 'input new-ticket-text'); done.name = 'done_when'; done.id = 'field-' + serial + '-done_when';
     done.rows = 2; done.maxLength = 2000; done.placeholder = 'What should be true when it is done? Say it in your own words.';
     doneLabel.htmlFor = done.id; doneLabel.append(done); fields.append(doneLabel); inputs.done_when = done; doneWrap = doneLabel;
   }
