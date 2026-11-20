@@ -61,7 +61,7 @@ def test_add_is_stopped_until_started_and_the_whole_cycle_works(cli, ws, fake):
     assert code == 0 and out["removed"] == "web"
     assert "web" not in fake.entries and not fake.entry_path(spec).exists()
     assert not (ws / ".orch/addons/services/services/web.json").exists()
-    assert log.read_text(encoding="utf-8") == "serving\n"  # the log stays
+    assert not log.exists()  # the log goes with the service (ORCH-847)
     assert [c[0] for c in fake.calls] == ["install", "start", "stop", "restart", "auto", "auto", "uninstall"]
 
 
@@ -341,3 +341,13 @@ def test_add_says_why_when_the_stored_keys_cannot_be_read(cli, monkeypatch):
     assert out["error"] == (
         "Could not compare the command with this workspace's stored keys: This is a test install outside the test folder."
     )
+
+
+def test_a_new_service_with_an_old_id_starts_with_an_empty_log(cli, ws, fake):
+    # ORCH-847: a log left behind by an earlier service of the same id must not show as the new one's log
+    log = ws / ".orch/addons/services/logs/web.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("old line from a removed service\n", encoding="utf-8")
+    code, _out = _add(cli, "web")
+    assert code == 0
+    assert not log.exists() or log.read_text(encoding="utf-8") == ""
