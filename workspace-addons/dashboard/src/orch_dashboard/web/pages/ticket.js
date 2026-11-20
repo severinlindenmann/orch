@@ -961,8 +961,20 @@ function addTaskRow(t, scope) {
   });
   return form;
 }
+// The selected tab lives on the address (#ticket/<id>?tab=tasks) so a reload or a shared link keeps it.
+function writeTicketTab(id, tab) {
+  if (typeof history !== 'object' || typeof location !== 'object' || String(location.hash || '').split('?')[0] !== href(id)) return;
+  const next = href(id) + (tab && tab !== 'overview' ? '?tab=' + encodeURIComponent(tab) : '');
+  if (location.hash !== next) history.replaceState(null, '', next);
+}
+function tabFromAddress(id) {
+  if (typeof location !== 'object') return '';
+  const full = String(location.hash || ''), at = full.indexOf('?');
+  return full.slice(0, at < 0 ? full.length : at) === href(id) && at >= 0 ? new URLSearchParams(full.slice(at + 1)).get('tab') || '' : '';
+}
 function selectTicketTab(id, tab, focusQuestion = false) {
   ticketTabs.set(id, tab);
+  writeTicketTab(id, tab);
   render();
   if (focusQuestion) {
     const host = main.querySelector('[data-question]');
@@ -1695,7 +1707,7 @@ function ticketRequestCard(t) {
 }
 const TAB_ALIAS = {questions:'overview', history:'activity', artifacts:'files'};
 function ticketSelectedTab(t) {
-  const raw = ticketTabs.get(t.id), tab = TAB_ALIAS[raw] || raw;
+  const raw = tabFromAddress(t.id) || ticketTabs.get(t.id), tab = TAB_ALIAS[raw] || raw;
   return ['overview', 'tasks', 'files', 'activity'].includes(tab) ? tab : 'overview';
 }
 // The answers given through the Review stack (a question answered there carries a `decision`), newest first, in the
@@ -1890,7 +1902,7 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   return h('section', {className:'strip ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
       m.helper && window.UI?.helperPill ? stripHelperPill(m.helper) : h('span', {className:'pill status-change ' + m.pill, 'data-key':'status-' + t.status + '-' + m.pill}, icon, m.word),
-      h('div', {className:'grow ticket-strip-text'}, h('h1', {className:'t-row'}, window.DashHelpers.keyTag(t, h), inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, m.sentence), railFacts(t)),
+      h('div', {className:'grow ticket-strip-text'}, h('h1', {className:'t-row'}, window.DashHelpers.keyTag(t, h), window.DashHelpers.kindTag(t, h), inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, m.sentence), railFacts(t)),
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);
 }
@@ -1904,7 +1916,8 @@ function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
   const minutes = Number.isFinite(run?.age_seconds) ? Math.max(1, Math.floor(run.age_seconds / 60)) + ' min' : '';
   const key = window.DashHelpers.ticketKey(t), dot = () => h('span', {'aria-hidden':'true'}, '·');
   const pill = window.UI?.helperPill ? stripHelperPill(helper) : h('span', {className:'pill working', 'data-key':'status-helper-' + helper.state}, helper.word);
-  const parts = [key ? h('span', {className:'key'}, key) : null, pill, agent ? name(agent) : null, minutes].filter(Boolean);
+  const kind = window.DashHelpers.kindTag(t, h)?.[1] || null;  // ORCH-906: 'ORCH-7 · Epic · Working'
+  const parts = [key ? h('span', {className:'key'}, key) : null, kind, pill, agent ? name(agent) : null, minutes].filter(Boolean);
   const kicker = h('p', {className:'t-meta strip-kicker', 'data-key':'ticket-kicker'}, parts.flatMap((x, i) => i ? [dot(), typeof x === 'string' ? h('span', {}, x) : x] : [x]));
   // a helper that is not plain working (idle, stuck, waits) still says why in one quiet line; so does "No news since"
   const why = helper.state !== 'working' && helper.detail ? clean(helper.detail) + '.' : '';
@@ -2101,7 +2114,18 @@ function inlineField(t, field) {
 async function saveField(t, field, value) {
   const same = o => String(o?.[field] ?? '') === String(t[field] ?? '');
   const result = await actRetry('ticket.edit', () => ({ticket:t.id, [field]:value, if_revision:(ticketOf(t.id) || t).revision}), () => same(ticketOf(t.id)));
-  if (!result.ok) window.orch.toast(changeError(result), 'error');
+  if (result.ok) return;
+  const now = ticketOf(t.id), theirs = now ? String(now[field] ?? '') : '';
+  if (result.status === 409 && now && !same(now) && theirs !== String(value)) {
+    // ORCH-903: someone changed this field while it was being edited: keep what was typed, one click applies it.
+    const shown = v => (field === 'owner' ? name(v) : clean(v)) || 'empty';
+    const mine = () => actRetry('ticket.edit', () => ({ticket:t.id, [field]:value, if_revision:(ticketOf(t.id) || t).revision}), () => true)
+      .then(r => { if (!r.ok) window.orch.toast(changeError(r), 'error'); });
+    mine.label = 'Use mine';
+    window.orch.toast('Someone just changed ' + FIELD_LABEL[field] + ' to "' + shown(theirs) + '". You typed "' + shown(value) + '".', 'error', mine);
+    return;
+  }
+  window.orch.toast(changeError(result), 'error');
 }
 function startInline(control) {
   const t = ticketOf(control.dataset.ticket), field = control.dataset.field, host = control.parentElement;

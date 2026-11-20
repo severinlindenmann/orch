@@ -295,10 +295,14 @@ const syncNow = () => syncUi.draft || syncSaved(syncUi.card);
 const syncSame = (a, b) => a.where === b.where && (a.where !== 'remote' || (a.addr === b.addr && a.every === b.every));
 const syncHost = addr => { const text = String(addr || '').trim(); const scp = /^[^@\s/]+@([^:\s/]+):/.exec(text); if (scp) return scp[1]; try { return new URL(text).host || text; } catch (_) { return text; } };
 const syncEveryLabel = every => (SYNC_EVERY.find(([v]) => v === String(every)) || SYNC_EVERY[1])[1];
+// The shapes sync takes (https, ssh, git@host:path; a plain path or file: only for a test install): anything else is wrong before Save
+const syncAddrOk = addr => { const t = String(addr || '').trim(); return !/\s/.test(t) && (/^(https|ssh):\/\/[^/\s:@]+/i.test(t) || /^git@[A-Za-z0-9.-]+:\S+$/.test(t) || /^(\/|file:)/.test(t)); };
+const SYNC_BAD_ADDR = 'This is not a valid sync address. Use one that starts with https:// or ssh://, or looks like git@host:name.';
 function syncReviewText(s) {
   if (s.where === 'off') return 'Sync will stop. Your tickets stay on this computer as they are.';
   if (s.where === 'local') return 'Sync will keep a copy on this computer only.';
   if (!s.addr.trim()) return 'Enter a sync address first.';
+  if (!syncAddrOk(s.addr)) return SYNC_BAD_ADDR;
   return 'Sync will copy tickets to ' + syncHost(s.addr) + ' every ' + syncEveryLabel(s.every) + '.';
 }
 // One click on the sync add-on's own verb; its answer comes back as state.act_answer.
@@ -460,7 +464,7 @@ function syncCard(settings) {
     h('div', {className:'row'}, button('Undo', 'quiet', () => { syncUi.draft = null; syncUi.check = null; render(); }), (() => {
       const save = button('Save', 'primary', syncSave);
       save.dataset.key = 'sync-review-save';
-      save.disabled = syncUi.busy || (cur.where === 'remote' && !cur.addr.trim());
+      save.disabled = syncUi.busy || (cur.where === 'remote' && (!cur.addr.trim() || !syncAddrOk(cur.addr)));
       return save;
     })())) : null;
   const warn = card?.public ? h('div', {className:'sync-warn', role:'alert', 'data-key':'sync-public'}, h('p', {}, SYNC_PUBLIC),
@@ -489,7 +493,7 @@ function syncCard(settings) {
 }
 async function syncSave() {
   const s = syncNow();
-  if (syncUi.busy || (s.where === 'remote' && !s.addr.trim())) return;
+  if (syncUi.busy || (s.where === 'remote' && (!s.addr.trim() || !syncAddrOk(s.addr)))) return;
   const saved = syncSaved(syncUi.card), sameAddr = s.where === 'remote' && saved.where === 'remote' && syncUi.card?.confirmed === true && s.addr.trim() === saved.addr;  // an unconfirmed address is never a 'same address' shortcut
   if (s.where === 'remote' && !sameAddr) {
     // choosing the sync address is the person's signed choice: the sign step shows the address the add-on returns
@@ -1048,13 +1052,21 @@ function pageStopped(r) {
 // the frame address's fragment (kit/frame.js takes it out at once); one orch did not ship gets no pass.
 const SHIPPED_SANDBOX = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
 const framePasses = new Map(), framePassAsks = new Map(), framePassFailed = new Map(), frameFresh = new Map();
+// The server ends a pass after its life (`life` seconds, framepass.py LIFE): one kept longer is asked for again
+// before a page opens with it, so its first call never answers 401 (ORCH-1004). The frame on screen keeps its pass
+// (a new one would load it again); when that one ends, its next call answers 401 and the frame asks for new ones.
 function framePass(name) {
-  if (framePasses.has(name)) return framePasses.get(name);
+  const kept = framePasses.get(name);
+  if (kept && (Date.now() < kept.until || frameShown()?.getAttribute('src')?.includes('#orch-frame=' + kept.pass + '&'))) return kept;
+  if (kept) framePasses.delete(name);
   if (framePassAsks.has(name) || Date.now() - (framePassFailed.get(name) || 0) < 10000) return null;
+  const asked = Date.now();  // the server's clock for the pass starts before its answer arrives
   framePassAsks.set(name, fetch('/api/frame-pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({addon:name})})
     .then(r => r.ok ? r.json() : null)
     .then(j => {
-      if (j && typeof j.pass === 'string' && typeof j.file === 'string') framePasses.set(name, {pass:j.pass, file:j.file, chan:frameChanNew()});
+      // used up to 60 s before the server ends it (half its life when that is short)
+      const life = Number.isFinite(j?.life) && j.life > 0 ? j.life : 900, keep = Math.max(life / 2, life - 60);
+      if (j && typeof j.pass === 'string' && typeof j.file === 'string') framePasses.set(name, {pass:j.pass, file:j.file, chan:frameChanNew(), until:asked + keep * 1000});
       else framePassFailed.set(name, Date.now());
     })
     .catch(() => framePassFailed.set(name, Date.now()))
