@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import struct
 import zlib
 from pathlib import Path
@@ -11,6 +12,10 @@ import pytest
 
 from orch import cli_shot
 from orch.errors import Refused
+
+# Read before the test fixtures fake the home: on Windows the browser hangs at start when USERPROFILE points
+# at an empty made-up folder (seen with Edge 157), so the real-browser test gives it the real one back.
+_REAL_USERPROFILE = os.environ.get("USERPROFILE")
 
 
 def test_command_has_keychain_safe_flags():
@@ -158,7 +163,9 @@ def _has_browser():
 
 
 @pytest.mark.skipif(not _has_browser(), reason="no Chrome or Chromium here")
-def test_narrow_width_lays_out_that_wide(tmp_path):
+def test_narrow_width_lays_out_that_wide(tmp_path, monkeypatch):
+    if os.name == "nt" and _REAL_USERPROFILE:
+        monkeypatch.setenv("USERPROFILE", _REAL_USERPROFILE)
     # ORCH-219: headless Chrome keeps windows at least 500 wide; a 390 picture must still show a
     # 390 wide page, not a 500 wide one cut at the right. The page paints its width as a bar.
     f = tmp_path / "w.html"
@@ -196,3 +203,119 @@ def _bar_width(png: bytes) -> int:
         prev = p
         px.append(p)
     return sum(1 for p in px if p[0] < 30 and p[1] < 30 and p[2] < 30)
+
+
+def _windows(monkeypatch, tmp_path):
+    """A Windows machine with its three program folders under tmp_path and nothing on PATH."""
+    roots = {}
+    for var in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
+        roots[var] = tmp_path / var.replace("(", "_").replace(")", "")
+        roots[var].mkdir()
+        monkeypatch.setenv(var, str(roots[var]))
+    monkeypatch.delenv("ORCH_SHOT_BROWSER", raising=False)
+    monkeypatch.setattr(cli_shot.os, "name", "nt")
+    monkeypatch.setattr(cli_shot.shutil, "which", lambda n: None)
+    return roots
+
+
+def _exe(path: Path) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("")
+    path.chmod(0o755)
+    return str(path)
+
+
+def test_windows_finds_chrome_in_program_files(tmp_path, monkeypatch):
+    roots = _windows(monkeypatch, tmp_path)
+    chrome = _exe(roots["ProgramFiles"] / "Google" / "Chrome" / "Application" / "chrome.exe")
+    _exe(roots["ProgramFiles(x86)"] / "Microsoft" / "Edge" / "Application" / "msedge.exe")
+    assert cli_shot.find_browser() == chrome  # Chrome before Edge
+
+
+def test_windows_finds_chrome_in_program_files_x86_and_per_user(tmp_path, monkeypatch):
+    roots = _windows(monkeypatch, tmp_path)
+    user = _exe(roots["LOCALAPPDATA"] / "Google" / "Chrome" / "Application" / "chrome.exe")
+    assert cli_shot.find_browser() == user
+    x86 = _exe(roots["ProgramFiles(x86)"] / "Google" / "Chrome" / "Application" / "chrome.exe")
+    assert cli_shot.find_browser() == x86
+
+
+def test_windows_falls_back_to_edge(tmp_path, monkeypatch):
+    roots = _windows(monkeypatch, tmp_path)
+    edge = _exe(roots["ProgramFiles(x86)"] / "Microsoft" / "Edge" / "Application" / "msedge.exe")
+    assert cli_shot.find_browser() == edge
+
+
+def test_windows_without_a_browser_names_edge(tmp_path, monkeypatch):
+    _windows(monkeypatch, tmp_path)
+    with pytest.raises(Refused, match="No Chrome or Edge found"):
+        cli_shot.find_browser()
+
+
+class _FakeStartupInfo:
+    lpAttributeList: dict = {}
+
+
+def _fake_windows_launch(monkeypatch, popen):
+    """The Windows calls _launch_windows makes, faked so the test runs anywhere: a pipe end's handle is its
+    fd + 1000."""
+    import sys
+    import types
+
+    inherited = []
+    monkeypatch.setitem(sys.modules, "msvcrt", types.SimpleNamespace(get_osfhandle=lambda fd: fd + 1000))
+    monkeypatch.setattr(
+        cli_shot.os, "set_handle_inheritable", lambda h, v: inherited.append((h, v)), raising=False
+    )
+    monkeypatch.setattr(cli_shot.subprocess, "STARTUPINFO", _FakeStartupInfo, raising=False)
+    monkeypatch.setattr(cli_shot.subprocess, "Popen", popen)
+    monkeypatch.setattr(cli_shot.os, "name", "nt")
+    # no reader thread in a test: the pipe is just its two fds here
+    monkeypatch.setattr(cli_shot, "_Pipe", lambda w, r: types.SimpleNamespace(w=w, r=r))
+    return inherited
+
+
+def test_windows_launch_hands_over_two_inherited_handles(monkeypatch):
+    # The fd 3/4 pipe does not exist on Windows: the browser gets two inherited handles, named on its
+    # command line, and only those two are inherited.
+    seen = {}
+
+    def popen(cmd, **kw):
+        seen.update(cmd=cmd, **kw)
+        return "proc"
+
+    inherited = _fake_windows_launch(monkeypatch, popen)
+    proc, pipe = cli_shot._launch(cli_shot.command("chrome.exe", "p", 1280, 800))
+    try:
+        assert proc == "proc"
+        flag = next(a for a in seen["cmd"] if a.startswith("--remote-debugging-io-pipes="))
+        h_in, h_out = (int(h) for h in flag.split("=", 1)[1].split(","))
+        assert seen["cmd"].index(flag) == seen["cmd"].index("--remote-debugging-pipe") + 1
+        assert sorted(inherited) == sorted([(h_in, True), (h_out, True)])
+        assert seen["startupinfo"].lpAttributeList == {"handle_list": [h_in, h_out]}
+        assert seen["close_fds"] is True
+        # The browser's ends are closed here; ours stay open and are the other ends of the same pipes.
+        for h in (h_in, h_out):
+            with pytest.raises(OSError):
+                os.fstat(h - 1000)
+        os.fstat(pipe.w)
+        os.fstat(pipe.r)
+    finally:
+        os.close(pipe.w)
+        os.close(pipe.r)
+
+
+def test_windows_launch_failure_closes_every_pipe_end(monkeypatch):
+    def popen(cmd, **kw):
+        raise OSError("cannot start")
+
+    _fake_windows_launch(monkeypatch, popen)
+    before = os.pipe()
+    os.close(before[0])
+    os.close(before[1])
+    with pytest.raises(OSError, match="cannot start"):
+        cli_shot._launch(cli_shot.command("chrome.exe", "p", 1280, 800))
+    after = os.pipe()  # the lowest free fds again: nothing was left open
+    os.close(after[0])
+    os.close(after[1])
+    assert after == before
