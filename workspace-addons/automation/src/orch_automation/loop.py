@@ -35,6 +35,11 @@ FAST_FAIL_SECONDS = 10
 TIME_LIMITS = (30, 45, 60, 75, 90, 120, 180)  # minutes a repeat's run may take (ext.automation.time_limit)
 
 
+def _stopped(root: Path, tid: str) -> bool:
+    """The current run was stopped by its time limit (it counts as stopped early)."""
+    return ((load_state(root).get(tid) or {}).get("current_run") or {}).get("stopped") is True
+
+
 def time_limit(t: dict | None) -> int | None:
     """The minutes after which a repeat's run is stopped, or None (no limit)."""
     v = (((t or {}).get("ext") or {}).get("automation") or {}).get("time_limit")
@@ -295,7 +300,7 @@ class Scheduler:
         )
         if res["result"] == "started":
             if n:
-                roles.begin(self.root, tid, fmt(now))
+                roles.begin(self.root, tid, fmt(now), time_limit(t))
             orchcli.log(self.root, tid, f"Automation started an agent run ({reason}).")
             starts = (load_state(self.root).get(tid, {}).get("starts") or [])[-49:]
             update_state(self.root, tid, starts=[*starts, fmt(datetime.now(UTC))])
@@ -365,16 +370,7 @@ class Scheduler:
             running = orchcli.run_running(self.root, tid)
             if running is None:
                 continue
-            if running:
-                # ORCH-827: watched to its end (the role page shows how long each run took); a role's time limit
-                # stops a run that goes on too long, once
-                limit = time_limit(orchcli.ticket(self.root, tid))
-                if limit and not w.get("stopped") and time.time() - w["t0"] > limit * 60:
-                    w["stopped"] = True
-                    orchcli.call(self.root, "run", "stop", tid)
-                    orchcli.log(
-                        self.root, tid, f"Stopped after {limit} minutes: the time limit of this repeat."
-                    )
+            if running:  # ORCH-827: watched to its end (the role page shows how long each run took)
                 continue
             del self.watch[tid]
             took = 0
@@ -385,7 +381,7 @@ class Scheduler:
             t = orchcli.ticket(self.root, tid)
             quiet = t is not None and others(t) <= w["hist"]
             failed = took < FAST_FAIL_SECONDS and quiet
-            history(self.root, tid, w["at"], took, 1 if failed or w.get("stopped") else 0)
+            history(self.root, tid, w["at"], took, 1 if failed or _stopped(self.root, tid) else 0)
             if failed:
                 self.fail(tid, "the agent stopped within 10 seconds without doing anything")
 
@@ -574,10 +570,23 @@ class Scheduler:
         return ((t.get("ext") or {}).get("automation") or {}).get("paused") is not True
 
     # -- pass ---------------------------------------------------------------
+    def enforce_limits(self, now: datetime) -> None:
+        """ORCH-827: a repeat's helper run that started with a time limit (planned or Run now) and goes on longer is
+        stopped once. Only helper runs: a repeat that runs a script has no time limit."""
+        for tid, st in load_state(self.root).items():
+            if not isinstance(st, dict) or not isinstance((st.get("current_run") or {}).get("limit"), int):
+                continue
+            limit = roles.over_limit(self.root, tid, now)
+            if limit and orchcli.run_running(self.root, tid):
+                roles.mark_stopped(self.root, tid)
+                orchcli.call(self.root, "run", "stop", tid)
+                orchcli.log(self.root, tid, f"Stopped after {limit} minutes: the time limit of this repeat.")
+
     def tick(self, now: datetime) -> list[str]:
         """One pass. Returns the ticket ids a run was started for."""
         self.cfg = load_config(self.root)
         self.check_watch()
+        self.enforce_limits(now)
         started: list[str] = self.act_on_answers(now)
         started += self.phone_tickets(now)
         started += self.queued_input(now, skip=started)

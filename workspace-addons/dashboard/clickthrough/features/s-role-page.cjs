@@ -47,22 +47,35 @@ module.exports = {
     must(await run1.getByRole('link').count() > 0, 'the finding has no link to its ticket');
     await shot('runs');
 
-    // Schedule: a time limit, saved by one choice; the command line agrees after a reload
+    // Schedule: in words; a script repeat ends by itself, so it has no time limit
     await page.getByRole('tab', { name: 'Schedule' }).click();
     must(/Monthly|month/i.test(await page.locator('[data-key="role-schedule"]').innerText()), 'Schedule does not say how it repeats in words');
+    must(await page.locator('[data-key="role-setting-limit"]').count() === 0, 'a script repeat shows a time limit');
+
+    // a helper repeat: the time limit is saved by one choice; the command line agrees and it stays after a reload
+    const helperTid = JSON.parse(orchAsPerson('ticket', 'new', 'Tidy the shared drive', '--json')).id;
+    orchAsPerson('automation', 'repeat', helperTid, 'monthly 1 04:00');
+    await open('#ticket/' + helperTid);
+    await page.locator('[data-key="ticket-strip-' + helperTid + '"]').getByText('Runs by itself').waitFor({ timeout: 30000 });
+    await page.getByRole('tab', { name: 'Schedule' }).click();
+    await page.locator('[data-key^="role-limit-"]').waitFor({ timeout: 20000 });
     await act('addon.act', () => page.locator('[data-key^="role-limit-"]').selectOption('90'));
-    const saved = JSON.parse(orchAsPerson('automation', 'role', tid, '--json')).schedule;
+    const saved = JSON.parse(orchAsPerson('automation', 'role', helperTid, '--json')).schedule;
     must(saved.time_limit === 90, 'orch automation role does not show the time limit: ' + JSON.stringify(saved));
     await reload();
     await page.getByRole('tab', { name: 'Schedule' }).click();
     let limit = '';
-    for (let i = 0; i < 20 && limit !== '90'; i++) { await page.waitForTimeout(500); limit = await page.locator('[data-key^="role-limit-"]').inputValue(); }
+    for (let i = 0; i < 20 && limit !== '90'; i++) { await page.waitForTimeout(500); limit = await page.locator('[data-key^="role-limit-"]').inputValue().catch(() => ''); }
     must(limit === '90', 'the time limit is not kept after a reload: ' + limit);
-    await page.locator('[data-key^="role-repeats-0 3"]').waitFor({ state: 'attached', timeout: 20000 });
+    await page.locator('[data-key^="role-repeats-0 4"]').waitFor({ state: 'attached', timeout: 20000 });
     await shot('schedule');
+
+    orchAsPerson('automation', 'repeat', helperTid, '--off');
+    await open('#ticket/' + tid);
 
     // Chat: the run as a run card, a note for the next run saved as the person's message
     await page.getByRole('tab', { name: 'Chat' }).click();
+    await page.locator('[data-key="role-chat-run-1"]').waitFor({ timeout: 20000 }).catch(() => {});
     must(await page.locator('[data-key="role-chat-run-1"]').count() === 1, 'the chat has no run card for run 1');
     await page.getByLabel('Tell it something for the next run').fill('Count the white wine first next time.');
     await act('log', () => page.locator('[data-key="role-say"]').getByRole('button', { name: 'Send' }).click());

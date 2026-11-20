@@ -582,10 +582,6 @@ def _script(args, root: Path, out) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
-
-
 def _role_ticket(root: Path, ref: str) -> dict:
     want = str(ref).strip().lower()
     t = next(
@@ -663,7 +659,7 @@ def _role_cmd(args, root: Path, out) -> int:
 
 def _role_schedule(root: Path, t: dict) -> dict:
     """The Schedule tab in words: how it repeats, the next three times (none while paused), quick check, time limit."""
-    from .loop import time_limit
+    from .loop import script_of, time_limit
 
     sched = (t.get("ext") or {}).get("automation") or {}
     cron = (
@@ -686,5 +682,10 @@ def _role_schedule(root: Path, t: dict) -> dict:
         "next": nxt,
         "quick": "on" if sched.get("when_changed") else "off" if sched.get("when_changed_off") else "none",
         "time_limit": time_limit(t),
+        "script": bool(script_of(t)) or "group" in sched,
         "running": bool(service.running_pid(root)),
     }
+
+
+if __name__ == "__main__":
+    sys.exit(main())

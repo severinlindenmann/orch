@@ -55,7 +55,11 @@ def _run(r: dict) -> dict | None:
         "checked": [_s(c, 200) for c in (r.get("checked") or [])[:12] if isinstance(c, str)],
         "cost": _num(r.get("cost")),
         "files": [
-            {"name": f["name"], "state": f.get("state") if f.get("state") in STATES else "unknown"}
+            {
+                "name": f["name"],
+                "state": f.get("state") if f.get("state") in STATES else "unknown",
+                "kind": "evidence" if f.get("kind") == "evidence" else "artifacts",
+            }
             for f in (r.get("files") or [])[:20]
             if isinstance(f, dict) and isinstance(f.get("name"), str) and NAME.fullmatch(f["name"])
         ],
@@ -96,6 +100,7 @@ def listing(root: Path, orch_bin: str | None, tid: str) -> dict:
         if isinstance(limit, int) and not isinstance(limit, bool) and 0 < limit <= 600
         else None,
         "running": sc.get("running") is True,
+        "script": sc.get("script") is True,
     }
     return {"available": True, "runs": runs, "totals": totals, "schedule": schedule}
 

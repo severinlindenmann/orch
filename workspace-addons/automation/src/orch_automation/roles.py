@@ -91,8 +91,9 @@ def run_lines(root: Path, tid: str) -> list[dict]:
     return mine
 
 
-def begin(root: Path, tid: str, at: str | None = None) -> int:
-    """A run starts now: give it the next number and remember it as the ticket's current run."""
+def begin(root: Path, tid: str, at: str | None = None, limit: int | None = None) -> int:
+    """A run starts now: give it the next number and remember it as the ticket's current run, with the time limit
+    that holds for it (a change counts from the next run)."""
     st = load_state(root).get(tid) or {}
     done = run_lines(root, tid)
     prev = st.get("current_run") or {}
@@ -107,7 +108,8 @@ def begin(root: Path, tid: str, at: str | None = None) -> int:
         )
         done.append({"run": prev["run"]})
     n = max([x["run"] for x in done] + [int(st.get("run_count") or 0)]) + 1
-    update_state(root, tid, run_count=n, current_run={"run": n, "at": at or fmt(datetime.now(UTC))})
+    cur = {"run": n, "at": at or fmt(datetime.now(UTC)), **({"limit": limit} if limit else {})}
+    update_state(root, tid, run_count=n, current_run=cur)
     return n
 
 
@@ -237,6 +239,16 @@ def _file_state(root: Path, tid: str, name: str, opens: dict) -> str:
     return "unknown"
 
 
+def _file_kind(root: Path, tid: str, name: str) -> str:
+    """The ticket folder a run file is in (the page opens it from there): artifacts unless only evidence has it."""
+    base = root / ".orch" / "tickets" / tid
+    return (
+        "evidence"
+        if not (base / "artifacts" / name).exists() and (base / "evidence" / name).exists()
+        else "artifacts"
+    )
+
+
 def runs(root: Path, t: dict, running: bool = False) -> list[dict]:
     """Every run of a role, newest first: number, when, how long, outcome (words and tone), what it checked, its
     files with their open state, its findings, cost when one was recorded."""
@@ -275,7 +287,14 @@ def runs(root: Path, t: dict, running: bool = False) -> list[dict]:
                 "text": (o or {}).get("text") or "",
                 "checked": (o or {}).get("checked") or [],
                 "cost": 0 if kind == "skipped" else (o or {}).get("cost"),
-                "files": [{"name": name, "state": _file_state(root, tid, name, opens)} for name in files],
+                "files": [
+                    {
+                        "name": name,
+                        "state": _file_state(root, tid, name, opens),
+                        "kind": _file_kind(root, tid, name),
+                    }
+                    for name in files
+                ],
                 "findings": [{"title": f.get("title"), "ticket": f.get("ticket")} for f in found.get(n, [])],
                 **({"script": x["script"]} if x.get("script") else {}),
             }
@@ -296,8 +315,17 @@ def runs(root: Path, t: dict, running: bool = False) -> list[dict]:
                 "checked": (o or {}).get("checked") or [],
                 "cost": (o or {}).get("cost"),
                 "files": [
-                    {"name": n2, "state": _file_state(root, tid, n2, opens)}
-                    for n2 in (o or {}).get("files") or []
+                    {
+                        "name": n2,
+                        "state": _file_state(root, tid, n2, opens),
+                        "kind": _file_kind(root, tid, n2),
+                    }
+                    for n2 in dict.fromkeys(
+                        [
+                            *((o or {}).get("files") or []),
+                            *(x for f in found.get(cur["run"], []) for x in f.get("files") or []),
+                        ]
+                    )
                 ],
                 "findings": [
                     {"title": f.get("title"), "ticket": f.get("ticket")} for f in found.get(cur["run"], [])
@@ -360,3 +388,18 @@ def prompt(tid: str, n: int) -> str:
         ' (add --checked "<line>" per thing checked and --file <name> per file it made).'
         f' Every problem it found: orch automation finding {tid} "<short title>" (it makes or reuses the ticket).'
     )
+
+
+def over_limit(root: Path, tid: str, now: datetime) -> int | None:
+    """The limit in minutes when the ticket's current run started with one and has gone on longer, else None."""
+    cur = (load_state(root).get(tid) or {}).get("current_run") or {}
+    limit, at = cur.get("limit"), parse(cur.get("at"))
+    if not isinstance(limit, int) or not at or cur.get("stopped"):
+        return None
+    return limit if (now - at).total_seconds() > limit * 60 else None
+
+
+def mark_stopped(root: Path, tid: str) -> None:
+    cur = dict((load_state(root).get(tid) or {}).get("current_run") or {})
+    cur["stopped"] = True
+    update_state(root, tid, current_run=cur)

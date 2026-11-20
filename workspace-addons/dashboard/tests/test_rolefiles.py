@@ -52,7 +52,10 @@ def test_keeps_only_checked_fields(monkeypatch, tmp_path):
     assert d["available"] is True and len(d["runs"]) == 1
     r = d["runs"][0]
     assert r["text"] == "Tests stopped early" and r["checked"] == ["Tests: 41 passed"]
-    assert r["files"] == [{"name": "log.txt", "state": "unopened"}, {"name": "a.png", "state": "unknown"}]
+    assert r["files"] == [
+        {"name": "log.txt", "state": "unopened", "kind": "artifacts"},
+        {"name": "a.png", "state": "unknown", "kind": "artifacts"},
+    ]
     assert r["findings"] == [{"title": "Usage page", "ticket": "t_abcdef"}]
     t = d["totals"]
     assert t["runs"] == 7 and t["findings"] == 0 and t["by_outcome"] == {"skipped": 2}

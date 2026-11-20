@@ -65,7 +65,7 @@ function roleFilesWords(tot) {
 function roleFileButtons(t, r, primary = false) {
   const files = r.files || [];
   if (!files.length) return [];
-  const open = () => previewFile(t.id, 'artifacts', files[0].name);
+  const open = () => previewFile(t.id, files[0].kind === 'evidence' ? 'evidence' : 'artifacts', files[0].name);
   return [ticketButton(files.length === 1 ? '1 file' : files.length + ' files', primary ? 'outline sm' : 'ghost sm', open, {'data-key':'role-run-files-' + r.run})];
 }
 function roleFindingLinks(r) {
@@ -195,7 +195,7 @@ function roleSchedulePanel(t, data) {
       roleSettingRow('Quick check first', [h('strong', {}, sc.quick === 'on' ? 'On' : 'Off'),
         h('p', {className:'meta'}, sc.quick === 'none' ? 'Nothing to check is set up for this role yet.' : 'It looks whether anything changed. If not, the run is skipped and costs nothing.')],
         sw(sc.quick === 'on', 'Quick check first', 'role-quick', () => roleAct(t, 'quick', fresh().quick === 'on' ? 'off' : 'on'), sc.quick === 'none'), 'quick'),
-      roleSettingRow('Time limit', limit, null, 'limit'),
+      sc.script ? null : roleSettingRow('Time limit', limit, null, 'limit'),  // a script ends by itself
       roleSettingRow('Helper strength', modelField(t), null, 'model'))];
 }
 // The chat: the Focus chat rows (steps, answers, the person's lines), each run as a run card, the person's notes for

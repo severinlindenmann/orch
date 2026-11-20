@@ -54,7 +54,7 @@ def test_result_names_the_current_run_and_the_newest_wins(ws):
     )
     assert r["checked"] == ["Tests: 41 passed"] and r["cost"] == 1.11
     assert r["files"] == [
-        {"name": "b.png", "state": "unknown"}
+        {"name": "b.png", "state": "unknown", "kind": "artifacts"}
     ]  # nothing measured yet: unknown, never unopened
 
 
@@ -214,3 +214,56 @@ def test_role_command_json(ws, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["totals"]["runs"] == 1 and out["runs"][0]["run"] == 1
     assert load_state(ws) == {}
+
+
+def test_the_time_limit_is_fixed_when_the_run_starts(ws):
+    t = _role(ws)
+    start = datetime(2026, 11, 20, 10, 0, tzinfo=UTC)
+    roles.begin(ws, t["id"], "2026-11-20T10:00:00Z", limit=30)
+    assert roles.over_limit(ws, t["id"], start + timedelta(minutes=29)) is None
+    assert roles.over_limit(ws, t["id"], start + timedelta(minutes=31)) == 30
+    roles.mark_stopped(ws, t["id"])
+    assert roles.over_limit(ws, t["id"], start + timedelta(minutes=40)) is None  # stopped once
+    roles.begin(ws, t["id"], "2026-11-20T11:00:00Z")  # a later change counts only from a new run
+    assert roles.over_limit(ws, t["id"], start + timedelta(hours=5)) is None
+
+
+def test_the_scheduler_stops_a_run_over_its_limit_once(ws):
+    from orch_automation.loop import Scheduler
+
+    t = _role(ws)
+    roles.begin(ws, t["id"], "2026-11-20T10:00:00Z", limit=30)  # Run now on a helper: no watch, still limited
+    s = Scheduler(ws)
+    s.enforce_limits(datetime(2026, 11, 20, 10, 45, tzinfo=UTC))
+    s.enforce_limits(datetime(2026, 11, 20, 10, 50, tzinfo=UTC))
+    stops = [c for c in calls(ws) if c["args"][:2] == ["run", "stop"]]
+    assert len(stops) == 1 and stops[0]["args"][2] == t["id"]
+    assert (
+        "Stopped after 30 minutes"
+        in json.loads((ws / ".orch" / "tickets" / f"{t['id']}.json").read_text())["history"][-1]["text"]
+    )
+
+
+def test_a_script_repeat_has_no_time_limit(ws):
+    import pytest
+
+    from orch_automation import actions
+
+    ext = json.loads(json.dumps(REPEAT))
+    ext["automation"]["script"] = "say"
+    add_ticket(ws, "t_scr001", ext=ext)
+    with pytest.raises(actions.Bad):
+        actions.act(ws, "limit", "t_scr001", value="60")
+
+
+def test_finding_files_show_on_the_current_run_and_evidence_files_say_so(ws):
+    t = _role(ws)
+    ev = ws / ".orch" / "tickets" / t["id"] / "evidence"
+    ev.mkdir(parents=True)
+    (ev / "shot.png").write_text("x")
+    roles.begin(ws, t["id"], "2026-11-20T10:00:00Z")
+    roles.finding_line(ws, t["id"], 1, "Cut off", "t_x00001", "cut off", files=["shot.png"])
+    r = roles.runs(ws, t, running=True)[0]
+    assert r["outcome"] == "running" and r["files"] == [
+        {"name": "shot.png", "state": "unknown", "kind": "evidence"}
+    ]

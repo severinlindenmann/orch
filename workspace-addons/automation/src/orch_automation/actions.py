@@ -52,7 +52,9 @@ def _run_now_helper(root: Path, t: dict, by: str | None, sched: dict) -> dict:
     n = roles.next_number(root, t["id"]) if sched.get("recurring") is True else None
     r = orchcli.run_start(root, t["id"], text=("Run now." + roles.prompt(t["id"], n)) if n else None, by=by)
     if n and r.get("result") == "started":
-        roles.begin(root, t["id"])
+        from .loop import time_limit
+
+        roles.begin(root, t["id"], limit=time_limit(t))
     return r
 
 
@@ -109,6 +111,8 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
 
         if sched.get("recurring") is not True:
             raise Bad("Only a repeat has a time limit.")
+        if script_of(t) or "group" in sched:
+            raise Bad("A repeat that runs a script has no time limit.")
         if value == "none":
             ok = orchcli.set_ext(root, t, remove=("time_limit",), by=by)
             return _saved(ok, target, "No time limit. It counts from the next run.")
