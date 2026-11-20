@@ -263,6 +263,20 @@ def test_log_mask_never_shows_part_of_a_value(cli, ws, stored_keys):
     assert out["lines"][0] == "tick 8 password=•••••• done", out["lines"]
 
 
+def test_log_line_with_a_stored_key_is_hidden_whole(cli, ws, stored_keys):
+    """ORCH-933 review: a stored value that itself holds key=value is never cut into shown pieces."""
+    _add(cli)
+    stored_keys["COMBO"] = "leftpart-81723 password=hunter2isverylong123 rightpart-81723"
+    log = ws / ".orch/addons/services/logs/web.log"
+    log.write_text(
+        "tick 10 leftpart-81723 password=hunter2isverylong123 rightpart-81723\ntick 11 fine\n",
+        encoding="utf-8",
+    )
+    code, out = jrun(cli, "log", "web")
+    assert code == 0
+    assert out["lines"] == ["••••••", "tick 11 fine"], out["lines"]
+
+
 def test_view_is_a_valid_page(cli, ws):
     _add(cli, "web", "--start")
     _code, out, _ = cli("view", "--json")

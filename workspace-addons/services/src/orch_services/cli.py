@@ -315,10 +315,17 @@ def mask_lines(root: Path, got: list[str]) -> list[str]:
     got = [re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", ln) for ln in got]
     text = "\n".join(got)
     try:
-        hits = {h["line"] for h in secretscan.find(text, root)}
+        found = secretscan.find(text, root)
     except Exception:  # noqa: BLE001 - never a pass: hide everything
         return [MASK for _ in got]
-    out = [_mask_line(ln, root) if (i + 1) in hits else ln for i, ln in enumerate(got)]
+    hits = {h["line"] for h in found}
+    # A stored key value is hidden with its whole line: masking a part inside it (its own "password=x") could
+    # cut it so the rest no longer matches and stays shown.
+    whole = {h["line"] for h in found if h["kind"] in ("stored-key", "keys-unreadable")}
+    out = [
+        (MASK if (i + 1) in whole else _mask_line(ln, root)) if (i + 1) in hits else ln
+        for i, ln in enumerate(got)
+    ]
     try:
         if secretscan.find("\n".join(out), root):  # e.g. a stored value split over lines: hide everything
             return [MASK for _ in out]
