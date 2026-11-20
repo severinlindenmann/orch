@@ -199,7 +199,8 @@ def _digest(p: Path) -> str:
 
 def _tree(folder: Path) -> dict[str, tuple[str, str]]:
     """{relative path: (kind, what)} of everything under folder; kind file (sha256), link (its target) or dir.
-    Links are never followed."""
+    Links are never followed, also not as the starting folder (refused)."""
+    _real_dir(folder)
     out: dict[str, tuple[str, str]] = {}
     for dirpath, dirs, files in os.walk(folder, followlinks=False):
         here = Path(dirpath)
@@ -229,6 +230,16 @@ def _size_ok(folder: Path) -> None:
         raise Refused("This skill folder is too big for the bin. Nothing was changed.")
 
 
+def _real_dir(folder: Path) -> None:
+    """Refuse a starting folder that is a link or not a folder: orch never walks or removes through a link."""
+    try:
+        st = os.lstat(folder)
+    except OSError:
+        raise Refused(f"{folder.name} is missing. Nothing was changed.") from None
+    if _is_link(folder) or not stat.S_ISDIR(st.st_mode):
+        raise Refused(f"{folder.name} is a link or not a folder; orch will not go through it. Nothing was changed.")
+
+
 def _same(tree: dict[str, tuple[str, str]], held: dict[str, tuple[str, str]]) -> bool:
     """Everything in tree (files and links) is in held with the same content."""
     return all(v[0] == "dir" or held.get(rel) == v for rel, v in tree.items())
@@ -237,6 +248,7 @@ def _same(tree: dict[str, tuple[str, str]], held: dict[str, tuple[str, str]]) ->
 def _clear_held(folder: Path, held: dict[str, tuple[str, str]]) -> bool:
     """Remove from folder only files and links the checked copy holds unchanged (each one compared right before it
     goes), then the folders that became empty. True when folder is gone."""
+    _real_dir(folder)
     for dirpath, dirs, files in os.walk(folder, topdown=False, followlinks=False):
         here = Path(dirpath)
         for f in [*files, *(d for d in dirs if _is_link(here / d))]:
@@ -305,7 +317,7 @@ def _recover_one(root: Path, where: str, entry: Path, rec: dict, account_home: P
         _rmtree(entry)
         return f"{name}: an unfinished delete was undone; the skill is where it was."
     src = _place_of(root, where, str(rec.get("from", "")), account_home)
-    held = _tree(entry / ITEM)
+    held = _tree(entry / ITEM)  # refused when the bin copy is a link
     if state == "removing":
         note = _finish_removal(src, entry, held)
         rec["state"] = "in-bin"
@@ -365,6 +377,10 @@ def delete(root: Path, where: str, name: str, who: str, account_home: Path | Non
     if not src.is_dir():
         raise Refused(f"{name} is not a skill folder. Nothing was changed.")
     _size_ok(src)
+    if any(p.name.startswith(".orch-delete-") for p in src.parent.iterdir()):
+        raise Refused(
+            "An earlier delete left a folder next to this skill that needs a look first. Nothing was changed."
+        )
     base = _bin(root, where)
     base.mkdir(parents=True, exist_ok=True)
     if where == "workspace":

@@ -400,3 +400,36 @@ def test_a_list_does_not_recover_while_a_change_runs(walk):
         assert entry.exists()  # the running change owns it
     model.build(ws)
     assert not entry.exists() and _files(folder) == before
+
+
+def test_a_planted_record_with_links_deletes_nothing(walk, tmp_path):
+    """Security review: a bin entry whose copy, or the aside folder, is a link to somewhere else."""
+    ws, folder, before = walk
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "precious.txt").write_text("keep me")
+    entry = ws / ".orch/addons/skills/bin/20261120T120000Z-release-walk-abcdef"
+    entry.mkdir(parents=True)
+    os.symlink(outside, entry / "item")
+    os.symlink(outside, folder.parent / f".orch-delete-{entry.name}")
+    (entry / "record.json").write_text(
+        json.dumps(
+            {
+                "schema": skill_bin.SCHEMA,
+                "where": "workspace",
+                "name": "release-walk",
+                "from": ".agents/skills/release-walk",
+                "state": "removing",
+            }
+        )
+    )
+    model.build(ws)
+    for state in ("restoring", "removing"):
+        rec = json.loads((entry / "record.json").read_text())
+        rec["state"] = state
+        (entry / "record.json").write_text(json.dumps(rec))
+        model.build(ws)
+    assert (outside / "precious.txt").read_text() == "keep me" and _files(folder) == before
+    with pytest.raises(switches.Refused, match="earlier delete"):
+        model.delete(ws, "skill:workspace:release-walk", "human:Anna")
+    assert _files(folder) == before
