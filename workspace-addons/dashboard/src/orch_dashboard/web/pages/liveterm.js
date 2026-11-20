@@ -3,8 +3,11 @@
 // terminal (kit term.js, UI.term) where the pane shows Terminal. Watching only by default: nothing is typed until the
 // person turns on "Let me type", and the server checks again (the typing setting and the sign-in).
 // The screen comes from the terminal bridge (ORCH-743) as server-sent events, GET /api/term/stream?ticket=<id>:
-// hello {typing_allowed}, screen {cols, rows, data}, out (base64 bytes), size {cols, rows}, end {state}. Typing goes to
-// POST /api/term/input {ticket, data}, a new size while typing to POST /api/term/size {ticket, cols, rows}.
+// hello {typing_allowed, page}, screen {cols, rows, data}, out (base64 bytes), size {cols, rows}, typing {by}, end
+// {state}. One page types at a time (ORCH-883): "Let me type" claims it with POST /api/term/typing {ticket, page, on}
+// (page: the id from this stream's hello); the page that typed before hears typing {by:'other'} and goes back to
+// watching. Typing goes to POST /api/term/input {ticket, data, page}, a new size while typing to POST /api/term/size
+// {ticket, cols, rows, page}; typing off gives the helper's window its own size back (the bridge, ORCH-881).
 // One terminal and one stream per session while its pane shows it, so a repaint of the layer keeps the screen, the
 // typing state and the keyboard. A terminal no pane shows closes its stream at once (the bridge serves few pages).
 const LIVE_TERM_EVERY = 1000;      // ms between two looks at which terminals are still shown
@@ -31,6 +34,7 @@ async function liveTermPost(path, payload) {
 }
 function liveTermSay(r) {
   if (r.status === 403) window.orch?.toast?.(r.text || 'Sign in to type here: open the dashboard with a sign-in link from orch.', 'error');
+  else if (r.status === 409 && /Another page/.test(r.text)) window.orch?.toast?.(r.text, 'error');
   else if (r.status === 409) window.orch?.toast?.('The helper’s screen has closed; that was not sent.', 'error');
   else window.orch?.toast?.(r.text.slice(0, 120) || 'The screen did not take that. Try again.', 'error');
 }
@@ -40,10 +44,15 @@ function liveTermFor(id, label, plain) {
   if (t) return t;
   const ui = window.UI.term({
     label, plain,
-    onInput: async data => { const r = await liveTermPost('/api/term/input', {ticket:id, data}); if (!r.ok) liveTermSay(r); return r; },
-    onSize: size => liveTermPost('/api/term/size', {ticket:id, cols:size.cols, rows:size.rows}),
+    onInput: async data => { const r = await liveTermPost('/api/term/input', {ticket:id, data, page:t.page}); if (!r.ok) liveTermSay(r); return r; },
+    onSize: size => liveTermPost('/api/term/size', {ticket:id, cols:size.cols, rows:size.rows, page:t.page}),
+    onTyping: async (on, byOther) => {
+      if (!t.page || byOther) return;  // no stream yet, or another page took it (nothing to give back)
+      const r = await liveTermPost('/api/term/typing', {ticket:id, page:t.page, on});
+      if (on && !r.ok) { ui.setTyping(false); liveTermSay(r); }
+    },
   });
-  t = {ui, es:null, seen:Date.now(), ended:false, retry:0};
+  t = {ui, es:null, seen:Date.now(), ended:false, retry:0, page:''};
   liveTerms.set(id, t);
   return t;
 }
@@ -52,7 +61,8 @@ function liveTermOpen(id, t) {
   if (t.es || typeof EventSource !== 'function' || Date.now() < t.retry) return;
   const es = new EventSource('/api/term/stream?ticket=' + encodeURIComponent(id));
   t.es = es; t.ended = false;
-  es.addEventListener('hello', e => t.ui.hello(liveTermJSON(e.data)));
+  es.addEventListener('hello', e => { const h = liveTermJSON(e.data); t.page = (h && typeof h.page === 'string') ? h.page : ''; t.ui.hello(h); });
+  es.addEventListener('typing', e => t.ui.typingBy((liveTermJSON(e.data) || {}).by || 'none'));
   es.addEventListener('screen', e => { const s = liveTermJSON(e.data); if (s) t.ui.screen(s); });
   es.addEventListener('out', e => t.ui.write(e.data));
   es.addEventListener('size', e => t.ui.size(liveTermJSON(e.data)));

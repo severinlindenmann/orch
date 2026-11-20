@@ -5,11 +5,14 @@
    Watching only by default: the terminal takes no input until the person turns on "Let me type"; the server decides
    again (the workspace setting and the sign-in). Select and copy like in the Terminal app; Copy copies the selection
    or the whole screen; a paste with a line end asks once. While typing the helper's screen follows the size of its
-   box (onSize); while watching it keeps the helper's own size and scrolls.
+   box (onSize); while watching it keeps the helper's own size and scrolls, and the box follows the newest line and
+   the cursor until the person scrolls away (ORCH-882). One page types at a time: when another page takes the typing,
+   this one goes back to watching and says so (typingBy, ORCH-883).
      UI.term({label, plain, onInput(data) -> Promise<{ok, status, text}>, onSize({cols, rows}), onTyping(on)})  -> handle
        plain                              true for a plain terminal (no helper): the words say "this terminal"
        handle.el                          the element to put in the page
        handle.hello({typing_allowed})     the bridge's first word: may this workspace type at all
+       handle.typingBy('you'|'other'|'none')  who types into this session now; 'other' stops typing here
        handle.screen({cols, rows, data})  the whole screen (data: base64 terminal bytes), first and after a gap
        handle.write(b64)                  more bytes the program wrote
        handle.size({cols, rows})          the helper's screen has a new size
@@ -18,7 +21,8 @@
        handle.setTyping(on) / handle.typing()
        handle.back()                      put the keyboard back after the page drew the pane again
        handle.dispose()                   free the terminal (its WebGL context)
-   Pure parts for tests: UI.term.pasteAsk, UI.term.lineCount, UI.term.bytes, UI.term.clamp, UI.term.WORDS.
+   Pure parts for tests: UI.term.pasteAsk, UI.term.lineCount, UI.term.bytes, UI.term.clamp, UI.term.WORDS,
+   UI.term.followTop, UI.term.plainText.
    No screen text ever goes in as markup: xterm draws it on a canvas. A program cannot write the clipboard (no OSC 52
    handler), change the page title (not listened to) or open a link other than http/https (opened with noopener). */
 (() => {
@@ -54,6 +58,24 @@
     const c = Math.floor(z.cols), r = Math.floor(z.rows);
     return {cols: Math.max(10, Math.min(500, c)), rows: Math.max(3, Math.min(300, r))};
   }
+  /* Where the box scrolls while watching so the newest line and the cursor are in view (ORCH-882): the lower of the
+     cursor row and the last row with text sits at the bottom of the box; the top when the screen fits. pad: the
+     box's padding above (and as much below) the screen. */
+  function followTop(f) {
+    const row = Math.max(f.cursorRow | 0, f.lastRow | 0) + 1;
+    const max = Math.max(0, f.height - f.view);
+    return Math.max(0, Math.min(max, Math.ceil(row * f.rowPx + 2 * (f.pad || 0) - f.view)));
+  }
+  /* The terminal's lines as text for Copy: no trailing spaces (a program pads its lines with them), wrapped lines
+     joined again, no empty lines at the end (ORCH-885). lines: [{text, wrapped}] */
+  function plainText(lines) {
+    const out = [];
+    for (const l of lines) {
+      const t = String(l.text || '');
+      if (l.wrapped && out.length) out[out.length - 1] += t; else out.push(t);
+    }
+    return out.map(t => t.replace(/[ \t\u00a0]+$/, '')).join('\n').replace(/\n+$/, '');
+  }
   const MAX_INPUT = 60000;  // characters in one typing request (the bridge takes 64 K)
 
   /* --- the element --- */
@@ -71,6 +93,7 @@
     type: 'Typing: your keys go to the helper · Shift+Tab stops',
     typePlain: 'Typing: your keys go to this terminal · Shift+Tab stops',
     off: 'Watching only · typing is off in Settings',
+    taken: 'Watching · another page is typing into this screen now',
     loading: 'Connecting to the helper’s screen…',
     error: 'The screen stopped updating. orch keeps trying; the helper keeps working.',
     ended: 'The helper’s screen has closed.',
@@ -117,7 +140,8 @@
     const note = el('p', {className: 'term-state meta', hidden: true});
     const root = el('div', {className: 'term', 'data-typing': 'off', 'data-state': 'loading'}, bar, ask, screen, loading, note);
 
-    let state = 'loading', live = false, typing = false, allowed = false, canType = true, held = null;
+    let state = 'loading', live = false, typing = false, allowed = false, canType = true, held = null, taken = false;
+    let stick = true, autoTop = -1, followAsked = false;
     let out = '', timer = null, chain = Promise.resolve(), gen = 0, sizeTimer = null, sent = '', lastFocus = null;
     let xt = null, fit = null, tried = false, cols = 80, rows = 24, watcher = null;
 
@@ -155,7 +179,8 @@
       return true;
     }
     function words() {
-      const w = !live ? WORDS[state] || WORDS.none : typing ? (o.plain ? WORDS.typePlain : WORDS.type) : allowed && canType ? WORDS.watch : WORDS.off;
+      const w = !live ? WORDS[state] || WORDS.none : typing ? (o.plain ? WORDS.typePlain : WORDS.type)
+        : allowed && canType ? (taken ? WORDS.taken : WORDS.watch) : WORDS.off;
       if (say.textContent !== w) say.textContent = w;
       swRow.hidden = !(live && allowed && canType);
       sw.setAttribute('aria-checked', String(typing));
@@ -167,22 +192,54 @@
       note.textContent = note.hidden ? '' : WORDS[state] || WORDS.none;
       copy.hidden = !live;
     }
-    function hello(h) { allowed = !!(h && h.typing_allowed === true); if (typing && !allowed) setTyping(false); words(); }
+    function hello(h) { allowed = !!(h && h.typing_allowed === true); taken = false; if (typing && !allowed) setTyping(false); words(); }
+    /* who types into this session now: another page took it, so this one goes back to watching (ORCH-883) */
+    function typingBy(by) {
+      taken = by === 'other';
+      if (taken && typing) setTyping(false, true); else words();
+    }
+    /* while watching, the box keeps the newest line and the cursor in view, until the person scrolls away */
+    function follow() {
+      if (followAsked) return;
+      followAsked = true;
+      const run = () => {
+        followAsked = false;
+        if (!xt || !live || typing || !stick) return;
+        const b = xt.buffer && xt.buffer.active;
+        const scr = host.querySelector && host.querySelector('.xterm-screen');
+        const height = scr ? scr.offsetHeight : 0;
+        if (!b || !height || !rows) return;
+        let last = 0;
+        for (let i = rows - 1; i >= 0; i--) { const l = b.getLine(b.baseY + i); if (l && l.translateToString(true).trim()) { last = i; break; } }
+        const pad = scr.getBoundingClientRect().top - screen.getBoundingClientRect().top + screen.scrollTop;
+        const top = followTop({cursorRow: b.cursorY, lastRow: last, rowPx: height / rows, pad, view: screen.clientHeight, height: screen.scrollHeight});
+        if (screen.scrollTop !== top) screen.scrollTop = top;
+        autoTop = screen.scrollTop;
+      };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run); else run();
+    }
+    /* a scroll the person made away from where the box followed stops following; back at it, it follows again */
+    screen.addEventListener('scroll', () => {
+      if (autoTop < 0 || typing) return;
+      stick = Math.abs(screen.scrollTop - autoTop) < 4 || screen.scrollTop + screen.clientHeight >= screen.scrollHeight - 4;
+    });
     function screenNow(s) {
       if (!make()) return;
       const z = clamp(s);
       xt.reset();
       if (z) { cols = z.cols; rows = z.rows; xt.resize(cols, rows); }
-      xt.write(bytes(s && s.data));
+      stick = true;
+      xt.write(bytes(s && s.data), follow);
       live = true; state = 'live'; words();
       if (typing) measure(true);
     }
-    function write(b64) { if (xt && live) xt.write(bytes(b64)); }
+    function write(b64) { if (xt && live) xt.write(bytes(b64), follow); }
     function size(z) {
       const n = clamp(z);
       if (!n || !xt) return;
       cols = n.cols; rows = n.rows; sent = cols + 'x' + rows;
       xt.resize(cols, rows);
+      follow();
     }
     function end(why) {
       if (typing) setTyping(false);
@@ -195,16 +252,17 @@
       setTyping(false);
       live = false; allowed = false; state = next; words();
     }
-    function setTyping(on) {
+    function setTyping(on, byOther) {
       if (!on && held) { held = null; ask.hidden = true; }
       const want = !!on && live && allowed && canType && !!xt;
+      if (want) taken = false;
       if (want === typing) { words(); return; }
       typing = want; sent = '';
       if (!typing) { out = ''; clearTimeout(timer); timer = null; clearTimeout(sizeTimer); sizeTimer = null; gen++; }  // nothing typed before goes out later
       if (xt) { xt.options.disableStdin = !typing; xt.options.cursorBlink = typing && !reduced(); }
       words();
-      if (typing) { xt.focus(); measure(true); }
-      if (typeof o.onTyping === 'function') o.onTyping(typing);
+      if (typing) { xt.focus(); measure(true); } else follow();
+      if (typeof o.onTyping === 'function') o.onTyping(typing, !!byOther);
     }
     /* what xterm hands over goes out in order, one request at a time */
     function schedule() { if (!timer) timer = setTimeout(() => { timer = null; chain = chain.then(flush, flush); }, 20); }
@@ -219,6 +277,7 @@
         if (mine !== gen) return;  // typing was turned off while this was out
         if (r && r.ok) continue;
         if (r && r.status === 403) { if (/is off/.test(r.text || '')) allowed = false; else canType = false; }
+        if (r && r.status === 409 && /Another page/.test(r.text || '')) taken = true;
         setTyping(false);
         return;
       }
@@ -248,10 +307,11 @@
     function allText() {
       if (!xt) return '';
       const b = xt.buffer.active, lines = [];
-      for (let i = 0; i < b.length; i++) { const l = b.getLine(i); lines.push(l ? l.translateToString(true) : ''); }
-      return lines.join('\n').replace(/\n+$/, '');
+      for (let i = 0; i < b.length; i++) { const l = b.getLine(i); lines.push({text: l ? l.translateToString(false) : '', wrapped: !!(l && l.isWrapped)}); }  // untrimmed: a space at a wrap stays
+      return plainText(lines);
     }
-    copy.addEventListener('click', () => copyText(xt && xt.hasSelection() ? xt.getSelection() : allText()));
+    const trimSel = t => String(t).split('\n').map(l => l.replace(/[ \t\u00a0]+$/, '')).join('\n');
+    copy.addEventListener('click', () => copyText(xt && xt.hasSelection() ? trimSel(xt.getSelection()) : allText()));
     /* the size: while typing, the helper's screen follows the box (sent once it stays the same for a moment) */
     function measure(now) {
       if (!typing || !fit || typeof o.onSize !== 'function') return;
@@ -272,7 +332,7 @@
     root.addEventListener('focusout', e => { if (e.relatedTarget && !root.contains(e.relatedTarget)) lastFocus = null; });
     words();
     return {
-      el: root, hello, screen: screenNow, write, size, end, show, setTyping,
+      el: root, hello, typingBy, screen: screenNow, write, size, end, show, setTyping,
       typing: () => typing,
       /* after the page drew the pane again: the keyboard goes back where it was in this terminal (the screen or the
          paste question), and only when nothing else on the page has it now */
@@ -284,6 +344,7 @@
       dispose() { setTyping(false); if (watcher) watcher.disconnect(); if (xt) { xt.dispose(); xt = null; } }
     };
   }
+  term.followTop = followTop; term.plainText = plainText;
   term.pasteAsk = pasteAsk; term.cleanPaste = cleanPaste; term.lineCount = lineCount; term.bytes = bytes; term.clamp = clamp; term.WORDS = WORDS;
   UI.term = term;
   if (typeof module === 'object' && module.exports) module.exports = term;

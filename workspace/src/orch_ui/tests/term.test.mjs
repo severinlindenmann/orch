@@ -306,3 +306,53 @@ test('a plain terminal says this terminal, not the helper', () => {
   ui.hello({typing_allowed: true}); ui.screen(SCREEN); ui.setTyping(true);
   assert.match(byClass(ui.el, 'term-say').textContent, /go to this terminal/);
 });
+
+test('Copy gives the lines without the spaces a program pads them with, wrapped lines joined (ORCH-885)', async () => {
+  assert.equal(T.plainText([{text: 'one   '}, {text: 'two\t  '}, {text: ''}, {text: '   '}]), 'one\ntwo');
+  assert.equal(T.plainText([{text: 'a long li'}, {text: 'ne   ', wrapped: true}, {text: '  indented'}]), 'a long line\n  indented');
+  assert.equal(T.plainText([{text: 'hello '}, {text: 'world   ', wrapped: true}]), 'hello world', 'a space at the wrap stays');
+  const {ui, xt} = live();
+  ui.write(b64('\r\npadded' + ' '.repeat(70)));
+  xt.sel = '';
+  byKey(ui.el, 'term-copy').click();
+  await wait(5);
+  assert.ok(!/ \n| $/.test(copied.at(-1)), 'no line ends in spaces');
+  assert.match(copied.at(-1), /padded$/);
+  xt.sel = 'one   \ntwo  ';
+  byKey(ui.el, 'term-copy').click();
+  await wait(5);
+  assert.equal(copied.at(-1), 'one\ntwo', 'a selection loses its trailing spaces too');
+});
+
+test('while watching the box follows the newest line and the cursor (ORCH-882)', () => {
+  // a 24-row screen at 16 px a row in a box 200 px tall (the pane under a page): the box scrolls so row 23 shows
+  assert.equal(T.followTop({cursorRow: 23, lastRow: 20, rowPx: 16, pad: 8, view: 200, height: 400}), 200);
+  // a shell with its prompt on row 2: the top stays in view
+  assert.equal(T.followTop({cursorRow: 2, lastRow: 2, rowPx: 16, pad: 8, view: 200, height: 400}), 0);
+  // a menu below the cursor: the last row with text counts
+  assert.equal(T.followTop({cursorRow: 3, lastRow: 18, rowPx: 16, pad: 0, view: 200, height: 400}), 104);
+  // the screen fits: no scroll; never past the end
+  assert.equal(T.followTop({cursorRow: 23, lastRow: 23, rowPx: 16, pad: 8, view: 500, height: 500}), 0);
+  assert.equal(T.followTop({cursorRow: 299, lastRow: 0, rowPx: 16, pad: 8, view: 200, height: 400}), 200);
+});
+
+test('another page takes the typing: this one goes back to watching and says so; Let me type takes it back (ORCH-883)', () => {
+  const turned = [];
+  const ui = T({label: 'ORCH-1', onInput: async () => ({ok: true}), onTyping: (on, byOther) => turned.push([on, byOther])});
+  ui.hello({typing_allowed: true});
+  ui.screen(SCREEN);
+  ui.setTyping(true);
+  assert.equal(ui.typing(), true);
+  ui.typingBy('you');
+  assert.equal(ui.typing(), true, 'its own claim changes nothing');
+  ui.typingBy('other');
+  assert.equal(ui.typing(), false);
+  assert.match(byClass(ui.el, 'term-say').textContent, /another page is typing/);
+  assert.deepEqual(turned, [[true, false], [false, true]]);
+  byKey(ui.el, 'term-type').click();
+  assert.equal(ui.typing(), true);
+  assert.match(byClass(ui.el, 'term-say').textContent, /^Typing/);
+  ui.setTyping(false);
+  ui.typingBy('none');
+  assert.match(byClass(ui.el, 'term-say').textContent, /^Watching · select/);
+});

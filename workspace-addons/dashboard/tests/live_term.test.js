@@ -30,11 +30,12 @@ function load() {
       const el = new N(); let typing = false;
       const ui = {el, o, got: [], hello: h => ui.got.push(['hello', h]), screen: x => ui.got.push(['screen', x]), write: b => ui.got.push(['out', b]),
         size: z => ui.got.push(['size', z]), end: w => ui.got.push(['end', w]), show: w => ui.got.push(['show', w]),
+        typingBy: by => ui.got.push(['typing', by]),
         setTyping: on => { typing = !!on; }, typing: () => typing, back() { ui.backs = (ui.backs || 0) + 1; }, dispose() { ui.disposed = true; }};
       made.push(ui); return ui;
     }}},
     document: {hidden: false, contains: n => { for (let x = n; x; x = x.parentNode) if (x.attached) return true; return false; }},
-    fetch: async (url, init) => { posts.push([url, JSON.parse(init.body)]); return {ok: true}; },
+    fetch: async (url, init) => { posts.push([url, JSON.parse(init.body)]); const a = ctx.answer || {ok: true, status: 200, text: ''}; return {ok: a.ok, status: a.status, text: async () => a.text}; },
   };
   vm.createContext(ctx);
   vm.runInContext(source, ctx);
@@ -93,14 +94,32 @@ test('the bridge\'s events go to the terminal; an end closes the stream and it o
   assert.equal(streams.length, 1, 'not opened again at once');
 });
 
-test('typing and a new size go to the bridge\'s input and size addresses for this session', async () => {
-  const {api, made, posts} = load();
+test('typing and a new size go to the bridge\'s input and size addresses for this session, named by this page', async () => {
+  const {api, made, posts, streams} = load();
   const {b} = body('t_a');
   api.liveTermApply(b, {id: 't_a'});
+  streams[0].emit('hello', '{"typing_allowed":true,"page":"p1"}');
   const r = await made[0].o.onInput('ls\r');
   await made[0].o.onSize({cols: 120, rows: 30});
   assert.equal(r.ok, true);
-  assert.deepEqual(JSON.parse(JSON.stringify(posts)), [['/api/term/input', {ticket: 't_a', data: 'ls\r'}], ['/api/term/size', {ticket: 't_a', cols: 120, rows: 30}]]);
+  assert.deepEqual(JSON.parse(JSON.stringify(posts)), [['/api/term/input', {ticket: 't_a', data: 'ls\r', page: 'p1'}],
+    ['/api/term/size', {ticket: 't_a', cols: 120, rows: 30, page: 'p1'}]]);
+});
+
+test('one page types at a time: Let me type claims it, off gives it back, another page taking it is heard (ORCH-883)', async () => {
+  const {api, made, posts, streams} = load();
+  const {b} = body('t_a');
+  api.liveTermApply(b, {id: 't_a'});
+  await made[0].o.onTyping(true, false);
+  assert.equal(posts.length, 0, 'no stream hello yet: nothing to claim with');
+  streams[0].emit('hello', '{"typing_allowed":true,"page":"p1"}');
+  await made[0].o.onTyping(true, false);
+  await made[0].o.onTyping(false, false);
+  await made[0].o.onTyping(false, true);  // another page took it: nothing to give back
+  assert.deepEqual(JSON.parse(JSON.stringify(posts)), [['/api/term/typing', {ticket: 't_a', page: 'p1', on: true}],
+    ['/api/term/typing', {ticket: 't_a', page: 'p1', on: false}]]);
+  streams[0].emit('typing', '{"by":"other"}');
+  assert.deepEqual(made[0].got.at(-1), ['typing', 'other']);
 });
 
 test('the layer draws the pane again: the same terminal moves in and gets the keyboard back', () => {
