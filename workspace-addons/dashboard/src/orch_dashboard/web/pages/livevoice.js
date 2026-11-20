@@ -8,7 +8,7 @@
 //   Then: "Writing down your words…", then the words in the box with draft D's line under it. A refusal (microphone
 //   blocked, nothing heard, the relay said no) is one plain sentence in the same place.
 const LIVE_VOICE_MAX_SECS = 120;   // the relay's limit for one recording (relay-api.md /v1/transcribe: 2 min)
-const LIVE_VOICE_TEXT = 2000;      // the box's own limit (run.send, LIVE_MSG_MAX in livegroups.js)
+const LIVE_VOICE_TEXT = 2000;      // run.send's limit (LIVE_MSG_MAX in livegroups.js); a box with a lower maxlength wins
 const LIVE_VOICE_SAY = {
   blocked:'The microphone is blocked for this page; allow it in the browser, then try again.',
   none:'No microphone was found on this computer.',
@@ -25,10 +25,10 @@ function liveVoiceOn(st, isSnapshot) {
   return rows.some(a => a && a.name === 'relay' && a.active === true && a.detail?.connected === true);
 }
 // The words go after what is already typed, on the same line, never over the box's limit.
-function liveVoiceJoin(typed, words) {
+function liveVoiceJoin(typed, words, max = LIVE_VOICE_TEXT) {
   const a = String(typed || '').replace(/\s+$/, ''), b = String(words || '').trim();
   if (!b) return String(typed || '');
-  return (a ? a + ' ' + b : b).slice(0, LIVE_VOICE_TEXT);
+  return (a ? a + ' ' + b : b).slice(0, max > 0 ? max : LIVE_VOICE_TEXT);
 }
 const liveVoiceClock = n => Math.floor(Math.max(0, n) / 60) + ':' + String(Math.max(0, n) % 60).padStart(2, '0');
 
@@ -112,14 +112,15 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
     }
     if (!liveVoiceAt || liveVoiceAt.ctl !== ctl) return;  // cancelled meanwhile
     if (!text) { end(id, {kind:'err', text:fail || LIVE_VOICE_SAY.empty}, 'live-voice'); return; }
-    if (typeof liveMsgDraft === 'object') liveMsgDraft.set(id, liveVoiceJoin(liveMsgDraft.get(id), text));
-    end(id, {kind:'done', text:LIVE_VOICE_DONE}, null);
+    // the words go into the composer's box as typing does (an input event, so the composer keeps them as its draft),
+    // before the line under them is set: that event would otherwise take the line away again
     const box = document.querySelector(`#live-dock [data-live-msg-text="${id.replace(/["\\]/g, '')}"]`);
     if (box) {
-      box.value = liveMsgDraft.get(id) || box.value;
-      requestAnimationFrame(() => { box.focus({preventScroll:true}); box.setSelectionRange(box.value.length, box.value.length); });
-    }
-   
+      box.value = liveVoiceJoin(box.value, text, box.maxLength);
+      box.dispatchEvent(new Event('input', {bubbles:true}));
+    } else if (typeof liveMsgDraft === 'object') liveMsgDraft.set(id, liveVoiceJoin(liveMsgDraft.get(id), text));
+    end(id, {kind:'done', text:LIVE_VOICE_DONE}, null);
+    if (box) requestAnimationFrame(() => { box.focus({preventScroll:true}); box.setSelectionRange(box.value.length, box.value.length); });
   }
 
   function liveVoiceStart(id) {
@@ -178,7 +179,7 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
     const box = e.target.closest?.('#live-dock [data-live-msg-text]');
     if (box && liveVoiceNote.get(box.dataset.liveMsgText)?.kind === 'done') {
       liveVoiceNote.delete(box.dataset.liveMsgText);
-      box.form?.querySelector('[data-key="live-voice-done"]')?.remove();
+      box.closest('[data-live-msg]')?.querySelector('[data-key="live-voice-done"]')?.remove();
     }
   });
   // a sent message clears the line too (the box is empty again)

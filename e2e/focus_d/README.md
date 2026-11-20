@@ -10,7 +10,7 @@ From the repo root (Playwright is found in `PW_DIR`, `~/orch-dev/e2e/dashboard/n
 
     node e2e/focus_d/clickthrough.cjs --out ~/.orch-test/focus-d-shots
 
-- Starts the real dashboard and today's Focus on fake data, each in a throw-away home under `~/.orch-test`
+- Starts the real dashboard on fake data, in a throw-away home under `~/.orch-test`
   (`env -i`, own `HOME`, `USERPROFILE` and `ORCH_HOME`, `ORCH_HOME_STRICT=1`). The orch of the computer is never used.
 - Chromium gets its own profile and `--use-mock-keychain --password-store=basic` (through `e2e/headless.cjs`).
 - Ready steps are clicked at each width; a page error, a console error, sideways scroll or a failed check fails the run.

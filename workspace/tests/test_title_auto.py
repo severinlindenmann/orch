@@ -23,11 +23,14 @@ def test_long_or_multiline_text_gets_a_placeholder_title_and_the_flag(proj):
 
 
 def test_start_prompt_tells_the_agent_to_write_title_and_description_first(proj):
+    # ORCH-737: one first instruction writes title, description, done-when and estimate together
     t = tickets.create_from_input(proj, LONG, "human:t")
     p = runs.fresh_prompt(t, [], proj)
-    assert f'orch ticket title {t["id"]} "<short title>" --description' in p
+    assert f'orch ticket tidy {t["id"]} "<short clear title>" --description' in p
+    assert "--done-when" in p and "--estimate-minutes" in p and "--estimate-cost" in p and "do not ask" in p
+    assert "orch ticket title" not in p and p.count("orch ticket tidy") == 1
     assert "placeholder" in p and f".orch/tickets/{t['id']}/artifacts/" in p
-    assert p.index("orch ticket title") < p.index("orch check add")
+    assert p.index("orch ticket tidy") < p.index("orch check add")
     plain = tickets.create(proj, "Plain", "human:t")
     assert "orch ticket title" not in runs.fresh_prompt(plain, [], proj)
 
@@ -133,7 +136,28 @@ def test_start_prompt_tells_the_agent_to_tidy_a_new_ticket_without_asking(proj):
     done = tickets.tidy(proj, t["id"], "Fix the login page", "agent:claude")
     assert "orch ticket tidy" not in runs.fresh_prompt(done, [], proj)
     auto = tickets.create_from_input(proj, LONG, "human:t")
-    assert "orch ticket tidy" not in runs.fresh_prompt(auto, [], proj)  # the title command covers it
+    assert "orch ticket tidy" in runs.fresh_prompt(auto, [], proj)  # ORCH-737: a placeholder is tidied too
+
+
+def test_one_tidy_on_a_placeholder_ticket_writes_everything_and_ends_the_placeholder(proj):
+    t = tickets.create_from_input(proj, LONG, "human:t", fields={"note": tickets.LONG_NOTE})
+    t = tickets.tidy(
+        proj,
+        t["id"],
+        "Evaluate the AI-inventory prompts",
+        "agent:claude",
+        fields={"done_when": "Each prompt has a verdict"},
+        description="Compare the prompts.",
+        estimate={"minutes": 30, "cost": 1.5},
+    )
+    assert t["title"] == "Evaluate the AI-inventory prompts" and "title_auto" not in t
+    assert t["description"] == "Compare the prompts." and t["done_when"] == "Each prompt has a verdict"
+    assert t["estimate"]["minutes"] == 30 and t.get("note") != tickets.LONG_NOTE
+    p = runs.fresh_prompt(t, [], proj)
+    assert "orch ticket tidy" not in p and "orch ticket title" not in p and "placeholder" not in p
+    kept = tickets.create_from_input(proj, LONG, "human:t")  # the helper keeps the placeholder's words
+    kept = tickets.tidy(proj, kept["id"], kept["title"], "agent:claude", description="Same words.")
+    assert "title_auto" not in kept and "orch ticket title" not in runs.fresh_prompt(kept, [], proj)
 
 
 def test_tidy_writes_the_agents_description_once_never_into_the_note(proj):

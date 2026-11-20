@@ -898,3 +898,23 @@ def test_agent_may_wait_on_a_question_and_a_person_on_nothing(proj, new_ticket, 
     tickets.ask(proj, other, "Which folder?", ["A", "B"], "A", "agent:codex")
     tickets.set_status(proj, other, "waiting", "agent:codex")
     assert tickets.load(proj, other)["status"] == "waiting"
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="time.tzset exists only on Unix; the zone cannot be set here"
+)
+def test_a_wait_time_without_a_zone_is_this_computers_local_time(monkeypatch):
+    import time
+
+    from orch import tickets
+
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    time.tzset()
+    try:
+        assert tickets.parse_time("2026-11-20 08:00") == "2026-11-20T07:00:00Z"
+        assert tickets.parse_time("2026-11-20T08:00:00") == "2026-11-20T07:00:00Z"
+        assert tickets.parse_time("2026-11-20T08:00:00Z") == "2026-11-20T08:00:00Z"
+        assert tickets.parse_time("2026-11-20T08:00:00+02:00") == "2026-11-20T06:00:00Z"
+    finally:
+        monkeypatch.undo()
+        time.tzset()

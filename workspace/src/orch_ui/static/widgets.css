@@ -1070,6 +1070,13 @@ button.live-pt:hover{color:var(--brand)}
 .live-links{display:flex;flex-wrap:wrap;gap:var(--s2)}
 .live-link{overflow-wrap:anywhere}
 .live-chat-empty{margin:auto 0}
+/* the files a sent message carried (ORCH-695): a picture's thumbnail or a file chip, a click opens the big preview */
+.live-chat-files{display:flex;flex-wrap:wrap;gap:var(--s2);justify-content:flex-end}
+.live-chat-file{display:inline-flex;gap:var(--s2);align-items:center;max-width:min(100%,240px);min-height:var(--touch);padding:var(--s1);border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text);font:inherit;font-size:var(--fs-meta);cursor:pointer}
+.live-chat-file:hover{border-color:var(--brand)}
+.live-chat-file img,.live-chat-kind{flex:none;width:48px;height:36px;border-radius:var(--r1);object-fit:cover}
+.live-chat-kind{display:grid;place-items:center;background:var(--surface-3);color:var(--text-muted)}
+.live-chat-fname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .live-pb[data-live-view=chat] .live-lines{display:none}
 /* the History tab of a pane (ORCH-363): the earlier sessions of the ticket, newest first, each with Reopen */
 .live-pb.live-pb-hist{align-items:stretch;justify-content:flex-start;padding:var(--s4);text-align:left;color:var(--text)}
@@ -1313,6 +1320,36 @@ body:has(.swipe-actions:not([hidden])) .ui-toasts{top:calc(var(--s4) + 56px);bot
 .swipe-preview:has(>.doc):not(:has(.doc-rows)){background:linear-gradient(transparent,var(--ink) 70%) 0 100%/100% 32px no-repeat local,linear-gradient(transparent,color-mix(in srgb,var(--text) 22%,transparent)) 0 100%/100% 16px no-repeat scroll,var(--ink)}
 /* a toast never covers the comment sheet's buttons: while a sheet is open it shows at the top (ORCH-422 look check) */
 body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:auto}
+/* Part tiles (Personal, ORCH-646 draft A, owner 18 Nov): one card per part with a glance body and a "Helpers can use" foot;
+   the whole card opens the part. .part-tile-add is the dashed "add" tile. Gallery: #part-tiles. */
+.tile-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,280px),1fr));gap:var(--s4)}
+.part-tile{position:relative;display:flex;flex-direction:column;transition:border-color var(--dur-fast) var(--ease-out)}
+.part-tile:hover,.part-tile:focus-within{border-color:var(--border-strong)}
+.part-tile .card-h{border-bottom:0;padding-bottom:0;color:var(--text-muted)}
+.part-tile .card-h h2{font-size:var(--s4);line-height:var(--s5);color:var(--text)}
+.part-tile-link{text-decoration:none;color:inherit}
+.part-tile-link::after{content:"";position:absolute;inset:0}
+.part-tile-link:focus-visible{outline:none}
+.part-tile:has(.part-tile-link:focus-visible){box-shadow:var(--focus-ring)}
+.part-tile-body{display:grid;gap:var(--s2);align-content:start;padding:var(--s3) var(--s4);flex:1}
+.part-tile-foot{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap;padding:var(--s3) var(--s4);border-top:1px solid var(--border)}
+.part-tile-foot .btn{position:relative}
+.part-tile-add{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--s2);min-height:calc(var(--s9)*2);padding:var(--s5);text-align:center;text-decoration:none;border:1px dashed var(--border-strong);border-radius:var(--r2);background:transparent;color:var(--text-muted)}
+.part-tile-add strong{color:var(--text)}
+.part-tile-add:hover{background:var(--surface)}
+.part-tile-add:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+/* one glance line: time, words, one fact on the right */
+.glance{display:flex;align-items:baseline;gap:var(--s2);min-width:0}
+.glance strong{font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.glance .when{flex:none;min-width:var(--s7);font-variant-numeric:tabular-nums}
+.glance .side{flex:none;margin-left:auto}
+/* a [[link]] between notes, shown as a quiet brand-coloured link */
+.wikilink{color:var(--brand);text-decoration:none}
+.wikilink:hover{text-decoration:underline}
+/* what a helper may do with one source: the rule and its choice in one row */
+.rule-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--s4);align-items:center;padding:var(--s3) var(--s4);border-top:1px solid var(--border)}
+.rule-row:first-child{border-top:0}
+@media(max-width:600px){.rule-row{grid-template-columns:minmax(0,1fr);gap:var(--s2)}}
 /* A choice card that fills its grid cell: a two-line .live-opt, pressed when in use (Usage "How work is spread", ORCH-657) */
 .live-opt.tall{align-items:flex-start;height:100%;padding:var(--s4)}
 .live-opt.tall .live-opt-t{gap:var(--s1)}
@@ -1378,9 +1415,11 @@ button.gtree-row:hover{background:var(--surface-2)}
 .live-pane[data-narrow] .live-gwrap>.gtree{padding:var(--s1) var(--s2);border-right:0;overflow:visible}
 .live-gwrap>.live-pb{min-width:0}
 .live-msg{display:grid;gap:var(--s1);margin-top:auto;padding-top:var(--s2);border-top:1px solid var(--border)}
+/* the message box stays at the bottom of the pane while the chat above it scrolls (draft D, ORCH-695) */
+.live-pb[data-live-body]>.live-msg{position:sticky;bottom:calc(-1 * var(--s3));z-index:1;padding-bottom:var(--s3);margin-bottom:calc(-1 * var(--s3));background:var(--surface)}
 .live-to{font-size:var(--fs-meta);line-height:16px;color:var(--text-muted)}
-.live-msg-row{display:flex;gap:var(--s2);align-items:flex-end;min-width:0}
-.live-msg-row .input{flex:1;min-width:0;min-height:var(--touch);max-height:calc(var(--s8) * 3);resize:vertical;height:auto;field-sizing:content}
+/* a pane takes dropped files into its message box (ORCH-695): the pane says so while files are over it */
+.live-pane[data-drop]{outline:2px dashed var(--brand);outline-offset:-2px}
 /* voice into the message box (ORCH-696, draft D feature 13): the strip while listening (a moving level, the time, Stop,
    Cancel) sits above the row; the line after the words, or one plain refusal, sits under it. Still with reduced motion. */
 .live-voice{display:flex;gap:var(--s2);align-items:center;min-width:0;padding:var(--s1) var(--s2);border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2)}

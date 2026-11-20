@@ -21,6 +21,7 @@ test('spoken words go after what is typed, on the same line, inside the limit', 
   assert.equal(V.liveVoiceJoin('Thanks.  ', ' Keep the old name. '), 'Thanks. Keep the old name.');
   assert.equal(V.liveVoiceJoin('Typed', '   '), 'Typed', 'nothing heard changes nothing');
   assert.equal(V.liveVoiceJoin('x'.repeat(1990), 'y'.repeat(50)).length, 2000);
+  assert.equal(V.liveVoiceJoin('x'.repeat(1490), 'y'.repeat(50), 1500).length, 1500, 'the box\'s own limit wins');
 });
 test('the clock reads like the draft', () => {
   assert.equal(V.liveVoiceClock(4), '0:04');

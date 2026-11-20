@@ -5,7 +5,8 @@
 //   step events     a done step ("Step 2 done: <its words>") at the time of its newest evidence
 //   helper messages the one-line summary of a done step, with its links (pull request, address); a question the
 //                   helper asked; a Chat or group line an agent wrote (chat_message)
-//   your messages   the answer to a question; a Chat line a person wrote; a message sent from this page
+//   your messages   the answer to a question; a Chat line a person wrote; a message sent to the helper (orch keeps it:
+//                   run status sent_input, so it stays after a reload, ORCH-695), with the files it carried
 //   other events    the helper started, stopped or finished, and a person moved the ticket
 // The open question is not a message: the pane shows it as its question card (live-layer.js liveAskFill).
 // Each pane chooses Chat or Terminal (its last lines until the terminal comes); the choice is kept per browser.
@@ -46,6 +47,20 @@ function liveChatLinks(evidence) {
     });
 }
 function clean0(s) { return typeof s === 'string' ? s.trim() : ''; }
+// A message with files (ticketTalkText on the ticket page, the message box of a pane) ends with one line naming them:
+// the words and the names come apart again, so the chat shows the files as small previews, not as that line.
+const LIVE_CHAT_FILES = /(?:^|\n\n)I added (?:a file|\d+ files) to this ticket(?:: ([^\n]+?))?\.(?: The voice note came without written words\.)? Read (?:it|them) (?:first|and carry on)\.$/;
+function liveChatSplit(text) {
+  const s = String(text ?? ''), m = LIVE_CHAT_FILES.exec(s);
+  if (!m || !m[1]) return {text:s, files:[]};  // no names (a long message): the line stays as words
+  return {text:s.slice(0, m.index).trim(), files:m[1].split(', ').map(x => x.trim()).filter(Boolean).slice(0, 10)};
+}
+// What the person sent: orch's own list (read or not) and, until orch lists it, what this page just sent (same words).
+function liveChatMine(run, local) {
+  const kept = Array.isArray(run?.sent_input) ? run.sent_input.filter(m => m && clean0(m.text) && Number.isFinite(liveChatTime(m.at))) : [];
+  const said = new Set(kept.map(m => clean0(m.text)));
+  return [...kept, ...(Array.isArray(local) ? local : []).filter(m => m && !said.has(clean0(m.text)))];
+}
 // rows: {w: 'e' | 'h' | 'y', text, at, who?, links?}; me: the person looking ("human:<name>"), whose lines say You.
 function liveChatModel(t, me = '', sent = []) {
   if (!t || typeof t !== 'object') return [];
@@ -81,7 +96,13 @@ function liveChatModel(t, me = '', sent = []) {
     const line = liveChatEvent(e);
     if (line) rows.push({w:'e', text:line, at:e.at});
   }
-  for (const m of Array.isArray(sent) ? sent : []) if (m && clean0(m.text) && Number.isFinite(liveChatTime(m.at))) rows.push({w:'y', text:liveChatCut(m.text), at:m.at, sent:true});
+  // a Chat line a person wrote is also queued for the helper: it shows once, from the history
+  const said = new Set((Array.isArray(t.history) ? t.history : []).filter(e => e && e.chat_message === true && /^human:/.test(String(e.by || ''))).map(e => clean0(e.text)));
+  for (const m of Array.isArray(sent) ? sent : []) {
+    if (!m || !clean0(m.text) || !Number.isFinite(liveChatTime(m.at)) || said.has(clean0(m.text))) continue;
+    const part = liveChatSplit(m.text), who = m.by && !mine(m.by) ? liveChatWho(m.by) : '';
+    rows.push({w:'y', text:liveChatCut(part.text), at:m.at, sent:true, ...(who ? {who} : {}), ...(part.files.length ? {files:part.files} : {})});
+  }
   // oldest first; at the same moment the step goes before what the helper said about it (the order pushed)
   return rows.map((r, n) => [r, n]).sort((a, b) => (liveChatTime(a[0].at) - liveChatTime(b[0].at)) || (a[1] - b[1]))
     .map(x => x[0]).slice(-LIVE_CHAT_MAX);
@@ -110,7 +131,7 @@ function liveViewSet(id, view) {
   liveViews = v;
   liveViewWrite(typeof liveLayerStore === 'function' ? liveLayerStore() : null, v);
 }
-function liveChatNote(id, text) {
+function liveChatNote(id, text) {  // shows at once; orch's own list takes over on the next poll
   const list = liveChatSent.get(id) || [];
   list.push({text, at:new Date().toISOString()});
   liveChatSent.set(id, list.slice(-20));
@@ -128,31 +149,44 @@ function liveChatBox(sess, label) {
   return h('div', {className:'live-chat', 'data-live-chat':sess.id, role:'log', 'aria-label':'Messages and ticket events of ' + label, tabindex:'0',
     hidden:liveViewOf(sess.id) !== 'chat'});
 }
-function liveChatRow(r) {
+const LIVE_CHAT_PIC = /\.(png|jpe?g|gif|webp)$/i;
+// The files a sent message carried, as small previews: a picture's thumbnail or a file chip; a click opens the big preview.
+function liveChatFiles(tid, names) {
+  if (!names?.length || !tid) return null;
+  return h('div', {className:'live-chat-files', role:'group', 'aria-label':names.length === 1 ? '1 file' : names.length + ' files'}, names.map(n => {
+    const src = typeof fileUrl === 'function' ? fileUrl(tid, 'artifacts', n) : '';
+    return h('button', {type:'button', className:'live-chat-file', 'data-live-file':n, 'data-ticket':tid, title:n, 'aria-label':'Open ' + n},
+      LIVE_CHAT_PIC.test(n) && src ? h('img', {src, alt:'', loading:'lazy'}) : (k => { if (typeof window === 'object' && window.icon) k.innerHTML = window.icon('file', 16); return k; })(h('span', {className:'live-chat-kind', 'aria-hidden':'true'})),
+      h('span', {className:'live-chat-fname'}, n));
+  }));
+}
+function liveChatRow(r, tid) {
   const stamp = typeof time === 'function' ? time(r.at) : '';
   if (r.w === 'e') return h('p', {className:'live-ev meta'}, h('span', {'aria-hidden':'true'}, '✓'), ' ' + r.text + (stamp ? ' · ' + stamp : ''));
   const links = (r.links || []).map(l => h('a', {className:'live-link', href:l.href, target:'_blank', rel:'noopener'}, l.label));
   return h('div', {className:'live-chat-msg', 'data-w':r.w},
     h('span', {className:'meta'}, (r.w === 'y' ? r.who || 'You' : 'Helper') + (stamp ? ' · ' + stamp : '')),
     r.text ? h('p', {}, r.text) : null,
+    liveChatFiles(tid, r.files),
     links.length ? h('div', {className:'live-links'}, links) : null);
 }
 // Written only when the rows change, so the scroll and a selection stay; follows the end while it is at the end.
 function liveChatFill(box) {
   const id = box.dataset.liveChat, t = typeof ticketOf === 'function' ? ticketOf(id) : null;
-  const rows = liveChatModel(t, typeof state === 'object' && state ? state.me || '' : '', liveChatSent.get(id));
-  const sigs = rows.map(r => [r.w, r.at, r.text, (r.links || []).map(l => l.href).join(' ')].join('\u0001'));
+  const st = typeof state === 'object' && state ? state : {};
+  const rows = liveChatModel(t, st.me || '', liveChatMine(st.runs?.[id], liveChatSent.get(id)));
+  const sigs = rows.map(r => [r.w, r.at, r.text, (r.links || []).map(l => l.href).join(' '), (r.files || []).join('/')].join('\u0001'));
   const was = box.liveChatSigs, sig = sigs.join('\u0002');
   if (was && was.join('\u0002') === sig && box.dataset.sig) return;
   const end = !box.dataset.sig || box.scrollHeight - box.scrollTop - box.clientHeight < 8;
   box.dataset.sig = '1';
   box.liveChatSigs = sigs;
   // new rows at the end only: they are added, so a focused link or a selection in the older rows stays
-  if (was && was.length && sigs.length > was.length && was.every((x, i) => x === sigs[i])) for (const r of rows.slice(was.length)) box.append(liveChatRow(r));
+  if (was && was.length && sigs.length > was.length && was.every((x, i) => x === sigs[i])) for (const r of rows.slice(was.length)) box.append(liveChatRow(r, id));
   else {
     box.textContent = '';
     if (!rows.length) box.append(h('p', {className:'meta live-chat-empty'}, 'No messages yet. Steps the helper finishes and its questions show here.'));
-    else for (const r of rows) box.append(liveChatRow(r));
+    else for (const r of rows) box.append(liveChatRow(r, id));
   }
   if (end) box.scrollTop = box.scrollHeight;
 }
@@ -168,6 +202,8 @@ function liveViewApply(body) {
 }
 if (typeof window === 'object' && typeof document === 'object' && !(typeof module === 'object' && module.exports)) {
   document.addEventListener('click', e => {
+    const f = e.target.closest?.('#live-dock [data-live-file]');
+    if (f && typeof previewFile === 'function') { previewFile(f.dataset.ticket, 'artifacts', f.dataset.liveFile); return; }
     const b = e.target.closest?.('#live-dock [data-live-view]');
     if (!b) return;
     const id = b.dataset.session, view = b.dataset.liveView === 'term' ? 'term' : 'chat';
