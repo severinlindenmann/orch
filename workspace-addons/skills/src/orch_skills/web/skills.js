@@ -166,10 +166,17 @@
           onclick: e => { d.close(); turn(it, !it.on, e.currentTarget); }}) : null),
       it.locked ? h('p', {className: 'meta', text: it.locked + '.'}) : null,
       !it.edit && it.edit_why ? h('p', {className: 'meta', text: 'Edit: ' + it.edit_why + '.'}) : null);
-    const d = h('dialog', {className: 'sheet', 'aria-label': it.name},
-      h('div', {className: 'sheet-h'}, h('h2', {text: it.name}), h('button', {className: 'btn outline sm', type: 'button', text: '× Close', onclick: () => d.close()})), box);
+    const d = h('dialog', {className: 'sheet', 'aria-label': it.name}, h('div', {className: 'sheet-h'}, h('h2', {text: it.name})), box);
     d.addEventListener('close', () => d.remove(), {once: true});
-    d.addEventListener('cancel', e => { if (d.dataset.dirty === '1') { e.preventDefault(); d.querySelector('[data-unsaved]')?.removeAttribute('hidden'); } });
+    // × Close, Esc and a click outside all close through d.close(): with unsaved changes the panel stays and says so
+    d.close = value => {
+      if (d.dataset.dirty === '1') {
+        const u = d.querySelector('[data-unsaved]');
+        if (u) { u.hidden = false; u.scrollIntoView?.({block: 'nearest'}); }
+        return;
+      }
+      HTMLDialogElement.prototype.close.call(d, value);
+    };
     document.body.append(d);
     d.showModal();
   }
@@ -177,7 +184,7 @@
   // ---- the editor (ORCH-840) ----
   // Everything from the file is put into form fields as their value (never as HTML), so a skill's text cannot run.
   const STATE_WORDS = [['', 'Not set'], ['active', 'In use'], ['draft', 'Draft'], ['deprecated', 'Old'], ['retired', 'Retired']];
-  const FORM = [['owner', 'Owner', ''], ['requires', 'Needs these programs', 'for example node, uv'], ['requires-logins', 'Needs these logins', 'names only, for example github'],
+  const FORM = [['owner', 'Owner', ''], ['requires', 'Needs these programs', 'for example node, uv'], ['requires-logins', 'Needs these logins', 'for example github'],
     ['version', 'Version', ''], ['tags', 'Tags', 'for example ui, design'], ['replaced-by', 'Use instead', 'name of the newer skill']];
   function field(label, control, hint) {
     return h('label', {className: 'field'}, label, control, hint ? h('span', {className: 'meta', text: hint}) : null);
@@ -185,12 +192,11 @@
   function input(value, extra) { const i = h('input', {className: 'input', type: 'text', ...extra}); i.value = value || ''; return i; }
   function area(value, extra) { const t = h('textarea', {className: 'input', spellcheck: 'false', ...extra}); t.value = value || ''; return t; }
   async function edit(it, d) {
-    if (!embedded) { say('Open Skills from the dashboard to change it.', 'error'); return; }
     const box = d.querySelector('.stack');
     box.replaceChildren(h('p', {className: 'muted', text: 'Loading…'}));
     let item;
     try {
-      const r = await fetch(P + '/api/item?id=' + encodeURIComponent(it.edit.id), {cache: 'no-store'});
+      const r = await fetch(P + '/api/item/' + encodeURIComponent(it.edit.id), {cache: 'no-store'});
       if (!r.ok) throw new Error((await r.text()).slice(0, 300) || 'No answer.');
       item = await r.json();
     } catch (e) {
@@ -199,7 +205,7 @@
     }
     d.querySelector('.sheet-h h2').textContent = 'Edit ' + item.name;
     const banner = h('div', {className: 'banner error', role: 'alert', hidden: true});
-    const unsaved = h('div', {className: 'banner warn', role: 'status', hidden: true, 'data-unsaved': ''},
+    const unsaved = h('div', {className: 'banner attn', role: 'status', hidden: true, 'data-unsaved': ''},
       h('p', {text: 'Your changes are not saved yet. Save them, or press Cancel to drop them.'}));
     const ctl = {};
     let parts;
@@ -250,6 +256,7 @@
     save.addEventListener('click', async () => {
       if (busy) return;
       if (!dirty()) { say('Nothing changed.'); d.dataset.dirty = ''; d.close(); return; }
+      if (!embedded) { banner.replaceChildren(h('p', {text: 'Open Skills from the dashboard to save.'})); banner.hidden = false; return; }
       busy = true; save.disabled = true; save.textContent = 'Saving…'; banner.hidden = true;
       const r = await askSave(item.id, item.revision, JSON.stringify(payload()));
       busy = false; save.disabled = false; save.textContent = 'Save';

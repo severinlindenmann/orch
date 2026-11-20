@@ -25,7 +25,8 @@
    },
    "problems": [],
    "locked": "orch needs it to work tickets; always on",
-   "can_off": false
+   "can_off": false,
+   "edit_why": "Comes with orch; orch keeps it up to date"
   },
   {
    "id": "skill:orch:orch-dashboard",
@@ -45,7 +46,8 @@
     "Codex": "on"
    },
    "problems": [],
-   "can_off": true
+   "can_off": true,
+   "edit_why": "Comes with orch; orch keeps it up to date"
   },
   {
    "id": "skill:orch:orch-focus",
@@ -65,7 +67,8 @@
     "Codex": "on"
    },
    "problems": [],
-   "can_off": true
+   "can_off": true,
+   "edit_why": "Comes with orch; orch keeps it up to date"
   },
   {
    "id": "skill:orch:orch-hello",
@@ -84,7 +87,8 @@
    "problems": [
     "Has no real description"
    ],
-   "can_off": true
+   "can_off": true,
+   "edit_why": "Comes with orch; orch keeps it up to date"
   },
   {
    "id": "skill:workspace:invoice-export",
@@ -106,7 +110,11 @@
     "Codex": "on"
    },
    "problems": [],
-   "can_off": true
+   "can_off": true,
+   "edit": {
+    "id": "e_9360a9362a10a557f4b78869",
+    "mode": "skill"
+   }
   },
   {
    "id": "skill:workspace:weekly-report",
@@ -126,7 +134,11 @@
     "Codex": "on"
    },
    "problems": [],
-   "can_off": true
+   "can_off": true,
+   "edit": {
+    "id": "e_b5033d5cd4582ffe370f86eb",
+    "mode": "skill"
+   }
   },
   {
    "id": "skill:workspace:release-check",
@@ -149,7 +161,11 @@
    "problems": [
     "Not ready here: playwright is missing"
    ],
-   "can_off": true
+   "can_off": true,
+   "edit": {
+    "id": "e_adda6e4ea790101a37812185",
+    "mode": "skill"
+   }
   },
   {
    "id": "skill:admin:github",
@@ -173,7 +189,8 @@
     "Codex": "on"
    },
    "problems": [],
-   "can_off": true
+   "can_off": true,
+   "edit_why": "Shared by your admin; ask them to change it"
   },
   {
    "id": "skill:admin:crm-notes",
@@ -191,7 +208,8 @@
    },
    "problems": [],
    "can_off": true,
-   "note": "Codex still sees it"
+   "note": "Codex still sees it",
+   "edit_why": "Shared by your admin; ask them to change it"
   },
   {
    "id": "skill:mine:status-page",
@@ -213,7 +231,8 @@
    "problems": [
     "Retired, but helpers still see it"
    ],
-   "can_off": true
+   "can_off": true,
+   "edit_why": "Editing your computer's own files comes in a later version"
   },
   {
    "id": "skill:mine:spreadsheets",
@@ -233,7 +252,8 @@
     "Codex": "on"
    },
    "problems": [],
-   "can_off": true
+   "can_off": true,
+   "edit_why": "Editing your computer's own files comes in a later version"
   },
   {
    "id": "skill:mine:translate",
@@ -251,7 +271,8 @@
    },
    "problems": [],
    "can_off": true,
-   "note": "Codex still sees it"
+   "note": "Codex still sees it",
+   "edit_why": "Editing your computer's own files comes in a later version"
   }
  ],
  "instructions": [
@@ -270,7 +291,8 @@
    },
    "problems": [],
    "switch": "claude",
-   "can_off": true
+   "can_off": true,
+   "edit_why": "Editing your computer's own files comes in a later version"
   },
   {
    "id": "instructions:workspace:AGENTS.md",
@@ -287,7 +309,11 @@
    },
    "problems": [],
    "locked": "Helpers in this workspace always read it",
-   "can_off": false
+   "can_off": false,
+   "edit": {
+    "id": "e_22f3f65bf967ee525015cf3c",
+    "mode": "text"
+   }
   },
   {
    "id": "instructions:workspace:CLAUDE.md",
@@ -304,7 +330,11 @@
    },
    "problems": [],
    "locked": "Helpers in this workspace always read it",
-   "can_off": false
+   "can_off": false,
+   "edit": {
+    "id": "e_f58abecc49d5b1af9250e645",
+    "mode": "text"
+   }
   },
   {
    "id": "instructions:orch:AGENTS.orch.md",
@@ -321,7 +351,8 @@
    },
    "problems": [],
    "locked": "Written by orch: one block for each add-on that is on. Turn the add-on off to remove its block",
-   "can_off": false
+   "can_off": false,
+   "edit_why": "Comes with orch; orch keeps it up to date"
   }
  ],
  "services": [

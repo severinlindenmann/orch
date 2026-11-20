@@ -302,17 +302,17 @@ def test_the_page_server_gives_the_item_as_json(ws):
     port = srv.server_address[1]
     try:
         c = http.client.HTTPConnection("127.0.0.1", port)
-        c.request("GET", "/api/item?id=" + it["edit"]["id"], headers={"Host": f"127.0.0.1:{port}"})
+        c.request("GET", "/api/item/" + it["edit"]["id"], headers={"Host": f"127.0.0.1:{port}"})
         r = c.getresponse()
         body = r.read()
         assert r.status == 200, body
         assert r.getheader("Content-Type") == "application/json"
         assert json.loads(body)["text"] == HOSTILE
-        c.request("GET", "/api/item?id=../AGENTS.md", headers={"Host": f"127.0.0.1:{port}"})
+        c.request("GET", "/api/item/../AGENTS.md", headers={"Host": f"127.0.0.1:{port}"})
         r = c.getresponse()
         r.read()
         assert r.status == 404
-        c.request("POST", "/api/item?id=" + it["edit"]["id"], body=b"x", headers={"Host": f"127.0.0.1:{port}"})
+        c.request("POST", "/api/item/" + it["edit"]["id"], body=b"x", headers={"Host": f"127.0.0.1:{port}"})
         r = c.getresponse()
         r.read()
         assert r.status == 405
