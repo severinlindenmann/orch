@@ -1227,8 +1227,8 @@ def _merge_first(root: Path, tid: str, q: dict, d: dict, by: str, via: str) -> N
 def excused_red(got: dict, known_red: dict | None) -> tuple[list[str], frozenset] | None:
     """The named exceptions that excuse every red check of a finished release pull request (ORCH-178, from
     ORCH-431): (["<check> (<ticket>)", ...], the red checks as (name, conclusion)), or None when a check still
-    runs, nothing failed, or one red check has no exception. The roll-up job (ROLLUP_JOBS) is red whenever a job it
-    waits for is; it counts as excused only on a plain failure (not cancelled or timed out) next to at least
+    runs, nothing failed, or one red check has no exception. The roll-up job (ROLLUP_JOBS) is red whenever a job
+    it waits for is; it counts as excused only on a plain failure (not cancelled or timed out) next to at least
     one excused job, as every job it waits for shows here too."""
     from orch.releasekeeper import ROLLUP_JOBS, known_name
 
