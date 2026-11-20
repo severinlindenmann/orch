@@ -485,6 +485,35 @@ def _probes_ignored(root: Path) -> bool:
     return all(_ignored(root, p) for p in (".orch/secrets/probe", ".orch/run/probe", ".orch/outbox/probe"))
 
 
+def git_visible(root: Path) -> list[str]:
+    """Files under .orch that git would show as new (neither ignored nor tracked): team files such as
+    workspace.toml, ask-when.md or checks/. Empty outside a git repo or when git cannot say."""
+    try:
+        if not _in_git_repo(root):
+            return []
+        rc, out, _ = _safegit().run_bytes(
+            ["ls-files", "--others", "--exclude-standard", "-z", "--", ".orch"], root, 10
+        )
+    except Refused:
+        return []
+    if rc != 0:
+        return []
+    names = [n.decode("utf-8", "replace") for n in out.split(b"\0") if n]
+    return sorted(n for n in names if not any(c in n for c in "\r\n"))[:5]
+
+
+def git_visible_warning(root: Path) -> str | None:
+    """One plain line naming the files git would commit under .orch, or None."""
+    seen = git_visible(root)
+    if not seen:
+        return None
+    return (
+        "Git sees new orch files that it would commit: "
+        + ", ".join(seen)
+        + ". Add them to .git/info/exclude to keep them local."
+    )
+
+
 def check_private_path(root: Path, path: Path) -> None:
     """Right before a private write: the file stays under root/.orch with no link on the way, and in a git repo
     git ignores this exact file and does not track it."""
