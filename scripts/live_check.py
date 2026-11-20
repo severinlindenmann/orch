@@ -76,7 +76,8 @@ def fetch(
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 if headers is not None:
-                    headers.update({k.lower(): v for k, v in r.headers.items()})
+                    for k, v in r.headers.items():  # the first one counts, as in browsers
+                        headers.setdefault(k.lower(), v)
                 return r.status, r.read(1 << 20)
         except urllib.error.HTTPError as e:
             return e.code, b""
@@ -100,9 +101,13 @@ def hsts(base: str) -> str:
         headers=h,
     )
     value = h.get("strict-transport-security", "")
-    age = next(
-        (p.split("=", 1)[1] for p in value.replace(" ", "").split(";") if p.startswith("max-age=")), ""
-    )
+    names = [d.split("=", 1)[0].strip().lower() for d in value.split(";") if d.strip()]
+    ages = [
+        d.split("=", 1)[1].strip().strip('"')
+        for d in value.split(";")
+        if "=" in d and d.split("=", 1)[0].strip().lower() == "max-age"
+    ]
+    age = ages[0] if len(ages) == 1 and len(names) == len(set(names)) else ""
     if not age.isdigit() or int(age) < MIN_HSTS_DAYS * 86400:
         raise AssertionError(
             f"Strict-Transport-Security is {value or 'missing'!r} (need max-age of {MIN_HSTS_DAYS} days)"

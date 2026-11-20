@@ -250,7 +250,38 @@ def test_hsts_needs_a_long_max_age(monkeypatch):
     assert "365 days" in lc.hsts("https://x")
     monkeypatch.setattr(lc, "fetch", fake("max-age=31536000; includeSubDomains"))
     assert "365 days" in lc.hsts("https://x")
-    for bad in (None, "max-age=300", "includeSubDomains", "max-age=abc"):
+    for good in ("MAX-AGE=31536000", 'max-age="31536000"', "max-age=31536000 ; preload"):
+        monkeypatch.setattr(lc, "fetch", fake(good))
+        assert "365 days" in lc.hsts("https://x")
+    for bad in (None, "max-age=300", "includeSubDomains", "max-age=abc", "max-age=31536000; max-age=0"):
         monkeypatch.setattr(lc, "fetch", fake(bad))
         with pytest.raises(AssertionError, match="Strict-Transport-Security"):
             lc.hsts("https://x")
+
+
+def test_first_header_counts(monkeypatch):
+    class Resp:
+        status = 200
+        headers = type(
+            "H",
+            (),
+            {
+                "items": lambda self: [
+                    ("Strict-Transport-Security", "max-age=0"),
+                    ("strict-transport-security", "max-age=31536000"),
+                ]
+            },
+        )()
+
+        def read(self, n):
+            return b"ok"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+    monkeypatch.setattr(lc.urllib.request, "urlopen", lambda req, timeout: Resp())
+    with pytest.raises(AssertionError, match="max-age=0"):
+        lc.hsts("https://x")
