@@ -318,12 +318,15 @@ async function syncRead() {
   } catch (_) { return {ok:false, answer:null}; }
 }
 // The Sync card lives in Settings › General and on the Sync page itself (#addon/sync): both change settings in place.
+// The settings say Sync is installed but off (ORCH-960): the 15 s look stops instead of reading a status that is refused.
+const syncTurnedOff = () => array(state.settings?.addons).find(a => a.name === SYNC)?.active === false;
 const syncPageOpen = () => { const r = route(); return r.kind === 'settings' || (r.kind === 'addon' && r.id === SYNC); };
 async function syncLoad() {
   if (syncUi.loading || snapshot) return;
   clearTimeout(syncUi.timer); syncUi.timer = null;
   if (addonChanging()) { syncUi.timer = setTimeout(syncLoad, 3000); return; }  // the server is restarting: look again soon
   if (!syncPageOpen()) return;  // the page was left: it loads again when Settings or the Sync page opens
+  if (syncTurnedOff()) return;  // Sync was turned off: no status read (it would be refused); it loads again once it is on
   syncUi.loading = true;
   try {
     const result = await syncRead();
@@ -411,6 +414,7 @@ function syncCard(settings) {
   const wrap = body => h('div', {className:'stack sync-wrap', 'data-key':'settings-sync'}, h('div', {className:'card sync-card', id:'sync-card'}, body));
   if (!addon.active) {
     syncUi.wasOff = true; syncUi.card = null; syncUi.draft = null;
+    clearTimeout(syncUi.timer); syncUi.timer = null;  // turned off: the 15 s status look stops (ORCH-960)
     return wrap(h('div', {className:'card-row'}, h('span', {className:'grow sync-lbl'}, 'Keep a copy of my tickets'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':false, 'aria-label':'Keep a copy of my tickets', 'data-key':'settings-switch-sync-off', 'data-action':'settings-addon', 'data-name':addon.name, disabled:settingsBusy.has('addon-' + addon.name)})));
   }
