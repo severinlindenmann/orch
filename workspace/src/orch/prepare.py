@@ -54,6 +54,8 @@ def skip_reason(root: Path, ticket: dict) -> str | None:
         return "Prepare on Save is off in Settings"
     if complete(ticket):
         return "every field is filled already"
+    if ticket.get("epic") is True:  # the person split it into its tickets already: nothing left to plan
+        return "it is an epic with its tickets"
     if ticket.get("parent") and made_by_agent(root, ticket):
         return "a helper made this sub-ticket"
     p = ticket.get("prepare") if isinstance(ticket.get("prepare"), dict) else {}

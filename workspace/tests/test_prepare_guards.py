@@ -101,6 +101,12 @@ def test_a_sub_ticket_a_helper_made_is_never_prepared_again_but_a_persons_is(pro
     assert starts == [mine["id"]]
 
 
+def test_an_epic_the_person_split_into_tickets_is_not_prepared(proj, starts):
+    epic = tickets.create(proj, "Autumn fair: everything for our stand", "human:t", epic=True)
+    assert runs.start_prepare(proj, epic["id"], "human:t")["skipped"] == "it is an epic with its tickets"
+    assert starts == [] and "prepare" not in tickets.load(proj, epic["id"])
+
+
 # ---------------------------------------------------------------- once per ticket
 
 
@@ -248,7 +254,7 @@ def test_a_persons_edit_right_after_save_is_not_refused_by_prepare_starting(proj
     tid = new_ticket("sales report pls")
     seen = tickets.revision(tickets.load(proj, tid))
     tickets.set_prepare(proj, tid, "waiting", "orch")
-    tickets.set_prepare(proj, tid, "preparing", "orch", run="r_1")
+    tickets.set_prepare(proj, tid, "preparing", "human:t", run="r_1", line="Claude is preparing the ticket")
     assert tickets.load(proj, tid)["prepare"]["state"] == "preparing"
     tickets.edit(proj, tid, "November sales report", "human:t", if_revision=seen)
     assert tickets.load(proj, tid)["title"] == "November sales report"

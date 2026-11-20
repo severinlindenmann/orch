@@ -189,6 +189,9 @@ def test_credit_account_by_hand_reads_its_spend(cli, fake_switcher, ws, tmp_path
     p.write_text(json.dumps(data))
     code, d = jrun(cli, "limit", "API key 1", "$200")
     assert code == 0 and d["account"]["rule"]["limits"] == [{"value": 200, "unit": "$", "period": "month"}]
+    code, d = jrun(cli, "limit", "API key 1", "50%")
+    assert code == 2 and "counts dollars" in d["error"] and "$25" in d["error"], d
+    assert d.get("account") is None
     code, d = jrun(cli, "list")
     api = next(x for x in d["accounts"] if x["label"] == "API key 1")
     assert api["use"]["month"]["spent"] == 3.5 and api["use"]["month"]["estimated"] is True

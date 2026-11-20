@@ -319,6 +319,11 @@ def test_start_never_calls_a_stopped_addon_running():
     assert "off here" in cli_status._service_line({"addon": "sync", "running": False, "idle": True})
     assert "not running" in cli_status._service_line({"addon": "sync", "running": False})
     assert "running (pid 5)" in cli_status._service_line({"addon": "sync", "running": True, "pid": 5})
+    # a name longer than the column keeps a space before the text (release 35: 'pull-requestsrunning')
+    assert "pull-requests  running (pid 5)" in cli_status._service_line({"addon": "pull-requests", "pid": 5})
+    long_bad = cli_status._service_line({"addon": "dashboard-tester", "error": "x"})
+    assert "dashboard-tester  did not start" in long_bad
+    assert cli_status._service_line({"addon": "sync", "pid": 5}, 15) == "  sync           running (pid 5)"
 
 
 def test_ago_words():
