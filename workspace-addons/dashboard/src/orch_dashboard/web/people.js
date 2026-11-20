@@ -4,7 +4,7 @@
 (() => {
   const root = document.getElementById('side-person');
   if (!root) return;
-  let ppl, adding = false, busy = false, closeNext = false;
+  let ppl, sess = null, adding = false, busy = false, closeNext = false;
   const node = (tag, attrs = {}, ...kids) => {
     const n = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) {
@@ -17,6 +17,23 @@
   };
   const initial = name => (String(name).trim()[0] || '?').toUpperCase();
   const avatar = name => node('span', {className: 'avatar sm', 'aria-hidden': 'true'}, initial(name));
+
+  const SESSION_LABEL = {
+    'signed-in': ['Signed in', 'You can make changes here.'],
+    'view-only': ['View only', 'Not signed in on this browser: open the dashboard from orch to make changes.'],
+    'agent': ['View only', 'Started by an agent. Restart with orch start in your terminal.'],
+  };
+  async function loadSession() {
+    try {
+      const r = await fetch('/api/session-state', {cache: 'no-store'});
+      const j = r.ok ? await r.json() : null;
+      const next = j && SESSION_LABEL[j.state] ? j.state : null;
+      if (next !== sess) { sess = next; paint(); }
+    } catch (e) { /* offline: keep what is shown */ }
+  }
+  loadSession();
+  window.addEventListener('focus', loadSession);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) loadSession(); });
 
   function paint() {
     const open = !closeNext && root.querySelector('details')?.open;
@@ -37,6 +54,8 @@
         avatar(me || 'You'), (me ? node('span', {className: 'nav-label'}, 'You: ', node('strong', {}, me)) : node('span', {className: 'nav-label', 'data-testid': 'person-pick'}, node('strong', {}, 'Pick your name'))), node('span', {className: 'grow'}), node('span', {className: 'chev', 'aria-hidden': 'true'})),
       node('div', {className: 'menu-pop', role: 'menu'}, node('p', {className: 'eyebrow'}, 'You are'), ...items, add));
     root.append(d);
+    const label = SESSION_LABEL[sess];
+    if (label) root.append(node('div', {className: 'nav-item meta session-state', role: 'status', 'data-testid': 'session-state', 'data-state': sess, title: label[1]}, node('span', {className: 'chip' + (sess === 'signed-in' ? '' : ' outline')}, label[0]), sess === 'agent' ? node('span', {}, ' ', label[1]) : null));
     if (adding) d.querySelector('input')?.focus();
   }
 
