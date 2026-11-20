@@ -190,7 +190,9 @@ def plan(
         touched.append("dashboard")  # the dashboard job runs the orch_ui page tests
     for name in touched:
         own = [f for f in files if f.startswith(f"workspace-addons/{name}/")]
-        if addon_texts is not None and name in addon_texts and own and all(ADDON_SKILL.match(f) for f in own):
+        page_lib = ui and name == "dashboard"  # the page library needs the whole dashboard suite
+        skill_only = bool(own) and all(ADDON_SKILL.match(f) for f in own)
+        if addon_texts is not None and name in addon_texts and skill_only and not page_lib:
             picked = sorted(t for t, text in addon_texts[name].items() if READS_SKILLS.search(text))
             if picked:
                 steps.append(

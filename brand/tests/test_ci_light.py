@@ -118,6 +118,12 @@ def test_an_addon_skill_and_code_change_runs_the_whole_suite():
     assert names(steps)[-1] == "add-on sync"
 
 
+def test_a_page_library_change_with_a_dashboard_skill_change_runs_the_whole_dashboard_suite():
+    f = "workspace-addons/dashboard/src/orch_dashboard/skills/orch-dashboard/SKILL.md"
+    steps = light.plan([f, "workspace/src/orch_ui/static/x.js"], TEXTS, ADDONS, ADDON_TEXTS)
+    assert "add-on dashboard" in names(steps)
+
+
 def test_without_addon_texts_a_skill_change_runs_the_whole_suite():
     assert names(light.plan([SKILL], TEXTS, ADDONS))[-1] == "add-on sync"
 
