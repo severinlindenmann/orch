@@ -1685,10 +1685,10 @@ function ticketResultsCard(t) {
     notes.map(n => ticketCompletionNote(n, t)),
     all.length ? (t.status === 'done' ? ticketResultFrame(t, all[0].kind, all[0].file) : ticketFileRow(t, all[0].kind, all[0].file)) : null, all.slice(1, 4).map(x => ticketFileRow(t, x.kind, x.file)), files.length ? headerProof(t) : null);
 }
-// Preview on (the new live page): the ticket's results as the same widgets as on the live wall (ORCH-697, draft D), the notes of its
-// finished steps above them; a click opens the big overlay. Off: the Result card above, as before.
+// The ticket's results as the same widgets as on the live wall (ORCH-697, draft D), the notes of its finished steps above
+// them; a click opens the big overlay. A read-only copy keeps the Result card above.
 function ticketWidgets(t) {
-  return !snapshot && typeof livePreviewOn === 'function' && livePreviewOn() && typeof resultsHost === 'function' && !!window.UI?.result;
+  return !snapshot && typeof resultsHost === 'function' && !!window.UI?.result;
 }
 function ticketWidgetsCard(t) {
   const notes = t.status === 'review' ? [] : completionNotes(t);
