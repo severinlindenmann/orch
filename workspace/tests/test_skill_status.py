@@ -72,7 +72,7 @@ def test_retired_shared_skill_is_not_linked_for_other_agents(proj, tmp_path):
     (sh / ".orch-shared").write_text("", encoding="utf-8")
     (sh / "SKILL.md").write_text("---\nname: team-tool\ndescription: x\n---\n", encoding="utf-8")
     skills.apply_agent_files(proj)
-    assert harness.is_link(proj / ".claude/skills/team-tool")
+    assert (proj / ".claude/skills/team-tool/SKILL.md").is_file()  # a link, or a copy where links fail
 
     (sh / "SKILL.md").write_text(
         "---\nname: team-tool\ndescription: x\nmetadata:\n  status: retired\n---\n", encoding="utf-8"
