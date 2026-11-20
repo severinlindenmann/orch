@@ -62,6 +62,18 @@ def test_a_change_in_one_workspace_shows_in_the_other_with_who_changed_it(two, s
     assert store.usage_dir(two["a"]) == store.usage_dir(two["b"]) == shared(two["a"])
 
 
+def test_the_page_and_the_history_name_the_workspace_a_change_came_from(two, switcher):
+    from orch_usage import page
+
+    seed(two["run_a"])
+    assert jrun(two["run_b"], "limit", "first", "80%", "--period", "5h", "--by", "human:owner")[0] == 0
+    seen_in_ws = page.history_rows(two["a"])[0]
+    assert seen_in_ws["who"] == "You in fernscout" and "80" in seen_in_ws["text"]
+    assert page.history_rows(two["b"])[0]["who"] == "You"  # its own change needs no name
+    code, out, _ = two["run_a"]("history")
+    assert code == 0 and "(by owner in fernscout)" in out.splitlines()[0]
+
+
 def test_switching_on_is_one_setting_for_the_computer(two):
     assert jrun(two["run_a"], "switching", "on", "--by", "human:owner")[0] == 0
     assert switching.switching_on(two["b"]) is True

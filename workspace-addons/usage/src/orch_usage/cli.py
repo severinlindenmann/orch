@@ -462,10 +462,15 @@ def run(args) -> int:
         if args.json:
             print(json.dumps({"history": rows}, ensure_ascii=False))
             return 0
+        from . import computer
+
+        here = computer.label(root)
         out = [
             f"{_local(r.get('at', ''))}  {r.get('label', r.get('account'))}: {r.get('what')}"
             + (f" ({r['why']})" if r.get("why") else "")
-            + f"  (by {str(r.get('who', '')).split(':', 1)[-1]})"
+            + f"  (by {str(r.get('who', '')).split(':', 1)[-1]}"
+            + (f" in {r['workspace']}" if r.get("workspace") and r["workspace"] != here else "")
+            + ")"
             for r in rows
         ] or ["No changes yet."]
         print("\n".join(out))

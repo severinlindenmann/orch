@@ -48,7 +48,10 @@ def history_rows(root: Path, at: datetime | None = None) -> list[dict]:
         why = r.get("why")
         if isinstance(why, str) and why.strip():
             text += f" ({why.strip()})"
-        out.append({"at": when, "who": who_words(str(r.get("who") or "")), "text": text[:300]})
+        who = who_words(str(r.get("who") or ""))
+        if isinstance(ws, str) and ws and ws != here and who != "Usage":
+            who = f"{who} in {ws}"  # a change made in another workspace on this computer says where
+        out.append({"at": when, "who": who, "text": text[:300]})
         if len(out) >= HISTORY_MAX:
             break
     return out
