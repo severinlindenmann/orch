@@ -220,6 +220,28 @@ def test_history_command_and_unreadable_file(cli, fake_switcher, ws):
     assert (ws / ".orch/addons/usage/accounts.json").read_text() == "{broken"  # never rewritten
 
 
+def test_a_row_that_cannot_be_read_is_kept_through_a_change(cli, fake_switcher, ws):
+    """ORCH-926: a hand-edited row that cannot be read stays in the file untouched when another account changes."""
+    jrun(cli, "list")
+    p = ws / ".orch/addons/usage/accounts.json"
+    doc = json.loads(p.read_text())
+    bad = {**doc["accounts"][0], "id": "a_bad1", "label": "by hand"}
+    worse = "not even an account"
+    doc["accounts"] += [bad, worse]
+    p.write_text(json.dumps(doc))
+    assert store.load(ws)["unreadable"] == 2
+    code, out = jrun(cli, "limit", "second", "90%")
+    assert code == 0, out
+    rows = json.loads(p.read_text())["accounts"]
+    assert bad in rows and worse in rows  # kept as they were, byte for byte in content
+    assert [a["label"] for a in store.load(ws)["accounts"]] == ["first", "second", "TEAMCO"]
+    assert store.load(ws)["unreadable"] == 2
+    code, out = jrun(cli, "order", "TEAMCO", "1")
+    assert code == 0, out
+    rows = json.loads(p.read_text())["accounts"]
+    assert rows[-2:] == [bad, worse]
+
+
 def test_actor_comes_from_the_run(cli, fake_switcher, ws, monkeypatch):
     jrun(cli, "list")
     monkeypatch.setenv("ORCH_AGENT", "helper1")
