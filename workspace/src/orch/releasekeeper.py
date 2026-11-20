@@ -32,6 +32,8 @@ is written on the role ticket.
 Every pass also runs the security check (secreview.py, ORCH-317): pull requests touching the servers, sign-in,
 secrets or what leaves this computer get a security review helper by themselves, and the idle phase cuts
 nothing until each of them in the release has an OK.
+A run or release check that is red only because jobs hit their time limit with no failed test in their log is
+run once more (per run and release) before the release is blocked or closed (ORCH-1050).
 A release pull request the keeper did not cut is only watched. `orch github release-hold "<why>"` stops
 cutting (a running release goes on); `orch github release-hold off` lifts it.
 
@@ -76,6 +78,12 @@ ROLLUP_JOBS = {"gate"}  # a roll-up of the other jobs: the jobs themselves are j
 # INTO (main). main has none of its own today, so the roll-up. Never develop's: develop's banned-words is
 # skipped on release/* into main by design.
 REQUIRED_FALLBACK = ["gate"]
+# A job GitHub stopped at its timeout-minutes (the check run's annotation) whose log has no failed test runs
+# once more per release before the release is blocked or closed (ORCH-1050).
+TIME_LIMIT_RE = re.compile(r"exceeded the maximum execution time", re.I)
+FAILED_TEST_RE = re.compile(r"\bFAILED\s+\S+::|\b\d+ (?:failed|errors?)\b")
+PASSED_RE = re.compile(r"\b\d+ passed\b[^\n]* in [\d.]+s\b")  # pytest's closing line
+JOB_URL_RE = re.compile(r"/actions/runs/(\d+)/job/(\d+)")
 TEST_TIMEOUT_H = 4  # dispatched runs that have not finished after this: say it once, dispatch again next pass
 KEEP_STAGED = 2  # newest prepared programs kept per server (rollback)
 PASSED = ("SUCCESS", "SKIPPED", "NEUTRAL")
@@ -728,6 +736,47 @@ class World:
             or []
         )
 
+    def hit_time_limit(self, job_id) -> bool:
+        """GitHub stopped the job at its timeout-minutes (its annotation on the job's check run says so)."""
+        if self.sim is not None:
+            return str(job_id) in {str(x) for x in self.sim.get("time_limit", [])}
+        try:
+            notes = self._gh_json(["api", f"repos/{self.cfg.repo}/check-runs/{int(job_id)}/annotations"])
+        except (Refused, ValueError, TypeError):
+            return False
+        return any(TIME_LIMIT_RE.search(str(a.get("message") or "")) for a in notes or [])
+
+    def all_passed(self, job_id) -> bool:
+        """The job's log holds pytest's closing line with passed tests and none failed (ORCH-1050: Windows
+        part 12 printed '438 passed, 62 skipped in 876.38s' and was still killed at 15m0s). A part stopped
+        before that line proves nothing: -q shows a failure only as an F until the end. GitHub gives the log
+        once the whole run finished."""
+        if self.sim is not None:
+            return str(job_id) in {str(x) for x in self.sim.get("passed_log", [])}
+        r = self._run([self.gh, "run", "view", "--repo", self.cfg.repo, "--job", str(int(job_id)), "--log"])
+        log = r.stdout or ""
+        return r.returncode == 0 and bool(PASSED_RE.search(log)) and not FAILED_TEST_RE.search(log)
+
+    def run_done(self, run_id) -> bool:
+        if self.sim is not None:
+            return str(run_id) not in {str(x) for x in self.sim.get("running_runs", [])}
+        try:
+            d = self._gh_json(["run", "view", str(int(run_id)), "--repo", self.cfg.repo, "--json", "status"])
+        except (Refused, ValueError, TypeError):
+            return False
+        return isinstance(d, dict) and d.get("status") == "completed"
+
+    def rerun(self, run_id) -> None:
+        """Runs the failed (and time-limit cancelled) jobs of one run again: a new attempt of the same run."""
+
+        def go():
+            self.bot_ok()
+            r = self._run([self.gh, "run", "rerun", str(int(run_id)), "--failed", "--repo", self.cfg.repo])
+            if r.returncode != 0:
+                raise Refused(f"rerun {run_id}: {(r.stderr or r.stdout).strip()[:200]}")
+
+        self.act(f"rerun:{run_id}", go)
+
     def tickets(self) -> list[dict]:
         if self.sim is not None:
             return self.sim.get("tickets", [])
@@ -1246,6 +1295,54 @@ def run_state(
     return state, r, noted
 
 
+def red_jobs(w: World, r: dict | None, known: dict[str, str]) -> list[tuple[str, str, str]]:
+    """(run id, job id, name) of every job that makes run `r` red (judged like run_state)."""
+    if not r or not r.get("databaseId"):
+        return []
+    out = []
+    for j in w.jobs(r.get("databaseId")) or []:
+        name = j.get("name") or ""
+        if name in ROLLUP_JOBS or known_name(name, known) is not None:
+            continue
+        if j.get("status") == "completed" and j.get("conclusion") not in ("success", "skipped", "neutral"):
+            out.append((str(r["databaseId"]), str(j.get("databaseId") or ""), name))
+    return out
+
+
+def red_checks(rollup, ignore=frozenset()) -> list[tuple[str, str, str]]:
+    """(run id, job id, name) of every red check of a pull request (from the check's link to its job)."""
+    bad = set(failed_checks(rollup, ignore))
+    out = []
+    for c in rollup or []:
+        name = str(c.get("name") or c.get("context") or "?")
+        if name in bad:
+            m = JOB_URL_RE.search(str(c.get("detailsUrl") or c.get("targetUrl") or ""))
+            out.append((m[1], m[2], name) if m else ("", "", name))
+    return out
+
+
+def retry_time_limit(w: World, rel: dict, red: list[tuple[str, str, str]]) -> list[str] | None:
+    """A release red ONLY through jobs that hit their time limit with every test passed: run those jobs again,
+    once per run and release (ORCH-1050). None when the red is anything else or already had its retry."""
+    if not red or any(not r or not j for r, j, _ in red):
+        return None
+    runs_ = sorted({r for r, _, _ in red})
+    done = set(rel.get("retried") or [])
+    if done & set(runs_):
+        return None  # the second time it is a real red
+    if not all(w.hit_time_limit(j) for _, j, _ in red):
+        return None
+    names = ", ".join(sorted({n for _, _, n in red}))
+    if not all(w.run_done(r) for r in runs_):  # the logs come only once the whole run finished
+        return [f"release {rel['n']}: {names} hit the time limit; waits for the rest of the run to judge it"]
+    if not all(w.all_passed(j) for _, j, _ in red):
+        return None
+    for r in runs_:
+        w.rerun(r)
+    rel["retried"] = sorted(done | set(runs_))
+    return [f"release {rel['n']}: {names} only hit the time limit with every test passed: started once more"]
+
+
 def _wf_name(f: str) -> str:
     return f.rsplit(".", 1)[0]
 
@@ -1431,6 +1528,9 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
             if g == "pending":
                 return out + [f"release {rel['n']}: release checks still running"]
             if g == "red":
+                again = retry_time_limit(w, rel, red_checks(p.get("statusCheckRollup"), ignore))
+                if again:
+                    return out + again
                 bad = ", ".join(failed_checks(p.get("statusCheckRollup"), ignore)) or "see the pull request"
                 if recut(w, st, rel, h, "checks"):
                     return out + [
@@ -1532,6 +1632,12 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
             states.append((_wf_name(wf), s_, r_))
             noted += n_
         rel["known_red"] = noted
+        per_run = [red_jobs(w, r_, known) for _, s_, r_ in states if s_ == "red"]
+        # a red run without a job list (red as a whole) is never retried, nor are the others with it
+        reds = [x for jobs_ in per_run for x in jobs_] if per_run and all(per_run) else []
+        again = retry_time_limit(w, rel, reds) if reds else None
+        if again:
+            return out + again
         for name, s_, r_ in states:
             if s_ == "red":
                 st["release"] = None
