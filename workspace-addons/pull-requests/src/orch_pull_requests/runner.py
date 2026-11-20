@@ -351,6 +351,11 @@ class Runner:
             if lone and batch:  # it runs in a group of its own, in a later round
                 continue
             if follow is not None and (lone or v.get("isCrossRepository") or b != follow.base):
+                if not batch:  # first in line: stack no group past it, or it waits as long as one runs
+                    why = "first in line: waits until the running groups end, then runs in a round of its own"
+                    store.set_state(self.root, r["url"], WAITING, why)
+                    self.log(f"No group on top of {follow.url}: {r['url']} is {why}")
+                    break
                 continue  # never on top of another group: it waits for a round of its own
             if not base and b != guess:  # moved to another base branch since it was added: that one counts
                 most = 1 if self.red_base(repo, b) else size
