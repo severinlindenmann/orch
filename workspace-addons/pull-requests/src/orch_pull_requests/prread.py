@@ -25,7 +25,7 @@ FIELDS = """number title url state isDraft mergeable mergeStateStatus baseRefNam
 author { login }
 commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
   __typename
-  ... on CheckRun { name status conclusion }
+  ... on CheckRun { name status conclusion startedAt checkSuite { workflowRun { workflow { name } } } }
   ... on StatusContext { context state }
 } } } } } }"""
 
