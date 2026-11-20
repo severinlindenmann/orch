@@ -24,6 +24,10 @@ A part that is not set up yet (no check workspaces, the outside job not on the d
   private network. GitHub runs scheduled jobs only from the default branch, so this part starts after a release.
 - **Inside**: an orch automation script on develop runs
   `python3 scripts/live_check.py --where inside --outside-from severinlindenmann/orch --out <file>` on a repeat.
+  On develop the round trips use three check folders in `~/orch-livecheck` (`relay-a` and `relay-b`, joined to the
+  relay as "Live check A" and "Live check B" with one rule A to B for text; `publish`, joined to publish as "Live
+  check" with files only): `--relay-a ~/orch-livecheck/relay-a --relay-b ~/orch-livecheck/relay-b --publish-ws
+  ~/orch-livecheck/publish`.
   Exit 1 makes orch put one question on the check's ticket. That question is the alert, so the owner hears
   about it only when a check fails.
 

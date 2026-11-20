@@ -210,6 +210,8 @@ def orch(ws: str, *args: str) -> dict | list:
     p = subprocess.run(
         [os.environ.get("ORCH_BIN", "orch"), *args, "--json"],
         cwd=ws,
+        # the automation runs with ORCH_ROOT set to its own workspace; the check folder must be used instead
+        env={k: v for k, v in os.environ.items() if k != "ORCH_ROOT"},
         capture_output=True,
         text=True,
         timeout=120,
