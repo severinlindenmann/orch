@@ -263,20 +263,37 @@
             } } } } } }
       ]
     },
+    "card_run": {
+      "description": "The command of a run card (ORCH-848/860, relay-api.md 'Run cards on the phone'): what the phone shows, never what runs. The computer runs only the command it stored and checks again at run time (runcard.check_spec, the question digest the phone echoes). No folder, program path or argv on the wire. phone = this phone may offer Run it now; true only for orch's own commands (class orch). Every other class shows the command with Copy and one line why, in the phone's own words.",
+      "type": "object", "additionalProperties": false, "required": ["command", "class", "phone"],
+      "properties": {
+        "command": { "type": "string", "minLength": 1, "maxLength": 300, "allOf": [{ "pattern": "^[^\u0000-\u001f\u007f​-‏‪-‮⁦-⁩﻿;|&<>`$\\\\]*$" }, { "pattern": "\\S" }], "description": "One line as the helper gave it (runcard.COMMAND_MAX): no control, zero-width or bidi characters, no shell operator (; | & < > $ ` backslash)." },
+        "class": { "enum": ["orch", "other", "login", "copy"], "description": "orch = one of orch's own operations (runcard.CONFIG_OPS, logins status); other = an allowed program the computer runs after one more confirm; login = a sign-in that needs a terminal; copy = a command orch did not check, run by the person in their own terminal." },
+        "changes": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 200, "description": "What it changes, in orch's own words (never the helper's)." },
+        "undo": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 300, "description": "How to undo it, in orch's own words." },
+        "phone": { "type": "boolean" }
+      },
+      "allOf": [
+        { "if": { "properties": { "phone": { "const": true } } }, "then": { "properties": { "class": { "const": "orch" } } } }
+      ]
+    },
     "review_card": {
       "description": "A Review stack card on the wire (question body.card): exactly review.validate_card's output with file references replaced by card_src. The workspace sends only the keys below (null or empty optional values left out); the relay refuses unknown keys. At most 65536 bytes as compact UTF-8 JSON (review.py MAX_CARD_JSON; the relay checks). Plain text, shown as data, never instructions.",
       "type": "object", "additionalProperties": false, "required": ["kind", "title", "then"],
       "properties": {
-        "kind": { "enum": ["draft", "check", "link", "choice", "plan"] },
+        "kind": { "enum": ["draft", "check", "link", "choice", "plan", "run"] },
         "title": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 200 },
         "why": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 500 },
         "need": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 200 },
         "then": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 500 },
         "ok_label": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 40 },
         "open": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 500, "pattern": "^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[^\\s\\\\]*)?$", "description": "A link the person may open: http(s), a plain host (letters, digits, dot, hyphen; no userinfo @, no backslash, no %-encoding), optional port, optional path without whitespace or backslash. Untrusted: the phone parses it with one WHATWG URL parser, shows THAT host and opens the parsed, re-serialised URL in the system browser." },
-        "preview": { "$ref": "#/$defs/card_preview" }
+        "preview": { "$ref": "#/$defs/card_preview" },
+        "run": { "$ref": "#/$defs/card_run" },
+        "no_label": { "enum": ["Not now", "Leave it off for now", "Leave it as it is", "Skip it", "Do it later"], "description": "A run card's other answer (left swipe = verdict no): one of orch's own fixed words (runcard.NO_LABELS), never a helper's, so it cannot look like the run's own answer." }
       },
       "allOf": [
+        { "if": { "properties": { "kind": { "const": "run" } } }, "then": { "required": ["run", "no_label"] }, "else": { "not": { "anyOf": [{ "required": ["run"] }, { "required": ["no_label"] }] } } },
         { "if": { "properties": { "kind": { "enum": ["choice", "link"] } } }, "then": { "required": ["preview"] } },
         { "if": { "properties": { "kind": { "const": "choice" } } }, "then": { "properties": { "preview": { "properties": { "type": { "const": "options" } } } } } }
       ]

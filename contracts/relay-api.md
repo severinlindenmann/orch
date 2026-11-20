@@ -265,6 +265,17 @@ has one cell per column (the two rules the schema cannot say); every `{"file": i
 `card_files` blob was uploaded by the sender (`404 not_found` otherwise, unknown ids included) with exactly that `size` and
 `sha256`; the sizes add up to at most 20 MB.
 
+*Run cards on the phone* (ORCH-848/860; `$defs/card_run`, the `card-run-*` and `run-*` shapes of vectors/review-card-v1.json).
+A card of kind `run` asks the person to run one command. It carries `run` = `{command, class, changes?, undo?, phone}` and
+`no_label` (one of orch's own fixed words for the other answer); every other kind carries neither. `run` is what the phone
+shows, never what runs: no folder, program path or argv goes on the wire; the computer runs only the command it stored and
+checks it again at run time (`runcard.check_spec`, the digest). `command` is one line of at most 300 characters with no
+control, zero-width or bidi character and no shell operator. `phone: true` (Run it now on this phone) is allowed only with
+`class: orch` (orch's own operations); any other class shows the command with Copy and one line why. The phone's Run it now
+is a plain `verdict: ok` with the digest it was shown; `no` is the `no_label` answer. The relay checks only the shape; the
+workspace decides (`relay._apply_run`: a paired phone, orch's own operations only, the digest, one run at a time) and answers
+with the review result (`applied` = it ran and the setting is in place; `refused` = it did not run or did not work).
+
 *Answer (phone → relay → workspace).* `POST /v1/phone/answer` takes an optional `verdict` = `{verdict: ok|no|talk, picked?,
 digest, note?}` (`$defs/verdict`: changes ≤ 20 × 500, words.text ≤ 2000, words.voice ≤ 3 `{blob_id, transcript ≤ 2000, lang,
 duration ≤ 120}`, pins ≤ 30 `{n, on?, x 0..1, y 0..1, text?}`; `picked` null with `no`; no other keys, so it cannot name a
