@@ -1130,18 +1130,28 @@ globalThis.addEventListener?.('message', e => {
 const framesLoaded = new Set();
 // The shown frame got the dashboard's starting page (its add-on's service is restarting after an add-on was added or
 // removed, ORCH-1055): open a new frame in a moment. Only this page can: a reload from inside the sandboxed frame is
-// cross-site and refused. A new element, as the same address with its #pass would not load again. At most
-// FRAME_RETRIES times per address within 5 minutes; after that the page says it is starting until the person opens it again.
-const FRAME_RETRY_MS = 2000, FRAME_RETRIES = 30, frameRetries = new Map();
+// cross-site and refused. A new element, as the same address with its #pass would not load again. Meanwhile the
+// page's skeleton shows (the starting page itself is empty). At most FRAME_RETRIES times per address within 5
+// minutes; after that the skeleton stays until the person opens the page again.
+const FRAME_RETRY_MS = 2000, FRAME_RETRIES = 30, frameRetries = new Map(), frameRetrying = new WeakSet();
 globalThis.addEventListener?.('message', e => {
   const frame = frameShown(), r = route();
   if (snapshot || e.origin !== 'null' || e.data?.orch !== 'frame-starting' || r.kind !== 'page' || !frame || e.source !== frame.contentWindow) return;
+  if (frameRetrying.has(frame)) return;  // already opening it again
   const was = frameRetries.get(r.hash), fresh = !was || Date.now() - was.since > 5 * 60000;  // a later restart counts anew
   const n = fresh ? 1 : was.n + 1;
   if (n > FRAME_RETRIES) return;
   frameRetries.set(r.hash, {n, since:fresh ? Date.now() : was.since});
+  const src = frame.getAttribute('src') || '';
+  framesLoaded.delete(src);  // the starting page was no load of the add-on page: the new frame gets its skeleton
+  if (!document.querySelector('[data-key="embed-skeleton"]')) {
+    const wait = skeletonFor('page'); wait.dataset.key = 'embed-skeleton'; frame.before(wait);
+  }
+  frame.classList.add('embed-loading');
+  frameRetrying.add(frame);
   setTimeout(() => {
     if (!frame.isConnected || frameShown() !== frame || route().hash !== r.hash) return;  // the person moved on
+    document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove());
     frame.replaceWith(pageFrame(route()));
   }, FRAME_RETRY_MS);
 });

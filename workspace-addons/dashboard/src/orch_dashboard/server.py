@@ -190,7 +190,7 @@ STARTING_RETRY = 2  # seconds: the dashboard page opens a (re)starting add-on pa
 STARTING_SCRIPT = b"parent.postMessage({orch:'frame-starting'},'*')"
 STARTING_PAGE = (
     b'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Starting</title></head>'
-    b"<body><p>One moment: this page is starting.</p><script>" + STARTING_SCRIPT + b"</script></body></html>"
+    b"<body><script>" + STARTING_SCRIPT + b"</script></body></html>"  # no words: the dashboard shows its skeleton
 )
 STARTING_CSP = (
     "default-src 'none'; script-src 'sha256-"

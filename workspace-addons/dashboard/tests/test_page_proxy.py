@@ -885,7 +885,7 @@ def test_orch1055_a_restarting_addon_page_loads_itself_again_in_its_frame(stack)
     digest = base64.b64encode(hashlib.sha256(script).digest()).decode()
     csp = headers["Content-Security-Policy"]
     assert csp == f"default-src 'none'; script-src 'sha256-{digest}'; frame-ancestors 'self'"
-    assert body.count(b"<script") == 1
+    assert body.count(b"<script") == 1 and b"<p>" not in body  # no words: the dashboard shows its skeleton
 
 
 def test_orch1055_only_the_frame_itself_gets_the_page_that_loads_again(stack):

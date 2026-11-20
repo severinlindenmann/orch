@@ -87,10 +87,16 @@ function retryEnv() {
   const src = read('../src/orch_dashboard/web/pages/settings.js');
   const chunk = /const FRAME_RETRY_MS = [\s\S]*?\n\}\);\n/.exec(src)[0];
   const env = {listener:null, timers:[], replaced:0, hash:'#addon/insights'};
-  env.frame = {isConnected:true, contentWindow:{}, replaceWith:() => { env.replaced++; }};
-  new Function('globalThis', 'snapshot', 'frameShown', 'route', 'pageFrame', 'setTimeout', chunk)(
+  env.skeletons = [];
+  env.loaded = new Set(['/addon/insights/#orch-frame=x']);
+  const classes = new Set();
+  env.frame = {isConnected:true, contentWindow:{}, classes, classList:{add:c => classes.add(c)}, getAttribute:() => '/addon/insights/#orch-frame=x',
+    before:n => env.skeletons.push(n), replaceWith:() => { env.replaced++; }};
+  const document = {querySelector:() => env.skeletons[0] || null, querySelectorAll:() => ({forEach:f => { env.skeletons.splice(0).forEach(f); }})};
+  new Function('globalThis', 'snapshot', 'frameShown', 'route', 'pageFrame', 'setTimeout', 'document', 'framesLoaded', 'skeletonFor', chunk)(
     {addEventListener:(n, f) => { if (n === 'message') env.listener = f; }}, false, () => env.frame,
-    () => ({kind:'page', id:'insights', path:'', hash:env.hash}), () => ({}), f => env.timers.push(f));
+    () => ({kind:'page', id:'insights', path:'', hash:env.hash}), () => ({}), f => env.timers.push(f), document, env.loaded,
+    () => ({dataset:{}, remove() {}}));
   env.send = (data, opts = {}) => env.listener({origin:opts.origin || 'null', source:opts.source || env.frame.contentWindow, data});
   env.tick = () => { const t = env.timers.splice(0); t.forEach(f => f()); };
   return env;
@@ -100,8 +106,14 @@ test('the starting page makes the dashboard open a new frame in a moment', () =>
   const env = retryEnv();
   env.send({orch:'frame-starting'});
   assert.equal(env.replaced, 0);  // not at once
+  assert.equal(env.skeletons.length, 1);  // the skeleton shows meanwhile, the empty starting page is hidden
+  assert.ok(env.frame.classes.has('embed-loading'));
+  assert.equal(env.loaded.size, 0);  // the new frame gets its skeleton until it really loaded
+  env.send({orch:'frame-starting'});
+  assert.equal(env.skeletons.length, 1);  // never two
   env.tick();
   assert.equal(env.replaced, 1);
+  assert.equal(env.skeletons.length, 0);  // the new frame brings its own
 });
 
 test('only the shown frame asks, and nothing happens once the person moved on', () => {
@@ -118,6 +130,6 @@ test('only the shown frame asks, and nothing happens once the person moved on', 
 
 test('the frame is opened again at most 30 times for one address', () => {
   const env = retryEnv();
-  for (let i = 0; i < 40; i++) { env.send({orch:'frame-starting'}); env.tick(); }
+  for (let i = 0; i < 40; i++) { env.frame = {...env.frame}; env.send({orch:'frame-starting'}); env.tick(); }  // a new frame each time
   assert.equal(env.replaced, 30);
 });
