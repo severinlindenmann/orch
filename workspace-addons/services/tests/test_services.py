@@ -361,3 +361,20 @@ def test_add_says_why_when_the_stored_keys_cannot_be_read(cli, monkeypatch):
     assert out["error"] == (
         "Could not compare the command with this workspace's stored keys, because This is a test install outside the test folder."
     )
+
+
+def test_stopping_the_regular_check_says_the_running_services_keep_running(cli, fake, monkeypatch):
+    # ORCH-935 point 2: turning Services off said only "The regular check stopped." while the jobs kept running
+    from orch_services import service
+
+    monkeypatch.setattr(service, "stop", lambda root: True)
+    assert _add(cli, "web", "--start")[0] == 0
+    assert _add(cli, "api")[0] == 0  # added, not started
+    code, out, _err = cli("stop")
+    assert code == 0
+    assert out.splitlines() == [
+        "The regular check stopped.",
+        "1 service keeps running on this computer; orch does not watch it while the check is off.",
+    ]
+    code, out, _err = cli("stop", "--json")
+    assert json.loads(out)["still_running"] == 1

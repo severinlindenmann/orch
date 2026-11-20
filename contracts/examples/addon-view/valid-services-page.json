@@ -59,7 +59,7 @@
          },
          {
           "label": "Starts by itself",
-          "value": "No, you start it by hand",
+          "value": "Only after a crash, not after this computer restarts",
           "switch": {
            "on": false,
            "label": "Starts by itself: Budget guard",
@@ -282,7 +282,7 @@
          },
          {
           "label": "Starts by itself",
-          "value": "No, you start it by hand",
+          "value": "Only after a crash, not after this computer restarts",
           "switch": {
            "on": false,
            "label": "Starts by itself: Dashboard front",

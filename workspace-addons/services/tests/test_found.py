@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import plistlib
+import shutil
 import sys
 from pathlib import Path
 
@@ -498,3 +499,23 @@ def test_orchs_own_background_pages_are_never_found(cli, mac, tools, ws):
     found = {i["id"]: i for i in jrun(cli, "found")[1]["found"]}
     assert "process:960" not in found and "process:961" not in found
     assert found["process:962"]["name"] == "watcher.py"  # an interpreter shows the script, also as Python
+
+
+def test_a_managed_services_own_processes_are_never_found(cli, mac, tools, ws):
+    # ORCH-935 point 4: launchd brings a crashing service back with a new pid that orch has not seen yet, and the
+    # service's own children (sleep) have other pids again; Found listed them as "Running, not managed".
+    (ws / "crash.sh").write_text("#!/bin/sh\necho boom\nsleep 5\nexit 1\n", encoding="utf-8")
+    code, out = jrun(cli, "add", "Crashy job", "--id", "crash", "--", "sh", "crash.sh")
+    assert code == 0, out
+    sh = shutil.which("sh")  # launchd runs the full path the plist names
+    tools.set(
+        ps=[
+            {"pid": 970, "ppid": 1, "tty": "??", "argv": [sh, "crash.sh"]},  # started again after a crash
+            {"pid": 971, "ppid": 970, "tty": "??", "argv": ["sleep", "5"]},  # what the service started
+            {"pid": 973, "ppid": 1, "tty": "??", "argv": ["/usr/bin/python3", "other.py"]},
+        ],
+        lsof={"970": str(ws), "971": str(ws), "973": str(ws)},
+    )
+    found = {i["id"] for i in jrun(cli, "found")[1]["found"]}
+    assert "process:970" not in found and "process:971" not in found
+    assert "process:973" in found  # a program orch does not keep still shows

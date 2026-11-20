@@ -17,7 +17,10 @@ from . import store
 LOG_LINES = 20
 WORD = {"running": "Running", "stopped": "Stopped", "failing": "Failing"}
 TONE = {"running": "good", "stopped": "neutral", "failing": "bad"}
-AUTO_WORDS = {True: "Yes, after this computer restarts", False: "No, you start it by hand"}
+AUTO_WORDS = {
+    True: "Yes, after this computer restarts",
+    False: "Only after a crash, not after this computer restarts",
+}
 TICKET_ID = re.compile(r"t_[a-z0-9]{6,16}")
 
 

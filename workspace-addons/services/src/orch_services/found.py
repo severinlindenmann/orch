@@ -323,7 +323,14 @@ def _is_orch(argv: list[str]) -> bool:
     return False
 
 
-def _processes(root: Path, skip: set[int]) -> list[dict]:
+def _same_command(argv: list[str], managed: set[tuple[str, ...]]) -> bool:
+    """The process runs a managed service's own command: exactly, or behind its interpreter (a script with a
+    shebang shows in ps as `/bin/bash /path/crash.sh`)."""
+    t = tuple(argv)
+    return t in managed or (len(t) > 1 and _interpreter(Path(t[0]).name) and t[1:] in managed)
+
+
+def _processes(root: Path, skip: set[int], managed: frozenset[tuple[str, ...]] = frozenset()) -> list[dict]:
     cp = _tool(["ps", "-ww", "-U", str(os.getuid()), "-o", "pid=,ppid=,tty=,lstart=,command="])
     if not cp or cp.returncode != 0:
         return []
@@ -342,10 +349,12 @@ def _processes(root: Path, skip: set[int]) -> list[dict]:
     mine.add(os.getpid())
 
     def from_orch(pid: int) -> bool:
+        """orch started it, or a service orch keeps runs it (its main process, the same command started again
+        by launchd after a crash with a new pid, or anything those started): never a found item."""
         seen = set()
         while pid in rows and pid not in seen:
             seen.add(pid)
-            if _is_orch(rows[pid]["argv"]):
+            if pid in skip or _is_orch(rows[pid]["argv"]) or _same_command(rows[pid]["argv"], managed):
                 return True
             pid = rows[pid]["ppid"]
         return False
@@ -353,7 +362,7 @@ def _processes(root: Path, skip: set[int]) -> list[dict]:
     cand = [
         pid
         for pid, r in rows.items()
-        if pid not in mine and pid not in skip and r["tty"] in ("?", "??", "-") and not from_orch(pid)
+        if pid not in mine and r["tty"] in ("?", "??", "-") and not from_orch(pid)
     ]
     if sys.platform.startswith("linux"):
         cwds = {pid: c for pid in cand if (c := _cwd_linux(pid))}
@@ -398,34 +407,43 @@ def scan(root: Path) -> list[dict]:
         return []
     done = _adopted(root)
     units = [u for u in units if u["id"] not in done]
-    items = units + _processes(root, pids | _record_pids(root))
+    kept, managed = _managed(root)
+    items = units + _processes(root, pids | kept, managed)
     items.sort(key=lambda i: (i["name"].lower(), i["id"]))
     return items
 
 
-def _record_pids(root: Path) -> set[int]:
-    """Main pids of the services orch keeps (made or adopted): their processes are not found again."""
+def _managed(root: Path) -> tuple[set[int], frozenset[tuple[str, ...]]]:
+    """The services orch keeps (made or adopted): their main pids and the commands they run. Their processes,
+    and what those start, are not found again, also while launchd brings a crashing one back with a new pid."""
     from . import drivers
     from .cli import _spec, _workspace_id
 
-    out: set[int] = set()
+    pids: set[int] = set()
+    argvs: set[tuple[str, ...]] = set()
     recs, _bad = store.load_all(root)
     if not recs:
-        return out
+        return pids, frozenset()
     try:
         drv = drivers.get()
         drv.check()
         wid = _workspace_id(root)
     except Refused:
-        return out
+        return pids, frozenset()
     for r in recs:
         try:
-            st = drv.status(_spec(root, r, wid, strict=False))
+            spec = _spec(root, r, wid, strict=False)
+        except Refused:
+            continue
+        if not spec.external:  # an adopted job's words are only shown; its pid still counts below
+            argvs.add(tuple(spec.argv))
+        try:
+            st = drv.status(spec)
         except Refused:
             continue
         if st.running and st.pid:
-            out.add(st.pid)
-    return out
+            pids.add(st.pid)
+    return pids, frozenset(argvs)
 
 
 def note() -> str | None:

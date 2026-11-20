@@ -306,7 +306,7 @@ const OrchBlocks = (() => {
     const row = el('div', 'row');
     if (it.question) row.append(el('span', 'muted', 'The question above is about this one.'));
     else arr(p.buttons).forEach((x, i) => { const b = splitButton(x, it, 'btn sm ' + (x.primary ? 'primary' : 'outline')); if (b) row.append(b); });
-    if (p.log) { const o = el('button', 'btn ghost sm', 'Open log'); o.type = 'button'; o.dataset.splitLog = it.id; o.setAttribute('aria-label', 'Open log of ' + it.title); row.append(o); }
+    if (p.log) { const o = el('button', 'btn ghost sm phone-only', 'Open log'); o.type = 'button'; o.dataset.splitLog = it.id; o.setAttribute('aria-label', 'Open log of ' + it.title); row.append(o); }
     if (row.childNodes.length) s.append(row);
     if (arr(p.facts).length) s.append(splitFacts(p.facts, it));
     if (p.note) s.append(el('p', 'muted', p.note));

@@ -55,7 +55,7 @@ def test_every_managed_service_is_in_the_list_with_its_panel(cli, ws):
     assert f["Starts by itself"]["switch"]["action"]["args"] == {"verb": "auto-off", "target": "web"}
     assert f["Made by"] == {"label": "Made by", "value": "DM1-12", "link": "t_abc123"}
     g = _facts(front)
-    assert g["Starts by itself"]["value"] == "No, you start it by hand"
+    assert g["Starts by itself"]["value"] == "Only after a crash, not after this computer restarts"
     assert g["Starts by itself"]["switch"]["action"]["args"]["verb"] == "auto-on"
     assert g["Made by"]["value"] == "Dashboard add-on" and "link" not in g["Made by"]
     for item in (web, front):  # every action names this service only
