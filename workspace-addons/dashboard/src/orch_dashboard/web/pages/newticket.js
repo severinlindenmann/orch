@@ -530,7 +530,7 @@ function ticketForm(t, {host = null} = {}) {
     fields.prepend(note);
   }
   if (onPage) {
-    inputs.text.focus?.({preventScroll:true});
+    inputs.text.focus({preventScroll:true});
     return {destroy() { pageClose(); }};
   }
   window.orch.open(d);
