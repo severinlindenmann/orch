@@ -219,10 +219,12 @@ def _typing_allowed(root) -> bool:
 
 
 def _link_msg(session, name: str) -> bytes:
-    from orch.pagesession import REVOKED_MSG
+    from orch.pagesession import REVOKED_MSG, WATCH_ONLY_MSG
 
     if session.revoked:
         return REVOKED_MSG.encode()
+    if getattr(session, "active", True) is False:  # a helper started this server: watch-only
+        return WATCH_ONLY_MSG.encode()
     return f"This link was already used. Open the {name} again from orch.".encode()
 
 
@@ -307,11 +309,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _refused_text(self, text: str) -> str:
         """The words of a 403 for a missing page session: a sign-in link that was used twice, else sign in."""
-        from orch.pagesession import REVOKED_MSG
+        from orch.pagesession import REVOKED_MSG, WATCH_ONLY_MSG
 
         session = getattr(self, "session", None)
         if session is not None and session.revoked:
             return REVOKED_MSG
+        if session is not None and getattr(session, "active", True) is False:
+            return WATCH_ONLY_MSG
         return text
 
     def _act_log(self, text: str) -> None:
