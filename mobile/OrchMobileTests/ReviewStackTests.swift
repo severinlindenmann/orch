@@ -377,4 +377,27 @@ final class RunCardTests: XCTestCase {
         let orch = try question("card-run-orch")
         XCTAssertNoThrow(try box.enqueueAnswer(question: orch, answer: "I ran it", verdict: ReviewVerdict(verdict: .ok, digest: orch.message.body.digest!)))
     }
+    func testAnOrchCommandThePhoneMayNotRunShowsWhy() throws {
+        let run = CardRun(command: "orch config set workflow.reviewer_look on", cls: .orch, phone: false)
+        XCTAssertFalse(run.runsHere)
+        XCTAssertEqual(run.whyNotHere, "Run this one at your computer.")
+        let item = ReviewStackRules.item(for: cardQ("m_rx", ReviewCard(kind: .run, title: "T", then: "x", run: run, noLabel: "Not now")))!
+        XCTAssertEqual(ReviewStackRules.okOutcome(item, picked: nil), .atComputer)
+    }
+    @MainActor func testOutboxRefusesOkWithoutTheDecoderOnAPhoneFlagOnAnotherClass() throws {
+        // built in code (the decoder would refuse it): phone true on a command that is not orch's own never runs here
+        let run = CardRun(command: "brew install gh", cls: .other, phone: true)
+        XCTAssertFalse(run.runsHere); XCTAssertFalse(run.isValid)
+        let q = cardQ("m_ry", ReviewCard(kind: .run, title: "T", then: "x", run: run, noLabel: "Not now"))
+        let dir = tmpDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let box = Outbox(directory: dir, phone: "ph_iphone0001")
+        XCTAssertThrowsError(try box.enqueueAnswer(question: q, answer: "I ran it", verdict: ReviewVerdict(verdict: .ok, digest: q.message.body.digest!)))
+    }
+    func testABrokenRunCardIsNotAnsweredAsAPlainQuestion() throws {
+        // the card is dropped on decode; a question without options is not a stack card, so no ok can be sent from the stack
+        let json = #"{"schema":"orch.msg/1","id":"m_z","from":"ws_p","to":"phones","type":"question","created_at":"2026-11-15T09:00:00Z","body":{"question_id":"q1","text":"T","options":[],"digest":"\#(String(repeating: "b", count: 64))","card":{"kind":"run","title":"t","then":"x","run":{"command":"rm x; id","class":"orch","phone":true},"no_label":"Not now"}}}"#
+        let m = try JSONCoding.decoder.decode(QuestionMessage.self, from: Data(json.utf8))
+        XCTAssertNil(m.body.card)
+        XCTAssertNil(ReviewStackRules.kind(of: Question(message: m, workspaceName: "P")))
+    }
 }

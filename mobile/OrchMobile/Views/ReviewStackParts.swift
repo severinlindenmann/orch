@@ -61,7 +61,8 @@ struct RunCommandView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 8) {
                 Text(verbatim: run.command).font(.system(.subheadline, design: .monospaced)).foregroundStyle(Theme.text)
-                    .lineLimit(4).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)   // always the whole command: what Copy copies is what you see
+                    .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12).padding(.vertical, 10)
                     .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
                     .accessibilityIdentifier("review-run-command")
@@ -92,7 +93,7 @@ struct RunCommandView: View {
             Text(label).themeFont(13).foregroundStyle(Theme.muted).frame(width: 64, alignment: .leading)
             Group {
                 if mono { Text(verbatim: value).font(.system(.footnote, design: .monospaced)) } else { Text(verbatim: value).themeFont(14) }
-            }.foregroundStyle(Theme.text).lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
+            }.foregroundStyle(Theme.text).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
         }.accessibilityElement(children: .combine).accessibilityIdentifier("review-run-" + label.lowercased())
     }
 }
