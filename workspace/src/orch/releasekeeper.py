@@ -749,7 +749,7 @@ class World:
     def tickets(self) -> list[dict]:
         if self.sim is not None:
             return self.sim.get("tickets", [])
-        keep = ("id", "key", "title", "status", "refs", "note")
+        keep = ("id", "key", "title", "status", "refs")
         return [{k: t.get(k) for k in keep} for t in tickets.list_all(self.root)]
 
     def ticket(self, ref: str) -> dict:
@@ -1276,12 +1276,24 @@ FIX_DAYS = 2  # how long an exception the keeper records for a fix ticket lasts 
 
 def fix_exceptions(w: World, rel: dict, bad: list[str]) -> list[str]:
     """Owner 20 Nov (ORCH-178, from ORCH-431): once the keeper's own "Release N checks are red" ticket links a
-    fix pull request (orch ref add), the keeper records the named exception itself for each red check that
-    ticket names: that ticket, ending FIX_DAYS later or when the ticket is done. It shows on the Merge card
-    and in the release note like one a person recorded; it is never renewed for the same ticket. Returns the
-    lines when it recorded any (the release is judged again next pass)."""
-    t = open_red_ticket(w.tickets(), f"Release {rel['n']} checks")
-    if not t or not bad:
+    fix pull request (orch ref add), the keeper records the named exception itself for each red check it put
+    on that ticket: that ticket, ending FIX_DAYS later or when the ticket is done. The ticket and its checks
+    come from the keeper's own record (rel["red_checks"], written when it opened or noted the ticket), never
+    from a title or note anyone can edit. It shows on the Merge card and in the release note like one a person
+    recorded; it is never renewed for the same ticket. Returns the lines when it recorded any (the release is
+    judged again next pass)."""
+    mine = rel.get("red_checks") or {}
+    if not bad or not mine.get("ticket"):
+        return []
+    t = next(
+        (
+            x
+            for x in w.tickets()
+            if mine["ticket"] in (x.get("key"), x.get("id")) and (x.get("status") or "") not in DONE
+        ),
+        None,
+    )
+    if t is None:
         return []
     fix = next(
         (
@@ -1299,12 +1311,11 @@ def fix_exceptions(w: World, rel: dict, bad: list[str]) -> list[str]:
     if fix is None:
         return []
     key = str(t.get("key") or t["id"])
-    text = f"{t.get('title') or ''}\n{t.get('note') or ''}"
     have = w.exceptions()
-    names = [  # a whole name from the ticket's list ("red on: A, B."); once per ticket and check
+    names = [
         c
         for c in bad
-        if re.search(rf"(?:^|[:,]\s){re.escape(c)}(?=$|,|\.(?:\s|$))", text, re.M)
+        if c in (mine.get("checks") or [])
         and not ((have.get(c) or {}).get("by") == BY and (have.get(c) or {}).get("ticket") == key)
     ]
     if not names:
@@ -1413,11 +1424,13 @@ def red(w: World, st: dict, role: str, title: str, words: str, note: str, done_w
     """One top ticket per red thing: never a second while one with the same words is open."""
     cur = open_red_ticket(w.tickets(), words)
     if cur:
+        st["red_ticket"] = str(cur.get("key") or cur["id"])
         if st.get("red_logged") != title:
             w.note(cur.get("key") or cur["id"], f"Release keeper: still red. {note[:600]}")
             st["red_logged"] = title
         return [f"red, ticket {cur.get('key') or cur['id']} is open"]
     tid = w.new_ticket(role, title, note, done_when, over_limit=True)  # a red base starts at once (ORCH-699)
+    st["red_ticket"] = tid if tid and not tid.startswith("not opened") else None
     st["red_logged"] = title
     return [f"red: opened top ticket {tid} ({title})"]
 
@@ -1506,9 +1519,10 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
                         f"release {rel['n']}: checks were red, develop moved and the fix ticket is closed: "
                         "closed the pull request; cut again next pass"
                     ]
-                if fixed := fix_exceptions(w, rel, failed_checks(p.get("statusCheckRollup"), ignore)):
+                names = failed_checks(p.get("statusCheckRollup"), ignore)
+                if fixed := fix_exceptions(w, rel, names):
                     return out + fixed
-                return out + red(
+                lines = red(
                     w,
                     st,
                     role,
@@ -1524,6 +1538,13 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
                     "<key> --until <YYYY-MM-DD>.",
                     f"Release {rel['n']}'s checks are green (after a fix on develop)",
                 )
+                mine = rel.get("red_checks") or {}  # which checks the keeper put on which ticket (ORCH-178)
+                if st.get("red_ticket") and mine.get("ticket") != st["red_ticket"]:
+                    mine = {"ticket": st["red_ticket"], "checks": []}
+                if mine:
+                    mine["checks"] = sorted(set(mine.get("checks") or []) | set(names))
+                    rel["red_checks"] = mine
+                return out + lines
             wv = walk_verdicts(w, rel)
             if wv["failed"]:
                 bad = "; ".join(wv["failed"])
