@@ -248,7 +248,10 @@ def _show(t: dict, root: Path) -> str:
             if tickets.checks_split(t)[1] == 0
             else f"✓ All resolved · {_progress(t)}"
         )
-    out.append(f"Evidence: {tickets.proof_state(t, root)['line']}")
+    proof = tickets.proof_state(t, root)
+    failed = [c for c in t.get("checklist") or [] if proof["per_item"].get(c.get("id")) == "failed"]
+    named = "".join(f" ({c['id']}: {c.get('text', '')})" for c in failed[:3])
+    out.append(f"Evidence: {proof['line']}{named}")
     extra = [f"Owner: {t['owner']}"] if t.get("owner") else []
     if t.get("due"):
         extra.append(tickets.due_label(t["due"], t["status"]) or f"Due: {t['due']}")
