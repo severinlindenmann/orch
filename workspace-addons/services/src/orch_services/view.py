@@ -87,13 +87,14 @@ def _adopted(r: dict) -> bool:
 
 def _log(root: Path, r: dict) -> list[str]:
     """The last log lines, masked; an adopted job's own log (its plist log or journal), as orch services log shows."""
-    from .cli import _log_lines, tail_masked
+    from .cli import _log_lines, _workspace_id_or_none, tail_masked
 
     try:
         if _adopted(r):
             lines = _log_lines(root, store.get(root, r["id"]), LOG_LINES * 2)  # blank lines are dropped below
         else:
-            lines = tail_masked(root, store.log_path(root, r["id"]), LOG_LINES * 2)
+            log = store.read_log_path(root, r["id"], _workspace_id_or_none(root))
+            lines = tail_masked(root, log, LOG_LINES * 2)
     except store.Refused:
         return []
     return [_plain(ln) for ln in lines if ln.strip()][-LOG_LINES:]

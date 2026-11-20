@@ -15,7 +15,7 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 ## Files (all under `.orch/addons/services/`, gitignored, local to this computer)
 - `services/<id>.json`: one record per service (`orch.services.service/1`), written as a new file + rename (R8.2).
   Fields this version does not know are kept on rewrite. A file that cannot be read is skipped and counted.
-- `logs/<id>.log`: stdout and stderr of the service, appended. Kept when the service is removed.
+- `logs/<id>.log`: stdout and stderr of the service, appended. Kept when the service is removed. macOS: `~/Library/Logs/orch/<workspace id>/<id>.log` instead (launchd cannot open a log on an external disk); `log` and the page read the newer of the two, and a job loaded before the move gets the new place at its next start.
 - `keeper/<id>.json`, `keeper/<id>.run.json`: Windows only, see below.
 - `state/<id>.json`: `{"running", "since"}` of the last start or stop through orch (the `since` of a stopped
   service when the platform does not say it; `running` = what the person last asked for), and `watch` written by
@@ -26,7 +26,7 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 ## Platform entries (never sudo, never `User=`, never a system-wide folder; home = `Path.home()`)
 - macOS: `~/Library/LaunchAgents/ch.orch.svc.<workspace id>.<id>.plist` (workspace id = the core's `.orch/.local-id`).
   `ProgramArguments` (the program's full path, found at add time), `WorkingDirectory`, `StandardOutPath` and
-  `StandardErrorPath` = the log, `KeepAlive = true`, `RunAtLoad` = starts by itself, `EnvironmentVariables.PATH`.
+  `StandardErrorPath` = the log, `KeepAlive = true`, `RunAtLoad` = starts by itself, `EnvironmentVariables.PATH`. A workspace on an external disk (`/Volumes/<disk>`, not the start disk) is never refused: `WorkingDirectory` = `~/Library/Application Support/orch/<workspace id>/` and the environment gets `ORCH_WORKSPACE` (the workspace) and `ORCH_SERVICE_DIR` (the folder it would have run in); `add` says so in `note`, and `orch doctor` shows it as a plain note. The plist is written again at each start of a job that is not loaded.
   Starts by itself off also runs `launchctl disable gui/<uid>/<label>` so the plist is not loaded at the next login;
   start = `enable` + `bootstrap` (+ `disable` again when off), stop = `bootout`, restart = `kickstart -k`, state from
   `launchctl print`.
@@ -51,8 +51,8 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 | Command | Answer (`--json`) |
 |---|---|
 | `list` | `{"services": [row], "unreadable": n, "note"?}`; row = `id, name, state ("running" \| "stopped" \| "failing"), since (RFC 3339 UTC), auto, made_by, port, command, cwd, pid?, health, failing, question`; `health` = `{"ok", "how": "process alive" \| "answers on its address", "text"}`, `question` = `{ticket, id, title, text}` while one is open, else `null`. Reads only |
-| `check` | `{"checked": [{id, name, health, failing, did?, error?}], "unreadable": n}`: one pass, no loop (see Health check) |
-| `add <name> --id <slug> [--port N] [--ticket ID \| --addon NAME] [--cwd DIR] [--auto] [--start] -- <command...>` | `{"service": row, "next"}`; installed stopped unless `--start` |
+| `check` | `{"checked": [{id, name, health, failing, unhealthy, did?, error?}], "unreadable": n}`: one pass, no loop (see Health check); a service whose health is not ok is named in the text even before it is failing |
+| `add <name> --id <slug> [--port N] [--ticket ID \| --addon NAME] [--cwd DIR] [--auto] [--start] -- <command...>` | `{"service": row, "next"}`; installed stopped unless `--start`. macOS: refused when the working folder or the program lies in Documents, Desktop, Downloads, iCloud Drive or `~/Library/CloudStorage` (launchd jobs may not use them); `start`/`restart` refuse the same. A start that does not stay running within 10 s names the last log line (with a local network hint for "No route to host", and a blocked-log hint for launchd exit 78 with no log) |
 | `start \| stop \| restart <id>` | `{"service": row, "next"}` |
 | `start \| stop \| status` (no id) | the regular check (see Health check): `{"running": true, "pid"}` \| `{"stopped": bool}` \| `{"running": bool, "pid"?}` (status exits 1 when it does not run); `orch start` / `orch stop` call these |
 | `auto <id> on \| off` | `{"service": row, "next"}` |
@@ -90,7 +90,10 @@ every minute until Services is turned off, so nobody sets up a repeat. Every pas
 check.lock`: the regular check and a person's `orch services check` never run at the same time (a person's waits up
 to 30 s, then is refused with "Another check runs right now"); the regular check skips a round a person holds. Its
 log: `.orch/addons/services/checker.log` (service names and counts only).
-- Health: the process is alive (driver state); with a `port`, a TCP connect to `127.0.0.1:<port>` within 0.5 s.
+- Health: the process is alive (driver state); with a `port`, a TCP connect to `127.0.0.1:<port>` within 0.5 s, and
+  the listener on that port (`lsof -iTCP:<port> -sTCP:LISTEN`) is the driver's pid or one of its child processes;
+  otherwise `"Alive, but another program answers on its address"`. Where the listener cannot be read (Windows, no
+  `lsof`) the connect alone counts.
   A service the person stopped is not checked (`"Stopped, so not checked"`) and never failing.
 - A failure = a failed health check, or a start the platform did by itself since the last pass (driver `runs()`:
   launchd `runs` from `launchctl print`, systemd `NRestarts`; starts through orch move the baseline and do not

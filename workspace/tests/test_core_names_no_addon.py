@@ -27,6 +27,10 @@ ALLOW = {
         "pull-requests": "ORCH-568: the helper watcher reads the merge queue file, so a helper waiting on "
         "a queued pull request is not nudged; follow-up like #837 (a manifest key instead of the name)",
     },
+    "orch/cli_leave.py": {
+        "services": "ORCH-843: orch doctor names a macOS-protected workspace folder only while the services "
+        "add-on is on (launchd jobs die there); follow-up like #837 (a manifest key instead of the name)"
+    },
     "orch/cli_chat.py": {"sync": "core `orch chat sync` command; not the add-on"},
     "orch/config.py": {"focus": _FOLLOW_UP, "insights": _FOLLOW_UP},
     "orch/history.py": {"sync": _FOLLOW_UP},
