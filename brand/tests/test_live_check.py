@@ -133,6 +133,7 @@ def test_check_turns_errors_into_lines():
 def test_result_and_exit_code(site, tmp_path, monkeypatch):
     up = site({"/health": (200, b"ok")})
     monkeypatch.setattr(lc, "tls", lambda b: "TLS valid, 80 days left")
+    monkeypatch.setattr(lc, "hsts", lambda b: "Strict-Transport-Security max-age 365 days")
     out = tmp_path / "r.json"
     assert (
         lc.main(
@@ -234,3 +235,22 @@ def test_network_error_is_tried_once_more(monkeypatch):
         lc.http_status("http://x/health")
     with pytest.raises(lc.Skip, match="GitHub not reachable"):
         lc.github_runs("r")
+
+
+def test_hsts_needs_a_long_max_age(monkeypatch):
+    def fake(value):
+        def f(req, timeout, tries=2, headers=None):
+            if value is not None:
+                headers["strict-transport-security"] = value
+            return 200, b"ok"
+
+        return f
+
+    monkeypatch.setattr(lc, "fetch", fake("max-age=31536000"))
+    assert "365 days" in lc.hsts("https://x")
+    monkeypatch.setattr(lc, "fetch", fake("max-age=31536000; includeSubDomains"))
+    assert "365 days" in lc.hsts("https://x")
+    for bad in (None, "max-age=300", "includeSubDomains", "max-age=abc"):
+        monkeypatch.setattr(lc, "fetch", fake(bad))
+        with pytest.raises(AssertionError, match="Strict-Transport-Security"):
+            lc.hsts("https://x")

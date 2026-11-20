@@ -44,6 +44,7 @@ ADMIN_HOSTS = {
 ADMIN_PORTS = {"publish private apps": 8410, "publish admin": 8411, "relay admin": 8412}
 ADMIN_PATHS = ["/admin", "/admin/", "/admin/api/workspaces"]
 MIN_CERT_DAYS = 14
+MIN_HSTS_DAYS = 180
 OUTSIDE_MAX_AGE_H = 3
 TIMEOUT = 8
 RETRY_S = 5
@@ -66,12 +67,16 @@ class Skip(Exception):
     pass
 
 
-def fetch(req: urllib.request.Request, timeout: float, tries: int = 2) -> tuple[int, bytes]:
-    """Status and start of the body. A network error is tried once more, so one lost packet
-    does not alert the owner; an HTTP answer is final."""
+def fetch(
+    req: urllib.request.Request, timeout: float, tries: int = 2, headers: dict | None = None
+) -> tuple[int, bytes]:
+    """Status and start of the body (response headers into `headers` when given). A network error is
+    tried once more, so one lost packet does not alert the owner; an HTTP answer is final."""
     for n in range(tries):
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
+                if headers is not None:
+                    headers.update({k.lower(): v for k, v in r.headers.items()})
                 return r.status, r.read(1 << 20)
         except urllib.error.HTTPError as e:
             return e.code, b""
@@ -84,6 +89,25 @@ def fetch(req: urllib.request.Request, timeout: float, tries: int = 2) -> tuple[
 
 def http_status(url: str, timeout: float = TIMEOUT) -> tuple[int, bytes]:
     return fetch(urllib.request.Request(url, headers={"User-Agent": "orch-live-check"}), timeout)
+
+
+def hsts(base: str) -> str:
+    """The site tells browsers to use https only, for at least MIN_HSTS_DAYS (set in the Caddy site)."""
+    h: dict = {}
+    fetch(
+        urllib.request.Request(base + "/health", headers={"User-Agent": "orch-live-check"}),
+        TIMEOUT,
+        headers=h,
+    )
+    value = h.get("strict-transport-security", "")
+    age = next(
+        (p.split("=", 1)[1] for p in value.replace(" ", "").split(";") if p.startswith("max-age=")), ""
+    )
+    if not age.isdigit() or int(age) < MIN_HSTS_DAYS * 86400:
+        raise AssertionError(
+            f"Strict-Transport-Security is {value or 'missing'!r} (need max-age of {MIN_HSTS_DAYS} days)"
+        )
+    return f"Strict-Transport-Security max-age {int(age) // 86400} days"
 
 
 def health(base: str) -> str:
@@ -238,6 +262,7 @@ def run(a: argparse.Namespace) -> dict:
     for name, base in (("relay", a.relay), ("publish", a.publish)):
         checks.append(check(f"{name} health", lambda b=base: health(b)))
         checks.append(check(f"{name} TLS", lambda b=base: tls(b)))
+        checks.append(check(f"{name} https only (HSTS)", lambda b=base: hsts(b)))
         checks.append(
             check(f"{name} admin closed on the public site", lambda b=base: admin_closed_on_site(b))
         )

@@ -1,0 +1,6 @@
+# /etc/caddy/sites/publish.caddy on the server. Only the public listener; the admin (8411) and private-network
+# app listener (8410) are never routed here.
+publish.severin.io {
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy 127.0.0.1:8102
+}
