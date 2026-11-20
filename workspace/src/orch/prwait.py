@@ -504,7 +504,7 @@ def _queue_wait(src, no_checks: float, timeout: float) -> Verdict:
         return v
     bad = [n for n, s in v.checks if s in HARD]
     ended = _cancel(src)  # a run still going cannot run its jobs again: then red as it is
-    try:  # what is red or cancelled now (the final gate too) runs again: its old result counts for nothing
+    try:  # what is red or cancelled now (the final check too) runs again: its old result is void
         now, _ = src.look()
     except Refused:
         now = []

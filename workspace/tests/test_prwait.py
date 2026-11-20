@@ -732,17 +732,17 @@ def _c(name, state):
 
 
 def _group(second):
-    """A merge queue group: lint fails while build still runs; after the cancel build and gate are cancelled
+    """A merge queue group: lint fails while build still runs; build and the final check get cancelled
     or red; the re-run first still shows the old results, then runs, then ends as `second` says."""
     polls = [
         [_c("build", "PENDING"), _c("lint", "FAILURE")],
-        [_c("build", "CANCELLED"), _c("lint", "FAILURE"), _c("gate", "FAILURE")],
-        [_c("build", "CANCELLED"), _c("lint", "FAILURE"), _c("gate", "FAILURE")],
-        [_c("build", "PENDING"), _c("lint", "PENDING"), _c("gate", "PENDING")],
+        [_c("build", "CANCELLED"), _c("lint", "FAILURE"), _c("final", "FAILURE")],
+        [_c("build", "CANCELLED"), _c("lint", "FAILURE"), _c("final", "FAILURE")],
+        [_c("build", "PENDING"), _c("lint", "PENDING"), _c("final", "PENDING")],
         [
             _c("build", "SUCCESS"),
             _c("lint", second),
-            _c("gate", "SUCCESS" if second == "SUCCESS" else "FAILURE"),
+            _c("final", "SUCCESS" if second == "SUCCESS" else "FAILURE"),
         ],
     ]
     return {"repo": "acme/app", "isDraft": False, "required": [], "polls": polls}
