@@ -448,6 +448,16 @@ class _Parser(argparse.ArgumentParser):
         self.exit(2, f"{message}. Run {self.prog} --help.\n")
 
 
+def _drop_hidden(parser: argparse.ArgumentParser) -> None:
+    """argparse prints a subcommand added with help=SUPPRESS as "name  ==SUPPRESS==" in --help.
+    Leave such subcommands out of every help list, at every level (they still run)."""
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            action._choices_actions[:] = [a for a in action._choices_actions if a.help != argparse.SUPPRESS]
+            for child in {id(c): c for c in action.choices.values()}.values():
+                _drop_hidden(child)
+
+
 def _hide_advanced(parser: argparse.ArgumentParser) -> None:
     """Help lists the everyday commands; `orch --help-all` (or `orch <cmd> --help-all`) lists the rest."""
 
@@ -956,10 +966,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     # publish and relay are built-in add-ons: listed under "Add-ons" only when on (never as core commands)
     top = p._subparsers._group_actions[0]
     top._choices_actions[:] = [
-        a
-        for a in top._choices_actions
-        if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS and a.help != argparse.SUPPRESS
+        a for a in top._choices_actions if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS
     ]
+    _drop_hidden(p)
     return p
 
 
