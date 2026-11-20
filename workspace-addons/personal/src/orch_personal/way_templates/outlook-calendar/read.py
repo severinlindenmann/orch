@@ -8,7 +8,7 @@ How it reaches Outlook is one command in fetch.json, next to this file:
 
     {"fetch": ["<program>", "<arg>", ...]}       e.g. {"fetch": ["python3", "./fetch_outlook.py"]}
 
-("./x" is a file in this folder.) It runs in Personal's data folder for this way in, never in this folder.
+("./x" is a file in this folder.) It runs in a fresh empty folder; to keep files it uses $ORCH_PERSONAL_WAY_DATA.
 
 It gets {"start": "<ISO time>", "end": "<ISO time>", "zone": "<IANA zone>"} on stdin and prints the Outlook calendars
 with their events as Microsoft Graph returns them (calendarView), in one JSON object:
@@ -191,14 +191,6 @@ def fetch_command(here: Path) -> list[str]:
     return [first, *(str((here / a).resolve()) if a.startswith("./") else a for a in argv[1:])]
 
 
-def work_dir(here: Path) -> Path:
-    """Where the fetch command runs: Personal's data folder for this way in (outside the checked folder)."""
-    d = os.environ.get("ORCH_PERSONAL_WAY_DATA")
-    if d and Path(d).is_dir():
-        return Path(d)
-    return Path(tempfile.gettempdir())
-
-
 def window(values: dict, zone: str) -> tuple[dt.datetime, dt.datetime]:
     try:
         frm = dt.date.fromisoformat(str(values.get("from") or dt.date.today().isoformat()))
@@ -218,16 +210,19 @@ def read(values: dict, here: Path) -> dict:
     argv = fetch_command(here)
     ask = json.dumps({"start": start.isoformat(), "end": end.isoformat(), "zone": zone})
     try:
-        p = subprocess.run(
-            argv,
-            check=False,
-            input=ask,
-            capture_output=True,
-            text=True,
-            timeout=FETCH_TIMEOUT,
-            cwd=work_dir(here),  # never this folder: a file written here would stop the way in
-            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-        )
+        # A fresh empty folder: never this checked folder (a file written here would stop the way in) and never the
+        # writable data folder (code found there would bypass the check). Keeping files: $ORCH_PERSONAL_WAY_DATA.
+        with tempfile.TemporaryDirectory(prefix="orch-outlook-") as empty:
+            p = subprocess.run(
+                argv,
+                check=False,
+                input=ask,
+                capture_output=True,
+                text=True,
+                timeout=FETCH_TIMEOUT,
+                cwd=empty,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONSAFEPATH": "1"},
+            )
     except subprocess.TimeoutExpired:
         raise Stop(f"Outlook did not answer within {FETCH_TIMEOUT} seconds.") from None
     except OSError:

@@ -615,7 +615,9 @@ def test_outlook_fetch_runs_outside_the_way_folder(tmp_path, monkeypatch):
     (way / "helper.py").write_text("ANSWER = {'calendars': []}\n", encoding="utf-8")
     (way / "fetch_outlook.py").write_text(
         "import json, os, sys\nsys.path.insert(0, os.path.dirname(__file__))\nimport helper\n"
-        "open('made-here.txt', 'w').write('x')\nprint(json.dumps(helper.ANSWER))\n",
+        "open('made-here.txt', 'w').write('x')\n"
+        "open(os.path.join(os.environ['ORCH_PERSONAL_WAY_DATA'], 'kept.txt'), 'w').write('x')\n"
+        "print(json.dumps(helper.ANSWER))\n",
         encoding="utf-8",
     )
     (way / "fetch.json").write_text(
@@ -625,4 +627,6 @@ def test_outlook_fetch_runs_outside_the_way_folder(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_PERSONAL_WAY_DATA", str(data))
     assert r.read({"from": "2026-11-16", "days": 7}, way)["calendars"] == []
     assert sorted(f.name for f in way.iterdir()) == before  # no __pycache__, no file written into the way in
-    assert (data / "made-here.txt").exists()
+    assert sorted(f.name for f in data.iterdir()) == [
+        "kept.txt"
+    ]  # runs in an empty folder, keeps only on purpose
