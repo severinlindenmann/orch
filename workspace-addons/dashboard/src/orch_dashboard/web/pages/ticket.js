@@ -959,8 +959,20 @@ function addTaskRow(t, scope) {
   });
   return form;
 }
+// The selected tab lives on the address (#ticket/<id>?tab=tasks) so a reload or a shared link keeps it.
+function writeTicketTab(id, tab) {
+  if (typeof history !== 'object' || typeof location !== 'object' || String(location.hash || '').split('?')[0] !== href(id)) return;
+  const next = href(id) + (tab && tab !== 'overview' ? '?tab=' + encodeURIComponent(tab) : '');
+  if (location.hash !== next) history.replaceState(null, '', next);
+}
+function tabFromAddress(id) {
+  if (typeof location !== 'object') return '';
+  const full = String(location.hash || ''), at = full.indexOf('?');
+  return full.slice(0, at < 0 ? full.length : at) === href(id) && at >= 0 ? new URLSearchParams(full.slice(at + 1)).get('tab') || '' : '';
+}
 function selectTicketTab(id, tab, focusQuestion = false) {
   ticketTabs.set(id, tab);
+  writeTicketTab(id, tab);
   render();
   if (focusQuestion) {
     const host = main.querySelector('[data-question]');
@@ -1693,7 +1705,7 @@ function ticketRequestCard(t) {
 }
 const TAB_ALIAS = {questions:'overview', history:'activity', artifacts:'files'};
 function ticketSelectedTab(t) {
-  const raw = ticketTabs.get(t.id), tab = TAB_ALIAS[raw] || raw;
+  const raw = tabFromAddress(t.id) || ticketTabs.get(t.id), tab = TAB_ALIAS[raw] || raw;
   return ['overview', 'tasks', 'files', 'activity'].includes(tab) ? tab : 'overview';
 }
 // The answers given through the Review stack (a question answered there carries a `decision`), newest first, in the
