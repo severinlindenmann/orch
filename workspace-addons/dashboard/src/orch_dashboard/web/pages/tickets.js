@@ -16,11 +16,12 @@ function savedView() {
 // ticketAddress builds it from the shown state (one place), syncTicketAddress adopts it when it was changed from outside (reload, Back, a shared link).
 function ticketAddress(over = {}) {
   const view = 'view' in over ? over.view : savedView(), q = 'q' in over ? over.q : String(ticketSearch).trim(), layout = 'layout' in over ? over.layout : ticketView;
-  const who = 'who' in over ? over.who : ticketPerson;
+  const who = 'who' in over ? over.who : ticketPerson, part = 'part' in over ? over.part : ticketGroup;
   const p = new URLSearchParams();
   if (view) p.set('view', view);
   if (q) p.set('q', q);
   if (who) p.set('who', who);
+  if (part) p.set('part', part);
   if (layout === 'board') p.set('layout', 'board');
   const text = p.toString();
   return '#tickets' + (text ? '?' + text : '');
@@ -28,12 +29,12 @@ function ticketAddress(over = {}) {
 let ticketAddressKey = null;
 function writeTicketAddress() {
   const next = ticketAddress();
-  ticketAddressKey = ticketAddressPart();
   if (typeof history === 'object' && location.hash !== next && (location.hash || '#home').split('?')[0] === '#tickets') history.replaceState(null, '', next);
+  ticketAddressKey = ticketAddressPart();  // after the write, so Back to the old address is seen as a change
 }
 function ticketAddressPart() {
   const full = typeof location === 'object' ? String(location.hash || '') : '', at = full.indexOf('?'), p = new URLSearchParams(at < 0 ? '' : full.slice(at + 1));
-  return (p.get('q') || '') + '|' + (p.get('who') || '') + '|' + (p.get('layout') === 'board' ? 'board' : '');
+  return (p.get('q') || '') + '|' + (p.get('who') || '') + '|' + (p.get('part') || '') + '|' + (p.get('layout') === 'board' ? 'board' : '');
 }
 function syncTicketAddress() {
   const key = ticketAddressPart();
@@ -42,6 +43,7 @@ function syncTicketAddress() {
   const full = String(location.hash || ''), at = full.indexOf('?'), p = new URLSearchParams(at < 0 ? '' : full.slice(at + 1));
   if (ticketSearch !== (p.get('q') || '')) { ticketSearch = p.get('q') || ''; searchFolds.clear(); }
   ticketPerson = p.get('who') || '';
+  ticketGroup = p.get('part') || '';
   if (p.get('layout') === 'board') ticketView = 'board';
   else if (at < 0 || !p.has('layout')) { try { ticketView = localStorage.getItem('orch.tickets.view') === 'board' ? 'board' : 'list'; } catch (_) { ticketView = 'list'; } }
 }
@@ -176,7 +178,7 @@ function ticketFilters() {
   const owners = [...new Set(tickets().map(t => String(t.owner || '')).filter(Boolean))].sort();
   const person = owners.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...owners.map(o => [o, name(o) || o])], ticketPerson, value => { ticketPerson = value; writeTicketAddress(); render(); }) : null;
   const all = tickets(), heads = all.filter(t => all.some(c => c.parent === t.id || (c.parent && c.parent === t.key))).sort((a, b) => String(a.title).localeCompare(String(b.title)));
-  const group = heads.length || ticketGroup ? ticketSelect('Part of', 'ticket-group', [['', 'Any ticket'], ...heads.map(t => [t.id, clean(t.title).slice(0, 40)])], ticketGroup, value => { ticketGroup = value; render(); }) : null;
+  const group = heads.length || ticketGroup ? ticketSelect('Part of', 'ticket-group', [['', 'Any ticket'], ...heads.map(t => [t.id, clean(t.title).slice(0, 40)])], ticketGroup, value => { ticketGroup = value; writeTicketAddress(); render(); }) : null;
   return [h('span', {className:'grow'}), group, person, h('label', {className:'search-field'}, input)];
 }
 function clearTicketFilters() {
