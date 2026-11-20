@@ -19,3 +19,12 @@ test('F3: a wrapped button is pushed in only after a leading icon, never on a ro
   assert.match(kit, /\.card-row:has\(>:first-child:not\(\.grow\)\)>\.btn\{margin-left:24px\}/);
   assert.doesNotMatch(kit, /\n\.card-row>\.btn\{margin-left:24px\}/);
 });
+
+// ORCH-902: the ticket page's 44px button height must not stretch the switch (Release, Human review needed).
+test('ORCH-902: the ticket page 44px minimum height leaves .switch at its 24px height', () => {
+  const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.css'), 'utf8');
+  const rule = ticket.match(/\.ticket-page :is\(([^)]*\)?[^)]*)\)\{min-height:44px\}/);
+  assert.ok(rule, 'the 44px rule exists');
+  assert.match(rule[1], /button:not\(\.switch\)/);
+  assert.match(kit, /\.switch\{[^}]*height:24px/);
+});
