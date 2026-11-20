@@ -226,6 +226,13 @@ HINTS = {
     "ticket artifacts": _on_ticket,
     "ticket title": _on_ticket,
     "ticket tidy": _on_ticket,
+    "ticket found": lambda d, a: (
+        "ask ONE question about the sources that could not be opened, then fill the ticket: "
+        f"orch ticket tidy {_tid(a)} ..."
+        if tickets.found_counts((d or {}).get("found"))[1]
+        else f"fill the ticket: orch ticket tidy {_tid(a)} ..."
+    ),
+    "ticket prepared": _on_ticket,
     "ticket plan": _on_ticket,
     "ticket attach": _on_ticket,
     "ticket wait": "keep working on other tickets: orch ticket list",
