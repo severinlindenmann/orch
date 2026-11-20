@@ -102,16 +102,17 @@ UI.state=o=>{o=o||{};const kind=o.kind||'empty';
  if(o.action){const a=el('button','btn '+(kind==='error'?'primary':'outline')+' sm',o.action.label);a.type='button';if(o.action.onClick)a.onclick=o.action.onClick;b.append(a)}
  return b};
 /* Launch (ORCH-1037): the short "starting" moment between pressing Start in a form and landing on what it made.
-   UI.launch({title, sub, steps:['Creating the ticket','Starting your helper','Opening it']}) -> {el, step(i), finish(title), fail()}.
-   step(i) marks the steps before i done and step i working; finish() marks all done and fades the box out. role=status, so a
+   UI.launch({title, sub, steps:['Creating the ticket','Starting your helper','Opening it']}) -> {el, step(i), warn(i, text), finish(title), fail()}.
+   step(i) marks the steps before i done and step i working; warn(i, text) marks step i as needing you, with new words; finish() marks all done and fades the box out. role=status, so a
    screen reader hears each step. Text only (textContent). Reduced motion: no spin, no fade (motion.css). */
 UI.launch=o=>{o=o||{};const box=el('div','launch');box.setAttribute('role','status');box.setAttribute('aria-live','polite');
  const mark=el('div','launch-mark');mark.setAttribute('aria-hidden','true');mark.append(el('span','launch-ring'),el('span','launch-core'));
  const title=el('h2','launch-title',o.title||'Starting');box.append(mark,title);if(o.sub)box.append(el('p','launch-sub meta',o.sub));
  const list=el('ol','launch-steps'),rows=(o.steps||[]).map(t=>{const li=el('li');li.dataset.state='todo';li.append(UI.statusIcon('todo'),el('span','',t));list.append(li);return li});
  if(rows.length)box.append(list);
- const mark_=(li,st)=>{if(li.dataset.state===st)return;li.dataset.state=st;li.firstChild.replaceWith(UI.statusIcon(st==='active'?'working':st))};
+ const mark_=(li,st)=>{if(li.dataset.state===st||li.dataset.state==='needs')return;li.dataset.state=st;li.firstChild.replaceWith(UI.statusIcon(st==='active'?'working':st))};
  const api={el:box,step(i){rows.forEach((li,n)=>mark_(li,n<i?'done':n===i?'active':'todo'))},
+  warn(i,t){const li=rows[i];if(!li)return;mark_(li,'needs');if(t)li.lastChild.textContent=t},
   finish(t){rows.forEach(li=>mark_(li,'done'));box.dataset.done='true';if(t)title.textContent=t;box.classList.add('launch-out')},
   fail(){box.remove()}};
  api.step(0);return api};

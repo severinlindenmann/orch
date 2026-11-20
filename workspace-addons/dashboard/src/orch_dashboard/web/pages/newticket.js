@@ -385,7 +385,11 @@ function ticketForm(t, {host = null} = {}) {
     let n = 1;
     launch.step(n);
     let started = false;
-    if (startAfter) { started = await startNow(true); await atLeast(1000); launch.step(++n); }
+    if (startAfter) {
+      started = await startNow(true);
+      if (!started) launch.warn(n, 'Helper not started. Your ticket is saved.');  // at once: the toast says why
+      await atLeast(1000); launch.step(++n);
+    }
     await atLeast(startAfter ? 1400 : 900);
     launch.finish(started ? 'Started' : 'Saved');  // a helper that did not start says so in its toast
     await pause(380);

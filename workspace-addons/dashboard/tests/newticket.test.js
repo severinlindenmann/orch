@@ -535,7 +535,7 @@ test('ORCH-185: when one ticket of the epic is not made, the window says which a
 // steps (UI.launch) before the address moves to the new ticket.
 function pageSetup({fail = false, startAfter = true} = {}) {
   const host = new Node('div'), calls = [], toasts = [], items = [], launches = [];
-  const launch = o => { const l = {o, el:new Node('div', 'launch'), steps:[], finished:'', failed:false}; l.step = i => l.steps.push(i); l.finish = t => { l.finished = t; }; l.fail = () => { l.failed = true; }; launches.push(l); return l; };
+  const launch = o => { const l = {o, el:new Node('div', 'launch'), steps:[], finished:'', failed:false}; l.step = i => l.steps.push(i); l.warn = (i, t) => { l.warned = [i, t]; }; l.finish = t => { l.finished = t; }; l.fail = () => { l.failed = true; }; launches.push(l); return l; };
   const c = {Blob, TextDecoder, Uint8Array, btoa, setTimeout, Event, serial:0, locks:new Set(), mounts:new Map(), nodeKey:() => '', clean:x => x,
     el:(...args) => new Node(...args), document:{body:new Node('body'), activeElement:null, querySelector:() => null}, render:() => {},
     sizeText:n => n + ' B', URL:{createObjectURL:() => 'blob:test', revokeObjectURL:() => {}},
@@ -607,6 +607,7 @@ test('ORCH-1037: a helper that does not start ends on "Saved" with the reason, s
   s.input.value = 'Plan it'; await s.input.fire('input');
   await s.form.fire('submit');
   assert.equal(s.launches[0].finished, 'Saved');
+  assert.equal(s.launches[0].warned.join('|'), '1|Helper not started. Your ticket is saved.');
   assert.ok(s.toasts.some(x => /did not start: No helper/.test(x[0]) && x[1] === 'error'));
   assert.equal(s.c.location.hash, '#ticket/new');
 });
