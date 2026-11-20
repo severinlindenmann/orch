@@ -33,8 +33,15 @@ module.exports = {
       localStorage.setItem(ws ? 'orch.live.layer.' + ws : 'orch.live.layer', JSON.stringify({ mode: 'bottom', last: 'bottom', back: 'bottom', panes: [id], cur: id }));
     }, tid);
     await reload();
-    const hist = page.locator('#live-dock [data-key="live-history"]').first();
-    await hist.waitFor({ timeout: 30000 }).catch(async () => { throw new Error('no History button on the ticket pane:\n' + (await page.locator('#live-dock').innerText().catch(() => '(no live dock)')).slice(0, 400)); });
+    // a roomy pane shows History in its header; a compact one (smaller than 1200 px, ORCH-463) keeps it in More
+    const tab = page.locator('#live-dock .live-pane :is([data-key="live-history"], [data-key="live-pane-more"])').first();
+    await tab.waitFor({ timeout: 30000 }).catch(async () => { throw new Error('no History button on the ticket pane:\n' + (await page.locator('#live-dock').innerText().catch(() => '(no live dock)')).slice(0, 400)); });
+    if (await tab.getAttribute('data-key') === 'live-pane-more') {
+      await tab.focus();
+      await page.keyboard.press('Enter');
+      await page.locator('[data-key="live-more-menu"] [data-key="live-history-item"]').waitFor({ timeout: 5000 });
+    }
+    const hist = page.locator('#live-dock :is([data-key="live-history"], [data-key="live-more-menu"] [data-key="live-history-item"])').first();
     // with the keyboard: a mouse press on a pane button replays the panel's slide-in, so the release misses the
     // button (orch issue 1431); Enter on the focused button is what a keyboard user does
     await hist.focus();
