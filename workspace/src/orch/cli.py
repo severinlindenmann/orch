@@ -434,7 +434,8 @@ class _Parser(argparse.ArgumentParser):
         m = re.search(r"invalid choice: '([^']*)'", message)
         if m:
             if self.prog == "orch ticket status":  # a status is a value, not a command
-                self.exit(2, f'"{m.group(1)}" is not a ticket status. Choose one of: {", ".join(tickets.STATUSES)}.\n')
+                names = ", ".join(tickets.STATUSES)
+                self.exit(2, f'"{m.group(1)}" is not a ticket status. Choose one of: {names}.\n')
             what = self.prog + " command" if self.prog != "orch" else "orch command"
             self.exit(2, f'"{m.group(1)}" is not an {what}. Run {self.prog} --help.\n')
         if self.prog in _EXAMPLES:
