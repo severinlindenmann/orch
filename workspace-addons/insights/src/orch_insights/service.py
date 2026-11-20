@@ -106,17 +106,19 @@ def start(root: Path, port: int | None = None) -> dict:
     from orch import pagesession
 
     cur = running(root)
+    prefer = None
     if cur and not pagesession.restart_watch_only(runfiles.read_json(_dir(root) / "server.json")):
         return cur
-    if cur:  # a helper started it (watch-only) and this start is the person's: start it again on its port
+    if cur:  # a helper started it (watch-only) and this start is the person's: start it again
         stop(root)
-        port = port or cur["port"]
+        prefer = cur["port"]  # its old port first, any free one if that is not free yet
     d = _dir(root)
     nonce = secrets.token_hex(16)
     ready = d / f"ready-{nonce[:12]}.json"
     from orch.procs import background_popen_kwargs, wait_port_free
 
-    first = port or _preferred_port() or DEFAULT_PORT  # sticky: `orch start` passes this service's last port
+    # sticky: `orch start` passes this service's last port; a watch-only restart tries the old one first
+    first = port or prefer or _preferred_port() or DEFAULT_PORT
     if not wait_port_free(first) and port:
         raise RuntimeError(f"Something else answers on port {port}; try again in a moment.")
 

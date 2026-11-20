@@ -283,7 +283,7 @@ def _no_agent(monkeypatch):
 
 def test_a_persons_start_restarts_a_dashboard_a_helper_started_on_its_port(ws, monkeypatch):
     """A dashboard started from a helper session is watch-only for its whole life (no sign-in). A helper's next
-    start leaves it; the person's start replaces it on the same port, so their link works (report r-1119-1255)."""
+    start leaves it; the person's start replaces it (its old port when free), so their link works (report r-1119-1255)."""
     _no_agent(monkeypatch)
     monkeypatch.setenv("ORCH_AGENT", "claude")
     cur = service.start(ws, port=_free_port())
@@ -292,7 +292,7 @@ def test_a_persons_start_restarts_a_dashboard_a_helper_started_on_its_port(ws, m
         assert service.start(ws) == cur  # a helper's start: unchanged (it would stay watch-only)
         monkeypatch.delenv("ORCH_AGENT")
         new = service.start(ws)
-        assert new["port"] == cur["port"] and new["pid"] != cur["pid"]
+        assert new["pid"] != cur["pid"]  # its old port when free, else another (parallel tests share ports)
         assert json.loads((_rundir(ws) / "server.json").read_text())["watch_only"] is False
         assert service.start(ws) == new  # a person's dashboard is never restarted by a start
     finally:
