@@ -143,6 +143,9 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("session.new", {"kind": "ticket"}),
         ("session.new", {"kind": "empty", "ticket": "t_abcdef"}),
         ("session.new", {}),
+        ("session.new", {"kind": "manager", "permissions": "root"}),
+        ("session.new", {"kind": "manager", "permissions": "--fresh"}),
+        ("session.new", {"kind": "terminal", "permissions": "auto"}),
         ("addon.start", {"name": "x"}),
         (
             "pull.merge",
@@ -319,6 +322,14 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
         ({"op": "session.new", "args": {"kind": "empty"}}, ["session", "new", "empty", *common]),
         ({"op": "session.new", "args": {"kind": "terminal"}}, ["session", "new", "terminal", *common]),
+        (
+            {"op": "session.new", "args": {"kind": "manager", "permissions": "full"}},
+            ["session", "new", "manager", "--permission-mode", "full", *common],
+        ),
+        (
+            {"op": "session.new", "args": {"kind": "chat", "permissions": "edits"}},
+            ["session", "new", "chat", "--permission-mode", "edits", *common],
+        ),
         (
             {
                 "op": "pull.merge",
@@ -1846,3 +1857,15 @@ def test_check_move_argv_and_refusals():
     for bad in ({"after": "--x"}, {"after": None}, {"check": "bad"}, {"extra": 1}):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("check.move", {"ticket": "t_abcdef", "check": "c2", "after": "c3", **bad})
+
+
+def test_a_signed_in_start_hands_the_session_start_a_person_grant(tmp_path):
+    """ORCH-818: only a signed-in page session hands `session.new` the one-time grant that lets the core raise a
+    session's permission mode; without a session there is no grant (the core then refuses a raise)."""
+    from orch_dashboard import actions
+
+    assert "session.new" in actions.SESSION_GRANT_OPS
+    root = tmp_path / "ws"
+    (root / ".orch").mkdir(parents=True)
+    env, fds = actions._person_env(root, "orch", "session.new", False)
+    assert fds == () and not any(k.startswith("ORCH_PERSON_GRANT") for k in env)
