@@ -438,6 +438,8 @@ def _drop_start_prompts_locked(root: Path, tid: str) -> None:
         _pending_write(root, tid, keep)
 
 
+START_TEXT_MAX = 40000  # the start prompt orch builds itself (a person's own text stays at 8000)
+
 PHONE_ID_RE = re.compile(r"ph_[A-Za-z0-9_-]{1,64}")
 
 
@@ -455,8 +457,11 @@ def _pending_add_locked(
     if kind not in PENDING_KINDS:
         raise Refused(f"Input kind must be one of: {', '.join(PENDING_KINDS)}.")
     text = (text or "").strip()
-    if not text or len(text) > 8000:
-        raise Refused("The text must be 1 to 8000 characters.")
+    # The start prompt is built by orch from the ticket (note, Done when, queued messages), each part already
+    # clipped; their sum may pass what a person may send (ORCH-1122), so it gets its own, larger limit.
+    limit = START_TEXT_MAX if via == "start" else 8000
+    if not text or len(text) > limit:
+        raise Refused(f"The text must be 1 to {limit} characters.")
     if pid is not None and not re.fullmatch(r"p_[a-z0-9]{6,32}", pid):
         raise Refused("An input id looks like p_ followed by 6 to 32 lowercase letters or digits.")
     items = _pending_read(root, tid)
