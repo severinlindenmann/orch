@@ -281,7 +281,7 @@
     return h + '</form>';
   }
   function termHTML(s) {
-    return '<div class="mw-term"><div class="mw-tbar"><span class="meta">Terminal · click and type · select text to copy it</span>' + btn('btn xs ghost', 'copyterm', 'Copy', { 'data-k': s.k }) + '</div><pre class="mw-screen" data-screen="' + esc(s.k) + '" tabindex="0" role="textbox" aria-multiline="true" aria-label="Terminal of ' + esc(s.k) + '. Type here, Enter sends the line.">' + esc(screenText(s)) + '</pre></div>';
+    return '<div class="mw-term"' + (st.typing ? ' data-typing="on"' : '') + '><div class="mw-tbar"><span class="meta">' + (st.typing ? 'Typing: your keys go to the helper · Shift+Tab stops' : 'Watching · select text to copy it') + '</span><span class="row">' + btn('switch', 'typing', '', { role: 'switch', 'aria-checked': String(!!st.typing), 'aria-label': 'Let me type into the screen of ' + s.k }) + '<span class="meta">Let me type</span>' + btn('btn xs ghost', 'copyterm', 'Copy', { 'data-k': s.k }) + '</span></div><pre class="mw-screen" data-screen="' + esc(s.k) + '" tabindex="0" role="textbox" aria-multiline="true" aria-label="Terminal of ' + esc(s.k) + '. Type here, Enter sends the line.">' + esc(screenText(s)) + '</pre></div>';
   }
   function histHTML(s) {
     return '<div class="mw-old"><h3>Earlier sessions</h3><ul>' + HIST.map(function (x, i) {
@@ -780,6 +780,7 @@
     else if (a === 'ov') { st.ov = { src: b.dataset.src, i: +b.dataset.i }; render('#mw-ovx'); }
     else if (a === 'ovnav') ovStep(+b.dataset.d);
     else if (a === 'ovclose') closeOv();
+    else if (a === 'typing') { st.typing = !st.typing; render('[data-act=typing]'); }  /* watching only by default (ORCH-744) */
     else if (a === 'copyterm') clip(screenText(by(k)), function () { b.textContent = 'Copied'; say('Terminal text copied.'); });
     else if (a === 'feat') openSheet(+b.dataset.n);
     else if (a === 'sheet') { if (st.sheet) { st.sheet = false; render('#mw-fbtn'); } else openSheet(0); }
@@ -837,12 +838,13 @@
     e.preventDefault(); attach(by(pn.dataset.k), fromFiles(fl)); render('.mw-comp[data-k="' + pn.dataset.k + '"] input');
   });
   document.addEventListener('paste', function (e) {
-    var scr = e.target.closest && e.target.closest('pre[data-screen]'); if (!scr) return;
+    var scr = e.target.closest && e.target.closest('pre[data-screen]'); if (!scr || !st.typing) return;
     e.preventDefault(); termKey(by(scr.dataset.screen), ((e.clipboardData && e.clipboardData.getData('text')) || '').replace(/\s+/g, ' '));
   });
   document.addEventListener('keydown', function (e) {
     var scr = e.target.closest && e.target.closest('pre[data-screen]');
-    if (scr && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'Enter' || e.key === 'Backspace' || e.key.length === 1)) { e.preventDefault(); termKey(by(scr.dataset.screen), e.key); return; }
+    if (scr && st.typing && e.key === 'Tab' && e.shiftKey) { e.preventDefault(); st.typing = false; render(); return; }
+    if (scr && st.typing && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'Enter' || e.key === 'Backspace' || e.key.length === 1)) { e.preventDefault(); termKey(by(scr.dataset.screen), e.key); return; }
     if (st.ov) {
       if (e.key === 'Tab') { var fs = $('mw-ov').querySelectorAll('button, a[href], iframe'), f0 = fs[0], f1 = fs[fs.length - 1]; if (e.shiftKey && document.activeElement === f0) { e.preventDefault(); f1.focus(); } else if (!e.shiftKey && document.activeElement === f1) { e.preventDefault(); f0.focus(); } return; }
       if (e.key === 'Escape') closeOv(); else if (e.key === 'ArrowLeft') ovStep(-1); else if (e.key === 'ArrowRight') ovStep(1);
