@@ -205,10 +205,14 @@ function offAddonName(hash) {
   const row = m && array(state?.settings?.addons).find(a => a && a.name === m[1]);
   return row && !row.active && !addons().some(a => a.name === m[1]) ? m[1] : null;
 }
+// The name a person sees for an add-on row: its menu label (Contacts), not its folder name (relay).
+function addonRowLabel(row) {
+  return String(row?.label || '').trim() || capitalise(row?.name || '');
+}
 function notFoundPage() {
   const off = offAddonName(location.hash);
   if (off) {
-    const label = capitalise(off);
+    const label = addonRowLabel(array(state?.settings?.addons).find(a => a && a.name === off));
     return fragment(heading(label + ' is turned off', 'Turn it on in Settings to use this page.'),
       h('div', {className:'state-frame', 'data-key':'addon-off'}, h('section', {className:'card pad stack'},
         h('p', {className:'muted'}, label + ' is turned off, so it has no page right now.'),
@@ -990,7 +994,7 @@ main.addEventListener('click', async event => {
       return result;
     };
     if (addon.active) await send();
-    else settingsConfirm('Turn on ' + capitalise(addon.name) + '?', addon.consent, 'preserve-lines', 'Turn on', send);
+    else settingsConfirm('Turn on ' + addonRowLabel(addon) + '?', addon.consent, 'preserve-lines', 'Turn on', send);
     return;
   }
   if (action === 'addon-remove') {
@@ -1004,7 +1008,7 @@ main.addEventListener('click', async event => {
       if (result.ok) location.hash = '#settings/addons';
       render();
     };
-    settingsConfirm('Remove ' + capitalise(addon.name) + '?', 'It is turned off and taken off this computer. Your tickets stay as they are. You can add it again any time.', '', 'Remove', send);
+    settingsConfirm('Remove ' + addonRowLabel(addon) + '?', 'It is turned off and taken off this computer. Your tickets stay as they are. You can add it again any time.', '', 'Remove', send);
     return;
   }
   if (action === 'agent') {
