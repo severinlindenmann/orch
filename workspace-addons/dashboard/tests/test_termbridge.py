@@ -666,3 +666,46 @@ def test_the_helpers_window_gets_its_own_size_back_when_typing_ends(helper, serv
     assert size_now() == "50x6"
     s.close()
     assert wait(lambda: size_now() == "80x24", timeout=8)
+
+
+def test_the_plain_terminal_has_its_own_typing_switch(tmp_path, monkeypatch):
+    """ORCH-261 (owner): the plain terminal is a shell on this computer; typing into it needs its own switch
+    (focus.terminal_typing, off by default), the helper's switch alone is not enough."""
+    SOCK[0] = "orch-" + secrets.token_hex(4)
+    monkeypatch.setattr(termbridge, "LINGER", 0.3)
+    sid = "t_plain0001"
+    tm("new-session", "-d", "-x", "80", "-y", "24", "-s", sid, "--", "sh", "-c", "echo plain-shell; cat -v")
+    sessions = {
+        "sessions": [
+            {"id": sid, "kind": "terminal", "open": True, "tmux": {"socket": SOCK[0], "session": sid}}
+        ]
+    }
+    orch = fake_orch(tmp_path, {"running": False}, sessions)
+    (tmp_path / ".orch" / "tickets").mkdir(parents=True)
+    srv = make_server(tmp_path, 0, orch_bin=orch)
+    srv.RequestHandlerClass = functools.partial(srv.RequestHandlerClass, session=Person())
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+    try:
+        typing_on(tmp_path)  # the helper's switch on, the plain terminal's not
+        s = Stream(port, tid=sid)
+        assert json.loads(s.next("hello")[1])["typing_allowed"] is False
+        s.next("screen")
+        assert termbridge.watching(sid).plain is True
+        code, body = post(port, "/api/term/input", {"ticket": sid, "data": "x"})
+        assert code == 403 and b"Typing into the plain terminal is off" in body
+        (tmp_path / ".orch" / "config.toml").write_text(
+            "[focus]\nsession_typing = false\nterminal_typing = true\n"
+        )
+        assert post(port, "/api/term/input", {"ticket": sid, "data": "shell-typed\r"}) == (200, b"{}")
+        assert s.until(b"shell-typed")
+        s.close()
+        s2 = Stream(port, tid=sid)  # a page that opens now hears that it may type
+        assert json.loads(s2.next("hello")[1])["typing_allowed"] is True
+        s2.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        for w in list(termbridge._WATCHES.values()):
+            w.close()
+        tm("kill-server")

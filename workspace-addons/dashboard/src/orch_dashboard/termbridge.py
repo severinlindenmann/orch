@@ -140,6 +140,7 @@ class Watch:
         self._asking = threading.Lock()  # one screen read written at a time
         self._owed: list[dict] = []  # screen reads waiting for their two answer blocks, oldest first
         self.typer: str | None = None  # the one page that types now (its stream's id), ORCH-883
+        self.plain = False  # the plain terminal's shell: typing into it has its own switch (ORCH-261)
         self.ids: set[str] = set()  # the ids of the streams open now: only one of them may claim the typing
         self.own: tuple[int, int] | None = None  # the helper's own size before a page resized it, ORCH-881
 
@@ -342,7 +343,7 @@ def join(root: Path, orch_bin: str | None, tid: str, page: str = "") -> Watch | 
     """Start watching the ticket's live session, or the plain terminal's shell (or join the watch that is on).
     The reason when there is none: 'none', 'oneshot', 'notmux' (as termsession.ref), 'busy' (too many pages)."""
     _reap()
-    r = termsession.ref(root, orch_bin, tid, plain=True)
+    r, shell = termsession.ref_kind(root, orch_bin, tid, plain=True)
     if isinstance(r, str):
         return r
     if not shutil.which("tmux"):
@@ -354,6 +355,7 @@ def join(root: Path, orch_bin: str | None, tid: str, page: str = "") -> Watch | 
         fresh = w is None or w.ended
         if fresh:
             w = Watch(*r)
+            w.plain = shell
             _WATCHES[r] = w
         w.pages += 1
         _PAGES[0] += 1

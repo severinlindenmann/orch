@@ -206,16 +206,23 @@ FILE_KEPT = "private, max-age=31536000, immutable"
 FILE_STAMP_MAX = 64
 
 
+TERMINAL_OFF = (
+    "Typing into the plain terminal is off. "
+    "Turn on 'Let me type into the plain terminal' in Settings \u2192 Add-ons, on the page of the add-on that shows it."
+)
 TYPING_OFF = (
     "Typing into the helper's screen is off. "
     "Turn on 'Let me type into the helper's screen' in Settings \u2192 Add-ons, on the page of the add-on that shows this screen."
 )
 
 
-def _typing_allowed(root) -> bool:
-    """The session_typing setting, a plain one (off unless the workspace turned it on)."""
+def _typing_allowed(root, plain: bool = False) -> bool:
+    """The session_typing setting, a plain one (off unless the workspace turned it on). plain: the plain terminal, a
+    shell on this computer, has its own switch, terminal_typing (off by default; owner, ORCH-261)."""
     from orch import config
 
+    if plain:
+        return bool(config.focus_terminal_typing(root))
     return bool(config.focus_session_typing(root))  # an unreadable config file counts as off (the default)
 
 
@@ -1221,7 +1228,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             # the setting only, as /api/term says it: a stream cannot carry the page secret, typing checks it
             write(
-                f"event: hello\ndata: {json.dumps({'typing_allowed': _typing_allowed(self.root), 'page': page})}\n\n".encode()
+                f"event: hello\ndata: {json.dumps({'typing_allowed': _typing_allowed(self.root, getattr(w, 'plain', False)), 'page': page})}\n\n".encode()
             )
             if isinstance(w, str):
                 write(f"event: end\ndata: {json.dumps({'state': w})}\n\n".encode())
@@ -1272,10 +1279,12 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, RecursionError, OSError):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
         off = path.endswith("/typing") and body.get("on") is False  # giving the typing back: always
-        if not off and not _typing_allowed(
-            self.root
-        ):  # the setting is checked here, not only hidden in the page
-            return self._send(403, TYPING_OFF.encode(), "text/plain; charset=utf-8")
+        # the setting is checked here, not only hidden in the page; the plain terminal has its own (ORCH-261)
+        shell = bool(getattr(termbridge.watching(body["ticket"]), "plain", False))
+        if not off and not _typing_allowed(self.root, shell):
+            return self._send(
+                403, (TERMINAL_OFF if shell else TYPING_OFF).encode(), "text/plain; charset=utf-8"
+            )
         if path.endswith("/input"):
             code, text = termbridge.type_text(body["ticket"], body["data"], body.get("page"))
         elif path.endswith("/typing"):
