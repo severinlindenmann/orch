@@ -248,18 +248,40 @@ HIDDEN = "[hidden]"
 def _mask_line(line: str, root: Path) -> str:
     """The line with the secret value replaced by [hidden]; the whole line (MASK) when the value cannot be told
     apart."""
-    from orch import secretscan
+    from orch import phone_view, secretscan
+
+    def clean(text: str) -> bool:
+        try:
+            return not secretscan.find(text, root)
+        except Exception:  # noqa: BLE001 - never a pass
+            return False
 
     out = line
     for _kind, rx in secretscan.PATTERNS:
         out = rx.sub(HIDDEN, out)
-    # key=value, key: value, --flag value: keep the name, hide what follows it
-    out = re.sub(r"(?i)([\w.-]*(?:[=:]\s*|\s+--?[\w-]+\s+))(\S+)", lambda m: m.group(1) + HIDDEN, out)
+    # The scan's own line rules first: they know where a value ends (a quoted value with spaces, a cookie
+    # header to the end of the line), so no part of it stays.
+    out = phone_view._scrub_text(out)
+    if clean(out):
+        return out
+    # key=value, key: value, --flag value: keep the name, hide what follows it (a quoted value as a whole)
+    out = re.sub(
+        r"(?i)([\w.-]*(?:[=:]\s*|\s+--?[\w-]+\s+))(\"[^\"]*\"?|'[^']*'?|\S+)",
+        lambda m: m.group(1) + HIDDEN,
+        out,
+    )
+    return out if clean(out) else MASK
+
+
+def _shown_is_safe(shown: str, root: Path) -> bool:
+    """The line as shown (dots in place of [hidden]) once more through the scan: only a password-like value
+    may hit (the dots after a label read as one); a token shape or a stored key value must not appear."""
+    from orch import secretscan
+
     try:
-        still = secretscan.find(out, root)
+        return all(h["kind"] == "secret-value" for h in secretscan.find(shown, root))
     except Exception:  # noqa: BLE001 - never a pass
-        still = [{"line": 1}]
-    return out if not still else MASK
+        return False
 
 
 def tail_masked(root: Path, path: Path, lines: int) -> list[str]:
@@ -302,8 +324,8 @@ def mask_lines(root: Path, got: list[str]) -> list[str]:
             return [MASK for _ in out]
     except Exception:  # noqa: BLE001 - never a pass
         return [MASK for _ in out]
-    out = [ln.replace(HIDDEN, MASK) if (i + 1) in hits else ln for i, ln in enumerate(out)]
-    return out
+    shown = [ln.replace(HIDDEN, MASK) if (i + 1) in hits else ln for i, ln in enumerate(out)]
+    return [ln if (i + 1) not in hits or _shown_is_safe(ln, root) else MASK for i, ln in enumerate(shown)]
 
 
 # ---------------------------------------------------------------- commands

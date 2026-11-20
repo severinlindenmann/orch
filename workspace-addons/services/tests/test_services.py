@@ -244,6 +244,25 @@ def test_log_masks_only_the_secret_part_of_a_line(cli, ws, stored_keys):
     ], out["lines"]
 
 
+def test_log_mask_never_shows_part_of_a_value(cli, ws, stored_keys):
+    """ORCH-933 review: a quoted value with spaces is hidden whole; dots put in for display never make a stored
+    key value appear (a literal [hidden] in the log next to its parts)."""
+    _add(cli)
+    stored_keys["ODD_KEY"] = "abc••••••def-81723"
+    log = ws / ".orch/addons/services/logs/web.log"
+    written = [
+        'tick 8 password="correct horse battery staple" done',
+        "tick 9 password=x1y2z3w4v5 abc[hidden]def-81723",
+    ]
+    log.write_text("\n".join(written) + "\n", encoding="utf-8")
+    code, out = jrun(cli, "log", "web")
+    assert code == 0
+    text = "\n".join(out["lines"])
+    for part in ("horse", "battery", "staple", "abc••••••def"):
+        assert part not in text, out["lines"]
+    assert out["lines"][0] == "tick 8 password=•••••• done", out["lines"]
+
+
 def test_view_is_a_valid_page(cli, ws):
     _add(cli, "web", "--start")
     _code, out, _ = cli("view", "--json")
