@@ -94,6 +94,8 @@ def _program(root: Path, rec: dict, strict: bool = True) -> str:
 def _spec(root: Path, rec: dict, wid: str | None = None, strict: bool = True) -> drivers.Spec:
     cwd = (root / rec.get("cwd", ".")).resolve()
     log = store.log_path(root, rec["id"]).absolute()
+    if store.on_external_volume(root) and store.on_external_volume(cwd):
+        cwd = Path.home()  # launchd jobs may not use a folder on an external disk
     # an adopted service runs from its own entry: its command words are only shown, never looked up
     argv = [_program(root, rec, strict and rec.get("adopted") is None), *rec["command"][1:]]
     for s in (str(cwd), str(log), *argv):
@@ -387,7 +389,7 @@ def cmd_add(args, root: Path) -> int:
     wid = _workspace_id(root)
     spec = _spec(root, rec, wid)
     store.save(root, rec)
-    store.logs_dir(root).mkdir(parents=True, exist_ok=True)
+    store.log_path(root, sid).parent.mkdir(parents=True, exist_ok=True)
     try:
         drv.install(spec)
     except Refused:
@@ -408,6 +410,12 @@ def cmd_add(args, root: Path) -> int:
         nxt = f"Added {rec['name']} and started it, but it did not stay running. Read its log: orch services log {sid}"
     else:
         nxt = f"Added {rec['name']}. Start it: orch services start {sid}"
+    if store.on_external_volume(root):
+        nxt += (
+            "\nThis workspace is on an external disk: its log is kept in your Library/Logs/orch folder and the "
+            "service runs from your home folder. A service that must reach another device on your network needs "
+            "Local Network access (System Settings > Privacy & Security > Local Network)."
+        )
     return _emit_kept(args, drv, {"service": row, "next": nxt}, nxt)
 
 
