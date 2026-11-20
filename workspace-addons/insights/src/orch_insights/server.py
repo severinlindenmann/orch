@@ -67,6 +67,19 @@ def read_counts(root, orch_bin=None):
     return read_json(root, orch_bin, ["record", "counts", "--days", "30", "--json"])
 
 
+def read_ticket_titles(root, orch_bin=None):
+    """Every ticket's id and title. From the core's ticket index (ORCH-521) in this interpreter when there is
+    one (ORCH-522: `orch ticket list --all --json` reads every ticket in full, 11 s at 10,000); else the CLI."""
+    if orch_bin in (None, actions.SELF):
+        try:
+            from orch import ticketindex
+
+            return [{"id": r.get("id"), "title": r.get("title")} for r in ticketindex.rows(Path(root))]
+        except Exception:  # noqa: BLE001, S110 - no index (an older core) or a broken one: the command answers
+            pass
+    return read_json(root, orch_bin, ["ticket", "list", "--all", "--json"])
+
+
 def read_json(root, orch_bin, argv):
     """One read-only CLI answer as JSON, or None when it fails. Runs with the same cleaned environment as a
     write (M6); when that environment can not be built the read fails (and so counts as unknown)."""
@@ -161,7 +174,7 @@ class Handler(BaseHTTPRequestHandler):
     def _settings_view(self):
         settings = self._read("record", "settings", "--json")
         counts = read_counts(self.root, self.orch_bin)
-        tickets = self._read("ticket", "list", "--all", "--json")
+        tickets = read_ticket_titles(self.root, self.orch_bin)
         return build_settings(settings, counts, tickets, self._can_act())
 
     def _fence(self, method, api, at_login=False):

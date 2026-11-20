@@ -844,6 +844,38 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps(load_links(self.root, self.orch_bin)).encode(), "application/json"
             )
+        m_ticket = re.fullmatch(r"/api/ticket/([A-Za-z0-9_-]{1,40})", path)
+        if (
+            m_ticket
+        ):  # one whole ticket (ORCH-522): a cut-short live row or a finished ticket not in the live state
+            from .data import read_ticket, ticket_id
+
+            ref = m_ticket.group(1)
+            held = getattr(self.server, "state_cache", None)
+            held = held.state if held is not None else None  # the stored copy as it is; never starts a build
+            rows = (held or {}).get("tickets") or []
+            live = next(
+                (
+                    x
+                    for x in rows
+                    if isinstance(x, dict)
+                    and (x.get("id") == ref or str(x.get("key") or "").upper() == ref.upper())
+                ),
+                None,
+            )
+            tid = live["id"] if live else ticket_id(self.root, self.orch_bin, ref)
+            t = read_ticket(self.root, self.orch_bin, tid, live) if tid else None
+            if t is None:
+                return self._send(404, b'{"error":"no such ticket"}', "application/json")
+            body = json.dumps({"ticket": t}).encode()
+            hdr = {"Cache-Control": "no-store"}
+            if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+                import gzip
+
+                body = gzip.compress(body, 3)
+                hdr["Content-Encoding"] = "gzip"
+                hdr["Vary"] = "Accept-Encoding"
+            return self._send(200, body, "application/json", hdr)
         if path == "/api/act/status":
             # did a click whose answer was lost go through? (ORCH-580) done / running / unknown, a few bytes
             act_id = parse_qs(query).get("id", [""])[0]
@@ -1573,6 +1605,19 @@ class _RemoteServer(ThreadingHTTPServer):
 
     remote = True
     request_queue_size = 128
+
+
+def warm(srv) -> None:
+    """Build the first state in a thread of its own before a page asks (ORCH-522: seconds with thousands of
+    tickets; the first page would wait for all of it). Only the started server (cli.main) calls it."""
+
+    def build():
+        try:
+            srv.state_cache.get()
+        except Exception:  # noqa: BLE001, S110 - the first page builds it again and says what went wrong
+            pass
+
+    threading.Thread(target=build, daemon=True, name="state-warm").start()
 
 
 def make_server(
