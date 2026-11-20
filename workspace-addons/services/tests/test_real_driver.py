@@ -92,7 +92,7 @@ def _cycle(real, ws, disabled):
     assert _wait(lambda: not _alive(pid))
     code, out = real("remove", "sleeper")
     assert code == 0, out
-    assert log.is_file()
+    assert not log.exists()  # the log goes with the service (ORCH-847)
 
 
 @pytest.mark.skipif(
