@@ -50,7 +50,7 @@ about two full runs at once, pull requests waited up to two hours and the queue 
 | clock (suites at 22:30 and 23:59:40 UTC) | | required, always | runs unless proven | runs | required |
 | contracts, publish, relay | required | required (contracts always) | runs unless proven | | required |
 | mobile | required | required | runs unless proven | runs, with phone UI tests | required |
-| brand (words, tokens, CI time limits) | in light | required, always | runs unless proven | runs | required |
+| brand (words, tokens, CI time limits, Windows-safe paths: ORCH-872) | in light | required, always | runs unless proven | runs | required |
 | full e2e (`e2e` workflow, 03:17 UTC) | | | | runs | |
 
 On a pull request and a release, a check runs only when the change touches files it reads (paths filter in
