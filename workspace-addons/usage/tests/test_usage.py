@@ -288,3 +288,10 @@ def test_end_shows_local_time_with_zone_and_the_history_line_has_the_date(cli, f
     assert store.history(ws)[0]["what"] == f"rule ends {local}"
     _, text, _ = cli("history")
     assert f"rule ends {local}" in text
+
+
+def test_a_switcher_that_fails_is_not_called_missing(cli, fake_switcher, ws):
+    fake_switcher.answer("not json")  # installed, but its answer cannot be read
+    code, d = jrun(cli, "list")
+    assert code == 0 and d["switcher"] is True
+    assert d["warnings"] and "not installed" not in d["warnings"][0]

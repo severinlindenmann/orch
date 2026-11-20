@@ -449,7 +449,12 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     except cswap.ReaderError as e:
         found, error = None, str(e)
     if found is None:
-        return {"at": _iso(at), "switcher": False, "did": "nothing", "note": error or "no account switcher"}
+        return {
+            "at": _iso(at),
+            "switcher": cswap.command() is not None,  # installed but not answering is not "missing"
+            "did": "nothing",
+            "note": error or "no account switcher",
+        }
 
     tz = when.zone(root)
     with store.change(root) as (accounts, rows):
