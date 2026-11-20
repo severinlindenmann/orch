@@ -419,10 +419,11 @@ def _launching(drv, spec) -> bool:
 def _why_stopped(root: Path, drv, spec, since: float) -> str:
     """After a start that did not stay running: the last line the job wrote since then (secrets hidden), and the
     folder hint when macOS refused it ("getcwd: Operation not permitted"). Empty when the log says nothing new."""
+    log = store.read_log_path(root, spec.sid, spec.workspace_id)  # a job loaded before the move: the old log
     try:
-        if spec.log.stat().st_mtime < since - 1:
+        if log.stat().st_mtime < since - 1:
             return ""
-        lines = [ln for ln in tail_masked(root, spec.log, 20) if ln.strip()]
+        lines = [ln for ln in tail_masked(root, log, 20) if ln.strip()]
     except (OSError, Refused):
         return ""
     if not lines:
@@ -442,10 +443,10 @@ def _why_stopped(root: Path, drv, spec, since: float) -> str:
     return out
 
 
-def _no_log_why(drv, spec, since: float) -> str:
+def _no_log_why(root: Path, drv, spec, since: float) -> str:
     """launchd ended the job with 78 before it ran and wrote no log: it could not open the log or the folder."""
     try:
-        written = spec.log.stat().st_mtime >= since - 1
+        written = store.read_log_path(root, spec.sid, spec.workspace_id).stat().st_mtime >= since - 1
     except OSError:
         written = False
     last = getattr(drv, "last_exit", None)
@@ -521,7 +522,7 @@ def cmd_add(args, root: Path) -> int:
     elif args.start:
         nxt = (
             f"Added {rec['name']} and started it, but it did not stay running."
-            f"{_why_stopped(root, drv, spec, started) or _no_log_why(drv, spec, started)}"
+            f"{_why_stopped(root, drv, spec, started) or _no_log_why(root, drv, spec, started)}"
             f" Read its log: orch services log {sid}"
         )
     else:
@@ -589,7 +590,7 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
     elif verb != "stop" and row["state"] != "running":
         nxt = (
             f"{rec['name']} did not stay running."
-            f"{_why_stopped(root, drv, spec, started) or _no_log_why(drv, spec, started)}"
+            f"{_why_stopped(root, drv, spec, started) or _no_log_why(root, drv, spec, started)}"
             f" Read its log: orch services log {sid}"
         )
     return _emit(args, {"service": row, "next": nxt}, nxt)

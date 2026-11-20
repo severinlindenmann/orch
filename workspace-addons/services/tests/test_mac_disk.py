@@ -144,6 +144,7 @@ def _launchd(monkeypatch, answers):
         return subprocess.CompletedProcess(args, out[0], out[1], "")
 
     monkeypatch.setattr(launchd.Launchd, "_run", run)
+    monkeypatch.setattr(launchd.os, "getuid", lambda: 501, raising=False)  # Windows has no getuid
     return launchd.Launchd(), calls
 
 
@@ -184,3 +185,16 @@ def test_launchd_start_rewrites_the_plist_when_not_loaded(monkeypatch, tmp_path)
     assert data["StandardOutPath"] == str(new.log) and data["WorkingDirectory"] == str(new.cwd)
     assert new.cwd.is_dir()
     assert any(c[0] == "bootstrap" for c in calls)
+
+
+def test_a_failed_start_reads_the_old_log_a_loaded_job_still_writes(cli, fake, ws, mac, clock):
+    from orch_services import store
+
+    assert _add(cli)[0] == 0
+    old = store.logs_dir(ws) / "web.log"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_text("Error: port 8000 is taken\n", encoding="utf-8")
+    fake.start_dies = True
+    fake.last_exit = lambda spec: 78
+    code, out = jrun(cli, "start", "web")
+    assert code == 0 and "port 8000 is taken" in out["next"] and "never ran" not in out["next"]
