@@ -1243,9 +1243,12 @@ function paintAddon(id) {
       const row = h('tr', {'data-key':'repeat-saving', role:'status'}, pendingCells((own || first).children.length, pendingRepeat).map(text => h('td', {}, text)));
       if (own) own.replaceWith(row); else body.prepend(row);
     } else if (!pendingRepeat.removing) {
-      const line = h('p', {className:'status-line', 'data-key':'repeat-saving', role:'status'}, pendingCells(1, pendingRepeat)[0]);
       const empty = blocks.querySelector('.blk-empty');
-      if (empty) empty.replaceWith(line); else blocks.prepend(line);
+      if (empty) {   // drawn as the list's own row: the name, the plan below it
+        const [head, plan] = pendingCells(2, pendingRepeat);
+        empty.replaceWith(h('ul', {className:'blk-list'}, h('li', {'data-key':'repeat-saving', role:'status'},
+          h('span', {className:'li-row'}, h('span', {className:'li-main'}, h('span', {className:'li-title'}, head), plan ? h('small', {className:'li-sub'}, plan) : null)))));
+      } else blocks.prepend(h('p', {className:'status-line', 'data-key':'repeat-saving', role:'status'}, pendingCells(1, pendingRepeat)[0]));
     }
   }
   reconcile(host, template);

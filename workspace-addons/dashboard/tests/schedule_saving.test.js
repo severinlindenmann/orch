@@ -123,6 +123,7 @@ test('ORCH-1006: the stored row stays until a reload asked after the save has th
 test('ORCH-1006: the first repeat takes the place of the No schedules yet card, never above it', () => {
   const body = src.slice(src.indexOf('function paintAddon'), src.indexOf('const addonAgain'));
   assert.match(body, /pendingRepeat\.addon === id/, 'only on the add-on that saved it');
-  assert.match(body, /const empty = blocks\.querySelector\('\.blk-empty'\);\s*if \(empty\) empty\.replaceWith\(line\); else blocks\.prepend\(line\);/);
+  assert.match(body, /const empty = blocks\.querySelector\('\.blk-empty'\);\s*if \(empty\) \{/);
+  assert.match(body, /empty\.replaceWith\(h\('ul', \{className:'blk-list'\}/, 'the empty card gives way to a list row');
   assert.match(body, /if \(pendingRepeat\.removing && pendingRepeat\.savedAt\) own\?\.remove\(\);/, 'a removed repeat leaves the list at once');
 });
