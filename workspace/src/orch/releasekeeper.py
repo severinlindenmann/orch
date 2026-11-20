@@ -369,6 +369,7 @@ class World:
         self.known_table = dict(known or {})
         self._bot_checked = False
         self.gh = shutil.which("gh") or "gh"
+        self.secret_hit: dict | None = None  # the line the release text's secret check stopped at
 
     # ---- processes (gh and git with the bot's login when github.release_env is set)
     def _run(self, argv, cwd=None, timeout=120) -> subprocess.CompletedProcess:
@@ -983,19 +984,27 @@ class World:
         return self.orch(["ask", *args, "--by", BY])
 
     def secret_free(self, text: str) -> bool:
-        from orch import secretscan
-
-        return not secretscan.find(text, self.root)
+        return not secret_lines(text, self.root)
 
     def cut(self, n: int, sha: str, body: str) -> dict | None:
         """Branch + worktree + merge main (ours) + push + pull request. Returns {"number", "url", "wt"}."""
         br = f"release/part{n}-{now().astimezone().strftime('%m%d')}"
         wt = (self.cfg.worktrees or Path(".")) / f"release-{n}"
 
+        made: dict[str, bool] = {}  # what this cut made, so a refused cut removes only that (ORCH-1000)
+
         def go():
             self.bot_ok()
             if wt.exists():
                 raise Refused(f"{wt} exists already: look at it, remove it by its path")
+            try:
+                return attempt()
+            except (Refused, subprocess.TimeoutExpired, OSError):
+                self._undo_cut(wt, br, made)
+                raise
+
+        def attempt():
+            self.secret_hit = None
             wt.parent.mkdir(parents=True, exist_ok=True)
             for argv in (
                 ["-C", str(self.cfg.clone), "worktree", "add", "-q", str(wt), "-b", br, sha],
@@ -1013,15 +1022,24 @@ class World:
                 ],
             ):
                 r = self._run(["git", *argv])
+                if argv[2] == "worktree" and r.returncode == 0:
+                    made["wt"] = made["branch"] = True
                 if r.returncode != 0:
                     raise Refused(f"git {argv[2]}: {(r.stderr or r.stdout).strip()[:200]}")
             if self._run(["git", "-C", str(wt), "diff", "--quiet", sha, "HEAD"]).returncode != 0:
                 raise Refused("release tree differs from develop: stop")
-            if not self.secret_free(body):
-                raise Refused("the release text looks like it holds a secret: stop")
+            hits = secret_lines(body, self.root)
+            if hits:
+                self.secret_hit = hits[0]
+                more = f" (and {len(hits) - 1} more)" if len(hits) > 1 else ""
+                raise Refused(
+                    f"line {hits[0]['line']} of the release text looks like it holds {hits[0]['words']}{more}: "
+                    f"{hits[0]['shown']}"
+                )
             r = self._run(["git", "-C", str(wt), "push", "-q", "-u", "origin", br], timeout=300)
             if r.returncode != 0:
                 raise Refused(f"push: {(r.stderr or r.stdout).strip()[:200]}")
+            made["pushed"] = True
             r = self._run(
                 [
                     self.gh,
@@ -1054,6 +1072,18 @@ class World:
             }
         return got
 
+    def _undo_cut(self, wt: Path, br: str, made: dict) -> None:
+        """A refused cut removes what it made itself (its worktree, its local branch, the branch it pushed),
+        so the next pass does not stop at "exists already" and shows the real cause (ORCH-1000)."""
+        for what, args in (
+            ("pushed", ["push", "-q", "origin", "--delete", br]),
+            ("wt", ["worktree", "remove", "--force", str(wt)]),
+            ("branch", ["branch", "-q", "-D", br]),
+        ):
+            if made.get(what):
+                with contextlib.suppress(subprocess.TimeoutExpired, OSError, Refused):
+                    self._git(*args)
+
     def close_release(self, rel: dict) -> None:
         def go():
             self.bot_ok()
@@ -1079,6 +1109,20 @@ class World:
     def remove_wt(self, wt: str | None) -> None:
         if wt and (self.sim is not None or Path(wt).exists()):
             self.act(f"rmwt:{wt}", lambda: self._git("worktree", "remove", "--force", wt))
+
+
+def secret_lines(text: str, root: Path | None) -> list[dict]:
+    """Every line of `text` the secret check stops at: {line, kind, words, shown}. `shown` is the line with the
+    value hidden, so a person can find the title it came from; a stored key's line shows no text at all."""
+    from orch import phone_view, secretscan
+
+    rows = text.split("\n")
+    out = []
+    for f in secretscan.find(text, root):
+        raw = rows[f["line"] - 1] if 0 < f["line"] <= len(rows) else ""
+        shown = "(not shown)" if f["kind"] == "stored-key" else phone_view.redact(raw).strip()[:200]
+        out.append({**f, "words": secretscan.WORDS.get(f["kind"], "a secret"), "shown": shown})
+    return out
 
 
 def is_linux_x86_64(head: bytes) -> bool:
@@ -1560,7 +1604,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
             ]
 
     if rel and rel.get("phase") == "cut":
-        return out + cut_now(w, st, h)
+        return out + cut_now(w, st, h, role)
 
     if rel:
         return out
@@ -1597,7 +1641,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         rel["phase"] = "cut"
         st["release"] = rel
         out.append(f"release {n}: the nightly runs on {sha[:8]} are green")
-        return out + cut_now(w, st, h)
+        return out + cut_now(w, st, h, role)
     for wf, extra in w.cfg.workflows:
         w.dispatch(wf, extra)
     st["release"] = rel
@@ -1615,18 +1659,40 @@ def tend_releases(w: World) -> dict:
         return {"refused": str(e)}
 
 
-def cut_now(w: World, st: dict, h: dict) -> list[str]:
+def cut_now(w: World, st: dict, h: dict, role: str | None = None) -> list[str]:
     rel = st["release"]
     signal = " and ".join(_wf_name(wf) for wf, _ in w.cfg.workflows)
     body = release_body(rel["n"], rel["sha"], rel.get("unreleased") or [], w.tickets(), w.cfg.repo, signal)
+    w.secret_hit = None
     try:
         got = w.cut(rel["n"], rel["sha"], body)
     except Refused as e:
-        return [f"release {rel['n']}: cut failed: {e}"]
+        out = [f"release {rel['n']}: cut failed: {e}"]
+        hit = w.secret_hit
+        if hit and role and rel.get("secret_card") != hit["shown"]:
+            out.append(secret_card(w, rel, role, hit))
+        return out
     if not got:
         return [f"release {rel['n']}: cut failed (see the log)"]
     rel.update(phase="gate", pr=got["number"], url=got["url"], wt=got["wt"], main_before=h["main"])
     return [f"release {rel['n']}: cut, pull request {got['url']}; its checks next", *start_walks(w, rel)]
+
+
+def secret_card(w: World, rel: dict, role: str, hit: dict) -> str:
+    """One card per release and line: which line of the release text the secret check stopped at (masked).
+    The keeper tries again every pass; the card only says what to change."""
+    q = (
+        f"Release {rel['n']} is not cut: line {hit['line']} of its release text looks like it holds "
+        f'{hit["words"]}: "{hit["shown"]}". The line comes from a ticket or pull request title: change '
+        "that title, and the next pass cuts the release by itself."
+    )
+    args = [role, q, "--option", "I changed the title", "--option", "Leave it for now"]
+    r = w.ask([*args, "--recommend", "I changed the title"]) if not (w.dry or w.sim is not None) else None
+    w.did.append(f"card:release {rel['n']} secret line {hit['line']}")
+    if r is not None and r.returncode != 0:
+        return f"release {rel['n']}: the card was refused: {(r.stderr or r.stdout).strip()[:200]}"
+    rel["secret_card"] = hit["shown"]
+    return f"release {rel['n']}: card on the role ticket names line {hit['line']} of the release text"
 
 
 def installed(w: World, st: dict, role: str, rel: dict, h: dict) -> list[str]:

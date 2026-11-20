@@ -1368,3 +1368,113 @@ def test_walks_start_at_the_cut_with_the_commit_in_the_note(tmp_path, monkeypatc
     assert out["state"]["release"]["phase"] == "gate" and len(out["state"]["release"]["walks"]) == 3
     assert [t for t, _ in notes] == [f"Release 31: {k} walk" for k in ("install", "services", "clickthrough")]
     assert f"--commit {DEV[:12]}" in notes[0][1] and "Use the skill release-walk." in notes[0][1]
+
+
+# ---- a refused cut: the line it stopped at, one card, nothing left behind (ORCH-1000)
+
+
+def _git(*args, cwd=None):
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
+@pytest.fixture
+def real_clone(tmp_path, monkeypatch):
+    for k, v in {
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.invalid",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.invalid",
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }.items():
+        monkeypatch.setenv(k, v)
+    origin, clone = tmp_path / "origin.git", tmp_path / "clone"
+    _git("init", "-q", "--bare", "-b", "main", str(origin))
+    _git("clone", "-q", str(origin), str(clone))
+    (clone / "a.txt").write_text("a\n")
+    _git("add", "a.txt", cwd=clone)
+    _git("commit", "-q", "-m", "first", cwd=clone)
+    _git("push", "-q", "origin", "HEAD:main", cwd=clone)
+    (clone / "a.txt").write_text("b\n")
+    _git("commit", "-q", "-am", "work", cwd=clone)
+    _git("push", "-q", "origin", "HEAD:develop", cwd=clone)
+    _git("fetch", "-q", "origin", cwd=clone)
+    sha = _git("rev-parse", "origin/develop", cwd=clone)
+    c = cfg(tmp_path, clone=str(clone), worktrees=str(tmp_path / "wts"), repo="o/r")
+    w = rk.World(None, c)
+    monkeypatch.setattr(rk.World, "bot_ok", lambda self: None)
+    return w, clone, sha, tmp_path / "wts" / "release-35"
+
+
+def test_a_cut_stopped_by_the_secret_check_names_the_line_masked_and_leaves_nothing(real_clone):
+    w, clone, sha, wt = real_clone
+    body = (
+        "Release 35\n\nWhat goes to main:\n- ORCH-447 a test count before pass: is no password label (#1481)"
+    )
+    with pytest.raises(Refused) as e:
+        w.cut(35, sha, body)
+    msg = str(e.value)
+    assert msg.startswith("line 4 of the release text looks like it holds a password or secret value: ")
+    assert "ORCH-447" in msg and "is no password" not in msg  # the value is hidden, the ticket shows
+    assert w.secret_hit["line"] == 4
+    assert not wt.exists()
+    assert _git("branch", "--list", "release/*", cwd=clone) == ""
+    assert "release/" not in _git("ls-remote", "--heads", "origin", cwd=clone)
+    with pytest.raises(Refused) as again:  # the next pass shows the same real cause, not "exists already"
+        w.cut(35, sha, body)
+    assert "exists already" not in str(again.value) and "line 4" in str(again.value)
+
+
+def test_a_cut_refused_after_its_push_removes_the_pushed_branch_too(real_clone, monkeypatch):
+    w, clone, sha, wt = real_clone
+    real_run = rk.World._run
+
+    def fake(self, argv, cwd=None, timeout=120):
+        if argv[:3] == [self.gh, "pr", "create"]:
+            return subprocess.CompletedProcess(argv, 1, "", "GraphQL: no")
+        return real_run(self, argv, cwd=cwd, timeout=timeout)
+
+    monkeypatch.setattr(rk.World, "_run", fake)
+    with pytest.raises(Refused, match="pr create"):
+        w.cut(35, sha, "Release 35\n- plain work (#1)")
+    assert not wt.exists()
+    assert _git("branch", "--list", "release/*", cwd=clone) == ""
+    assert "release/" not in _git("ls-remote", "--heads", "origin", cwd=clone)
+
+
+def test_a_leftover_folder_is_not_removed_by_the_cut(real_clone):
+    w, clone, sha, wt = real_clone
+    wt.mkdir(parents=True)
+    (wt / "keep.txt").write_text("someone's\n")
+    with pytest.raises(Refused, match="exists already"):
+        w.cut(35, sha, "Release 35")
+    assert (wt / "keep.txt").exists()
+
+
+def test_a_secret_stop_puts_one_card_per_line_on_the_role_ticket(tmp_path, monkeypatch):
+    w = rk.World(None, cfg(tmp_path))
+    asked = []
+    hit = {
+        "line": 4,
+        "kind": "secret-value",
+        "words": "a password or secret value",
+        "shown": "- ORCH-447 x [hidden]",
+    }
+
+    def cut(self, n, sha, body):
+        self.secret_hit = dict(hit)
+        raise Refused("line 4 of the release text looks like it holds a password or secret value: x")
+
+    monkeypatch.setattr(rk.World, "cut", cut)
+    monkeypatch.setattr(rk.World, "tickets", lambda self: [])
+    monkeypatch.setattr(
+        rk.World, "ask", lambda self, args: asked.append(args) or subprocess.CompletedProcess(args, 0, "", "")
+    )
+    st = {"release": {"n": 35, "sha": DEV, "unreleased": [], "phase": "cut"}}
+    first = rk.cut_now(w, st, {"main": MAIN}, "ORCH-79")
+    again = rk.cut_now(w, st, {"main": MAIN}, "ORCH-79")
+    assert len(asked) == 1 and asked[0][0] == "ORCH-79"
+    assert "line 4" in asked[0][1] and "- ORCH-447 x [hidden]" in asked[0][1]
+    assert "card on the role ticket" in first[-1] and len(again) == 1
+    st["release"]["secret_card"] = None
+    rk.cut_now(w, st, {"main": MAIN}, None)  # no role (a dry look): no card
+    assert len(asked) == 1
