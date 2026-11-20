@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import share, spread, store, switching
+from . import share, spread, store, switching, when
 from .store import PERIOD_WORDS
 
 HISTORY_DAYS = 30
@@ -117,9 +117,11 @@ def switch_flapping(root: Path, at: datetime | None = None) -> dict | None:
 def build(data: dict, root: Path) -> dict:
     """The page model from `cli.gather()` (accounts with use) plus switching, the warning and the history."""
     memory = switching._read(switching.memory_path(root))
+    tz, now = when.zone(root), datetime.now(UTC)
     accounts = []
     for row in data["accounts"]:
         rule = row["rule"]
+        reset = when.next_reset(row, now, tz)
         accounts.append(
             {
                 "id": row["id"],
@@ -133,6 +135,9 @@ def build(data: dict, root: Path) -> dict:
                 "periods": list(store.allowed_periods(row)),
                 "unit": store.default_unit(row),
                 "ends": rule.get("ends"),
+                # the workspace's wall clock ('YYYY-MM-DD' = to the end of that day); the page writes it with UI.stamp
+                "ends_local": when.local(rule["ends"], tz) if rule.get("ends") else None,
+                "next_reset_local": when.local(reset, tz) if reset else None,
                 "full_until": _full_until(row),
                 "falls_back": bool(row.get("prev")),
                 "fetched_at": row.get("fetched_at"),
@@ -140,16 +145,18 @@ def build(data: dict, root: Path) -> dict:
         )
     subs = [a for a in accounts if a["type"] == "subscription"]
     on_subs = [a for a in subs if a["on"]]
+    all_at_limit = bool(memory.get("all_at_limit")) and len(on_subs) > 0
     return {
         "schema": "orch.usage-page/1",
         "at": store.now(),
         "switcher": bool(data["switcher"]),
         "switching": switching.switching_on(root),
         # the loop's last look said no account is good: helpers wait soon
-        "all_at_limit": bool(memory.get("all_at_limit")) and len(on_subs) > 0,
+        "all_at_limit": all_at_limit,
         "one_account": len(subs) <= 1,
         "flapping": switch_flapping(root),
-        "warnings": list(data["warnings"]),
+        # the page draws its own banner for "every account is at its limit": no second box with the same sentence
+        "warnings": [w for w in data["warnings"] if not (all_at_limit and w == switching.ALL_AT_LIMIT_ALERT)],
         "accounts": accounts,
         "spread": spread.build(root, accounts),
         "history": history_rows(root),

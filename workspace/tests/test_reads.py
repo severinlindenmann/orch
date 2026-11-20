@@ -40,12 +40,36 @@ def test_same_answer_as_the_command(three, run, argv):
     assert reads.answer(root, argv) == json.loads(out)
 
 
+_AGES = {"seconds", "idle_seconds", "age_seconds"}
+
+
+def _split_ages(value, ages, path=""):
+    """A copy of value without the "how many seconds ago" counters, which are collected into ages by path."""
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            if key in _AGES and isinstance(item, (int, float)):
+                ages[f"{path}/{key}"] = item
+            else:
+                out[key] = _split_ages(item, ages, f"{path}/{key}")
+        return out
+    if isinstance(value, list):
+        return [_split_ages(item, ages, f"{path}/{i}") for i, item in enumerate(value)]
+    return value
+
+
 def test_run_status_same_answer_for_one_and_many(three, run):
+    # The two reads happen a moment apart: a second boundary between them moves the age counters by one
+    # (release 36 went red on last_activity.seconds 0 vs 1), so those may differ by a little.
     root, ids = three
     for argv in (["run", "status", ids[0], "--json"], ["run", "status", *ids, "--json"]):
         code, out, _ = run(*argv)
         assert code == 0
-        assert reads.answer(root, argv) == json.loads(out)
+        got_ages, want_ages = {}, {}
+        assert _split_ages(reads.answer(root, argv), got_ages) == _split_ages(json.loads(out), want_ages)
+        assert got_ages.keys() == want_ages.keys()
+        for key, want in want_ages.items():
+            assert abs(got_ages[key] - want) <= 5, key
 
 
 def test_ticket_show_same_answer(three, run):

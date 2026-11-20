@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from . import share as share_mod
-from . import store, switching
+from . import store, switching, when
 from .readers import credit_reader, cswap
 from .store import PERIOD_WORDS, Refused
 
@@ -337,6 +337,16 @@ def prepare_text(p: dict) -> str:
     return f"Preparing tickets on Save: {p['used']} of {p['limit']} in the last 24 hours"
 
 
+def _now() -> datetime:
+    """The clock (a test sets a fixed one)."""
+    return datetime.now(UTC)
+
+
+def _ender(root: Path):
+    tz = when.zone(root)
+    return lambda ends: when.words(ends, tz)
+
+
 def gather(root: Path) -> dict:
     """Sync what the readers see, let ended rules fall back, and return accounts with their use."""
     warnings: list[str] = []
@@ -347,13 +357,13 @@ def gather(root: Path) -> dict:
         warnings.append(str(e))
     if found is None and not warnings:
         warnings.append(NO_SWITCHER)
+    at = _now()
     with store.change(root) as (accounts, rows):
-        store.expire(accounts, rows)
+        store.expire(accounts, rows, at, say=_ender(root))
         if found:
             store.sync_found(accounts, rows, found, provider="anthropic", reader="cswap")
     d = store.load(root)
     by_key = {f.key: f for f in (found or [])}
-    at = datetime.now(UTC)
     out = []
     for a in d["accounts"]:
         row = {k: v for k, v in a.items() if k != "source"}
@@ -398,7 +408,7 @@ def _local(at: str) -> str:
     return store.local_text(at)
 
 
-def _rule_text(rule: dict) -> str:
+def _rule_text(rule: dict, tz=None) -> str:
     parts = []
     for lim in rule["limits"]:
         p = PERIOD_WORDS[lim["period"]]
@@ -411,7 +421,7 @@ def _rule_text(rule: dict) -> str:
         )
     text = ", ".join(parts) or "no limit"
     if rule.get("ends"):
-        text += f" (ends {_local(rule['ends'])})"
+        text += f" (ends {when.words(rule['ends'], tz)})"
     return text
 
 
@@ -462,7 +472,7 @@ def run(args) -> int:
             state = "on" if r["on"] else "off"
             if r.get("active"):
                 state += ", in use"
-            lines.append(f"{r['order']}. {r['label']} ({state}): {_rule_text(r['rule'])}")
+            lines.append(f"{r['order']}. {r['label']} ({state}): {_rule_text(r['rule'], when.zone(root))}")
             use = _use_text(r)
             if use:
                 lines.append(f"   {use}")
@@ -514,13 +524,21 @@ def run(args) -> int:
         return _share_cmd(args, root)
 
     who = _actor(args.by)
-    end = parse_time(args.end) if getattr(args, "end", None) else None
+    tz, at = when.zone(root), _now()
+    end_words = getattr(args, "end", None) or getattr(args, "when", None)
+    reset, wants_reset = None, when.is_reset(end_words)
     try:
-        store.find(store.load(root)["accounts"], args.account)
+        known = bool(store.find(store.load(root)["accounts"], args.account))
     except Refused:
-        gather(root)  # a fresh workspace: let the readers find the accounts first
+        known = False
+    if not known or wants_reset:
+        # a fresh workspace, or an end at the next reset: let the readers find the accounts and their resets first
+        data = gather(root)
+        if wants_reset:
+            reset = when.next_reset(store.find(data["accounts"], args.account), at, tz)
+    end = when.parse_end(args.end, at, tz, reset, args.account) if getattr(args, "end", None) else None
     with store.change(root) as (accounts, rows):
-        store.expire(accounts, rows)
+        store.expire(accounts, rows, at, say=_ender(root))
         a = store.find(accounts, args.account)
         if cmd == "limit":
             value, unit = parse_value(args.value)
@@ -541,8 +559,12 @@ def run(args) -> int:
         elif cmd in ("on", "off"):
             store.set_on(a, rows, who, cmd == "on")
         elif cmd == "end":
-            when = None if args.when.strip().lower() in ("none", "never", "no") else parse_time(args.when)
-            store.set_end(a, rows, who, when)
+            ends = (
+                None
+                if args.when.strip().lower() in ("none", "never", "no")
+                else when.parse_end(args.when, at, tz, reset, a["label"])
+            )
+            store.set_end(a, rows, who, ends, when.words(ends, tz) if ends else "")
         else:
             raise Refused(f"Unknown command {cmd}.")
         changed = bool(rows)
@@ -553,7 +575,7 @@ def run(args) -> int:
     return _emit(
         args,
         {"account": result, "changed": changed, "next": nxt},
-        f"{result['label']}: {_rule_text(result['rule'])}, {'on' if result['on'] else 'off'}, "
+        f"{result['label']}: {_rule_text(result['rule'], tz)}, {'on' if result['on'] else 'off'}, "
         f"place {result['order']}.\n{nxt}",
     )
 

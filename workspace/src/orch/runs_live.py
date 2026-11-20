@@ -453,6 +453,8 @@ def start_live(
         r = tmux(
             root, "new-session", "-d", "-P", "-F", "#{pane_pid}", "-x", "200", "-y", "50",
             "-s", tid, "-c", str(work), "-e", f"ORCH_ROOT={root}", "--", *cmd,
+            # ORCH-707: orch's own server passes focus events on, so the tool shows no tmux tip about it
+            ";", "set-option", "-g", "focus-events", "on",
         )  # fmt: skip
         if r.returncode != 0:
             raise Refused(f"tmux could not start the session: {r.stderr.strip() or 'unknown error'}")

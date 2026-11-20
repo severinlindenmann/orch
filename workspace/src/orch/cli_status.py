@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from orch import cardtext, history, look, pagelaunch, services, term
+from orch import addons, cardtext, history, look, pagelaunch, services, term
 from orch.errors import Refused
 
 
@@ -67,18 +67,19 @@ def _home_path(p: str) -> str:
         return p
 
 
-def _service_line(r: dict) -> str:
+def _service_line(r: dict, w: int = 12) -> str:
+    w = max(w, len(r["addon"]) + 2)
     if r.get("error"):
-        return f"  {r['addon']:<12}did not start: {r['error']}"
+        return f"  {r['addon']:<{w}}did not start: {r['error']}"
     if r.get("running") is False and r.get("idle"):
-        return f"  {r['addon']:<12}off here (turned off in its settings)"
+        return f"  {r['addon']:<{w}}off here (turned off in its settings)"
     if r.get("running") is False and "last_seen" not in r and "url" not in r:
-        return f"  {r['addon']:<12}not running - start it: orch start"
+        return f"  {r['addon']:<{w}}not running - start it: orch start"
     if r.get("running") is False and "last_seen" in r:
         seen = services.ago(r["last_seen"])
-        return f"  {r['addon']:<12}not running (last seen {seen}) - start it: orch start"
+        return f"  {r['addon']:<{w}}not running (last seen {seen}) - start it: orch start"
     url = services.local_url(r.get("url"))
-    return f"  {r['addon']:<12}" + (url or f"running (pid {r.get('pid')})")
+    return f"  {r['addon']:<{w}}" + (url or f"running (pid {r.get('pid')})")
 
 
 def _pick(running: list[dict]) -> list[Path]:
@@ -136,7 +137,8 @@ def _services_cmd(args, root: Path) -> None:
             print("No add-on that is on here runs in the background. Nothing to start.")
         else:
             print(f"Started in {root.name}:")
-            print("\n".join(_service_line(r) for r in rows))
+            w = addons.name_width(r["addon"] for r in rows)
+            print("\n".join(_service_line(r, w) for r in rows))
             print("Stop: orch stop")
         if launch and not args.json:
             print("\n".join(f"launch {a}: {u}" for a, u in launch))
@@ -166,7 +168,8 @@ def _services_cmd(args, root: Path) -> None:
         lines = []
         for w in ws:
             lines.append(f"{w['name']}  ({_home_path(w['workspace'])})")
-            lines += [_service_line(a) for a in w["addons"]] or ["  nothing running"]
+            width = addons.name_width(a["addon"] for a in w["addons"])
+            lines += [_service_line(a, width) for a in w["addons"]] or ["  nothing running"]
         if (root / ".orch").is_dir() and not args.json:  # git notes for this workspace (a plain line each)
             from orch import cli_config
 
@@ -212,8 +215,6 @@ def _services_cmd(args, root: Path) -> None:
 def _with_known(ws: list) -> list:
     """Add the person's other known workspaces (consent records) that run nothing, so the switcher can list
     them as "Not running". Only folders that still exist and hold .orch; de-duplicated by resolved path."""
-    from orch import addons
-
     try:
         known = addons._registered_workspaces(None)
     except Exception:

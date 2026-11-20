@@ -280,7 +280,8 @@ def test_end_shows_local_time_with_zone_and_the_history_line_has_the_date(cli, f
     jrun(cli, "limit", "TEAMCO", "50", "--period", "week")
     jrun(cli, "end", "TEAMCO", "2099-01-01T10:00")
     ends = store.find(store.load(ws)["accounts"], "TEAMCO")["rule"]["ends"]
-    local = store.to_time(ends).astimezone().strftime("%Y-%m-%d %H:%M %Z").strip()
+    t = store.to_time(ends).astimezone()
+    local = f"{t.day} {t:%b %Y, %H:%M %Z}".strip()  # the kit's date format with the zone (ORCH-599)
     assert store.history(ws)[0]["what"] == f"rule ends {local}"
     _, text, _ = cli("history")
     assert f"rule ends {local}" in text
