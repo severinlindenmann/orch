@@ -292,7 +292,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     fd.add_argument("ticket", help="the role ticket")
     fd.add_argument("title", help="the problem in a few words")
-    fd.add_argument("--ticket", dest="into", help="put it on this ticket (for example the day's review ticket)")
+    fd.add_argument(
+        "--ticket", dest="into", help="put it on this ticket (for example the day's review ticket)"
+    )
     fd.add_argument("--same-as", help="a short name that marks the same problem again (default: the title)")
     fd.add_argument("--file", action="append", help="a file of the role ticket that shows it (repeat it)")
     fd.add_argument("--run", type=int, help="the run number (default: the run going on now)")
@@ -586,7 +588,9 @@ if __name__ == "__main__":
 
 def _role_ticket(root: Path, ref: str) -> dict:
     want = str(ref).strip().lower()
-    t = next((x for x in orchcli.tickets(root) if x["id"] == want or str(x.get("key") or "").lower() == want), None)
+    t = next(
+        (x for x in orchcli.tickets(root) if x["id"] == want or str(x.get("key") or "").lower() == want), None
+    )
     if not t:
         raise Refused(f"There is no ticket {ref}.")
     return t
@@ -600,7 +604,9 @@ def _role_cmd(args, root: Path, out) -> int:
     tid, key = t["id"], t.get("key") or t["id"]
     if args.cmd == "result":
         try:
-            line = roles.result(root, tid, args.text, args.outcome, args.checked, args.file, args.cost, args.run)
+            line = roles.result(
+                root, tid, args.text, args.outcome, args.checked, args.file, args.cost, args.run
+            )
         except ValueError as e:
             raise Refused(str(e)) from None
         out(line, f"Result of run {line['run']} saved: {roles.OUTCOME_WORDS[line['outcome']]}.")
@@ -610,8 +616,12 @@ def _role_cmd(args, root: Path, out) -> int:
         running = bool(orchcli.run_running(root, tid))
         rl = roles.runs(root, t, running)
         tot = roles.totals(root, t, all_t, rl)
-        lines = [f"{key}: {tot['runs']} runs, {tot['findings']} findings, {tot['fixed']} fixed, {tot['open']} open, {tot['dropped']} dropped."]
-        lines += [f"  Run {r['run']} · {r['words']}" + (f": {r['text']}" if r["text"] else "") for r in rl[:10]]
+        lines = [
+            f"{key}: {tot['runs']} runs, {tot['findings']} findings, {tot['fixed']} fixed, {tot['open']} open, {tot['dropped']} dropped."
+        ]
+        lines += [
+            f"  Run {r['run']} · {r['words']}" + (f": {r['text']}" if r["text"] else "") for r in rl[:10]
+        ]
         out({"ticket": tid, "runs": rl, "totals": tot, "schedule": _role_schedule(root, t)}, "\n".join(lines))
         return 0
     run = args.run if args.run is not None else roles.current(root, tid)
@@ -656,7 +666,9 @@ def _role_schedule(root: Path, t: dict) -> dict:
     from .loop import time_limit
 
     sched = (t.get("ext") or {}).get("automation") or {}
-    cron = sched.get("cron") if sched.get("recurring") is True and isinstance(sched.get("cron"), str) else None
+    cron = (
+        sched.get("cron") if sched.get("recurring") is True and isinstance(sched.get("cron"), str) else None
+    )
     tz = plain.zone(sched.get("tz")) or plain.zone(plain.workspace_tz(root))
     paused = sched.get("paused") is True
     nxt: list[str] = []

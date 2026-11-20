@@ -17,7 +17,18 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, unquote_plus
 
-from . import actids, actions, copychanges, diagapi, framepass, reffiles, rolefiles, selfupdate, sessionlist, ticketfiles
+from . import (
+    actids,
+    actions,
+    copychanges,
+    diagapi,
+    framepass,
+    reffiles,
+    rolefiles,
+    selfupdate,
+    sessionlist,
+    ticketfiles,
+)
 from .data import (
     forget_static,
     load_addons,

@@ -39,6 +39,8 @@ def time_limit(t: dict | None) -> int | None:
     """The minutes after which a repeat's run is stopped, or None (no limit)."""
     v = (((t or {}).get("ext") or {}).get("automation") or {}).get("time_limit")
     return v if isinstance(v, int) and not isinstance(v, bool) and v in TIME_LIMITS else None
+
+
 WAKE_RETRIES, WAKE_RETRY_MINUTES = 3, 5  # a wake-time start that failed: tries after the first, minutes apart
 QUEUED_TRIES = 3  # starts that failed for one waiting input before it is left for a person
 KIND = "automation:failure"
@@ -285,7 +287,9 @@ class Scheduler:
         res = orchcli.run_start(
             self.root,
             tid,
-            BUSY_TEXT if note else f"Automation asked for another run ({reason})." + (roles.prompt(tid, n) if n else ""),
+            BUSY_TEXT
+            if note
+            else f"Automation asked for another run ({reason})." + (roles.prompt(tid, n) if n else ""),
             self.agent_of(t),
             mode=None if phone else "oneshot",
         )
@@ -368,7 +372,9 @@ class Scheduler:
                 if limit and not w.get("stopped") and time.time() - w["t0"] > limit * 60:
                     w["stopped"] = True
                     orchcli.call(self.root, "run", "stop", tid)
-                    orchcli.log(self.root, tid, f"Stopped after {limit} minutes: the time limit of this repeat.")
+                    orchcli.log(
+                        self.root, tid, f"Stopped after {limit} minutes: the time limit of this repeat."
+                    )
                 continue
             del self.watch[tid]
             took = 0
@@ -641,7 +647,9 @@ class Scheduler:
                     if (
                         parse(sched.get("next_run")) or now
                     ) <= now:  # once per interval, not every pass: core's
-                        roles.skipped(self.root, tid, fmt(now))  # the role page shows the skipped run (no cost)
+                        roles.skipped(
+                            self.root, tid, fmt(now)
+                        )  # the role page shows the skipped run (no cost)
                         nxt = next_after(cron, now, tz)  # health check must not call a waiting repeat stopped
                         if nxt:
                             orchcli.set_ext(self.root, t, next_run=fmt(nxt))

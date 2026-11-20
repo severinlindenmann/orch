@@ -96,9 +96,15 @@ def begin(root: Path, tid: str, at: str | None = None) -> int:
     st = load_state(root).get(tid) or {}
     done = run_lines(root, tid)
     prev = st.get("current_run") or {}
-    if isinstance(prev.get("run"), int) and isinstance(prev.get("at"), str) and all(x["run"] != prev["run"] for x in done):
+    if (
+        isinstance(prev.get("run"), int)
+        and isinstance(prev.get("at"), str)
+        and all(x["run"] != prev["run"] for x in done)
+    ):
         # a run nobody watched to its end (Run now on a helper): keep it in the list before the next one starts
-        _append(root, "runs.jsonl", {"ticket": tid, "at": prev["at"], "took": None, "exit": 0, "run": prev["run"]})
+        _append(
+            root, "runs.jsonl", {"ticket": tid, "at": prev["at"], "took": None, "exit": 0, "run": prev["run"]}
+        )
         done.append({"run": prev["run"]})
     n = max([x["run"] for x in done] + [int(st.get("run_count") or 0)]) + 1
     update_state(root, tid, run_count=n, current_run={"run": n, "at": at or fmt(datetime.now(UTC))})
@@ -171,7 +177,9 @@ def match_name(title: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", str(title).lower()))[:120]
 
 
-def finding_ticket(findings: list[dict], tickets: dict, role: str, match: str) -> tuple[str | None, str | None]:
+def finding_ticket(
+    findings: list[dict], tickets: dict, role: str, match: str
+) -> tuple[str | None, str | None]:
     """(open ticket to reuse, done ticket it follows) for a finding of `role` with this match name."""
     reuse = earlier = None
     for f in findings:
@@ -287,8 +295,13 @@ def runs(root: Path, t: dict, running: bool = False) -> list[dict]:
                 "text": (o or {}).get("text") or "",
                 "checked": (o or {}).get("checked") or [],
                 "cost": (o or {}).get("cost"),
-                "files": [{"name": n2, "state": _file_state(root, tid, n2, opens)} for n2 in (o or {}).get("files") or []],
-                "findings": [{"title": f.get("title"), "ticket": f.get("ticket")} for f in found.get(cur["run"], [])],
+                "files": [
+                    {"name": n2, "state": _file_state(root, tid, n2, opens)}
+                    for n2 in (o or {}).get("files") or []
+                ],
+                "findings": [
+                    {"title": f.get("title"), "ticket": f.get("ticket")} for f in found.get(cur["run"], [])
+                ],
             }
         )
     return list(reversed(out))
@@ -341,7 +354,7 @@ def next_number(root: Path, tid: str) -> int:
 def prompt(tid: str, n: int) -> str:
     """The lines a role's helper reads at the start of run n: how to write its result and its findings."""
     return (
-        f" This is run {n}. First read the newest history lines that start with \"For the next run:\" (the"
+        f' This is run {n}. First read the newest history lines that start with "For the next run:" (the'
         " person's notes). When you finish, write its result once:"
         f' orch automation result {tid} "<what it found, one line>" --outcome ok|problems|not-finished|failed'
         ' (add --checked "<line>" per thing checked and --file <name> per file it made).'

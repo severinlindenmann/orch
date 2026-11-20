@@ -533,7 +533,12 @@ def _runs(root: Path) -> list[dict]:
         except ValueError:
             continue
         # a run the quick check skipped started nothing: it is on the role page, not in Recent starts
-        if isinstance(r, dict) and parse(r.get("at")) and isinstance(r.get("exit"), int) and not r.get("skipped"):
+        if (
+            isinstance(r, dict)
+            and parse(r.get("at"))
+            and isinstance(r.get("exit"), int)
+            and not r.get("skipped")
+        ):
             out.append(r)
     return out
 
@@ -543,7 +548,10 @@ def files_words(tot: dict) -> str:
     f = tot["files"]
     if not any(f.values()):
         return "none"
-    parts = [f"{f['unopened']} unopened" if f["unopened"] else "", f"{f['unknown']} unknown" if f["unknown"] else ""]
+    parts = [
+        f"{f['unopened']} unopened" if f["unopened"] else "",
+        f"{f['unknown']} unknown" if f["unknown"] else "",
+    ]
     return ", ".join(x for x in parts if x) or "all opened"
 
 

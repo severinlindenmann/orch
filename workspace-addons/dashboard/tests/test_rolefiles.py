@@ -14,7 +14,11 @@ RUN = {
     "text": "Tests   stopped\nearly",
     "checked": ["Tests: 41 passed", 5],
     "cost": 1.11,
-    "files": [{"name": "log.txt", "state": "unopened"}, {"name": "../x", "state": "opened"}, {"name": "a.png", "state": "?"}],
+    "files": [
+        {"name": "log.txt", "state": "unopened"},
+        {"name": "../x", "state": "opened"},
+        {"name": "a.png", "state": "?"},
+    ],
     "findings": [{"title": "Usage page", "ticket": "t_abcdef"}, {"title": "bad", "ticket": "../t"}],
 }
 
@@ -26,8 +30,20 @@ def test_keeps_only_checked_fields(monkeypatch, tmp_path):
         seen["args"] = args
         return {
             "runs": [RUN, {**RUN, "run": "8"}, {**RUN, "outcome": "boom"}, "x"],
-            "totals": {"runs": 7, "findings": "3", "files": {"unopened": 1, "unknown": True}, "by_outcome": {"skipped": 2, "zzz": 1}, "cost": -1},
-            "schedule": {"repeats": "Every 6 hours", "next": ["2026-11-20T17:00:00Z", 5], "quick": "maybe", "time_limit": 75, "paused": "no"},
+            "totals": {
+                "runs": 7,
+                "findings": "3",
+                "files": {"unopened": 1, "unknown": True},
+                "by_outcome": {"skipped": 2, "zzz": 1},
+                "cost": -1,
+            },
+            "schedule": {
+                "repeats": "Every 6 hours",
+                "next": ["2026-11-20T17:00:00Z", 5],
+                "quick": "maybe",
+                "time_limit": 75,
+                "paused": "no",
+            },
         }
 
     monkeypatch.setattr(rolefiles, "run_orch", fake)
@@ -42,7 +58,12 @@ def test_keeps_only_checked_fields(monkeypatch, tmp_path):
     assert t["runs"] == 7 and t["findings"] == 0 and t["by_outcome"] == {"skipped": 2}
     assert t["files"] == {"opened": 0, "unopened": 1, "unknown": 0} and t["cost"] is None
     sc = d["schedule"]
-    assert sc["next"] == ["2026-11-20T17:00:00Z"] and sc["quick"] == "none" and sc["time_limit"] == 75 and sc["paused"] is False
+    assert (
+        sc["next"] == ["2026-11-20T17:00:00Z"]
+        and sc["quick"] == "none"
+        and sc["time_limit"] == 75
+        and sc["paused"] is False
+    )
 
 
 def test_unavailable_when_orch_cannot_answer(monkeypatch, tmp_path):
@@ -60,5 +81,10 @@ def test_first_open_is_kept_and_only_for_real_ticket_files(tmp_path):
     assert first["since"] and first["files"]["t_role01"]["log.txt"] == first["since"]
     assert rolefiles.note_open(tmp_path, "t_role01", "artifacts", "log.txt") is True
     assert json.loads(p.read_text()) == first  # the first open stays
-    for args in (("t_role01", "artifacts", "nope.txt"), ("t_role01", "secrets", "log.txt"), ("../x", "artifacts", "log.txt"), ("t_role01", "artifacts", "../log.txt")):
+    for args in (
+        ("t_role01", "artifacts", "nope.txt"),
+        ("t_role01", "secrets", "log.txt"),
+        ("../x", "artifacts", "log.txt"),
+        ("t_role01", "artifacts", "../log.txt"),
+    ):
         assert rolefiles.note_open(tmp_path, *args) is False

@@ -33,6 +33,10 @@ def _s(v, n: int) -> str:
     return " ".join(v.split())[:n] if isinstance(v, str) else ""
 
 
+def _int(v) -> int:
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else 0
+
+
 def _num(v):
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 else None
 
@@ -73,11 +77,11 @@ def listing(root: Path, orch_bin: str | None, tid: str) -> dict:
     t = d.get("totals") if isinstance(d.get("totals"), dict) else {}
     ints = ("runs", "findings", "distinct_findings", "tickets", "fixed", "open", "dropped")
     files = t.get("files") if isinstance(t.get("files"), dict) else {}
-    totals = {k: t.get(k) if isinstance(t.get(k), int) else 0 for k in ints}
+    totals = {k: _int(t.get(k)) for k in ints}
     totals["by_outcome"] = {
-        k: v for k, v in (t.get("by_outcome") or {}).items() if k in OUTCOMES and isinstance(v, int)
+        k: _int(v) for k, v in (t.get("by_outcome") or {}).items() if k in OUTCOMES and _int(v)
     }
-    totals["files"] = {k: files.get(k) if isinstance(files.get(k), int) else 0 for k in STATES}
+    totals["files"] = {k: _int(files.get(k)) for k in STATES}
     totals["files_measured"] = t.get("files_measured") is True
     totals["cost"] = _num(t.get("cost"))
     sc = d.get("schedule") if isinstance(d.get("schedule"), dict) else {}
@@ -88,7 +92,9 @@ def listing(root: Path, orch_bin: str | None, tid: str) -> dict:
         "paused": sc.get("paused") is True,
         "next": [_s(x, 40) for x in (sc.get("next") or [])[:3] if isinstance(x, str)],
         "quick": sc.get("quick") if sc.get("quick") in ("on", "off", "none") else "none",
-        "time_limit": limit if isinstance(limit, int) and not isinstance(limit, bool) and 0 < limit <= 600 else None,
+        "time_limit": limit
+        if isinstance(limit, int) and not isinstance(limit, bool) and 0 < limit <= 600
+        else None,
         "running": sc.get("running") is True,
     }
     return {"available": True, "runs": runs, "totals": totals, "schedule": schedule}
@@ -96,7 +102,12 @@ def listing(root: Path, orch_bin: str | None, tid: str) -> dict:
 
 def note_open(root: Path, tid: str, kind: str, name: str) -> bool:
     """The file viewer showed this file: keep its first open. False when the request is not a ticket file."""
-    if not TID.fullmatch(tid or "") or kind not in KINDS or not isinstance(name, str) or not NAME.fullmatch(name):
+    if (
+        not TID.fullmatch(tid or "")
+        or kind not in KINDS
+        or not isinstance(name, str)
+        or not NAME.fullmatch(name)
+    ):
         return False
     folder = root / ".orch" / "tickets" / tid / kind
     if not (folder / name).is_file():

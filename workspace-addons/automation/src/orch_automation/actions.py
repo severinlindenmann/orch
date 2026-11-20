@@ -128,7 +128,9 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
             return _saved(ok, target, "Quick check off: every planned time starts a helper.")
         back = sched.get("when_changed") or sched.get("when_changed_off")
         if not back:
-            raise Bad("There is nothing to check yet. A helper sets what to watch with orch automation repeat --when-changed.")
+            raise Bad(
+                "There is nothing to check yet. A helper sets what to watch with orch automation repeat --when-changed."
+            )
         ok = orchcli.set_ext(root, t, remove=("when_changed_off",), by=by, when_changed=back)
         return _saved(ok, target, "Quick check on: a run with nothing new is skipped and costs nothing.")
     if verb == "run":

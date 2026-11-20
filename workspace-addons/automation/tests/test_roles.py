@@ -35,12 +35,27 @@ def test_result_names_the_current_run_and_the_newest_wins(ws):
     t = _role(ws)
     roles.begin(ws, t["id"], "2026-11-02T00:00:00Z")
     roles.result(ws, t["id"], "first try", "ok")
-    roles.result(ws, t["id"], "Tests stopped early", "not-finished", checked=["Tests: 41 passed"], files=["a/b.png"], cost=1.11)
+    roles.result(
+        ws,
+        t["id"],
+        "Tests stopped early",
+        "not-finished",
+        checked=["Tests: 41 passed"],
+        files=["a/b.png"],
+        cost=1.11,
+    )
     history(ws, t["id"], "2026-11-02T00:00:00Z", 420, 0)
     r = roles.runs(ws, t)[0]
-    assert (r["outcome"], r["words"], r["tone"], r["text"]) == ("not-finished", "not finished", "warn", "Tests stopped early")
+    assert (r["outcome"], r["words"], r["tone"], r["text"]) == (
+        "not-finished",
+        "not finished",
+        "warn",
+        "Tests stopped early",
+    )
     assert r["checked"] == ["Tests: 41 passed"] and r["cost"] == 1.11
-    assert r["files"] == [{"name": "b.png", "state": "unknown"}]  # nothing measured yet: unknown, never unopened
+    assert r["files"] == [
+        {"name": "b.png", "state": "unknown"}
+    ]  # nothing measured yet: unknown, never unopened
 
 
 def test_a_run_without_a_result_says_so(ws):
@@ -80,10 +95,14 @@ def test_finding_makes_a_ticket_naming_role_and_run_and_reuses_it(ws):
     new = json.loads((ws / ".orch" / "tickets" / "t_new002.json").read_text())
     assert "Found by ORCH-279 (Quality pass), run 1" in new["history"][-1]["text"]
     roles.begin(ws, t["id"], "2026-11-01T06:00:00Z")
-    assert cli.main(["--dir", str(ws), "finding", t["id"], "Usage page: cut off at 390!"]) == 0  # same match name
+    assert (
+        cli.main(["--dir", str(ws), "finding", t["id"], "Usage page: cut off at 390!"]) == 0
+    )  # same match name
     assert len([c for c in calls(ws) if c["args"][:2] == ["ticket", "new"]]) == 1
     assert [f["run"] for f in roles.findings_of(ws, t["id"])] == [1, 2]
-    assert roles.runs(ws, t)[0]["findings"] == [{"title": "Usage page: cut off at 390!", "ticket": "t_new002"}]
+    assert roles.runs(ws, t)[0]["findings"] == [
+        {"title": "Usage page: cut off at 390!", "ticket": "t_new002"}
+    ]
 
 
 def test_a_finding_seen_again_after_its_ticket_closed_gets_a_new_linked_ticket(ws):
@@ -91,7 +110,9 @@ def test_a_finding_seen_again_after_its_ticket_closed_gets_a_new_linked_ticket(w
     roles.begin(ws, t["id"])
     cli.main(["--dir", str(ws), "finding", t["id"], "Broken link"])
     p = ws / ".orch" / "tickets" / "t_new002.json"
-    old = json.loads(p.read_text()); old["status"] = "done"; p.write_text(json.dumps(old))
+    old = json.loads(p.read_text())
+    old["status"] = "done"
+    p.write_text(json.dumps(old))
     cli.main(["--dir", str(ws), "finding", t["id"], "Broken link"])
     new = json.loads((ws / ".orch" / "tickets" / "t_new003.json").read_text())
     assert "Seen again after t_new002 was closed" in new["history"][-1]["text"]
@@ -103,7 +124,9 @@ def test_finding_on_the_days_review_ticket_keeps_each_finding_linked(ws):
     roles.begin(ws, t["id"])
     cli.main(["--dir", str(ws), "finding", t["id"], "One", "--ticket", "t_daily1"])
     cli.main(["--dir", str(ws), "finding", t["id"], "Two", "--ticket", "t_daily1"])
-    tot = roles.totals(ws, t, {x: json.loads((ws / ".orch" / "tickets" / f"{x}.json").read_text()) for x in ("t_daily1",)})
+    tot = roles.totals(
+        ws, t, {x: json.loads((ws / ".orch" / "tickets" / f"{x}.json").read_text()) for x in ("t_daily1",)}
+    )
     assert (tot["findings"], tot["distinct_findings"], tot["tickets"], tot["open"]) == (2, 2, 1, 1)
 
 
@@ -113,9 +136,17 @@ def test_totals_count_each_ticket_once_by_its_status(ws):
         add_ticket(ws, f"t_fnd00{i}", status=status)
         roles.finding_line(ws, t["id"], 1, title, f"t_fnd00{i}", title)
     roles.finding_line(ws, t["id"], 2, "a", "t_fnd000", "a")  # seen again: one more sighting, same ticket
-    tix = {f"t_fnd00{i}": {"id": f"t_fnd00{i}", "status": s} for i, s in enumerate(["done", "dropped", "open"])}
+    tix = {
+        f"t_fnd00{i}": {"id": f"t_fnd00{i}", "status": s} for i, s in enumerate(["done", "dropped", "open"])
+    }
     tot = roles.totals(ws, t, tix, [])
-    assert (tot["findings"], tot["distinct_findings"], tot["fixed"], tot["dropped"], tot["open"]) == (4, 3, 1, 1, 1)
+    assert (tot["findings"], tot["distinct_findings"], tot["fixed"], tot["dropped"], tot["open"]) == (
+        4,
+        3,
+        1,
+        1,
+        1,
+    )
 
 
 def test_file_open_state_opened_unopened_unknown(ws):
@@ -152,15 +183,28 @@ def test_automation_page_shows_the_same_totals(ws):
     roles.skipped(ws, t["id"], "2026-11-01T06:00:00Z")
     add_ticket(ws, "t_fnd001", status="done")
     roles.finding_line(ws, t["id"], 1, "a", "t_fnd001", "a")
-    table = view.roles_table(ws, [json.loads((ws / ".orch" / "tickets" / f).read_text()) for f in ("t_role01.json", "t_fnd001.json")])
+    table = view.roles_table(
+        ws,
+        [json.loads((ws / ".orch" / "tickets" / f).read_text()) for f in ("t_role01.json", "t_fnd001.json")],
+    )
     cells = table["rows"][0]["cells"]
-    assert cells == {"role": cells["role"], "runs": "2 (1 skipped)", "findings": "1", "tickets": "1 fixed · 0 open · 0 dropped", "files": "none"}
+    assert cells == {
+        "role": cells["role"],
+        "runs": "2 (1 skipped)",
+        "findings": "1",
+        "tickets": "1 fixed · 0 open · 0 dropped",
+        "files": "none",
+    }
     assert table["rows"][0]["link"] == t["id"]
 
 
 def test_the_role_prompt_names_the_run_and_both_commands(ws):
     text = roles.prompt("t_role01", 7)
-    assert "run 7" in text and "orch automation result t_role01" in text and "orch automation finding t_role01" in text
+    assert (
+        "run 7" in text
+        and "orch automation result t_role01" in text
+        and "orch automation finding t_role01" in text
+    )
 
 
 def test_role_command_json(ws, capsys):
