@@ -367,7 +367,7 @@ function livePane(key, where, s, o) {
         s.menu === placeMenu ? livePlaceMenu(where, true) : null,
         s.menu === besideMenu && o.others.length ? liveBesideMenu(key, label, o.others) : null,
         s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned, o.narrow, o.narrow && n > 1 && !o.phone) : null)),
-    sess?.running && !sess.kind && typeof window.liveModelRow === 'function' ? window.liveModelRow(sess, s) : null,
+    sess?.running && (!sess.kind || sess.kind === 'empty') && typeof window.liveModelRow === 'function' ? window.liveModelRow(sess, s) : null,
     group ? h('div', {className:'live-gwrap', 'data-key':'live-gwrap'}, liveGroupSwitcher(group, key, o.narrow), livePaneBody(key, sess, label))
       : livePaneBody(key, sess, label));
 }
