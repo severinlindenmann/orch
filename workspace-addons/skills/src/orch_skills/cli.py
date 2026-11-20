@@ -1,4 +1,4 @@
-"""orch skills list|on|off|history|act|run|start|stop|status (contract: contracts/addons/skills/README.md)."""
+"""orch skills list|on|off|delete|restore|new|bin|history|act|run|start|stop|status (contract: contracts/addons/skills/README.md)."""
 
 from __future__ import annotations
 
@@ -10,12 +10,20 @@ import sys
 import time
 from pathlib import Path
 
+from . import bin as skill_bin
 from . import model
 from .switches import Refused
 
-VERBS = ("on", "off")
+VERBS = ("on", "off", "delete", "restore", "new")
 TARGET = re.compile(r"(skill|instructions|service|login):(orch|workspace|admin|mine):[A-Za-z0-9_.@-]{1,120}")
 HISTORY = Path(".orch") / "addons" / "skills" / "history.jsonl"
+HISTORY_WORD = {
+    "on": "turned on",
+    "off": "turned off",
+    "delete": "moved to the bin",
+    "restore": "restored",
+    "new": "made as a draft",
+}
 KIND_WORD = {"skills": "Skills", "instructions": "Instructions", "services": "Connected services", "logins": "Logins"}
 
 
@@ -133,6 +141,62 @@ def _turn(args, root: Path, on: bool) -> int:
     return _emit(args, {"item": it, "changed": res["changed"], "next": text}, text)
 
 
+def _person(args) -> str:
+    who = _actor(args.by)
+    if _a_helper_runs_this() or not who.startswith("human:"):
+        raise Refused("Only a person deletes, restores or makes skills here. Ask the person to use the Skills page.")
+    return who
+
+
+def _delete(args, root: Path) -> int:
+    who = _person(args)
+    target = args.target.strip()
+    if not TARGET.fullmatch(target):
+        raise Refused("Name the skill by its id from orch skills list, e.g. skill:workspace:weekly-report.")
+    res = model.delete(root, target, who)
+    it, row = res["item"], res["bin"]
+    _log(root, who, "delete", it)
+    place = "every workspace on this computer" if it["where"] == "mine" else "this workspace"
+    text = f"{it['name']} is in the bin; helpers in {place} no longer see it. Undo: orch skills restore {row['id']}"
+    if row.get("note"):
+        text += f" ({row['note']})"
+    return _emit(args, {"item": it, "bin": row, "changed": True, "next": text}, text)
+
+
+def _restore(args, root: Path) -> int:
+    who = _person(args)
+    target = args.target.strip()
+    if not skill_bin.BIN_TARGET.fullmatch(target):
+        raise Refused(
+            "Name the bin entry by its id from orch skills bin, e.g. bin:workspace:20261120T120000Z-x-a1b2c3."
+        )
+    res = model.restore(root, target, who)
+    _log(root, who, "restore", res["item"])
+    text = f"{res['item']['name']} is back where it was. Helpers see it from their next start."
+    return _emit(args, {**res, "changed": True, "next": text}, text)
+
+
+def _new(args, root: Path) -> int:
+    who = _person(args)
+    name = args.target.strip()
+    if name.startswith("skill:workspace:"):  # the page names it like an item
+        name = name.split(":", 2)[2]
+    res = model.new_skill(root, name, who.split(":", 1)[1])
+    _log(root, who, "new", res["item"])
+    text = f"Made the draft skill {name} in .agents/skills/{name}/SKILL.md. Fill in its description and steps."
+    return _emit(args, {**res, "changed": True, "next": text}, text)
+
+
+def _bin_text(rows: list[dict]) -> str:
+    if not rows:
+        return "The bin is empty."
+    lines = []
+    for r in rows:
+        state = "" if r["can_restore"] else f"  ({r.get('why', 'cannot be restored now')})"
+        lines.append(f"  {r['id']}  {r['name']} from {r['from']}, deleted {r['at']} by {r['by']}{state}")
+    return "In the bin (nothing is removed by itself):\n" + "\n".join(lines) + "\nNext: orch skills restore <id>"
+
+
 def _loop(args, root: Path) -> int:
     from . import server, service
 
@@ -203,12 +267,24 @@ def run(args) -> int:
     if args.cmd == "history":
         rows = _history(root)
         text = "\n".join(
-            f"{r.get('at')}  {r.get('name')}: turned {r.get('what')} (by {str(r.get('who', '')).split(':', 1)[-1]})"
+            f"{r.get('at')}  {r.get('name')}: {HISTORY_WORD.get(r.get('what'), r.get('what'))} "
+            f"(by {str(r.get('who', '')).split(':', 1)[-1]})"
             for r in rows
         )
         return _emit(args, {"history": rows}, text or "No changes yet.")
     if args.cmd in ("on", "off"):
         return _turn(args, root, args.cmd == "on")
+    if args.cmd == "bin":
+        with skill_bin.locked(root):
+            skill_bin.recover(root)
+        rows = skill_bin.rows(root)
+        return _emit(args, {"bin": rows}, _bin_text(rows))
+    if args.cmd == "delete":
+        return _delete(args, root)
+    if args.cmd == "restore":
+        return _restore(args, root)
+    if args.cmd == "new":
+        return _new(args, root)
     return _loop(args, root)
 
 
@@ -223,10 +299,18 @@ def main(argv=None) -> int:
         return s
 
     p("list", help="everything helpers get here, with ids")
-    p("history", help="who turned what on or off")
+    p("history", help="who turned on, off, deleted, restored or made what")
+    p("bin", help="deleted skills that can be restored")
+    helps = {
+        "on": "turn one item on in this workspace",
+        "off": "turn one item off in this workspace",
+        "delete": "move one workspace or computer skill to the bin",
+        "restore": "put one bin entry back",
+        "new": "make a draft skill in .agents/skills",
+    }
     for name in VERBS:
-        s = p(name, help=f"turn one item {name} in this workspace")
-        s.add_argument("target")
+        s = p(name, help=helps[name])
+        s.add_argument("target", metavar="name" if name == "new" else "id")
         s.add_argument("--by")
     s = p("act", help=argparse.SUPPRESS)
     s.add_argument("verb")
@@ -242,7 +326,8 @@ def main(argv=None) -> int:
         if args.cmd == "act":  # the page's clicks, run by the dashboard as the person
             if args.verb not in VERBS:
                 raise Refused(f"Skills has no '{args.verb}' action.")
-            if not TARGET.fullmatch(args.target or ""):
+            ok = {"restore": skill_bin.BIN_TARGET, "new": re.compile(r"skill:workspace:[a-z0-9-]{1,64}")}
+            if not ok.get(args.verb, TARGET).fullmatch(args.target or ""):
                 raise Refused("That is not something Skills can change. Reload the page and try again.")
             args.cmd = args.verb
         return run(args)

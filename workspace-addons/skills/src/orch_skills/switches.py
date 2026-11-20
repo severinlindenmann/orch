@@ -111,7 +111,7 @@ def _locked(root: Path, wait: float = 5.0):
             break
         except FileExistsError:
             with contextlib.suppress(OSError):
-                if time.time() - lock.stat().st_mtime > 30:  # left by a process that died
+                if time.time() - lock.stat().st_mtime > 300:  # left by a process that died (a delete copies)
                     lock.unlink()
                     continue
             if time.monotonic() > end:

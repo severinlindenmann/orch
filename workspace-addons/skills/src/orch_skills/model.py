@@ -8,6 +8,7 @@ and what needs a look. Names and short texts only: never a key, an environment v
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
@@ -177,6 +178,8 @@ def skills(root: Path, account_home: Path | None = None, keys: set[str] | None =
             "fields": {k: v for k, v in meta.items() if isinstance(v, str)},
             "words": len((head.get("description") or "").split()),
         }
+        if where in ("workspace", "mine") and _is_link(folder):
+            item["link"] = True  # a link to somewhere else: orch does not delete through it
         if where in ("orch", "admin"):
             linked_off = name in off
             item["on"] = not linked_off and name not in claude
@@ -344,7 +347,11 @@ def logins(root: Path) -> list[dict]:
 
 
 def build(root: Path, account_home: Path | None = None) -> dict:
+    from . import bin as skill_bin
+
     root = Path(root)
+    with contextlib.suppress(Exception), skill_bin.locked(root, wait=1.0):  # a cut-off move is finished or undone
+        skill_bin.recover(root, account_home)  # first; while another change runs, the next look does it
     lg = logins(root)
     data = {
         "schema": SCHEMA,
@@ -354,11 +361,13 @@ def build(root: Path, account_home: Path | None = None) -> dict:
         "instructions": instructions(root, account_home),
         "services": services(root, account_home),
         "logins": lg,
+        "bin": skill_bin.rows(root, account_home),
     }
     for kind in ("skills", "instructions", "services", "logins"):
         for it in data[kind]:
             it["can_off"] = it.get("switch") is not None and "locked" not in it
             seen = [t for t, s in it.get("tools", {}).items() if s == "on"]
+            it["can_delete"] = it["kind"] == "skill" and it["where"] in ("workspace", "mine") and not it.get("link")
             if not it["on"] and seen:
                 it["note"] = " and ".join(seen) + (" still sees it" if len(seen) == 1 else " still see it")
     return data
@@ -391,3 +400,39 @@ def turn(root: Path, target: str, on: bool, account_home: Path | None = None) ->
     else:
         raise Refused(f"{it['name']} cannot be turned off here.")
     return {"item": find(root, target, account_home), "changed": changed}
+
+
+def delete(root: Path, target: str, who: str, account_home: Path | None = None) -> dict:
+    """Move one workspace or computer skill into its bin. Returns {"item", "bin"}."""
+    from . import bin as skill_bin
+
+    it = find(root, target, account_home)
+    if not it.get("can_delete"):
+        why = (
+            "it is a link to somewhere else"
+            if it.get("link")
+            else "only this workspace's and your computer's skills can"
+        )
+        raise Refused(f"{it['name']} cannot be deleted here: {why}.")
+    with skill_bin.locked(root):
+        skill_bin.recover(root, account_home)
+        row = skill_bin.delete(root, it["where"], it["name"], who, account_home)
+    return {"item": it, "bin": row}
+
+
+def restore(root: Path, target: str, who: str, account_home: Path | None = None) -> dict:
+    from . import bin as skill_bin
+
+    with skill_bin.locked(root):
+        skill_bin.recover(root, account_home)
+        back = skill_bin.restore(root, target, who, account_home)
+    return {"item": {"id": target, "name": back["name"]}, "restored": back}
+
+
+def new_skill(root: Path, name: str, owner: str, account_home: Path | None = None) -> dict:
+    from . import bin as skill_bin
+
+    taken = {it["name"] for it in skills(root, account_home)}
+    with skill_bin.locked(root):
+        skill_bin.new_skill(root, name, owner, taken)
+    return {"item": find(root, item_id("skill", "workspace", name), account_home)}

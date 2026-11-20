@@ -1,5 +1,6 @@
 # Skills: everything helpers get in this workspace (skills, instruction files, connected services, logins) and
-# Turn off / Turn on for this workspace only. Its page is served by its background process. Preview (ORCH-834).
+# Turn off / Turn on for this workspace only, Delete into a Bin, Restore and New skill (ORCH-841). Its page is served
+# by its background process. Preview (ORCH-834).
 schema = "orch.addon/1"
 orch_api = 1
 name = "skills"
@@ -27,4 +28,16 @@ who = "people"
 
 [acts.off]
 summary = "Turn one skill, rules file or connected service off in this workspace"
+who = "people"
+
+[acts.delete]
+summary = "Move one skill of this workspace or your computer to the Bin"
+who = "people"
+
+[acts.restore]
+summary = "Put one skill from the Bin back where it was, never over another"
+who = "people"
+
+[acts.new]
+summary = "Make a new draft skill in this workspace"
 who = "people"
