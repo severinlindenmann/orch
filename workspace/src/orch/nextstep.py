@@ -177,6 +177,35 @@ def _status_cmd(data, args) -> str:
     return "orch stop  (when you are done)" if data else "orch ticket list"
 
 
+def _expert(data, args) -> str:
+    """Only a pass that really opened a ticket for a red run points at the ticket list."""
+    d = data if isinstance(data, dict) else {}
+    if d.get("off"):
+        return "orch config set github.dev_expert <role ticket>  (turns the Development expert on)"
+    if d.get("paused"):
+        return "orch resume  (automation is paused)"
+    if getattr(args, "dry_run", False):
+        return "orch github expert  (do what the dry run said)" if d.get("changed") else "nothing to do now."
+    if any(str(c).startswith("opened top ticket") for c in d.get("changed") or []):
+        return "orch ticket list  (a red run opened a top ticket)"
+    return "nothing to do now; the next pass runs on its repeat."
+
+
+def _release(data, args) -> str:
+    """Only a pass that really opened a ticket points at the ticket list."""
+    d = data if isinstance(data, dict) else {}
+    if d.get("off"):
+        return "orch github release --help  (how to turn the release keeper on)"
+    if d.get("paused"):
+        return "orch resume  (automation is paused)"
+    did = [str(x) for x in d.get("did") or []]
+    if getattr(args, "dry_run", False):
+        return "orch github release  (do what the dry run said)" if did else "nothing to do now."
+    if any(x.startswith(("ticket:", "security-review:")) and not x.endswith("failed") for x in did):
+        return "orch ticket list  (the release keeper opened a ticket)"
+    return "orch review list  (what still waits for the owner)"
+
+
 def _ref_wait(data, args) -> str:
     """Says the verdict again: the last line is all a caller that reads through a pipe sees (PR 978)."""
     if data and data[-1].get("status") == "owner merges":
@@ -226,6 +255,13 @@ HINTS = {
     "ticket artifacts": _on_ticket,
     "ticket title": _on_ticket,
     "ticket tidy": _on_ticket,
+    "ticket found": lambda d, a: (
+        "ask ONE question about the sources that could not be opened, then fill the ticket: "
+        f"orch ticket tidy {_tid(a)} ..."
+        if tickets.found_counts((d or {}).get("found"))[1]
+        else f"fill the ticket: orch ticket tidy {_tid(a)} ..."
+    ),
+    "ticket prepared": _on_ticket,
     "ticket plan": _on_ticket,
     "ticket attach": _on_ticket,
     "ticket wait": "keep working on other tickets: orch ticket list",
@@ -290,8 +326,8 @@ HINTS = {
     "review verdict": "orch ticket show <next ticket in the history>  (the next one to look at)",
     "review security": "orch github release --dry-run  (what the release still waits for)",
     "review accepted": "orch needs",
-    "github expert": "orch ticket list  (a red run opened a top ticket)",
-    "github release": "orch ticket list  (a red run opened a top ticket)",
+    "github expert": _expert,
+    "github release": _release,
     "look *": "orch ticket list",
     "publish connect": 'describe this workspace: orch publish profile --description "..." --tags a,b',
     "publish new": lambda d, a: f"orch publish app {a.folder}",

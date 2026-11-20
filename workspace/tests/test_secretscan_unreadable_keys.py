@@ -44,7 +44,7 @@ def test_real_token_still_blocks_when_keys_unreadable(unreadable, tmp_path):
 
 
 def test_find_strict_default_still_fails_closed(unreadable, tmp_path):
-    assert secretscan.find("hello", tmp_path) == [{"kind": "stored-key", "line": 1}]
+    assert secretscan.find("hello", tmp_path) == [{"kind": "keys-unreadable", "line": 1}]
     assert secretscan.find("hello", tmp_path, strict=False) == []
 
 

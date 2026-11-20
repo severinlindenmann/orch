@@ -79,8 +79,11 @@ test('Done: "What the helper did" lists the finished tasks; Properties are compa
   assert.match(text(did), /Changed 3 lines/);
   assert.doesNotMatch(text(did), /Skipped bit/);
   const props = nodes(tree).find(n => n.tag === 'aside' && /properties/.test(n.attrs.className || ''));
-  assert.match(text(props), /Finished/);
   assert.doesNotMatch(text(props), /What happens next|Updated/);
+  // ORCH-581: created and finished are one quiet line at the foot of the rail
+  const stamp = nodes(tree).find(n => /^ticket-stamp-/.test(n.attrs?.['data-key'] || ''));
+  assert.match(text(stamp), /finished/);
+  assert.doesNotMatch(text(stamp), /updated/);
 });
 
 test('G2: a quiet ticket shows one line, "No news since" replaces "Updated"', () => {
