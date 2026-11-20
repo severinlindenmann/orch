@@ -1,4 +1,5 @@
 """e2e/main.py refuses V3-SIM in a list: it never ends and sorts first (ORCH-1012)."""
+
 import subprocess
 import sys
 from pathlib import Path
@@ -10,8 +11,19 @@ E2E = Path(__file__).resolve().parents[2] / "e2e"
 
 def _run(what, tmp_path):
     return subprocess.run(
-        [sys.executable, str(E2E / "main.py"), what, "--tmp", str(tmp_path / "t-x"), "--repo", str(E2E.parent)],
-        capture_output=True, text=True, cwd=E2E, timeout=60,
+        [
+            sys.executable,
+            str(E2E / "main.py"),
+            what,
+            "--tmp",
+            str(tmp_path / "t-x"),
+            "--repo",
+            str(E2E.parent),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=E2E,
+        timeout=60,
     )
 
 
