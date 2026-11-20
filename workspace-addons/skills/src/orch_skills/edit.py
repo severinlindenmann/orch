@@ -22,15 +22,14 @@ import tempfile
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from . import switches
-from .model import INSTRUCTION_FILES
+from . import adapters, switches
 from .switches import Refused, safe_path
 
 MAX_FILE = 64 * 1024  # a file bigger than this (UTF-8 bytes) is not offered for editing and not written
 MAX_INPUT = 160 * 1024  # what a save may send on stdin: the text as JSON (escapes make it longer than the file)
 EDIT_ID = re.compile(r"e_[0-9a-f]{24}")
 REVISION = re.compile(r"[0-9a-f]{64}")
-SKILL_BASES = (Path(".agents") / "skills", Path(".claude") / "skills")
+SKILL_BASES = adapters.SKILL_DIRS
 BIN = Path(".orch") / "addons" / "skills" / "bin"
 # The ORCH-531 header form: the description and these metadata fields. Anything else in a header is kept as it is.
 META_FIELDS = (
@@ -118,7 +117,7 @@ def candidates(root: Path) -> list[dict]:
                 continue
             seen.add(name)
             out.append({"kind": "skill", "where": "workspace", "name": name, "rel": rel})
-    for fn in INSTRUCTION_FILES:
+    for fn in adapters.INSTRUCTION_FILES:
         rel = Path(fn)
         if _regular(root, rel) is not None:
             out.append({"kind": "instructions", "where": "workspace", "name": fn, "rel": rel})
