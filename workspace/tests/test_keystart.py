@@ -172,7 +172,9 @@ def test_claude_gets_the_key_through_a_pipe_only_and_the_ticket_says_why_and_wha
         assert KEY.encode() not in data, f"the key is in {p}"
 
 
-def test_a_key_start_keeps_the_workspace_permission_level_like_a_subscription_start(ws, run, fakes, monkeypatch):
+def test_a_key_start_keeps_the_workspace_permission_level_like_a_subscription_start(
+    ws, run, fakes, monkeypatch
+):
     """ORCH-913: with CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 Claude Code drops --permission-mode to default, so a
     helper on a key could not write a file. A key start passes the same permission flags as any start and
     never turns that setting on, even when the starter's own environment has it."""
