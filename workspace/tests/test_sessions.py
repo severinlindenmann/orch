@@ -106,6 +106,9 @@ def test_without_tmux_the_plain_terminal_stays_a_placeholder(proj, monkeypatch):
 
 
 @pytest.mark.skipif(os.name == "nt" or shutil.which("tmux") is None, reason="needs tmux")
+@pytest.mark.skipif(
+    "faketime" in os.environ.get("LD_PRELOAD", ""), reason="a real tmux hangs under libfaketime"
+)
 def test_the_plain_terminal_runs_a_real_shell_in_the_workspace(proj):
     sock = runs_live.socket_name(proj)
     try:
