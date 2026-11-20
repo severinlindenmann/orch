@@ -290,6 +290,19 @@ def test_a_failed_check_keeps_the_last_good_answer(faketool, monkeypatch):
     assert t["last_good_at"]
 
 
+@unix_only
+def test_a_failed_notes_read_is_plain_and_not_an_update_error(faketool, monkeypatch):
+    def forbidden(*a, **k):
+        raise urllib.error.HTTPError("u", 403, "x", {}, None)
+
+    monkeypatch.setattr(toolupdates, "notes_of", forbidden)
+    t = toolupdates.status(faketool["root"], refresh=True)["tools"][0]
+    assert t["newest"] == "1.1.0" and t["update"] is True
+    assert t["error"] is None
+    assert t["notes_error"] == "What is new could not be read just now."
+    assert "403" not in str(t)
+
+
 # ------------------------------------------------------------------------------------------------ update
 
 
