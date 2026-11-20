@@ -16,6 +16,11 @@
 // The runner records every action the page really sends and every page it shows. A click-through that claims a
 // feature in `covers` but never did it fails; with no --only, a feature of the catalogue (catalogue.cjs) that no
 // click-through did fails too, by name. Exit 0 = all passed.
+//
+// A click-through that fails is tried once more at the end, alone, on a fresh throw-away home, server and browser
+// context (ORCH-1132): a pass then counts, and the summary names it ("passed on second try: <file>") so a flaky one
+// stays visible. Failed twice = failed. More than 3 failures at once are not tried again (a real break). Each
+// click-through has a time limit of 3 minutes, so one hang cannot eat the job.
 'use strict';
 const fs = require('node:fs');
 const net = require('node:net');
@@ -316,7 +321,77 @@ function where(e) {
   return ` (at ${m[2]}:${m[3]}${src ? ': ' + src : ''})`;
 }
 
+/** A time limit for one click-through (the slowest takes about a minute on CI): a hang fails it by name instead of
+ *  eating the whole job. */
+const STEP_LIMIT_MS = 180000;
+/** At most this many failed click-throughs are tried a second time: more failures at once are a real break, and a
+ *  fresh server for each would only stretch a red job. */
+const MAX_RETRIES = 3;
+/** No second try starts after this long (the CI job stops at 15 minutes). */
+const RETRY_DEADLINE_MS = 12 * 60000;
+
+/** promise, or a plain error after ms; the timer never keeps the process alive */
+function withTimeout(promise, ms, what) {
+  let timer;
+  const late = new Promise((_, no) => {
+    timer = setTimeout(() => no(new Error(`${what} took longer than ${Math.round(ms / 1000)}s and was stopped`)), ms);
+    if (timer.unref) timer.unref();
+  });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+
+/** Every click-through once, then each failed one once more from a clean state (fresh(c) runs it on a fresh server and
+ *  browser context). A pass on the second try counts as a pass and is named, so flakes stay visible; failed twice =
+ *  failed. first(c) and fresh(c) resolve {c, problems, ...}; between() runs after the first round. */
+async function runAll(todo, { first, fresh, between = async () => {}, maxRetries = MAX_RETRIES, deadline = Infinity,
+  now = Date.now, log = console.log }) {
+  const results = [];
+  for (const c of todo) results.push(await first(c));
+  await between();
+  const failed = results.filter(r => r.problems.length);
+  const secondTry = [];
+  if (failed.length > maxRetries) {
+    log(`\n${failed.length} click-throughs failed: more than ${maxRetries}, so none is tried again.`);
+    return { results, secondTry };
+  }
+  for (const r of failed) {
+    if (now() > deadline) { log(`no time left for a second try of ${r.c.file}`); continue; }
+    log(`\ntrying ${r.c.file} once more on a fresh server`);
+    const again = await fresh(r.c);
+    if (!again.problems.length) {
+      results[results.indexOf(r)] = again;
+      secondTry.push(r.c.file);
+    }
+  }
+  return { results, secondTry };
+}
+
+/** One click-through on a new page of ctx: its problems, the features it did, its time. */
+async function runOne(ctx, srv, c, o) {
+  const page = await ctx.newPage();
+  const rec = recorder(page, srv.base);
+  const problems = [];
+  const t0 = Date.now();
+  try {
+    await withTimeout(c.run(tools(page, srv, rec, o.out ? path.join(o.out, c.file.replace(/\.cjs$/, '')) : null)), o.limit || STEP_LIMIT_MS, c.file);
+  } catch (e) {
+    problems.push(String(e.message).split('\n')[0] + where(e));
+  }
+  if (o.out) await withTimeout(page.screenshot({ path: path.join(o.out, c.file.replace(/\.cjs$/, '.png')) }), 30000, 'the picture').catch(() => {});
+  await withTimeout(page.close(), 30000, 'closing the page').catch(() => {});
+  problems.push(...new Set(rec.errors));
+  const did = new Set([...rec.ops.filter(x => ok(x.status) || rec.refusedOk.has(x.op)).map(x => x.op), ...rec.pages]);
+  const claimedNotDone = (c.covers || []).filter(k => !did.has(k));
+  if (!problems.length && claimedNotDone.length) problems.push(`says it covers ${claimedNotDone.join(', ')} but never did it`);
+  const r = { c, problems, secs: ((Date.now() - t0) / 1000).toFixed(1) };
+  console.log(`${problems.length ? 'FAILED' : 'passed'}  ${c.name} (${c.file}, ${r.secs}s)`);
+  for (const p of problems) console.log(`        ${p}`);
+  if (problems.length && rec.ops.length) console.log(`        actions sent: ${rec.ops.map(x => `${x.op} ${x.status}`).join(', ')}`);
+  return r;
+}
+
 async function main() {
+  const started = Date.now();
   const o = args(process.argv.slice(2));
   const all = catalogue.clickthroughs();
   if (o.list) {
@@ -328,39 +403,35 @@ async function main() {
   const todo = all.filter(c => !o.only || o.only.has(c.file.replace(/\.cjs$/, '')));
   if (o.only && todo.length !== o.only.size) throw new Error(`no such click-through: ${[...o.only].filter(n => !all.some(c => c.file === n + '.cjs')).join(', ')}`);
   if (o.out) fs.mkdirSync(o.out, { recursive: true });
-  const srv = await serve();
+  let srv = await serve();
   const { chromium } = playwright();
   // a fake microphone that is always allowed (ORCH-422: the voice note click-through records with it)
   const browser = await chromium.launch({ args: ['--use-mock-keychain', '--password-store=basic', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
-  const done = new Set(), results = [];
+  let run;
   try {
     const ctx = await signIn(browser, srv);
-    for (const c of todo) {
-      const page = await ctx.newPage();
-      const rec = recorder(page, srv.base);
-      const problems = [];
-      const t0 = Date.now();
-      try {
-        await c.run(tools(page, srv, rec, o.out ? path.join(o.out, c.file.replace(/\.cjs$/, '')) : null));
-      } catch (e) {
-        problems.push(String(e.message).split('\n')[0] + where(e));
-      }
-      if (o.out) await page.screenshot({ path: path.join(o.out, c.file.replace(/\.cjs$/, '.png')) }).catch(() => {});
-      await page.close();
-      problems.push(...new Set(rec.errors));
-      const did = new Set([...rec.ops.filter(x => ok(x.status) || rec.refusedOk.has(x.op)).map(x => x.op), ...rec.pages]);
-      const claimedNotDone = (c.covers || []).filter(k => !did.has(k));
-      if (!problems.length && claimedNotDone.length) problems.push(`says it covers ${claimedNotDone.join(', ')} but never did it`);
-      if (!problems.length) for (const k of c.covers || []) done.add(k);
-      results.push({ c, problems, secs: ((Date.now() - t0) / 1000).toFixed(1) });
-      console.log(`${problems.length ? 'FAILED' : 'passed'}  ${c.name} (${c.file}, ${results.at(-1).secs}s)`);
-      for (const p of problems) console.log(`        ${p}`);
-      if (problems.length && rec.ops.length) console.log(`        actions sent: ${rec.ops.map(x => `${x.op} ${x.status}`).join(', ')}`);
-    }
+    run = await runAll(todo, {
+      first: c => runOne(ctx, srv, c, o),
+      between: async () => { await ctx.close().catch(() => {}); srv.stop(); srv = null; },
+      // the second try: a new throw-away home and server and a new browser context, as for the first round
+      fresh: async c => {
+        const one = await serve();
+        try {
+          const fctx = await signIn(browser, one);
+          try { return await runOne(fctx, one, c, o); } finally { await fctx.close().catch(() => {}); }
+        } catch (e) {
+          return { c, problems: [`the second try did not start: ${String(e.message).split('\n')[0]}`] };
+        } finally { one.stop(); }
+      },
+      deadline: started + RETRY_DEADLINE_MS,
+    });
   } finally {
     await browser.close();
-    srv.stop();
+    if (srv) srv.stop();
   }
+  const { results, secondTry } = run;
+  const done = new Set();
+  for (const r of results) if (!r.problems.length) for (const k of r.c.covers || []) done.add(k);
   const failed = results.filter(r => r.problems.length);
   let missing = [];
   if (!o.only) {
@@ -371,9 +442,11 @@ async function main() {
     }
   }
   console.log(`\n${results.length - failed.length} of ${results.length} click-throughs passed${o.only ? '' : `; ${catalogue.features().length - missing.length} of ${catalogue.features().length} features done`}.`);
+  if (secondTry.length) console.log(`passed on second try: ${secondTry.join(', ')}`);
+  if (failed.length) console.log(`failed: ${failed.map(r => r.c.file).join(', ')}`);
   return failed.length || missing.length ? 1 : 0;
 }
 
-module.exports = { tools, recorder, where };
+module.exports = { tools, recorder, where, runAll, withTimeout };
 
 if (require.main === module) main().then(c => process.exit(c), e => { console.error(e); process.exit(1); });
