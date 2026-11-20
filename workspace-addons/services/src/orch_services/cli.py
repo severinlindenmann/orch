@@ -141,7 +141,7 @@ def _driver() -> drivers.Driver:
     return d
 
 
-def _row(root: Path, rec: dict, st: drivers.Status | None) -> dict:
+def _row(root: Path, rec: dict, st: drivers.Status | None, off: bool = False) -> dict:
     running = bool(st and st.running)
     since = (st.since if st else None) or store.last_change(root, rec["id"]) or rec.get("created_at")
     row = {
@@ -149,7 +149,7 @@ def _row(root: Path, rec: dict, st: drivers.Status | None) -> dict:
         "name": rec["name"],
         "state": "running" if running else "stopped",
         "since": since,
-        "auto": bool(rec.get("auto")),
+        "auto": bool(rec.get("auto")) and not off,
         "made_by": rec.get("made_by"),
         "port": rec.get("port"),
         "command": _masked_command(root, rec["command"]),
@@ -173,14 +173,16 @@ def _rows(root: Path) -> tuple[list[dict], int, str | None]:
         drv, wid, note = None, None, str(e)
     rows = []
     for r in recs:
-        st = None
+        st, off = None, False
         if drv and wid:
             try:
                 _same_kind(drv, r)
-                st = drv.status(_spec(root, r, wid, strict=False))
+                spec = _spec(root, r, wid, strict=False)
+                st = drv.status(spec)
+                off = _switched_off(drv, r, spec)
             except Refused:
                 st = None
-        rows.append(_row(root, r, st))
+        rows.append(_row(root, r, st, off))
     return rows, bad, note
 
 
@@ -335,8 +337,15 @@ def _list_text(rows: list[dict], bad: int, note: str | None) -> str:
     return "\n".join(lines)
 
 
+def _switched_off(drv: drivers.Driver, rec: dict, spec: drivers.Spec) -> bool:
+    """An adopted job switched off outside orch (launchctl disable) does not start by itself (ORCH-1003).
+    orch's own entries follow the record: auto on/off enables or disables the label itself."""
+    return rec.get("adopted") is not None and bool(rec.get("auto")) and drv.switched_off(spec)
+
+
 def _state(root: Path, drv: drivers.Driver, rec: dict, wid: str) -> dict:
-    return _row(root, rec, drv.status(_spec(root, rec, wid, strict=False)))
+    spec = _spec(root, rec, wid, strict=False)
+    return _row(root, rec, drv.status(spec), _switched_off(drv, rec, spec))
 
 
 SETTLE_QUIET = 3.0  # seconds a job that is not even launching gets before it counts as stopped

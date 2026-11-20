@@ -67,7 +67,8 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 `found` lists background jobs of the person's own account that orch did not make; it only reads, nothing about a
 found job changes until the person chooses Manage with orch (`adopt`).
 - macOS: plists in `~/Library/LaunchAgents` (Label, `ProgramArguments`/`Program`, `RunAtLoad`) plus
-  `launchctl print gui/<uid>/<label>`; labels `ch.orch.svc.*` (orch's own) and `com.apple.`, `com.google.`,
+  `launchctl print gui/<uid>/<label>`; starts by itself = `RunAtLoad` and the label not switched off in
+  `launchctl print-disabled gui/<uid>` (also asked for an adopted job in list and on the page); labels `ch.orch.svc.*` (orch's own) and `com.apple.`, `com.google.`,
   `com.microsoft.` are left out (one list in `found.py`).
 - Linux: `systemctl --user list-units --type=service --all` and `~/.config/systemd/user/*.service`, then one
   `systemctl --user show`; only units whose file is in `~/.config/systemd/user` or `~/.local/share/systemd/user`, never
