@@ -628,7 +628,7 @@ _ANSWERED_RAW = re.compile(r"q\d+ = (?P<ans>.*?)(?: \(routine: [^()]*\))?\s*", r
 
 
 def _answered_words(raw: str) -> str:
-    """'q3 = Morning (routine: a plain question ...)' (the history line) as plain words: 'answered "Morning"'."""
+    """The history line 'q3 = Morning (routine: ...)' as plain words: 'answered "Morning"'."""
     m = _ANSWERED_RAW.fullmatch(raw.strip())
     return f'answered "{m.group("ans")}"' if m and m.group("ans") else "answered " + raw
 
