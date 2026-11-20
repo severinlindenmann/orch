@@ -345,3 +345,89 @@ def test_a_linked_or_broken_old_file_is_not_taken_over(two, tmp_path):
     bad.mkdir(parents=True)
     (bad / "accounts.json").write_text(json.dumps({"schema": store.SCHEMA, "accounts": [{"id": "nope"}]}))
     assert store.load(two["a"])["accounts"] == []
+
+
+# ---------------------------------------------------------------- use of every workspace counts (ORCH-947)
+
+
+def _key_source(day_limit):
+    return [
+        {
+            "id": "a_key001",
+            "label": "OpenAI credit",
+            "tool": "codex",
+            "type": "api-key",
+            "on": True,
+            "left": 100.0,
+            "day_limit": day_limit,
+            "spent_today": 0.0,
+            "models": {"sonnet": "gpt-small"},
+        },
+        {
+            "id": "a_sub001",
+            "label": "Claude main",
+            "tool": "claude",
+            "type": "subscription",
+            "on": True,
+            "week_used": 10.0,
+        },
+    ]
+
+
+_KEY_FIRST = {"order": ["a_key001", "a_sub001"], "credit_kinds": ["reviews"]}
+
+
+def _req(n):
+    return {"start": f"s{n}", "ticket": f"ORCH-{n}", "kind": "reviews", "model": "sonnet"}
+
+
+def test_every_workspace_writes_its_starts_to_the_one_store_of_the_computer(two):
+    from orch_usage import picker
+
+    picker.pick(two["a"], _req(1), _KEY_FIRST, _key_source(10.0), T0)
+    picker.pick(two["b"], _req(2), _KEY_FIRST, _key_source(10.0), T0)
+    assert not (computer.local_dir(two["a"]) / picker.STARTS).exists()
+    assert not (computer.local_dir(two["b"]) / picker.STARTS).exists()
+    starts = json.loads((shared(two["a"]) / picker.STARTS).read_text(encoding="utf-8"))["starts"]
+    assert {k: v["workspace"] for k, v in starts.items()} == {
+        "s1": computer.label(two["a"]),
+        "s2": computer.label(two["b"]),
+    }
+
+
+def test_a_day_limit_counts_what_both_workspaces_spent(two):
+    from orch_usage import picker
+
+    src = _key_source(2.0)  # room for one hold of 1.05, not two
+    first = picker.pick(two["a"], _req(1), _KEY_FIRST, src, T0)
+    second = picker.pick(two["b"], _req(2), _KEY_FIRST, src, T0)
+    assert first.source == "a_key001"
+    assert second.source == "a_sub001" and "OpenAI credit at its day limit" in second.why
+    day = T0.date().isoformat()
+    assert picker.spread(two["b"], day) == picker.spread(two["a"], day)
+
+
+def test_the_usage_page_shows_the_split_per_workspace_in_both_workspaces(two):
+    from orch_usage import picker, spread
+
+    for n, root in enumerate([two["a"], two["b"], two["b"]]):
+        picker.pick(root, _req(n), _KEY_FIRST, _key_source(10.0), T0)
+    accounts = [{**a, "limits": []} for a in _key_source(10.0)]
+    a, b = spread.build(two["a"], accounts, T0), spread.build(two["b"], accounts, T0)
+    assert a["starts"] == b["starts"] == 3
+    assert (
+        a["workspaces"]
+        == b["workspaces"]
+        == [
+            {"name": computer.label(two["b"]), "starts": 2, "dollars": 2.1},
+            {"name": computer.label(two["a"]), "starts": 1, "dollars": 1.05},
+        ]
+    )
+    assert sum(w["starts"] for w in a["workspaces"]) == a["starts"]
+
+
+def test_one_workspace_alone_shows_no_split(two):
+    from orch_usage import picker, spread
+
+    picker.pick(two["a"], _req(1), _KEY_FIRST, _key_source(10.0), T0)
+    assert spread.build(two["a"], [], T0)["workspaces"] == []
