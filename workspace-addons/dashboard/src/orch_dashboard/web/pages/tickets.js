@@ -51,7 +51,7 @@ function syncTicketAddress() {
   if (['board', 'calendar'].includes(p.get('layout'))) ticketView = p.get('layout');
   else if (at < 0 || !p.has('layout')) { try { ticketView = storedTicketView(); } catch (_) { ticketView = 'list'; } }
   calMode = p.get('cal') === 'week' ? 'week' : 'month';
-  calDay = /^\d{4}-\d{2}-\d{2}$/.test(p.get('day') || '') ? p.get('day') : '';
+  calDay = window.DashHelpers?.calendar ? window.DashHelpers.calendar.okDay(p.get('day')) : '';  // an impossible day (2026-02-30) means today
 }
 // The layout last picked on this computer: list, board or calendar.
 function storedTicketView() { const v = localStorage.getItem('orch.tickets.view'); return v === 'board' || v === 'calendar' ? v : 'list'; }

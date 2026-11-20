@@ -838,8 +838,8 @@
   const calDow = s => (calDate(s).getDay() + 6) % 7;
   const calMonday = s => calAdd(s, -calDow(s));
   const calOkDay = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && dueKey(calDate(v)) === v ? v : '';
-  const calDayOf = due => { const m = /^(\d{4}-\d{2}-\d{2})(?:T\d{2}:\d{2})?$/.exec(String(due || '')); return m && calOkDay(m[1]) ? m[1] : ''; };
-  const calTime = due => { const m = /T(\d{2}:\d{2})$/.exec(String(due || '')); return m ? m[1] : ''; };
+  const calDayOf = due => { const m = /^(\d{4}-\d{2}-\d{2})(?:T([01]\d|2[0-3]):[0-5]\d)?$/.exec(String(due || '')); return m && calOkDay(m[1]) ? m[1] : ''; };  // a broken time (T99:99) is not on the calendar
+  const calTime = due => { const m = /T((?:[01]\d|2[0-3]):[0-5]\d)$/.exec(String(due || '')); return m ? m[1] : ''; };
   const calNum = s => calDate(s).getDate();
   const calDayShort = s => CAL_DOW[calDow(s)] + ' ' + calNum(s) + ' ' + DUE_MONTHS[calDate(s).getMonth()];
   const calDayLong = s => CAL_DOW_LONG[calDow(s)] + ' ' + calNum(s) + ' ' + CAL_MONTHS_LONG[calDate(s).getMonth()];

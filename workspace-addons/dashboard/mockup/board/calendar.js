@@ -16,7 +16,7 @@ const RAW = [
  [12, 'Plan the autumn newsletter', 'working', 'Anna', '2026-11-24', ''],
  [14, 'Update the price list', 'working', 'Anna', '2026-11-23', '12:00'],
  [15, 'Book the spring workshop room', 'working', 'Ben', '2026-11-18', ''],
- [16, 'Prepare the new opening hours sign', 'done', 'Anna', '2026-11-17', ''],
+ [16, 'Prepare the new opening hours poster', 'done', 'Anna', '2026-11-17', ''],
  [17, 'Fix the typo on the opening hours page', 'done', 'Anna', '2026-11-13', ''],
  [18, 'Set up the weekly sales report', 'todo', 'Anna', '2026-11-27', ''],
  [19, 'Redesign the logo', 'todo', 'Ben', '2026-11-16', ''],

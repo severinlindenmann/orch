@@ -9,7 +9,7 @@ const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/page
 function load(hash, stored) {
   const from = src.indexOf('const TICKET_VIEWS'), to = src.indexOf('const changesPending');
   const ctx = {location:{hash}, history:{replaceState:(_s, _t, url) => { ctx.location.hash = url; }}, searchFolds:new Set(),
-    URLSearchParams, localStorage:{getItem:() => stored || null}, ticketSearch:'', ticketPerson:'', ticketView:'list', calMode:'month', calDay:'', window:{}};
+    URLSearchParams, localStorage:{getItem:() => stored || null}, ticketSearch:'', ticketPerson:'', ticketView:'list', calMode:'month', calDay:'', window:{DashHelpers:require('../src/orch_dashboard/web/helpers.js')}};
   vm.createContext(ctx);
   vm.runInContext(src.slice(from, to).replace('let ticketAddressKey', 'var ticketAddressKey') + '\nthis.api = {ticketAddress, writeTicketAddress, syncTicketAddress, savedView};', ctx);
   return ctx;
@@ -76,6 +76,9 @@ test('ORCH-1081: the calendar layout, its week view and shown day round-trip thr
   const junk = load('#tickets?layout=calendar&day=tomorrow');
   junk.api.syncTicketAddress();
   assert.equal(junk.calDay, '', 'a broken day is ignored');
+  const impossible = load('#tickets?layout=calendar&day=2026-02-30');
+  impossible.api.syncTicketAddress();
+  assert.equal(impossible.calDay, '', 'a day that does not exist means today, so Next steps from what is shown');
 });
 test('ORCH-1081: the calendar is remembered like the board when the address names no layout', () => {
   const ctx = load('#tickets', 'calendar');

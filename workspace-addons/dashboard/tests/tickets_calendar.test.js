@@ -66,3 +66,34 @@ test('month and week: weeks as rows, titles and stepping', () => {
   assert.equal(C.step('week', '2026-11-20', -1), '2026-11-13');
   assert.equal(C.plan([], {now, day:'nonsense'}).day, '2026-11-20');
 });
+
+test('a broken due time is on no day and never shown as a time', () => {
+  assert.equal(C.dayOf('2026-11-23T99:99'), '');
+  assert.equal(C.dayOf('2026-11-23T24:00'), '');
+  assert.equal(C.time('2026-11-23T99:99'), '');
+  assert.equal(C.time('2026-11-23T23:59'), '23:59');
+  const plan = C.plan([{key:'B-1', due:'2026-11-23T99:99', status:'ready'}], {now});
+  assert.equal(plan.weeks.flatMap(w => w.days).some(d => d.items.length), false);
+});
+
+// Date math across daylight-saving changes and the new year, in zones that have them (the host zone may not).
+const {execFileSync} = require('node:child_process');
+for (const TZ of ['Europe/Zurich', 'America/New_York', 'Australia/Sydney', 'UTC']) {
+  test('days, Mondays and steps stay right across DST and the new year in ' + TZ, () => {
+    const script = `
+      const {calendar: C} = require(${JSON.stringify(require.resolve('../src/orch_dashboard/web/helpers.js'))});
+      const out = [];
+      for (let d = '2026-01-01'; d < '2028-01-01'; d = C.add(d, 1)) out.push(d);
+      const mondays = new Set(out.map(C.monday));
+      const steps = [C.step('month', '2026-12-15', 1, ''), C.step('month', '2027-01-10', -1, ''), C.step('week', '2026-12-28', 1, ''),
+        C.step('week', '2026-03-23', 1, ''), C.step('week', '2026-10-19', 1, ''), C.step('week', '2026-04-06', -1, '')];
+      process.stdout.write(JSON.stringify({n: out.length, first: out[0], last: out[out.length - 1], mondays: [...mondays].map(m => new Date(m + 'T12:00').getDay()), steps,
+        title: C.title('week', '2026-12-30')}));`;
+    const r = JSON.parse(execFileSync(process.execPath, ['-e', script], {env: {...process.env, TZ}}).toString());
+    assert.equal(r.n, 730, 'every day of 2026 and 2027 once, none skipped or doubled');
+    assert.equal(r.last, '2027-12-31');
+    assert.ok(r.mondays.every(d => d === 1), 'every week starts on a Monday');
+    assert.deepEqual(r.steps, ['2027-01-01', '2026-12-01', '2027-01-04', '2026-03-30', '2026-10-26', '2026-03-30']);
+    assert.equal(r.title, '28 Dec – 3 Jan 2027');
+  });
+}
