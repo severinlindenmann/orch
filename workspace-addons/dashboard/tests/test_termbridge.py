@@ -6,6 +6,7 @@ import http.client
 import json
 import os
 import queue
+import re
 import secrets
 import shutil
 import subprocess
@@ -197,6 +198,12 @@ def post(port, path, body, secret="secret", origin=None, host=None):
     out = (r.status, r.read())
     conn.close()
     return out
+
+
+def _tmux_version() -> tuple[int, int]:
+    out = subprocess.run(["tmux", "-V"], check=False, capture_output=True, text=True).stdout
+    m = re.search(r"(\d+)\.(\d+)", out)
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
 
 
 def wait(cond, timeout=5.0):
@@ -428,13 +435,14 @@ def test_a_page_that_joins_gets_the_modes_the_program_turned_on(helper, server):
         "-c",
         "printf '\\033[?2004h\\033[?1h\\033[?1000hready'; cat",
     )
-    assert wait(
-        lambda: tm("display-message", "-p", "-t", f"={TID}:", "#{bracket_paste_flag}").stdout.strip() == "1"
-    )
+    # wait on the screen, not on bracket_paste_flag: that flag came in tmux 3.7 and CI's Ubuntu ships 3.4
+    assert wait(lambda: "ready" in tm("capture-pane", "-p", "-t", f"={TID}:").stdout)
     port = server().server_address[1]
     s = Stream(port)
     data = base64.b64decode(json.loads(s.next("screen")[1])["data"])
-    assert b"ready" in data and b"\x1b[?2004h" in data and b"\x1b[?1h" in data and b"\x1b[?1000h" in data
+    assert b"ready" in data and b"\x1b[?1h" in data and b"\x1b[?1000h" in data
+    if _tmux_version() >= (3, 7):  # an older tmux cannot tell whether bracketed paste is on
+        assert b"\x1b[?2004h" in data
     assert b"\x1b[?1003h" not in data  # only what is on
     s.close()
 
