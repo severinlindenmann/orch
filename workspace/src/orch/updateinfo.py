@@ -165,7 +165,49 @@ def release_now(sha: str | None) -> int | None:
     return release_in(msgs) if msgs else None
 
 
+def _commit_at(ref: str, at: int) -> str | None:
+    """The commit `ref` pointed at, at time `at` (Unix seconds), from the GitHub API; None when unknown."""
+    from urllib.parse import quote
+    from urllib.request import Request, urlopen
+
+    api = addons._github_api()
+    if not api:
+        return None
+    until = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(at))
+    url = f"{api}/commits?sha={quote(ref, safe='')}&until={until}&per_page=1"
+    try:
+        with urlopen(Request(url, headers={"Accept": "application/vnd.github+json"}), timeout=6) as r:  # noqa: S310
+            rows = json.load(r)
+    except Exception:  # noqa: BLE001 - best effort: still no answer, try again next time
+        return None
+    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+        return addons._sha_or_none(rows[0].get("sha"))
+    return None
+
+
+def resolve_pending() -> None:
+    """An update GitHub did not answer recorded only the ref and time it installed: look up that commit and
+    its release number now, and save them (orch then shows the right release again)."""
+    try:
+        d = json.loads((addons.home() / "installed.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if not isinstance(d, dict):
+        return
+    p = d.get("pending")
+    if addons._sha_or_none(d.get("sha")) or not isinstance(p, dict):
+        return
+    ref, at = p.get("ref"), p.get("at")
+    if not isinstance(ref, str) or not isinstance(at, int) or isinstance(at, bool):
+        return
+    sha = _commit_at(ref, at)
+    msgs = _fetch_messages("at", sha) if sha else None
+    if msgs is not None:  # both answered; else keep `pending` and try again next time
+        addons._save_installed(sha, release_in(msgs))
+
+
 def _compute() -> dict:
+    resolve_pending()
     ref = addons.ref()
     have = installed()
     newest_sha = addons._source_sha()

@@ -337,7 +337,7 @@ def main() -> int:
     if not a.no_history:
         (STATE / "history.json").write_text(json.dumps(hist, indent=1))
     _prune(STATE / "reports", 40)
-    url = f"http://develop.netbird.cloud:{a.serve_port}/{runname}/"
+    url = f"http://develop.nb.severin.io:{a.serve_port}/{runname}/"
     log(f"REPORT {url}  ({page})")
     nfail = sum(s["status"] == "fail" for s in steps)
     missing = [l for l in want if l not in {x["lane"] for x in lanes}]

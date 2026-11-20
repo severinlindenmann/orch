@@ -275,7 +275,7 @@ def main() -> int:
     ap.add_argument("--repo", required=True)
     ap.add_argument("--bins", default="")
     a = ap.parse_args()
-    import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc, scenarios_v2, scenarios_phone_v3, scenarios_sim, scenarios_look, scenarios_sync, scenarios_factory, scenarios_lessons, scenarios_services  # noqa: F401,E401
+    import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc, scenarios_v2, scenarios_phone_v3, scenarios_sim, scenarios_look, scenarios_sync, scenarios_factory, scenarios_lessons, scenarios_services, scenarios_usage  # noqa: F401,E401
 
     if a.what == "smoke":
         ids = list(SMOKE)
@@ -403,12 +403,12 @@ def live_servers(e: E):
         except OSError as ex:
             print(f"live: {u}/health failed: {ex!r}")
             return None, None
-    host = os.environ.get("E2E_VPS", "ubuntu@179.237.125.155")
-    key = os.path.join(os.environ.get("E2E_REAL_HOME", ""), ".ssh", "orch-dev_rsa")
+    host = os.environ.get("E2E_VPS", "root@hostinger-vps.nb.severin.io")
+    key = os.path.join(os.environ.get("E2E_REAL_HOME", ""), ".ssh", "hostinger-vps_ed25519")
     base = ["ssh", "-i", key, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
             "-o", f"UserKnownHostsFile={os.environ.get('E2E_REAL_HOME', '')}/.ssh/known_hosts", host]
     def admin(port, tok_env, tokfile):
-        url = f"http://100.71.130.135:{port}"
+        url = f"http://hostinger-vps.nb.severin.io:{port}"
         tok = os.environ.get(tok_env)
         if tok:  # direct over the private network (token from Proton Pass, passed by run.sh)
             try:

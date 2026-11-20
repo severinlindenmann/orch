@@ -14,7 +14,7 @@ from pathlib import Path
 from . import actions, orchcli, plain, scripts, service
 from .cron import fmt, next_after, valid
 from .listen import NOT_LISTENING
-from .loop import Scheduler, scheduled
+from .loop import Scheduler, group_of, scheduled
 from .runner import load_state
 from .view import cron_human
 
@@ -47,6 +47,8 @@ def list_line(x: dict) -> str:
     if x["kind"] == "wake":
         return f"{name}  Wakes {x.get('local') or x['at']}  {x['title']}"
     nxt = "switched off" if x.get("off") else f"next {x.get('local') or x['at'] or 'unknown'}"
+    if x["kind"] == "script":
+        return f"{name}  script {x['script']}: {x['when']}, {nxt}  {x['title']}"
     return f"{name}  {x['when']}, {nxt}  {x['title']}"
 
 
@@ -85,6 +87,22 @@ def describe(root: Path) -> list[dict]:
                     }
                 )
                 continue
+            for n, c in sorted(group_of(t).items()):  # each script of a group on its own plan
+                nx = next_after(c, datetime.now(UTC), plain.zone(s.get("tz")))
+                gat = fmt(nx) if nx else None
+                rows.append(
+                    {
+                        "ticket": t["id"],
+                        "key": t.get("key"),
+                        "title": t["title"],
+                        "kind": "script",
+                        "script": n,
+                        "cron": c,
+                        "at": gat,
+                        "when": cron_human(c, plain.zone(s.get("tz"))),
+                        "local": local_text(gat),
+                    }
+                )
             nxt = next_after(s["cron"], datetime.now(UTC), plain.zone(s.get("tz")))
             at = fmt(nxt) if nxt else state.get(t["id"], {}).get("next_run")
             rows.append(
@@ -403,7 +421,7 @@ def _run(args, root: Path) -> int:
             when_changed=args.when_changed,
         )
         if res.get("until"):
-            text = f"{args.ticket} wakes once at {res['until']}."
+            text = f"{args.ticket} wakes once at {local_text(res['until']) or res['until']}."
         elif res["recurring"]:
             text = f"{args.ticket} repeats: {cron_human(res['cron'], plain.zone(res['tz']), local=plain.zone(res['tz']))} ({res['tz']})."
             if res.get("script"):
@@ -423,7 +441,7 @@ def _run(args, root: Path) -> int:
 
 
 def _script(args, root: Path, out) -> int:
-    from .loop import ask_failure, group_of, script_of
+    from .loop import ask_failure, script_of
 
     if args.script_cmd == "add":
         cmd = list(args.command)
@@ -494,30 +512,50 @@ def _script(args, root: Path, out) -> int:
         )
         if t is None:
             raise Refused(f"There is no ticket {args.ticket}.")
-        member = bool(args.name)
-        name = args.name if member else script_of(t)
-        if member and name not in group_of(t):
-            raise Refused(f"{name} is not one of the scripts of {args.ticket}.")
-        if not name:
+        group = group_of(t)
+        if args.name and args.name not in group:
+            raise Refused(f"{args.name} is not one of the scripts of {args.ticket}.")
+        if args.name:
+            todo = [(args.name, True)]
+        elif script_of(t):
+            todo = [(script_of(t), False)]
+        elif group:
+            todo = [(n, True) for n in sorted(group)]  # what Start now does: the whole group
+        else:
             raise Refused(
                 f"{args.ticket} runs no script. Set one: orch automation repeat {args.ticket} <when> --script <name>"
             )
         refused = orchcli.sync_refusal(root, t["id"])
         if refused:
             raise Refused(refused)
-        code = scripts.run(
-            root,
-            t["id"],
-            name,
-            fmt(datetime.now(UTC)),
-            lambda why: ask_failure(root, t["id"], f"The script did not work: {why}"),
-            member=member,
-        )
-        if code == 75:
-            out({"ticket": t["id"], "running": True}, "It is still running from before.")
-            return 0
-        out({"ticket": t["id"], "exit": code}, f"Script {name} ended with exit code {code}.")
-        return 0 if code == 0 else 1
+        results, worst = [], 0
+        for name, member in todo:
+            code = scripts.run(
+                root,
+                t["id"],
+                name,
+                fmt(datetime.now(UTC)),
+                lambda why: ask_failure(root, t["id"], f"The script did not work: {why}"),
+                member=member,
+            )
+            results.append((name, code))
+            if code not in (0, 75) and worst == 0:
+                worst = code
+        if len(results) == 1:
+            name, code = results[0]
+            if code == 75:
+                out({"ticket": t["id"], "running": True}, "It is still running from before.")
+                return 0
+            out({"ticket": t["id"], "exit": code}, f"Script {name} ended with exit code {code}.")
+            return 0 if code == 0 else 1
+        lines = [
+            f"Script {n} is still running from before."
+            if c == 75
+            else f"Script {n} ended with exit code {c}."
+            for n, c in results
+        ]
+        out({"ticket": t["id"], "exit": worst, "scripts": dict(results)}, "\n".join(lines))
+        return 0 if worst == 0 else 1
     return 0
 
 

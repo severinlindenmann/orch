@@ -15,6 +15,7 @@ The shape (the wall builds on it; keep it in step with the PR text):
       "status": "needs-you" | "working" | "in-line" | "idle" | "closed",
       "word": "Waits for you" | "Working" | "Starting" | "On hold" | "Stuck" | "In line" | "Idle" | "No session",
       "detail": "Your answer" | "Running pytest" | "" ...,          # the core's one-line detail
+      "step": "<the step it works on now>" | "",                    # orch check start; the live line when no detail
       "waiting_on": [{"kind": "person"|"time"|"ticket"|"external"|"command"|"hold", "what": "<plain words>"}],
       "question": "<the open question>" | null,                    # what Needs you shows
       "lines": ["<last screen line>", ...],                        # [] when nothing is live or no screen
@@ -139,6 +140,14 @@ def _int(v) -> int | None:
     return v if isinstance(v, int) and not isinstance(v, bool) else None
 
 
+def _step(ticket: dict) -> str:
+    """The step the helper marked it works on now (orch check start), in one line; '' when none (ORCH-463)."""
+    for c in ticket.get("checklist") or []:
+        if isinstance(c, dict) and c.get("state") == "doing" and not c.get("done") and not c.get("wont_do"):
+            return " ".join(str(c.get("text") or c.get("title") or "").split())[:200]
+    return ""
+
+
 def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> dict:
     """One session from the state: the ticket, its `orch run status` row and whether it waits in line."""
     run = run if isinstance(run, dict) else {}
@@ -162,6 +171,11 @@ def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> 
     if status in ("idle", "closed") and ticket.get("status") == "review":
         # ORCH-674: a quiet session whose result waits for the person reads Check, as its ticket does everywhere else
         word = "Check"
+    # ORCH-790: a quiet or closed session whose ticket asks a question or waits for a result still needs the person;
+    # the wall puts it in the Needs you band so the band and the "N need you" count agree.
+    needs = status in ("idle", "closed") and (
+        ticket.get("status") == "review" or _question(ticket) is not None
+    )
     waits = [
         {"kind": str(w.get("kind") or ""), "what": " ".join(str(w.get("what") or "").split())[:200]}
         for w in run.get("waiting_on") or []
@@ -182,8 +196,10 @@ def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> 
         "title": " ".join(str(ticket.get("title") or "").split()) or "Untitled",
         "status": status,
         "word": word,
+        "needs": needs,
         "detail": helper.get("detail") if alive and isinstance(helper.get("detail"), str) else "",
         "waiting_on": waits if alive else [],
+        "step": _step(ticket) if alive else "",
         "question": _question(ticket) if status == "needs-you" else None,
         "lines": [],
         "tool": tool if alive else None,

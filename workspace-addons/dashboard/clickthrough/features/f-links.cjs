@@ -16,8 +16,14 @@ module.exports = {
     await open('#addon/publish');
     await page.getByRole('button', { name: 'Share a file' }).waitFor({ timeout: 30000 })
       .catch(async () => { throw new Error('no Share a file button:\n' + (await text()).slice(0, 400)); });
-    await page.getByRole('button', { name: 'Share a file' }).click();
-    const dlg = page.locator('dialog[open]');
+    // the page draws its list again once the links are loaded, and a click that lands during that redraw is lost:
+    // press Share a file again until its window is open
+    const dlg = page.locator('dialog.share-dialog[open]');
+    for (let i = 0; i < 4 && !(await dlg.count()); i++) {
+      await page.getByRole('button', { name: 'Share a file' }).click();
+      await dlg.waitFor({ timeout: 5000 }).catch(() => {});
+    }
+    await dlg.waitFor({ timeout: 5000 }).catch(async () => { throw new Error('Share a file opens no window:\n' + (await text()).slice(0, 400)); });
     const file = path.join(home, 'lunch-menu.txt');
     fs.writeFileSync(file, 'Soup, bread, apple cake\n');
     await dlg.locator('input[type=file]').setInputFiles(file);
