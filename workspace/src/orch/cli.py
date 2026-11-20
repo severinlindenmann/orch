@@ -36,6 +36,7 @@ from orch import (
     cli_shot,
     cli_status,
     cli_tools,
+    cli_workspace,
     diag,
     diag_incident,
     fields,
@@ -528,6 +529,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_diag.add_parsers(sub, common)
     cli_report.add_parsers(sub, common)
     cli_leave.add_parsers(sub, common)
+    cli_workspace.add_parsers(sub, common)
     cli_health.add_parsers(sub, common)
     cli_checks.add_parsers(sub, common)
     cli_tools.add_parsers(sub, common)
@@ -1140,6 +1142,7 @@ def run(args: argparse.Namespace) -> None:
         or cli_diag.dispatch(args, root)
         or cli_report.dispatch(args, root)
         or cli_leave.dispatch(args, root)
+        or cli_workspace.dispatch(args, root)
         or cli_health.dispatch(args, root)
         or cli_checks.dispatch(args, root)
         or cli_tools.dispatch(args, root)
