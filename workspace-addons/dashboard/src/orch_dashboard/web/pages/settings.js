@@ -1050,13 +1050,21 @@ function pageStopped(r) {
 // the frame address's fragment (kit/frame.js takes it out at once); one orch did not ship gets no pass.
 const SHIPPED_SANDBOX = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
 const framePasses = new Map(), framePassAsks = new Map(), framePassFailed = new Map(), frameFresh = new Map();
+// The server ends a pass after its life (`life` seconds, framepass.py LIFE): one kept longer is asked for again
+// before a page opens with it, so its first call never answers 401 (ORCH-1004). The frame on screen keeps its pass
+// (a new one would load it again); when that one ends, its next call answers 401 and the frame asks for new ones.
 function framePass(name) {
-  if (framePasses.has(name)) return framePasses.get(name);
+  const kept = framePasses.get(name);
+  if (kept && (Date.now() < kept.until || frameShown()?.getAttribute('src')?.includes('#orch-frame=' + kept.pass + '&'))) return kept;
+  if (kept) framePasses.delete(name);
   if (framePassAsks.has(name) || Date.now() - (framePassFailed.get(name) || 0) < 10000) return null;
+  const asked = Date.now();  // the server's clock for the pass starts before its answer arrives
   framePassAsks.set(name, fetch('/api/frame-pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({addon:name})})
     .then(r => r.ok ? r.json() : null)
     .then(j => {
-      if (j && typeof j.pass === 'string' && typeof j.file === 'string') framePasses.set(name, {pass:j.pass, file:j.file, chan:frameChanNew()});
+      // used up to 60 s before the server ends it (half its life when that is short)
+      const life = Number.isFinite(j?.life) && j.life > 0 ? j.life : 900, keep = Math.max(life / 2, life - 60);
+      if (j && typeof j.pass === 'string' && typeof j.file === 'string') framePasses.set(name, {pass:j.pass, file:j.file, chan:frameChanNew(), until:asked + keep * 1000});
       else framePassFailed.set(name, Date.now());
     })
     .catch(() => framePassFailed.set(name, Date.now()))

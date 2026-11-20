@@ -558,7 +558,11 @@ class Handler(BaseHTTPRequestHandler):
         if passes is None:
             return self._send(503, b"Try again in a moment.", "text/plain")
         header, file = passes.issue(name, act, self._pass_tag())
-        self._send(200, json.dumps({"pass": header, "file": file, "act": act}).encode(), "application/json")
+        self._send(
+            200,
+            json.dumps({"pass": header, "file": file, "act": act, "life": framepass.LIFE}).encode(),
+            "application/json",
+        )
 
     def do_OPTIONS(self):
         """The preflight of a sandboxed add-on page's call (origin "null", the X-Orch-Frame header). It carries
