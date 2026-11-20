@@ -324,7 +324,7 @@ function liveMoreMenu(key, label, where, pinned, narrow, minHere) {
     liveOpt('bottom', 'dock-bottom', 'At the bottom', where === 'bottom'),
     phone ? null : liveOpt('right', 'dock-right', 'On the right', where === 'right'),
     sess && !sess.kind ? h('a', {className:'live-opt', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-more-ticket', 'data-live-ticket':''}, liveIc('ticket'), h('span', {}, 'Open ticket')) : null,
-    sess && typeof window.liveEndMenu === 'function' ? liveMoreEnd(key) : null);
+    narrow && sess && typeof window.liveEndMenu === 'function' ? liveMoreEnd(key) : null);
 }
 // Stop and End session in More (ORCH-817): End closes More and opens the one question under the header.
 function liveMoreEnd(key) {
@@ -335,9 +335,9 @@ function liveMoreEnd(key) {
     h('button', {type:'button', className:'live-opt', 'data-live-end':'ask', 'data-where':'pane:' + key, 'data-id':key, 'data-key':'live-more-end'}, liveIc('power'), h('span', {}, 'End session')));
 }
 // ORCH-817: Stop (the current step) and End session (asks once) of every kind of session: pages/live-end.js. In a
-// compact pane they sit in More; the End question then opens under the header.
-const liveEndHere = (key, label, compact) => typeof window.liveEndButtons !== 'function' ? []
-  : compact ? [window.liveEndOpenAt?.('pane') === key ? window.liveEndMenu(key, 'pane:' + key) : null] : window.liveEndButtons(key, label);
+// narrow pane (a phone) they sit in More; a compact one keeps them in its header; the End question then opens under the header.
+const liveEndHere = (key, label, narrow) => typeof window.liveEndButtons !== 'function' ? []
+  : narrow ? [window.liveEndOpenAt?.('pane') === key ? window.liveEndMenu(key, 'pane:' + key) : null] : window.liveEndButtons(key, label);
 function livePane(key, where, s, o) {
   const sess = liveLayerSession(key), name = liveLayerName(), n = o.n, compact = o.compact;
   const title = sess ? sess.title : 'This session has ended', label = sess?.key || title, on = key === s.cur;
@@ -358,7 +358,7 @@ function livePane(key, where, s, o) {
       o.narrow || typeof liveViewSwitch !== 'function' ? null : liveViewSwitch(sess),
       h('span', {className:'live-ctl'},
         compact || typeof liveHistButton !== 'function' ? null : liveHistButton(sess, label),
-        ...(sess ? liveEndHere(key, label, compact) : []),
+        ...(sess ? liveEndHere(key, label, o.narrow) : []),
         compact ? null : livePaneBtn('pin', (pinned ? 'Unpin ' : 'Pin ') + label, 'pinned', pinned ? 'Unpin' : 'Pin', {'data-session':key, 'aria-pressed':String(pinned), 'data-key':'live-pin'}),
         o.phone ? null : livePaneBtn('menu', besideWhy, 'plus', 'Add beside', {'data-menu':besideMenu, 'aria-expanded':String(s.menu === besideMenu), 'aria-haspopup':'true', 'data-key':'live-beside', disabled:o.total >= LIVE_MAX || !o.others.length}),
         compact || where === 'full' ? null : livePaneBtn('menu', 'Place: where ' + name + ' sits', where === 'right' ? 'dock-right' : 'dock-bottom', 'Place', {'data-menu':placeMenu, 'aria-expanded':String(s.menu === placeMenu), 'data-key':'live-pane-place'}),

@@ -297,9 +297,9 @@ test('a button with a word is named by the word unless its label starts with it'
 
 test('ORCH-817: every pane has Stop and End session in its header (More when narrow); the old body Stop is gone', () => {
   assert.doesNotMatch(source, /data-live-stop/);
-  assert.match(source, /\.\.\.\(sess \? liveEndHere\(key, label, compact\) : \[\]\)/);
-  assert.match(source, /compact \? \[window\.liveEndOpenAt\?\.\('pane'\) === key \? window\.liveEndMenu\(key, 'pane:' \+ key\) : null\] : window\.liveEndButtons\(key, label\)/);
-  assert.match(source, /sess && typeof window\.liveEndMenu === 'function' \? liveMoreEnd\(key\) : null/);
+  assert.match(source, /\.\.\.\(sess \? liveEndHere\(key, label, o\.narrow\) : \[\]\)/);
+  assert.match(source, /narrow \? \[window\.liveEndOpenAt\?\.\('pane'\) === key \? window\.liveEndMenu\(key, 'pane:' \+ key\) : null\] : window\.liveEndButtons\(key, label\)/);
+  assert.match(source, /narrow && sess && typeof window\.liveEndMenu === 'function' \? liveMoreEnd\(key\) : null/);
   assert.match(source, /typeof window\.liveEndKey === 'function' \? window\.liveEndKey\(\) : null\]\);/, 'the dock repaints when a Stop or End menu opens');
 });
 
