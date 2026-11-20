@@ -282,6 +282,18 @@ def test_counts_empty_workspace(proj, capsys):
     check(validator("counts", "answer"), ans, "counts")
 
 
+def test_counts_started_counts_runs_orch_started(proj, capsys, monkeypatch):
+    """ORCH-966: runs orch started count even when the helper wrote no record lines."""
+    from orch import runs_live
+
+    day = cli_record._today().strftime("%Y-%m-%d")
+    recs = [{"started_at": day + "T10:00:00Z"}, {"started_at": "2001-01-01T00:00:00Z"}]
+    monkeypatch.setattr(runs_live, "records", lambda root: recs)
+    code, (ans,) = cli_lines(capsys, "counts")
+    assert code == 0 and ans["runs"] == 0 and ans["started"] == 1
+    check(validator("counts", "answer"), ans, "counts")
+
+
 def test_counts_denominator_vectors():
     vec = json.loads((CONTRACTS / "vectors/counts-v1.json").read_text())
     for case in vec["denominators"]:
