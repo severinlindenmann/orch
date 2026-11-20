@@ -20,6 +20,7 @@ EXPECTED = {
         ("_can_act", "can_act"),  # /api/act (every op, update.start), update status, typing, report, vouching
         ("_signed_in", "cookie_ok"),  # READS under a host name that is not this computer's (a proxy in front)
         ("_session_post", "launch"),
+        ("do_POST", "can_act"),  # /api/act: a sign-in link's session or a token login (ORCH-1035)
     },
     "focus": {
         ("_area_op", "can_act"),  # area.accept / area.remove

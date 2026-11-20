@@ -40,7 +40,10 @@
   // plain words. Nothing restarted: this is never an update notice (those come from update.js after a real update).
   function signInNotice(r) {
     r.clone().text().then(function (t) {
-      if (t.indexOf("Sign in to ") === 0) showSignIn(t);
+      var login = window.orchLogin;  // login.js (ORCH-1035): the login screen and the profile picker
+      if (t.indexOf("Sign in to ") === 0) {
+        if (login && login.available()) login.showLogin(); else showSignIn(t);
+      } else if (t === "Pick a profile first." && login) login.showPicker();
     }).catch(function () {});
   }
   function showSignIn(t) {

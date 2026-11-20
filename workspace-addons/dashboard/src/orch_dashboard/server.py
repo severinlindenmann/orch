@@ -17,7 +17,18 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, unquote_plus
 
-from . import actids, actions, copychanges, diagapi, framepass, reffiles, selfupdate, sessionlist, ticketfiles
+from . import (
+    actids,
+    actions,
+    copychanges,
+    diagapi,
+    framepass,
+    reffiles,
+    selfupdate,
+    sessionlist,
+    ticketfiles,
+    tokenlogin,
+)
 from .data import (
     forget_static,
     load_addons,
@@ -432,7 +443,10 @@ class Handler(BaseHTTPRequestHandler):
         return getattr(self.server, "page_port", None) or self.server.server_address[1]
 
     def _signed_in(self) -> bool:
-        """This server's session cookie (no page secret needed): enough to READ under any host name."""
+        """This server's session cookie (no page secret needed): enough to READ under any host name. Or the
+        cookie of a token login (ORCH-1035), on any server, whoever started it."""
+        if tokenlogin.current(self, need_page=False):
+            return True
         if getattr(self, "session", None) is None:  # a server without a page session: nobody signs in
             return False
         return self.session.cookie_ok(self.headers, self._page_port())
@@ -443,9 +457,11 @@ class Handler(BaseHTTPRequestHandler):
         frame = getattr(self, "_frame", None)
         if frame is not None:
             return frame[1]
-        if getattr(self, "session", None) is None:
-            return False
-        return self.session.can_act(self.headers, self._page_port())
+        if getattr(self, "session", None) is not None and self.session.can_act(
+            self.headers, self._page_port()
+        ):
+            return True
+        return tokenlogin.current(self, need_page=True) is not None  # a token login (ORCH-1035)
 
     def _pass_tag(self) -> str:
         return framepass.pass_tag(
@@ -724,6 +740,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._refuse_host()
         if path == "/" and selfupdate.answer(self):
             return
+        if path == "/session/me":
+            return tokenlogin.me_get(self)
         px = PROXY.fullmatch(path)
         if (
             px
@@ -1031,6 +1049,7 @@ class Handler(BaseHTTPRequestHandler):
             "app.js",
             "mobile-mode.js",
             "people.js",
+            "login.js",
             "look.js",
             "look-icons.js",
             "look-colors.css",
@@ -1208,13 +1227,16 @@ class Handler(BaseHTTPRequestHandler):
         why = self._fence(at_login=True)
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
-        if self.session is None:
-            return self._send(403, b"forbidden", "text/plain")
         try:
             n = int(self.headers.get("Content-Length") or "")
-            token = json.loads(self.rfile.read(n)).get("token") if 0 < n <= 200 else None
-        except (ValueError, AttributeError, OSError):
-            token = None
+            body = json.loads(self.rfile.read(n)) if 0 < n <= 300 else None
+        except (ValueError, OSError, RecursionError):
+            body = None
+        if isinstance(body, dict) and "login" in body:  # the login screen: a token made on the command line
+            return tokenlogin.login_post(self, body.get("login"))
+        if self.session is None:
+            return self._send(403, b"forbidden", "text/plain")
+        token = body.get("token") if isinstance(body, dict) else None
         cookie = self.session.launch(token)
         if not cookie:
             return self._send(403, _link_msg(self.session, "dashboard"), "text/plain; charset=utf-8")
@@ -1236,6 +1258,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._frame_refused()
         if path == "/session":
             return self._session_post()
+        if path in ("/session/profile", "/session/logout"):
+            why = self._fence()
+            if why:
+                return self._send(403, why.encode(), "text/plain; charset=utf-8")
+            return (tokenlogin.profile_post if path == "/session/profile" else tokenlogin.logout_post)(self)
         if path == "/api/term/keys":
             return self._term_keys()
         if path in ("/api/diag", "/api/diag/report", "/api/diag/open", "/api/diag/share"):
@@ -1287,8 +1314,25 @@ class Handler(BaseHTTPRequestHandler):
         from . import update as _update
 
         session = self._can_act()
+        launch = self.session is not None and self.session.can_act(self.headers, self._page_port())
+        tok = None if launch or self._frame is not None else tokenlogin.current(self, need_page=True)
+        if tok is not None:  # a token login acts as the profile this browser picked, never as someone else
+            if body.get("op") in (
+                "person.set",
+                "person.add",
+            ):  # "You: ..." in a token browser: its own profile
+                return self._token_person(body)
+            person = tokenlogin.person_of(self, tok)
+            if person is None:
+                return self._send(403, tokenlogin.PICK_PROFILE.encode(), "text/plain; charset=utf-8")
+            actions.REQUEST_PERSON.set(person)
         with _update.click():  # no automatic update starts during a person's click (or right after it)
             return self._act_run(body, op_name, session)
+
+    def _token_person(self, body):
+        """person.set / person.add from a token browser: never the computer's "You: ..." (that would change who
+        every other browser acts as). The page switches its own profile with POST /session/profile."""
+        return self._send(400, b"Switch profile from the menu.", "text/plain; charset=utf-8")
 
     def _run_once(self, body, session: bool):
         """actions.run_op, once per click id (X-Orch-Act-Id, ORCH-580): a repeat of an id that was done gets the
