@@ -2,7 +2,7 @@
 .ticket-page{display:grid}
 .ticket-page .ticket-columns{display:grid;align-items:start;grid-template-columns:minmax(0,1fr) 248px;gap:24px}
 .ticket-page .ticket-main,.ticket-page .ticket-side{min-width:0}
-.ticket-page :is(button,summary,.ticket-part,.ab-actions a){min-height:44px}
+.ticket-page :is(button:not(.switch),summary,.ticket-part,.ab-actions a){min-height:44px}
 .ticket-page :is(button,summary,a,input,textarea):focus-visible{outline:2px solid var(--brand);outline-offset:3px}
 .ticket-page .btn.icon{min-width:44px}
 .ticket-page .tabs{overflow-x:auto;flex-wrap:nowrap}
