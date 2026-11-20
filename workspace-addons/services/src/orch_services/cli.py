@@ -503,9 +503,11 @@ def _log_lines(root: Path, rec: dict, n: int) -> list[str]:
 # ---------------------------------------------------------------- found and adopt
 
 
-def _found_text(items: list[dict]) -> str:
+def _found_text(items: list[dict], others: int = 0) -> str:
+    extra = f"{others} other program{'s' if others != 1 else ''} run{'' if others != 1 else 's'} here." if others else ""
     if not items:
-        return "Nothing found: orch sees no other background jobs of your account on this computer."
+        base = "Nothing found: orch sees no other background jobs of your account on this computer."
+        return f"{base} {extra}" if extra else base
     lines = []
     for it in items:
         bits = ["Running" if it["running"] else "Stopped"]
@@ -513,6 +515,8 @@ def _found_text(items: list[dict]) -> str:
             bits.append("starts by itself")
         lines.append(f"{it['id']}  {it['name']}  ({', '.join(bits)}) - {it['what']}")
     lines.append("Next: orch services adopt <id> to manage one with orch (nothing changes until then)")
+    if extra:
+        lines.append(extra)
     return "\n".join(lines)
 
 
@@ -661,7 +665,8 @@ def run(args) -> int:
         note = found.note()
         if note:
             return _emit(args, {"found": items, "note": note}, note)
-        return _emit(args, {"found": items}, _found_text(items))
+        n = found.others(root)
+        return _emit(args, {"found": items, **({"others": n} if n else {})}, _found_text(items, n))
     if cmd == "adopt":
         return cmd_adopt(args, root, args.found_id)
     if cmd in ("start", "stop") and args.id is None:
