@@ -162,6 +162,9 @@ def test_permission_modes_for_claude(claude_help, mode, proj):
         )
 
     assert flags("ask") == ()
+    assert flags("edits") == ("--permission-mode", "acceptEdits")
+    guard = adapters.permission_args("claude", proj, "ask")
+    assert guard and adapters.permission_args("claude", proj, "edits") == ["--permission-mode", "acceptEdits", *guard]
     assert flags("full") == ("--dangerously-skip-permissions",)
     assert flags("auto") == ("--permission-mode", "acceptEdits")  # this claude does not list auto
     claude_help.say('choices: "acceptEdits", "auto"')
