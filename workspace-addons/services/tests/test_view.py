@@ -280,3 +280,31 @@ def test_a_running_job_that_does_not_answer_is_amber_in_the_list(ws):
     assert by["hung"]["state"] == {"label": "Not answering", "tone": "warn"}
     assert by["fine"]["state"] == {"label": "Running", "tone": "good"}
     assert _facts(by["hung"])["State"]["value"] == "Running"  # the panel keeps the plain state
+
+
+def test_a_service_with_a_port_shows_its_address_as_a_link_next_to_the_health_check(cli):
+    # ORCH-846: a web app's address was shown nowhere; the person had to know the port
+    _add(cli, "web", "Web preview", "--port", "8765", "--start")
+    _add(cli, "watch", "Watcher")
+    view = _view(cli)  # checked against the view contract, so the local link is allowed there
+    by = {i["id"]: i for i in view["blocks"][0]["groups"][0]["items"]}
+    labels = [f["label"] for f in by["web"]["panel"]["facts"]]
+    assert labels.index("Address") == labels.index("Health check") - 1
+    assert _facts(by["web"])["Address"] == {
+        "label": "Address",
+        "value": "http://127.0.0.1:8765",
+        "link": "http://127.0.0.1:8765",
+    }
+    assert "Address" not in _facts(by["watch"])  # no port, no address
+
+
+def test_a_stopped_service_shows_its_address_without_a_link_and_a_bad_port_shows_none(ws):
+    from orch_services.view import build
+
+    def row(sid, state, port):
+        return {"id": sid, "name": sid, "state": state, "since": None, "auto": False, "port": port}
+
+    rows = [row("off", "stopped", 5173), row("odd", "running", "8000"), row("big", "running", 70000)]
+    by = {i["id"]: i for i in build(ws, (rows, 0, None))["blocks"][0]["groups"][0]["items"]}
+    assert _facts(by["off"])["Address"] == {"label": "Address", "value": "http://127.0.0.1:5173"}
+    assert "Address" not in _facts(by["odd"]) and "Address" not in _facts(by["big"])

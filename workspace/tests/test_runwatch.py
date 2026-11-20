@@ -272,6 +272,44 @@ def test_status_carries_the_helper_state_and_last_activity(proj, new_ticket, run
     assert data["helper"] is None and data["last_activity"] is None
 
 
+def test_a_helper_noted_at_the_usage_limit_shows_stopped_with_the_time_it_continues(
+    proj, new_ticket, run, monkeypatch, child
+):
+    """ORCH-643 (report r-1118-1812-ws): a helper the watcher noted as stopped on the usage limit showed as
+    working or waiting for an OK on Home. Now every page reads 'Stopped: usage limit' and when it goes on."""
+    from orch import limitstop
+
+    tid, other = new_ticket(), new_ticket("B")
+    _live(proj, tid, "attention", child)
+    monkeypatch.setattr(runwatch, "_table", lambda: [])
+    at = time.time() + 3600
+    limitstop.note(proj, tid, {"until": at, "text": "Usage limit reached"})
+    data = json.loads(run("run", "status", tid, "--json")[1])
+    assert data["helper"] == {
+        "state": "limit",
+        "word": "Stopped: usage limit",
+        "detail": f"Continues at {limitstop.clock(at + limitstop.GRACE)}",
+    }
+    rows = json.loads(run("run", "list", "--json")[1])["runs"]
+    assert rows[0]["helper"]["word"] == "Stopped: usage limit"
+    # the reset passed but the watcher has not started it yet; a ticket that is not noted keeps its state
+    assert runwatch.limit_state(proj, tid, now=at + limitstop.GRACE + 1)["detail"] == "Continues shortly"
+    # a helper that works again after the note (a person's prompt) is no longer shown as stopped
+    rec = runs.read(proj, tid)
+    working = {**rec, "live": {"state": "working", "since": _since(-5)}}
+    assert runwatch.limit_state(proj, tid, working) is None
+    # still "working" from before the note (the tool ended the turn without its hook, ORCH-642): stopped
+    assert (
+        runwatch.limit_state(proj, tid, {**rec, "live": {"state": "working", "since": _since(600)}})["state"]
+        == "limit"
+    )
+    assert runwatch.limit_state(proj, other) is None
+    # no helper runs: no state at all, also when the ticket is still noted
+    assert json.loads(run("run", "status", other, "--json")[1])["helper"] is None
+    limitstop.forget(proj, [tid])
+    assert json.loads(run("run", "status", tid, "--json")[1])["helper"]["state"] == "you"
+
+
 def test_label_names_the_pull_request_wait_in_plain_words():
     assert runwatch.label("orch ref wait ORCH-46 --merge") == "the pull request checks"
     assert runwatch.label("/opt/bin/orch github wait merge --for a/b#1") == "the GitHub merge limit"
