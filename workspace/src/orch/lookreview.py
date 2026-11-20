@@ -144,6 +144,23 @@ def own(root: Path) -> set[str]:
     return set(read_state(root)["mine"])
 
 
+def ticket_result(root: Path | None, ticket: dict) -> dict | None:
+    """ORCH-826: a second-look ticket of this role whose every ticket has a verdict is good news only: what it
+    left for the owner already waits as that ticket's own card. None while a ticket on it still waits, and for
+    any other ticket."""
+    if root is None or not str(ticket.get("title") or "").startswith(TITLE):
+        return None
+    st = read_state(root)
+    tid = ticket.get("id")
+    if tid not in st["mine"]:
+        return None
+    opened = st["open"] or {}
+    if opened.get("ticket") == tid and any(t in st["line"] for t in opened.get("items") or []):
+        return None
+    line = "every ticket it looked at has a verdict; what it left for you waits on its own card"
+    return {"ok": True, "line": line, "what": "the Reviewer's second look"}
+
+
 def _write_state(root: Path, st: dict) -> None:
     with contextlib.suppress(OSError):
         runs.run_dir(root).mkdir(parents=True, exist_ok=True)
