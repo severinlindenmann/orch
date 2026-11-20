@@ -810,7 +810,7 @@ def test_closed_ticket_lets_an_agent_switch_a_repeat_off_and_nothing_else(proj, 
 
 
 def test_closed_ticket_keeps_a_paused_repeat_block_against_an_agent(proj, new_ticket):
-    """Removing the whole block of a paused repeat would lift its switched-off gate: refused for an agent on a
+    """Removing the whole block of a paused repeat would undo its switch-off: refused for an agent on a
     closed ticket; switching it further off still works, and a person may remove it."""
     tid = new_ticket()
     tickets.ext_set(proj, tid, "automation", '{"recurring": true, "paused": true}', "human:t")

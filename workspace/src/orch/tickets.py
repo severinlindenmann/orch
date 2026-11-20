@@ -3548,14 +3548,20 @@ def validate_ext(schema: dict, obj: dict, addon: str) -> None:
         raise Refused(f"ext.{addon}{'.' + where if where else ''}: {e.message}")
 
 
-REPEAT_OFF = {"recurring": False, "paused": True}  # the values that switch an automation repeat off
+REPEAT_OFF = {"recurring": False, "paused": True}  # the values that switch an add-on's repeat off
+
+
+def _repeat_block(ticket: dict, addon: str) -> dict | None:
+    """An add-on's ext block that holds a repeat (it has a `recurring` field), else None. Core names no
+    add-on (R1.2): the rule is about the fields."""
+    cur = (ticket.get("ext") or {}).get(addon)
+    return cur if isinstance(cur, dict) and "recurring" in cur else None
 
 
 def repeat_off_only(cur: dict, new: dict) -> bool:
     """#2051: the change from cur to new only switches a repeat off (recurring false, paused true), nothing
     else. An agent may do that on a done or dropped ticket (a helper turns off a repeat on a ticket in
-    Review);
-    it never switches one on there or changes anything else."""
+    Review); it never switches one on there or changes anything else."""
     changed = {k for k in set(cur) | set(new) if cur.get(k) != new.get(k)}
     return all(k in REPEAT_OFF and new.get(k) is REPEAT_OFF[k] for k in changed)
 
@@ -3589,8 +3595,8 @@ def ext_set(
         add_history(ticket, by, f"Set ext.{addon}")
 
     def only_off(ticket) -> bool:
-        cur = (ticket.get("ext") or {}).get(addon)
-        return addon == "automation" and isinstance(cur, dict) and repeat_off_only(cur, {**cur, **obj})
+        cur = _repeat_block(ticket, addon)
+        return cur is not None and repeat_off_only(cur, {**cur, **obj})
 
     return apply_op(root, tid, op, if_revision=if_revision, by=by, closed_ok=only_off)[0]
 
@@ -3636,9 +3642,9 @@ def ext_unset(
 
     def only_off(ticket) -> bool:
         """Removing a repeat (or its next planned start) only switches work off, so it is allowed on a closed
-        ticket too; but not the whole block of a paused one: that would also lift its "switched off" gate."""
-        cur = (ticket.get("ext") or {}).get("automation")
-        if addon != "automation" or not isinstance(cur, dict):
+        ticket too; but not the whole block of a paused one: that would also undo its switch-off."""
+        cur = _repeat_block(ticket, addon)
+        if cur is None:
             return False
         return key in ("next_run", "each_run") or (not key and cur.get("paused") is not True)
 
