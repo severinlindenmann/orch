@@ -1105,6 +1105,8 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "release_merge_on": release_merge_on(root),  # Settings: "Merge releases without my click"
         "auto_reviewer_on": auto_reviewer_on(root),  # ORCH-424: new tickets start without human review
         "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)
+        # ORCH-971: the two pull-request switches above show only where the workspace has pull requests
+        "pull_requests": _has_pull_requests(root, rows),
         "copies": copies_mode(root),
         "copies_max": copies_max(root),
         "live_max": live_max(root),  # Settings > Helper > Helpers at once: None = no limit (the default)
@@ -1169,6 +1171,19 @@ def _core_addons() -> tuple[str, ...]:
         return tuple(CORE_ADDONS)
     except Exception:  # noqa: BLE001 - without the core list the CLI still refuses, in plain words
         return ()
+
+
+def _has_pull_requests(root: Path, rows) -> bool:
+    """True when the workspace has pull requests: a github.com remote on its folder, or the pull-requests
+    add-on is on (a workspace of several repos, like orch's own, has no remote of its own)."""
+    if any(r["name"] == "pull-requests" and r.get("active") is True for r in _addon_rows(rows)):
+        return True
+    try:
+        from orch.skillrender import has_github_remote
+
+        return has_github_remote(root)
+    except (ImportError, OSError, ValueError):
+        return False
 
 
 def _addon_rows(rows) -> list[dict]:
