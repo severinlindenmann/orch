@@ -8,6 +8,7 @@ carries this file's code.
 """
 
 import os as _os
+import re as _re
 import shutil as _shutil
 import time as _time
 
@@ -24,8 +25,9 @@ FETCH_WORDS = (
     "error sending request",
     "no route to host",
     "connect error",
-    "failed to download",
 )
+# Not "failed to download": uv starts every build or metadata error with "Failed to download and build",
+# so it read as no internet (ORCH-871). A real network failure also names its cause (dns error, ...).
 STILL_OLD = "orch is still the old version"
 
 
@@ -118,12 +120,18 @@ def discard_backup(state):
                 _shutil.rmtree(old, ignore_errors=True)
 
 
+def fetch_failure(detail):
+    # Did uv fail to reach the source? Whole words only, so "tls" does not match inside another word.
+    t = (detail or "").lower()
+    return any(_re.search(r"(?<![a-z])" + _re.escape(w) + r"(?![a-z])", t) for w in FETCH_WORDS)
+
+
 def plain_reason(detail, restored):
     # The plain words the page and the terminal show for a failed reinstall.
     t = (detail or "").lower()
     if not restored:
         return "The update failed and orch could not be put back. Run the orch install script again."
-    if any(w in t for w in FETCH_WORDS):
+    if fetch_failure(t):
         return "No internet connection to GitHub - " + STILL_OLD + ". Try again later."
     if "already exists" in t:
         return "Another program named orch is in the way - " + STILL_OLD + ". Try again later."

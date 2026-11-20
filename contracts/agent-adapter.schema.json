@@ -174,6 +174,14 @@
                 }
               }
               ,{
+                "type": "object", "required": ["args", "with"], "additionalProperties": false,
+                "description": "args followed by the flags of another mode of this table (that entry must be a plain list), so a shared flag list is written once.",
+                "properties": {
+                  "args": { "type": "array", "items": { "$ref": "#/$defs/arg" } },
+                  "with": { "enum": ["ask", "edits", "auto", "full"] }
+                }
+              }
+              ,{
                 "type": "object", "required": ["args"], "additionalProperties": false,
                 "description": "Flags kept narrower by the person's own tool config. unless_config names that TOML file (a relative name under the tool's home folder): when it sets `key` to `value`, or cannot be read safely (not a regular file, over 1 MiB, malformed), no flags are added and the run start says `say` (otherwise it says `note` when set: what the tool cannot reach at this mode); when it sets `approval_key` to anything but `approval_value`, approval_args are left out. A start whose flags include workspace-write is refused when the orch home is inside the start folder or a temporary folder.",
                 "properties": {
