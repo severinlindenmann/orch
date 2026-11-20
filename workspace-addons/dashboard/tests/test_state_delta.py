@@ -47,12 +47,26 @@ def _ticket(i: int, lines: int = 40) -> dict:
     }
 
 
+def _run(i: int, step: int) -> dict:
+    """A helper's run row as `orch run status` gives it: its ages tick every poll (ORCH-524)."""
+    return {
+        "running": True,
+        "state": "idle",
+        "agent": "claude",
+        "claim": {"mode": "live", "session": f"s{i:04d}", "live": {"since": "2026-11-18T10:00:00Z"}},
+        "age_seconds": 4000 + step * 5,
+        "last_activity": {"at": "2026-11-18T10:00:00Z", "text": "Claude started", "seconds": 7000 + step * 5},
+        "screen": "waiting at the prompt " * 8,
+    }
+
+
 def _state(n: int, lines: int = 40) -> dict:
     s = {
         "workspace": "Busy",
         "now": "2026-11-18T12:00:00Z",
         "tickets": [_ticket(i, lines) for i in range(n)],
-        "runs": [],
+        "runs": {f"t_{i:06d}": _run(i, 0) for i in range(0, min(n, 250), 5)},  # 50 helpers at most
+        "settings": {"diag": {"notes": {"bytes": 1000, "files": 3}}, "agents": [{"name": "claude"}] * 20},
         "needs": [],
         "review": {"cards": [], "answered": [], "accepted": []},
         "auto_update_note": None,
@@ -63,15 +77,24 @@ def _state(n: int, lines: int = 40) -> dict:
 
 
 def _work(state: dict, step: int, busy: int = 3) -> dict:
-    """A few seconds of helpers working: `busy` tickets get a history line, the runs change."""
+    """A few seconds of helpers working: `busy` tickets get a history line and move to the top (the newest
+    change first, as the real state is ordered), every run's age ticks, the diagnostics notes grow."""
     s = copy.deepcopy(state)
+    moved = []
     for j in range(busy):
         t = s["tickets"][(step * busy + j) * 7 % len(s["tickets"])]
         t["history"].append(
             {"at": f"2026-11-18T12:00:{step:02d}Z", "who": "agent:claude", "text": f"step {step}"}
         )
         t["updated_at"] = f"2026-11-18T12:00:{step:02d}Z"
-    s["runs"] = [{"ticket": "t_000000", "beat": step}]
+        moved.append(t["id"])
+    s["tickets"] = [t for t in s["tickets"] if t["id"] in moved] + [
+        t for t in s["tickets"] if t["id"] not in moved
+    ]
+    for run in s["runs"].values():
+        run["age_seconds"] += 5
+        run["last_activity"]["seconds"] += 5
+    s["settings"]["diag"]["notes"]["bytes"] += 7000
     s.pop("rev")
     s["rev"] = state_rev(s)
     return s
@@ -106,6 +129,11 @@ def test_a_delta_applied_by_the_page_gives_the_new_state():
     del b["tickets"][5]  # a ticket gone
     b["tickets"][0], b["tickets"][1] = b["tickets"][1], b["tickets"][0]  # the order changed
     b["needs"] = [{"id": "n1"}]  # a top-level key changed
+    b["runs"]["t_000000"]["age_seconds"] += 5  # a field of an entry of a top-level object
+    b["runs"]["t_000007"] = _run(7, 1)  # a new entry
+    del b["runs"]["t_000005"]  # an entry gone
+    del b["runs"]["t_000000"]["screen"]  # a field gone: the entry is sent whole
+    b["settings"]["agents"] = []  # an entry that is not an object
     b["build"] = {"v": 1}  # a new top-level key
     b["now"] = "2026-11-18T12:00:05Z"
     b.pop("rev")
@@ -117,6 +145,18 @@ def test_a_delta_applied_by_the_page_gives_the_new_state():
     assert rows["t_000004"]["~append"]["history"] == [b["tickets"][4]["history"][-1]]
     assert "~append" not in rows["t_000006"] and len(rows["t_000006"]["history"]) == 2
     assert len(json.dumps(d)) < len(json.dumps(b)) / 2
+    assert "runs" not in d["set"] and set(d["patch"]["runs"]) == {"set", "drop"}
+
+
+def test_a_ticking_run_age_sends_only_that_field():
+    """ORCH-524: at 10,000 tickets with 70 helpers every poll sent all run rows (49 KB) because each row's age ticks."""
+    a = _state(250, lines=1)
+    b = _work(a, 1)
+    d = state_delta.delta(state_delta.fingerprint(a), state_delta.fingerprint(b), b, a["rev"])
+    assert "runs" not in d["set"] and "settings" not in d["set"]
+    row = d["patch"]["runs"]["fields"]["t_000005"]
+    assert row == {"age_seconds": 4005, "last_activity": b["runs"]["t_000005"]["last_activity"]}
+    assert d["patch"]["settings"] == {"fields": {"diag": {"notes": {"bytes": 8000, "files": 3}}}}
 
 
 @node
@@ -124,6 +164,41 @@ def test_a_delta_for_another_revision_is_refused_by_the_page():
     a, b = _state(3, lines=1), _work(_state(3, lines=1), 1)
     d = state_delta.delta(state_delta.fingerprint(a), state_delta.fingerprint(b), b, a["rev"])
     assert _apply({**a, "rev": "something-else"}, d) is None
+
+
+def _to_top(state: dict, picks: list[int]) -> dict:
+    """What the real state does when helpers write: the changed tickets move to the top of the order."""
+    s = copy.deepcopy(state)
+    moved = [s["tickets"][i] for i in picks]
+    s["tickets"] = moved + [t for i, t in enumerate(s["tickets"]) if i not in set(picks)]
+    s.pop("rev")
+    s["rev"] = state_rev(s)
+    return s
+
+
+def test_tickets_that_move_to_the_top_cost_a_few_order_pieces_not_every_id():
+    """ORCH-524: at 10,000 tickets every changed poll sent the whole order (10,000 ids, about 60 KB packed), because a
+    changed ticket moves to the top. Now the order comes as pieces of the order the page holds."""
+    a = _state(10_000, lines=0)
+    b = _to_top(a, [5000, 17, 9998])
+    d = state_delta.delta(state_delta.fingerprint(a), state_delta.fingerprint(b), b, a["rev"])
+    assert d["order"] == ["t_005000", "t_000017", "t_009998", [0, 17], [18, 4982], [5001, 4997], "t_009999"]
+    assert len(json.dumps(d["order"])) < 200
+
+
+@node
+def test_the_page_builds_the_order_back_from_its_pieces():
+    a = _state(40, lines=1)
+    b = _to_top(a, [30, 2])
+    b["tickets"].insert(5, _ticket(77, lines=1))  # a new ticket in the middle
+    del b["tickets"][20]  # a ticket gone
+    b.pop("rev")
+    b["rev"] = state_rev(b)
+    d = state_delta.delta(state_delta.fingerprint(a), state_delta.fingerprint(b), b, a["rev"])
+    assert any(isinstance(p, list) for p in d["order"])
+    assert _apply(a, d) == b
+    bad = {**d, "order": [[0, 999]]}  # a piece outside what the page holds: the page asks for the whole state
+    assert _apply(a, bad) is None
 
 
 def test_tickets_without_distinct_ids_get_the_whole_state():
@@ -194,6 +269,23 @@ def test_a_changed_picture_is_sent_again(busy_server, ws):
     (ws / ".orch" / "tickets" / "t_other000x" / "artifacts" / "shot.png").write_bytes(b"\x89PNG new")
     code, body, h2, _ = _get(port, pic, {"If-None-Match": h["ETag"]})
     assert code == 200 and body == b"\x89PNG new" and h2["ETag"] != h["ETag"]
+
+
+def test_a_picture_link_with_its_version_is_kept_without_asking_again(busy_server):
+    """ORCH-524: pictures are fetched once, then served from the browser's cache. The page puts the file's time and
+    size in the link (`v`); such a link may be kept a year, so a redraw or a reload does not ask the server at all,
+    and a new version of the file gets a new link. Without `v`, or for a download, the browser keeps asking."""
+    from orch_dashboard.server import FILE_KEPT
+
+    port, _ = busy_server
+    pic = "/api/file?t=t_other000x&k=artifacts&n=shot.png"
+    code, body, h, _ = _get(port, pic + "&v=2026-11-18T10%3A00%3A00Z~102404")
+    assert code == 200 and len(body) > 100_000
+    assert h["Cache-Control"] == FILE_KEPT == "private, max-age=31536000, immutable" and h["ETag"]
+    code, body, h2, _ = _get(port, pic + "&v=2026-11-18T10%3A00%3A00Z~102404", {"If-None-Match": h["ETag"]})
+    assert code == 304 and body == b"" and h2["Cache-Control"] == FILE_KEPT  # a 304 keeps it kept
+    for plain in (pic, pic + "&v=", pic + "&v=" + "x" * 65, pic + "&v=1~2&dl=1"):
+        assert _get(port, plain)[2]["Cache-Control"] == "private, no-cache", plain
 
 
 def test_an_unknown_revision_still_gets_the_whole_state(busy_server):

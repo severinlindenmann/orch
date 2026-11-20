@@ -151,46 +151,57 @@ function liveGroupSwitcher(g, key, narrow) {
 function liveGroupKey(panes) {
   return (panes || []).map(k => { const g = liveGroupOf(liveGroups(), k); return g ? [k, g.id, liveGroupRows(g, k).map(r => [r.id || r.of, r.status, r.word, r.title])] : null; });
 }
-// The message box of a pane with a working helper: who receives it, the words, Send (run.send). What is typed is
-// kept per session across repaints of the dock.
+// The message box of a pane with a working helper (draft D feature 13, ORCH-695): who receives it, then the one shared
+// composer (kit/composer.js, layout 'row'): previews of the added files and screenshots above one line of clip, words
+// and Send. Files are added by the clip, by pasting into the box or by dropping them anywhere on the pane; each shows
+// as a picture thumbnail or a file chip that can be removed before Send. Send goes the ticket page's one way
+// (ticketTalkSend: ticket.attach for the files, then run.send naming them), so there is no second upload path.
+// The composer itself is kept per session, so what is typed and added stays across repaints of the dock.
 const liveMsgDraft = new Map();
-const liveMsgBusy = new Set();
+const liveMsgBoxes = new Map();  // session id -> {root, composer}
+const LIVE_MSG_HINT = 'Paste a screenshot or drop files here · up to 10 files, 25 MB each';
+function liveMsgComposer(sess) {
+  const was = liveMsgBoxes.get(sess.id);
+  if (was) return was;
+  const root = h('div', {id:'live-msg-' + sess.id.replace(/[^A-Za-z0-9_-]/g, '_'), 'data-key':'live-msg-box'});
+  const box = typeof FEEDBACK_BOX === 'object' ? FEEDBACK_BOX : {};
+  const who = () => { const s = liveLayerSession(sess.id); return s?.key || s?.title || 'the helper'; };
+  const composer = window.UI.composer(root, {...box, voice:false, layout:'row', interrupt:false, enterSends:true,
+    label:'Message to ' + (sess.key || sess.title || 'the helper'), placeholder:'Message the helper', attachLabel:'Add files',
+    maxLength:typeof TALK_TYPED_MAX === 'number' ? TALK_TYPED_MAX : LIVE_MSG_MAX, hint:LIVE_MSG_HINT, sendLabel:'Send',
+    emptyError:'Write something or add a file.', dropLabel:'Drop to add to ' + (sess.key || sess.title || 'this ticket'), sendingText:'Sending…',
+    draft:liveMsgDraft.get(sess.id) || '', onDraft:v => { if (v) liveMsgDraft.set(sess.id, v); else liveMsgDraft.delete(sess.id); },
+    fieldAttrs:{'data-live-msg-text':sess.id}, sendAttrs:{'data-key':'live-msg-send'},
+    onSend:async message => {
+      const r = await ticketTalkSend(sess.id, message);
+      if (!r.ok) return r;
+      if (typeof liveChatNote === 'function') { liveChatNote(sess.id, r.said || message.text); if (typeof liveLayerFill === 'function') liveLayerFill(); }  // shows in the chat at once
+      window.orch?.toast?.('Sent to ' + who() + '.', 'ok');
+      return {ok:true, text:''};
+    }});
+  const kept = {root, composer};
+  liveMsgBoxes.set(sess.id, kept);
+  return kept;
+}
 function liveMsgBox(sess) {
-  if (!sess || sess.kind || !sess.running || snapshot) return null;
-  const g = liveGroupOf(liveGroups(), sess.id), id = 'live-msg-' + sess.id, busy = liveMsgBusy.has(sess.id);
-  return h('form', {className:'live-msg', 'data-live-msg':sess.id, 'data-key':'live-msg'},
-    h('label', {className:'live-to', for:id, 'data-key':'live-msg-to'}, liveMsgTo(sess, g)),
-    h('div', {className:'live-msg-row'},
-      h('textarea', {className:'input', id, rows:'1', maxlength:String(LIVE_MSG_MAX), placeholder:'Write to this helper', 'data-live-msg-text':sess.id}, liveMsgDraft.get(sess.id) || ''),
-      h('button', {type:'submit', className:'btn sm primary', disabled:busy, 'data-key':'live-msg-send'}, busy ? 'Sending…' : 'Send')));
+  if (!sess || sess.kind || !sess.running || snapshot || !window.UI?.composer) return null;
+  const g = liveGroupOf(liveGroups(), sess.id), {root} = liveMsgComposer(sess);
+  return h('div', {className:'live-msg', 'data-live-msg':sess.id, 'data-key':'live-msg'},
+    h('label', {className:'live-to', for:root.id + '-message', 'data-key':'live-msg-to'}, liveMsgTo(sess, g)), root);
 }
 if (typeof window === 'object' && typeof document === 'object' && !(typeof module === 'object' && module.exports)) {
-  document.addEventListener('input', e => {
-    const box = e.target.closest?.('#live-dock [data-live-msg-text]');
-    if (box) liveMsgDraft.set(box.dataset.liveMsgText, box.value);
-  });
-  document.addEventListener('keydown', e => {  // Enter sends, Shift+Enter is a new line (as in the ticket's box)
-    const box = e.target.closest?.('#live-dock [data-live-msg-text]');
-    if (box && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); box.form?.requestSubmit(); }
-  });
-  document.addEventListener('submit', async e => {
-    const form = e.target.closest?.('#live-dock [data-live-msg]');
-    if (!form) return;
+  // Files dropped anywhere on a pane with a message box go into its box (the box itself takes its own drops).
+  const paneOf = e => [...(e.dataTransfer?.types || [])].includes('Files') ? e.target.closest?.('#live-dock .live-pane') : null;
+  const boxOf = pane => pane && liveMsgBoxes.get(pane.querySelector('[data-live-msg]')?.dataset.liveMsg || '');
+  let over = null;
+  const mark = pane => { if (over && over !== pane) delete over.dataset.drop; over = pane; if (pane) pane.dataset.drop = ''; };
+  document.addEventListener('dragover', e => { const pane = paneOf(e); if (!boxOf(pane)) return mark(null); e.preventDefault(); mark(pane); });
+  document.addEventListener('dragleave', e => { if (over && !over.contains(e.relatedTarget)) mark(null); });
+  document.addEventListener('drop', e => {
+    const pane = paneOf(e), kept = boxOf(pane);
+    mark(null);
+    if (!kept || e.defaultPrevented) return;
     e.preventDefault();
-    const id = form.dataset.liveMsg, text = String(liveMsgDraft.get(id) || '').trim();
-    if (!text || liveMsgBusy.has(id)) return;
-    const sess = liveLayerSession(id), who = sess?.key || sess?.title || 'the helper';
-    liveMsgBusy.add(id);
-    const btn = form.querySelector('[data-key="live-msg-send"]');
-    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
-    const r = await act('run.send', {ticket:id, text});
-    liveMsgBusy.delete(id);
-    // only what was sent is cleared: words typed while it was on its way stay in the box
-    const sent = r.ok && String(liveMsgDraft.get(id) || '').trim() === text;
-    if (sent) liveMsgDraft.delete(id);
-    const box = document.querySelector(`#live-dock [data-live-msg-text="${id.replace(/["\\]/g, '')}"]`);
-    if (box && sent) box.value = '';
-    if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
-    window.orch?.toast?.(r.ok ? 'Sent to ' + who + '.' : r.text || 'Could not send the message.', r.ok ? 'ok' : 'error');
+    kept.composer.add(e.dataTransfer.files);
   });
 }

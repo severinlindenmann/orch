@@ -36,9 +36,9 @@ def dispatch(args, root: Path) -> bool:
     sub = getattr(args, "sub", None)
     if sub == "list":
         rows = addons.listing(root)
-        w = addons.name_width(r["name"] for r in rows)
         have = [r for r in rows if r["installed"]]
         avail = [r for r in rows if not r["installed"]]
+        w = addons.name_width(r["name"] for r in rows)
         text = "\n".join(
             f"  {r['name']:<{w}}{'on' if r['active'] else 'off':<6}{r['description']}" for r in have
         )
