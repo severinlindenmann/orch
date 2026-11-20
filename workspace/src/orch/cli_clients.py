@@ -582,6 +582,11 @@ def _problem(args, root: Path, out) -> None:
         r = rp.fetch(root, args.id)
         if r.get("mine") and not (Path(r["path"]) / rp.FROM).exists():  # the original folder, no copy
             text = f"Report {r['ref']} was shared from here, so nothing new was fetched.\n{r['path']}"
+            if not args.look:  # taken on purpose (ORCH-86), but say so: other workspaces cannot take it now
+                text += (
+                    "\nIt is now taken by this workspace, so no other workspace can take it."
+                    f" To let another take it: orch relay problem back {args.id}"
+                )
         else:
             text = (
                 f"Report {r['ref']}\n{r['path']}\n"
