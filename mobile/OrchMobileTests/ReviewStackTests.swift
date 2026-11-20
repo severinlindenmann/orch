@@ -329,3 +329,52 @@ final class CardFileCacheTests: XCTestCase {
         XCTAssertNil(again)
     }
 }
+
+/// ORCH-860: Run it now on the phone. A run card shows the command with Copy; Run it now only for orch's own commands the
+/// computer marked for the phone; every other command shows one line why and a right swipe never sends ok.
+final class RunCardTests: XCTestCase {
+    func testRunShapesDecodeOnlyWhenTheSchemaTakesThem() throws {
+        var n = 0
+        for s in try shapes() where (s["name"] as! String).hasPrefix("card-run-") || (s["name"] as! String).hasPrefix("run-") {
+            let name = s["name"] as! String
+            // an extra key (folder, argv) is refused by the relay; the app ignores unknown keys like on every card and never shows them
+            if ["run-cwd-on-wire", "run-argv-on-wire"].contains(name) { continue }
+            let card = try question(name).message.body.card
+            if s["schema"] as? Bool == true { XCTAssertEqual(card?.kind, .run, name) } else { XCTAssertNil(card, name) }
+            n += 1
+        }
+        XCTAssertGreaterThanOrEqual(n, 28)
+    }
+    func testOrchCommandRunsHereOthersShowWhy() throws {
+        let orch = ReviewStackRules.item(for: try question("card-run-orch"))!
+        XCTAssertEqual(orch.kind, .run)
+        XCTAssertEqual(orch.card.run?.runsHere, true)
+        XCTAssertNil(orch.card.run?.whyNotHere)
+        XCTAssertEqual(ReviewStackRules.okOutcome(orch, picked: nil), .allowed)
+        for name in ["card-run-other", "card-run-copy", "card-run-login"] {
+            let item = ReviewStackRules.item(for: try question(name))!
+            XCTAssertEqual(item.card.run?.runsHere, false, name)
+            XCTAssertEqual(ReviewStackRules.okOutcome(item, picked: nil), .atComputer, name)
+            let why = try XCTUnwrap(item.card.run?.whyNotHere, name)
+            XCTAssertFalse(why.contains("\n"), name)
+        }
+    }
+    func testAnswersAreOrchsOwnWords() throws {
+        let item = ReviewStackRules.item(for: try question("card-run-orch"))!
+        let ok = try XCTUnwrap(ReviewStackRules.verdict(item, .ok)), no = try XCTUnwrap(ReviewStackRules.verdict(item, .no))
+        XCTAssertEqual(ReviewStackRules.summary(item, verdict: ok), "I ran it")
+        XCTAssertEqual(ReviewStackRules.summary(item, verdict: no), "Leave it off for now")
+        XCTAssertEqual(ReviewStackRules.countsText([item]), "1 command")
+    }
+    @MainActor func testOkOnARunCardThePhoneMayNotRunIsNeverQueued() throws {
+        let dir = tmpDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let box = Outbox(directory: dir, phone: "ph_iphone0001")
+        let other = try question("card-run-other"), digest = other.message.body.digest!
+        XCTAssertThrowsError(try box.enqueueAnswer(question: other, answer: "I ran it", verdict: ReviewVerdict(verdict: .ok, digest: digest))) {
+            XCTAssertEqual($0 as? Outbox.VerdictProblem, .invalid)
+        }
+        XCTAssertNoThrow(try box.enqueueAnswer(question: other, answer: "Not now", verdict: ReviewVerdict(verdict: .no, digest: digest)))
+        let orch = try question("card-run-orch")
+        XCTAssertNoThrow(try box.enqueueAnswer(question: orch, answer: "I ran it", verdict: ReviewVerdict(verdict: .ok, digest: orch.message.body.digest!)))
+    }
+}

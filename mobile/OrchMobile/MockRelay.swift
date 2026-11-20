@@ -95,6 +95,7 @@ actor MockRelay: RelayAPI {
         }
         #endif
         if UserDefaults.standard.bool(forKey: "mockReviewStack") { all.append(contentsOf: MockReviewStack.questions) }
+        if UserDefaults.standard.bool(forKey: "mockRunCards") { all.append(contentsOf: MockReviewStack.runQuestions) }
         if UserDefaults.standard.bool(forKey: "mockAllow") { all.append(Self.allowQuestion) }
         if UserDefaults.standard.bool(forKey: "mockGroups") {
             for (id, name) in GroupMock.names where names[id] == nil { names[id] = name }

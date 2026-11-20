@@ -11,9 +11,10 @@ struct ReviewCardView: View {
     let state: String?
     var workspaceName: String? = nil
     let onOpen: () -> Void
+    var onRun: () -> Void = {}
 
     private var kindName: String {
-        switch item.kind { case .draft: "Draft"; case .check: "Result"; case .link: "Link"; case .choice, .plainQuestion: "Choice"; case .plan: "Plan" }
+        switch item.kind { case .draft: "Draft"; case .check: "Result"; case .link: "Link"; case .choice, .plainQuestion: "Choice"; case .plan: "Plan"; case .run: "Command" }
     }
 
     var body: some View {
@@ -29,13 +30,15 @@ struct ReviewCardView: View {
             }
             Text(item.card.title).themeFont(21, .semibold).lineLimit(3).accessibilityAddTraits(.isHeader).accessibilityIdentifier("review-title")
             if let why = item.card.why, !why.isEmpty { Text(why).themeFont(14).foregroundStyle(Theme.muted).lineLimit(3) }
-            if let preview = item.card.preview {
+            if let run = item.card.run {
+                RunCommandView(run: run, onRun: onRun)
+            } else if let preview = item.card.preview {
                 CardPreviewView(item: item, preview: preview, picked: $picked, onOpen: onOpen)
             } else {
                 Spacer(minLength: 0)
             }
             if !item.card.then.isEmpty {
-                Text("If you approve: \(item.card.then)").themeFont(14).foregroundStyle(Theme.text).lineLimit(3).accessibilityIdentifier("review-then")
+                Text(item.kind == .run ? "After it runs: \(item.card.then)" : "If you approve: \(item.card.then)").themeFont(14).foregroundStyle(Theme.text).lineLimit(3).accessibilityIdentifier("review-then")
             }
             HStack(spacing: 8) {
                 if let state { Text(state).themeFont(12, .semibold).foregroundStyle(Theme.warn).accessibilityIdentifier("review-state") }
@@ -44,6 +47,53 @@ struct ReviewCardView: View {
         .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous).stroke(Theme.border))
+    }
+}
+
+/// A run card's command (ORCH-848 draft A, ORCH-860): the command line with Copy, Run it now beside it only when the phone may
+/// run it (orch's own commands), else one line why; then what it changes and how to undo it, in orch's words.
+struct RunCommandView: View {
+    let run: CardRun
+    let onRun: () -> Void
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
+                Text(verbatim: run.command).font(.system(.subheadline, design: .monospaced)).foregroundStyle(Theme.text)
+                    .lineLimit(4).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
+                    .accessibilityIdentifier("review-run-command")
+                Button {
+                    UIPasteboard.general.string = run.command; copied = true
+                    Task { try? await Task.sleep(for: .seconds(1.6)); copied = false }
+                } label: {
+                    Text(copied ? "Copied" : "Copy").themeFont(14, .semibold).frame(minWidth: 64, minHeight: 44)
+                        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous).stroke(Theme.border))
+                }.buttonStyle(PressStyle()).accessibilityIdentifier("review-run-copy").accessibilityLabel("Copy")
+            }
+            if run.runsHere {
+                Button(action: onRun) {
+                    Text("Run it now").themeFont(16, .semibold).foregroundStyle(Theme.onBrand).frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Theme.brand, in: RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
+                }.buttonStyle(PressStyle()).accessibilityIdentifier("review-run-now").accessibilityLabel("Run it now")
+            } else if let why = run.whyNotHere {
+                Text(why).themeFont(13).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("review-run-why")
+            }
+            if let changes = run.changes { row("Changes", changes, mono: false) }
+            if let undo = run.undo { row("Undo", undo, mono: run.cls != .orch || undo.hasPrefix("orch ")) }
+        }
+    }
+
+    private func row(_ label: String, _ value: String, mono: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label).themeFont(13).foregroundStyle(Theme.muted).frame(width: 64, alignment: .leading)
+            Group {
+                if mono { Text(verbatim: value).font(.system(.footnote, design: .monospaced)) } else { Text(verbatim: value).themeFont(14) }
+            }.foregroundStyle(Theme.text).lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
+        }.accessibilityElement(children: .combine).accessibilityIdentifier("review-run-" + label.lowercased())
     }
 }
 

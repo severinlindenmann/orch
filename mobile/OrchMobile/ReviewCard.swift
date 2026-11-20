@@ -110,8 +110,43 @@ indirect enum CardPreview: Codable, Equatable, Sendable {
     }
 }
 
+/// `card.run` of a run card (message.schema.json `$defs/card_run`, ORCH-860): the command as the computer shows it, never
+/// what runs. The computer runs only the command it stored and checks it again. `phone` = this phone may offer Run it now.
+struct CardRun: Codable, Equatable, Sendable {
+    enum Class: String, Codable, Sendable { case orch, other, login, copy }
+    var command: String
+    var cls: Class
+    var changes: String? = nil
+    var undo: String? = nil
+    var phone: Bool
+    enum CodingKeys: String, CodingKey { case command, cls = "class", changes, undo, phone }
+
+    /// Run it now shows on the phone only for orch's own commands the computer marked for the phone (the computer checks again).
+    var runsHere: Bool { phone && cls == .orch }
+    /// The one line under the command when the phone cannot run it (plain words, ORCH-848 draft A).
+    var whyNotHere: String? {
+        if runsHere { return nil }
+        switch cls {
+        case .orch: return "Run this one at your computer."
+        case .other: return "The phone runs only orch’s own commands. Run this one at your computer."
+        case .login: return "This is a sign-in. Run it in a terminal on your computer."
+        case .copy: return "orch did not check this command. Read it before you run it in your terminal."
+        }
+    }
+    /// Same rules as the schema: one line of printable ASCII, at most 300, no shell operator; phone only with orch.
+    var isValid: Bool {
+        guard !command.trimmingCharacters(in: .whitespaces).isEmpty, command.count <= 300 else { return false }
+        let bad = CharacterSet(charactersIn: ";|&<>`$\\")
+        guard command.unicodeScalars.allSatisfy({ (0x20...0x7e).contains($0.value) && !bad.contains($0) }) else { return false }
+        return !phone || cls == .orch
+    }
+}
+
 struct ReviewCard: Codable, Equatable, Sendable {
-    enum Kind: String, Codable, Sendable { case draft, check, link, choice, plan }
+    enum Kind: String, Codable, Sendable { case draft, check, link, choice, plan, run }
+    /// A run card's other answer: orch's own fixed words only (runcard.NO_LABELS).
+    static let runNoLabels = ["Not now", "Leave it off for now", "Leave it as it is", "Skip it", "Do it later"]
+    static let runOkLabel = "I ran it"
     var kind: Kind
     var title: String
     var why: String? = nil
@@ -120,6 +155,8 @@ struct ReviewCard: Codable, Equatable, Sendable {
     var okLabel: String? = nil
     var open: String? = nil
     var preview: CardPreview? = nil
+    var run: CardRun? = nil
+    var noLabel: String? = nil
     var fileIndexes: [Int] { preview?.fileIndexes ?? [] }
 
     /// The kinds that need a preview per the schema (choice, link); the card is refused otherwise.
@@ -137,11 +174,20 @@ struct ReviewCard: Codable, Equatable, Sendable {
             guard case .options? = preview else { throw DecodingError.dataCorruptedError(forKey: .preview, in: c, debugDescription: "choice needs options") }
         }
         if kind == .link, preview == nil { throw DecodingError.dataCorruptedError(forKey: .preview, in: c, debugDescription: "link needs a preview") }
+        run = try c.decodeIfPresent(CardRun.self, forKey: .run)
+        noLabel = try c.decodeIfPresent(String.self, forKey: .noLabel)
+        if kind == .run {
+            guard let r = run, r.isValid, let n = noLabel, Self.runNoLabels.contains(n), okLabel == nil || okLabel == Self.runOkLabel else {
+                throw DecodingError.dataCorruptedError(forKey: .run, in: c, debugDescription: "a run card needs its command and orch's own answers")
+            }
+        } else if run != nil || noLabel != nil {
+            throw DecodingError.dataCorruptedError(forKey: .run, in: c, debugDescription: "only a run card carries a command")
+        }
     }
     init(kind: Kind, title: String, then: String, why: String? = nil, need: String? = nil, okLabel: String? = nil,
-         open: String? = nil, preview: CardPreview? = nil) {
+         open: String? = nil, preview: CardPreview? = nil, run: CardRun? = nil, noLabel: String? = nil) {
         self.kind = kind; self.title = title; self.then = then; self.why = why; self.need = need; self.okLabel = okLabel
-        self.open = open; self.preview = preview
+        self.open = open; self.preview = preview; self.run = run; self.noLabel = noLabel
     }
 }
 
