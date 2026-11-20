@@ -2,8 +2,9 @@ name: ci
 # FOR NOW (ORCH-1106, owner decision 20 Nov): merge queue groups (orch-queue/...) do not run the job
 # 'addons / dashboard-clickthroughs' nor the jobs 'workspace / test (windows-latest, n/N)'; a group merges without them.
 # They still run in full and count on every push to develop (also one a green group proved: then only they run, see
-# the addons and workspace jobs below), at night and on a release pull request into main / the release check; a red
-# one on develop opens the release keeper's red-develop ticket as before.
+# the addons and workspace jobs below) and for a release: the click-throughs on the pull request into main, the
+# Windows parts at night and in the release keeper's release check (unchanged). A red one on develop opens the
+# release keeper's red-develop ticket as before.
 # SWITCH BACK (follow-up ORCH ticket "Queue groups: run the click-throughs and Windows parts again") when ORCH-555
 # (steady click-throughs) and ORCH-1050 (Windows split) are done and 20 queue groups in a row were green with them:
 # drop "clickthroughs:" from the addons job's inputs. brand/tests/test_ci_queue_skip.py keeps both places in step.
