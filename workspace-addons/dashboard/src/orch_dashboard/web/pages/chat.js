@@ -521,14 +521,19 @@ function chatKeydown(event) {
 }
 // Observe committed DOM, not speculative render trees. Preserve readers' scroll position.
 function chatLogStamp(log) { return log.textContent; }
+// The welcome block is read from its top (on a phone it is taller than the log): never scroll it to the bottom.
+function chatFollowLog(log) {
+  const previous = chatScroll.get(log), stamp = chatLogStamp(log);
+  if (log.querySelector('.chat-welcome')) log.scrollTop = 0;
+  else if (!previous || (previous.near && previous.stamp !== stamp)) log.scrollTop = log.scrollHeight;
+  chatScroll.set(log, {stamp, near:log.scrollHeight - log.scrollTop - log.clientHeight < 80});
+}
 new MutationObserver(() => {
   const field = document.querySelector('.chat-page .chat-draft');
   if (field) { field.style.height = 'auto'; field.style.height = Math.min(124, Math.max(44, field.scrollHeight)) + 'px'; }
   const log = document.querySelector('.chat-page .chat-log');
   if (!log || !log.clientHeight) return;
-  const previous = chatScroll.get(log), stamp = chatLogStamp(log);
-  if (!previous || (previous.near && previous.stamp !== stamp)) log.scrollTop = log.scrollHeight;
-  chatScroll.set(log, {stamp, near:log.scrollHeight - log.scrollTop - log.clientHeight < 80});
+  chatFollowLog(log);
 }).observe(document.documentElement, {childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['class']});
 
 // Workspace DMs are a separate layer, so group/Chat changes can merge independently.
