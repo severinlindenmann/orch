@@ -139,9 +139,34 @@ def passed(rollup) -> bool:
     return good > 0
 
 
+def failed_names(rollup) -> list[tuple[str, str]] | None:
+    """(full name, conclusion) of each check that did not pass (newest run of each), or None while one still
+    runs or the rollup cannot be judged. A release with named exceptions (ORCH-178) merges by itself only when
+    every check here is excused."""
+    if not isinstance(rollup, list) or not rollup:
+        return None
+    failed = []
+    for c in _newest(rollup):
+        if not isinstance(c, dict):
+            return None
+        if "state" in c and "status" not in c:
+            word = c.get("state")
+            if word == "PENDING":
+                return None
+        elif c.get("status") != "COMPLETED":
+            return None
+        else:
+            word = c.get("conclusion")
+        if word not in PASSED:
+            failed.append((str(c.get("name") or c.get("context") or ""), str(word)))
+    return failed
+
+
 def checks(url: str) -> dict | None:
     """What GitHub says about a pull request now, read-only, with whatever login this process has:
-    {"state": OPEN|MERGED|CLOSED, "head": <newest commit>, "green": <open, not a draft, checks passed>}.
+    {"state": OPEN|MERGED|CLOSED, "head": <newest commit>, "green": <open, not a draft, checks passed>,
+    "failed": <names of the failed checks once every check finished on an open pull request that is no draft,
+    else None>}.
     None when it cannot be read (no gh, not signed in, no network): the caller then shows nothing."""
     gh = shutil.which("gh")
     if gh is None or not is_pr_url(url):
@@ -156,8 +181,15 @@ def checks(url: str) -> dict | None:
     head = data.get("headRefOid")
     if not isinstance(head, str) or not SHA.fullmatch(head):
         return None
-    green = data["state"] == "OPEN" and data.get("isDraft") is False and passed(data.get("statusCheckRollup"))
-    return {"state": data["state"], "head": head, "green": green}
+    ready = data["state"] == "OPEN" and data.get("isDraft") is False
+    rollup = data.get("statusCheckRollup")
+    green = ready and passed(rollup)
+    return {
+        "state": data["state"],
+        "head": head,
+        "green": green,
+        "failed": failed_names(rollup) if ready else None,
+    }
 
 
 MERGE_COMMIT = re.compile(r"Merge pull request #([0-9]{1,9}) from ")
@@ -393,26 +425,34 @@ def head_of(url: str) -> str:
     return head
 
 
-def _unfinished_checks(gh: str, url: str) -> str | None:
+def _unfinished_checks(gh: str, url: str, excused: frozenset = frozenset()) -> str | None:
     """Plain words when the pull request's checks have not all passed yet ("3 of 18 checks still running",
     "1 check failed: lint"), read now at GitHub; None when they passed, there are none (a repository without
-    checks), or GitHub could not be read (GitHub's own rules then decide)."""
+    checks), or GitHub could not be read (GitHub's own rules then decide). `excused`: (full check name,
+    conclusion) pairs that may be red (a release's named exceptions, ORCH-178); every other check must pass,
+    none may still run, and GitHub must answer: with exceptions nothing merges on an unread or empty list."""
+    unread = "GitHub could not be read right before the merge" if excused else None
     try:
         v = _gh(gh, ["pr", "view", url, "--json", "statusCheckRollup"], 15)
         rollup = (json.loads(v.stdout) if v.returncode == 0 else {}).get("statusCheckRollup")
     except (ValueError, AttributeError, Refused):
-        return None
+        return unread
     if not isinstance(rollup, list) or not rollup:
-        return None
+        return unread
+    if excused and failed_names(rollup) is None:  # still running, or a list it cannot judge
+        return checks_state(rollup)[1] if all(isinstance(c, dict) for c in rollup) else unread
     tone, words = checks_state(rollup)
+    if tone == "failed" and excused and set(failed_names(rollup) or [("", "")]) <= excused:
+        return None
     return None if tone == "done" else words
 
 
-def merge(url: str, head: str, add_review: bool = True) -> dict:
+def merge(url: str, head: str, add_review: bool = True, excused: frozenset = frozenset()) -> dict:
     """Merge the pull request at `url` as the person signed in to gh, only while its newest commit is still
     `head` (what the card showed). Returns {"login", "already"}: already is True when it was merged before (a
     second click, or a retry after a crash), which is not an error. add_review False (`orch ref merge`): the
-    person's review is never added; where the branch rules want one, GitHub refuses and says so."""
+    person's review is never added; where the branch rules want one, GitHub refuses and says so. excused:
+    (check name, conclusion) pairs that may be red (only the release keeper's named exceptions, ORCH-178)."""
     repo, num = _parts(url)
     if not isinstance(head, str) or not SHA.fullmatch(head):
         raise Refused("This merge card has no commit to merge. Ask the helper for a new card.")
@@ -430,7 +470,7 @@ def merge(url: str, head: str, add_review: bool = True) -> dict:
         raise Refused("The pull request is closed on GitHub, so it cannot be merged. Open it to see why.")
     if now != head:
         raise MergeFailed(CHANGED)
-    unfinished = _unfinished_checks(gh, url)
+    unfinished = _unfinished_checks(gh, url, frozenset(excused))
     if unfinished:  # say it plainly instead of GitHub's "base branch policy prohibits the merge"
         raise Refused(
             f"Its checks have not all passed yet ({unfinished}), so nothing was merged. "

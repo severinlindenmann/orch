@@ -226,3 +226,124 @@ def test_release_problem(monkeypatch, gh_kw, want):
     assert got is None if want is None else want in got
     if want is None:  # compared with develop's own commit, never the name (a tag could carry it)
         assert fake.compared == [f"repos/acme/app/compare/{'b' * 40}...{HEAD}"]
+
+
+WIN = "workspace / test (windows-latest, 12/16)"
+KNOWN = {"workspace / test (windows-latest)": "ORCH-32, until 2026-11-30"}
+
+
+def _red(*failed, gate="FAILURE"):
+    return {"state": "OPEN", "head": HEAD, "green": False,
+            "failed": [(n, gate if n == "gate" else "FAILURE") for n in failed]}  # fmt: skip
+
+
+def _rollup(gh, *failed):
+    gh.rollup = [
+        {"name": "workspace / lint", "workflowName": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}
+    ]
+    gh.rollup += [
+        {"name": n, "workflowName": "ci", "status": "COMPLETED", "conclusion": "FAILURE"} for n in failed
+    ]
+
+
+def test_red_only_in_named_exceptions_merges_by_itself(tk, run, gh):  # noqa: F811
+    """ORCH-178 (from ORCH-431): the owner's click on such a card would merge it; with the switch on it goes
+    by itself, and the card's answer names the exception. The roll-up job is judged by its jobs."""
+    root, tid = tk
+    _ask(run, tid, "--release")
+    _on(run)
+    _rollup(gh, "gate", WIN)  # what the merge reads again at GitHub right before it merges
+    res = review.tend_releases(root, checks_of=lambda u: _red("gate", WIN), known_red=KNOWN)
+    row = res["actions"][0]
+    assert row["verdict"] == "merge" and row["done"] is True and gh.merges
+    assert f"{WIN} (ORCH-32, until 2026-11-30)" in row["why"]
+    q = _q(root, tid)
+    assert q["answer"] == "Merge" and "named exceptions" in q["decision"]["summary"]
+
+
+@pytest.mark.parametrize(
+    ("facts", "known"),
+    [
+        (_red("gate", WIN, "workspace / lint"), KNOWN),  # one red check without an exception
+        (_red("gate", WIN), None),  # `orch review tend-releases` alone: no exceptions passed
+        (_red("gate", WIN), {}),
+        (_red("gate"), KNOWN),  # only the roll-up: nothing names why
+        (_red("gate", WIN, gate="CANCELLED"), KNOWN),  # the roll-up itself was cut: not explained by WIN
+        (_red("gate", "workspace / test (windows-latest, arm64)"), KNOWN),  # another matrix axis, not a part
+        ({"state": "OPEN", "head": HEAD, "green": False, "failed": None}, KNOWN),  # a check still runs
+        ({"state": "OPEN", "head": HEAD, "green": False}, KNOWN),
+    ],
+)
+def test_red_outside_the_exceptions_still_waits(tk, run, facts, known):
+    root, tid = tk
+    _ask(run, tid, "--release")
+    _on(run)
+    res = review.tend_releases(root, checks_of=lambda u: facts, known_red=known)
+    assert [a["verdict"] for a in res["actions"]] == ["wait"]
+    assert not FakeGh.current.merges and _q(root, tid)["answer"] is None
+
+
+def test_named_exceptions_never_pass_the_release_check(tk, run, monkeypatch):
+    root, tid = tk
+    _ask(run, tid, "--release")
+    _on(run)
+    monkeypatch.setattr(ghmerge, "release_problem", lambda url, head: "not from a release/ branch")
+    res = review.tend_releases(root, checks_of=lambda u: _red("gate", WIN), known_red=KNOWN)
+    assert [a["verdict"] for a in res["actions"]] == ["wait"] and not FakeGh.current.merges
+
+
+def test_failed_names_reads_the_newest_run_and_waits_while_one_runs():
+    done = {"status": "COMPLETED"}
+    roll = [
+        {**done, "name": "a", "workflowName": "ci", "conclusion": "FAILURE", "startedAt": "1"},
+        {**done, "name": "a", "workflowName": "ci", "conclusion": "SUCCESS", "startedAt": "2"},
+        {**done, "name": WIN, "workflowName": "ci", "conclusion": "FAILURE", "startedAt": "1"},
+        {"context": "legacy", "state": "SUCCESS"},
+    ]
+    assert ghmerge.failed_names(roll) == [(WIN, "FAILURE")]
+    assert ghmerge.failed_names([*roll, {"name": "b", "status": "IN_PROGRESS"}]) is None
+    assert ghmerge.failed_names([*roll, {"context": "c", "state": "PENDING"}]) is None
+    assert ghmerge.failed_names([]) is None
+
+
+def test_the_keeper_hands_its_named_exceptions_to_the_merge(monkeypatch, tmp_path):
+    from orch import releasekeeper
+
+    got = {}
+    monkeypatch.setattr(review, "tend_releases", lambda root, **kw: got.update(root=root, **kw) or {})
+
+    class W:
+        root = tmp_path
+
+        def known_red(self):
+            return dict(KNOWN)
+
+    releasekeeper.tend_releases(W())
+    assert got == {"root": tmp_path, "known_red": KNOWN}
+
+
+def test_the_merge_reads_github_again_and_refuses_a_red_check_outside_the_exceptions(tk, run, gh):  # noqa: F811
+    """Between the judgement and the merge a check can change: the merge itself allows only the named red
+    checks, and the owner's click (no exceptions) still needs every check green."""
+    root, tid = tk
+    _ask(run, tid, "--release")
+    _on(run)
+    _rollup(gh, "gate", WIN, "workspace / lint (2)")
+    res = review.tend_releases(root, checks_of=lambda u: _red("gate", WIN), known_red=KNOWN)
+    assert res["actions"][0]["verdict"] == "wait" and "checks have not all passed" in res["actions"][0]["why"]
+    assert not gh.merges and _q(root, tid)["answer"] is None
+    _rollup(gh, "gate", WIN)
+    with pytest.raises(tickets.Refused):
+        ghmerge.merge(PR, HEAD)  # no exceptions: a red check stops the merge as before
+    ok = frozenset({("gate", "FAILURE"), (WIN, "FAILURE")})
+    gh.rollup[1]["conclusion"] = "CANCELLED"  # the roll-up ran again and was cut: no longer what was excused
+    with pytest.raises(tickets.Refused):
+        ghmerge.merge(PR, HEAD, excused=ok)
+    gh.rollup = [None]  # a list nobody can judge
+    with pytest.raises(tickets.Refused, match="could not be read"):
+        ghmerge.merge(PR, HEAD, excused=ok)
+    gh.rollup = []  # GitHub answers nothing: with exceptions nothing merges
+    with pytest.raises(tickets.Refused, match="could not be read"):
+        ghmerge.merge(PR, HEAD, excused=ok)
+    _rollup(gh, "gate", WIN)
+    assert ghmerge.merge(PR, HEAD, excused=ok)["already"] is False and gh.merges

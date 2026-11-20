@@ -16,7 +16,8 @@ One pass moves the release one phase on (state: .orch/run/release-keeper.json):
   gate     the release pull request's checks: green -> the Merge card on the role ticket (orch ask
            --merge --release) -> card. Red -> one top ticket; when develop moves past it the old pull
            request is closed and the release is cut again from scratch.
-  card     `orch review tend-releases` merges it when the owner allowed it (workflow.release_merge);
+  card     `orch review tend-releases` merges it when the owner allowed it (workflow.release_merge), also
+           when its only red checks have a named exception (ORCH-178);
            otherwise the owner clicks Merge. Merged -> installed.
   merged   `orch update` here; when a server folder (github.release_servers) changed the deploy is prepared
            (the CI-built program fetched and checked, production's program read over ssh, read only, new
@@ -25,8 +26,9 @@ One pass moves the release one phase on (state: .orch/run/release-keeper.json):
            the release worktree removed -> idle.
 Release proof (ORCH-456): a red check holds the release unless a person recorded a named exception for it
 (`orch github release-exception "<check>" --ticket <key> --until <date>`, shown on the Merge card and in the
-note); and the walks named in github.release_walks (install walk, services test, click-through pass) each get
-a helper ticket when the release is cut; the Merge card waits until every walk recorded a pass
+note; the keeper records one itself, for FIX_DAYS, when its "Release N checks are red" ticket links a fix pull
+request, ORCH-178); and the walks named in github.release_walks (install walk, services test, click-through
+pass) each get a helper ticket when the release is cut; the Merge card waits until every walk recorded a pass
 (`orch github release-walk <N> <walk> pass|fail "<line>"`). A release that reached main without that proof
 is written on the role ticket.
 Every pass also runs the security check (secreview.py, ORCH-317): pull requests touching the servers, sign-in,
@@ -53,7 +55,7 @@ import re
 import shutil
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from orch import brake, config, runs, secreview, tickets
@@ -271,14 +273,17 @@ def ts(s) -> datetime | None:
     return d if d is None or d.tzinfo else d.replace(tzinfo=UTC)
 
 
+SHARD = re.compile(r", [0-9]{1,3}/[0-9]{1,3}\)")
+
+
 def known_name(name: str, names) -> str | None:
     """The entry of `names` that covers job `name`: the same name, or the job without its part. A job split
     into parts (ORCH-315, "workspace / test (windows-latest, 3/6)") is covered by "workspace / test
     (windows-latest)", so a known-red entry keeps working when CI splits the job."""
     if name in names:
         return name
-    for n in names:
-        if n.endswith(")") and name.startswith(n[:-1] + ", "):
+    for n in names:  # only a part number ("3/6") is added; another matrix axis is another job
+        if n.endswith(")") and name.startswith(n[:-1] + ", ") and SHARD.fullmatch(name[len(n) - 1 :]):
             return n
     return None
 
@@ -679,6 +684,19 @@ class World:
             return dict(self.sim.get("exceptions") or {})
         return _read_json(self.cfg.exceptions_path)
 
+    def record_exception(self, check: str, entry: dict) -> None:
+        """A named exception the keeper records itself for a fix ticket (ORCH-178, owner 20 Nov)."""
+        self.did.append(f"exception:{check}")
+        if self.sim is not None:
+            self.sim.setdefault("exceptions", {})[check] = entry
+            return
+        if self.dry:
+            return
+        data = _read_json(self.cfg.exceptions_path)
+        data[check] = entry
+        self.cfg.run_dir.mkdir(parents=True, exist_ok=True)
+        runs._atomic(self.cfg.exceptions_path, json.dumps(data, indent=1) + "\n")
+
     def walk_results(self) -> dict[str, dict]:
         """{release number: {walk: {verdict, line, at, by}}} as the walk helpers recorded them."""
         if self.sim is not None:
@@ -731,7 +749,7 @@ class World:
     def tickets(self) -> list[dict]:
         if self.sim is not None:
             return self.sim.get("tickets", [])
-        keep = ("id", "key", "title", "status", "refs")
+        keep = ("id", "key", "title", "status", "refs", "note")
         return [{k: t.get(k) for k in keep} for t in tickets.list_all(self.root)]
 
     def ticket(self, ref: str) -> dict:
@@ -1253,6 +1271,60 @@ def open_red_ticket(rows: list[dict], words: str) -> dict | None:
     )
 
 
+FIX_DAYS = 2  # how long an exception the keeper records for a fix ticket lasts (owner 20 Nov, ORCH-178)
+
+
+def fix_exceptions(w: World, rel: dict, bad: list[str]) -> list[str]:
+    """Owner 20 Nov (ORCH-178, from ORCH-431): once the keeper's own "Release N checks are red" ticket links a
+    fix pull request (orch ref add), the keeper records the named exception itself for each red check that
+    ticket names: that ticket, ending FIX_DAYS later or when the ticket is done. It shows on the Merge card
+    and in the release note like one a person recorded; it is never renewed for the same ticket. Returns the
+    lines when it recorded any (the release is judged again next pass)."""
+    t = open_red_ticket(w.tickets(), f"Release {rel['n']} checks")
+    if not t or not bad:
+        return []
+    fix = next(
+        (
+            u
+            for r in t.get("refs") or []
+            if (
+                m := re.search(
+                    rf"github\.com/{re.escape(w.cfg.repo)}/pull/(\d+)", u := (r or {}).get("url") or ""
+                )
+            )
+            and int(m[1]) != rel.get("pr")
+        ),
+        None,
+    )
+    if fix is None:
+        return []
+    key = str(t.get("key") or t["id"])
+    text = f"{t.get('title') or ''}\n{t.get('note') or ''}"
+    have = w.exceptions()
+    names = [  # a whole name from the ticket's list ("red on: A, B."); once per ticket and check
+        c
+        for c in bad
+        if re.search(rf"(?:^|[:,]\s){re.escape(c)}(?=$|,|\.(?:\s|$))", text, re.M)
+        and not ((have.get(c) or {}).get("by") == BY and (have.get(c) or {}).get("ticket") == key)
+    ]
+    if not names:
+        return []
+    until = (now().date() + timedelta(days=FIX_DAYS)).isoformat()
+    for c in names:
+        w.record_exception(
+            c,
+            {"ticket": key, "until": until, "why": f"fix pull request {fix} linked to {key}"[:300], "by": BY,
+             "at": now().isoformat(timespec="seconds")},
+        )  # fmt: skip
+    w.note(
+        key, f"Release keeper: recorded a named exception until {until} for {', '.join(names)} (fix {fix})."
+    )
+    return [
+        f"release {rel['n']}: {key} links the fix {fix}: recorded named exceptions until {until} for "
+        f"{', '.join(names)}; judged again next pass"
+    ]
+
+
 def recut(w: World, st: dict, rel: dict, h: dict, what: str) -> bool:
     """A release held by red `what` (checks, walks) whose fix ticket is closed while develop moved on: close
     its pull request so the next pass cuts it again from the new develop. True when it did."""
@@ -1434,6 +1506,8 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
                         f"release {rel['n']}: checks were red, develop moved and the fix ticket is closed: "
                         "closed the pull request; cut again next pass"
                     ]
+                if fixed := fix_exceptions(w, rel, failed_checks(p.get("statusCheckRollup"), ignore)):
+                    return out + fixed
                 return out + red(
                     w,
                     st,
@@ -1443,9 +1517,11 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
                     f"The release pull request {p.get('url')} into main is red on: {bad}. Fix it on "
                     "develop (a normal pull request); the release keeper closes this release and cuts it "
                     "again once develop "
-                    "has the fix and this ticket is done. A red check ships only with a named exception a "
-                    'person records: orch github release-exception "<check>" --ticket <key> --until '
-                    "<YYYY-MM-DD>.",
+                    "has the fix and this ticket is done. A red check ships only with a named exception: "
+                    "link the fix pull request to this ticket (orch ref add) and the release keeper records "
+                    f"one for the checks named here until {FIX_DAYS} days later, so the release goes without "
+                    'a new cut; or a person records one: orch github release-exception "<check>" --ticket '
+                    "<key> --until <YYYY-MM-DD>.",
                     f"Release {rel['n']}'s checks are green (after a fix on develop)",
                 )
             wv = walk_verdicts(w, rel)
@@ -1610,7 +1686,7 @@ def tend_releases(w: World) -> dict:
     from orch import review
 
     try:
-        return review.tend_releases(w.root)
+        return review.tend_releases(w.root, known_red=w.known_red())
     except Refused as e:  # inside a helper, or GitHub said no: the owner's click still works
         return {"refused": str(e)}
 

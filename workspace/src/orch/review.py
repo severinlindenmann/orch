@@ -1224,13 +1224,40 @@ def _merge_first(root: Path, tid: str, q: dict, d: dict, by: str, via: str) -> N
         tickets.note_history(root, tid, by, line, via)
 
 
+def excused_red(got: dict, known_red: dict | None) -> tuple[list[str], frozenset] | None:
+    """The named exceptions that excuse every red check of a finished release pull request (ORCH-178, from
+    ORCH-431): (["<check> (<ticket>)", ...], the red checks as (name, conclusion)), or None when a check still
+    runs, nothing failed, or one red check has no exception. The roll-up job (gate) is red whenever a job it
+    waits for is; it counts as excused only on a plain failure (not cancelled or timed out) next to at least
+    one excused job, as every job it waits for shows here too."""
+    from orch.releasekeeper import ROLLUP_JOBS, known_name
+
+    failed = got.get("failed")
+    if not known_red or not failed:
+        return None
+    named = []
+    for name, word in failed:
+        if name in ROLLUP_JOBS:
+            if word != "FAILURE":
+                return None
+            continue
+        entry = known_name(name, known_red)
+        if entry is None:
+            return None
+        named.append(f"{name} ({known_red[entry]})")
+    return (named, frozenset(failed)) if named else None
+
+
 def tend_releases(
-    root: Path, dry_run: bool = False, checks_of=None, merge_with=None, release_check=None
+    root: Path, dry_run: bool = False, checks_of=None, merge_with=None, release_check=None, known_red=None
 ) -> dict:
     """One pass of the release keeper (`orch review tend-releases`): every unanswered release Merge card
     (`orch ask ... --merge --release`) whose pull request is open, not a draft, still on the card's commit and
     green on every check is merged with the gh login of this computer (the owner's: ghmerge drops helper
-    tokens) and recorded as answered by the release keeper. Only while the owner turned it on in Settings
+    tokens) and recorded as answered by the release keeper. `known_red` ({check: "<ticket>[, until <date>]"},
+    the release keeper's named exceptions while their tickets are open, ORCH-456) lets a release whose only
+    red checks are named there merge too, as the owner's click on that card would (ORCH-178); without it every
+    check must be green. Only while the owner turned it on in Settings
     (`workflow.release_merge`) and automation is not paused. Returns {"off", "paused", "actions": [{ticket,
     key, question, url, verdict, why, done}]}; verdict is merge, wait or stale. dry_run only says it.
     Only a real release merges: from a release/... branch into the default branch, changing nothing that is
@@ -1259,7 +1286,7 @@ def tend_releases(
                 continue
             if tickets.taken_back_text(q):
                 continue
-            head = act.get("head")
+            head, excused = act.get("head"), None
             row = {"ticket": t["id"], "key": t.get("key") or t["id"], "question": q["id"], "url": url,
                    "done": False}  # fmt: skip
             got = checks_of(url)
@@ -1267,19 +1294,24 @@ def tend_releases(
                 row.update(verdict="wait", why="GitHub could not be read")
             elif got["state"] != "OPEN" or got["head"] != head:
                 row.update(verdict="stale", why="the pull request changed or closed; a new card is needed")
-            elif not got["green"]:
+            elif not got["green"] and (excused := excused_red(got, known_red)) is None:
                 row.update(verdict="wait", why="not every check is green yet")
             elif (why := release_check(url, head)) is not None:
                 row.update(verdict="wait", why=f"not a release that merges by itself: {why}")
+            elif not got["green"]:
+                row.update(
+                    verdict="merge",
+                    why="every check is green except named exceptions: " + ", ".join(excused[0]),
+                )
             else:
                 row.update(verdict="merge", why="every check is green")
             if row["verdict"] != "merge" or dry_run:
                 actions.append(row)
                 continue
             try:
-                done = merge_with(url, head)
+                done = merge_with(url, head, excused=excused[1]) if excused else merge_with(url, head)
                 d = _bare("approve", "Merge", [], _note(None))
-                d["summary"] = "Merged by itself: every check was green."
+                d["summary"] = f"Merged by itself: {row['why'].replace('is green', 'was green')}."
                 line = (f"merged already on GitHub ({done['login']}): {url}" if done.get("already")
                         else f"merged on GitHub as {done['login']}: {url}")  # fmt: skip
                 tickets.merged_for_owner(root, t["id"], q["id"], url, head, line, d)
