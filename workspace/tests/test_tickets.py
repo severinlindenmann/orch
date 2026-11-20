@@ -800,9 +800,25 @@ def test_closed_ticket_lets_an_agent_switch_a_repeat_off_and_nothing_else(proj, 
     tickets.ext_set(proj, tid, "automation", '{"paused": true}', "agent:claude")  # already off: fine
     assert tickets.load(proj, tid)["ext"]["automation"]["recurring"] is False
     tickets.ext_unset(proj, tid, "automation.next_run", "agent:claude")
-    tickets.ext_unset(proj, tid, "automation", "agent:automation")
-    t = tickets.load(proj, tid)
-    assert "automation" not in t["ext"] and t["status"] == status
+    assert "next_run" not in tickets.load(proj, tid)["ext"]["automation"]
+    other = new_ticket()  # a repeat that is not paused: its whole block may go
+    tickets.ext_set(proj, other, "automation", json.dumps(rep), "human:t")
+    tickets.set_status(proj, other, status, "human:t")
+    tickets.ext_unset(proj, other, "automation", "agent:automation")
+    t = tickets.load(proj, other)
+    assert "automation" not in t.get("ext", {}) and t["status"] == status
+
+
+def test_closed_ticket_keeps_a_paused_repeat_block_against_an_agent(proj, new_ticket):
+    """Removing the whole block of a paused repeat would lift its switched-off gate: refused for an agent on a
+    closed ticket; switching it further off still works, and a person may remove it."""
+    tid = new_ticket()
+    tickets.ext_set(proj, tid, "automation", '{"recurring": true, "paused": true}', "human:t")
+    tickets.set_status(proj, tid, "done", "human:t")
+    with pytest.raises(Refused, match="This ticket is closed"):
+        tickets.ext_unset(proj, tid, "automation", "agent:claude")
+    tickets.ext_set(proj, tid, "automation", '{"recurring": false}', "agent:claude")
+    tickets.ext_unset(proj, tid, "automation", "human:t")
 
 
 def test_repeat_off_only():

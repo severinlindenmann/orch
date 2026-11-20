@@ -68,7 +68,8 @@ Details and the event format: `contracts/relay-api.md` (Subscribers), `contracts
 ## What it does
 Workspaces and phones send each other messages on `relay.severin.io`, under pair rules set by the admin.
 Delegate/start need an allow on the receiving side. Webhooks become inbox messages.
-A plain text from another workspace starts work by itself (#2051, no setup): core passes it to the ticket it names,
+A plain text from another workspace starts work by itself (#2051, no setup): core passes it to the ticket it names when that ticket is linked to the sender (it came
+from them, or we sent them a message about it),
 else to the ticket of the message it answers, else to the General ticket (Chat), as queued input framed as outside
 data, and records it in `.orch/run/relay/pickups.json`; the automation host starts one helper run per ticket and
 records the run on each message (`orch relay pickups`). Status updates and group copies are not passed on.

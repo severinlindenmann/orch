@@ -3634,9 +3634,15 @@ def ext_unset(
         if not ext:
             del ticket["ext"]
 
-    # removing a repeat (or its next planned start) only switches work off: allowed on a closed ticket too
-    off = addon == "automation" and key in ("", "next_run", "each_run")
-    return apply_op(root, tid, op, if_revision=if_revision, by=by, closed_ok=lambda _t: off)[0]
+    def only_off(ticket) -> bool:
+        """Removing a repeat (or its next planned start) only switches work off, so it is allowed on a closed
+        ticket too; but not the whole block of a paused one: that would also lift its "switched off" gate."""
+        cur = (ticket.get("ext") or {}).get("automation")
+        if addon != "automation" or not isinstance(cur, dict):
+            return False
+        return key in ("next_run", "each_run") or (not key and cur.get("paused") is not True)
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by, closed_ok=only_off)[0]
 
 
 _SECRET_FOLDER_RE = re.compile(r"\.orch[/\\]+secrets|\borch secrets\b|\bsecrets folder\b", re.I)
