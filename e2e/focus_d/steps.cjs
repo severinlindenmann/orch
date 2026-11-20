@@ -147,7 +147,7 @@ async function liveBarState(page, tweak = null) {
     const res = await route.fetch();
     if (res.status() !== 200) return route.fulfill({ response: res });
     const st = await res.json();
-    const base = (st.tickets || [])[0] || {};
+    const base = (st.tickets || []).find(t => t.id !== WIDGET_ID) || {};  // not the demo ticket of every widget kind
     const extra = BAR_SESSIONS.map(([s, key, title]) => ({ ...base, id: 't_bar' + key.slice(5), key, title,
       status: 'active', checks: [], sessions: [],
       questions: barAsk && s === 'wait' ? [{ ...BAR_QUESTION, answer: barAnswered.has('t_bar' + key.slice(5)) ? BAR_QUESTION.options[0] : null }] : [] }));
@@ -271,10 +271,14 @@ async function chatView(page, dash) {
   const pane = '#live-dock .live-pane[data-session="t_bar238"]', chat = `${pane} [data-live-chat]`;
   await page.waitForFunction(c => /Step 1 done/.test(document.querySelector(c)?.textContent || ''), chat, { timeout: 10000 });
   const rows = await page.$$eval(`${chat} > *`, els => els.map(el => (el.dataset.w || 'e') + ' ' + el.textContent.replace(/\s+/g, ' ').trim()));
-  const want = [/^e ✓ The helper started/, /^e ✓ Step 1 done: Files can be dropped on a ticket/, /^h Helper · .*Uploading works.*Pull request 1309$/,
+  const want = [/^e ✓ The helper started/, /^e ✓ Step 1 done: Files can be dropped on a ticket/, /^h Helper · .*Uploading works/,
     /^h Helper · .*above or below the files\?$/, /^y Demo · .*Below$|^y You · .*Below$/];
   if (rows.length !== want.length || want.some((re, i) => !re.test(rows[i]))) throw new Error('the chat reads:\n' + rows.join('\n'));
   if (await page.isVisible(`${pane} [data-live-lines]`)) throw new Error('Chat also shows the last lines');
+  // ORCH-697: the step's pull request is a result widget inside its message; a click opens it big
+  const prw = `${chat} .live-chat-msg .result[data-type="pr"]`;
+  await page.waitForSelector(prw, { timeout: 10000 });
+  if (!/Pull request 1309/.test(await page.textContent(prw))) throw new Error('the pull request widget does not name pull request 1309');
   const ask = `${pane} [data-live-ask]`;
   if (!/Keep the old file name/.test(await page.textContent(ask))) throw new Error('the waiting question is not shown above the chat');
   if (rows.some(r => /Keep the old file name/.test(r))) throw new Error('the waiting question is also a chat message');
@@ -316,6 +320,109 @@ async function chatView(page, dash) {
   await noSideways(page);
 }
 
+// Steps 20 and 21 (ORCH-697): the result widgets. The demo ticket (widgets_ticket.json) has one result of every kind:
+// e2e/focus_insights/dashboard_server.py writes its files into the test workspace and the real server reads them; the
+// ticket joins the page's state here and the list of its result files comes from a stand-in, as orch lists them.
+const WIDGET_DEMO = require('./widgets_ticket.json');
+const WIDGET_ID = WIDGET_DEMO.ticket.id;
+const WIDGET_KINDS = ['md', 'text', 'code', 'data', 'table', 'page', 'pdf', 'picture', 'video', 'audio', 'chart', 'change', 'pr', 'archive', 'link', 'file'];
+function widgetFiles() {
+  const fs = require('node:fs'), path = require('node:path');
+  const samples = path.join(__dirname, '..', '..', 'workspace', 'src', 'orch_ui', 'static', 'samples');
+  // made in the order listed, the picture last: the tile shows it as the newest result
+  return Object.entries(WIDGET_DEMO.files).map(([name, f], i) => ({ name, mtime: name === 'home-390.svg' ? '2026-11-19T14:40:00Z' : `2026-11-19T13:${String(30 + i).padStart(2, '0')}:00Z`,
+    size: f.sample ? fs.statSync(path.join(samples, f.sample)).size : Buffer.byteLength(f.text) }));
+}
+// The overlay: open from a widget, step through with the arrow keys, Esc closes and the keyboard is back on the opener.
+async function overlayRound(page, opener, want) {
+  await page.locator(opener).first().scrollIntoViewIfNeeded();
+  await page.locator(opener).first().click();
+  const dlg = 'dialog.result-overlay[open]';
+  await page.waitForSelector(dlg, { timeout: 5000 });
+  const titles = [await page.textContent(`${dlg} .result-ov-title`)];
+  const pos = await page.textContent(`${dlg} .result-ov-pos`);
+  const total = Number((/of (\d+)/.exec(pos) || [])[1] || 1);
+  if (want && total < want) throw new Error(`the overlay steps through ${total} results, want ${want}`);
+  for (let i = 1; i < total; i++) {
+    await page.keyboard.press('ArrowRight');
+    titles.push(await page.textContent(`${dlg} .result-ov-title`));
+  }
+  if (new Set(titles).size !== total) throw new Error('the arrows do not reach every result: ' + titles.join(', '));
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(d => !document.querySelector(d), dlg, { timeout: 5000 });
+  const back = await page.evaluate(o => { const el = document.querySelector(o); return !!el && document.activeElement === el; }, opener);
+  if (!back) throw new Error('after Esc the keyboard is not back on the widget that opened the overlay');
+  return titles;
+}
+// Step 20: the 16 widgets in the style guide, small, each opens big, the arrows go through, Esc closes; the states.
+async function widgetsGuide(page, dash) {
+  await page.goto(dash + '/styleguide/#result-widgets');
+  await page.waitForSelector('#rw-grid [data-type]', { timeout: 15000 });
+  const kinds = await page.$$eval('#rw-grid [data-type]', els => els.map(el => el.dataset.type));
+  const miss = WIDGET_KINDS.filter(k => !kinds.includes(k));
+  if (kinds.length !== 16 || miss.length) throw new Error(`the style guide shows ${kinds.length} widgets; missing: ${miss.join(', ')}`);
+  await overlayRound(page, '#rw-grid .result[data-type="md"] .result-open', 15);
+  for (const st of ['empty', 'loading', 'error', 'large']) if (!(await page.$(`#rw-states .result[data-state="${st}"]`))) throw new Error(`no ${st} state in the style guide`);
+  await page.locator('#rw-grid').scrollIntoViewIfNeeded();
+  await noSideways(page);
+}
+// Step 21: the demo ticket's results on its wall tile (the newest, small, "+N more"), inside its session's chat (each
+// step's results in that step's message) and on its ticket page (all 16 kinds); a click opens the same overlay.
+// Extra pictures of a step's middle states for the Look stop, only when FD_EXTRA names a folder (not part of the run).
+async function extraShot(page, name, width) {
+  const dir = process.env.FD_EXTRA;
+  if (!dir || !width) return;
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: require('node:path').join(dir, `${name}-${width}.png`) });
+}
+async function widgetsTicket(page, dash, width) {
+  await liveBarState(page, st => {
+    st.tickets = [...(st.tickets || []).filter(t => t.id !== WIDGET_ID), JSON.parse(JSON.stringify(WIDGET_DEMO.ticket))];
+    st.runs = { ...(st.runs || {}), [WIDGET_ID]: { running: true, helper: { state: 'working' }, claim: { agent: 'agent:claude' } } };
+  });
+  const files = widgetFiles();
+  await page.route(`**/api/artifacts/${WIDGET_ID}`, route => route.fulfill({ json: { available: true, files } }));
+  const demo = { id: WIDGET_ID, key: WIDGET_DEMO.ticket.key, title: WIDGET_DEMO.ticket.title, status: 'working', word: 'Working',
+    detail: 'Checking the previews', waiting_on: [], question: null, lines: ['⏺ Bash(node --test tests/attach.test.js)', '  ⎿ ✔ a table shows its rows (7 ms)'],
+    tool: 'Helper', model: 'Opus', mode: 'live', opened_at: null, open_seconds: 34 * 60, idle_seconds: null, closes_in_seconds: 3600,
+    last_at: null, kind: '', pinned: true, name: null };
+  await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { sessions: [demo, ...barSessions()], lines: 8, age_ms: 0 } }));
+  await page.addInitScript(() => { try { localStorage.removeItem('orch.live.wall'); localStorage.removeItem('orch.live.view'); Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
+  // 1. the wall tile: the newest result, small, and "+N more"
+  await page.goto(dash + '/#addon/focus');
+  const tile = tileOf(WIDGET_ID);
+  await page.waitForSelector(`${tile} .wall-results .result`, { timeout: 15000 });
+  const onTile = await page.$$eval(`${tile} .wall-results .result`, els => els.map(el => el.dataset.type));
+  if (onTile.join() !== 'picture') throw new Error(`the tile shows ${onTile.join(', ') || 'nothing'}, want the newest result, the picture`);
+  const more = (await page.textContent(`${tile} .result-more`)).trim();
+  if (!/^\+\d+ more$/.test(more)) throw new Error('the tile does not say how many more results: ' + more);
+  await overlayRound(page, `${tile} .wall-results .result-open`, 15);
+  await page.locator(tile).scrollIntoViewIfNeeded();
+  await extraShot(page, 'fd-21a-tile', width);
+  // 2. the session's chat: each step's results inside its message
+  await page.click(`${tile} [data-wall-open]`);
+  const chat = `#live-dock .live-pane[data-session="${WIDGET_ID}"] [data-live-chat]`;
+  await page.waitForFunction(c => document.querySelectorAll(c + ' .live-chat-msg .results-host [data-type]').length >= 7, chat, { timeout: 15000 });
+  const inChat = await page.$$eval(`${chat} .live-chat-msg`, els => els.map(m => [...m.querySelectorAll('.results-host [data-type]')].map(r => r.dataset.type).sort().join(',')).filter(Boolean));
+  if (inChat.join(' | ') !== 'md,pr,text | link,page,picture,video') throw new Error('the chat messages carry: ' + inChat.join(' | '));
+  await overlayRound(page, `${chat} .live-chat-msg .result[data-type="picture"] .result-open`, 15);
+  await extraShot(page, 'fd-21b-chat', width);
+  // the layer goes to the bar, so the ticket page is seen whole (the session stays open in the bar)
+  await page.click(`#live-dock .live-pane[data-session="${WIDGET_ID}"] [data-key="live-min"]`).catch(() => page.keyboard.press('Escape'));
+  // 3. the ticket page: every kind, the same overlay
+  await page.evaluate(id => { location.hash = '#ticket/' + id; }, WIDGET_ID);
+  const host = `[data-key="ticket-results-${WIDGET_ID}"]`;
+  await page.waitForFunction(h => { const el = document.querySelector(h); return el && el.querySelectorAll('[data-type]').length >= 16 && !el.querySelector('[data-state="loading"]'); }, host, { timeout: 15000 });
+  const onPage = await page.$$eval(`${host} [data-type]`, els => [...new Set(els.map(el => el.dataset.type))]);
+  const miss = WIDGET_KINDS.filter(k => !onPage.includes(k));
+  if (miss.length) throw new Error('the ticket page misses the widgets: ' + miss.join(', '));
+  const broken = await page.$$eval(`${host} .result[data-state="error"]`, els => els.map(el => el.querySelector('.result-name')?.textContent));
+  if (broken.length) throw new Error('these results could not be read: ' + broken.join(', '));
+  if ((await page.textContent(`[data-key="results-widgets"] h2`)).trim() !== 'Results') throw new Error('the card is not called Results');
+  await overlayRound(page, `${host} .result[data-type="chart"] .result-open`, 15);
+  await page.locator(host).scrollIntoViewIfNeeded();
+  await noSideways(page);
+}
 // Step 18 (ORCH-695): the message box of a ticket's pane takes files by the clip, a pasted screenshot and a file dropped
 // on the pane; each shows as a preview (a picture's thumbnail or a file chip) that can be taken out before Send. Send
 // puts the files on the ticket (ticket.attach) and then tells the helper (run.send), the ticket page's one way. The sent
@@ -1061,7 +1168,7 @@ async function focusButton(page, dash, width) {
     const res = await route.fetch();
     if (res.status() !== 200) return route.fulfill({ response: res });
     const st = await res.json();
-    const base = (st.tickets || [])[0] || {};
+    const base = (st.tickets || []).find(t => t.id !== WIDGET_ID) || {};  // not the demo ticket of every widget kind
     const extra = FOCUS_TICKETS.map(([s, key, title]) => ({ ...base, id: id(key), key, title, status: s === 'none' ? 'ready' : 'active',
       questions: s === 'wait' ? [{ id: 'q1', text: 'Send it to the whole team or only to sales?', options: ['Whole team', 'Only sales'] }] : [],
       checks: [], sessions: [] }));
@@ -1426,7 +1533,7 @@ async function groupState(page) {
   });
   // the dashboard's own state with the group's tickets and runs on top (also the answer to a send: the page takes it whole)
   const shape = st => {
-    const base = (st.tickets || [])[0] || {};
+    const base = (st.tickets || []).find(t => t.id !== WIDGET_ID) || {};  // not the demo ticket of every widget kind
     const extra = GROUP.map(([key, title, , depth]) => ({ ...base, id: gid(key), key, title, status: 'active', questions: [], checks: [],
       sessions: [], parent: depth === 1 ? gid('ORCH-300') : null }));
     st.tickets = [...(st.tickets || []).filter(t => !String(t.id).startsWith('t_grp')), ...extra];
@@ -1844,18 +1951,25 @@ const STEPS = [
   },
   {
     n: 20, pic: 'fd-20-widgets', area: '16 widgets', title: 'All 16 result widgets, small and big', feature: [10],
-    waits: T.widgets,
     do: ['Open the style guide, section Results.', 'Open each widget big, use the arrows to go to the next one, close with Esc.'],
     see: ['One small widget for each of the 16 kinds: ' + WIDGETS.join(', ') + '.',
       'Each opens big in an overlay; arrows step through, Esc closes and gives the focus back.',
       'Empty, loading and error look like the style guide states.'],
+    run: ({ page, dash }) => widgetsGuide(page, dash),
     draft: { q: '?page=widgets' },
   },
   {
-    n: 21, pic: 'fd-21-widgets-ticket', area: '16 widgets', title: 'The same widgets on a ticket page', feature: [10],
-    waits: T.widgets,
-    do: ['Open a ticket with results.', 'Open one result big.'],
-    see: ['The ticket shows the same widgets as Focus.', 'The big overlay is the same one.'],
+    n: 21, pic: 'fd-21-widgets-ticket', area: '16 widgets', title: 'The same widgets on a tile, in the chat and on a ticket page', feature: [10],
+    do: ['Open Focus and look at the tile of a ticket with results; open its result big.',
+      'Open the session: each finished step carries its results inside its message; open one big.',
+      'Open the ticket page and open one result big.'],
+    see: ['The tile shows the newest result small and how many more there are.',
+      'The chat shows the files, check runs and pull request of a step inside that step\'s message.',
+      'The ticket page shows every result of the ticket as the same widgets as Focus, all 16 kinds from its real files, evidence and links.',
+      'The big overlay is the same one everywhere: arrows step through, Esc closes and gives the focus back.'],
+    run: ({ page, dash, width }) => widgetsTicket(page, dash, width),
+    // a helper's web page shows in a frame with an empty sandbox: its own script is refused on purpose
+    okConsole: /Blocked script execution in '[^']*\/view\/t_widget16\//,
     draft: { q: '?page=ticket&tk=ORCH-228&res=ORCH-228:0' },
   },
   {
