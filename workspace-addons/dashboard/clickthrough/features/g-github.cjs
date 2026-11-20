@@ -38,9 +38,12 @@ module.exports = {
     addonOn('pull-requests');
     await until(s => (s.addons || []).some(a => a.name === 'pull-requests' && a.ticket_fields), 'the Pull requests add-on turned on');
     await open('#ticket/' + tid);
+    // ORCH-581: an add-on the ticket has not used waits in + Add; picking it shows its group and opens the field
+    const pick = page.locator(`[data-key="prop-add-addon:pull-requests-${tid}"]`);
+    await page.locator(`[data-key="props-add-${tid}"] > summary`).waitFor({ timeout: 20000 }).catch(async () => { throw new Error('no + Add menu:\n' + (await text()).slice(0, 600)); });
+    await page.locator(`[data-key="props-add-${tid}"] > summary`).click();
+    await pick.click();
     const field = page.locator(`button[data-action="field"][data-field="merge_when_green"]`);
-    await field.waitFor({ timeout: 20000 }).catch(async () => { throw new Error('no Merge when green field:\n' + (await text()).slice(0, 600)); });
-    await field.click();
     await act('ticket.field', () => page.getByRole('menuitemradio', { name: 'On' }).click());
     await reload();
     must((await field.innerText()).trim() === 'On', 'Merge when green is not On after a reload');

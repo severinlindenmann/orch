@@ -288,5 +288,6 @@ def test_its_own_second_look_ticket_is_never_queued(proj, run, new_ticket, facts
     tickets.set_status(proj, helper, "review", "human:tester")
     reviewer.run(proj)
     assert helper not in lookreview.read_state(proj)["line"]
-    assert _lines(proj, helper)[-1].startswith("Left for you by the Reviewer: ")
+    # ORCH-826: a finished second look is good news only: accepted for the owner, never queued or left
+    assert _lines(proj, helper)[-1].startswith("Accepted for you by the Reviewer: The Reviewer's second look")
     assert len(starts) == 1

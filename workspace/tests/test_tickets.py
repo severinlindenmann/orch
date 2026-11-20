@@ -59,6 +59,19 @@ def test_no_temp_files_left(proj, new_ticket, run):
     assert names == [f"{tid}.json"]
 
 
+def test_check_plain_number_is_the_task_at_that_place(proj, run, new_ticket):
+    """ORCH-864: `check done <id> 1` is c1; a wrong number says tasks are named c1, c2, ... and the range."""
+    tid = new_ticket()
+    for step in ("one", "two"):
+        assert run("check", "add", tid, step)[0] == 0
+    code, _, _ = run("check", "done", tid, "2", "--note", "ran it")
+    assert code == 0
+    t = read(proj, tid)
+    assert [c["done"] for c in t["checklist"]] == [False, True]
+    code, _, err = run("check", "done", tid, "99", "--note", "ran it")
+    assert code == 2 and "named c1, c2" in err and "c1..c2" in err
+
+
 def test_check_done_needs_evidence(proj, run, new_ticket, validate):
     tid = new_ticket()
     assert run("check", "add", tid, "Implement")[0] == 0
@@ -898,3 +911,23 @@ def test_agent_may_wait_on_a_question_and_a_person_on_nothing(proj, new_ticket, 
     tickets.ask(proj, other, "Which folder?", ["A", "B"], "A", "agent:codex")
     tickets.set_status(proj, other, "waiting", "agent:codex")
     assert tickets.load(proj, other)["status"] == "waiting"
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="time.tzset exists only on Unix; the zone cannot be set here"
+)
+def test_a_wait_time_without_a_zone_is_this_computers_local_time(monkeypatch):
+    import time
+
+    from orch import tickets
+
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    time.tzset()
+    try:
+        assert tickets.parse_time("2026-11-20 08:00") == "2026-11-20T07:00:00Z"
+        assert tickets.parse_time("2026-11-20T08:00:00") == "2026-11-20T07:00:00Z"
+        assert tickets.parse_time("2026-11-20T08:00:00Z") == "2026-11-20T08:00:00Z"
+        assert tickets.parse_time("2026-11-20T08:00:00+02:00") == "2026-11-20T06:00:00Z"
+    finally:
+        monkeypatch.undo()
+        time.tzset()
