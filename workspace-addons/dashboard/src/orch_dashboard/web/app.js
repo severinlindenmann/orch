@@ -313,8 +313,8 @@ function accept(next) {
 }
 function route() {
   const r = pageRoute();
-  // The Preview switch (the live-session add-on's settings): on, its addresses show the new live page (pages/live.js)
-  return r.kind === 'page' && typeof livePreviewOn === 'function' && livePreviewOn() && livePageOf(r.id) ? {...r, kind:'live'} : r;
+  // The live-session add-on's addresses show the live page (pages/live.js)
+  return r.kind === 'page' && typeof liveFocusOn === 'function' && liveFocusOn() && livePageOf(r.id) ? {...r, kind:'live'} : r;
 }
 function pageRoute() {
   const full = location.hash || '#home', query = full.indexOf('?'), hash = query < 0 ? full : full.slice(0, query) || '#home';
@@ -438,7 +438,7 @@ function render(arrived = new Set()) {
     for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
     main.replaceChildren();
   }
-  // Preview on: a page that cannot be drawn softly loads once the normal way (pages/soft.js)
+  // a page that cannot be drawn softly loads once the normal way (pages/soft.js)
   try {
   reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'live' ? liveNextPage(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
   } catch (err) {
@@ -446,7 +446,7 @@ function render(arrived = new Set()) {
     throw err;
   }
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
-  if (typeof liveDockSync === 'function') liveDockSync();  // the layer of the new live page (Preview), outside main
+  if (typeof liveDockSync === 'function') liveDockSync();  // the layer of the live page, outside main
   if (typeof liveOpenFromAddress === 'function') liveOpenFromAddress(r);  // a ticket's address opens its session (ORCH-465)
   if (typeof resultsFillAll === 'function') resultsFillAll(document);  // result widgets on tiles, in chat and on the ticket page
   if (r.kind === 'review') mountReview(main);
@@ -469,7 +469,7 @@ function render(arrived = new Set()) {
     main.querySelectorAll('[data-need-row]').forEach(row => { if (arrived.has(row.dataset.needRow)) window.orch.needsIn(row); });
   }
   if (changed) window.orch.enter(main);
-  window.paintLiveBar?.();  // the live bar under every page while the Preview switch is on (pages/livebar.js)
+  window.paintLiveBar?.();  // the live bar under every page (pages/livebar.js)
   renderedRoute = r.hash;
   if (!active?.isConnected && activeKey && !document.querySelector('dialog[open]')) {
     [...document.querySelectorAll('a,button,summary')].find(n => nodeKey(n) === activeKey)?.focus({preventScroll:true});
@@ -940,13 +940,6 @@ main.addEventListener('click', async event => {
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
   if (action === 'auto-update-note-ok') { const r = await act('update.note.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
-  if (action === 'live-preview') {
-    if (settingsBusy.has('live-preview')) return;
-    const on = state.settings?.focus_preview_on !== true;
-    const result = await settingsSend('focus_preview.set', {on}, 'live-preview'), label = addonLabel(addons().find(a => a.page?.live_session === true));
-    if (result.ok) window.orch.toast(on ? label + ' now shows the new ' + label + ' (Preview).' : label + ' is back to today\u2019s ' + label + '.', 'ok');
-    return;
-  }
   if (action === 'session-typing') {
     if (settingsBusy.has('session-typing')) return;
     const on = state.settings?.typing_on !== true;
@@ -1093,7 +1086,7 @@ main.addEventListener('click', async event => {
 });
 window.addEventListener('hashchange', async () => {
   if (document.querySelector('.sidebar')?.dataset.open === 'true') setMenu(false);
-  // Preview on: a dialog in the keep place (the layer) stays open across the page change (pages/soft.js)
+  // a dialog in the keep place (the layer) stays open across the page change (pages/soft.js)
   const soft = typeof SoftNav === 'object' ? SoftNav : null;
   soft?.hold(true);
   for (const d of soft ? soft.dialogsToClose() : document.querySelectorAll('dialog[open]')) await window.orch.close(d);

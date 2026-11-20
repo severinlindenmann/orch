@@ -50,63 +50,41 @@ async function mainHasText(page) {
   }, null, { timeout: 20000 });
 }
 
-// Step 3. The test dashboard reads files only, so it has no add-on list (that comes from the orch command): the step
-// adds the live-session add-on to the page's state and answers the switch's one call (focus_preview.set) like the
-// server does. Everything else is the real page: Settings row, the click, the address, today's frame, the new page.
-async function previewSwitch(page, dash) {
-  let on = false;
+// Steps 2 and 3. The test dashboard reads files only, so it has no add-on list (that comes from the orch command): the
+// steps add the live-session add-on to the page's state, as an updated workspace has it. Nothing else is set: Focus is
+// the new Focus with no switch (ORCH-816). Everything else is the real page: the side bar, the address, Settings.
+async function focusIsNew(page, dash) {
   const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
     description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
     dashboard: { label: 'Focus', icon: 'target', order: 20 } };
-  let last = null;
-  const dress = st => {
-    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: on,
-      addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
-    last = st;
-    return st;
-  };
   await page.route(/\/api\/state(\?.*)?$/, async route => {
     const res = await route.fetch();
     if (res.status() !== 200) return route.fulfill({ response: res });
-    route.fulfill({ response: res, json: dress(await res.json()) });
+    const st = await res.json();
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
+    route.fulfill({ response: res, json: st });
   });
-  await page.route('**/api/act', async route => {
-    const body = route.request().postDataJSON();
-    if (body.op !== 'focus_preview.set') return route.fallback();
-    on = body.args.on === true;
-    route.fulfill({ json: dress({ ...last }) });
-  });
-  await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
-    body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
-  const sw = '[data-key="addon-detail-live-preview"]';
-  const settings = async want => {
-    await page.evaluate(() => { location.hash = '#settings/addons/focus'; });
-    await page.waitForSelector(sw, { timeout: 20000 });
-    if (await page.getAttribute(sw, 'aria-checked') !== String(!want)) throw new Error('the Preview switch is not ' + (want ? 'off' : 'on') + ' before the click');
-    await page.click(sw);
-    await page.waitForSelector(`${sw}[aria-checked="${want}"]`, { timeout: 10000 });
-  };
-  const focusPage = async () => { await page.evaluate(() => { location.hash = '#addon/focus'; }); await page.waitForTimeout(300); };
-  await page.goto(dash + '/#settings/addons/focus');
-  await page.waitForSelector(sw, { timeout: 20000 });
-  await focusPage();
-  await page.waitForSelector('iframe.embed', { timeout: 10000 });  // off: today's Focus
-  await settings(true);
-  await focusPage();
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  const link = page.locator('a[href="#addon/focus"]').first();
+  await link.waitFor({ state: 'attached', timeout: 20000 });  // the side bar's Focus link (folded away at phone width)
+  if (await link.isVisible()) await link.click(); else await page.evaluate(() => { location.hash = '#addon/focus'; });
   await page.waitForSelector('[data-key="live-next"]', { timeout: 10000 });
-  if (await page.$('iframe.embed')) throw new Error('today\'s Focus still shows with Preview on');
-  if ((await page.textContent('[data-key="live-next-tag"]')).trim() !== 'Preview') throw new Error('the new Focus is not marked Preview');
-  await settings(false);
-  await focusPage();
-  await page.waitForSelector('iframe.embed', { timeout: 10000 });  // off again: today's Focus is back
-  await settings(true);
-  await focusPage();
-  await page.waitForSelector('[data-key="live-next"]', { timeout: 10000 });
+  if (await page.$('iframe.embed')) throw new Error('the old Focus page shows');
+  if (/Preview|today.s Focus/.test(await page.textContent('main'))) throw new Error('Focus still says Preview or names an old Focus');
   await noSideways(page);
 }
 
-// Step 13. Preview on without the switch's clicks (step 3 clicks them): the page's state says the switch is on.
+async function noPreviewSwitch(page) {
+  await page.evaluate(() => { location.hash = '#settings/addons/focus'; });
+  await page.waitForSelector('[data-key="addon-detail-typing"]', { timeout: 20000 });
+  if (await page.$('[data-key="addon-detail-live-preview"]')) throw new Error('Focus settings still have a Preview switch');
+  if (/Preview|today.s Focus/.test(await page.textContent('main'))) throw new Error('Focus settings still say Preview');
+  await noSideways(page);
+}
+
+// Step 13. The page's state has the live-session add-on.
 async function previewOn(page) {
   const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
     description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
@@ -116,14 +94,13 @@ async function previewOn(page) {
     if (res.status() !== 200) return route.fulfill({ response: res });
     const st = await res.json();
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true };
     route.fulfill({ response: res, json: st });
   });
 }
 
 // Step 9. The test dashboard has no running helpers, so the step gives the page draft D's 24 sessions (3 need you,
 // 1 pinned, 3 working, 9 in line, 8 idle) as extra tickets in its state and as the answer of the live sessions API
-// (/api/sessions, ORCH-359: the bar and the panes read it), with the Preview switch on. A pin or a name (session.pin /
+// (/api/sessions, ORCH-359: the bar and the panes read it), with the live-session add-on. A pin or a name (session.pin /
 // session.name, ORCH-361) is taken by a stand-in, as the real server keeps it in the workspace (this test page has no
 // sign-in; the dashboard click-through f-session-pin-name sends them to the real server), and the stand-in list then
 // carries it, as the real API does. Everything else is the real page: the bar, its fold, list and search.
@@ -182,7 +159,7 @@ async function liveBarState(page, tweak = null) {
         : { running: true, helper: { state: HELPER[s] }, claim: { agent: 'agent:claude' } };
     });
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true,
+    st.settings = { ...(st.settings || {}), 
       addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
     if (tweak) tweak(st);
     if (Array.isArray(st.tickets) && st.workspace) barState = st;  // a full state, not the poll's "unchanged"
@@ -282,6 +259,7 @@ async function chatView(page, dash) {
     else return route.fallback();
     const st = JSON.parse(JSON.stringify(barState));
     tweak(st);
+    if (body.op === 'run.send') st.send_result = { id: 'p_17', delivered: 1, state: 'idle' };  // as the server answers
     route.fulfill({ json: st });
   });
   await page.goto(dash + '/#home');
@@ -445,6 +423,101 @@ async function widgetsTicket(page, dash, width) {
   await page.locator(host).scrollIntoViewIfNeeded();
   await noSideways(page);
 }
+// Step 18 (ORCH-695): the message box of a ticket's pane takes files by the clip, a pasted screenshot and a file dropped
+// on the pane; each shows as a preview (a picture's thumbnail or a file chip) that can be taken out before Send. Send
+// puts the files on the ticket (ticket.attach) and then tells the helper (run.send), the ticket page's one way. The sent
+// message carries the files as small previews and stays after a reload (orch lists it in run status sent_input).
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+async function messageBox(page, dash) {
+  const attached = [], sent = [];
+  const tweak = st => {
+    const t = (st.tickets || []).find(x => x.id === 't_bar238');
+    if (!t) return;
+    t.questions = [];
+    t.checklist = [{ id: 'c1', text: 'Files can be dropped on a ticket', done: false, evidence: [] }];
+    t.history = [{ at: new Date(Date.now() - 30 * 60e3).toISOString(), by: 'agent:factory', via: 'cli', text: 'Claude started', chat_message: false }];
+    const run = st.runs?.t_bar238;
+    if (run) run.sent_input = sent.map((text, i) => ({ id: 'p_18' + i, text, at: new Date(Date.now() - 60e3).toISOString(), by: st.me || 'human:demo', read: true }));
+  };
+  await liveBarState(page, tweak);
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (body.args?.ticket !== 't_bar238' || !['ticket.attach', 'run.send'].includes(body.op)) return route.fallback();
+    const st = JSON.parse(JSON.stringify(barState));
+    if (body.op === 'ticket.attach') { attached.push(...body.args.files.map(f => f.name)); st.attached = { saved: body.args.files.map(f => f.name), failed: [] }; }
+    else { sent.push(body.args.text); st.send_result = { id: 'p_18', delivered: 1, state: 'idle' }; }
+    tweak(st);
+    route.fulfill({ json: st });
+  });
+  await page.route(/\/api\/file\?/, route => route.fulfill({ contentType: 'image/png', body: Buffer.from(PNG, 'base64') }));
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.waitForSelector('#live-bar :is([data-lbar-open="t_bar238"], [data-lbar-list="wait"])', { timeout: 10000 });
+  if (!(await page.$('#live-bar [data-lbar-open="t_bar238"]'))) await page.click('#live-bar [data-lbar-list="wait"]');  // a phone: counts only
+  await page.click('#live-bar [data-lbar-open="t_bar238"]');
+  const pane = '#live-dock .live-pane[data-session="t_bar238"]', box = `${pane} [data-key="live-msg-box"]`, tiles = `${box} .attachment-tile`;
+  const chat = `${pane} [data-live-chat]`;
+  await page.waitForSelector(`${box} [data-live-msg-text]`, { timeout: 10000 });
+  const hint = await page.textContent(box);
+  if (!/up to 10 files, 25 MB each/.test(hint)) throw new Error('the box does not say its limits in plain words: ' + hint);
+  // the clip opens the file choice
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click(`${box} [data-attach]`)]);
+  await chooser.setFiles({ name: 'notes.md', mimeType: 'text/markdown', buffer: Buffer.from('# Notes\nKeep the old name.\n') });
+  // a screenshot pasted into the box, a file dropped on the pane (on the chat, not on the box)
+  await page.evaluate(([b, png]) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([Uint8Array.from(atob(png), c => c.charCodeAt(0))], 'image.png', { type: 'image/png' }));
+    document.querySelector(b + ' [data-live-msg-text]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  }, [box, PNG]);
+  await page.evaluate(c => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(['second file\n'], 'second.txt', { type: 'text/plain' }));
+    const at = document.querySelector(c);
+    for (const type of ['dragenter', 'dragover', 'drop']) at.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, chat);
+  await page.waitForFunction(t => document.querySelectorAll(t).length === 3 && !document.querySelector(t + ' progress:not([value="100"])'), tiles, { timeout: 5000 });
+  const names = await page.$$eval(`${tiles} .attachment-name`, els => els.map(el => el.textContent));
+  if (names[0] !== 'notes.md' || !/^Screenshot \d\d-\d\d\.png$/.test(names[1]) || names[2] !== 'second.txt') throw new Error('the previews read: ' + names.join(', '));
+  if (!(await page.$(`${tiles}:nth-child(2) img`)) || !(await page.$(`${tiles}:nth-child(1) .attachment-kind`))) throw new Error('a picture shows no thumbnail, or a file no chip');
+  // a file over the limit is refused in plain words and not added
+  await page.evaluate(b => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array(26 * 1024 * 1024)], 'huge.png', { type: 'image/png' }));
+    document.querySelector(b + ' [data-live-msg-text]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  }, box);
+  const err = await page.textContent(`${box} .attachment-error`);
+  if (!/larger than 25 MB/.test(err) || (await page.$$(tiles)).length !== 3) throw new Error('a file over 25 MB was not refused plainly: ' + err);
+  if (attached.length || sent.length) throw new Error('something was sent before Send');
+  await noSideways(page);
+  // take one out, then send
+  await page.click(`${tiles}:nth-child(1) .attachment-remove`);
+  await page.waitForFunction(t => document.querySelectorAll(t).length === 2, tiles, { timeout: 3000 });
+  await page.fill(`${box} [data-live-msg-text]`, 'Here is what I see.');
+  await page.click(`${box} [data-key="live-msg-send"]`);
+  await page.waitForFunction(t => document.querySelectorAll(t).length === 0, tiles, { timeout: 8000 });
+  if (attached.length !== 2 || attached[0] !== names[1] || attached[1] !== 'second.txt') throw new Error('the files put on the ticket: ' + attached.join(', '));
+  if (sent.length !== 1 || !sent[0].startsWith('Here is what I see.\n\nI added 2 files to this ticket: ' + names[1] + ', second.txt.')) throw new Error('the message sent: ' + JSON.stringify(sent));
+  const mine = `${chat} .live-chat-msg[data-w="y"]`;
+  const shows = async where => {
+    await page.waitForFunction(m => { const el = document.querySelectorAll(m); const last = el[el.length - 1];
+      return last && /Here is what I see\./.test(last.textContent) && last.querySelectorAll('.live-chat-file').length === 2; }, mine, { timeout: 10000 })
+      .catch(async () => { throw new Error(where + ': the chat reads ' + (await page.textContent(chat))); });
+    if (/I added 2 files/.test(await page.textContent(chat))) throw new Error(where + ': the file line shows as words');
+    if (!(await page.$(`${mine} .live-chat-file img`))) throw new Error(where + ': the sent picture has no thumbnail');
+  };
+  await shows('after Send');
+  // the sent message stays after a reload
+  await page.reload();
+  await mainHasText(page);
+  await page.waitForSelector(chat, { timeout: 10000 });
+  await shows('after a reload');
+  // the picture: two previews waiting in the box under the sent message
+  const [again] = await Promise.all([page.waitForEvent('filechooser'), page.click(`${box} [data-attach]`)]);
+  await again.setFiles([{ name: 'home-390.png', mimeType: 'image/png', buffer: Buffer.from(PNG, 'base64') },
+    { name: 'test-run.log', mimeType: 'text/plain', buffer: Buffer.from('ok 1 adds a picture\n') }]);
+  await page.waitForFunction(t => document.querySelectorAll(t).length === 2 && !document.querySelector(t + ' progress:not([value="100"])'), tiles, { timeout: 5000 });
+  await noSideways(page);
+}
 
 // Step 13 until the layer exists (crew task layer replaces the stand-in with the real layer): a small open dialog with
 // a typed, unsent message in the keep place. Page changes by real links, Back, Forward, a deep link and a reload.
@@ -514,9 +587,9 @@ async function barIsOneRow(page) {
   if (r.bottom > r.vh + 1) throw new Error('the bar is below the screen');
 }
 
-// The new page with Preview on, for the steps after step 3: the same dressing of the page's state as previewSwitch
-// (the live-session add-on and the setting), plus the one ticket of the test workspace marked as having a working helper.
-async function livePreview(page) {
+// Focus, for the steps after step 3: the same dressing of the page's state as focusIsNew
+// (the live-session add-on), plus the one ticket of the test workspace marked as having a working helper.
+async function liveFocus(page) {
   let one = null;
   const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
     description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
@@ -526,7 +599,6 @@ async function livePreview(page) {
     if (res.status() !== 200) return route.fulfill({ response: res });
     const st = await res.json();
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true };
     const first = (st.tickets || [])[0];
     if (first) st.runs = { ...(st.runs || {}), [first.id]: { running: true, state: 'alive' } };
     if (first && !first.key) first.key = 'ORCH-238';  // the test ticket has no key; the pane shows the key, never the raw id
@@ -547,7 +619,7 @@ async function layer(page, dash, width) {
   const phone = width <= 720;
   const panel = m => `#live-dock[data-mode="${m}"] .live-panel[data-mode="${m}"]`;
   const press = async key => { await page.keyboard.press(key); await page.waitForTimeout(50); };
-  await livePreview(page);
+  await liveFocus(page);
   // start with nothing kept, without an extra page load (the reload below must keep what this step chose)
   await page.addInitScript(() => { try { if (!sessionStorage.getItem('fd10')) { Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); sessionStorage.setItem('fd10', '1'); } } catch (e) { /* none */ } });
   await page.goto(dash + '/#home');
@@ -636,7 +708,6 @@ async function history(page, dash) {
     if (res.status() !== 200) return route.fulfill({ response: res });
     const st = await res.json();
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true };
     const first = (st.tickets || [])[0];
     if (first) { tid = first.id; if (!first.key) first.key = 'ORCH-189'; st0 = st; }  // a full state, for the fake Reopen answer
     route.fulfill({ response: res, json: st });
@@ -711,7 +782,7 @@ async function startChoice(page, dash) {
     const st = await res.json();
     st.rev = 'fake-' + (full ? 'full' : 'free');
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true, live_max: full ? 4 : 6,
+    st.settings = { ...(st.settings || {}), live_max: full ? 4 : 6,
       agents: [{ name: 'claude', label: 'Claude Code', found: true, chosen: true, models: true },
         { name: 'codex', label: 'Codex', found: true, chosen: false, models: false }] };
     const first = (st.tickets || [])[0];
@@ -787,7 +858,7 @@ async function toolModel(page, dash) {
     const st = await res.json();
     st.rev = 'fake-tool-model';
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true,
+    st.settings = { ...(st.settings || {}), 
       agents: [{ name: 'claude', label: 'Claude Code', found: true, chosen: true, models: true }] };
     const first = (st.tickets || [])[0];
     if (first) {
@@ -970,7 +1041,6 @@ async function noTicket(page, dash, width) {
   let last = null;
   const dress = st => {
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true };
     st.sessions = made.map(([kind, title, id]) => ({ id, kind, title, open: true }));
     st.runs = { ...(st.runs || {}) };
     made.forEach(([kind, , id]) => { if (kind !== 'terminal') st.runs[id] = { running: true, helper: { state: kind === 'empty' ? 'working' : 'idle' }, claim: { agent: 'agent:claude' } }; });
@@ -1059,7 +1129,7 @@ async function noTicket(page, dash, width) {
 }
 
 // Step 6: the Focus button on the ticket page and on every ticket row, and Open ticket back from the session. The test
-// workspace has one ticket, so the step adds four with the run states the button speaks for (Preview on).
+// workspace has one ticket, so the step adds four with the run states the button speaks for.
 const FOCUS_TICKETS = [['run', 'ORCH-189', 'New price list for the shop', 'Watch'], ['wait', 'ORCH-190', 'Send the weekly summary', 'Answer'],
   ['idle', 'ORCH-191', 'Tidy the release notes', 'Open'], ['none', 'ORCH-192', 'Opening hours page', 'Start']];
 async function focusButton(page, dash, width) {
@@ -1090,7 +1160,7 @@ async function focusButton(page, dash, width) {
     st.runs = { ...(st.runs || {}) };
     FOCUS_TICKETS.forEach(([s, key]) => { if (s !== 'none') st.runs[id(key)] = { running: true, helper: { state: HELPER[s] }, claim: { agent: 'agent:claude' } }; });
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true,
+    st.settings = { ...(st.settings || {}), 
       addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
     lastState = st;
     route.fulfill({ response: res, json: answered ? unasked(st) : st });
@@ -1137,7 +1207,7 @@ async function focusButton(page, dash, width) {
   const strip = `[data-key="ticket-strip-${id('ORCH-189')}"] [data-key="live-session-btn"]`;
   await page.waitForSelector(strip, { timeout: 10000 });
   if ((await page.textContent(strip)).trim() !== 'Watch in Focus') throw new Error('the ticket page does not say Watch in Focus');
-  if (await page.$('[data-key="watch-live"]')) throw new Error('today\'s Watch live still shows with Preview on');
+  if (await page.$('[data-key="watch-live"]')) throw new Error('the old Watch live still shows');
   await page.click(strip);
   const pane = `#live-dock .live-pane[data-session="${id('ORCH-189')}"]`;
   await page.waitForSelector(pane, { timeout: 5000 });
@@ -1448,7 +1518,7 @@ async function groupState(page) {
       else if (s !== 'closed') st.runs[gid(key)] = { running: true, helper: { state: HELPER[s] }, claim: { agent: 'agent:claude' } };
     });
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-    st.settings = { ...(st.settings || {}), focus_preview_on: true,
+    st.settings = { ...(st.settings || {}), 
       addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
     return st;
   };
@@ -1636,24 +1706,22 @@ const STEPS = [
     draft: { q: '?page=home' },
   },
   {
-    n: 2, pic: 'fd-02-focus-today', area: 'start', title: 'Today\'s Focus still works with Preview off', feature: [], focus: true,
-    do: ['Leave the Preview switch off.', 'Open Focus from the side bar.'],
-    see: ['Today\'s Focus opens with its list of live helpers.', 'Nothing of the new Focus shows.'],
-    async run({ page, focus }) {
-      await page.goto(focus + '/');
-      await page.waitForSelector('.fx-livenow .helper-row', { timeout: 20000 });
-      await noSideways(page);
+    n: 2, pic: 'fd-02-focus-new', area: 'start', title: 'Focus opens as the new Focus', feature: [],
+    do: ['Open Focus from the side bar (at phone width from its address).'],
+    see: ['Focus opens as the new Focus (the wall of step 4 fills it), with no Preview mark.', 'No old Focus page shows.',
+      'At 390 wide nothing scrolls sideways.'],
+    async run({ page, dash }) {
+      await focusIsNew(page, dash);
     },
   },
   {
-    n: 3, pic: 'fd-03-preview-on', area: 'start', title: 'Turn the new Focus on with the Preview switch', feature: [],
-    do: ['Open Settings and turn on the Preview switch for the new Focus.', 'Open Focus from the side bar.'],
-    see: ['Focus opens as the new Focus, marked Preview (the wall of step 4 fills it).', 'The switch is marked Preview.',
-      'Turning it off again brings back today\'s Focus.'],
+    n: 3, pic: 'fd-03-no-switch', area: 'start', title: 'Focus has no Preview switch', feature: [],
+    do: ['Open Settings, Add-ons, Focus.'],
+    see: ['The Typing switch is there; there is no Preview switch and no word Preview.'],
     async run({ page, dash }) {
-      await previewSwitch(page, dash);
+      await focusIsNew(page, dash);
+      await noPreviewSwitch(page);
     },
-    draft: { q: '' },
   },
   {
     n: 4, pic: 'fd-04-wall', area: 'wall', title: 'The live wall in bands', feature: [1],
@@ -1841,9 +1909,11 @@ const STEPS = [
   },
   {
     n: 18, pic: 'fd-18-message-box', area: 'message box', title: 'Files and screenshots in the message box, with a preview before sending',
-    feature: [13], waits: T.chat,
-    do: ['Attach a file, paste a screenshot, drop a second file.', 'Remove one, then send.'],
-    see: ['Each one shows as a small preview before sending.', 'Removing one takes it out; the sent message carries the rest.'],
+    feature: [13],
+    do: ['Attach a file, paste a screenshot, drop a second file.', 'Remove one, then send.', 'Reload the page.'],
+    see: ['Each one shows as a small preview before sending.', 'Removing one takes it out; the sent message carries the rest.',
+      'The box says its limits in plain words; a file over 25 MB is refused.', 'The sent message and its files stay after a reload.'],
+    run: ({ page, dash }) => messageBox(page, dash),
     draft: { q: '?page=focus&cur=ORCH-238&view=zoom&att=1' },
   },
   {
@@ -1979,4 +2049,4 @@ const STEPS = [
   },
 ];
 
-module.exports = { STEPS, AREAS, SIZES, WIDGETS, noSideways, mainHasText, liveBarState, barIsOneRow, livePreview };
+module.exports = { STEPS, AREAS, SIZES, WIDGETS, noSideways, mainHasText, liveBarState, barIsOneRow, liveFocus };

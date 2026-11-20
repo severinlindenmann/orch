@@ -1,7 +1,7 @@
 'use strict';
 // Live sessions (ORCH-359): the one list of sessions the live page reads (the bar, the panes, later the wall), from
 // GET /api/sessions (sessions.py: built from the state the page already polls, plus one read of the live screens).
-// Polled every few seconds while the Preview switch is on and the page is shown; nothing else asks for it.
+// Polled every few seconds while the page is shown; nothing else asks for it.
 // window.LiveSessions: list (in the API's order), get(id or key), ready (true after the first answer), refresh(),
 // pins, name(id), pin(id, on), rename(id, name): pins and own names kept by orch for the workspace (ORCH-361).
 // Every answer fires 'orch:live-sessions' on window; the bar and the layer repaint on it.
@@ -132,7 +132,7 @@ if (typeof module === 'object' && module.exports) {
         if (done.every(Boolean)) try { localStorage.removeItem('orch.live.pins'); } catch { /* private window */ }
       });
     }
-    const on = () => typeof livePreviewOn === 'function' && livePreviewOn();
+    const on = () => typeof liveFocusOn === 'function' && liveFocusOn();
     async function read() {
       if (store.busy || !on() || document.visibilityState === 'hidden') return;
       store.busy = true;
@@ -167,7 +167,7 @@ if (typeof module === 'object' && module.exports) {
       name(ref) { const x = this.get(ref); return x ? liveName(x) : ''; },
       pin(id, on) { const x = this.get(id); return x ? save('session.pin', x.id, {pinned:typeof on === 'boolean' ? on : !livePinIds([x], store.pending).length}) : Promise.resolve(false); },
       rename(id, name) { const x = this.get(id); return x ? save('session.name', x.id, {name:String(name || '').trim() || null}) : Promise.resolve(false); },
-      // app.js calls it after every render: starts the poll the first time the Preview switch is seen on
+      // app.js calls it after every render: starts the poll the first time the live page is on
       sync() { if (on() && !store.timer) tick(); },
     };
   })();
