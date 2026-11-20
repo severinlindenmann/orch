@@ -742,3 +742,17 @@ def test_a_running_services_old_record_is_cleaned_when_carried_forward(proj, mon
     services.running_path().write_text(json.dumps(entries))
     services.start(proj)  # the same pid is still running: its record stays, cleaned and size-limited
     assert services.running()[0]["env"] == {"HOME": "/h"}
+
+
+def test_no_github_answer_is_not_up_to_date(proj, run, source):  # noqa: F811
+    """The install ran but the commit lookup failed: say so, and forget the old release number."""
+    (addons.home() / "installed.json").write_text(json.dumps({"sha": A40, "release": 33}))
+    source["next"] = {"sha": None}
+    code, out, err = run("update")
+    out = _strip(out)
+    assert code == 0, err
+    assert "up to date" not in out
+    assert "could not be looked up" in out
+    saved = json.loads((addons.home() / "installed.json").read_text())
+    assert saved["sha"] is None and "release" not in saved
+    assert saved["pending"]["ref"] == "main" and isinstance(saved["pending"]["at"], int)

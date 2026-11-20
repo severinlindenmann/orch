@@ -39,7 +39,7 @@ def test_all_checks_are_registered_and_one_file_each():
     assert names == {
         "run_gone_ticket_working", "dead_lock_holder", "no_heartbeat", "waiting_for_permission",
         "ticket_op_refused", "hook_lines_missing", "relay_unreachable", "clock_skew", "disk_low",
-        "diag_dropped",
+        "diag_dropped", "workspace_folder_moved",
     }  # fmt: skip
 
 
@@ -49,7 +49,7 @@ def test_a_check_that_raises_is_cannot_check_and_the_rest_still_run(proj, monkey
     out = diag_checks.run_all(snap(proj))
     assert [c for c in out if c["name"] == mod.NAME][0]["verdict"] == "cannot_check" and len(
         out
-    ) == 9  # relay is off: its check has nothing to say
+    ) == 10  # relay is off: its check has nothing to say
 
 
 def test_run_gone_ticket_working(proj):
@@ -217,6 +217,19 @@ def test_disk_low(proj, monkeypatch):
         diag_collect.shutil, "disk_usage", lambda p: type("U", (), {"free": 1024, "total": 10**9})()
     )
     assert one(proj, "disk_low")["verdict"] == "problem"
+
+
+def test_workspace_folder_moved(proj, monkeypatch):
+    from orch import home as orch_home
+
+    for state, verdict in (("here", "ok"), ("none", "ok"), ("unknown", "cannot_check")):
+        monkeypatch.setattr(orch_home, "binding_state", lambda root, s=state: s)
+        assert one(proj, "workspace_folder_moved")["verdict"] == verdict
+    monkeypatch.setattr(orch_home, "binding_state", lambda root: "moved")
+    c = one(proj, "workspace_folder_moved")
+    assert c["verdict"] == "problem" and "orch workspace move-here" in c["evidence"][0]
+    monkeypatch.setattr(orch_home, "binding_state", lambda root: "copy")
+    assert "copy" in one(proj, "workspace_folder_moved")["fact"]
 
 
 def test_diag_dropped(proj):

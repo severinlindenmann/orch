@@ -1,5 +1,5 @@
 'use strict';
-// The live bar (draft D, ORCH-337): one calm row under every page while the Preview switch is on. Needs-you chips
+// The live bar (draft D, ORCH-337): one calm row under every page. Needs-you chips
 // (orange) and pinned chips first, then quiet counts (working, in line, idle) that open a list with search. It never
 // wraps: when the row is too narrow it folds step by step into counts (kit .lbar, data-fold). The dashboard names no
 // add-on: the live page is found by its live_session capability (pages/live.js).
@@ -32,8 +32,8 @@ const LIVEBAR_NEW = [
 // One row per live session: {id, key, title, s: wait|run|queue|idle, word, pin}, from the live sessions API
 // (pages/livesessions.js, ORCH-359): the same list the panes and the wall read.
 const liveBarModel = typeof liveBarRows === 'function' ? liveBarRows : require('./livesessions.js').liveBarRows;
-// One ticket's session from the dashboard's own state (helpers.js), for the ticket's session button: it shows without
-// the Preview switch, so it does not wait for the live sessions API. Same states as the bar: wait, run, queue, idle.
+// One ticket's session from the dashboard's own state (helpers.js), for the ticket's session button: it shows on its
+// own, so it does not wait for the live sessions API. Same states as the bar: wait, run, queue, idle.
 function liveTicketSession(t, run, helperState) {
   if (!t || !t.id || t.status === 'dropped' || !run) return null;
   const hs = helperState(run, t);
@@ -225,7 +225,7 @@ if (typeof module === 'object' && module.exports) {
       }
     }
     function paint(force) {
-      const a = liveAddon(), on = typeof livePreviewOn === 'function' && livePreviewOn() && !!a;
+      const a = liveAddon(), on = typeof liveFocusOn === 'function' && liveFocusOn() && !!a;
       // the place that outlives a page change when the dashboard has one ([data-keep]), else the end of .shell-body
       const host = bar.host?.isConnected ? bar.host : document.querySelector('.shell-body [data-keep]') || document.querySelector('.shell-body');
       if (!on || !host) {
