@@ -117,3 +117,23 @@ def test_start_waits_for_old_listener_before_spawn(ws, monkeypatch):
     monkeypatch.setattr(service.subprocess, "Popen", spawn)
     with pytest.raises(RuntimeError, match="reached spawn after port freed"):
         service.start(ws, port=8430)
+
+
+@pytest.mark.slow
+def test_a_persons_start_restarts_focus_a_helper_started(ws, monkeypatch):
+    """Watch-only (a helper started it): the person's start replaces it on the same port."""
+    from orch import adapters
+
+    for k, v in list(os.environ.items()):
+        if adapters.detect_env({k: v}):
+            monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("ORCH_AGENT", "claude")
+    try:
+        cur = service.start(ws)
+        assert service.start(ws) == cur
+        monkeypatch.delenv("ORCH_AGENT")
+        new = service.start(ws)
+        assert new["port"] == cur["port"] and new["pid"] != cur["pid"]
+        assert json.loads((service._dir(ws) / "server.json").read_text())["watch_only"] is False
+    finally:
+        assert service.stop(ws) in ("stopped", "not running")
