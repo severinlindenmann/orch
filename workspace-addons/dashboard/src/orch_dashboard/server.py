@@ -456,6 +456,11 @@ class Handler(BaseHTTPRequestHandler):
         already checked for this request's add-on (_frame_begin)."""
         frame = getattr(self, "_frame", None)
         if frame is not None:
+            if getattr(self, "_frame_owner", None):  # a token login's add-on frame: only as its picked profile
+                person = getattr(self, "_frame_person", None)
+                if not person:
+                    return False
+                actions.REQUEST_PERSON.set(person)
             return frame[1]
         if self._launch_session():
             return True

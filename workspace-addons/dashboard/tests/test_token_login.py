@@ -233,3 +233,20 @@ def test_a_frame_pass_of_a_token_login_ends_with_it(live):
     dashlogin.revoke_token(root, entry["id"])
     assert dashlogin.alive(root, s["sid"]) is None
     assert dashlogin.alive(root, "../etc") is None
+
+
+def test_a_token_frame_without_its_profile_cannot_act(live):
+    """A frame pass of a token login whose profile was removed from the list never acts as anyone else."""
+    from orch_dashboard import server as srv_mod
+
+    root, _, _ = live
+    token, _ = dashlogin.new_token(root)
+    s = dashlogin.login(root, token)
+    h = srv_mod.Handler.__new__(srv_mod.Handler)
+    h._frame, h._frame_owner = ("focus", True), s["sid"]
+    h._frame_person = None
+    assert h._can_act() is False
+    h._frame_person = "Anna"
+    actions.REQUEST_PERSON.set(None)
+    assert h._can_act() is True and actions.REQUEST_PERSON.get() == "Anna"
+    actions.REQUEST_PERSON.set(None)
