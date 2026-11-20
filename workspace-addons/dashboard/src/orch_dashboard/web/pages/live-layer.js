@@ -1,5 +1,5 @@
 'use strict';
-// The layer of the new live page (draft D, ORCH-338), behind the Preview switch (pages/live.js). One dock under every
+// The layer of the live page (draft D, ORCH-338; pages/live.js). One dock under every
 // page, outside main, so it stays open while the page changes: a panel at the bottom, on the right or full screen,
 // above a bar; minimised it is only the bar, closed to the side it is a slim edge tab. Place and size are kept per
 // browser. Esc goes one step back: an open menu, then full screen, then the panel to the bar. The split (ORCH-339):
@@ -368,12 +368,18 @@ function liveAskFill(box, id) {
   if (!q) return;
   const send = async answer => {
     const text = String(answer || '').trim(); if (!text || box.dataset.busy) return;
+    // a disabled or removed button drops the keyboard to the page, where Esc no longer reaches the layer (ORCH-709):
+    // it waits on the box and goes back into the pane when the answer is in
+    const had = box.contains(document.activeElement);
+    if (had) { box.tabIndex = -1; box.focus({preventScroll:true}); }
     box.dataset.busy = '1'; box.querySelectorAll('button,input').forEach(c => { c.disabled = true; });
     const r = await act('answer', {ticket:id, question:q.id, digest:q.digest, answer:text});
     delete box.dataset.busy;
     window.orch?.toast?.(r.ok ? 'Answered: ' + text : r.text || 'Could not send your answer.', r.ok ? 'ok' : 'error');
     if (r.ok) { liveAskDrafts.delete(id + '/' + q.id); box.dataset.sig = ''; liveAskFill(box, id); }
     else box.querySelectorAll('button,input').forEach(c => { c.disabled = false; });  // the typed words stay
+    const now = document.activeElement;  // still waiting on the box (or dropped by a repaint): not moved by the person meanwhile
+    if (had && (!now || now === document.body || now === box)) { liveLayerWant = {id, until:Date.now() + 5000, ask:true}; liveLayerTake(); requestAnimationFrame(liveLayerTake); }
   };
   box.append(h('p', {className:'live-ask-q'}, q.text));
   if (!q.plain) { box.append(h('a', {className:'btn primary sm', href:'#ticket/' + encodeURIComponent(id), 'data-key':'live-ask-open'}, 'Answer on the ticket')); return; }
@@ -497,16 +503,17 @@ function liveLayerPaint() {
 }
 // The keyboard goes into a pane a ticket's button or address opened (ORCH-677). The pane is drawn again when its live
 // data or Start choice arrives and that drops the keyboard to the page, so every paint puts it back until the person
-// presses a key or clicks somewhere (or 5 seconds pass).
+// presses a key or clicks somewhere (or 5 seconds pass). After an answer in the pane (`ask`) it goes to the next
+// question's first choice when there is one, else to Open ticket (ORCH-709).
 let liveLayerWant = null;
 function liveLayerTake() {
   if (!liveLayerWant) return;
   if (Date.now() > liveLayerWant.until) { liveLayerWant = null; return; }
   const pane = document.querySelector('#live-dock .live-pane[data-session="' + String(liveLayerWant.id).replace(/["\\]/g, '') + '"]');
   if (!pane) return;
-  const a = document.activeElement;
-  if (a && a !== document.body && pane.contains(a)) return;
-  (pane.querySelector('[data-key="live-open-ticket"]') || pane).focus({preventScroll:true});
+  const a = document.activeElement, ask = liveLayerWant.ask && pane.querySelector('[data-live-ask]:not([hidden]) :is(button, input):not(:disabled)');
+  if (a && a !== document.body && pane.contains(a) && !(ask && a.matches('[data-live-ask]'))) return;
+  (ask || pane.querySelector('[data-key="live-open-ticket"]') || pane).focus({preventScroll:true});
 }
 for (const type of ['keydown', 'pointerdown']) document.addEventListener(type, () => { liveLayerWant = null; }, true);
 // Full screen covers the page: the page behind leaves the Tab order and the screen reader (inert), so the keyboard
@@ -546,10 +553,10 @@ function liveLayerOff() {
   liveLayerWas = '';
   liveLayerWasPanes = [];
 }
-// Called after every page render (app.js): on with the Preview switch, gone without it.
+// Called after every page render (app.js): on wherever the live page runs, gone without it (a shared copy, no add-on).
 function liveDockSync() {
   window.LiveSessions?.sync();
-  if (!livePreviewOn() || !liveLayerPage()) { liveLayerOff(); return; }
+  if (!liveFocusOn() || !liveLayerPage()) { liveLayerOff(); return; }
   liveLayerPaint();
 }
 // A new answer of the sessions API: the panes' live part in place; the dock itself only when what it shows changed.
@@ -571,9 +578,9 @@ window.LiveLayer = {
 
 // The session button of a ticket (draft D feature 3): on the ticket page (long: "Watch in" + the page's name) and on every ticket row.
 // It opens the ticket's session in the layer; with no helper running the pane offers the Start choice (pages/live-start.js).
-// Only with the Preview switch on; otherwise null and the page keeps what it had (Watch live, Answer).
+// Only where the live page runs; otherwise null and the page keeps what it had (Watch live, Answer).
 function liveFocusButton(t, long = false) {
-  if (!t?.id || snapshot || !livePreviewOn() || !liveLayerPage() || !window.DashHelpers?.helperState) return null;
+  if (!t?.id || snapshot || !liveFocusOn() || !liveLayerPage() || !window.DashHelpers?.helperState) return null;
   const verb = liveFocusVerb(t, state.runs?.[t.id], window.DashHelpers.helperState);
   if (!verb) return null;
   const name = liveLayerName(), key = window.DashHelpers.ticketKey?.(t) || clean(t.title) || 'this ticket';

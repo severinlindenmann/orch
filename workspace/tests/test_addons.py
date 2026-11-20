@@ -603,7 +603,9 @@ def test_default_repo_is_never_a_folder(proj, monkeypatch):
     planted = proj / "https:" / "github.com" / "severinlindenmann" / "orch"
     planted.mkdir(parents=True)
     assert not addons._is_local(addons.DEFAULT_REPO)
-    assert addons.spec("workspace").startswith("https://github.com/severinlindenmann/orch/archive/")
+    assert addons.spec("workspace").startswith(
+        "orch-workspace @ https://github.com/severinlindenmann/orch/archive/"
+    )
     monkeypatch.setenv("ORCH_REPO", "relative/dir")  # relative: not local either
     (proj / "relative" / "dir").mkdir(parents=True)
     assert not addons._is_local("relative/dir")
@@ -1078,13 +1080,13 @@ def test_addons_install_from_where_orch_came_from(proj, monkeypatch, uv_calls):
         "--reinstall",
         "--refresh",
         "--no-sources",
-        f"{zip_}#subdirectory=workspace",
+        f"orch-workspace @ {zip_}#subdirectory=workspace",
     ]
     assert args[6:] == [
         "--with",
-        f"{zip_}#subdirectory=workspace-addons/dashboard",
+        f"orch-dashboard @ {zip_}#subdirectory=workspace-addons/dashboard",
         "--with",
-        f"{zip_}#subdirectory=workspace-addons/focus",
+        f"orch-focus @ {zip_}#subdirectory=workspace-addons/focus",
     ]
     monkeypatch.setenv("ORCH_REF", "v1")  # an explicit override still wins
     assert addons.spec("workspace").endswith("/archive/v1.zip#subdirectory=workspace")
@@ -1130,18 +1132,47 @@ def test_github_sources_install_without_git(monkeypatch):
         (
             "https://github.com/a/orch",
             "main",
-            "https://github.com/a/orch/archive/main.zip#subdirectory=workspace",
+            "orch-workspace @ https://github.com/a/orch/archive/main.zip#subdirectory=workspace",
         ),
         (
             "https://github.com/a/orch.git",
             "fix/win",
-            "https://github.com/a/orch/archive/fix/win.zip#subdirectory=workspace",
+            "orch-workspace @ https://github.com/a/orch/archive/fix/win.zip#subdirectory=workspace",
         ),
-        ("https://gitlab.com/a/orch", "main", "git+https://gitlab.com/a/orch@main#subdirectory=workspace"),
+        (
+            "https://gitlab.com/a/orch",
+            "main",
+            "orch-workspace @ git+https://gitlab.com/a/orch@main#subdirectory=workspace",
+        ),
     ]:
         monkeypatch.setattr(addons, "_install_origin", lambda r=repo, f=ref: {"repo": r, "ref": f})
         monkeypatch.delenv("ORCH_REF", raising=False)
         assert addons.spec("workspace") == want
+
+
+def test_builtin_package_names_match_spec(monkeypatch):
+    """ORCH-871: uv 0.12 keys an unnamed URL requirement by the URL without #subdirectory, and core and every
+    built-in add-on share one GitHub zip, so each --with was taken for orch-workspace ("Package metadata name
+    orch-automation does not match given name orch-workspace"). spec() names each package orch-<folder>;
+    that name must be the one in the folder's pyproject.toml, or uv refuses the install."""
+    import tomllib
+
+    monkeypatch.delenv("ORCH_REPO", raising=False)
+    monkeypatch.delenv("ORCH_REF", raising=False)
+    origin = {"repo": "https://github.com/a/orch", "ref": "main"}
+    monkeypatch.setattr(addons, "_install_origin", lambda: origin)
+    root = Path(__file__).resolve().parents[2]
+    built_in = sorted(p.parent for p in (root / "workspace-addons").glob("*/pyproject.toml"))
+    folders = [root / "workspace", *built_in]
+    assert len(folders) > 5
+    names = set()
+    for f in folders:
+        sub = f.relative_to(root).as_posix()
+        want = tomllib.loads((f / "pyproject.toml").read_text(encoding="utf-8"))["project"]["name"]
+        got = addons.spec(sub)
+        assert got.startswith(f"{want} @ https://github.com/a/orch/archive/main.zip#subdirectory={sub}"), got
+        names.add(want)
+    assert len(names) == len(folders)  # one distinct name per package
 
 
 def test_install_origin_reads_direct_url(monkeypatch, tmp_path):
@@ -1525,3 +1556,34 @@ def test_focus_page_is_the_live_session_page_and_live_session_must_be_a_flag():
     assert "live_session" not in (addons.folder_manifest(base / "workspace-addons" / "factory")["page"])
     schema = json.loads((base / "contracts" / "addon-manifest.schema.json").read_text())
     assert schema["properties"]["page"]["properties"]["live_session"]["type"] == "boolean"
+
+
+def test_list_keeps_a_space_after_long_names(proj, run, monkeypatch):
+    """Report r-1119-1349-ws-2: names of 12+ characters ran into the next column (dashboard-testerLooks)."""
+    rows = [
+        {
+            "name": "dashboard-tester",
+            "installed": True,
+            "active": False,
+            "description": "Looks at every page",
+        },
+        {"name": "focus", "installed": True, "active": True, "description": "A live page"},
+        {"name": "pull-requests", "installed": False, "active": False, "description": "Open pull requests"},
+    ]
+    monkeypatch.setattr(addons, "listing", lambda root: rows)
+    code, out, _ = run("addon", "list")
+    assert code == 0
+    for r in rows:
+        line = next(x for x in out.splitlines() if x.strip().startswith(r["name"]))
+        assert line.split()[0] == r["name"], line  # at least one space after the name
+    cols = {
+        x.index(x.split()[1])
+        for x in out.splitlines()
+        if x.startswith("  ") and x.split()[0] in {"focus", "dashboard-tester", "pull-requests"}
+    }
+    assert len(cols) == 1, out  # one shared column, wide enough for the longest name
+    manifests = {r["name"]: {"description": r["description"]} for r in rows}
+    monkeypatch.setattr(addons, "active_manifests", lambda root: manifests)
+    for line in addons.help_lines(proj):
+        assert line.split()[0] in manifests, line
+    assert addons.name_width(["focus"]) == 12 and addons.name_width(["dashboard-tester"]) == 18

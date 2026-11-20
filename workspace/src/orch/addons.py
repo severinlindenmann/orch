@@ -362,17 +362,22 @@ _GITHUB_ZIP = re.compile(
 
 
 def spec(subdir: str) -> str:
-    """What uv installs. GitHub sources come as a zip download, so no git is needed: Windows PCs often have
-    none, and their users may not be allowed to install it. Other hosts keep git."""
+    """What uv installs, named for a remote source. GitHub sources come as a zip download, so no git is
+    needed: Windows PCs often have none, and their users may not be allowed to install it. Other hosts keep
+    git."""
     r = repo()
     if _is_local(r):
         return str((Path(r) / subdir).resolve())
     r = r.removesuffix(".git")
     if any(c.isspace() or c in "\"'#?" for c in r):
         raise Refused(f"'{r}' is not a repository address orch can install from (check ORCH_REPO).")
+    # Named ("orch-x @ url"): core and add-ons share one zip and differ only in #subdirectory, and uv 0.12
+    # keys an unnamed URL without it, so every --with add-on was taken for orch-workspace (ORCH-871). Each
+    # package is named orch-<folder> (test_builtin_package_names_match_spec).
+    name = f"orch-{subdir.rstrip('/').rsplit('/', 1)[-1]}"
     if r.startswith("https://github.com/"):
-        return f"{r}/archive/{ref()}.zip#subdirectory={subdir}"
-    return f"git+{r}@{ref()}#subdirectory={subdir}"
+        return f"{name} @ {r}/archive/{ref()}.zip#subdirectory={subdir}"
+    return f"{name} @ git+{r}@{ref()}#subdirectory={subdir}"
 
 
 def real_home() -> Path:
@@ -1979,8 +1984,15 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
     return 0
 
 
+def name_width(names) -> int:
+    """Width of an add-on name column: at least 12, and always 2 spaces after the longest name."""
+    return max([12, *(len(n) + 2 for n in names)])
+
+
 def help_lines(root: Path) -> list[str]:
-    return [f"  {n:<12}{m['description']}" for n, m in sorted(active_manifests(root).items())]
+    found = sorted(active_manifests(root).items())
+    w = name_width(n for n, _ in found)
+    return [f"  {n:<{w}}{m['description']}" for n, m in found]
 
 
 # ---------------------------------------------------------------- add / remove / uninstall
@@ -2542,14 +2554,27 @@ def _stored_sha() -> str | None:
     return _sha_or_none(d.get("sha")) if isinstance(d, dict) else None
 
 
-def _save_installed(sha: str | None, release: int | str | None = None) -> None:
-    """The commit this install came from and, when known, its release (what a person reads: 33 or "33.1")."""
+def _save_installed(sha: str | None, release: int | str | None = None, pending: dict | None = None) -> None:
+    """The commit this install came from and, when known, its release (what a person reads: 33 or "33.1").
+    pending: no commit was known at install time; the ref and time it was installed from, so the commit and
+    release are looked up later (updateinfo.resolve_pending)."""
     from orch import updateinfo
 
     data: dict = {"sha": _sha_or_none(sha)}
     if updateinfo.as_version(release) is not None:
         data["release"] = updateinfo.as_version(release)
+    if data["sha"] is None and pending:
+        data["pending"] = pending
     _write_atomic(home() / "installed.json", json.dumps(data))
+
+
+def _pending_install(started: float) -> dict | None:
+    """The ref and start time of an install whose commit GitHub did not tell (for a later lookup). The time
+    from before the download: a release merged meanwhile then still shows as an update, never as installed."""
+    try:
+        return {"ref": ref(), "at": int(started)}
+    except Refused:
+        return None
 
 
 def _stored_release() -> int | None:
@@ -2597,6 +2622,12 @@ def _load_snapshot(root: Path, nonce: str | None) -> dict | None:
     return d
 
 
+NO_RELEASE_LOOKUP = (
+    "orch was updated, but the release number could not be looked up (GitHub did not answer). "
+    "It shows by itself once GitHub answers again."
+)
+
+
 def _update_lines(before: dict, found: dict, sha: str | None) -> tuple[list[str], bool]:
     """The lines to print and whether to restart. A restart needs a version change or a changed local
     source; a sha from the network only shows in the text."""
@@ -2619,6 +2650,9 @@ def _update_lines(before: dict, found: dict, sha: str | None) -> tuple[list[str]
         if old is not None and isinstance(new, str) and old != new:
             lines.append(f"Updating {_printable(name)} {_printable(old)} → {_printable(new)}")
             restart = True
+    if sha is None:  # GitHub did not answer: the install ran, so it cannot be called up to date
+        lines.append(NO_RELEASE_LOOKUP)
+        restart = True
     if not lines:
         return ["orch is up to date."], False
     title = _release_title()
@@ -2983,6 +3017,7 @@ def update(
             if entry["name"] in found:
                 entry["version"] = found[entry["name"]]["version"]
         _save_registry(reg)
-        if sha:
-            _save_installed(sha, new_release)
+        # No commit answer: drop the old number so it is not shown for the new code; remember what was
+        # installed so the commit and release are looked up once GitHub answers again.
+        _save_installed(sha, new_release, None if sha else _pending_install(before["time"]))
     return done

@@ -318,12 +318,15 @@ async function syncRead() {
   } catch (_) { return {ok:false, answer:null}; }
 }
 // The Sync card lives in Settings › General and on the Sync page itself (#addon/sync): both change settings in place.
+// The settings say Sync is installed but off (ORCH-960): the 15 s look stops instead of reading a status that is refused.
+const syncTurnedOff = () => array(state.settings?.addons).find(a => a.name === SYNC)?.active === false;
 const syncPageOpen = () => { const r = route(); return r.kind === 'settings' || (r.kind === 'addon' && r.id === SYNC); };
 async function syncLoad() {
   if (syncUi.loading || snapshot) return;
   clearTimeout(syncUi.timer); syncUi.timer = null;
   if (addonChanging()) { syncUi.timer = setTimeout(syncLoad, 3000); return; }  // the server is restarting: look again soon
   if (!syncPageOpen()) return;  // the page was left: it loads again when Settings or the Sync page opens
+  if (syncTurnedOff()) return;  // Sync was turned off: no status read (it would be refused); it loads again once it is on
   syncUi.loading = true;
   try {
     const result = await syncRead();
@@ -411,6 +414,7 @@ function syncCard(settings) {
   const wrap = body => h('div', {className:'stack sync-wrap', 'data-key':'settings-sync'}, h('div', {className:'card sync-card', id:'sync-card'}, body));
   if (!addon.active) {
     syncUi.wasOff = true; syncUi.card = null; syncUi.draft = null;
+    clearTimeout(syncUi.timer); syncUi.timer = null;  // turned off: the 15 s status look stops (ORCH-960)
     return wrap(h('div', {className:'card-row'}, h('span', {className:'grow sync-lbl'}, 'Keep a copy of my tickets'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':false, 'aria-label':'Keep a copy of my tickets', 'data-key':'settings-switch-sync-off', 'data-action':'settings-addon', 'data-name':addon.name, disabled:settingsBusy.has('addon-' + addon.name)})));
   }
@@ -616,8 +620,6 @@ function addonDetailPage(addon) {
   const settingsRows = [
     row('Add-on', settingsText('p', {}, addon.description || label),
       fragment(switchBusy(addon), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':label + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off')), 'addon-detail-switch'),
-    addon.page?.live_session === true && addon.active && typeof state.settings?.focus_preview_on === 'boolean' ? row('Preview', h('div', {}, settingsText('p', {}, 'Try the new ' + label), settingsText('p', {className:'meta'}, 'A bar under every page and sessions in a layer you can split, with their earlier sessions. Still being built: turn it off to go back to today\u2019s ' + label + '.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.focus_preview_on, 'aria-label':'Try the new ' + label, 'data-action':'live-preview', 'data-key':'addon-detail-live-preview', disabled:snapshot || settingsBusy.has('live-preview')}, state.settings.focus_preview_on ? 'On' : 'Off'), 'addon-detail-live-preview-row') : null,
     addon.page?.live_session === true && addon.active && typeof state.settings?.typing_on === 'boolean' ? row('Typing', h('div', {}, settingsText('p', {}, 'Let me type into the helper\u2019s screen'), settingsText('p', {className:'meta'}, 'When on, you can click the helper\u2019s live screen and type into it.')),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.typing_on, 'aria-label':'Let me type into the helper\u2019s screen', 'data-action':'session-typing', 'data-key':'addon-detail-typing', disabled:snapshot || settingsBusy.has('session-typing')}, state.settings.typing_on ? 'On' : 'Off'), 'addon-detail-typing-row') : null,
     addon.active && d ? row('Connection', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), null, 'addon-detail-connection') : null,
