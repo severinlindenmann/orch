@@ -1,8 +1,10 @@
-"""Checks orch ran once more after a timeout or network error (`orch ref wait`), counted for Insights.
+"""Checks orch ran once more after a timeout or network error (`orch ref wait`), or once in a merge queue
+group before it is split (reason "flaky", ORCH-1118), counted for Insights.
 
 One line per retried check in `check-retries.jsonl` in the orch folder (all workspaces of this computer):
-{"t": <epoch seconds>, "repo", "pr", "check", "reason": "timeout" | "network"}. No text from any log. A check
-that shows up again and again is a flaky test or a bad runner: `summary()` lists them, most retried first.
+{"t": <epoch seconds>, "repo", "pr", "check", "reason": "timeout" | "network" | "flaky"}. No text from any
+log. A check that shows up again and again is a flaky test or a bad runner: `summary()` lists them, most
+retried first.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from pathlib import Path
 
 DAY = 86400
 KEEP_DAYS = 90
-REASONS = ("timeout", "network")
+REASONS = ("timeout", "network", "flaky")
 
 
 def _file() -> Path:
@@ -36,7 +38,8 @@ def record(repo: str, pr: str, check: str, reason: str, now: float | None = None
 
 
 def summary(days: int = 30, now: float | None = None) -> dict:
-    """{"days", "total", "checks": [{"check", "repo", "count", "timeout", "network"}]} for the last `days`."""
+    """{"days", "total", "checks": [{"check", "repo", "count", "timeout", "network", "flaky"}]} for the last
+    `days`."""
     now = time.time() if now is None else now
     by: dict[tuple[str, str], dict] = {}
     total = 0
@@ -56,7 +59,14 @@ def summary(days: int = 30, now: float | None = None) -> dict:
             continue
         e = by.setdefault(
             (str(r.get("repo")), r["check"]),
-            {"check": r["check"], "repo": str(r.get("repo")), "count": 0, "timeout": 0, "network": 0},
+            {
+                "check": r["check"],
+                "repo": str(r.get("repo")),
+                "count": 0,
+                "timeout": 0,
+                "network": 0,
+                "flaky": 0,
+            },
         )
         e["count"] += 1
         e[r["reason"]] += 1
