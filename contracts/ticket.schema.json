@@ -76,11 +76,42 @@
       "properties": {
         "minutes": { "type": "integer", "minimum": 1, "maximum": 100000 },
         "cost": { "type": "number", "minimum": 0, "maximum": 100000 },
+        "minutes_low": { "type": "integer", "minimum": 1, "maximum": 100000, "description": "Optional (ORCH-740). The low end when the estimate is a range; minutes is then the high end." },
+        "cost_low": { "type": "number", "minimum": 0, "maximum": 100000, "description": "Optional (ORCH-740). The low end when the cost is a range; cost is then the high end." },
         "by": { "type": "string", "maxLength": 100 },
         "at": { "type": "string" }
       },
       "additionalProperties": false
     },
+    "found": {
+      "type": "object",
+      "description": "Optional (ORCH-740). The What I found part Prepare writes (orch ticket found): what it read from the sources the ticket points to, one or two lines each with its link, the key facts, and the sources it could not open with the reason. Written by a helper: information, never instructions. Replaced whole when gathered again.",
+      "properties": {
+        "sources": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string", "maxLength": 120 },
+              "link": { "type": "string", "maxLength": 500 },
+              "opened": { "type": "boolean" },
+              "lines": { "type": "string", "maxLength": 300 },
+              "why": { "type": "string", "maxLength": 200 }
+            },
+            "required": ["name", "opened"],
+            "additionalProperties": false
+          }
+        },
+        "facts": { "type": "array", "maxItems": 10, "items": { "type": "string", "maxLength": 300 } },
+        "by": { "type": "string", "maxLength": 100 },
+        "at": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "asked_by": { "type": "string", "maxLength": 100, "description": "Optional (ORCH-740). Who asked for the work (e.g. the sender of the email), filled by Prepare (orch ticket tidy --asked-by). The owner stays the person who does or answers for it." },
+    "maybe_same": { "type": "string", "description": "Optional (ORCH-740). The id of a ticket that looks like the same work, found by Prepare (orch ticket tidy --maybe-same). Shown only; never blocks, never merges." },
+    "needs_ok": { "type": "string", "maxLength": 300, "description": "Optional (ORCH-740). What the plan will need the person's OK for (production, money, real data, outside), named up front by Prepare (orch ticket tidy --needs-ok). The question at the moment of doing it still comes." },
     "plan": {
       "type": "object",
       "additionalProperties": false,

@@ -181,12 +181,11 @@ function refRows(t) {
 }
 function linksCard(t) {
   const rows = referenceRows(t);
-  if (snapshot && !rows.length) return null;
+  if (!rows.length && !adding(t, 'links')) return null;
   const refresh = snapshot ? [] : refreshers(t);
   return h('section', {className:'links-card', 'data-key':'links-card'},
     h('h2', {className:'ref-head'}, 'References', rows.length ? h('span', {}, '· ' + rows.length) : null,
       refresh.map(a => h('button', {type:'button', className:'btn ghost xs', title:'Update titles and state (' + addonLabel(a) + ')', 'data-action':'link-refresh', 'data-addon':a.name, 'data-ticket':t.id, 'data-key':'link-refresh-' + a.name}, iconEl('refresh'), refresh.length > 1 ? addonLabel(a) : 'Refresh'))),
-    rows.length ? null : h('p', {className:'meta'}, 'No links yet.'),
     h('ul', {className:'ref-list'}, refRows(t),
       snapshot ? null : h('li', {'data-key':'add-link-' + t.id}, h('button', {type:'button', className:'ref-row ref-add', 'data-action':'link-add', 'data-ticket':t.id}, iconEl('plus'), h('span', {className:'ref-text'}, 'Add reference')))));
 }
@@ -297,9 +296,10 @@ const fieldText = (f, value) => {
   return typeof value === 'object' ? '' : clean(value);
 };
 function fieldSections(t) {
-  return addons().filter(a => a.ticket_fields && array(a.ticket_fields.fields).some(f => !f.hidden)).map(a => {
+  return addons().filter(a => a.ticket_fields && array(a.ticket_fields.fields).some(f => !f.hidden) && (addonUsed(t, a) || adding(t, 'addon:' + a.name))).map(a => {
     const tf = a.ticket_fields, ext = (t.ext || {})[a.name] || {};
-    const rows = array(tf.fields).filter(f => !f.hidden).map(f => {
+    // a read-only field (filled in by the add-on) shows once it holds something; an editable one always, to change it
+    const rows = array(tf.fields).filter(f => !f.hidden && (!f.read_only || fieldText(f, ext[f.key]) !== '')).map(f => {
       const shown = fieldText(f, ext[f.key]);
       let value;
       if (f.read_only || snapshot) value = h('span', {className:'ed-ro' + (shown ? '' : ' empty-v'), title:f.read_only ? 'Filled in by the ' + addonLabel(a) + ' add-on' : null}, f.read_only && f.key && ext[f.key] && KEY.test(String(ext[f.key])) ? linkStatus(String(ext[f.key])) : shown || '—');
@@ -309,8 +309,8 @@ function fieldSections(t) {
       }
       return h('div', {}, h('dt', {}, clean(f.title)), h('dd', {}, value));
     });
-    return h('section', {className:'card ticket-aside addon-fields', 'data-key':'fields-' + a.name},
-      h('div', {className:'card-h'}, h('h2', {className:'grow'}, clean(tf.section)), h('span', {className:'addon-pill'}, 'add-on')),
+    return h('section', {className:'rail-group addon-fields', 'data-key':'fields-' + a.name},
+      h('div', {className:'rail-sheet-h'}, h('h2', {}, clean(tf.section)), h('span', {className:'addon-pill'}, 'add-on')),
       h('dl', {className:'ticket-details ed-list'}, rows));
   });
 }
@@ -538,7 +538,7 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
   const title = (typeof file.title === 'string' && file.title.trim().slice(0, 200)) || String(file.name || '').split('/').pop() || 'Result';
   const tile = h('div', {className:'ticket-preview'}, h('span', {className:'ticket-preview-label'}, title));
   if (!snapshot && /\.pdf$/i.test(file.name)) {  // the browser's own PDF view, from the same-origin file endpoint
-    tile.append(h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name), 'aria-label':title},
+    tile.append(h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name, false, file), 'aria-label':title},
       h('p', {className:'meta'}, 'This browser cannot show the PDF here. Open it to read it.')));
     return tile;
   }
@@ -549,7 +549,8 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
     if (live) { tile.classList.add('has-thumb'); tile.append(live); }
     return tile;
   }
-  const url = '/api/file?t=' + encodeURIComponent(t.id) + '&k=' + kind + '&n=' + encodeURIComponent(file.name);
+  const stamp = window.FileViewer?.stampOf ? window.FileViewer.stampOf(file) : '';  // ORCH-524: the version in the link
+  const url = '/api/file?t=' + encodeURIComponent(t.id) + '&k=' + kind + '&n=' + encodeURIComponent(file.name) + (stamp ? '&v=' + encodeURIComponent(stamp) : '');
   const key = url + '|' + (file.mtime || '');
   if (!ticketPreviewText.has(key)) ticketPreviewText.set(key, fetch(url).then(async r => {
     if (r.status === 404) return {missing:true};  // listed, but not on this computer: say so instead of an empty tile
@@ -636,7 +637,10 @@ function ticketShareButton(t, file) {
 }
 // ---- The shared file viewer: name, meta, Open in new tab, Download, Copy link. × Close, Esc and a click outside close it,
 // and the opening control gets the cursor back.
-const fileUrl = (tid, kind, fileName, dl = false) => '/api/file?t=' + encodeURIComponent(tid) + '&k=' + encodeURIComponent(kind) + '&n=' + encodeURIComponent(fileName) + (dl ? '&dl=1' : '');
+// ORCH-524: with the file (its time and size) the link names its version and the browser keeps the picture (kit/fileviewer.js stampOf).
+const fileStamp = file => file && window.FileViewer?.stampOf ? window.FileViewer.stampOf(file) : '';
+const fileUrl = (tid, kind, fileName, dl = false, file = null) => '/api/file?t=' + encodeURIComponent(tid) + '&k=' + encodeURIComponent(kind) + '&n=' + encodeURIComponent(fileName)
+  + (dl ? '&dl=1' : fileStamp(file) ? '&v=' + encodeURIComponent(fileStamp(file)) : '');
 const fileTitle = fileName => clean(window.DashHelpers.plainFileName(fileName) || String(fileName).split('/').pop());
 // The title given when the file was attached; else the file name made readable.
 const oneLineTitle = value => typeof value === 'string' ? clean(value).replace(/\s+/g, ' ').trim().slice(0, 200) : '';
@@ -654,7 +658,9 @@ async function copyFileLink(url) {
 const viewerKind = name => window.FileViewer ? window.FileViewer.kindOf(name) : 'other';
 const viewerWord = kind => window.FileViewer ? window.FileViewer.word(kind) : 'File';
 function ticketFileEntries(t) {
-  const entries = ticketFileGroups(t).flatMap(g => g.files.map(file => fileEntry(t, g, file)));
+  // The files the person attached themselves belong in the tab and its count too (their Overview card stays), so "Files 0" never reads as lost files.
+  const mine = inputFiles(t), groups = mine.length ? [...ticketFileGroups(t), {label:'What you asked', kind:'artifacts', files:mine}] : ticketFileGroups(t);
+  const entries = groups.flatMap(g => g.files.map(file => fileEntry(t, g, file)));
   // A web page with its own stylesheet, script and pictures in a folder is ONE website, not four files.
   const sites = new Map(entries.filter(f => f.fileKind === 'page' && f.name.includes('/')).map(f => [f.name.slice(0, f.name.lastIndexOf('/') + 1), f]));
   const parts = new Map();
@@ -708,7 +714,7 @@ function ticketFileActions(t, kind, file) {
     kind === 'artifacts' ? ticketShareButton(t, file) : null);
 }
 // ORCH-185: a picture shows itself in its row (the badge stays under it until it has loaded).
-const fileThumbImage = (t, kind, file) => h('img', {src:fileUrl(t.id, kind, file.name), alt:'', loading:'lazy'});
+const fileThumbImage = (t, kind, file) => h('img', {src:fileUrl(t.id, kind, file.name, false, file), alt:'', loading:'lazy'});
 function ticketFileRow(t, kind, file) {
   return h('div', {className:'file-row', 'data-key':'file-' + kind + '-' + file.name},
     (picture => h('span', {className:'file-type' + (picture || shownThumb(t, kind, file) ? ' has-thumb' : ''), 'aria-hidden':'true'}, fileBadge(file.name), picture ? fileThumbImage(t, kind, file) : shownThumb(t, kind, file)))(viewerKind(file.name) === 'image' && !snapshot),
@@ -720,7 +726,7 @@ function ticketFileRow(t, kind, file) {
 function ticketLivePreview(t, file, kind) {
   if (snapshot) return null;
   const type = viewerKind(file.name), title = titleOf(file);
-  if (type === 'pdf') return h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name), 'aria-label':title},
+  if (type === 'pdf') return h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name, false, file), 'aria-label':title},
     h('p', {className:'meta'}, 'This browser cannot show the PDF here. Open it to read it.'));
   if (type === 'page') return h('iframe', {className:'preview-live', sandbox:'allow-scripts', referrerpolicy:'no-referrer', title, loading:'lazy',
     src:'/view/' + encodeURIComponent(t.id) + '/' + encodeURIComponent(kind) + '/' + file.name.split('/').map(encodeURIComponent).join('/')});
@@ -756,7 +762,7 @@ function sortedEntries(list) {
 }
 function fileThumb(t, f) {
   const thumb = h('div', {className:'file-thumb', 'data-kind':f.fileKind});
-  if (f.fileKind === 'image') { thumb.append(h('img', {src:fileUrl(f.tid, f.kind, f.name), alt:'', loading:'lazy'})); return thumb; }
+  if (f.fileKind === 'image') { thumb.append(h('img', {src:fileUrl(f.tid, f.kind, f.name, false, f), alt:'', loading:'lazy'})); return thumb; }
   if (['md', 'text', 'code', 'table'].includes(f.fileKind) && !(f.size > 2 * 1048576)) {  // size unknown: still draw the capped snippet
     const p = ticketPreviewTile(t, {name:f.name, mtime:f.mtime}, f.kind);
     p.classList.add('file-snippet'); thumb.append(p); return thumb;
@@ -968,7 +974,8 @@ const PHONE_IMG = /\.(png|jpe?g|gif|webp)$/i;
 function phoneEntry(tid, entry) {
   const p = window.DashHelpers.phoneParts(entry.text, tid);
   if (!p) return null;
-  const src = (n, dl) => '/api/file?t=' + encodeURIComponent(tid) + '&k=files&n=' + encodeURIComponent(n) + (dl ? '&dl=1' : '');
+  // a phone file is written once, when its text arrives: the text's time names its version (ORCH-524)
+  const src = (n, dl) => fileUrl(tid, 'files', n, dl, entry.at ? {mtime:String(entry.at)} : null);
   const body = p.parts.map(x => {
     if (x.type === 'voice') return h('p', {className:'phone-voice'}, iconEl('play'), x.transcript ? '“' + clean(x.transcript) + '”' : 'Voice message (nothing could be understood)', x.lang ? h('span', {className:'meta'}, ' · ' + clean(x.lang)) : null);
     if (x.type === 'sound') return snapshot ? h('p', {className:'meta'}, 'Voice recording') : h('audio', {className:'phone-audio', controls:true, preload:'none', src:src(x.name)});
@@ -1191,24 +1198,24 @@ async function ticketTalkSend(tid, message) {
   const partial = r => ({ok:false, dropFiles:files.length > 0, text:(files.length ? 'The files are on the ticket, but the helper was not told: ' : '') + talkFailed(r)});
   if (t.status === 'review') {  // the same call as Send back: Ready, the note queued, a helper starts from it
     const back = await act('ticket.changes', {ticket:tid, text});
-    return back.ok ? {ok:true, text:'Sent back to the helper with your note.'} : partial(back);
+    return back.ok ? {ok:true, said:text, text:'Sent back to the helper with your note.'} : partial(back);
   }
   const sent = await act('run.send', {ticket:tid, text});
   if (!sent.ok) return partial(sent);
   const r = sent.state?.send_result;
   const delivered = !!r && Number.isInteger(r.delivered) && r.delivered > 0;
   if (!delivered && !(r && typeof r.id === 'string' && r.id)) return partial({status:200, text:'orch did not confirm that your message was saved.'});
-  if (delivered) return {ok:true, text:'Sent. The helper reads it now.'};
-  if (r.state !== 'none') return {ok:true, text:'Sent. The helper reads it when it finishes what it is doing.'};
+  if (delivered) return {ok:true, said:text, text:'Sent. The helper reads it now.'};
+  if (r.state !== 'none') return {ok:true, said:text, text:'Sent. The helper reads it when it finishes what it is doing.'};
   // nothing on the ticket: start a helper, it reads this first. Through the one starter (ORCH-475): Starting… until it
   // runs, one run for a double click, and the way the person picked in the Start choice (else the usual start).
   const ops = talkStartOps.get(tid) || [['run.start', {ticket:tid}]];
   talkStartOps.delete(tid);
   const starter = window.UI?.startStarter;
   const started = starter ? await starter.start(tid, ops) : await act('run.start', {ticket:tid});
-  if (started.again) return {ok:true, text:'Sent. The helper is starting and reads it first.'};
-  if (started.queued) return {ok:true, text:'Sent. The ticket waits in line for a free helper place; the helper reads it first.'};
-  return started.ok ? {ok:true, text:'Sent. A helper starts and reads it first.'} : {ok:true, text:'Saved on the ticket. Start the helper to go on.'};
+  if (started.again) return {ok:true, said:text, text:'Sent. The helper is starting and reads it first.'};
+  if (started.queued) return {ok:true, said:text, text:'Sent. The ticket waits in line for a free helper place; the helper reads it first.'};
+  return started.ok ? {ok:true, said:text, text:'Sent. A helper starts and reads it first.'} : {ok:true, said:text, text:'Saved on the ticket. Start the helper to go on.'};
 }
 // The helper's screen as plain text: colours and cursor codes dropped (the kit's dock shows text only).
 function talkScreenText(screen) { return String(screen || '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\x1b[@-_]/g, '').replace(/\s+$/, ''); }
@@ -1707,17 +1714,132 @@ function ticketAnswerNodes(t, plainRow) {
   return [window.UI?.appliesNow && list.length ? window.UI.appliesNow(list, o) : null, ...rows].filter(Boolean);
 }
 const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Tasks', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t, 'All').length]];
+// ORCH-581 (owner picked draft E, 19 Nov): Properties shows only what is filled in. Everything empty, and every add-on
+// this ticket has not used yet, comes back from one "+ Add" menu; a pick shows its row and opens its editor. Human
+// review needed always shows (a safety switch, ORCH-424). Below 1100 px the same rail is a sheet behind a
+// Properties button (railOpen), so there is one copy of every control.
+const propsAdding = new Map();  // ticket id -> keys a person picked from + Add (their rows show while still empty)
+const adding = (t, key) => !snapshot && !!propsAdding.get(t.id)?.has(key);
+const hasValue = (t, f) => t[f] != null && String(t[f]).trim() !== '';
+// An add-on is used on a ticket once one of its visible fields holds a value (false and 0 count; '' and [] do not).
+function addonUsed(t, a) {
+  const ext = (t.ext || {})[a.name];
+  if (!ext || typeof ext !== 'object') return false;
+  return array(a.ticket_fields?.fields).some(f => !f.hidden && f.key in ext && fieldText(f, ext[f.key]) !== '');
+}
+const addonEditable = a => array(a.ticket_fields?.fields).some(f => !f.hidden && !f.read_only);
+const repeatsSet = t => addonViewRows(t, false).some(([, , addon]) => addon === repeatsAddon());
 function ticketProperties(t, parent) {
-  const field = (label, value) => h('div', {}, h('dt', {}, label), h('dd', {}, value));
-  const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = window.DashHelpers.doneAt(t);
+  const field = (label, value, key) => h('div', {'data-key':key ? 'prop-' + key + '-' + t.id : null}, h('dt', {}, label), h('dd', {}, value));
+  const done = t.status === 'done';
+  const show = (key, filled) => filled || adding(t, key);
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
-    h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
-    h('dl', {className:'ticket-details ed-list'}, snapshot ? (parent ? field('Part of', h('a', {href:href(parent.id)}, partName(parent))) : null) : field('Part of', partOfField(t, parent)), field('Release', releaseField(t)), field('Human review needed', humanReviewField(t)),
-      ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t), field('Priority', priorityField(t)), field('Helper strength', modelField(t)),
-      t.created_at ? field('Created', localStamp(t.created_at)) : null,
-      done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
+    h('div', {className:'rail-sheet-h'}, h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
+      snapshot ? null : ticketButton(iconEl('x'), 'ghost icon sm narrow-only', () => railToggle(t, false), {'aria-label':'Close Properties', 'data-key':'props-close-' + t.id})),
+    h('dl', {className:'ticket-details ed-list'},
+      show('partOf', !!parent) ? field('Part of', snapshot ? h('a', {href:href(parent.id)}, partName(parent)) : partOfField(t, parent), 'part-of') : null,
+      show('release', !!t.release) ? field('Release', releaseField(t), 'release') : null,
+      field('Human review needed', humanReviewField(t)),
+      show('owner', hasValue(t, 'owner')) ? field('Owner', inlineField(t, 'owner'), 'owner') : null,
+      show('due', hasValue(t, 'due')) ? field('Due', inlineField(t, 'due'), 'due') : null,
+      show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when') : null,
+      costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t),
+      show('priority', prioritySet(t)) ? field('Priority', priorityField(t), 'priority') : null,
+      show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model') : null),
+    propertiesAddMenu(t, parent),
     linksCard(t),
     copyLine(t));
+}
+// Created and updated (or finished) in one quiet line at the foot of the rail.
+function railStamp(t) {
+  const finished = t.status === 'done' ? window.DashHelpers.doneAt(t) : null;
+  const stamp = [t.created_at ? 'Created ' + localStamp(t.created_at) : '',
+    t.status === 'done' ? (finished ? 'finished ' + localStamp(finished) : '') : (t.updated_at ? 'updated ' + localStamp(t.updated_at) : '')].filter(Boolean).join(' · ');
+  return stamp ? h('p', {className:'meta', 'data-key':'ticket-stamp-' + t.id}, stamp) : null;
+}
+// The one place every empty property and every unused add-on comes back (draft E's "+ Add").
+function propertiesAddMenu(t, parent) {
+  if (snapshot) return null;
+  const item = (key, label) => ticketButton(label, 'menu-item', e => propAdd(t, key, e?.currentTarget), {role:'menuitem', 'data-key':'prop-add-' + key + '-' + t.id});
+  const props = [
+    [!parent, 'partOf', 'Part of'], [!hasValue(t, 'owner'), 'owner', 'Owner'], [!hasValue(t, 'due'), 'due', 'Due'],
+    [!hasValue(t, 'done_when'), 'done_when', 'Done when'], [!t.release, 'release', 'Mark as a release'],
+    [!prioritySet(t), 'priority', 'Priority'], [!modelChoice(t), 'model', 'Helper strength'], [!referenceRows(t).length, 'links', 'Reference']]
+    .filter(([missing, key]) => missing && !adding(t, key)).map(([, key, label]) => item(key, label));
+  const fromAddons = addons().filter(a => addonEditable(a) && !addonUsed(t, a) && !adding(t, 'addon:' + a.name))
+    .map(a => item('addon:' + a.name, clean(a.ticket_fields.section) || addonLabel(a)));
+  if (repeatsAddon() && !repeatsSet(t)) fromAddons.push(item('repeat', 'Repeat…'));
+  if (!props.length && !fromAddons.length) return null;
+  return h('details', {className:'menu props-add', 'data-key':'props-add-' + t.id},
+    h('summary', {className:'btn ghost xs', 'aria-label':'Add a property'}, iconEl('plus'), 'Add'),
+    h('div', {className:'menu-pop', role:'menu'}, props.length ? [h('p', {className:'eyebrow'}, 'Properties'), props] : null,
+      fromAddons.length ? [h('p', {className:'eyebrow'}, 'From add-ons'), fromAddons] : null));
+}
+// A pick from + Add: Release and Repeat act at once; every other pick shows its row and opens its editor.
+async function propAdd(t, key, trigger) {
+  trigger?.closest('details')?.removeAttribute('open');
+  if (key === 'repeat') return repeatsDialog(t.id, repeatsAddon());
+  if (key === 'release') {
+    const result = await act('ticket.edit', {ticket:t.id, release:true, if_revision:(ticketOf(t.id) || t).revision});
+    if (!result.ok) window.orch.toast(changeError(result), 'error');
+    return;
+  }
+  if (!propsAdding.has(t.id)) propsAdding.set(t.id, new Set());
+  propsAdding.get(t.id).add(key);
+  render();
+  const rail = document.getElementById('ticket-rail-' + t.id) || document;
+  const at = key === 'links' ? '[data-action="link-add"]' : key.startsWith('addon:') ? '[data-action="field"][data-addon="' + CSS.escape(key.slice(6)) + '"]'
+    : key === 'partOf' ? 'select[aria-label="Part of"]' : key === 'model' ? 'select[aria-label="Helper strength"]' : key === 'priority' ? 'select[aria-label="Priority"]' : '[data-action="inline"][data-field="' + key + '"]';
+  const target = rail.querySelector(at);
+  if (target?.tagName === 'SELECT') target.focus(); else target?.click();
+}
+// How many filled things the rail holds besides owner and due (those stay in the line under the title when narrow).
+function railCount(t, parent) {
+  const used = addons().filter(a => a.ticket_fields && addonUsed(t, a)).length;
+  return [!!parent, !!t.release, hasValue(t, 'done_when'), !!costValue(t), !!modelChoice(t), referenceRows(t).length > 0].filter(Boolean).length + addonPropertyRows(t).length + used;
+}
+const railOpen = {id:null, trigger:null, keys:false};
+const railNarrow = () => !window.matchMedia || window.matchMedia('(max-width:1099px)').matches;
+function railToggle(t, open, trigger) {
+  if (open && !railOpen.keys) {
+    railOpen.keys = true;
+    document.addEventListener('keydown', railKeys);
+    // wider than the sheet needs: the rail is back in the page, so the sheet closes without moving the keyboard
+    window.matchMedia?.('(min-width:1100px)').addEventListener?.('change', e => { if (e.matches && railOpen.id) { railOpen.id = null; render(); } });
+  }
+  railOpen.id = open ? t.id : null;
+  if (open) railOpen.trigger = trigger?.dataset?.key || null;
+  render();
+  const back = open ? document.querySelector('[data-key="props-close-' + t.id + '"]') : railOpen.trigger && document.querySelector('[data-key="' + CSS.escape(railOpen.trigger) + '"]');
+  back?.focus();
+}
+// While the sheet is open: Esc closes it (the keyboard goes back to Properties) and Tab stays inside it.
+function railKeys(e) {
+  const rail = railOpen.id && railNarrow() ? document.getElementById('ticket-rail-' + railOpen.id) : null;
+  if (!rail) return;
+  if (e.key === 'Escape') { e.preventDefault(); railToggle({id:railOpen.id}, false); return; }
+  if (e.key !== 'Tab') return;
+  const stops = [...rail.querySelectorAll('button, select, input, textarea, summary, a[href], [tabindex="0"]')].filter(n => !n.disabled && n.offsetParent !== null);
+  if (!stops.length) return;
+  const first = stops[0], last = stops[stops.length - 1], at = document.activeElement;
+  if (e.shiftKey ? at === first || !rail.contains(at) : at === last || !rail.contains(at)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+}
+// A click beside the open sheet closes it (narrow screens only).
+function railScrim(t) {
+  const scrim = h('div', {className:'rail-scrim narrow-only', 'aria-hidden':'true', 'data-key':'rail-scrim-' + t.id});
+  scrim.onclick = () => railToggle(t, false);
+  return scrim;
+}
+// Narrow screens only: Properties (with how many things it holds) and the owner / due line under the title.
+function railButton(t) {
+  if (snapshot) return null;
+  const n = railCount(t, window.DashHelpers.parentOf(tickets(), t)), open = railOpen.id === t.id;
+  return ticketButton(['Properties', n ? h('span', {className:'chip'}, String(n)) : null], 'ghost sm narrow-only', e => railToggle(t, !open, e?.currentTarget),
+    {'aria-haspopup':'dialog', 'aria-expanded':String(open), 'aria-controls':'ticket-rail-' + t.id, 'data-key':'props-open-' + t.id});
+}
+function railFacts(t) {
+  const parts = [hasValue(t, 'owner') ? 'Owner ' + name(String(t.owner)) : '', hasValue(t, 'due') ? 'Due ' + dueText(t) : ''].filter(Boolean);
+  return parts.length ? h('p', {className:'t-meta narrow-only', 'data-key':'rail-facts-' + t.id}, parts.join(' · ')) : null;
 }
 
 // A ticket made outside this page (command line, a helper) may not be in the state we hold yet: read the workspace
@@ -1761,6 +1883,7 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
     // the new live page (Preview, draft D feature 3): one session button that opens this ticket's session in the layer
     const focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
     if (focusBtn) actions.push(focusBtn);
+    actions.push(railButton(t));
     if (menu) actions.push(menu);
   }
   const icon = window.UI?.statusIcon ? window.UI.statusIcon(m.pill) : null;
@@ -1768,7 +1891,7 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   return h('section', {className:'strip ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
       m.helper && window.UI?.helperPill ? stripHelperPill(m.helper) : h('span', {className:'pill status-change ' + m.pill, 'data-key':'status-' + t.status + '-' + m.pill}, icon, m.word),
-      h('div', {className:'grow ticket-strip-text'}, h('h1', {className:'t-row'}, window.DashHelpers.keyTag(t, h), inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, m.sentence)),
+      h('div', {className:'grow ticket-strip-text'}, h('h1', {className:'t-row'}, window.DashHelpers.keyTag(t, h), inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, m.sentence), railFacts(t)),
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);
 }
@@ -1789,11 +1912,11 @@ function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
   const sentence = [why, quiet ? quiet + '.' : ''].filter(Boolean).join(' ');
   const live = liveLinkFor(t), focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
   if (focusBtn) focusBtn.className = 'btn primary sm';  // the one filled button while a helper runs, as Watch live was
-  const actions = [focusBtn || (live ? h('a', {className:'btn primary sm', href:live.url, 'data-key':'watch-live'}, 'Watch live') : null), menu].filter(Boolean);
+  const actions = [focusBtn || (live ? h('a', {className:'btn primary sm', href:live.url, 'data-key':'watch-live'}, 'Watch live') : null), railButton(t), menu].filter(Boolean);
   return h('section', {className:'strip strip-plain ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
       h('div', {className:'grow ticket-strip-text'}, kicker, h('h1', {className:'t-title'}, inlineField(t, 'title')),
-        sentence ? h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, sentence) : null),
+        sentence ? h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, sentence) : null, railFacts(t)),
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);
 }
@@ -1877,7 +2000,11 @@ function detail(t) {
         panel('tasks', 'Tasks', card('tasks', 'Tasks', total ? done + ' of ' + total + ' done' : '', [total ? taskRows(t) : emptyRow('No tasks yet.'), t.status === 'done' ? null : addTaskRow(t, 'tasks')])),
         panel('files', 'Files', artifactsPanel(t)),
         panel('activity', 'Activity', ticketHistoryPanel(t))),
-      h('div', {className:'stack ticket-side'}, ticketProperties(t, parent), fieldSections(t)))));
+      // a read-only copy keeps the rail in the page at every width (it has no Properties button)
+      h('div', {className:'stack ticket-side' + (snapshot ? '' : ' rail-sheet'), id:'ticket-rail-' + t.id, 'data-open':String(railOpen.id === t.id), 'aria-label':'Properties', 'data-key':'ticket-rail-' + t.id,
+        role:railOpen.id === t.id ? 'dialog' : null, 'aria-modal':railOpen.id === t.id ? 'true' : null},
+        ticketProperties(t, parent), fieldSections(t), railStamp(t)),
+      snapshot || railOpen.id !== t.id ? null : railScrim(t))));
 }
 
 // ORCH-189: Time · cost, only when the helper estimated it or worked on it (read-only).
@@ -1944,6 +2071,7 @@ function humanReviewField(t) {
 // ORCH-813: the ticket's priority. When helpers wait for a free slot, high tickets start first, low ones last.
 // No field = normal. The same native select as Helper strength.
 const PRIORITY_NAMES = {high:'High, starts first', normal:'Normal', low:'Low, starts last'};
+function prioritySet(t) { return ['high', 'low'].includes(t.priority); }
 function priorityField(t) {
   const was = ['high', 'low'].includes(t.priority) ? t.priority : 'normal';
   if (snapshot) return el('span', 'ed-ro', PRIORITY_NAMES[was]);

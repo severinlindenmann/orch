@@ -24,5 +24,7 @@ def test_select_takes_only_the_three_values(bad):
 
 def test_ticket_page_shows_the_priority_select():
     page = PAGE.read_text(encoding="utf-8")
-    assert "field('Priority', priorityField(t))" in page
+    assert "field('Priority', priorityField(t), 'priority')" in page
+    # Normal hides the row; + Add brings it back (the Properties add menu of develop).
+    assert "[!prioritySet(t), 'priority', 'Priority']" in page
     assert "act('ticket.edit', {ticket:t.id, priority:select.value" in page
