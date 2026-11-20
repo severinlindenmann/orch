@@ -207,25 +207,31 @@ async function paneData(page, dash) {
   await page.evaluate(() => window.LiveSessions.refresh());
   await page.waitForTimeout(300);
   if (!(await page.evaluate(l => document.activeElement === document.querySelector(l), link))) throw new Error('a new answer moved the keyboard place');
-  // ORCH-679 (checked since ORCH-701): Stop in the pane itself sends the ticket page's run.stop (caught before orch);
-  // an idle helper's button says Stop idle helper
-  const stops = [];
+  // ORCH-679, since ORCH-817: the pane of a ticket's helper has Stop (ends the current step: run.interrupt) and End
+  // session (asks once, then the ticket page's run.stop); both caught before orch. In the header of a wide or compact
+  // pane, in More on a phone.
+  const acts = [];
   await page.route('**/api/act', async route => {
     const b = route.request().postDataJSON();
-    if (b.op !== 'run.stop') return route.fallback();
-    stops.push(b.args);
+    if (!['run.interrupt', 'run.stop'].includes(b.op)) return route.fallback();
+    acts.push([b.op, b.args.ticket]);
     route.fulfill({ json: barState });
   });
-  const stop = `${body} [data-key="live-stop"]`;
-  const word = (await page.textContent(stop).catch(() => '')).trim();
+  const pane = '#live-dock .live-pane[data-session="t_bar238"]';
+  const inMore = !(await page.$(`${pane} [data-key="live-stop"]`));
+  const stop = `${pane} [data-key="${inMore ? 'live-more-stop' : 'live-stop'}"]`;
+  if (inMore) await page.click(`${pane} [data-key="live-pane-more"]`);
+  const word = (await page.textContent(stop, { timeout: 5000 }).catch(() => '')).trim();
   if (word !== 'Stop') throw new Error(`the pane of a helper that waits has no Stop (it says "${word}")`);
   await page.click(stop);
-  for (let i = 0; i < 20 && !stops.length; i++) await page.waitForTimeout(100);
-  if (stops.length !== 1 || stops[0].ticket !== 't_bar238') throw new Error('Stop did not ask orch to stop that helper: ' + JSON.stringify(stops));
-  await page.evaluate(() => window.LiveLayer.open('t_bar241'));
-  const idle = '#live-dock .live-pane[data-session="t_bar241"] [data-key="live-stop"]';
-  await page.waitForSelector(idle, { timeout: 5000 });
-  if ((await page.textContent(idle)).trim() !== 'Stop idle helper') throw new Error('an idle helper\'s pane does not say Stop idle helper');
+  for (let i = 0; i < 20 && !acts.length; i++) await page.waitForTimeout(100);
+  if (acts.length !== 1 || acts[0].join() !== 'run.interrupt,t_bar238') throw new Error('Stop did not ask orch to stop the current step: ' + JSON.stringify(acts));
+  if (inMore && !(await page.$(`${pane} [data-key="live-more-end"]`))) await page.click(`${pane} [data-key="live-pane-more"]`);
+  await page.click(`${pane} [data-key="${inMore ? 'live-more-end' : 'live-end'}"]`);
+  await page.click(`${pane} [data-key="live-end-yes"]`, { timeout: 5000 });
+  for (let i = 0; i < 20 && acts.length < 2; i++) await page.waitForTimeout(100);
+  if (acts.length !== 2 || acts[1].join() !== 'run.stop,t_bar238') throw new Error('End session did not ask orch to stop that helper: ' + JSON.stringify(acts));
+  await page.unroute('**/api/act');
   await page.evaluate(() => window.LiveLayer.open('t_bar238'));
   await noSideways(page);
 }

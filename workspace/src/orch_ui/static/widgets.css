@@ -1047,7 +1047,8 @@ button.live-pt:hover{color:var(--brand)}
 .live-ren{display:flex;flex:1 1 0;gap:var(--s2);align-items:center;min-width:0}
 .live-ren .input{flex:1 1 0;min-width:0}
 .live-ctl{position:relative;display:flex;flex:none;gap:var(--s1);align-items:center}
-.live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0}
+.live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0;max-height:calc(var(--live-h) - var(--touch) - var(--s3));overflow-y:auto;overscroll-behavior:contain}
+.live-dock[data-mode=full] .live-ctl .live-pop{max-height:calc(100dvh - var(--live-bottom,0px) - var(--touch) * 2)}  /* More stays above the phone tab bar and scrolls (ORCH-817) */
 /* Pane buttons carry their word (ORCH-463). A compact pane (split, narrow, small): the title keeps a full row, the
    buttons go on a second row and wrap when even that is short */
 .live-pbtn{gap:var(--s1);padding-inline:var(--s1)}
