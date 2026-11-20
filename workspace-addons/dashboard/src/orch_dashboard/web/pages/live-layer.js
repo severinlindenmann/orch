@@ -427,7 +427,7 @@ function liveLayerFill() {
     const live = window.LiveSessions?.get(body.dataset.liveBody) || null;
     const now = body.querySelector('[data-live-now]'), pre = body.querySelector('[data-live-lines]'), meta = body.querySelector('[data-live-meta]');
     const kind = body.dataset.liveKind || '';  // a session without a ticket (ORCH-364)
-    const text = kind === 'terminal' ? 'A plain terminal in this workspace, no helper. The terminal itself comes here next.'
+    const text = kind === 'terminal' ? 'A plain terminal in this workspace, no helper.'
       : !window.LiveSessions?.ready ? 'Loading…' : live ? liveNow(live) : kind ? 'This helper is not on right now.' : 'No helper is working on this ticket right now.';
     if (now.textContent !== text) now.textContent = text;
     const askBox = body.querySelector('[data-live-ask]');
@@ -444,6 +444,7 @@ function liveLayerFill() {
     const m = live && kind !== 'terminal' ? liveMeta(live).join(' · ') : '';
     if (meta.textContent !== m) meta.textContent = m;
     meta.hidden = !m;
+    if (typeof liveTermApply === 'function') liveTermApply(body, live);  // the real screen (pages/liveterm.js)
   }
 }
 // The layer's part of the bar: Open (when only the bar shows), Place with its menu, and in full screen the way out.
