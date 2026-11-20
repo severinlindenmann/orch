@@ -164,7 +164,8 @@ def test_permission_modes_for_claude(claude_help, mode, proj):
     assert flags("ask") == ()
     assert flags("edits") == ("--permission-mode", "acceptEdits")
     guard = adapters.permission_args("claude", proj, "ask")
-    assert guard and adapters.permission_args("claude", proj, "edits") == ["--permission-mode", "acceptEdits", *guard]
+    edits = adapters.permission_args("claude", proj, "edits")
+    assert guard and edits == ["--permission-mode", "acceptEdits", *guard]
     assert flags("full") == ("--dangerously-skip-permissions",)
     assert flags("auto") == ("--permission-mode", "acceptEdits")  # this claude does not list auto
     claude_help.say('choices: "acceptEdits", "auto"')
@@ -948,3 +949,16 @@ def test_find_binary_looks_in_nvm_when_the_path_is_clean(tmp_path, monkeypatch):
     env = adapters.with_binary_dir({"PATH": "/usr/bin"}, [str(exe), "x"])
     assert env["PATH"].split(":")[0] == str(nvm)
     assert adapters.with_binary_dir({"PATH": "/usr/bin"}, ["codex"]) == {"PATH": "/usr/bin"}
+
+
+def test_a_with_entry_that_names_no_flag_list_is_refused(monkeypatch):
+    table = {
+        "ask": {"args": ["--x"], "if_help_has": "x", "else": []},
+        "edits": {"args": ["--e"], "with": "ask"},
+    }
+    monkeypatch.setattr(adapters, "load", lambda name, root=None: {"permissions": table})
+    with pytest.raises(ValueError, match="plain flag list"):
+        adapters.permission_args("t", None, "edits")
+    table["edits"]["with"] = "full"  # missing
+    with pytest.raises(ValueError, match="plain flag list"):
+        adapters.permission_args("t", None, "edits")

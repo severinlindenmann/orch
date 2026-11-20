@@ -290,7 +290,9 @@ def permission_args(
         return list(entry)
     if "with" in entry:  # args, then another mode's plain flag list (written once in the table)
         base = table.get(entry["with"])
-        return list(entry["args"]) + (list(base) if isinstance(base, list) else [])
+        if not isinstance(base, list):  # fail closed: never start without the flags it was meant to carry
+            raise ValueError(f"{name}: permissions.{mode}.with must name a plain flag list")
+        return list(entry["args"]) + list(base)
     st = person if person is not None else person_state(entry.get("unless_config"))
     if st["strict"]:
         return []  # never lift a stricter personal setting
