@@ -128,7 +128,8 @@ def _scan(args, root: Path) -> None:
         err.extra = {"code": "too_large"}
         raise err
     if not secretscan.stored_keys_readable(root):  # the explicit command stays strict
-        err = Refused("Couldn't read your saved keys, so the scan could not finish. Fix that and scan again.")
+        why = secretscan.keys_unreadable_reason(root)
+        err = Refused(f"Couldn't read your saved keys, so the scan could not finish: {why}")
         err.extra = {"code": "stored_keys_unreadable"}
         raise err
     found: list[dict] = []
@@ -139,7 +140,7 @@ def _scan(args, root: Path) -> None:
     if not found:
         print(json.dumps({"found": []}) if getattr(args, "json", False) else "No secrets found.")
         return
-    err = Refused(secretscan.refusal(found))
+    err = Refused(secretscan.refusal(found, root))
     err.extra = {"code": "refused", "found": found}
     raise err
 
