@@ -4,6 +4,7 @@ import base64
 import functools
 import http.client
 import json
+import os
 import queue
 import re
 import secrets
@@ -18,7 +19,14 @@ import pytest
 from orch_dashboard import termbridge, termsession
 from orch_dashboard.server import make_server
 
-pytestmark = pytest.mark.skipif(shutil.which("tmux") is None, reason="needs tmux")
+pytestmark = [
+    pytest.mark.skipif(shutil.which("tmux") is None, reason="needs tmux"),
+    # the CI clock job runs the add-on suites under libfaketime, where a real tmux server hangs; runs in addons.yml
+    pytest.mark.skipif(
+        "faketime" in os.environ.get("LD_PRELOAD", ""),
+        reason="a real tmux hangs under libfaketime; runs in addons.yml",
+    ),
+]
 
 TID = "t_term0001"
 SOCK = ["orch-00000000"]
