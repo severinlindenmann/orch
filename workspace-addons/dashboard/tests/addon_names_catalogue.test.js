@@ -153,6 +153,12 @@ test('the live-session add-on page has no Preview switch', () => {
   assert.equal(find(page, byKey('addon-detail-live-preview')), null);
   assert.doesNotMatch(text(page), /Preview|today’s Focus/);
   assert.ok(find(page, byKey('addon-detail-typing')), 'the Typing switch stays');
+  // ORCH-300 item 14: Typing sits in the "More" fold; the connection status stays in view, outside it
+  const more = find(page, byKey('settings-more-addon-focus'));
+  assert.ok(find(more, byKey('addon-detail-typing')));
+  const linked = ctx.page({name: 'sync', active: true, description: 'd', detail: {connected: true}});
+  assert.ok(find(linked, byKey('addon-detail-status')));
+  assert.equal(find(linked, byKey('settings-more-addon-sync')), null, 'nothing technical: no More fold');
 });
 
 // 19: the Update button keeps the version before, so the end says "Updated orch 23 → 24."

@@ -636,8 +636,8 @@ function addonDetailPage(addon) {
     links && shown !== null ? row('Shared pages', settingsText('p', {}, 'Show workspace name and icon'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on shared pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
   ];
-  // Typing and Preview are technical: behind "More" (ORCH-300 item 14).
-  const technical = settingsRows.splice(1, 2).filter(Boolean);
+  // Typing is technical: behind "More" (ORCH-300 item 14). Connection stays in view.
+  const technical = settingsRows.splice(1, 1).filter(Boolean);
   if (technical.length) settingsRows.push(moreSettings('addon-' + addon.name, ...technical));
   const where = live && (live.dashboard || live.page)
     ? h('div', {className:'card'}, row('Open', settingsText('p', {}, 'See what ' + label + ' holds.'), h('a', {className:'btn ghost sm', href:'#addon/' + encodeURIComponent(addon.name), 'data-key':'addon-detail-open'}, 'Open ' + label + ' →'), 'addon-detail-open-row')) : null;
