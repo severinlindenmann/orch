@@ -330,12 +330,11 @@ const MAX_RETRIES = 3;
 /** No second try starts after this long (the CI job stops at 15 minutes). */
 const RETRY_DEADLINE_MS = 12 * 60000;
 
-/** promise, or a plain error after ms; the timer never keeps the process alive */
+/** promise, or a plain error after ms; the timer is always cleared when it settles (an unref timer let Node 20 end a pending test as cancelled) */
 function withTimeout(promise, ms, what) {
   let timer;
   const late = new Promise((_, no) => {
     timer = setTimeout(() => no(new Error(`${what} took longer than ${Math.round(ms / 1000)}s and was stopped`)), ms);
-    if (timer.unref) timer.unref();
   });
   return Promise.race([promise, late]).finally(() => clearTimeout(timer));
 }
