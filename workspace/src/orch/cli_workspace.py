@@ -1,0 +1,47 @@
+"""`orch workspace move-here`: keep a moved workspace's saved keys and settings (ORCH-853). Person only."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from orch import history, nextstep
+
+
+def add_parsers(sub, common) -> None:
+    # hidden from help like `orch copy`: a rare step a person takes after a move; every refusal names it
+    w = sub.add_parser("workspace", help=argparse.SUPPRESS)
+    wsub = w.add_subparsers(dest="workspace_cmd", metavar="<command>", required=True)
+    wsub.add_parser(
+        "move-here",
+        parents=[common],
+        help="after you moved this folder: keep its saved keys and settings here (asks you first)",
+    )
+
+
+def _text(res: dict) -> str:
+    if not res["moved"]:
+        return "Nothing to move: the saved keys already belong to this folder."
+    text = f"Moved the saved keys and settings from {res['old']} to {res['new']}."
+    if res.get("not_moved"):
+        text += (
+            " orch could not update its list of running background services; those started in the old folder"
+            " start again the next time you open orch here."
+        )
+    return text
+
+
+def dispatch(args, root: Path) -> bool:
+    if args.cmd != "workspace":
+        return False
+    from orch import workspace_move
+
+    if args.workspace_cmd == "move-here":
+        res = workspace_move.move_here(root, by=getattr(args, "by", None))
+        data = {"ok": True, **res}
+        if args.json:
+            data = history.shown_json(history.args_root(args), data)
+        nextstep.remember(args, data)
+        print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else _text(res))
+    return True
