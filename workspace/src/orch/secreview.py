@@ -214,6 +214,31 @@ def _may_record(root: Path, n: int, e: dict) -> None:
         raise Refused(nobody)
 
 
+def ticket_result(root: Path | None, ticket: dict) -> dict | None:
+    """ORCH-826: the result of a "Security review: pull request #N" ticket for the commit it was started on:
+    {"ok": True|False, "line", "what"} once a verdict is recorded, else None (no verdict yet, not a security
+    review, or the pull request moved on and a newer review owns it). The Reviewer accepts an ok for the
+    owner; only a problem stays on the owner's list, and its card leads with it."""
+    if root is None or not str(ticket.get("title") or "").startswith(TITLE.split("#")[0]):
+        return None
+    from orch import releasekeeper
+
+    try:
+        prs = (releasekeeper.read_state(releasekeeper.Cfg(root)).get("security") or {}).get("prs") or {}
+    except (OSError, ValueError, Refused):
+        return None
+    for n, e in prs.items() if isinstance(prs, dict) else ():
+        if not isinstance(e, dict) or e.get("tid") != ticket.get("id"):
+            continue
+        v = read_verdicts(root).get(str(n))
+        word = _effective(e, v)
+        if word is None:
+            return None
+        line = "you said release anyway" if word == "owner-ok" else str((v or {}).get("line") or "")
+        return {"ok": word in OK, "line": line, "what": f"the security review of pull request #{n}"}
+    return None
+
+
 def verdict(root: Path, n: int, word: str, line: str, by: str, sha: str = "") -> dict:
     """`orch review security <n> ok|problems "<line>" --sha <commit>`: the review helper of that pull request,
     or a person. The verdict holds only for the commit the review was started on and names the one it read."""
