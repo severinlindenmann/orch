@@ -601,3 +601,24 @@ test('ORCH-1037: Cancel goes back to the page it came from; leaving keeps the un
   await s.mounted.destroy();
   assert.equal(vm.runInContext('ticketDraft', s.c).text, 'Half typed');
 });
+test('ORCH-1037: a helper that does not start ends on "Saved" with the reason, still on the new ticket', async () => {
+  const s = pageSetup();
+  const act = s.c.act; s.c.act = async (op, args) => op === 'run.start' ? (s.calls.push({op}), {ok:false, text:'No helper'}) : act(op, args);
+  s.input.value = 'Plan it'; await s.input.fire('input');
+  await s.form.fire('submit');
+  assert.equal(s.launches[0].finished, 'Saved');
+  assert.ok(s.toasts.some(x => /did not start: No helper/.test(x[0]) && x[1] === 'error'));
+  assert.equal(s.c.location.hash, '#ticket/new');
+});
+test('ORCH-1037: a form left while saving never moves the person later', async () => {
+  const s = pageSetup();
+  let release; const act = s.c.act;
+  s.c.act = async (op, args) => { if (op === 'ticket.new') await new Promise(r => { release = r; }); return act(op, args); };
+  s.input.value = 'Plan it'; await s.input.fire('input');
+  const sent = s.form.fire('submit');
+  await new Promise(r => setTimeout(r, 0));
+  await s.mounted.destroy();  // the person left; then came back to #new (a fresh form)
+  release(); await sent;
+  assert.equal(s.c.location.hash, '#new');
+  assert.ok(s.toasts.some(x => x[0] === 'Ticket created'));
+});

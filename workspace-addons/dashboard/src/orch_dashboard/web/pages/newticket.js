@@ -364,10 +364,11 @@ function ticketForm(t, {host = null} = {}) {
   actions.append(submit);
   if (plain) actions.prepend(plain);
   const startNow = async (quiet = false) => {
-    if (t || !startAfter || !created) return;
+    if (t || !startAfter || !created) return false;
     const run = await act('run.start', {ticket:created.id});
-    if (run.ok && quiet) return;  // the starting animation already says it
+    if (run.ok && quiet) return true;  // the starting animation already says it
     window.orch.toast(run.ok ? 'Helper started' : 'The ticket was created, but the helper did not start: ' + run.text, run.ok ? 'ok' : 'error');
+    return run.ok;
   };
   form.append(fields, error, reload, actions); d.append(form);
   const steps_ = () => steps.filter(step => step.input.value.trim() || step.files.length);
@@ -376,14 +377,16 @@ function ticketForm(t, {host = null} = {}) {
   // Each step shows for a moment (at least ~0.45 s) so the move to the new ticket reads as one calm motion, not a jump.
   const atLeast = async ms => { const left = launchAt + ms - Date.now(); if (left > 0) await pause(left); };
   const launchInto = async made => {
-    const leftPage = () => (location.hash || '').split('?')[0] !== '#new';
+    // left, or left and came back to a fresh form: this (closed) form never moves the person
+    const leftPage = () => closed || (location.hash || '').split('?')[0] !== '#new';
     if (!launch) { await startNow(); if (!leftPage() && typeof href === 'function') location.hash = href(made.id); return; }
     await atLeast(450);
     let n = 1;
     launch.step(n);
-    if (startAfter) { await startNow(true); await atLeast(1000); launch.step(++n); }
+    let started = false;
+    if (startAfter) { started = await startNow(true); await atLeast(1000); launch.step(++n); }
     await atLeast(startAfter ? 1400 : 900);
-    launch.finish(startAfter ? 'Started' : 'Saved');
+    launch.finish(started ? 'Started' : 'Saved');  // a helper that did not start says so in its toast
     await pause(380);
     if (leftPage()) { window.orch.toast((epicMade ? 'Epic' : 'Ticket') + ' created', 'ok'); return; }  // the person went elsewhere meanwhile
     newTicketFrom = '';
