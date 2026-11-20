@@ -293,6 +293,7 @@
   "run": "orch_personal",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-personal",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,

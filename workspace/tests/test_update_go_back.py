@@ -41,7 +41,7 @@ def _installed_at(state, n):
 def test_go_back_installs_that_release_commit_of_the_same_source(_setup):
     addons.switch_to("32")
     assert addons.repo() == OFFICIAL and addons.ref() == SHA[32]
-    assert addons.spec("workspace") == f"{OFFICIAL}/archive/{SHA[32]}.zip#subdirectory=workspace"
+    assert addons.spec("workspace") == f"orch-workspace @ {OFFICIAL}/archive/{SHA[32]}.zip#subdirectory=workspace"
     assert addons.pinned() == {"release": 32, "sha": SHA[32], "left": 33, "repo": OFFICIAL}
     assert addons.build() == "release"
     _installed_at(_setup, 32)
