@@ -436,27 +436,27 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  render();ready=true;Promise.resolve().then(()=>o.onChange&&o.onChange());
  return {jump,openOverview,answers:ans,items,fly,undo,syncUndo:()=>{undoBtn.disabled=!undoable()},pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,later,get busy(){return !!overlay||busy},get index(){return idx}}};
 })();
-/* Login gate and profile picker (ORCH-1035). UI.gateLogin({onLogin, hintCommand, error}) is the full-page login card
+/* Login door and profile picker (ORCH-1035). UI.doorLogin({onLogin, hintCommand, error}) is the full-page login card
    ("Welcome", one token field, Log in); onLogin(token) returns a promise of an error line or null. UI.profilePicker(
    {people, current, onPick, onAdd, onLogout}) is the full-page "Who is using orch?" picker; onPick(name) and
-   onAdd(name) return a promise of an error line or null. Both return the .gate element (the caller adds it to the page
+   onAdd(name) return a promise of an error line or null. Both return the .door element (the caller adds it to the page
    and removes it when done). Text only through textContent. */
 (()=>{'use strict';const UI=window.UI=window.UI||{};
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};
 const COLORS=['blue','green','violet','amber','teal','pink','indigo','orange','cyan','red','lime','slate'];
 UI.profileColor=name=>{let h=0;for(const c of String(name||''))h=(h*31+c.codePointAt(0))>>>0;return COLORS[h%COLORS.length]};
-UI.gateLogo=UI.gateLogo||'logo.svg';  // the page's orch mark (a mockup sets its own path)
-const mark=()=>{const m=el('img','gate-mark');m.src=UI.gateLogo;m.alt='';return m};
-const shell=(title,text)=>{const g=el('div','gate');g.setAttribute('role','dialog');g.setAttribute('aria-modal','true');
- const inner=el('div','gate-inner'),h=el('h1','gate-title',title);h.id='gate-title-'+Math.random().toString(36).slice(2,8);g.setAttribute('aria-labelledby',h.id);
- inner.append(mark(),h);if(text)inner.append(el('p','gate-text',text));g.append(inner);return [g,inner]};
-UI.gateLogin=o=>{o=o||{};const [g,inner]=shell('Welcome','Log in with your token.');
- const form=el('form','gate-card'),field=el('div','field'),label=el('label','',  'Token'),inp=el('input','input');
- inp.type='password';inp.name='token';inp.autocomplete='current-password';inp.spellcheck=false;inp.id='gate-token';label.htmlFor=inp.id;inp.required=true;
- const err=el('p','gate-error');err.id='gate-token-err';err.setAttribute('role','alert');err.hidden=!o.error;if(o.error){err.textContent=o.error;inp.setAttribute('aria-invalid','true');inp.setAttribute('aria-describedby',err.id)}
+UI.doorLogo=UI.doorLogo||'logo.svg';  // the page's orch mark (a mockup sets its own path)
+const mark=()=>{const m=el('img','door-mark');m.src=UI.doorLogo;m.alt='';return m};
+const shell=(title,text)=>{const g=el('div','door');g.setAttribute('role','dialog');g.setAttribute('aria-modal','true');
+ const inner=el('div','door-inner'),h=el('h1','door-title',title);h.id='door-title-'+Math.random().toString(36).slice(2,8);g.setAttribute('aria-labelledby',h.id);
+ inner.append(mark(),h);if(text)inner.append(el('p','door-text',text));g.append(inner);return [g,inner]};
+UI.doorLogin=o=>{o=o||{};const [g,inner]=shell('Welcome','Log in with your token.');
+ const form=el('form','door-card'),field=el('div','field'),label=el('label','',  'Token'),inp=el('input','input');
+ inp.type='password';inp.name='token';inp.autocomplete='current-password';inp.spellcheck=false;inp.id='door-token';label.htmlFor=inp.id;inp.required=true;
+ const err=el('p','door-error');err.id='door-token-err';err.setAttribute('role','alert');err.hidden=!o.error;if(o.error){err.textContent=o.error;inp.setAttribute('aria-invalid','true');inp.setAttribute('aria-describedby',err.id)}
  const go=el('button','btn primary','Log in');go.type='submit';
  field.append(label,inp,err);form.append(field,go);inner.append(form);
- if(o.hintCommand){const p=el('p','gate-hint','Make a token on the workspace computer: ');p.append(el('code','',o.hintCommand));inner.append(p)}
+ if(o.hintCommand){const p=el('p','door-hint','Make a token on the workspace computer: ');p.append(el('code','',o.hintCommand));inner.append(p)}
  form.addEventListener('submit',async e=>{e.preventDefault();const v=inp.value.trim();if(!v){inp.focus();return}
   go.disabled=true;go.setAttribute('aria-busy','true');go.textContent='Logging in…';
   let why=null;try{why=o.onLogin?await o.onLogin(v):null}catch(_){why='That did not work. Try again.'}
@@ -464,7 +464,7 @@ UI.gateLogin=o=>{o=o||{};const [g,inner]=shell('Welcome','Log in with your token
   if(why){err.textContent=why;err.hidden=false;inp.setAttribute('aria-invalid','true');inp.setAttribute('aria-describedby',err.id);inp.select()}});
  setTimeout(()=>inp.focus(),0);return g};
 UI.profilePicker=o=>{o=o||{};const [g,inner]=shell('Who is using orch?',null);
- const list=el('ul','profiles'),err=el('p','gate-error');err.setAttribute('role','alert');err.hidden=true;
+ const list=el('ul','profiles'),err=el('p','door-error');err.setAttribute('role','alert');err.hidden=true;
  const fail=why=>{err.textContent=why||'';err.hidden=!why};
  const tile=(name,add)=>{const li=el('li'),b=el('button','profile'+(add?' add':''));b.type='button';
   const face=el('span','profile-face',add?'+':(String(name).trim()[0]||'?').toUpperCase());face.setAttribute('aria-hidden','true');

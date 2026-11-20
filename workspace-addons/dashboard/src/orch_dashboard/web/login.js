@@ -3,27 +3,27 @@
 // gateway, on another computer) sees "Welcome, log in with your token" instead of an empty page; the token comes from
 // `orch dashboard token new` on the workspace computer. After the login it picks a profile ("Who is using orch?"):
 // that profile is who this browser acts as (kept on the server for this browser's session), and can be switched
-// from the "You:" menu. A sign-in link (`#launch=`) keeps working as before. Builders: UI.gateLogin, UI.profilePicker.
+// from the "You:" menu. A sign-in link (`#launch=`) keeps working as before. Builders: UI.doorLogin, UI.profilePicker.
 (() => {
   const KEY = 'orch_page_secret';
-  let me = null, gate = null, kind = null;
+  let me = null, door = null, kind = null;
   window.orchBrowserPerson = null;
 
   const post = (path, body) => fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})});
   const textOf = async r => { try { return (await r.text()).trim(); } catch (_) { return ''; } };
 
-  function close() { if (gate) gate.remove(); gate = null; kind = null; }
+  function close() { if (door) door.remove(); door = null; kind = null; }
   function setPerson(p) {
     window.orchBrowserPerson = p || null;
     window.dispatchEvent(new CustomEvent('orch:person', {detail: window.orchBrowserPerson}));
   }
 
   function showLogin() {
-    if (kind === 'login' || !window.UI?.gateLogin) return;
+    if (kind === 'login' || !window.UI?.doorLogin) return;
     close();
     Array.prototype.forEach.call(document.querySelectorAll('dialog[open]'), d => { try { d.close(); } catch (_) { /* gone */ } });
     document.getElementById('orch-signin')?.remove();
-    gate = UI.gateLogin({
+    door = UI.doorLogin({
       hintCommand: 'orch dashboard token new',
       onLogin: async token => {
         const r = await post('/session', {login: token});
@@ -34,9 +34,9 @@
         return null;
       },
     });
-    gate.dataset.testid = 'login-gate';
+    door.dataset.testid = 'login-door';
     kind = 'login';
-    document.body.append(gate);
+    document.body.append(door);
   }
 
   async function pick(name, add) {
@@ -52,11 +52,11 @@
   function showPicker() {
     if (kind === 'picker' || !window.UI?.profilePicker || me?.login !== 'token') return;
     close();
-    gate = UI.profilePicker({people: me.people || [], current: me.person, onPick: n => pick(n, false), onAdd: n => pick(n, true), onLogout: logout});
-    gate.dataset.testid = 'profile-picker';
-    if (me.person) gate.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });  // switching: Esc keeps the profile
+    door = UI.profilePicker({people: me.people || [], current: me.person, onPick: n => pick(n, false), onAdd: n => pick(n, true), onLogout: logout});
+    door.dataset.testid = 'profile-picker';
+    if (me.person) door.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });  // switching: Esc keeps the profile
     kind = 'picker';
-    document.body.append(gate);
+    document.body.append(door);
   }
 
   async function logout() {

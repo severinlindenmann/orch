@@ -53,7 +53,7 @@ def _dir(root: Path, create: bool) -> Path:
 
 def _load(d: Path, name: str, key: str) -> list[dict]:
     """The list under `key`, or [] when the file is missing. A file that cannot be read or parsed is
-    treated as empty (fail closed: nothing in it signs anyone in)."""
+    treated as empty (fail closed: nothing in it logs anyone in)."""
     try:
         data = json.loads(orch_home._read_guarded(d / name).decode("utf-8"))
     except FileNotFoundError:

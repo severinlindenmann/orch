@@ -68,7 +68,7 @@ def test_login_makes_a_browser_session_with_only_hashes_on_disk(tws):
 
 
 @pytest.mark.parametrize("bad", ["", "odt_", "odt_abcdefgh_" + "A" * 43, "x" * 300, None, 5])
-def test_a_wrong_token_signs_nobody_in(tws, bad):
+def test_a_wrong_token_logs_nobody_in(tws, bad):
     dashlogin.new_token(tws)
     assert dashlogin.login(tws, bad) is None
 
@@ -111,7 +111,7 @@ def test_person_and_logout(tws):
     assert not dashlogin.set_person(tws, s["sid"], "Anna")
 
 
-def test_a_broken_sessions_file_signs_nobody_in(tws):
+def test_a_broken_sessions_file_logs_nobody_in(tws):
     token, _ = dashlogin.new_token(tws)
     s = dashlogin.login(tws, token)
     _, sessions_file = _files(tws)

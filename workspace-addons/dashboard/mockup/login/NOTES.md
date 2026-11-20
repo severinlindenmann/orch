@@ -6,5 +6,5 @@
   the login, and `?state=switch` the picker opened again from the "You:" menu (the current profile is marked).
 - The picker lists the dashboard's people (big initials, colour from the name), "Add profile" and "Log out".
   The chosen profile acts for this browser only.
-- Builders: `UI.gateLogin`, `UI.profilePicker` in the master `widgets.js` (gallery: "Login gate", "Profile
+- Builders: `UI.doorLogin`, `UI.profilePicker` in the master `widgets.js` (gallery: "Login door", "Profile
   picker"). The product uses the same builders (`web/login.js`).

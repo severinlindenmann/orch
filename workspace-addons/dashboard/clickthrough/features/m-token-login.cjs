@@ -23,10 +23,10 @@ module.exports = {
     await page.evaluate(() => { localStorage.removeItem('orch_page_secret'); sessionStorage.removeItem('orch_page_secret'); });
     await reload();
     await page.evaluate(() => window.orchLogin.showLogin());
-    await page.locator('[data-testid="login-gate"]').waitFor();
-    must(/Log in with your token/.test(await page.locator('[data-testid="login-gate"]').innerText()), 'the login screen does not ask for the token');
-    await page.locator('#gate-token').fill(made.token);
-    await Promise.all([page.waitForNavigation(), page.locator('[data-testid="login-gate"] button[type=submit]').click()]);
+    await page.locator('[data-testid="login-door"]').waitFor();
+    must(/Log in with your token/.test(await page.locator('[data-testid="login-door"]').innerText()), 'the login screen does not ask for the token');
+    await page.locator('#door-token').fill(made.token);
+    await Promise.all([page.waitForNavigation(), page.locator('[data-testid="login-door"] button[type=submit]').click()]);
     // first time: the profile picker; add a profile (the demo list may be empty)
     await page.locator('[data-testid="profile-picker"]').waitFor();
     const add = page.locator('[data-testid="profile-picker"] .profile.add');
@@ -36,7 +36,7 @@ module.exports = {
     await page.locator('[data-testid="profile-picker"]').waitFor({ state: 'detached' });
     await until(async () => /Clara/.test(await page.locator('[data-testid="person-switch"]').innerText()), 'the sidebar says You: Clara', 20);
     await reload();
-    must(!(await page.locator('[data-testid="login-gate"]').count()), 'after a reload the browser is not logged in any more');
+    must(!(await page.locator('[data-testid="login-door"]').count()), 'after a reload the browser is not logged in any more');
     must(/Clara/.test(await page.locator('[data-testid="person-switch"]').innerText()), 'after a reload the profile is not Clara');
     const listed = tokens('list');
     must(listed.some(t => t.id === made.id && t.state === 'active'), 'the token list does not show the token');
