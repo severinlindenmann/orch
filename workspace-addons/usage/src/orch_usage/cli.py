@@ -353,7 +353,7 @@ def gather(root: Path) -> dict:
         )
     mem = switching._read(switching.memory_path(root))  # what the loop's last look found (ORCH-620)
     warnings += [w for w in mem.get("alerts") or [] if isinstance(w, str)]
-    return {"accounts": out, "switcher": found is not None, "warnings": warnings}
+    return {"accounts": out, "switcher": cswap.command() is not None, "warnings": warnings}
 
 
 # ---------------------------------------------------------------- output
@@ -635,6 +635,8 @@ def _loop_cmd(args, root: Path) -> int:
 def _look_text(r: dict) -> str:
     if not r.get("switcher"):
         return NO_SWITCHER
+    if r.get("did") == "nothing":  # installed, but it did not answer: say so, Usage looks again by itself
+        return (r.get("note") or "The account switcher did not answer.") + " Usage looks again in a minute."
     text = {
         "stay": f"Staying on {r.get('active')}.",
         "switched": f"Switched from {r.get('active')} to {r.get('target')}.",
