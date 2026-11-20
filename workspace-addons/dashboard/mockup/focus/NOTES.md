@@ -217,6 +217,17 @@ phone shows only the selected session and has no add beside. The split and the s
 stay while the page changes. Pins are kept in this browser (the bar's key) until the wall stores them in orch.
 Master: `.live-*` in widgets.css (style guide: Live layer); click-through step 12.
 
+## Pane buttons with words, a choice for Add beside (ORCH-463, 18 Nov)
+
+The owner's persona round 4: the pane showed icons only, the split cut the titles to 'Plan…' and the state to 'Wor…',
+and Add beside took a session without asking. The owner chose: words on the buttons and a choice for Add beside. Now
+every pane button carries its word (Pin, Add beside, Place, Full screen, Minimise, Close, More). A compact pane (every
+split, a single pane under 1200 px, the right panel, a phone) gives the title a row of its own and puts the buttons on
+a second row; pin, history, place and full screen fold into More there, and minimise too when the pane is narrow
+(three at 1280). Add beside opens a list of the live sessions not shown yet (key, title, state) and shows the one
+picked. A helper that says nothing now shows the step it works on as its live line ('Working on: ...').
+Master: `.live-pbtn`, `.live-ph[data-compact]`, `.live-pop-scroll` in widgets.css (style guide: Live layer).
+
 ## The Focus button and Open ticket, built (ORCH-365, 17 Nov)
 
 focus-v4d.html stays the source of truth; nothing in the draft changed. In the new Focus every ticket page and
