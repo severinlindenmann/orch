@@ -1555,3 +1555,34 @@ def test_focus_page_is_the_live_session_page_and_live_session_must_be_a_flag():
     assert "live_session" not in (addons.folder_manifest(base / "workspace-addons" / "factory")["page"])
     schema = json.loads((base / "contracts" / "addon-manifest.schema.json").read_text())
     assert schema["properties"]["page"]["properties"]["live_session"]["type"] == "boolean"
+
+
+def test_list_keeps_a_space_after_long_names(proj, run, monkeypatch):
+    """Report r-1119-1349-ws-2: names of 12+ characters ran into the next column (dashboard-testerLooks)."""
+    rows = [
+        {
+            "name": "dashboard-tester",
+            "installed": True,
+            "active": False,
+            "description": "Looks at every page",
+        },
+        {"name": "focus", "installed": True, "active": True, "description": "A live page"},
+        {"name": "pull-requests", "installed": False, "active": False, "description": "Open pull requests"},
+    ]
+    monkeypatch.setattr(addons, "listing", lambda root: rows)
+    code, out, _ = run("addon", "list")
+    assert code == 0
+    for r in rows:
+        line = next(x for x in out.splitlines() if x.strip().startswith(r["name"]))
+        assert line.split()[0] == r["name"], line  # at least one space after the name
+    cols = {
+        x.index(x.split()[1])
+        for x in out.splitlines()
+        if x.startswith("  ") and x.split()[0] in {"focus", "dashboard-tester", "pull-requests"}
+    }
+    assert len(cols) == 1, out  # one shared column, wide enough for the longest name
+    manifests = {r["name"]: {"description": r["description"]} for r in rows}
+    monkeypatch.setattr(addons, "active_manifests", lambda root: manifests)
+    for line in addons.help_lines(proj):
+        assert line.split()[0] in manifests, line
+    assert addons.name_width(["focus"]) == 12 and addons.name_width(["dashboard-tester"]) == 18
