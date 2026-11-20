@@ -156,6 +156,7 @@ def row(repo: str, pr: dict) -> dict | None:
         "draft": pr.get("isDraft") is True,
         "base": str(pr.get("baseRefName") or ""),
         "head": str(pr.get("headRefName") or ""),
+        "head_sha": str(pr.get("headRefOid") or ""),
         "author": str(((pr.get("author") or {}).get("login")) or ""),
         "updated_at": str(pr.get("updatedAt") or ""),
         "checks": checks(ctx),
