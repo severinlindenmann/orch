@@ -2403,12 +2403,25 @@ def _stored_sha() -> str | None:
     return _sha_or_none(d.get("sha")) if isinstance(d, dict) else None
 
 
-def _save_installed(sha: str | None, release: int | None = None) -> None:
-    """The commit this install came from and, when known, its release number (what a person reads)."""
+def _save_installed(sha: str | None, release: int | None = None, pending: dict | None = None) -> None:
+    """The commit this install came from and, when known, its release number (what a person reads).
+    pending: no commit was known at install time; the ref and time it was installed from, so the commit and
+    release are looked up later (updateinfo.resolve_pending)."""
     data: dict = {"sha": _sha_or_none(sha)}
     if isinstance(release, int) and not isinstance(release, bool) and release > 0:
         data["release"] = release
+    if data["sha"] is None and pending:
+        data["pending"] = pending
     _write_atomic(home() / "installed.json", json.dumps(data))
+
+
+def _pending_install(started: float) -> dict | None:
+    """The ref and start time of an install whose commit GitHub did not tell (for a later lookup). The time
+    from before the download: a release merged meanwhile then still shows as an update, never as installed."""
+    try:
+        return {"ref": ref(), "at": int(started)}
+    except Refused:
+        return None
 
 
 def _stored_release() -> int | None:
@@ -2456,6 +2469,12 @@ def _load_snapshot(root: Path, nonce: str | None) -> dict | None:
     return d
 
 
+NO_RELEASE_LOOKUP = (
+    "orch was updated, but the release number could not be looked up (GitHub did not answer). "
+    "It shows by itself once GitHub answers again."
+)
+
+
 def _update_lines(before: dict, found: dict, sha: str | None) -> tuple[list[str], bool]:
     """The lines to print and whether to restart. A restart needs a version change or a changed local
     source; a sha from the network only shows in the text."""
@@ -2478,6 +2497,9 @@ def _update_lines(before: dict, found: dict, sha: str | None) -> tuple[list[str]
         if old is not None and isinstance(new, str) and old != new:
             lines.append(f"Updating {_printable(name)} {_printable(old)} → {_printable(new)}")
             restart = True
+    if sha is None:  # GitHub did not answer: the install ran, so it cannot be called up to date
+        lines.append(NO_RELEASE_LOOKUP)
+        restart = True
     if not lines:
         return ["orch is up to date."], False
     title = _release_title()
@@ -2835,6 +2857,7 @@ def update(
             if entry["name"] in found:
                 entry["version"] = found[entry["name"]]["version"]
         _save_registry(reg)
-        if sha:
-            _save_installed(sha, new_release)
+        # No commit answer: drop the old number so it is not shown for the new code; remember what was
+        # installed so the commit and release are looked up once GitHub answers again.
+        _save_installed(sha, new_release, None if sha else _pending_install(before["time"]))
     return done
