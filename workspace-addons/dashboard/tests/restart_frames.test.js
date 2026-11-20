@@ -10,8 +10,9 @@ const read = f => fs.readFileSync(path.join(__dirname, f), 'utf8');
 function noteBootEnv() {
   const src = read('../src/orch_dashboard/web/app.js');
   const fn = /function noteBoot\(res\) \{[\s\S]*?\n\}\n/.exec(src)[0];
-  const env = {forgets:0};
-  env.api = new Function('framesForget', 'let serverBoot = null;\n' + fn + '\nreturn {noteBoot, boot: () => serverBoot};')(() => { env.forgets++; });
+  const env = {forgets:0, later:[]};
+  env.api = new Function('framesForget', 'render', 'setTimeout', 'let serverBoot = null;\n' + fn + '\nreturn {noteBoot, boot: () => serverBoot};')(
+    () => { env.forgets++; }, () => { env.renders = (env.renders || 0) + 1; }, f => env.later.push(f));
   env.answer = boot => env.api.noteBoot({headers:{get:n => (n === 'X-Orch-Boot' ? boot : null)}});
   return env;
 }
@@ -25,6 +26,8 @@ test('a new run of the dashboard makes the page forget its frame passes, the sam
   assert.equal(env.forgets, 0);
   assert.equal(env.answer('b2'), true);  // restarted
   assert.equal(env.forgets, 1);
+  env.later.forEach(f => f());
+  assert.equal(env.renders, 1);  // drawn again by noteBoot itself: a failed click's answer may be the one that noticed
   assert.equal(env.answer('b2'), false);
   assert.equal(env.forgets, 1);
 });
@@ -32,8 +35,7 @@ test('a new run of the dashboard makes the page forget its frame passes, the sam
 test('refresh and the click answers both note the run of the dashboard', () => {
   const src = read('../src/orch_dashboard/web/app.js');
   assert.ok(!/serverBoot = res\.headers/.test(src.replace(/function noteBoot\(res\) \{[\s\S]*?\n\}\n/, '')));
-  assert.match(src, /const restarted = noteBoot\(res\);/);
-  assert.match(src, /if \(restarted\) render\(\);/);  // an unchanged state still draws the page again
+  assert.equal((src.match(/\bnoteBoot\(res\);/g) || []).length, 2);  // /api/state and /api/act
 });
 
 function passEnv() {

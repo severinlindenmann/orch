@@ -635,12 +635,13 @@ const LOST_UNKNOWN = 'The answer did not arrive and orch could not tell whether 
 let serverBoot = null;
 // Note the run of the dashboard an answer came from. A new run (the dashboard restarted, e.g. after an add-on was
 // added or removed in Settings) knows none of the frame passes this page holds: drop them, so the shown add-on page
-// is opened again with a fresh one instead of staying blank (ORCH-1055). True when the run changed.
+// is opened again with a fresh one instead of staying blank (ORCH-1055). The page is drawn again whichever answer
+// noticed it (a failed click's too: the next refresh sees the same run). True when the run changed.
 function noteBoot(res) {
   const was = serverBoot;
   serverBoot = res.headers?.get?.('X-Orch-Boot') || serverBoot;
   const restarted = !!was && serverBoot !== was;
-  if (restarted && typeof framesForget === 'function') framesForget();
+  if (restarted && typeof framesForget === 'function') { framesForget(); setTimeout(() => render(), 0); }
   return restarted;
 }
 // The answer was lost: ask whether this id went through (a few tries, the server may still be at it). `boot`: the
@@ -697,7 +698,7 @@ async function refresh() {
     wantFull = false;
     const res = await fetch('/api/state' + have, {cache:'no-store'});
     if (!res.ok) throw new Error('Could not load the workspace.');
-    const restarted = noteBoot(res);
+    noteBoot(res);
     let next = await res.json();
     if (next.delta) {  // only what changed since the revision held (ORCH-517); a delta that does not fit: the whole state
       const merged = window.DashHelpers.applyStateDelta(state, next);
@@ -709,7 +710,6 @@ async function refresh() {
       connection.hidden = true;
       lastOk = Date.now();
       paintUpdated();
-      if (restarted) render();  // the shown add-on page loads again with a pass of the new run
       return;
     }
     if (writing || version !== mutation) { refreshAgain = true; return; }
@@ -719,7 +719,6 @@ async function refresh() {
     // rev is the server's hash of the whole state (every ticket field, runs, needs ...); without one, always take it.
     window.DiagTrail?.install(window).state(state?.rev, next.rev, res.headers.get('X-State-Age-Ms'));  // client vs server revision, cache age
     if (!state || !next.rev || next.rev !== state.rev) accept(next);
-    else if (restarted) render();
   } catch (_) {
     connectionNotice(connection, !!state);
   } finally {
