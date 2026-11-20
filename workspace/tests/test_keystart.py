@@ -38,6 +38,7 @@ rep = {
     "in_argv": bool(key) and any(key in a for a in args),
     "env_names": sorted(k for k, v in os.environ.items() if key and key in v),
     "scrub": os.environ.get("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"),
+    "args": args,
     "inherited": [k for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY") if k in os.environ],
 }
 with open(os.environ["FAKE_REPORT"], "a") as f:
@@ -157,7 +158,7 @@ def test_claude_gets_the_key_through_a_pipe_only_and_the_ticket_says_why_and_wha
     assert rep["sha"] == _sha(KEY)  # the helper got exactly the stored key
     assert rep["read_twice"] is False  # a pipe is read once: anything started later finds it empty
     assert rep["in_argv"] is False and rep["env_names"] == []  # not in its arguments, not in its environment
-    assert rep["scrub"] == "1"  # the commands it runs lose credentials
+    assert rep["scrub"] == "0"  # SCRUB=1 makes Claude Code force the default mode: no writes (ORCH-913)
     assert "ANTHROPIC_API_KEY" not in rep["inherited"]  # the starter's own key does not reach it
     hist = _history(ws, tid)
     assert f"Runs on Claude credit: {WHY}." in hist
@@ -169,6 +170,23 @@ def test_claude_gets_the_key_through_a_pipe_only_and_the_ticket_says_why_and_wha
     assert rec["mode"] == "oneshot"
     for p, data in _all_workspace_bytes(ws):
         assert KEY.encode() not in data, f"the key is in {p}"
+
+
+def test_a_key_start_keeps_the_workspace_permission_level_like_a_subscription_start(ws, run, fakes, monkeypatch):
+    """ORCH-913: with CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 Claude Code drops --permission-mode to default, so a
+    helper on a key could not write a file. A key start passes the same permission flags as any start and
+    never turns that setting on, even when the starter's own environment has it."""
+    config.set_permissions(ws, "auto")
+    tid = _ticket(run)
+    monkeypatch.setenv("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", "1")
+    code, _, err = _start(run, tid)
+    assert code == 0, err
+    _wait(ws, tid)
+    rep = json.loads(fakes.read_text().splitlines()[-1])
+    assert rep["scrub"] == "0"
+    args = rep["args"]
+    assert args[args.index("--permission-mode") + 1] in ("auto", "acceptEdits")  # never forced to default
+    assert rep["sha"] == _sha(KEY)
 
 
 def test_the_key_is_kept_by_name_only_and_scans_clean(ws, run, fakes):
