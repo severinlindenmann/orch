@@ -415,13 +415,14 @@ async function main() {
       between: async () => { await ctx.close().catch(() => {}); srv.stop(); srv = null; },
       // the second try: a new throw-away home and server and a new browser context, as for the first round
       fresh: async c => {
-        const one = await serve();
+        let one = null;
         try {
+          one = await serve();
           const fctx = await signIn(browser, one);
           try { return await runOne(fctx, one, c, o); } finally { await fctx.close().catch(() => {}); }
         } catch (e) {
           return { c, problems: [`the second try did not start: ${String(e.message).split('\n')[0]}`] };
-        } finally { one.stop(); }
+        } finally { if (one) one.stop(); }
       },
       deadline: started + RETRY_DEADLINE_MS,
     });
