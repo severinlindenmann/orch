@@ -474,7 +474,8 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     did = "stay"
 
     # all at a limit: one warning when it starts, none while it lasts
-    stuck = _nowhere_to_go(ch)  # no account to go to: a look that switches to one with room warns about nothing
+    # a look that switches to an account with room warns about nothing
+    stuck = _nowhere_to_go(ch)
     if stuck and not memory.get("all_at_limit"):
         where = ch.target or ch.active
         state = "; ".join(_use_words(c) for c in ch.candidates) or "no account to read"
