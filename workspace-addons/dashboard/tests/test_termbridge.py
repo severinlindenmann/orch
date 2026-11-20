@@ -694,6 +694,10 @@ def test_the_plain_terminal_has_its_own_typing_switch(tmp_path, monkeypatch):
         assert termbridge.watching(sid).plain is True
         code, body = post(port, "/api/term/input", {"ticket": sid, "data": "x"})
         assert code == 403 and b"Typing into the plain terminal is off" in body
+        # resize and taking the typing are refused too, also with a page id
+        assert post(port, "/api/term/size", {"ticket": sid, "cols": 60, "rows": 10})[0] == 403
+        assert post(port, "/api/term/typing", {"ticket": sid, "page": "p" * 16, "on": True})[0] == 403
+        assert post(port, "/api/term/typing", {"ticket": sid, "page": "p" * 16, "on": False})[0] == 200
         (tmp_path / ".orch" / "config.toml").write_text(
             "[focus]\nsession_typing = false\nterminal_typing = true\n"
         )
@@ -708,4 +712,32 @@ def test_the_plain_terminal_has_its_own_typing_switch(tmp_path, monkeypatch):
         srv.server_close()
         for w in list(termbridge._WATCHES.values()):
             w.close()
+        tm("kill-server")
+
+
+def test_an_id_that_is_both_a_helper_and_the_plain_terminal_counts_as_the_shell(tmp_path):
+    """ORCH-261: the stricter switch wins; a helper claim on the same id never makes the shell a helper."""
+    SOCK[0] = "orch-" + secrets.token_hex(4)
+    sid = "t_plain0001"
+    tmux = {"socket": SOCK[0], "session": sid}
+    try:
+        tm("new-session", "-d", "-x", "80", "-y", "24", "-s", sid, "--", "sh", "-c", "cat")
+        orch = fake_orch(
+            tmp_path,
+            {"running": True, "claim": {"tmux": tmux}},
+            {"sessions": [{"id": sid, "kind": "terminal", "open": True, "tmux": tmux}]},
+        )
+        assert termsession.ref_kind(tmp_path, orch, sid, plain=True) == ((SOCK[0], sid), True)
+        assert termsession.ref_kind(tmp_path, orch, sid) == ((SOCK[0], sid), False)  # helpers' own routes
+        w = termbridge.Watch(SOCK[0], sid)
+        w.plain = True
+        termbridge._WATCHES[(SOCK[0], sid)] = w
+        fake_orch(tmp_path, {"running": True, "claim": {"tmux": tmux}}, {"sessions": []})
+        joined = termbridge.join(tmp_path, orch, sid, "pg")
+        assert joined is w and w.plain is True  # a later helper look never turns the mark off
+        termbridge.leave(w, "pg")
+    finally:
+        for x in list(termbridge._WATCHES.values()):
+            x.close()
+        termbridge._WATCHES.clear()
         tm("kill-server")

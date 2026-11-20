@@ -1279,18 +1279,25 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, RecursionError, OSError):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
         off = path.endswith("/typing") and body.get("on") is False  # giving the typing back: always
-        # the setting is checked here, not only hidden in the page; the plain terminal has its own (ORCH-261)
-        shell = bool(getattr(termbridge.watching(body["ticket"]), "plain", False))
-        if not off and not _typing_allowed(self.root, shell):
+        root = self.root
+
+        def may(plain: bool) -> str:
+            """The setting, checked here and not only hidden in the page, for the very watch that takes the keys
+            (termbridge asks it under that watch's lock); the plain terminal has its own switch (ORCH-261)."""
+            if off or _typing_allowed(root, plain):
+                return ""
+            return TERMINAL_OFF if plain else TYPING_OFF
+
+        if not off and not _typing_allowed(root) and not _typing_allowed(root, True):
             return self._send(
-                403, (TERMINAL_OFF if shell else TYPING_OFF).encode(), "text/plain; charset=utf-8"
-            )
+                403, TYPING_OFF.encode(), "text/plain; charset=utf-8"
+            )  # both off: nothing to look up
         if path.endswith("/input"):
-            code, text = termbridge.type_text(body["ticket"], body["data"], body.get("page"))
+            code, text = termbridge.type_text(body["ticket"], body["data"], body.get("page"), may)
         elif path.endswith("/typing"):
-            code, text = termbridge.claim(body["ticket"], body["page"], body["on"])
+            code, text = termbridge.claim(body["ticket"], body["page"], body["on"], may)
         else:
-            code, text = termbridge.resize(body["ticket"], body["cols"], body["rows"], body.get("page"))
+            code, text = termbridge.resize(body["ticket"], body["cols"], body["rows"], body.get("page"), may)
         self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
 
     def _standing_link(self, sent: str):

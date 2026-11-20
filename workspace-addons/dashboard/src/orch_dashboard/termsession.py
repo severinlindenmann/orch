@@ -72,27 +72,26 @@ def _tmux(socket: str, *args: str, timeout: float = TIMEOUT) -> subprocess.Compl
 
 
 def ref(root: Path, orch_bin: str | None, tid: str, plain: bool = False) -> tuple[str, str] | str:
+    """(socket, session) of the ticket's live session, or the plain reason there is none: 'oneshot' (a run that
+    works one step at a time), 'none' (nothing runs), 'notmux' (this machine cannot show it). plain: the plain
+    terminal's shell counts too (only the terminal bridge, ORCH-743; the screen and keys routes stay helpers')."""
     return ref_kind(root, orch_bin, tid, plain)[0]
 
 
 def ref_kind(
     root: Path, orch_bin: str | None, tid: str, plain: bool = False
 ) -> tuple[tuple[str, str] | str, bool]:
-    """ref(), and whether it is the plain terminal's shell (its typing has its own switch, ORCH-261)."""
-    shell = False
-    """(socket, session) of the ticket's live session, or the plain reason there is none: 'oneshot' (a run that
-    works one step at a time), 'none' (nothing runs), 'notmux' (this machine cannot show it). plain: the plain
-    terminal's shell counts too (only the terminal bridge, ORCH-743; the screen and keys routes stay helpers')."""
+    """ref(), and whether it is the plain terminal's shell (its typing has its own switch, ORCH-261). With plain,
+    the plain terminal is looked for first: an id that is both counts as the shell (the stricter switch)."""
     if not TID.fullmatch(tid or ""):
-        return "none", shell
-    status = run_orch(orch_bin, ["run", "status", tid, "--json"], root)
-    claim = (status or {}).get("claim") if isinstance(status, dict) else None
-    if not isinstance(claim, dict) or not (status or {}).get("running"):
-        # no helper runs: the plain terminal's shell, when it is one and the caller is the bridge
-        claim = _plain_terminal(root, orch_bin, tid) if plain else None
-        if claim is None:
+        return "none", False
+    claim = _plain_terminal(root, orch_bin, tid) if plain else None
+    shell = claim is not None
+    if claim is None:
+        status = run_orch(orch_bin, ["run", "status", tid, "--json"], root)
+        claim = (status or {}).get("claim") if isinstance(status, dict) else None
+        if not isinstance(claim, dict) or not (status or {}).get("running"):
             return "none", shell
-        shell = True
     t = claim.get("tmux")
     if not isinstance(t, dict):
         return "oneshot", shell

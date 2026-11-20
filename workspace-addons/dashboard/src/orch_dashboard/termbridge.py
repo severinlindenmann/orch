@@ -355,8 +355,8 @@ def join(root: Path, orch_bin: str | None, tid: str, page: str = "") -> Watch | 
         fresh = w is None or w.ended
         if fresh:
             w = Watch(*r)
-            w.plain = shell
             _WATCHES[r] = w
+        w.plain = w.plain or shell  # once seen as the plain terminal, its own switch counts (never back)
         w.pages += 1
         _PAGES[0] += 1
         if page:
@@ -395,7 +395,13 @@ def watching(tid: str) -> Watch | None:
 OTHER = "Another page is typing into this screen now."
 
 
-def claim(tid: str, page, on) -> tuple[int, str]:
+def _refused(w: Watch, may) -> str:
+    """may(plain) -> '' or the refusal text: the typing setting, asked for THIS watch (the plain terminal has its
+    own switch, ORCH-261), under its typing lock so it is the watch that takes the keys."""
+    return may(w.plain) if may is not None else ""
+
+
+def claim(tid: str, page, on, may=None) -> tuple[int, str]:
     """A page turns its typing on (it becomes the one page that types; the page that typed before hears it and goes
     back to watching) or off (ORCH-883)."""
     if not isinstance(page, str) or not 0 < len(page) <= 64 or not isinstance(on, bool):
@@ -407,6 +413,9 @@ def claim(tid: str, page, on) -> tuple[int, str]:
         w.release(page)
         return 200, "{}"
     with w.typing:
+        no = _refused(w, may)
+        if no:
+            return 403, no
         with _LOCK:
             if (
                 page not in w.ids
@@ -423,7 +432,7 @@ def _typer_ok(w: Watch, page) -> bool:
     return w.typer is None or page == w.typer
 
 
-def type_text(tid: str, data, page: str | None = None) -> tuple[int, str]:
+def type_text(tid: str, data, page: str | None = None, may=None) -> tuple[int, str]:
     """Send what the page typed (raw terminal input: text, control keys, escape sequences, a bracketed paste)."""
     if not isinstance(data, str) or not 0 < len(data) <= MAX_INPUT or data.count("\x00") > MAX_NUL:
         return 400, "That request could not be read."
@@ -437,6 +446,9 @@ def type_text(tid: str, data, page: str | None = None) -> tuple[int, str]:
         for at in range(0, len(piece), PART):
             calls.append(["-l", "--", termsession._literal(piece[at : at + PART])])
     with w.typing:
+        no = _refused(w, may)
+        if no:
+            return 403, no
         if not _typer_ok(
             w, page
         ):  # checked under the lock: a claim cannot come between the check and the keys
@@ -450,7 +462,7 @@ def type_text(tid: str, data, page: str | None = None) -> tuple[int, str]:
     return 200, "{}"
 
 
-def resize(tid: str, cols, rows, page: str | None = None) -> tuple[int, str]:
+def resize(tid: str, cols, rows, page: str | None = None, may=None) -> tuple[int, str]:
     """Give the helper's window this size (a page that was made bigger or smaller)."""
     if not all(isinstance(x, int) and not isinstance(x, bool) for x in (cols, rows)):
         return 400, "That request could not be read."
@@ -460,6 +472,9 @@ def resize(tid: str, cols, rows, page: str | None = None) -> tuple[int, str]:
     if w is None:
         return 409, "There is no live session to resize."
     with w.typing:  # with the claim and give_back: the saved own size is never one a page made
+        no = _refused(w, may)
+        if no:
+            return 403, no
         if not _typer_ok(w, page):
             return 409, OTHER
         if w.own is None and w.size != (0, 0):
