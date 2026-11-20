@@ -373,6 +373,7 @@ function ticketForm(t, {host = null} = {}) {
   form.append(fields, error, reload, actions); d.append(form);
   const steps_ = () => steps.filter(step => step.input.value.trim() || step.files.length);
   let launch = null, launchAt = 0;
+  const heads = () => [d.querySelector?.('h1'), d.querySelector?.('.new-ticket-sub')].filter(Boolean);  // the starting moment stands alone
   const pause = ms => new Promise(done => setTimeout(done, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : ms));
   // Each step shows for a moment (at least ~0.45 s) so the move to the new ticket reads as one calm motion, not a jump.
   const atLeast = async ms => { const left = launchAt + ms - Date.now(); if (left > 0) await pause(left); };
@@ -406,13 +407,13 @@ function ticketForm(t, {host = null} = {}) {
     // At once: the button that was pressed says what is happening (the helper start can take a while).
     const busy = t || startAfter || !plain ? submit : plain, busyText = busy.textContent;
     busy.textContent = t || !startAfter ? 'Saving…' : 'Starting…'; busy.setAttribute('aria-busy', 'true'); if (plain) plain.disabled = true;
-    const idle = () => { launch?.fail(); launch = null; form.hidden = false; busy.textContent = busyText; busy.removeAttribute?.('aria-busy'); busy.ariaBusy = null; if (plain) plain.disabled = false; };
+    const idle = () => { launch?.fail(); launch = null; form.hidden = false; heads().forEach(n => { n.hidden = false; }); busy.textContent = busyText; busy.removeAttribute?.('aria-busy'); busy.ariaBusy = null; if (plain) plain.disabled = false; };
     togetherDone = false; epicProblems = [];
     // On the page the form steps aside for the starting moment at once (ORCH-1037); a refusal brings it back.
     if (onPage && window.UI?.launch) {
       const labels = ['Creating the ' + (steps_().length ? 'tickets' : 'ticket'), ...(startAfter ? ['Starting your helper'] : []), 'Opening it'];
       launch = window.UI.launch({title:startAfter ? 'Starting…' : 'Saving…', sub:ticketTextTitle(inputs.text.value || pastedText || files[0]?.name || '', 80), steps:labels});
-      launchAt = Date.now(); form.hidden = true; d.append(launch.el);
+      launchAt = Date.now(); form.hidden = true; heads().forEach(n => { n.hidden = true; }); d.append(launch.el);
     }
     const values = Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, key === 'done_when' ? input.value : input.value.trim()]));
     // A helper other than the default is kept as the ticket's owner. FOLLOW-UP: run.start takes no helper yet.
