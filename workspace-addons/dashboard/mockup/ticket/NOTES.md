@@ -198,3 +198,11 @@ It is the ticket page's own box, separate from Focus (owner answer on ORCH-238).
 - Check after a move by a person reads "Moved to Check by Anna 14:23", never "Helper finished".
 - An epic whose sub-tickets are all done says so and offers Mark Done; Done with open sub-tickets asks first
   ("Mark Done anyway" or Cancel).
+
+## Role page (ORCH-827)
+`ticket-role.html`: a ticket that runs by itself, as the owner picked draft A2 on ORCH-812. Header chip "Runs by
+itself", Run now and Pause (Turn on while paused); tabs Overview · Runs · Schedule · Chat · Files. States by the
+preview controls (`?state=running|question|paused`), tabs by `?tab=role-runs|role-schedule|role-chat|role-files`.
+About this role shows the same totals as the Automation page block "What the roles found": runs, findings, their
+tickets fixed / open / dropped, files nobody opened (unknown where nothing was measured). The look is in the master
+(`widgets.css`, "Role page"). Demo data is invented.

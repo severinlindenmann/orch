@@ -60,7 +60,7 @@ function ticketLinks(t) {
 }
 function addonValue(row, value) {
   if (value == null || value === '' || (Array.isArray(value) && !value.length)) return '';
-  if (row.format === 'time') return [date(value), time(value)].filter(Boolean).join(' ');
+  if (row.format === 'time') return time(value) || date(value);  // the stamp says the day already ("today 18:38")
   if (row.format === 'cron-human') return window.DashHelpers.cronHuman(value);
   if (row.format === 'yes-no') return value === true ? 'Yes' : value === false ? 'No' : '';
   if (row.format === 'chips') return h('div', {className:'chips'}, array(value).map(v => chip(clean(v))));
@@ -2140,9 +2140,12 @@ function detail(t) {
   const working = !fresh && !planQ && !['done', 'review'].includes(t.status), helperLive = ticketHelperLive(t, run);
   const filled = f => t[f] != null && String(t[f]).trim() !== '';
   const note = snapshot ? (filled('note') ? h('p', {className:'muted preserve-lines', 'data-key':'note'}, clean(t.note)) : null) : h('div', {className:'ticket-note', 'data-key':'ticket-note'}, inlineField(t, 'note'));
-  const menu = snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),
+  const menuFor = () => snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),
     h('div', {className:'menu-pop', role:'menu'}, ticketHelperMenuItems(t, run), t.status === 'done' ? null : ticketMoveItems(t),
       repeatsAddon() ? [ticketButton('Repeat…', 'menu-item', () => repeatsDialog(t.id, repeatsAddon()), {role:'menuitem', 'data-key':'ticket-repeat'})] : null));
+  // ORCH-827: a ticket that runs by itself gets the role page (draft A2): runs, schedule and chat instead of tasks
+  if (typeof roleOf === 'function' && roleOf(t)) return roleDetail(t, run, parent, menuFor());
+  const menu = menuFor();
   const tabs = ticketTabList(t);
   const panel = (id, label, body) => h('section', {id:'ticket-panel-' + id, role:snapshot ? null : 'tabpanel', 'aria-labelledby':snapshot ? null : 'ticket-tab-' + id, className:'stack ticket-panel', hidden:!snapshot && selected !== id, tabindex:'0'}, snapshot ? h('h2', {}, label) : null, body);
   const total = array(t.checklist).length, done = array(t.checklist).filter(window.DashHelpers.resolved).length;

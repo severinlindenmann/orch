@@ -1880,3 +1880,37 @@ def test_a_signed_in_start_hands_the_session_start_a_person_grant(tmp_path):
     (root / ".orch").mkdir(parents=True)
     env, fds = actions._person_env(root, "orch", "session.new", False)
     assert fds == () and not any(k.startswith("ORCH_PERSON_GRANT") for k in env)
+
+
+def test_addon_act_limit_and_quick_take_only_their_values(act_orch, ws):
+    """ORCH-827: the role page's Time limit (minutes or none) and Quick check first (on or off)."""
+    import threading
+
+    from orch_dashboard.server import make_server
+
+    src = act_orch.read_text().replace(
+        'if a[:2] in (["addon", "list"]',
+        'if a[:2] == ["addon", "list"]:\n    print(json.dumps([{"name": "alpha", "active": True}]))\n    sys.exit(0)\n'
+        'if a[:2] in (["addon", "list"]',
+    )
+    act_orch.write_text(src)
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        lim = {"addon": "alpha", "verb": "limit", "target": "t_abcdef"}
+        for good in ("90", "none"):
+            assert post(base, {"op": "addon.act", "args": {**lim, "value": good}})[0] == 200, good
+            assert f"--value={good}" in acts(act_orch)[-1]
+        quick = {**lim, "verb": "quick"}
+        for good in ("on", "off"):
+            assert post(base, {"op": "addon.act", "args": {**quick, "value": good}})[0] == 200, good
+        n = len(acts(act_orch))
+        for bad in ("9", "1000", "ninety", " 90", 90, None):
+            assert post(base, {"op": "addon.act", "args": {**lim, "value": bad}})[0] == 400, bad
+        for bad in ("yes", "", "ON", True):
+            assert post(base, {"op": "addon.act", "args": {**quick, "value": bad}})[0] == 400, bad
+        assert len(acts(act_orch)) == n
+    finally:
+        srv.shutdown()
+        srv.server_close()

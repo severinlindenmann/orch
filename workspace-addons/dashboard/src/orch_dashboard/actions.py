@@ -967,6 +967,14 @@ def _addon_act(a):
             if not (isinstance(a["value"], str) and re.fullmatch(r"[0-9a-f]{64}", a["value"])):
                 raise BadRequest("Look at the command again.")
             value = a["value"]
+        elif verb == "limit":  # the role page's time limit (ORCH-827): minutes or none
+            value = a["value"]
+            if not (isinstance(value, str) and re.fullmatch(r"none|[0-9]{2,3}", value)):
+                raise BadRequest("Choose a time limit from the list.")
+        elif verb == "quick":  # the role page's Quick check first switch (ORCH-827)
+            value = a["value"]
+            if value not in ("on", "off"):
+                raise BadRequest("Quick check is on or off.")
         elif verb == "edit":  # one line of plain text (Lessons: edit a lesson), 1 to 200 characters
             value = _text(a["value"], "text").strip()
             if HIDDEN_CHARS.search(value):
