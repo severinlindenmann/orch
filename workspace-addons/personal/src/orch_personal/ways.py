@@ -141,11 +141,12 @@ def saved(root: Path) -> dict[str, dict]:
 
 
 @contextlib.contextmanager
-def _file_lock(root: Path):
-    """ways.json is written by the CLI and the page server: one writer at a time across processes and threads."""
-    f = store.base(root) / "ways.lock"
+def _file_lock(root: Path, name: str = "ways.lock", lock: threading.Lock | None = None):
+    """ways.json is written by the CLI and the page server: one writer at a time across processes and threads.
+    Meetings uses the same with its own file and lock."""
+    f = store.base(root) / name
     f.parent.mkdir(parents=True, exist_ok=True)
-    with _LOCK, open(f, "a+") as fh:
+    with lock or _LOCK, open(f, "a+") as fh:
         if os.name == "nt":
             import msvcrt
 

@@ -99,26 +99,35 @@ final class TicketChatsTests: XCTestCase {
     func testTicketChatsListNewestFirstAcrossWorkspaces() {
         let a = summary("ws_a", [topic("t_old", .working, at: "2026-11-20T09:00:00Z"), topic("t_new", .waitingOnYou, at: "2026-11-21T10:00:00Z", unread: 2)])
         let b = summary("ws_b", [topic("t_mid", .review, at: "2026-11-21T08:00:00Z")])
-        let rows = TicketChatsRules.rows([a, b])
+        let rows = TicketChatsRules.rows([a, b]).open
         XCTAssertEqual(rows.map { $0.topic.title }, ["t_new", "t_mid", "t_old"])
         XCTAssertEqual(rows[1].workspace.id, "ws_b")
+        XCTAssertEqual(rows[1].accessibilityId, "ticket-ws_b|t_mid", "the id topic rows had on the workspace screen")
         XCTAssertEqual(TicketChatsRules.detail(rows[1], workspaceName: "Product"), "MKT-1 · Product")
     }
 
-    func testTicketChatsListLeavesOutStartingAndReadFinishedTickets() {
+    func testFinishedTicketsGoUnderDoneAndStartingTopicsStay() {
         let a = summary("ws_a", [topic("c1", .working, at: "2026-11-21T10:00:00Z", starting: true),
                                  topic("t_done", .done, at: "2026-11-21T09:00:00Z"),
-                                 topic("t_done_unread", .done, at: "2026-11-21T08:00:00Z", unread: 1),
+                                 topic("t_failed", .didntWork, at: "2026-11-21T08:30:00Z", unread: 1),
                                  topic("t_open", .backlog, at: "2026-11-21T07:00:00Z")])
-        XCTAssertEqual(TicketChatsRules.rows([a]).map { $0.topic.title }, ["t_done_unread", "t_open"])
+        let rows = TicketChatsRules.rows([a])
+        XCTAssertEqual(rows.open.map { $0.topic.title }, ["c1", "t_open"], "a topic that is still starting shows, so New topic is seen")
+        XCTAssertEqual(rows.done.map { $0.topic.title }, ["t_done", "t_failed"])
+    }
+
+    func testTicketChatsLeaveOutWhatTheWorkspaceHides() {
+        let a = summary("ws_a", [topic("t_shown", .working, at: "2026-11-21T10:00:00Z"), topic("t_archived", .working, at: "2026-11-21T09:00:00Z")])
+        let rows = TicketChatsRules.rows([a], topics: { $0.topics.filter { $0.title != "t_archived" } })
+        XCTAssertEqual(rows.open.map { $0.topic.title }, ["t_shown"], "archived chats stay in Archived")
     }
 
     func testTicketChatsListFollowsTheFilter() {
         let a = summary("ws_a", [topic("t_unread", .working, at: "2026-11-21T10:00:00Z", unread: 1),
                                  topic("t_needs", .waitingOnYou, at: "2026-11-21T09:00:00Z"),
                                  topic("t_quiet", .working, at: "2026-11-21T08:00:00Z")])
-        XCTAssertEqual(TicketChatsRules.rows([a], filter: "Unread").map { $0.topic.title }, ["t_unread"])
-        XCTAssertEqual(TicketChatsRules.rows([a], filter: "Needs your OK").map { $0.topic.title }, ["t_needs"])
-        XCTAssertEqual(TicketChatsRules.rows([a], filter: "All").count, 3)
+        XCTAssertEqual(TicketChatsRules.rows([a], filter: "Unread").open.map { $0.topic.title }, ["t_unread"])
+        XCTAssertEqual(TicketChatsRules.rows([a], filter: "Needs your OK").open.map { $0.topic.title }, ["t_needs"])
+        XCTAssertEqual(TicketChatsRules.rows([a], filter: "All").open.count, 3)
     }
 }

@@ -436,6 +436,68 @@ def reply(
     return {"id": mid, "sent": False}
 
 
+# ---------------------------------------------------------------- ticket chats (team chat step 1, ORCH-1168)
+
+TICKET_CHAT_MAX = 8000  # what the ticket's pending input takes (runs._pending_add_locked)
+
+
+def _chat_ticket(root: Path, ref: str) -> dict:
+    """A ticket whose chat a person or its helper writes in: not the workspace Chat, Manager or a session."""
+    t = tickets.load(root, tickets.resolve(root, ref))
+    if tickets.is_hidden(t):
+        raise Refused("That is not a ticket chat.")
+    return t
+
+
+def _ticket_text(text: str) -> str:
+    text = (text or "").strip()
+    if not text or len(text) > TICKET_CHAT_MAX:
+        raise Refused(f"A ticket chat message has 1 to {TICKET_CHAT_MAX} characters.")
+    return text
+
+
+def ticket_hint(key: str) -> str:
+    """orch's own line before a person's ticket chat message in the helper's input: where to answer."""
+    return f'This message was written in the ticket\'s chat. Answer there: orch chat reply --ticket {key} "<your answer>"'
+
+
+def say_ticket(root: Path, ref: str, text: str, by: str | None = None, by_name: str | None = None) -> dict:
+    """A person writes in a ticket's chat (the dashboard Chats page): one chat line on the ticket (theirs, via
+    dashboard, with the name they typed if any) and the same words handed to the ticket's helper, as Send to
+    helper does; orch's hint line before it says where to answer. Nothing works on the ticket: it waits there
+    and the next helper reads it first (the dashboard starts one, like Add to this ticket)."""
+    text = _ticket_text(text)
+    who = tickets.current_actor(by)
+    if not who.startswith("human:") or tickets.agent_tool():
+        raise Refused(
+            "Only a person writes as themselves in a ticket chat. A helper answers with orch chat reply."
+        )
+    t = _chat_ticket(root, ref)
+    mid = tickets.chat_line_id()
+    tickets.apply_op(
+        root,
+        t["id"],
+        lambda tk: tickets.add_history(
+            tk, who, text, tickets.PERSON_VIA, chat=True, mid=mid, by_name=by_name
+        ),
+        by=who,
+    )
+    runs.pending_add(root, t["id"], "orch", "event", ticket_hint(t.get("key") or t["id"]), "chat")
+    sent = runs_live.send(root, t["id"], who, text)
+    return {"id": mid, "ticket": t["id"], "key": t.get("key") or t["id"], "send": sent}
+
+
+def reply_ticket(root: Path, ref: str, text: str) -> dict:
+    """The helper answers in a ticket's chat (`orch chat reply --ticket <id>` on a ticket that is not the
+    workspace Chat): one chat line on the ticket by the helper."""
+    text = _ticket_text(text)
+    t = _chat_ticket(root, ref)
+    who = tickets.current_actor()
+    mid = tickets.chat_line_id()
+    tickets.apply_op(root, t["id"], lambda tk: tickets.add_history(tk, who, text, chat=True, mid=mid), by=who)
+    return {"id": mid, "ticket": t["id"], "key": t.get("key") or t["id"], "sent": False}
+
+
 def proposal_state(root: Path, mid: str) -> str:
     """Where the proposal in Chat message `mid` stands: "open" (nobody made it), "making" (started, not finished:
     a retry finishes the same ticket), "made", or "gone" (no such proposal in the last days)."""

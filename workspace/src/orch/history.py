@@ -713,6 +713,15 @@ def lines(root: Path, ticket) -> list:
     return hist if isinstance(hist, list) else []
 
 
+def last_chat_id(ticket) -> str | None:
+    """The id of the stored ticket's newest chat line (a message id, never an author), or None."""
+    hist = ticket.get("history") if isinstance(ticket, dict) else None
+    for e in reversed(hist if isinstance(hist, list) else []):
+        if isinstance(e, dict) and e.get("chat_message") is True:
+            return e.get("id") if isinstance(e.get("id"), str) else None
+    return None
+
+
 def length(ticket) -> int:
     """How many history lines the stored ticket has (a position, never an author)."""
     hist = ticket.get("history") if isinstance(ticket, dict) else None

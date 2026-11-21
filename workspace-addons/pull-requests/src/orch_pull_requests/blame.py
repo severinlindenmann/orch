@@ -6,6 +6,11 @@ of a check name (`addons / dashboard-clickthroughs` -> addons, dashboard, clickt
 changed path (`workspace-addons/dashboard/src/x.js` -> workspace, addons, dashboard, src, x, js). The members with
 the most shared words are the suspects; the runner checks the others together first (they merge on green) and the
 suspects after. No member shares a word, or every member shares the same number: the runner splits in halves.
+
+The failed tests come first (ORCH-1118): 'addons / dashboard-clickthroughs' shares 'dashboard' with every member
+that touches the dashboard, so the test files the failed jobs' logs name (`FAILED tests/test_sessions.py::...`,
+`FAILED  Relay: ... (m-relay-chat.cjs, 34.9s)`) are compared first; only when they tell nobody apart do the
+check names decide.
 """
 
 from __future__ import annotations
@@ -19,6 +24,10 @@ NOISE = frozenset(
     {"test", "tests", "check", "checks", "job", "jobs", "ci", "run", "ubuntu", "macos", "windows", "latest",
      "linux", "part", "parts", "the", "and", "of", "src", "py", "js", "cjs", "mjs", "md", "json", "toml"}
 )  # fmt: skip
+# a line of a failed job's log that reports a failure (pytest -rfE, node --test, the dashboard click-throughs);
+# `gh run view --log-failed` puts "<job>\t<step>\t<time> " in front of each line
+_FAILED_LINE = re.compile(r"^(?:[^\t\n]*\t[^\t\n]*\t\S+ )?\s*(?:FAILED|ERROR|not ok|✖)\s.*$", re.MULTILINE)
+_TEST_FILE = re.compile(r"[\w./-]*?([\w-]+\.(?:py|cjs|mjs|js|ts|swift))\b")
 
 
 def words(text: str) -> frozenset[str]:
@@ -32,10 +41,26 @@ def score(failed: Iterable[str], paths: Iterable[str]) -> int:
     return len(want & have)
 
 
-def suspects(failed: Iterable[str], members: list[tuple[str, list[str]]]) -> list[str]:
-    """The keys of the members that touch the failed checks most; [] when that tells nothing apart (no failed
-    name, no member shares a word, or every member shares as many)."""
-    failed = [c for c in failed if c]
+def failed_tests(log: str, most: int = 20) -> list[str]:
+    """The test file names a failed job's log names on its failure lines, in order, each once."""
+    out: list[str] = []
+    for line in _FAILED_LINE.findall(log or ""):
+        for name in _TEST_FILE.findall(line):
+            if name not in out:
+                out.append(name)
+    return out[:most]
+
+
+def suspects(
+    failed: Iterable[str], members: list[tuple[str, list[str]]], tests: Iterable[str] = ()
+) -> list[str]:
+    """The keys of the members that touch the failed tests most, else the failed checks most; [] when that
+    tells nothing apart (no failed name, no member shares a word, or every member shares as many)."""
+    picked = _pick([t for t in tests if t], members)
+    return picked or _pick([c for c in failed if c], members)
+
+
+def _pick(failed: list[str], members: list[tuple[str, list[str]]]) -> list[str]:
     if not failed or len(members) < 2:
         return []
     got = {k: score(failed, paths) for k, paths in members}

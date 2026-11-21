@@ -1290,6 +1290,10 @@ def load_runs(
         # one process for all tickets (a process per ticket was most of the idle cost of an open page)
         batch = run_orch(orch_bin, ["run", "status", *todo, "--json"], root, timeout=5.0 + 0.5 * len(todo))
         rows = batch.get("runs") if isinstance(batch, dict) else None
+        if rows is None and len(todo) == 1 and isinstance(batch, dict) and batch:
+            rows = {
+                todo[0]: batch
+            }  # one ticket: the core answers its run itself, not {runs: {...}} (ORCH-884)
         rows = rows if isinstance(rows, dict) else {}
         got = [
             rows.get(i) if isinstance(rows.get(i), dict) and "error" not in rows[i] else None for i in todo
@@ -1542,6 +1546,7 @@ def load_state(
         "settings": settings,  # only the live local server: it holds the folder path
         # Home: the note after an automatic update (new version and what changed, or why it failed); live page only
         "auto_update_note": _auto_update_note() if with_settings else None,
+        "update_check": _update_check() if with_settings else None,
         # Where this orch came from ('release' / 'development'): the top bar marks a development build; live page only
         "build": _build() if with_settings else None,
         # Home and Settings > Helper: what helpers need (tool logins, connections, keys); live page only
@@ -1615,6 +1620,12 @@ def _auto_update_note() -> dict | None:
     from . import update
 
     return update.auto_note()
+
+
+def _update_check() -> dict | None:
+    from . import update
+
+    return update.check_card()
 
 
 def hide_unset_sharing(addons: list[dict], root: Path, orch_bin: str | None) -> list[dict]:

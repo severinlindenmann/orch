@@ -138,6 +138,9 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("run.start", {"ticket": "t_abcdef", "agent": "--all"}),
         ("run.start", {"ticket": "t_abcdef", "agent": 5}),
         ("run.start", {"ticket": "t_abcdef", "model": "opus"}),
+        ("run.start", {"ticket": "t_abcdef", "prepare": "yes"}),
+        ("run.start", {"ticket": "t_abcdef", "prepare": True, "agent": "codex"}),  # ORCH-738: goes alone
+        ("run.start", {"ticket": "t_abcdef", "prepare": True, "fresh": True}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "../x"}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "-rf"}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "s-1", "fresh": True}),
@@ -318,6 +321,10 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         (
             {"op": "run.start", "args": {"ticket": "t_abcdef", "fresh": True, "take_over": True}},
             ["run", "start", "t_abcdef", "--fresh", "--take-over", *common],
+        ),
+        (  # ORCH-738: Save without starting only prepares the ticket
+            {"op": "run.start", "args": {"ticket": "t_abcdef", "prepare": True}},
+            ["run", "start", "t_abcdef", "--prepare", *common],
         ),
         (  # ORCH-362: the Start choice's fresh start on the tool the person picked
             {"op": "run.start", "args": {"ticket": "t_abcdef", "fresh": True, "agent": "codex"}},
@@ -1264,8 +1271,23 @@ def test_chat_new_and_make_ticket_validation():
         [],
         [],
     )
+    # a ticket's chat on the Chats page (ORCH-1168): the ticket id and the text; opening it marks it read
+    assert actions.OPS["chat.say"]({"text": "hi", "ticket": "t_abcdef"}) == (
+        ["chat", "say"],
+        ["--ticket", "t_abcdef"],
+        ["hi"],
+    )
+    assert actions.OPS["chat.read"]({"ticket": "t_abcdef"}) == (
+        ["chat", "read", "t_abcdef"],
+        ["--reader", "dashboard"],
+        [],
+    )
     for op, args in [
         ("chat.say", {"text": "hi", "new": "yes"}),
+        ("chat.say", {"text": "hi", "ticket": "--help"}),
+        ("chat.say", {"text": "hi", "ticket": "t_abcdef", "new": True}),
+        ("chat.read", {"ticket": "t_abcdef", "reader": "you"}),
+        ("chat.read", {}),
         ("chat.make_ticket", {"id": "--help"}),
         ("chat.make_ticket", {"id": "m_abcdefghij", "by": "agent:x"}),
     ]:

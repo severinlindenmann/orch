@@ -370,3 +370,71 @@ def test_a_session_working_for_a_short_while_is_not_looked_at(proj, new_ticket, 
     _live_like_production(proj, tid, child(), "working", since_s=30)
     _transcript(proj, claude_home, [_notice(LIMIT_NOTICE), _notice(SWITCH_NOTICE)])
     assert tend.run(proj)["actions"] == []
+
+
+# ---------------------------------------------------------------- ORCH-943: a switch by another workspace
+
+
+def _computer_switch(n, at=None, name="fernscout"):
+    from orch import addons
+
+    d = addons.home() / "usage"
+    d.mkdir(parents=True, exist_ok=True)
+    at = at or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    with open(d / "switched.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps({"n": n, "at": at, "name": name, "from": "first", "to": "second"}) + "\n")
+
+
+def test_a_switch_by_another_workspace_lifts_the_hold_here_once(proj, new_ticket, starts):
+    """A workspace without Usage: its helpers held at the limit start again when any workspace switched."""
+    tid = new_ticket()
+    limitstop.note(proj, tid, {"until": time.time() + 3600})
+    _computer_switch(1)
+    r = tend.run(proj)
+    assert any(
+        a["action"] == "switched" and "Account switched by fernscout" in a["text"] for a in r["actions"]
+    )
+    assert limitstop.active(proj) is None
+    assert [s[0] for s in starts] == [tid]  # started again, not waiting for the reset
+    assert "Account switched by fernscout" in json.dumps(tickets.load(proj, tid))
+    assert not [a for a in tend.run(proj)["actions"] if a["action"] == "switched"]  # once per switch
+
+
+def test_an_old_switch_seen_for_the_first_time_does_not_lift(proj, new_ticket, starts):
+    tid = new_ticket()
+    limitstop.note(proj, tid, {"until": time.time() + 3600})
+    _computer_switch(4, at="2026-01-01T00:00:00Z")
+    tend.run(proj)
+    assert limitstop.active(proj) is not None and starts == []
+    _computer_switch(5)  # a new one counts
+    tend.run(proj)
+    assert limitstop.active(proj) is None
+
+
+def test_a_hold_noted_after_the_switch_stays(proj, new_ticket, starts):
+    """The new account reached its own limit after the switch: only the helper held before it starts again."""
+    old, new = new_ticket(), new_ticket("Later")
+    t = time.time()
+    limitstop.note(proj, old, {"until": t + 3600}, t - 120)
+    _computer_switch(1, at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t - 60)))
+    limitstop.note(proj, new, {"until": t + 3600}, t - 10)
+    tend.run(proj)
+    assert [s[0] for s in starts] == [old]
+    assert limitstop.active(proj) is not None
+    assert list(limitstop.read(proj)["tickets"]) == [new]
+
+
+def test_a_login_change_names_the_workspace_that_switched(proj, new_ticket, child, claude_home, starts):
+    """ORCH-948: a workspace without Usage; fernscout switched; the session stopped with 'login changed' is
+    carried on and its ticket says who switched, once."""
+    tid = new_ticket()
+    _live_like_production(proj, tid, child(), "idle", since_s=60)
+    _transcript(proj, claude_home, [_answer(), _notice(LIMIT_NOTICE), _notice(SWITCH_NOTICE)])
+    _computer_switch(1)
+    res = tend.run(proj)
+    assert [a["action"] for a in res["actions"] if a["ticket"] == tid] == ["carry"]
+    assert any("account was switched" in i["text"] for i in runs.undelivered(proj, tid))
+    lines = [h for h in _history(proj, tid) if "Account switched by fernscout" in h]
+    assert len(lines) == 1
+    tend.run(proj)
+    assert len([h for h in _history(proj, tid) if "Account switched by fernscout" in h]) == 1

@@ -821,9 +821,23 @@ def _log(a):
 
 
 def _chat_say(a):
-    """The person writes in Chat (history by "you", via dashboard; the background host starts the helper)."""
-    _only(a, ("text", "new"))
+    """The person writes in Chat (history by "you", via dashboard; the background host starts the helper).
+    With `ticket`: in that ticket's chat on the Chats page (a chat line on the ticket, handed to its helper)."""
+    _only(a, ("text", "new", "ticket"))
+    if a.get("ticket") is not None:
+        if _flag(a.get("new")):
+            raise BadRequest("A ticket chat has no new conversation.")
+        return ["chat", "say"], ["--ticket", _tid(a.get("ticket"))], [_text(a.get("text"))]
     return ["chat", "say"], ["--new"] if _flag(a.get("new")) else [], [_text(a.get("text"))]
+
+
+TICKET_CHAT_READER = "dashboard"  # data.DASHBOARD_READER: one read mark for this computer's dashboard
+
+
+def _chat_read(a):
+    """The person opened a ticket chat on the Chats page: its unread count starts again from now."""
+    _only(a, ("ticket",))
+    return ["chat", "read", _tid(a.get("ticket"))], ["--reader", TICKET_CHAT_READER], []
 
 
 def _chat_make_ticket(a):
@@ -836,8 +850,13 @@ def _chat_make_ticket(a):
 
 def _run_start(a):
     """Start a helper on the ticket: continue its last conversation, or fresh; the Start choice (ORCH-362) can
-    name the tool (`--agent`, a name from `orch agents`); orch refuses a tool it does not know."""
-    _only(a, ("ticket", "fresh", "take_over", "agent"))
+    name the tool (`--agent`, a name from `orch agents`); orch refuses a tool it does not know.
+    prepare: Save without starting (ORCH-738) only prepares the ticket; it goes alone, with no other flag."""
+    _only(a, ("ticket", "fresh", "take_over", "agent", "prepare"))
+    if _flag(a.get("prepare")):
+        if any(a.get(k) is not None for k in ("fresh", "take_over", "agent")):
+            raise BadRequest("Prepare goes alone: no tool, fresh start or take-over with it.")
+        return ["run", "start", _tid(a.get("ticket"))], ["--prepare"], []
     flags = (["--fresh"] if _flag(a.get("fresh")) else []) + (
         ["--take-over"] if _flag(a.get("take_over")) else []
     )
@@ -1217,6 +1236,7 @@ OPS = {
     "ticket.model": _ticket_model,
     "log": _log,
     "chat.say": _chat_say,
+    "chat.read": _chat_read,
     "chat.make_ticket": _chat_make_ticket,
     "check.add": _check_add,
     "check.set": _check_set,
@@ -1613,6 +1633,13 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         from . import update
 
         update.dismiss_auto_note()
+        return 200, "", None
+    if op == "update.check.dismiss":  # Home: "Not now" on the card after a failed self-check; nothing runs
+        if not session:
+            raise NeedsPerson(SIGNIN)
+        from . import update
+
+        update.dismiss_check_card()
         return 200, "", None
     if orch_bin == SELF and turns_review_off(op, args) and not session:  # ORCH-424: only the signed-in person
         raise NeedsPerson(SIGNIN)

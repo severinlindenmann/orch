@@ -1370,13 +1370,15 @@ def _status(ticket: dict) -> str:
     return s if s in STATUSES else "open"
 
 
-CHAT_KEEP = 20  # chat lines kept in the phone's history window even when newer plain lines would push them out
+CHAT_KEEP = (
+    20  # chat lines kept in the phone's history window even when newer plain lines would push them out
+)
 
 
 def _tail(lines: list[dict]) -> list[dict]:
-    """The phone's history window (at most HISTORY lines, oldest first): the newest CHAT_KEEP chat lines are kept
-    first, so a ticket chat on the phone does not lose its messages while a helper writes many plain lines;
-    the rest of the window is the newest plain lines."""
+    """The phone's history window (at most HISTORY lines, oldest first): the newest CHAT_KEEP chat lines are
+    kept first, so a ticket chat on the phone does not lose its messages while a helper writes many plain
+    lines; the rest of the window is the newest plain lines."""
     if len(lines) <= HISTORY:
         return lines
     idx = [i for i, e in enumerate(lines) if e.get("chat_message") is True][-CHAT_KEEP:]
@@ -1389,9 +1391,10 @@ def _tail(lines: list[dict]) -> list[dict]:
 
 
 def _chat_fields(entry: dict, line: dict, h) -> dict:
-    """A chat line (`chat_message: true`) is a real message: the phone's ticket chat shows it as a bubble with its
-    stable id (so a relay copy of the same message is shown once) and the typed name, if any. The name is shown
-    as typed and marked "not signed in" on the phone; it proves nothing (contracts/history.md "Chat lines")."""
+    """A chat line (`chat_message: true`) is a real message: the phone's ticket chat shows it as a bubble with
+    its stable id (so a relay copy of the same message is shown once) and the typed name, if any. The name is
+    shown as typed and marked "not signed in" on the phone; it proves nothing (contracts/history.md
+    "Chat lines")."""
     if entry.get("chat_message") is not True:
         return line
     line["chat"] = True
@@ -1527,8 +1530,9 @@ def view_for(root: Path, tid: str) -> dict | None:
 
 
 def _tasks_sig(ticket: dict, root: Path | None = None) -> str:
-    """What the phone's snapshot depends on: tasks, status and whether an agent runs now (so "<agent> is
-    working" on the phone ends when the agent stops, not only when a task changes)."""
+    """What the phone's snapshot depends on: tasks, status, whether an agent runs now (so "<agent> is
+    working" on the phone ends when the agent stops, not only when a task changes) and the newest chat
+    line."""
     items = [
         [c.get("text"), bool(c.get("done")), *([True] if c.get("wont_do") else [])]
         for c in ticket.get("checklist") or []
@@ -1537,6 +1541,10 @@ def _tasks_sig(ticket: dict, root: Path | None = None) -> str:
     data = [items, ticket.get("status"), running]
     if ticket.get("started") is True:
         data.append(True)
+    # the newest chat line: a message in the ticket's chat (helper or person) reaches the phone right away
+    last_chat = history.last_chat_id(ticket)
+    if last_chat:
+        data.append(last_chat)
     return hashlib.sha256(json.dumps(data).encode()).hexdigest()[:16]
 
 

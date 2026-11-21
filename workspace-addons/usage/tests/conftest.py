@@ -12,6 +12,8 @@ from _orch_test_guard import check_real_home, isolated_orch_home  # noqa: F401
 
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE.parents[2] / "workspace" / "src"))
+# imported now, so isolated_orch_home fakes its real home: Usage keeps its files in the test's tool home (ORCH-943)
+import orch.addons  # noqa: F401
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -120,3 +122,75 @@ def cli(ws, capsys):
 def jrun(cli, *argv):
     code, out, _ = cli(*argv, "--json")
     return code, json.loads(out)
+
+
+@pytest.fixture
+def switcher(tmp_path, monkeypatch):
+    """A fake `cswap` that lists from a file and really moves `active` on `switch N` (and logs every call)."""
+    d = tmp_path / "bin"
+    d.mkdir()
+    answer = tmp_path / "switcher.json"
+    calls = tmp_path / "switcher-calls.txt"
+    fail = tmp_path / "switcher-fails"
+    answer.write_text(json.dumps(switcher_data()), encoding="utf-8")
+    exe = d / "cswap"
+    exe.write_text(
+        textwrap.dedent(f"""\
+            #!{sys.executable}
+            import json, os, sys
+            a = sys.argv[1:]
+            open({str(calls)!r}, "a").write(" ".join(a) + "\\n")
+            if a == ["list", "--json"]:
+                sys.stdout.write(open({str(answer)!r}).read()); sys.exit(0)
+            if len(a) == 2 and a[0] in ("enable", "switch"):
+                if os.path.exists({str(fail)!r}):
+                    sys.exit(1)
+                if a[0] == "switch":
+                    d = json.load(open({str(answer)!r}))
+                    n = int(a[1])
+                    d["activeAccountNumber"] = n
+                    for x in d["accounts"]:
+                        x["active"] = x["number"] == n
+                    json.dump(d, open({str(answer)!r}, "w"))
+                sys.exit(0)
+            sys.exit(3)
+            """),
+        encoding="utf-8",
+    )
+    exe.chmod(0o755)
+    monkeypatch.setenv("ORCH_USAGE_SWITCHER", str(exe))
+
+    class Fake:
+        @staticmethod
+        def use(active=None, **acc):
+            """Set use per account: first=(5h, week), second=..., third=...; keeps the active one unless given."""
+            cur = json.loads(answer.read_text())
+            act = active if active is not None else cur["activeAccountNumber"]
+            data = switcher_data(active=act, **acc)
+            answer.write_text(json.dumps(data), encoding="utf-8")
+
+        @staticmethod
+        def reset_5h(n, at="2026-11-16T23:00:00+00:00"):
+            cur = json.loads(answer.read_text())
+            for x in cur["accounts"]:
+                if x["number"] == n:
+                    x["usage"]["fiveHour"]["resetsAt"] = at
+            answer.write_text(json.dumps(cur), encoding="utf-8")
+
+        @staticmethod
+        def active():
+            return json.loads(answer.read_text())["activeAccountNumber"]
+
+        @staticmethod
+        def calls():
+            return calls.read_text().splitlines() if calls.exists() else []
+
+        @staticmethod
+        def changes():
+            return [c for c in Fake.calls() if not c.startswith("list")]
+
+        @staticmethod
+        def failing(on=True):
+            fail.write_text("x") if on else fail.unlink(missing_ok=True)
+
+    return Fake

@@ -65,11 +65,16 @@ def test_non_ascii_agent_labels_are_not_trusted(by):
 
 
 def test_chat_lines_carry_chat_id_and_typed_name(proj):
-    """A chat line reaches the phone's ticket chat as a message: flagged, with its stable id and typed name."""
+    """A chat line reaches the phone's ticket chat as a message: flagged, with its id and typed name."""
     ticket = {
         "id": "t_abc123",
         "history": [
-            {"at": "2026-11-21T09:00:00Z", "by": "agent:claude", "text": "Finished a task: Draft", "via": "cli"},
+            {
+                "at": "2026-11-21T09:00:00Z",
+                "by": "agent:claude",
+                "text": "Finished a task: Draft",
+                "via": "cli",
+            },
             {
                 "at": "2026-11-21T09:01:00Z",
                 "by": "you",
@@ -105,16 +110,39 @@ def test_chat_lines_carry_chat_id_and_typed_name(proj):
 
 
 def test_chat_lines_stay_in_the_window_after_many_plain_lines(proj):
-    """A helper writing many plain lines does not push the ticket's chat messages out of the phone's window."""
+    """A helper writing many plain lines does not push the chat messages out of the phone's window."""
     chat = [
-        {"at": f"2026-11-21T08:0{i}:00Z", "by": "you", "text": f"chat {i}", "chat_message": True, "id": f"m_{i:016d}"}
+        {
+            "at": f"2026-11-21T08:0{i}:00Z",
+            "by": "you",
+            "text": f"chat {i}",
+            "chat_message": True,
+            "id": f"m_{i:016d}",
+        }
         for i in range(3)
     ]
     plain = [
-        {"at": f"2026-11-21T09:{i:02d}:00Z", "by": "agent:claude", "text": f"Step {i}", "via": "cli"} for i in range(40)
+        {"at": f"2026-11-21T09:{i:02d}:00Z", "by": "agent:claude", "text": f"Step {i}", "via": "cli"}
+        for i in range(40)
     ]
     tail = phone_view.build(proj, {"id": "t_abc123", "history": chat + plain}, [])["history_tail"]
     assert len(tail) == phone_view.HISTORY
     assert [t["text"] for t in tail[:3]] == ["chat 0", "chat 1", "chat 2"]
     assert tail[-1]["text"] == "Step 39"
     assert [t["at"] for t in tail] == sorted(t["at"] for t in tail)
+
+
+def test_a_new_chat_line_changes_what_the_phone_follows():
+    """A message in the ticket chat reaches a phone that follows the ticket right away."""
+    ticket = {
+        "status": "active",
+        "checklist": [],
+        "history": [{"at": "x", "by": "agent:claude", "text": "Step"}],
+    }
+    before = phone_view._tasks_sig(ticket)
+    ticket["history"].append({"at": "y", "by": "agent:claude", "text": "Plain line", "chat_message": False})
+    assert phone_view._tasks_sig(ticket) == before, "a plain line alone sends nothing"
+    ticket["history"].append(
+        {"at": "z", "by": "agent:claude", "text": "Hi", "chat_message": True, "id": "m_" + "a" * 16}
+    )
+    assert phone_view._tasks_sig(ticket) != before

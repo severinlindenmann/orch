@@ -544,11 +544,14 @@ def apply_op(
     if_revision: int | None = None,
     by: str,
     person_click: bool = False,
+    closed_ok=None,
 ):
     """person_click: a person's click on the dashboard or a phone, whatever tool started that server.
+    closed_ok(ticket) -> bool: a write the closed-ticket guard lets through on a done/dropped ticket (only
+    switching an add-on's repeat off, #2051); checked under the lock on the stored ticket.
     Every attempt leaves one decision event in the debug log (diag.md): ticket.op_applied or
     ticket.op_refused (actor, op, status and revision before/after, the refusing guard; no ticket text)."""
-    info: dict = {"person_click": person_click}
+    info: dict = {"person_click": person_click, "closed_ok": closed_ok}
     try:
         out = _apply_op(root, tid, fn, expect, if_revision, by, info)
     except BaseException as e:
@@ -592,7 +595,12 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
         ticket = _load_raw(root, tid)
         eff_status = ticket.get("status")
         info.update(status=eff_status, revision=revision(ticket))
-        if eff_status in CLOSED and _agent_actor(by) and not _addon_keeps_its_ticket(root, ticket, by):
+        if (
+            eff_status in CLOSED
+            and _agent_actor(by)
+            and not _addon_keeps_its_ticket(root, ticket, by)
+            and not (info.get("closed_ok") and info["closed_ok"](ticket))
+        ):
             raise ClosedRefused(CLOSED_AGENT)
         if if_revision is not None and revision(ticket) != if_revision:
             raise _conflict(root, ticket, f"Ticket {tid}", {k: ticket.get(k) for k in PATCH_FIELDS})
@@ -2242,6 +2250,220 @@ def tidied(root: Path, ticket: dict) -> bool:
     return any(t.startswith((TIDY_LINE, "Ticket tidied")) for t in texts)
 
 
+# Prepare on Save without starting (ORCH-738, draft ORCH-730 section 3): a prepare-only helper run fills the
+# ticket and stops; the ticket stays in Backlog. `prepare` on the ticket says where that stands.
+PREPARE_STATES = ("waiting", "preparing", "prepared", "not_prepared")
+PREPARED_LINE = "Prepared: title, description, done-when, estimate and suggested steps"
+NOT_PREPARED = "Not prepared yet"
+
+
+def set_prepare(
+    root: Path, tid: str, state: str, by: str, why: str | None = None, run: str | None = None
+) -> bool:
+    """Write where the prepare run stands. Prepared and Not prepared yet get one history line. Only a ticket
+    still in Backlog changes: one a person or a helper moved on meanwhile keeps its newer state, and an older
+    run's result never overwrites a newer run's. Returns True when written."""
+    if state not in PREPARE_STATES:
+        raise ValueError(state)
+
+    def op(ticket):
+        if hidden_kind(ticket) or ticket.get("status") != "open":
+            return NO_WRITE
+        cur = ticket.get("prepare") if isinstance(ticket.get("prepare"), dict) else {}
+        if run and cur.get("run") and cur["run"] != run and state in ("prepared", "not_prepared"):
+            return NO_WRITE
+        rec: dict = {"state": state, "at": now()}
+        if run:
+            rec["run"] = run
+        if why:
+            rec["why"] = " ".join(str(why).split())[:200]
+        if state == "prepared":  # what Prepare left, so Start can tell what changed since (ORCH-739)
+            rec["seen"] = _prepare_seen(root, ticket)
+        ticket["prepare"] = rec
+        if state == "prepared":
+            add_history(ticket, by, PREPARED_LINE)
+        elif state == "not_prepared":
+            add_history(ticket, by, f"{NOT_PREPARED}: {rec['why']}" if why else NOT_PREPARED)
+        return True
+
+    try:
+        return apply_op(root, tid, op, by=SYSTEM)[1] is True
+    except (Refused, FileNotFoundError):
+        if ticket_path(root, tid).exists():
+            raise
+        return False
+
+
+_PREPARE_FIELDS = (
+    ("title", "Title"),
+    ("note", "The person's note"),
+    ("description", "Description"),
+    ("done_when", "Done when"),
+    ("due", "Due date"),
+    ("owner", "Owner"),
+)
+_SEEN_FILES_MAX = 200
+# lines that only say the work started (the Start itself), not something the helper must react to
+_START_NOISE = re.compile(r"^(Status \S+ -> \S+|\S+( \S+)? started|" + re.escape(PREPARED_LINE) + r")$")
+
+
+def _artifact_names(root: Path, tid: str) -> list[str]:
+    """The files in the ticket's artifacts folder (relative names, sorted, capped); [] when there is none.
+    Read only: never creates the folder, never follows a link."""
+    d = artifacts_path(root, tid)
+    try:
+        if d.is_symlink() or not d.is_dir():
+            return []
+        names = sorted(
+            p.relative_to(d).as_posix() for p in d.rglob("*") if p.is_file() and not p.is_symlink()
+        )
+    except OSError:
+        return []
+    return names[:_SEEN_FILES_MAX]
+
+
+def _prepare_seen(root: Path, ticket: dict) -> dict:
+    """The ticket as Prepare left it: its fields, its steps and its files (ORCH-739)."""
+    seen: dict = {k: ticket.get(k) for k, _ in _PREPARE_FIELDS if ticket.get(k) not in (None, "")}
+    seen["checks"] = {
+        str(c.get("id")): str(c.get("text") or "")
+        for c in ticket.get("checklist") or []
+        if isinstance(c, dict) and c.get("id")
+    }
+    seen["files"] = _artifact_names(root, ticket["id"])
+    seen["lines"] = history.length(ticket)  # lines from here on came after Prepare
+    return seen
+
+
+def _short(v: object, n: int = 300) -> str:
+    s = " ".join(str(v).split())
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def changed_since_prepare(root: Path, ticket: dict, agent: str | None = None) -> list[str] | None:
+    """What changed on a prepared ticket since Prepare ended, one plain line each: a field a person edited,
+    steps added, removed or reworded, new files, and what others wrote on the ticket since (answers,
+    messages). [] = nothing changed; None = the ticket was never marked Prepared (no record to compare).
+    agent: the helper's own label (agent:<name>), whose own lines are left out."""
+    p = ticket.get("prepare") if isinstance(ticket.get("prepare"), dict) else {}
+    seen = p.get("seen") if p.get("state") == "prepared" else None
+    if not isinstance(seen, dict):
+        return None
+    out: list[str] = []
+    for key, label in _PREPARE_FIELDS:
+        old, new = seen.get(key), ticket.get(key)
+        if old in (None, "") and new in (None, ""):
+            continue
+        if old == new:
+            continue
+        if old in (None, ""):
+            out.append(f"{label} added: {_short(new)}")
+        elif new in (None, ""):
+            out.append(f"{label} removed (was: {_short(old)})")
+        else:
+            out.append(f"{label} changed from: {_short(old)} | to: {_short(new)}")
+    old_checks = seen.get("checks") if isinstance(seen.get("checks"), dict) else {}
+    now_checks = {
+        str(c.get("id")): c for c in ticket.get("checklist") or [] if isinstance(c, dict) and c.get("id")
+    }
+    for cid, c in now_checks.items():
+        text = str(c.get("text") or "")
+        if cid not in old_checks:
+            out.append(f"Step added: {cid} {_short(text, 200)}")
+        elif old_checks[cid] != text:
+            out.append(f"Step {cid} reworded from: {_short(old_checks[cid], 200)} | to: {_short(text, 200)}")
+    for cid, text in old_checks.items():
+        if cid not in now_checks:
+            out.append(f"Step removed: {cid} {_short(text, 200)}")
+    old_files = set(seen.get("files") or [])
+    new_files = [f for f in _artifact_names(root, ticket["id"]) if f not in old_files]
+    if new_files:
+        shown = ", ".join(_short(f, 200) for f in new_files[:20])  # a name is one plain line, never more
+        out.append("New files: " + shown + (" …" if len(new_files) > 20 else ""))
+    lines = history.lines(root, ticket)
+    start = seen.get("lines")
+    if not isinstance(start, int) or isinstance(start, bool) or not 0 <= start <= len(lines):
+        since = str(p.get("at") or "")  # no position kept (or the history was cut): by time, strictly after
+        lines = [h for h in lines if isinstance(h, dict) and str(h.get("at") or "") > since]
+    else:
+        lines = lines[start:]
+    said = []
+    for h in lines:
+        if not isinstance(h, dict):
+            continue
+        by, text = str(h.get("by") or "?"), str(h.get("text") or "")
+        if (agent and by == agent) or by in (SYSTEM, "orch") or _START_NOISE.match(text):
+            continue
+        said.append(f"{by}: {_short(text)}")
+    if said:
+        out.append("Written on the ticket since:\n" + "\n".join(f"  - {s}" for s in said[-10:]))
+    return out
+
+
+def worked_since_prepare(root: Path, ticket: dict, agent: str | None) -> bool:
+    """True once the helper (agent:<name>) wrote on the ticket after Prepare ended: the first Start after
+    Prepare is over, so later runs are not told again that preparing ended or what changed (ORCH-739)."""
+    p = ticket.get("prepare") if isinstance(ticket.get("prepare"), dict) else {}
+    if not agent or not p.get("state"):
+        return False
+    lines = history.lines(root, ticket)
+    seen = p.get("seen") if isinstance(p.get("seen"), dict) else {}
+    start = seen.get("lines")
+    if isinstance(start, int) and not isinstance(start, bool) and 0 <= start <= len(lines):
+        after = lines[start:]
+    else:  # Not prepared yet (no position kept): by time, strictly after
+        since = str(p.get("at") or "")
+        after = [h for h in lines if isinstance(h, dict) and str(h.get("at") or "") > since]
+    since = str(p.get("at") or "")
+    checklist = history.shown_ticket(root, ticket).get("checklist") or []  # who marked a step, as proven
+    if any(  # a helper started or finished a step since Prepare ended (starting one writes no history line;
+        # Prepare itself starts and finishes none, so the same second counts); a person's tick is a change
+        isinstance(c, dict)
+        and (c.get("state") == "doing" or c.get("done"))
+        and not str(c.get("by") or "").startswith("human:")
+        and str(c.get("at") or "") >= since
+        for c in checklist
+    ):
+        return True
+    return any(
+        isinstance(h, dict)
+        and h.get("by") == agent
+        and not _START_NOISE.match(str(h.get("text") or ""))
+        and not str(h.get("text") or "").startswith(NOT_PREPARED)
+        for h in after
+    )
+
+
+def prepare_state(root: Path, ticket: dict) -> dict | None:
+    """Where Prepare stands for a reader ({"state", "words", "why"?}), or None when it never ran. A ticket in
+    Backlog still marked preparing or waiting whose run is gone and that waits in no line was left by a run
+    that died: it reads Not prepared yet (Prepare fails quietly; Start still works)."""
+    p = ticket.get("prepare")
+    if not isinstance(p, dict) or p.get("state") not in PREPARE_STATES:
+        return None
+    state, why = p["state"], p.get("why")
+    if state in ("waiting", "preparing", "not_prepared") and ticket.get("status") != "open":
+        return None  # a person started the work meanwhile: Prepare is over, nothing to show
+    if state in ("waiting", "preparing"):
+        from orch import runs, runs_live
+
+        try:
+            gone = not runs.running(root, ticket["id"]) and ticket["id"] not in {
+                t for t, _ in runs_live.waiting_line(root)
+            }
+        except Exception:  # noqa: BLE001 - a reader never fails on this
+            gone = False
+        if gone:
+            state, why = "not_prepared", "the helper stopped"
+    words = {
+        "waiting": "Waits in line to be prepared",
+        "preparing": "Preparing",
+        "prepared": "Prepared",
+        "not_prepared": NOT_PREPARED,
+    }[state]
+    return {"state": state, "words": words, **({"why": why} if why else {})}
+
+
 def _minutes_words(m: int) -> str:
     return (f"{m // 60} h" + (f" {m % 60} min" if m % 60 else "")) if m >= 60 else f"{m} min"
 
@@ -3591,6 +3813,41 @@ def validate_ext(schema: dict, obj: dict, addon: str) -> None:
         raise Refused(f"ext.{addon}{'.' + where if where else ''}: {e.message}")
 
 
+# an add-on marks a boolean field of its ticket_ext schema with the value that switches it off
+OFF_MARK = "x-orch-off"
+
+
+def _off_values(schema: dict | None) -> dict:
+    """The fields an add-on's ticket_ext schema marks with x-orch-off, and the value that switches its repeat
+    off: {field: True|False}. Declared by the add-on, never inferred from stored data; core names no field."""
+    props = (schema or {}).get("properties") if isinstance(schema, dict) else None
+    if not isinstance(props, dict):
+        return {}
+    return {
+        k: v[OFF_MARK]
+        for k, v in props.items()
+        if isinstance(v, dict) and v.get("type") == "boolean" and isinstance(v.get(OFF_MARK), bool)
+    }
+
+
+def _repeat_block(ticket: dict, addon: str, schema: dict | None) -> tuple[dict, dict] | None:
+    """(ext block, off values) of an ACTIVE add-on whose own ticket_ext schema marks fields that switch a
+    repeat off, else None (R1.2: core names no add-on)."""
+    off = _off_values(schema)
+    if not off:
+        return None
+    cur = (ticket.get("ext") or {}).get(addon)
+    return (cur, off) if isinstance(cur, dict) else None
+
+
+def repeat_off_only(cur: dict, new: dict, off: dict) -> bool:
+    """#2051: the change from cur to new only sets fields to their switch-off values (`off`), nothing else.
+    An agent may do that on a done or dropped ticket (a helper turns off a repeat on a ticket in Review); it
+    never switches one on there or changes anything else."""
+    changed = {k for k in set(cur) | set(new) if cur.get(k) != new.get(k)}
+    return all(k in off and new.get(k) is off[k] for k in changed)
+
+
 def ext_set(
     root: Path,
     tid: str,
@@ -3619,7 +3876,11 @@ def ext_set(
         ext[addon] = merged
         add_history(ticket, by, f"Set ext.{addon}")
 
-    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+    def only_off(ticket) -> bool:
+        block = _repeat_block(ticket, addon, schema)
+        return block is not None and repeat_off_only(block[0], {**block[0], **obj}, block[1])
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by, closed_ok=only_off)[0]
 
 
 def ext_unset(
@@ -3661,7 +3922,19 @@ def ext_unset(
         if not ext:
             del ticket["ext"]
 
-    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+    def only_off(ticket) -> bool:
+        """Removing a repeat (or its next planned start) only switches work off, so it is allowed on a closed
+        ticket too; but not the whole block of a paused one: that would also undo its switch-off."""
+        block = _repeat_block(ticket, addon, schema)
+        if block is None:
+            return False
+        cur, off = block
+        # a field whose switch-off value is true (absent = on) must not be removed while it is set
+        return key in ("next_run", "each_run") or (
+            not key and not any(v is True and cur.get(k) is True for k, v in off.items())
+        )
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by, closed_ok=only_off)[0]
 
 
 _SECRET_FOLDER_RE = re.compile(r"\.orch[/\\]+secrets|\borch secrets\b|\bsecrets folder\b", re.I)

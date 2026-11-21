@@ -332,6 +332,8 @@ function pageRoute() {
   const settingsHash = /^#settings(?:\/(general|agent|helper|phone|contacts|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
   if (settingsHash && !snapshot && state?.settings) { const [named, addon] = (settingsHash[1] || 'general').split('/'), tab = {helper:'agent', contacts:'phone'}[named] || named; return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
   if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
+  // a ticket's chat on the Chats page (pages/ticketchat.js, ORCH-1168)
+  if (/^#chat\/t_[a-z0-9]{6,16}$/.test(hash) && !snapshot && (state?.chat || state?.general || Array.isArray(state?.ticket_chats))) return {kind:'chat', hash};
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
   try {
     if (hash.startsWith('#ticket/')) return {kind:'ticket', id:decodeURIComponent(hash.slice(8)), hash};
@@ -452,6 +454,7 @@ function render(arrived = new Set()) {
     throw err;
   }
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
+  if (typeof armLoadMore === 'function') armLoadMore(main);  // lists draw more rows as their end scrolls into view (ORCH-523)
   if (typeof liveDockSync === 'function') liveDockSync();  // the layer of the live page, outside main
   if (typeof liveOpenFromAddress === 'function') liveOpenFromAddress(r);  // a ticket's address opens its session (ORCH-465)
   if (typeof resultsFillAll === 'function') resultsFillAll(document);  // result widgets on tiles, in chat and on the ticket page
@@ -554,11 +557,13 @@ async function addonSet(name, on, tries = 24, pause = 1500, settle = true, again
   const result = await act('addon.set', {name, on}, {check:false});  // the server restarts: its click ids are gone
   if (snapshot || (!result.ok && result.status !== 0)) return result;
   if (result.ok && !settle) return result;
-  const next = await afterRestart(boot, tries, pause);
-  if (result.ok || !next) return result;
-  const row = array(next.settings?.addons).find(a => a && a.name === name);
-  if (row && !!row.active === on) return {ok:true, status:200, state:next, recovered:true};
-  return again ? addonSet(name, on, tries, pause, settle, false) : result;
+  return addonWait(name, async () => {
+    const next = await afterRestart(boot, tries, pause);
+    if (result.ok || !next) return result;
+    const row = array(next.settings?.addons).find(a => a && a.name === name);
+    if (row && !!row.active === on) return {ok:true, status:200, state:next, recovered:true};
+    return again ? addonSet(name, on, tries, pause, settle, false) : result;
+  });
 }
 // Uninstall an add-on (`orch addon uninstall`, refused while it is on: turn it off first). The services restart
 // like for the switch; the row leaves the list at once and the state read after the restart confirms it. The
@@ -574,10 +579,26 @@ async function addonUninstall(name, tries = 24, pause = 1500, again = true) {
   const result = await act('addon.uninstall', {name}, {check:false});
   if (snapshot || (!result.ok && result.status !== 0)) return result;
   if (result.ok && state?.settings) { state.settings.addons = array(state.settings.addons).filter(a => !(a && a.name === name)); render(); }
-  const next = await afterRestart(boot, tries, pause);
-  if (result.ok || !next) return result;
-  if (!still(next.settings?.addons)) return {ok:true, status:200, state:next, recovered:true};
-  return again ? addonUninstall(name, tries, pause, false) : result;  // never arrived: once more, like the switch
+  return addonWait(name, async () => {
+    const next = await afterRestart(boot, tries, pause);
+    if (result.ok || !next) return result;
+    if (!still(next.settings?.addons)) return {ok:true, status:200, state:next, recovered:true};
+    return again ? addonUninstall(name, tries, pause, false) : result;  // never arrived: once more, like the switch
+  });
+}
+// While the page waits for its server to come back after an add-on change, the add-on's button and switch say so
+// (ORCH-1046) instead of a bare "Failed to fetch"; when it is still not back, one plain sentence says what to do.
+const addonWaiting = new Set();
+let addonWaitPaint = () => render();  // the catalogue dialog paints itself too while it is open
+const ADDON_WAIT_TEXT = 'Waiting for orch to restart…';
+const ADDON_SLOW = 'orch is still restarting. Wait a moment, then try again.';
+async function addonWait(name, wait) {
+  const outer = !addonWaiting.has(name);  // the click sent once more waits inside the first wait
+  if (outer) { addonWaiting.add(name); addonWaitPaint(); }
+  try {
+    const r = await wait();
+    return r.ok || r.status !== 0 ? r : {...r, ok:false, status:0, text:ADDON_SLOW};
+  } finally { if (outer) { addonWaiting.delete(name); addonWaitPaint(); } }
 }
 // The button a person just pressed shows the kit's busy state at once (aria-busy + aria-disabled), before the
 // answer comes, and until it came (ORCH-102: a click showed nothing for seconds while helpers ran).
@@ -605,7 +626,8 @@ function busyOff(busy) {
 async function act(op, args, opts = {}) {
   if (snapshot) return {ok:false, status:0, text:'This is a shared copy.'};
   const busy = busyOn();
-  const before = op === 'run.start' ? ticketOf(args.ticket)?.status : null;
+  // Prepare (Save without starting, ORCH-738) keeps the ticket in Backlog: it is never shown as Working at once
+  const before = op === 'run.start' && !args.prepare ? ticketOf(args.ticket)?.status : null;
   let succeeded = false, queued = false;
   if (before) { starting.add(args.ticket); state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:'active'} : t); render(); }
   writing++;
@@ -971,6 +993,14 @@ main.addEventListener('click', async event => {
   if (action === 'release-merge-set') { await releaseMergeSwitch(); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
+  if (action === 'update-check-ok') { const r = await act('update.check.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
+  if (action === 'update-check-back') {
+    const to = String(control.dataset.to || '');
+    if (!/^[1-9][0-9]{0,5}(\.[1-9][0-9]{0,3})?$/.test(to)) return;
+    location.hash = '#settings/about';  // the same steps as any update: Downloading, Installing, Restarting, Done
+    await updStart(to);
+    return;
+  }
   if (action === 'auto-update-note-ok') { const r = await act('update.note.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
   if (action === 'session-typing') {
     if (settingsBusy.has('session-typing')) return;
