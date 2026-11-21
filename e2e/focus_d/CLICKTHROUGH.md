@@ -68,7 +68,7 @@ Do:
 Must be seen:
 
 - Bands in this order: Pinned, Needs you and working, In line, Idle and no session.
-- One summary line on top.
+- One summary line on top, with the number of sessions and of helper places in use.
 - Each tile says in one plain sentence what its helper does.
 - A working tile adds its newest last line by itself.
 
@@ -293,7 +293,7 @@ Do:
 
 Must be seen:
 
-- The open question, the last lines of its screen, then tool and model (for example "Helper · Opus").
+- The open question, the last lines of its screen, then tool and model (for example "Claude Code · Opus").
 - How long it is open and how long it stays (warm while it works, or when it closes for being idle).
 - All of it stays current while you look; the keyboard place does not jump.
 - Stop in the pane stops its helper; an idle helper's button says Stop idle helper.
@@ -573,6 +573,7 @@ Do:
 Must be seen:
 
 - Its tile leaves Working and says No session.
+- Its pane header no longer says Working.
 - Its pane offers the Start choice.
 
 ## 33. Start the Manager in a chosen permission mode

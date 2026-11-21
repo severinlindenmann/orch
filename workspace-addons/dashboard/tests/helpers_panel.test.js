@@ -22,7 +22,7 @@ const texts = n => !n || typeof n !== 'object' ? [] : [n.text ?? n.textContent ?
 
 test('helperState takes the core words as they are; null when no helper runs', () => {
   const run = {running:true, helper:{state:'you', word:'anything', detail:'Your answer'}};
-  assert.deepEqual({...helpers.helperState(run, {})}, {state:'you', word:'Waits for you', detail:'Your answer'});
+  assert.deepEqual({...helpers.helperState(run, {})}, {state:'you', word:'Needs you', detail:'Your answer'});
   assert.equal(helpers.helperState({running:false}, {}), null);
   assert.equal(helpers.helperState(null, {}), null);
   assert.equal(helpers.helperState({running:true, helper:{state:'bogus'}}, {}).state, 'working');  // unknown: the fallback
@@ -36,8 +36,8 @@ test('helperState without the core field: the same words from the claim (older c
   assert.equal(helpers.helperState(live('idle'), {}).word, 'Idle');
   assert.equal(helpers.helperState(live('attention'), {}).detail, 'Your OK on the screen');
   assert.equal(helpers.helperState(live('idle'), {questions:[{id:'q1', answer:null}]}).detail, 'Your answer');
-  // the case of 16 Nov: a helper with an open question shows Waits for you, never Working
-  assert.equal(helpers.helperState(live('idle'), {questions:[{id:'q1', answer:null}]}).word, 'Waits for you');
+  // the case of 16 Nov: a helper with an open question shows Needs you, never Working
+  assert.equal(helpers.helperState(live('idle'), {questions:[{id:'q1', answer:null}]}).word, 'Needs you');
 });
 
 test('helperRows: one row per running helper, working first, stuck last, with step, minutes and finished', () => {
@@ -69,8 +69,8 @@ test('kit: the meta line and the summary use the same words on every page', () =
   assert.equal(UI.helperMeta({state:'you', idle:180, detail:'Your answer'}), 'Since 3 h · your answer');
   assert.equal(UI.helperMeta({state:'idle', detail:'Nothing running for 18 min'}), 'Nothing running for 18 min');
   assert.equal(UI.helperMeta({state:'idle', finished:true, detail:'Nothing running for 5 min'}), 'Finished · Nothing running for 5 min');
-  assert.equal(UI.helperSummary([{state:'working'}, {state:'working'}, {state:'you'}, {state:'idle'}]), '2 working · 1 waits for you · 1 idle');
-  assert.equal(UI.helperSummary([{state:'you'}, {state:'you'}]), '2 wait for you');
+  assert.equal(UI.helperSummary([{state:'working'}, {state:'working'}, {state:'you'}, {state:'idle'}]), '2 working · 1 needs you · 1 idle');
+  assert.equal(UI.helperSummary([{state:'you'}, {state:'you'}]), '2 need you');
 });
 
 test('ORCH-643: a helper stopped on the usage limit shows Stopped: usage limit and when it continues, after stuck', () => {

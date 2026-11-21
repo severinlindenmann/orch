@@ -216,11 +216,11 @@ def test_screen_returns_the_last_lines_read_only(proj, new_ticket, run, monkeypa
          ("working", "Working", "Running tests")),
         ("starting", [], None, ("starting", "Starting", "")),
         ("waiting", [{"kind": "person", "what": "an answer from the person", "ref": "q1"}], 60,
-         ("you", "Waits for you", "Your answer")),
+         ("you", "Needs you", "Your answer")),
         ("waiting", [{"kind": "person", "what": "the person's OK on the screen"}], None,
-         ("you", "Waits for you", "Your OK on the screen")),
+         ("you", "Needs you", "Your OK on the screen")),
         ("waiting", [{"kind": "person", "what": "x", "ref": "q1"}, {"kind": "person", "what": "y"}], None,
-         ("you", "Waits for you", "Your answer and your OK on the screen")),
+         ("you", "Needs you", "Your answer and your OK on the screen")),
         ("waiting", [{"kind": "command", "label": "pr-green.sh", "seconds": 360, "what": "x"}], 60,
          ("waiting", "On hold", "Running a script · 6 min")),
         ("waiting", [{"kind": "command", "label": "sleep", "seconds": 240, "what": "x"}], 60,
@@ -277,11 +277,11 @@ def test_status_carries_the_helper_state_and_last_activity(proj, new_ticket, run
     _live(proj, tid, "idle", child)
     monkeypatch.setattr(runwatch, "_table", lambda: [])
     data = json.loads(run("run", "status", tid, "--json")[1])
-    assert data["helper"] == {"state": "you", "word": "Waits for you", "detail": "Your answer"}
+    assert data["helper"] == {"state": "you", "word": "Needs you", "detail": "Your answer"}
     last = data["last_activity"]
     assert last["at"].endswith("Z") and last["seconds"] >= 0 and last["text"]
     rows = json.loads(run("run", "list", "--json")[1])["runs"]
-    assert rows[0]["helper"]["word"] == "Waits for you"  # orch run list says the same
+    assert rows[0]["helper"]["word"] == "Needs you"  # orch run list says the same
     data = json.loads(run("run", "status", new_ticket("B"), "--json")[1])
     assert data["helper"] is None and data["last_activity"] is None
 

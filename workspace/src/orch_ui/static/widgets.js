@@ -21,12 +21,12 @@ UI.commandCopy=(command,o)=>{o=o||{};command=String(command||'');const box=el('d
  row.append(code,b);box.append(row);return box};
 /* Helpers list (ORCH-61): one row per live helper, the same on dashboard Home and in Focus. The state comes from the core
    (orch run status "helper": working | starting | you | waiting | idle | stuck | limit); the page never words it itself.
-   UI.helperPill(state, word) -> the worded pill; UI.helperSummary(rows) -> "4 working · 1 waits for you · 1 idle";
+   UI.helperPill(state, word) -> the worded pill; UI.helperSummary(rows) -> "4 working · 1 needs you · 1 idle";
    UI.helperList(rows, o) -> <section class="card helper-list"> with rows {key, title, href, state, word, meta, actions:[{label, run, key}]},
    o.title (default "Helpers"), o.empty (shown when there are no rows), o.dataKey. */
 const HELPER_LOOK={working:['working','working'],starting:['working','working'],you:['needs','needs'],waiting:['','check'],idle:['','todo'],stuck:['failed','needs'],limit:['','check']};
 UI.helperPill=(state,word)=>{const [cls,icon]=HELPER_LOOK[state]||['','todo'];const p=el('span','pill helper-pill'+(cls?' '+cls:''));p.dataset.state=state||'';p.append(UI.statusIcon(icon),document.createTextNode(word||''));return p};
-const HELPER_COUNT=[['working','working'],['starting','starting'],['you','waits for you','wait for you'],['waiting','on hold'],['idle','idle'],['stuck','stuck'],['limit','stopped on the usage limit']];
+const HELPER_COUNT=[['working','working'],['starting','starting'],['you','needs you','need you'],['waiting','on hold'],['idle','idle'],['stuck','stuck'],['limit','stopped on the usage limit']];
 UI.helperSummary=rows=>{const n={};(rows||[]).forEach(r=>{n[r.state]=(n[r.state]||0)+1});return HELPER_COUNT.filter(([k])=>n[k]).map(([k,one,many])=>n[k]+' '+(n[k]>1&&many?many:one)).join(' · ')};
 /* The meta line under a helper's title, the same words everywhere: "Step 3 of 4 · 52 min", "Since 3 h · your answer",
    "Nothing running for 18 min". row: {state, detail, step:{n,of}, minutes, idle, finished} (minutes: since start, idle: quiet). */
@@ -43,7 +43,7 @@ UI.helperMeta=r=>{r=r||{};const d=r.detail||'';
 /* active with no helper is In progress: Working is said only while a helper runs, so the pill never contradicts
    the ticket's "No helper is working" line (ORCH-415) */
 const TICKET_WORD={open:'Backlog',ready:'To do',active:'In progress',waiting:'Needs you',review:'Check',done:'Done',dropped:"Won't do"};
-const HELPER_WORD={working:'Working',starting:'Starting',you:'Waits for you',waiting:'On hold',idle:'Idle',stuck:'Stuck',limit:'Stopped: usage limit'};
+const HELPER_WORD={working:'Working',starting:'Starting',you:'Needs you',waiting:'On hold',idle:'Idle',stuck:'Stuck',limit:'Stopped: usage limit'};
 const HELPER_PILL={working:'working',starting:'working',you:'needs',waiting:'check',idle:'todo',stuck:'needs',limit:'check'};
 UI.ticketState=(t,helper)=>{t=t||{};
  if(t.status==='done')return {pill:'done',word:'Done',helper:null};

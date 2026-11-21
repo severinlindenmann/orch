@@ -157,6 +157,17 @@ function liveAskModel(t) {
   const options = Array.isArray(q.options) ? q.options.filter(o => typeof o === 'string' && o.trim()).slice(0, 6) : [];
   return {id:q.id, digest:q.digest, text:String(q.text || ''), options, plain:q.kind == null};
 }
+// ORCH-1358: the pane header follows the live sessions API, the list the bar and the wall read, so the three never
+// disagree (the page's own state is polled at another time): a session that ended has no helper (never Working), one
+// that needs you says Needs you. Without an answer of the API yet, the page's own helper state (`own`) stays.
+const LIVE_LAYER_HELPER = {'needs-you':'you', working:'working', idle:'idle'};
+function liveLayerHelper(live, own) {
+  if (!live || typeof live.status !== 'string') return own || null;
+  const st = LIVE_LAYER_HELPER[live.status];
+  if (!st) return null;  // in line or closed: no helper runs
+  if (own && (own.state === st || (st === 'working' && ['working', 'starting', 'waiting', 'stuck', 'limit'].includes(own.state)))) return own;
+  return {state:st, word:{you:'Needs you', working:'Working', idle:'Idle'}[st], detail:typeof live.detail === 'string' ? live.detail : ''};
+}
 // --- the page ---
 let liveLayer = null;
 let liveLayerPainted = '';
@@ -188,9 +199,10 @@ function liveLayerSession(key) {
     // ORCH-817: an ended helper without a ticket (Manager, empty or chat helper) keeps its pane: Start again and History
     return {pill:null, key:'', id:x.id, title:clean(x.title) || 'Session', live, kind:x.kind, running, ended:!running && x.kind !== 'terminal' && (x.open !== true || (!!window.LiveSessions?.ready && !live))};
   }
-  const run = state.runs?.[t.id], helper = run?.running && window.DashHelpers?.helperState ? window.DashHelpers.helperState(run, t) : null;
+  const run = state.runs?.[t.id], live = window.LiveSessions?.get(t.id) || null;
+  const own = run?.running && window.DashHelpers?.helperState ? window.DashHelpers.helperState(run, t) : null;
+  const helper = liveLayerHelper(live, own);
   const pill = window.UI?.ticketState && window.UI?.ticketPill ? window.UI.ticketPill(window.UI.ticketState(t, helper)) : null;
-  const live = window.LiveSessions?.get(t.id) || null;
   return {pill, key:window.DashHelpers?.ticketKey?.(t) || '', id:t.id, title:clean(live ? liveName(live) : t.title) || 'Untitled', live,
     running:live ? ['working', 'needs-you', 'idle'].includes(live.status) : !!state.runs?.[t.id]?.running};
 }

@@ -13,7 +13,7 @@ const {liveBarRows} = require('../src/orch_dashboard/web/pages/livesessions.js')
 
 const WEB = path.join(__dirname, '../src/orch_dashboard/web');
 const KIT = path.join(__dirname, '../../../workspace/src/orch_ui/static');
-const m = (id, key, title, status, extra = {}) => ({id, key, title, depth:1, main:false, status, word:{working:'Working', idle:'Idle', 'in-line':'In line', closed:'No session', 'needs-you':'Waits for you'}[status], small:[], ...extra});
+const m = (id, key, title, status, extra = {}) => ({id, key, title, depth:1, main:false, status, word:{working:'Working', idle:'Idle', 'in-line':'In line', closed:'No session', 'needs-you':'Needs you'}[status], small:[], ...extra});
 const EPIC = {id:'t_ep', key:'ORCH-300', title:'Autumn newsletter', kind:'epic', members:[
   m('t_ep', 'ORCH-300', 'Autumn newsletter', 'working', {depth:0, main:true}),
   m('t_tx', 'ORCH-301', 'Write the texts', 'working', {small:[{what:'Draft intro', seconds:180}, {what:'Draft offers', seconds:60}]}),
