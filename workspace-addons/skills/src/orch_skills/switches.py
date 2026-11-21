@@ -213,7 +213,9 @@ def _owned(root: Path) -> dict:
         doc = {}
     if doc.get("schema") != OWNED_SCHEMA:
         doc = {}
-    return {k: [v for v in doc.get(k, []) if isinstance(v, str)] for k in KINDS}
+    spec = tool() or {}
+    old = {"skills": spec.get("skills"), "rules": spec.get("rules_exclude")}  # keys of the first drafts' files
+    return {k: [v for v in doc.get(k, doc.get(old.get(k) or k, [])) if isinstance(v, str)] for k in KINDS}
 
 
 def _entries(settings: dict, kind: str, spec: dict) -> list[str]:

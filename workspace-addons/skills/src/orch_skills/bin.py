@@ -92,7 +92,7 @@ def _place_of(root: Path, where: str, origin: str, account_home: Path | None) ->
     computer entry only in one of the helper tools' skill folders. A record that names anything else is refused."""
     if where == "workspace":
         rel = Path(origin)
-        if rel.is_absolute() or len(rel.parts) != 3 or rel.parent not in switches.skill_places():
+        if rel.is_absolute() or rel.parent not in switches.skill_places() or not rel.name:
             raise Refused("This bin entry does not say where it came from. Nothing was changed.")
         return safe_path(root, rel)
     p = Path(origin)
