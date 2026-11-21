@@ -10,7 +10,7 @@ skill = "skills/orch-usage"
 agents_block = "skills/orch-usage/AGENTS-block.md"
 gitignore = [".orch/addons/usage/"]
 background = true
-needs = true                                # orch usage needs --json: the warnings, once each
+needs = true                                # orch usage needs --json: the warnings, once each; which rule wins
 
 [dashboard]
 label = "Usage"

@@ -49,6 +49,9 @@ kbd{display:inline-grid;place-items:center;min-width:24px;padding:2px 4px;border
 .grow{flex:1;min-width:0}
 .end{justify-content:flex-end}
 .stack{display:flex;flex-direction:column;gap:12px}
+/* A costly action (UX D2, ORCH-415): its cost in one meta line above it, the outlined buttons below, the cheaper choice beside */
+.cost-pick{display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:0}.cost-pick>.meta{margin:0;text-align:right}.cost-pick>.row{justify-content:flex-end}
+@media(max-width:760px){.strip-h:has(.cost-pick)>.grow{flex:1 1 100%}.cost-pick{align-items:flex-start}.cost-pick>.meta{text-align:left}.cost-pick>.row{justify-content:flex-start}}
 .pad{padding:16px}
 .space-top{margin-top:24px}
 .reading{max-width:var(--reading-width)}
@@ -83,6 +86,21 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .nav-group>summary::-webkit-details-marker{display:none}
 .nav-group>summary:after{content:'';display:block;width:16px;height:16px;margin-left:auto;background:var(--text-faint);-webkit-mask:var(--chev) center/16px no-repeat;mask:var(--chev) center/16px no-repeat;transition:transform var(--dur-base) var(--ease-move)}.nav-group[open]>summary:after{transform:rotate(180deg)}
 .nav-group nav{margin-top:4px}
+/* Menu head and add-ons (ORCH-1184): the orch name with the button that closes the menu to its icons (1280 px and wider);
+   add-ons the person pinned, then Show more (n) that unfolds the rest in place. Each row has a pin button, faint until
+   the row is pointed at or focused, filled while pinned. */
+.side-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.side-head>.side-toggle{display:none}
+.nav-addons{display:grid;gap:4px}
+.nav-row{position:relative;display:grid}
+.nav-row>.nav-item{padding-right:40px}
+.nav-row>.nav-pin{position:absolute;right:4px;top:0;bottom:0;margin-block:auto;height:fit-content;opacity:.4;transition:opacity var(--dur-fast) var(--ease-move)}
+.nav-row:is(:hover,:focus-within) .nav-pin{opacity:1}
+.nav-pin[aria-pressed=true] svg{fill:currentColor}
+.nav-more{width:100%;font:inherit;font-size:14px;cursor:pointer}
+.nav-more .ic{transition:transform var(--dur-base) var(--ease-move)}
+.nav-more[aria-expanded=true] .ic{transform:rotate(180deg)}
+@media(min-width:1280px){.side-head>.side-toggle{display:inline-flex}}
 .saved-views{padding-left:28px;margin-top:4px}
 .saved-views a{font-size:12px;line-height:16px;min-height:28px;padding:4px 8px}
 .side-foot{margin-top:auto;display:grid;gap:12px;padding-top:12px;border-top:1px solid var(--border)}
@@ -396,7 +414,8 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .shell:has(.nav-label){--sidebar-width:64px}
 .sidebar:has(.nav-label){padding:16px 8px}
 .sidebar:has(.nav-label) .brand{padding:0 12px}
-.sidebar:has(.nav-label) :is(.brand-word,.ws-text,.ws-chev,.nav-label,.phone-toggle>span,.saved-views){display:none}
+.sidebar:has(.nav-label) :is(.brand-word,.ws-text,.ws-chev,.nav-label,.phone-toggle>span,.saved-views,.eyebrow,.nav-pin){display:none}
+.sidebar:has(.nav-label) .side-head{flex-direction:column;gap:12px}
 .sidebar:has(.nav-label) .ws-switch{padding:8px;justify-content:center}
 .sidebar:has(.nav-label) .nav-item{justify-content:center;padding:8px}
 .sidebar:has(.nav-label) .nav-item .count{position:absolute;top:0;right:0;min-width:16px;min-height:16px;height:16px;padding:0 4px}
@@ -419,6 +438,25 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .sidebar:has(.nav-label) .saved-views .nav-item:after{display:none}
 .columns{--panel-width:256px;gap:16px}
 }
+/* The menu closed with its button (ORCH-1184): from 1280 px the same icon rail as 721-1279, until it is opened again. */
+@media(min-width:1280px){
+.shell[data-side=rail]{--sidebar-width:64px}
+.shell[data-side=rail] .sidebar{padding:16px 8px}
+.shell[data-side=rail] .brand{padding:0 12px}
+.shell[data-side=rail] .sidebar :is(.brand-word,.ws-text,.ws-chev,.nav-label,.phone-toggle>span,.saved-views,.eyebrow,.nav-pin){display:none}
+.shell[data-side=rail] .side-head{flex-direction:column;gap:12px}
+.shell[data-side=rail] .ws-switch{padding:8px;justify-content:center}
+.shell[data-side=rail] .sidebar .nav-item{justify-content:center;padding:8px}
+.shell[data-side=rail] .nav-item .count{position:absolute;top:0;right:0;min-width:16px;min-height:16px;height:16px;padding:0 4px}
+.shell[data-side=rail] .nav-group{position:relative}
+.shell[data-side=rail] .nav-group>summary:after{display:none}
+.shell[data-side=rail] .phone-toggle{padding:8px 4px}
+.shell[data-side=rail] .side-foot{gap:8px}
+.shell[data-side=rail] .workspace .menu{left:48px;top:0}
+.shell[data-side=rail] .sidebar-scroll{overflow:visible}
+.shell[data-side=rail] .sidebar-scroll.cramped{overflow-x:hidden;overflow-y:auto}
+.shell[data-side=rail] .nav-item:focus-visible:after,.shell[data-side=rail] .nav-item:hover:after{content:attr(aria-label);position:absolute;left:52px;top:0;padding:8px 12px;background:var(--surface-3);border:1px solid var(--border-strong);border-radius:8px;white-space:nowrap;z-index:80;font-size:12px;color:var(--text)}
+}
 @media(max-width:899px){:root{--page-gutter:16px}.columns{grid-template-columns:minmax(0,1fr)}.grid-3{grid-template-columns:repeat(2,minmax(0,1fr))}.topbar{gap:8px}.topbar-actions{flex-wrap:wrap}.page{padding-top:24px}.table-wrap table{min-width:560px}}
 @media(max-width:720px){.shell{display:block}
 .sidebar{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--border);padding:8px 16px;gap:8px}
@@ -437,6 +475,8 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .sidebar .side-foot{margin:0}
 .btn,.btn.sm,.btn.xs,.btn.icon,.btn.icon.sm,.btn.icon.xs,.tabs button,.tabs a,.nav-item,summary,.menu-item{min-height:44px}
 .btn.icon,.btn.icon.sm,.btn.icon.xs{width:44px}
+.nav-pin{opacity:1}
+.nav-row>.nav-item{padding-right:52px}
 .card-row{flex-wrap:wrap;gap:8px}
 .card-row .grow{flex-basis:calc(100% - 40px)}
 /* the 24 px push lines a wrapped button up with the text after a leading icon; a row that starts with its text (Home's results) keeps the button on the left edge */
