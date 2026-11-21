@@ -18,7 +18,12 @@ def _out(args, data, text: str) -> None:
 
 
 def add_parsers(sub, common) -> None:
-    x = sub.add_parser("start", parents=[common], help="start the add-ons that run in the background here")
+    x = sub.add_parser(
+        "start",
+        aliases=["restart"],
+        parents=[common],
+        help="start the add-ons that run in the background here",
+    )
     x.add_argument("--no-open", action="store_true", help="do not open the dashboard in the browser")
     x.add_argument(
         "--print-launch-url",
@@ -117,7 +122,7 @@ def _launch_urls(root: Path, rows: list[dict]) -> list[tuple[str, str]]:
 
 
 def _services_cmd(args, root: Path) -> None:
-    if args.cmd == "start":
+    if args.cmd in ("start", "restart"):
         if args.print_launch_url:  # refuse before anything starts: a person only, never an agent
             from orch import tickets
 
@@ -125,6 +130,8 @@ def _services_cmd(args, root: Path) -> None:
                 raise Refused("Only a person can print a sign-in link. Run orch start in your own terminal.")
         from orch import worktrees
 
+        if args.cmd == "restart":
+            services.stop(root)
         worktrees.schedule_sweep(root)  # B12: copies nobody needs, in a detached run (never raises)
         rows = services.start(root)
         launch = _launch_urls(root, rows) if args.print_launch_url else []
@@ -197,8 +204,11 @@ def _services_cmd(args, root: Path) -> None:
             targets = [root.resolve()]
         else:
             targets = _pick(services.status())
-        from orch import runs_live
+        from orch import runs_live, service_guard
 
+        # Check every target before stopping any, including --all and explicit paths.
+        for target in targets:
+            service_guard.require_change(target, getattr(args, "by", None))
         done = [
             {"workspace": str(t), "addons": services.stop(t), "sessions": runs_live.stop_hidden(t)}
             for t in targets
@@ -339,7 +349,7 @@ def dispatch(args, root: Path) -> bool:
     if args.cmd in ("pause", "resume"):
         _brake_cmd(args, root)
         return True
-    if args.cmd not in ("start", "stop", "status"):
+    if args.cmd not in ("start", "stop", "restart", "status"):
         return False
     _services_cmd(args, root)
     return True
