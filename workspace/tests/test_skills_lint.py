@@ -45,6 +45,7 @@ HUMAN_ONLY = {
     "workspace move-here",  # a person keeps a moved folder's saved keys (helpers are refused)
     "start",
     "stop",
+    "restart",
     "status",
     "pause",  # a person's runaway brake
     "resume",

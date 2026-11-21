@@ -1,4 +1,4 @@
-"""`orch start`, `orch stop`, `orch status`: add-on background processes."""
+"""`orch start`, `orch stop`, `orch restart`, `orch status`: add-on background processes."""
 
 from __future__ import annotations
 
@@ -31,6 +31,11 @@ def add_parsers(sub, common) -> None:
     x.add_argument("workspace", nargs="?", metavar="PATH|NAME", help="the workspace to stop")
     x.add_argument("--all", action="store_true", help="stop every running workspace")
     x.add_argument("--pick", action="store_true", help="choose from the running workspaces")
+    x = sub.add_parser(
+        "restart", parents=[common], help="stop and start the add-ons that run in the background here"
+    )
+    x.add_argument("--no-open", action="store_true", help=argparse.SUPPRESS)  # a restart never opens a page
+    x.add_argument("--print-launch-url", action="store_true", help=argparse.SUPPRESS)
     sub.add_parser("status", parents=[common], help="what runs in the background, and where")
     x = sub.add_parser("pause", parents=[common], help="stop all automation in this workspace")
     x.add_argument("--reason", help="why, in one short line (shown when a start is held back)")
@@ -117,6 +122,17 @@ def _launch_urls(root: Path, rows: list[dict]) -> list[tuple[str, str]]:
 
 
 def _services_cmd(args, root: Path) -> None:
+    if args.cmd == "restart":  # this workspace only: stop, then the same start as orch start (no page opened)
+        if not (root / ".orch").is_dir():
+            raise Refused("No orch workspace here. Run orch restart inside a workspace folder.")
+        from orch import runs_live
+
+        stopped = services.stop(root.resolve())
+        runs_live.stop_hidden(root.resolve())
+        if not args.json:
+            names = [r["addon"] for r in stopped if r.get("stopped")]
+            print(f"Stopped in {root.name}: " + (", ".join(names) or "nothing was running"))
+        args.cmd, args.no_open = "start", True
     if args.cmd == "start":
         if args.print_launch_url:  # refuse before anything starts: a person only, never an agent
             from orch import tickets
@@ -339,7 +355,7 @@ def dispatch(args, root: Path) -> bool:
     if args.cmd in ("pause", "resume"):
         _brake_cmd(args, root)
         return True
-    if args.cmd not in ("start", "stop", "status"):
+    if args.cmd not in ("start", "stop", "restart", "status"):
         return False
     _services_cmd(args, root)
     return True

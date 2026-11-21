@@ -100,7 +100,7 @@ then refreshes skills and AGENTS blocks of the active add-ons in this workspace.
 - Config: one file `.orch/config.toml`; the add-on reads only its own table `[<name>]` (and `[<name>.*]`). Defaults live in the add-on.
 - Required subcommands: `view --json` if `[dashboard]`; `start`, `stop`, `status` (all with `--json`) if `background`.
 
-## Background (`orch start`, `orch stop`, `orch status`)
+## Background (`orch start`, `orch stop`, `orch restart`, `orch status`)
 
 An active add-on with `background = true` runs one process per workspace, started and stopped by its own commands:
 - `orch <name> start --json` → starts it detached (or finds it running), exit 0, stdout `{"running": true, "pid": N, "url"?: "http://127.0.0.1:P"}`;
@@ -113,6 +113,7 @@ An active add-on with `background = true` runs one process per workspace, starte
 - `orch stop`: in a workspace → that workspace; outside one (or `--pick`) → the running workspaces as a numbered list, the user
   picks a number or `all`; `orch stop <path|name>` / `--all` without asking. It calls `stop` on each active background add-on there.
   An add-on that is no longer on there is never run; its process ends by itself.
+- `orch restart [--json]`: this workspace only: `orch stop` here, then the same start as `orch start` (no page is opened).
 - `orch status [--json]`: `running.json` grouped by workspace `[{"workspace", "name", "addons": [{"addon", "pid", "url"?}]}]`.
 - Runtime files of the background process (pid, port, nonce, log) live in `.orch/run/<name>/` (gitignored, 0700). A repo can
   still force-add files there, so an add-on never trusts them alone: no symlinks are followed (`.orch/run` or the folder being a
