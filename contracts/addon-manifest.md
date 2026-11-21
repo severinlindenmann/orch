@@ -259,6 +259,10 @@ most 3 lines. `workspace/tests/test_skills_lint.py` checks all of this for every
 
 `ext.<name>` is a free object for the core. When the add-on is active, every CLI write of `ext.<name>` is checked with its
 `ticket_ext` schema; a failing check refuses that write only. Inactive or unknown `ext` keys are kept unchanged and not shown.
+A boolean property may carry `"x-orch-off": true|false`: the value that switches the add-on's work off. On a done or
+dropped ticket a helper may still write those fields to that value (nothing else), so it can switch a repeat off there.
+It may also remove the planned next start (`next_run`, `each_run`), and the whole block unless a field whose off value is
+`true` is set (an absent `true`-off field reads as on, an absent `false`-off field as off).
 Waiting is core (`waiting_on {kind: time|ticket|question|external, until?, ref?}`): the core records it and never promises
 that something wakes the ticket; an add-on (the scheduler) may wake `kind: time` tickets.
 
