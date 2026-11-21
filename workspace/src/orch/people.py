@@ -266,7 +266,7 @@ LOCAL_VIA = ("cli", "dashboard")  # where a line made at this computer comes fro
 def stamp(root: Path, line: dict) -> None:
     """A NEW history line core made in this process (tickets._write calls it before the digest is recorded):
     once the list is on, a person's action at this machine records the owner's person id and device `machine`.
-    Allowlist only: a human line from this computer's CLI or dashboard (via cli / dashboard), not from a
+    Allowlist only: a human line made at this machine's CLI or dashboard (via cli / dashboard), not from a
     helper's environment and not a phone (`human:ph_...`). A person id typed in `--by` still stamps the owner
     (whoever sits at the machine is the owner). Everything else stays unstamped: phones (step 4), relay and
     chat lines from other workspaces, helpers, system lines. A line that names a person is left alone.

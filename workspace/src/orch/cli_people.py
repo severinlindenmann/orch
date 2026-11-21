@@ -3,6 +3,7 @@ helper's environment is refused. The dashboard's Settings, People runs the same 
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -11,7 +12,8 @@ from orch.errors import Refused
 
 
 def add_parsers(sub, common) -> None:
-    p = sub.add_parser("people", parents=[common], help="the people of this workspace and their rights")
+    # hidden from help: a person sets people up in Settings > People; helpers are refused
+    p = sub.add_parser("people", parents=[common], help=argparse.SUPPRESS)
     ps = p.add_subparsers(dest="people_cmd", metavar="<command>")
     ps.add_parser("list", parents=[common], help="show the people and their rights (the default)")
     q = ps.add_parser("on", parents=[common], help="turn the people list on, with you as its owner")
