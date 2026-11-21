@@ -103,6 +103,52 @@ def whoami(root: Path) -> dict:
     return _api(root, "GET", "/v1/whoami")[1]
 
 
+# Speech to text through the relay's one Deepgram key (relay-api.md: POST /v1/transcribe, workspace auth).
+# The key never comes here; the relay answers {text, language, duration}. Used by the dashboard's message box
+# (ORCH-696). Safari records audio/mp4, which the relay takes as audio/m4a.
+TRANSCRIBE_TYPES = {
+    "audio/webm": "audio/webm",
+    "audio/wav": "audio/wav",
+    "audio/m4a": "audio/m4a",
+    "audio/mp4": "audio/m4a",
+}
+TRANSCRIBE_MAX = 10 * 1024 * 1024  # the relay's limit (transcribe.rs MAX_AUDIO)
+TRANSCRIBE_TEXT = 4000  # characters kept: two minutes of speech (the relay's limit) is far below
+
+
+def _transcribe_refused(text: str, status: int) -> Refused:
+    err = Refused(text)
+    err.status = status
+    return err
+
+
+def transcribe(root: Path, audio: bytes, mime: str, timeout: float = 60) -> dict:
+    """The words of one short recording, from the connected relay. Returns {text, language, duration}; text
+    is "" when nothing could be heard. Raises Refused (with .status as the relay answered: 503
+    transcription_off, 429, 413, 422, 502; None when unreachable). The words are the person's own: shown in
+    the box, never acted on here."""
+    kind = TRANSCRIBE_TYPES.get(str(mime or "").split(";", 1)[0].strip().lower())
+    if kind is None:
+        raise _transcribe_refused("This kind of recording can't be turned into words.", 422)
+    if not audio:
+        raise _transcribe_refused("The recording is empty.", 422)
+    if len(audio) > TRANSCRIBE_MAX:
+        raise _transcribe_refused("The recording is too long.", 413)
+    scan_blob(bytes(audio), root=root)  # whatever leaves is scanned (R5.2), as every blob
+    cfg = _cfg(root)
+    headers = {**net.auth_headers(cfg), "Content-Type": kind}
+    _, out = net.call_json("POST", cfg["url"] + "/v1/transcribe", headers, bytes(audio), timeout)
+    out = out if isinstance(out, dict) else {}
+    text = out.get("text") if isinstance(out.get("text"), str) else ""
+    lang = out.get("language") if isinstance(out.get("language"), str) else ""
+    dur = out.get("duration")
+    return {
+        "text": clean_untrusted(text, TRANSCRIBE_TEXT).strip(),
+        "language": lang[:16],
+        "duration": dur if isinstance(dur, (int, float)) and not isinstance(dur, bool) else None,
+    }
+
+
 def heartbeat(root: Path, mobile_mode: dict) -> None:
     """Tell the relay we are here and whether Mobile mode is on (shape: contracts/relay-api.md)."""
     _api(root, "POST", "/v1/heartbeat", {"mobile_mode": mobile_mode}, timeout=15)
