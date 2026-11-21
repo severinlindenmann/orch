@@ -334,6 +334,40 @@ def lift(root: Path, now: float | None = None) -> None:
             _write(root, data)
 
 
+COMPUTER_SWITCH_FRESH = 10 * 60  # a switch from before tend first looked counts only when this recent
+
+
+def computer_switch() -> dict:
+    """The last account switch on this computer (ORCH-943): the Usage add-on of whichever workspace switches
+    writes one numbered line per switch to <tool home>/usage/switched.jsonl ({"n", "at", "name", "from",
+    "to"}).
+    Every workspace reads it, with or without Usage, so its helpers held at the limit start again.
+    {} when none."""
+    try:
+        from orch import addons
+
+        p = addons.home() / "usage" / "switched.jsonl"
+        with open(p, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 4096))
+            tail = f.read().decode("utf-8", errors="replace").splitlines()
+    except Exception:  # noqa: BLE001 - no tool home, no file: no switch
+        return {}
+    for line in reversed(tail):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(r, dict) and isinstance(r.get("n"), int) and not isinstance(r.get("n"), bool):
+            return r
+    return {}
+
+
+def computer_switched_text(row: dict) -> str:
+    name = str(row.get("name") or "another workspace")[:80]
+    return f"Account switched by {name}: the helper starts again now instead of waiting for the usage limit."
+
+
 def switched_text() -> str:
     return (
         "The account was switched while you waited at the usage limit. Carry on with the open tasks where "

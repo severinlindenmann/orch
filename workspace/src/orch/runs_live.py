@@ -1558,6 +1558,23 @@ def stop(root: Path, tid: str, hold: bool = False) -> bool:
     return True
 
 
+def interrupt(root: Path, tid: str) -> bool:
+    """Stop only the current step of a live session (`orch run interrupt`, Stop in Focus, ORCH-817): the
+    tool's own interrupt keys go in once; the session, its claim and its conversation stay, and the helper
+    waits for the next message. False when no live session is on. A tool with no interrupt keys is refused."""
+    rec = runs.read(root, tid)
+    if not rec or rec.get("mode") != "live" or not session_exists(root, tid):
+        return False
+    keys = adapters.load(rec["agent"], root).get("live", {}).get("interrupt_keys") or []
+    if not keys:
+        raise Refused(
+            "This helper's tool has no key that stops one step. End the session instead: orch run stop."
+        )
+    for k in keys:
+        tmux(root, "send-keys", "-t", target(tid), k)
+    return True
+
+
 def stop_hidden(root: Path) -> list[str]:
     """`orch stop`: also end the live sessions a person can not see in the ticket list: the hidden Chat
     (General) ticket's and those of tickets with waiting input (run/pending). Only an exact session name of

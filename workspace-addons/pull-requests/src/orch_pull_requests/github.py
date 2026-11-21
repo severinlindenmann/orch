@@ -68,6 +68,31 @@ class GitHub:
             str(r.get("name") or "") for r in rows if isinstance(r, dict) and r.get("bucket") == "fail"
         )
 
+    def failed_tests(self, url: str) -> list[str]:
+        """The test files the logs of the pull request's failed jobs name as failed (blame.py, ORCH-1118);
+        [] when none is named or GitHub did not answer. Reads only."""
+        from . import blame
+
+        v = self.pr(url)
+        repo = url.split("github.com/", 1)[-1].split("/pull/", 1)[0]
+        if v is None or repo.count("/") != 1:
+            return []
+        runs = self._json("api", f"repos/{repo}/actions/runs?head_sha={v['headRefOid']}&per_page=50")
+        rows = runs.get("workflow_runs") if isinstance(runs, dict) else None
+        bad = [
+            r for r in rows or [] if isinstance(r, dict) and r.get("conclusion") in ("failure", "cancelled")
+        ]
+        bad.sort(
+            key=lambda r: r.get("conclusion") != "failure"
+        )  # the failed runs first: cancelled ones say less
+        out: list[str] = []
+        for r in bad[:4]:
+            got = self._run("run", "view", str(r.get("id")), "--repo", repo, "--log-failed", timeout=90)
+            for name in blame.failed_tests(got.stdout[-400_000:] if got.returncode == 0 else ""):
+                if name not in out:
+                    out.append(name)
+        return out[:20]
+
     def base_failed(self, repo: str, base: str) -> frozenset[str] | None:
         """The failed jobs of the base branch's last finished push run of each workflow (cancelled runs and
         runs still going are skipped): empty when the base branch is green, None when GitHub did not answer."""

@@ -16,3 +16,4 @@ workspace/src/orch/releasekeeper.py  # the CI roll-up job's own name and the rel
 workspace/tests/test_releasekeeper.py  # recorded check lists that name that job
 scripts/ci_proven.py  # reads the conclusion of ci.yml's roll-up job by its name (ORCH-1124)
 workspace-addons/pull-requests/src/orch_pull_requests/required_checks.py  # the required checks' names, one of them the roll-up job (ORCH-1124)
+workspace/tests/ci_times_windows.json  # measured seconds per existing test, keyed by the tests' own names (ORCH-1050)

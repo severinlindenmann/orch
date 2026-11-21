@@ -137,6 +137,7 @@ class Runner:
         self.pre = precheck or prechecks.run
         self.me: str | None = None
         self.red_checks: frozenset[str] = frozenset()  # failed check names of the last red group
+        self.red_tests: list[str] = []  # the test files its failed jobs' logs name (blame.py)
         self._red: dict[tuple[str, str], tuple[float, frozenset[str]]] = {}
         self._ahead: Lead | None = None  # set while a group is built and checked on top of a running one
         self._live: set[str] = set()  # group branches whose checks run now: tidy leaves them alone
@@ -514,10 +515,10 @@ class Runner:
         if len(batch) == 1:
             self.alone(batch[0])
             return
-        self.red_checks = frozenset()
+        self.red_checks, self.red_tests = frozenset(), []
         red = self.group(batch)
         if len(red) > 1:
-            for part in self.split(red, self.red_checks):
+            for part in self.split(red, self.red_checks, self.red_tests):
                 left = [e for e in part if _state(self.root, e["url"]) == RUNNING]
                 if len(left) == 1:  # group() looks at members again; one alone is looked at here
                     left = self.check_members(left, left[0]["base"])
@@ -526,7 +527,9 @@ class Runner:
         elif red:
             self.alone(dict(red[0], red=True))
 
-    def split(self, red: list[dict], failed: frozenset[str]) -> list[list[dict]]:
+    def split(
+        self, red: list[dict], failed: frozenset[str], tests: list[str] | None = None
+    ) -> list[list[dict]]:
         """The parts a red group runs again in, in order: the members that do not touch what failed first, then
         those that do (blame.py); halves when that tells nobody apart."""
         members = []
@@ -534,12 +537,13 @@ class Runner:
             v = self.gh.pr(e["url"]) or {}
             files = v.get("files") if isinstance(v.get("files"), list) else []
             members.append((e["url"], [str(f.get("path") or "") for f in files if isinstance(f, dict)]))
-        bad = set(blame.suspects(failed, members))
+        bad = set(blame.suspects(failed, members, tests or ()))
         if bad:
             rest = [e for e in red if e["url"] not in bad]
             sus = [e for e in red if e["url"] in bad]
+            what = _names(failed) + (f" ({', '.join(tests[:3])})" if tests else "")
             self.log(
-                f"The group was red in {_names(failed)}: " + ", ".join(f"#{e['number']}" for e in sus)
+                f"The group was red in {what}: " + ", ".join(f"#{e['number']}" for e in sus)
                 + f" touch that; the other {len(rest)} run again first."
             )  # fmt: skip
             return [rest, sus]
@@ -840,6 +844,11 @@ class Runner:
             self.red_checks = frozenset(look(url)) if look else frozenset()
             if self.base_to_blame(repo, base, url, inside, self.red_checks if look else None):
                 return []  # red in what the base branch is red in: not split, nobody blamed
+            tests = getattr(self.gh, "failed_tests", None)  # the failed test files pick the suspect first
+            try:
+                self.red_tests = list(tests(url)) if tests and len(inside) > 1 else []
+            except Exception:  # noqa: BLE001 - a log GitHub would not give: blame by the check names alone
+                self.red_tests = []
             for e in inside:
                 why = f"its group {url} was red; checked in a smaller group"
                 store.set_state(self.root, e["url"], RUNNING, why, group=None)
