@@ -141,3 +141,39 @@ def test_the_last_line_keeps_the_typed_name(proj):
     )
     (row,) = ticketchats.chats(proj)
     assert row["last"]["by_name"] == "Anna" and row["last"]["by"] == YOU
+
+
+def test_a_line_in_the_same_second_as_the_read_mark_is_still_unread(proj):
+    tid = _ticket(proj, "Same second")
+    _say(proj, tid, AGENT, "First", "2026-11-10T09:00:00+00:00")
+    ticketchats.mark_read(proj, tid)  # read now: one line seen
+    t = tickets.load(proj, tid)
+    _say(proj, tid, AGENT, "Arrived right after", t["history"][-1]["at"])  # stamped in an already-read second
+    (row,) = ticketchats.chats(proj)
+    assert row["unread"] == 1
+
+
+def test_an_old_question_without_asked_at_stays_read_after_an_edit(proj):
+    tid = _ticket(proj, "Old question")
+    tickets.ask(proj, tid, "Which colour?", ["Blue", "Green"], "Blue", AGENT)
+
+    def drop_asked_at(t):
+        t["questions"][0].pop("asked_at", None)
+
+    tickets.apply_op(proj, tid, drop_asked_at, by=AGENT)
+    ticketchats.mark_read(proj, tid)
+    tickets.apply_op(proj, tid, lambda t: t.update(title="Old question, renamed"), by=AGENT)
+    (row,) = ticketchats.chats(proj)
+    assert row["unread"] == 0
+
+
+def test_a_bad_typed_name_in_the_file_is_dropped(proj):
+    tid = _ticket(proj, "Edited by hand")
+    _say(proj, tid, YOU, "Hi", "2026-11-10T09:00:00+00:00")
+
+    def bad_name(t):
+        t["history"][-1]["by_name"] = "x" * 500
+
+    tickets.apply_op(proj, tid, bad_name, by=YOU)
+    (row,) = ticketchats.chats(proj)
+    assert "by_name" not in row["last"]
