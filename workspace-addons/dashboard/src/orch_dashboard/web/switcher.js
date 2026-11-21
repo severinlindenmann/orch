@@ -396,7 +396,9 @@
 
   let first = true;
   window.addEventListener('orch:state', e => {
-    look = e.detail && e.detail.look ? e.detail.look : null;
+    // a state without a look (orch look timed out on a busy computer) keeps the last one: the open menu and what was
+    // typed in Add place stay
+    look = e.detail && e.detail.look ? e.detail.look : look;
     paint();
     if (look && first) { first = false; arrive(); }
   });
