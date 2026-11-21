@@ -1228,24 +1228,9 @@ class World:
 
         self.act(f"close:release {rel['n']} PR {rel['pr']}", go)
 
-    def rerun_failed(self, run_id: str) -> None:
-        """Run the failed jobs of one Actions run once more (a red release check gets one more try)."""
-
-        def go():
-            self.bot_ok()
-            r = self._run([self.gh, "run", "rerun", str(run_id), "--failed", "--repo", self.cfg.repo])
-            if r.returncode != 0:
-                raise Refused(f"rerun {run_id}: {(r.stderr or r.stdout).strip()[:200]}")
-
-        self.act(f"rerun:{run_id}", go)
-
-    def remove_wt(self, wt: str | None) -> None:
-        if wt and (self.sim is not None or Path(wt).exists()):
-            self.act(f"rmwt:{wt}", lambda: self._git("worktree", "remove", "--force", wt))
-
-    # ---- a red after-merge run on develop (ORCH-1128)
-    def rerun_failed(self, run_id) -> bool:
-        """Run the failed jobs of one Actions run once more. False when GitHub refused it."""
+    def rerun_failed(self, run_id: str):
+        """Run the failed jobs of one Actions run once more (a red release check gets one more try).
+        Raises Refused when GitHub refused it."""
 
         def go():
             self.bot_ok()
@@ -1254,8 +1239,17 @@ class World:
                 raise Refused(f"rerun {run_id}: {(r.stderr or r.stdout).strip()[:200]}")
             return True
 
+        return self.act(f"rerun:{run_id}", go)
+
+    def remove_wt(self, wt: str | None) -> None:
+        if wt and (self.sim is not None or Path(wt).exists()):
+            self.act(f"rmwt:{wt}", lambda: self._git("worktree", "remove", "--force", wt))
+
+    # ---- a red after-merge run on develop (ORCH-1128)
+    def rerun_once(self, run_id) -> bool:
+        """rerun_failed, as yes/no: False when GitHub refused it (the refusal stays in the log)."""
         try:
-            got = self.act(f"rerun:{run_id}", go)
+            got = self.rerun_failed(run_id)
         except Refused:
             self.did[-1] += " failed"
             return False
@@ -1763,7 +1757,7 @@ def _red_after_merge(
         asked = ts(rec.get("rerun_at"))
         if rec.get("rerun") == rid and asked and (now() - asked).total_seconds() < TEST_TIMEOUT_H * 3600:
             return [f"{name} on develop {sha[:8]} is red; waits for its failed jobs to run once more"]
-        if rec.get("rerun") != rid and w.rerun_failed(rid):
+        if rec.get("rerun") != rid and w.rerun_once(rid):
             mem[wf] = {**rec, "rerun": rid, "rerun_at": now().isoformat(timespec="seconds")}
             return [f"{name} on develop {sha[:8]} is red: ran its failed jobs once more"]
     # 2. still red: the red-develop ticket (once per commit; the fix goes first in the merge queue)
