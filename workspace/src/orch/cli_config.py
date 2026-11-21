@@ -45,6 +45,8 @@ KEYS = (
     "workflow.reviewer_answers",
     "workflow.reviewer_look",
     "workflow.release_merge",
+    "workflow.dispatcher",
+    "workflow.dispatcher_helpers",
     "workflow.copies",
     "workflow.copies_max",
     "workflow.copy_setup",
@@ -299,6 +301,8 @@ def _config(args, root: Path) -> None:
             "workflow.reviewer_answers": lambda: config.reviewer_answers_on(root),
             "workflow.reviewer_look": lambda: config.reviewer_look_on(root),
             "workflow.release_merge": lambda: config.release_merge_on(root),
+            "workflow.dispatcher": lambda: config.dispatcher_on(root),
+            "workflow.dispatcher_helpers": lambda: config.dispatcher_helpers(root),
             "workflow.copies": lambda: config.copies_mode(root),
             "workflow.copies_max": lambda: config.copies_max(root),
             "workflow.copy_setup": lambda: config.copy_setup(root),
@@ -410,6 +414,40 @@ def _config(args, root: Path) -> None:
             {"workflow.auto_reviewer": value},
             "Saved: new tickets start with Human review needed "
             + ("off (the Auto Reviewer checks them)." if value else "on."),
+        )
+    elif args.sub == "set" and args.key == "workflow.dispatcher":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        who = _actor(args)
+        if args.value == "on" and not who.startswith("human:"):  # it starts paid helpers by itself
+            raise Refused("Only the owner turns this on: orch config set in their own terminal.")
+        value = config.set_dispatcher(root, args.value == "on", who)
+        _out(
+            args,
+            {"workflow.dispatcher": value},
+            (
+                f"The dispatcher keeps about {config.dispatcher_helpers(root)} helpers working while the "
+                "weekly budget is on pace, more when it is behind, fewer when it is ahead or the computer "
+                "is busy. "
+                "It works in each orch run tend pass."
+            )
+            if value
+            else "The dispatcher is off: tickets start only when someone starts them.",
+        )
+    elif args.sub == "set" and args.key == "workflow.dispatcher_helpers":
+        v = args.value.strip()
+        if not (v.isascii() and v.isdigit()):
+            raise Refused("Give a number of helpers from 1 to 10.")
+        # more helpers spend more: raising is the owner's choice
+        if int(v) > config.dispatcher_helpers(root) and not _actor(args).startswith("human:"):
+            raise Refused(
+                "Only the owner raises this: orch config set in their own terminal. Lowering is fine."
+            )
+        n = config.set_dispatcher_helpers(root, v)
+        _out(
+            args,
+            {"workflow.dispatcher_helpers": n},
+            f"Saved: {n} helpers while the budget is on pace (at most {2 * n} when it is behind).",
         )
     elif args.sub == "set" and args.key == "workflow.release_merge":
         if args.value not in ("on", "off"):

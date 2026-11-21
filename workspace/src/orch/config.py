@@ -703,6 +703,44 @@ def set_release_merge(root: Path, value: bool, by: str | None = None) -> bool:
     return value
 
 
+DISPATCHER_HELPERS_DEFAULT = 3
+DISPATCHER_HELPERS_CHOICES = range(1, 11)
+
+
+def dispatcher_on(root: Path | None) -> bool:
+    """[workflow] dispatcher (default off): `orch run tend` starts Ready and Backlog tickets up to a target
+    that follows the weekly budget pace and the machine load (orch.dispatcher). Only the owner turns it on."""
+    if root is None:
+        return False
+    return file_switch(root, "workflow", "dispatcher", False) is True
+
+
+def set_dispatcher(root: Path, value: bool, by: str | None = None) -> bool:
+    set_key(root, "workflow", "dispatcher", value)
+    return value
+
+
+def dispatcher_helpers(root: Path | None) -> int:
+    """[workflow] dispatcher_helpers: how many helpers the dispatcher keeps working while the budget is
+    exactly on pace (1 to 10, default 3). Behind pace it aims higher (at most twice this), ahead lower."""
+    if root is None:
+        return DISPATCHER_HELPERS_DEFAULT
+    try:
+        v = (read(root).get("workflow") or {}).get("dispatcher_helpers")
+    except Refused:
+        return DISPATCHER_HELPERS_DEFAULT
+    ok = isinstance(v, int) and not isinstance(v, bool) and v in DISPATCHER_HELPERS_CHOICES
+    return v if ok else DISPATCHER_HELPERS_DEFAULT
+
+
+def set_dispatcher_helpers(root: Path, value: str) -> int:
+    v = value.strip()
+    if not (v.isascii() and v.isdigit()) or int(v) not in DISPATCHER_HELPERS_CHOICES:
+        raise Refused("Give a number of helpers from 1 to 10.")
+    set_key(root, "workflow", "dispatcher_helpers", int(v))
+    return int(v)
+
+
 def set_live_idle_minutes(root: Path, value: str) -> int:
     if not value.isdigit() or not 1 <= int(value) <= 10080:
         raise Refused("Give a whole number of minutes, from 1 to 10080 (one week).")

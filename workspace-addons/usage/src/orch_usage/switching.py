@@ -9,7 +9,9 @@ the last minutes and applied to every candidate (the same work moves with the sw
 switch, so an account left early is not taken back until its use drops (a reset) or the work slows down.
 
 Files in .orch/addons/usage/: `settings.json` {"switching": bool} (written by the command; off until the person turns
-it on) and `switching.json` (the loop's own memory: samples, pace, the last choice). Only labels, numbers and times.
+it on), `switching.json` (the loop's own memory: samples, pace, the last choice) and `budget.json` (each look:
+the week and 5-hour use of every subscription that is on, read by orch's dispatcher, ORCH-507). Only labels, numbers
+and times.
 """
 
 from __future__ import annotations
@@ -77,6 +79,33 @@ def _write(p: Path, data: dict) -> None:
 
 def settings_path(root: Path) -> Path:
     return store.usage_dir(root) / "settings.json"
+
+
+def budget_path(root: Path) -> Path:
+    """`budget.json`: the use of every subscription that is on, for orch's dispatcher (schema orch.budget/1)."""
+    return store.usage_dir(root) / "budget.json"
+
+
+def budget(cands: list[Candidate], at: datetime) -> dict:
+    """The orch.budget/1 document: per subscription that is on, its week and 5-hour use and limits. Only
+    numbers and times; an account whose week use is unknown is left out."""
+    rows = []
+    for c in cands:
+        if c.use.disabled:
+            continue
+        caps = dict(_limits(c.account))
+        week, short = c.use.windows.get("week"), c.use.windows.get("5h")
+        if week is None or week.pct is None:
+            continue
+        row = {
+            "week_used": float(week.pct),
+            "week_cap": caps.get("week", 100.0),
+            "week_resets_at": week.resets_at,
+        }
+        if short is not None and short.pct is not None:
+            row.update(short_used=float(short.pct), short_cap=caps.get("5h", 100.0))
+        rows.append(row)
+    return {"schema": "orch.budget/1", "at": _iso(at), "accounts": rows}
 
 
 def memory_path(root: Path) -> Path:
@@ -608,6 +637,7 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     with store._lock(root):
         _write(memory_path(root), memory)
         store._append_history(root, hist)
+        _write(budget_path(root), budget(ch.candidates, at))
     return {
         "at": _iso(at),
         "switcher": True,
