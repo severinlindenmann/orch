@@ -67,3 +67,13 @@ def test_a_workspaces_message_never_counts_as_the_persons_add(proj, run, rel, ho
     m = team_text(host, BANK, i=8, frm=HOME)
     assert cg.phone_team(proj, host, m, "human:iPhone") is None
     assert not cg._is_member(proj, host, BANK)
+
+
+def test_add_works_on_a_reply_to_a_group_copy_too(proj, run, rel, host):
+    inbox(run, rel, team_text(host, HOME))
+    run("relay", "group", "say", host, "Hello group")
+    copy = [m for m in rel.sent if m["to"] == "phones"][-1]["id"]
+    m = team_text(host, BANK, i=9)
+    m["reply_to"] = copy
+    inbox(run, rel, m)
+    assert cg._is_member(proj, host, BANK)

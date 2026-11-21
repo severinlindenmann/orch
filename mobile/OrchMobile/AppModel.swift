@@ -808,7 +808,11 @@ final class AppModel {
         } catch { handle(error) }
     }
     /// Team chat step 2 (ORCH-1175): workspaces the person asked to add, per ticket chat, until the host lists them.
-    var teamAsked: [String: Set<String>] = [:]
+    /// When each was asked; an ask counts for `TeamChatRules.askWindow`, so a refused Add can be tried again.
+    var teamAsked: [String: [String: Date]] = [:]
+    func teamPending(_ workspace: String, _ ticket: String, members: [GroupMember], now: Date = Date()) -> Set<String> {
+        TeamChatRules.pending(teamAsked[Self.teamKey(workspace, ticket)] ?? [:], members: members, now: now)
+    }
     static func teamKey(_ workspace: String, _ ticket: String) -> String { workspace + "|" + ticket }
 
     /// The person's Add in a ticket chat: a text with the choice to the ticket's workspace, which adds the workspace
@@ -824,7 +828,7 @@ final class AppModel {
             let receipt = try await client.send(request)
             await refresh(quiet: true)
             guard receipt.team == true else { message = TeamChatRules.notReady; announcement = message; return false }
-            teamAsked[Self.teamKey(workspace, ticket), default: []].insert(add.id)
+            teamAsked[Self.teamKey(workspace, ticket), default: [:]][add.id] = Date()
             message = nil
             return true
         } catch { handle(error); return false }

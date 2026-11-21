@@ -74,7 +74,7 @@ struct AddToChatSheet: View {
     var body: some View {
         let group = TeamChatRules.group(in: model.groups.groups, workspace: workspace, ticket: ticket)
         let members = TeamChatRules.members(group, workspace: workspace, workspaceName: workspaceName)
-        let waiting = TeamChatRules.pending(model.teamAsked[AppModel.teamKey(workspace, ticket)] ?? [], members: members)
+        let waiting = model.teamPending(workspace, ticket, members: members)
         let candidates = TeamChatRules.candidates(model.workspaces, members: members)
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -152,7 +152,7 @@ struct TeamChatInfoView: View {
     var body: some View {
         let group = TeamChatRules.group(in: model.groups.groups, workspace: workspace, ticket: ticket)
         let members = TeamChatRules.members(group, workspace: workspace, workspaceName: workspaceName)
-        let waiting = TeamChatRules.pending(model.teamAsked[AppModel.teamKey(workspace, ticket)] ?? [], members: members)
+        let waiting = model.teamPending(workspace, ticket, members: members)
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {

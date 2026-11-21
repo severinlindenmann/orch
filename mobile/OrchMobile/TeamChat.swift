@@ -66,9 +66,13 @@ enum TeamChatRules {
     /// The text the person's Add sends with the choice; it stays in the chat as their line.
     static func addText(_ name: String) -> String { "Add \(name) to this chat" }
 
-    /// Waiting rows: workspaces the person asked to add that are not members yet.
-    static func pending(_ asked: Set<String>, members: [GroupMember]) -> Set<String> {
-        asked.subtracting(members.map(\.ws))
+    /// How long an Add shows "Adding…" before the workspace can be picked again (it was refused or did not arrive;
+    /// a refusal is said in the chat).
+    static let askWindow: TimeInterval = 120
+
+    /// Waiting rows: workspaces the person asked to add in the last `askWindow` that are not members yet.
+    static func pending(_ asked: [String: Date], members: [GroupMember], now: Date = Date()) -> Set<String> {
+        Set(asked.filter { now.timeIntervalSince($0.value) < askWindow }.keys).subtracting(members.map(\.ws))
     }
 
     private static func dayText(_ iso: String) -> String? {

@@ -83,7 +83,10 @@ final class TeamChatTests: XCTestCase {
         XCTAssertEqual(TeamChatRules.candidates(mine, members: members).map(\.id), ["ws_rep0000001"])
         XCTAssertTrue(TeamChatStrip.shows(members: [members[0]], candidates: [mine[2]]))
         XCTAssertFalse(TeamChatStrip.shows(members: [members[0]], candidates: []), "nothing to add and nobody else: no strip")
-        XCTAssertEqual(TeamChatRules.pending([home, "ws_rep0000001"], members: members), ["ws_rep0000001"])
+        let now = Date()
+        XCTAssertEqual(TeamChatRules.pending([home: now, "ws_rep0000001": now], members: members, now: now), ["ws_rep0000001"])
+        XCTAssertEqual(TeamChatRules.pending(["ws_rep0000001": now.addingTimeInterval(-121)], members: members, now: now), [],
+                       "after two minutes the workspace can be picked again")
     }
 
     func testStripText() {

@@ -2671,14 +2671,16 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
         _ack_once(root, mid, frm, tid, False, "Got it")
         from orch import chat_groups
 
+        # ORCH-1175: the person's Add from the ticket chat on the phone (body.team, set only on phone texts)
+        added = False
+        with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
+            added = bool(
+                (chat_groups.phone_team(root, tid, msg, "human:" + (who or "phone")) or {}).get("added")
+            )
         with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
             if chat_groups.phone_text(root, tid, msg):  # G8: only a reply to a group copy joins the group
                 return f"added to {tid} and the group", tid
-        # ORCH-1175: the person's Add from the ticket chat on the phone (body.team, set only on phone texts)
-        with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
-            if (chat_groups.phone_team(root, tid, msg, "human:" + (who or "phone")) or {}).get("added"):
-                return f"added to {tid}; added a workspace to its chat", tid
-        return f"added to {tid}", tid
+        return (f"added to {tid}; added a workspace to its chat" if added else f"added to {tid}"), tid
     if tid is None:
         spoken = body.get("voice", {}).get("transcript", "") if isinstance(body.get("voice"), dict) else ""
         said = str(body.get("text") or spoken or "")
