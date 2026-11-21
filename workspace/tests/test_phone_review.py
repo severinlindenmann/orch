@@ -9,7 +9,7 @@ import pytest
 from fakes import WS
 from test_relay_client import msg
 
-from orch import phone_view, review, runs, tickets
+from orch import phone_view, relay, review, runs, tickets
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 PHONE = "ph_iphone0001"
@@ -406,3 +406,145 @@ def _bump_checklist(proj, tid):
         t["checklist"].append({"id": "c_new", "text": "Added after it was shown", "done": False})
 
     tickets.apply_op(proj, tid, op, by="human:dash")
+
+
+# ---- ORCH-444: voice notes, pictures and files added to a Send back on the phone ----------------------
+
+VOICE_B, PHOTO_B, PDF_B = "b_v0icenote000001a", "b_ph0to00000000001", "b_pdf0000000000001"
+PHOTO = {"blob_id": PHOTO_B, "kind": "image", "name": "screen.jpg", "size": 8, "mime": "image/jpeg"}
+
+
+def _send_back(conn, proj, new_ticket, note, n=1):
+    tid = new_ticket(f"files {n}")
+    to_review(proj, tid)
+    phone_view.sync_reviews(proj)
+    q = review_questions(conn)[-1]
+    body = {
+        "question_id": q["body"]["question_id"],
+        "answer": "Send back for changes",
+        "answered_by": "human:iPhone",
+        "verdict": {"verdict": "talk", "digest": q["body"]["digest"], "note": note},
+    }
+    conn.inbox.append(msg(f"m_fb{n:014d}", "answer", body, frm=PHONE, ticket=tid, reply_to=q["id"]))
+    return tid
+
+
+def _files(proj, tid):
+    d = proj / ".orch" / "tickets" / tid / "files"
+    return sorted(p.name for p in d.iterdir()) if d.is_dir() else []
+
+
+def _blobs(conn):
+    conn.blobs[VOICE_B] = b"\x00\x00\x00\x18ftypM4A voice"
+    conn.blobs[PHOTO_B] = b"\xff\xd8\xff\xe0jpeg"
+    conn.blobs[PDF_B] = b"%PDF-1.7 offer"
+
+
+def test_send_back_with_a_voice_note_a_picture_and_a_file_lands_on_the_ticket(proj, run, new_ticket, conn):
+    _blobs(conn)
+    note = {
+        "words": {
+            "text": "Make the logo bigger",
+            "voice": [{"blob_id": VOICE_B, "transcript": "Logo bigger", "lang": "en", "duration": 2.5}],
+        },
+        "files": [
+            PHOTO,
+            {"blob_id": PDF_B, "kind": "file", "name": "../../offer.pdf", "size": 14, "mime": "app/pdf"},
+        ],
+    }
+    tid = _send_back(conn, proj, new_ticket, note)
+    run("relay", "inbox")
+    t = status(run, tid)
+    assert t["status"] == "ready"
+    assert _files(proj, tid) == ["offer.pdf", "screen.jpg", "voice-1.m4a"]  # the phone's name is cleaned
+    step = t["checklist"][-1]["text"]
+    assert step.startswith("Make the logo bigger\n\nI added 3 files to this ticket from the phone: ")
+    base = f".orch/tickets/{tid}/files/"
+    for line in (f"Voice recording: {base}voice-1.m4a", f"Photo: {base}screen.jpg", f"File: {base}offer.pdf"):
+        assert line in step
+    assert step.endswith("Read them first.")
+    (item,) = runs._pending_read(proj, tid)
+    assert "screen.jpg" in item["text"] and item["by"] == "human:iPhone"
+    assert (proj / base / "offer.pdf").read_bytes() == b"%PDF-1.7 offer"
+
+
+def test_files_alone_are_enough_to_send_back(proj, run, new_ticket, conn):
+    _blobs(conn)
+    note = {"files": [PHOTO]}
+    tid = _send_back(conn, proj, new_ticket, note)
+    run("relay", "inbox")
+    t = status(run, tid)
+    assert t["status"] == "ready"
+    assert t["checklist"][-1]["text"] == (
+        "I added a file to this ticket from the phone: "
+        f"Photo: .orch/tickets/{tid}/files/screen.jpg. Read it first."
+    )
+
+
+def test_a_file_the_relay_cannot_serve_yet_keeps_the_answer_for_the_next_pull(
+    proj, run, new_ticket, conn, monkeypatch
+):
+    from test_phone_v3 import _flaky_blob
+
+    _blobs(conn)
+    calls = _flaky_blob(monkeypatch, 1)
+    note = {
+        "words": {"text": "See the picture"},
+        "files": [PHOTO],
+    }
+    tid = _send_back(conn, proj, new_ticket, note)
+    run("relay", "inbox")
+    assert status(run, tid)["status"] == "review"  # the round stays open: nothing decided without the file
+    assert not [m for m in conn.sent if "review_result" in m["body"]]
+    run("relay", "inbox")
+    t = status(run, tid)
+    assert t["status"] == "ready" and calls["n"] == 2
+    assert "Photo: " in t["checklist"][-1]["text"] and _files(proj, tid) == ["screen.jpg"]
+    (r,) = [m for m in conn.sent if "review_result" in m["body"]]
+    assert r["body"]["review_result"]["result"] == "applied"
+
+
+def test_a_file_that_never_comes_is_named_and_the_answer_still_counts(
+    proj, run, new_ticket, conn, monkeypatch
+):
+    from test_phone_v3 import _flaky_blob
+
+    from orch import relay
+
+    _blobs(conn)
+    _flaky_blob(monkeypatch, 99)
+    monkeypatch.setattr(relay, "PHONE_RETRY_SECONDS", 0)
+    note = {
+        "words": {"text": "See the picture"},
+        "files": [PHOTO],
+    }
+    tid = _send_back(conn, proj, new_ticket, note)
+    for _ in range(relay.PHONE_TRIES + 1):
+        run("relay", "inbox")
+    t = status(run, tid)
+    assert t["status"] == "ready"
+    assert "Photo screen.jpg: could not be downloaded." in t["checklist"][-1]["text"]
+
+
+def test_the_file_line_never_cuts_the_persons_words():
+    """Codex review: a 2,000-character note lost its end to the file line; now the short line is used."""
+    saved = ["Photo: .orch/tickets/t_x/files/screen.jpg", "File: .orch/tickets/t_x/files/offer.pdf"]
+    own = "x" * 1900 + " Do not publish."
+    out = relay._note_with_files({"words": {"text": own}}, saved)
+    text = out["words"]["text"]
+    assert text.startswith(own) and len(text) <= relay.NOTE_WORDS_MAX
+    assert text.endswith("I added 2 files from the phone to this ticket's files. Read them first.")
+    short = relay._note_with_files({"words": {"text": "Bigger logo"}}, saved)["words"]["text"]
+    assert "screen.jpg" in short and "offer.pdf" in short  # names when they fit
+
+
+def test_the_file_line_reaches_the_helper_with_twenty_changes():
+    """Codex review: at 20 changes the line was only in words, which the helper's task does not read."""
+    changes = [f"change {i}" for i in range(relay.NOTE_CHANGES_MAX)]
+    out = relay._note_with_files({"changes": changes}, ["Photo: .orch/tickets/t_x/files/screen.jpg"])
+    assert len(out["changes"]) == relay.NOTE_CHANGES_MAX
+    assert out["changes"][:-1] == changes[:-1]
+    assert out["changes"][-1].startswith("change 19 I added a file to this ticket from the phone: ")
+    assert all(len(c) <= relay.NOTE_CHANGE_MAX for c in out["changes"])
+    few = relay._note_with_files({"changes": ["a"]}, ["Photo: p.jpg"])["changes"]
+    assert few == ["a", "I added a file to this ticket from the phone: Photo: p.jpg. Read it first."]

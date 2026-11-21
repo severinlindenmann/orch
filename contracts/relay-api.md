@@ -47,7 +47,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | GET | `/v1/inbox?wait=0..30` | – | `{items: [message…], next: null}` not yet acked, oldest first, max 100. `wait` = long-poll seconds |
 | POST | `/v1/inbox/ack` | `{ids: [m_…]}` | `204`. Acked messages are no longer delivered (the admin can still read them). The relay keeps the ack time; for a phone's text it is that text's `delivered_at` (Phone API) |
 | POST | `/v1/blobs` | raw bytes, max 100 MB | `201 {blob_id, size, sha256}` |
-| GET | `/v1/blobs/<blob_id>` | – | raw bytes; only for the uploader, receivers of a `file` message with this blob, and the workspace a stored phone text names it in (`body.attachments[].blob_id`, `body.voice.blob_id`, `body.feedback.pins[].voice_blob_id` of a phone text whose `to` is exactly the calling workspace; never via `to: phones`), the workspace a phone answer names it in (`body.verdict.note.words.voice[].blob_id` of a stored phone `answer` whose `to` is exactly the calling workspace), else `404`. That access lasts as long as the phone text is stored: removing the workspace from the phone or signing the phone out does not take it back. Always served as `application/octet-stream` |
+| GET | `/v1/blobs/<blob_id>` | – | raw bytes; only for the uploader, receivers of a `file` message with this blob, and the workspace a stored phone text names it in (`body.attachments[].blob_id`, `body.voice.blob_id`, `body.feedback.pins[].voice_blob_id` of a phone text whose `to` is exactly the calling workspace; never via `to: phones`), the workspace a phone answer names it in (`body.verdict.note.words.voice[].blob_id` or `body.verdict.note.files[].blob_id` of a stored phone `answer` whose `to` is exactly the calling workspace), else `404`. That access lasts as long as the phone text is stored: removing the workspace from the phone or signing the phone out does not take it back. Always served as `application/octet-stream` |
 | POST | `/v1/webhooks` | `{mode: "once"\|"permanent", ticket?}` | `201 {id, url}`; `url` = `https://relay.severin.io/webhook/<id>?token=whk_…` (shown once) |
 | GET | `/v1/webhooks` | – | list of `{id, mode, ticket, created_at, last_call_at}` (own only) |
 | DELETE | `/v1/webhooks/<id>` | – | `204` |
@@ -265,17 +265,32 @@ has one cell per column (the two rules the schema cannot say); every `{"file": i
 `card_files` blob was uploaded by the sender (`404 not_found` otherwise, unknown ids included) with exactly that `size` and
 `sha256`; the sizes add up to at most 20 MB.
 
+*Run cards on the phone* (ORCH-848/860; `$defs/card_run`, the `card-run-*` and `run-*` shapes of vectors/review-card-v1.json).
+A card of kind `run` asks the person to run one command. It carries `run` = `{command, class, changes?, undo?, phone}` and
+`no_label` (one of orch's own fixed words for the other answer); every other kind carries neither. `run` is what the phone
+shows, never what runs: no folder, program path or argv goes on the wire; the computer runs only the command it stored and
+checks it again at run time (`runcard.check_spec`, the digest). `command` is one line of at most 300 characters with no
+control, zero-width or bidi character and no shell operator. `phone: true` (Run it now on this phone) is allowed only with
+`class: orch` (orch's own operations); any other class shows the command with Copy and one line why. The phone's Run it now
+is a plain `verdict: ok` with the digest it was shown; `no` is the `no_label` answer. The relay checks only the shape; the
+workspace decides (`relay._apply_run`: a paired phone, orch's own operations only, the digest, one run at a time) and answers
+with the review result (`applied` = it ran and the setting is in place; `refused` = it did not run or did not work).
+
 *Answer (phone → relay → workspace).* `POST /v1/phone/answer` takes an optional `verdict` = `{verdict: ok|no|talk, picked?,
 digest, note?}` (`$defs/verdict`: changes ≤ 20 × 500, words.text ≤ 2000, words.voice ≤ 3 `{blob_id, transcript ≤ 2000, lang,
-duration ≤ 120}`, pins ≤ 30 `{n, on?, x 0..1, y 0..1, text?}`; `picked` null with `no`; no other keys, so it cannot name a
+duration ≤ 120}`, files ≤ 5 `{blob_id, kind: image|file|voice, name ≤ 120, size, mime, duration?}` (what the person recorded or
+added to the answer), pins ≤ 30 `{n, on?, x 0..1, y 0..1, text?}`; `picked` null with `no`; no other keys, so it cannot name a
 ticket or question). `answer` stays required: the phone's own plain line for the swipe, for old readers only. The relay
 refuses the verdict (`422 invalid`) on a question without `body.digest`, when `verdict.digest` is not exactly that
-`body.digest`, or when it is over **8192 bytes** as compact UTF-8 JSON (`review.MAX_NOTE_BYTES`); every voice `blob_id` must be
-an upload of **this** phone (`404 not_found` for another phone's, a workspace's or an unknown blob; the same rule as `send`).
+`body.digest`, or when it is over **8192 bytes** as compact UTF-8 JSON (`review.MAX_NOTE_BYTES`); every voice and files `blob_id`
+must be an upload of **this** phone (`404 not_found` for another phone's, a workspace's or an unknown blob; the same rule as
+`send`), and a file's `size` must be the uploaded size (`422 invalid`).
 It then copies `verdict` unchanged into the answer body (`ticket`, `key`, `question_id` from the question, as for every
 answer). First answer wins (`409 already_answered`), as for every question: a phone cannot change its verdict once the relay
 stored it; until then it sits in the phone's Outbox and may be changed there (M4). A blob named in an answer counts as used
-(not deleted after 24 h).
+(not deleted after 24 h). Before it decides, the workspace saves every voice and `files` blob of a verdict it can still use in the
+ticket's files and adds one line naming them to the person's words, so the helper reads them (a file it cannot fetch is named as
+not downloaded).
 
 *Workspace rules* (vectors/review-card-v1.json `workspace`, review-question-v1.json `verdict_cases`). It acts on a verdict only
 as for every phone answer (human-proof.md "Phone actions"): fetched itself, `from` a phone of its `phones` list, not

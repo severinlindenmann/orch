@@ -1,0 +1,9 @@
+# Public side of publish: goes into /etc/caddy/sites/ on the server (Caddy gets TLS itself).
+# The admin page (<private IP>:8411) and the private-app listener (<private IP>:8410) listen on the
+# private network only and never get a route here.
+publish.severin.io {
+	request_body {
+		max_size 110MB
+	}
+	reverse_proxy 127.0.0.1:8102
+}

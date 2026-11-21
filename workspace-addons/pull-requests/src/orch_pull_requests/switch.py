@@ -127,7 +127,7 @@ def tend(root: Path, gh, clock=time.time, log=print, start=None) -> dict:
     "removed": [url], "skipped": [(url, why)]}. Refused when the tickets cannot be read (nothing is queued)."""
     from orch import stuck, tickets
 
-    from .runner import admit, merge_cards, pr_key
+    from .runner import _release_fix, admit, merge_cards, pr_key
 
     try:
         all_tickets = tickets.list_all(root)
@@ -196,7 +196,9 @@ def tend(root: Path, gh, clock=time.time, log=print, start=None) -> dict:
             head = v["headRefOid"]
             tries = prev.get("tries", 0) + 1 if prev.get("head") == head else 1
             by = BY if on else BY_STOPPED
-            queue[k], _ = store.add(root, url, t["id"], by, **got)  # linked on two tickets: queued once
+            fix = _release_fix(root, t["id"])  # a release keeper's red-run fix goes first (ORCH-1023)
+            # linked on two tickets: queued once
+            queue[k], _ = store.add(root, url, t["id"], by, first=fix, **got)
             seen[k] = {"head": head, "tries": tries, "at": now, "ticket": t["id"]}
             out["added"].append(url)
             if on:

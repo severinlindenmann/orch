@@ -1437,3 +1437,18 @@ def test_github_skill_in_a_folder_with_spaces_and_umlauts(proj, run, fake_gh, mo
     _git(folder, "remote", "add", "origin", "ssh://git@github.com/acme/billing.git")
     assert run("init")[0] == 0
     assert _github_skill_is_on(folder)
+
+
+def test_init_warns_by_name_when_git_would_commit_an_orch_file(proj, run):
+    _git_repo(proj)
+    run("init")
+    assert harness.git_visible_warning(proj) is None  # tickets and private files stay ignored
+    (proj / ".orch" / "ask-when.md").write_text("x\n", encoding="utf-8")
+    warn = harness.git_visible_warning(proj)
+    assert warn and ".orch/ask-when.md" in warn
+    assert "tickets" not in warn
+
+
+def test_no_git_no_warning(proj, run):
+    run("init")
+    assert harness.git_visible_warning(proj) is None
