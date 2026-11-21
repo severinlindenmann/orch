@@ -192,3 +192,132 @@ def test_start_with_session_continues_that_conversation(proj, run, new_ticket, t
     code, out, err = run("run", "start", tid, "--session", "s-one", "--by", "human:p", "--json")
     assert code == 0, err
     assert seen["agent"] == "claude" and seen["sid"] == "s-one" and seen["fresh"] is False
+
+
+def _helper_session(tmp_path, sid, turns):
+    """A helper session as orch starts it: orch's notice is the first user turn, never a person's words."""
+    claude = tmp_path / "c"
+    _w(claude / "projects" / "-Users-a-ws" / f"{sid}.jsonl", turns)
+    return {"CLAUDE_CONFIG_DIR": str(claude), "HOME": str(tmp_path)}
+
+
+def _u(text, at):
+    return {"type": "user", "timestamp": at, "message": {"role": "user", "content": text}}
+
+
+def _a(text, at):
+    return {"type": "assistant", "timestamp": at, "message": {"content": [{"type": "text", "text": text}]}}
+
+
+def _ticket(checklist, title="Daily summary"):
+    return {"title": title, "checklist": checklist, "sessions": [{"agent": "claude", "id": SID, "host": "h"}]}
+
+
+def test_title_never_shows_orchs_notice(tmp_path):
+    """ORCH-678: the History title of a helper session was orch's start notice with an id and a command."""
+    env = _helper_session(
+        tmp_path,
+        SID,
+        [
+            _u(
+                "Your task for orch ticket t_72a9ii is ready. Read it with: orch run input t_72a9ii",
+                "2026-11-18T20:08:00.100Z",
+            ),
+            _a("Reading the task.", "2026-11-18T20:08:05.000Z"),
+            _u(
+                "New input on orch ticket t_72a9ii. Read it with: orch run input t_72a9ii",
+                "2026-11-18T20:20:00.000Z",
+            ),
+            _a("Done.", "2026-11-18T20:30:00.000Z"),
+        ],
+    )
+    steps = [
+        {
+            "id": "c1",
+            "text": "Old step from yesterday",
+            "done": True,
+            "evidence": [{"at": "2026-11-17T09:00:00Z"}],
+        },
+        {
+            "id": "c2",
+            "text": "Collect the orders",
+            "done": True,
+            "evidence": [{"at": "2026-11-18T20:10:00Z"}],
+        },
+        {
+            "id": "c3",
+            "text": "Write the summary for the team",
+            "done": True,
+            "evidence": [{"at": "2026-11-18T20:29:00Z"}],
+        },
+        {"id": "c4", "text": "Not done", "done": False, "evidence": []},
+    ]
+    row = session_history.sessions(_ticket(steps), env)[0]
+    assert "orch run input" not in row["title"] and "t_72a9ii" not in row["title"]
+    assert row["title"] == "Write the summary for the team"
+
+
+def test_title_step_in_progress_then_ticket_title(tmp_path):
+    turns = [
+        _u(
+            "Your task for orch ticket t_72a9ii is ready. Read it with: orch run input t_72a9ii",
+            "2026-11-18T20:08:00Z",
+        ),
+        _a("Working.", "2026-11-18T20:09:00Z"),
+    ]
+    env = _helper_session(tmp_path, SID, turns)
+    doing = [
+        {
+            "id": "c1",
+            "text": "Collect the orders",
+            "done": False,
+            "state": "doing",
+            "at": "2026-11-18T20:08:30Z",
+        }
+    ]
+    assert session_history.sessions(_ticket(doing), env)[0]["title"] == "Collect the orders"
+    # no step in the session's time: the ticket's own title, never the notice
+    assert session_history.sessions(_ticket([]), env)[0]["title"] == "Daily summary"
+
+
+def test_title_first_person_words_after_the_notice(tmp_path):
+    env = _helper_session(
+        tmp_path,
+        SID,
+        [
+            _u("Work on orch ticket t_72a9ii: Daily summary.", "2026-11-18T20:08:00Z"),
+            _u("Please also add the returns", "2026-11-18T20:09:00Z"),
+        ],
+    )
+    assert session_history.sessions(_ticket([]), env)[0]["title"] == "Please also add the returns"
+
+
+def test_title_step_proved_again_later_stays_with_its_session(tmp_path):
+    turns = [
+        _u(
+            "Your task for orch ticket t_72a9ii is ready. Read it with: orch run input t_72a9ii",
+            "2026-11-18T20:08:00Z",
+        ),
+        _a("Done.", "2026-11-18T20:30:00Z"),
+    ]
+    env = _helper_session(tmp_path, SID, turns)
+    ev = [{"at": "2026-11-18T20:10:00Z"}, {"at": "2026-11-19T09:00:00Z"}]
+    steps = [{"id": "c1", "text": "Collect the orders", "done": True, "evidence": ev}]
+    assert session_history.sessions(_ticket(steps), env)[0]["title"] == "Collect the orders"
+
+
+def test_title_long_session_counts_work_after_the_turns_read(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_history, "MAX_TURNS", 2)
+    turns = [
+        _u(
+            "Your task for orch ticket t_72a9ii is ready. Read it with: orch run input t_72a9ii",
+            "2026-11-18T20:08:00Z",
+        ),
+        _a("Working.", "2026-11-18T20:09:00Z"),
+        _a("Still working.", "2026-11-18T21:00:00Z"),
+    ]
+    env = _helper_session(tmp_path, SID, turns)
+    steps = [
+        {"id": "c1", "text": "Write the summary", "done": True, "evidence": [{"at": "2026-11-18T20:59:00Z"}]}
+    ]
+    assert session_history.sessions(_ticket(steps), env)[0]["title"] == "Write the summary"

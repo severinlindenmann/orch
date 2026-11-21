@@ -60,8 +60,15 @@ if args[:2] == ["ticket", "new"]:
 elif args[:2] == ["ticket", "show"]:
     result = load(args[2])
 elif args[:2] == ["ticket", "list"]:
-    assert args[2:] == ["--all"]
+    assert args[2:] in (["--all"], ["--all", "--ext", "factory"])
     result = [json.loads(p.read_text()) for p in sorted(folder.iterdir())]
+    if "--ext" in args:  # ORCH-603: only tickets with that add-on's data, no children counts
+        if (root / "old-core").exists():  # an orch without --ext: argparse error, nothing on stdout
+            sys.exit(2)
+        result = [t for t in result if args[-1] in (t.get("ext") or {})]
+    elif (root / "no-full-list").exists():
+        print(json.dumps({"error": "A full ticket list was asked for.", "code": "refused"}))
+        sys.exit(2)
 elif args[:2] == ["ext", "set"]:
     t = load(args[2])
     if t["revision"] != int(flag("--if-revision")) or (root / "fail-ext").exists():

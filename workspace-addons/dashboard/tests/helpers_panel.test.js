@@ -73,6 +73,20 @@ test('kit: the meta line and the summary use the same words on every page', () =
   assert.equal(UI.helperSummary([{state:'you'}, {state:'you'}]), '2 wait for you');
 });
 
+test('ORCH-643: a helper stopped on the usage limit shows Stopped: usage limit and when it continues, after stuck', () => {
+  const run = {running:true, helper:{state:'limit', word:'Stopped: usage limit', detail:'Continues at 19:10'}};
+  assert.deepEqual({...helpers.helperState(run, {})}, {state:'limit', word:'Stopped: usage limit', detail:'Continues at 19:10'});
+  const rows = helpers.helperRows([{id:'l', status:'active'}, {id:'s', status:'active'}],
+    {l:run, s:{running:true, helper:{state:'stuck', detail:'Nothing running for 25 min'}}});
+  assert.deepEqual(rows.map(r => r.state), ['stuck', 'limit']);
+  const UI = kit();
+  assert.equal(UI.helperMeta({state:'limit', minutes:52, detail:'Continues at 19:10'}), 'Continues at 19:10');
+  assert.equal(UI.helperSummary([{state:'working'}, {state:'limit'}, {state:'limit'}]), '1 working · 2 stopped on the usage limit');
+  assert.match(UI.helperPill('limit', 'Stopped: usage limit').className, /^pill helper-pill$/);
+  const s = UI.ticketState({status:'active'}, {state:'limit', word:'Stopped: usage limit', detail:'Continues at 19:10'});
+  assert.equal(s.word, 'Stopped: usage limit'); assert.equal(s.pill, 'check');
+});
+
 test('kit: the Helpers list shows ORCH-n, title, the worded pill and the row buttons; an empty list says so', () => {
   const UI = kit();
   let pressed = '';

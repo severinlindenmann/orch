@@ -71,22 +71,50 @@ def _tmux(socket: str, *args: str, timeout: float = TIMEOUT) -> subprocess.Compl
     )
 
 
-def ref(root: Path, orch_bin: str | None, tid: str) -> tuple[str, str] | str:
+def ref(root: Path, orch_bin: str | None, tid: str, plain: bool = False) -> tuple[str, str] | str:
     """(socket, session) of the ticket's live session, or the plain reason there is none: 'oneshot' (a run that
-    works one step at a time), 'none' (nothing runs), 'notmux' (this machine cannot show it)."""
+    works one step at a time), 'none' (nothing runs), 'notmux' (this machine cannot show it). plain: the plain
+    terminal's shell counts too (only the terminal bridge, ORCH-743; the screen and keys routes stay helpers')."""
+    return ref_kind(root, orch_bin, tid, plain)[0]
+
+
+def ref_kind(
+    root: Path, orch_bin: str | None, tid: str, plain: bool = False
+) -> tuple[tuple[str, str] | str, bool]:
+    """ref(), and whether it is the plain terminal's shell (its typing has its own switch, ORCH-261). With plain,
+    the plain terminal is looked for first: an id that is both counts as the shell (the stricter switch)."""
     if not TID.fullmatch(tid or ""):
-        return "none"
-    status = run_orch(orch_bin, ["run", "status", tid, "--json"], root)
-    claim = (status or {}).get("claim") if isinstance(status, dict) else None
-    if not isinstance(claim, dict) or not (status or {}).get("running"):
-        return "none"
+        return "none", False
+    claim = _plain_terminal(root, orch_bin, tid) if plain else None
+    shell = claim is not None
+    if claim is None:
+        status = run_orch(orch_bin, ["run", "status", tid, "--json"], root)
+        claim = (status or {}).get("claim") if isinstance(status, dict) else None
+        if not isinstance(claim, dict) or not (status or {}).get("running"):
+            return "none", shell
     t = claim.get("tmux")
     if not isinstance(t, dict):
-        return "oneshot"
+        return "oneshot", shell
     sock, sess = t.get("socket"), t.get("session")
     if not (isinstance(sock, str) and SOCKET.fullmatch(sock) and isinstance(sess, str) and sess == tid):
-        return "none"
-    return (sock, sess) if shutil.which("tmux") else "notmux"
+        return "none", shell
+    return ((sock, sess) if shutil.which("tmux") else "notmux"), shell
+
+
+def _plain_terminal(root: Path, orch_bin: str | None, tid: str) -> dict | None:
+    """{tmux: {socket, session}} of the plain terminal (a session without a ticket, ORCH-743) when tid is its
+    hidden ticket and its shell runs; from `orch session list`, checked by ref() like a run's claim."""
+    listed = run_orch(orch_bin, ["session", "list", "--json"], root)
+    rows = listed.get("sessions") if isinstance(listed, dict) else None
+    for row in rows if isinstance(rows, list) else []:
+        if (
+            isinstance(row, dict)
+            and row.get("kind") == "terminal"
+            and row.get("id") == tid
+            and row.get("open")
+        ):
+            return {"tmux": row["tmux"]} if isinstance(row.get("tmux"), dict) else None
+    return None
 
 
 def snapshot(root: Path, orch_bin: str | None, tid: str) -> dict:

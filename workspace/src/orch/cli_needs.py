@@ -13,6 +13,8 @@ def add_parsers(sub, common) -> None:
     x = sub.add_parser("needs", parents=[common], help="what waits for a person")
     # orch's own detached run: asks GitHub about pull requests left open (stuck.py), prints nothing
     x.add_argument("--look-at-pulls", action="store_true", help=argparse.SUPPRESS)
+    # orch's own detached run: saves a fresh answer of an add-on that was late (needs.refresh), prints nothing
+    x.add_argument("--refresh-addon", metavar="NAME", help=argparse.SUPPRESS)
     sub.add_parser(
         "counts", parents=[common], help="the numbers every page shows (needs you, working, stuck)"
     )
@@ -55,6 +57,9 @@ def dispatch(args, root: Path) -> bool:
         from orch import history, stuck, tickets
 
         stuck.look(root, history.shown_json(root, tickets.list_all(root)))
+        return True
+    if args.refresh_addon:
+        needs_mod.refresh(root, args.refresh_addon)
         return True
     rows = needs_mod.needs(root)
     if args.json:

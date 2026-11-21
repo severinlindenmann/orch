@@ -6,6 +6,7 @@ from `rel.sent` and checked against the contract (schemas + rules) every time.""
 
 import hashlib
 import json
+import os
 import re
 import sys
 import unicodedata
@@ -45,8 +46,8 @@ def _expand(node):
     return node
 
 
-_MSG = _expand(json.loads((CONTRACTS / "message.schema.json").read_text()))
-_CG = _expand(json.loads((CONTRACTS / "chat-groups.schema.json").read_text()))
+_MSG = _expand(json.loads((CONTRACTS / "message.schema.json").read_text(encoding="utf-8")))
+_CG = _expand(json.loads((CONTRACTS / "chat-groups.schema.json").read_text(encoding="utf-8")))
 _V = [
     Draft202012Validator(_MSG, format_checker=FormatChecker()),
     Draft202012Validator(
@@ -2409,6 +2410,8 @@ def test_a_huge_jump_when_first_seen_and_group_wide_without_seq(proj, run, rel, 
 
 @pytest.mark.parametrize("folder", ["SECRETS", "Secrets", "secrets.", "secrets "])
 def test_secrets_folder_is_matched_without_case_or_trailing_dots(proj, run, rel, host, folder):
+    if os.name == "nt" and folder != folder.rstrip(" ."):
+        pytest.skip("Windows drops a trailing space or dot from a folder name")
     run("relay", "group", "add", host, HOME)
     d = proj / folder
     try:

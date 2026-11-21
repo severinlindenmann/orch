@@ -211,7 +211,24 @@ def read(root: Path, want: dict[str, list[int]], data: dict, fetch=gh.fetch) -> 
             if r.get("repo") == repo and gone:
                 del data["prs"][url]
     data["polled_at"] = stamp
+    keep_queue_verdict(root, data)
     return data
+
+
+def keep_queue_verdict(root: Path, data: dict) -> None:
+    """A pull request the queue dropped for a red group keeps "checks failed" until it gets a new commit or is
+    added again: its own checks are green, so GitHub alone would show it as ready to merge again (ORCH-910)."""
+    try:
+        rows = store.read(root)
+    except Exception:  # noqa: BLE001 - a damaged queue file must not stop the refresh
+        return
+    for url, r in data["prs"].items():
+        if r.get("state") != "OPEN" or r.get("status") in ("checks failed", "draft", "closed", "merged"):
+            continue
+        mine = store.find(rows, store.canonical(url))
+        sha = r.get("head_sha")
+        if mine and mine.get("state") == store.OUT and sha and mine.get("red_head") == sha:
+            r["status"] = "checks failed"
 
 
 def answer(t: dict, data: dict) -> dict:
@@ -253,7 +270,9 @@ def apply(root: Path, ts: list[dict], data: dict) -> list[str]:
     """Refresh each ticket whose links show something else now. Returns the ticket ids refreshed."""
     done = []
     for t in ts:
-        if not links(t):
+        # the core refuses every write by an add-on to a closed ticket (guard closed_ticket): asking each pass
+        # only fills the debug log and trips the ticket_op_refused health check (ORCH-418)
+        if not links(t) or not open_ticket(t):
             continue
         res = answer(t, data)
         if res["refs"] and differs(t, res):

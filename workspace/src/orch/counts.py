@@ -23,7 +23,7 @@ from datetime import datetime
 
 OPEN_DONE = ("done", "dropped")
 WONT_DO = "won't do"  # the one word for a task that will not be done (never "skipped")
-HELPER_STATES = ("working", "starting", "you", "waiting", "idle", "stuck")
+HELPER_STATES = ("working", "starting", "you", "waiting", "idle", "stuck", "limit")
 WORKING = ("working", "starting")  # what "N working" counts
 
 

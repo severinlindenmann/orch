@@ -13,7 +13,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-from orch import harness, skills
+from orch import harness, skills, skillstatus
 
 _SEC = re.compile(r"\{\{([#^])(\w+)\}\}(.*?)\{\{/\2\}\}", re.S)
 _TAG = re.compile(r"\{\{[#^/]\w+\}\}")
@@ -198,6 +198,7 @@ def sync_github(root: Path) -> bool:
     dest = skills.harness_skill(root, GITHUB_SKILL)
     if github_on(root):
         body, block = render_skill(src, facts_for(root, GITHUB_SKILL))
+        body = skillstatus.mark_deprecated(body)
         if (
             dest.is_dir()
             and (dest / "SKILL.md").is_file()
@@ -235,6 +236,7 @@ def render_installed(root: Path, addon: str, source: Path) -> bool:
         return False  # a plain skill: install_skill already copied it
     dest = skills.harness_skill(root, skill) / "SKILL.md"
     body, block = render_skill(source, facts_for(root, skill))
+    body = skillstatus.mark_deprecated(body)
     changed = False
     if not dest.is_file() or dest.read_text(encoding="utf-8") != body:
         _safe_write(root, dest, body)

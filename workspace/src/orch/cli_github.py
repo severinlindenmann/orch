@@ -36,7 +36,7 @@ import argparse
 import json
 from pathlib import Path
 
-from orch import ghlimit, tickets
+from orch import ghlimit, nextstep, tickets
 from orch.errors import Refused
 
 
@@ -108,6 +108,7 @@ def _release(args, root: Path | None) -> None:
         print(json.dumps(res) if args.json else rk.green_text(res))
     elif args.sub == "release":
         res = rk.run(root, dry_run=args.dry_run, known=rk.parse_known(args.known_red))
+        nextstep.remember(args, res)
         print(json.dumps(res, indent=2, default=str) if args.json else rk.text(res, args.dry_run))
     elif args.sub == "release-exception":
         _exception(args, root, rk)
@@ -183,6 +184,7 @@ def dispatch(args, root: Path | None) -> bool:
         from orch import devexpert
 
         res = devexpert.run(root, dry_run=args.dry_run, known=devexpert.parse_known(args.known))
+        nextstep.remember(args, res)
         print(json.dumps(res, indent=2, default=str) if args.json else devexpert.text(res, args.dry_run))
         return True
     if args.sub == "retries":

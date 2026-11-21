@@ -322,6 +322,7 @@ HELPER_WORDS = {
     "waiting": "On hold",  # never a bare "Waiting": the owner's word for a waiting ticket is Needs you
     "idle": "Idle",
     "stuck": "Stuck",
+    "limit": "Stopped: usage limit",  # ORCH-643: noted by the watcher (limitstop); it continues by itself
 }
 
 
@@ -361,6 +362,30 @@ def helper_state(sig: str, waits: list[dict], idle_seconds: int | None) -> dict 
     return {"state": key, "word": HELPER_WORDS[key], "detail": detail}
 
 
+def limit_state(root: Path, tid: str, rec: dict | None = None, now: float | None = None) -> dict | None:
+    """ORCH-643: the helper state of a ticket the watcher noted as stopped on the usage limit (limitstop),
+    with the time orch starts it again; None when the ticket is not noted, or when its helper started working
+    again after the note (a person's prompt or start; the note stays until the reset). Home showed such a
+    helper as working or as waiting for an OK on the screen (report r-1118-1812-ws)."""
+    from orch import limitstop
+
+    data = limitstop.read(root)
+    noted = (data.get("tickets") or {}).get(tid)
+    if not isinstance(noted, dict):
+        return None
+    live = (rec or {}).get("live") or {}
+    if live.get("state") in ("working", "starting"):
+        try:
+            if runs._parse(live.get("since")) > float(noted.get("at") or 0):
+                return None  # it went on after the note
+        except (TypeError, ValueError):
+            pass
+    now = time.time() if now is None else now
+    at = limitstop.until(data)  # the reset plus the short wait: when the watcher starts it again
+    detail = f"Continues at {limitstop.clock(at)}" if at is not None and at > now else "Continues shortly"
+    return {"state": "limit", "word": HELPER_WORDS["limit"], "detail": detail}
+
+
 def _is_cmd(w: dict) -> bool:
     return w.get("kind") == "command" and bool(w.get("label") or w.get("doing"))
 
@@ -389,9 +414,12 @@ def describe(root: Path, tid: str, rec: dict | None = None, table: list | None =
     waits = waiting_on(root, rec, ticket, table)
     since = idle_since(rec)
     sig = signal(rec, waits)
+    helper = helper_state(sig, waits, _age(since))
+    if helper is not None:
+        helper = limit_state(root, tid, rec) or helper
     return {
         "signal": sig,
-        "helper": helper_state(sig, waits, _age(since)),
+        "helper": helper,
         "last_activity": last_activity(root, ticket),
         "waiting_on": waits,
         "idle_since": since,
@@ -445,9 +473,20 @@ def list_runs(root: Path) -> list[dict]:
     return out
 
 
-def list_text(rows: list[dict]) -> str:
+def line_text(line: list[dict]) -> str:
+    """The tickets waiting for a free helper place, in the order they start ('' when none)."""
+    if not line:
+        return ""
+    names = ", ".join(
+        q["key"] + (f" ({q['priority']})" if q.get("priority") not in (None, "normal") else "") for q in line
+    )
+    return f"Waiting for a free helper place, in this order: {names}."
+
+
+def list_text(rows: list[dict], line: list[dict] | None = None) -> str:
+    waits = line_text(line or [])
     if not rows:
-        return "No runs right now."
+        return "No runs right now." + (f"\n{waits}" if waits else "")
     head = ("TICKET", "RUN", "MODEL", "AGE", "SIGNAL", "IDLE", "WAITING ON")
     body = [
         (
@@ -463,7 +502,7 @@ def list_text(rows: list[dict]) -> str:
     ]
     widths = [max(len(str(x[i])) for x in [head, *body]) for i in range(len(head) - 1)]
     fmt = "  ".join(f"{{:<{w}}}" for w in widths) + "  {}"
-    return "\n".join(fmt.format(*row) for row in [head, *body])
+    return "\n".join(fmt.format(*row) for row in [head, *body]) + (f"\n\n{waits}" if waits else "")
 
 
 def screen(root: Path, tid: str, lines: int = SCREEN_LINES) -> dict:
@@ -497,9 +536,84 @@ def _rows(text: str, n: int) -> tuple[list[str], str | None]:
     raw = text.rstrip("\n").split("\n")
     rows = [runs_live.clean(_ANSI.sub("", ln)).rstrip() for ln in raw]
     hint = _suggestion(raw, rows)
+    rows = _below_frame_dropped(rows)
+    rows = _banner_dropped(rows)
+    rows = [r for r in rows if not (_is_frame(r) or _is_notice(r) or _is_tip(r))]
+    # at most one blank row in a row: padding must not fill a short view
+    rows = [r for i, r in enumerate(rows) if r.strip() or (i and rows[i - 1].strip())]
     while rows and not rows[-1].strip():
         rows.pop()
     return rows[-n:], hint
+
+
+_PROMPT = re.compile(r"^\s*[>\u276f\u203a]")
+
+
+def _below_frame_dropped(rows: list[str]) -> list[str]:
+    """The tool's status rows under its prompt box (model, usage, mode, shortcuts) are frame, not work.
+    Only when the box is found (a rule, a prompt row, a rule) are the rows under it dropped."""
+    rules = [i for i, r in enumerate(rows) if _RULE.match(r)]
+    for b in reversed(rules):
+        a = next((i for i in reversed(rules) if i < b), None)
+        if a is not None and _PROMPT.match(rows[a + 1]) and b - a <= 12:
+            return rows[: b + 1]
+    return rows
+
+
+_RULE = re.compile(r"^[\s\u2500-\u257f\-=_~]{3,}$")  # a row of box lines or dashes
+_EMPTY_PROMPT = re.compile(r"^\s*[>\u276f\u203a]\s*$")
+_FOOTER = re.compile(r"^\s*(\? for shortcuts|\u23f5\u23f5)")
+
+
+def _is_frame(row: str) -> bool:
+    """The tool's own prompt frame (rows of rules, an empty prompt, the shortcut footer) says nothing about
+    the work, and fills the last lines of a narrow or short view. Typed or suggested prompt text stays."""
+    return bool(_RULE.match(row) or _EMPTY_PROMPT.match(row) or _FOOTER.match(row))
+
+
+# ORCH-707: a fresh session starts with the tool's banner (a block-glyph logo or a rounded box beside its
+# name, version and the full folder path), orch's own notice line at the prompt and tool tips. None of it is
+# work, and ids, a path and commands must not reach a person in the last lines.
+_BANNER_START = re.compile(r"^\s*[\u2580-\u259f\u256d]")  # logo block glyphs, or a rounded box top
+_BANNER_ROW = re.compile(r"^\s*[\u2580-\u259f\u256d\u2502\u2570]")  # ... and its sides and bottom
+_VERSION = re.compile(r"\bv\d+\.\d+|\b\d+\.\d+\.\d+\b")
+_NOTICE_ROW = re.compile(
+    r"^\s*(?:[>\u276f\u203a]\s*)?(?:"
+    + "|".join(
+        re.escape(t).replace(re.escape("{tid}"), r"t_[a-z0-9]{6,16}") for t in runs_live._NOTICE.values()
+    )
+    + r")\s*$"
+)
+_TIP = re.compile(r"^[\s\W]*(Tip:|tmux focus-events off\b)")
+
+
+def _banner_dropped(rows: list[str]) -> list[str]:
+    """Drop each run of banner rows (logo block glyphs, or a rounded box) that names a version (v2.1 or
+    1.2.3). A progress bar or a table drawn with straight corners stays."""
+    out: list[str] = []
+    i = 0
+    while i < len(rows):
+        j = i
+        if _BANNER_START.match(rows[i]):
+            j = i + 1
+            while j < len(rows) and _BANNER_ROW.match(rows[j]):
+                j += 1
+        if j > i and any(_VERSION.search(r) for r in rows[i:j]):
+            i = j
+            continue
+        out.extend(rows[i : max(j, i + 1)])
+        i = max(j, i + 1)
+    return out
+
+
+def _is_notice(row: str) -> bool:
+    """orch's own start or new-input notice (runs_live.notice_line), typed at the prompt."""
+    return bool(_NOTICE_ROW.match(row))
+
+
+def _is_tip(row: str) -> bool:
+    """A tool's tip row (for example "Tip: ..." or the terminal focus-events advice)."""
+    return bool(_TIP.search(row))
 
 
 _TAIL_MARK = "@@orch-tail "

@@ -6,7 +6,7 @@
     if (c.wont_do) return "Won't do";
     const ev = (c.evidence || []).slice(-1)[0];
     const text = ev && (cleanOutcome(ev.summary) || cleanOutcome(ev.text) || (ev.type === 'note' ? cleanOutcome(ev.ref) : ''));
-    return text || (c.done ? 'Completed.' : c.state === 'doing' ? 'Working on this task.' : 'Not started yet.');
+    return text || (c.done ? 'Completed.' : c.state === 'doing' ? 'Working on this task.' : c.origin === 'change_request' ? 'Waiting for your helper.' : 'Not started yet.');
   }
   function phase(v) {
     const t = v.ticket, run = v.run || {};
@@ -89,7 +89,7 @@
     return v && v.run && v.run.running === true && typeof v.hold === 'string' ? v.hold.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
   }
   /* The helper's state while one runs: the core's word (ORCH-61), or from the view when an older core sends none. */
-  const HELPER_STATES = ['working', 'starting', 'you', 'waiting', 'idle', 'stuck'];
+  const HELPER_STATES = ['working', 'starting', 'you', 'waiting', 'idle', 'stuck', 'limit'];
   function helperOf(v) {
     const run = (v && v.run) || {};
     if (run.running !== true) return null;

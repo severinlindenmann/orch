@@ -82,3 +82,14 @@ def test_ask_file_json_makes_a_glance_card(tmp_path):
     (tmp_path / "bad.json").write_text("[1]")
     with pytest.raises(Refused):
         cli_review._file_preview(tmp_path, "bad.json", "file")
+
+
+def test_check_card_keeps_more_than_six_result_files():
+    # ORCH-421: eight pictures on one step were cut to six without a word; the card now gets them all
+    # (the page shows five tiles and a "+N more" tile)
+    head = ".orch/tickets/t_9/evidence/"
+    ev = [{"type": "file", "ref": f"{head}photo-{i}.png"} for i in range(8)]
+    step = {"id": "c1", "text": "Photos", "done": True, "evidence": ev}
+    t = {"id": "t_9", "title": "Shop photos", "checklist": [step]}
+    files = review.check_card(t)["files"]
+    assert [f["name"] for f in files] == [f"photo-{i}.png" for i in range(8)]

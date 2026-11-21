@@ -10,7 +10,7 @@ const PULL = 'https://github.com/standin/lunch/pull/7';
 module.exports = {
   name: 'GitHub: merge a green pull request from Home, set Merge when green',
   covers: ['pull.merge', 'ticket.field', 'page:ticket'],
-  async run({ page, open, reload, act, must, text, orch, orchAsPerson, addonOn, workspace, standins, home, until }) {
+  async run({ page, open, reload, act, must, text, orch, addonOn, workspace, standins, home, until, addonOff }) {
     const tid = JSON.parse(orch('ticket', 'new', 'Add the lunch poll to the team page', '--json')).id;
     orch('check', 'add', tid, 'Build the poll');
     orch('check', 'done', tid, 'c1', '--summary', 'Poll built.', '--note', 'Pull request 7.', '--pr', PULL);
@@ -38,14 +38,16 @@ module.exports = {
     addonOn('pull-requests');
     await until(s => (s.addons || []).some(a => a.name === 'pull-requests' && a.ticket_fields), 'the Pull requests add-on turned on');
     await open('#ticket/' + tid);
+    // ORCH-581: an add-on the ticket has not used waits in + Add; picking it shows its group and opens the field
+    const pick = page.locator(`[data-key="prop-add-addon:pull-requests-${tid}"]`);
+    await page.locator(`[data-key="props-add-${tid}"] > summary`).waitFor({ timeout: 20000 }).catch(async () => { throw new Error('no + Add menu:\n' + (await text()).slice(0, 600)); });
+    await page.locator(`[data-key="props-add-${tid}"] > summary`).click();
+    await pick.click();
     const field = page.locator(`button[data-action="field"][data-field="merge_when_green"]`);
-    await field.waitFor({ timeout: 20000 }).catch(async () => { throw new Error('no Merge when green field:\n' + (await text()).slice(0, 600)); });
-    await field.click();
     await act('ticket.field', () => page.getByRole('menuitemradio', { name: 'On' }).click());
     await reload();
     must((await field.innerText()).trim() === 'On', 'Merge when green is not On after a reload');
     must(JSON.parse(orch('ticket', 'show', tid, '--json')).ext?.['pull-requests']?.merge_when_green === 'on', 'the ticket file does not say on');
-    orchAsPerson('addon', 'remove', 'pull-requests');   // off again for the next click-through
-    await until(s => !(s.addons || []).some(a => a.name === 'pull-requests'), 'pull-requests off again');
+    await addonOff('pull-requests');   // off again for the next click-through
   },
 };

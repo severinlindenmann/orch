@@ -95,6 +95,8 @@ def test_three_failures_in_ten_minutes_raise_exactly_one_question(cli, fake, ws,
     assert res["failing"] is True
     asks = orch.asks()
     assert len(asks) == 1 and asks[0]["by"] == "agent:services"
+    # ORCH-614: an add-on kind keeps the answer with Services; a plain question would start a helper on the ticket
+    assert asks[0]["args"][asks[0]["args"].index("--kind") + 1] == "services:health"
     q = orch.ticket()["questions"][0]
     assert (
         q["text"]
@@ -116,7 +118,7 @@ def test_three_failures_in_ten_minutes_raise_exactly_one_question(cli, fake, ws,
         "ticket": "DM1-12",
         "id": "q1",
         "title": "Budget guard keeps stopping",
-        "text": "Restart, Stop or Look into it?",
+        "text": "It failed 4 times in the last 10 minutes. Restart, Stop or Look into it?",
     }
     assert row["health"] == {"ok": True, "how": "process alive", "text": "Process alive"}
 
@@ -348,3 +350,70 @@ def test_an_answer_that_cannot_be_carried_out_is_asked_again(cli, fake, ws, cloc
     clock["t"] = T0 + 360
     _check(cli)
     assert len(orch.asks()) == 2
+
+
+def test_one_bad_pass_counts_once_even_when_it_was_also_started_again(
+    cli, fake, ws, clock, orch, monkeypatch
+):
+    # ORCH-371 bug 5: "not alive" and a restart by the computer in the same pass counted as two failures
+    from orch_services import watch
+
+    monkeypatch.setattr(watch, "port_answers", lambda port: False)
+    _add(cli, "--port", "5173")
+    for i in range(2):
+        clock["t"] = T0 + 60 * (i + 1)
+        _crash(fake)
+        assert _check(cli)["failing"] is False and not orch.asks()
+    clock["t"] = T0 + 180
+    _crash(fake)
+    assert _check(cli)["failing"] is True and len(orch.asks()) == 1
+    assert "3 times" in orch.ticket()["questions"][0]["text"]
+
+
+def test_a_silent_port_just_after_a_start_is_starting_not_a_failure(monkeypatch):
+    """ORCH-639: Restart on a web preview showed 'does not answer' while it was only starting."""
+    from orch_services import watch
+
+    rec = {"id": "web", "port": 59999}
+    st = watch.drivers.Status(running=True, pid=1)
+    monkeypatch.setattr(watch, "port_answers", lambda port: False)
+    h = watch.health(rec, st, True, starting=True)
+    assert h["text"] == "Starting…" and h["starting"] is True and h["ok"] is False
+    h = watch.health(rec, st, True, starting=False)
+    assert h["text"] == "Alive, but does not answer on its address" and not h.get("starting")
+
+
+def test_just_started_is_true_only_in_the_grace_after_a_start(ws, clock):
+    from orch_services import store, watch
+
+    store.mark(ws, "web", True)
+    since = store.last_change(ws, "web")
+    from datetime import UTC, datetime
+
+    t = datetime.strptime(since, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+    clock["t"] = t + 30
+    assert watch.just_started(ws, "web") is True
+    clock["t"] = t + watch.START_GRACE + 5
+    assert watch.just_started(ws, "web") is False
+
+
+def test_starting_is_not_counted_as_running_fine_again(monkeypatch):
+    """A failing service restarted through orch reads Starting… for a while: that is no recovery yet (ORCH-1130)."""
+    from types import SimpleNamespace
+
+    from orch_services import watch
+
+    q = {"id": "q1", "open": True}
+    w = {"events": [1, 2, 3], "failing": True, "healthy_since": None, "runs": None, "question": q}
+    monkeypatch.setattr(watch, "clock", lambda: 700)
+    monkeypatch.setattr(watch, "read_state", lambda *a: {"running": True, "watch": w})
+    monkeypatch.setattr(watch, "_act_on_answer", lambda *a: None)
+    monkeypatch.setattr(watch, "just_started", lambda *a: True)
+    monkeypatch.setattr(watch, "port_answers", lambda port: False)
+    monkeypatch.setattr(watch, "_save_watch", lambda root, sid, state: w.update(state))
+    monkeypatch.setattr(watch, "_ticket_for", lambda *a: "T-1")
+    monkeypatch.setattr(watch, "orch", lambda *a, **k: {})
+    drv = SimpleNamespace(status=lambda spec: watch.drivers.Status(running=True, pid=1))
+    r = watch.check_one(None, drv, {"id": "web", "name": "Web", "port": 8000}, None)
+    assert r["health"]["starting"] is True and r["failing"] is True and r["did"] is None
+    assert w["healthy_since"] is None and w["question"] is q

@@ -80,6 +80,9 @@ function emptyTiles(view, team) {
   // No run is recorded: say so, never a 0 (the record can be empty although helpers worked, ORCH-139). When the
   // tickets show helper time, say where that comes from, so the page does not contradict itself (ORCH-410).
   const worked = team && team.time && team.time !== '–';
+  // orch started runs but the helper wrote no record lines (a custom helper): say so, not "no runs" (ORCH-966).
+  const started = view.started || 0;
+  if (started) return [metric('Times helpers worked', null, `orch started ${plural(started, 'run')}; this helper does not report them, so they are not measured`), servicesTile(view, note)];
   return [metric('Times helpers worked', null, worked ? 'Not counted here; the helper time above comes from the tickets' : 'No helper runs are recorded here yet'), servicesTile(view, note)];
 }
 

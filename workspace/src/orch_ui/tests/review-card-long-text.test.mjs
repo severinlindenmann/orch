@@ -15,7 +15,8 @@ test('review card head is capped only above a picture preview', () => {
 
 test('a cut copy of the question is not shown above the full question', () => {
   const js = readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8');
-  assert.match(js, /if\(!cut\)h\.append\(el\('h3','',it\.title\)\)/);
+  // the title shows only when the question is not cut (ORCH-421: it also carries the whole title on hover)
+  assert.match(js, /if\(!cut\)\{const t3=el\('h3','',it\.title\);t3\.title=it\.title;h\.append\(t3\)\}/);
   assert.match(js, /it\.text&&\(cut\|\|it\.text!==it\.title\)/);
 });
 

@@ -2,8 +2,6 @@
 names a fake (or a missing one) through ORCH_USAGE_SWITCHER."""
 
 import json
-import sys
-import textwrap
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -19,78 +17,6 @@ T0 = datetime(2026, 11, 16, 18, 0, 0, tzinfo=UTC)
 @pytest.fixture(autouse=True)
 def never_the_real_switcher(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_USAGE_SWITCHER", str(tmp_path / "no-switcher-here"))
-
-
-@pytest.fixture
-def switcher(tmp_path, monkeypatch):
-    """A fake `cswap` that lists from a file and really moves `active` on `switch N` (and logs every call)."""
-    d = tmp_path / "bin"
-    d.mkdir()
-    answer = tmp_path / "switcher.json"
-    calls = tmp_path / "switcher-calls.txt"
-    fail = tmp_path / "switcher-fails"
-    answer.write_text(json.dumps(switcher_data()), encoding="utf-8")
-    exe = d / "cswap"
-    exe.write_text(
-        textwrap.dedent(f"""\
-            #!{sys.executable}
-            import json, os, sys
-            a = sys.argv[1:]
-            open({str(calls)!r}, "a").write(" ".join(a) + "\\n")
-            if a == ["list", "--json"]:
-                sys.stdout.write(open({str(answer)!r}).read()); sys.exit(0)
-            if len(a) == 2 and a[0] in ("enable", "switch"):
-                if os.path.exists({str(fail)!r}):
-                    sys.exit(1)
-                if a[0] == "switch":
-                    d = json.load(open({str(answer)!r}))
-                    n = int(a[1])
-                    d["activeAccountNumber"] = n
-                    for x in d["accounts"]:
-                        x["active"] = x["number"] == n
-                    json.dump(d, open({str(answer)!r}, "w"))
-                sys.exit(0)
-            sys.exit(3)
-            """),
-        encoding="utf-8",
-    )
-    exe.chmod(0o755)
-    monkeypatch.setenv("ORCH_USAGE_SWITCHER", str(exe))
-
-    class Fake:
-        @staticmethod
-        def use(active=None, **acc):
-            """Set use per account: first=(5h, week), second=..., third=...; keeps the active one unless given."""
-            cur = json.loads(answer.read_text())
-            act = active if active is not None else cur["activeAccountNumber"]
-            data = switcher_data(active=act, **acc)
-            answer.write_text(json.dumps(data), encoding="utf-8")
-
-        @staticmethod
-        def reset_5h(n, at="2026-11-16T23:00:00+00:00"):
-            cur = json.loads(answer.read_text())
-            for x in cur["accounts"]:
-                if x["number"] == n:
-                    x["usage"]["fiveHour"]["resetsAt"] = at
-            answer.write_text(json.dumps(cur), encoding="utf-8")
-
-        @staticmethod
-        def active():
-            return json.loads(answer.read_text())["activeAccountNumber"]
-
-        @staticmethod
-        def calls():
-            return calls.read_text().splitlines() if calls.exists() else []
-
-        @staticmethod
-        def changes():
-            return [c for c in Fake.calls() if not c.startswith("list")]
-
-        @staticmethod
-        def failing(on=True):
-            fail.write_text("x") if on else fail.unlink(missing_ok=True)
-
-    return Fake
 
 
 def seed(cli):
@@ -283,6 +209,121 @@ def test_every_account_at_its_limit_warns_once_and_stays(cli, switcher, ws):
     assert len([h for h in usage_rows(ws) if h["what"].startswith("warning")]) == 2
 
 
+def _warn_ids(ws, t):
+    return [r["id"] for r in switching.needs_rows(ws, at(t)) if r["kind"].startswith("usage:all-at-limit")]
+
+
+def test_every_account_at_its_limit_reaches_the_person_once_as_one_row(cli, switcher, ws):
+    """ORCH-644: one row in `orch usage needs` with a stable id while it lasts, not one per look."""
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switcher.use(first=(97.0, 80.0), second=(93.0, 40.0), third=(95.0, 50.0))
+    switching.look(ws, at(0))
+    first = _warn_ids(ws, 0)
+    assert first == [f"usage:all-at-limit:{switching._iso(at(0))}"]
+    for n in range(1, 6):  # five more looks: the same one row
+        switching.look(ws, at(30 * n))
+        assert _warn_ids(ws, 30 * n) == first
+    (row,) = [r for r in switching.needs_rows(ws, at(150)) if r["id"] == first[0]]
+    assert row["source"] == "usage" and row["ticket"] is None and row["tone"] == "bad"
+    # the title is not said again in the text, and the hint has no brackets inside brackets
+    assert not row["text"].lower().startswith("every account is at or near")
+    assert "(" not in row["cli"]
+    assert (
+        row["actions"][0]["verb"] == "seen" and row["actions"][0]["target"] == f"all-at-limit:{row['since']}"
+    )
+    # a look that stopped long ago is not shown: it may be out of date (the command reads the clock: T0 is old)
+    assert _warn_ids(ws, 150 + 60 * switching.FRESH_MINUTES) == []
+
+
+def test_a_warning_comes_back_only_after_it_cleared_and_started_again(cli, switcher, ws):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    full = {"first": (97.0, 80.0), "second": (93.0, 40.0), "third": (95.0, 50.0)}
+    room = {"first": (97.0, 80.0), "second": (10.0, 40.0), "third": (95.0, 50.0)}
+    switcher.use(**full)
+    switching.look(ws, at(0))
+    first = _warn_ids(ws, 0)
+    switcher.use(active=switcher.active(), **room)  # a flicker: room for one look, then full again
+    switching.look(ws, at(30))
+    assert _warn_ids(ws, 30) == []  # gone while it is gone
+    switcher.use(active=switcher.active(), **full)
+    switching.look(ws, at(60))
+    assert _warn_ids(ws, 60) == first  # back within 10 minutes: the same warning, not a new card
+    switcher.use(active=switcher.active(), **room)
+    switching.look(ws, at(90))
+    switching.look(ws, at(90 + 60 * switching.CLEAR_MINUTES))  # gone for 10 minutes: cleared
+    switcher.use(active=switcher.active(), **full)
+    t = 120 + 60 * switching.CLEAR_MINUTES
+    switching.look(ws, at(t))
+    again = _warn_ids(ws, t)
+    assert again and again != first  # it came back: a new row the person is told about once more
+
+
+def test_a_warning_gone_ten_minutes_starts_anew_even_without_a_look_between():
+    t = T0
+    a = switching._episodes({}, {"all-at-limit": {}}, t)
+    b = switching._episodes(a, {}, t + timedelta(seconds=30))
+    assert b["all-at-limit"]["since"] == a["all-at-limit"]["since"] and b["all-at-limit"]["cleared"]
+    later = t + timedelta(seconds=30, minutes=switching.CLEAR_MINUTES)
+    c = switching._episodes(b, {"all-at-limit": {}}, later)
+    assert c["all-at-limit"] == {"since": switching._iso(later)}
+    d = switching._episodes(b, {"all-at-limit": {}}, later - timedelta(seconds=1))
+    assert d["all-at-limit"] == {"since": a["all-at-limit"]["since"]}  # back in time: the same warning
+
+
+def test_a_failure_that_moves_to_another_account_is_the_same_warning():
+    a = switching._episodes({}, {"switch-failed": {"to": "a_111111", "label": "A"}}, T0)
+    b = switching._episodes(
+        a, {"switch-failed": {"to": "a_222222", "label": "B"}}, T0 + timedelta(minutes=11)
+    )
+    assert b["switch-failed"] == {"to": "a_222222", "label": "B", "since": a["switch-failed"]["since"]}
+
+
+def test_a_failed_switch_alone_is_not_every_account_at_its_limit(cli, switcher, ws):
+    """The accounts a switch failed to are left out of the choice, but they still have room under their limits."""
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switcher.failing()
+    switching.look(ws, at(0))
+    kinds = [r["kind"] for r in switching.needs_rows(ws, at(0))]
+    assert kinds == ["usage:switch-failed"]
+    assert not any("Every account" in w for w in jrun(cli, "list")[1]["warnings"])
+
+
+def test_got_it_hides_a_warning_until_it_comes_back(cli, switcher, ws):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switcher.use(first=(97.0, 80.0), second=(93.0, 40.0), third=(95.0, 50.0))
+    switching.look(ws, at(0))
+    (row,) = [r for r in switching.needs_rows(ws, at(0)) if r["kind"] == "usage:all-at-limit"]
+    assert jrun(cli, "act", "seen", "all-at-limit:2020-01-01T00:00:00Z", "--by", "human:owner")[0] != 0
+    code, out = jrun(cli, "act", "seen", row["actions"][0]["target"], "--by", "human:owner")
+    assert code == 0 and out["changed"] is True, out
+    switching.look(ws, at(30))
+    assert _warn_ids(ws, 30) == []
+    assert any(h["what"].startswith("warning seen") for h in store.history(ws))
+    assert jrun(cli, "act", "seen", "bogus:x", "--by", "human:owner")[0] != 0
+
+
+def test_a_failed_switch_reaches_the_person_once_and_clears_after_a_switch(cli, switcher, ws):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switcher.failing()
+    switching.look(ws, at(0))
+    switching.look(ws, at(30))
+    rows = [r for r in switching.needs_rows(ws, at(30)) if r["kind"] == "usage:switch-failed"]
+    assert len(rows) == 1 and "TEAMCO" in rows[0]["title"] and rows[0]["tone"] == "warn"
+    assert rows[0]["id"] == f"usage:switch-failed:{switching._iso(at(0))}"
+    switching.look(ws, at(601))  # tried again, failed again: still the same one row
+    assert [r["id"] for r in switching.needs_rows(ws, at(601)) if r["kind"] == "usage:switch-failed"] == [
+        rows[0]["id"]
+    ]
+    switcher.failing(False)
+    switching.look(ws, at(1300))
+    assert [r for r in switching.needs_rows(ws, at(1300)) if r["kind"] == "usage:switch-failed"] == []
+
+
 def test_near_every_limit_it_still_leaves_an_account_that_is_over(cli, switcher, ws):
     """No account is safe for 10 minutes, but the active one is over its limit and another still has room."""
     seed(cli)
@@ -300,9 +341,60 @@ def test_a_failed_switch_is_written_and_tried_again_after_ten_minutes(cli, switc
     switcher.failing()
     assert switching.look(ws, at(0))["did"] == "switch failed"
     assert switching.look(ws, at(30))["did"] == "waiting to try again"
-    assert [h["what"] for h in usage_rows(ws)] == ["could not switch to TEAMCO"]
+    assert next(h["what"] for h in usage_rows(ws)) == "could not switch to TEAMCO"
     switcher.failing(False)
     assert switching.look(ws, at(601))["did"] == "switched"
+
+
+def test_a_failed_switch_tries_the_next_good_account_at_once(cli, switcher, ws):
+    """ORCH-620: it waited ten minutes on the same account; now the next account in order is tried in the same look."""
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    first = switcher.active()
+    tried = []
+
+    def switch(slot):
+        tried.append(slot)
+        return len(tried) > 1 and switching._switch(slot)  # the first account it tries never works
+
+    r = switching.look(ws, at(0), switch=switch)
+    assert r["did"] == "switched" and len(tried) == 2 and tried[0] != tried[1]
+    assert switcher.active() == tried[1] != first
+    assert next(h["what"] for h in usage_rows(ws)) == "could not switch to TEAMCO"
+
+
+def test_a_failed_switch_and_a_full_house_show_in_list_and_status(cli, switcher, ws):
+    """ORCH-620: both warnings stayed in the history; now list and status say them too."""
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switcher.failing()
+    switching.look(ws, at(0))
+    _, out = jrun(cli, "list")
+    assert any("Could not switch to TEAMCO" in w for w in out["warnings"])
+
+
+def test_a_switch_another_program_undoes_is_written_once_and_says_so(cli, switcher, ws):
+    """ORCH-591: three 'switched to' rows in a row hid that a second switcher kept moving the account back."""
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    assert switching.look(ws, at(0))["did"] == "switched"
+    for n in (1, 2, 3):
+        switcher.use(active=1)  # the other program switches back to the first account
+        assert switching.look(ws, at(120 * n))["did"] == "switched"  # Usage switches again, quietly
+    assert [h["what"] for h in usage_rows(ws)] == [
+        "switched to TEAMCO",
+        "another program switched back to first",
+    ]
+
+
+def test_a_switch_that_did_not_change_the_account_in_use_is_not_written_as_done(
+    cli, switcher, ws, monkeypatch
+):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    monkeypatch.setattr(switching, "_stuck", lambda key, read=None: False)
+    assert switching.look(ws, at(0))["did"] == "switch failed"
+    assert next(h["what"] for h in usage_rows(ws)) == "could not switch to TEAMCO"
 
 
 def test_a_rule_that_ended_falls_back_before_choosing(cli, switcher, ws):
@@ -317,7 +409,7 @@ def test_nothing_secret_is_written(cli, switcher, ws):
     seed(cli)
     jrun(cli, "switching", "on", "--by", "human:owner")
     switching.look(ws, at(0))
-    d = ws / ".orch/addons/usage"
+    d = store.usage_dir(ws)
     text = "".join(p.read_text() for p in d.iterdir() if p.is_file())
     assert "@" not in text and "example.test" not in text
 
@@ -334,7 +426,7 @@ def test_loop_looks_every_30_seconds_and_stops_when_usage_is_turned_off(cli, swi
     )
     assert slept == [30, 30, 30]
     assert (
-        json.loads((ws / ".orch/addons/usage/switching.json").read_text())["last"]["at"]
+        json.loads((store.usage_dir(ws) / "switching.json").read_text())["last"]["at"]
         == "2026-11-16T18:01:00Z"
     )
 
@@ -351,7 +443,10 @@ def test_loop_reads_its_pace_from_config_and_survives_a_bad_look(cli, ws, monkey
     switching.run_forever(
         ws, clock=lambda: T0, sleep=slept.append, log=logs.append, active=lambda r: next(on)
     )
-    assert slept == [45, 45] and logs[0] == "skipped: OSError: disk"
+    assert slept == [45, 45] and logs[:2] == [
+        "This workspace switches the accounts.",
+        "skipped: OSError: disk",
+    ]
 
 
 def test_start_status_stop(ws, cli):
@@ -427,10 +522,54 @@ def test_an_account_turned_off_in_the_switcher_is_never_a_target():
 
 
 def test_reader_keeps_the_switchers_disabled_flag():
-    from conftest import switcher_data
 
     from orch_usage.readers import cswap
 
     data = switcher_data()
     data["accounts"][1]["disabled"] = True
     assert [r.disabled for r in cswap.parse(data)] == [False, True, False]
+
+
+def _weekly_only(label, order):
+    a = _acc(label, order)
+    a["rule"]["limits"] = [{"value": 98, "unit": "%", "period": "week"}]
+    return a
+
+
+def test_an_account_with_only_a_weekly_limit_switches_early_at_90_percent_of_its_5_hours():
+    """ORCH-642 (report r-1118-1812-ws): ALTYCA had only a weekly limit and was left only AT 100 % of its 5 hours,
+    after every helper had stopped on it."""
+    from orch_usage.readers import Window
+
+    accs = [_weekly_only("altyca", 1), _weekly_only("lindenmann", 2)]
+    first = SubscriptionUse(key="k_altyca", label="altyca", slot=1, active=True,
+                            windows={"5h": Window(91.0), "week": Window(40.0)})  # fmt: skip
+    other = SubscriptionUse(key="k_lindenmann", label="lindenmann", slot=2,
+                            windows={"5h": Window(10.0), "week": Window(20.0)})  # fmt: skip
+    c = switching.judge(accs[0], first, {}, 10)
+    assert c.under and not c.good and c.why == "5 hours 91%, switches early at 90%"
+    ch = switching.choose(accs, [first, other], {}, 10)
+    assert ch.target.account["label"] == "lindenmann" and not ch.all_at_limit
+    # alone it is kept: past the early switch is not full
+    ch = switching.choose(accs[:1], [first], {}, 10)
+    assert ch.target.account["label"] == "altyca"
+    assert switching.judge(accs[0], SubscriptionUse(key="k_altyca", label="altyca", slot=1,
+                           windows={"5h": Window(100.0)}), {}, 10).under is False  # fmt: skip
+
+
+def test_a_5_hour_limit_of_the_account_wins_over_the_default():
+    from orch_usage.readers import Window
+
+    a = _acc("main", 1, h5=95)
+    use = SubscriptionUse(
+        key="k_main", label="main", slot=1, windows={"5h": Window(93.0), "week": Window(1.0)}
+    )
+    assert switching.judge(a, use, {}, 10).good
+
+
+def test_a_look_with_a_failing_switcher_says_it_did_not_answer(cli, fake_switcher, ws):
+    fake_switcher.answer("not json")
+    code, d = jrun(cli, "run", "--once")
+    assert code == 0 and d["switcher"] is True and d["did"] == "nothing"
+    code, out, _ = cli("run", "--once")
+    assert "not installed" not in out and "looks again" in out
