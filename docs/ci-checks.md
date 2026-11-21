@@ -106,8 +106,9 @@ ci.yml's `route` job (`scripts/mac_route.py`) decides once per run:
   is one part at `-n 6` there.
 
 Turn it on (owner, admin rights):
-1. Settings > Actions > General > "Fork pull request workflows from outside collaborators": **Require approval for
-   all external contributors** (a fork's workflow file can name any runner; nothing runs without that approval).
+1. Settings > Actions > General > "Fork pull request workflows from outside collaborators": pick the strictest
+   choice, the one for all external contributors (a fork's workflow file can name any runner; nothing runs until
+   you click).
 2. On the Mac: `sudo bash scripts/mac-runner/setup.sh` (asks for the runner registration token from
    Settings > Actions > Runners > New self-hosted runner; used once, never stored).
 3. A fine-grained token for this repository only, permission "Administration: read", as the Actions secret
