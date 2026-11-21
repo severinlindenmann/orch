@@ -6,7 +6,7 @@ Unknown fields are kept: a ticket is loaded as a plain dict, changed, saved whol
 from __future__ import annotations
 
 import contextlib
-import getpass
+import contextvars
 import hashlib
 import json
 import os
@@ -134,17 +134,16 @@ def require_human(question: str, what: str) -> None:
 
 
 def current_actor(explicit: str | None = None) -> str:
-    """--by, else the agent tool seen in the environment, else human:<os user>."""
+    """--by, else the agent tool seen in the environment, else the person picked in the dashboard
+    ("You: <name>", orch.people), else human:<os user>."""
     if explicit:
         who = explicit
     elif agent_tool():
         who = "agent:" + str(agent_tool())
     else:
-        try:
-            user = getpass.getuser()
-        except Exception:
-            user = "user"
-        who = "human:" + re.sub(r"[^A-Za-z0-9_.@ -]", "_", user)[:64]
+        from orch import people
+
+        who = people.person_actor()
     if not re.fullmatch(r"(agent|human):[A-Za-z0-9_.@ -]{1,64}", who):
         raise Refused(f"'{who}' is not a valid actor. Use agent:<tool> or human:<name>.")
     if history.is_reserved_label(who):
@@ -159,6 +158,108 @@ def acting_by(args) -> str:
     if tool:
         return "agent:" + str(tool)
     return current_actor(getattr(args, "by", None))
+
+
+# ORCH-547: an answer given FOR a person (the manager, a script, Away mode) records who really gave it
+# (answered_by: agent:<role>) and whom it was for (answered_for: human:<name>; a history line's `for`).
+_STAND_IN: contextvars.ContextVar[str | None] = contextvars.ContextVar("orch_stand_in", default=None)
+STAND_IN_SCRIPT = "agent:script"  # a program answering with no helper around and no terminal
+
+
+OWNER_ONLY_CARDS = ("draft", "choice")  # drafts, designs and picks among them: only the person (owner 18 Nov)
+
+
+def refuse_stand_in_on(card) -> None:
+    """Drafts, mockups and designs are accepted only by the person: never by the manager, Away mode or a
+    script standing in for them (AGENTS.md, owner 18 Nov)."""
+    if _STAND_IN.get() and isinstance(card, dict) and card.get("kind") in OWNER_ONLY_CARDS:
+        who = _STAND_IN.get() or ""
+        raise Refused(f"Drafts and designs wait for {who.removeprefix('human:')}'s own answer.")
+
+
+def stand_in_for() -> str | None:
+    """human:<name> while an answer is given for that person in this process (standing_in), else None."""
+    return _STAND_IN.get()
+
+
+@contextlib.contextmanager
+def standing_in(person: str | None):
+    """Answers and history lines made inside are given for `person` (human:<name>). None: no-op."""
+    if not person:
+        yield
+        return
+    tok = _STAND_IN.set(person)
+    try:
+        yield
+    finally:
+        _STAND_IN.reset(tok)
+
+
+def refuse_own_ticket_stand_in(root: Path, tid: str) -> None:
+    """A helper never answers FOR the person on the ticket it works on itself: that would accept or decide
+    its own work (ORCH-547). Called before every stand-in answer."""
+    mine = os.environ.get("ORCH_TICKET")
+    if not mine or not (agent_tool() or os.environ.get("ORCH_RUN")):
+        return
+    try:
+        own = resolve(root, mine)
+    except Refused:
+        return
+    if own == resolve(root, tid):
+        raise Refused("A helper never answers for the person on its own ticket. Ask them: orch ask.")
+
+
+def answer_terminal() -> bool:
+    """Is a person at a terminal for this answer? (stdin is one). A seam: the core tests set it."""
+    return term.is_terminal(sys.stdin)
+
+
+def answer_actor(args, *, terminal: bool | None = None) -> tuple[str, str | None]:
+    """Who gives an answer from the CLI, and for whom: (answered_by, answered_for or None).
+
+    - `--for <name>`: a stand-in. By the helper's own label (agent:<tool>, or its role `--by agent:<role>`),
+      else `--by agent:<role>`, else agent:script.
+    - A helper's shell never answers as a person: `--by human:<name>` there is refused.
+    - With no helper around, a person's answer via the terminal (`--via cli`) from a process with no terminal
+      is a program answering for that person: recorded as agent:script for them (18 Nov: a script picked a
+      draft as the owner). The dashboard, the review page and the phones (another `--via`) are the person."""
+    from orch import people
+
+    given = getattr(args, "by", None)
+    for_name = people.clean(getattr(args, "for_", None)) if getattr(args, "for_", None) else None
+    if getattr(args, "for_", None) is not None and not for_name:
+        raise Refused("--for needs the person's name, e.g. --for Severin.")
+    tool = agent_tool()
+    if tool and given and given.startswith("human:"):
+        raise Refused(
+            "A helper never answers as a person. To answer for someone, say so: --for <name> (recorded as "
+            "given for them, and they can undo it)."
+        )
+    if given and given.startswith("agent:"):
+        role = current_actor(given)
+        if role.casefold() in (
+            REVIEWER,
+            "agent:release-keeper",
+            STAND_IN_SCRIPT,
+        ) or history.is_reserved_label(role):
+            raise Refused(f"'{role}' is orch's own role. Use agent:manager or agent:<tool>.")
+        if tool and role.casefold() not in ("agent:manager", f"agent:{tool}".casefold()):
+            raise Refused("A helper answers as itself or as the manager: --by agent:manager, or no --by.")
+    else:
+        role = None
+    if for_name:
+        by = role or (f"agent:{tool}" if tool else STAND_IN_SCRIPT)
+        return current_actor(by), f"human:{for_name}"
+    if tool:
+        return role or f"agent:{tool}", None
+    if role:
+        return role, None
+    who = current_actor(given)
+    if terminal is None:
+        terminal = answer_terminal()
+    if who.startswith("human:") and getattr(args, "via", "cli") == "cli" and not terminal:
+        return STAND_IN_SCRIPT, who
+    return who, None
 
 
 def tickets_dir(root: Path) -> Path:
@@ -451,9 +552,38 @@ def _get(ticket: dict, path: str):
     return cur
 
 
+def own_agent_label() -> str | None:
+    """agent:<tool> of the helper this process runs in (its tool's environment, else the run's ORCH_AGENT)."""
+    tool = agent_tool() or os.environ.get("ORCH_AGENT")
+    label = f"agent:{tool}" if tool else None
+    return label if label and re.fullmatch(r"agent:[A-Za-z0-9_.-]{1,40}", label) else None
+
+
+def _stamp_for(root: Path, ticket: dict) -> None:
+    """A helper's own new history lines get `for: <person>` when a person started its run (orch.people):
+    shown as "Agent - <person>". A helper that runs on its own (automation, factory, reviewer) gets none."""
+    try:
+        label = own_agent_label()
+        lines = (
+            [h for h in history.created_lines(ticket) if h.get("by") == label and "for" not in h]
+            if label
+            else []
+        )
+        if not lines:
+            return
+        from orch import people
+
+        who = people.acting_for(root)
+        for h in lines if who else ():
+            h["for"] = who
+    except Exception:  # noqa: BLE001 - attribution only: a line without `for` reads "Agent"
+        return
+
+
 def _write(root: Path, ticket: dict) -> None:
     """Lock-free atomic write (tmp + os.replace). Callers hold the lock."""
     p = ticket_path(root, ticket["id"])
+    _stamp_for(root, ticket)  # whom a helper works for, on its new lines (before they are recorded)
     history.register_written(root, ticket)  # the lines/evidence/refs core made for it (only once sync is on)
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
@@ -484,6 +614,12 @@ def _wont_view(ticket: dict) -> dict:
         for c in ticket.get("checklist") or []
         if isinstance(c, dict) and (c.get("wont_do") or c.get("reason"))
     }
+
+
+def _stand_in_role(by: str) -> bool:
+    """`by` is a role answering FOR a person right now (standing_in): recorded as such, so it may do what the
+    person could undo (answer, accept, send back), never pass for the person (ORCH-547)."""
+    return bool(_STAND_IN.get()) and isinstance(by, str) and by.startswith("agent:")
 
 
 def _is_person(by: str) -> bool:
@@ -951,6 +1087,9 @@ def add_history(
     group message (`chat_message: true`): the only lines the Chat shows. The exact line object made here is
     marked as core's own (history.created); _write records it when the ticket is written."""
     entry = {"at": at or now(), "by": by, "via": via or _env_via(), "text": text, "chat_message": chat}
+    person = _STAND_IN.get()
+    if person and not str(by).startswith("human:"):  # a role standing in for the person (ORCH-547)
+        entry["for"] = person[len("human:") :] if person.startswith("human:") else person
     ticket["history"].append(entry)
     history.created("lines", entry)
 
@@ -1015,7 +1154,13 @@ def create(
     if parent is not None:
         # the parent must exist (a new ticket has no children, so no loop; set_parent checks loops later)
         parent_ticket = load(root, parent)
-    fields = fields or {}
+    fields = dict(fields or {})
+    if not fields.get("owner") and (by.startswith("human:") or by == own_agent_label()):
+        from orch import people
+
+        owner = people.owner_for(root, by)  # the person who makes it, or whom the helper works for
+        if owner:
+            fields["owner"] = owner
     for k, v in fields.items():
         clean_field(k, v)
     t = now()
@@ -1346,7 +1491,7 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone", *, person: 
     second accept is refused. The relay's phone path calls it for an answer to the current review question
     (relay._apply_review_answer). person: a signed-in person or a paired phone; a ticket that carries a draft
     is accepted only then, checked under the ticket's lock (ORCH-582)."""
-    if not by.startswith("human:") or agent_tool():
+    if (not by.startswith("human:") or agent_tool()) and not _stand_in_role(by):
         raise Refused("Only a person can accept.")
 
     def op(ticket):
@@ -1437,6 +1582,7 @@ def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str) -> d
         if not rec or rec not in q["options"]:
             raise Refused(f"{qid} has no recommended answer.")
         q["answer"], q["answered_by"], q["via"] = rec, REVIEWER, REVIEWER_VIA
+        q["answered_for"] = person  # Away mode for the owner (ORCH-547)
         q["answered_at"] = now()
         _release_wait(root, tid, ticket, qid)
         add_history(ticket, REVIEWER, f"Answered {qid}: {rec}", REVIEWER_VIA)
@@ -1444,7 +1590,11 @@ def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str) -> d
         history.created("answers", q)
         return q
 
-    return apply_op(root, tid, op, by=REVIEWER)[0]
+    from orch import people
+
+    person = people.person_actor(root)
+    with standing_in(person):
+        return apply_op(root, tid, op, by=REVIEWER)[0]
 
 
 RELEASE_KEEPER = "agent:release-keeper"  # merges a green release for the owner (review.tend_releases)
@@ -1502,7 +1652,7 @@ def ask_for_changes(
     A ticket the Reviewer accepted for the person (Done) can be sent back the same way.
     The Reviewer itself (by REVIEWER) sends a Review ticket back once when work is missing (reviewer.py)."""
     role = by == REVIEWER
-    if not role and (not by.startswith("human:") or agent_tool()):
+    if not role and (not by.startswith("human:") or agent_tool()) and not _stand_in_role(by):
         raise Refused("Only a person can ask for changes.")
     note = (text or "").strip()
     if not note:
@@ -3848,6 +3998,79 @@ def ask(
     return apply_op(root, tid, op, by=by)
 
 
+_ASK_AGAIN_KEYS = (
+    "text",
+    "options",
+    "recommended",
+    "kind",
+    "action",
+    "check",
+    "card",
+    "shown",
+    "group",
+    "links",
+)
+
+
+def answered_for_person(q) -> str | None:
+    """human:<name> when this answer was given for that person by someone else (ORCH-547), else None."""
+    who = q.get("answered_for") if isinstance(q, dict) else None
+    return who if isinstance(who, str) and who.startswith("human:") else None
+
+
+def _stand_in_shown(root: Path, ticket: dict, qid: str) -> tuple[str | None, str]:
+    """(whom answer `qid` was given for, who gave it in words), as SHOWN here: an unproven synced stand-in
+    is no stand-in."""
+    shown = next((x for x in history.shown_ticket(root, ticket)["questions"] if x.get("id") == qid), {})
+    who = answered_for_person(shown)
+    return who, history.answered_words(shown.get("answered_by"), who)
+
+
+def undo_answer(root: Path, tid: str, qid: str, by: str, via: str = "cli") -> dict:
+    """The person takes back an answer someone gave FOR them (answered_for): the question is asked again as a
+    new open question (same words, options and card), the old answer stays in the history marked undone.
+    A Check result accepted for them goes back to Review. Only a person undoes; a merge is never given for
+    anyone, so there is none to undo. Returns {"undone": qid, "again": new qid or None, "ticket": status}."""
+    if not VIA_RE.fullmatch(via):
+        raise Refused("via must be a short word (a-z, 0-9, -), e.g. cli or dashboard.")
+    if not by.startswith("human:") or agent_tool():
+        raise Refused("Only the person undoes an answer given for them.")
+
+    def op(ticket):
+        q = next((x for x in ticket["questions"] if x["id"] == qid), None)
+        if q is None:
+            raise Refused(f"Ticket {tid} has no question {qid}.")
+        refuse_if_taken_back(q)
+        who, words = _stand_in_shown(root, ticket, qid)
+        if q.get("answer") is None or who is None:
+            raise Refused(f"{qid} was not answered for you. Answer it again on its card instead.")
+        d = q.get("decision") if isinstance(q.get("decision"), dict) else None
+        if q.get("undone") or (d and d.get("replaced_by")):
+            raise Refused(f"{qid} was already undone or answered again.")
+        again = None
+        if (q.get("card") or {}).get("kind") == "check":
+            if ticket["status"] != "done":
+                raise Refused("The helper already has this note. Send it back or accept it on the ticket.")
+            ticket["status"] = "review"
+            add_history(ticket, by, "Status done -> review", via)
+        else:
+            again = {"id": _next_id(ticket["questions"], "q")}
+            again.update({k: q[k] for k in _ASK_AGAIN_KEYS if k in q})
+            again.update({"answer": None, "answered_by": None, "via": None, "asked_at": now(), "again": qid})
+            ticket["questions"].append(again)
+            ticket["status"] = "waiting" if ticket["status"] not in ("done", "review") else ticket["status"]
+            if ticket["status"] == "waiting":
+                ticket["waiting_on"] = {"kind": "question", "ref": again["id"]}
+        q["undone"] = {"at": now(), "by": by, "again": again["id"] if again else None}
+        if d is not None:
+            q["decision"] = {**d, "replaced_by": again["id"] if again else "undone"}
+        tail = f": asked again as {again['id']}" if again else ": back in Review"
+        add_history(ticket, by, f"Undid {qid} (answered by {words}){tail}", via)
+        return {"undone": qid, "again": again["id"] if again else None, "ticket": ticket["status"]}
+
+    return apply_op(root, tid, op, by=by)[1]
+
+
 GROUP_MAX = 80
 QUESTION_UNENCODABLE = "unencodable"  # never equal to a sha256 hex: an answer expecting it is always refused
 
@@ -4022,11 +4245,12 @@ def answer(
         refuse_if_taken_back(q)
         if q["answer"] is not None:
             raise Refused(f"{qid} is already answered.")
-        if isinstance(q.get("card"), dict) and not str(by).startswith("human:"):
+        if isinstance(q.get("card"), dict) and not str(by).startswith("human:") and not _STAND_IN.get():
             raise Refused(
                 "This card waits for the owner. Ask with orch review add and wait with orch review wait."
             )
         ownerpick.refuse_card(q, person and str(by).startswith("human:"))
+        refuse_stand_in_on(q.get("card"))
         if decision is None and isinstance(q.get("action"), dict) and "merge" in q["action"]:
             raise Refused(f"{qid} merges a pull request: answer it on the card (Merge or Not now).")
         if expected_question_digest is not None and (
@@ -4039,6 +4263,8 @@ def answer(
                 ans = opt
                 break
         q["answer"], q["answered_by"], q["via"] = ans, by, via
+        if _STAND_IN.get() and not by.startswith("human:"):
+            q["answered_for"] = _STAND_IN.get()  # given for the person, by a role (ORCH-547)
         q["answered_at"] = now()  # when, whatever `via` says (a page shows "Answered on your phone 12:34")
         if decision is not None:
             q["decision"], q["at"] = dict(decision), now()
@@ -4080,11 +4306,12 @@ def record_answered(
         raise Refused("via must be a short word (a-z, 0-9, -), e.g. cli or dashboard.")
     if not isinstance(entry.get("answer"), str) or not entry["answer"].strip():
         raise Refused("An answer needs text.")
-    if isinstance(entry.get("card"), dict) and not str(by).startswith("human:"):
+    if isinstance(entry.get("card"), dict) and not str(by).startswith("human:") and not _STAND_IN.get():
         raise Refused(
             "This card waits for the owner. Ask with orch review add and wait with orch review wait."
         )
     ownerpick.refuse_card(entry, person and str(by).startswith("human:"))
+    refuse_stand_in_on(entry.get("card"))
 
     def op(ticket):
         old = None
@@ -4098,10 +4325,12 @@ def record_answered(
             "answer": None,
             "answered_by": None,
             "via": None,  # fixed key order, like ask()
-            **{k: v for k, v in entry.items() if k not in ("id", "answered_by", "via", "at")},
+            **{k: v for k, v in entry.items() if k not in ("id", "answered_by", "answered_for", "via", "at")},
         }
         q = {"id": _next_id(ticket["questions"], "q"), **q}
         q["answer"], q["answered_by"], q["via"], q["at"] = entry["answer"], by, via, now()
+        if _STAND_IN.get() and not by.startswith("human:"):
+            q["answered_for"] = _STAND_IN.get()  # given for the person, by a role (ORCH-547)
         q["answered_at"] = q["at"]
         if replaces is not None:
             q["decision"] = {**(q.get("decision") or {}), "replaces": replaces, "replaced_by": None}

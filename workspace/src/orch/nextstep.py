@@ -323,6 +323,7 @@ HINTS = {
     "triage": _triage,
     "review list": "orch review link  (the page where a person answers)",
     "review answer": "orch needs",
+    "review undo": "orch review list  (the card waits for you again)",
     "review wait": _on_ticket,
     "review link": "orch needs",
     "review tend": "orch review accepted  (what was accepted for you today)",

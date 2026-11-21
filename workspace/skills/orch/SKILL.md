@@ -210,7 +210,7 @@ A GitHub pull request only the person may merge: `orch ask <id> "Merge release 3
 
 The ticket now waits for the answer (Waiting). Keep working on the steps that do not depend on it; stop only when
 nothing is left that you can do without the answer. Do not treat silence as an answer. On your next run, when the
-answer is in `orch ticket show <id>`, set the ticket active again and follow it. A person answers with `orch answer <id> q1 "<answer>"`. See everything that
+answer is in `orch ticket show <id>`, set the ticket active again and follow it. A person answers with `orch answer <id> q1 "<answer>"`. A helper, the manager or a script never answers as the person: answering FOR them says so, `orch answer <id> q1 "<answer>" --for <name> [--by agent:manager]` (the same on `orch review answer`; never on drafts, designs or a Merge). It shows as "Manager for <name>", and they look through and undo it with `orch review list --answered --for-me` and `orch review undo <id> q1`. See everything that
 waits for a person with `orch needs`.
 
 **Wait**

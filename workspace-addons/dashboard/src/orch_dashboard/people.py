@@ -41,15 +41,15 @@ def _read(root: Path) -> dict:
 
 
 def _home_file() -> Path:
-    from orch import addons
+    from orch import people as core_people  # ONE place for where the pick lives (core reads it too)
 
-    return addons.home() / "people.json"
+    return core_people.home_file()
 
 
 def _key(root: Path) -> str:
-    from orch.config import _perm_key
+    from orch import people as core_people
 
-    return _perm_key(root)
+    return core_people.key(root)
 
 
 def _chosen(root: Path):

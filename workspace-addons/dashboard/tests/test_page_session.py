@@ -437,6 +437,7 @@ ACT_ARGS = {
     "link.stop": {"id": "f_abc"},
     "answer": {"ticket": TID, "question": "q1", "digest": "a" * 64, "answer": "x"},
     "review.answer": {"ticket": TID, "key": "q1", "verdict": "ok", "digest": "a" * 64},
+    "review.undo": {"ticket": TID, "key": "q1"},
     "ticket.changes": {"ticket": TID, "text": "more"},
     "chat.say": {"text": "hi"},
     "chat.make_ticket": {"id": "m_abcdefghijkl"},

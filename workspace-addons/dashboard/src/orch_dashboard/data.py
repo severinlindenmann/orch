@@ -278,8 +278,12 @@ def _demote_all(t: dict) -> dict:
     out = dict(t)
     if isinstance(t.get("history"), list):
         out["history"] = [
-            {**h, "by": SYNC_BY, "text": SYNCED_UNVERIFIED + str(h.get("text", ""))}
-            if isinstance(h, dict) and not agent(h.get("by"))
+            {
+                **{k: v for k, v in h.items() if k != "for"},  # whom a helper worked for is a person field
+                "by": SYNC_BY,
+                "text": SYNCED_UNVERIFIED + str(h.get("text", "")),
+            }
+            if isinstance(h, dict) and (not agent(h.get("by")) or h.get("for") is not None)
             else h
             for h in t["history"]
         ]

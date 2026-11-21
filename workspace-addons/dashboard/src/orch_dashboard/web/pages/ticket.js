@@ -811,6 +811,13 @@ function artifactsPanel(t) {
     [0, 1, 2].map(i => h('div', {className:'file-tile skeleton-tile', 'data-key':'skeleton-' + i})))];
   return [all.length >= FILES_TOOLBAR_FROM ? filesToolbar(all.length) : null, filesPanelBody(t, all)];
 }
+/* ORCH-417: a helper's history line says whom it worked for ("for": the person who started its run): "Helper - Severin".
+   A helper's line without it ran on its own (a timed run, factory, reviewer, older lines): "Helper". */
+function historyActor(entry) {
+  const by = String(entry?.by || '');
+  if (typeof chatDmName === 'function' && chatDmName(by)) return ticketActor(by);
+  return window.DashHelpers.agentWho(entry, n => name(window.DashHelpers.personName('human:' + n, state))) || ticketActor(by);
+}
 function ticketActor(by) {
   if (typeof chatDmName === 'function' && chatDmName(by)) return chatDmName(by);  // another workspace answered: its contact name
   return /^agent:/.test(by || '') || array(state.settings?.agents).some(a => a.name === by) ? window.DashHelpers.agentLabel(state.settings, {agent:String(by).replace(/^agent:/, '')}) : name(window.DashHelpers.personName(by, state));
@@ -1139,7 +1146,7 @@ function ticketHistoryPanel(t) {
     const day = ticketHistoryDay(entry.at);
     if (!groups.has(day)) groups.set(day, []);
     groups.get(day).push(h('div', {className:'ticket-event'}, entry.via === 'phone' ? phoneEntry(t.id, entry) : null,
-      h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · ')),
+      h('p', {}, view.sentence ? clean(view.sentence) : [historyActor(entry), clean(view.line)].filter(Boolean).join(' · ')),
       (change => change ? h('p', {className:'meta ticket-change'}, 'Was: ' + clean(change.was) + '  →  Now: ' + clean(change.now)) : null)(window.DashHelpers.historyChange(entry)), h('time', {className:'meta', datetime:entry.at}, time(entry.at))));
   }
   const controls = snapshot ? null : h('div', {className:'ticket-history-filters', role:'group', 'aria-label':'Show'}, ['All', 'People', 'Helper'].map(label => ticketButton(label, 'outline sm', () => { ticketHistoryActor = label; render(); }, {'aria-pressed':String(ticketHistoryActor === label)})));
@@ -1736,7 +1743,7 @@ function ticketSelectedTab(t) {
 // shape of the kit's answer record. They show under the ticket's questions, not on a tab of their own.
 function ticketReviewAnswers(t) {
   return array(t.questions).filter(q => q.answer != null && q.decision && typeof q.decision === 'object')
-    .map(q => ({id:'core:q:' + t.id + ':' + q.id, ticket:t.id, key:q.id, text:q.text, by:q.answered_by, via:q.via, at:q.at, card:q.card || {}, shown:q.shown, decision:q.decision}))
+    .map(q => ({id:'core:q:' + t.id + ':' + q.id, ticket:t.id, key:q.id, text:q.text, by:q.answered_by, for:q.answered_for || null, who:window.DashHelpers?.answeredWho?.(q, name) || '', undone:!!q.undone, via:q.via, at:q.at, card:q.card || {}, shown:q.shown, decision:q.decision}))
     .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
 }
 // "What applies now" on top (when a card answer exists), then each card answer as a record; plain answers stay rows.
@@ -2028,7 +2035,7 @@ function detail(t) {
   const working = !fresh && !planQ && !['done', 'review'].includes(t.status), helperLive = ticketHelperLive(t, run);
   const filled = f => t[f] != null && String(t[f]).trim() !== '';
   const answeredRow = q => h('div', {className:'card-row', 'data-key':'answered-' + q.id},
-    h('div', {className:'grow'}, h('h3', {}, clean(q.text), ticketPhone(q)), h('p', {className:'preserve-lines' + (q.taken_back ? ' muted' : '')}, clean(q.answer)), h('p', {className:'meta'}, [q.taken_back ? 'Taken back' : 'Answered', (typeof chatDmName === 'function' && chatDmName(q.answered_by)) || name(q.answered_by), surface(q.via)].filter(Boolean).join(' · '))));
+    h('div', {className:'grow'}, h('h3', {}, clean(q.text), ticketPhone(q)), h('p', {className:'preserve-lines' + (q.taken_back ? ' muted' : '')}, clean(q.answer)), h('p', {className:'meta'}, [q.taken_back ? 'Taken back' : q.undone ? 'Answered, then undone' : 'Answered', window.DashHelpers?.answeredWho?.(q, name) || (typeof chatDmName === 'function' && chatDmName(q.answered_by)) || name(q.answered_by), surface(q.via)].filter(Boolean).join(' · '))));
   const answered = ticketAnswerNodes(t, answeredRow);
   const note = snapshot ? (filled('note') ? h('p', {className:'muted preserve-lines', 'data-key':'note'}, clean(t.note)) : null) : h('div', {className:'ticket-note', 'data-key':'ticket-note'}, inlineField(t, 'note'));
   const menu = snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),
