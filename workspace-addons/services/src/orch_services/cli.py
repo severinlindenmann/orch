@@ -1,4 +1,4 @@
-"""orch services list|check|found|add|adopt|start|stop|restart|auto|remove|log|act|view (contract: contracts/addons/services/README.md)."""
+"""orch services list|check|found|add|adopt|start|stop|restart|auto|remove|log|act|view|status (contract: contracts/addons/services/README.md)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import drivers, store, watch
+from . import drivers, service, store, watch
 from .store import Refused
 
 START_WAIT_TRIES = 12  # after start / restart: look up to 12 x 0.25 s before saying it did not stay running
@@ -97,6 +97,8 @@ def _program(root: Path, rec: dict, strict: bool = True) -> str:
 def _spec(root: Path, rec: dict, wid: str | None = None, strict: bool = True) -> drivers.Spec:
     cwd = (root / rec.get("cwd", ".")).resolve()
     log = store.log_path(root, rec["id"]).absolute()
+    if store.on_external_volume(root) and store.on_external_volume(cwd):
+        cwd = Path.home()  # launchd jobs may not use a folder on an external disk
     # an adopted service runs from its own entry: its command words are only shown, never looked up
     argv = [_program(root, rec, strict and rec.get("adopted") is None), *rec["command"][1:]]
     for s in (str(cwd), str(log), *argv):
@@ -144,7 +146,7 @@ def _driver() -> drivers.Driver:
     return d
 
 
-def _row(root: Path, rec: dict, st: drivers.Status | None) -> dict:
+def _row(root: Path, rec: dict, st: drivers.Status | None, off: bool = False) -> dict:
     running = bool(st and st.running)
     since = (st.since if st else None) or store.last_change(root, rec["id"]) or rec.get("created_at")
     row = {
@@ -152,7 +154,7 @@ def _row(root: Path, rec: dict, st: drivers.Status | None) -> dict:
         "name": rec["name"],
         "state": "running" if running else "stopped",
         "since": since,
-        "auto": bool(rec.get("auto")),
+        "auto": bool(rec.get("auto")) and not off,
         "made_by": rec.get("made_by"),
         "port": rec.get("port"),
         "command": _masked_command(root, rec["command"]),
@@ -176,14 +178,16 @@ def _rows(root: Path) -> tuple[list[dict], int, str | None]:
         drv, wid, note = None, None, str(e)
     rows = []
     for r in recs:
-        st = None
+        st, off = None, False
         if drv and wid:
             try:
                 _same_kind(drv, r)
-                st = drv.status(_spec(root, r, wid, strict=False))
+                spec = _spec(root, r, wid, strict=False)
+                st = drv.status(spec)
+                off = _switched_off(drv, r, spec)
             except Refused:
                 st = None
-        rows.append(_row(root, r, st))
+        rows.append(_row(root, r, st, off))
     return rows, bad, note
 
 
@@ -197,10 +201,12 @@ def _no_secret(root: Path, rec: dict) -> None:
     except ImportError:  # the core is always there (python -m under orch); never a silent pass
         raise Refused("Could not check the command for secrets. Update orch and try again.") from None
     hits = secretscan.find("\n".join([rec["name"], *rec["command"]]), root)
-    if hits and all(h.get("kind") == "stored-key" for h in hits):
+    unreadable = any(h.get("kind") == "keys-unreadable" for h in hits)
+    if unreadable or (hits and all(h.get("kind") == "stored-key" for h in hits)):  # stored-key: an older core
         why = _stored_keys_unreadable(root)
-        if why:  # the comparison could not run: say why instead of blaming a harmless command
-            raise Refused(f"Could not compare the command with this workspace's stored keys: {why}")
+        if why or unreadable:  # the comparison could not run: say why instead of blaming a harmless command
+            why = why or "orch could not read them. Try again in a moment."
+            raise Refused(f"Could not compare the command with this workspace's stored keys, because {why}")
     if hits:
         raise Refused(
             "The name or command holds a secret. Leave it out and read it inside the command with orch secret exec."
@@ -219,7 +225,7 @@ def _stored_keys_unreadable(root: Path) -> str | None:
 
 
 def _plain_reason(e: Exception) -> str:
-    text = " ".join(str(e).split())[:200]
+    text = " ".join(str(e).split()).removeprefix("Refused: ")[:1000]
     return text if text else "orch could not read them. Try again in a moment."
 
 
@@ -336,8 +342,36 @@ def _list_text(rows: list[dict], bad: int, note: str | None) -> str:
     return "\n".join(lines)
 
 
+def _switched_off(drv: drivers.Driver, rec: dict, spec: drivers.Spec) -> bool:
+    """An adopted job switched off outside orch (launchctl disable) does not start by itself (ORCH-1003).
+    orch's own entries follow the record: auto on/off enables or disables the label itself."""
+    return rec.get("adopted") is not None and bool(rec.get("auto")) and drv.switched_off(spec)
+
+
 def _state(root: Path, drv: drivers.Driver, rec: dict, wid: str) -> dict:
-    return _row(root, rec, drv.status(_spec(root, rec, wid, strict=False)))
+    spec = _spec(root, rec, wid, strict=False)
+    return _row(root, rec, drv.status(spec), _switched_off(drv, rec, spec))
+
+
+SETTLE_QUIET = 3.0  # seconds a job that is not even launching gets before it counts as stopped
+SETTLE_LAUNCH = 90.0  # seconds a job the platform is still launching gets (slow start under load)
+
+
+def _settle(drv, spec) -> drivers.Status | None:
+    """After a start: wait until the job runs, or is clearly not coming (never launching, or launching too long)."""
+    t0 = time.monotonic()
+    while True:
+        st = drv.status(spec)
+        if st.running:
+            return st
+        limit = SETTLE_LAUNCH if st.starting else SETTLE_QUIET
+        if time.monotonic() - t0 >= limit:
+            return st
+        time.sleep(0.5)
+
+
+def _launching(drv, spec) -> bool:
+    return bool(drv.status(spec).starting)
 
 
 def cmd_add(args, root: Path) -> int:
@@ -367,7 +401,7 @@ def cmd_add(args, root: Path) -> int:
     wid = _workspace_id(root)
     spec = _spec(root, rec, wid)
     store.save(root, rec)
-    store.logs_dir(root).mkdir(parents=True, exist_ok=True)
+    store.log_path(root, sid).parent.mkdir(parents=True, exist_ok=True)
     try:
         drv.install(spec)
     except Refused:
@@ -378,12 +412,22 @@ def cmd_add(args, root: Path) -> int:
         drv.start(spec)
         store.mark(root, sid, True)
         watch.note_own_start(root, drv, spec)
+        _settle(drv, spec)
     row = _state(root, drv, rec, wid)
-    nxt = (
-        f"Added {rec['name']}; it is running."
-        if row["state"] == "running"
-        else f"Added {rec['name']}. Start it: orch services start {sid}"
-    )
+    if row["state"] == "running":
+        nxt = f"Added {rec['name']}; it is running."
+    elif args.start and _launching(drv, spec):
+        nxt = f"Added {rec['name']}; it was started and is still starting. Check later: orch services list"
+    elif args.start:
+        nxt = f"Added {rec['name']} and started it, but it did not stay running. Read its log: orch services log {sid}"
+    else:
+        nxt = f"Added {rec['name']}. Start it: orch services start {sid}"
+    if store.on_external_volume(root):
+        nxt += (
+            "\nThis workspace is on an external disk: its log is kept in your Library/Logs/orch folder and the "
+            "service runs from your home folder. A service that must reach another device on your network needs "
+            "Local Network access (System Settings > Privacy & Security > Local Network)."
+        )
     return _emit_kept(args, drv, {"service": row, "next": nxt}, nxt)
 
 
@@ -433,6 +477,8 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
     store.mark(root, sid, verb != "stop")
     if verb != "stop":
         watch.note_own_start(root, drv, spec)
+    if verb != "stop":
+        _settle(drv, spec)
     row = _state(root, drv, rec, wid)
     for _ in range(START_WAIT_TRIES if verb != "stop" else 0):  # a job can take a moment to show as alive
         if row["state"] == "running":
@@ -441,7 +487,9 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
         row = _state(root, drv, rec, wid)
     words = {"start": "Started", "stop": "Stopped", "restart": "Restarted"}[verb]
     nxt = f"{words} {rec['name']}."
-    if verb != "stop" and row["state"] != "running":
+    if verb != "stop" and row["state"] != "running" and _launching(drv, spec):
+        nxt = f"{rec['name']} is still starting. Check later: orch services list"
+    elif verb != "stop" and row["state"] != "running":
         nxt = f"{rec['name']} did not stay running. Read its log: orch services log {sid}"
     return _emit(args, {"service": row, "next": nxt}, nxt)
 
@@ -480,9 +528,15 @@ def _log_lines(root: Path, rec: dict, n: int) -> list[str]:
 # ---------------------------------------------------------------- found and adopt
 
 
-def _found_text(items: list[dict]) -> str:
+def _found_text(items: list[dict], others: int = 0) -> str:
+    extra = (
+        f"{others} other program{'s' if others != 1 else ''} run{'' if others != 1 else 's'} here."
+        if others
+        else ""
+    )
     if not items:
-        return "Nothing found: orch sees no other background jobs of your account on this computer."
+        base = "Nothing found: orch sees no other background jobs of your account on this computer."
+        return f"{base} {extra}" if extra else base
     lines = []
     for it in items:
         bits = ["Running" if it["running"] else "Stopped"]
@@ -490,6 +544,8 @@ def _found_text(items: list[dict]) -> str:
             bits.append("starts by itself")
         lines.append(f"{it['id']}  {it['name']}  ({', '.join(bits)}) - {it['what']}")
     lines.append("Next: orch services adopt <id> to manage one with orch (nothing changes until then)")
+    if extra:
+        lines.append(extra)
     return "\n".join(lines)
 
 
@@ -517,9 +573,11 @@ def cmd_adopt(args, root: Path, fid: str) -> int:
     from . import found
 
     if isinstance(fid, str) and fid.startswith("process:"):
+        it = found.get(root, fid)
+        cmd = " ".join(it["command"])
         raise Refused(
-            "A plain program has no service entry, so orch cannot take it over. To keep it running with orch, "
-            'stop it yourself, then add it: orch services add "<name>" --id <id> -- <command>'
+            f"{it['name']} is a program without a service entry, so orch cannot take it over as it is: to keep it "
+            f'running with orch, stop it yourself, then add it: orch services add "{it["name"]}" --id <id> -- {cmd}'
         )
     it = found.get(root, fid)
     drv = _driver()
@@ -557,8 +615,9 @@ def cmd_adopt(args, root: Path, fid: str) -> int:
     return _emit_kept(args, drv, {"service": row, "next": nxt}, nxt)
 
 
-def cmd_check(args, root: Path) -> int:
-    """One pass over every service: health, failing, the one question and acting on its answer (no loop)."""
+def check_pass(root: Path) -> tuple[list[dict], list[str], int]:
+    """One pass over every service: health, failing, the one question and acting on its answer (no loop).
+    The caller holds the check lock (service.check_pass)."""
     recs, bad = store.load_all(root)
     drv = _driver()
     wid = _workspace_id(root)
@@ -580,8 +639,39 @@ def cmd_check(args, root: Path) -> int:
         said.append("No services yet.")
     elif not said:
         said.append(f"Checked {len(recs)} service(s); all as expected.")
+    return out, said, bad
+
+
+def cmd_check(args, root: Path) -> int:
+    with service.check_pass(root, wait=service.CHECK_WAIT):
+        out, said, bad = check_pass(root)
     data: dict = {"checked": out, "unreadable": bad}
     return _emit(args, data, "\n".join(said))
+
+
+def cmd_checker(args, root: Path) -> int:
+    """start | stop | status without a service id: the regular check (run by orch start and turning Services on)."""
+    if args.cmd == "start":
+        pid = service.start(root)
+        text = f"The regular check runs: every {service.EVERY_SECS} seconds (pid {pid})."
+        return _emit(args, {"running": True, "pid": pid}, text)
+    if args.cmd == "stop":
+        stopped = service.stop(root)
+        text = "The regular check stopped." if stopped else "The regular check was not running."
+        return _emit(args, {"stopped": stopped}, text)
+    pid = service.running_pid(root)
+    if pid:
+        return _emit(args, {"running": True, "pid": pid}, f"The regular check runs (pid {pid}).")
+    text = "The regular check is off. Start it: orch start (or orch services start)"
+    _emit(args, {"running": False}, text)
+    return 1
+
+
+def _checker_round(root: Path) -> None:
+    _out, said, _bad = check_pass(root)
+    for line in said:
+        if not line.startswith(("Checked ", "No services yet.")):
+            print(f"{store.now()} {line}", flush=True)
 
 
 def run(args) -> int:
@@ -604,9 +694,16 @@ def run(args) -> int:
         note = found.note()
         if note:
             return _emit(args, {"found": items, "note": note}, note)
-        return _emit(args, {"found": items}, _found_text(items))
+        n = found.others(root)
+        return _emit(args, {"found": items, **({"others": n} if n else {})}, _found_text(items, n))
     if cmd == "adopt":
         return cmd_adopt(args, root, args.found_id)
+    if cmd in ("start", "stop") and args.id is None:
+        return cmd_checker(args, root)
+    if cmd == "status":
+        return cmd_checker(args, root)
+    if cmd == "watch":
+        return service.watch(root, lambda: _checker_round(root), log=lambda m: print(m, flush=True))
     if cmd in ("start", "stop", "restart", "remove"):
         return cmd_simple(args, root, cmd, args.id)
     if cmd == "auto":
@@ -663,8 +760,12 @@ def main(argv=None) -> int:
     s.add_argument("--cwd")
     s.add_argument("--auto", action="store_true")
     s.add_argument("--start", action="store_true")
-    for verb in ("start", "stop", "restart", "remove"):
+    for verb in ("start", "stop"):  # without an id: the regular check (orch start runs these)
+        p(verb).add_argument("id", nargs="?")
+    for verb in ("restart", "remove"):
         p(verb).add_argument("id")
+    p("status")
+    sub.add_parser("watch", help=argparse.SUPPRESS)
     s = p("auto")
     s.add_argument("id")
     s.add_argument("value", choices=("on", "off"))

@@ -118,3 +118,13 @@ test('Open log shows every line of a long log and Close log goes back to the las
   assert.ok(box.classList.contains('log-short') && !box.classList.contains('log-full'));
   assert.equal(btn.textContent, 'Open log');
 });
+
+test("a service's address opens the app in a new tab (ORCH-846)", () => {
+  address = '#addon/services';
+  const s = draw();
+  const panel = s.querySelectorAll('[data-split-panel]').find(p => p.dataset.splitPanel === 'web-preview');
+  const a = panel.querySelectorAll('a').find(x => x.getAttribute('href') === 'http://127.0.0.1:5173');
+  assert.ok(a, 'the address is a link');
+  assert.equal(a.getAttribute('target') ?? a.target, '_blank');
+  assert.match(a.getAttribute('rel') ?? a.rel, /noopener/);
+});

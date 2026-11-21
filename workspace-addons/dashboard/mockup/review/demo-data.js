@@ -3,6 +3,18 @@
    shows why it waits on you (need). Order: most urgent first. */
 window.SWIPE_KIT='../../../../workspace/src/orch_ui/static/';
 window.SWIPE_ITEMS=[
+ /* A CI workflow change the owner merges (ORCH-305, ORCH-429): the changed lines with the risky ones red, the check's words
+    first, and "Safe to merge" only when a script check found nothing. The click approves and merges this exact version. */
+ {id:'m1',kind:'link',kindLabel:'Merge',icon:'link',ticket:'ORCH-512',ticketId:'ORCH-512',ticketTitle:'Release builds upload the app',when:'today 11:40',title:'Merge the CI workflow change of ORCH-512?',
+  why:'It changes a CI workflow, so GitHub waits for you to approve it: your click approves this exact version and merges it with your own GitHub login.',okLabel:'Merge',
+  links:[{label:'Workflow changes',url:'https://github.com/'}],
+  then:'It is merged on GitHub with your own login.',
+  preview:{type:'doc',heading:'What goes out · 1 change',status:{tone:'done',text:'All 14 checks passed · checked 11:40'},chips:[{text:'Look at the red lines',tone:'bad'}],
+   paras:['Workflow check, look at this: reads a secret (DEPLOY_KEY); runs a download straight in a shell.'],
+   diff:[{op:'-',file:'.github/workflows/release.yml',text:'      - run: make dist'},{op:'+',file:'.github/workflows/release.yml',text:'      - run: make dist upload'},
+    {op:'+',file:'.github/workflows/release.yml',text:'          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}',risk:'secret'},
+    {op:'+',file:'.github/workflows/release.yml',text:'      - run: curl -fsSL https://get.example.dev/install.sh | bash',risk:'download run in a shell'}],
+   rows:[{title:'.github/workflows/release.yml (+3 −1)'},{title:'Release builds upload the app',key:'ORCH-512',n:1842}],foot:'Exact version: 3f9c2a1'}},
  /* A design review as one set of cards (16 Nov, ORCH-65): the question text on the card, full-page pictures that fit the
     pane on a dark ground with a zoom per side, a marked suggestion, a choice with how it is today. */
  {id:'g1',kind:'draft',kindLabel:'Draft',icon:'page',group:'Home look',ticket:'DT-50',ticketId:'DT-50',ticketTitle:'Home look',when:'today 11:02',title:'Home: one list of what needs you',
@@ -58,7 +70,7 @@ window.SWIPE_ITEMS=[
   preview:{type:'doc',heading:'Plan',steps:['Every Monday 08:00, find invoices older than 30 days.','Write one friendly reminder per customer (your usual wording).','Send from billing@, copy to you.','Stop after 3 reminders; then ask you.']}},
  {id:'d2',kind:'check',kindLabel:'Check result',icon:'text',ticket:'DT-38',ticketId:'DT-38',ticketTitle:'Customer survey',when:'today 08:40',title:'Customer survey summary',
   why:'Round 2, after your comment “shorter, and say what we should do”.',
-  then:'The ticket is done; the summary goes to Anna.',
+  then:'The ticket is done and the summary goes to Anna. Nothing else starts. To change something, press Send back and say what; a helper then works on it in this ticket.',
   preview:{type:'compare',note:'Round 2',
    before:{type:'doc',heading:'Survey results (round 1)',paras:['We received 48 answers between 1 and 12 November. Respondents mentioned the team, opening hours, products, prices, music and parking. 40 of 48 people (83 %) praised the team. 29 (60 %) asked for Sunday opening.','Other topics: waiting time (6), prices (5), oat milk (3), music (2).']},
    after:{type:'doc',heading:'Survey: what customers said',paras:['48 people answered (1–12 Nov). 40 praised the friendly team. 29 asked for Sunday opening.','Proposal: try Sunday 9–13 for four weeks, then look at the numbers again.','Smaller points: 6 about waiting time on Saturday, 3 asked for oat milk.']}}},
@@ -68,14 +80,18 @@ window.SWIPE_ITEMS=[
   preview:{type:'table',cols:['Topic','People','Of 48'],rows:[['Friendly team','40','83 %'],['Sunday opening','29','60 %'],['Waiting time','6','13 %'],['Prices','5','10 %'],['Oat milk','3','6 %'],['Music','2','4 %']]}},
  {id:'d7',kind:'check',kindLabel:'Check result',icon:'check',ticket:'DT-47',ticketId:'DT-47',ticketTitle:'Opening hours page',when:'today 09:15',need:'Done when is not fully covered',title:'New opening hours on the website',
   why:'The helper says this is ready for your check.',okLabel:'Looks good',open:'https://example.com/pull/12',
-  then:'The ticket is done.',
+  then:'The ticket is done as it is, although pull request #12 is not merged yet. The missing part is dropped: no new ticket is made for it. To get it done, press Send back and say what is missing; a helper then works on it in this ticket.',
   files:[{label:'Opening hours page',type:'page',src:window.SWIPE_KIT+'samples/sample-page.html'},{label:'Door poster',type:'img',src:window.SWIPE_KIT+'demo-image.svg'},{label:'Shop window photo 1',type:'img',src:window.SWIPE_KIT+'demo-image.svg'},{label:'Shop window photo 2',type:'img',src:window.SWIPE_KIT+'demo-image.svg'},{label:'Shop window photo 3',type:'img',src:window.SWIPE_KIT+'demo-image.svg'},{label:'Shop window photo 4',type:'img',src:window.SWIPE_KIT+'demo-image.svg'},{label:'Shop window photo 5',type:'img',src:window.SWIPE_KIT+'demo-image.svg'},{label:'Shop window photo 6',type:'img',src:window.SWIPE_KIT+'demo-image.svg'}],/* the result's own files (ORCH-183); eight: 5 tiles and "+3 more" (ORCH-421) */
   preview:{type:'doc',heading:'What was done',paras:['In short: Sunday 9–13 is on the website and the Google entry.','No task covers: “the poster at the door shows it”','What to do: send it back and say which part is missing, or approve it if that part does not matter.'],
    steps:['Done: Change the hours on the website — Page now says Sunday 9:00 – 13:00 · Ran: page check (all links fine) · PR #12','Done: Update the Google entry — Saved; Google shows the new hours']}},
  {id:'d8',kind:'check',kindLabel:'Check result',icon:'check',ticket:'DT-48',ticketId:'DT-48',ticketTitle:'Supplier call',when:'today 09:20',title:'Call the supplier about oat milk',
   why:'The helper says this is ready for your check.',okLabel:'Looks good',
-  then:'The ticket is done.',
+  then:'The ticket is done. Nothing else starts: no new ticket, no more work. To change something, press Send back and say what; a helper then works on it in this ticket.',
   preview:{type:'doc',heading:'What was done',paras:['In short: The supplier delivers oat milk from Monday, 12 cartons a week.','Done when: The supplier confirmed a weekly oat milk order','Part of: DT-38 Customer survey']}},
+ {id:'d9',kind:'check',kindLabel:'Check result',icon:'check',ticket:'DT-49',ticketId:'DT-49',ticketTitle:'Lunch plan',when:'today 09:24',need:'Looks good is off',title:'Lunch plan for Friday',
+  why:'The helper says this is ready for your check.',okLabel:'Looks good',
+  then:'The ticket is done. Nothing else starts: no new ticket, no more work. To change something, press Send back and say what; a helper then works on it in this ticket.',blocked:'1 step is not finished. Send it back to get it done.',/* ORCH-548: Looks good is off and says why */
+  preview:{type:'doc',progress:{done:1,total:2},steps:['Done: Ask the team what they want','Open: Book the table']}},
  {id:'d6',kind:'draft',kindLabel:'Draft',icon:'image',ticket:'DT-29',ticketId:'DT-29',ticketTitle:'Invoice export',task:'d6',about:'Design the export screen',when:'Thu 16:20',title:'Invoice export screen',
   why:'New screen for the October export.',okLabel:'Build it',
   then:'The helper builds the screen. You check it before it is used.',

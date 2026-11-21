@@ -986,25 +986,36 @@ def _send_proposal(
         return {**local, "sent": True}
 
 
-def send_file(root: Path, target: str, path: Path, text: str | None, ticket: str | None = None) -> dict:
+def send_file(
+    root: Path,
+    target: str,
+    path: Path,
+    text: str | None,
+    ticket: str | None = None,
+    reply_to: str | None = None,
+) -> dict:
+    """A file (with an optional text). With reply_to it answers that message, and stays in the topic that
+    message started, as a text reply does."""
     if not path.is_file():
         raise Refused(f"{path} is not a file.")
     if path.stat().st_size > MAX_BLOB:
         raise Refused("The file is bigger than 100 MB.")
     to = resolve(root, target)
+    if not ticket and reply_to:
+        ticket = _topic_of_message(root, reply_to)  # answers a text that started a topic: stays in that topic
     data = path.read_bytes()
     if _DRY_RUN.get():  # nothing is uploaded: the body shows the file's name, size and fingerprint
         body = {"name": path.name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
         if text:
             body["text"] = text
-        return _message(root, to, "file", body, ticket)
+        return _message(root, to, "file", body, ticket, reply_to)
     blob = _api(root, "POST", "/v1/blobs", data, 300)[1]
     body = {"blob_id": blob["blob_id"], "name": path.name, "size": len(data), "sha256": blob["sha256"]}
     if blob["sha256"] != hashlib.sha256(data).hexdigest() or blob["size"] != len(data):
         raise Refused("The relay stored something different from the file. Not sent.")
     if text:
         body["text"] = text
-    return _message(root, to, "file", body, ticket)
+    return _message(root, to, "file", body, ticket, reply_to)
 
 
 def send_delegate(
@@ -1723,6 +1734,7 @@ def _apply_verdict(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]
             via=via,
             digest=asked_digest,
             phone=frm,
+            person=True,  # a paired phone, checked above (ORCH-582: may answer a draft)
             pid="p_" + answer_id[2:],
         )
     except review.BadVerdict as e:
@@ -1781,7 +1793,7 @@ def _apply_review_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str |
         return f"not applied to {tid}: not the current review", None
     try:
         if ans.casefold() == "accept":
-            tickets.accept_review(root, tid, by, via)
+            tickets.accept_review(root, tid, by, via, person=True)  # a paired phone, checked above
             return f"accepted {tid} (via {via})", tid
         tickets.ask_for_changes(root, tid, ans, by, via=via, phone=frm, pid="p_" + str(msg["id"])[2:])
         return f"asked for changes on {tid} (via {via})", tid
@@ -1972,6 +1984,7 @@ def _card_plain(root: Path, msg: dict, asked: dict) -> tuple[str, str | None] | 
             by=by,
             via=via,
             digest=asked.get("question_digest"),
+            person=True,  # a paired phone, checked above (ORCH-582: may answer a draft)
         )
     except Refused as e:
         return f"not applied to {asked['ticket']}: {e}", None
@@ -2839,6 +2852,10 @@ def sync_phone_views(root: Path) -> None:
         from orch import phone_alerts
 
         phone_alerts.sync(root)  # tool logins, connections and keys that run out or stopped (ORCH-47)
+    with contextlib.suppress(Refused, OSError, ValueError, TimeoutError):
+        from orch import phone_stuck
+
+        phone_stuck.sync(root)  # stuck tickets, as at the top of dashboard Home (ORCH-426)
 
 
 def _hint_applied(root: Path, m: dict) -> bool:

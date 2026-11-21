@@ -1,6 +1,7 @@
 // Local only (no live servers): two dashboard screenshots for docs/workspace-addons.md.
 // Usage: node addon-shots.mjs <out dir>. Needs `orch` installed from this checkout in a temp tool dir (done here).
 import { chromium } from 'playwright';
+import headless from '../headless.cjs'; // the keychain options (ORCH-615)
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -28,7 +29,7 @@ try {
   const port = 18000 + Math.floor(Math.random() * 900);
   dash = spawn('orch', ['dashboard', 'serve', '--port', String(port)], { cwd: ws, env, stdio: 'ignore', detached: true });
   for (let i = 0; i < 60; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/`)).ok) break; } catch {} await new Promise(r => setTimeout(r, 250)); }
-  browser = await chromium.launch();
+  browser = await headless.launch(chromium);
   const page = await (await browser.newContext({ viewport: { width: 1280, height: 760 }, colorScheme: 'light' })).newPage();
   fs.mkdirSync(OUT, { recursive: true });
   await page.goto(`http://127.0.0.1:${port}/#tickets`); await page.waitForSelector('a.card');

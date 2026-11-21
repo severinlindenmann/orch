@@ -6,6 +6,7 @@
 // Prints "ok: <step>" or "FAIL: <step>: <why>" per step and exits 1 if any step failed. A step fails on a console
 // error, an uncaught page error, an HTTP 4xx/5xx the page asked for, or (narrow widths) a page wider than the window.
 import { chromium, request } from 'playwright';
+import headless from '../headless.cjs'; // the keychain options (ORCH-615)
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -15,7 +16,7 @@ fs.mkdirSync(OUT, { recursive: true });
 const base = URL_.replace(/\/$/, '');
 let n = 0, failed = 0, problems = [];
 
-const browser = await chromium.launch();
+const browser = await headless.launch(chromium);
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 page.on('console', m => { if (m.type() === 'error') problems.push(`console: ${m.text().slice(0, 200)}`); });
 page.on('pageerror', e => problems.push(`page error: ${String(e).slice(0, 200)}`));

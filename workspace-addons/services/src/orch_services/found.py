@@ -5,8 +5,9 @@
 programs, never writes a file and never starts, stops or changes anything. Every command line it returns has been
 through the core secret scan (a hit shows as ••••••).
 
-Plain programs (tail, tmux, a helper's script) are never listed: only jobs the computer itself keeps (LaunchAgents,
-systemd user units). ORCH-639.
+Processes: a program of this user without a terminal whose working folder is inside this workspace. On Linux the
+folder comes from /proc/<pid>/cwd. On macOS only `lsof` can tell it; when lsof is missing (as on the develop Mac)
+processes are skipped, because without the folder there is no way to tell a workspace job from any other program.
 """
 
 from __future__ import annotations
@@ -30,6 +31,8 @@ ORCH_LABEL = "ch.orch.svc."
 ORCH_UNIT = "orch-svc-"
 VENDOR_LABELS = ("com.apple.", "com.google.", "com.microsoft.")
 INTERPRETERS = {"python", "python3", "node", "ruby", "perl", "php", "bash", "sh", "zsh", "deno", "bun", "uv"}
+PROC = Path("/proc")
+LSOF = "/usr/sbin/lsof"
 ID_RE = re.compile(r"(launchd|systemd):[A-Za-z0-9@._-]{1,200}|process:\d{1,10}")
 PAGE_ID = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,63}")  # a plain item id of the page (addon-view schema)
 HASHED_ID = re.compile(r"found-[0-9a-f]{12}")
@@ -142,6 +145,10 @@ def _launchd(root: Path) -> tuple[list[dict], set[int]]:
     items, pids = [], set()
     if not folder.is_dir():
         return items, pids
+    from .drivers.launchd import disabled_labels
+
+    cp = _tool([tool, "print-disabled", domain])
+    off = disabled_labels(cp.stdout) if cp and cp.returncode == 0 else set()
     for p in sorted(folder.glob("*.plist")):
         if p.is_symlink() or not p.is_file():
             continue
@@ -181,7 +188,7 @@ def _launchd(root: Path) -> tuple[list[dict], set[int]]:
                 what,
                 how,
                 argv,
-                d.get("RunAtLoad"),
+                bool(d.get("RunAtLoad")) and label not in off,  # a switched-off label is not loaded at login
             )
         )
     return items, pids
@@ -273,7 +280,30 @@ def _systemd(root: Path) -> tuple[list[dict], set[int]]:
     return items, pids
 
 
-# ---------------------------------------------------------------- the list
+# ---------------------------------------------------------------- processes
+
+
+def _cwd_linux(pid: int) -> Path | None:
+    try:
+        return Path(os.readlink(PROC / str(pid) / "cwd"))
+    except OSError:
+        return None
+
+
+def _cwds_lsof(pids: list[int]) -> dict[int, Path]:
+    lsof = shutil.which("lsof") or (LSOF if Path(LSOF).exists() else None)
+    if not lsof or not pids:
+        return {}
+    cp = _tool([lsof, "-a", "-d", "cwd", "-Fpn", "-p", ",".join(map(str, pids))])
+    if not cp:
+        return {}
+    out, pid = {}, None
+    for line in cp.stdout.splitlines():
+        if line.startswith("p") and line[1:].isdigit():
+            pid = int(line[1:])
+        elif line.startswith("n") and pid is not None:
+            out[pid] = Path(line[1:])
+    return out
 
 
 def _interpreter(prog: str) -> bool:
@@ -281,19 +311,137 @@ def _interpreter(prog: str) -> bool:
     return re.sub(r"[\d.]+$", "", prog.lower()) in INTERPRETERS
 
 
-def scan(root: Path) -> list[dict]:
-    """Every found item, sorted by name. Reads only; an item already managed by orch is left out."""
+def _is_orch(argv: list[str]) -> bool:
+    """orch itself, or one of its own parts (orch_dashboard, orch_automation ...), also behind interpreter flags
+    such as `Python -P -m orch_dashboard`: orch's own background pages are never found items."""
+    prog = Path(argv[0]).name if argv else ""
+    if prog == "orch" or any(a == "orch" or a.startswith("orch_") for a in argv[1:3]):
+        return True
+    if not _interpreter(prog):
+        return False
+    for a in argv[1:6]:
+        if a.startswith("-"):
+            continue
+        name = Path(a).name
+        return name == "orch" or name.startswith("orch_") or "/orch_" in a
+    return False
+
+
+def _processes(root: Path, skip: set[int]) -> list[dict]:
+    cp = _tool(["ps", "-ww", "-U", str(os.getuid()), "-o", "pid=,ppid=,tty=,lstart=,command="])
+    if not cp or cp.returncode != 0:
+        return []
+    rows = {}
+    for line in cp.stdout.splitlines():
+        w = line.split()
+        if len(w) < 9 or not w[0].isdigit() or not w[1].isdigit():
+            continue
+        rows[int(w[0])] = {"ppid": int(w[1]), "tty": w[2], "lstart": " ".join(w[3:8]), "argv": w[8:]}
+    # Never this run itself or what started it, nothing orch started (and what those started), nothing with a
+    # terminal (a person's shell or a helper's session is not a background job).
+    mine, p = set(), os.getpid()
+    while p in rows and p not in mine:
+        mine.add(p)
+        p = rows[p]["ppid"]
+    mine.add(os.getpid())
+
+    def from_orch(pid: int) -> bool:
+        """orch started it, or a job orch keeps or the computer keeps (skip) did: a child of a managed job, such as
+        the `sleep` of a ticker, belongs to that job and is no other program (ORCH-1130)."""
+        seen = set()
+        while pid in rows and pid not in seen:
+            seen.add(pid)
+            if pid in skip or _is_orch(rows[pid]["argv"]):
+                return True
+            pid = rows[pid]["ppid"]
+        return False
+
+    cand = [
+        pid
+        for pid, r in rows.items()
+        if pid not in mine and r["tty"] in ("?", "??", "-") and not from_orch(pid)
+    ]
+    if sys.platform.startswith("linux"):
+        cwds = {pid: c for pid in cand if (c := _cwd_linux(pid))}
+    else:
+        cwds = _cwds_lsof(cand)  # no lsof: no processes (see the module comment)
+    base = root.resolve()
+    items = []
+    for pid in sorted(set(cwds) & set(cand)):  # only the candidates, whatever lsof answered
+        try:
+            cwds[pid].resolve().relative_to(base)
+        except (ValueError, OSError):
+            continue
+        r = rows[pid]
+        name = script_name(r["argv"])
+        how = {"kind": "process", "pid": pid}
+        items.append(
+            _item(
+                root,
+                f"process:{pid}",
+                name,
+                True,
+                _utc_from_ps(r["lstart"]),
+                "A program running in this workspace folder",
+                how,
+                r["argv"],
+                False,
+            )
+        )
+    return items
+
+
+# ---------------------------------------------------------------- the list
+
+
+def scan(root: Path, processes: bool = False) -> list[dict]:
+    """Every found job orch can take over (launchd / systemd), sorted by name. Reads only; an item already managed
+    by orch is left out. Plain programs (tail, hand-run scripts) cannot be taken over and are no items: they are
+    only counted by `others`, unless `processes` is set (adopt looks one up to explain why it cannot)."""
     if sys.platform == "darwin":
-        units, _pids = _launchd(root)
+        units, pids = _launchd(root)
     elif sys.platform.startswith("linux"):
-        units, _pids = _systemd(root)
+        units, pids = _systemd(root)
     else:
         return []
     done = _adopted(root)
     units = [u for u in units if u["id"] not in done]
-    items = units
+    items = units + (_processes(root, pids | _record_pids(root)) if processes else [])
     items.sort(key=lambda i: (i["name"].lower(), i["id"]))
     return items
+
+
+def others(root: Path) -> int:
+    """How many plain programs run in this workspace folder (shown as one line, never as items)."""
+    if not (sys.platform == "darwin" or sys.platform.startswith("linux")):
+        return 0
+    _units, pids = _launchd(root) if sys.platform == "darwin" else _systemd(root)
+    return len(_processes(root, pids | _record_pids(root)))
+
+
+def _record_pids(root: Path) -> set[int]:
+    """Main pids of the services orch keeps (made or adopted): their processes are not found again."""
+    from . import drivers
+    from .cli import _spec, _workspace_id
+
+    out: set[int] = set()
+    recs, _bad = store.load_all(root)
+    if not recs:
+        return out
+    try:
+        drv = drivers.get()
+        drv.check()
+        wid = _workspace_id(root)
+    except Refused:
+        return out
+    for r in recs:
+        try:
+            st = drv.status(_spec(root, r, wid, strict=False))
+        except Refused:
+            continue
+        if st.running and st.pid:
+            out.add(st.pid)
+    return out
 
 
 def note() -> str | None:
@@ -304,7 +452,7 @@ def note() -> str | None:
 def get(root: Path, fid: str) -> dict:
     if not isinstance(fid, str) or not (ID_RE.fullmatch(fid) or HASHED_ID.fullmatch(fid)):
         raise Refused(f"'{fid}' is not a found service. Run orch services found to see them.")
-    for it in scan(root):
+    for it in scan(root, processes=fid.startswith("process:")):
         if it["id"] == fid or (HASHED_ID.fullmatch(fid) and page_id(it["id"]) == fid):
             return it
     raise Refused(f"There is no found service {fid} (any more). Run orch services found to see them.")

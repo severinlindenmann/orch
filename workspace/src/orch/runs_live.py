@@ -5,8 +5,9 @@
 orch owns that tmux server (own socket), so a person's own tmux is never touched. The claim's pid is the pane
 process (the wrapper). Input waits in the pending file and is pasted (bracketed paste, then a separate Enter)
 only when the agent says it is idle (the wrapper then checks that it was submitted: watch_submit): the tool's
-own hooks call `orch run event --kind idle`, a generic agent calls
-`orch run done`. Any number of live sessions per workspace, unless Settings > Helper > Helpers at
+own hooks call `orch run event --kind idle` (also when an error such as a usage limit or a login that changed
+ended the turn: the tool then fires its failure hook instead of the normal one, ORCH-689), a generic agent
+calls `orch run done`. Any number of live sessions per workspace, unless Settings > Helper > Helpers at
 once (workspace.live_max) sets a limit; then a start waits in line for a slot. A session idle (or
 waiting for a person) for an hour (workspace.live_idle_minutes; 10 minutes once the ticket is in Review,
 Done or Dropped, and such a session does not count toward the limit, nor does one idle while it only waits for
@@ -167,6 +168,23 @@ def _only_waits_for_checks(rec: dict) -> bool:
     return False
 
 
+def _waits_on_time_or_work(root: Path, rec: dict) -> bool:
+    """Idle at its prompt on a ticket that waits for a time, another ticket or something outside (a pull
+    request, the merge queue): the ticket wakes by its timer or the verdict, the session does nothing and
+    uses no machine, so it does not hold a slot. A wait on a question or a start that failed still counts."""
+    if (rec.get("live") or {}).get("state") != "idle":
+        return False
+    with contextlib.suppress(Exception):
+        t = tickets.load(root, rec["ticket"])
+        w = t.get("waiting_on") or {}
+        return (
+            t.get("status") == "waiting"
+            and w.get("kind") in ("time", "ticket", "external")
+            and not w.get("start")
+        )
+    return False
+
+
 def _runs_check_wait(rec: dict) -> bool:
     """The agent runs a wait on pull request checks (orch ref wait, orch github wait) right now. The tool
     says idle once it put the wait in the background and ended its turn, but the wait still merges on green
@@ -191,14 +209,16 @@ def _keeps_busy(root: Path, rec: dict) -> bool:
 def live_alive(root: Path) -> list[dict]:
     """Live runs that count against the limit. A session that is idle or waiting for a person on a ticket in
     Review, Done or Dropped does not (it closes by itself after FINISHED_IDLE_SECONDS), nor does one idle
-    while it only waits for pull request checks; a working or starting one does. Both stay under the
-    hard ceiling in _full (the limit plus HARD_EXTRA)."""
+    while it only waits for pull request checks, nor one idle on a ticket that waits for a time, another
+    ticket or something outside (ORCH-666); a working or starting one does. Both stay under the hard ceiling
+    in _full (the limit plus HARD_EXTRA)."""
     return [
         r
         for r in live_all(root)
         if not (
             ((r.get("live") or {}).get("state") in ("idle", "attention") and _finished(root, r["ticket"]))
             or _only_waits_for_checks(r)
+            or _waits_on_time_or_work(root, r)
         )
     ]
 
@@ -372,10 +392,12 @@ def start_live(
     take_over: bool,
     busy_text: str,
     priority: str = "normal",
+    over_limit: bool = False,
 ) -> dict:
     cur = runs.read(root, tid)
     mine = cur is not None and runs.state(cur) == "alive"
-    hit = None if mine or tickets.is_manager(root, tid) else _full(root)  # the Manager never waits in line
+    # the Manager and an urgent start (red develop, ORCH-699) never wait in line
+    hit = None if mine or over_limit or tickets.is_manager(root, tid) else _full(root)
     held = None if (mine or hit) else _held(root, by)
     if held:
         _queue_for_slot(root, tid, by, busy_text, priority)
@@ -418,6 +440,8 @@ def start_live(
         r = tmux(
             root, "new-session", "-d", "-P", "-F", "#{pane_pid}", "-x", "200", "-y", "50",
             "-s", tid, "-c", str(work), "-e", f"ORCH_ROOT={root}", "--", *cmd,
+            # ORCH-707: orch's own server passes focus events on, so the tool shows no tmux tip about it
+            ";", "set-option", "-g", "focus-events", "on",
         )  # fmt: skip
         if r.returncode != 0:
             raise Refused(f"tmux could not start the session: {r.stderr.strip() or 'unknown error'}")
@@ -426,6 +450,7 @@ def start_live(
             tmux={"socket": socket_name(root), "session": tid},
             live={"state": "starting", "since": tickets.now()},
         )  # fmt: skip
+        runs.set_process_fields(root, tid, run, permissions=p.get("permissions"))  # ORCH-818: the pane header
     except BaseException:
         runs.release(root, tid, run)
         hooks_path.unlink(missing_ok=True)

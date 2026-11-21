@@ -95,6 +95,8 @@ def test_three_failures_in_ten_minutes_raise_exactly_one_question(cli, fake, ws,
     assert res["failing"] is True
     asks = orch.asks()
     assert len(asks) == 1 and asks[0]["by"] == "agent:services"
+    # ORCH-614: an add-on kind keeps the answer with Services; a plain question would start a helper on the ticket
+    assert asks[0]["args"][asks[0]["args"].index("--kind") + 1] == "services:health"
     q = orch.ticket()["questions"][0]
     assert (
         q["text"]

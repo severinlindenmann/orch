@@ -245,6 +245,106 @@ def test_gate_red_and_develop_moved_closes_and_recuts(tmp_path, capsys):
     assert out["did"] == ["close:release 31 PR 9031"] and out["state"]["release"] is None
 
 
+RUN_URL = "https://github.com/o/r/actions/runs/{}/job/7"
+
+
+def test_gate_red_runs_the_failed_jobs_once_more_before_a_ticket(tmp_path, capsys):
+    """ORCH-1023: a flaky test each closed releases 35 and 36 in one night; red checks get one more try."""
+    bad = [
+        {
+            "name": "macos 3/5",
+            "status": "COMPLETED",
+            "conclusion": "FAILURE",
+            "detailsUrl": RUN_URL.format(11),
+        },
+        {
+            "name": "macos 4/5",
+            "status": "COMPLETED",
+            "conclusion": "FAILURE",
+            "detailsUrl": RUN_URL.format(11),
+        },
+        {"name": "linux", "status": "COMPLETED", "conclusion": "SUCCESS", "detailsUrl": RUN_URL.format(12)},
+        ROLLUP_DONE,
+    ]
+    moved = {"develop": "e" * 40, "main": MAIN, "unreleased": UN3}
+    out = go(
+        tmp_path,
+        capsys,
+        state={"release": gate()},
+        open_release={"number": 9031},
+        prs=pr(checks=bad),
+        heads=moved,
+    )
+    assert out["did"] == ["rerun:11"]  # not closed although develop moved: the run gets its one more try
+    assert out["state"]["release"]["reran"]["runs"] == ["11"] and "once more" in out["lines"][-1]
+    st, rel = out["state"], dict(open_release={"number": 9031}, heads=moved)
+    wait = go(tmp_path, capsys, state=st, prs=pr(checks=bad), **rel)  # GitHub still shows the old failure
+    assert wait["did"] == [] and "waits for the failed jobs" in wait["lines"][-1]
+    later = "2999-01-01T00:00:00Z"  # the new try started after the rerun and is red again
+    red_again = [dict(c, startedAt=later) if c.get("conclusion") == "FAILURE" else c for c in bad]
+    again = go(tmp_path, capsys, state=wait["state"], prs=pr(checks=red_again), **rel)
+    assert again["did"] == ["close:release 31 PR 9031"]  # red again: as before, no second rerun
+
+
+def test_gate_rerun_that_never_reports_stops_waiting(tmp_path, capsys):
+    bad = [{"name": "m", "status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": RUN_URL.format(5)}]
+    st = {"release": dict(gate(), reran={"runs": ["5"], "at": "2000-01-01T00:00:00Z"})}
+    heads = {"develop": DEV, "main": MAIN, "unreleased": UN3}
+    out = go(
+        tmp_path,
+        capsys,
+        state=st,
+        open_release={"number": 9031},
+        prs=pr(checks=bad + [ROLLUP_DONE]),
+        heads=heads,
+    )
+    assert out["did"] == ["ticket:Release 31 checks are red: m"]  # waited longer than the test timeout
+
+
+def test_gate_refused_rerun_goes_on_to_the_ticket(tmp_path, capsys, monkeypatch):
+    def refuse(self, run_id):
+        raise Refused("no write")
+
+    monkeypatch.setattr(rk.World, "rerun_failed", refuse)
+    bad = [{"name": "m", "status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": RUN_URL.format(5)}]
+    heads = {"develop": DEV, "main": MAIN, "unreleased": UN3}
+    out = go(
+        tmp_path,
+        capsys,
+        state={"release": gate()},
+        open_release={"number": 9031},
+        prs=pr(checks=bad + [ROLLUP_DONE]),
+        heads=heads,
+    )
+    assert out["did"] == ["ticket:Release 31 checks are red: m"] and out["state"]["release"]["reran"]
+    assert any("could not run 5 again" in line for line in out["lines"])
+
+
+def test_failed_runs_reads_the_newest_try_of_each_check():
+    old = {
+        "name": "a",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "startedAt": "1",
+        "detailsUrl": RUN_URL.format(1),
+    }
+    new = {
+        "name": "a",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "startedAt": "2",
+        "detailsUrl": RUN_URL.format(1),
+    }
+    status = {
+        "context": "ext",
+        "state": "FAILURE",
+        "targetUrl": "https://ci.example/9",
+    }  # no Actions run: none
+    assert rk.failed_runs([old, new, status]) == []
+    assert rk.failed_runs([old]) == ["1"]
+    assert rk.failed_runs([old], ignore=frozenset({"a"})) == []
+
+
 def test_merged_updates_notes_highlights_and_asks_deploy(tmp_path, capsys):
     out = go(
         tmp_path,
@@ -616,7 +716,9 @@ def test_deploy_ticket_says_how_to_write_down_the_deploy(tmp_path, capsys, monke
     monkeypatch.setattr(
         rk.World,
         "new_ticket",
-        lambda self, parent, title, note, dw, priority="high": seen.update(note=note) or "t_sim",
+        lambda self, parent, title, note, dw, priority="high", over_limit=False: (
+            seen.update(note=note) or "t_sim"
+        ),
     )
     t = {
         "questions": [
@@ -728,12 +830,34 @@ def test_a_build_not_for_linux_is_not_prepared(tmp_path, capsys):
     assert "not prepared" in rk.prep_line("relay", p)
 
 
+def test_deploy_card_says_when_production_could_not_be_read(tmp_path, capsys):
+    """ORCH-1026: after the server move the deploy host was silently wrong (production read as unknown)."""
+    out = go(
+        tmp_path,
+        capsys,
+        state={"release": gate(phase="card")},
+        open_release=None,
+        prs=pr("MERGED"),
+        changed=["relay/src/main.rs"],
+        built=BUILT,
+        fetched=FETCHED,
+        prod_sha={},
+    )
+    p = out["state"]["deploy"]["prep"]["relay"]
+    assert p["ready"] and p["prod"] is None
+    line = rk.prep_line("relay", p)
+    assert line.startswith("The relay server is fetched and checked (")
+    assert "Production's relay program could not be read over ssh" in line and "release_deploy_host" in line
+
+
 def test_deploy_go_hands_the_helper_the_prepared_program(tmp_path, capsys, monkeypatch):
     seen = {}
     monkeypatch.setattr(
         rk.World,
         "new_ticket",
-        lambda self, parent, title, note, dw, priority="high": seen.update(note=note) or "t_sim",
+        lambda self, parent, title, note, dw, priority="high", over_limit=False: (
+            seen.update(note=note) or "t_sim"
+        ),
     )
     t = {
         "questions": [
@@ -1143,7 +1267,9 @@ def test_a_red_check_without_an_exception_gets_no_card_and_says_how_to_record_on
     monkeypatch.setattr(
         rk.World,
         "new_ticket",
-        lambda self, parent, title, note, dw, priority="high": seen.update(title=title, note=note) or "t_sim",
+        lambda self, parent, title, note, dw, priority="high", over_limit=False: (
+            seen.update(title=title, note=note) or "t_sim"
+        ),
     )
     out = go(tmp_path, state={"release": gate()}, open_release={"number": 9031}, prs=pr(checks=red_mac()))
     assert "card:release 31" not in out["did"]
@@ -1350,7 +1476,9 @@ def test_walks_start_at_the_cut_with_the_commit_in_the_note(tmp_path, monkeypatc
     monkeypatch.setattr(
         rk.World,
         "new_ticket",
-        lambda self, parent, title, note, dw, priority="high": notes.append((title, note)) or "t_sim",
+        lambda self, parent, title, note, dw, priority="high", over_limit=False: (
+            notes.append((title, note)) or "t_sim"
+        ),
     )
     out = go_walks(
         tmp_path,
@@ -1360,3 +1488,37 @@ def test_walks_start_at_the_cut_with_the_commit_in_the_note(tmp_path, monkeypatc
     assert out["state"]["release"]["phase"] == "gate" and len(out["state"]["release"]["walks"]) == 3
     assert [t for t, _ in notes] == [f"Release 31: {k} walk" for k in ("install", "services", "clickthrough")]
     assert f"--commit {DEV[:12]}" in notes[0][1] and "Use the skill release-walk." in notes[0][1]
+
+
+def test_dry_run_text_says_would_not_did():
+    # ORCH-911: a dry run listed "did: security-review:#6" although it wrote nothing
+    res = {"off": False, "paused": False, "lines": ["one line"], "did": ["security-review:#6"]}
+    dry = rk.text(res, dry_run=True)
+    assert "would: security-review:#6" in dry and "did:" not in dry
+    assert "did: security-review:#6" in rk.text(res)
+
+
+def test_refused_ticket_is_listed_as_failed(tmp_path, monkeypatch):
+    # ORCH-911 review: a ticket the keeper could not open must not count as opened for the Next line
+    def refuse(*a, **k):
+        raise Refused("no such parent")
+
+    monkeypatch.setattr(tickets, "resolve", refuse)
+    w = rk.World.__new__(rk.World)
+    w.root, w.sim, w.dry, w.did = tmp_path, None, False, []
+    assert w.new_ticket("ORCH-1", "Develop is red", "n", "d").startswith("not opened")
+    assert w.did == ["ticket:Develop is red failed"]
+
+
+def test_a_done_role_ticket_is_opened_again_so_its_cards_are_not_refused(proj, on):
+    tickets.set_status(proj, tickets.resolve(proj, on), "done", tickets.SYSTEM)
+    res = rk.run(proj, world=sim_world(proj))
+    assert "opened it again" in res["lines"][0]
+    assert tickets.load(proj, tickets.resolve(proj, on))["status"] == "open"
+    assert rk.run(proj, world=sim_world(proj))["lines"][0] != res["lines"][0]  # only once
+
+
+def test_a_dry_run_leaves_a_done_role_ticket_alone(proj, on):
+    tickets.set_status(proj, tickets.resolve(proj, on), "done", tickets.SYSTEM)
+    rk.run(proj, dry_run=True, world=sim_world(proj))
+    assert tickets.load(proj, tickets.resolve(proj, on))["status"] == "done"

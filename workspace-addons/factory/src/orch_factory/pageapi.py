@@ -486,10 +486,11 @@ def _grants(store, tickets, journal):
     ]
 
 
-def _all(root):
-    """(summaries, ok decided question ids, store, tickets, journal): one pass over every order."""
+def _all(root, own=False):
+    """(summaries, ok decided question ids, store, tickets, journal): one pass over every order. `own`: read
+    only the tickets with Factory's data (orders, crew), enough for orders, crew and grants (ORCH-603)."""
     store = Store(root)
-    tickets = orchcli.tickets(root)
+    tickets = orchcli.own_tickets(root) if own else orchcli.tickets(root)
     journal = store.journal_read()
     summaries, ok = [], set()
     held, on, stuck = watch.held(store), _watcher_on(root), watch.stuck(store)
@@ -541,7 +542,7 @@ def needs(root):
     """`orch factory needs`: one row per stage review that waits for the person's Looks good (contracts/needs.schema.json),
     the same review the Factory page shows (ORCH-419). In a terminal the person answers it with core's own commands:
     Looks good = each built task to done (`cli`), a change = words to the helper on the order."""
-    summaries, _ok, _store, tickets, _journal = _all(root)
+    summaries, _ok, _store, tickets, _journal = _all(root, own=True)  # fast at 10,000 tickets (ORCH-603)
     changed = {t["id"]: t.get("updated_at") for t in tickets}
     now = _iso(clock())
     out = []

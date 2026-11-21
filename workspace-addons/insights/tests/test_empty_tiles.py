@@ -125,3 +125,19 @@ def test_tile_does_not_contradict_the_helper_time_shown_above():
     tile = run({"count": 0, "known": True}, {"time": "88 h 28 min"})["tiles"][0]
     assert "No helper runs are recorded" not in tile and "helper time above" in tile
     assert "No helper runs are recorded" in run({"count": 0, "known": True}, {"time": "–"})["tiles"][0]
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node missing")
+def test_tile_says_runs_orch_started_are_not_measured():
+    """ORCH-966: a custom helper writes no record lines; orch still started runs: not "No helper runs"."""
+    view = json.dumps({"started": 4, "tabs": {"connections": {"count": 0, "known": True}}})
+    out = json.loads(
+        subprocess.run(
+            ["node", "-e", RUNNER, str(JS), view, json.dumps({"time": "–"})],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    )
+    tile = out["tiles"][0]
+    assert "orch started 4 runs" in tile and "not measured" in tile and "No helper runs" not in tile

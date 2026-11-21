@@ -433,6 +433,8 @@ ACT_ARGS = {
     "check.move": {"ticket": TID, "check": "c1", "after": "c2"},
     "run.start": {"ticket": TID},
     "session.reopen": {"ticket": TID, "session": "s-1"},
+    "session.pin": {"session": TID, "pinned": True},
+    "session.name": {"session": TID, "name": "Lunch money"},
     "session.new": {"kind": "empty"},
     "run.stop": {"ticket": TID},
     "run.send": {"ticket": TID, "text": "x"},
@@ -460,7 +462,6 @@ ACT_ARGS = {
     "triage.start": {"lanes": ["backlog"]},
     "diag.set": {"on": False},
     "typing.set": {"on": True},
-    "focus_preview.set": {"on": True},
     "update.auto": {"on": True},
     "diag.delete_reports": {},
     "copies.remove_orphaned": {"ws8": "abcd1234"},
@@ -971,3 +972,22 @@ def test_update_info_endpoint_gives_versions_and_changes(live, monkeypatch):
         and data["changes"] == ["Helpers tidy up new tickets"]
     )
     assert "source" in data
+
+
+def get_state(port, cookie=None):
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    h = {"Host": f"127.0.0.1:{port}", "Origin": f"http://127.0.0.1:{port}"}
+    if cookie:
+        h["Cookie"] = cookie
+        h["X-Orch-Page"] = SECRETS[cookie]
+    c.request("GET", "/api/session-state", headers=h)
+    r = c.getresponse()
+    return r.status, json.loads(r.read())
+
+
+def test_session_state_says_signed_in_view_only_or_helper(live, monkeypatch):
+    root, port = live
+    assert get_state(port) == (200, {"state": "view-only"})
+    assert get_state(port, session(root, port)) == (200, {"state": "signed-in"})
+    monkeypatch.setattr(SERVERS[port].RequestHandlerClass.keywords["session"], "active", False)
+    assert get_state(port) == (200, {"state": "helper"})

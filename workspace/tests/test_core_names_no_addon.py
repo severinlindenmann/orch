@@ -41,6 +41,7 @@ ALLOW = {
     "orch/cli_record.py": {"usage": _TOKENS},
     "orch/collect_claude.py": {"usage": _TOKENS},
     "orch/collect_execjson.py": {"usage": _TOKENS},
+    "orch/keystart.py": {"usage": _TOKENS},
     "orch/record.py": {"usage": _TOKENS},
     "orch/usage.py": {"usage": _TOKENS},
     "orch/cli_look.py": {"services": _KEY},

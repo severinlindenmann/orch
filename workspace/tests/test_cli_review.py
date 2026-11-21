@@ -151,11 +151,12 @@ def test_add_needs_then_and_a_ticket(tk, run):
     assert code == 2
 
 
-def test_answer_ok_resumes_helper_and_records(tk, run, monkeypatch):
+def test_answer_ok_resumes_helper_and_records(tk, run, monkeypatch, person_grant):
     root, tid = tk
     q = _draft(run, tid)
     seen = []
     monkeypatch.setattr("orch.runs_live.pass_answer", lambda *a, **k: seen.append((a, k)))
+    person_grant(root)  # a signed-in page (ORCH-582: only a person picks a draft)
     code, out, err = run(
         "review", "answer", tid, q["id"], "--verdict", "ok", "--digest", _digest(root, tid, q["id"]),
         "--via", "page", "--by", ME, "--json",
@@ -168,10 +169,11 @@ def test_answer_ok_resumes_helper_and_records(tk, run, monkeypatch):
     assert json.loads(out)["cards"] == []
 
 
-def test_answer_talk_with_note_and_answered_list(tk, run):
+def test_answer_talk_with_note_and_answered_list(tk, run, person_grant):
     root, tid = tk
     q = _draft(run, tid)
     note = json.dumps({"changes": ["Shorter title."], "pins": [{"n": 1, "on": "title", "text": "here"}]})
+    person_grant(root)
     code, out, err = run(
         "review", "answer", tid, q["id"], "--verdict", "talk", "--note", note, "--by", ME, "--json"
     )
@@ -259,8 +261,10 @@ def test_answer_too_large_note_and_unknown_keys(tk, run):
     assert code == 2 and json.loads(out)["code"] == "refused"  # words alone need something to change
 
 
-def _in_review(root, tid):
+def _in_review(root, tid, *, finished=True):
     tickets.check_add(root, tid, "Write it", "agent:claude")
+    if finished:
+        tickets.check_done(root, tid, "c1", ['{"type":"note","ref":"wrote it"}'], "agent:claude")
     tickets.set_status(root, tid, "review", "agent:claude")
 
 
@@ -293,11 +297,140 @@ def test_answer_check_send_back_needs_note(tk, run):
     assert tickets.load(root, tid)["status"] not in ("review", "done")
 
 
-def test_ticket_show_lists_what_applies_now_and_the_answers(tk, run):
+def _check_card(run):
+    code, out, _ = run("review", "list", "--json")
+    return next(c for c in json.loads(out)["cards"] if c["key"] == "review")
+
+
+def _ok(run, tid, digest):
+    code, out, err = run(
+        "review", "answer", tid, "review", "--verdict", "ok", "--digest", digest, "--by", ME, "--json"
+    )
+    return code, json.loads(out) if out.strip() else {}, err
+
+
+def test_a_second_looks_good_says_it_is_done_already(tk, run):
+    """ORCH-548: a Looks good saved twice (another tab, the phone, a page that sent its held answers again)
+    is not a failure: it says the ticket is Done, who did it and when (code decided), never "not waiting for
+    your review"."""
+    root, tid = tk
+    _in_review(root, tid)
+    digest = _check_card(run)["digest"]
+    assert _ok(run, tid, digest)[0] == 0
+    code, out, _ = _ok(run, tid, digest)
+    assert code == 2 and out["code"] == "decided", out
+    assert out["error"].startswith("Already Done: you accepted it today "), out
+    assert tickets.load(root, tid)["status"] == "done"
+
+
+def test_looks_good_after_the_reviewer_accepted_says_so(tk, run):
+    root, tid = tk
+    _in_review(root, tid)
+    digest = _check_card(run)["digest"]
+    assert run("config", "set", "workflow.reviewer", "on")[0] == 0
+    tickets.accept_for_owner(root, tid, "small change, every task has evidence")
+    code, out, _ = _ok(run, tid, digest)
+    assert code == 2 and out["code"] == "decided", out
+    assert "the Reviewer accepted it for you today " in out["error"], out
+    assert out["error"].endswith("Nothing more to press."), out
+
+
+def test_looks_good_after_the_reviewer_sent_it_back_says_why(tk, run):
+    """The race with the Reviewer (ORCH-548): it sent the ticket back in the seconds before the person's Looks
+    good was saved. The answer names the Reviewer's reason and what happens next, even with the card's old
+    digest."""
+    root, tid = tk
+    _in_review(root, tid)
+    digest = _check_card(run)["digest"]
+    tickets.ask_for_changes(root, tid, "Pull request #12 is not merged yet.", tickets.REVIEWER)
+    code, out, _ = _ok(run, tid, digest)
+    assert code == 2 and out["code"] == "decided", out
+    assert out["error"].startswith("The Reviewer sent it back today "), out
+    assert (
+        ": Pull request #12 is not merged yet. It is To do now and comes back to Check"
+        " when the helper is done." in out["error"]
+    ), out
+    assert tickets.load(root, tid)["status"] == "ready"
+
+
+def test_looks_good_after_you_sent_it_back(tk, run):
+    root, tid = tk
+    _in_review(root, tid)
+    digest = _check_card(run)["digest"]
+    note = json.dumps({"changes": ["Redo the test."]})
+    assert run("review", "answer", tid, "review", "--verdict", "talk", "--note", note, "--by", ME)[0] == 0
+    code, out, _ = _ok(run, tid, digest)
+    assert code == 2 and out["code"] == "decided", out
+    assert out["error"].startswith("You sent it back today "), out
+
+
+def test_an_open_step_turns_looks_good_off_with_the_reason(tk, run):
+    """Owner 18 Nov (ORCH-548): open steps stop Looks good, like the ticket page's button (ORCH-250); the card
+    says why and what to press, and an answer that comes anyway is refused with the same line."""
+    root, tid = tk
+    _in_review(root, tid, finished=False)
+    card = _check_card(run)
+    assert card["card"]["blocked"] == "1 step is not finished. Send it back to get it done."
+    assert card["card"]["need"] == "Looks good is off"
+    code, out, _ = _ok(run, tid, card["digest"])
+    assert code == 2 and out["code"] == "refused" and out["error"] == card["card"]["blocked"], out
+    assert tickets.load(root, tid)["status"] == "review"
+    wire = review.wire_card(card["card"], {})
+    assert wire["then"] == "Looks good is off: 1 step is not finished. Send it back to get it done."
+
+
+def test_an_open_question_turns_looks_good_off(tk, run):
+    root, tid = tk
+    _in_review(root, tid)
+    # a plain question keeps a ticket out of Check (set_status refuses); an add-on's own question does not
+    tickets.ask(root, tid, "Start the run?", ["Start", "Not now"], None, "agent:x", kind="factory:start")
+    tickets.set_status(root, tid, "review", "agent:claude")
+    card = _check_card(run)
+    assert card["card"]["blocked"] == (
+        "A question on this ticket still waits for your answer. Answer it first, then press Looks good."
+    )
+    assert _ok(run, tid, card["digest"])[0] == 2
+    assert run("review", "answer", tid, "q1", "--verdict", "ok", "--picked", "Start", "--by", ME)[0] == 0
+    card = _check_card(run)
+    assert "blocked" not in card["card"]
+    assert _ok(run, tid, card["digest"])[0] == 0
+    assert tickets.load(root, tid)["status"] == "done"
+
+
+def test_an_unmerged_pull_request_and_a_second_look_only_say_so(tk, run):
+    """Owner 18 Nov (ORCH-548): a pull request not merged yet and the Reviewer's second look still to come do
+    not
+    stop Looks good; the card's "If you approve" line says them, and Looks good makes the ticket Done."""
+    from orch import lookreview
+
+    root, tid = tk
+    _in_review(root, tid)
+    tickets.ref_add(root, tid, "https://github.com/acme/app/pull/12", "agent:x")
+    t = tickets.load(root, tid)
+    for r in t["refs"]:  # as the pull-requests add-on keeps them
+        r.update(kind="github-pr", status="ready to merge")
+    assert review.check_card(t, root)["then"] == (
+        "The ticket is done, although pull request #12 is not merged yet. Nothing else starts: no new"
+        " ticket, no more work." + review._CHECK_SEND_BACK
+    )
+    lookreview.queue(root, tid, "the look of a page changed")
+    t = tickets.load(root, tid)
+    for r in t["refs"]:
+        r.update(kind="github-pr", status="merged")
+    assert review.check_card(t, root)["then"] == (
+        review.CHECK_DONE + " The Reviewer's second look is not needed then." + review._CHECK_SEND_BACK
+    )
+    assert "blocked" not in review.check_card(t, root)
+    assert _ok(run, tid, _check_card(run)["digest"])[0] == 0
+    assert tickets.load(root, tid)["status"] == "done"
+
+
+def test_ticket_show_lists_what_applies_now_and_the_answers(tk, run, person_grant):
     root, tid = tk
     q = _draft(run, tid)
     code, out, _ = run("ticket", "show", tid)
     assert "Needs an answer" in out and "What applies now" not in out
+    person_grant(root)
     run("review", "answer", tid, q["id"], "--verdict", "ok", "--by", ME)
     code, out, _ = run("ticket", "show", tid)
     assert "What applies now" in out and "Build it" in out and "Answered q1:" in out
@@ -312,12 +445,13 @@ def test_ticket_show_plain_answer_is_listed(tk, run):
     assert "Answered q1: Ship it? - Yes" in out and "What applies now" not in out
 
 
-def test_wait_returns_the_answer_and_times_out(tk, run, monkeypatch):
+def test_wait_returns_the_answer_and_times_out(tk, run, monkeypatch, person_grant):
     root, tid = tk
     q = _draft(run, tid)
     monkeypatch.setattr("orch.cli_review.time.sleep", lambda s: None)
     code, out, err = run("review", "wait", tid, "--timeout", "0", "--json")
     assert code == 2 and json.loads(out)["code"] == "busy"
+    person_grant(root)
     run("review", "answer", tid, q["id"], "--verdict", "ok", "--via", "phone", "--by", ME)
     code, out, _ = run("review", "wait", tid)
     assert code == 0 and "(pat, phone," in out
@@ -333,7 +467,7 @@ def test_wait_polls_until_answered(tk, run, monkeypatch):
     def fake_sleep(_s):
         calls.append(1)
         if len(calls) == 2:
-            tickets.answer(root, tid, q["id"], "Yes", ME, "cli")
+            tickets.answer(root, tid, q["id"], "Yes", ME, "cli", person=True)
 
     monkeypatch.setattr("orch.cli_review.time.sleep", fake_sleep)
     code, out, _ = run("review", "wait", tid, q["id"])
@@ -420,11 +554,12 @@ def test_the_phone_card_leaves_out_the_today_picture():
     assert "before" not in wire["preview"] and wire["preview"]["options"][0]["preview"]["src"] == {"file": 0}
 
 
-def test_a_typed_comment_from_the_page_is_kept_with_the_answer(tk, run):
+def test_a_typed_comment_from_the_page_is_kept_with_the_answer(tk, run, person_grant):
     # the dashboard turns the page's {text, pins} into {words: {text}, pins} (actions._review_answer)
     root, tid = tk
     q = _draft(run, tid)
     note = json.dumps({"words": {"text": "Make the rows taller."}, "pins": []})
+    person_grant(root)  # the signed-in dashboard hands its call a person grant (ORCH-582)
     code, out, err = run(
         "review",
         "answer",

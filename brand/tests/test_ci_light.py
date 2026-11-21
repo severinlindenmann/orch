@@ -39,6 +39,13 @@ def test_words_and_style_always_run():
     assert names(steps) == ["brand: words, tokens, CI time limits", "style rules"]
 
 
+def test_a_workspace_or_addon_change_checks_the_generated_files():
+    for f in ("workspace/src/orch/store.py", "workspace-addons/sync/src/orch_sync/orch-addon.toml"):
+        steps = light.plan([f], TEXTS, ADDONS)
+        assert "generated files are current (shipped_addons.json)" in names(steps)
+    assert "generated files are current (shipped_addons.json)" not in names(light.plan(["docs/x.md"], TEXTS, ADDONS))
+
+
 def test_a_changed_module_runs_the_tests_that_import_it_and_no_others():
     steps = light.plan(["workspace/src/orch/store.py"], TEXTS, ADDONS)
     cmd = steps[-1]["cmd"]
@@ -84,6 +91,28 @@ def test_a_changed_addon_runs_its_own_suite_only():
     assert names(steps)[-1] == "add-on sync"
     assert steps[-1]["cwd"] == "workspace-addons/sync"
     assert not any("workspace:" in n for n in names(steps))
+
+
+def test_rule_tests_over_the_whole_tree_run_on_workspace_and_addon_changes():
+    for f in ("workspace/src/orch/store.py", "workspace-addons/sync/src/orch_sync/x.py", "workspace/README.md"):
+        steps = light.plan([f], TEXTS, ADDONS)
+        rules = next(s for s in steps if s["name"] == "rule tests over the whole tree")
+        assert rules["cwd"] == "workspace"
+        for t in light.RULE_TESTS:
+            assert f"tests/{t}" in rules["cmd"], (f, t)
+    assert "rule tests over the whole tree" not in names(light.plan(["docs/x.md"], TEXTS, ADDONS))
+
+
+def test_a_rule_test_is_not_run_twice():
+    texts = {**TEXTS, "test_cli_seams.py": "from orch import store\n"}
+    steps = light.plan(["workspace/src/orch/store.py"], texts, ADDONS)
+    assert "test_cli_seams.py" not in steps[-1]["cmd"]
+    assert "tests/test_store.py" in steps[-1]["cmd"]
+
+
+def test_every_rule_test_exists():
+    have = {p.name for p in (ROOT / "workspace" / "tests").glob("test_*.py")}
+    assert set(light.RULE_TESTS) <= have
 
 
 def test_the_page_library_runs_the_dashboard_suite():
@@ -155,3 +184,9 @@ def test_the_light_job_runs_only_on_light_pull_requests_and_the_final_check_wait
     assert _job_if("light") == "needs.changes.outputs.light == 'true'"
     assert re.search(r"needs: \[changes, light,", CI)
     assert "scripts/ci_light.py" in CI and "scripts/ci_proven.py" in CI
+
+
+def test_steps_use_uv_s_own_python_not_the_shared_tool_folder_one():
+    """#1566: the setup-python interpreter lives in a group-writable folder; orch secret exec refuses it."""
+    env = light.step_env({"PATH": "/opt/hostedtoolcache/Python/3.12/x64/bin:/usr/bin"})
+    assert env["UV_PYTHON_PREFERENCE"] == "only-managed" and env["PATH"].startswith("/opt/hostedtoolcache")

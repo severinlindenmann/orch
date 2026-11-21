@@ -35,7 +35,7 @@ const OrchBlocks = (() => {
     s.setAttribute('class', 'ic' + (cls ? ' ' + cls : '')); s.setAttribute('aria-hidden', 'true');
     return s;
   }
-  // Wrap `child` in a link when `link` is a ticket id or an https URL; otherwise return it as is.
+  // Wrap `child` in a link when `link` is a ticket id, an https URL or a local app address; otherwise return it as is.
   function linked(cls, link, child) {
     const l = typeof link === 'string' ? link : '';
     if (APP.test(l)) { const a = el('a', cls); a.href = '#' + l.slice(4); a.append(...child); return a; }  // a page of the dashboard itself
@@ -56,7 +56,7 @@ const OrchBlocks = (() => {
       return b;
     }
     if (TICKET.test(l)) { const a = el('a', cls); a.href = '#ticket/' + encodeURIComponent(l); a.append(...child); return a; }
-    if (HTTPS.test(l)) {
+    if (HTTPS.test(l) || LOCAL.test(l)) {  // an https page, or an app on this computer (http://127.0.0.1:<port>)
       const a = el('a', cls); a.href = l; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.append(...child);
       const sr = el('span', 'sr-only', ' (opens in a new tab)'); a.append(sr);
       return a;
@@ -132,7 +132,7 @@ const OrchBlocks = (() => {
     d.append(el('span', 'meta', quiet));
     return d;
   }
-  const shownLink = to => typeof to === 'string' && (APP.test(to) || TICKET.test(to) || HTTPS.test(to));
+  const shownLink = to => typeof to === 'string' && (APP.test(to) || TICKET.test(to) || HTTPS.test(to) || LOCAL.test(to));  // LOCAL: an app on this computer (ORCH-846)
   const MARKS = {arrow: '\u2197', repeat: '\u21ba', dash: '\u2014'};
   function emptyState(e) {
     // The one master empty state (UI.state); the buttons stay real links checked by shownLink.

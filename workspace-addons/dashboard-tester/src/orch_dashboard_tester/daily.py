@@ -94,6 +94,12 @@ def as_json(p: subprocess.CompletedProcess):
         return None
 
 
+def version_name(text: str) -> str:
+    """The whole build name from `orch --version` ("orch 3.x (release build)" -> "3.x (release build)")."""
+    first = (text.strip().splitlines() or [""])[0].strip()
+    return first[len("orch ") :].strip() if first.lower().startswith("orch ") else first
+
+
 class Refused(Exception):
     pass
 
@@ -117,7 +123,7 @@ class World:
 
     def version(self) -> str:
         r = orch(self.root, ["--version"], timeout=30)
-        return r.stdout.strip().split()[-1] if r.stdout.strip() else ""
+        return version_name(r.stdout)
 
     def launch_url(self) -> str:
         """A one-time sign-in link to this workspace's dashboard (starts it when it is not running). orch makes it
@@ -137,7 +143,10 @@ class World:
     def browse(self, routes: list[str]) -> dict:
         from . import browser
 
-        return browser.look(self.launch_url(), routes, words.load(), self.out, self.root)
+        try:
+            return browser.look(self.launch_url(), routes, words.load(), self.out, self.root)
+        except browser.Unreachable as e:  # no page could be read: say so once, report no page as empty
+            raise Refused(str(e)) from None
 
     def send(self, rep: dict) -> tuple[str | None, str]:
         """One report through `orch report problem`, kept on this computer (not shared). (ref, how)."""

@@ -14,7 +14,8 @@ One pass moves the release one phase on (state: .orch/run/release-keeper.json):
            into main -> its checks. A red run -> one top ticket (a helper starts at once) and the candidate is
            skipped until develop moves.
   gate     the release pull request's checks: green -> the Merge card on the role ticket (orch ask
-           --merge --release) -> card. Red -> one top ticket; when develop moves past it the old pull
+           --merge --release) -> card. Red -> its failed jobs run once more (a flaky test, ORCH-1023); red
+           again -> one top ticket; when develop moves past it the old pull
            request is closed and the release is cut again from scratch.
   card     `orch review tend-releases` merges it when the owner allowed it (workflow.release_merge);
            otherwise the owner clicks Merge. Merged -> installed.
@@ -53,7 +54,7 @@ import re
 import shutil
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from orch import brake, config, runs, secreview, tickets
@@ -311,6 +312,46 @@ def checks_green(rollup, ignore=frozenset()) -> str:
             return "red"
         good += word == "SUCCESS"
     return state if good or state != "green" else "pending"
+
+
+RUN_URL = re.compile(r"/actions/runs/(\d+)")
+
+
+def _newest_failed(rollup, ignore=frozenset()) -> list[dict]:
+    """The failed checks, the newest try of each (not ignored)."""
+    last: dict = {}
+    for n, c in enumerate(rollup or []):
+        name = c.get("name") or c.get("context") or ""
+        if known_name(name, ignore) is not None:
+            continue
+        key, when = (c.get("workflowName"), name or n), str(c.get("startedAt") or "")
+        if key not in last or when >= last[key][0]:
+            last[key] = (when, c)
+    out = []
+    for _, c in last.values():
+        word = c.get("conclusion") if "status" in c else c.get("state")
+        if c.get("status") in (None, "COMPLETED") and word not in PASSED and word not in (None, "PENDING"):
+            out.append(c)
+    return out
+
+
+def failed_runs(rollup, ignore=frozenset()) -> list[str]:
+    """The Actions run ids of the failed checks (newest try of each check counts), for one more try."""
+    out = []
+    for c in _newest_failed(rollup, ignore):
+        m = RUN_URL.search(str(c.get("detailsUrl") or c.get("targetUrl") or ""))
+        if m and m.group(1) not in out:
+            out.append(m.group(1))
+    return out
+
+
+def failed_before(rollup, since: datetime, ignore=frozenset()) -> bool:
+    """A failed check whose newest try started before `since`: the run again has not reported it yet."""
+    for c in _newest_failed(rollup, ignore):
+        started = ts(c.get("startedAt"))
+        if started is None or started < since:
+            return True
+    return False
 
 
 def not_reported(rollup, names) -> list[str]:
@@ -935,7 +976,13 @@ class World:
         self.act(f"dispatch:{workflow}", go)
 
     def new_ticket(
-        self, parent: str, title: str, note: str, done_when: str, priority: str = "high"
+        self,
+        parent: str,
+        title: str,
+        note: str,
+        done_when: str,
+        priority: str = "high",
+        over_limit: bool = False,
     ) -> str | None:
         def go():
             try:
@@ -950,10 +997,13 @@ class World:
             except Refused as e:
                 return f"not opened ({e})"
             with contextlib.suppress(Exception):  # busy, paused or no agent: the ticket waits in line
-                runs.start(self.root, t["id"], BY, priority=priority)
+                runs.start(self.root, t["id"], BY, priority=priority, over_limit=over_limit)
             return str(t.get("key") or t["id"])
 
-        return self.act(f"ticket:{title}", go) or (None if self.sim is None else "t_sim")
+        got = self.act(f"ticket:{title}", go)
+        if isinstance(got, str) and got.startswith("not opened"):
+            self.did[-1] += " failed"  # act lists a step before it runs: no "opened" for a refusal
+        return got or (None if self.sim is None else "t_sim")
 
     def record_deployed(self, parts: list[str], sha: str, by: str) -> None:
         def go():
@@ -1069,6 +1119,17 @@ class World:
                 self._git("worktree", "remove", "--force", rel["wt"])
 
         self.act(f"close:release {rel['n']} PR {rel['pr']}", go)
+
+    def rerun_failed(self, run_id: str) -> None:
+        """Run the failed jobs of one Actions run once more (a red release check gets one more try)."""
+
+        def go():
+            self.bot_ok()
+            r = self._run([self.gh, "run", "rerun", str(run_id), "--failed", "--repo", self.cfg.repo])
+            if r.returncode != 0:
+                raise Refused(f"rerun {run_id}: {(r.stderr or r.stdout).strip()[:200]}")
+
+        self.act(f"rerun:{run_id}", go)
 
     def remove_wt(self, wt: str | None) -> None:
         if wt and (self.sim is not None or Path(wt).exists()):
@@ -1339,7 +1400,7 @@ def red(w: World, st: dict, role: str, title: str, words: str, note: str, done_w
             w.note(cur.get("key") or cur["id"], f"Release keeper: still red. {note[:600]}")
             st["red_logged"] = title
         return [f"red, ticket {cur.get('key') or cur['id']} is open"]
-    tid = w.new_ticket(role, title, note, done_when)
+    tid = w.new_ticket(role, title, note, done_when, over_limit=True)  # a red base starts at once (ORCH-699)
     st["red_logged"] = title
     return [f"red: opened top ticket {tid} ({title})"]
 
@@ -1423,6 +1484,30 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
                 return out + [f"release {rel['n']}: release checks still running"]
             if g == "red":
                 bad = ", ".join(failed_checks(p.get("statusCheckRollup"), ignore)) or "see the pull request"
+                runs = failed_runs(p.get("statusCheckRollup"), ignore)
+                again = rel.get("reran") or {}
+                if runs and not again:  # one more try: a flaky test must not close it (ORCH-1023)
+                    # written before the call: the new try starts after this time at GitHub
+                    rel["reran"] = {"runs": runs, "at": now().isoformat()}
+                    asked = []
+                    for run_id in runs:
+                        try:
+                            w.rerun_failed(run_id)
+                            asked.append(run_id)
+                        except Refused as e:  # refused: no endless retries, the red path below goes on
+                            out.append(f"release {rel['n']}: could not run {run_id} again: {e}")
+                    if asked:
+                        return out + [
+                            f"release {rel['n']}: checks red on {bad}; ran the failed jobs once more"
+                        ]
+                elif again:
+                    since = ts(again.get("at"))
+                    if (
+                        since
+                        and now() - since < timedelta(hours=TEST_TIMEOUT_H)
+                        and failed_before(p.get("statusCheckRollup"), since, ignore)
+                    ):
+                        return out + [f"release {rel['n']}: waits for the failed jobs to finish once more"]
                 if recut(w, st, rel, h, "checks"):
                     return out + [
                         f"release {rel['n']}: checks were red, develop moved and the fix ticket is closed: "
@@ -1783,7 +1868,16 @@ def prep_line(part: str, p: dict) -> str:
     if not p.get("ready"):
         return f"The {part} server is not prepared ({p.get('why') or 'unknown'}); the helper fetches it."
     needs = "; ".join(p.get("needs") or []) or "no new settings or data changes"
-    return f"The {part} server is fetched and checked ({needs})."
+    line = f"The {part} server is fetched and checked ({needs})."
+    if not p.get(
+        "prod"
+    ):  # after the 19 Nov server move the deploy host pointed at the stopped server, unnoticed
+        line += (
+            f" Production's {part} program could not be read over ssh: check that the deploy host and key "
+            "settings (github.release_deploy_host, github.release_deploy_key) point at the server that runs "
+            "it now."
+        )
+    return line
 
 
 def helper_steps(prep: dict, script: str | None = None) -> str:
@@ -1976,12 +2070,27 @@ def run(
         root, tickets.resolve(root, cfg.role)
     )  # the role ticket was removed: Refused, plain words
     role = str(t.get("key") or t["id"])
+    reopened = None
+    if t.get("status") == "done" and not dry_run:
+        # A person moved the role ticket to Done but its repeat goes on (a repeat survives Done): every
+        # card of this pass would be refused ("This ticket is closed") and nothing reaches Home.
+        # Open it again.
+        tickets.set_status(root, t["id"], "open", tickets.SYSTEM)
+        tickets.log(
+            root,
+            t["id"],
+            "The role ticket was Done but its repeat still runs: opened it again so the cards reach you.",
+            tickets.SYSTEM,
+        )
+        reopened = f"{role} was Done while its repeat runs: opened it again"
     st = read_state(cfg)
     w = world or World(root, cfg, dry=dry_run, known=known)
     try:
         lines = pass_once(w, st, role, hold_text(cfg))
     except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError) as e:
         lines = [f"pass stopped: {e}"]
+    if reopened:
+        lines.insert(0, reopened)
     if not dry_run:
         _write_state(cfg, st)
     return {"off": False, "paused": False, "role": role, "lines": lines, "did": w.did, "state": st}
@@ -2046,4 +2155,5 @@ def text(res: dict, dry_run: bool = False) -> str:
     if res.get("paused"):
         return "Automation is paused here: the release keeper did nothing. Turn it back on: orch resume."
     head = ["Dry run, nothing written."] if dry_run else []
-    return "\n".join(head + list(res.get("lines") or []) + [f"  did: {d}" for d in res.get("did") or []])
+    verb = "would" if dry_run else "did"  # act() lists a step before it skips it on a dry run
+    return "\n".join(head + list(res.get("lines") or []) + [f"  {verb}: {d}" for d in res.get("did") or []])
