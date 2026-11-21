@@ -1489,3 +1489,30 @@ button.gtree-row:hover{background:var(--surface-2)}
 .history-reply{margin:0;padding-left:var(--s3);border-left:2px solid var(--brand);overflow-wrap:anywhere}
 .history-more{display:flex;flex-wrap:wrap;justify-content:center;gap:var(--s2);padding-top:var(--s2);border-top:1px dashed var(--border)}
 .ticket-talk.talk-line{display:grid;gap:var(--s2)}
+
+/* Login door and profile picker (ORCH-1035): a full-page screen over the app before it can be used. .door covers the
+   page; .door-card is the login card (title, one field, one button); .profiles / .profile is the "Who is using orch?"
+   picker: big round initials with the name under them (colour from [data-c] like the workspace badge). */
+.door{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:24px 16px;overflow:auto;background:var(--bg);animation:door-in var(--dur-base) var(--ease-enter)}
+@keyframes door-in{from{opacity:0}to{opacity:1}}
+.door-inner{display:grid;justify-items:center;gap:24px;width:min(640px,100%)}
+.door-mark{width:40px;height:40px}
+.door-title{margin:0;font-size:24px;line-height:32px;font-weight:600;text-align:center}
+.door-text{margin:0;color:var(--text-muted);font-size:14px;line-height:20px;text-align:center}
+.door-card{display:grid;gap:16px;width:min(400px,100%);padding:24px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card)}
+.door-card .btn{width:100%}
+.door-error{margin:0;color:var(--danger);font-size:14px;line-height:20px}
+.door-hint{margin:0;color:var(--text-faint);font-size:12px;line-height:16px;text-align:center}
+.door-hint code{font-family:var(--font-mono);color:var(--text-muted);white-space:nowrap}
+.profiles{display:flex;flex-wrap:wrap;justify-content:center;gap:24px;margin:0;padding:0;list-style:none}
+.profile{display:grid;justify-items:center;gap:12px;width:112px;padding:8px;border:0;border-radius:var(--radius-card);background:transparent;color:var(--text-muted);font:inherit;font-size:14px;line-height:20px;cursor:pointer}
+.profile-face{display:grid;place-items:center;width:96px;height:96px;border-radius:24px;border:2px solid transparent;color:var(--c,var(--text-muted));background:color-mix(in srgb,var(--c,var(--text-muted)) 18%,var(--surface));font-size:40px;line-height:1;font-weight:600;transition:border-color var(--dur-fast) var(--ease-out),transform var(--dur-fast) var(--ease-out)}
+.profile:hover,.profile:focus-visible{color:var(--text)}
+.profile:hover .profile-face,.profile:focus-visible .profile-face{border-color:var(--c,var(--text-muted));transform:translateY(-2px)}
+.profile:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.profile[aria-current=true] .profile-face{border-color:var(--c,var(--brand))}
+.profile.add .profile-face{border:2px dashed var(--border-strong);background:transparent;color:var(--text-muted);font-size:32px}
+.profile-name{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.profiles-add{display:flex;gap:8px;width:min(400px,100%)}
+@media(max-width:600px){.profiles{gap:12px}.profile{width:96px}.profile-face{width:72px;height:72px;border-radius:20px;font-size:30px}.door-title{font-size:20px;line-height:28px}}
+@media(prefers-reduced-motion:reduce){.door{animation:none}.profile-face{transition:none}}

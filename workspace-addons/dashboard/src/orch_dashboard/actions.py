@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import contextvars
 import getpass
 import json
 import os
@@ -1251,8 +1252,19 @@ def computer_user() -> str:
         return ""
 
 
+# The profile a browser picked after a token login (ORCH-1035): set by the server for one request (each request
+# runs in its own thread), so two browsers act as two people. None: the "You: ..." person of this computer.
+REQUEST_PERSON: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "orch_request_person", default=None
+)
+
+
 def actor(root: Path | None = None) -> str:
-    """Who acts from this dashboard: the person picked in "You: ..." (people.py), else the computer's user."""
+    """Who acts from this dashboard: the profile this browser picked after a token login, else the person picked
+    in "You: ..." (people.py), else the computer's user."""
+    browser = REQUEST_PERSON.get()
+    if browser:
+        return f"human:{browser}"
     if root is not None:
         me = people.current(root)
         if me:

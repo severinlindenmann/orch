@@ -303,8 +303,15 @@ function reconcile(target, source) {
   for (const node of old) if (!used.has(node) && !locks.has(node.dataset?.key)) node.remove();
 }
 const seenNeeds = new Set();
+function asBrowserPerson(next) {  // a token login (login.js, ORCH-1035): this browser's profile is "you", not the computer's
+  const p = window.orchBrowserPerson;
+  if (!p || !next) return next;
+  return {...next, who: p, me: next.me == null ? next.me : p, people: next.people ? {...next.people, me: p} : next.people};
+}
+window.addEventListener('orch:person', () => { if (state) accept(state); });
 function accept(next) {
   if (typeof acceptOverlay === 'function') next = acceptOverlay(next);  // a Looks good still being saved (ORCH-548)
+  next = asBrowserPerson(next);
   const first = !state;
   const arrived = new Set(array(next.needs).filter(n => !seenNeeds.has(n.id)).map(n => n.id));
   array(next.needs).forEach(n => seenNeeds.add(n.id));
