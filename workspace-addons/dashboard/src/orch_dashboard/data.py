@@ -1421,6 +1421,22 @@ def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dic
             for x in tickets
         ]
     out["tickets"] = tickets
+    # ORCH-1047: a question of this ticket that is no longer open (answered, taken back) leaves the needs list at
+    # once; the cached list would bring an answered question back on Home until the background build runs, and a
+    # click on it is refused ("q1 is already answered.").
+    open_qs = {
+        q.get("id") for q in raw.get("questions") or [] if isinstance(q, dict) and q.get("answer") is None
+    }
+    mine = f"core:q:{tid}:"
+    out["needs"] = [
+        n
+        for n in state.get("needs") or []
+        if not (
+            isinstance(n, dict)
+            and str(n.get("id", "")).startswith(mine)
+            and n["id"][len(mine) :] not in open_qs
+        )
+    ]
     out["runs"] = {k: v for k, v in (state.get("runs") or {}).items() if k != tid}
     if runs.get(tid):
         out["runs"][tid] = runs[tid]

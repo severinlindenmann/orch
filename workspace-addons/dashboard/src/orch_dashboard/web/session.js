@@ -93,3 +93,21 @@
     return true;
   }
 })();
+// A page loaded while an add-on change reinstalls orch can get its scripts missing or empty (the old server still
+// answers while the files are replaced) and then stays on the loading skeleton (ORCH-1034, seen in the walk). A
+// script of this page that fails to load: reload once a few seconds later, when the restarted server serves them,
+// at most every 20 s so a page that really lacks a file does not reload without end.
+(function () {
+  var KEY = "orch_reload_broken", armed = false;
+  window.addEventListener("error", function (event) {
+    var el = event && event.target;
+    if (armed || !el || el.tagName !== "SCRIPT" || !el.src) return;
+    try { if (new URL(el.src, location.href).origin !== location.origin) return; } catch (e) { return; }
+    var last = 0;
+    try { last = Number(sessionStorage.getItem(KEY)) || 0; } catch (e) { return; }  // no storage: never reload
+    if (Date.now() - last < 20000) return;
+    armed = true;
+    try { sessionStorage.setItem(KEY, String(Date.now())); } catch (e) { return; }
+    setTimeout(function () { location.reload(); }, 4000);
+  }, true);
+})();

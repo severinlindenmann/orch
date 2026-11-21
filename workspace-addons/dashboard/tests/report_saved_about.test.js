@@ -30,3 +30,14 @@ test("Settings' Style guide row is in About & updates, not in General", () => {
   assert.ok(about.includes("'data-key':'settings-style-guide'"));
   assert.ok(!general.includes('settings-style-guide') && !general.includes("'About'"));
 });
+
+test('the report keeps the page as it was when the dialog opened, with the window size (ORCH-1117)', () => {
+  const report = read('pages/report.js');
+  const open = between(report, 'function reportOpen()', '\n}\n');
+  const shot = open.indexOf('const seen = reportPageSnapshot()');
+  assert.ok(shot > 0 && shot < open.indexOf("dialog('Report a problem'"), 'the page is taken before the dialog opens');
+  assert.match(open, /page:picture\.checked && content\.checked \? seen : undefined/);
+  assert.equal(open.match(/reportPageSnapshot\(\)/g).length, 1, 'no second, later snapshot at Create');
+  const snap = between(report, 'function reportPageSnapshot()', '\n}\n');
+  assert.match(snap, /window\.innerWidth \+ 'x' \+ window\.innerHeight/);
+});
