@@ -9,9 +9,14 @@ module.exports = {
   name: 'Home: answer the questions of a Factory order in a row',
   covers: ['page:home', 'answer'],
   async run({ page, open, reload, must, orch, orchAsPerson, addonOn, addonOff, until, workspace }) {
-    // the seeded lunch question is answered first, so the order's question is Home's first card
+    // every other open question (the seeded lunch one, any an earlier click-through left) is answered or taken back
+    // first, so the order's question is Home's first card with its answer buttons
     for (const t of JSON.parse(orch('ticket', 'list', '--json'))) {
-      for (const q of t.questions || []) if (q.answer == null && q.recommended) orchAsPerson('answer', t.id, q.id, q.recommended);
+      for (const q of t.questions || []) {
+        if (q.answer != null) continue;
+        try { orchAsPerson('answer', t.id, q.id, q.recommended || (q.options || [])[0] || 'OK'); }
+        catch (_) { try { orch('ask', t.id, 'Not needed for this click-through.', '--take-back', q.id); } catch (_e) { /* a card stays */ } }
+      }
     }
     addonOn('factory');
     await open('#home');
