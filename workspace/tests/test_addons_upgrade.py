@@ -306,3 +306,36 @@ def test_the_project_step_drops_what_the_old_orch_kept(proj, run, github, uv_cal
     assert code == 0, err
     assert "Add-on dashboard-tester removed: it no longer ships with orch." in out
     assert [e["name"] for e in json.loads(p.read_text(encoding="utf-8"))] == ["dashboard"]
+
+
+def test_a_failed_retry_keeps_the_add_on_list(proj, run, github, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(addons, "_entry_points", lambda: {})
+    _old_orch_ships(monkeypatch, "dashboard-tester")
+
+    def fake_uv(args):
+        if "dashboard-tester" in " ".join(args):
+            raise RuntimeError("has no subdirectory workspace-addons/dashboard-tester")
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(addons, "run_uv", fake_uv)
+    p = _write_registry([OLD[0], {"name": "dashboard-tester", "source": "built-in", "version": "0.1.0"}])
+    code, _, err = run("update")
+    assert code == 2, err
+    assert [e["name"] for e in json.loads(p.read_text(encoding="utf-8"))] == ["dashboard", "dashboard-tester"]
+
+
+def test_a_local_source_placeholder_is_not_an_add_on(proj, run, tmp_path, monkeypatch, uv_calls):  # noqa: F811
+    """A source folder that keeps only the placeholder (no src/): the update drops the add-on there too."""
+    monkeypatch.setattr(addons, "_entry_points", lambda: {})
+    src = tmp_path / "src-repo"
+    (src / "workspace-addons" / "dashboard-tester").mkdir(parents=True)
+    (src / "workspace-addons" / "dashboard-tester" / "pyproject.toml").write_text(
+        "[project]\n", encoding="utf-8"
+    )
+    (src / "workspace-addons" / "dashboard" / "src").mkdir(parents=True)
+    monkeypatch.setenv("ORCH_REPO", str(src))
+    p = _write_registry([OLD[0], {"name": "dashboard-tester", "source": "built-in", "version": "0.1.0"}])
+    code, out, err = run("update")
+    assert code == 0, err
+    assert "Add-on dashboard-tester removed: it no longer ships with orch." in out
+    assert [e["name"] for e in json.loads(p.read_text(encoding="utf-8"))] == ["dashboard"]

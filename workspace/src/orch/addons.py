@@ -749,10 +749,10 @@ def _source_catalog() -> frozenset[str] | None:
     """What the NEW orch ships, asked of the source once per command. The running orch's SHIPPED_ADDONS is the
     OLD catalog: after an add-on was removed from the repository (dashboard-tester, #1772) it still listed it,
     and uv failed on the folder the new source no longer has (ORCH-1369)."""
-    key = (repo(), ref())
-    if key not in _source_catalog_cache:
-        _source_catalog_cache[key] = _fetch_source_catalog(*key)
-    return _source_catalog_cache[key]
+    at = (repo(), ref())
+    if at not in _source_catalog_cache:
+        _source_catalog_cache[at] = _fetch_source_catalog(*at)
+    return _source_catalog_cache[at]
 
 
 def _no_longer_ships(e: dict) -> bool:
@@ -761,8 +761,8 @@ def _no_longer_ships(e: dict) -> bool:
     instead of failing on a folder the repository no longer has."""
     if e["source"] != "built-in":
         return False
-    if _is_local(repo()):
-        return not (Path(repo()) / "workspace-addons" / e["name"]).is_dir()
+    if _is_local(repo()):  # a placeholder folder (pyproject.toml only, no src/) is no add-on
+        return not (Path(repo()) / "workspace-addons" / e["name"] / "src").is_dir()
     names = _source_catalog()
     return e["name"] not in (SHIPPED_ADDONS if names is None else names)
 
@@ -974,8 +974,10 @@ def _install_tool(entries: list[dict]) -> list[dict]:
                 gone = _gone_in_uv_error(str(e), entries)
                 if not gone:
                     raise
-                entries = _drop_gone(entries, gone)
-                run_uv(_tool_args(entries))  # once more without them; a second failure is a real one
+                rest = [x for x in entries if x["name"] not in gone]
+                run_uv(_tool_args(rest))  # once more without them; a second failure is a real one
+                _drop_gone(gone)
+                entries = rest
         except Exception as e:
             restored = winfinish.restore_tool(kept) if kept else plan is None
             detail = str(e)
@@ -995,14 +997,14 @@ def _gone_in_uv_error(detail: str, entries: list[dict]) -> set[str]:
     return {e["name"] for e in entries if e["source"] == "built-in" and e["name"] in named}
 
 
-def _drop_gone(entries: list[dict], gone: set[str]) -> list[dict]:
-    """Take add-ons the source no longer ships out of `entries` and the registry, one plain line each."""
+def _drop_gone(gone: set[str]) -> None:
+    """Take add-ons the source no longer ships off the registry (after the install without them worked), one
+    plain line each."""
     for n in sorted(gone):
         print(f"Add-on {n} removed: it no longer ships with orch.")
     reg = registry(ships_check=False)
     if any(e["name"] in gone for e in reg):
         _save_registry([e for e in reg if e["name"] not in gone])
-    return [e for e in entries if e["name"] not in gone]
 
 
 def _running_workspaces(root: Path) -> list[str]:
