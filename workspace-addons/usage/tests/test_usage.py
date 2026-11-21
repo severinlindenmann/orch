@@ -37,8 +37,8 @@ def test_list_finds_the_switcher_accounts_once_with_use(cli, fake_switcher, ws):
     assert len(store.load(ws)["accounts"]) == 3
     hist = store.history(ws)
     assert [h["what"] for h in hist] == ["account found"] * 3 and {h["who"] for h in hist} == {"usage"}
-    files = (ws / ".orch/addons/usage/accounts.json").read_text() + (
-        ws / ".orch/addons/usage/history.jsonl"
+    files = (store.usage_dir(ws) / "accounts.json").read_text() + (
+        store.usage_dir(ws) / "history.jsonl"
     ).read_text()
     assert "@" not in files and "example.test" not in files
     assert fake_switcher.calls() == ["list --json", "list --json"]  # read only: never a switch or enable
@@ -87,14 +87,14 @@ def test_any_number_is_a_limit(cli, fake_switcher, ws, value):
 )
 def test_bad_input_is_refused_and_changes_nothing(cli, fake_switcher, ws, args, words):
     jrun(cli, "list")
-    before = (ws / ".orch/addons/usage/accounts.json").read_text()
+    before = (store.usage_dir(ws) / "accounts.json").read_text()
     if words is None:
         with pytest.raises(SystemExit):
             cli(*args)
         return
     code, d = jrun(cli, *args)
     assert code == 2 and words in d["error"], d
-    assert (ws / ".orch/addons/usage/accounts.json").read_text() == before
+    assert (store.usage_dir(ws) / "accounts.json").read_text() == before
 
 
 def test_two_limits_need_a_period_and_a_third_is_refused(cli, fake_switcher, ws):
@@ -151,7 +151,7 @@ def test_end_on_the_current_rule_and_no_end(cli, fake_switcher, ws):
 
 def test_an_ended_rule_falls_back_on_the_next_command(cli, fake_switcher, ws):
     _seed(cli)
-    p = ws / ".orch/addons/usage/accounts.json"
+    p = store.usage_dir(ws) / "accounts.json"
     data = json.loads(p.read_text())
     a = next(x for x in data["accounts"] if x["label"] == "second")
     a["prev"] = a["rule"]
@@ -171,7 +171,7 @@ def test_credit_account_by_hand_reads_its_spend(cli, fake_switcher, ws, tmp_path
     log = tmp_path / "spend.jsonl"
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     log.write_text(json.dumps({"t": now, "account": "main", "usd": 3.5}) + "\n")
-    p = ws / ".orch/addons/usage/accounts.json"
+    p = store.usage_dir(ws) / "accounts.json"
     data = json.loads(p.read_text())
     data["accounts"].append(
         {
@@ -214,16 +214,16 @@ def test_history_command_and_unreadable_file(cli, fake_switcher, ws):
     assert code == 0 and d["history"][0]["what"] == "order 3 to 2" and len(d["history"]) == 4
     code, out, _ = cli("history")
     assert "TEAMCO: order 3 to 2  (by owner)" in out
-    (ws / ".orch/addons/usage/accounts.json").write_text("{broken")
+    (store.usage_dir(ws) / "accounts.json").write_text("{broken")
     code, d = jrun(cli, "limit", "first", "50", "--period", "week")
     assert code == 2 and "could not be read" in d["error"]
-    assert (ws / ".orch/addons/usage/accounts.json").read_text() == "{broken"  # never rewritten
+    assert (store.usage_dir(ws) / "accounts.json").read_text() == "{broken"  # never rewritten
 
 
 def test_a_row_that_cannot_be_read_is_kept_through_a_change(cli, fake_switcher, ws):
     """ORCH-926: a hand-edited row that cannot be read stays in the file untouched when another account changes."""
     jrun(cli, "list")
-    p = ws / ".orch/addons/usage/accounts.json"
+    p = store.usage_dir(ws) / "accounts.json"
     doc = json.loads(p.read_text())
     bad = {**doc["accounts"][0], "id": "a_bad1", "label": "by hand"}
     worse = "not even an account"
