@@ -20,7 +20,7 @@ from .settings import KEYS, TID, current_value
 
 _run = subprocess.run  # tests may patch this name, never the global subprocess.run
 
-PERSON = "Sign in to do this: run orch dashboard open in your terminal."
+PERSON = "Sign in to do this: open the dashboard with a sign-in link from orch."
 AGENT_VARS = ("ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET", "ORCH_DEV", "ORCH_BY", "ORCH_VIA")
 FAILED = "That did not work."
 NOT_READ = "The record could not be read. Nothing was deleted."

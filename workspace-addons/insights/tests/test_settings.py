@@ -238,7 +238,7 @@ def test_a_change_without_session_is_refused_and_runs_nothing(start_server, fake
     for srv in (start_server(), start_server(session=fake_session)):
         code, _, text = post(srv, body)
         assert code == 403
-        assert text.decode() == "Sign in to do this: run orch dashboard open in your terminal."
+        assert text.decode() == "Sign in to do this: open the dashboard with a sign-in link from orch."
     assert writes(fake_orch) == []
     assert stored(fake_orch) == SETTINGS
 
@@ -581,7 +581,10 @@ def test_no_insights_page_server_in_core_is_watch_only(start_server, fake_orch, 
     assert srv.session is None
     assert request(srv, "/")[0] == 200
     code, _, text = post(srv, delete(), cookie=True)
-    assert code == 403 and text.decode() == "Sign in to do this: run orch dashboard open in your terminal."
+    assert (
+        code == 403
+        and text.decode() == "Sign in to do this: open the dashboard with a sign-in link from orch."
+    )
     assert seen == []  # no page session: nothing ran
     assert post(srv, {"token": FakeSession.token}, path="/session", headers=SAME_SITE)[0] == 403
     assert calls(fake_orch) == []

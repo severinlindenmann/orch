@@ -424,7 +424,7 @@ def _attach_all(root: Path, orch_bin: str | None, tid: str, files: list[tuple[st
 
 
 # the ONLY check is the sign-in (owner rule, 16 Nov); equal to orch.pagesession.SIGNIN_MSG.
-SIGNIN = "Sign in to do this: run orch dashboard open in your terminal."
+SIGNIN = "Sign in to do this: open the dashboard with a sign-in link from orch."
 
 
 def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) -> tuple[int, str, dict | None]:

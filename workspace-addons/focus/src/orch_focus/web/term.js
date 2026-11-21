@@ -220,7 +220,7 @@
           if (r.status === 403) {
             const text = (await r.text()).slice(0, 200);
             if (/is off/.test(text)) typingAllowed = false; else canType = false;
-            setTyping(false); show(status); S.toast(text || 'Sign in to type here: run orch dashboard open in your terminal.', 'error'); return;
+            setTyping(false); show(status); S.toast(text || 'Sign in to type here: open the dashboard with a sign-in link from orch.', 'error'); return;
           }
           if (r.status === 409) { S.toast('The helper’s screen has closed; those keys were not sent.', 'error'); return; }
           if (!r.ok) { S.toast((await r.text()).slice(0, 120) || 'The screen did not take that. Try again.', 'error'); return; }

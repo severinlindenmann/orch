@@ -171,7 +171,7 @@
   function deleteCard() {
     const section = card('Delete detail for a ticket');
     if (view.tickets.error) { section.append(node('p', view.tickets.error, 'note set-block')); return section; }
-    if (!view.can_act) section.append(node('p', 'Sign in to do this: run orch dashboard open in your terminal.', 'note set-block'));
+    if (!view.can_act) section.append(node('p', 'Sign in to do this: open the dashboard with a sign-in link from orch.', 'note set-block'));
     for (const entry of view.tickets.rows) section.append(ticketItem(entry));
     if (!view.tickets.rows.length) section.append(node('p', 'No tickets.', 'muted set-block'));
     return section;

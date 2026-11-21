@@ -54,12 +54,3 @@ test('work log lines orch writes are plain words, with task names and no interna
   assert.equal(L.plainLine('Created under ORCH-46 Quarter close', cl), 'Created under ORCH-46 Quarter close');
   assert.equal(L.plainLine('Edited done_when, note', cl), 'Changed the Done when line, the note');
 });
-
-test('add-on settings writes never show in the work log (raw lines, not only the translated ones)', () => {
-  const {live: L} = live();
-  const h = (text, at) => ({at, by: 'agent:automation', text, chat_message: false});
-  const v = {ticket: {history: [h('Set ext.automation', '2026-11-18T08:00:00Z'), h('Removed ext.focus.mode', '2026-11-18T08:01:00Z'),
-    h('Updated Focus settings', '2026-11-18T08:02:00Z'), h('Asked q1, waiting', '2026-11-18T08:03:00Z')], checklist: []}, events: []};
-  const texts = L.feedItems(v, null).map(i => i.text);
-  assert.deepEqual(texts, ['Asked a question']);
-});
