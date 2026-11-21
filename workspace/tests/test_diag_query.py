@@ -90,6 +90,26 @@ def test_query_filters_and_pagination(proj):
         diag_query.query(proj, limit=100000)
 
 
+def test_next_page_reads_the_first_pages_window(proj):
+    """A page asked a few seconds later still belongs to the same question and reads the same events
+    (the window ends "now"; it was in the token's question, so a second tick refused the next page,
+    issue 2336)."""
+    _log(proj, 5)
+    now = time.time()
+    a = diag_query.query(proj, ev="ticket.*", limit=2, now=now)
+    b = diag_query.query(proj, ev="ticket.*", limit=2, page=a["next"], now=now + 5)
+    assert b["window"] == a["window"]
+    c = diag_query.query(
+        proj, ev="ticket.*", limit=2, page=b["next"], now=now + 7200
+    )  # even after the window
+    assert [i["seq"] for r in (a, b, c) for i in r["items"]] == sorted(
+        i["seq"] for r in (a, b, c) for i in r["items"]
+    )
+    assert len([i for r in (a, b, c) for i in r["items"]]) == 5 and c["next"] is None
+    with pytest.raises(Refused):  # another window is another question
+        diag_query.query(proj, ev="ticket.*", limit=2, since="5m", page=a["next"])
+
+
 def test_query_window_around_and_since(proj):
     _log(proj, 2)
     now = time.time()

@@ -160,3 +160,10 @@ test('a change that deletes a file names it; a check run in two steps shows in b
   const items = F.resultsItems({id: 't_abcdef', checklist: [{id: 'c1', evidence: [run('2026-11-19T10:00:00Z')]}, {id: 'c2', evidence: [run('2026-11-19T11:00:00Z')]}]}, null);
   assert.deepEqual(items.map(it => it.step), ['c1', 'c2']);
 });
+
+test('a file preview on a small result card never grows wider than its card (report r-1121-1222-ws-2)', () => {
+  // The small card keeps list lines on one row (nowrap); an auto grid column grew to their full width, so the
+  // heading ran 739 px wide in a 290 px card at phone width and was cut mid-word.
+  const css = fs.readFileSync(path.join(KIT, 'results.css'), 'utf8');
+  assert.match(css, /\.result-md\{[^}]*grid-template-columns:minmax\(0,\s*1fr\)/);
+});
