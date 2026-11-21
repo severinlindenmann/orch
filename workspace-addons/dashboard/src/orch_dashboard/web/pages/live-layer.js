@@ -426,20 +426,26 @@ function liveAskFill(box, id) {
     // a disabled or removed button drops the keyboard to the page, where Esc no longer reaches the layer (ORCH-709):
     // it goes back into the pane (the next question or Open ticket)
     const had = box.contains(document.activeElement);
+    let toast = null, over = false;
     const undone = await new Promise(done => {
       const timer = setTimeout(() => finish(false), LIVE_ASK_UNDO_MS);
-      const finish = back => { clearTimeout(timer); if (!liveAskPending.has(slot)) return; if (back) liveAskPending.delete(slot); done(back); };
+      // once the window ends the answer goes out: a later Undo (the toast kept open by the keyboard or the mouse) does nothing
+      const finish = back => { clearTimeout(timer); if (over) return; over = true; if (back) liveAskPending.delete(slot); done(back); };
       liveAskPending.set(slot, () => finish(false));
       liveLayerFill();
       if (had) { liveLayerWant = {id, until:Date.now() + 5000, ask:true}; liveLayerTake(); requestAnimationFrame(liveLayerTake); }
-      window.orch?.toast?.('Answered: ' + text, 'ok', () => { finish(true); liveLayerFill(); });
+      toast = window.orch?.toast?.('Answered: ' + text, 'ok', () => { finish(true); liveLayerFill(); });
     });
     if (undone) return;
+    for (const b of toast?.isConnected ? toast.querySelectorAll('button') : []) if (b.textContent === 'Undo') b.remove();
     const r = await act('answer', {ticket:id, question:q.id, digest:q.digest, answer:text});
     liveAskPending.delete(slot);
     if (r.ok) liveAskDrafts.delete(slot);
     else window.orch?.toast?.(r.text || 'Could not send your answer.', 'error');  // the question and the typed words come back
     liveLayerFill();
+    // the answer redraws the pane: the keyboard goes back into it again unless the person moved it out meanwhile
+    const now = document.activeElement;
+    if (had && (!now || now === document.body || now.closest?.('#live-dock'))) { liveLayerWant = {id, until:Date.now() + 5000, ask:true}; liveLayerTake(); requestAnimationFrame(liveLayerTake); }
   };
   box.append(h('p', {className:'live-ask-q'}, q.text));
   if (!q.plain) { box.append(h('a', {className:'btn primary sm', href:'#ticket/' + encodeURIComponent(id), 'data-key':'live-ask-open'}, 'Answer on the ticket')); return; }

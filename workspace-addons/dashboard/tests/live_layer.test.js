@@ -359,6 +359,8 @@ test('an answer in the layer waits with Undo on its toast before it is sent (ORC
   assert.match(fill, /toast\?\.\('Answered: ' \+ text, 'ok', \(\) => \{ finish\(true\)/, 'the toast offers Undo');
   const wait = fill.indexOf('if (undone) return;'), send = fill.indexOf("act('answer'");
   assert.ok(wait > 0 && send > wait, 'the answer is sent only after the Undo window');
+  assert.match(fill, /if \(over\) return; over = true;/, 'an Undo after the window has ended does nothing');
+  assert.match(fill, /if \(b\.textContent === 'Undo'\) b\.remove\(\)/, 'and the toast loses its Undo once the answer goes out');
   assert.match(source, /addEventListener\('pagehide', \(\) => \{ for \(const now of \[\.\.\.liveAskPending\.values\(\)\]\) now\(\); \}\)/, 'leaving the page sends it at once');
 });
 
