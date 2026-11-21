@@ -57,7 +57,7 @@
   var PAGES = { focus: 'Focus', home: 'Home', tickets: 'Tickets', ticket: 'Tickets', review: 'Review', widgets: 'Widgets' };
   var AG = window.MW_TOOLS, TOOL = { t1: AG.t1.label, t2: AG.t2.label, shell: 'Plain terminal' };
   var NEW = [['Empty helper', 'A helper with no ticket and no task yet'], ['Chat helper', 'Ask anything, no ticket'], ['Plain terminal', 'An empty terminal in this workspace'], ['Manager', 'Looks after all helpers']];
-  var st = { page: 'focus', view: 'wall', cur: 'ORCH-238', term: false, mode: 'bar', last: 'bottom', full: false, ask: false, ren: '', menu: '', list: '', lq: '', f: '', col: {}, panes: ['ORCH-238'], act: 0, pm: '', ov: null, nt: 't1', nm: 'Sonnet', voice: '', vk: '', many: false, sheet: false, feat: 0, marks: false, tk: 'ORCH-238' };
+  var st = { page: 'focus', view: 'wall', cur: 'ORCH-238', term: false, mode: 'bar', last: 'bottom', full: false, ask: false, ren: '', menu: '', list: '', lq: '', f: '', col: {}, panes: ['ORCH-238'], act: 0, pm: '', ov: null, nt: 't1', nm: 'Sonnet', np: '', voice: '', vk: '', many: false, sheet: false, feat: 0, marks: false, tk: 'ORCH-238' };
   var drafts = {}, picks = {}, uid = 0, feedAt = 0;
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   try { picks = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { picks = {}; }
@@ -130,7 +130,20 @@
   /* tool and model for a new session or a fresh start: the usual choice is preselected, so starting stays one click */
   function pickHTML() {
     var sg = function (label, list, cur, act, name) { return '<span class="segmented" role="group" aria-label="' + label + '">' + list.map(function (x) { return btn('btn sm', act, name ? name(x) : x, { 'data-v': x, 'aria-pressed': String(cur === x) }); }).join('') + '</span>'; };
-    return '<div class="mw-pick" role="group" aria-label="Runs on"><span class="mw-bl">Runs on</span>' + sg('Tool', ['t1', 't2'], st.nt, 'ntool', function (x) { return TOOL[x]; }) + sg('Model', MODELS[st.nt], st.nm, 'nmodel') + mk(12) + '</div>';
+    return '<div class="mw-pick" role="group" aria-label="Runs on"><span class="mw-bl">Runs on</span>' + sg('Tool', ['t1', 't2'], st.nt, 'ntool', function (x) { return TOOL[x]; }) + sg('Model', MODELS[st.nt], st.nm, 'nmodel') + mk(12) + '</div>' + permHTML();
+  }
+  /* ORCH-818: the permission row of the Start choice (Manager, Empty helper, Chat helper). The tool's own modes; a mode
+     the workspace does not allow is off and says why; Bypass permissions shows one plain warning the first time. */
+  var PERM = { t1: [['ask', 'Default'], ['edits', 'Accept edits'], ['auto', 'Auto'], ['full', 'Bypass permissions']], t2: [['ask', 'This folder only'], ['full', 'Full access']] };
+  var PERM_TOP = 'auto'; /* demo: workspace.permissions = auto, so Bypass permissions is off */
+  var PERM_RANK = { ask: 0, edits: 1, auto: 2, full: 3 };
+  function permWord(tl, m) { var x = (PERM[tl || 't1'] || []).filter(function (p) { return p[0] === m; })[0]; return x ? x[1] : ''; }
+  function permHTML() {
+    var cur = st.np || PERM_TOP, list = PERM[st.nt] || [];
+    if (!list.some(function (p) { return p[0] === cur; })) cur = list[0][0];
+    var seg = '<span class="segmented" role="group" aria-label="Permissions">' + list.map(function (p) { var off = PERM_RANK[p[0]] > PERM_RANK[PERM_TOP]; return btn('btn sm', 'nperm', p[1], { 'data-v': p[0], 'aria-pressed': String(cur === p[0]), disabled: off ? 'disabled' : null, title: off ? 'Not allowed in this workspace. A person can allow it in Settings.' : null }); }).join('') + '</span>';
+    var warn = cur === 'full' ? '<p class="meta">Bypass permissions: the helper runs every command without asking, also risky ones. Use it only in a workspace you trust.</p>' : '';
+    return '<div class="mw-pick" role="group" aria-label="Permissions"><span class="mw-bl">Permissions</span>' + seg + '</div>' + warn;
   }
   function meta(s, bare) { return '<span class="mw-meta meta">' + (bare ? '' : tool(s)) + (live(s) && s.up !== undefined ? '<span>open ' + dur(s.up) + '</span>' : '') + '<span>' + warm(s) + '</span></span>'; }
 
@@ -347,7 +360,7 @@
   }
   function mdlBtn(s, can) {
     if (s.kind === 'shell') return tool(s);
-    var t = I[s.tool || 't1'] + tlabel(s) + (s.next && s.next !== mdl(s) ? ' → ' + s.next + ' after this step' : '');
+    var t = I[s.tool || 't1'] + tlabel(s) + (s.next && s.next !== mdl(s) ? ' → ' + s.next + ' after this step' : '') + (s.kind === 'free' && s.perm ? ' · ' + permWord(s.tool, s.perm) : '');
     return can ? btn('mw-mdl', 'pm', t, { 'data-k': s.k, 'data-kind': 'model', 'aria-expanded': String(pmOpen(s.k, 'model')), title: 'See or change the model' }) : '<span class="mw-tool">' + t + '</span>';
   }
   function histBtn(s) { return s.kind !== 'shell' ? btn('btn sm ghost', st.ask ? 'askoff' : 'ask', 'History', { 'aria-pressed': String(!!st.ask && live(s)) }) : ''; }
@@ -635,7 +648,7 @@
       if (k === 'Plain terminal') S.push({ k: k, t: 'No helper, just a terminal', kind: 'shell', s: 'open', up: 0, pin: true, now: 'An empty terminal, ready for you.', lines: ['Last login: today 15:06', 'demo@workspace ~ %'], chat: [], files: [] });
       else {
         var fullUp = used() >= max(), t = T[k] || T['Empty helper'];
-        S.push({ k: k, t: t[0], kind: 'free', tool: st.nt, model: st.nm, s: fullUp ? 'queue' : 'run', up: 0, pin: true, now: fullUp ? 'Waits in line for a free helper place.' : t[1], lines: [t[2]], chat: [['h', t[2].slice(2), 'now']], files: [] });
+        S.push({ k: k, t: t[0], kind: 'free', tool: st.nt, model: st.nm, perm: st.np || PERM_TOP, s: fullUp ? 'queue' : 'run', up: 0, pin: true, now: fullUp ? 'Waits in line for a free helper place.' : t[1], lines: [t[2]], chat: [['h', t[2].slice(2), 'now']], files: [] });
       }
       say(k + ' opened and pinned.');
     }
@@ -743,6 +756,7 @@
     if (st.pm) { st.pm = ''; if (k && has(k) && (a === 'ask' || a === 'view')) st.cur = k; }
     if (a === 'ntool') { st.nt = b.dataset.v; st.nm = AG[st.nt].usual; render('[data-act=ntool][data-v=' + st.nt + ']'); return; }
     if (a === 'nmodel') { st.nm = b.dataset.v; render('[data-act=nmodel][aria-pressed=true]'); return; }
+    if (a === 'nperm') { st.np = b.dataset.v; render('[data-act=nperm][aria-pressed=true]'); return; }
     if (a === 'smodel') { s = by(k); s.next = b.dataset.v === mdl(s) ? '' : b.dataset.v; render('[data-act=pm][data-k="' + k + '"][data-kind=model]'); say(s.next ? 'Model ' + s.next + ' chosen for ' + s.k + '.' : 'The model stays ' + mdl(s) + '.'); return; }
     if (a === 'min') { setMode('bar'); return; }
     if (a === 'attach') { attach(by(k), DEMO.filter(function (d) { return !(by(k).att || []).some(function (x) { return x[1] === d[1]; }); })); render('.mw-comp[data-k="' + k + '"] input'); return; }
