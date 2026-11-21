@@ -215,12 +215,14 @@ def _workers(n: int) -> int:
     return max(1, min(n, WORKERS))
 
 
-def group_plan(files: list[str], addons: dict[str, int], base: str) -> list[dict]:
+def group_plan(files: list[str], addons: dict[str, int], base: str, labels: str = "") -> list[dict]:
     """The group set in order, cheap first: {name, cwd, cmd}. Pure: reads nothing but its arguments.
-    addons: {add-on folder: test workers} of the add-ons CI checks (ci_addons)."""
+    addons: {add-on folder: test workers} of the add-ons CI checks (ci_addons). labels: the group's pull request
+    labels, comma separated, as rules.yml passes them (owner-approved lifts the banned words)."""
     q = shlex.quote
+    words = f"python3 scripts/check_banned_words.py --base {q(base)}" + (f" --labels {q(labels)}" if labels else "")
     steps: list[dict] = [
-        {"name": "banned words", "cwd": ".", "cmd": f"python3 scripts/check_banned_words.py --base {q(base)}"},
+        {"name": "banned words", "cwd": ".", "cmd": words},
         {"name": "style rules", "cwd": ".", "cmd": "python3 scripts/check_style.py"},
         {"name": "CI time limits", "cwd": ".", "cmd": "python3 scripts/check_ci_timeouts.py"},
         {"name": "headless launch", "cwd": ".", "cmd": "python3 scripts/check_headless_launch.py"},
@@ -303,10 +305,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base", default="origin/develop")
     ap.add_argument("--plan", action="store_true", help="print the steps as JSON, run nothing")
     ap.add_argument("--group", action="store_true", help="the before-merge set of a merge queue group")
+    ap.add_argument("--labels", default="", help="--group: the pull request labels, comma separated")
     a = ap.parse_args(argv)
     if a.group:
         addons = ci_addons((ROOT / ".github/workflows/addons.yml").read_text(encoding="utf-8"))
-        steps = group_plan(changed(a.base), addons, a.base)
+        steps = group_plan(changed(a.base), addons, a.base, a.labels)
         if a.plan:
             print(json.dumps(steps, indent=1))
             return 0

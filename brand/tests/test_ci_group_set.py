@@ -65,6 +65,13 @@ def test_the_text_checks_run_their_scripts_and_banned_words_reads_the_group_base
         assert (ROOT / "scripts" / f"{script}.py").is_file()
 
 
+def test_the_labels_go_to_banned_words_like_rules_yml_passes_them():
+    steps = by_name(light.group_plan([], ADDONS, "b", "owner-approved,x y"))
+    assert (
+        steps["banned words"]["cmd"] == "python3 scripts/check_banned_words.py --base b --labels 'owner-approved,x y'"
+    )
+
+
 def test_the_base_is_quoted_for_the_shell():
     steps = by_name(light.group_plan([], ADDONS, "x; rm -rf y"))
     assert steps["banned words"]["cmd"].endswith("--base 'x; rm -rf y'")
