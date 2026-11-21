@@ -150,6 +150,10 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("session.new", {"kind": "chat", "model": "opus"}),  # ORCH-710: only the Empty helper takes a model
         ("session.new", {"kind": "empty", "model": "auto"}),
         ("session.new", {"kind": "empty", "model": "gpt"}),
+        ("session.end", {"kind": "ticket"}),
+        ("session.end", {"kind": "chat", "ticket": "t_abcdef"}),
+        ("run.interrupt", {"ticket": "nope"}),
+        ("run.interrupt", {"ticket": "t_abcdef", "kind": "chat"}),
         ("addon.start", {"name": "x"}),
         (
             "pull.merge",
@@ -325,6 +329,9 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         ),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
         ({"op": "session.new", "args": {"kind": "empty"}}, ["session", "new", "empty", *common]),
+        ({"op": "run.interrupt", "args": {"ticket": "t_abcdef"}}, ["run", "interrupt", "t_abcdef", *common]),
+        ({"op": "session.end", "args": {"kind": "manager"}}, ["session", "end", "manager", *common]),
+        ({"op": "session.end", "args": {"kind": "terminal"}}, ["session", "end", "terminal", *common]),
         ({"op": "session.new", "args": {"kind": "terminal"}}, ["session", "new", "terminal", *common]),
         (  # ORCH-710: the Empty helper starts on the model the person picked in the New menu
             {"op": "session.new", "args": {"kind": "empty", "model": "sonnet"}},
