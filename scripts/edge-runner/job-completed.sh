@@ -26,9 +26,12 @@ fi
 # transient units too (systemd-run --user ..., Restart=always would bring a killed process back) and timers, paths
 # and sockets that would start something later: every active user unit except the session bus
 rm -rf "$REAL_HOME/.local/share/systemd/user" 2>/dev/null
+# runtime overrides a job may have made (systemctl --user --runtime, set-property --runtime) go too
+rm -rf "$XDG_RUNTIME_DIR/systemd/user.control" "$XDG_RUNTIME_DIR/systemd/user" 2>/dev/null
+systemctl --user daemon-reload >/dev/null 2>&1
 systemctl --user list-units --type=timer,path,socket,service,scope --state=active,activating,reloading,listening,waiting --plain --no-legend 2>/dev/null \
   | awk '{print $1}' | while read -r u; do
-    case $u in (dbus.service|dbus.socket|init.scope|"") continue;; esac
+    case $u in (dbus.socket|init.scope|"") continue;; esac
     systemctl --user stop "$u" >/dev/null 2>&1
   done
 systemctl --user reset-failed >/dev/null 2>&1
@@ -40,9 +43,10 @@ while [ -n "$p" ] && [ "$p" -gt 1 ]; do keep="$keep$p "; p=$(ps -p "$p" -o ppid=
 # could copy.
 RBIN=$(cd "$REAL_HOME/actions-runner/bin" 2>/dev/null && pwd -P)
 # The manager's PID comes from the system manager (a job cannot change it). (sd-pam) is the one child the manager
-# starts in its first second (a job's own units are its children too, but start later). The bus counts only when its
-# program is the system's dbus binary (a job could replace dbus.service with a runtime override).
-start() { awk '{print $22}' "/proc/$1/stat" 2>/dev/null; }
+# starts in its first second (a job's own units are its children too, but start later). The session bus is NOT kept:
+# a job could start it with its own settings; it is stopped like the rest and starts again when it is next needed.
+# start time = field 22 of /proc/PID/stat, counted after the LAST ')' (the name in brackets may hold spaces)
+start() { local st; st=$(cat "/proc/$1/stat" 2>/dev/null) || return; st=${st##*) }; set -- $st; echo "${20}"; }
 SYSTEM_PIDS=""
 mgr=$(systemctl show "user@$ME.service" -p MainPID --value 2>/dev/null)
 if [ "${mgr:-0}" -gt 0 ] 2>/dev/null; then
@@ -52,12 +56,6 @@ if [ "${mgr:-0}" -gt 0 ] 2>/dev/null; then
     c0=$(start "$c")
     [ -n "$c0" ] && [ -n "$m0" ] && [ $((c0 - m0)) -le "$hz" ] && { SYSTEM_PIDS="$SYSTEM_PIDS $c"; break; }
   done
-fi
-bus=$(systemctl --user show dbus.service -p MainPID --value 2>/dev/null)
-if [ "${bus:-0}" -gt 0 ] 2>/dev/null; then
-  case $(readlink "/proc/$bus/exe" 2>/dev/null) in
-    (/usr/bin/dbus-daemon|/usr/bin/dbus-broker|/usr/bin/dbus-broker-launch) SYSTEM_PIDS="$SYSTEM_PIDS $bus";;
-  esac
 fi
 leftovers() {
   local pid exe
