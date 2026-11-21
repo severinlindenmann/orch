@@ -212,6 +212,7 @@
     const b = String(by || '');
     if (me && b === me) return 'You';
     if (listedName(b)) return listedName(b);
+    if (/^human:pr_[a-z0-9]{10}$/.test(b)) return 'Someone';  // a person id without the list (a shared copy)
     return titleCase(b.replace(/^(?:agent|human):/, '')) || 'Someone';
   }
   /* The history of a ticket as plain rows {entry, who, line, sentence}. Person actions on the status or fields become one
@@ -230,7 +231,8 @@
     const hidden = new Set();
     for (const e of list) {
       const text = String((e && e.text) || '').trim(), by = String((e && e.by) || '');
-      const who = historyWho(by, me);
+      // a line stamped with a person (people list on) reads as that person's name; "You" stays "You"
+      const who = (me && by === me) ? 'You' : (listedName(e && e.person) || historyWho(by, me));
       let sentence = null, m;
       if (by.startsWith('human:')) {
         if ((m = /^Asked for changes(?:: ([\s\S]*))?$/.exec(text))) {

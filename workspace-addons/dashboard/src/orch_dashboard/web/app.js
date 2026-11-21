@@ -309,7 +309,7 @@ function accept(next) {
   const arrived = new Set(array(next.needs).filter(n => !seenNeeds.has(n.id)).map(n => n.id));
   array(next.needs).forEach(n => seenNeeds.add(n.id));
   state = next;
-  if ('person_names' in next) window.DashHelpers.setPersonNames(next.person_names);  // human:pr_... reads as the name
+  if ('person_names' in next) window.DashHelpers.setPersonNames(next.person_names);  // live page only  // human:pr_... reads as the name
   wsNames = new Map([...['hosted', 'joined'].flatMap(k => array(state?.groups?.[k])).flatMap(g => [...array(g.members), ...array(g.connectable)]),
     ...array(typeof chatDm === 'object' ? chatDm.contacts : [])].filter(m => m && m.ws && m.name).map(m => [m.ws, String(m.name)]));
   window.dispatchEvent(new CustomEvent('orch:state', {detail: next}));

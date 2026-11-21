@@ -13,5 +13,16 @@ test('person ids read as the name; old actors keep theirs', () => {
   assert.strictEqual(H.historyWho('human:lume', null), 'Lume');  // an old line keeps its old name
   assert.strictEqual(H.historyWho('agent:claude', null), 'Claude');
   H.setPersonNames(null);
-  assert.strictEqual(H.historyWho('human:pr_k3f9q2m1xa', null), 'Pr k3f9q2m1xa');  // list off: shown as written
+  assert.strictEqual(H.historyWho('human:pr_k3f9q2m1xa', null), 'Someone');  // no list here (a shared copy)
+});
+
+test('a stamped line reads as the stamped person, a rename shows at once', () => {
+  H.setPersonNames({pr_aaaaaaaaaa: 'Sev'});
+  const rows = H.historyView([{at: '2026-11-21T10:00:00Z', by: 'human:lume', person: 'pr_aaaaaaaaaa', device: 'machine', text: 'Created'}], [], null);
+  assert.strictEqual(rows[0].who, 'Sev');
+  const old = H.historyView([{at: '2026-11-21T10:00:00Z', by: 'human:lume', text: 'Created'}], [], null);
+  assert.strictEqual(old[0].who, 'Lume');  // an old line without a person keeps its name
+  H.setPersonNames({pr_aaaaaaaaaa: 'Severin'});
+  assert.strictEqual(H.historyView([{at: '2026-11-21T10:00:00Z', by: 'human:lume', person: 'pr_aaaaaaaaaa', text: 'Created'}], [], null)[0].who, 'Severin');
+  H.setPersonNames(null);
 });

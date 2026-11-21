@@ -129,6 +129,18 @@ def test_broken_file_fails_closed(proj, new_ticket):
     assert "person" not in tickets.load(proj, tid)["history"][0]
 
 
+@pytest.mark.parametrize(
+    "part, bad", [("log", {}), ("devices", "x"), ("devices", [1]), ("log", ["x"]), ("people", {})]
+)
+def test_damaged_parts_are_broken_not_a_crash(proj, part, bad):
+    doc = _on(proj)
+    doc[part] = bad
+    people.path(proj).write_text(json.dumps(doc), encoding="utf-8")
+    assert people.state(proj) == "broken"
+    with pytest.raises(Refused):
+        people.add(proj, "Lea")
+
+
 def test_file_without_owner_is_broken(proj):
     doc = _on(proj)
     doc["people"][0]["owner"] = False

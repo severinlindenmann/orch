@@ -94,14 +94,16 @@ def clean_rights(value) -> list[str]:
 def _valid(doc) -> bool:
     if not isinstance(doc, dict) or doc.get("schema") != SCHEMA or not isinstance(doc.get("revision"), int):
         return False
-    people = doc.get("people")
-    if not isinstance(people, list) or not isinstance(doc.get("devices", []), list):
+    people, devices, log = doc.get("people"), doc.get("devices", []), doc.get("log", [])
+    if not isinstance(people, list) or not isinstance(devices, list) or not isinstance(log, list):
+        return False
+    if any(not isinstance(d, dict) for d in devices) or any(not isinstance(x, dict) for x in log):
         return False
     ids = set()
     for p in people:
         if not isinstance(p, dict) or not isinstance(p.get("id"), str) or not _ID_RE.fullmatch(p["id"]):
             return False
-        if p["id"] in ids or not isinstance(p.get("name"), str) or not p["name"]:
+        if p["id"] in ids or not isinstance(p.get("name"), str) or not p["name"].strip():
             return False
         if not isinstance(p.get("rights"), list) or any(r not in RIGHTS for r in p["rights"]):
             return False

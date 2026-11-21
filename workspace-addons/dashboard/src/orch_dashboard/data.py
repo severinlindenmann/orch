@@ -1509,7 +1509,8 @@ def load_state(
         "people": people.load(root)
         if with_settings
         else None,  # the "You: ..." switch (live page only)  # who "You" is in a history line (the live page only)
-        "person_names": person_names(root),  # human:pr_... -> the person's name (people list, ORCH-1161)
+        # human:pr_... -> the person's name (people list, ORCH-1161); live page only, never in a shared copy
+        "person_names": person_names(root) if with_settings else None,
         "tickets": tickets,
         "skipped": skipped,
         "addons": addons,

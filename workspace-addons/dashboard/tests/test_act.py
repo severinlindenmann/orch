@@ -1095,13 +1095,15 @@ def test_people_click_through_core(ws, monkeypatch, capsys):
 
     from orch import cli_people
     from orch import people as orch_people
+    from orch.adapters import human_environ
 
     from orch_dashboard import data
     from orch_dashboard.actions import build_argv
 
     monkeypatch.chdir(ws)
-    for k in ("ORCH_AGENT", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"):
-        monkeypatch.delenv(k, raising=False)
+    keep = human_environ(os.environ)
+    for k in [k for k in os.environ if k not in keep]:  # every helper variable (Claude, Codex, ORCH_AGENT)
+        monkeypatch.delenv(k)
 
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--by")
@@ -1109,7 +1111,9 @@ def test_people_click_through_core(ws, monkeypatch, capsys):
     parser = argparse.ArgumentParser()
     cli_people.add_parsers(parser.add_subparsers(dest="cmd"), common)
 
-    def run(op, args):  # core's own parser and dispatch for `orch people` (the dashboard's env has no full core)
+    def run(
+        op, args
+    ):  # core's own parser and dispatch for `orch people` (the dashboard's env has no full core)
         try:
             cli_people.dispatch(parser.parse_args(build_argv(op, args)), ws)
             return 0
