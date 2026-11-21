@@ -147,6 +147,26 @@ def test_three_unrelated_pull_requests_in_an_hour_make_one_issue_and_every_helpe
     assert any("broken test, not its change" in h for h in history(on, tids[3]))
 
 
+def test_a_broken_test_keeps_the_cap_of_woken_helpers_and_tells_the_rest_later(on, monkeypatch):
+    """The cap of woken helpers per pass (ORCH-454) also holds for the helpers told about a broken test
+    (ORCH-455): the rest are told on the next passes."""
+    monkeypatch.setattr(checks, "WAKES_PER_PASS", 2)
+    gh, waker = NightGitHub(), Waker()
+    tids = [ticket(on, n) for n in (1, 2, 3, 4)]
+    for n in (1, 2, 3, 4):
+        gh.fail(n, f"{n}" * 40, page_smoke=CLOCK_LOG)
+    got = tend(on, gh, waker, 1000.0)
+    assert len(got["broken"]) == 1 and len(gh.issues) == 1  # the pattern is seen in the first pass
+    assert len(waker.calls) == 2  # the cap
+    for at in (1060.0, 1120.0, 1180.0):
+        before = len(waker.calls)
+        tend(on, gh, waker, at)
+        assert len(waker.calls) - before <= 2
+    # every helper hears it is not their change, each once (one woken first to fix it hears so a pass later)
+    told = [tid for tid, text in waker.calls if "not because of your change" in text]
+    assert sorted(told) == sorted(tids)
+
+
 def test_a_person_is_asked_on_one_ticket_for_the_broken_test(on):
     from orch import tickets
 

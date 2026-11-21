@@ -404,11 +404,15 @@ def tend(root: Path, gh, take=None, wake_fn=None, clock=time.time, log=print, ro
                 how = wake_fn(root, tid, text)
                 out["woke"].append(url)
                 line = f"Checks of {url} failed at {head[:7]} ({names}): {how}."
+            for _, t in theirs:  # dealt with for these broken tests: a later catch-up tells it nothing more
+                t["told"] = sorted(set(t["told"]) | {k})
             log(f"{key}: {line}")
             _history(root, tid, line)
     _write(root, {k: v for k, v in seen.items() if k in keep})
     for t in list(bdata["tests"].values()):  # what an earlier pass could not do
         _issue(root, gh, take, bdata, t, "")
+        if not t.get("fixed"):
+            _tell_earlier(root, wake_fn, bdata, t, None, out)
         with contextlib.suppress(Exception):
             broken.ask(root, t)
     broken.answers(root, bdata)
@@ -463,10 +467,23 @@ def _found(root: Path, gh, take, wake_fn, bdata: dict, t: dict, log_text: str, n
         f"Broken test {broken.name(t)} on {len(t['prs'])} pull requests"
         + (f": {t['issue']}" if t["issue"] else "")
     )
-    for p in t["prs"]:
+    _tell_earlier(root, wake_fn, bdata, t, now_pr, out)
+    try:
+        broken.ask(root, t)
+    except Exception as e:  # noqa: BLE001 - asked again on the next pass
+        log(f"The question for the broken test {broken.name(t)} could not be asked: {e}")
+
+
+def _tell_earlier(root: Path, wake_fn, bdata: dict, t: dict, now_pr: str | None, out) -> None:
+    """Tell the helpers of the broken test's earlier pull requests that it is not their change, within the
+    pass's wake cap (WAKES_PER_PASS, ORCH-454); the rest are told on a later pass (tend calls this again)."""
+    for p in list(t["prs"]):
         hit = broken.hit_of(bdata, t, p)
         if p == now_pr or p in t["told"] or not hit or not hit.get("ticket"):
             continue  # the pull request of this pass is told by the caller
+        if len(out["woke"]) + len(out["told"]) >= WAKES_PER_PASS:
+            out["skipped"].append((_url(p), f"{WAKES_PER_PASS} helpers woken this pass already; next pass"))
+            continue
         alone = hit.get("alone")
         how = wake_fn(root, hit["ticket"], (broken.told_text if alone else broken.part_text)(t, _url(p)))
         t["told"].append(p)
@@ -474,10 +491,6 @@ def _found(root: Path, gh, take, wake_fn, bdata: dict, t: dict, log_text: str, n
         what = "only in a broken test" if alone else "also in a broken test"
         _history(root, hit["ticket"], f"{_url(p)} failed {what}, not because of its change: {how}.")
         broken.write(root, bdata)
-    try:
-        broken.ask(root, t)
-    except Exception as e:  # noqa: BLE001 - asked again on the next pass
-        log(f"The question for the broken test {broken.name(t)} could not be asked: {e}")
 
 
 def _publish(gh, take, bdata: dict, repo: str, log, out) -> None:
