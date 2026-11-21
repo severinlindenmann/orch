@@ -1700,9 +1700,10 @@ function ticketResultsCard(t) {
     all.length ? (t.status === 'done' ? ticketResultFrame(t, all[0].kind, all[0].file) : ticketFileRow(t, all[0].kind, all[0].file)) : null, all.slice(1, 4).map(x => ticketFileRow(t, x.kind, x.file)), files.length ? headerProof(t) : null);
 }
 // The ticket's results as the same widgets as on the live wall (ORCH-697, draft D), the notes of its finished steps above
-// them; a click opens the big overlay. A read-only copy keeps the Result card above.
+// them; a click opens the big overlay. A read-only copy keeps the Result card above, and so does a ticket that hosts an
+// open group: its file rows carry Share with group, which the widgets do not have yet (bundle ORCH-1185, issue 2280).
 function ticketWidgets(t) {
-  return !snapshot && typeof resultsHost === 'function' && !!window.UI?.result;
+  return !snapshot && typeof resultsHost === 'function' && !!window.UI?.result && !ticketHostsOpenGroup(t);
 }
 function ticketWidgetsCard(t) {
   const notes = t.status === 'review' ? [] : completionNotes(t);
