@@ -257,7 +257,11 @@ def test_a_proven_develop_push_runs_no_suite():
     # for now (ORCH-1106) a proven push still calls these two for the click-throughs and the Windows parts only,
     # which queue groups skip; their other suites stay off (brand/tests/test_ci_queue_skip.py)
     for job in ("workspace", "addons"):
-        assert _job_if(job).startswith("needs.changes.outputs.proven == 'true' ||"), job
+        cond = _job_if(job)
+        # jobs that also wait for the Mac route are wrapped so a failed route still runs them (ORCH-1125)
+        wrap = "${{ !cancelled() && needs.changes.result == 'success' && ("
+        cond = cond[len(wrap) :] if cond.startswith(wrap) else cond
+        assert cond.startswith("needs.changes.outputs.proven == 'true' ||"), job
 
 
 def test_the_light_job_runs_only_on_light_pull_requests_and_the_final_check_waits_for_it():
