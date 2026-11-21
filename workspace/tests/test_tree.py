@@ -18,7 +18,7 @@ def mk(run, title, *extra):
 def test_new_with_parent(proj, run, validate):
     p = mk(run, "Quarter close")
     code, out, _ = run("ticket", "new", "Q3 invoices", "--parent", p, "--by", "human:t")
-    assert code == 0 and "step of: Quarter close" in out
+    assert code == 0 and "sub-ticket of: Quarter close" in out
     c = [t for t in tickets.list_all(proj) if t["title"] == "Q3 invoices"][0]
     validate(c)
     key = read(proj, p)["key"]

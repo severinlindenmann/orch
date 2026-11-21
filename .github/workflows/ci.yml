@@ -1,4 +1,13 @@
 name: ci
+# FOR NOW (ORCH-1106, owner decision 20 Nov): merge queue groups (orch-queue/...) do not run the job
+# 'addons / dashboard-clickthroughs' nor the jobs 'workspace / test (windows-latest, n/N)'; a group merges without them.
+# They still run in full and count on every push to develop (also one a green group proved: then only they run, see
+# the addons and workspace jobs below) and for a release: the click-throughs on the pull request into main, the
+# Windows parts at night and in the release keeper's release check (unchanged). A red one on develop opens the
+# release keeper's red-develop ticket as before.
+# SWITCH BACK (follow-up ORCH ticket "Queue groups: run the click-throughs and Windows parts again") when ORCH-555
+# (steady click-throughs) and ORCH-1050 (Windows split) are done and 20 queue groups in a row were green with them:
+# drop "clickthroughs:" from the addons job's inputs. brand/tests/test_ci_queue_skip.py keeps both places in step.
 on:
   pull_request:
     # draft PRs get no CI run (the gate says "draft"); marking the PR ready starts it
@@ -149,16 +158,18 @@ jobs:
   workspace:
     needs: changes
     # light pull requests skip it, except one that changes file, process or path code while Windows is green (oscode)
-    if: needs.changes.outputs.proven != 'true' && ((needs.changes.outputs.light != 'true' && (needs.changes.outputs.workspace == 'true' || needs.changes.outputs.queue == 'true')) || needs.changes.outputs.oscode == 'true' || github.event_name == 'schedule')
+    # A push to develop that a green queue group proved runs only the Windows parts (ORCH-1106: groups skip them).
+    if: needs.changes.outputs.proven == 'true' || (needs.changes.outputs.light != 'true' && (needs.changes.outputs.workspace == 'true' || needs.changes.outputs.queue == 'true')) || needs.changes.outputs.oscode == 'true' || github.event_name == 'schedule'
     uses: ./.github/workflows/workspace.yml
     with:
+      linux: ${{ needs.changes.outputs.proven != 'true' }}
       # PRs into develop and merge queue groups: Linux only (+ the CLI smoke on Windows/macOS below). macOS and
       # Windows run on develop itself: every push (never cancelled, see concurrency), the nightly run and the
       # release check (the keeper's manual run with windows=true); a red one opens the release keeper's
       # red-develop ticket (releasekeeper.develop_red). Merge queue groups ran all three systems for a day
       # (PR 1428) and waited 50+ minutes on GitHub's 5 macOS machines at once (18 Nov, ORCH-315).
       # PRs into main and manual runs keep macOS too. Each system stays split into parts under 15 minutes.
-      full: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
+      full: ${{ (github.event_name != 'pull_request' || github.base_ref == 'main') && needs.changes.outputs.proven != 'true' }}
       # Windows: every push to develop, the nightly run, a manual run with windows=true and pull requests that
       # change file, process or path code while Windows is not known red (scripts/touches_os_code.py --pr), except
       # merge queue groups. Which check is required where: docs/ci-checks.md.
@@ -176,8 +187,13 @@ jobs:
     uses: ./.github/workflows/e2e-smoke.yml
   addons:
     needs: changes
-    if: needs.changes.outputs.light != 'true' && needs.changes.outputs.proven != 'true' && (needs.changes.outputs.addons == 'true' || needs.changes.outputs.queue == 'true')
+    # ORCH-1106 (for now): queue groups skip the click-throughs; a push to develop that a green group proved runs
+    # only the click-throughs. Every other place runs both as before.
+    if: needs.changes.outputs.proven == 'true' || (needs.changes.outputs.light != 'true' && (needs.changes.outputs.addons == 'true' || needs.changes.outputs.queue == 'true'))
     uses: ./.github/workflows/addons.yml
+    with:
+      suites: ${{ needs.changes.outputs.proven != 'true' }}
+      clickthroughs: ${{ needs.changes.outputs.queue != 'true' }}
   publish:
     needs: changes
     if: needs.changes.outputs.proven != 'true' && needs.changes.outputs.publish == 'true'

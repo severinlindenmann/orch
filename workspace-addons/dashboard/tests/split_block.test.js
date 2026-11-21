@@ -100,3 +100,13 @@ test('Remove says what happens with Keep it and its own word, never a typed word
   assert.doesNotMatch(body, /<input|type=['"]text/);
   assert.match(body, /act_answer\?\.addon === id/);   // the toast uses only the open add-on's own answer
 });
+
+test("a service's address opens the app in a new tab (ORCH-846)", () => {
+  address = '#addon/services';
+  const s = draw();
+  const panel = s.querySelectorAll('[data-split-panel]').find(p => p.dataset.splitPanel === 'web-preview');
+  const a = panel.querySelectorAll('a').find(x => x.getAttribute('href') === 'http://127.0.0.1:5173');
+  assert.ok(a, 'the address is a link');
+  assert.equal(a.getAttribute('target') ?? a.target, '_blank');
+  assert.match(a.getAttribute('rel') ?? a.rel, /noopener/);
+});

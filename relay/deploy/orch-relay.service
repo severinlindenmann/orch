@@ -9,7 +9,7 @@ StartLimitIntervalSec=0
 [Service]
 User=orch-relay
 EnvironmentFile=/etc/orch-relay/env
-ExecStart=/usr/local/bin/orch-relay
+ExecStart=/opt/orch/bin/orch-relay
 Restart=on-failure
 RestartSec=10
 NoNewPrivileges=true

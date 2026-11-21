@@ -298,6 +298,19 @@ def test_last_result_comes_from_the_recorded_run(ws):
     assert row["cells"]["last"].startswith("Done · ")
 
 
+def test_group_last_result_says_a_script_failed(ws):
+    add_ticket(ws, "t_rec00005", title="Pair", ext={"automation": {"recurring": True, "cron": "0 8 * * *"}})
+    runs = ws / ".orch" / "addons" / "automation"
+    runs.mkdir(parents=True, exist_ok=True)
+    lines = [
+        {"ticket": "t_rec00005", "at": "2026-11-04T08:00:00Z", "exit": 1, "script": "a"},
+        {"ticket": "t_rec00005", "at": "2026-11-04T08:00:01Z", "exit": 0, "script": "b"},
+    ]
+    (runs / "runs.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines))
+    (row,) = blocks(build(ws, T(9)), "table")[0]["rows"]
+    assert row["cells"]["last"].startswith("A script failed · ")
+
+
 def test_paused_schedule_stays_listed_but_is_not_planned(ws):
     add_ticket(
         ws,

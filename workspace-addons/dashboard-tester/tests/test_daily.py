@@ -371,6 +371,16 @@ def test_settings_pages_keep_no_text_and_no_report_picture():
     assert reps[0]["pictures"] == [] and reps[1]["pictures"] == ["/s/c.png"]
 
 
+def test_version_name_keeps_the_whole_build_name():
+    assert daily.version_name("orch 3.x (release build)\n") == "3.x (release build)"
+    assert daily.version_name("orch 16\n") == "16"
+    assert (
+        daily.version_name("orch develop 0af5d58e (development build)")
+        == "develop 0af5d58e (development build)"
+    )
+    assert daily.version_name("") == ""
+
+
 def test_look_falls_back_to_this_computers_own_address():
     # report r-1119-0642-ws: the private-network name did not answer while the dashboard was fine on 127.0.0.1
     url = "http://develop.example:8790/go/SECRET"

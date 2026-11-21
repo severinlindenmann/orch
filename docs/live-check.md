@@ -9,7 +9,7 @@ plain program (no AI) and uses only the Python standard library.
 |---|---|
 | `/health` answers `ok` | outside and inside |
 | TLS valid for at least 14 more days | outside and inside |
-| `Strict-Transport-Security` with max-age of at least 180 days (set in the Caddy sites, `relay/deploy/Caddyfile` and `publish/deploy/Caddyfile`) | outside and inside |
+| `Strict-Transport-Security` with max-age of at least 180 days (set in the Caddy sites, `relay/deploy/relay.caddy` and `publish/deploy/publish.caddy`) | outside and inside |
 | `/admin`, `/admin/` and `/admin/api/workspaces` answer 404 on the public sites | outside and inside |
 | Admin ports 8410-8412 closed on the server's public address | outside only (GitHub Actions) |
 | Admin listeners answer 200 over the private network (direct: hostinger-vps.nb.severin.io:8412 and :8411) | inside only |

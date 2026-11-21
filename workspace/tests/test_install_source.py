@@ -72,8 +72,9 @@ def test_switch_installs_the_official_source_at_that_branch(monkeypatch, tmp_pat
     monkeypatch.setenv("ORCH_REF", "feat/x")
     addons.switch_to(to)
     assert addons.repo() == OFFICIAL and addons.ref() == ref
-    assert addons.spec("workspace") == f"{OFFICIAL}/archive/{ref}.zip#subdirectory=workspace"
-    assert addons.spec("workspace-addons/dashboard").startswith(f"{OFFICIAL}/archive/{ref}.zip#")
+    assert addons.spec("workspace") == f"orch-workspace @ {OFFICIAL}/archive/{ref}.zip#subdirectory=workspace"
+    dash = addons.spec("workspace-addons/dashboard")
+    assert dash.startswith(f"orch-dashboard @ {OFFICIAL}/archive/{ref}.zip#")
     assert addons.build() == to
 
 

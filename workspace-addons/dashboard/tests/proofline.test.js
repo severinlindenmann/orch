@@ -77,3 +77,12 @@ test('#n mentions link to GitHub through the ticket\'s own links; no GitHub link
   const other = c.linkRefs({id:'t_2'}, 'see #12, not a&#13; or x#14');
   assert.deepEqual(Array.from(other.filter(n => typeof n !== 'string'), n => n.attrs.href), ['https://github.com/x/y/issues/12'], 'another ticket here names the repository');
 });
+test('a done task whose newest check run failed says so on the Tasks tab (ORCH-904)', () => {
+  const a = src.indexOf('const taskCheckFailed'), b = src.indexOf('const taskWord');
+  const c = vm.createContext({});
+  vm.runInContext(src.slice(a, b), c);
+  const f = vm.runInContext('taskCheckFailed', c), t = {proof:{per_item:{c1:'failed', c2:'passed'}}};
+  assert.equal(f(t, {id:'c1', done:true}), true);
+  assert.equal(f(t, {id:'c2', done:true}), false);
+  assert.equal(f({}, {id:'c1'}), false);
+});
