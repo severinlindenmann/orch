@@ -348,6 +348,7 @@ def run_group(args, root: Path, out) -> None:
         r = cg.say(root, tid, args.text, tickets.PERSON_VIA if as_person else "helper", args.to_person, by)
         out(args, r, "Written into the group.")
     elif sub == "add":
+        cg.refuse_task_of_other_chat(root, tid)
         r = cg.add_member(root, tid, ws, by)
         out(args, r, "Added to the group." if r["added"] else "Already in the group.")
     elif sub == "remove":

@@ -2457,7 +2457,7 @@ V_CG = Draft202012Validator(
     registry=Registry().with_resource(_msg_schema["$id"], Resource.from_contents(_msg_schema)),
     format_checker=FormatChecker(),
 )
-CG_HOST_ONLY = ("group_event", "shared_ticket", "origin", "echo_of", "shared_files", "question_kind", "own_seq")
+CG_HOST_ONLY = ("group_event", "shared_ticket", "shared_chat", "origin", "echo_of", "shared_files", "question_kind", "own_seq")
 CG_MEMBER_ONLY = ("seen", "leave", "member_version")
 CG_FILE_MAX = 26214400
 # task.status order: a status may repeat or move right, never left; the last column is final.
@@ -2559,6 +2559,11 @@ def cg_rules(m, ctx=None):
                 out.append("shared_ticket must describe the host ticket")
             if len(json.dumps(st, separators=(",", ":"), ensure_ascii=False).encode()) > 4096:
                 out.append("shared_ticket is over 4096 bytes")
+        if "shared_chat" in b:
+            if m.get("type") != "text" or not str(to).startswith("ws_") or "shared_ticket" not in b:
+                out.append("shared_chat rides only on the ticket card (shared_ticket) to one member workspace")
+            if len(json.dumps(b["shared_chat"], separators=(",", ":"), ensure_ascii=False).encode()) > 32768:
+                out.append("shared_chat is over 32768 bytes")
     elif str(frm).startswith("ws_"):
         if to != host:
             out.append("members send group messages only to the host (only the host fans out)")
