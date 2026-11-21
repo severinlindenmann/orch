@@ -50,11 +50,10 @@ index  = {"v": 1, "entry": "index.html", "files": [{"path": "index.html", "type"
   Vector: `vectors/publish-bundle-v1.json` (the bundle bytes, not encrypted: `good` with index.html, `good_no_index`
   with nested folders and no index.html; plus `must_fail` cases).
 
-## 1b. Signed messages (workspaces and phones)
+## 1b. Message envelope (workspaces and phones)
 
-Ed25519 signatures over the exact message bytes with a purpose tag; format, strict reading, key ids,
-fingerprints and who checks what: relay-api.md "Signed messages (v1)". Vectors: `vectors/signing-v1.json`
-(Python, Rust and the phone; includes the Wycheproof Ed25519 cases).
+Ed25519 over the exact message bytes with a purpose tag: `msgsig.md` (vectors: `vectors/msgsig-v1.json`, Python,
+Rust and the phone; includes the Wycheproof Ed25519 cases).
 
 ## 2. Relay: TLS + encrypted at rest + admin can read
 

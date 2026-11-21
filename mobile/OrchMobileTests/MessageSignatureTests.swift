@@ -2,12 +2,12 @@
 import CryptoKit
 import XCTest
 
-/// Signed messages v1: the shared vectors (contracts/vectors/signing-v1.json, copied to Fixtures) on the phone.
+/// Signed messages v1: the shared vectors (contracts/vectors/msgsig-v1.json, copied to Fixtures) on the phone.
 final class MessageSignatureTests: XCTestCase {
     private final class Token {}
 
     private func vectors() throws -> [String: Any] {
-        let url = try XCTUnwrap(Bundle(for: Token.self).url(forResource: "signing-v1", withExtension: "json"))
+        let url = try XCTUnwrap(Bundle(for: Token.self).url(forResource: "msgsig-v1", withExtension: "json"))
         return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
     }
 

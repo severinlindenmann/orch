@@ -1,4 +1,4 @@
-"""Signed messages v1: the shared vectors (contracts/vectors/signing-v1.json) against orch.msgsig."""
+"""Signed messages v1: the shared vectors (contracts/vectors/msgsig-v1.json) against orch.msgsig."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import pytest
 from orch import msgsig
 
 REPO = Path(__file__).resolve().parents[2]
-VEC = json.loads((REPO / "contracts" / "vectors" / "signing-v1.json").read_text(encoding="utf-8"))
+VEC = json.loads((REPO / "contracts" / "vectors" / "msgsig-v1.json").read_text(encoding="utf-8"))
 
 
 def _b64u(s: str) -> bytes:
@@ -117,8 +117,8 @@ def test_msgsig_wycheproof():
 
 
 def test_msgsig_the_phone_copy_is_the_same_file():
-    phone = REPO / "mobile" / "OrchMobileTests" / "Fixtures" / "signing-v1.json"
-    assert phone.read_bytes() == (REPO / "contracts" / "vectors" / "signing-v1.json").read_bytes()
+    phone = REPO / "mobile" / "OrchMobileTests" / "Fixtures" / "msgsig-v1.json"
+    assert phone.read_bytes() == (REPO / "contracts" / "vectors" / "msgsig-v1.json").read_bytes()
 
 
 def test_msgsig_every_case_family_is_there():
