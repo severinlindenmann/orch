@@ -341,6 +341,28 @@ test('ORCH-1108: a stuck card\'s buttons do what Home\'s do; a row that is gone,
   const shared = stuckHome(); shared.snapshot = true;
   assert.equal(shared.reviewStuckCards().length, 0, 'a shared copy shows no buttons that change things');
 });
+// Outside review (OpenAI credit): what was done belongs to one stop; two quick presses run one action.
+test('ORCH-1108: "Helper started" stays with the stop it was pressed on; a later stop of the same ticket starts clean', async () => {
+  const row = STUCK('helper:idle', 't_aaaa02');
+  const c = home({settings:{}, runs:{}, services:[], review:{cards:[], answered:[]}}, [{id:'t_aaaa02', key:'DT-2', title:'Docs', status:'active', questions:[]}], [row]);
+  const api = c.reviewApi(), [card] = await api.stack();
+  assert.deepEqual({...await api.answer({id:card.id, digest:card.digest, verdict:'ok', picked:'fresh'})}, {ok:true});
+  assert.match((await api.stack())[0].card.why, /^Helper started fresh /);
+  row.since = '2026-11-16T08:00:00Z';  // it went idle again later: the same row id, a new stop
+  const later = (await api.stack())[0];
+  assert.equal(later.card.why, undefined, 'the earlier press is not shown on the new stop');
+  assert.notEqual(later.digest, card.digest);
+});
+test('ORCH-1108: two presses at once on a stuck card run its action once', async () => {
+  let release; const gate = new Promise(r => { release = r; });
+  const c = home({settings:{}, runs:{t_aaaa03:{running:true}}, services:[], review:{cards:[], answered:[]}}, [{id:'t_aaaa03', key:'DT-3', title:'Booking', status:'active', questions:[]}], [STUCK('helper:failing', 't_aaaa03')]);
+  const calls = []; c.act = async (op, args) => { calls.push(op); await gate; return {ok:true, status:200}; };
+  const api = c.reviewApi(), [card] = await api.stack(), press = () => api.answer({id:card.id, digest:card.digest, verdict:'ok', picked:'fresh'});
+  const first = press(), second = await press();
+  assert.equal(second.error.code, 'busy', 'the second press does nothing while the first runs');
+  release(); assert.deepEqual({...await first}, {ok:true});
+  assert.deepEqual(calls, ['run.stop', 'run.start'], 'one stop, one fresh start');
+});
 test('ORCH-1108: Merge on a card shown before a newer commit arrived merges nothing', async () => {
   const c = stuckHome(), api = c.reviewApi();
   const shown = (await api.stack())[0];
