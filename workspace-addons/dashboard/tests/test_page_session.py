@@ -478,6 +478,7 @@ ACT_ARGS = {
     "triage.start": {"lanes": ["backlog"]},
     "diag.set": {"on": False},
     "typing.set": {"on": True},
+    "terminal-typing.set": {"on": True},
     "update.auto": {"on": True},
     "diag.delete_reports": {},
     "copies.remove_orphaned": {"ws8": "abcd1234"},

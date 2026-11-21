@@ -101,3 +101,8 @@ def check_command(root: Path) -> list[str]:
     if isinstance(got, list) and got and all(isinstance(x, str) and x.strip() for x in got):
         return [x.strip() for x in got]
     return list(DEFAULT_CHECK)
+
+
+def precheck(root: Path) -> str | None:
+    got = _table(root).get("precheck")
+    return got.strip() if isinstance(got, str) and got.strip() else None

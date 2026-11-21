@@ -166,11 +166,11 @@ class GitHub:
         )
 
     def merged_prs(self, repo: str, base: str, since: str) -> list[dict] | None:
-        """Pull requests merged into base since an ISO time: {number, title, headRefName, headRefOid, mergedAt,
-        url}, None when GitHub did not answer."""
+        """Pull requests merged into base since an ISO time: {number, title, headRefName, headRefOid, createdAt,
+        mergedAt, url}, None when GitHub did not answer."""
         v = self._json(
             "pr", "list", "--repo", repo, "--base", base, "--state", "merged", "--limit", "300",
-            "--search", f"merged:>={since}", "--json", "number,title,headRefName,headRefOid,mergedAt,url",
+            "--search", f"merged:>={since}", "--json", "number,title,headRefName,headRefOid,createdAt,mergedAt,url",
         )  # fmt: skip
         return [r for r in v if isinstance(r, dict)] if isinstance(v, list) else None
 

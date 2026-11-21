@@ -33,6 +33,10 @@ merges, so sync holds a changed block until a person allows it.
   on pushes and other, and that total per merge; and the minutes from joining the queue to merged of the entries
   the queue merged (middle and longest). JSON adds `runs` per repository (null: GitHub did not answer) and
   `waited_minutes`.
+  Also (ORCH-1129): the busiest hour, the most pull requests the queue merged (in a group or alone) within any
+  60 minutes, with their links (goal 20); and group start to merged, the minutes from opening a group pull request
+  to its merge (GitHub's created and merged times), the middle over the last 20 merged groups (goal under 6).
+  `--json` adds `hour` {count, goal, start, end, prs} and `group_minutes` {groups, middle}.
 - `orch pull-requests queue remove <url>`: only a waiting entry.
 - `orch pull-requests queue run`: the runner (one per workspace, lock folder `runner.lock`).
 - `orch pull-requests failed-checks on|off|status|tend [--json]`: the failed-checks part (below). `on`/`off` write
