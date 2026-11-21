@@ -75,14 +75,14 @@ function servicesTile(view, small) {
 
 // First day, nothing recorded yet: the same tiles as the overview, each saying when it fills.
 function emptyTiles(view, team) {
-  const note = 'Fills after the first helper run';
+  const note = 'Fills after a helper’s first work';
   // No run is recorded: say so, never a 0 (the record can be empty although helpers worked, ORCH-139). When the
   // tickets show helper time, say where that comes from, so the page does not contradict itself (ORCH-410).
   const worked = team && team.time && team.time !== '–';
   // orch started runs but the helper wrote no record lines (a custom helper): say so, not "no runs" (ORCH-966).
   const started = view.started || 0;
   if (started) return [metric('Times helpers worked', null, `orch started ${plural(started, 'run')}; this helper does not report them, so they are not measured`), servicesTile(view, note)];
-  return [metric('Times helpers worked', null, worked ? 'Not counted here; the helper time above comes from the tickets' : 'No helper runs are recorded here yet'), servicesTile(view, note)];
+  return [metric('Times helpers worked', null, worked ? 'Not counted here; the helper time above comes from the tickets' : 'No work by helpers is recorded here yet'), servicesTile(view, note)];
 }
 
 function fillMetrics() {
@@ -95,9 +95,9 @@ function fillMetrics() {
 function fillTrend() {
   const runs = overview.runs;
   byId('trend').setAttribute('aria-label',
-    `Daily run trend unavailable. ${plural(runs, 'run')} recorded; daily totals were not supplied.`);
+    `Daily trend unavailable. Helpers worked ${plural(runs, 'time')}; daily totals were not supplied.`);
   byId('trend-text').textContent =
-    `${plural(runs, 'run')} ${runs === 1 ? 'is' : 'are'} recorded. There isn’t enough dated activity to draw a reliable trend.`;
+    `Helpers worked ${plural(runs, 'time')}. There isn’t enough dated activity to draw a reliable trend.`;
 }
 
 function fillBars() {
@@ -106,13 +106,13 @@ function fillBars() {
   bars.replaceChildren();
   if (!rows.length) { byId('skill-text').textContent = 'No skill use is recorded yet.'; return; }
   const top = rows[0];
-  byId('skill-text').textContent = `${top.name} was used in ${top.runs_used} of ${top.runs_of} runs in the last 30 days.`;
+  byId('skill-text').textContent = `${top.name} was used ${top.runs_used} of the ${top.runs_of} times helpers worked in the last 30 days.`;
   rows.slice(0, 5).forEach((row, index) => {
     const bar = node('div', undefined, index ? 'bar-row secondary' : 'bar-row');
     const head = node('div', undefined, 'row between');
     head.append(node('span', row.name), node('strong', `${row.runs_used} / ${row.runs_of}`));
     const meter = node('div', undefined, 'progress');
-    meter.setAttribute('aria-label', `${row.name} used in ${row.runs_used} of ${row.runs_of} runs`);
+    meter.setAttribute('aria-label', `${row.name} used ${row.runs_used} of the ${row.runs_of} times helpers worked`);
     const fill = node('span');
     fill.style.setProperty('--value', `${Math.round(100 * row.runs_used / row.runs_of)}%`);
     meter.append(fill);
@@ -124,9 +124,9 @@ function fillBars() {
 const short = (n, d, unit) => `${(n / d).toFixed(1).replace(/\.0$/, "")}${unit}`;
 const fmt = n => n >= 1e6 ? short(n, 1e6, "M") : n >= 1e3 ? short(n, 1e3, "k") : String(n);
 
-// Runs and tokens come from two records: runs without recorded tokens are not "no model use" (ORCH-232).
+// Work and tokens come from two records: work without recorded tokens is not "no helper work" (ORCH-232).
 function modelsEmptyText(view, runs) {
-  return runs > 0 ? 'Token use isn’t recorded for these runs yet.' : view.text;
+  return runs > 0 ? 'Token use isn’t recorded for this work yet.' : view.text;
 }
 
 function renderModels(view) {
@@ -137,6 +137,7 @@ function renderModels(view) {
   bars.replaceChildren();
   rows.replaceChildren();
   rows.hidden = view.empty;
+  byId('models-more').hidden = view.empty;
   if (view.empty) { byId('models-text').textContent = modelsEmptyText(view, overview && overview.runs); return; }
   byId('models-text').textContent = view.moved_text + '.';
   const most = Math.max(...view.models.map(m => m.tokens));

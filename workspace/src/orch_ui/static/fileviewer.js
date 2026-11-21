@@ -436,6 +436,9 @@
     function draw() {
       const f = files[index], kind = kindOf(f.name), mine = ++token;
       d.dataset.kind = kind;
+      // ORCH-827: a file shown here counts as opened (thumbnails and previews do not); the page tells which run files
+      // nobody opened. Fire and forget: no answer is needed and a failure changes nothing on screen.
+      if (f.tid && f.kind && f.name && window.fetch) fetch('/api/file-opened?t=' + encodeURIComponent(f.tid) + '&k=' + encodeURIComponent(f.kind) + '&n=' + encodeURIComponent(f.name), {credentials:'same-origin', cache:'no-store'}).catch(() => {});
       eyebrow.textContent = [opts.context, files.length > 1 ? (index + 1) + ' of ' + files.length + (files.length === 1 ? ' file' : ' files') : ''].filter(Boolean).join('  /  ');
       title.textContent = f.title;
       const base = f.meta || WORD[kind];

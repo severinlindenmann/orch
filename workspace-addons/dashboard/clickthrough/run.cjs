@@ -161,6 +161,13 @@ function recorder(page, base) {
     const s = /^503 GET ([^?]+)/.exec(line);
     if (s && rec.slowOk.has(s[1])) rec.slow503++;
   });
+  // the login routes (ORCH-1035): a login with a token, how this browser is signed in, its profile, Log out
+  page.on('response', r => {
+    const m = /^\/session(?:\/(me|profile|logout))?$/.exec(r.url().replace(base, '').split('?')[0]);
+    if (!m || r.status() >= 400) return;
+    if (m[1]) rec.pages.add(`session:${m[1]}`);
+    else if (/"login"/.test(r.request().postData() || '')) rec.pages.add('session:login');
+  });
   page.on('pageerror', e => rec.errors.push(`uncaught exception: ${String(e.message).slice(0, 300)}`));
   page.on('console', m => {
     if (m.type() !== 'error') return;
@@ -200,6 +207,10 @@ function tools(page, srv, rec, shots = null) {
     const k = await page.evaluate(PAGE_KIND);
     if (k) rec.pages.add(`page:${k}`);
   };
+  const openMore = async () => {
+    const closed = page.locator('details[data-key^="settings-more-"]:not([open]) > summary:visible');
+    for (let n = await closed.count(); n > 0; n--) await closed.first().click();
+  };
   const t = {
     page, ids: srv.ids, base: srv.base,
     /** the demo workspace folder (in the throw-away home) */
@@ -237,10 +248,12 @@ function tools(page, srv, rec, shots = null) {
       return execFileSync('env', [...envArgs(runEnv(srv.dir)), ...UV_RUN, 'python', '-I', '-c', code, ...rest],
         { cwd: path.join(srv.dir, 'Pilatus'), encoding: 'utf8', timeout: 120000 });
     },
+    /** Settings keeps its technical switches in a closed "More" fold (ORCH-300): click it open, as a person does */
+    openMore,
     /** open a dashboard address (`#tickets`, `#ticket/<id>`, `#settings/agent`) and wait until it is drawn */
-    async open(hash = '#home') { await page.goto(`${srv.base}/${hash}`); await settle(); },
+    async open(hash = '#home') { await page.goto(`${srv.base}/${hash}`); await settle(); await openMore(); },
     /** reload the page and wait until it is drawn again: what is shown now came from the files, not the page's memory */
-    async reload() { await page.reload(); await settle(); },
+    async reload() { await page.reload(); await settle(); await openMore(); },
     /** wait until the page has drawn the current address (after a click that changed it) */
     settle,
     /** run fn and wait for the action `op` it sends; returns {status, text}. `refused: true` = a 4xx is the expected answer */

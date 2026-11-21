@@ -143,7 +143,7 @@
   function contextCard() {
     const aside = node('aside', undefined, 'card context-card');
     aside.append(node('h2', 'Your activity stays useful'),
-      node('p', 'Counts help you see what your helpers use. Full details let you look more closely at individual runs.', 'muted'),
+      node('p', 'Counts help you see what your helpers use. Full details let you look more closely at each time a helper worked.', 'muted'),
       node('hr'), node('h3', 'What is recorded'), node('p', view.recorded.what, 'muted'),
       node('p', view.recorded.where, 'muted'));
     if (view.recorded.since) {
@@ -194,7 +194,7 @@
       const result = await act('record.delete_detail', {ticket});
       const n = Number(result.deleted) || 0;
       const left = (Number(result.kept) || 0) + (Number(result.unreadable) || 0) + (Number(result.skipped) || 0);
-      say(`Deleted detail of ${n} ${n === 1 ? 'run' : 'runs'}.` + (left ? ' Some files could not be deleted and were left.' : ''));
+      say(`Deleted detail of ${n} ${n === 1 ? 'time' : 'times'} a helper worked.` + (left ? ' Some files could not be deleted and were left.' : ''));
     } catch (error) {
       await load();
       say(error.message);
