@@ -423,6 +423,8 @@ def human_waiting(root: Path, tid: str) -> list[dict]:
         rule = _human_author(i.get("by", ""), i.get("via"), i.get("kind"), i.get("phone"))
         if rule and i.get("phone") and not people.phone_may_start(root, str(i["phone"]), i.get("at")):
             continue  # people list on: this phone's person may not start work (now); the text stays queued
+        if rule and not people.person_may(root, str(i.get("by", "")), "start"):
+            continue  # an answer or message of a person of the list who may not start work: kept, no start
         if rule and i.get("human") in (True, None):
             out.append(i)
     return out
@@ -1547,6 +1549,9 @@ def start(
     from orch import runs_live, worktrees
 
     tickets.load(root, tid)  # an unknown ticket is refused before anything is planned or spawned
+    ok, why = people.start_allowed(root, tid, by)  # ORCH-1161: the Start work tick, at the moment of starting
+    if not ok:
+        raise Refused(f"No helper started: {why}. Someone who may start work can start it.")
     brake.check_start(root, tid, by)  # R8.6: paused, or over the daily cap, for an automatic start
     if by != runs_live.AUTOMATION_BY:  # an explicit start (any caller) ends a person's stop hold
         runs_live.clear_held(root, tid)

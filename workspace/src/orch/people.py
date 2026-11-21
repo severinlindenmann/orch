@@ -597,13 +597,24 @@ def refused(root: Path, limit: int = 20) -> list[dict]:
     return out
 
 
+def paired_now(root: Path, phone: str) -> bool:
+    """The phone is in the relay's last snapshot of phones paired with this workspace (refresh writes it)."""
+    snap = Path(root) / ".agents" / "skills" / "orch-relay" / "workspaces.json"
+    try:
+        phones = json.loads(snap.read_text(encoding="utf-8")).get("phones") or []
+    except (OSError, ValueError, AttributeError):
+        return False
+    return any(isinstance(p, dict) and p.get("id") == phone for p in phones)
+
+
 def phone_may_start(root: Path, phone: str, queued_at: str | None = None) -> bool:
     """For queued work at the moment it would start: True when the list is off (as before), else only a tied,
     uncut phone of a person who may start work, and only for work queued after the phone's latest tie (tying a
     cut phone again never revives what it queued before). Never raises."""
     try:
-        if who_sent(root, phone, "start") is None:
+        if load(root) is None:
             return True  # list off
+        who_sent(root, phone, "start", paired=paired_now(root, phone))
         d = _device(load(root), phone) or {}
         if d.get("tied_at") and not queued_at:
             return False  # no time on the queued item: it can't be shown to come after the tie (fail closed)
@@ -660,15 +671,42 @@ def ticket_may_start(root: Path, tid: str) -> tuple[bool, str | None]:
     may start work now. Any other ticket, or the list off: yes."""
     from orch import tickets
 
-    relay = ((tickets.load(root, tid).get("ext") or {}).get("relay")) or {}
+    t = tickets.load(root, tid)
+    relay = ((t.get("ext") or {}).get("relay")) or {}
     phone = relay.get("from") if relay.get("origin") == "phone" else None
     if not isinstance(phone, str):
         return True, None
     try:
-        who_sent(root, phone, "start")
+        doc = load(root)
+        if doc is None:
+            return True, None
+        who_sent(root, phone, "start", paired=paired_now(root, phone))
     except PhoneRefused as e:
         return False, str(e)
+    except Broken:
+        return False, "the people list is damaged"
+    tied = (_device(doc, phone) or {}).get("tied_at")
+    if tied and str(t.get("created_at") or "") <= str(tied):
+        # made before the phone's latest tie (cut, then tied again, maybe to someone else): never revived
+        return False, "this ticket came from the phone before it was tied again"
     return True, None
+
+
+def start_allowed(root: Path, tid: str, by: str) -> tuple[bool, str | None]:
+    """runs.start, the one place every helper start goes through (also a start that waited for a slot, and
+    the helper resuming after an answer): with the list on, a start on behalf of a person of the list needs
+    their Start work right; a start by orch itself (automation, a slot opening) of a ticket a phone text made
+    needs that phone's person to have it, now. The person at this computer, and the list off: as before."""
+    try:
+        if load(root) is None:
+            return True, None
+    except Broken:
+        return False, "the people list is damaged"
+    if isinstance(by, str) and by.startswith("human:"):
+        if person_may(root, by, "start"):
+            return True, None
+        return False, f"{show(root, by)} may not start work here"
+    return ticket_may_start(root, tid)
 
 
 def person_may(root: Path, by: str, *rights: str) -> bool:
@@ -682,3 +720,43 @@ def person_may(root: Path, by: str, *rights: str) -> bool:
     except Broken:
         return False
     return doc is not None and may(doc, pid, *rights)
+
+
+def _answers_path(root: Path) -> Path:
+    return Path(root) / ".orch" / "local" / "people-answers.json"
+
+
+def remember_answer(root: Path, tid: str, qid: str, phone: str) -> None:
+    """A question whose answer takes effect later (a workspace allow): which phone answered it, so the check
+    when it takes effect also covers that phone (cut, unpaired, tied to someone else since)."""
+    p = _answers_path(root)
+    with contextlib.suppress(OSError, ValueError):
+        d = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+        d = d if isinstance(d, dict) else {}
+        d[f"{tid}/{qid}"] = phone
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(p.name + f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(dict(list(d.items())[-200:])), encoding="utf-8")
+        os.replace(tmp, p)
+
+
+def answer_still_ok(root: Path, tid: str, qid: str, by: str, *rights: str) -> bool:
+    """person_may, plus: when a phone of the list answered it, that phone is still paired, tied to the same
+    person and not cut."""
+    if not person_may(root, by, *rights):
+        return False
+    pid = by[6:] if isinstance(by, str) and by.startswith("human:") else None
+    if pid is None or not _ID_RE.fullmatch(pid):
+        return True
+    try:
+        phone = json.loads(_answers_path(root).read_text(encoding="utf-8")).get(f"{tid}/{qid}")
+    except (OSError, ValueError, AttributeError):
+        phone = None
+    if not phone:
+        return True  # answered at this computer (or before this was kept): person_may decided
+    try:
+        doc = load(root)
+    except Broken:
+        return False
+    d = _device(doc or {}, phone) or {}
+    return d.get("person") == pid and not d.get("cut_at") and paired_now(root, phone)

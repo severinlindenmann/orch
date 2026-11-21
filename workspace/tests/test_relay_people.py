@@ -150,7 +150,8 @@ def test_queued_phone_text_starts_a_helper_only_with_start_work(proj, team, new_
     assert runs.human_waiting(proj, tid) == []  # a cut phone's queued work never starts
 
 
-def test_phone_ticket_run_waits_for_start_work(proj, run, rel, team):
+def test_phone_ticket_run_waits_for_start_work(proj, run, rel, team, monkeypatch):
+    monkeypatch.setattr(tickets, "now", lambda: "2099-01-01T00:00:00Z")  # made after the phone was tied
     _text(rel, run, "m_tik0000000000001", LEA)
     tid = _made_by(proj, "m_tik0000000000001")
     ok, why = people.ticket_may_start(proj, tid)
@@ -193,3 +194,70 @@ def test_tying_again_does_not_revive_queued_work_of_a_cut_phone(proj, team, new_
     monkeypatch.setattr(tickets, "now", lambda: "2099-01-01T00:00:00Z")  # a later message
     runs.pending_add(proj, tid, "agent:relay from " + LEA, "message", "again", "phone", phone=LEA)
     assert [i["text"] for i in runs.human_waiting(proj, tid)] == ["again"]
+
+
+# ---- outside review (Codex) of the enforcement: each gap it found, closed
+
+
+def test_every_start_checks_the_tick_at_the_moment_of_starting(proj, run, rel, team, new_ticket):
+    """runs.start is the one place every start goes through: the helper resuming after Max's answer, a start
+    that waited for a slot (by orch itself) for a ticket a phone text made."""
+    tid = new_ticket()
+    with pytest.raises(people.Refused, match="Max may not start work"):
+        runs.start(proj, tid, "human:" + team["max"])
+    _text(rel, run, "m_slt0000000000001", LEA)
+    phone_tid = _made_by(proj, "m_slt0000000000001")
+    assert people.start_allowed(proj, phone_tid, "agent:automation")[0] is False
+    assert people.start_allowed(proj, phone_tid, "human:lume") == (True, None)  # the person at this computer
+    with pytest.raises(people.Refused, match="may not start work"):
+        runs.start(proj, phone_tid, "agent:automation")
+
+
+def test_a_persons_queued_answer_starts_nothing_without_start_work(proj, team, new_ticket):
+    tid = new_ticket()
+    runs.pending_add(proj, tid, "human:" + team["max"], "answer", "Tue", "phone")
+    assert runs.human_waiting(proj, tid) == []
+    people.set_rights(proj, "Max", ["write", "decide", "start"])
+    assert len(runs.human_waiting(proj, tid)) == 1
+
+
+def test_queued_work_of_a_phone_no_longer_paired_never_starts(proj, run, rel, team, new_ticket, monkeypatch):
+    people.set_rights(proj, "Lea", ["write", "start"])
+    tid = new_ticket()
+    monkeypatch.setattr(tickets, "now", lambda: "2099-01-01T00:00:00Z")
+    runs.pending_add(proj, tid, "agent:relay from " + LEA, "message", "hello", "phone", phone=LEA)
+    assert len(runs.human_waiting(proj, tid)) == 1
+    rel.snapshot["workspaces"]["phones"] = [p for p in rel.snapshot["workspaces"]["phones"] if p["id"] != LEA]
+    run("relay", "refresh")
+    assert runs.human_waiting(proj, tid) == []
+
+
+def test_tying_a_phone_again_never_revives_tickets_it_made_before(proj, run, rel, team):
+    _text(rel, run, "m_old0000000000001", LEA)
+    tid = _made_by(proj, "m_old0000000000001")
+    people.cut(proj, LEA)
+    people.set_rights(proj, "Max", ["write", "decide", "start"])
+    people.tie(proj, LEA, "Max")  # the phone now belongs to someone who may start work
+    ok, why = people.ticket_may_start(proj, tid)
+    assert not ok and "before it was tied again" in why
+
+
+def test_an_allow_answered_by_a_phone_is_void_once_that_phone_is_cut(proj, team):
+    people.set_rights(proj, "Max", ["write", "decide", "start"])
+    by = "human:" + team["max"]
+    people.remember_answer(proj, "t_aaaaaa", "q1", MAX)
+    assert people.answer_still_ok(proj, "t_aaaaaa", "q1", by, "decide", "start")
+    people.cut(proj, MAX)
+    assert not people.answer_still_ok(proj, "t_aaaaaa", "q1", by, "decide", "start")
+
+
+def test_a_refused_answer_sends_the_question_to_the_phones_again(proj, run, rel, team, new_ticket):
+    """The real relay keeps only the first answer to a question message: after a refused one, the open
+    question goes out again so a phone that may decide can still answer."""
+    tid, qmid = _ask_phone(run, new_ticket, rel)
+    before = sum(1 for m in rel.sent if m.get("type") == "question")
+    _answer(rel, run, "m_ans0000000000009", LEA, tid, qmid)
+    assert sum(1 for m in rel.sent if m.get("type") == "question") == before + 1
+    new_qmid = next(m["id"] for m in reversed(rel.sent) if m.get("type") == "question")
+    _answer(rel, run, "m_ans0000000000010", MAX, tid, new_qmid)
+    assert tickets.load(proj, tid)["questions"][0]["answered_by"] == "human:" + team["max"]

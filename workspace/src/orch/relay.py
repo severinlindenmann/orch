@@ -1999,6 +1999,19 @@ def _phone_action(root: Path, asked: dict | None) -> str:
     return "merge" if review.merge_url(q) else "answer"
 
 
+def _ask_again(root: Path, asked: dict | None) -> None:
+    """A refused phone answer may have used up the relay's one answer to that question message: a plain
+    question still open goes to the phones again (a new message), so a phone that may decide can answer it.
+    Cards, reviews and proposals are sent again by their own sync; group questions are not ours to resend."""
+    if not isinstance(asked, dict) or asked.get("group") or asked.get("review") or asked.get("proposal"):
+        return
+    with contextlib.suppress(Refused, OSError, ValueError, KeyError, TypeError, StopIteration):
+        t = tickets.load(root, str(asked["ticket"]))
+        q = next(x for x in t["questions"] if x.get("id") == asked["question_id"])
+        if q.get("answer") is None and q.get("kind") in (None, "plain", "relay:allow"):
+            send_question(root, t, q)
+
+
 def _people_gate(root: Path, msg: dict, action: str):
     """The people check for a message from a phone (who_sent): (person, device), None when the list is off
     (nothing changes), or raises people.PhoneRefused (noted, never applied)."""
@@ -2017,10 +2030,14 @@ def _apply_answer(root: Path, msg: dict, final: bool = False) -> tuple[str, str 
     start work, for a Merge card or an allow), before anything is written or the question is used up."""
     if str(msg.get("from", "")).startswith("ph_"):
         asked, _ = _answer_asked(root, msg)
+        action = _phone_action(root, asked)
         try:
-            who = _people_gate(root, msg, _phone_action(root, asked))
+            who = _people_gate(root, msg, action)
         except people.PhoneRefused as e:
+            _ask_again(root, asked)
             return f"refused: {e}", None
+        if who is not None and action == "allow":
+            people.remember_answer(root, str(asked["ticket"]), str(asked["question_id"]), who[1])
         with people.acting(who):
             return _apply_answer_checked(root, msg, final)
     return _apply_answer_checked(root, msg, final)
@@ -2930,10 +2947,12 @@ def apply_allow_answers(root: Path) -> list[str]:
                 q.get("via") or "cli",
                 q.get("answered_by") or "unknown",
             )
-            if choice != "ignore" and not people.person_may(root, by, "decide", "start"):
+            still = people.answer_still_ok(root, t["id"], q["id"], by, "decide", "start")
+            if choice != "ignore" and not still:
                 # ORCH-1161: an allow answered by a person of the list is checked again when it takes effect
                 # (removed, or a right taken away since): not applied, said once
-                skip(f"Not applied: {people.show(root, by)} may not decide and start work here any more")
+                who_now = people.show(root, by)
+                skip(f"Not applied: {who_now} (or that phone) may not decide and start work here now")
                 continue
             # applied once: recorded in the binding FIRST (the synced allow_applied below is shown, never
             # trusted); what cannot be recorded is not applied (else it would be applied again each pass).
