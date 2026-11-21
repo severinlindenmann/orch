@@ -971,6 +971,14 @@ main.addEventListener('click', async event => {
   if (action === 'release-merge-set') { await releaseMergeSwitch(); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
+  if (action === 'update-check-ok') { const r = await act('update.check.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
+  if (action === 'update-check-back') {
+    const to = String(control.dataset.to || '');
+    if (!/^[1-9][0-9]{0,5}(\.[1-9][0-9]{0,3})?$/.test(to)) return;
+    location.hash = '#settings/about';  // the same steps as any update: Downloading, Installing, Restarting, Done
+    await updStart(to);
+    return;
+  }
   if (action === 'auto-update-note-ok') { const r = await act('update.note.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
   if (action === 'session-typing') {
     if (settingsBusy.has('session-typing')) return;

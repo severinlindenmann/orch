@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -121,3 +122,93 @@ def test_no_budget_means_no_limit(tmp_path):
 def test_the_budget_can_come_from_the_environment(tmp_path):
     r = _run(tmp_path, SLOW, budget="0.3")
     assert "1 failed, 2 passed" in r.stdout
+
+
+# ---- split by measured time (--part-times, ORCH-1050)
+
+
+def test_the_time_split_puts_every_test_in_one_part_and_evens_the_time():
+    ids = [f"tests/test_x{i % 40}.py::test_{i}" for i in range(2000)]
+    times = {ids[i]: 100.0 for i in range(0, 160, 10)} | {ids[i]: 30.0 for i in range(1, 400, 7)}
+    for n in (1, 4, 20):
+        got = ci_parts.parts_by_time(ids, n, times, 0.5)
+        assert set(got) == set(ids) and all(1 <= p <= n for p in got.values())
+        load = [0.0] * n
+        for nodeid, p in got.items():
+            load[p - 1] += times.get(nodeid, 0.5)
+        assert max(load) - min(load) <= 100.0, load  # never more apart than the slowest single test
+
+
+def test_the_time_split_does_not_depend_on_the_collection_order():
+    ids = [f"tests/test_x.py::test_{i}" for i in range(300)]
+    times = {ids[i]: float(i % 13) for i in range(0, 300, 3)}
+    assert ci_parts.parts_by_time(ids, 7, times, 0.5) == ci_parts.parts_by_time(ids[::-1], 7, times, 0.5)
+
+
+def test_the_slow_tests_no_longer_pile_up_in_one_part():
+    """By hash, part 12 of 16 got most of the slow bring-back tests (releases 35 and 38)."""
+    ids = [f"tests/test_bring_back.py::test_{i}" for i in range(40)] + [
+        f"tests/test_o.py::t{i}" for i in range(800)
+    ]
+    times = {i: 90.0 for i in ids[:40]}
+    got = ci_parts.parts_by_time(ids, 20, times, 0.5)
+    per_part = [sum(1 for i in ids[:40] if got[i] == k) for k in range(1, 21)]
+    assert per_part == [2] * 20
+
+
+def _times_file(tmp_path, tests, default=0.5):
+    p = tmp_path / "times.json"
+    p.write_text(json.dumps({"default_s": default, "tests": tests}))
+    return p
+
+
+def test_the_parts_by_time_together_run_every_test_once_and_write_their_times(tmp_path):
+    body = "import time\n" + "\n".join(
+        f"def test_{i}():\n    time.sleep({0.2 if i < 3 else 0})\n" for i in range(12)
+    )
+    times = _times_file(tmp_path, {f"test_tiny.py::test_{i}": 10.0 for i in range(3)})
+    total, slow_parts = 0, []
+    for k in (1, 2, 3):
+        out = tmp_path / f"out{k}.json"
+        r = _run(tmp_path, body, "--part", f"{k}/3", "--part-times", str(times), "--times-out", str(out))
+        assert r.returncode == 0, r.stdout + r.stderr
+        total += int(r.stdout.split(" passed")[0].split()[-1])
+        got = json.loads(out.read_text())
+        slow_parts.append(sum(1 for i in range(3) if f"test_tiny.py::test_{i}" in got))
+        assert all(v >= 0 for v in got.values())
+    assert total == 12 and slow_parts == [1, 1, 1]  # one slow test in each part
+
+
+def test_a_broken_time_file_stops_the_run(tmp_path):
+    bad = tmp_path / "times.json"
+    bad.write_text("{not json")
+    r = _run(tmp_path, "def test_a():\n    pass\n", "--part", "1/2", "--part-times", str(bad))
+    assert r.returncode != 0 and "not a time file" in r.stderr
+
+
+def test_merge_keeps_the_slow_tests_by_name_and_the_rest_as_the_default(tmp_path):
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    a.write_text(json.dumps({"t::slow": 40.0, "t::quick": 0.2, "t::mid": 0.4}))
+    b.write_text(json.dumps({"t::slow": 60.0, "t::other": 0.6}))
+    out = tmp_path / "times.json"
+    data = ci_parts.merge(out, [a, b])
+    assert data["tests"] == {"t::slow": 50.0} and data["default_s"] == 0.4
+    assert ci_parts.read_times(out) == ({"t::slow": 50.0}, 0.4)
+
+
+def test_the_windows_time_file_reads():
+    tests, default = ci_parts.read_times(Path(ci_parts.__file__).parent / "ci_times_windows.json")
+    assert len(tests) > 100 and 0 < default < 5
+    assert max(tests.values()) < 300  # pytest-timeout stops a test at 300 s
+
+
+def test_merge_never_writes_a_default_of_0(tmp_path):
+    a = tmp_path / "a.json"
+    a.write_text(json.dumps({f"t::q{i}": 0.0 for i in range(50)} | {"t::slow": 9.0}))
+    data = ci_parts.merge(tmp_path / "times.json", [a])
+    assert data["default_s"] == ci_parts.MIN_DEFAULT_S
+
+
+def test_a_time_file_with_a_default_of_0_is_refused(tmp_path):
+    with pytest.raises(pytest.UsageError):
+        ci_parts.read_times(_times_file(tmp_path, {}, default=0))
