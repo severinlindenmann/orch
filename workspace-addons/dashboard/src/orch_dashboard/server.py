@@ -1084,6 +1084,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             "look.js",
             "look-icons.js",
             "look-colors.css",
+            "places.js",
             "switcher.js",
             "blocks.js",
             "helpers.js",

@@ -8,6 +8,7 @@ approves in the service's admin page). The caller is always the signed-in sessio
 
 from __future__ import annotations
 
+import hashlib
 import re
 import time
 import unicodedata
@@ -158,6 +159,21 @@ def _workspaces(root: Path, orch_bin: str | None) -> list[dict]:
     return out[:50]
 
 
+def place_id(root: Path) -> str | None:
+    """This workspace's id for Saved places in the browser (ORCH-1273): a hash of the random local id, so the same
+    workspace under two addresses is one saved row. The local id itself never reaches the page (consent is bound to
+    it); None for a copy without one or an older core."""
+    try:
+        from orch.addons import read_local_id
+
+        local = read_local_id(root)
+    except Exception:
+        return None
+    if not local:
+        return None
+    return "ws_" + hashlib.sha256(("orch-place:" + local).encode()).hexdigest()[:24]
+
+
 def load_look(root: Path, orch_bin: str | None, fresh: bool = False) -> dict | None:
     """What Settings and the sidebar show about the look. None when `orch look` is not there (older core)."""
     from .data import run_orch
@@ -201,6 +217,7 @@ def load_look(root: Path, orch_bin: str | None, fresh: bool = False) -> dict | N
         "pending_tags": pending_tags,
         "waiting": pending is not None or pending_tags is not None,
         "workspaces": _workspaces(root, orch_bin),
+        "place_id": place_id(root),
     }
     _CACHE[key] = (time.monotonic(), out)
     return out
