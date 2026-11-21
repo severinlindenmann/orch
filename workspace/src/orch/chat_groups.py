@@ -186,6 +186,8 @@ def message_errors(m: dict, ctx: dict | None = None) -> list[str]:
     if isinstance(ge0, dict) and "mode" in ge0 and ge0["mode"] not in ("once", "always"):
         out.append("group_event.mode is once or always")
     if not isinstance(g, dict):
+        if "mentions" in b or "member_version" in b:
+            out.append("mentions and member_version ride only on a group message (body.group)")
         return out
     host, frm, to = g.get("host"), m.get("from"), m.get("to")
     if len(set(members_of(g))) != len(members_of(g)):
@@ -376,6 +378,8 @@ def receive_errors(m: dict, ctx: dict) -> list[str]:
             m.get("type") == "file" and rate.get("files", 0) >= RATE["files_per_min"]
         ):
             out.append("dropped: member over its rate limit")
+        if isinstance(b.get("mentions"), list) and any(x not in hs.get("members", []) for x in b["mentions"]):
+            out.append("mentions: every named workspace is a current member (the host's own list)")
         t = b.get("task")
         if isinstance(t, dict):
             if t.get("delegate") not in hs.get("delegates_sent", {}).get(frm, []):

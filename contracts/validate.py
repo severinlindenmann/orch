@@ -2506,6 +2506,8 @@ def cg_rules(m, ctx=None):
     if m.get("type") == "question" and b.get("allow_question") is True and b.get("options") != CG_ALLOW_OPTIONS:
         out.append("a permission (allow) question has the wire options once, always, no (UI words are only shown)")
     if not isinstance(g, dict):
+        if "mentions" in b or "member_version" in b:
+            out.append("mentions and member_version ride only on a group message (body.group)")
         return out
     host, frm, to = g.get("host"), m.get("from"), m.get("to")
     if len(set(cg_members(g))) != len(cg_members(g)):
@@ -2640,6 +2642,8 @@ def cg_receive(m, ctx):
         rate = hs.get("last_minute", {}).get(frm, {})
         if rate.get("msgs", 0) >= CG_RATE["msgs_per_min"] or (m.get("type") == "file" and rate.get("files", 0) >= CG_RATE["files_per_min"]):
             out.append("dropped: member over its rate limit")
+        if isinstance(b.get("mentions"), list) and any(x not in hs.get("members", []) for x in b["mentions"]):
+            out.append("mentions: every named workspace is a current member (the host's list, not the sender's)")
         t = b.get("task")
         if isinstance(t, dict):
             if t.get("delegate") not in hs.get("delegates_sent", {}).get(frm, []):

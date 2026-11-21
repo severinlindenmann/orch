@@ -394,7 +394,8 @@ A phone text cannot carry `mentions` (the relay builds phone texts from a fixed 
 helper is decided in the app step (2.5), with a relay field or the host's own choice, and needs no change here.
 
 **Security rules (v2).**
-- **G13** `mentions` only on a group `text`; every id is a current member; the writer never names itself; 1–7, each
+- **G13** `mentions` only on a group `text`; every id is a current member (the host checks its own list, never the copy the sender holds); the writer never
+  names itself; `mentions` and `member_version` only with `body.group`; 1–7, each
   once. Mentions name helpers to answer, never grant anything (G10 still holds).
 - **G14** member list changes come only from the host (G3): `added_by` / `removed_by` are `"you"` or the host;
   `added_by` only on `member_added` and non-host member entries, `removed_by` only on `member_left` with `reason:
@@ -433,7 +434,7 @@ last-minute counts). `expect.group_text` = whether a phone text joins the group 
 | `valid-own-seq-stub-to-sender`, `invalid-own-seq-to-other-member`, `invalid-member-sends-own-seq` | `own_seq` stub: only host → the origin's own workspace (§2) |
 | `invalid-left-member-text`, `invalid-too-many-members` | F12, limits |
 | `invalid-phones-copy-loud` | push set |
-| `valid-v2-mention-from-dashboard`, `valid-v2-member-text-mentions-other-member`, `invalid-v2-mention-not-a-member`, `invalid-v2-mention-self`, `invalid-v2-mentions-on-question`, `invalid-v2-mentions-twice` | v2 `mentions` (G13) |
+| `valid-v2-mention-from-dashboard`, `valid-v2-member-text-mentions-other-member`, `invalid-v2-mention-not-a-member`, `invalid-v2-mention-self`, `invalid-v2-mentions-on-question`, `invalid-v2-mentions-twice`, `invalid-v2-mention-removed-member`, `invalid-v2-mentions-without-group` | v2 `mentions` (G13) |
 | `valid-v2-member-added-by-you`, `valid-v2-member-removed-by-you`, `invalid-v2-added-by-a-member`, `invalid-v2-removed-by-on-leave`, `invalid-v2-host-entry-added-by` | v2 `added_by` / `removed_by` and `joined_at` (G14) |
 | `valid-v2-member-reports-version`, `invalid-v2-host-sends-member-version`, `invalid-v2-member-orch-version-not-a-version` | v2 member versions (G15) |
 | `valid-v2-copy-to-older-member` | mixed versions: the same copy with `mentions` to a `chat_groups: 1` member |

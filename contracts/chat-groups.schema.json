@@ -284,6 +284,16 @@
                 "required": [
                   "echo_of"
                 ]
+              },
+              {
+                "required": [
+                  "mentions"
+                ]
+              },
+              {
+                "required": [
+                  "member_version"
+                ]
               }
             ]
           },
