@@ -400,6 +400,15 @@ def failed_test_files(log: str, most: int = 20) -> list[str]:
     return out[:most]
 
 
+def queue_merge(subject: str, repo: str) -> bool:
+    """The merge commit of a merge queue group: GitHub's merge line for a branch orch-queue/... of the
+    repository itself (a fork's branch of the same name is not the queue's)."""
+    owner = repo.split("/", 1)[0]
+    return (
+        re.fullmatch(rf"Merge pull request #\d+ from {re.escape(owner)}/orch-queue/\S+", subject) is not None
+    )
+
+
 def _words(text: str) -> frozenset[str]:
     return frozenset(w for w in _WORD.findall(text.lower()) if len(w) >= 3 and w not in _NOISE)
 
@@ -1205,7 +1214,7 @@ class World:
         out: list[dict] = []
         for line in lg.splitlines():
             sha, _, subject = line.partition("\x1f")
-            group = MERGE_LINE.match(subject) and "/orch-queue/" in subject  # only the queue's own merges
+            group = queue_merge(subject, self.cfg.repo)  # only the queue's own group merges
             members = [
                 (m[1], x.split("\x1f", 1)[0])
                 for x in self._git(

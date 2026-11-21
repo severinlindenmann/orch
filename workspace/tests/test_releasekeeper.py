@@ -1571,6 +1571,14 @@ def test_suspect_rules():
     assert rk.suspect([b, {"pr": 4, "files": ["x/sessions.py"]}], ["test_sessions.py"]) is None  # a tie
 
 
+def test_only_the_repositorys_own_queue_branch_is_a_group_merge():
+    repo = "acme/app"
+    assert rk.queue_merge("Merge pull request #10 from acme/orch-queue/develop-1-ab", repo)
+    assert not rk.queue_merge("Merge pull request #10 from evil/orch-queue/develop-1", repo)  # a fork
+    assert not rk.queue_merge("Merge pull request #10 from acme/feat/orch-queue/x", repo)
+    assert not rk.queue_merge("Merge pull request #10 from acme/orch-queue/x extra", repo)
+
+
 def test_failed_test_files_reads_pytest_and_node_lines():
     log = (
         "workspace / test\tRun tests\t2026-11-21T01:00:00Z FAILED tests/test_sessions.py::test_x - assert\n"
@@ -1671,7 +1679,7 @@ def test_merged_between_names_queue_group_members_and_plain_merges(tmp_path):
         "--no-ff",
         "orch-queue/develop-1",
         "-m",
-        "Merge pull request #10 from x/orch-queue/develop-1",
+        "Merge pull request #10 from severinlindenmann/orch-queue/develop-1",
     )
     branch("pr3", "c/three.py")
     (repo / "c/four.py").write_text("x\n")
