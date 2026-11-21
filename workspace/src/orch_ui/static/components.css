@@ -49,6 +49,9 @@ kbd{display:inline-grid;place-items:center;min-width:24px;padding:2px 4px;border
 .grow{flex:1;min-width:0}
 .end{justify-content:flex-end}
 .stack{display:flex;flex-direction:column;gap:12px}
+/* A costly action (UX D2, ORCH-415): its cost in one meta line above it, the outlined buttons below, the cheaper choice beside */
+.cost-pick{display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:0}.cost-pick>.meta{margin:0;text-align:right}.cost-pick>.row{justify-content:flex-end}
+@media(max-width:760px){.strip-h:has(.cost-pick)>.grow{flex:1 1 100%}.cost-pick{align-items:flex-start}.cost-pick>.meta{text-align:left}.cost-pick>.row{justify-content:flex-start}}
 .pad{padding:16px}
 .space-top{margin-top:24px}
 .reading{max-width:var(--reading-width)}
