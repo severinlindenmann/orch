@@ -33,8 +33,11 @@ QUIET_SEC = 0.7  # no new network event for this long = the page has settled
 _CANDIDATES = (
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    # Playwright 1.57+ downloads Chrome for Testing; older builds were Chromium
+    "~/Library/Caches/ms-playwright/chromium-*/chrome-mac*/Google Chrome for Testing.app/Contents/MacOS/"
+    "Google Chrome for Testing",
     "~/Library/Caches/ms-playwright/chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium",
-    "~/.cache/ms-playwright/chromium-*/chrome-linux/chrome",
+    "~/.cache/ms-playwright/chromium-*/chrome-linux*/chrome",
 )
 
 

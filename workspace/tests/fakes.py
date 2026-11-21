@@ -275,4 +275,20 @@ def make_relay() -> Fake:
         "DELETE", r"/v1/webhooks/(wh_[a-z0-9]+)", lambda m, q, b: (f.webhooks.pop(m.group(1)) and 204, None)
     )
     f.route("GET", "/v1/refresh", lambda m, q, b: (200, f.snapshot))
+
+    # POST /v1/transcribe (relay-api.md): audio in, {text, language, duration} out. `transcript` is what it
+    # "hears" ("" = nothing heard); `transcribe_off` answers as a relay without a Deepgram key.
+    f.transcript, f.transcribe_off = "Please keep the old file name.", False
+
+    def transcribe(m, q, body):
+        kind = (f.calls[-1][2].get("Content-Type") or "").split(";")[0].strip()
+        if f.transcribe_off:
+            return 503, {"error": "transcription_off", "message": "Voice transcription is not set up."}
+        if kind not in ("audio/m4a", "audio/wav", "audio/webm"):
+            return 422, {"error": "invalid", "message": "Content-Type must be audio/m4a, audio/wav or webm."}
+        if not body:
+            return 422, {"error": "invalid", "message": "The audio is empty."}
+        return 200, {"text": f.transcript, "language": "en", "duration": 2.0}
+
+    f.route("POST", "/v1/transcribe", transcribe)
     return f.start()
