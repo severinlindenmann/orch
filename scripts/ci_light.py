@@ -85,6 +85,12 @@ RULE_NODES = (
 )
 CLICK = re.compile(r"^workspace-addons/dashboard/clickthrough/features/([^/]+)\.cjs$")
 PAGE_SMOKE = re.compile(r"^(workspace-addons/(focus|insights)/|e2e/focus_insights)")
+# An add-on's documentation (contracts/docs-pages.md): its docs.json, or an orch-addon.toml whose change is only the
+# docs = line. orch's own tests/test_docs.py checks every docs file, so such a change runs that file, not the add-on's
+# suite (owner 21 Nov, ORCH-735: one docs file in each of 11 add-ons ran every suite past light's 10 minutes).
+DOCS_FILE = re.compile(r"^workspace-addons/[^/]+/src/[^/]+/docs\.json$")
+ADDON_TOML = re.compile(r"^workspace-addons/[^/]+/src/[^/]+/orch-addon\.toml$")
+DOCS_LINE = re.compile(r"^[+-]\s*docs\s*=")
 PLAYWRIGHT = "1.64.1"  # the version of the page-smoke and dashboard-clickthroughs jobs (addons.yml)
 
 
@@ -99,6 +105,32 @@ def changed(base: str) -> list[str]:
         ["git", "diff", "--name-only", "-z", f"{base}...HEAD"], capture_output=True, text=True, check=True, cwd=ROOT
     ).stdout
     return [x for x in out.split("\0") if x]  # -z: no quoting of unusual names
+
+
+def toml_docs_only(diff: str) -> bool:
+    """A `git diff -U0` of one orch-addon.toml changes nothing but its docs = line."""
+    lines = [x for x in diff.splitlines() if x[:1] in "+-" and not x.startswith(("+++", "---"))]
+    return bool(lines) and all(DOCS_LINE.match(x) for x in lines)
+
+
+def docs_only(files: list[str], base: str) -> frozenset[str]:
+    """The changed add-on files that are only documentation (DOCS_FILE, or an orch-addon.toml per toml_docs_only)."""
+    renamed = subprocess.run(  # a file renamed to docs.json (from code) is not documentation
+        ["git", "diff", "--name-only", "-z", "--diff-filter=R", f"{base}...HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=ROOT,
+    ).stdout.split("\0")
+    out = {f for f in files if DOCS_FILE.match(f) and f not in renamed}
+    for f in files:
+        if ADDON_TOML.match(f):
+            diff = subprocess.run(
+                ["git", "diff", "-U0", f"{base}...HEAD", "--", f], capture_output=True, text=True, check=True, cwd=ROOT
+            ).stdout
+            if toml_docs_only(diff):
+                out.add(f)
+    return frozenset(out)
 
 
 def imports(module: str) -> re.Pattern[str]:
@@ -157,8 +189,9 @@ GENERATED = {
 }
 
 
-def plan(files: list[str], texts: dict[str, str], addons: set[str]) -> list[dict]:
-    """The steps in order: {name, cwd, cmd}. Pure: reads nothing but its arguments."""
+def plan(files: list[str], texts: dict[str, str], addons: set[str], docs: frozenset[str] = frozenset()) -> list[dict]:
+    """The steps in order: {name, cwd, cmd}. Pure: reads nothing but its arguments. docs: the changed add-on files
+    that are only documentation (docs_only): they run orch's docs test instead of their add-on's suite."""
     steps: list[dict] = [
         {"name": "brand: words, tokens, CI time limits", "cwd": ".", "cmd": "python -m pytest -q brand/tests"},
         {"name": "style rules", "cwd": ".", "cmd": "python scripts/check_style.py"},
@@ -201,8 +234,17 @@ def plan(files: list[str], texts: dict[str, str], addons: set[str]) -> list[dict
                     "cmd": "uv run pytest -q -n auto --budget 90 " + " ".join(shlex.quote(f"tests/{t}") for t in tests),
                 }
             )
+    if docs:
+        steps.append(
+            {
+                "name": "add-on documentation files (orch's docs test)",
+                "cwd": "workspace",
+                "cmd": "uv run pytest -q tests/test_docs.py",
+            }
+        )
+    code = [f for f in files if f not in docs]  # what can break an add-on's suite or its pages
     ui = any(UI.match(f) for f in files)
-    touched = sorted({m.group(1) for f in files if (m := ADDON.match(f)) and m.group(1) in addons})
+    touched = sorted({m.group(1) for f in code if (m := ADDON.match(f)) and m.group(1) in addons})
     if ui and "dashboard" in addons and "dashboard" not in touched:
         touched.append("dashboard")  # the dashboard job runs the orch_ui page tests
     for name in touched:
@@ -214,7 +256,7 @@ def plan(files: list[str], texts: dict[str, str], addons: set[str]) -> list[dict
             )
         steps.append({"name": f"add-on {name}", "cwd": f"workspace-addons/{name}", "cmd": cmd})
     clicks = sorted({m.group(1) for f in files if (m := CLICK.match(f))})
-    smoke = any(PAGE_SMOKE.match(f) for f in files)
+    smoke = any(PAGE_SMOKE.match(f) for f in code)
     if clicks or smoke:  # the browser only when a page test of this pull request needs it (about a minute)
         steps.append(
             {
@@ -448,7 +490,11 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(steps, indent=1))
             return 0
         return run_group(steps, step_env(dict(os.environ)))
-    steps = rules_plan(test_texts()) if a.rules else plan(changed(a.base), test_texts(), addons_known())
+    if a.rules:
+        steps = rules_plan(test_texts())
+    else:
+        files = changed(a.base)
+        steps = plan(files, test_texts(), addons_known(), docs_only(files, a.base))
     if a.plan:
         print(json.dumps(steps, indent=1))
         return 0
