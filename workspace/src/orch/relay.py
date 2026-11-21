@@ -2638,9 +2638,8 @@ def _continue(
         r["phone"] = (
             True  # the owner wrote to it from a phone: its questions go there too (mobile_mode.from_phone)
         )
-        tickets.add_history(
-            t, by, plain, "phone", chat=general, mid=_line_mid({"id": mid}) if general else None
-        )
+        # a phone text is a message in the ticket's chat (General or a ticket chat); its id is the relay id
+        tickets.add_history(t, by, plain, "phone", chat=True, mid=_line_mid({"id": mid}))
         t["waiting_on"] = None
         if general:
             return
@@ -2701,7 +2700,12 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
     if mid not in _v3_state(root)["described"]:
         # also the retry of a message whose files could not be fetched the first time (Transient)
         text = _describe(root, tid, mid, who, body, final)
-        tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"), by=by)
+        tickets.apply_op(
+            root,
+            tid,
+            lambda t: tickets.add_history(t, by, text, "phone", chat=True, mid=_line_mid({"id": mid})),
+            by=by,
+        )
         _mark_described(root, mid)
         _working_add(root, mid, frm, tid, False, "run")
     _ack_once(root, mid, frm, tid, False, f"Got it: {tickets.load(root, tid)['title']}"[:300])

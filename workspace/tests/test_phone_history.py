@@ -130,3 +130,19 @@ def test_chat_lines_stay_in_the_window_after_many_plain_lines(proj):
     assert [t["text"] for t in tail[:3]] == ["chat 0", "chat 1", "chat 2"]
     assert tail[-1]["text"] == "Step 39"
     assert [t["at"] for t in tail] == sorted(t["at"] for t in tail)
+
+
+def test_a_new_chat_line_changes_the_phone_signature():
+    """A message in the ticket chat reaches a phone that follows the ticket right away."""
+    ticket = {
+        "status": "active",
+        "checklist": [],
+        "history": [{"at": "x", "by": "agent:claude", "text": "Step"}],
+    }
+    before = phone_view._tasks_sig(ticket)
+    ticket["history"].append({"at": "y", "by": "agent:claude", "text": "Plain line", "chat_message": False})
+    assert phone_view._tasks_sig(ticket) == before, "a plain line alone sends nothing"
+    ticket["history"].append(
+        {"at": "z", "by": "agent:claude", "text": "Hi", "chat_message": True, "id": "m_" + "a" * 16}
+    )
+    assert phone_view._tasks_sig(ticket) != before

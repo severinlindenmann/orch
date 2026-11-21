@@ -81,7 +81,7 @@ const TC_GROUP_MS = 5 * 60 * 1000;
 function tcLineShell(item, previous, ...body) {
   const e = item.e, who = tcWho(e), prev = previous ? tcWho(previous.e) : null;
   const near = previous && Math.abs((Date.parse(item.at) || 0) - (Date.parse(previous.at) || 0)) < TC_GROUP_MS;
-  const grouped = prev && near && prev.mine === who.mine && prev.name === who.name && previous.kind !== 'question' && item.kind !== 'answer';
+  const grouped = prev && near && prev.mine === who.mine && prev.name === who.name && prev.typed === who.typed && previous.kind !== 'question' && item.kind !== 'answer';
   const helper = !who.mine && who.name === CHAT_HELPER;
   const label = who.mine ? (who.typed ? who.typed + ' (not signed in)' : 'You') : who.name;
   return h('article', {className:'thread-line' + (grouped ? ' cont' : ''), 'data-key':'message-' + item.key, 'data-message-id':e.id || null, tabindex:'-1'},
@@ -178,7 +178,7 @@ chatPage = function () {
 async function tcMarkRead(id) {
   if (snapshot || !tcId(id)) return;
   const row = tcRows().find(r => r.id === id);
-  if (row && !chatCount(row.unread)) return;  // nothing new: no write
+  if (row && (!chatCount(row.unread) || tcReadNow.get(id) === row.last_at)) return;  // nothing new, or sent: no write
   if (row) tcReadNow.set(id, row.last_at);
   try { await act('chat.read', {ticket:id}, {quiet:true}); } catch { /* the count comes back on the next build */ }
 }
@@ -230,6 +230,10 @@ function tcRoute() {
 }
 window.addEventListener('hashchange', tcRoute);
 window.addEventListener('orch:state', tcRoute);
+// New lines that arrive while a ticket chat stays open are read: they do not come back as unread on leaving it.
+window.addEventListener('orch:state', () => {
+  if (tcId(chatUi.open) && route().kind === 'chat' && document.visibilityState === 'visible') tcMarkRead(chatUi.open);
+});
 window.addEventListener('DOMContentLoaded', tcRoute);
 
 // The ticket page's Open chat (in the ticket's strip, next to its other actions).
