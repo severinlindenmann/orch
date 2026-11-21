@@ -83,6 +83,21 @@ TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPR
 
 MIN_GAP_H = 3  # at most one release this often while pull requests wait (manager, 17 Nov) ...
 URGENT_LABEL = "urgent"  # ... at once for a merged pull request with this GitHub label
+# A pull request labelled "fix for release 33" is checked alone in the merge queue and, once merged into
+# develop, shipped at once as release 33.1 (main + only that change), without pace or other work (ORCH-552).
+FIX_LABEL_RE = re.compile(r"^fix[ -]for[ -]release[ -]([1-9][0-9]{0,5})$", re.IGNORECASE)
+
+
+def fix_target(labels) -> int | None:
+    """The release a pull request fixes, from its GitHub labels ("fix for release 33" -> 33), else None."""
+    for lb in labels or []:
+        name = lb.get("name") if isinstance(lb, dict) else lb
+        hit = FIX_LABEL_RE.match(name) if isinstance(name, str) else None
+        if hit:
+            return int(hit[1])
+    return None
+
+
 ROLLUP_JOBS = {"gate"}  # a roll-up of the other jobs: the jobs themselves are judged
 # The checks a release pull request must REPORT before it is judged: the required checks of the branch it goes
 # INTO (main). main has none of its own today, so the roll-up. Never develop's: develop's banned-words is
@@ -795,6 +810,72 @@ class World:
         )
         return {int(r["number"]) for r in rows or []}
 
+    def fixes(self) -> list[dict]:
+        """Recently merged pull requests into develop labelled "fix for release N": {number, release, sha,
+        head, title, url}. sha = the commit GitHub says merged it: a merge-queue group's merge commit
+        when it was merged inside a group, so never shipped as a whole; head = the pull request's own last
+        commit, the one that was reviewed (ORCH-786)."""
+        if self.sim is not None:
+            return list(self.sim.get("fixes") or [])
+        rows = self._gh_json(
+            [
+                "pr",
+                "list",
+                "--repo",
+                self.cfg.repo,
+                "--state",
+                "merged",
+                "--base",
+                "develop",
+                "--limit",
+                "30",
+                "--json",
+                "number,title,url,labels,mergeCommit,headRefOid",
+            ]
+        )
+        out = []
+        for r in rows or []:
+            n = fix_target(r.get("labels"))
+            sha = str((r.get("mergeCommit") or {}).get("oid") or "")
+            head = str(r.get("headRefOid") or "")
+            if n is not None and re.fullmatch(r"[0-9a-f]{40}", sha) and re.fullmatch(r"[0-9a-f]{40}", head):
+                out.append(
+                    {
+                        "number": int(r["number"]),
+                        "release": n,
+                        "sha": sha,
+                        "head": head,
+                        "title": r.get("title") or "",
+                        "url": r.get("url") or "",
+                    }  # fmt: skip
+                )
+        return out
+
+    def fix_count(self, n: int) -> int:
+        """How many fix releases of release n exist already (Release 33.1, 33.2 ... into main)."""
+        if self.sim is not None:
+            return int((self.sim.get("fix_count") or {}).get(str(n), 0))
+        rows = self._gh_json(
+            [
+                "pr",
+                "list",
+                "--repo",
+                self.cfg.repo,
+                "--base",
+                "main",
+                "--state",
+                "all",
+                "--limit",
+                "30",
+                "--json",
+                "title",
+            ]  # fmt: skip
+        )
+        got = [
+            int(m[1]) for r in rows or [] if (m := re.match(rf"Release {n}\.(\d+)\b", r.get("title") or ""))
+        ]
+        return max(got, default=0)
+
     def last_release_at(self) -> datetime | None:
         if self.sim is not None:
             return ts(self.sim.get("last_release_at"))
@@ -1254,6 +1335,139 @@ class World:
             }
         return got
 
+    def fix_range(self, fix: dict, cwd: str | Path) -> tuple[str, str]:
+        """(base, head): the fix pull request's own change is `git diff base head`, nothing else (ORCH-786):
+        from where its reviewed head meets develop as it was before the merge, to that head. The same for a
+        merge commit (alone or a merge-queue group's) and a squash: never the merged commit's own content.
+        Refused when the head is not known or was not what got merged."""
+        sha, head = str(fix.get("sha") or ""), str(fix.get("head") or "")
+        num = fix.get("number")
+        if not (re.fullmatch(r"[0-9a-f]{40}", sha) and re.fullmatch(r"[0-9a-f]{40}", head)):
+            raise Refused(f"the fix #{num} has no known merged commit and head")
+
+        def git(*a: str, timeout: int = 120) -> subprocess.CompletedProcess:
+            return self._run(["git", "-C", str(cwd), *a], timeout=timeout)
+
+        parents = git("rev-list", "--parents", "-n", "1", sha).stdout.split()[1:]
+        if not parents:
+            raise Refused(f"the fix #{num}'s merged commit {sha[:8]} is not known here")
+        if git("cat-file", "-e", f"{head}^{{commit}}").returncode != 0 and isinstance(num, int):
+            git("fetch", "-q", "origin", f"refs/pull/{num}/head", timeout=180)  # a squashed branch is gone
+        if git("cat-file", "-e", f"{head}^{{commit}}").returncode != 0:
+            raise Refused(f"the fix #{num}'s reviewed head {head[:8]} is not known here")
+        before = parents[0]
+        if git("merge-base", "--is-ancestor", head, sha).returncode != 0 and len(parents) != 1:
+            raise Refused(
+                f"the fix #{num}'s own commits cannot be told apart in {sha[:8]} (its head is not in it)"
+            )
+        if git("merge-base", "--is-ancestor", head, before).returncode == 0:
+            raise Refused(f"the fix #{num} was in develop before {sha[:8]}: nothing of its own")
+        base = git("merge-base", head, before).stdout.strip()
+        if not base:
+            raise Refused(f"the fix #{num} shares no history with develop")
+        return base, head
+
+    def fix_files(self, fix: dict) -> list[str] | None:
+        """Every path the fix's own change touches (a rename as both names), from git; None when unknown."""
+        if self.sim is not None:
+            got = fix.get("files")
+            return None if got is None else [str(f.get("path") if isinstance(f, dict) else f) for f in got]
+        try:
+            base, top = self.fix_range(fix, self.cfg.clone)
+        except Refused:
+            return None
+        r = self._run(
+            ["git", "-C", str(self.cfg.clone), "diff", "-z", "--name-only", "--no-renames", base, top]
+        )
+        return [x for x in r.stdout.split("\0") if x] if r.returncode == 0 else None
+
+    def cut_fix(self, n: int, k: int, fix: dict, body: str) -> dict | None:
+        """Release n.k: a branch from main with ONLY the fix pull request's own change on top, pushed, and a
+        pull request into main. Returns {number, url, wt, branch, sha}.
+
+        Its own change is what the pull request itself shows: from where its last commit (head, the one that
+        was reviewed) meets develop as it was before the merge, to that head. Never the merge commit as a
+        whole: a merge-queue group merge commit holds the other pull requests of the group too (ORCH-786)."""
+        br = f"release/part{n}.{k}-{now().astimezone().strftime('%m%d')}"
+        wt = (self.cfg.worktrees or Path(".")) / f"release-{n}.{k}"
+
+        def git(*a: str) -> subprocess.CompletedProcess:
+            return self._run(["git", "-C", str(wt), *a])
+
+        def go():
+            self.bot_ok()
+            if wt.exists():
+                raise Refused(f"{wt} exists already: look at it, remove it by its path")
+            wt.parent.mkdir(parents=True, exist_ok=True)
+            r = self._run(
+                ["git", "-C", str(self.cfg.clone), "worktree", "add", "-q", str(wt), "-b", br, "origin/main"]
+            )
+            if r.returncode != 0:
+                raise Refused(f"git worktree: {(r.stderr or r.stdout).strip()[:200]}")
+            base, tip = self.fix_range(fix, wt)
+            patch = (wt.parent / f".release-{n}.{k}.patch").resolve()
+            try:
+                r = git("diff", "--binary", "--no-color", "--no-ext-diff", f"--output={patch}", base, tip)
+                if r.returncode != 0 or not patch.is_file() or not patch.stat().st_size:
+                    raise Refused(f"the fix #{fix['number']} has no change of its own")
+                r = git("apply", "--3way", "--index", str(patch))
+            finally:
+                patch.unlink(missing_ok=True)
+            if r.returncode != 0:
+                git("reset", "-q", "--hard", "origin/main")
+                raise Refused(
+                    f"the fix #{fix['number']} does not apply on main as it is: "
+                    f"{(r.stderr or r.stdout).strip()[:160]}"
+                )
+            msg = (
+                f"Fix #{fix['number']}: {_short(fix.get('title') or 'fix', TITLE_MAX)}\n\n"
+                f"Only the change of pull request #{fix['number']} ({base[:12]}..{tip[:12]}), "
+                f"taken by the release keeper for fix release {n}.{k}."
+            )
+            r = git("commit", "-q", "--no-verify", "-m", msg)
+            if r.returncode != 0:
+                raise Refused(f"commit: {(r.stderr or r.stdout).strip()[:200]}")
+            if not self.secret_free(body):
+                raise Refused("the release text looks like it holds a secret: stop")
+            top = git("rev-parse", "HEAD").stdout.strip()
+            r = self._run(["git", "-C", str(wt), "push", "-q", "-u", "origin", br], timeout=300)
+            if r.returncode != 0:
+                raise Refused(f"push: {(r.stderr or r.stdout).strip()[:200]}")
+            r = self._run(
+                [
+                    self.gh,
+                    "pr",
+                    "create",
+                    "--repo",
+                    self.cfg.repo,
+                    "--base",
+                    "main",
+                    "--head",
+                    br,
+                    "--title",
+                    _short(f"Release {n}.{k}: {fix.get('title') or 'fix'}", TITLE_MAX),
+                    "--body",
+                    body,
+                ]  # fmt: skip
+            )
+            if r.returncode != 0:
+                raise Refused(f"pr create: {(r.stderr or r.stdout).strip()[:200]}")
+            url = r.stdout.strip().splitlines()[-1]
+            return {
+                "number": int(url.rsplit("/", 1)[1]),
+                "url": url,
+                "wt": str(wt),
+                "branch": br,
+                "sha": top,
+            }
+
+        got = self.act(f"cut:release {n}.{k} with #{fix['number']}", go)
+        if got is None and self.sim is not None:
+            num = 9500 + int(fix["number"]) % 400
+            got = {"number": num, "url": f"https://github.com/{self.cfg.repo}/pull/{num}", "wt": str(wt),
+                   "branch": br, "sha": "f" * 40}  # fmt: skip
+        return got
+
     def close_release(self, rel: dict) -> None:
         def go():
             self.bot_ok()
@@ -1695,8 +1909,12 @@ def fix_exceptions(w: World, rel: dict, bad: list[str]) -> list[str]:
 def recut(w: World, st: dict, rel: dict, h: dict, what: str) -> bool:
     """A release held by red `what` (checks, walks) whose fix ticket is closed while develop moved on: close
     its pull request so the next pass cuts it again from the new develop. True when it did."""
-    if h.get("green") == rel["sha"] or open_red_ticket(w.tickets(), f"Release {rel['n']} {what}"):
-        return False
+    if (
+        rel.get("fix")
+        or h.get("green") == rel["sha"]
+        or open_red_ticket(w.tickets(), f"Release {rel['n']} {what}")
+    ):
+        return False  # a fix release is never cut again from develop: its own fix makes it green
     w.close_release(rel)
     st["release"] = None
     st["skip_sha"] = None
@@ -1704,7 +1922,10 @@ def recut(w: World, st: dict, rel: dict, h: dict, what: str) -> bool:
 
 
 def start_walks(w: World, rel: dict) -> list[str]:
-    """One helper ticket per walk in github.release_walks that this release has not started yet."""
+    """One helper ticket per walk in github.release_walks that this release has not started yet. A fix release
+    has none: it is one change on top of a release that was walked, and must ship within 30 minutes."""
+    if rel.get("fix"):
+        return []
     started = rel.setdefault("walks", {})
     out = []
     for name, skill in w.cfg.walks:
@@ -1735,10 +1956,12 @@ def start_walks(w: World, rel: dict) -> list[str]:
 def walk_verdicts(w: World, rel: dict) -> dict:
     """{"passed", "failed", "waiting"} lines for the walks of github.release_walks; only a result for this
     release's own commit counts (an earlier cut of the same number walked another one)."""
+    res: dict[str, list[str]] = {"passed": [], "failed": [], "waiting": []}
+    if rel.get("fix"):
+        return res
     got = (w.walk_results() or {}).get(str(rel["n"])) or {}
     started = rel.get("walks") or {}
     status = {t.get(k): t.get("status") for t in w.tickets() for k in ("key", "id")}
-    res: dict[str, list[str]] = {"passed": [], "failed": [], "waiting": []}
     for name, _ in w.cfg.walks:
         s = started.get(name) or {}
         r = got.get(name) or {}
@@ -1976,6 +2199,13 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
     foreign = w.open_release()
     if foreign and not (rel and rel.get("pr") == foreign.get("number")):
         return out + [f"release PR {foreign['number']} is open and was not cut by the keeper: watching only"]
+
+    if not rel or rel.get("phase") == "testing":  # a fix for the newest release goes before anything else
+        lane = fix_lane(w, st, hold, sec_holds)
+        if st.get("release") is not rel:
+            return out + lane
+        out += lane
+        rel = st.get("release")
 
     if rel and rel.get("phase") in ("gate", "card"):
         p = w.pr(rel["pr"])
@@ -2221,6 +2451,129 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
     st["release"] = rel
     names = " and ".join(_wf_name(wf) for wf, _ in w.cfg.workflows)
     return out + [f"release {n}: {len(un)} pull requests waiting; started {names} on {sha[:8]}"]
+
+
+def _other_change(hold: str, fix: dict) -> bool:
+    """A security hold that names another pull request or another commit than the fix: the fix release ships
+    only the fix pull request's own change (cut_fix), so those cannot hold it. A hold on a merge-queue group
+    names the group, and the group's other pull requests are not shipped. Any other hold (the check could not
+    run, a commit of the fix itself or its merge commit ...) counts."""
+    m = re.match(r"^#(\d+) \(", hold) or re.match(r"^([0-9a-f]{7,40}) \(", hold)
+    if not m:
+        return False
+    v = m[1]
+    if hold.startswith("#"):
+        return v != str(fix["number"])
+    return not any(str(fix.get(k) or "").startswith(v) for k in ("sha", "head"))
+
+
+def _own_review_hold(w: World, st: dict, fix: dict) -> tuple[str | None, list[str]]:
+    """(hold, lines) for the fix pull request's own security review, for the head it was merged with. A fix
+    merged inside a merge-queue group has no hold of its own in the release's list (that names the group), so
+    it is checked here, over exactly the files the fix release ships: when one is a watched path, only an OK
+    for that head lets it ship. A missing review is started here (ORCH-786)."""
+    n, head = str(fix["number"]), str(fix.get("head") or "")
+    files = w.fix_files(fix)
+    if files is None:
+        return f"#{n} (its own changed files are not known)", []
+    hits = secreview.matched(files, secreview.patterns(w.cfg.security_paths))
+    if not hits:
+        return None, []
+    sec = st.get("security") if isinstance(st.get("security"), dict) else {}
+    sec.setdefault("prs", {})
+    st["security"] = sec
+    e = sec["prs"].get(n)
+    lines: list[str] = []
+    if not isinstance(e, dict) or (e.get("sha") != head and not secreview._open(w, e.get("tid"))):
+        pr = {"number": int(n), "title": fix.get("title"), "url": fix.get("url"), "headRefOid": head}
+        lines.append(secreview._start(w, sec, w.cfg.role or "", pr, hits, secreview._window(w)))
+        e = sec["prs"].get(n)
+    if not isinstance(e, dict) or not head or e.get("sha") != head:
+        return f"#{n} (no security review of its merged head yet)", lines
+    got = secreview._effective(e, (w.security_verdicts() or {}).get(n))
+    if got in secreview.OK:
+        return None, lines
+    return f"#{n} (security review " + ("found problems)" if got == "problems" else "has no OK yet)"), lines
+
+
+def fix_lane(w: World, st: dict, hold: str | None, sec_holds: list[str] | None = None) -> list[str]:
+    """A merged pull request labelled "fix for release N", N the newest release on main, not shipped yet: cut
+    release N.k from main with only that change, at once (no pace, no other work, no walks). Its checks, Merge
+    card and update then go the normal way. A release that was being tested waits; it is tested after."""
+    try:
+        fixes = w.fixes()
+    except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
+        return [f"the fix lane could not read merged fixes: {e}"]
+    done = set(st.get("fixes_shipped") or [])
+    try:
+        newest = w.last_release()
+    except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
+        return [f"the fix lane could not read the newest release: {e}"]
+    todo = [f for f in fixes if f["number"] not in done and f["release"] == newest]
+    stale = [f for f in fixes if f["number"] not in done and f["release"] != newest]
+    out = [
+        f"#{f['number']} is labelled a fix for release {f['release']}, but the newest release is {newest}: "
+        "it ships with the next release"
+        for f in stale
+    ]
+    st["fixes_shipped"] = sorted(done | {f["number"] for f in stale})[-100:]
+    if not todo:
+        return out
+    if hold:
+        return out + [f"fix #{todo[0]['number']} for release {newest} waits: on hold: {hold}"]
+    fix = sorted(todo, key=lambda f: f["number"])[0]
+    mine = [x for x in sec_holds or [] if not _other_change(x, fix)]  # fail closed: unknown holds count
+    own, started = _own_review_hold(w, st, fix)
+    out += started
+    if own and own not in mine:
+        mine.append(own)
+    if mine:  # the same rule as every release: no cut before the security OK of what it ships
+        return out + [
+            f"fix #{fix['number']} for release {newest} waits for its security OK: " + ", ".join(mine)
+        ]
+    k = w.fix_count(newest) + 1
+    label = f"{newest}.{k}"
+    rel = st.get("release")
+    if rel:  # a normal release was being tested: it starts again after the fix release
+        out.append(f"release {rel['n']}: testing stopped for fix release {label}; tested again after it")
+        st["release"] = None
+    body = (
+        f"Fix release {label}: release {newest} plus only #{fix['number']} "
+        f"({_short(fix.get('title') or '')}).\n\n"
+        f"Cut by the release keeper from main: the change of {fix.get('url') or '#' + str(fix['number'])} "
+        "and nothing else. No walks: it is one change on top of a walked release."
+    )
+    try:
+        got = w.cut_fix(newest, k, fix, body)
+    except Refused as e:
+        st["fixes_shipped"] = sorted(set(st["fixes_shipped"]) | {fix["number"]})[-100:]
+        return out + red(
+            w,
+            st,
+            w.cfg.role or "",
+            f"Fix release {label} could not be cut: #{fix['number']}"[:120],
+            f"Fix release {label}",
+            f"The fix {fix.get('url')} for release {newest} could not be shipped as {label}: {e}. Ship it "
+            "with the next release, or make a pull request that applies on main and label it again.",
+            f"Fix release {label} is out, or the fix ships with the next release",
+        )
+    if not got:
+        return out + [f"fix release {label}: cut failed (see the log); tried again next pass"]
+    st["fixes_shipped"] = sorted(set(st["fixes_shipped"]) | {fix["number"]})[-100:]
+    st["release"] = {
+        "n": label,
+        "fix": fix["number"],
+        "sha": got.get("sha") or "",
+        "unreleased": [],
+        "phase": "gate",
+        "pr": got["number"],
+        "url": got["url"],
+        "wt": got["wt"],
+        "main_before": w.heads()["main"] if w.sim is None else (w.sim.get("heads") or {}).get("main"),
+    }
+    return out + [
+        f"fix release {label}: cut with only #{fix['number']}, pull request {got['url']}; its checks next"
+    ]
 
 
 def tend_releases(w: World) -> dict:
