@@ -173,16 +173,16 @@ def test_a_delete_cut_off_while_removing_is_finished(walk, monkeypatch):
     assert _files(folder) == before
 
 
-def test_finishing_a_cut_off_delete_keeps_files_added_since(walk, monkeypatch):
+def test_finishing_a_cut_off_delete_keeps_files_added_since(walk):
     ws, folder, _ = walk
 
     def cut(src, entry, held):
         raise KeyboardInterrupt  # cut off before the folder was moved aside
 
-    monkeypatch.setattr(skill_bin, "_finish_removal", cut)
-    with pytest.raises(KeyboardInterrupt):
-        model.delete(ws, "skill:workspace:release-walk", "human:Anna")
-    monkeypatch.undo()
+    with pytest.MonkeyPatch.context() as mp:  # only this patch: undo() would also drop the test home
+        mp.setattr(skill_bin, "_finish_removal", cut)
+        with pytest.raises(KeyboardInterrupt):
+            model.delete(ws, "skill:workspace:release-walk", "human:Anna")
     (folder / "notes.md").write_text("written after the delete started")
     rows = model.build(ws)["bin"]
     assert (folder / "notes.md").read_text() == "written after the delete started"
@@ -205,7 +205,7 @@ def test_a_restore_cut_off_before_the_rename_is_undone(walk, monkeypatch):
     assert _files(folder) == before
 
 
-def test_a_restore_cut_off_after_the_rename_is_finished(walk, monkeypatch):
+def test_a_restore_cut_off_after_the_rename_is_finished(walk):
     ws, folder, before = walk
     row = model.delete(ws, "skill:workspace:release-walk", "human:Anna")["bin"]
     real = skill_bin._write
@@ -215,26 +215,26 @@ def test_a_restore_cut_off_after_the_rename_is_finished(walk, monkeypatch):
             raise KeyboardInterrupt
         real(entry, doc)
 
-    monkeypatch.setattr(skill_bin, "_write", stop)
-    with pytest.raises(KeyboardInterrupt):
-        model.restore(ws, row["id"], "human:Anna")
-    monkeypatch.undo()
+    with pytest.MonkeyPatch.context() as mp:  # only this patch: undo() would also drop the test home
+        mp.setattr(skill_bin, "_write", stop)
+        with pytest.raises(KeyboardInterrupt):
+            model.restore(ws, row["id"], "human:Anna")
     assert _files(folder) == before  # in place, the record still says "restoring"
     assert model.build(ws)["bin"] == []
     assert _files(folder) == before
 
 
-def test_a_failed_restore_stays_in_the_bin(walk, monkeypatch):
+def test_a_failed_restore_stays_in_the_bin(walk):
     ws, folder, _ = walk
     row = model.delete(ws, "skill:workspace:release-walk", "human:Anna")["bin"]
 
     def fail(a, b):
         raise OSError("no")
 
-    monkeypatch.setattr(skill_bin.os, "rename", fail)
-    with pytest.raises(OSError):
-        model.restore(ws, row["id"], "human:Anna")
-    monkeypatch.undo()
+    with pytest.MonkeyPatch.context() as mp:  # only this patch: undo() would also drop the test home
+        mp.setattr(skill_bin.os, "rename", fail)
+        with pytest.raises(OSError):
+            model.restore(ws, row["id"], "human:Anna")
     assert not folder.exists() and not list(folder.parent.glob(".orch-restore-*"))
     assert model.build(ws)["bin"][0]["can_restore"]
 
@@ -348,7 +348,7 @@ def test_recovering_a_restore_leaves_a_foreign_temporary_folder(walk):
     assert (tmp / "other.txt").exists() and rows[0]["state"] == "in-bin" and "left it" in rows[0]["note"]
 
 
-def test_restore_never_replaces_an_empty_folder_that_appears(walk, monkeypatch):
+def test_restore_never_replaces_an_empty_folder_that_appears(walk):
     ws, folder, _ = walk
     row = model.delete(ws, "skill:workspace:release-walk", "human:Anna")["bin"]
     real = shutil.copytree
@@ -358,10 +358,10 @@ def test_restore_never_replaces_an_empty_folder_that_appears(walk, monkeypatch):
         if Path(dst).name.startswith(".orch-restore-"):  # the top call, not shutil's own for subfolders
             folder.mkdir()  # an empty folder of that name appears between the check and the rename
 
-    monkeypatch.setattr(skill_bin.shutil, "copytree", then_someone_makes_it, raising=True)
-    with pytest.raises(switches.Refused, match="never replaces"):
-        model.restore(ws, row["id"], "human:Anna")
-    monkeypatch.undo()
+    with pytest.MonkeyPatch.context() as mp:  # only this patch: undo() would also drop the test home
+        mp.setattr(skill_bin.shutil, "copytree", then_someone_makes_it, raising=True)
+        with pytest.raises(switches.Refused, match="never replaces"):
+            model.restore(ws, row["id"], "human:Anna")
     assert folder.is_dir() and not any(folder.iterdir())  # theirs, untouched
     assert model.build(ws)["bin"][0]["state"] == "in-bin"
 
