@@ -647,3 +647,44 @@ def test_links_and_descriptions_are_checked(tk, run, extra):
     _, tid = tk
     code, out, err = _add(run, tid, *extra)
     assert code == 2, out + err
+
+
+def test_answer_on_a_card_answered_elsewhere_says_so_and_changes_nothing(tk, run):
+    """ORCH-921: the page still shows a question that was answered in the terminal (the phone, another
+    tab). Its answer with the digest it was shown must not become a second, opposite answer: refused as
+    decided, saying what was answered, by whom and when, like a Check card since ORCH-548."""
+    root, tid = tk
+    code, out, _ = _add(
+        run, tid, "--choose", "Which?", "--option", "A=One", "--option", "B=Two", "--then", "x"
+    )
+    qid = json.loads(out)["id"]
+    shown = _digest(root, tid, qid)  # the open card as the page showed it
+    code, out, err = run(
+        "review", "answer", tid, qid, "--verdict", "ok", "--picked", "A", "--by", "human:sam"
+    )
+    assert code == 0, out + err
+    before = tickets.load(root, tid)["questions"]
+    code, out, err = run(
+        *("review", "answer", tid, qid, "--verdict", "ok", "--picked", "B"),
+        *("--digest", shown, "--by", ME, "--json"),
+    )
+    assert code == 2, out + err
+    res = json.loads(out)
+    assert res["code"] == "decided"
+    assert "answered already" in res["error"] and "sam" in res["error"] and "Use A" in res["error"]
+    assert tickets.load(root, tid)["questions"] == before  # no q2, no replaced_by
+
+
+def test_change_from_the_terminal_without_a_shown_card_still_replaces(tk, run):
+    """A person who chooses to change an answer (no shown card, no digest) still gets a new answer."""
+    root, tid = tk
+    code, out, _ = _add(
+        run, tid, "--choose", "Which?", "--option", "A=One", "--option", "B=Two", "--then", "x"
+    )
+    qid = json.loads(out)["id"]
+    run("review", "answer", tid, qid, "--verdict", "ok", "--picked", "A", "--by", "human:sam")
+    code, out, err = run(
+        "review", "answer", tid, qid, "--verdict", "ok", "--picked", "B", "--by", ME, "--json"
+    )
+    assert code == 0, out + err
+    assert json.loads(out)["decision"]["replaces"] == qid

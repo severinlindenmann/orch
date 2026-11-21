@@ -5,6 +5,7 @@
 const { chromium } = require(require('path').join(process.env.PW_DIR, 'playwright'));
 const headless = require('./headless.cjs'); // the keychain options (ORCH-615)
 const [base, shots, desc, launch] = process.argv.slice(2);
+const WAIT = 60000;  // a computer busy with other helpers answers slowly (load 34-40 took LOOK-2 past 15 s)
 (async () => {
   const out = {};
   const b = await headless.launch(chromium);
@@ -13,7 +14,7 @@ const [base, shots, desc, launch] = process.argv.slice(2);
     const errs = []; p.on('pageerror', e => errs.push(e.message));
     if (w === 1280 && launch) {  // sign in the way a person does: the page hands the one-time token over and reloads
       await p.goto(launch);
-      await p.waitForFunction(() => !location.hash.includes('launch=') && !!localStorage.length, null, { timeout: 15000 });
+      await p.waitForFunction(() => !location.hash.includes('launch=') && !!localStorage.length, null, { timeout: WAIT });
     }
     await p.goto(base + '/#settings');
     await p.waitForSelector('[data-testid=settings-profile]');
@@ -34,13 +35,13 @@ const [base, shots, desc, launch] = process.argv.slice(2);
       await p.click('[data-key=pf-edit]');
       await p.fill('[data-key=pf-description]', desc);
       await p.click('[data-key=pf-save]');
-      await p.waitForFunction(() => /Waiting for relay/.test(document.querySelector('[data-testid=profile-relay-state]')?.textContent || ''), null, { timeout: 15000 });
+      await p.waitForFunction(() => /Waiting for relay/.test(document.querySelector('[data-testid=profile-relay-state]')?.textContent || ''), null, { timeout: WAIT });
       out.pending = await p.textContent('[data-testid=profile-relay-state]');
       // shared pages switch off
       const sharedBefore = await p.getAttribute('[data-testid=look-shared-pages]', 'aria-checked');
       await p.click('[data-testid=look-shared-pages]');
       await p.waitForFunction(b => document.querySelector('[data-testid=look-shared-pages]')?.getAttribute('aria-checked') !== b,
-        sharedBefore, { timeout: 15000 });
+        sharedBefore, { timeout: WAIT });
       out.shared = await p.getAttribute('[data-testid=look-shared-pages]', 'aria-checked');
       // switcher
       await p.click('[data-testid=ws-switch]');
