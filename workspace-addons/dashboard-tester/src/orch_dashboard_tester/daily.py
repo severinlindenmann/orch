@@ -94,6 +94,12 @@ def as_json(p: subprocess.CompletedProcess):
         return None
 
 
+def version_name(text: str) -> str:
+    """The whole build name from `orch --version` ("orch 3.x (release build)" -> "3.x (release build)")."""
+    first = (text.strip().splitlines() or [""])[0].strip()
+    return first[len("orch ") :].strip() if first.lower().startswith("orch ") else first
+
+
 class Refused(Exception):
     pass
 
@@ -117,7 +123,7 @@ class World:
 
     def version(self) -> str:
         r = orch(self.root, ["--version"], timeout=30)
-        return r.stdout.strip().split()[-1] if r.stdout.strip() else ""
+        return version_name(r.stdout)
 
     def launch_url(self) -> str:
         """A one-time sign-in link to this workspace's dashboard (starts it when it is not running). orch makes it

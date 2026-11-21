@@ -986,25 +986,36 @@ def _send_proposal(
         return {**local, "sent": True}
 
 
-def send_file(root: Path, target: str, path: Path, text: str | None, ticket: str | None = None) -> dict:
+def send_file(
+    root: Path,
+    target: str,
+    path: Path,
+    text: str | None,
+    ticket: str | None = None,
+    reply_to: str | None = None,
+) -> dict:
+    """A file (with an optional text). With reply_to it answers that message, and stays in the topic that
+    message started, as a text reply does."""
     if not path.is_file():
         raise Refused(f"{path} is not a file.")
     if path.stat().st_size > MAX_BLOB:
         raise Refused("The file is bigger than 100 MB.")
     to = resolve(root, target)
+    if not ticket and reply_to:
+        ticket = _topic_of_message(root, reply_to)  # answers a text that started a topic: stays in that topic
     data = path.read_bytes()
     if _DRY_RUN.get():  # nothing is uploaded: the body shows the file's name, size and fingerprint
         body = {"name": path.name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
         if text:
             body["text"] = text
-        return _message(root, to, "file", body, ticket)
+        return _message(root, to, "file", body, ticket, reply_to)
     blob = _api(root, "POST", "/v1/blobs", data, 300)[1]
     body = {"blob_id": blob["blob_id"], "name": path.name, "size": len(data), "sha256": blob["sha256"]}
     if blob["sha256"] != hashlib.sha256(data).hexdigest() or blob["size"] != len(data):
         raise Refused("The relay stored something different from the file. Not sent.")
     if text:
         body["text"] = text
-    return _message(root, to, "file", body, ticket)
+    return _message(root, to, "file", body, ticket, reply_to)
 
 
 def send_delegate(
