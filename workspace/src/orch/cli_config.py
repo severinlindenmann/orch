@@ -43,6 +43,7 @@ KEYS = (
     "workflow.reviewer",
     "workflow.auto_reviewer",
     "workflow.reviewer_answers",
+    "workflow.reviewer_kinds",
     "workflow.reviewer_look",
     "workflow.release_merge",
     "workflow.copies",
@@ -297,6 +298,7 @@ def _config(args, root: Path) -> None:
             "workflow.reviewer": lambda: config.reviewer_on(root),
             "workflow.auto_reviewer": lambda: config.auto_reviewer_on(root),
             "workflow.reviewer_answers": lambda: config.reviewer_answers_on(root),
+            "workflow.reviewer_kinds": lambda: ",".join(config.reviewer_kinds(root)) or "none",
             "workflow.reviewer_look": lambda: config.reviewer_look_on(root),
             "workflow.release_merge": lambda: config.release_merge_on(root),
             "workflow.copies": lambda: config.copies_mode(root),
@@ -384,6 +386,22 @@ def _config(args, root: Path) -> None:
             {"workflow.reviewer_answers": value},
             "Saved: small routine questions are "
             + ("answered for you by the Reviewer." if value else "left for you."),
+        )
+    elif args.sub == "set" and args.key == "workflow.reviewer_kinds":
+        who = _actor(args)
+        if not who.startswith("human:"):  # which work is accepted in the owner's place (ORCH-645)
+            raise Refused(
+                "Only a person changes which kinds the Reviewer accepts: "
+                "orch config set in their own terminal."
+            )
+        kinds = config.set_reviewer_kinds(root, args.value)
+        names = ", ".join(tickets.KINDS[k] for k in kinds)
+        _out(
+            args,
+            {"workflow.reviewer_kinds": kinds},
+            f"Saved: the Reviewer accepts by itself: {names}. Drafts and designs stay yours."
+            if kinds
+            else "Saved: the Reviewer accepts no kind of work by itself.",
         )
     elif args.sub == "set" and args.key == "workflow.reviewer_look":
         if args.value not in ("on", "off"):

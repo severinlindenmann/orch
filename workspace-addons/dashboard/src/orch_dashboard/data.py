@@ -1130,6 +1130,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         focus_session_typing,
         live_max,
         release_merge_on,
+        reviewer_kinds,
         reviewer_on,
         workspace_description,
         workspace_name,
@@ -1148,6 +1149,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "agents_may_finish": agents_may_finish(root),
         "release_merge_on": release_merge_on(root),  # Settings: "Merge releases without my click"
         "auto_reviewer_on": auto_reviewer_on(root),  # ORCH-424: new tickets start without human review
+        "reviewer_kinds": reviewer_kinds(root),  # ORCH-645: the kinds it accepts by itself
         "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)
         "copies": copies_mode(root),
         "copies_max": copies_max(root),

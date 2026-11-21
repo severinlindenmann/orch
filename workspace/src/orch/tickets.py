@@ -1722,6 +1722,7 @@ PROTECTED_FIELDS = (
     "description",
     "description_by",
     "model",
+    "kind",
 )
 
 
@@ -2281,6 +2282,75 @@ def _estimate(minutes: object, cost: object) -> dict | None:
     return out
 
 
+# ORCH-645 (owner 18 Nov): what kind of work a ticket is. The tidy helper sets it; the Reviewer accepts work
+# by itself only for the kinds the workspace lists (workflow.reviewer_kinds), never a draft.
+KINDS = {
+    "bug": "Bug",
+    "small_bug": "Small bug",
+    "feature": "New feature",
+    "small_feature": "Small feature",
+    "draft": "Draft or design",
+    "other": "Other",
+}
+
+
+def clean_kind(name) -> str:
+    name = str(name or "").strip().lower().replace(" ", "_").replace("-", "_")
+    if name not in KINDS:
+        raise Refused("Pick a kind: " + ", ".join(KINDS) + ".")
+    return name
+
+
+def kind(ticket: dict) -> str | None:
+    """The ticket's kind, or None (not set yet, or a value orch does not know)."""
+    k = ticket.get("kind") if isinstance(ticket, dict) else None
+    name = k.get("name") if isinstance(k, dict) else None
+    return name if name in KINDS else None
+
+
+def kind_by_person(ticket: dict) -> bool:
+    k = ticket.get("kind")
+    return kind(ticket) is not None and str(k.get("by") or "").startswith("human:")
+
+
+def _put_kind(ticket: dict, name: str, by: str) -> bool:
+    """Set the kind (a history line); False when it already is that. A person's kind stays: only a person
+    changes it."""
+    if kind(ticket) == name:
+        return False
+    old = kind(ticket)
+    person = _is_person(by)
+    ask = (
+        f'Ask instead: orch ask {ticket.get("id", "<id>")} "Change the kind to {KINDS[name]}?" '
+        "--option yes --option no"
+    )
+    if not person:
+        if kind_by_person(ticket):
+            raise Refused(f"A person set this ticket's kind ({KINDS[old]}); only a person changes it. {ask}")
+        if old == "draft":  # a helper never turns a draft into work the Reviewer may accept
+            raise Refused(f"Only a person moves a ticket out of Draft or design. {ask}")
+        if ticket.get("status") in ("review", "done", "dropped"):
+            raise Refused(f"The work is finished: only a person changes its kind now. {ask}")
+        if by.startswith(
+            "human:"
+        ):  # --by human:... from inside a helper: stored as the helper (never a lock)
+            by = "agent:" + str(agent_tool() or "helper")
+    ticket["kind"] = {"name": name, "by": by[:100]}
+    add_history(ticket, by, f"Kind: {KINDS[name]}" + (f" (was: {KINDS[old]})" if old else ""))
+    return True
+
+
+def set_kind(root: Path, tid: str, name: str, by: str) -> dict:
+    """`orch ticket kind`: change what kind of work the ticket is."""
+    name = clean_kind(name)
+
+    def op(ticket):
+        if not _put_kind(ticket, name, by):
+            raise Refused(f"This ticket already is: {KINDS[name]}.")
+
+    return apply_op(root, tid, op, by=by)[0]
+
+
 def tidy(
     root: Path,
     tid: str,
@@ -2290,6 +2360,7 @@ def tidy(
     description: str | None = None,
     estimate: dict | None = None,
     extra: dict | None = None,
+    kind_name: str | None = None,
 ) -> dict:
     """Tidy a new ticket when work starts, without asking: a short clear title (the person's own words stay in
     the history: "Title tidied from: ...") and owner / due / done_when,
@@ -2310,6 +2381,7 @@ def tidy(
     for k, v in fields.items():
         clean_field(k, v)
     more = _prepare_fields(root, tid, extra or {})
+    kind_name = clean_kind(kind_name) if kind_name else None
 
     def op(ticket):
         if tidied(root, ticket):
@@ -2350,7 +2422,8 @@ def tidy(
         for k in added:
             ticket[k] = more[k]
             add_history(ticket, by, PREPARE_FIELDS[k] + ": " + _field_words(root, k, more[k]))
-        if (title == old or edited) and not filled and not wrote and not estimated and not added:
+        kinded = bool(kind_name and not kind(ticket) and _put_kind(ticket, kind_name, by))
+        if (title == old or edited) and not filled and not wrote and not estimated and not added and not kinded:
             add_history(ticket, by, "Ticket tidied: nothing to change")
 
     return apply_op(root, tid, op, by=by)[0]

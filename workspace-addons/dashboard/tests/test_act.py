@@ -1880,3 +1880,20 @@ def test_a_signed_in_start_hands_the_session_start_a_person_grant(tmp_path):
     (root / ".orch").mkdir(parents=True)
     env, fds = actions._person_env(root, "orch", "session.new", False)
     assert fds == () and not any(k.startswith("ORCH_PERSON_GRANT") for k in env)
+def test_ticket_kind_and_reviewer_kinds_build_the_orch_commands():
+    """ORCH-645: a person sets a ticket's kind and which kinds the Reviewer accepts; draft is never offered."""
+    assert actions.build_argv("ticket.kind", {"ticket": "t_abcdef", "kind": "small_bug"})[:4] == [
+        "ticket",
+        "kind",
+        "t_abcdef",
+        "small_bug",
+    ]
+    argv = actions.build_argv("reviewer.kinds", {"kinds": ["bug", "small_feature"]})
+    assert argv[:4] == ["config", "set", "workflow.reviewer_kinds", "bug,small_feature"]
+    assert actions.build_argv("reviewer.kinds", {"kinds": []})[3] == "none"
+    for bad in ({"kinds": ["draft"]}, {"kinds": "bug"}, {"kinds": ["epic"]}):
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("reviewer.kinds", bad)
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("ticket.kind", {"ticket": "t_abcdef", "kind": "huge"})
+    assert actions.needs_session("ticket.kind") and actions.needs_session("reviewer.kinds")

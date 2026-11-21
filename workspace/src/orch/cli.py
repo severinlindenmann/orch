@@ -261,6 +261,8 @@ def _show(t: dict, root: Path) -> str:
     if modelpick.label(t):
         reason = modelpick.why(t)
         extra.append(f"Model: {modelpick.label(t)}" + (f": {reason}" if reason else ""))
+    if tickets.kind(t):  # ORCH-645
+        extra.append(f"Kind: {tickets.KINDS[tickets.kind(t)]}")
     extra.append("Human review needed: " + ("yes" if tickets.human_review(t) else "no"))  # ORCH-424
     if extra:
         out.append("  ".join(extra))
@@ -677,6 +679,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         dest="needs_ok",
         help="what the plan will need the person's OK for (production, money...)",
     )
+    x.add_argument(
+        "--kind",
+        choices=("bug", "small_bug", "feature", "small_feature", "draft", "other"),
+        help="what kind of work it is (draft = drafts, mockups, designs, look changes)",
+    )
     x = t.add_parser(
         "found",
         parents=[common],
@@ -688,6 +695,13 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         "prepared", parents=[common], help="end Prepare: one history line of what was read and filled"
     )
     x.add_argument("id")
+    x = t.add_parser(
+        "kind",
+        parents=[common],
+        help="what kind of work a ticket is: bug, small_bug, feature, small_feature, draft or other",
+    )
+    x.add_argument("id")
+    x.add_argument("name", choices=("bug", "small_bug", "feature", "small_feature", "draft", "other"))
     x = t.add_parser(
         "model",
         parents=[common],
@@ -1321,7 +1335,7 @@ def run(args: argparse.Namespace) -> None:
             "cost": tickets.parse_range(args.estimate_cost, "cost"),
         }
         extra = {k: getattr(args, k) for k in tickets.PREPARE_FIELDS if getattr(args, k)}
-        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est, extra)
+        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est, extra, args.kind)
         _out(args, t, f'Tidied: "{t["title"]}"')
     elif cmd == "ticket" and sub == "found":
         raw = sys.stdin.read() if not term.is_terminal(sys.stdin) else ""
@@ -1343,6 +1357,9 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "prepared":
         t = tickets.prepared(root, args.id, by())
         _out(args, t, history.lines(root, t)[-1].get("text", "Prepared"))
+    elif cmd == "ticket" and sub == "kind":
+        t = tickets.set_kind(root, args.id, args.name, by())
+        _out(args, t, f"Kind: {tickets.KINDS[tickets.kind(t)]}")
     elif cmd == "ticket" and sub == "model" and args.name == "up":
         from orch import modelpick
         from orch import runs_live as _live

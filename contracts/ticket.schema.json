@@ -112,6 +112,14 @@
     "asked_by": { "type": "string", "maxLength": 100, "description": "Optional (ORCH-740). Who asked for the work (e.g. the sender of the email), filled by Prepare (orch ticket tidy --asked-by). The owner stays the person who does or answers for it." },
     "maybe_same": { "type": "string", "description": "Optional (ORCH-740). The id of a ticket that looks like the same work, found by Prepare (orch ticket tidy --maybe-same). Shown only; never blocks, never merges." },
     "needs_ok": { "type": "string", "maxLength": 300, "description": "Optional (ORCH-740). What the plan will need the person's OK for (production, money, real data, outside), named up front by Prepare (orch ticket tidy --needs-ok). The question at the moment of doing it still comes." },
+    "kind": {
+      "type": "object", "required": ["name", "by"], "additionalProperties": false,
+      "description": "Optional (ORCH-645). What kind of work the ticket is: bug, small_bug, feature, small_feature, draft (drafts, mockups, designs, look changes) or other. Set by the helper that tidies a new ticket (orch ticket tidy --kind) or later (orch ticket kind); once a person set it (by human:...), only a person changes it. The Reviewer accepts work by itself only for the kinds the workspace lists in workflow.reviewer_kinds; draft never. Older orch versions ignore it.",
+      "properties": {
+        "name": { "enum": ["bug", "small_bug", "feature", "small_feature", "draft", "other"] },
+        "by": { "type": "string", "minLength": 1, "maxLength": 100 }
+      }
+    },
     "plan": {
       "type": "object",
       "additionalProperties": false,

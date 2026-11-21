@@ -42,11 +42,14 @@ ask; its list replaces the one above.
     orch ticket new "<title>"             # none fits
     orch ticket show <id>                 # read it before you work
     orch ticket status <id> active
-    orch ticket tidy <id> "<short clear title>" --description "<what and why>" --done-when "<one line>" --estimate-minutes <n> --estimate-cost <dollars> [--owner <name>] [--due YYYY-MM-DD]
+    orch ticket tidy <id> "<short clear title>" --description "<what and why>" --done-when "<one line>" --estimate-minutes <n> --estimate-cost <dollars> --kind <kind> [--owner <name>] [--due YYYY-MM-DD]
                                         # a NEW ticket, first thing, no asking: fix typos, short clear title, a description and a
                                         # done-when line from the person's note (kept when they wrote one); your estimate of the
-                                        # helper time and cost at list price for the whole ticket; owner / due only where
+                                        # helper time and cost at list price for the whole ticket; its kind (bug, small_bug,
+                                        # feature, small_feature, draft = drafts/mockups/designs/look, other; small = a few
+                                        # files, no new command or setting, no look or words); owner / due only where
                                         # their text says them (their title stays in the history)
+    orch ticket kind <id> <kind>          # change the kind later; a kind a person set only a person changes
     orch check add <id> "<step>"          # one per piece of the person's work, plain words (no ids, paths, commands);
                                         # BEFORE you start; 0 steps is wrong
     orch check start <id> <c>             # the step you work on now

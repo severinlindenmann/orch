@@ -2,7 +2,7 @@
 // debug log (each reloaded, then flipped back), make a problem report and delete the saved reports.
 module.exports = {
   name: 'Settings General: profile, switches, debug log, reports',
-  covers: ['page:settings/general', 'workspace.propose', 'workspace.set', 'workflow.set', 'reviewer.set',
+  covers: ['page:settings/general', 'workspace.propose', 'workspace.set', 'workflow.set', 'reviewer.set', 'reviewer.kinds',
     'release_merge.set', 'diag.set', 'diag.delete_reports'],
   async run({ page, open, reload, act, must }) {
     const sw = key => page.locator(`[data-key="${key}"]`);
@@ -45,6 +45,14 @@ module.exports = {
 
     await flip('workflow.set', 'settings-switch-workflow', true);  // shows a review first
     await flip('reviewer.set', 'settings-switch-reviewer');
+    // the kinds it accepts: Small feature on, reload, still on; off again (ORCH-645)
+    const kind = page.locator('[data-kind="small_feature"]');
+    await act('reviewer.kinds', () => kind.click());
+    await reload();
+    must(await kind.isChecked(), 'Small feature is not on after a reload');
+    await act('reviewer.kinds', () => kind.click());
+    await reload();
+    must(!(await kind.isChecked()), 'Small feature is still on after it was turned off');
     await flip('release_merge.set', 'settings-switch-release-merge');
 
     // a saved report makes "Delete all" usable; deleting it leaves 0 reports after a reload

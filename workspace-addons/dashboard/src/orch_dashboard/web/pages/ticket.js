@@ -1758,7 +1758,8 @@ function ticketProperties(t, parent) {
       show('due', hasValue(t, 'due')) ? field('Due', inlineField(t, 'due'), 'due') : null,
       show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when') : null,
       costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t),
-      show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model') : null),
+      show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model') : null,
+      show('kind', !!t.kind?.name) ? field('Kind', kindField(t), 'kind') : null),
     propertiesAddMenu(t, parent),
     linksCard(t),
     copyLine(t));
@@ -1777,7 +1778,7 @@ function propertiesAddMenu(t, parent) {
   const props = [
     [!parent, 'partOf', 'Part of'], [!hasValue(t, 'owner'), 'owner', 'Owner'], [!hasValue(t, 'due'), 'due', 'Due'],
     [!hasValue(t, 'done_when'), 'done_when', 'Done when'], [!t.release, 'release', 'Mark as a release'],
-    [!modelChoice(t), 'model', 'Helper strength'], [!referenceRows(t).length, 'links', 'Reference']]
+    [!modelChoice(t), 'model', 'Helper strength'], [!t.kind?.name, 'kind', 'Kind'], [!referenceRows(t).length, 'links', 'Reference']]
     .filter(([missing, key]) => missing && !adding(t, key)).map(([, key, label]) => item(key, label));
   const fromAddons = addons().filter(a => addonEditable(a) && !addonUsed(t, a) && !adding(t, 'addon:' + a.name))
     .map(a => item('addon:' + a.name, clean(a.ticket_fields.section) || addonLabel(a)));
@@ -1802,7 +1803,7 @@ async function propAdd(t, key, trigger) {
   render();
   const rail = document.getElementById('ticket-rail-' + t.id) || document;
   const at = key === 'links' ? '[data-action="link-add"]' : key.startsWith('addon:') ? '[data-action="field"][data-addon="' + CSS.escape(key.slice(6)) + '"]'
-    : key === 'partOf' ? 'select[aria-label="Part of"]' : key === 'model' ? 'select[aria-label="Helper strength"]' : '[data-action="inline"][data-field="' + key + '"]';
+    : key === 'partOf' ? 'select[aria-label="Part of"]' : key === 'model' ? 'select[aria-label="Helper strength"]' : key === 'kind' ? 'select[aria-label="Kind"]' : '[data-action="inline"][data-field="' + key + '"]';
   const target = rail.querySelector(at);
   if (target?.tagName === 'SELECT') target.focus(); else target?.click();
 }
@@ -2081,6 +2082,22 @@ function humanReviewField(t) {
     sw.disabled = false;
   };
   return sw;
+}
+// What kind of work this ticket is (ORCH-645): the helper that tidies a new ticket sets it; a person changes it
+// here. Settings says which kinds are accepted for the person by themselves; Draft or design never.
+const KIND_NAMES = {bug:'Bug', small_bug:'Small bug', feature:'New feature', small_feature:'Small feature', draft:'Draft or design', other:'Other'};
+function kindField(t) {
+  const was = t.kind && KIND_NAMES[t.kind.name] ? t.kind.name : '';
+  if (snapshot) return el('span', 'ed-ro', was ? KIND_NAMES[was] : 'Not set yet');
+  const select = h('select', {'aria-label':'Kind', 'data-key':'kind-' + t.id},
+    was ? null : h('option', {value:''}, 'Not set yet'),
+    Object.entries(KIND_NAMES).map(([k, label]) => h('option', {value:k}, label)));
+  select.value = was;
+  select.onchange = async () => {
+    const result = await act('ticket.kind', {ticket:t.id, kind:select.value});
+    if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = was; }
+  };
+  return select;
 }
 function modelField(t) {
   const m = modelChoice(t);
