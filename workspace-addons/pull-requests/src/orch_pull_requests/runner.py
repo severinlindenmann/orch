@@ -25,7 +25,8 @@ branch, in line order:
   words with the failed checks' names are the suspects; the others run again together first (they merge on
   green), the suspects after. When that tells nobody apart it is split in halves. So one bad pull request in a
   group of 10 that touches the failing area costs two more runs, not about four. A red group of one leaves the
-  queue.
+  queue. A member left alone by the split is never merged on its own light checks, whatever `merge_alone` says
+  (ORCH-909): it runs in a group of its own on top of the base, so the check that failed runs on it.
 - a change to CI or to the queue itself (settings.alone_paths) runs alone in its own group: its green run is the
   proof before it counts. One a person merges (a Merge card, or a CI workflow change GitHub holds for the
   code owner) is only checked: on green its head gets the mark and the person merges it with the Merge card.
@@ -520,9 +521,9 @@ class Runner:
                 if len(left) == 1:  # group() looks at members again; one alone is looked at here
                     left = self.check_members(left, left[0]["base"])
                 if left:
-                    self.process(left)
+                    self.process([dict(e, red=True) for e in left])
         elif red:
-            self.alone(red[0])
+            self.alone(dict(red[0], red=True))
 
     def split(self, red: list[dict], failed: frozenset[str]) -> list[list[dict]]:
         """The parts a red group runs again in, in order: the members that do not touch what failed first, then
@@ -554,8 +555,9 @@ class Runner:
         helper's branch never takes the base in. A fork is never put on a branch of the repository: merged
         directly when it may be, else it leaves the queue and a person merges it."""
         base = e.get("base") or ""
-        if e.get("lone") or e.get("proof") or not settings.merge_alone(self.root):
-            self.on_base(e, why)  # merge_alone off: its own checks are only the light set, a group run counts
+        if e.get("lone") or e.get("proof") or e.get("red") or not settings.merge_alone(self.root):
+            # merge_alone off, or its group was red (ORCH-909): its light checks never ran what failed
+            self.on_base(e, why)
             return
         marked: list[str] = []
         o = None

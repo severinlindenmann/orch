@@ -317,8 +317,9 @@ def test_a_red_group_is_split_and_the_good_ones_still_merge(ws):
     r, calls = make(ws, gh, FakeGit(), bad={3})
     r.run()
     assert states(ws) == {1: "merged", 2: "merged", 3: "out", 4: "merged"}
-    assert len(gh.closed) == 2  # [1,2,3,4] and [3,4] were red; #3 alone is red in its own checks: no group
-    assert url(3) in gh.direct  # #3 alone: red in its own checks
+    # [1,2,3,4] and [3,4] were red; #3 left alone is checked in a group of its own (ORCH-909): red too
+    assert len(gh.closed) == 3
+    assert url(3) not in gh.direct  # #3 alone is never merged on its own light checks (ORCH-909)
     assert gh.groups[calls[-1]] == [4]  # #4: develop changed its files, a group of one
 
 
