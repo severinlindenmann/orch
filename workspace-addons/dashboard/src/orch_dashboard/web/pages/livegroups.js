@@ -175,7 +175,9 @@ function liveMsgComposer(sess) {
     draft:liveMsgDraft.get(sess.id) || '', onDraft:v => { if (v) liveMsgDraft.set(sess.id, v); else liveMsgDraft.delete(sess.id); },
     fieldAttrs:{'data-live-msg-text':sess.id}, sendAttrs:{'data-key':'live-msg-send'},
     onSend:async message => {
-      const r = await ticketTalkSend(sess.id, message);
+      // a session without a ticket (ORCH-817) takes words only: files are kept on a ticket
+      if (sess.kind && (message.files || []).length) return {ok:false, text:'Files go only to a ticket\'s helper. Remove them and send the words.'};
+      const r = sess.kind ? await act('run.send', {ticket:sess.id, text:String(message.text || '').trim()}) : await ticketTalkSend(sess.id, message);
       if (!r.ok) return r;
       if (typeof liveChatNote === 'function') { liveChatNote(sess.id, r.said || message.text); if (typeof liveLayerFill === 'function') liveLayerFill(); }  // shows in the chat at once
       window.orch?.toast?.('Sent to ' + who() + '.', 'ok');
@@ -186,7 +188,8 @@ function liveMsgComposer(sess) {
   return kept;
 }
 function liveMsgBox(sess) {
-  if (!sess || sess.kind || !sess.running || snapshot || !window.UI?.composer) return null;
+  // a helper without a ticket (Manager, empty or chat helper) gets one too (ORCH-817); a plain terminal has no helper
+  if (!sess || sess.kind === 'terminal' || !sess.running || snapshot || !window.UI?.composer) return null;
   const g = liveGroupOf(liveGroups(), sess.id), {root} = liveMsgComposer(sess);
   const voice = what => typeof window[what] === 'function' ? window[what](sess) : null;
   // the composer is kept per session, so its line gets the microphone of this paint (or none) each time

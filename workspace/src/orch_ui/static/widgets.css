@@ -1047,7 +1047,8 @@ button.live-pt:hover{color:var(--brand)}
 .live-ren{display:flex;flex:1 1 0;gap:var(--s2);align-items:center;min-width:0}
 .live-ren .input{flex:1 1 0;min-width:0}
 .live-ctl{position:relative;display:flex;flex:none;gap:var(--s1);align-items:center}
-.live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0}
+.live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0;max-height:calc(var(--live-h) - var(--touch) - var(--s3));overflow-y:auto;overscroll-behavior:contain}
+.live-dock[data-mode=full] .live-ctl .live-pop{max-height:calc(100dvh - var(--live-bottom,0px) - var(--touch) * 2)}  /* More stays above the phone tab bar and scrolls (ORCH-817) */
 /* Pane buttons carry their word (ORCH-463). A compact pane (split, narrow, small): the title keeps a full row, the
    buttons go on a second row and wrap when even that is short */
 .live-pbtn{gap:var(--s1);padding-inline:var(--s1)}
@@ -1447,6 +1448,25 @@ button.gtree-row:hover{background:var(--surface-2)}
 @media(prefers-reduced-motion:reduce){.live-voice[data-rec] .live-voice-wave i{animation:none;height:60%}}
 .lbar-n{min-width:16px;padding:0 var(--s1);border-radius:var(--r1);background:var(--surface-3);color:var(--text-muted);font-variant-numeric:tabular-nums;text-align:center}
 @media(prefers-reduced-motion:reduce){.gtree-row{transition:none}}
+/* ORCH-817: Stop and End session in the pane header, a wall tile's More and the bar; the idle note of a helper pane */
+.live-end-menu,.live-end-ask{width:min(300px,calc(100vw - var(--s5)))}
+.live-end-ask p{margin:0}
+.live-end-opt{align-items:flex-start;min-height:var(--touch)}
+.live-end-opt .ic-wrap{margin-top:2px}
+.live-end-row{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.live-end-idle{display:grid;flex:none;gap:var(--s2);padding:var(--s3);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2)}
+.live-end-idle p{margin:0}
+.live-end-idle[hidden]{display:none}
+.live-ended{display:grid;gap:var(--s3)}
+.live-ended h3,.live-ended>p{margin:0}
+.wall-foot,.wall-line{position:relative}
+.wall-tile:has(.live-end-menu,.live-end-ask),.wall-line:has(.live-end-menu,.live-end-ask){z-index:7}
+.lbar-rw{display:flex;gap:var(--s1);align-items:center}
+.lbar-rw .lbar-row{flex:1;min-width:0}
+.lbar-endwrap{position:absolute;left:var(--s3);bottom:100%;z-index:6}
+.lbar-endwrap .live-pop{right:auto;left:0}
+.lbar-newrow{display:flex;gap:var(--s1);align-items:stretch}
+.lbar-newrow .live-opt{flex:1;min-width:0}
 /* Side rail that is a sheet on smaller screens (ORCH-581, ticket page draft E). The same element serves both widths, so
    every control exists once: from 1100 px it sits in the page; below, it shows only while [data-open=true], as a sheet
    from the right over a scrim, and a closed rail is out of the tab order. .narrow-only marks what only small screens
