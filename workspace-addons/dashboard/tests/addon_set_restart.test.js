@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
-const start = src.indexOf('let restartHold = 0;');
+const start = src.indexOf('let restartHold = 0');
 const end = src.indexOf('\n}\n', src.indexOf('async function addonUninstall(', start)) + 3;
 
 // states: 'down' (refused), or [state, boot] / a bare state (no boot header)
@@ -23,6 +23,7 @@ function page(actResult, states, opts = {}) {
       if (opts.urls) opts.urls.push(url);
       const s = states.shift();
       if (s === 'down' || s === undefined) throw new Error('Failed to fetch');
+      if (s === 'broken') return {ok: true, headers: {get: () => 'b2'}, json: async () => { throw new Error('body cut off'); }};
       const [body, boot] = Array.isArray(s) ? s : [s, null];
       return {ok: true, headers: {get: k => k === 'X-Orch-Boot' ? boot : null}, json: async () => body};
     },
@@ -93,6 +94,32 @@ test('Remove with a lost answer: recovered when the restarted server no longer l
   const r = await c.addonUninstall('factory');
   assert.equal(r.ok, true);
   assert.equal(r.recovered, true);
+});
+
+test('a reply whose body breaks off during the restart counts as still restarting', async () => {
+  const on = {settings: {addons: [{name: 'factory', active: true}]}};
+  const c = page({ok: true, status: 200}, ['broken', [on, 'b2']], {boot: 'b1'});
+  const r = await c.addonSet('factory', true);
+  assert.equal(r.ok, true);
+  assert.deepEqual(c.accepted, [on]);
+  assert.equal(c.win.orchQuiet(), false);
+});
+
+test('two changes at once: the first one ending does not end the quiet time of the second', async () => {
+  const on = {settings: {addons: [{name: 'factory', active: true}, {name: 'relay', active: true}]}};
+  const reply = boot => ({ok: true, headers: {get: () => boot}, json: async () => on});
+  let release;
+  const held = new Promise(done => { release = done; });
+  const replies = [() => held, () => Promise.resolve(reply('b2'))];  // the second change's read waits until released
+  const c = page({ok: true, status: 200}, [], {boot: 'b1'});
+  c.fetch = async () => replies.shift()();
+  const second = c.addonSet('relay', true);
+  const first = c.addonSet('factory', true);
+  await first;
+  assert.equal(c.win.orchQuiet(), true);  // the second change still waits for the server
+  release(reply('b2'));
+  await second;
+  assert.equal(c.win.orchQuiet(), false);
 });
 
 test('the poll, the live sessions and the debug log skip their requests while the page is quiet', () => {

@@ -509,28 +509,31 @@ window.orchActId = () => newActId();  // one id a form keeps for its retries (OR
 // debug log wait (window.orchQuiet), and this one wait reads the state once it is back (ORCH-1034: every poll hit
 // the closed port, the browser logged refused connections and the page said it could not reach the workspace).
 // The same run answering twice (`boot` unchanged) means nothing restarted: its answer is taken.
-let restartHold = 0;
-window.orchQuiet = () => Date.now() < restartHold;
+let restartHold = 0, restartWaits = 0;  // two changes at once: the page stays quiet until the last wait ends
+window.orchQuiet = () => restartWaits > 0 && Date.now() < restartHold;
 async function afterRestart(boot, tries = 24, pause = 1500, head = 2500) {
   const wait = ms => new Promise(done => setTimeout(done, ms));
-  restartHold = Date.now() + head + (tries + 2) * pause;  // never longer than this wait, even if it is cut short
+  restartWaits++;  // never longer than the waits, even if one is cut short
+  restartHold = Math.max(restartHold, Date.now() + head + (tries + 2) * pause);
   try {
     await wait(head);
     let same = 0;
     for (let i = 0; i < tries; i++) {
       if (i) await wait(pause);
-      let res = null;
-      try { res = await fetch('/api/state?fresh=1', {cache:'no-store'}); } catch (_) { continue; }  // still restarting
-      if (!res.ok) continue;
-      const now = res.headers?.get?.('X-Orch-Boot') || null;
-      if (boot && now === boot && ++same < 2) continue;  // the old run, not stopped yet
+      let now = null, next = null;
+      try {
+        const res = await fetch('/api/state?fresh=1', {cache:'no-store'});
+        if (!res.ok) continue;
+        now = res.headers?.get?.('X-Orch-Boot') || null;
+        if (boot && now === boot && ++same < 2) continue;  // the old run, not stopped yet
+        next = await res.json();  // the body can break off too while the server stops
+      } catch (_) { continue; }  // still restarting
       serverBoot = now || serverBoot;
-      const next = await res.json();
       if (next && !next.delta) accept(next);
       return next && !next.delta ? next : null;
     }
     return null;
-  } finally { restartHold = 0; }
+  } finally { if (--restartWaits <= 0) { restartWaits = 0; restartHold = 0; } }
 }
 // Turning an add-on on or off: when the answer is lost on the way (the server restarted), the state read once the
 // server is back says if it worked (the add-on's switch).
