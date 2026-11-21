@@ -438,7 +438,7 @@ def test_without_tmux_the_run_is_one_turn_at_a_time(proj, run, lab, monkeypatch)
     code, out, err = run(
         "run", "start", tid, "--mode", "live", "--json"
     )  # asked for live: same record, plain note
-    assert code == 0 and json.loads(out)["mode"] == "oneshot" and "needs tmux" in err
+    assert code == 0 and json.loads(out)["mode"] == "oneshot" and "needs tmux" in err, (code, out, err)
     _until(lambda: runs.read(proj, tid) is None)
 
 

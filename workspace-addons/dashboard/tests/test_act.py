@@ -138,6 +138,9 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("run.start", {"ticket": "t_abcdef", "agent": "--all"}),
         ("run.start", {"ticket": "t_abcdef", "agent": 5}),
         ("run.start", {"ticket": "t_abcdef", "model": "opus"}),
+        ("run.start", {"ticket": "t_abcdef", "prepare": "yes"}),
+        ("run.start", {"ticket": "t_abcdef", "prepare": True, "agent": "codex"}),  # ORCH-738: goes alone
+        ("run.start", {"ticket": "t_abcdef", "prepare": True, "fresh": True}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "../x"}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "-rf"}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "s-1", "fresh": True}),
@@ -150,6 +153,10 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("session.new", {"kind": "chat", "model": "opus"}),  # ORCH-710: only the Empty helper takes a model
         ("session.new", {"kind": "empty", "model": "auto"}),
         ("session.new", {"kind": "empty", "model": "gpt"}),
+        ("session.end", {"kind": "ticket"}),
+        ("session.end", {"kind": "chat", "ticket": "t_abcdef"}),
+        ("run.interrupt", {"ticket": "nope"}),
+        ("run.interrupt", {"ticket": "t_abcdef", "kind": "chat"}),
         ("addon.start", {"name": "x"}),
         (
             "pull.merge",
@@ -315,6 +322,10 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             {"op": "run.start", "args": {"ticket": "t_abcdef", "fresh": True, "take_over": True}},
             ["run", "start", "t_abcdef", "--fresh", "--take-over", *common],
         ),
+        (  # ORCH-738: Save without starting only prepares the ticket
+            {"op": "run.start", "args": {"ticket": "t_abcdef", "prepare": True}},
+            ["run", "start", "t_abcdef", "--prepare", *common],
+        ),
         (  # ORCH-362: the Start choice's fresh start on the tool the person picked
             {"op": "run.start", "args": {"ticket": "t_abcdef", "fresh": True, "agent": "codex"}},
             ["run", "start", "t_abcdef", "--fresh", "--agent", "codex", *common],
@@ -325,6 +336,9 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         ),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
         ({"op": "session.new", "args": {"kind": "empty"}}, ["session", "new", "empty", *common]),
+        ({"op": "run.interrupt", "args": {"ticket": "t_abcdef"}}, ["run", "interrupt", "t_abcdef", *common]),
+        ({"op": "session.end", "args": {"kind": "manager"}}, ["session", "end", "manager", *common]),
+        ({"op": "session.end", "args": {"kind": "terminal"}}, ["session", "end", "terminal", *common]),
         ({"op": "session.new", "args": {"kind": "terminal"}}, ["session", "new", "terminal", *common]),
         (  # ORCH-710: the Empty helper starts on the model the person picked in the New menu
             {"op": "session.new", "args": {"kind": "empty", "model": "sonnet"}},

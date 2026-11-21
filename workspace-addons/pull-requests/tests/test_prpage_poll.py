@@ -153,3 +153,46 @@ def test_closed_tickets_are_never_refreshed(prws):
     res = poll.once(prws, fetch=FakeGitHub({"acme/app": [gql_pr(1)]}))
     assert res["refreshed"] == ["t_aaaaa3"]
     assert [r["args"][-1] for r in refreshes(prws)] == ["t_aaaaa3"]
+
+
+def _dropped(prws, n, head):
+    """The queue's entry of pull request n: dropped for a red group while its head was `head`."""
+    from orch_pull_requests import store
+
+    store.add(prws, PR.format(n), "t_aaaaa1", "test")
+    store.set_state(prws, PR.format(n), store.OUT, "red group", red_head=head)
+
+
+def test_queue_dropped_pull_request_stays_failed_until_a_new_commit(prws):
+    """ORCH-910: its own checks are green, but the queue's red-group verdict holds for that commit."""
+    add_ticket(prws, "t_aaaaa1", [{"url": PR.format(1), "status": "checks failed"}])
+    _dropped(prws, 1, "a" * 40)
+    data = poll.load(prws)
+    poll.read(prws, {"acme/app": [1]}, data, FakeGitHub({"acme/app": [gql_pr(1, sha="a" * 40)]}))
+    assert data["prs"][PR.format(1)]["status"] == "checks failed"
+    poll.read(
+        prws, {"acme/app": [1]}, data, FakeGitHub({"acme/app": [gql_pr(1, sha="b" * 40)]})
+    )  # new commit
+    assert data["prs"][PR.format(1)]["status"] == "ready to merge"
+
+
+def test_added_again_after_a_drop_shows_github_state(prws):
+    from orch_pull_requests import store
+
+    add_ticket(prws, "t_aaaaa1", [{"url": PR.format(1)}])
+    _dropped(prws, 1, "a" * 40)
+    store.add(prws, PR.format(1), "t_aaaaa1", "test")
+    data = poll.load(prws)
+    poll.read(prws, {"acme/app": [1]}, data, FakeGitHub({"acme/app": [gql_pr(1, sha="a" * 40)]}))
+    assert data["prs"][PR.format(1)]["status"] == "ready to merge"
+
+
+def test_queue_verdict_found_when_the_link_spells_the_repository_in_capitals(prws):
+    add_ticket(prws, "t_aaaaa1", [{"url": PR.format(1)}])
+    _dropped(prws, 1, "a" * 40)
+    data = poll.load(prws)
+    got = FakeGitHub({"Acme/App": [gql_pr(1, sha="a" * 40)]})
+    got.prs["Acme/App"][0]["url"] = "https://github.com/Acme/App/pull/1"
+    poll.read(prws, {"Acme/App": [1]}, data, got)
+    (r,) = data["prs"].values()
+    assert r["status"] == "checks failed"

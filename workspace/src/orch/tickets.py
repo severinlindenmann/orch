@@ -544,11 +544,14 @@ def apply_op(
     if_revision: int | None = None,
     by: str,
     person_click: bool = False,
+    closed_ok=None,
 ):
     """person_click: a person's click on the dashboard or a phone, whatever tool started that server.
+    closed_ok(ticket) -> bool: a write the closed-ticket guard lets through on a done/dropped ticket (only
+    switching an add-on's repeat off, #2051); checked under the lock on the stored ticket.
     Every attempt leaves one decision event in the debug log (diag.md): ticket.op_applied or
     ticket.op_refused (actor, op, status and revision before/after, the refusing guard; no ticket text)."""
-    info: dict = {"person_click": person_click}
+    info: dict = {"person_click": person_click, "closed_ok": closed_ok}
     try:
         out = _apply_op(root, tid, fn, expect, if_revision, by, info)
     except BaseException as e:
@@ -592,7 +595,12 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
         ticket = _load_raw(root, tid)
         eff_status = ticket.get("status")
         info.update(status=eff_status, revision=revision(ticket))
-        if eff_status in CLOSED and _agent_actor(by) and not _addon_keeps_its_ticket(root, ticket, by):
+        if (
+            eff_status in CLOSED
+            and _agent_actor(by)
+            and not _addon_keeps_its_ticket(root, ticket, by)
+            and not (info.get("closed_ok") and info["closed_ok"](ticket))
+        ):
             raise ClosedRefused(CLOSED_AGENT)
         if if_revision is not None and revision(ticket) != if_revision:
             raise _conflict(root, ticket, f"Ticket {tid}", {k: ticket.get(k) for k in PATCH_FIELDS})
@@ -2242,6 +2250,78 @@ def tidied(root: Path, ticket: dict) -> bool:
     return any(t.startswith((TIDY_LINE, "Ticket tidied")) for t in texts)
 
 
+# Prepare on Save without starting (ORCH-738, draft ORCH-730 section 3): a prepare-only helper run fills the
+# ticket and stops; the ticket stays in Backlog. `prepare` on the ticket says where that stands.
+PREPARE_STATES = ("waiting", "preparing", "prepared", "not_prepared")
+PREPARED_LINE = "Prepared: title, description, done-when, estimate and suggested steps"
+NOT_PREPARED = "Not prepared yet"
+
+
+def set_prepare(
+    root: Path, tid: str, state: str, by: str, why: str | None = None, run: str | None = None
+) -> bool:
+    """Write where the prepare run stands. Prepared and Not prepared yet get one history line. Only a ticket
+    still in Backlog changes: one a person or a helper moved on meanwhile keeps its newer state, and an older
+    run's result never overwrites a newer run's. Returns True when written."""
+    if state not in PREPARE_STATES:
+        raise ValueError(state)
+
+    def op(ticket):
+        if hidden_kind(ticket) or ticket.get("status") != "open":
+            return NO_WRITE
+        cur = ticket.get("prepare") if isinstance(ticket.get("prepare"), dict) else {}
+        if run and cur.get("run") and cur["run"] != run and state in ("prepared", "not_prepared"):
+            return NO_WRITE
+        rec: dict = {"state": state, "at": now()}
+        if run:
+            rec["run"] = run
+        if why:
+            rec["why"] = " ".join(str(why).split())[:200]
+        ticket["prepare"] = rec
+        if state == "prepared":
+            add_history(ticket, by, PREPARED_LINE)
+        elif state == "not_prepared":
+            add_history(ticket, by, f"{NOT_PREPARED}: {rec['why']}" if why else NOT_PREPARED)
+        return True
+
+    try:
+        return apply_op(root, tid, op, by=SYSTEM)[1] is True
+    except (Refused, FileNotFoundError):
+        if ticket_path(root, tid).exists():
+            raise
+        return False
+
+
+def prepare_state(root: Path, ticket: dict) -> dict | None:
+    """Where Prepare stands for a reader ({"state", "words", "why"?}), or None when it never ran. A ticket in
+    Backlog still marked preparing or waiting whose run is gone and that waits in no line was left by a run
+    that died: it reads Not prepared yet (Prepare fails quietly; Start still works)."""
+    p = ticket.get("prepare")
+    if not isinstance(p, dict) or p.get("state") not in PREPARE_STATES:
+        return None
+    state, why = p["state"], p.get("why")
+    if state in ("waiting", "preparing", "not_prepared") and ticket.get("status") != "open":
+        return None  # a person started the work meanwhile: Prepare is over, nothing to show
+    if state in ("waiting", "preparing"):
+        from orch import runs, runs_live
+
+        try:
+            gone = not runs.running(root, ticket["id"]) and ticket["id"] not in {
+                t for t, _ in runs_live.waiting_line(root)
+            }
+        except Exception:  # noqa: BLE001 - a reader never fails on this
+            gone = False
+        if gone:
+            state, why = "not_prepared", "the helper stopped"
+    words = {
+        "waiting": "Waits in line to be prepared",
+        "preparing": "Preparing",
+        "prepared": "Prepared",
+        "not_prepared": NOT_PREPARED,
+    }[state]
+    return {"state": state, "words": words, **({"why": why} if why else {})}
+
+
 def _minutes_words(m: int) -> str:
     return (f"{m // 60} h" + (f" {m % 60} min" if m % 60 else "")) if m >= 60 else f"{m} min"
 
@@ -3591,6 +3671,41 @@ def validate_ext(schema: dict, obj: dict, addon: str) -> None:
         raise Refused(f"ext.{addon}{'.' + where if where else ''}: {e.message}")
 
 
+# an add-on marks a boolean field of its ticket_ext schema with the value that switches it off
+OFF_MARK = "x-orch-off"
+
+
+def _off_values(schema: dict | None) -> dict:
+    """The fields an add-on's ticket_ext schema marks with x-orch-off, and the value that switches its repeat
+    off: {field: True|False}. Declared by the add-on, never inferred from stored data; core names no field."""
+    props = (schema or {}).get("properties") if isinstance(schema, dict) else None
+    if not isinstance(props, dict):
+        return {}
+    return {
+        k: v[OFF_MARK]
+        for k, v in props.items()
+        if isinstance(v, dict) and v.get("type") == "boolean" and isinstance(v.get(OFF_MARK), bool)
+    }
+
+
+def _repeat_block(ticket: dict, addon: str, schema: dict | None) -> tuple[dict, dict] | None:
+    """(ext block, off values) of an ACTIVE add-on whose own ticket_ext schema marks fields that switch a
+    repeat off, else None (R1.2: core names no add-on)."""
+    off = _off_values(schema)
+    if not off:
+        return None
+    cur = (ticket.get("ext") or {}).get(addon)
+    return (cur, off) if isinstance(cur, dict) else None
+
+
+def repeat_off_only(cur: dict, new: dict, off: dict) -> bool:
+    """#2051: the change from cur to new only sets fields to their switch-off values (`off`), nothing else.
+    An agent may do that on a done or dropped ticket (a helper turns off a repeat on a ticket in Review); it
+    never switches one on there or changes anything else."""
+    changed = {k for k in set(cur) | set(new) if cur.get(k) != new.get(k)}
+    return all(k in off and new.get(k) is off[k] for k in changed)
+
+
 def ext_set(
     root: Path,
     tid: str,
@@ -3619,7 +3734,11 @@ def ext_set(
         ext[addon] = merged
         add_history(ticket, by, f"Set ext.{addon}")
 
-    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+    def only_off(ticket) -> bool:
+        block = _repeat_block(ticket, addon, schema)
+        return block is not None and repeat_off_only(block[0], {**block[0], **obj}, block[1])
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by, closed_ok=only_off)[0]
 
 
 def ext_unset(
@@ -3661,7 +3780,19 @@ def ext_unset(
         if not ext:
             del ticket["ext"]
 
-    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+    def only_off(ticket) -> bool:
+        """Removing a repeat (or its next planned start) only switches work off, so it is allowed on a closed
+        ticket too; but not the whole block of a paused one: that would also undo its switch-off."""
+        block = _repeat_block(ticket, addon, schema)
+        if block is None:
+            return False
+        cur, off = block
+        # a field whose switch-off value is true (absent = on) must not be removed while it is set
+        return key in ("next_run", "each_run") or (
+            not key and not any(v is True and cur.get(k) is True for k, v in off.items())
+        )
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by, closed_ok=only_off)[0]
 
 
 _SECRET_FOLDER_RE = re.compile(r"\.orch[/\\]+secrets|\borch secrets\b|\bsecrets folder\b", re.I)
