@@ -172,6 +172,7 @@ async fn workspaces(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value
             card["muted_until"] = store::muted_until(&c, &pid, w);
             card["mobile_mode"] = store::mobile_mode(&c, w);
             card["can"] = store::phone_can(&c, &pid, w);
+            crate::phonekeys::add_workspace_key(&c, &mut card);
             items.push(card);
         }
     }

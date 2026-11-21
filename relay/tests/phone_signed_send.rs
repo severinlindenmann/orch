@@ -77,6 +77,10 @@ async fn a_signed_send_keeps_its_id_and_reaches_the_workspace_unchanged() {
     let inbox = t.inbox(&a).await;
     let m = inbox.iter().find(|m| m["id"] == id).expect("in the inbox");
     assert_eq!(m["envelope"], env, "handed over unchanged");
+    // The phone's own feed carries it too (the phone rebuilds and checks from it).
+    let (_, feed) = t.phone(&p, "GET", "/v1/phone/messages", None).await;
+    let mine = feed["items"].as_array().unwrap().iter().find(|i| i["message"]["id"] == id).expect("in the feed");
+    assert_eq!(mine["message"]["envelope"], env);
     assert_eq!(m["body"]["text"], "Hallo");
     // The same bytes again: a duplicate, not a second message.
     let (s, v) = t.phone(&p, "POST", "/v1/phone/send", Some(request(&a.id, "Hallo", env))).await;

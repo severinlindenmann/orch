@@ -67,6 +67,13 @@ pub fn add_to_card(c: &Connection, card: &mut Value) {
     card["signing_key"] = info(c, &id);
 }
 
+/// Adds a workspace's registered key to the phone's workspace item (`signing_key`, a hint the phone shows with
+/// Accept; the phone trusts it only after the person accepted the fingerprint).
+pub fn add_workspace_key(c: &Connection, card: &mut Value) {
+    let id = card["id"].as_str().unwrap_or_default().to_string();
+    card["signing_key"] = crate::signkeys::info(c, &id);
+}
+
 /// The phone's registered raw key, for the signature check of what it sends.
 pub fn raw_key(c: &Connection, pid: &str) -> Option<[u8; 32]> {
     let k: Option<String> = c

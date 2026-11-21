@@ -104,3 +104,17 @@ async fn a_new_pairing_replaces_the_key() {
     let keys: Vec<&Value> = d["workspaces"]["phones"].as_array().unwrap().iter().map(|p| &p["signing_key"]["public_key"]).collect();
     assert!(keys.contains(&&json!(k2)), "{d}");
 }
+
+#[tokio::test]
+async fn the_phone_sees_each_workspace_key_as_a_hint() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let (k1, _, _) = keys();
+    let (s, _) = t.call(&a, "PUT", "/v1/me/signing-key", Some(json!({"alg": "ed25519", "public_key": k1}))).await;
+    assert_eq!(s, 201);
+    let p = t.pair_phone(&[&a]).await;
+    let (s, w) = t.phone(&p, "GET", "/v1/phone/workspaces", None).await;
+    assert_eq!(s, 200, "{w}");
+    assert_eq!(w["items"][0]["signing_key"]["public_key"], k1.as_str());
+    assert!(w["items"][0]["signing_key"].get("fingerprint").is_none());
+}
