@@ -569,7 +569,7 @@ Must be seen:
 
 - Part: sessions (draft D feature 6)
 - State: ready, clicked by the script
-- Pictures: `fd-33-permissions-1280.png`, `fd-33-permissions-1920.png`, `fd-33-permissions-390.png`
+- Pictures: `fd-33-permissions-1280.png`, `fd-33-permissions-1440.png`, `fd-33-permissions-1920.png`, `fd-33-permissions-390.png`
 
 Do:
 
