@@ -27,6 +27,12 @@
 .tc-comp .tc-in{flex:1;border:1px solid var(--border-strong);border-radius:var(--r-pill);padding:7px 12px;color:var(--text-faint);font-size:12px}
 .tc-send{width:30px;height:30px;border-radius:50%;background:var(--brand);color:var(--on-brand);display:grid;place-items:center;font-weight:700}
 .tc-sub{font-size:11px;color:var(--text-muted)}
+.tc-plus{width:30px;height:30px;border-radius:50%;background:var(--surface-2);display:grid;place-items:center;font-weight:700;color:var(--text-muted)}
+.tc-info{margin-left:auto;width:26px;height:26px;border-radius:50%;border:1px solid var(--border-strong);display:grid;place-items:center;font-size:12px;color:var(--text-muted)}
+.tc-att{max-width:70%;margin-left:auto;background:#173e35;border-radius:16px 16px 6px 16px;padding:8px 10px;font-size:12px}
+.tc-tabs{display:flex;flex-wrap:wrap;gap:4px;margin:4px 10px}
+.tc-tabs span{white-space:nowrap;padding:3px 8px;border-radius:var(--r-pill);background:var(--surface-2);font-size:11px}
+.tc-tabs span.on{background:var(--brand-soft);color:var(--brand)}
 .tc-day{text-align:center;font-size:11px;color:var(--text-muted);margin:4px 0}
 </style></head><body><div class="page"><div class="top"><a href="index.html">&larr; Phone app v3</a></div>
 <h1>Ticket chats</h1>
@@ -54,7 +60,7 @@
 </div><div class="tc-comp"><span class="tc-in" style="text-align:center;color:var(--brand)">New topic</span></div></div>
 <p class="muted" style="margin-top:8px;font-size:12px">The workspace's own chat, its archived chats and New topic. The new topic shows under Ticket chats on Chats.</p></div>
 
-<div><p class="cap"><b>2</b> A ticket chat: names, question card, composer</p><div class="phone"><div class="p-nav"><span>&lsaquo;</span><div style="flex:1;min-width:0"><h4 style="font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Launch the Trail Runner X shoe</h4><div class="tc-sub"><span class="warn">● Needs your OK</span> · Marketing</div></div></div>
+<div><p class="cap"><b>2</b> A ticket chat: names, question card, composer</p><div class="phone"><div class="p-nav"><span>&lsaquo;</span><div style="flex:1;min-width:0"><h4 style="font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Launch the Trail Runner X shoe</h4><div class="tc-sub"><span class="warn">● Needs your OK</span> · Marketing</div></div><span class="tc-info">i</span></div>
 <div class="tc-chat"><div class="tc-day">Today</div>
 <div class="tc-who"><span class="av s">NW</span>Nina Weber · not signed in</div>
 <div class="tc-b">Photo shoot is Friday.<time>09:20</time></div>
@@ -63,8 +69,8 @@
 <div class="tc-b">Draft is in the part "Spring campaign plan". One choice before media is booked:<time>09:40</time></div>
 <div class="tc-q"><b>Which colour leads the campaign?</b><small>Recommended: Glacier blue</small><div class="row"><span class="btn primary sm">Glacier blue</span><span class="btn outline sm">Moss</span></div></div>
 </div>
-<div class="tc-comp"><span class="tc-in">Message</span><span class="tc-send">↑</span></div></div>
-<p class="muted" style="margin-top:8px;font-size:12px">The name sits above the first message of each run: the helper's name and its workspace, or a name typed on the computer marked "not signed in". Your own messages (from the phone or the computer without a typed name) are on the right with no name.</p></div>
+<div class="tc-comp"><span class="tc-plus">+</span><span class="tc-in">Message</span><span class="tc-send">🎙</span></div></div>
+<p class="muted" style="margin-top:8px;font-size:12px">The box to write is the one the topic chat had: + for a photo, the camera, a file or a place, and the microphone for a voice message. The name sits above the first message of each run: the helper's name and its workspace, or a name typed on the computer marked "not signed in". Your own messages (from the phone or the computer without a typed name) are on the right with no name.</p></div>
 
 <div><p class="cap"><b>3</b> After answering: the card says what was decided</p><div class="phone"><div class="p-nav"><span>&lsaquo;</span><div style="flex:1;min-width:0"><h4 style="font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Launch the Trail Runner X shoe</h4><div class="tc-sub">● Working · Marketing</div></div></div>
 <div class="tc-chat"><div class="tc-day">Today</div>
@@ -74,7 +80,19 @@
 <div class="tc-who"><span class="av s g">M</span>Claude · Marketing</div>
 <div class="tc-b">Glacier blue it is. I book the media now.<time>09:43</time></div>
 </div>
-<div class="tc-comp"><span class="tc-in">Message</span><span class="tc-send">↑</span></div></div>
+<div class="tc-comp"><span class="tc-plus">+</span><span class="tc-in">Message</span><span class="tc-send">🎙</span></div></div>
 <p class="muted" style="margin-top:8px;font-size:12px">Answering uses the existing question card; the answer also shows under Decided on the computer's Chats page.</p></div>
+
+<div><p class="cap"><b>4</b> Attachments and the chat's info, as before</p><div class="phone"><div class="p-nav"><span>&lsaquo;</span><div style="flex:1;min-width:0"><h4 style="font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Launch the Trail Runner X shoe</h4><div class="tc-sub">● Working · Marketing</div></div><span class="tc-info">i</span></div>
+<div class="tc-chat"><div class="tc-day">Today</div>
+<div class="tc-att">🖼 Shoe photo<time style="display:block;text-align:right;font-size:10px;color:var(--text-muted)">10:02 ✓✓</time></div>
+<div class="tc-att">📄 Offer-Q3.pdf · 12 KB<time style="display:block;text-align:right;font-size:10px;color:var(--text-muted)">10:03 ✓✓</time></div>
+<div class="tc-att">📍 Shop Lucerne · Open in Maps<time style="display:block;text-align:right;font-size:10px;color:var(--text-muted)">10:04 ✓✓</time></div>
+<div class="tc-h" style="margin-top:10px">Info › Shared</div>
+<div class="tc-tabs"><span>Photos</span><span>Files</span><span class="on">Links</span><span>Previews</span></div>
+<div class="tc-list"><div class="row"><div class="m"><b>Board deck draft</b><small>docs.pilatus.ch</small></div></div></div>
+</div>
+<div class="tc-comp"><span class="tc-plus">+</span><span class="tc-in">Message</span><span class="tc-send">🎙</span></div></div>
+<p class="muted" style="margin-top:8px;font-size:12px">A ticket chat is the topic chat it replaces: photos, files, places and voice messages work as before, and the info button (or the summary at the top) opens the chat's info with its results and its Photos, Files, Links and Previews.</p></div>
 
 </div></div></body></html>

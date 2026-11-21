@@ -598,6 +598,7 @@ actor MockRelay: RelayAPI {
     func blob(id: String) async throws -> Data {
         try await check()
         if let b = MockReviewStack.blobs[id] { return b.data }
+        if let d = uploads[id] { return d }   // a photo sent in this run shows as sent
         guard id == "b_chart" || (UserDefaults.standard.bool(forKey: "mockGroups") && id == "b_0123456789abcdef") else { throw RelayError.api(status: 404, code: "not_found", message: "Image not found.") }
         let r = UIGraphicsImageRenderer(size: CGSize(width: 240, height: 140))
         return r.pngData { c in
