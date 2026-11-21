@@ -836,8 +836,13 @@ def _chat_make_ticket(a):
 
 def _run_start(a):
     """Start a helper on the ticket: continue its last conversation, or fresh; the Start choice (ORCH-362) can
-    name the tool (`--agent`, a name from `orch agents`); orch refuses a tool it does not know."""
-    _only(a, ("ticket", "fresh", "take_over", "agent"))
+    name the tool (`--agent`, a name from `orch agents`); orch refuses a tool it does not know.
+    prepare: Save without starting (ORCH-738) only prepares the ticket; it goes alone, with no other flag."""
+    _only(a, ("ticket", "fresh", "take_over", "agent", "prepare"))
+    if _flag(a.get("prepare")):
+        if any(a.get(k) is not None for k in ("fresh", "take_over", "agent")):
+            raise BadRequest("Prepare goes alone: no tool, fresh start or take-over with it.")
+        return ["run", "start", _tid(a.get("ticket"))], ["--prepare"], []
     flags = (["--fresh"] if _flag(a.get("fresh")) else []) + (
         ["--take-over"] if _flag(a.get("take_over")) else []
     )
