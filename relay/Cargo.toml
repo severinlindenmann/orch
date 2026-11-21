@@ -13,6 +13,7 @@ name = "orch-relay"
 path = "src/main.rs"
 
 [dependencies]
+libc = "0.2"
 axum = { version = "0.7", features = ["macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "fs", "signal"] }
 tower-http = { version = "0.5", features = ["trace"] }
