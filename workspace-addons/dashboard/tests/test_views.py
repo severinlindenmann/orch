@@ -662,7 +662,10 @@ def test_v1_home_and_ticket_controls():
     for old in ("Jump to", "status-jumps", "board-jump", "boardCol"):
         assert old not in tickets
     css = (WEBDIR / "pages" / "tickets.css").read_text()
-    assert ".board .kanban-col{flex:0 0 82%" in css  # ORCH-240: phone lanes side by side, swiped
+    # ORCH-576: the board is status rows (kit widgets.css); on the phone each row is one column of tiles, no swiping
+    assert ".kanban-col" not in css
+    kit = (KITDIR / "widgets.css").read_text()
+    assert ".status-row{grid-template-columns:1fr" in kit and ".tile-grid{grid-template-columns:1fr}" in kit
     # Reduced motion for Home comes from the kit (motion.css switches every animation and transition off).
     assert 'href="kit/motion.css"' in (WEBDIR / "index.html").read_text()
 
