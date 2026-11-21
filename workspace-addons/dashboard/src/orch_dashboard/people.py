@@ -4,11 +4,11 @@ asks the name too; this module keeps the dashboard's import path. orch is read o
 
 from __future__ import annotations
 
-__all__ = ["MAX_PEOPLE", "BadName", "choose", "clean_name", "current", "load"]
+_NAMES = ["MAX_PEOPLE", "BadName", "choose", "clean_name", "current", "load"]
 
 
 def __getattr__(name: str):
-    if name in __all__:
+    if name in _NAMES:
         from orch import people
 
         return getattr(people, name)
