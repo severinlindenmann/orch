@@ -9,6 +9,7 @@ the rules, refusals and history lines are the CLI's own:
     on, off    <account>
     end        <account>:<YYYY-MM-DD>[T<HH:MM>] | <account>:reset | <account>:none   (the workspace's time zone)
     switching  on | off
+    switcher   follow | take-over   (another workspace switches the accounts: follow it, or switch from here)
     seen       all-at-limit:<since> | switch-failed:<since>   (Got it on a warning card; since = its start time)
     share      preset:<save|even|sub> | week:<10-100>:<weekday> | api:<none|kind,kind> | tool:<0-20>
                | ahead:<api|tool|both|none>:<dollars> | clear      (how helper work is spread, ORCH-657)
@@ -22,7 +23,7 @@ from pathlib import Path
 from . import store
 from .store import Refused
 
-VERBS = ("limit", "period", "order", "on", "off", "end", "switching", "share", "seen")
+VERBS = ("limit", "period", "order", "on", "off", "end", "switching", "switcher", "share", "seen")
 _ACC = r"a_[a-z0-9]{6}"
 _PERIOD = r"5h|week|month|until"
 _DAY = r"\d{4}-\d\d-\d\d"
@@ -37,6 +38,7 @@ PATTERNS = {
     "off": re.compile(rf"({_ACC})"),
     "end": re.compile(rf"({_ACC}):({_DAY_TIME}|reset|none)"),
     "switching": re.compile(r"(on|off)"),
+    "switcher": re.compile(r"(follow|take-over)"),
     "seen": re.compile(r"(all-at-limit|switch-failed):(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)"),
     "share": re.compile(
         r"(preset):(save|even|sub)|(week):(\d{2,3}):(monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
@@ -78,6 +80,8 @@ def argv_for(root: Path, verb: str, target: str, by: str | None) -> list[str]:
         return ["seen", g[0], "--since", g[1], *who]
     if verb == "share":
         return ["share", *_share_words([x for x in g if x is not None]), *who]
+    if verb == "switcher":
+        return [g[0], *who]
     return ["switching", g[0], *who]
 
 
