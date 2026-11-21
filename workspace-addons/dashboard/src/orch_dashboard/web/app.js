@@ -423,6 +423,8 @@ function render(arrived = new Set()) {
   const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
   const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' || r.kind === 'new' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' || r.kind === 'live' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
+  // stage = "preview" in the add-on's manifest: not finished yet, a small Preview tag beside its name
+  const stageTag = a => a.dashboard?.stage === 'preview' ? h('span', {className:'badge', title:'Not finished yet'}, 'Preview') : null;
   const navLink = (url, text, glyph, tail = null) => navEntry(here, url, text, glyph, tail);
   const needsWords = window.DashHelpers.needsYou(needCount), contactsAddon = addons().find(a => a.dashboard?.panel === 'phone' && a.dashboard);
   // The needs-you number sits on Review (the page that lists exactly those questions and results), not on Home (ORCH-63)
@@ -437,7 +439,7 @@ function render(arrived = new Set()) {
   const sideAddons = document.getElementById('side-addons');
   if (sideAddons) reconcile(sideAddons, fragment(pages.length ? h('details', {className:'nav-group', 'data-key':'nav-addons', open:addonsOpen() ? '' : null},
     h('summary', {className:'nav-item', 'aria-label':'Add-ons'}, navIcon('addons'), h('span', {className:'nav-label'}, 'Add-ons')),
-    h('nav', {'aria-label':'Add-ons'}, pages.map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon)))) : null));
+    h('nav', {'aria-label':'Add-ons'}, pages.map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon, stageTag(a))))) : null));
   reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'settings') : null));
   if (changed) {
     for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
