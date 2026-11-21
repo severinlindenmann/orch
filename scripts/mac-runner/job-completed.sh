@@ -1,14 +1,16 @@
-#!/bin/bash
+#!/bin/bash -p
 # Runner hook after every job on this Mac's CI runner (ACTIONS_RUNNER_HOOK_JOB_COMPLETED, set by setup.sh; ORCH-1125).
 # Leaves nothing for the next job: stops the Simulators, stops every process of the runner user except the runner
 # itself (dashboards, Chromium, Python, node the job left running), empties this user's temp folder and releases
-# the shared locks. The job's throwaway home lives in the job's temp folder, which the runner wipes itself.
+# the shared locks. The job's throwaway home lives in the job's temp folder, which the runner wipes itself. Before the
+# next job runner-loop.sh (root) stops everything of orch-ci again and makes a fresh runner folder and home.
 # Never fails the job.
 # A job sets its own environment, and bash loads shell functions from it: a function (find, ps, kill) would replace
 # that command here, whatever PATH says. So the hook first starts itself again as privileged bash (-p never loads
 # functions from the environment) with only the values it needs. Only paths with a slash run before that line.
-# Limit: bash reads BASH_ENV before any line of this file, so a job whose settings reach the hook can still run code
-# first. The hook is the second lock; the first: GitHub holds every outside contributor's run until the owner clicks (docs/ci-checks.md).
+# The runner starts this file through /usr/local/orch-mac-runner/bin/bash (setup.sh puts it first on the runner's
+# PATH): privileged bash with an empty environment, so BASH_ENV, SHELLOPTS and the job's functions never run before
+# line 1 (security review ORCH-1233 M1). The #! line above does the same when the file is started directly.
 if [[ ${1-} != --orch-clean ]]; then   # the runner starts hooks without arguments; a job cannot add one
   pass=(PATH=/usr/bin:/bin:/usr/sbin:/sbin)
   for v in GITHUB_RUN_ID ORCH_LOCK_DIR; do
@@ -32,7 +34,7 @@ keep=" $$ "; p=$PPID
 while [ -n "$p" ] && [ "$p" -gt 1 ]; do keep="$keep$p "; p=$(ps -p "$p" -o ppid= 2>/dev/null | tr -d ' '); done
 # The runner is recognised by the program it runs (its own bin folder), never by words in a command line a job
 # could copy. The pipeline below (ps, the loop's subshell) is a child of this hook and ends before the kill.
-RBIN=$(cd ~orch-ci/actions-runner/bin 2>/dev/null && pwd -P)   # the account's home, not $HOME
+RBIN=$(cd "$HERE/job/bin" 2>/dev/null && pwd -P)   # the fresh runner folder runner-loop.sh makes per job
 leftovers() {
   local pid comm
   ps -U "$ME" -o pid=,comm= | while read -r pid comm; do
