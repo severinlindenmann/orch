@@ -199,9 +199,9 @@ def _factory_work(t: dict) -> bool:
 
 def _scheduled(t: dict) -> bool:
     """An add-on starts this ticket on its own schedule (a repeat or a script)."""
-    return any(
-        isinstance(v, dict) and (v.get("recurring") or v.get("cron")) for v in (t.get("ext") or {}).values()
-    )
+    from orch import addons
+
+    return addons.scheduled_by_addon(t)
 
 
 def _open_question(t: dict) -> bool:
@@ -239,7 +239,7 @@ def candidates(root: Path) -> list[dict]:
         rows.append((rank, due, t.get("created_at") or "", tid, t))
     rows.sort(key=lambda r: r[:4])
     return [
-        {"ticket": r[3], "key": r[4].get("key") or r[3], "rank": ("factory", "ready", "backlog")[r[0]]}
+        {"ticket": r[3], "key": r[4].get("key") or r[3], "rank": ("run", "ready", "backlog")[r[0]]}
         for r in rows
     ]
 

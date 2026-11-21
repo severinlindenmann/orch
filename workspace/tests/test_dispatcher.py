@@ -199,7 +199,7 @@ def test_factory_work_first_then_ready_then_backlog_by_due_and_age(proj, calm):
     order_ids = [c["ticket"] for c in dispatcher.candidates(proj)]
     assert order_ids[:6] == [crew, order, ready_soon, ready_late, ready_none, old_backlog]
     ranks = [c["rank"] for c in dispatcher.candidates(proj)]
-    assert ranks[:2] == ["factory", "factory"] and ranks[-1] == "backlog"
+    assert ranks[:2] == ["run", "run"] and ranks[-1] == "backlog"
 
 
 def test_tickets_that_must_not_start_are_skipped(proj, calm, monkeypatch):

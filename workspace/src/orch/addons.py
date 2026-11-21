@@ -1878,6 +1878,15 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
     return 0
 
 
+def scheduled_by_addon(ticket: dict) -> bool:
+    """An add-on starts this ticket on its own schedule (a repeat or a script in its `ext` part): the
+    dispatcher leaves it alone (ORCH-507). Here, not in the dispatcher: core text names no add-on field."""
+    return any(
+        isinstance(v, dict) and (v.get("recurring") or v.get("cron"))
+        for v in (ticket.get("ext") or {}).values()
+    )
+
+
 def name_width(names) -> int:
     """Width of an add-on name column: at least 12, and always 2 spaces after the longest name."""
     return max([12, *(len(n) + 2 for n in names)])
