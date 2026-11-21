@@ -17,7 +17,7 @@
 .result[data-size=lg] .result-body{max-height:440px;overflow:auto;font-size:var(--fs-body);line-height:20px}
 .result-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* text, code, data */
-.result-md{display:grid;gap:var(--s1);max-width:75ch}
+.result-md{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s1);max-width:75ch}
 .result-md h3{font-size:var(--fs-body);line-height:20px}
 .result-md h4{font-size:var(--fs-meta);line-height:16px;color:var(--text-muted)}
 .result-md ul{margin:0;padding-left:var(--s4)}

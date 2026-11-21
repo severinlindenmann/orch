@@ -1082,6 +1082,9 @@ class Handler(BaseHTTPRequestHandler):
             "apple-touch-icon.png",
         ):
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
+        # Browsers still ask for favicon.ico on some pages; a 404 there is a page error in the console.
+        if name == "favicon.ico":
+            return self._send(200, web_file("favicon.svg"), TYPES[".svg"])
         self._send(404, b"not found", "text/plain")
 
     def _events(self):
