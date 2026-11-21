@@ -39,9 +39,10 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| GET | `/v1/whoami` | – | `{id, name, description, tags, icon, color, look_by, phones: n, pending}` (`icon`/`color`/`look_by`: look.md): the approved values, plus `pending` = `{description: string\|null, tags: [..]\|null, at}` (only the proposed fields are set; `rev` identifies this exact proposal) or `null` |
+| GET | `/v1/whoami` | – | `{id, name, description, tags, icon, color, look_by, phones: n, pending, signing_key}` (`signing_key`: see Signing key below, `null` = none registered yet) (`icon`/`color`/`look_by`: look.md): the approved values, plus `pending` = `{description: string\|null, tags: [..]\|null, at}` (only the proposed fields are set; `rev` identifies this exact proposal) or `null` |
 | PATCH | `/v1/me` | `{description?: string ≤ 280, tags?: [string ≤ 24, ≤ 8 items]}` (at least one) | `202 {…whoami, status: "pending"}`. The change is only a proposal: the owner must approve it in the admin panel, and until then the old values stay in effect everywhere (directory, refresh snapshot, phones). One pending change per workspace; a new one replaces it. `description` is one line of plain text, characters from Unicode categories L, M, N, P, S and Zs only (no control, newline, bidi or zero-width characters), NFC-normalised, no Default_Ignorable_Code_Point characters (variation selectors, U+034F, U+3164, ...) or U+2800, at most 2 combining marks in a row; tags are lowercase `[a-z0-9-]`, 1–24 characters. Admin-set values follow the same rules. Writes only the pending fields, only while the calling token is still current (else `401`). Bad input → `422 invalid` |
 | PATCH | `/v1/me` (look) | `{icon?: <id>\|null, color?: <token>\|null}` (at least one; look.schema.json `me_look_patch`) | `200 {…whoami}`. Applied at once, not pending; sets `look_by = workspace`. Left out = unchanged, `null` = default. One bad value → `422 invalid`, nothing stored. Look fields mixed with `description`/`tags` or any other field → `422` (send them on their own). Not part of `workspaces.json`: no version bump, no refresh-hint (look.md, vectors/look-v1.json `me_patch`) |
+| PUT | `/v1/me/signing-key` | `{alg: "ed25519", public_key: <43 characters>}` (no other field) | `201 {alg, public_key, key_id, registered_at, status: "stored"}`; the same key again → `200 {…, status: "unchanged"}`; a different key while one is stored → `409 key_exists` (a key change is a statement signed by the old key, a later step: the token alone never swaps it); a bad key or body → `422 invalid`, nothing stored. See **Signing key** below |
 | POST | `/v1/heartbeat` | `{mobile_mode: {on, since, ends_at, machine, ended?}}` | `200 {mobile_mode}` (the stored value, as phones see it). See **Mobile mode** below |
 | POST | `/v1/messages` | one message | `201 {id}` (see rules above) |
 | GET | `/v1/inbox?wait=0..30` | – | `{items: [message…], next: null}` not yet acked, oldest first, max 100. `wait` = long-poll seconds |
@@ -53,6 +54,23 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | DELETE | `/v1/webhooks/<id>` | – | `204` |
 | POST | `/v1/transcribe` | Same as `/v1/phone/transcribe`, with workspace auth (agents transcribe audio files) | Same as `/v1/phone/transcribe` |
 | GET | `/v1/refresh` | – | Full snapshot of everything assigned to this workspace now: `{version, skills: [{name, version, files: {"<relative path>": "<base64>"}}], mcp: {"<name>": {…server config…}}, credentials: {"<NAME>": "<value>"}, workspaces: <workspaces.schema.json>}` (its `phones` = the paired phones that may reach this workspace). What is missing was unassigned and gets removed locally (local-files.md) |
+
+### Signing key (ORCH-1200; signed messages design, ORCH-1027)
+
+Each workspace makes its own Ed25519 key pair on `orch relay connect` (or once on the next relay command of a workspace
+connected before). The private key stays in the guarded orch home (`keys/<workspace>/signing.key`, stored as `ors_` +
+base64url of the 32-byte seed; the secret scan refuses that form and the value hider hides the seed in every text
+form). It is never sent: only the public key is registered here.
+
+- `public_key`: the raw 32-byte key, base64url without padding, written the one canonical way. Refused: another
+  length or alphabet, padding, spare bits set, a non-canonical point encoding, a point not on the curve and the
+  small-order (weak) keys. Vectors: `vectors/signing-key-v1.json` (Python `signkey.py`, relay `signkeys.rs`).
+- `key_id`: the first 16 hex characters of SHA-256(`"ed25519"` + raw key). An index, never the trust decision.
+- Fingerprint (what people compare): the same hash in Crockford base32, the first 32 characters as 8 groups of 4. A
+  workspace shows its own (`orch relay key`, `orch relay status`, `orch relay whoami`), always computed from its own
+  key, never read from the relay. The relay never sends a fingerprint.
+- The relay keeps the key and shows it in whoami and in each directory item (`workspaces.schema.json` `signing_key`)
+  as a HINT only: a receiver trusts a key once a person accepted its fingerprint, never because the relay lists it.
 
 ## Usage counts and policy (draft 02; usage-counts.md, counts.schema.json)
 
