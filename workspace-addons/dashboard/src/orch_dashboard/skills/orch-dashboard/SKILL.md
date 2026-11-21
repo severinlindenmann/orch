@@ -35,6 +35,10 @@ one tab for every add-on that is turned on and has a page. It follows changes by
 `orch dashboard` runs it in the foreground and prints its address (usually 127.0.0.1:8420). The link works on this computer only. Give the
 user the printed link.
 
+**The page says "Sign in to do this"**: the person runs `orch dashboard open` in their own terminal (it opens the
+page signed in; `--print` gives a one-time link for another computer). You cannot sign in for them: tell them the
+command.
+
 **A read-only copy**
 
     orch dashboard snapshot                  # writes dashboard-snapshot.html

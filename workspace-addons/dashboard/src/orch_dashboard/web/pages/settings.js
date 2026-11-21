@@ -184,6 +184,12 @@ function reviewerCard(settings) {
 async function reviewerSwitch() {
   await settingsSend('reviewer.set', {on:state.settings?.reviewer_on !== true}, 'reviewer');
 }
+// ORCH-971: both switches are about merged pull requests, so a plain folder (no GitHub remote, no pull-requests
+// add-on) does not see them. A switch that is already on still shows, so the person can turn it off.
+function prSwitchCards(settings) {
+  const has = settings.pull_requests === true;
+  return [has || settings.reviewer_on ? reviewerCard(settings) : null, has || settings.release_merge_on ? releaseMergeCard(settings) : null];
+}
 // Merge releases without my click (ORCH-79): off = the owner clicks Merge on the release card; on = a release
 // with every check green merges by itself (orch review tend-releases). Only a person can turn it on.
 function releaseMergeCard(settings) {
@@ -693,7 +699,7 @@ function settingsPage() {
       snapshot ? null : window.OrchLook?.settingsSection(),
       syncCard(settings),
       everydayCard(settings, phoneAddon),
-      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), reviewerCard(settings), releaseMergeCard(settings), copiesCard(settings)), diagCard(settings)]),
+      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), ...prSwitchCards(settings), copiesCard(settings)), diagCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
       helperNeedsCard(), permissionsCard(settings), helpersAtOnceCard(settings)]),
@@ -1050,6 +1056,7 @@ function pageStopped(r) {
 // the frame address's fragment (kit/frame.js takes it out at once); one orch did not ship gets no pass.
 const SHIPPED_SANDBOX = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
 const framePasses = new Map(), framePassAsks = new Map(), framePassFailed = new Map(), frameFresh = new Map();
+let frameGen = 0;  // a dashboard restart (framesForget) ends every pass ask still under way: its answer is the old run's
 // The server ends a pass after its life (`life` seconds, framepass.py LIFE): one kept longer is asked for again
 // before a page opens with it, so its first call never answers 401 (ORCH-1004). The frame on screen keeps its pass
 // (a new one would load it again); when that one ends, its next call answers 401 and the frame asks for new ones.
@@ -1058,17 +1065,19 @@ function framePass(name) {
   if (kept && (Date.now() < kept.until || frameShown()?.getAttribute('src')?.includes('#orch-frame=' + kept.pass + '&'))) return kept;
   if (kept) framePasses.delete(name);
   if (framePassAsks.has(name) || Date.now() - (framePassFailed.get(name) || 0) < 10000) return null;
-  const asked = Date.now();  // the server's clock for the pass starts before its answer arrives
-  framePassAsks.set(name, fetch('/api/frame-pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({addon:name})})
+  const asked = Date.now(), gen = frameGen;  // the server's clock for the pass starts before its answer arrives
+  const ask = fetch('/api/frame-pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({addon:name})})
     .then(r => r.ok ? r.json() : null)
     .then(j => {
+      if (gen !== frameGen) return;
       // used up to 60 s before the server ends it (half its life when that is short)
       const life = Number.isFinite(j?.life) && j.life > 0 ? j.life : 900, keep = Math.max(life / 2, life - 60);
       if (j && typeof j.pass === 'string' && typeof j.file === 'string') framePasses.set(name, {pass:j.pass, file:j.file, chan:frameChanNew(), until:asked + keep * 1000});
       else framePassFailed.set(name, Date.now());
     })
-    .catch(() => framePassFailed.set(name, Date.now()))
-    .finally(() => { framePassAsks.delete(name); if (framePasses.has(name)) render(); }));
+    .catch(() => { if (gen === frameGen) framePassFailed.set(name, Date.now()); })
+    .finally(() => { if (framePassAsks.get(name) === ask) framePassAsks.delete(name); if (gen === frameGen && framePasses.has(name)) render(); });
+  framePassAsks.set(name, ask);
   return null;
 }
 // A per-frame code the page's messages must carry: a document that is navigated into the frame (not the add-on's
@@ -1140,6 +1149,41 @@ globalThis.addEventListener?.('message', e => {
   else render();
 });
 const framesLoaded = new Set();
+// The shown frame got the dashboard's starting page (its add-on's service is restarting after an add-on was added or
+// removed, ORCH-1055): open a new frame in a moment. Only this page can: a reload from inside the sandboxed frame is
+// cross-site and refused. A new element, as the same address with its #pass would not load again. Meanwhile the
+// page's skeleton shows (the starting page itself is empty). At most FRAME_RETRIES times per address within 5
+// minutes; after that the skeleton stays until the person opens the page again.
+const FRAME_RETRY_MS = 2000, FRAME_RETRIES = 30, frameRetries = new Map(), frameRetrying = new WeakSet();
+globalThis.addEventListener?.('message', e => {
+  const frame = frameShown(), r = route();
+  if (snapshot || e.origin !== 'null' || e.data?.orch !== 'frame-starting' || r.kind !== 'page' || !frame || e.source !== frame.contentWindow) return;
+  if (frameRetrying.has(frame)) return;  // already opening it again
+  const was = frameRetries.get(r.hash), fresh = !was || Date.now() - was.since > 5 * 60000;  // a later restart counts anew
+  const n = fresh ? 1 : was.n + 1;
+  if (n > FRAME_RETRIES) return;
+  frameRetries.set(r.hash, {n, since:fresh ? Date.now() : was.since});
+  const src = frame.getAttribute('src') || '';
+  framesLoaded.delete(src);  // the starting page was no load of the add-on page: the new frame gets its skeleton
+  if (!document.querySelector('[data-key="embed-skeleton"]')) {
+    const wait = skeletonFor('page'); wait.dataset.key = 'embed-skeleton'; frame.before(wait);
+  }
+  frame.classList.add('embed-loading');
+  frameRetrying.add(frame);
+  setTimeout(() => {
+    if (!frame.isConnected || frameShown() !== frame || route().hash !== r.hash) return;  // the person moved on
+    document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove());
+    frame.replaceWith(pageFrame(route()));
+  }, FRAME_RETRY_MS);
+});
+// The dashboard restarted (app.js noteBoot): its passes are gone. Forget ours and the shown frame itself, so the
+// next drawing asks for a new pass and loads the add-on page anew: also one that failed while the dashboard was down
+// (its calls refused), which would wait for its own next refresh. A new element: a new #pass alone loads nothing.
+function framesForget() {
+  frameGen++; framePassAsks.clear();
+  framePasses.clear(); framePassFailed.clear(); frameFresh.clear(); frameRetries.clear(); frameKeep = null;
+  frameShown()?.remove();
+}
 // A page that is the dashboard's own shell (three columns, no header) says so once; its frame then fills the page.
 const shellAddons = new Set();
 globalThis.addEventListener?.('message', event => {

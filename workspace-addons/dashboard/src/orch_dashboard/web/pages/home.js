@@ -518,16 +518,20 @@ function backgroundBanner() {
 function autoUpdateNote() {
   const n = state.auto_update_note;
   if (!n || (n.state !== 'updated' && n.state !== 'failed')) return null;
-  const num = v => String(v || '').replace(/^orch /, '');
+  // "orch 17" is a release ("17", as drawn); a development build ("orch develop 5d59166f") is a test version: never a
+  // branch name or commit id on Home (report r-1118-0907)
+  const rel = v => (/^orch (\d+)$/.exec(String(v || '')) || [])[1];
+  const to = rel(n.to) || 'the newest test version';
   const got = snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'auto-update-note-ok', 'data-key':'auto-update-note-ok'}, 'Got it');
   if (n.state === 'failed') {
     return h('div', {className:'banner attn', 'data-key':'auto-update-note', role:'status'}, h('p', {className:'grow'},
-      'orch could not update itself to ' + num(n.to) + (n.reason ? ': ' + clean(n.reason).replace(/[.\s]+$/, '') : '') + '. It is still ' + num(n.from) + ' and tries again later.'), got);
+      'orch could not update itself to ' + to + (n.reason ? ': ' + clean(n.reason).replace(/[.\s]+$/, '') : '') + '. ' +
+      (rel(n.from) ? 'It is still ' + rel(n.from) : 'It keeps the version it has') + ' and tries again later.'), got);
   }
   const changes = array(n.changes);
   return h('section', {className:'card home-card', 'data-key':'auto-update-note'},
-    h('div', {className:'card-h row between'}, h('h2', {}, 'orch updated itself to ' + num(n.to)), got),
-    h('div', {className:'pad'}, changes.length ? h('ul', {className:'upd-changes', 'data-key':'auto-update-changes'}, changes.map(c => h('li', {}, clean(c)))) : h('p', {className:'muted'}, 'Updated from ' + num(n.from) + '.')));
+    h('div', {className:'card-h row between'}, h('h2', {}, 'orch updated itself to ' + to), got),
+    h('div', {className:'pad'}, changes.length ? h('ul', {className:'upd-changes', 'data-key':'auto-update-changes'}, changes.map(c => h('li', {}, clean(c)))) : h('p', {className:'muted'}, rel(n.from) ? 'Updated from ' + rel(n.from) + '.' : 'Nothing to do for you.')));
 }
 // "What changed": what the helper wrote when work finished (the outcome, else the completion note), newest first.
 function doneAt(t) {
@@ -655,16 +659,23 @@ function loginBanner(stopped) {
     snapshot ? null : h('a', {className:'btn primary sm', href:'#settings/agent', 'data-key':'login-see'}, 'See what to fix'));
 }
 // Tickets waiting in line for a helper, and why none starts now (ORCH-266: the computer looked busy and nothing said so).
+// One short line, never the list of waiting tickets (ORCH-1100: 112 links filled the screen; owner picked design B).
 // No reason (only the short pause between two starts): no banner, it passes within seconds.
+function lineWords(line) {
+  if (line.limit) return 'Helper limit reached.';
+  const why = clean(line.why);
+  if (/^the usage limit/i.test(why)) return 'Usage limit reached.';
+  if (/^the disk is almost full/i.test(why)) return 'Disk almost full.';
+  if (/busy/i.test(why)) return 'Computer too busy to start more work.';
+  return why.charAt(0).toUpperCase() + why.slice(1).replace(/\.?$/, '.');
+}
 function lineBanner() {
   const line = snapshot ? null : state.start_line;
   if (!line || !line.why || !array(line.waiting).length) return null;
-  const byId = new Map(tickets().map(t => [t.id, t])), list = array(line.waiting).map(id => byId.get(id)).filter(Boolean);
-  if (!list.length) return null;
-  const n = list.length, why = clean(line.why);
+  const known = new Set(tickets().map(t => t.id));
+  if (!array(line.waiting).some(id => known.has(id))) return null;
   return h('div', {className:'banner attn', role:'status', 'data-key':'start-line'},
-    h('div', {className:'grow'}, h('strong', {}, 'No helper starts right now: ' + why + '.'),
-      h('p', {}, n + (n === 1 ? ' ticket waits' : ' tickets wait') + ' in line and ' + (n === 1 ? 'starts by itself' : 'start by themselves') + ' when that passes: ', loginTicketLinks(list))),
+    h('p', {className:'grow'}, h('strong', {}, lineWords(line))),
     line.limit ? h('a', {className:'btn outline sm', href:'#settings/helper', 'data-key':'start-line-limit'}, 'Allow more helpers') : null);
 }
 // Home: what needs the person first, as ONE list: the oldest question with its answers, then one row per further

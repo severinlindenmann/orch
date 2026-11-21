@@ -616,6 +616,9 @@ test('phone and zoom layout: nothing pushes the page sideways or hides a menu it
   // the icon rail scrolls its list only when it does not fit above the foot
   assert.match(kit, /\.sidebar:has\(\.nav-label\) \.sidebar-scroll\.cramped\{overflow-x:hidden;overflow-y:auto\}/);
   assert.match(source, /classList\.toggle\('cramped', sideScroll\.scrollHeight > sideScroll\.clientHeight \+ 1\)/);
+  // a long menu on a short screen (12 items at 900 px high, report r-1118-0908-t_oxw444-2): soft edges show it scrolls, the foot gets lower rows
+  assert.match(kit, /\.sidebar-scroll\{background:linear-gradient\(var\(--sidebar\) 30%,transparent\) top\/100% 24px no-repeat local/);
+  assert.match(kit, /@media\(min-width:721px\) and \(max-height:960px\)\{\.side-foot \.nav-item/);
 });
 test('ticket saved views filter by status and the board shows Changes to add', () => {
   const items = [{id:'w',title:'W',status:'active',owner:'anna'}, {id:'r',title:'R',status:'review',owner:'ben'},
@@ -741,6 +744,18 @@ test('Settings: "Merge releases without my click" is one switch that saves at on
   assert.equal(nodes(c.releaseMergeCard(c.state.settings), n => n.attrs?.role === 'switch')[0].attrs['aria-checked'], true);
   await c.releaseMergeSwitch();
   assert.equal(calls[1], JSON.stringify(['release_merge.set', {on:false}]));
+});
+
+// ORCH-971: a plain folder (no GitHub remote, no pull-requests add-on) does not see the two pull-request switches.
+test('Settings: the pull-request switches show only where the workspace has pull requests, or when one is on (ORCH-971)', () => {
+  const c = context([], {snapshot:false, addons:() => [], render:() => {}, document:{querySelector:() => null}});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
+  const keys = s => [...c.prSwitchCards(s)].filter(Boolean).map(n => n.attrs['data-key']);
+  assert.deepEqual(keys({}), []);
+  assert.deepEqual(keys({pull_requests:false, reviewer_on:false, release_merge_on:false}), []);
+  assert.deepEqual(keys({pull_requests:true}), ['settings-reviewer', 'settings-release-merge']);
+  assert.deepEqual(keys({reviewer_on:true}), ['settings-reviewer']);
+  assert.deepEqual(keys({release_merge_on:true}), ['settings-release-merge']);
 });
 
 // ORCH-58: the number goes before every title in the list and on the board; a search opens a folded group that holds a hit.

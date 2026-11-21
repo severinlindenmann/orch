@@ -325,7 +325,7 @@ class Scheduler:
 
     def fail(self, tid: str, reason: str) -> None:
         """A run that did not work becomes one question (kind automation:failure), asked once."""
-        ask_failure(self.root, tid, f"The agent run did not work: {reason}")
+        ask_failure(self.root, tid, f"The helper could not start: {reason.rstrip('.')}.")
 
     def start_due(self, tid: str, reason: str, now: datetime) -> str:
         """A planned start (wait over, cron due, Try again): the ticket's script when it names one, every script of

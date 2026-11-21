@@ -1149,6 +1149,8 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "release_merge_on": release_merge_on(root),  # Settings: "Merge releases without my click"
         "auto_reviewer_on": auto_reviewer_on(root),  # ORCH-424: new tickets start without human review
         "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)
+        # ORCH-971: the two pull-request switches above show only where the workspace has pull requests
+        "pull_requests": _has_pull_requests(root, rows),
         "copies": copies_mode(root),
         "copies_max": copies_max(root),
         "live_max": live_max(root),  # Settings > Helper > Helpers at once: None = no limit (the default)
@@ -1213,6 +1215,19 @@ def _core_addons() -> tuple[str, ...]:
         return tuple(CORE_ADDONS)
     except Exception:  # noqa: BLE001 - without the core list the CLI still refuses, in plain words
         return ()
+
+
+def _has_pull_requests(root: Path, rows) -> bool:
+    """True when the workspace has pull requests: a github.com remote on its folder, or the pull-requests
+    add-on is on (a workspace of several repos, like orch's own, has no remote of its own)."""
+    if any(r["name"] == "pull-requests" and r.get("active") is True for r in _addon_rows(rows)):
+        return True
+    try:
+        from orch.skillrender import has_github_remote
+
+        return has_github_remote(root)
+    except (ImportError, OSError, ValueError):
+        return False
 
 
 def _addon_rows(rows) -> list[dict]:
@@ -1588,9 +1603,18 @@ def _auto_update_note() -> dict | None:
 def hide_unset_sharing(addons: list[dict], root: Path, orch_bin: str | None) -> list[dict]:
     """No sharing set up: the Shared links tab is not there at all (the add-on stays in Settings > Add-ons)."""
     tabs = [a for a in addons if (a.get("dashboard") or {}).get("panel") == "links"]
-    if not tabs or publish_connected(root, orch_bin):
+    if not tabs or publish_set_up(root):
         return addons
     return [{**a, "dashboard": None} if a in tabs else a for a in addons]
+
+
+def publish_set_up(root: Path) -> bool:
+    """This folder holds the saved sharing connection (read from disk only). The tab follows this and never a
+    network call: a slow or unreachable sharing server must not make the left menu entry vanish and come back."""
+    cfg = _load(root / ".orch" / "secrets" / "publish.json")
+    return isinstance(cfg, dict) and all(
+        isinstance(cfg.get(k), str) and cfg[k] for k in ("url", "workspace", "token")
+    )
 
 
 def publish_connected(root: Path, orch_bin: str | None) -> bool:
