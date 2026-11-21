@@ -65,6 +65,7 @@ final class SignedPushAndListsTests: XCTestCase {
         let changed = Question(message: try question("Delete the old backups?", relayText: "Keep the backups?"), workspaceName: "Dev")
         XCTAssertTrue(model.testCheckQuestions([changed]).isEmpty, "not accepted yet: not on the list")
         XCTAssertTrue(model.acceptWorkspace(ws, shownFingerprint: MessageSignature.fingerprint(raw)))
+        XCTAssertEqual(model.trust.names()[ws], "Dev", "the name the person saw is kept for checked pushes")
         let list = model.testCheckQuestions([changed])
         XCTAssertEqual(list.map(\.message.body.text), ["Delete the old backups?"])
         XCTAssertEqual(list.first?.workspaceName, "Dev")
@@ -86,6 +87,9 @@ final class SignedPushAndListsTests: XCTestCase {
         let ok = PushCheck.decide(try push(q, relayBody: "Keep the backups?"), title: "Dev", body: "Keep the backups?", me: ph,
                                   accepted: [ws: [raw]], nowMs: now)
         XCTAssertEqual(ok, PushCheck.Shown(title: "Dev", body: "DM1-12 · Delete the old backups?", verified: true))
+        let named = PushCheck.decide(try push(q, relayBody: "x"), title: "Bank Login", body: "x", me: ph, accepted: [ws: [raw]],
+                                     names: [ws: "Dev"], nowMs: now)
+        XCTAssertEqual(named.title, "Dev", "a checked push carries the name saved at Accept, not the relay's title")
 
         var info = try push(q, relayBody: "x")
         var env = try XCTUnwrap(info["envelope"] as? [String: Any])
@@ -116,6 +120,11 @@ final class SignedPushAndListsTests: XCTestCase {
         XCTAssertEqual(PushCheck.decide(otherId, title: "Dev", body: "x", me: ph, accepted: [ws: [raw]], nowMs: now), plain,
                        "the signed id must be the pushed id")
         XCTAssertEqual(PushCheck.decide(try push(q, relayBody: "x"), title: "", body: "x", me: ph, accepted: [:], nowMs: now).body, "New message")
+        let long = PushCheck.decide(unsigned, title: "Transfer your money now to the account in this notice please", body: "x", me: ph,
+                                    accepted: [:], nowMs: now)
+        XCTAssertEqual(long.title.count, 40, "the relay's name is cut short")
+        XCTAssertEqual(PushCheck.decide(unsigned, title: "Transfer your money now", body: "x", me: ph, accepted: [ws: [raw]],
+                                        names: [ws: "Dev"], nowMs: now), plain, "the name saved at Accept wins over the relay's")
     }
 
     func testATextPushUsesTheSignedUpdateTitleAndFirstLine() throws {

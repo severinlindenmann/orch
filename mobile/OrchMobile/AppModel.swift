@@ -584,7 +584,7 @@ final class AppModel {
         guard let w = workspaces.first(where: { $0.id == workspaceId }), let k = w.signingKey,
               let raw = MessageSignature.b64urlDecodeStrict(k.publicKey),
               MessageSignature.fingerprint(raw) == shownFingerprint,
-              trust.accept(workspaceId, key: k.publicKey) else { return false }
+              trust.accept(workspaceId, key: k.publicKey, name: w.displayName) else { return false }
         let waiting = held.removeValue(forKey: workspaceId) ?? []
         revision &+= 1
         merge(waiting)
@@ -1061,6 +1061,14 @@ final class AppModel {
         let d = UserDefaults.standard
         path = []   // a cold start always lands on the Chats list; only a push or `-open` below opens something
         if d.bool(forKey: "resetState") { Keychain.delete(); PhoneKey.delete(); trust.clear(); if !useMock { TrustStore.savePhoneId(nil) }; reset() }
+        #if DEBUG
+        // Signed-push check in the Simulator (scripts/signed-push-check.sh, ORCH-1296): the notification extension reads
+        // the accepted key and the phone id from the shared keychain, also when the app runs on the mock relay.
+        if let t = d.string(forKey: "seedPushTrust"), let i = t.firstIndex(of: ":") {
+            TrustStore.keychain.accept(String(t[..<i]), key: String(t[t.index(after: i)...]), name: "Pilatus Workspace")
+            TrustStore.savePhoneId(d.string(forKey: "seedPushPhone"))
+        }
+        #endif
         if d.bool(forKey: "seedPaired"), credentials == nil, useMock {
             openSampleInvite(); await connect(phoneName: "Severin's iPhone"); await finishSetup(allowNotifications: false)
         }

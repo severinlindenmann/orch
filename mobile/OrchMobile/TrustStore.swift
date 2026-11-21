@@ -12,6 +12,8 @@ struct TrustStore: Sendable {
     struct Entry: Codable, Sendable, Equatable {
         let publicKey: String     // base64url raw key
         let acceptedAt: String
+        /// The workspace's name as the person saw it when they accepted; a checked push shows this, not the relay's title.
+        var name: String? = nil
     }
 
     let load: @Sendable () -> [String: Entry]
@@ -23,11 +25,10 @@ struct TrustStore: Sendable {
     private static let account = "trust-v1"
     private static let phoneAccount = "phone-id-v1"
 
-    /// `<team prefix>.io.severin.orch.shared`, read from the bundle's `AppIdentifierPrefix` Info.plist key;
-    /// nil when the build has none (unit tests on a plain host): the item then stays in the default group.
+    /// `<team prefix>.io.severin.orch.shared`, the prefix read from the bundle's `AppIdentifierPrefix` Info.plist key.
+    /// A build without a team (CI's ad hoc signing) has an empty prefix and the entitlement says the same.
     static var sharedGroup: String? {
-        guard let p = Bundle.main.object(forInfoDictionaryKey: "AppIdentifierPrefix") as? String, !p.isEmpty else { return nil }
-        return p + sharedGroupSuffix
+        (Bundle.main.object(forInfoDictionaryKey: "AppIdentifierPrefix") as? String ?? "") + sharedGroupSuffix
     }
 
     private static func query(_ account: String) -> [String: Any] {
@@ -81,12 +82,15 @@ struct TrustStore: Sendable {
         load().compactMapValues { e in MessageSignature.b64urlDecodeStrict(e.publicKey).map { [$0] } }
     }
 
+    /// The names saved at Accept, per workspace.
+    func names() -> [String: String] { load().compactMapValues(\.name) }
+
     /// Accept `key` for `workspace` (the person's tap). A weak or malformed key is never accepted.
     @discardableResult
-    func accept(_ workspace: String, key: String, now: Date = Date()) -> Bool {
+    func accept(_ workspace: String, key: String, name: String? = nil, now: Date = Date()) -> Bool {
         guard let raw = MessageSignature.b64urlDecodeStrict(key), MessageSignature.publicKeyOK(raw) else { return false }
         var m = load()
-        m[workspace] = Entry(publicKey: key, acceptedAt: ISO8601DateFormatter().string(from: now))
+        m[workspace] = Entry(publicKey: key, acceptedAt: ISO8601DateFormatter().string(from: now), name: name)
         save(m)
         return true
     }

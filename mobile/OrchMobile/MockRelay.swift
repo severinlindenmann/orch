@@ -337,8 +337,32 @@ actor MockRelay: RelayAPI {
     func questions() async throws -> [Question] {
         try await check()
         if empty { return [] }
-        return all.filter { answered[$0.id] == nil && takenBack[$0.id] == nil }
+        return (all + Self.relayChanged.questions).filter { answered[$0.id] == nil && takenBack[$0.id] == nil }
     }
+    /// ORCH-1296 evidence (`-mockRelayChanged YES`, with `-mockSigningKey YES`): Pilatus signed a question and a text with
+    /// the demo key, and this "relay" lists other words for both. The phone must show the signed words.
+    static let relayChanged: (questions: [Question], messages: [PhoneMessage]) = {
+        guard UserDefaults.standard.bool(forKey: "mockRelayChanged"),
+              let key = try? Curve25519.Signing.PrivateKey(rawRepresentation: Data(repeating: 7, count: 32)) else { return ([], []) }
+        let qBody: [String: Any] = ["question_id": "q-backup", "text": "Delete the old backups?", "options": ["yes", "no"], "recommended": "no"]
+        let qd = MessageSigner.Draft(id: "m_relaychangedq001", from: pilatus, to: "phones", type: "question", body: qBody, ticket: "t_pil042")
+        let td = MessageSigner.Draft(id: "m_relaychangedt001", from: pilatus, to: "phones", body: ["text": "Do not deploy tonight."])
+        guard let qe = try? MessageSigner.envelope(qd, key: key), let te = try? MessageSigner.envelope(td, key: key) else { return ([], []) }
+        func env(_ e: [String: Any]) -> SignedEnvelope? {
+            guard let k = e["key_id"] as? String, let sd = e["signed"] as? String, let sg = e["sig"] as? String else { return nil }
+            return SignedEnvelope(sigV: 1, keyId: k, signed: sd, sig: sg)
+        }
+        let at = ISO8601DateFormatter().string(from: Date())
+        let q = Question(message: QuestionMessage(schema: "orch.msg/1", id: qd.id, from: pilatus, to: "phones", type: "question", createdAt: at,
+                                                  ticket: "t_pil042",
+                                                  body: QuestionBody(questionId: "q-backup", title: nil, text: "Keep the old backups?",
+                                                                     options: ["yes", "no"], recommended: "yes"),
+                                                  envelope: env(qe)),
+                         workspaceName: "Pilatus Workspace")
+        var t = TextMessage(id: td.id, from: pilatus, to: "phones", type: "text", createdAt: at, ticket: nil, body: TextBody(text: "Deploy now."))
+        t.envelope = env(te)
+        return ([q], [PhoneMessage(message: t, workspaceName: "Pilatus Workspace")])
+    }()
     /// Questions their workspace took back (id -> reason). Same rules as the relay: no more answers (409 taken_back).
     private var takenBack: [String: String] = [:]
     /// Test / evidence hook: the workspace takes the question back. `text` = false only closes it on the relay (the phone has not
@@ -362,7 +386,7 @@ actor MockRelay: RelayAPI {
                                               key: u.key, replyTo: u.replyTo),
                          workspaceName: u.workspaceName)
         }
-        let all = (received + sentMessages + updateTexts + generalReceipts).filter { !removed.contains($0.workspaceId) }
+        let all = (received + sentMessages + updateTexts + generalReceipts + Self.relayChanged.messages).filter { !removed.contains($0.workspaceId) }
             .sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
         var start = 0
         if let after {
