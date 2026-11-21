@@ -12,29 +12,25 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 [ -f "$HERE/repo" ] && { PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; unset BASH_ENV ENV CDPATH; }
 ME=$(id -u)
 REAL_HOME=$(getent passwd "$ME" | cut -d: -f6)
-# user services: every unit file in the runner user's own unit folder is a job's leftover (setup.sh puts none there)
 export XDG_RUNTIME_DIR="/run/user/$ME"
-if [ -d "$REAL_HOME/.config/systemd/user" ] && [ ! -L "$REAL_HOME/.config/systemd/user" ]; then
-  for f in "$REAL_HOME/.config/systemd/user"/*; do
-    [ -e "$f" ] || continue
-    u=$(basename "$f")
-    systemctl --user disable --now "$u" >/dev/null 2>&1
-  done
-  rm -rf "$REAL_HOME/.config/systemd/user"
+# User services, timers, sockets, overrides and the manager's environment: the job could have changed any of them, so
+# its unit and settings folders go, and then the user service manager is RESTARTED from the system side (the one
+# command setup.sh allows this user with sudo). That ends every user unit and starts the manager from scratch.
+for d in "$REAL_HOME/.config/systemd" "$REAL_HOME/.config/environment.d" "$REAL_HOME/.local/share/systemd"; do
+  [ -e "$d" ] || [ -L "$d" ] && rm -rf "$d"
+done
+if ! sudo -n /usr/bin/systemctl restart "user@$ME.service" 2>/dev/null; then
+  # not set up for it (an older setup.sh): stop what the user manager runs, as well as it can from inside
+  echo "edge runner: could not restart the user service manager; stopping its units one by one" >&2
+  rm -rf "$XDG_RUNTIME_DIR/systemd/user.control" "$XDG_RUNTIME_DIR/systemd/user" 2>/dev/null
   systemctl --user daemon-reload >/dev/null 2>&1
+  systemctl --user list-units --type=timer,path,socket,service,scope --state=active,activating,reloading,listening,waiting --plain --no-legend 2>/dev/null \
+    | awk '{print $1}' | while read -r u; do
+      case $u in (init.scope|"") continue;; esac
+      systemctl --user stop "$u" >/dev/null 2>&1
+    done
+  systemctl --user reset-failed >/dev/null 2>&1
 fi
-# transient units too (systemd-run --user ..., Restart=always would bring a killed process back) and timers, paths
-# and sockets that would start something later: every active user unit except the session bus
-rm -rf "$REAL_HOME/.local/share/systemd/user" 2>/dev/null
-# runtime overrides a job may have made (systemctl --user --runtime, set-property --runtime) go too
-rm -rf "$XDG_RUNTIME_DIR/systemd/user.control" "$XDG_RUNTIME_DIR/systemd/user" 2>/dev/null
-systemctl --user daemon-reload >/dev/null 2>&1
-systemctl --user list-units --type=timer,path,socket,service,scope --state=active,activating,reloading,listening,waiting --plain --no-legend 2>/dev/null \
-  | awk '{print $1}' | while read -r u; do
-    case $u in (dbus.socket|init.scope|"") continue;; esac
-    systemctl --user stop "$u" >/dev/null 2>&1
-  done
-systemctl --user reset-failed >/dev/null 2>&1
 # Every other process of this user is a leftover of the job (the user exists only for the runner): only the runner,
 # its user service manager and this hook's own ancestors stay.
 keep=" $$ "; p=$PPID

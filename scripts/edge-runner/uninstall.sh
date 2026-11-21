@@ -7,7 +7,7 @@
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "Run it as root: sudo bash $0" >&2; exit 1; }
 systemctl disable --now orch-edge-runner.service 2>/dev/null || true
-rm -f /etc/systemd/system/orch-edge-runner.service
+rm -f /etc/systemd/system/orch-edge-runner.service /etc/sudoers.d/orch-ci-runner
 uid=$(id -u orch-ci 2>/dev/null || true)
 [ -n "$uid" ] && rm -f "/etc/systemd/system/user-$uid.slice.d/orch-ci.conf" && rmdir "/etc/systemd/system/user-$uid.slice.d" 2>/dev/null || true
 systemctl daemon-reload

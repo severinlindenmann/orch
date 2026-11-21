@@ -248,6 +248,15 @@ def test_setup_refuses_anything_but_root_on_the_arm64_debian_test_server():
     assert "TOKEN" not in text.split("unset TOKEN")[1]  # the token is never kept or printed after registering
 
 
+def test_after_each_job_the_user_manager_restarts_and_only_that_command_is_allowed():
+    hook = (RUNNER / "job-completed.sh").read_text()
+    assert 'sudo -n /usr/bin/systemctl restart "user@$ME.service"' in hook
+    for d in (".config/systemd", ".config/environment.d", ".local/share/systemd"):
+        assert f'"$REAL_HOME/{d}"' in hook
+    setup = (RUNNER / "setup.sh").read_text()
+    assert "NOPASSWD: /usr/bin/systemctl restart user@%s.service" in setup and "visudo -cqf" in setup
+
+
 def test_scripts_parse():
     for f in RUNNER.glob("*.sh"):
         subprocess.run(["bash", "-n", str(f)], check=True)

@@ -71,6 +71,10 @@ loginctl enable-linger "$U"
 # no cron or at jobs for it: a job must not leave work that starts after it
 for f in /etc/cron.deny /etc/at.deny; do touch "$f"; grep -qx "$U" "$f" || echo "$U" >> "$f"; done
 crontab -r -u "$U" 2>/dev/null || true
+# after every job the clean-up hook restarts this user's own service manager: that one command, nothing else
+SUDO=/etc/sudoers.d/orch-ci-runner
+printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl restart user@%s.service\n' "$U" "$(id -u "$U")" > "$SUDO.new"
+chmod 0440 "$SUDO.new"; visudo -cqf "$SUDO.new" && mv -f "$SUDO.new" "$SUDO" || { rm -f "$SUDO.new"; echo "sudoers rule invalid; stopped." >&2; exit 1; }
 # user services a job starts (systemd --user) live outside the runner's own cap: give them one of their own, so the
 # runner (5 GB) and its user services (1.5 GB) together leave room for the test copies of relay, publish and hub
 mkdir -p "/etc/systemd/system/user-$(id -u "$U").slice.d"
