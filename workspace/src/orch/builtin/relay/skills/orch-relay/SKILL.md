@@ -1,6 +1,9 @@
 ---
 name: orch-relay
 description: "{{description}}"
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch relay
 

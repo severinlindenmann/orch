@@ -1,6 +1,9 @@
 ---
 name: orch-diagnose
 description: Find out why something went wrong in orch from a problem report or the live debug log, and answer with the cause, the evidence, a fix proposal and the check that would have caught it. Use when a person or ticket says "Investigate orch report <ref>", or when orch looks stuck, slow or broken. Not for normal ticket work.
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch diagnose: read a report, find the cause
 

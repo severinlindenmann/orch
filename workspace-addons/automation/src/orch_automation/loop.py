@@ -39,6 +39,7 @@ KINDS = (KIND,)
 TRY_AGAIN, LEAVE = "Try again", "Leave it"
 GENERAL_NOTE = "General conversation"  # `orch relay inbox` note of a phone text in General
 DOCTOR_EVERY = 60  # seconds between two asks for the scheduled health checks (core runs them every 15 min)
+SKILL_REVIEW_EVERY = 3600  # seconds between two looks at the skills' review-by dates (core, no AI)
 BUSY_TEXT = "More work arrived for this ticket: read the newest note on it."
 
 
@@ -260,6 +261,7 @@ class Scheduler:
         self.last_inbox: datetime | None = None
         self.last_reports: datetime | None = None
         self.last_doctor: datetime | None = None
+        self.last_skill_review: datetime | None = None
         self.wake = threading.Event()  # the listener sets it when something arrived
         self.watch: dict[str, dict] = {}  # tid -> {t0, at, log, hist} for runs started in the last moments
         self.last_start: dict = {}  # the last orchcli.run_start answer (its run id)
@@ -655,6 +657,7 @@ class Scheduler:
                 upd["next_run"] = fmt(nxt) if nxt else None
                 update_state(self.root, tid, **upd)
         self.doctor_soon(now)
+        self.skill_reviews(now)
         force = self.wake.is_set()
         self.wake.clear()
         if self._inbox_due(now, force):
@@ -712,6 +715,14 @@ class Scheduler:
             return
         self.last_doctor = now
         orchcli.call(self.root, "doctor", "soon", by=False)
+
+    def skill_reviews(self, now: datetime) -> None:
+        """A skill whose review-by date has passed gets a ticket for its owner (core `orch skill review-due`, no AI).
+        Once an hour; core opens one ticket per skill and date and starts no helper: it waits for a person."""
+        if self.last_skill_review and now - self.last_skill_review < timedelta(seconds=SKILL_REVIEW_EVERY):
+            return
+        self.last_skill_review = now
+        orchcli.call(self.root, "skill", "review-due", by=False)
 
     # -- relay inbox --------------------------------------------------------
     def _inbox_due(self, now: datetime, force: bool = False) -> bool:

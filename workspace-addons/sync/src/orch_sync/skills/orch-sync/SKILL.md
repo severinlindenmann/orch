@@ -1,6 +1,9 @@
 ---
 name: orch-sync
 description: Check or change how this computer keeps a private copy of the workspace's tickets with orch sync. Use when the person asks whether their tickets are backed up, or asks to turn the backup on or off. Not for sharing tickets with a team (not available yet) and not for the team code repository.
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch sync
 
