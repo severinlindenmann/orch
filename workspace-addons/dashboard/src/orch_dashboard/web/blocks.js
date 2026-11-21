@@ -409,11 +409,11 @@ const OrchBlocks = (() => {
   const dayOf = v => { const d = typeof v === 'string' ? parseDate(v) : null; return d ? dayLabel(d) : ''; };
   const waitLine = n => n > 0 ? el('p', 'trust-held', n === 1 ? '1 message waits for your Accept' : n + ' messages wait for your Accept') : null;
   function acceptForm(c, again) {
-    const risky = c.state === 'new_key';
+    const risky = c.state === 'new_key' || !!c.old_fingerprint;   // any key that is not the one accepted
     const f = el('form', 'trust-accept'); f.dataset.contactForm = c.id;
     const field = el('label', 'field'); field.append(el('span', '', 'Your own name for it (optional)'));
     const input = el('input', 'input'); input.name = 'name'; input.maxLength = 60; input.autocomplete = 'off';
-    input.value = risky ? '' : String(c.name); input.placeholder = risky ? 'A new name' : String(c.relay_name || c.name);
+    input.value = !risky && c.relay_name ? String(c.name) : ''; input.placeholder = risky ? 'A new name' : String(c.relay_name || c.name);
     field.append(input);
     const label = risky ? 'Accept as new contact' : again ? 'Accept again' : 'Accept';
     const b = el('button', 'btn sm ' + (risky ? 'outline' : 'primary'), label); b.type = 'submit';
@@ -422,6 +422,12 @@ const OrchBlocks = (() => {
     f.append(field, b);
     return f;
   }
+  function oldKey(c) {
+    if (!c.old_fingerprint) return [];
+    const old = el('p', 'meta trust-old'); old.append(c.state === 'changed' ? 'Before: ' : 'Old key, no longer used: ', fingerprint(c.old_fingerprint, 'sm'));
+    return [old];
+  }
+  const warnLine = c => c.state === 'new_key' || (c.old_fingerprint && c.state !== 'changed') ? [el('p', 'trust-warn', 'Only accept if they set up a new computer.')] : [];
   function checkLine(c) {
     return el('p', 'trust-check', 'Check that it matches the fingerprint ' + String(c.relay_name || c.name) + ' shows on its own Settings page.');
   }
@@ -432,12 +438,7 @@ const OrchBlocks = (() => {
     const sub = [KIND[c.kind] || 'Workspace']; if (c.relay_name) sub.push('Name on the relay: ' + c.relay_name);
     who.append(el('span', 'meta', sub.join(' · ')));
     head.append(who, trustPill(c.state)); card.append(head, el('p', '', t.text));
-    if (c.old_fingerprint && FPRINT.test(c.old_fingerprint)) {
-      const old = el('p', 'meta trust-old'); old.append(c.state === 'changed' ? 'Before: ' : 'Old key, no longer used: ', fingerprint(c.old_fingerprint, 'sm'));
-      card.append(old);
-    }
-    card.append(checkLine(c), fingerprint(c.fingerprint, 'lg'));
-    if (c.state === 'new_key') card.append(el('p', 'trust-warn', 'Only accept if they set up a new computer.'));
+    card.append(...oldKey(c), checkLine(c), fingerprint(c.fingerprint, 'lg'), ...warnLine(c));
     card.append(acceptForm(c, false));
     const w = waitLine(c.held); if (w) card.append(w);
     return card;
@@ -453,7 +454,7 @@ const OrchBlocks = (() => {
     const who = el('td', 'trust-cell'); who.dataset.label = 'Contact'; who.append(el('strong', '', c.name));
     const sub = [KIND[c.kind] || 'Workspace']; if (c.relay_name) sub.push('Name on the relay: ' + c.relay_name);
     who.append(el('span', 'meta', sub.join(' · ')));
-    const fp = el('td'); fp.dataset.label = 'Fingerprint'; fp.append(fingerprint(c.fingerprint, 'sm'));
+    const fp = el('td'); fp.dataset.label = 'Fingerprint'; fp.append(fingerprint(c.fingerprint, 'sm'), ...oldKey(c));
     const st = el('td', 'trust-cell'); st.dataset.label = 'State'; st.append(trustPill(c.state));
     const note = stateNote(c); if (note) st.append(el('span', 'meta', note));
     const act = el('td', 'trust-act');
@@ -463,14 +464,14 @@ const OrchBlocks = (() => {
       act.append(b);
     } else {   // Not valid or Withdrawn: the same check and Accept, one click to open it here
       const d = el('details', 'trust-again'), s = el('summary', 'btn outline sm', 'Check and accept again');
-      d.append(s, checkLine(c), acceptForm(c, true)); act.append(d);
+      d.append(s, checkLine(c), ...warnLine(c), acceptForm(c, true)); act.append(d);
     }
     tr.append(who, fp, st, act);
     return tr;
   }
   function drawContacts(b) {
     const items = arr(b.items).filter(c => c && PEER_ID.test(String(c.id)) && Object.prototype.hasOwnProperty.call(TRUST, c.state) && FPRINT.test(String(c.fingerprint)) && typeof c.name === 'string' && c.name)
-      .map(c => ({...c, held: Number.isInteger(c.held) && c.held > 0 ? c.held : 0, relay_name: typeof c.relay_name === 'string' && c.relay_name !== c.name ? c.relay_name : ''}));
+      .map(c => ({...c, old_fingerprint: FPRINT.test(String(c.old_fingerprint || '')) && c.old_fingerprint !== c.fingerprint ? c.old_fingerprint : '', held: Number.isInteger(c.held) && c.held > 0 ? c.held : 0, relay_name: typeof c.relay_name === 'string' && c.relay_name !== c.name ? c.relay_name : ''}));
     const asks = items.filter(c => TRUST[c.state].ask), others = items.filter(c => !TRUST[c.state].ask);
     const s = el('section', 'blk blk-above blk-contacts trust-layout');   // blk-above: no outer card around the cards
     const main = el('div', 'trust-asks');

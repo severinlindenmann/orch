@@ -203,21 +203,21 @@ def _trust_block(root: Path) -> dict | None:
         from orch import msgtrust, signkey
     except ImportError:
         return None
-    try:
+    try:  # an odd trust store or key file hides this block, never the whole Contacts page
         items = msgtrust.contacts(root)
         me = msgtrust.own_id(root)
-    except (Refused, OSError, ValueError, KeyError):
+    except Exception:  # noqa: BLE001
         return None
+    own = None
     try:
         raw = signkey.public_key(root)
-    except (Refused, OSError):
-        raw = None
-    own = None
-    if raw:
-        from orch import config
+        if raw:
+            from orch import config
 
-        name = config.workspace_name(root) or relay._shown_name(root, me, root.resolve().name)
-        own = {"name": plain(name, 60), "fingerprint": signkey.fingerprint(raw)}
+            name = config.workspace_name(root) or relay._shown_name(root, me, root.resolve().name)
+            own = {"name": plain(name, 60), "fingerprint": signkey.fingerprint(raw)}
+    except Exception:  # noqa: BLE001
+        own = None
     rows = []
     for c in items:
         state = str(c.get("state") or "")
@@ -235,7 +235,7 @@ def _trust_block(root: Path) -> dict | None:
         if relay_name and relay_name != row["name"]:
             row["relay_name"] = relay_name
         old = c.get("accepted_fingerprint")
-        if state in ("new_key", "changed") and old and old != row["fingerprint"]:
+        if old and old != row["fingerprint"]:  # any state: a swapped key is always shown (review, ORCH-1203)
             row["old_fingerprint"] = str(old)
         if state == "not_valid":
             row["refused"] = int(c.get("not_valid") or 0)

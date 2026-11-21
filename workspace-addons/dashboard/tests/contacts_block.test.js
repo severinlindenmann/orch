@@ -25,6 +25,7 @@ const block = {type: 'contacts', title: 'Contacts', own: {name: 'ORCH Developmen
   {id: 'ws_fernscout1', name: 'fernscout', kind: 'workspace', state: 'not_accepted', fingerprint: OLD, held: 2},
   {id: 'ws_severin001', name: 'Workspace Severin', relay_name: 'severin-main', kind: 'workspace', state: 'accepted', fingerprint: FP, held: 0, accepted_at: '2026-11-12T08:00:00Z'},
   {id: 'ws_market0001', name: 'Marketing', kind: 'workspace', state: 'not_valid', fingerprint: FP, held: 0, refused: 3},
+  {id: 'ws_swapped001', name: 'Sales', kind: 'workspace', state: 'withdrawn', fingerprint: FP, old_fingerprint: OLD, held: 0},
   {id: 'ws_bad', name: 'Wrong id', kind: 'workspace', state: 'accepted', fingerprint: FP, held: 0},
   {id: 'ws_badfp00001', name: 'Wrong fp', kind: 'workspace', state: 'accepted', fingerprint: '<img src=x>', held: 0},
   {id: 'ws_badstate01', name: 'Wrong state', kind: 'workspace', state: 'trusted', fingerprint: FP, held: 0},
@@ -43,7 +44,8 @@ test('the contacts that need an Accept come first, each with the check line, the
   const acc = fern.find(n => n.dataset.contactAccept)[0];
   assert.equal(acc.text, 'Accept'); assert.match(acc.className, /primary/);
   assert.equal(acc.dataset.fingerprint, OLD);
-  assert.equal(fern.find(n => n.tagName === 'INPUT')[0].value, 'fernscout');   // keep the relay's name or type your own
+  const name = fern.find(n => n.tagName === 'INPUT')[0];   // empty keeps the relay's name; it is never saved as your own
+  assert.equal(name.value, ''); assert.equal(name.placeholder, 'fernscout');
   assert.match(fern.textContent, /2 messages wait for your Accept/);
 });
 
@@ -61,7 +63,7 @@ test('a new key without the old one gets the careful Accept: outline, empty name
 test('every other contact is a table row: Accepted with Stop trusting, Not valid with Check and accept again', () => {
   const s = draw();
   const rows = s.find(n => n.tagName === 'TR' && n.dataset.contact);
-  assert.deepEqual(rows.map(r => r.dataset.contact), ['ws_severin001', 'ws_market0001']);
+  assert.deepEqual(rows.map(r => r.dataset.contact), ['ws_severin001', 'ws_market0001', 'ws_swapped001']);
   assert.match(rows[0].textContent, /Accepted/); assert.match(rows[0].textContent, /Name on the relay: severin-main/);
   assert.equal(rows[0].find(n => n.dataset.contactWithdraw)[0].text, 'Stop trusting');
   assert.match(rows[1].textContent, /Not valid/); assert.match(rows[1].textContent, /3 messages refused as forged or changed\./);
@@ -74,4 +76,21 @@ test('this workspace shows its own fingerprint with Copy; a wrong id, fingerprin
   assert.match(own.textContent, /This workspace/); assert.match(own.textContent, /ORCH Development/);
   assert.equal(own.find(n => n.dataset.copy)[0].dataset.copy, block.own.fingerprint);
   assert.doesNotMatch(s.textContent, /Wrong id|Wrong fp|Wrong state|img/);
+});
+
+test('a key swapped on a Withdrawn or Not valid contact shows the old key and the careful Accept', () => {
+  const r = draw().find(n => n.tagName === 'TR' && n.dataset.contact === 'ws_swapped001')[0];
+  assert.match(r.textContent, /Old key, no longer used: /);
+  assert.match(r.textContent, /Only accept if they set up a new computer\./);
+  const acc = r.find(n => n.dataset.contactAccept)[0];
+  assert.equal(acc.text, 'Accept as new contact'); assert.match(acc.className, /outline/);
+  assert.equal(r.find(n => n.tagName === 'INPUT')[0].value, '');
+  const plain = draw().find(n => n.tagName === 'TR' && n.dataset.contact === 'ws_market0001')[0];
+  assert.doesNotMatch(plain.textContent, /Old key|Only accept/);
+});
+
+test('your own earlier name for a contact is kept in the field', () => {
+  const sev = {...block.items[2], state: 'not_accepted'};
+  const c = B.render([{...block, items: [sev]}]).kids[0].find(n => n.tagName === 'INPUT')[0];
+  assert.equal(c.value, 'Workspace Severin');
 });

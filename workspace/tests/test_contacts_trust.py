@@ -122,3 +122,45 @@ def test_relay_view_text_lists_contacts_too(ws, run):
     code, out, err = run("relay", "view")
     assert code == 0, err
     assert f"Reports  {FP}  Not accepted yet" in out
+
+
+def test_a_swapped_key_shows_the_old_fingerprint_in_every_state(ws, rel, person):
+    """Review: Withdrawn and Not valid come before New key; a key swap must still show (old fingerprint)."""
+    from test_msgtrust import _dir_entry
+
+    from orch import relay
+
+    msgtrust.accept(ws, PEER, "human:tester", "cli", FP)
+    msgtrust.withdraw(ws, PEER, "human:tester", "cli")
+    rel.snapshot["workspaces"]["workspaces"][0] = _dir_entry(PEER, bytes.fromhex("44" * 32), "Reports")
+    relay.refresh(ws)
+    r = next(r for r in trust(ws)["items"] if r["id"] == PEER)
+    assert r["state"] == "withdrawn" and r["old_fingerprint"] == FP and r["fingerprint"] != FP
+
+
+def test_a_terminal_inside_a_helper_run_is_no_proof(ws, run, monkeypatch):
+    monkeypatch.setattr(ownerpick, "person_granted", lambda root, by: False)
+    monkeypatch.setattr(msgtrust, "_is_tty", lambda: True)
+    from orch import tickets
+
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    monkeypatch.setenv("ORCH_RUN", "r_123")
+    code, _, err = run("relay", "contacts", "accept", "--fingerprint", FP, "--by", "human:x", "--", PEER)
+    assert code == 2 and "Only a person" in err
+    assert next(r for r in trust(ws)["items"] if r["id"] == PEER)["state"] == "not_accepted"
+
+
+def test_a_broken_key_file_hides_only_the_own_fingerprint(ws, run, monkeypatch):
+    from orch import signkey
+
+    def broken(root):
+        raise ValueError("bad key file")
+
+    monkeypatch.setattr(signkey, "public_key", broken)
+    b = trust(ws)
+    assert "own" not in b and any(r["id"] == PEER for r in b["items"])
+    monkeypatch.setattr(msgtrust, "contacts", lambda root: [{"id": PEER}] + 1)  # a TypeError inside
+    v = relay_view.view(ws)
+    assert not any(x["type"] == "contacts" for x in v["blocks"]) and any(
+        x["type"] == "list" for x in v["blocks"]
+    )

@@ -767,6 +767,16 @@ def state_of(st: dict, peer: str, hint: bytes | None) -> str:
     return "accepted"
 
 
+def _kept_fp(c: dict) -> str | None:
+    """The fingerprint of the key a person accepted, kept while withdrawn or not valid (ORCH-1203: the page
+    still shows a key swap then)."""
+    try:
+        pub = bytes.fromhex(str((c.get("keys") or [{}])[0].get("pub") or ""))
+    except (ValueError, AttributeError):
+        return None
+    return msgsig.fingerprint(pub) if len(pub) == 32 else None
+
+
 def contacts(root: Path) -> list[dict]:
     """Every workspace and phone we know (directory + trust store): id, name, fingerprint (of the key the
     relay
@@ -797,7 +807,7 @@ def contacts(root: Path) -> list[dict]:
                 "accepted_at": keys[0].get("accepted_at"),
                 "withdrawn_at": (c.get("withdrawn") or {}).get("at"),
                 "fingerprint": msgsig.fingerprint(shown) if shown else None,
-                "accepted_fingerprint": msgsig.fingerprint(acc[0]) if acc else None,
+                "accepted_fingerprint": msgsig.fingerprint(acc[0]) if acc else _kept_fp(c),
                 "state": state_of(st, peer, hint),
                 "held": counts.get(peer, 0),
                 "not_valid": int((st["contacts"].get(peer) or {}).get("not_valid", 0)),
@@ -819,10 +829,17 @@ def require_person_via(what: str, root: Path | None = None, by: str | None = Non
     is the one-time grant the dashboard's signed-in page session hands this call (the Contacts page,
     ORCH-1203), or a terminal. The grant is always used up first, so no child inherits it. True = the
     dashboard's grant."""
-    from orch import ownerpick, tickets
+    import os
+
+    from orch import ownerpick, renew, tickets
 
     if root is not None and ownerpick.person_granted(root, by):
         return True
-    if tickets.agent_tool() is not None or (by or "").startswith("agent:") or not _is_tty():
+    if (
+        tickets.agent_tool() is not None
+        or (by or "").startswith("agent:")
+        or any(os.environ.get(k) for k in renew.RUN_MARKS)  # inside a helper run, a terminal is no proof
+        or not _is_tty()
+    ):
         raise Refused(f"Only a person can do this ({what}), on the Contacts page or at a terminal.")
     return False
