@@ -148,7 +148,11 @@ else:
 (fake / "orch").chmod(0o755)
 
 from orch_focus import areas  # noqa: E402
-from orch_focus.server import make_server  # noqa: E402
+from orch_focus.server import Handler, make_server  # noqa: E402
+
+# A fixture server with no page session (nobody could sign in): the test browser counts as signed in to READ.
+# The real servers need the sign-in for every data read (ORCH-481); this fixture only listens on 127.0.0.1.
+Handler._may_read = lambda self: True
 
 areas.add(ws, "Offsite", "offsite/")
 areas.add(ws, "Newsletter", "comms/")

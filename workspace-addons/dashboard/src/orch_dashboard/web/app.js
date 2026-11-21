@@ -73,6 +73,9 @@ const parse = value => {
 const date = value => window.UI?.stamp ? window.UI.stamp(value, {time:false}) : (parse(value)?.toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'}) || '');
 const time = value => window.UI?.stamp ? window.UI.stamp(value) : (parse(value)?.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) || '');
 let state, renderedRoute = '', fetching = false, writing = 0, serial = 0, mutation = 0;
+// Not signed in: every data read needs the sign-in (ORCH-481). The page then shows only the sign-in notice
+// (session.js) and stops asking; a sign-in link reloads the page.
+let signedOut = false;
 const now = () => parse(state?.now) || new Date();
 const today = () => {
   const d = now();
@@ -681,7 +684,7 @@ async function actAnswer(next) {
 let refreshAgain = false;
 let wantFull = false;  // the last delta did not fit the state held: ask for the whole state once
 async function refresh() {
-  if (snapshot) return;
+  if (snapshot || signedOut) return;
   if (fetching || writing) { refreshAgain = true; return; }
   fetching = true;
   refreshAgain = false;
@@ -693,6 +696,12 @@ async function refresh() {
     const have = state?.rev && !wantFull ? '?have=' + encodeURIComponent(state.rev) : '';
     wantFull = false;
     const res = await fetch('/api/state' + have, {cache:'no-store'});
+    if (res.status === 401) {  // no sign-in: not a lost connection, and no loading shapes that never fill
+      signedOut = true;
+      connection.hidden = true;
+      if (!state) main.replaceChildren();
+      return;
+    }
     if (!res.ok) throw new Error('Could not load the workspace.');
     serverBoot = res.headers?.get?.('X-Orch-Boot') || serverBoot;
     let next = await res.json();

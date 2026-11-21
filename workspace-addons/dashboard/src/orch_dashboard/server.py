@@ -135,6 +135,7 @@ PROXY = re.compile(r"/addon/([a-z][a-z0-9-]{1,31})(/(?:[A-Za-z0-9_./-]|%20)*)?")
 # that, and only when the add-on answers with its own sandbox Content-Security-Policy, which is then kept, not
 # replaced; any other answer to such a request is a 403.
 PAGE_PATH = re.compile(r"/page/t_[a-z0-9]{6,16}/[0-9a-f]{16}/.+")  # ticket, key (unguessable), file
+VIEW_KEYED = re.compile(r"/view/(t_[a-z0-9]{6,16})/k/([0-9a-f]{16})/(artifacts|evidence|files)/(.+)")
 LOCAL = re.compile(r"http://(?:127\.0\.0\.1|localhost):(\d{1,5})/?")
 PROXY_CSP = "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; frame-ancestors 'self'; base-uri 'none'"
 # The page of an add-on orch ships runs sandboxed too (ORCH-186): its own origin is opaque, so it can never read the
@@ -231,9 +232,15 @@ def _link_msg(session, name: str) -> bytes:
 
 # Ops that reinstall orch's tool env and so restart the running services, this server too (an add-on add/remove).
 RESTARTING_OPS = ("addon.set", "addon.uninstall")
-# What a browser that has not signed in may load under a host name that is not this computer's (a proxy in front):
-# the page shell only, no data. Everything else there needs the session cookie of that host name.
+# What a browser that has not signed in may load under any host name, this computer's own too (ORCH-481): the page
+# shell only, no data. Everything else needs the session cookie of that host name.
 _PRIVATE_PREFIXES = ("/api/", "/view/", "/addon/", "/page/", "/ready", "/styleguide")
+
+
+def _hide_keys(path: str) -> str:
+    """A path for the debug log without the unguessable key of a ticket page (/view/.../k/<key>/, /page/<t>/<key>/)."""
+    path = re.sub(r"(/view/t_[a-z0-9]{6,16}/k/)[0-9a-f]{16}", r"\1<hidden>", path)
+    return re.sub(r"(/page/t_[a-z0-9]{6,16}/)[0-9a-f]{16}", r"\1<hidden>", path)
 
 
 def _arm_resume(root: Path, session) -> None:
@@ -280,7 +287,9 @@ class Handler(BaseHTTPRequestHandler):
         diag.new_trace(self.headers.get("traceparent"))
         if self.path.startswith("/api/diag"):  # the page's own trail is not logged again as a request
             return
-        path = "/go/<hidden>" if self.path.startswith("/go/") else self.path.split("?", 1)[0][:200]
+        path = (
+            "/go/<hidden>" if self.path.startswith("/go/") else _hide_keys(self.path.split("?", 1)[0][:200])
+        )
         method = getattr(self, "command", "")
         self._req = (method, path, time.monotonic())
         diag.log("dashboard.request", "debug", method=method, path=path)
@@ -377,37 +386,47 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(view[at : at + WRITE_SLICE])
 
     def _host_ok(self, path: str = "/") -> bool:
-        """DNS-rebinding guard. This computer's names always pass. Any other well-formed name (a proxy in front,
-        another computer) passes with this server's session cookie, or for the page shell alone (no data):
-        after the sign-in it does not matter where the browser is."""
+        """DNS-rebinding guard and the sign-in for reads. Any well-formed host name passes with this server's
+        session cookie, or for the page shell alone (no data): after the sign-in it does not matter where the
+        browser is. This computer's own name is no sign-in either (ORCH-481, owner 18 Nov): ticket files are
+        private on disk, and any local user or process can reach 127.0.0.1, so every data read needs the cookie."""
         raw = (self.headers.get("Host") or "").strip().lower()
         host = raw.rsplit("]", 1)[0] + "]" if raw.startswith("[") else raw.split(":", 1)[0]
-        if host in ("127.0.0.1", "localhost", "[::1]") and not self._remote():
-            return True
-        try:
-            from orch_ui.origin import any_host_ok
-        except ImportError:
-            return False
-        if not any_host_ok(raw):
-            return False
+        local = host in ("127.0.0.1", "localhost", "[::1]") and not self._remote()
+        if not local:
+            try:
+                from orch_ui.origin import any_host_ok
+            except ImportError:
+                return False
+            if not any_host_ok(raw):
+                return False
         if self._signed_in() or getattr(self, "_frame", None) or self._frame_static(path):
             return True
+        if local and path == "/ready" and self.nonce:
+            return True  # orch's start/stop check: answered only with a proof of the start secret, no data
+        if local and path == "/api/session-state":
+            return True  # the sign-in chip's own state (signed in, view only, helper): no data, so it can say so
         # a sandboxed ticket page's own files: its origin is opaque, so the browser sends no cookie with them
         # (a cross-site load an attacker's page can show but never read); the page document itself needs one
         px = PROXY.fullmatch(path)
         if px and PAGE_PATH.fullmatch(px.group(2) or ""):  # an unguessable key in the address
             return True
-        if (
-            not self._remote()  # browser headers anyone can forge prove nothing on the port for other computers
-            and path.startswith("/view/")
-            and self.headers.get("Sec-Fetch-Site") in ("same-site", "cross-site")
-            and self.headers.get("Sec-Fetch-Dest") in ticketfiles.PAGE_SUBRESOURCE_DEST
-            and not path.lower().endswith((".html", ".htm"))
-        ):
+        kv = VIEW_KEYED.fullmatch(path)
+        if kv and not kv.group(4).lower().endswith((".html", ".htm")) and self._view_key_ok(kv):
+            # a ticket page's own files (never a page) by the unguessable key only a signed-in page was given
+            # (browser headers anyone can forge prove nothing, also on this computer: ORCH-481)
             return True
         return path == "/" or (
             not path.startswith(_PRIVATE_PREFIXES) and path.lower().endswith((*STATIC_EXT, ".html"))
         )
+
+    def _signin_tag(self) -> str:
+        """What ties a ticket page's key to the current sign-in: a new or ended sign-in changes it."""
+        session = getattr(self, "session", None)
+        return str(getattr(session, "cookie", "") or "") if session is not None else ""
+
+    def _view_key_ok(self, kv) -> bool:
+        return ticketfiles.view_key_ok(kv.group(1), kv.group(2), self._signin_tag())
 
     def _refuse_host(self):
         """The answer when _host_ok says no. A well-formed host name (a proxy, another computer) only lacks the
@@ -437,7 +456,8 @@ class Handler(BaseHTTPRequestHandler):
         return getattr(self.server, "page_port", None) or self.server.server_address[1]
 
     def _signed_in(self) -> bool:
-        """This server's session cookie (no page secret needed): enough to READ under any host name."""
+        """This server's session cookie (no page secret needed): enough to READ under any host name, this
+        computer's own name too; without it no data is read (ORCH-481)."""
         if getattr(self, "session", None) is None:  # a server without a page session: nobody signs in
             return False
         return self.session.cookie_ok(self.headers, self._page_port())
@@ -530,8 +550,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _frame_pass_post(self):
         """POST /api/frame-pass {"addon": name}: the dashboard page asks for a pass for the shipped add-on page
-        it is about to show. Only the dashboard page itself (same origin, never a frame); a signed-in page gets
-        a pass that acts, a page without sign-in on this computer a read-only one (it could read anyway)."""
+        it is about to show. Only the dashboard page itself (same origin, never a frame) and only after the sign-in:
+        with the page secret a pass that acts, with the session cookie alone a read-only one."""
         if getattr(self, "_frame", None) or self._frame_bad or self.headers.get(framepass.FRAME_HEADER):
             return self._send(403, b"forbidden", "text/plain")
         why = self._fence()
@@ -545,20 +565,17 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError
         except (ValueError, OSError):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        session = getattr(self, "session", None)
+        act = session is not None and session.can_act(self.headers, self._page_port())
+        if not (act or self._signed_in()):  # this computer's own address is no sign-in (ORCH-481)
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
         if not any(
             a["name"] == name and a.get("shipped") is True and a.get("page")
             for a in load_addons(self.root, self.orch_bin)
         ):
             return self._send(404, b"not found", "text/plain")
-        session = getattr(self, "session", None)
-        act = session is not None and session.can_act(self.headers, self._page_port())
-        raw = (self.headers.get("Host") or "").strip().lower()
-        host = raw.rsplit("]", 1)[0] + "]" if raw.startswith("[") else raw.split(":", 1)[0]
-        local_read = host in ("127.0.0.1", "localhost", "[::1]") and not self._remote()
-        if not (act or local_read or self._signed_in()):
-            from orch.pagesession import SIGNIN_MSG
-
-            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
         passes = getattr(self.server, "frame_passes", None)
         if passes is None:
             return self._send(503, b"Try again in a moment.", "text/plain")
@@ -649,6 +666,12 @@ class Handler(BaseHTTPRequestHandler):
             key = vouch_key(self.root, create=True)
             if key:
                 up[VOUCH_HEADER] = key
+        elif self._signed_in() or getattr(self, "_frame", None):  # signed in to read only: vouch for the read
+            from orch.pagesession import READ_VOUCH_HEADER, read_vouch_key
+
+            key = read_vouch_key(self.root, create=True)
+            if key:
+                up[READ_VOUCH_HEADER] = key
         body = None
         if method == "POST":
             if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
@@ -745,23 +768,33 @@ class Handler(BaseHTTPRequestHandler):
             if cross and not PAGE_PATH.fullmatch(px.group(2) or ""):
                 return self._send(403, b"forbidden", "text/plain")
             return self._proxy("GET", px.group(1), px.group(2) or "/", query, cross)
+        kv = VIEW_KEYED.fullmatch(path)
         pv = re.fullmatch(r"/view/(t_[a-z0-9]{6,16})/(artifacts|evidence|files)/(.+)", path)
         if (
-            pv
+            kv or pv
         ):  # a ticket's web page and its own assets, only ever inside a sandboxed frame (no cookie, no /api)
+            tid, kind, rest = (kv.group(1), kv.group(3), kv.group(4)) if kv else pv.groups()
+            if kv and not self._view_key_ok(kv):
+                return self._send(404, b"not found", "text/plain")
             site = self.headers.get("Sec-Fetch-Site")
             if site not in (None, "same-origin", "none"):
                 # The page itself and anything a script fetches must come from this app. Only a sandboxed page's own
                 # stylesheet, script, picture, font or media arrives as cross-site (its origin is opaque).
-                last = pv.group(3).rsplit(".", 1)[-1].lower()
+                last = rest.rsplit(".", 1)[-1].lower()
                 if self.headers.get("Sec-Fetch-Dest") not in ticketfiles.PAGE_SUBRESOURCE_DEST or last in (
                     "html",
                     "htm",
                 ):
                     return self._send(403, b"forbidden", "text/plain")
-            code, body, ctype, extra = ticketfiles.read_page(
-                self.root, pv.group(1), pv.group(2), unquote(pv.group(3))
-            )
+            if (
+                not kv
+            ):  # signed in (checked above): on to the address with the key, so the page's own files load
+                key = ticketfiles.view_key(tid, self._signin_tag())
+                where = f"/view/{tid}/k/{key}/{kind}/{rest}" + (f"?{query}" if query else "")
+                return self._send(
+                    302, b"", "text/plain", {"Location": where, "Referrer-Policy": "no-referrer"}
+                )
+            code, body, ctype, extra = ticketfiles.read_page(self.root, tid, kind, unquote(rest))
             return self._send(code, body, ctype, extra, csp=ticketfiles.PAGE_CSP)
         if path.startswith("/api/") and not (
             self._frame or self._same_origin()

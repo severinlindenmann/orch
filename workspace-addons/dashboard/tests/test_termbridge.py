@@ -422,7 +422,8 @@ def test_the_plain_terminal_is_found_by_its_session(tmp_path):
 def test_watching_needs_the_sign_in(helper, server):
     port = server(Person(False)).server_address[1]
     s = Stream(port)
-    assert s.resp.status == 403 and not termbridge._WATCHES
+    # 401: no sign-in reaches no data at all (ORCH-481); 403: the bridge itself refuses
+    assert s.resp.status in (401, 403) and not termbridge._WATCHES
 
 
 def test_a_page_that_joins_gets_the_modes_the_program_turned_on(helper, server):
