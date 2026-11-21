@@ -327,7 +327,8 @@ test('the pane shows the waiting question with its options and answers it there 
 });
 
 test('the waiting question shows once: the now line steps back while the question box shows it (ORCH-708)', () => {
-  assert.match(source, /liveAskFill\(askBox, body\.dataset\.liveBody\);\s*now\.hidden = !!askBox && !askBox\.hidden;/,
+  // ORCH-817 adds the idle note between the fill and the hide; the now line still steps back for the question box
+  assert.match(source, /liveAskFill\(askBox, body\.dataset\.liveBody\);[^]{0,300}?now\.hidden = \(?!!askBox && !askBox\.hidden\)?/,
     'the fill hides the now line after the question box is written');
 });
 
