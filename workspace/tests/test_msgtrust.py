@@ -451,7 +451,8 @@ def test_sent_by_a_person_is_marked_person(ws, rel):
     assert s["origin"] == "person"
 
 
-def test_without_a_key_messages_still_go_out_unsigned(ws, run, rel):
+def test_without_a_key_messages_still_go_out_unsigned(ws, run, rel, monkeypatch):
+    monkeypatch.setattr(signkey, "public_key", lambda root: None)  # a workspace with no key yet
     assert run("relay", "send", PEER, "hello")[0] == 0
     assert "envelope" not in rel.sent[-1]
 
@@ -730,3 +731,25 @@ def test_a_stale_author_signature_is_refused_not_held(ws, person):
     )
     v = msgtrust.gate(ws, _host_copy(m["envelope"], "Hi"))
     assert v.kind == "refused" and v.code == "too_old"
+
+
+def test_a_host_cannot_drop_or_bend_the_members_fields(ws, person):
+    accept(ws, PEER)
+    accept(ws, OTHER)
+    env = _author_env("Draft is ready")
+    # `origin` dropped while `by` still names the member
+    m = _host_copy(env, "Draft is ready")
+    body = {k: v for k, v in m["body"].items() if k != "origin"}
+    assert msgtrust.gate(ws, signed_msg(SEED_PEER, body=body, ticket="t_abc123")).code == "author_mismatch"
+    # `by` names someone else than the signed author
+    body = dict(_host_copy(env, "Draft is ready")["body"], by=PEER)
+    assert msgtrust.gate(ws, signed_msg(SEED_PEER, body=body, ticket="t_abc123")).code == "author_mismatch"
+    # "written by the person" added by the host to a helper's words
+    body = dict(_host_copy(_author_env("Draft is ready"), "Draft is ready")["body"], via="dashboard")
+    assert msgtrust.gate(ws, signed_msg(SEED_PEER, body=body, ticket="t_abc123")).code == "author_mismatch"
+    # a task status the member never sent
+    body = dict(
+        _host_copy(_author_env("Draft is ready"), "Draft is ready")["body"],
+        task={"delegate": "m_0000000000000abc", "ws": OTHER, "status": "done", "title": "x"},
+    )
+    assert msgtrust.gate(ws, signed_msg(SEED_PEER, body=body, ticket="t_abc123")).code == "author_mismatch"

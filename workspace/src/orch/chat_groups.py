@@ -3237,7 +3237,11 @@ def say_member(root: Path, host: str, gid: str, text: str, via: str = "helper") 
         if j is None or j["left"] or j["closed"]:
             raise Refused("That group is closed or not known here.")
         body = {"text": phone_view.redact(text)[:TEXT_MAX], "group": _wire_joined(j), "by": me, "via": via}
-        msg = _send(root, host, "text", body, j.get("ticket"))
+        from orch import msgtrust
+
+        # callers pass PERSON_VIA only after their own person check: signed as the person's words (ORCH-1202)
+        with msgtrust.as_person(via == tickets.PERSON_VIA):
+            msg = _send(root, host, "text", body, j.get("ticket"))
         _own_sent(j, msg)
     return msg or {"sent": False}
 

@@ -399,10 +399,19 @@ def _group_author(root: Path, st: dict, m: dict, now_ms: int) -> Verdict | None:
 
     b = m.get("body") or {}
     g = b.get("group") if isinstance(b.get("group"), dict) else None
-    o = b.get("origin") if isinstance(b.get("origin"), dict) else None
-    if g is None or o is None:
+    if g is None:
         return None
-    author, host = o.get("from"), m.get("from")
+    o = b.get("origin") if isinstance(b.get("origin"), dict) else None
+    host, by = m.get("from"), b.get("by")
+    # a copy that names a member as its author is that member's words: `by` and `origin.from` must agree, and
+    # a copy cannot drop `origin` to dodge the author check
+    if isinstance(by, str) and _WS.fullmatch(by) and by != host and (o is None or o.get("from") != by):
+        return _refuse(st, m, "author_mismatch", by)
+    if o is None:
+        return None
+    author = o.get("from")
+    if isinstance(author, str) and _WS.fullmatch(author) and author != host and by != author:
+        return _refuse(st, m, "author_mismatch", author)
     if not isinstance(author, str) or not _WS.fullmatch(author) or author == host:
         return None  # the host's own words (its signature is the outer one) or a phone's (relay-made today)
     env = b.get("author")
@@ -453,6 +462,30 @@ def _author_stale(s: dict, now_ms: int) -> str | None:
     return None
 
 
+def _author_fields_match(s: dict, b: dict, chat_groups) -> bool:
+    """The member's own fields the host passes on (`via`, `task`, `update`) come from its signed body."""
+    from orch import tickets
+
+    sb = s.get("body") or {}
+    if b.get("via") == tickets.PERSON_VIA and (
+        sb.get("via") != tickets.PERSON_VIA or s["origin"] != "person"
+    ):
+        return False  # "written by the person" only when the member signed it as its person's own words
+    t, st_ = b.get("task"), sb.get("task")
+    if t is not None:
+        if not isinstance(t, dict) or not isinstance(st_, dict):
+            return False
+        if any(t.get(k) != st_.get(k) for k in ("delegate", "status")):
+            return False
+    u, su = b.get("update"), sb.get("update")
+    if u is not None:
+        if not isinstance(u, dict) or not isinstance(su, dict) or u.get("kind") != su.get("kind"):
+            return False
+        if "title" in u and u["title"] != chat_groups._line(su.get("title") or "", chat_groups.TITLE_MAX):
+            return False
+    return True
+
+
 def _author_bound(s, m, host, author, g, o, chat_groups, phone_view) -> bool:
     sb = s.get("body") or {}
     sg = sb.get("group") if isinstance(sb.get("group"), dict) else {}
@@ -468,6 +501,7 @@ def _author_bound(s, m, host, author, g, o, chat_groups, phone_view) -> bool:
         and sg.get("id") == g.get("id")
         and author in members
         and (shown or "-") == (m.get("body") or {}).get("text")
+        and _author_fields_match(s, m.get("body") or {}, chat_groups)
     )
 
 
