@@ -323,3 +323,12 @@ def test_installed_hook_ignores_a_repository_named_by_the_job(tmp_path):
            "GITHUB_EVENT_NAME": "pull_request", "GITHUB_REF": "refs/pull/1/merge", "GITHUB_EVENT_PATH": str(ev)}
     r = subprocess.run(["bash", str(inst / "job-started.sh")], env=env, capture_output=True, text=True, timeout=30)
     assert r.returncode == 1 and "fork" in r.stderr
+
+
+def test_the_clean_up_hook_never_acts_as_a_person():
+    """It stops every other process of its user; run by a helper it would stop the helper's whole session."""
+    hook = (RUNNER / "job-completed.sh").read_text()
+    guard = hook.index('[ "$(id -un)" = orch-ci ] ||')
+    assert guard < hook.index("kill ") and guard < hook.index("trap ")
+    r = subprocess.run(["bash", str(RUNNER / "job-completed.sh")], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0 and "did nothing" in r.stderr
