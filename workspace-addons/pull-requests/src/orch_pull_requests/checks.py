@@ -216,7 +216,9 @@ def wake_text(gh, url: str, head: str, failed: list[dict], reran: list[str], roo
 # -- waking the helper -----------------------------------------------------------------------------------------
 def wake(root: Path, tid: str, text: str) -> str:
     """Give the text to the ticket's helper: a live one gets it as input, otherwise the helper is started with
-    it. Returns what came of it in plain words."""
+    it. Returns what came of it in plain words. With no free slot the ticket waits in line at high priority: a
+    pull request that cannot merge holds up everything behind it (ORCH-688: 57 of 88 wakes stood in line at
+    normal priority behind new work)."""
     from orch import runs, runs_live
 
     rec = runs.read(root, tid)
@@ -225,7 +227,9 @@ def wake(root: Path, tid: str, text: str) -> str:
         return "told the helper" if r.get("delivered") else "the helper gets it after its current step"
     runs.pending_add(root, tid, BY, "event", text, VIA)
     try:
-        r = runs.start(root, tid, runs_live.AUTOMATION_BY)
+        r = runs.start(
+            root, tid, runs_live.AUTOMATION_BY, priority="high"
+        )  # a blocked pull request jumps the line
     except runs.Busy:
         return "the helper waits in line for a free slot"
     except Exception as e:  # noqa: BLE001 - the reason goes into the history

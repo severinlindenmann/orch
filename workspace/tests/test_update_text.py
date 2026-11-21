@@ -448,6 +448,7 @@ def test_lock_times_out_with_a_clear_message(proj):
         th.join()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no SIGHUP")
 def test_restart_retries_once_and_restores_sighup(proj, tmp_path, monkeypatch):  # noqa: F811
     import signal
 
@@ -474,6 +475,7 @@ def test_restart_retries_once_and_restores_sighup(proj, tmp_path, monkeypatch): 
     assert lines == ["Restarted: dashboard (Pilatus)"]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no SIGHUP")
 def test_spawned_services_do_not_inherit_ignored_sighup():
     import signal
     import subprocess
@@ -534,6 +536,9 @@ def test_one_unverified_service_is_skipped_but_the_verified_sibling_restarts(pro
     assert any("focus (Pilatus) not restarted (can't verify)" in x for x in lines)
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="the same-user check uses ps and os.getuid; Windows keeps the add-on's own checks"
+)
 def test_other_users_process_is_not_verified(monkeypatch):
     monkeypatch.setattr(addons.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": "0\n"})())
     assert addons._same_user(1234) is False
@@ -587,8 +592,13 @@ def _with_env(f, rec):
     services.running = f.running
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the system home comes from the POSIX password database; Windows keeps the caller's HOME",
+)
 def test_update_with_a_test_home_starts_services_with_the_system_home(proj, tmp_path, monkeypatch):  # noqa: F811
     f = Fleet(tmp_path, monkeypatch)
+    monkeypatch.delenv("ORCH_HOME_STRICT", raising=False)  # a normal install, not a test one
     _with_env(f, {"HOME": _real_home(), "PATH": "/usr/bin:/bin"})
     other = tmp_path / "test-home"
     other.mkdir()
@@ -600,8 +610,13 @@ def test_update_with_a_test_home_starts_services_with_the_system_home(proj, tmp_
     assert "Restarted: dashboard (Pilatus), focus (Pilatus), dashboard (Rigi), focus (Rigi)" in lines
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the system home comes from the POSIX password database; Windows keeps the caller's HOME",
+)
 def test_a_recorded_path_or_login_folder_is_never_used(proj, tmp_path, monkeypatch):  # noqa: F811
     f = Fleet(tmp_path, monkeypatch)
+    monkeypatch.delenv("ORCH_HOME_STRICT", raising=False)  # a normal install, not a test one
     evil = tmp_path / "evil"
     evil.mkdir()
     rec = {
@@ -622,26 +637,57 @@ def test_a_recorded_path_or_login_folder_is_never_used(proj, tmp_path, monkeypat
             assert merged.get(k) != rec[k]
 
 
+def test_a_test_install_restarts_add_ons_with_the_callers_home(proj, tmp_path, monkeypatch):  # noqa: F811
+    """ORCH-1002: under ORCH_HOME_STRICT the restarted add-on keeps the test HOME, never the real one, and the
+    line names the HOME it used."""
+    f = Fleet(tmp_path, monkeypatch)
+    _with_env(f, {"HOME": "/some/other/home", "PATH": os.environ["PATH"]})
+    test_home = tmp_path / "test-home"
+    test_home.mkdir()
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    monkeypatch.setenv("HOME", str(test_home))
+    lines = addons._restart_updated()
+    assert f.envs["dashboard"] == {"ORCH_HOME": str(addons.home())}  # HOME is not overridden
+    assert launchenv_apply(f.envs["dashboard"])["HOME"] == str(test_home)  # the child gets the test HOME
+    text = "\n".join(lines)
+    assert f"restarted with HOME {test_home} (this terminal's) and this terminal's PATH" in text
+    assert "could not read this user's home folder" not in text
+    assert "Restarted: dashboard (Pilatus), focus (Pilatus), dashboard (Rigi), focus (Rigi)" in lines
+
+
 def launchenv_apply(over):
     from orch import launchenv
 
     return launchenv.apply(dict(os.environ), over)
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the system home comes from the POSIX password database; Windows keeps the caller's HOME",
+)
 def test_a_different_recorded_home_or_path_is_reported_once(proj, tmp_path, monkeypatch):  # noqa: F811
     f = Fleet(tmp_path, monkeypatch)
+    monkeypatch.delenv("ORCH_HOME_STRICT", raising=False)  # a normal install, not a test one
     _with_env(f, {"HOME": "/some/other/home", "PATH": "/old/path"})
     monkeypatch.setenv("PATH", "/caller/path")
     lines = "\n".join(addons._restart_updated())
-    assert "dashboard (Pilatus) started with a different HOME/PATH; restarted with this terminal's" in lines
+    assert (
+        f"dashboard (Pilatus) started with a different HOME/PATH; restarted with HOME {_real_home()} "
+        "(this user's home folder) and this terminal's PATH"
+    ) in lines
     _with_env(f, {"HOME": _real_home(), "PATH": "/caller/path"})
     assert "different" not in "\n".join(addons._restart_updated())  # same HOME and PATH: no line
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the system home comes from the POSIX password database; Windows keeps the caller's HOME",
+)
 def test_without_a_system_home_the_callers_home_is_kept_and_said(proj, tmp_path, monkeypatch):  # noqa: F811
     from orch import launchenv
 
     f = Fleet(tmp_path, monkeypatch)
+    monkeypatch.delenv("ORCH_HOME_STRICT", raising=False)  # a normal install, not a test one
     monkeypatch.setattr(launchenv, "user_home", lambda: None)
     lines = addons._restart_updated()
     assert "HOME" not in f.envs["dashboard"] and f.envs["dashboard"]["ORCH_HOME"] == str(addons.home())
@@ -695,10 +741,15 @@ def test_start_records_home_and_path_for_information_only(proj, monkeypatch):
     assert services.running()[0]["env"]["HOME"] == "/first/home"
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the system home comes from the POSIX password database; Windows keeps the caller's HOME",
+)
 def test_pwd_failure_note_is_said_once_per_workspace(proj, tmp_path, monkeypatch):  # noqa: F811
     from orch import launchenv
 
     Fleet(tmp_path, monkeypatch)
+    monkeypatch.delenv("ORCH_HOME_STRICT", raising=False)  # a normal install, not a test one
     monkeypatch.setattr(launchenv, "user_home", lambda: None)
     lines = addons._restart_updated()
     notes = [x for x in lines if "could not read this user's home folder" in x]
@@ -717,3 +768,17 @@ def test_a_running_services_old_record_is_cleaned_when_carried_forward(proj, mon
     services.running_path().write_text(json.dumps(entries))
     services.start(proj)  # the same pid is still running: its record stays, cleaned and size-limited
     assert services.running()[0]["env"] == {"HOME": "/h"}
+
+
+def test_no_github_answer_is_not_up_to_date(proj, run, source):  # noqa: F811
+    """The install ran but the commit lookup failed: say so, and forget the old release number."""
+    (addons.home() / "installed.json").write_text(json.dumps({"sha": A40, "release": 33}))
+    source["next"] = {"sha": None}
+    code, out, err = run("update")
+    out = _strip(out)
+    assert code == 0, err
+    assert "up to date" not in out
+    assert "could not be looked up" in out
+    saved = json.loads((addons.home() / "installed.json").read_text())
+    assert saved["sha"] is None and "release" not in saved
+    assert saved["pending"]["ref"] == "main" and isinstance(saved["pending"]["at"], int)

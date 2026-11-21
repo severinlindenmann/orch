@@ -137,12 +137,25 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("run.start", {"ticket": "t_abcdef", "agent": "--all"}),
         ("run.start", {"ticket": "t_abcdef", "agent": 5}),
         ("run.start", {"ticket": "t_abcdef", "model": "opus"}),
+        ("run.start", {"ticket": "t_abcdef", "prepare": "yes"}),
+        ("run.start", {"ticket": "t_abcdef", "prepare": True, "agent": "codex"}),  # ORCH-738: goes alone
+        ("run.start", {"ticket": "t_abcdef", "prepare": True, "fresh": True}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "../x"}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "-rf"}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "s-1", "fresh": True}),
         ("session.new", {"kind": "ticket"}),
         ("session.new", {"kind": "empty", "ticket": "t_abcdef"}),
         ("session.new", {}),
+        ("session.new", {"kind": "manager", "permissions": "root"}),
+        ("session.new", {"kind": "manager", "permissions": "--fresh"}),
+        ("session.new", {"kind": "terminal", "permissions": "auto"}),
+        ("session.new", {"kind": "chat", "model": "opus"}),  # ORCH-710: only the Empty helper takes a model
+        ("session.new", {"kind": "empty", "model": "auto"}),
+        ("session.new", {"kind": "empty", "model": "gpt"}),
+        ("session.end", {"kind": "ticket"}),
+        ("session.end", {"kind": "chat", "ticket": "t_abcdef"}),
+        ("run.interrupt", {"ticket": "nope"}),
+        ("run.interrupt", {"ticket": "t_abcdef", "kind": "chat"}),
         ("addon.start", {"name": "x"}),
         (
             "pull.merge",
@@ -308,6 +321,10 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             {"op": "run.start", "args": {"ticket": "t_abcdef", "fresh": True, "take_over": True}},
             ["run", "start", "t_abcdef", "--fresh", "--take-over", *common],
         ),
+        (  # ORCH-738: Save without starting only prepares the ticket
+            {"op": "run.start", "args": {"ticket": "t_abcdef", "prepare": True}},
+            ["run", "start", "t_abcdef", "--prepare", *common],
+        ),
         (  # ORCH-362: the Start choice's fresh start on the tool the person picked
             {"op": "run.start", "args": {"ticket": "t_abcdef", "fresh": True, "agent": "codex"}},
             ["run", "start", "t_abcdef", "--fresh", "--agent", "codex", *common],
@@ -318,7 +335,26 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         ),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
         ({"op": "session.new", "args": {"kind": "empty"}}, ["session", "new", "empty", *common]),
+        ({"op": "run.interrupt", "args": {"ticket": "t_abcdef"}}, ["run", "interrupt", "t_abcdef", *common]),
+        ({"op": "session.end", "args": {"kind": "manager"}}, ["session", "end", "manager", *common]),
+        ({"op": "session.end", "args": {"kind": "terminal"}}, ["session", "end", "terminal", *common]),
         ({"op": "session.new", "args": {"kind": "terminal"}}, ["session", "new", "terminal", *common]),
+        (  # ORCH-710: the Empty helper starts on the model the person picked in the New menu
+            {"op": "session.new", "args": {"kind": "empty", "model": "sonnet"}},
+            ["session", "new", "empty", "--model", "sonnet", *common],
+        ),
+        (  # ORCH-710 + ORCH-818: one start with both picks
+            {"op": "session.new", "args": {"kind": "empty", "model": "opus", "permissions": "auto"}},
+            ["session", "new", "empty", "--model", "opus", "--permission-mode", "auto", *common],
+        ),
+        (
+            {"op": "session.new", "args": {"kind": "manager", "permissions": "full"}},
+            ["session", "new", "manager", "--permission-mode", "full", *common],
+        ),
+        (
+            {"op": "session.new", "args": {"kind": "chat", "permissions": "edits"}},
+            ["session", "new", "chat", "--permission-mode", "edits", *common],
+        ),
         (
             {
                 "op": "pull.merge",
@@ -1602,6 +1638,27 @@ def test_attach_files_to_an_existing_ticket():
         )
 
 
+def test_a_voice_note_is_a_ticket_file_like_a_picture():
+    """ORCH-422: Send back and Add note bring a voice note recorded in the browser; the mirror of orch's list takes it."""
+    import base64
+
+    from orch import tickets
+
+    rec = b"\x1a\x45\xdf\xa3voice"
+    args = {
+        "ticket": "t_abcdef12",
+        "files": [{"name": "voice-note-0931.webm", "data": base64.b64encode(rec).decode()}],
+    }
+    assert actions.attachments("ticket.attach", args) == [("voice-note-0931.webm", rec)]
+    # the dashboard's early check names exactly what orch itself accepts
+    core = set(tickets.ATTACH_TEXT) | set(tickets.ATTACH_IMAGES) | set(tickets.ATTACH_AUDIO)
+    assert set(actions.ATTACH_EXT) == core
+    with pytest.raises(actions.BadRequest, match="voice recordings"):
+        actions.attachments(
+            "ticket.attach", {"ticket": "t_abcdef12", "files": [{"name": "clip.mov", "text": "x"}]}
+        )
+
+
 # --- Review page: review.answer ----------------------------------------------------------------------------
 D64 = "a" * 64
 
@@ -1825,3 +1882,15 @@ def test_check_move_argv_and_refusals():
     for bad in ({"after": "--x"}, {"after": None}, {"check": "bad"}, {"extra": 1}):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("check.move", {"ticket": "t_abcdef", "check": "c2", "after": "c3", **bad})
+
+
+def test_a_signed_in_start_hands_the_session_start_a_person_grant(tmp_path):
+    """ORCH-818: only a signed-in page session hands `session.new` the one-time grant that lets the core raise a
+    session's permission mode; without a session there is no grant (the core then refuses a raise)."""
+    from orch_dashboard import actions
+
+    assert "session.new" in actions.SESSION_GRANT_OPS
+    root = tmp_path / "ws"
+    (root / ".orch").mkdir(parents=True)
+    env, fds = actions._person_env(root, "orch", "session.new", False)
+    assert fds == () and not any(k.startswith("ORCH_PERSON_GRANT") for k in env)

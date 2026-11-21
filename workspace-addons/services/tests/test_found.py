@@ -30,6 +30,13 @@ if tool == "launchctl":
     verb = args[0]
     if verb == "print" and args[1].count("/") == 1:
         sys.exit(0)
+    if verb == "print-disabled":  # like launchd: one line per label that was ever enabled or disabled
+        out("\tdisabled services = {{\n")
+        for n, j in st["launchd"].items():
+            if "disabled" in j:
+                out('\t\t"%s" => %s\n' % (n, "disabled" if j["disabled"] else "enabled"))
+        out("\t}}\n")
+        sys.exit(0)
     target = args[-1]
     label = target.split("/", 2)[-1]
     jobs = st["launchd"]
@@ -43,7 +50,8 @@ if tool == "launchctl":
     elif verb == "bootstrap":
         d = plistlib.loads(Path(target).read_bytes())
         j = jobs.setdefault(d["Label"], {{}})
-        j.update(loaded=True, running=True, pid=j.get("pid", 5000) + 1)
+        run = bool(d.get("RunAtLoad") or d.get("KeepAlive"))  # like launchd: loading alone starts nothing
+        j.update(loaded=True, running=run, pid=j.get("pid", 5000) + 1)
     elif verb == "bootout":
         jobs.get(label, {{}}).update(loaded=False, running=False)
     elif verb == "kickstart":
@@ -138,6 +146,10 @@ def tools(tmp_path, monkeypatch, ws):
 
 
 def _platform(monkeypatch, name):
+    # The secret scan imports urllib.request (phone_view -> net) on first use; imported under a faked darwin on
+    # Linux it fails on _scproxy and the scan fails closed (every name masked). Import it on the real platform.
+    import orch.phone_view  # noqa: F401
+
     from orch_services import drivers
     from orch_services.drivers.launchd import Launchd
     from orch_services.drivers.systemd import Systemd
@@ -266,13 +278,14 @@ def test_found_on_linux_keeps_only_the_persons_own_units(cli, linux, tools, monk
     code, out = jrun(cli, "found")
     assert code == 0, out
     items = {i["id"]: i for i in out["found"]}
-    assert set(items) == {"systemd:notes-sync.service", "process:900"}
+    assert set(items) == {"systemd:notes-sync.service"}  # a plain program is no item (ORCH-622)
+    assert out["others"] == 1  # server.js: counted, not listed
     unit = items["systemd:notes-sync.service"]
     assert unit["name"] == "notes-sync" and unit["what"] == "Keeps my notes in sync" and unit["auto"] is True
     assert unit["since"] == "2026-11-17T16:19:15Z" and unit["how"]["unit"] == "notes-sync.service"
-    proc_item = items["process:900"]
-    assert proc_item["name"] == "server.js" and proc_item["how"] == {"kind": "process", "pid": 900}
-    assert proc_item["command"][-1] == "••••••" and TOKEN not in json.dumps(out)
+    assert TOKEN not in json.dumps(out)
+    code, text, _ = cli("found")
+    assert "1 other program runs here." in text and "server.js" not in text
 
 
 def test_on_a_mac_processes_come_from_lsof_and_are_skipped_without_it(
@@ -283,11 +296,11 @@ def test_on_a_mac_processes_come_from_lsof_and_are_skipped_without_it(
         lsof={"950": str(ws)},
     )
     _code, out = jrun(cli, "found")
-    assert "process:950" in {i["id"] for i in out["found"]}
+    assert "process:950" not in {i["id"] for i in out["found"]} and out["others"] == 1
     (tmp_path / "bin" / "lsof").unlink()
     monkeypatch.setattr("orch_services.found.LSOF", str(tmp_path / "no-lsof"))
     _code, out = jrun(cli, "found")
-    assert "process:950" not in {i["id"] for i in out["found"]}
+    assert "others" not in out
 
 
 def test_found_and_list_never_write_or_change_anything(cli, mac, tools, ws):
@@ -299,7 +312,7 @@ def test_found_and_list_never_write_or_change_anything(cli, mac, tools, ws):
         cli(*argv, "--json")
     assert _tree(Path.home(), ws) == before
     verbs = {c[1] for c in tools.calls("launchctl")}
-    assert verbs <= {"print"}, verbs
+    assert verbs <= {"print", "print-disabled"}, verbs
     assert not (ws / ".orch" / "addons").exists()
 
 
@@ -323,7 +336,7 @@ def test_adopt_on_a_mac_manages_the_job_without_touching_it(cli, mac, tools, ws)
     assert code == 0, out
     assert out["service"]["id"] == "web-preview" and out["service"]["state"] == "running"
     assert "not moved, changed or restarted" in out["next"]
-    assert {c[1] for c in tools.calls("launchctl")} <= {"print"}  # adopt itself only reads
+    assert {c[1] for c in tools.calls("launchctl")} <= {"print", "print-disabled"}  # adopt itself only reads
     assert mac["web"].read_bytes() == plist_before
     rec = json.loads((ws / ".orch/addons/services/services/web-preview.json").read_text(encoding="utf-8"))
     assert not [e.message for e in validator(SCHEMA).iter_errors(rec)]
@@ -387,6 +400,47 @@ def test_adopt_on_linux_and_log_from_the_journal(cli, linux, tools, ws):
     assert jrun(cli, "remove", "notes-sync")[1]["forgotten"] is True and unit_file.read_bytes() == before
 
 
+def test_a_job_switched_off_in_launchd_does_not_start_by_itself(cli, mac, tools, ws):
+    """ORCH-1003: RunAtLoad says yes, but `launchctl disable` keeps launchd from loading it at login."""
+    tools.set(
+        launchd={"com.example.web-preview": {"loaded": True, "running": True, "pid": 4321, "disabled": True}}
+    )
+    web = next(i for i in jrun(cli, "found")[1]["found"] if i["id"] == "launchd:com.example.web-preview")
+    assert web["auto"] is False
+    code, out = jrun(cli, "adopt", "launchd:com.example.web-preview")
+    assert code == 0 and out["service"]["auto"] is False
+    assert jrun(cli, "list")[1]["services"][0]["auto"] is False
+    # switched on again in launchd: RunAtLoad counts again
+    jrun(cli, "remove", "web-preview")
+    tools.set(
+        launchd={"com.example.web-preview": {"loaded": True, "running": True, "pid": 4321, "disabled": False}}
+    )
+    web = next(i for i in jrun(cli, "found")[1]["found"] if i["id"] == "launchd:com.example.web-preview")
+    assert web["auto"] is True
+
+
+def test_an_adopted_job_switched_off_later_shows_as_not_starting_by_itself(cli, mac, tools, ws):
+    assert jrun(cli, "adopt", "launchd:com.example.web-preview")[1]["service"]["auto"] is True
+    st = tools.read()
+    st["launchd"]["com.example.web-preview"]["disabled"] = True  # launchctl disable outside orch
+    tools.set(launchd=st["launchd"])
+    assert jrun(cli, "list")[1]["services"][0]["auto"] is False
+    # auto on in orch switches the label on again
+    code, out = jrun(cli, "auto", "web-preview", "on")
+    assert code == 0 and out["service"]["auto"] is True
+    assert ["launchctl", "enable", f"gui/{os.getuid()}/com.example.web-preview"] in tools.calls()
+
+
+def test_disabled_labels_reads_both_forms_of_print_disabled():
+    from orch_services.drivers.launchd import disabled_labels
+
+    new = '\tdisabled services = {\n\t\t"a.off" => disabled\n\t\t"a.on" => enabled\n\t}\n'
+    old = 'disabled services = {\n\t"b.off" => true\n\t"b.on" => false\n}\n'
+    assert disabled_labels(new) == {"a.off"}
+    assert disabled_labels(old) == {"b.off"}
+    assert disabled_labels("") == set()
+
+
 def test_adopt_names_ids_and_refusals(cli, mac, tools, ws):
     code, out = jrun(cli, "adopt", "launchd:com.example.backup", "--name", "Nightly backup")
     assert (
@@ -410,7 +464,7 @@ def test_a_bare_process_is_never_adopted_or_stopped(cli, mac, tools, ws):
     assert code == 2 and "orch services add" in out["error"] and "stop it yourself" in out["error"]
     assert TOKEN not in out["error"]
     assert not (ws / ".orch/addons/services/services").exists()
-    assert {c[1] for c in tools.calls("launchctl")} <= {"print"}
+    assert {c[1] for c in tools.calls("launchctl")} <= {"print", "print-disabled"}
 
 
 def test_a_ticket_key_resolves_even_when_the_core_cannot_be_asked(ws, monkeypatch):
@@ -424,3 +478,72 @@ def test_a_ticket_key_resolves_even_when_the_core_cannot_be_asked(ws, monkeypatc
 
     monkeypatch.setattr(tickets, "resolve", broken)
     assert cli._ticket_key(ws, "dm1-12") == "DM1-12"
+
+
+def test_adopt_refuses_a_name_with_a_secret_and_found_masks_names_and_descriptions(cli, linux, tools, ws):
+    # review ORCH-378: adopt saved --name without the secret check add has; a unit description was shown as is
+    st = tools.read()
+    st["systemd"]["notes-sync.service"]["desc"] = f"Sync with key {TOKEN}"
+    tools.set(systemd=st["systemd"])
+    code, out = jrun(cli, "found")
+    assert code == 0 and TOKEN not in json.dumps(out)
+    assert out["found"][0]["what"] == "••••••"
+    code, out = jrun(cli, "adopt", "systemd:notes-sync.service", "--name", f"Notes {TOKEN}")
+    assert code == 2 and "secret" in out["error"] and TOKEN not in json.dumps(out)
+    assert not (ws / ".orch/addons/services/services").is_dir() or not list(
+        (ws / ".orch/addons/services/services").iterdir()
+    )
+
+
+def test_adopt_takes_the_page_id_of_a_found_job_with_capitals(cli, mac, tools, ws):
+    # review ORCH-378: the page gives a label with capitals a hashed id; Manage with orch must still find the job
+    from orch_services.found import page_id
+    from orch_services.view import build
+
+    mac["agents"].joinpath("ch.Example.Forwarder.plist").write_bytes(
+        plistlib.dumps({"Label": "ch.Example.Forwarder", "ProgramArguments": ["/usr/local/bin/fwd"]})
+    )
+    found = jrun(cli, "found")[1]["found"]
+    view = build(ws, ([], 0, None), found=found)
+    vid = page_id("launchd:ch.Example.Forwarder")
+    items = {i["id"]: i for i in view["blocks"][0]["groups"][-1]["items"]}
+    fwd = items[vid]
+    assert fwd["id"] == vid and vid.startswith("found-")
+    assert fwd["panel"]["buttons"][0]["action"]["args"] == {"verb": "adopt", "target": vid}
+    code, out = jrun(cli, "act", "adopt", "--", vid)
+    assert code == 0, out
+    rec = json.loads((ws / ".orch/addons/services/services" / f"{out['service']['id']}.json").read_text())
+    assert rec["adopted"]["entry"] == "ch.Example.Forwarder"
+    code, out = jrun(cli, "adopt", "found-000000000000")
+    assert code == 2 and "no found service" in out["error"]
+
+
+def test_start_on_a_taken_over_job_without_run_at_load_really_runs_it(cli, mac, tools, ws):
+    # ORCH-371 bug 3: bootstrap only loads such a job; start answered "did not stay running"
+    assert jrun(cli, "adopt", "launchd:com.example.backup")[0] == 0
+    target = f"gui/{os.getuid()}/com.example.backup"
+    tools.clear()
+    code, out = jrun(cli, "start", "backup")
+    assert code == 0 and out["service"]["state"] == "running", out
+    assert ["launchctl", "kickstart", target] in tools.calls()
+
+
+def test_orchs_own_background_pages_are_never_found(cli, mac, tools, ws):
+    # ORCH-371 bug 2: orch starts its pages as `Python -P -m orch_dashboard ...` (macOS framework Python)
+    py = "/opt/homebrew/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
+    tools.set(
+        ps=[
+            {
+                "pid": 960,
+                "ppid": 1,
+                "tty": "??",
+                "argv": [py, "-P", "-m", "orch_dashboard", "--dir", str(ws)],
+            },
+            {"pid": 961, "ppid": 1, "tty": "??", "argv": [py, "-P", "-m", "orch_automation", "run"]},
+            {"pid": 962, "ppid": 1, "tty": "??", "argv": [py, "-P", "watcher.py"]},
+        ],
+        lsof={"960": str(ws), "961": str(ws), "962": str(ws)},
+    )
+    out = jrun(cli, "found")[1]
+    assert out["found"] == [] or all(not i["id"].startswith("process:") for i in out["found"])
+    assert out["others"] == 1  # only watcher.py; orch's own pages are not counted

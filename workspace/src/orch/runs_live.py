@@ -5,8 +5,9 @@
 orch owns that tmux server (own socket), so a person's own tmux is never touched. The claim's pid is the pane
 process (the wrapper). Input waits in the pending file and is pasted (bracketed paste, then a separate Enter)
 only when the agent says it is idle (the wrapper then checks that it was submitted: watch_submit): the tool's
-own hooks call `orch run event --kind idle`, a generic agent calls
-`orch run done`. Any number of live sessions per workspace, unless Settings > Helper > Helpers at
+own hooks call `orch run event --kind idle` (also when an error such as a usage limit or a login that changed
+ended the turn: the tool then fires its failure hook instead of the normal one, ORCH-689), a generic agent
+calls `orch run done`. Any number of live sessions per workspace, unless Settings > Helper > Helpers at
 once (workspace.live_max) sets a limit; then a start waits in line for a slot. A session idle (or
 waiting for a person) for an hour (workspace.live_idle_minutes; 10 minutes once the ticket is in Review,
 Done or Dropped, and such a session does not count toward the limit, nor does one idle while it only waits for
@@ -167,6 +168,23 @@ def _only_waits_for_checks(rec: dict) -> bool:
     return False
 
 
+def _waits_on_time_or_work(root: Path, rec: dict) -> bool:
+    """Idle at its prompt on a ticket that waits for a time, another ticket or something outside (a pull
+    request, the merge queue): the ticket wakes by its timer or the verdict, the session does nothing and
+    uses no machine, so it does not hold a slot. A wait on a question or a start that failed still counts."""
+    if (rec.get("live") or {}).get("state") != "idle":
+        return False
+    with contextlib.suppress(Exception):
+        t = tickets.load(root, rec["ticket"])
+        w = t.get("waiting_on") or {}
+        return (
+            t.get("status") == "waiting"
+            and w.get("kind") in ("time", "ticket", "external")
+            and not w.get("start")
+        )
+    return False
+
+
 def _runs_check_wait(rec: dict) -> bool:
     """The agent runs a wait on pull request checks (orch ref wait, orch github wait) right now. The tool
     says idle once it put the wait in the background and ended its turn, but the wait still merges on green
@@ -191,14 +209,16 @@ def _keeps_busy(root: Path, rec: dict) -> bool:
 def live_alive(root: Path) -> list[dict]:
     """Live runs that count against the limit. A session that is idle or waiting for a person on a ticket in
     Review, Done or Dropped does not (it closes by itself after FINISHED_IDLE_SECONDS), nor does one idle
-    while it only waits for pull request checks; a working or starting one does. Both stay under the
-    hard ceiling in _full (the limit plus HARD_EXTRA)."""
+    while it only waits for pull request checks, nor one idle on a ticket that waits for a time, another
+    ticket or something outside (ORCH-666); a working or starting one does. Both stay under the hard ceiling
+    in _full (the limit plus HARD_EXTRA)."""
     return [
         r
         for r in live_all(root)
         if not (
             ((r.get("live") or {}).get("state") in ("idle", "attention") and _finished(root, r["ticket"]))
             or _only_waits_for_checks(r)
+            or _waits_on_time_or_work(root, r)
         )
     ]
 
@@ -339,21 +359,34 @@ def busy_words(n: int, ticket: str) -> str:
 PRIORITIES = ("high", "normal", "low")  # the order tickets waiting in line start in (then oldest first)
 
 
-def _queue_for_slot(root: Path, tid: str, by: str, text: str, priority: str = "normal") -> None:
-    """Put the ticket in line for a free slot. Queued again: the line keeps one place, the higher priority."""
+def _queue_for_slot(
+    root: Path, tid: str, by: str, text: str, priority: str = "normal", prepare: bool = False
+) -> None:
+    """Put the ticket in line for a free slot. Queued again: the line keeps one place, the higher priority.
+    prepare: the place is for a prepare-only run (ORCH-738); a real start queued meanwhile makes it one for
+    the work (a person's Start always wins over Prepare)."""
     with runs.locked(root, tid):
         items = runs._pending_read(root, tid)
         mine = [i for i in items if i.get("via") == "slots" and not i.get("delivered_at")]
         want = PRIORITIES.index(priority)
+        made = False
         if mine:
             want = min([_rank(i) for i in mine] + [want])  # queued again: never lower
         else:
             item = runs._pending_add_locked(root, tid, by, "event", text, "slots", None)
             items = runs._pending_read(root, tid)
             mine = [i for i in items if i["id"] == item["id"]]
-        if any(_rank(i) != want or (want != 1 and "priority" not in i) for i in mine):
-            for i in mine:
-                i["priority"] = PRIORITIES[want]
+            made = True
+        changed = False
+        for i in mine:
+            if made and prepare and not i.get("prepare"):
+                i["prepare"], changed = True, True
+            elif not prepare and i.get("prepare"):
+                i.pop("prepare")
+                changed = True
+            if _rank(i) != want or (want != 1 and "priority" not in i):
+                i["priority"], changed = PRIORITIES[want], True
+        if changed:
             runs._pending_write(root, tid, items)
 
 
@@ -372,10 +405,12 @@ def start_live(
     take_over: bool,
     busy_text: str,
     priority: str = "normal",
+    over_limit: bool = False,
 ) -> dict:
     cur = runs.read(root, tid)
     mine = cur is not None and runs.state(cur) == "alive"
-    hit = None if mine or tickets.is_manager(root, tid) else _full(root)  # the Manager never waits in line
+    # the Manager and an urgent start (red develop, ORCH-699) never wait in line
+    hit = None if mine or over_limit or tickets.is_manager(root, tid) else _full(root)
     held = None if (mine or hit) else _held(root, by)
     if held:
         _queue_for_slot(root, tid, by, busy_text, priority)
@@ -418,6 +453,8 @@ def start_live(
         r = tmux(
             root, "new-session", "-d", "-P", "-F", "#{pane_pid}", "-x", "200", "-y", "50",
             "-s", tid, "-c", str(work), "-e", f"ORCH_ROOT={root}", "--", *cmd,
+            # ORCH-707: orch's own server passes focus events on, so the tool shows no tmux tip about it
+            ";", "set-option", "-g", "focus-events", "on",
         )  # fmt: skip
         if r.returncode != 0:
             raise Refused(f"tmux could not start the session: {r.stderr.strip() or 'unknown error'}")
@@ -426,6 +463,7 @@ def start_live(
             tmux={"socket": socket_name(root), "session": tid},
             live={"state": "starting", "since": tickets.now()},
         )  # fmt: skip
+        runs.set_process_fields(root, tid, run, permissions=p.get("permissions"))  # ORCH-818: the pane header
     except BaseException:
         runs.release(root, tid, run)
         hooks_path.unlink(missing_ok=True)
@@ -1533,6 +1571,23 @@ def stop(root: Path, tid: str, hold: bool = False) -> bool:
     return True
 
 
+def interrupt(root: Path, tid: str) -> bool:
+    """Stop only the current step of a live session (`orch run interrupt`, Stop in Focus, ORCH-817): the
+    tool's own interrupt keys go in once; the session, its claim and its conversation stay, and the helper
+    waits for the next message. False when no live session is on. A tool with no interrupt keys is refused."""
+    rec = runs.read(root, tid)
+    if not rec or rec.get("mode") != "live" or not session_exists(root, tid):
+        return False
+    keys = adapters.load(rec["agent"], root).get("live", {}).get("interrupt_keys") or []
+    if not keys:
+        raise Refused(
+            "This helper's tool has no key that stops one step. End the session instead: orch run stop."
+        )
+    for k in keys:
+        tmux(root, "send-keys", "-t", target(tid), k)
+    return True
+
+
 def stop_hidden(root: Path) -> list[str]:
     """`orch stop`: also end the live sessions a person can not see in the ticket list: the hidden Chat
     (General) ticket's and those of tickets with waiting input (run/pending). Only an exact session name of
@@ -1834,8 +1889,12 @@ def start_waiting(root: Path) -> list[str]:
             continue
         if _status(root, tid) in ("done", "dropped"):
             continue  # a Done ticket never gets a run by itself (ORCH-247); the person starts it by hand
+        prepare = all(i.get("prepare") for i in items)  # Save without starting (ORCH-738)
         with contextlib.suppress(Exception):
-            runs.start(root, tid, items[0]["by"], mode="live")
+            if prepare:
+                runs.start(root, tid, items[0]["by"], prepare=True)
+            else:
+                runs.start(root, tid, items[0]["by"], mode="live")
             started.append(tid)
     return started
 

@@ -21,9 +21,15 @@ def _epoch(at) -> float | None:
         return None
 
 
+def _by(actors) -> str:
+    """The caller, so the person sees who keeps writing (ORCH-418: agent:pull-requests on closed tickets)."""
+    return f", by {', '.join(sorted(actors))}" if actors else ""
+
+
 def check(snap):
     since = snap["now"] - RECENT_S
     seen = Counter()
+    who: dict = {}
     for e in snap["events"]:
         if e.get("ev") != "ticket.op_refused":
             continue
@@ -32,9 +38,13 @@ def check(snap):
         at = _epoch(e.get("at"))
         if guard in NOT_COUNTED or at is None or at < since:
             continue
-        seen[(e.get("ticket"), kv.get("op"), guard)] += 1
+        key = (e.get("ticket"), kv.get("op"), guard)
+        seen[key] += 1
+        if kv.get("actor"):
+            who.setdefault(key, set()).add(str(kv["actor"]))
     bad = [
         f"{t}{'' if op in (None, 'op') else ' ' + op}: refused {n}x in the last hour (guard {g})"
+        + _by(who.get((t, op, g)))
         for (t, op, g), n in seen.items()
         if n >= TIMES
     ]

@@ -4,6 +4,7 @@ Also the automatic update (off until a person turns it on): a background thread 
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from pathlib import Path
@@ -17,6 +18,13 @@ except ImportError:  # standalone use without orch: nothing runs
 
 
 BUILDS = ("release", "development")
+_RELEASE_NO = re.compile(
+    r"[1-9][0-9]{0,5}(?:\.[1-9][0-9]{0,3})?"
+)  # 33, or 33.1 (a fix release)  # "Go back to release N" (the card after a failed self-check)
+
+
+def target_ok(to) -> bool:
+    return to is None or to in BUILDS or (isinstance(to, str) and bool(_RELEASE_NO.fullmatch(to)))
 
 
 def start_update(
@@ -27,8 +35,8 @@ def start_update(
     without a page session is refused by the caller before this runs."""
     if pagelaunch is None:
         return 503, "Updating is not available in this install."
-    if to is not None and to not in BUILDS:
-        return 400, "Choose release or development build."
+    if not target_ok(to):
+        return 400, "Choose release, development build or a release number."
     if session is not None:
         pagelaunch.write_resume_cookie(root, session.server, session.cookie, session.secret)
     try:
@@ -152,6 +160,25 @@ def dismiss_auto_note() -> None:
         pass
 
 
+def check_card() -> dict | None:
+    """The Home card after an update whose self-check failed ("Go back to release N?")."""
+    try:
+        from orch import selfcheck
+
+        return selfcheck.card()
+    except Exception:  # noqa: BLE001 - an older orch: no card
+        return None
+
+
+def dismiss_check_card() -> None:
+    try:
+        from orch import selfcheck
+
+        selfcheck.dismiss()
+    except Exception:  # noqa: BLE001, S110 - the card stays; the next click tries again
+        pass
+
+
 def tick_once(root: Path, orch_bin, env_for, start=None) -> str:
     """One automatic-update look. `env_for()` gives the person's environment for the detached update."""
     try:
@@ -186,3 +213,51 @@ def start_ticker(root: Path, orch_bin, env_for, every: float = TICK_SECONDS) -> 
     t = threading.Thread(target=loop, daemon=True, name="autoupdate")
     t.start()
     return t
+
+
+# ---- Tool updates (ORCH-589): the helper tools and the other tools this workspace uses, their newest version,
+# notes and an Update button. orch.toolupdates does the work; this only reads it and starts one update.
+
+
+def tool_updates(root: Path, refresh: bool = False) -> dict:
+    """Every tool with installed / newest version and notes (orch keeps the answers 6 hours)."""
+    try:
+        from orch import toolupdates
+
+        return toolupdates.status(Path(root), refresh=refresh)
+    except Exception:  # noqa: BLE001 - never an error page for a version line
+        return {"tools": [], "updates": 0, "job": None}
+
+
+def start_tool_update(root: Path, orch_bin, env, name: str, start=None) -> tuple[int, str]:
+    """The person clicked Update on one tool: `orch tools update <name>` in the background (it keeps its own
+    state, which the page reads back from tool_updates)."""
+    import re
+    import subprocess
+
+    if pagelaunch is None:
+        return 503, "Updating is not available in this install."
+    if not (isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", name)):
+        return 400, "Choose a tool."
+    doc = tool_updates(root)
+    job = doc.get("job") or {}
+    if job.get("status") == "running":
+        return 409, f"{job.get('label') or 'Another tool'} is being updated. Try again when it is done."
+    have = {t.get("name"): t for t in doc.get("tools") or []}
+    if not (have.get(name) or {}).get("can_update"):
+        return 409, "There is no update orch can install for this tool."
+    from orch import pagesession, procs
+
+    argv = [*pagesession.argv0(orch_bin), "tools", "update", name]
+    try:
+        (start or subprocess.Popen)(
+            argv,
+            cwd=str(root),
+            env=pagesession.child_env(env, orch_bin),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            **procs.background_popen_kwargs(),
+        )
+    except OSError:
+        return 503, "The update could not be started. Please try again."
+    return 202, "Update started."

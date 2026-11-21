@@ -417,6 +417,26 @@ def test_addon_links_pass_only_with_a_plain_path():
         assert check_view(v(bad)) is None, bad
 
 
+def test_a_local_app_link_passes_only_as_a_bare_address_on_this_computer():
+    # ORCH-846: a service's own address (http://127.0.0.1:<port>) opens from the Services page
+    def v(link):
+        return {
+            "schema": "orch.addon-view/1",
+            "generated_at": "2026-11-06T08:00:00Z",
+            "blocks": [{"type": "list", "title": "T", "items": [{"title": "x", "link": link}]}],
+        }
+
+    for ok in ("http://127.0.0.1:8765", "http://127.0.0.1:8765/", "http://localhost:3000"):
+        assert check_view(v(ok)) and not list(VALIDATOR.iter_errors(v(ok))), ok
+    for bad in (
+        "http://127.0.0.1:8765/x",
+        "http://127.0.0.1",
+        "http://example.com:80",
+        "http://127.0.0.1.example.com:80",
+    ):
+        assert check_view(v(bad)) is None, bad
+
+
 FOCUS_VIEW = {
     "schema": "orch.addon-view/1",
     "generated_at": "2026-11-06T08:00:00Z",
@@ -565,7 +585,7 @@ def test_one_name_for_the_ai_and_plain_description_help():
         "button('Add helper'",
         "'Let the helper do everything?'",
         "' is now the default helper.'",
-        "ticketButton('Start helper'",
+        "alive ? 'Nudge' : 'Start helper'",  # the Start buttons are the kit's one Start button now (ORCH-475)
         "'Ask your helper to check again'",
         "['All', 'People', 'Helper']",
         "'Helper is working'",

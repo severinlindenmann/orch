@@ -35,8 +35,12 @@ FRAME_PARAM = "orch-frame"
 FRAME_ROOT = {"focus": ("/api/act", "/api/events", "/api/term", "/api/term/keys")}
 ALL_ROOT_PATHS = frozenset(p for paths in FRAME_ROOT.values() for p in paths)
 PASS_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
-# the addresses a file pass may read: an add-on's file and picture answers (Focus /api/file, Factory order files)
-FILE_PATH = re.compile(r"/api/(?:file|order/[A-Za-z0-9_-]{1,64}/file/[A-Za-z0-9_./%-]{1,300})")
+# the addresses a file pass may read: an add-on's file and picture answers (Focus /api/file, Factory order files and
+# the pictures and demo of a built task on its stage review, ORCH-419)
+FILE_PATH = re.compile(
+    r"/api/(?:file|order/[A-Za-z0-9_-]{1,64}/file/[A-Za-z0-9_./%-]{1,300}"
+    r"|order/t_[a-z0-9]{6,16}/result/t_[a-z0-9]{6,16}/[A-Za-z0-9._-]{1,80})"
+)
 LIFE = 900  # 15 minutes: the frame asks for new passes by itself when a call answers 401
 # What each add-on's pass may run through the dashboard's /api/act (Focus's store.js EMBED_HUMAN, `ticket.done`
 # arriving as `ticket.patch` to done). Everything else is refused (ORCH-186 review M1).

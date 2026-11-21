@@ -34,8 +34,14 @@ STATE_MAX = 256 * 1024
 FILE = "limit-stop.json"
 
 _WORDS = re.compile(r"(hit|reached) your .{0,40}limit|usage limit reached", re.IGNORECASE)
+# ORCH-642: newer tool versions save the stop as a `system` notice, not an answer: "Usage limit reached ·
+# continuing automatically at 7:10pm · esc to cancel", and, when the login changes before then (Usage switched
+# the account), "Automatic continue stopped · your login changed or ended · send a prompt to continue".
+# Nothing continues it then.
+_SWITCHED = re.compile(r"automatic continue stopped.{0,40}login changed", re.IGNORECASE)
 _RESETS = re.compile(
-    r"resets\s+(?:(?P<mon>[A-Z][a-z]{2,8})\s+(?P<day>\d{1,2}),?\s+(?:at\s+)?)?"
+    r"(?:resets|continuing automatically at)\s+"
+    r"(?:(?P<mon>[A-Z][a-z]{2,8})\s+(?P<day>\d{1,2}),?\s+(?:at\s+)?)?"
     r"(?P<h>\d{1,2})(?::(?P<m>\d{2}))?\s*(?P<ap>am|pm)?(?:\s*\((?P<tz>[A-Za-z_/+-]+)\))?",
     re.IGNORECASE,
 )
@@ -116,13 +122,42 @@ def _limit_entry(entry: dict, now: float | None) -> dict | None:
     return None
 
 
+def _notice(entry: dict) -> str:
+    c = entry.get("content")
+    return c if entry.get("type") == "system" and isinstance(c, str) else ""
+
+
+def _typed(entry: dict) -> bool:
+    """A prompt that went in (a person's words or orch's notice line), not a tool's result."""
+    msg = entry.get("message")
+    content = msg.get("content") if isinstance(msg, dict) else None
+    if entry.get("isMeta") or not content:
+        return False
+    if isinstance(content, str):
+        return True
+    return isinstance(content, list) and any(isinstance(b, dict) and b.get("type") == "text" for b in content)
+
+
 def from_entries(entries: Iterable[dict], now: float | None = None) -> dict | None:
     """The limit stop shown by the LAST answer in these lines (a saved conversation, or one run's stream), or
     None when the last answer is a normal one (the helper went on after it). A `rate_limit_event` that was
-    rejected gives the reset time when the error line itself carries none."""
+    rejected gives the reset time when the error line itself carries none. The tool's own notices count too
+    (ORCH-642): "Usage limit reached · continuing automatically at 7:10pm", and after it "Automatic continue
+    stopped · your login changed": then the hit has switched=True (the account changed; one prompt carries it
+    on). A prompt that went in after a notice means it goes on."""
     found, event = None, None
     for e in entries:
         if not isinstance(e, dict):
+            continue
+        words = _notice(e)
+        if words and _SWITCHED.search(words):
+            found = {**(found or {"until": None}), "text": " ".join(words.split())[:200], "switched": True}
+            continue
+        if words and _WORDS.search(words):
+            found = {**_info(None, words, now), "notice": True}
+            continue
+        if e.get("type") == "user" and found is not None and found.get("notice") and _typed(e):
+            found = None  # a prompt went in after the tool's notice: it goes on
             continue
         if e.get("type") == "rate_limit_event":
             info = e.get("rate_limit_info")
@@ -132,10 +167,17 @@ def from_entries(entries: Iterable[dict], now: float | None = None) -> dict | No
         if e.get("type") not in ("assistant", "result"):
             continue
         found = _limit_entry(e, now)
+        if found is not None and found.get("until") is None and event is not None:
+            found = {
+                **found,
+                **{k: v for k, v in _info(event, "", now).items() if k != "text" and v is not None},
+            }
         if found is None and e.get("type") == "result" and e.get("is_error") is not True:
             event = None  # the run went on and finished normally
     if found is not None and found.get("until") is None and event is not None:
         found = {**found, **{k: v for k, v in _info(event, "", now).items() if k != "text" and v is not None}}
+    if found is not None:
+        found.pop("notice", None)
     return found
 
 
@@ -279,6 +321,58 @@ def forget(root: Path, tids: Iterable[str]) -> None:
             ticks.pop(tid, None)
         data["tickets"] = ticks
         _write(root, data)
+
+
+def lift(root: Path, now: float | None = None) -> None:
+    """The account changed (ORCH-642: Usage switched it): the limit no longer holds anyone back. Noted tickets
+    are due at once, and automatic starts no longer wait for the reset."""
+    now = time.time() if now is None else now
+    with _locked(root):
+        data = read(root)
+        if data.get("tickets"):
+            data["until"] = now - GRACE
+            _write(root, data)
+
+
+COMPUTER_SWITCH_FRESH = 10 * 60  # a switch from before tend first looked counts only when this recent
+
+
+def computer_switch() -> dict:
+    """The last account switch on this computer (ORCH-943): the Usage add-on of whichever workspace switches
+    writes one numbered line per switch to <tool home>/usage/switched.jsonl ({"n", "at", "name", "from",
+    "to"}).
+    Every workspace reads it, with or without Usage, so its helpers held at the limit start again.
+    {} when none."""
+    try:
+        from orch import addons
+
+        p = addons.home() / "usage" / "switched.jsonl"
+        with open(p, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 4096))
+            tail = f.read().decode("utf-8", errors="replace").splitlines()
+    except Exception:  # noqa: BLE001 - no tool home, no file: no switch
+        return {}
+    for line in reversed(tail):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(r, dict) and isinstance(r.get("n"), int) and not isinstance(r.get("n"), bool):
+            return r
+    return {}
+
+
+def computer_switched_text(row: dict) -> str:
+    name = str(row.get("name") or "another workspace")[:80]
+    return f"Account switched by {name}: the helper starts again now instead of waiting for the usage limit."
+
+
+def switched_text() -> str:
+    return (
+        "The account was switched while you waited at the usage limit. Carry on with the open tasks where "
+        "you stopped (orch ticket show shows them)."
+    )
 
 
 def clock(ts: object) -> str:

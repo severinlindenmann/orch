@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
+from orch_dashboard import framepass
 from orch_dashboard.data import load_state
 from orch_dashboard.server import make_server
 
@@ -535,6 +536,7 @@ def test_the_dashboard_page_gets_a_pass_for_a_shipped_page_only(stack, monkeypat
     code, body, _ = _mint(base, headers={"X-Orch-Page": "secret"})
     got = json.loads(body)
     assert code == 200 and got["act"] is True and len(got["pass"]) >= 40 and len(got["file"]) >= 40
+    assert got["life"] == framepass.LIFE  # the page asks again before the pass ends (ORCH-1004)
     code, body, _ = _mint(base)  # no sign-in on this computer: a read-only pass (it could read anyway)
     assert code == 200 and json.loads(body)["act"] is False
     assert _mint(base, headers=REMOTE)[0] == 403  # another computer without sign-in: none
@@ -710,6 +712,11 @@ def test_the_file_pass_only_reads_its_own_addon_and_the_pass_never_rides_in_an_a
     assert (
         call(base + f"/addon/focus/api/order/o1/file/a.png?orch-frame={got['file']}", headers=img)[0] == 200
     )
+    # a built task's picture on a Factory stage review (ORCH-419), only with plain ticket ids and a plain name
+    result = f"/addon/focus/api/order/t_abcdef/result/t_bcdefg/home-1280.png?orch-frame={got['file']}"
+    assert call(base + result, headers=img)[0] == 200
+    bad = f"/addon/focus/api/order/t_abcdef/result/t_bcdefg/sub/a.png?orch-frame={got['file']}"
+    assert call(base + bad, headers=img)[0] == 401
     n = len(SEEN)
     assert (
         call(base + f"/addon/focus/api/tickets?orch-frame={got['file']}", headers=img)[0] == 401
@@ -762,7 +769,6 @@ def test_the_file_pass_is_taken_off_however_its_name_is_written(stack, monkeypat
 
 
 def test_only_focus_makes_dashboard_calls_from_its_frame():
-    from orch_dashboard import framepass
 
     assert set(framepass.FRAME_ROOT) == {"focus"}  # Insights and Factory get no dashboard call at all
     assert "/api/frame-pass" not in framepass.ALL_ROOT_PATHS and "/session" not in framepass.ALL_ROOT_PATHS

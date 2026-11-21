@@ -220,6 +220,8 @@ def test_git_runs_through_safegit_with_the_hardened_flags(ws, monkeypatch):
     monkeypatch.setenv("GIT_DIR", "/nonexistent")
     _edit(ws)
     assert workcheck.check(ws)["remind"] is True
+    seen = [(a, e) for a, e in seen if os.path.splitext(os.path.basename(a[0]))[0].lower() == "git"]
+    # (safegit.subprocess is the shared module: on Windows other helpers, e.g. taskkill, show up in the spy)
     assert seen
     for argv, env in seen:
         assert os.path.isabs(argv[0])  # resolved by safegit, never a bare "git"
@@ -250,7 +252,7 @@ def test_git_is_never_taken_from_the_project_or_a_relative_path_entry(ws, monkey
     path = os.pathsep.join([str(ws / "tools"), "bin", "", ".", str(ws), os.path.dirname(real)])
     monkeypatch.setenv("PATH", path)
     monkeypatch.chdir(ws)
-    assert safegit.git_exe(ws) == real
+    assert os.path.normcase(safegit.git_exe(ws)) == os.path.normcase(real)  # Windows: git.EXE vs git.exe
     _edit(ws)
     assert workcheck.check(ws)["remind"] is True
     assert not (ws / "planted.txt").exists()

@@ -1,4 +1,4 @@
-"""orch pull-requests queue add|list|remove|run, tend, failed-checks, start|stop|status (contract: contracts/addons/pull-requests/README.md)."""
+"""orch pull-requests queue add|list|remove|run, tend, failed-checks, helper-stopped, start|stop|status (contract: contracts/addons/pull-requests/README.md)."""
 
 from __future__ import annotations
 
@@ -253,6 +253,24 @@ def _checks_cmd(args, root: Path) -> int:
     return 0
 
 
+def _stopped_cmd(args, root: Path) -> int:
+    """helper-stopped on|off|status: a ready pull request a helper left open goes into the merge queue."""
+    from . import switch
+
+    if args.state in ("on", "off"):
+        on = switch.set_stopped(root, args.state == "on")
+    else:
+        on = switch.stopped_is_on(root)
+    text = (
+        "Helper stopped: on. When no helper works on a ticket, its pull requests that are ready to merge go into "
+        "the merge queue (the Merge when green watcher, every minute)."
+        if on
+        else "Helper stopped: off."
+    )
+    print(json.dumps({"on": on}) if args.json else text, flush=True)
+    return 0
+
+
 def _switch_cmd(args, root: Path) -> int:
     """tend, start, stop, status, watch: the Merge when green switch and its background watcher."""
     from . import service
@@ -302,8 +320,17 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--json", action="store_true")
     ls = q.add_parser("list", help="what waits and what happened lately")
     ls.add_argument("--json", action="store_true")
+    au = q.add_parser(
+        "audit",
+        help="merges past the queue, times it stood still, check runs per merge, minutes to merged, the busiest hour and group start to merged, for the last hours",
+    )
+    au.add_argument("--hours", type=float, default=14, help="how far back (default 14: one night)")
+    au.add_argument("--json", action="store_true")
     rm = q.add_parser("remove", help="take a waiting pull request out of the queue")
     rm.add_argument("url")
+    q.add_parser(
+        "check", help="exit 1 when pull requests wait and no runner is alive (the check after an update)"
+    )
     r = q.add_parser("run", help="the runner (add starts it by itself)")
     r.add_argument("--root", help=argparse.SUPPRESS)
     t = sub.add_parser("tend", help="Merge when green: one pass over the switched-on tickets")
@@ -326,7 +353,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     fc.add_argument("state", nargs="?", choices=("on", "off", "status", "tend"), default="status")
     fc.add_argument("--json", action="store_true")
-    w = sub.add_parser("watch", help=argparse.SUPPRESS)
+    hs = sub.add_parser(
+        "helper-stopped", help="a ready pull request a helper left open goes into the merge queue by itself"
+    )
+    hs.add_argument("state", nargs="?", choices=("on", "off", "status"), default="status")
+    hs.add_argument("--json", action="store_true")
+    w = sub.add_parser("watch")  # hidden: no help= keeps it out of the --help list
     w.add_argument("--root", help=argparse.SUPPRESS)
     args = p.parse_args(argv)
     try:
@@ -335,18 +367,37 @@ def main(argv: list[str] | None = None) -> int:
             return _page_cmd(args, root)
         if args.cmd == "failed-checks":
             return _checks_cmd(args, root)
+        if args.cmd == "helper-stopped":
+            return _stopped_cmd(args, root)
         if args.cmd != "queue":
             return _switch_cmd(args, root)
         if args.sub == "run":
             return _run(root)
+        if args.sub == "check":
+            waiting = [x for x in store.read(root) if x.get("state") in (store.WAITING, store.RUNNING)]
+            if waiting and not runner_alive(root):
+                print(f"{len(waiting)} pull requests wait and no merge queue runner is running.")
+                return 1
+            print("The merge queue runner is fine.")
+            return 0
         if args.sub == "list":
             rows = store.read(root)
             if args.json:
                 print(json.dumps({"entries": rows, "running": runner_alive(root)}, indent=1))
             elif not rows:
                 print("The merge queue is empty.")
-            else:
-                print("\n".join(_show(x) for x in rows))
+            else:  # what waits, and the last 50 that ended (the file keeps more for the audit)
+                done = [x for x in rows if x.get("state") in FINISHED]
+                shown = done[-50:] + [x for x in rows if x.get("state") not in FINISHED]
+                print("\n".join(_show(x) for x in rows if x in shown))
+            return 0
+        if args.sub == "audit":
+            from . import audit
+
+            if args.hours <= 0:
+                raise Refused("--hours is a number of hours above 0.")
+            report = audit.run(root, _github(), args.hours)
+            print(json.dumps(audit.as_json(report), indent=1) if args.json else audit.text(report))
             return 0
         if args.sub == "remove":
             if store.remove(root, args.url, _actor()):
@@ -354,13 +405,15 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             print(f"{args.url} does not wait in the merge queue.")
             return 1
-        from .runner import admit
+        from .runner import _release_fix, admit
 
         url = store.canonical(args.url)
         ticket = _ticket(root, args.ticket, url)
         old = store.find(store.read(root), url)
         seen = {} if old and old.get("state") not in FINISHED else admit(root, _github(), url)
-        row, new = store.add(root, url, ticket, _actor(), first=args.first, **seen)
+        # a release keeper's red-run fix goes first by itself (ORCH-1023)
+        first = args.first or _release_fix(root, ticket)
+        row, new = store.add(root, url, ticket, _actor(), first=first, **seen)
         start_runner(root)
         if not args.wait:
             ahead = [x for x in store.read(root) if x.get("state") not in FINISHED and x["url"] != url]

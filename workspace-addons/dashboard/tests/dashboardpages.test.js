@@ -685,7 +685,7 @@ test('the Automation page heading is the add-on menu name, not a second name', (
 test('ticket page: brief heading, Repeats in Properties, plain values with a pencil, no Edit text (UX round 5)', () => {
   const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
   assert.match(ticket, /h\('h2', \{\}, 'What you asked'\)/);
-  assert.match(ticket, /field\('Done when', inlineField\(t, 'done_when'\)\), costValue\(t\) \? field\('Time · cost', costValue\(t\)\) : null, addonPropertyRows\(t\)/);
+  assert.match(ticket, /field\('Done when', inlineField\(t, 'done_when'\), 'done-when'\) : null,\s+costValue\(t\) \? field\('Time · cost', costValue\(t\)\) : null, addonPropertyRows\(t\)/);
   assert.match(ticket, /'Set a due date'/);
   assert.match(ticket, /iconEl\('pencil'\)/);
   assert.doesNotMatch(ticket, /'Helper: '/);
@@ -823,6 +823,17 @@ test('home: a ticket in Review that also asks a question counts once, and the ti
   assert.equal(today.count, 4);
   const page = JSON.stringify(c.home());
   assert.match(page, /4 things need you/); assert.match(page, /2 questions · 2 results to check/);
+});
+test('ORCH-705: work that stopped is part of the one number, so Home, the top bar, Menu, the Focus bar and the wall agree', () => {
+  const items = [{id:'a', title:'T a', status:'review'}, {id:'d', title:'T d', status:'review'}, {id:'b', title:'T b', status:'active'}, {id:'c', title:'T c', status:'waiting'}];
+  const core = (kind, ticket) => ({id:'core:' + kind + ':' + ticket, source:'core', kind, ticket, title:'T ' + ticket, since:'2026-11-19T05:00:00Z', text:'Stopped.'});
+  const needs = [{id:'c1', ticket:'c', title:'Q?', answer:{question:'c1'}}, core('helper:failing', 'b'), core('reviewer:unsure', 'a')];
+  const c = context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})});
+  // 1 question + 2 results + 2 stuck rows - 1 result that is the Reviewer's unsure row = 4
+  assert.equal(c.needsToday().count, 4);
+  assert.equal(c.needsYouTotal(), 4, 'the number the top bar, Menu, Focus bar and wall read');
+  const page = JSON.stringify(c.home());
+  assert.match(page, /4 things need you/); assert.match(page, /2 stuck tickets · 1 question · 1 result to check/);
 });
 test('ORCH-184: one finish time and one wait time per ticket on every page', () => {
   const t = {id:'a', status:'done', done_at:'2026-11-15T10:24:00Z', updated_at:'2026-11-17T09:00:00Z', history:[{at:'2026-11-13T08:00:00Z', text:'Status review -> done'}]};

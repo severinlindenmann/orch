@@ -250,8 +250,14 @@ def lost_view(counts):
         return None
     return {
         "lines": n,
-        "text": f"{n:,} helper actions in the last 30 days were not recorded, so the counts on this page are too low.",
+        "text": f"{n:,} helper actions in the last 30 days were not recorded, so the counts on this page are too low. They cannot be added back. If the number keeps growing, press Report a problem.",
     }
+
+
+def _started(counts):
+    """Runs orch started (ORCH-966); 0 when the answer does not carry it (an older orch)."""
+    n = counts.get("started")
+    return n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else 0
 
 
 def build_overview(counts) -> dict:
@@ -270,6 +276,7 @@ def build_overview(counts) -> dict:
     return {
         "window": "last 30 days",
         "runs": counts["runs"],
+        "started": _started(counts),
         "tickets": counts["tickets"],
         "complete": True,
         "since": counts["since"],

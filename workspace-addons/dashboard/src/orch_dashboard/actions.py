@@ -38,7 +38,7 @@ except ImportError:  # standalone use without orch: nothing runs
 MAX_TEXT = 2000
 LONG_TEXT = 1500  # a longer new-ticket text is kept as a file (note.md), the Note stays short
 MAX_LONG = 500_000  # characters of one long text (core refuses a file over 2 MB)
-# Mirror of orch.tickets (ATTACH_TEXT/ATTACH_IMAGES/ATTACH_MAX): refuse early, before a ticket is made. orch decides.
+# Mirror of orch.tickets (ATTACH_TEXT/ATTACH_IMAGES/ATTACH_AUDIO/ATTACH_MAX): refuse early, before a ticket is made. orch decides.
 ATTACH_EXT = frozenset(
     {
         "txt",
@@ -56,6 +56,11 @@ ATTACH_EXT = frozenset(
         "jpeg",
         "gif",
         "webp",
+        "webm",
+        "ogg",
+        "m4a",
+        "mp3",
+        "wav",
     }
 )
 ATTACH_MAX = 25 * 1024 * 1024
@@ -151,6 +156,18 @@ FREE_OPS = frozenset(
 
 def needs_session(op) -> bool:
     return isinstance(op, str) and op not in FREE_OPS
+
+
+def turns_review_off(op, args) -> bool:
+    """ORCH-424: a ticket.new or ticket.edit that turns Human review needed off (also for a ticket inside an epic).
+    It lets work be accepted without the person, so it needs the page session even though the op is free."""
+    if op not in ("ticket.new", "ticket.edit") or not isinstance(args, dict):
+        return False
+    steps = args.get("steps") if isinstance(args.get("steps"), list) else []
+    # anything but true counts as off here, so the check never reads a value differently from the command
+    return any(
+        isinstance(x, dict) and "human_review" in x and x["human_review"] is not True for x in [args, *steps]
+    )
 
 
 def _tid(v) -> str:
@@ -260,12 +277,13 @@ def _review_answer(a):
 
 def review_error(out, stderr: str, status: int) -> str:
     """The JSON the Review page reads for a refused card: {"ok": false, "error": {"code", "message"}}. The core's
-    codes (changed, too_large, not_found, needs_person, refused) pass through; anything else is "refused"."""
+    codes (changed, too_large, not_found, needs_person, refused, busy, decided) pass through; anything else is
+    "refused". decided (ORCH-548): the Check result was decided elsewhere; the message says who and when."""
     code = out.get("code") if isinstance(out, dict) else None
     msg = out.get("error") if isinstance(out, dict) else None
     if not isinstance(msg, str) or not msg:
         msg = (stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
-    if code not in ("changed", "too_large", "not_found", "needs_person", "refused", "busy"):
+    if code not in ("changed", "too_large", "not_found", "needs_person", "refused", "busy", "decided"):
         code = "refused"
     return json.dumps({"ok": False, "error": {"code": code, "message": msg[:500]}}, ensure_ascii=False)
 
@@ -286,9 +304,15 @@ def _ticket_new(a):
             "plan_first",
             "epic",
             "steps",
+            "human_review",
         ),
     )
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
+    # ORCH-424: the Human review needed box; sent only when the person changed it from the workspace default
+    if "human_review" in a:
+        if not isinstance(a["human_review"], bool):
+            raise BadRequest("human_review is true or false.")
+        flags.append(f"--human-review={'yes' if a['human_review'] else 'no'}")
     if _flag(a.get("title_auto")):  # the title is a placeholder: the agent writes the real one
         flags.append("--title-auto")
     if _flag(a.get("plan_first")):
@@ -348,7 +372,9 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
             raise BadRequest("That file could not be read.")
         ext = f["name"].rsplit(".", 1)[-1].lower() if "." in f["name"] else ""
         if ext not in ATTACH_EXT:
-            raise BadRequest(f"{f['name'][:60]}: only text files and pictures can be added.")
+            raise BadRequest(
+                f"{f['name'][:60]}: only text files, pictures and voice recordings can be added."
+            )
         if len(raw) > ATTACH_MAX:
             raise BadRequest(f"{f['name'][:60]} is over 25 MB. Choose a smaller file.")
         out.append((f["name"], raw))
@@ -358,9 +384,11 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
 def _ticket_attach(a):
     """Files added to a ticket that already exists (a ticket page composer): one line in the history, the files go through
     `orch ticket attach` after it (see attachments / run_op)."""
-    _only(a, ("ticket", "files"))
+    _only(a, ("ticket", "files", "feedback"))
     if not isinstance(a.get("files"), list) or not a["files"]:
         raise BadRequest("Choose a file to add.")
+    if a.get("feedback") not in (None, True, False):
+        raise BadRequest("feedback is true or false.")
     return ["log", _tid(a.get("ticket"))], [], ["Added files to the ticket"]
 
 
@@ -428,8 +456,26 @@ def _ticket_changes(a):
 
 
 def _ticket_edit(a):
-    _only(a, ("ticket", "title", "owner", "due", "note", "done_when", "parent", "release", "if_revision"))
+    _only(
+        a,
+        (
+            "ticket",
+            "title",
+            "owner",
+            "due",
+            "note",
+            "done_when",
+            "parent",
+            "release",
+            "human_review",
+            "if_revision",
+        ),
+    )
     flags = []
+    if "human_review" in a:  # ORCH-424: the Human review needed switch on the ticket page
+        if not isinstance(a["human_review"], bool):
+            raise BadRequest("human_review is true or false.")
+        flags.append(f"--human-review={'yes' if a['human_review'] else 'no'}")
     if "parent" in a:  # ORCH-156: "Part of": put the ticket under an epic, or None to take it out
         flags.append(f"--parent={_tid(a['parent']) if a['parent'] else ''}")
     if "release" in a:  # ORCH-37: the Release switch on the ticket page (true marks it, false takes it off)
@@ -655,14 +701,15 @@ def _typing_set(a):
     return ["config", "set", SESSION_TYPING_KEY, "on" if a["on"] else "off"], [], []
 
 
-def _focus_preview_set(a):
-    """The Preview switch on the live-session add-on's settings page: a plain `orch config set` (core names the key)."""
-    from orch.config import FOCUS_PREVIEW_KEY
+def _terminal_typing_set(a):
+    """Settings > Add-ons: may the person type into the plain terminal (a shell on this computer), its own switch
+    apart from the helper's screen (owner, ORCH-261), a plain `orch config set` (core names the key)."""
+    from orch.config import TERMINAL_TYPING_KEY
 
     _only(a, ("on",))
     if type(a.get("on")) is not bool:
         raise BadRequest("Say on or off.")
-    return ["config", "set", FOCUS_PREVIEW_KEY, "on" if a["on"] else "off"], [], []
+    return ["config", "set", TERMINAL_TYPING_KEY, "on" if a["on"] else "off"], [], []
 
 
 def _diag_delete(what):
@@ -789,8 +836,13 @@ def _chat_make_ticket(a):
 
 def _run_start(a):
     """Start a helper on the ticket: continue its last conversation, or fresh; the Start choice (ORCH-362) can
-    name the tool (`--agent`, a name from `orch agents`); orch refuses a tool it does not know."""
-    _only(a, ("ticket", "fresh", "take_over", "agent"))
+    name the tool (`--agent`, a name from `orch agents`); orch refuses a tool it does not know.
+    prepare: Save without starting (ORCH-738) only prepares the ticket; it goes alone, with no other flag."""
+    _only(a, ("ticket", "fresh", "take_over", "agent", "prepare"))
+    if _flag(a.get("prepare")):
+        if any(a.get(k) is not None for k in ("fresh", "take_over", "agent")):
+            raise BadRequest("Prepare goes alone: no tool, fresh start or take-over with it.")
+        return ["run", "start", _tid(a.get("ticket"))], ["--prepare"], []
     flags = (["--fresh"] if _flag(a.get("fresh")) else []) + (
         ["--take-over"] if _flag(a.get("take_over")) else []
     )
@@ -813,15 +865,31 @@ def _session_reopen(a):
 
 
 SESSION_KINDS = ("empty", "chat", "terminal", "manager")  # core sessions.KINDS (ORCH-364)
+SESSION_MODES = ("ask", "edits", "auto", "full")  # core sessionmode.MODES (ORCH-818)
 
 
 def _session_new(a):
     """The New menu of the live bar: a session without a ticket (empty helper, chat helper, plain terminal,
     Manager), through the core's one start path. A second New of the same kind goes to the one that is open."""
-    _only(a, ("kind",))
+    _only(a, ("kind", "permissions", "model"))
     if a.get("kind") not in SESSION_KINDS:
         raise BadRequest("Choose an empty helper, a chat helper, a plain terminal or the Manager.")
-    return ["session", "new", a["kind"]], [], []
+    flags: list[str] = []
+    model = a.get("model")
+    if model is not None:
+        if (
+            a["kind"] != "empty" or model not in MODELS or model == "auto"
+        ):  # ORCH-710: the Empty helper's pick
+            raise BadRequest("Pick Sonnet, Opus, Haiku or Fable for the Empty helper.")
+        flags += ["--model", model]
+    mode = a.get("permissions")
+    if mode is not None:
+        # ORCH-818: the Start choice's permission mode; the core refuses one the workspace does not allow, and a
+        # raise without the signed-in person's grant (SESSION_GRANT_OPS)
+        if mode not in SESSION_MODES or a["kind"] == "terminal":
+            raise BadRequest("Choose a permission mode the helper knows.")
+        flags += ["--permission-mode", mode]
+    return ["session", "new", a["kind"]], flags, []
 
 
 def _run_send(a):
@@ -855,6 +923,21 @@ def _pull_merge(a):
 def _run_stop(a):
     _only(a, ("ticket",))
     return ["run", "stop", _tid(a.get("ticket"))], [], []
+
+
+def _run_interrupt(a):
+    """Stop in the live layer (ORCH-817): only the current step stops; the session stays (`orch run interrupt`)."""
+    _only(a, ("ticket",))
+    return ["run", "interrupt", _tid(a.get("ticket"))], [], []
+
+
+def _session_end(a):
+    """End session in the live layer for a session without a ticket (ORCH-817): `orch session end <kind>`; a helper's
+    conversation stays in History, the plain terminal closes."""
+    _only(a, ("kind",))
+    if a.get("kind") not in SESSION_KINDS:
+        raise BadRequest("Choose an empty helper, a chat helper, a plain terminal or the Manager.")
+    return ["session", "end", a["kind"]], [], []
 
 
 def _addon_start(a):
@@ -1151,6 +1234,8 @@ OPS = {
     "session.reopen": _session_reopen,
     "session.new": _session_new,
     "run.stop": _run_stop,
+    "run.interrupt": _run_interrupt,
+    "session.end": _session_end,
     "run.send": _run_send,
     "run.take_back": _run_take_back,
     "pull.merge": _pull_merge,
@@ -1177,7 +1262,7 @@ OPS = {
     "live.set": _live_set,
     "diag.set": _diag_set,
     "typing.set": _typing_set,
-    "focus_preview.set": _focus_preview_set,
+    "terminal-typing.set": _terminal_typing_set,
     "update.auto": _update_auto,
     "diag.delete_reports": _diag_delete("reports"),
     "copies.set": _copies_set,
@@ -1303,14 +1388,26 @@ def _without_agent(environ) -> dict:
         ) from None
 
 
-def _attach_all(root: Path, orch_bin: str, tid: str, files: list[tuple[str, bytes]]) -> dict:
+def _attach_all(
+    root: Path, orch_bin: str, tid: str, files: list[tuple[str, bytes]], feedback: bool = False
+) -> dict:
     """Keep each file with the new ticket through `orch ticket attach` (orch picks the name and checks type,
     content and size). A file that is refused does not undo the ticket: it is listed as failed."""
     saved, failed = [], []
     for hint, raw in files:
         try:
             r = _run(
-                [*argv0(orch_bin), "ticket", "attach", tid, f"--name={hint}", "--by", actor(root), "--json"],
+                [
+                    *argv0(orch_bin),
+                    "ticket",
+                    "attach",
+                    tid,
+                    f"--name={hint}",
+                    *(["--feedback"] if feedback else []),
+                    "--by",
+                    actor(root),
+                    "--json",
+                ],
                 check=False,
                 cwd=root,
                 capture_output=True,
@@ -1465,9 +1562,13 @@ def epic_new(root: Path, orch_bin: str | None, args: dict, session: bool) -> tup
     if not isinstance(epic_id, str) or not TID.fullmatch(epic_id):
         return 422, "The epic was made, but its address could not be read. Reload before trying again.", None
     made, failed = [], []
+    # ORCH-424: the tickets inside follow the epic's Human review needed choice unless one says its own
+    same = {"human_review": rest["human_review"]} if "human_review" in rest else {}
     for index, step in enumerate(steps):
         try:
-            st, msg, child = run_op(root, orch_bin, "ticket.new", {**step, "parent": epic_id}, session)
+            st, msg, child = run_op(
+                root, orch_bin, "ticket.new", {**same, **step, "parent": epic_id}, session
+            )
         except (BadRequest, Unavailable) as e:
             st, msg, child = 422, str(e), None
         if st == 200:
@@ -1495,6 +1596,22 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             return 200, "", {"people": people.choose(root, args.get("name"), add=op == "person.add")}
         except people.BadName as e:
             raise BadRequest(str(e)) from None
+    if op in (
+        "session.pin",
+        "session.name",
+    ):  # the live page: pin or name a session, kept in the workspace (ORCH-361)
+        from . import sessionprefs
+
+        if not isinstance(args, dict):
+            raise BadRequest("The arguments must be an object.")
+        if not session:  # watch-only: pins and names are the person's clicks
+            raise NeedsPerson(SIGNIN)
+        try:
+            if op == "session.pin":
+                return 200, "", {"prefs": sessionprefs.set_pin(root, args.get("session"), args.get("pinned"))}
+            return 200, "", {"prefs": sessionprefs.set_name(root, args.get("session"), args.get("name"))}
+        except sessionprefs.BadPref as e:
+            raise BadRequest(str(e)) from None
     if op == "update.note.dismiss":  # Home: "Got it" on the note after an automatic update; nothing runs
         if not session:
             raise NeedsPerson(SIGNIN)
@@ -1502,6 +1619,15 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
 
         update.dismiss_auto_note()
         return 200, "", None
+    if op == "update.check.dismiss":  # Home: "Not now" on the card after a failed self-check; nothing runs
+        if not session:
+            raise NeedsPerson(SIGNIN)
+        from . import update
+
+        update.dismiss_check_card()
+        return 200, "", None
+    if orch_bin == SELF and turns_review_off(op, args) and not session:  # ORCH-424: only the signed-in person
+        raise NeedsPerson(SIGNIN)
     if op == "ticket.new" and isinstance(args, dict) and "steps" in args:
         return epic_new(root, orch_bin, args, session)
     argv = build_argv(op, args, root)
@@ -1609,7 +1735,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         if files and op == "ticket.attach":
             out = {**(out if isinstance(out, dict) else {}), "id": args["ticket"]}
         if files and isinstance(out, dict) and isinstance(out.get("id"), str) and TID.fullmatch(out["id"]):
-            out["attached"] = _attach_all(root, orch_bin, out["id"], files)
+            feedback = op == "ticket.attach" and args.get("feedback") is True
+            out["attached"] = _attach_all(root, orch_bin, out["id"], files, feedback=feedback)
         return 200, "", out if isinstance(out, dict) else None
     if op == "review.answer":  # JSON the page reads: the code decides what it says (changed = look again)
         return 422, review_error(out, r.stderr, r.returncode), None
@@ -1618,6 +1745,48 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         msg = (r.stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
     conflict = isinstance(out, dict) and "revision" in out and "changed_by" in out
     return (409 if conflict else 422), str(msg)[:500], out if conflict else None
+
+
+# Add-on verbs that only read (ORCH-413). The page reads them with GET /api/addon-read under the same rights as
+# /api/state (no page secret), so Settings opened without a signed-in session sends no click that is refused. The same
+# command as the click (`orch <addon> act <verb> -- <addon>`); anything not listed here stays a click (POST /api/act).
+READ_ACTS = frozenset({("sync", "status")})
+
+
+def addon_read(root: Path, orch_bin: str | None, addon, verb) -> tuple[int, str, dict | None]:
+    """One listed read-only add-on verb. Returns (http status, plain text, the add-on's answer or None)."""
+    if not (isinstance(addon, str) and isinstance(verb, str) and (addon, verb) in READ_ACTS):
+        raise BadRequest("That cannot be read here.")
+    if not orch_bin:
+        raise Unavailable("The orch command is not available here.")
+    if not _addon_is_on(root, orch_bin, addon):
+        raise BadRequest("That add-on is not on in this workspace.")
+    args = {"addon": addon, "verb": verb, "target": addon}
+    try:
+        r = _run(
+            [*argv0(orch_bin), *build_argv("addon.act", args, root)],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=_op_timeout("addon.act", args),
+            stdin=subprocess.DEVNULL,
+            env=human_env(root, orch_bin),
+        )
+    except subprocess.TimeoutExpired:
+        return 504, "That took too long. Please try again.", None
+    except OSError:
+        raise Unavailable("The orch command could not be started.") from None
+    try:
+        out = json.loads(r.stdout)
+    except ValueError:
+        out = None
+    if r.returncode == 0 and isinstance(out, dict):
+        return 200, "", out
+    msg = out.get("error") if isinstance(out, dict) else None
+    if not msg:
+        msg = (r.stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
+    return 422, str(msg)[:500], None
 
 
 # Renew from the warning (ORCH-46): the tool's own sign-in, and a key put in through the key store. A pasted code
@@ -1651,6 +1820,11 @@ def _logins_cancel(a):
 PERSON_GRANT_OPS = frozenset(
     {"logins.renew", "logins.status", "logins.cancel", "logins.code", "logins.replace"}
 )
+# a signed-in answer may pick a draft, and a signed-in Done may finish a ticket that carries one (ORCH-582)
+DRAFT_GRANT_OPS = frozenset({"answer", "review.answer", "ticket.patch"})
+# ORCH-818: a signed-in Start may raise a session's permission mode; without a session no grant, and the core
+# refuses a raise (keeping or lowering it starts as before)
+SESSION_GRANT_OPS = frozenset({"session.new"})
 
 
 def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> tuple[dict, tuple[int, ...]]:
@@ -1671,6 +1845,15 @@ def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> tuple[dict
         except Exception:  # noqa: BLE001  no guarded orch home here: nothing to renew from this page
             raise Unavailable("orch cannot renew logins in this workspace.") from None
         fds = () if fd is None else (fd,)
+    elif op in (DRAFT_GRANT_OPS | SESSION_GRANT_OPS) and session:
+        # ORCH-582: a draft (and the Check of a ticket with one) is answered only by a signed-in person; the
+        # core takes nothing else as proof, whatever --by or --via say. Without a session: no grant, and the
+        # core refuses a draft (other cards answer as before).
+        from orch import renew
+
+        with contextlib.suppress(Exception):  # no guarded orch home: drafts stay unanswerable from here
+            fd = renew.hand_over(env, renew.GRANT_ENV, renew.grant(root))
+            fds = () if fd is None else (fd,)
     return env, fds
 
 

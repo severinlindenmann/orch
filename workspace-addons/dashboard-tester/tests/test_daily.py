@@ -369,3 +369,102 @@ def test_settings_pages_keep_no_text_and_no_report_picture():
     small = dict(SMALL1, route="#settings/agent", key="slow|#settings/agent|phone", shot="/s/set2.png")
     reps = daily.build_reports([big, small, SMALL2], [])
     assert reps[0]["pictures"] == [] and reps[1]["pictures"] == ["/s/c.png"]
+
+
+def test_version_name_keeps_the_whole_build_name():
+    assert daily.version_name("orch 3.x (release build)\n") == "3.x (release build)"
+    assert daily.version_name("orch 16\n") == "16"
+    assert (
+        daily.version_name("orch develop 0af5d58e (development build)")
+        == "develop 0af5d58e (development build)"
+    )
+    assert daily.version_name("") == ""
+
+
+def test_look_falls_back_to_this_computers_own_address():
+    # report r-1119-0642-ws: the private-network name did not answer while the dashboard was fine on 127.0.0.1
+    url = "http://develop.example:8790/go/SECRET"
+    seen = []
+
+    def only_local(host, port):
+        seen.append((host, port))
+        return host == "127.0.0.1"
+
+    assert browser.reachable_url(url, only_local) == "http://127.0.0.1:8790/go/SECRET"
+    assert seen == [("develop.example", 8790), ("127.0.0.1", 8790)]
+    assert browser.reachable_url(url, lambda h, p: True) == url
+    with pytest.raises(browser.Unreachable, match="could not be reached") as e:
+        browser.reachable_url(url, lambda h, p: False)
+    assert "SECRET" not in str(e.value)
+    with pytest.raises(browser.Unreachable):  # https keeps its own name
+        browser.reachable_url("https://develop.example:8790/go/SECRET", only_local)
+
+
+class GotoError(Exception):
+    pass
+
+
+class FakePage:
+    def __init__(self, error):
+        self.error = error
+
+    def goto(self, url, **kw):
+        raise GotoError(self.error)
+
+
+def test_no_connection_is_unreachable_but_a_slow_page_is_not():
+    up, down = (lambda h, p: True), (lambda h, p: False)
+    with pytest.raises(browser.Unreachable):
+        browser._goto(
+            FakePage("Page.goto: net::ERR_CONNECTION_TIMED_OUT at http://x:1/"), "http://x:1/#a", 1, up
+        )
+    with pytest.raises(
+        browser.Unreachable, match="x:1"
+    ):  # the browser's own wait ran out, the port is silent
+        browser._goto(FakePage("Page.goto: Timeout 30000ms exceeded."), "http://x:1/#home", 1, down)
+    browser._goto(FakePage("Page.goto: Timeout 30000ms exceeded."), "http://x:1/#home", 1, up)  # only slow
+
+
+def test_unreachable_dashboard_is_one_line_and_no_page_is_reported(monkeypatch, tmp_path):
+    def gone(*a, **kw):
+        raise browser.Unreachable(browser.UNREACHABLE.format(where="x:1"))
+
+    monkeypatch.setattr(daily.World, "launch_url", lambda self: "http://x:1/go/SECRET")
+    monkeypatch.setattr(browser, "look", gone)
+    with pytest.raises(daily.Refused, match="could not be reached"):
+        daily.World(tmp_path, tmp_path).browse(["#addon/services"])
+    state = reported()
+    w = FakeWorld([SMALL1], error=daily.Refused(browser.UNREACHABLE.format(where="x:1")))
+    s = daily.run_pass(w, state, None)
+    assert w.sent == [] and "could not be reached" in s["error"]
+
+
+class _Frame:
+    def __init__(self, n):
+        self.n = n
+
+    def evaluate(self, _js):
+        if self.n is None:  # a frame that never gets a page: Playwright would wait without end
+            raise AssertionError("asked a frame although the page already showed its content")
+        return self.n
+
+
+class _Page:
+    def __init__(self, main, *frames):
+        self.main_frame = main
+        self.frames = [main, *frames]
+
+
+def test_shown_page_asks_no_frame():
+    """Report r-1121-1222-ws-2: phone #home 'took 164.8 s' while the page polled every few seconds; a frame was asked."""
+    assert browser._text_len(_Page(_Frame(500), _Frame(None))) == 500
+
+
+def test_empty_main_reads_the_add_on_frame():
+    assert browser._text_len(_Page(_Frame(0), _Frame(300), _Frame(40))) == 300
+
+
+def test_helper_lines_are_left_out_of_the_word_check():
+    """A Focus card holds the helper's last terminal lines ('Codex CLI is missing'): its words, not orch's."""
+    js = browser.PROBE_JS
+    assert "querySelectorAll('pre, code, samp, kbd, textarea')" in js and ".map(e => own(e).trim())" in js

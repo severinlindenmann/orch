@@ -107,7 +107,7 @@ Total: 61 items.
 2. [auto] items: `node workspace/src/orch_ui/tests/ux_checks.cjs` and `brand/tests/test_contrast.py` (both in CI, see
    `DESIGN.md` "UX/UI checklist" for exactly what they cover), style lint, wording tests, `test_orch_ui_kit.py`,
    axe-core (as in `e2e/full/web/stepper.mjs`),
-   Lighthouse or a DevTools trace for K1/J3, a keyboard Tab run, an emulated `prefers-reduced-motion` run, and a
+   Lighthouse or a DevTools trace for K1/J3 (how: SKILL.md "Optional: Lighthouse and a speed trace"), a keyboard Tab run, an emulated `prefers-reduced-motion` run, and a
    `scrollWidth <= innerWidth` check at each width.
 3. [eye] items: look at every screenshot against groups A-M; write the "no" lines.
 4. PR body: `UX checklist: 61 items, N n.a., all others yes` or the list of "no" items with the reason; `Screenshots:`

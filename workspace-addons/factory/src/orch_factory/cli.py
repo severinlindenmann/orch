@@ -22,7 +22,7 @@ HELP = {
     "ship": "ship an order once the person said Ship it",
     "list": "every order",
     "view": "the dashboard view of all orders (takes no order: use show <order>)",
-    "needs": "what waits for a person (the dashboard shows Factory's questions)",
+    "needs": "the stage reviews that wait for your Looks good, with the commands that answer them",
     "reconcile": "check every order's record against its tickets",
 }
 NO_ORDER = {
@@ -91,6 +91,32 @@ def background(args, root):
     except RuntimeError as error:
         raise Refused(str(error), "not_available") from None
     return 0
+
+
+def _value(v):
+    return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+
+
+def plain(cmd, result):
+    """Plain lines for a person (list, show, next); --json prints the same data as JSON."""
+    if cmd == "list":
+        if not result:
+            return "No orders yet."
+        lines = []
+        for o in result:
+            line = f"{o['order']}  {o.get('stage') or '-'}  {o.get('title') or ''}"
+            if o.get("broken"):
+                line += f"  (problem: {o['broken']})"
+            elif o.get("questions"):
+                line += f"  ({len(o['questions'])} open question(s))"
+            lines.append(line)
+        return "\n".join(lines)
+    if cmd == "show":
+        lines = [f"{k}: {_value(v)}" for k, v in result.items() if k != "questions"]
+        for q in result.get("questions") or []:
+            lines.append(f"question: {_value(q)}")
+        return "\n".join(lines)
+    return "\n".join(f"{k}: {_value(v)}" for k, v in result.items())
 
 
 def main(argv=None):
@@ -242,8 +268,13 @@ def main(argv=None):
             result = commands.listing(root)
         elif args.cmd == "view":
             result = render_view(root)
-        else:  # needs: Factory's questions are shown by the dashboard view; nothing extra to list
-            result = []
+        else:  # needs: the stage reviews waiting for your Looks good (Factory's questions are core questions)
+            from . import pageapi
+
+            result = pageapi.needs(root)
+        if args.cmd in ("list", "show", "next") and not args.json:
+            print(plain(args.cmd, result))
+            return 0
         print(json.dumps(result))
         return 0
     except (Refused, OSError) as error:

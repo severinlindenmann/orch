@@ -112,11 +112,35 @@ def test_hook_main_answers_a_tool_step_in_the_tools_protocol(proj, run, monkeypa
     }
 
 
+def test_the_record_hook_with_the_tool_gives_the_same_notice(proj, run, monkeypatch, capsys):
+    """`orch record hook --with claude` (one process per tool event, ORCH-634) answers a tool step with the
+    same notice as the work-check step hook, even for a big result cut off at 64 KB."""
+    from orch import cli_record
+
+    tid, rn = _oneshot(proj, run)
+    runs.pending_add(proj, tid, "human:lume", "message", "Please add a rain plan.")
+    for k, v in _env(proj, tid, rn).items():
+        monkeypatch.setenv(k, v)
+    payload = f'{{"hook_event_name": "PostToolUse", "cwd": "{proj}", "tool_response": "{"x" * 70000}"}}\n'
+    monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+    assert cli_record.hook_main(["record", "hook", "--with", "claude"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["hookSpecificOutput"] == {
+        "hookEventName": "PostToolUse",
+        "additionalContext": runs_live.notice_line(tid, False),
+    }
+
+
 def test_the_step_hooks_go_only_into_the_runs_own_settings(proj):
     doc = adapters.reminder_doc("claude", proj)
     if doc is None:
         pytest.skip("the hook's python cannot import orch here")
-    cmds = {g["hooks"][0]["command"] for g in doc["hooks"]["PostToolUse"]}
-    assert len(cmds) == 2  # the record hook and the work-check step hook
+    cmds = [g["hooks"][0]["command"] for g in doc["hooks"]["PostToolUse"]]
+    # one command: the record hook runs the step notice itself (`--with claude`, ORCH-634); on Windows there
+    # is no record hook and the work-check step hook is its own command (adapters.reminder_doc)
+    assert len(cmds) == 1
+    assert cmds[0].endswith(
+        "work-check --hook claude" if adapters._is_windows() else "record hook --with claude"
+    )
     a = adapters.load("claude", proj)
     assert "PostToolUse" not in a["reminder_hooks"]  # never in the workspace's own settings file

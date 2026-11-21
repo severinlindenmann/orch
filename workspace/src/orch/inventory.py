@@ -1,4 +1,4 @@
-"""Read-only inventory of connections (contracts/inventory.md, schema inventory.schema.json $defs/connection).
+"""Read-only inventory of skills, connections and keys (contracts/inventory.md, schema inventory.schema.json).
 
 Three sources, winner first on one name: workspace (.orch/mcp.json), admin (the relay refresh record in the
 guarded orch home, `<orch home>/keys/<ws>/connections.json`), harness (the agent tool's own settings, where
@@ -29,6 +29,7 @@ HOST_RE = re.compile(r"^[a-z0-9.-]{1,253}(:[0-9]{1,5})?$")
 PROFILE_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 LABEL_RE = re.compile(r"^[^\x00-\x1f\x7f<>]{1,64}$")
 MAX_BYTES = 32 * 1024 * 1024
+SKILL_MAX_FILES = 2000  # a skill folder with more files is not listed (it is not a skill)
 
 
 # --- small readers: a missing, unreadable or odd file means "nothing there" ---
@@ -280,3 +281,131 @@ def connections(root: Path, *, orch_home: Path | None = None, account_home: Path
             item["label"] = e["label"]
         items.append(item)
     return items, also
+
+
+# --- skills (ORCH-416) ---
+
+
+def skill_version(folder: Path) -> str | None:
+    """Same as inv_skill_version: every file under the folder by relative POSIX path (UTF-8 byte order), names
+    starting with "." and symlinks skipped. None when the folder cannot be read or is too big."""
+    files: list[tuple[bytes, Path]] = []
+    stack = [(folder, "")]
+    try:
+        while stack:
+            here, rel = stack.pop()
+            for entry in here.iterdir():
+                if entry.name.startswith(".") or entry.is_symlink():
+                    continue
+                path = f"{rel}{entry.name}"
+                if entry.is_dir():
+                    stack.append((entry, path + "/"))
+                elif entry.is_file():
+                    files.append((path.encode(), entry))
+                if len(files) > SKILL_MAX_FILES:
+                    return None
+        h = hashlib.sha256()
+        for path, entry in sorted(files, key=lambda f: f[0]):
+            if entry.stat().st_size > MAX_BYTES:
+                return None
+            h.update(path + b"\0" + hashlib.sha256(entry.read_bytes()).hexdigest().encode() + b"\n")
+    except OSError:
+        return None
+    return "sha256:" + h.hexdigest()
+
+
+def _skill_folders(base: Path, inside: Path | None = None) -> dict[str, Path]:
+    """Sub-folders of base that hold a SKILL.md, by name. With inside, a folder that leads out of it (a link
+    out of the workspace) is left out."""
+    out: dict[str, Path] = {}
+    try:
+        entries = sorted(base.iterdir(), key=lambda e: e.name)
+    except OSError:
+        return out
+    for entry in entries:
+        if not NAME_RE.match(entry.name):
+            continue
+        try:
+            real = entry.resolve()
+            if inside is not None and inside.resolve() not in real.parents:
+                continue
+            if real.is_dir() and (real / "SKILL.md").is_file():
+                out[entry.name] = real
+        except OSError:
+            continue
+    return out
+
+
+def harness_skill_dirs(account_home: Path | None = None) -> list[Path]:
+    """The agent tools' own skill folders of the account (agents/connections.json skill_dirs), read only."""
+    home = addons.real_home() if account_home is None else account_home
+    dirs: list[Path] = []
+    for adapter in agentsdata.load()["adapters"].values():
+        for loc in adapter.get("skill_dirs", []):
+            path = Path(loc.replace("{home}", str(home)))
+            if path not in dirs:
+                dirs.append(path)
+    return dirs
+
+
+def skills(root: Path, *, account_home: Path | None = None) -> list[dict]:
+    """Schema `skill` objects: the workspace's .agents/skills (source workspace; unproven = workspace, P1) and
+    the agent tools' own skill folders (source harness). Both entries of one name are listed; the harness one
+    is shadowed by the workspace one. Names and content hashes only."""
+    root = Path(root)
+    found: list[tuple[str, str, Path]] = []
+    for name, folder in _skill_folders(root / ".agents" / "skills", inside=root).items():
+        found.append(("workspace", name, folder))
+    for base in harness_skill_dirs(account_home):
+        for name, folder in _skill_folders(base).items():
+            found.append(("harness", name, folder))
+    items, first = [], set()
+    for source, name, folder in found:  # workspace first, so the first of a name wins
+        version = skill_version(folder)
+        if version is None:
+            continue
+        items.append({"name": name, "source": source, "version": version, "shadowed": name in first})
+        first.add(name)
+    return sorted(items, key=lambda i: (i["name"], i["source"] != "workspace"))
+
+
+def keys(root: Path) -> list[dict]:
+    """Schema `key` objects from the key store: name, type and source, never a value. Damaged store: none."""
+    from orch import keystore
+    from orch.errors import Refused
+
+    try:
+        listed = keystore.list_keys(Path(root))
+    except (
+        Refused,
+        OSError,
+        ValueError,
+    ):  # a damaged key store lists nothing here; orch secret list says why
+        return []
+    out, seen = [], set()
+    for k in listed:
+        entry = (k.get("name"), k.get("type"), k.get("source"))
+        if (
+            entry not in seen
+            and isinstance(entry[0], str)
+            and NAME_RE.match(entry[0])
+            and entry[1] in keystore.TYPES
+            and entry[2] in ("workspace", "admin")
+        ):
+            seen.add(entry)
+            out.append({"name": entry[0], "type": entry[1], "source": entry[2]})
+    return out
+
+
+def document(
+    root: Path, generated_at: str, *, orch_home: Path | None = None, account_home: Path | None = None
+):
+    """The `orch.inventory/1` document for orch record counts (counts.md): what this workspace can use."""
+    conns, _ = connections(root, orch_home=orch_home, account_home=account_home)
+    return {
+        "schema": "orch.inventory/1",
+        "generated_at": generated_at,
+        "skills": skills(root, account_home=account_home),
+        "connections": conns,
+        "keys": keys(root),
+    }

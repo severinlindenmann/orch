@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import contextlib
 import re
+import socket
 import time
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 VIEWPORTS = (
     {"name": "desktop", "width": 1280, "height": 900},
@@ -49,8 +51,12 @@ PROBE_JS = """({never, leak}) => {
       if (!scrolls) out.cut.push((el.innerText || el.getAttribute('aria-label') || el.tagName).trim().slice(0, 40));
     }
   }
+  // A helper's own lines (a terminal excerpt on a Focus card, code in a result) are its words, not orch's: left out.
+  const own = e => { let t = e.innerText || '';
+    for (const q of e.querySelectorAll('pre, code, samp, kbd, textarea')) { const x = q.innerText; if (x) t = t.split(x).join(' '); }
+    return t; };
   const chrome = [...document.querySelectorAll('button, [role=tab], nav a, h1, h2, h3, label, th, .btn')]
-    .filter(vis).map(e => (e.innerText || '').trim()).filter(Boolean);
+    .filter(vis).map(e => own(e).trim()).filter(Boolean);
   for (const w of never) {
     const re = new RegExp('(^|[^A-Za-z])' + w.replace(/[.*+?^${}()|[\\]\\\\-]/g, '\\\\$&') + '([^A-Za-z]|$)');
     const hit = chrome.find(t => re.test(t.replace(/\\bSign in\\b/g, '')));
@@ -67,6 +73,54 @@ def redact(text: str, base: str) -> str:
     s = re.sub(r"/go/[^/?#\s\"]+", "/go/XXX", str(text))
     s = re.sub(r"launch=[A-Za-z0-9_-]+", "launch=XXX", s)
     return s.replace(base, "") if base else s
+
+
+# The browser could not open a connection at all (not a slow page): the dashboard is not there for it.
+NO_CONNECTION = re.compile(
+    r"net::ERR_(CONNECTION_\w+|NAME_NOT_RESOLVED|ADDRESS_UNREACHABLE|NETWORK_\w+|INTERNET_DISCONNECTED|EMPTY_RESPONSE)"
+)
+UNREACHABLE = "The dashboard could not be reached (at {where}), so no page was looked at."
+
+
+class Unreachable(Exception):
+    """No connection to the dashboard: one plain line for the pass instead of every page as empty."""
+
+
+def _answers(host: str, port: int, timeout: float = 3.0) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def reachable_url(launch_url: str, answers=_answers) -> str:
+    """The launch link as given when its computer name answers, else the same link on this computer's own
+    address (the look runs on the computer the dashboard runs on; a private-network name can be down while the
+    dashboard is fine). Neither answers: Unreachable. The link works once, so this checks before using it."""
+    parts = urlsplit(launch_url)
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    if not parts.hostname or answers(parts.hostname, port):
+        return launch_url
+    local = parts.scheme == "http" and parts.hostname not in (
+        "127.0.0.1",
+        "localhost",
+    )  # https stays on its own name
+    if local and answers("127.0.0.1", port):
+        return urlunsplit(parts._replace(netloc=f"127.0.0.1:{port}"))
+    raise Unreachable(UNREACHABLE.format(where=f"{parts.hostname}:{port}"))
+
+
+def _goto(page, url: str, timeout: int, answers=_answers) -> None:
+    """Open an address. A slow answer is left to the wait after it; no connection at all (the browser says so,
+    or its own wait ran out and the port does not answer either) is Unreachable."""
+    try:
+        page.goto(url, wait_until="commit", timeout=timeout)
+    except Exception as e:  # noqa: BLE001 - timed out: the wait below says so
+        parts = urlsplit(url)
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+        if NO_CONNECTION.search(str(e)) or (parts.hostname and not answers(parts.hostname, port)):
+            raise Unreachable(UNREACHABLE.format(where=f"{parts.hostname}:{port}")) from None
 
 
 def slug(route: str) -> str:
@@ -101,7 +155,15 @@ def browser_ready() -> bool:
 
 def _text_len(page) -> int:
     best = 0
+    with contextlib.suppress(Exception):
+        best = int(page.main_frame.evaluate(TEXT_LEN_JS) or 0)
+    if best > 20:
+        # Shown. A frame is asked only when main is empty: an evaluate in a frame that never gets a page has no
+        # time limit (phone #home "took 164.8 s", report r-1121-1222-ws-2).
+        return best
     for f in page.frames:  # add-on pages live in a frame inside main
+        if f == page.main_frame:
+            continue
         with contextlib.suppress(Exception):  # a frame that went away
             best = max(best, int(f.evaluate(TEXT_LEN_JS) or 0))
     return best
@@ -196,6 +258,7 @@ def look(launch_url: str, routes: list[str], never: list[str], out: Path, root: 
     out/shots, page texts to out/texts. Returns {"findings": [...], "timings": [...]}."""
     from playwright.sync_api import sync_playwright
 
+    launch_url = reachable_url(launch_url)
     base = launch_url.split("#", 1)[0].rstrip("/")
     shots, texts = out / "shots", out / "texts"
     shots.mkdir(parents=True, exist_ok=True)
@@ -225,8 +288,7 @@ def look(launch_url: str, routes: list[str], never: list[str], out: Path, root: 
                 ),
             )
             # one sign-in for the whole pass: the session then lives in this browser context
-            with contextlib.suppress(Exception):  # never repeat the address (it holds the sign-in)
-                page.goto(launch_url, wait_until="commit", timeout=45000)
+            _goto(page, launch_url, 45000)  # never repeat the address (it holds the sign-in)
             page.wait_for_timeout(3500)
             body = ""
             with contextlib.suppress(Exception):
@@ -241,9 +303,9 @@ def look(launch_url: str, routes: list[str], never: list[str], out: Path, root: 
                 errs.clear()
                 for route in routes:
                     cur["route"] = route
-                    with contextlib.suppress(Exception):  # timed out: the wait below says so
+                    with contextlib.suppress(Exception):
                         page.goto("about:blank")
-                        page.goto(f"{base}/{route}", wait_until="commit", timeout=30000)
+                    _goto(page, f"{base}/{route}", 30000)
                     ms = _wait_main(page, EMPTY_MS)
                     page.wait_for_timeout(1200)
                     shot = shots / f"{vp['name']}-{slug(route)}.png"
