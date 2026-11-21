@@ -63,7 +63,9 @@ async fn serve(allow_root: bool) -> Result<(), String> {
     // fail closed: the admin page binds only a private address, never a fallback
     let admin_listen = orch_publish::resolve_admin_listen(&admin_listen)?;
     let public = bind(&listen).await?;
-    let admin = bind(&admin_listen).await.map_err(|e| format!("{e} (admin)"))?;
+    let admin = bind(&admin_listen)
+        .await
+        .map_err(|e| format!("{e} (admin)"))?;
     let _lock = cli::lock_data_dir(&cli::data_dir_from_env(), "orch-publish")?;
     let cfg = Config::from_env();
     cfg.validate()?;
