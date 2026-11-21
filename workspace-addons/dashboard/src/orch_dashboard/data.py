@@ -1278,6 +1278,10 @@ def load_runs(
         # one process for all tickets (a process per ticket was most of the idle cost of an open page)
         batch = run_orch(orch_bin, ["run", "status", *todo, "--json"], root, timeout=5.0 + 0.5 * len(todo))
         rows = batch.get("runs") if isinstance(batch, dict) else None
+        if rows is None and len(todo) == 1 and isinstance(batch, dict) and batch:
+            rows = {
+                todo[0]: batch
+            }  # one ticket: the core answers its run itself, not {runs: {...}} (ORCH-884)
         rows = rows if isinstance(rows, dict) else {}
         got = [
             rows.get(i) if isinstance(rows.get(i), dict) and "error" not in rows[i] else None for i in todo
