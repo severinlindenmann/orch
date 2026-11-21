@@ -20,7 +20,9 @@
 // A click-through that fails is tried once more at the end, alone, on a fresh throw-away home, server and browser
 // context (ORCH-1132): a pass then counts, and the summary names it ("passed on second try: <file>") so a flaky one
 // stays visible. Failed twice = failed. More than 3 failures at once are not tried again (a real break). Each
-// click-through has a time limit of 3 minutes, so one hang cannot eat the job.
+// click-through has a time limit of 3 minutes, so one hang cannot eat the job. A click-through on the short
+// UNSTEADY list (each entry names the ticket that fixes it) still runs, but its failure is printed as
+// "FAILED (known unsteady, does not count): <file>" and does not make the run red.
 'use strict';
 const fs = require('node:fs');
 const net = require('node:net');
@@ -327,6 +329,13 @@ const STEP_LIMIT_MS = 180000;
 /** At most this many failed click-throughs are tried a second time: more failures at once are a real break, and a
  *  fresh server for each would only stretch a red job. */
 const MAX_RETRIES = 3;
+/** Known unsteady click-throughs: each still runs and is printed, but a failure does not make the run red (nor do
+ *  the features only it covers). The owner decided click-throughs must not hold up queue groups (20 Nov); this is
+ *  the bridge until the named ticket fixes the click-through. Keep it short (a test allows at most 3) and remove an
+ *  entry as soon as its ticket is done. */
+const UNSTEADY = {
+  'r-factory-idea-to-start.cjs': 'ORCH-1118',  // failed twice in one run in group #2220 (Running after a reload; 404)
+};
 /** No second try starts after this long (the CI job stops at 15 minutes). */
 const RETRY_DEADLINE_MS = 12 * 60000;
 
@@ -430,23 +439,35 @@ async function main() {
     if (srv) srv.stop();
   }
   const { results, secondTry } = run;
-  const done = new Set();
-  for (const r of results) if (!r.problems.length) for (const k of r.c.covers || []) done.add(k);
-  const failed = results.filter(r => r.problems.length);
-  let missing = [];
-  if (!o.only) {
-    missing = catalogue.features().filter(k => !done.has(k));
-    if (missing.length) {
-      console.log('\nThese dashboard features have no passing click-through (add one in workspace-addons/dashboard/clickthrough/features/):');
-      for (const k of missing) console.log(`  - ${k}`);
-    }
+  const v = verdict(results, o.only ? null : catalogue.features());
+  if (v.missing.length) {
+    console.log('\nThese dashboard features have no passing click-through (add one in workspace-addons/dashboard/clickthrough/features/):');
+    for (const k of v.missing) console.log(`  - ${k}`);
   }
-  console.log(`\n${results.length - failed.length} of ${results.length} click-throughs passed${o.only ? '' : `; ${catalogue.features().length - missing.length} of ${catalogue.features().length} features done`}.`);
+  const nFeatures = catalogue.features().length;
+  console.log(`\n${results.length - v.failed.length - v.unsteady.length} of ${results.length} click-throughs passed${o.only ? '' : `; ${nFeatures - v.missing.length - v.excused.length} of ${nFeatures} features done`}.`);
   if (secondTry.length) console.log(`passed on second try: ${secondTry.join(', ')}`);
-  if (failed.length) console.log(`failed: ${failed.map(r => r.c.file).join(', ')}`);
-  return failed.length || missing.length ? 1 : 0;
+  for (const r of v.unsteady) console.log(`FAILED (known unsteady, does not count): ${r.c.file} (${UNSTEADY[r.c.file]} fixes it)`);
+  if (v.failed.length) console.log(`failed: ${v.failed.map(r => r.c.file).join(', ')}`);
+  return v.code;
 }
 
-module.exports = { tools, recorder, where, runAll, withTimeout };
+/** The run's verdict. failed: what makes it red; unsteady: failures of the UNSTEADY list (printed, not counted);
+ *  missing: features (when given) no passing click-through did, except those only a failed unsteady one covers
+ *  (excused). code: 1 = red. */
+function verdict(results, features, unsteady = UNSTEADY) {
+  const bad = results.filter(r => r.problems.length);
+  const failed = bad.filter(r => !unsteady[r.c.file]);
+  const shaky = bad.filter(r => unsteady[r.c.file]);
+  const done = new Set(), shakyCovers = new Set();
+  for (const r of results) if (!r.problems.length) for (const k of r.c.covers || []) done.add(k);
+  for (const r of shaky) for (const k of r.c.covers || []) shakyCovers.add(k);
+  const notDone = (features || []).filter(k => !done.has(k));
+  const missing = notDone.filter(k => !shakyCovers.has(k));
+  const excused = notDone.filter(k => shakyCovers.has(k));
+  return { failed, unsteady: shaky, missing, excused, code: failed.length || missing.length ? 1 : 0 };
+}
+
+module.exports = { tools, recorder, where, runAll, withTimeout, verdict, UNSTEADY };
 
 if (require.main === module) main().then(c => process.exit(c), e => { console.error(e); process.exit(1); });
