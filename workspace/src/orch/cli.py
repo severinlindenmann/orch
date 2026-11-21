@@ -303,6 +303,8 @@ def _show(t: dict, root: Path) -> str:
                 if b
                 else f"Blocked by: {w['ref']}"
             )
+        elif w["kind"] == "pr":
+            out.append(f"Waiting for: pull request {w['ref']} to be merged")
         else:
             out.append(
                 "Waiting for: " + ("an answer" if w["kind"] == "question" else f"{w['kind']} {w['ref']}")

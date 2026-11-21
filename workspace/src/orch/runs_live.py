@@ -179,7 +179,7 @@ def _waits_on_time_or_work(root: Path, rec: dict) -> bool:
         w = t.get("waiting_on") or {}
         return (
             t.get("status") == "waiting"
-            and w.get("kind") in ("time", "ticket", "external")
+            and w.get("kind") in ("time", "ticket", "pr", "external")
             and not w.get("start")
         )
     return False
