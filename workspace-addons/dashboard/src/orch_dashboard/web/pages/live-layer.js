@@ -367,7 +367,8 @@ function livePane(key, where, s, o) {
         s.menu === placeMenu ? livePlaceMenu(where, true) : null,
         s.menu === besideMenu && o.others.length ? liveBesideMenu(key, label, o.others) : null,
         s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned, o.narrow, o.narrow && n > 1 && !o.phone) : null)),
-    sess?.running && !sess.kind && typeof window.liveModelRow === 'function' ? window.liveModelRow(sess, s) : null,
+    sess?.running && (!sess.kind || sess.kind === 'empty') && typeof window.liveModelRow === 'function' ? window.liveModelRow(sess, s) : null,
+    sess?.running && sess.kind && typeof window.livePermPaneRow === 'function' ? window.livePermPaneRow(sess, s) : null,
     group ? h('div', {className:'live-gwrap', 'data-key':'live-gwrap'}, liveGroupSwitcher(group, key, o.narrow), livePaneBody(key, sess, label))
       : livePaneBody(key, sess, label));
 }
@@ -497,7 +498,7 @@ function liveLayerPaint() {
   const host = liveDockHost(), s = liveLayerModel(), where = liveLayerWhere(s, liveLayerPhone());
   const shown = s.panes.map(liveLayerSession).map(x => x && [x.key, x.title, x.running, x.pill?.textContent || '', x.running && !x.kind ? liveStopLabel(x) : '']);
   const v = s.panes.length && where !== 'bar' && where !== 'side' ? liveLayerView(s, where) : null;
-  const key = JSON.stringify([where, s.menu, s.panes, s.cur, shown, liveRen, v && [v.narrow, v.compact, v.pins.filter(k => s.panes.includes(k)), v.others], liveLayerName(), liveLayerPage()?.name, typeof liveHistKey === 'function' ? liveHistKey() : null, typeof window.liveStartKey === 'function' ? window.liveStartKey() : null, typeof window.liveModelKey === 'function' ? window.liveModelKey(s.panes) : null]);
+  const key = JSON.stringify([where, s.menu, s.panes, s.cur, shown, liveRen, v && [v.narrow, v.compact, v.pins.filter(k => s.panes.includes(k)), v.others], liveLayerName(), liveLayerPage()?.name, typeof liveHistKey === 'function' ? liveHistKey() : null, typeof window.liveStartKey === 'function' ? window.liveStartKey() : null, typeof window.liveModelKey === 'function' ? window.liveModelKey(s.panes) : null, typeof window.livePermKey === 'function' ? window.livePermKey() : null, typeof liveGroupKey === 'function' ? liveGroupKey(s.panes) : null]);
   host.dataset.mode = where;
   host.style.setProperty('--live-h', s.height ? s.height + 'px' : '');
   host.style.setProperty('--live-w', s.width ? s.width + 'px' : '');

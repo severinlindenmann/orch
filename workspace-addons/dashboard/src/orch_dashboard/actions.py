@@ -701,6 +701,17 @@ def _typing_set(a):
     return ["config", "set", SESSION_TYPING_KEY, "on" if a["on"] else "off"], [], []
 
 
+def _terminal_typing_set(a):
+    """Settings > Add-ons: may the person type into the plain terminal (a shell on this computer), its own switch
+    apart from the helper's screen (owner, ORCH-261), a plain `orch config set` (core names the key)."""
+    from orch.config import TERMINAL_TYPING_KEY
+
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", TERMINAL_TYPING_KEY, "on" if a["on"] else "off"], [], []
+
+
 def _diag_delete(what):
     def build(a):
         _only(a, ())
@@ -849,15 +860,31 @@ def _session_reopen(a):
 
 
 SESSION_KINDS = ("empty", "chat", "terminal", "manager")  # core sessions.KINDS (ORCH-364)
+SESSION_MODES = ("ask", "edits", "auto", "full")  # core sessionmode.MODES (ORCH-818)
 
 
 def _session_new(a):
     """The New menu of the live bar: a session without a ticket (empty helper, chat helper, plain terminal,
     Manager), through the core's one start path. A second New of the same kind goes to the one that is open."""
-    _only(a, ("kind",))
+    _only(a, ("kind", "permissions", "model"))
     if a.get("kind") not in SESSION_KINDS:
         raise BadRequest("Choose an empty helper, a chat helper, a plain terminal or the Manager.")
-    return ["session", "new", a["kind"]], [], []
+    flags: list[str] = []
+    model = a.get("model")
+    if model is not None:
+        if (
+            a["kind"] != "empty" or model not in MODELS or model == "auto"
+        ):  # ORCH-710: the Empty helper's pick
+            raise BadRequest("Pick Sonnet, Opus, Haiku or Fable for the Empty helper.")
+        flags += ["--model", model]
+    mode = a.get("permissions")
+    if mode is not None:
+        # ORCH-818: the Start choice's permission mode; the core refuses one the workspace does not allow, and a
+        # raise without the signed-in person's grant (SESSION_GRANT_OPS)
+        if mode not in SESSION_MODES or a["kind"] == "terminal":
+            raise BadRequest("Choose a permission mode the helper knows.")
+        flags += ["--permission-mode", mode]
+    return ["session", "new", a["kind"]], flags, []
 
 
 def _run_send(a):
@@ -1213,6 +1240,7 @@ OPS = {
     "live.set": _live_set,
     "diag.set": _diag_set,
     "typing.set": _typing_set,
+    "terminal-typing.set": _terminal_typing_set,
     "update.auto": _update_auto,
     "diag.delete_reports": _diag_delete("reports"),
     "copies.set": _copies_set,
@@ -1765,6 +1793,9 @@ PERSON_GRANT_OPS = frozenset(
 )
 # a signed-in answer may pick a draft, and a signed-in Done may finish a ticket that carries one (ORCH-582)
 DRAFT_GRANT_OPS = frozenset({"answer", "review.answer", "ticket.patch"})
+# ORCH-818: a signed-in Start may raise a session's permission mode; without a session no grant, and the core
+# refuses a raise (keeping or lowering it starts as before)
+SESSION_GRANT_OPS = frozenset({"session.new"})
 
 
 def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> tuple[dict, tuple[int, ...]]:
@@ -1785,7 +1816,7 @@ def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> tuple[dict
         except Exception:  # noqa: BLE001  no guarded orch home here: nothing to renew from this page
             raise Unavailable("orch cannot renew logins in this workspace.") from None
         fds = () if fd is None else (fd,)
-    elif op in DRAFT_GRANT_OPS and session:
+    elif op in (DRAFT_GRANT_OPS | SESSION_GRANT_OPS) and session:
         # ORCH-582: a draft (and the Check of a ticket with one) is answered only by a signed-in person; the
         # core takes nothing else as proof, whatever --by or --via say. Without a session: no grant, and the
         # core refuses a draft (other cards answer as before).

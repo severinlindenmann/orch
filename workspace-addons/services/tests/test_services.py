@@ -224,6 +224,59 @@ def test_log_masks_secrets_and_keeps_plain_lines(cli, ws, stored_keys):
     assert out.strip() == "listening on 8000"
 
 
+def test_log_masks_only_the_secret_part_of_a_line(cli, ws, stored_keys):
+    """ORCH-933: a key=value secret hides the value, not the whole line (the rest of the log stays useful)."""
+    _add(cli)
+    stored_keys["MY_TOKEN"] = "zq-stored-value-81723"
+    log = ws / ".orch/addons/services/logs/web.log"
+    written = [
+        "tick 5 password=hunter2isverylong123 TOKEN=abcDEF123456ghiJKL789",
+        "tick 6 API_KEY=hunter2hunter2hunter2 done",
+        "tick 7 all good [hidden]",
+    ]
+    log.write_text("\n".join(written) + "\n", encoding="utf-8")
+    code, out = jrun(cli, "log", "web")
+    assert code == 0
+    assert out["lines"] == [
+        "tick 5 password=•••••• TOKEN=••••••",
+        "tick 6 API_KEY=•••••• done",
+        "tick 7 all good [hidden]",
+    ], out["lines"]
+
+
+def test_log_mask_never_shows_part_of_a_value(cli, ws, stored_keys):
+    """ORCH-933 review: a quoted value with spaces is hidden whole; dots put in for display never make a stored
+    key value appear (a literal [hidden] in the log next to its parts)."""
+    _add(cli)
+    stored_keys["ODD_KEY"] = "abc••••••def-81723"
+    log = ws / ".orch/addons/services/logs/web.log"
+    written = [
+        'tick 8 password="correct horse battery staple" done',
+        "tick 9 password=x1y2z3w4v5 abc[hidden]def-81723",
+    ]
+    log.write_text("\n".join(written) + "\n", encoding="utf-8")
+    code, out = jrun(cli, "log", "web")
+    assert code == 0
+    text = "\n".join(out["lines"])
+    for part in ("horse", "battery", "staple", "abc••••••def"):
+        assert part not in text, out["lines"]
+    assert out["lines"][0] == "tick 8 password=•••••• done", out["lines"]
+
+
+def test_log_line_with_a_stored_key_is_hidden_whole(cli, ws, stored_keys):
+    """ORCH-933 review: a stored value that itself holds key=value is never cut into shown pieces."""
+    _add(cli)
+    stored_keys["COMBO"] = "leftpart-81723 password=hunter2isverylong123 rightpart-81723"
+    log = ws / ".orch/addons/services/logs/web.log"
+    log.write_text(
+        "tick 10 leftpart-81723 password=hunter2isverylong123 rightpart-81723\ntick 11 fine\n",
+        encoding="utf-8",
+    )
+    code, out = jrun(cli, "log", "web")
+    assert code == 0
+    assert out["lines"] == ["••••••", "tick 11 fine"], out["lines"]
+
+
 def test_view_is_a_valid_page(cli, ws):
     _add(cli, "web", "--start")
     _code, out, _ = cli("view", "--json")
@@ -361,3 +414,28 @@ def test_add_says_why_when_the_stored_keys_cannot_be_read(cli, monkeypatch):
     assert out["error"] == (
         "Could not compare the command with this workspace's stored keys, because This is a test install outside the test folder."
     )
+
+
+def test_workspace_on_external_disk_keeps_log_and_cwd_in_home(cli, ws, fake, monkeypatch, tmp_path):
+    """macOS: launchd cannot open a log or a working folder under /Volumes (exit 78 / getcwd hang)."""
+    from orch_services import store
+
+    monkeypatch.setattr(store, "on_external_volume", lambda p: True)
+    monkeypatch.setattr(store.Path, "home", classmethod(lambda cls: tmp_path))
+    code, out = _add(cli)
+    assert code == 0, out
+    spec = fake.entries["web"]["spec"]
+    assert spec.cwd == tmp_path
+    assert spec.log.parent.parent == tmp_path / "Library" / "Logs" / "orch" and spec.log.parent.is_dir()
+    assert "Local Network" in out["next"]
+    assert not str(spec.log).startswith(str(ws))
+
+
+def test_on_external_volume_only_for_volumes_paths_on_macos(monkeypatch):
+    from orch_services import store
+
+    monkeypatch.setattr(store.sys, "platform", "darwin")
+    assert store.on_external_volume(__import__("pathlib").Path("/Volumes/NoSuchDisk/ws")) is True
+    assert store.on_external_volume(__import__("pathlib").Path("/tmp")) is False
+    monkeypatch.setattr(store.sys, "platform", "linux")
+    assert store.on_external_volume(__import__("pathlib").Path("/Volumes/NoSuchDisk/ws")) is False

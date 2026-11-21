@@ -159,7 +159,7 @@
         },
         "permissions": {
           "type": "object", "additionalProperties": false,
-          "propertyNames": { "enum": ["ask", "auto", "full"] },
+          "propertyNames": { "enum": ["ask", "edits", "auto", "full"] },
           "description": "Optional. Flags for the workspace's permission mode (kept per machine in the orch home (permissions.json), set by orch config set workspace.permissions, never read from .orch/config.toml: ask | auto (default) | full), added to every oneshot and live start. An adapter without this ignores the mode. A mode that is missing adds nothing.",
           "additionalProperties": {
             "oneOf": [
@@ -171,6 +171,14 @@
                   "args": { "type": "array", "items": { "$ref": "#/$defs/arg" } },
                   "if_help_has": { "type": "string", "minLength": 1, "maxLength": 100 },
                   "else": { "type": "array", "items": { "$ref": "#/$defs/arg" } }
+                }
+              }
+              ,{
+                "type": "object", "required": ["args", "with"], "additionalProperties": false,
+                "description": "args followed by the flags of another mode of this table (that entry must be a plain list), so a shared flag list is written once.",
+                "properties": {
+                  "args": { "type": "array", "items": { "$ref": "#/$defs/arg" } },
+                  "with": { "enum": ["ask", "edits", "auto", "full"] }
                 }
               }
               ,{
@@ -195,6 +203,14 @@
                 }
               }
             ]
+          }
+        },
+        "permission_choices": {
+          "type": "array", "maxItems": 4,
+          "description": "The modes the Start choice of a session without a ticket offers for this tool, lowest first (ORCH-818): each names a key of permissions and the words shown for it. A mode the workspace does not allow is shown off.",
+          "items": {
+            "type": "object", "required": ["mode", "label"], "additionalProperties": false,
+            "properties": { "mode": { "enum": ["ask", "edits", "auto", "full"] }, "label": { "type": "string", "minLength": 1, "maxLength": 40 } }
           }
         },
         "hooks": {

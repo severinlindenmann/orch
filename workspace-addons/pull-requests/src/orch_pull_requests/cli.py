@@ -322,7 +322,7 @@ def main(argv: list[str] | None = None) -> int:
     ls.add_argument("--json", action="store_true")
     au = q.add_parser(
         "audit",
-        help="merges past the queue, times it stood still, check runs per merge and minutes to merged, for the last hours",
+        help="merges past the queue, times it stood still, check runs per merge, minutes to merged, the busiest hour and group start to merged, for the last hours",
     )
     au.add_argument("--hours", type=float, default=14, help="how far back (default 14: one night)")
     au.add_argument("--json", action="store_true")
@@ -355,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     hs.add_argument("state", nargs="?", choices=("on", "off", "status"), default="status")
     hs.add_argument("--json", action="store_true")
-    w = sub.add_parser("watch", help=argparse.SUPPRESS)
+    w = sub.add_parser("watch")  # hidden: no help= keeps it out of the --help list
     w.add_argument("--root", help=argparse.SUPPRESS)
     args = p.parse_args(argv)
     try:
@@ -395,13 +395,15 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             print(f"{args.url} does not wait in the merge queue.")
             return 1
-        from .runner import admit
+        from .runner import _release_fix, admit
 
         url = store.canonical(args.url)
         ticket = _ticket(root, args.ticket, url)
         old = store.find(store.read(root), url)
         seen = {} if old and old.get("state") not in FINISHED else admit(root, _github(), url)
-        row, new = store.add(root, url, ticket, _actor(), first=args.first, **seen)
+        # a release keeper's red-run fix goes first by itself (ORCH-1023)
+        first = args.first or _release_fix(root, ticket)
+        row, new = store.add(root, url, ticket, _actor(), first=first, **seen)
         start_runner(root)
         if not args.wait:
             ahead = [x for x in store.read(root) if x.get("state") not in FINISHED and x["url"] != url]

@@ -23,8 +23,16 @@ steps are marked `continue-on-error`, so its check stays green and only a warnin
 A pull request into develop on its own runs one **light** job (`scripts/ci_light.py`, about 5 minutes): words and
 style, ruff, the workspace tests that import the modules it changed (or a quarter of the suite as a sample when it
 changes what all tests share, a module no test imports, or more than a quarter of the suite), the rule tests that
-read the whole tree (`RULE_TESTS`: tool names, CLI seams, skills and history lint, next-step hints; about 15 s; they
-made most red queue groups on 18-19 Nov) and the suites of the add-ons it changed. The full set runs **once per merge queue group** (`orch-queue/…`) on top of develop, whatever
+read the whole tree (`RULE_TESTS` plus every file named `test_no_*`, `test_*_lint`, `test_*_seams`, `test_*_scan_doors`,
+`test_*names*` or `test_spawn_argv`, and the node ids in `RULE_NODES`; about 25 s; they made most red queue groups on
+18-19 Nov), the suites of the add-ons it changed, the click-throughs it changed and the Focus/Insights page smoke
+when those add-ons change. A new rule test runs on every pull request by its file name alone.
+
+Before a group is pushed the merge queue runs `python scripts/ci_light.py --rules` (the whole-tree checks above that
+take seconds) on the group's merged tree on this computer (setting `[pull_requests] precheck = "uv run --project
+workspace python scripts/ci_light.py --rules"`, about 35 s). Red: the base alone first (red there too = a broken
+setting, nobody blamed), then each member on its own; a member red alone leaves the queue at once with the failing
+lines, instead of after a 16 minute group run. The full set runs **once per merge queue group** (`orch-queue/…`) on top of develop, whatever
 files the group touches. A push to develop whose files equal a green queue group (`scripts/ci_proven.py`: a merge
 commit with the tree of its second parent, and a green `ci` run of that parent on an `orch-queue/` branch) runs no
 suite again. Contracts, publish, relay, mobile and the dashboard pictures still follow their paths on a pull request.
@@ -42,11 +50,12 @@ about two full runs at once, pull requests waited up to two hours and the queue 
 | headless-launch (rules): every browser start goes through `e2e/headless.cjs` / `.py` (ORCH-615) | runs (the queue stops on it) | required | | | runs |
 | workspace, Linux (2 parts) | only with Windows ² | required, always | runs unless proven | runs | required |
 | workspace, macOS (5 parts) | | | runs | runs | required |
-| workspace, Windows (10 parts) | not while known red ¹ | | shown (known red) | shown (known red) | shown (known red), in the release check |
+| workspace, Windows (16 parts) | not while known red ¹ | not run ³ | shown (known red), also when proven ³ | shown (known red) | shown (known red), in the release check |
 | Windows install as a standard user | not while Windows is known red ¹ | | runs | runs | required, in the release check |
 | CLI smoke, Windows + macOS | | required, always | | | required |
 | e2e smoke (5 minutes) | | required, always | | | required |
-| add-on suites, page smoke, click-throughs | in light (changed add-ons only) | required, always | runs unless proven | | required |
+| add-on suites, page smoke | in light (changed add-ons only) | required, always | runs unless proven | | required |
+| dashboard click-throughs | in light (changed add-ons only) | not run, for now ³ | runs, also when proven ³ | | required |
 | clock (suites at 22:30 and 23:59:40 UTC, 4 parts each: ORCH-1118) | | required, always | runs unless proven | runs | required |
 | contracts, publish, relay | required | required (contracts always) | runs unless proven | | required |
 | mobile | required (smoke set) | not run (owner, 20 Nov: ORCH-1118) | runs, full suite, also when proven | runs, with phone UI tests | required |
@@ -66,6 +75,13 @@ Once Windows is green (KNOWN_RED empty), a pull request that changes file, proce
 
 ² A light pull request that changes file, process or path code while Windows is green runs the workspace job
 with its Windows parts (`scripts/touches_os_code.py --pr`); while Windows is known red that never happens.
+
+³ For now (ORCH-1106, owner 20 Nov): queue groups skip the click-throughs and the Windows parts, so a flaky
+click-through or a Windows part at its time limit no longer drops a group (17 green and 81 red groups on 20 Nov).
+Both still run on every push to develop, also one a green group proved (then only they run), and on a release
+pull request; a red one on develop opens the red-develop ticket as before. Switch back when ORCH-555 and ORCH-1050
+are done and 20 groups in a row were green with them: the note at the top of `ci.yml`,
+`brand/tests/test_ci_queue_skip.py`.
 
 A draft pull request gets no CI run; marking it ready starts one.
 

@@ -65,7 +65,7 @@ $env:Path = "$nodeDir;$env:Path"
 $pw = "$env:LOCALAPPDATA\orch-smoke\pw"; New-Item -ItemType Directory -Force $pw | Out-Null
 Copy-Item "$pub\dashboard-smoke.mjs" $pw -Force
 Copy-Item "$pub\headless.cjs" "$pw\.." -Force  # dashboard-smoke.mjs imports ../headless.cjs, as in the repository
-'{"name":"orch-win-smoke","private":true,"type":"module","dependencies":{"playwright":"1.55.0"}}' | Set-Content "$pw\package.json" -Encoding ASCII
+'{"name":"orch-win-smoke","private":true,"type":"module","dependencies":{"playwright":"1.64.1"}}' | Set-Content "$pw\package.json" -Encoding ASCII
 Set-Location $pw
 L (cmd /c "npm install --no-audit --no-fund --loglevel=error < NUL 2>&1" | Out-String)
 L (cmd /c "npx playwright install chromium < NUL 2>&1" | Out-String)

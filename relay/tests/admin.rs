@@ -586,6 +586,12 @@ fn portal_shows_webhook_and_person_senders() {
 }
 
 #[test]
+fn portal_show_code_needs_a_workspace() {
+    let page = include_str!("../web/portal.html");
+    assert!(page.contains("const ws=selected(f);if(!ws.length)throw new Error("));
+}
+
+#[test]
 fn portal_blur_validation_skips_submit_button() {
     let page = include_str!("../web/portal.html");
     assert!(page.contains("e.relatedTarget&&e.relatedTarget.type==='submit'"));
