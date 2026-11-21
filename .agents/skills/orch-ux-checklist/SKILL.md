@@ -36,11 +36,44 @@ Full list with thresholds and how to check: `references/CHECKLIST.md`. Sources a
    `node workspace/src/orch_ui/tests/ux_checks.cjs` (master gallery at 1280/390/320: sideways scroll, 24 px
    targets, focus mark, reduced motion, text contrast, console errors), `brand/tests/test_contrast.py` (token
    contrast), `scripts/check_style.py` (no page-local colours), `brand/tests/test_wording.py` and the banned-word
-   check. `DESIGN.md` "UX/UI checklist" lists which items stay by eye.
+   check. `DESIGN.md` "UX/UI checklist" lists which items stay by eye. Optional for a changed page: Lighthouse and
+   a speed trace (next section).
 6. **PR body:** `UX checklist: 61 items, N n.a., all others yes` (or the "no" lines with reasons), `Screenshots:`,
    `Mockup: updated <where>`, `Master: <change or none>`, rules touched.
 7. **Visual or flow change → owner review card** in orch with before/after pictures (`--ci-shots` for a dashboard
    pull request). Never assume the owner agrees.
+
+## Optional: Lighthouse and a speed trace (Chrome DevTools for agents)
+
+**When.** Only for a changed page, and only where Playwright's own console, network and trace do not answer the
+question: K1 (LCP, INP, CLS), J3 (layout shift), a page that feels slow, or a second accessibility look at H6/H7
+(Lighthouse turns on axe rules our checks leave off, such as "label in name"). Not for click-throughs, not on every
+pull request, and skip it when the change has no visible page.
+
+**How.** The command line of Chrome DevTools for agents (`chrome-devtools-mcp`, Chrome Stable only), never the
+plugin's own MCP tools as they are set up here: those start a visible Chrome with a saved profile folder under
+`~/.cache` (keychain rule, ORCH-1101).
+1. Throwaway home, as for every test (`env -i`, `HOME`, `ORCH_HOME`, `ORCH_HOME_STRICT=1`; set `npm_config_cache` there
+   too). Install the version the plugin pins there, not globally: `npm i chrome-devtools-mcp@<version>`.
+2. A real page on sample data: start orch from your worktree in that home; `Home` in `e2e/dash_ci_shots.py` installs,
+   seeds and prints a sign-in link. Pages are `#` routes (`/#ticket/KEY`); `/t/KEY` answers 404.
+3. `chrome-devtools status` first: the daemon's socket is per user (`/tmp/chrome-devtools-mcp-<uid>`), so another
+   helper's daemon would be shared; wait until it is gone. Then start it:
+   `chrome-devtools start --headless --isolated --chromeArg=--use-mock-keychain --chromeArg=--password-store=basic --performanceCrux=false --usageStatistics=false --workspace=<out folder>`
+   (`--isolated`: a throwaway profile, deleted on stop; the two CrUX/statistics flags keep page addresses and usage
+   from going to Google).
+4. `chrome-devtools new_page "<sign-in link>"`, then `navigate_page <page> --url "<page url>"`.
+5. Lighthouse: `chrome-devtools lighthouse_audit <page> --device desktop --outputDirPath <out>/lh-desktop`, again with
+   `--device mobile` (about 30 s each; accessibility, best practices, failing nodes; no performance score).
+6. Speed trace: `chrome-devtools performance_start_trace <page> --reload true --autoStop true --ignoreCache true
+   --filePath <out>/trace.json.gz` (LCP and its parts, CLS, insights); a cause:
+   `performance_analyze_insight <page> NAVIGATION_0 CLSCulprits` (or `LCPBreakdown`).
+7. `chrome-devtools stop`, then check no Chrome with `puppeteer_dev_chrome_profile` is left running.
+
+**Result.** Put the scores, LCP, CLS and every failed audit on the ticket as a text file (the HTML report trips
+`orch secret scan`); answer K1/J3/H6 with them in the PR body. A failed audit outside your change becomes an issue,
+not a blocker. The lab numbers come from this machine with no throttling: a check against the limits, not field
+data. Worked example: ORCH-1111 (ticket page: accessibility 100, 5 "label in name" fails, LCP 154 ms, CLS 0.08).
 
 ## Owner rules (always win)
 
