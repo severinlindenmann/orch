@@ -1056,10 +1056,10 @@ function pageStopped(r) {
 // the frame address's fragment (kit/frame.js takes it out at once); one orch did not ship gets no pass.
 const SHIPPED_SANDBOX = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
 const framePasses = new Map(), framePassAsks = new Map(), framePassFailed = new Map(), frameFresh = new Map();
+let frameGen = 0;  // a dashboard restart (framesForget) ends every pass ask still under way: its answer is the old run's
 // The server ends a pass after its life (`life` seconds, framepass.py LIFE): one kept longer is asked for again
 // before a page opens with it, so its first call never answers 401 (ORCH-1004). The frame on screen keeps its pass
 // (a new one would load it again); when that one ends, its next call answers 401 and the frame asks for new ones.
-let frameGen = 0;  // a dashboard restart (framesForget) ends every pass ask still under way: its answer is the old run's
 function framePass(name) {
   const kept = framePasses.get(name);
   if (kept && (Date.now() < kept.until || frameShown()?.getAttribute('src')?.includes('#orch-frame=' + kept.pass + '&'))) return kept;
