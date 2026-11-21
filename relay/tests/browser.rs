@@ -290,3 +290,73 @@ fn a_database_from_before_browsers_gets_kind_phone_and_keeps_working() {
         ]
     );
 }
+
+#[tokio::test]
+async fn pair_answer_names_the_browser_by_the_admin_label() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let (_, v) = add_device(&t, &a, json!({"name": "Max laptop", "kind": "browser"})).await;
+    let r = pair_with(
+        &t,
+        &code_of(v["link"].as_str().unwrap()),
+        Some("https://relay.test"),
+    )
+    .await;
+    assert_eq!(r.status(), 201);
+    let pv: Value = r.json().await.unwrap();
+    // The page shows this name ("Signed in as Max laptop"); the browser's own name was ignored.
+    assert_eq!(pv["name"], "Max laptop");
+}
+
+#[tokio::test]
+async fn relay_serves_the_browser_page_with_strict_headers() {
+    let t = start().await;
+    for (path, ct) in [
+        ("/app", "text/html"),
+        ("/app/app.css", "text/css"),
+        ("/app/app.js", "text/javascript"),
+    ] {
+        let r = t
+            .http
+            .get(format!("{}{path}", t.base))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200, "{path}");
+        let h = r.headers().clone();
+        let get = |k: &str| {
+            h.get(k)
+                .map(|v| v.to_str().unwrap().to_string())
+                .unwrap_or_default()
+        };
+        assert!(get("content-type").starts_with(ct), "{path}");
+        let csp = get("content-security-policy");
+        // Only the relay's own scripts run; no inline script, no framing, no other site to talk to.
+        assert!(csp.contains("script-src 'self'"), "{csp}");
+        assert!(
+            !csp.contains("unsafe-inline") && !csp.contains("unsafe-eval"),
+            "{csp}"
+        );
+        assert!(csp.contains("frame-ancestors 'none'"), "{csp}");
+        assert!(csp.contains("connect-src 'self'"), "{csp}");
+        assert_eq!(get("x-frame-options"), "DENY");
+        assert_eq!(get("referrer-policy"), "no-referrer");
+        assert_eq!(get("x-content-type-options"), "nosniff");
+        // Never CORS: no other site may read the page or an answer of the device API.
+        assert!(h.get("access-control-allow-origin").is_none(), "{path}");
+        let body = r.text().await.unwrap();
+        if path == "/app" {
+            // No inline script and no style attribute (both blocked by the rules above).
+            assert!(
+                !body.contains("<script>") && !body.contains(" style="),
+                "inline code in the page"
+            );
+            assert!(body.contains("src=\"/app/app.js\""));
+        }
+        if path == "/app/app.js" {
+            // The code is read from after `#` and sent only by the Sign in press (a POST).
+            assert!(body.contains("location.hash") && body.contains("/v1/phone/pair"));
+            assert!(body.contains("function icon") || body.contains("window.icon"));
+        }
+    }
+}

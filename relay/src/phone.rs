@@ -107,9 +107,11 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
         )?;
     }
     tx.commit()?;
-    let list: String = c.query_row("SELECT workspaces FROM phones WHERE id=?1", [&pid], |r| {
-        r.get(0)
-    })?;
+    let (list, dev_name): (String, String) = c.query_row(
+        "SELECT workspaces,name FROM phones WHERE id=?1",
+        [&pid],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
     // Its workspaces now list this phone (refresh) and may send to it.
     store::bump_and_hint(&c, &app.key, &store::parse_ws_list(&list))?;
     let ws: Vec<Value> = store::parse_ws_list(&list)
@@ -118,7 +120,7 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
         .collect();
     Ok((
         StatusCode::CREATED,
-        Json(json!({"phone_id": pid, "token": token, "workspaces": ws})),
+        Json(json!({"phone_id": pid, "token": token, "name": dev_name, "workspaces": ws})),
     ))
 }
 
