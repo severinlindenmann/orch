@@ -39,3 +39,10 @@ relay/src/phonegate.rs
 relay/tests/phone_signed_send.rs
 relay/tests/phone_signing_key.rs
 relay/Cargo.lock                     # crate names of the Ed25519 library (ed25519, signature)
+# Push text and lists from the signed bytes (ORCH-1296):
+mobile/OrchMobile/SignedCheck.swift
+mobile/OrchMobile/PushCheck.swift
+mobile/OrchMobile/TrustStore.swift
+mobile/OrchNotify/NotificationService.swift
+mobile/OrchMobileTests/SignedPushAndListsTests.swift
+relay/tests/push_signed.rs
