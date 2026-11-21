@@ -1,7 +1,7 @@
 """Personal's own files: which parts are on, their rules, what was handed to which ticket, what helpers did.
 
 All plain JSON under `.orch/addons/personal/` (gitignored), written atomically. Rules are checked here, in the
-workspace, before a helper sees anything (the notebook checks them again once ORCH-649 brings the connection).
+workspace, before a helper sees anything; ways in (ways.py) check theirs on every run.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ PARTS = {
 SOON = {
     "meetings": (
         "Meetings",
-        "Record calls on your notebook; get the transcript, a summary and next steps here.",
+        "Record calls on this computer; get the transcript, a summary and next steps here.",
     ),
     "calendar": ("Calendar", "All your calendars in one week view."),
     "messages": ("Messages", "Work chats and the private chats you choose to bring in."),
