@@ -123,9 +123,10 @@ def _check_account(a) -> bool:
 
 
 def load(root: Path) -> dict:
-    """{"accounts": [...] (in order), "unreadable": n}. A bad file or row is counted, never rewritten here."""
+    """{"accounts": [...] (in order), "unreadable": n, "kept": [...]}. A bad file or row is counted, never rewritten:
+    "kept" holds the rows that could not be read, as they were, so a change writes them back untouched."""
     p = usage_dir(root) / "accounts.json"
-    out = {"accounts": [], "unreadable": 0}
+    out = {"accounts": [], "unreadable": 0, "kept": []}
     if not p.exists():
         return out
     try:
@@ -149,6 +150,7 @@ def load(root: Path) -> dict:
             out["accounts"].append(a)
         else:
             out["unreadable"] += 1
+            out["kept"].append(a)
     out["accounts"].sort(key=lambda a: (a["order"], a["label"].lower()))
     return out
 
@@ -202,9 +204,13 @@ def _lock(root: Path):
         lock.unlink(missing_ok=True)
 
 
-def _write_accounts(root: Path, accounts: list[dict]) -> None:
+def _write_accounts(root: Path, accounts: list[dict], kept: list | None = None) -> None:
+    """`kept`: rows that could not be read, written back after the accounts exactly as they were found."""
     d = usage_dir(root)
-    body = json.dumps({"schema": SCHEMA, "accounts": accounts}, indent=1, ensure_ascii=False) + "\n"
+    body = (
+        json.dumps({"schema": SCHEMA, "accounts": accounts + list(kept or [])}, indent=1, ensure_ascii=False)
+        + "\n"
+    )
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".accounts.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -249,7 +255,7 @@ def change(root: Path):
         yield accounts, rows
         _renumber(accounts)
         if json.dumps(accounts, sort_keys=True) != before or rows:
-            _write_accounts(root, accounts)
+            _write_accounts(root, accounts, d["kept"])
             _append_history(root, rows)
 
 
@@ -376,6 +382,8 @@ def set_limit(
     unit = unit or default_unit(a)
     if a["type"] == "subscription" and unit != "%":
         raise Refused("A subscription limit is a percent, for example 90%.")
+    if a["type"] != "subscription" and unit != "$":
+        raise Refused(f"{a['label']} counts dollars, for example $25.")
     if unit == "%" and value is not None and value > 100:
         raise Refused("A percent limit is at most 100%.")
     if period == "until" and value is not None and not until:

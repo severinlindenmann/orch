@@ -53,9 +53,9 @@ test('only web pages and PDFs get a thumbnail; the box has a stable key so a red
   assert.equal(w3.FileViewer.thumb(f('a.pdf')), null);  // no built-in PDF viewer: the icon stays
 });
 
-test('b4: the viewer copy button says it is local and says where it works', () => {
-  assert.match(source, /btn\('Copy link for this computer'/);
-  assert.doesNotMatch(source, /btn\('Copy link'/);
+test('ORCH-907: the viewer copy button says Copy link and never sends the person to "this computer" (R4.1a)', () => {
+  assert.match(source, /btn\('Copy link'/);
+  assert.doesNotMatch(source, /btn\('[^']*this computer/);
   assert.doesNotMatch(source, /Works only on this computer/);
 });
 

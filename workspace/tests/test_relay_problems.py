@@ -209,6 +209,12 @@ def test_a_workspace_that_shares_and_picks_up_keeps_one_report(proj, run, srv):
     assert srv.problems[0]["status"] == "taken"  # taken by the workspace that already works on it
     code, out, _ = run("relay", "problem", "get", pid)
     assert code == 0 and "shared from here" in out and "another computer" not in out
+    assert "now taken by this workspace" in out and f"orch relay problem back {pid}" in out  # ORCH-932
+    assert run("relay", "problem", "back", pid)[0] == 0 and srv.problems[0]["status"] == "new"
+    code, out, _ = run("relay", "problem", "get", pid, "--look")  # opens it, leaves it for the others
+    assert code == 0 and "shared from here" in out and "now taken" not in out
+    assert srv.problems[0]["status"] == "new"
+    assert run("relay", "problem", "get", pid)[0] == 0
     assert run("relay", "problem", "done", pid)[0] == 0 and srv.problems[0]["status"] == "done"
 
 

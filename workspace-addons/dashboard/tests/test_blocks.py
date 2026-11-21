@@ -344,7 +344,7 @@ def test_messages_page_pairs_half_lists_with_empty_states(tmp_path):
     pairs = [x for x in walk(tree) if x["cls"] == "blk-pair"]
     assert len(pairs) == 1 and len(pairs[0]["kids"]) == 2
     t = texts(tree)
-    assert "No messages yet" in t and "No workspaces allowed" in t and "Open phone settings" in t
+    assert "No messages yet" in t and "No workspaces allowed" in t and "Open Contacts settings" in t
     assert "Allow a workspace" in t
 
 
