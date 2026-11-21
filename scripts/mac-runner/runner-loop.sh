@@ -66,7 +66,8 @@ fresh() {
   if [ -e "$H" ]; then mv "$H" "$old" || return 1; fi
   mkdir -p "$H/Library/Developer" || return 1
   if realdir "$old" Library/Developer/CoreSimulator; then mv "$old/Library/Developer/CoreSimulator" "$H/Library/Developer/"; fi
-  chown -R "$U:$U" "$H" && chmod 700 "$H" || return 1
+  # only the folders root just made: never a recursive chown over what the job left (a hard link to a root file)
+  chown "$U:$U" "$H" "$H/Library" "$H/Library/Developer" && chmod 700 "$H" || return 1
   gone "$old" || return 1
   # the temp and cache folders macOS gives the user (their parent belongs to root or is not the user's to replace)
   for k in DARWIN_USER_TEMP_DIR DARWIN_USER_CACHE_DIR; do
@@ -75,7 +76,10 @@ fresh() {
   done
   # its files in the shared temp folders and in /Users/Shared; the apps and data in its Simulators
   for d in /private/tmp /private/var/tmp /Users/Shared; do
-    find "$d" -xdev -mindepth 1 -maxdepth 3 -user "$U" -prune -print 2>/dev/null | while IFS= read -r f; do gone "$f"; done
+    # NUL-separated: a file name with a line break never turns into another path
+    find "$d" -xdev -mindepth 1 -maxdepth 3 -user "$U" -prune -print0 2>/dev/null | while IFS= read -r -d '' f; do
+      [ "$(stat -f %u "$f" 2>/dev/null)" = "$uid" ] && gone "$f"
+    done
   done
   /usr/bin/perl -e 'alarm 300; exec @ARGV' sudo -u "$U" /usr/bin/xcrun simctl erase all >/dev/null 2>&1
   pkill -KILL -U "$U" 2>/dev/null   # the calls above

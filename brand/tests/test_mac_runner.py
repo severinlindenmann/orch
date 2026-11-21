@@ -540,3 +540,11 @@ def test_a_round_has_a_hard_end_and_nothing_of_the_user_is_set_to_start_again():
     loop = (RUNNER / "runner-loop.sh").read_text()
     assert 'log "round longer than ${MAX}s; stopping it"' in loop
     assert 'launchctl bootout "user/$uid"' in loop
+
+
+def test_root_never_hands_the_job_s_leftovers_to_it_or_splits_names():
+    """Automated review: chown -R over a moved tree with a hard link to a root file; a file name with a line break."""
+    loop = (RUNNER / "runner-loop.sh").read_text()
+    fresh = loop[loop.index("fresh() {"):loop.index("fails=0")]
+    assert 'chown -R "$U:$U" "$H"' not in fresh and 'chown "$U:$U" "$H" "$H/Library" "$H/Library/Developer"' in fresh
+    assert "-print0" in fresh and "read -r -d ''" in fresh and "-print 2>" not in fresh
