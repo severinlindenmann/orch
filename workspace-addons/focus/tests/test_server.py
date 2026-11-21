@@ -118,8 +118,7 @@ def test_ops_build_exact_argv(server, fake_orch):
             ["relay", "mobile"],
         )
     ]
-    # ORCH-417: a Start is the person's (the helper then works for them), no longer the page's "focus"
-    assert got[0][:4] == ["run", "start", TID, "--by"] and got[0][4].startswith("human:")
+    assert got[0][:4] == ["run", "start", TID, "--by"] and got[0][4] == "focus"
     assert "--fresh" in got[1]
     assert got[2][:3] == ["run", "stop", TID]
     assert got[3][-3:] == ["--", TID, "--delete everything"]  # free text can never be an option

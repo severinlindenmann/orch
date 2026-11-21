@@ -76,4 +76,3 @@
   and the Waiting tab read one number. Stress cards (x1-x8): a 2-word title, a 114-character title, an unbroken web
   address, one line and 15 paragraphs, 0/1/2/12 files with a wide banner, a tall phone picture and a tiny icon, a
   choice of 2 and of 6, a question with no detail text.
-- 18 Nov (ORCH-547): an answer someone gave FOR the person names who gave it ("Manager for Severin", "Away mode for Severin", "Script for Severin") and says "Answered for you."; above the Answered list a segmented All / Answered for me (master `.segmented`, shown only when something was answered for the person) and an outlined Undo on each such record: the card waits for the person again. No page CSS.

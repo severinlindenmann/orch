@@ -39,8 +39,7 @@ def test_F1_agent_env_with_by_human_SHOULD_count_as_agent(proj, run, gen, one_st
     started = runs.read(proj, tid) is not None
     if started:
         _wait(proj, tid)
-    # ORCH-547: refused outright (a helper never answers as a person), so nothing was answered or started
-    assert code == 2 and q["answer"] is None and not started, (q["answered_by"], started, err)
+    assert q["answered_by"].startswith("agent:") and not started, (q["answered_by"], started)
 
 
 def test_F1b_agent_env_SHOULD_not_answer_a_phone_question_as_human(proj, run, monkeypatch):

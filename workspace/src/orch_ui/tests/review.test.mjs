@@ -456,34 +456,3 @@ test('the large view shows a PDF in the browser\'s own view and keeps "Open in n
   d.fire('keydown', {key: 'ArrowRight'});
   assert.match(body.textContent, /cannot be shown here/); assert.equal(out.href, '/f/n.md');
 });
-
-// ORCH-547: an answer someone gave FOR the person says who gave it, and can be undone from "Answered for me".
-test('answerRecord: an answer given for the person names who gave it and offers Undo', async () => {
-  const {UI} = load();
-  const e = entry({action: 'approve', summary: 'Approved'}, {who: 'Manager for Severin', for: 'human:Severin', by: 'agent:manager'});
-  const undone = [];
-  const rec = UI.answerRecord(e, {now: NOW, undo: async x => { undone.push(x.id); return {ok: true}; }});
-  assert.match(rec.textContent, /Manager for Severin/); assert.match(rec.textContent, /Answered for you\./);
-  const b = rec.byClass('btn').find(n => n.textContent === 'Undo');
-  assert.ok(b); await b.onclick(); assert.deepEqual(undone, [e.id]);
-  assert.equal(UI.answerRecord({...e, undone: true}, {now: NOW, undo: async () => ({ok: true})}).byClass('btn').find(n => n.textContent === 'Undo'), undefined);
-  assert.equal(UI.answerRecord(entry({action: 'approve'}), {now: NOW, undo: async () => ({ok: true})}).byClass('btn').find(n => n.textContent === 'Undo'), undefined, 'the person\'s own answer has no Undo');
-});
-
-test('the Answered list filters to "Answered for me" and Undo reloads it', async () => {
-  const mine = entry({action: 'approve', summary: 'Approved'}, {id: 'core:q:t_aaaaaa:q2', who: 'Script for Severin', for: 'human:Severin', by: 'agent:script'});
-  const own = entry({action: 'approve', summary: 'Looks good'});
-  let list = [mine, own];
-  const undos = [];
-  const api = {...fakeApi([[]]), answered: async () => list, undo: async e => { undos.push(e.id); list = [{...mine, undone: true}, own]; return {ok: true}; }};
-  const {host} = await mount(api);
-  host.byClass('btn').find(n => n.dataset.show === 'answered').onclick(); await flush();
-  const sec = host.all(n => n.id === 'answered')[0];
-  const forMe = sec.byClass('btn').find(n => n.textContent === 'Answered for me');
-  assert.ok(forMe); forMe.onclick(); await flush();
-  const shown = host.all(n => n.id === 'answered')[0];
-  assert.equal(shown.byClass('decision').length, 1); assert.match(shown.textContent, /Script for Severin/);
-  shown.byClass('btn').find(n => n.textContent === 'Undo').onclick(); await flush(); await flush();
-  assert.deepEqual(undos, [mine.id]);
-  assert.match(host.all(n => n.id === 'answered')[0].textContent, /You undid it/);
-});

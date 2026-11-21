@@ -24,7 +24,7 @@ from orch import (
 )
 from orch.errors import Refused
 
-SUBS = ("list", "answer", "undo", "wait", "link", "tend", "tend-releases", "accepted", "verdict", "security")
+SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict", "security")
 CARD_KINDS = ("draft", "link", "plan", "choose")
 SUGGEST_VERDICTS = ("ok", "no")
 LINKS_MAX = 5  # what a card without options can suggest: approve or don't do
@@ -52,9 +52,6 @@ def add_parsers(sub, common) -> None:
     s = r.add_subparsers(dest="sub", metavar="<command>")
     x = s.add_parser("list", parents=[common], help="what waits for an answer (or --answered)")
     x.add_argument("--answered", action="store_true", help="the answers already given, newest first")
-    x.add_argument(
-        "--for-me", action="store_true", help="with --answered: only answers someone gave for you (to undo)"
-    )
 
     x = s.add_parser("answer", parents=[common], help="answer one card")
     x.add_argument("ticket")
@@ -63,15 +60,6 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--picked", metavar="ID")
     x.add_argument("--note", metavar="JSON", help="changes, words, pins (JSON, at most 8 KB)")
     x.add_argument("--digest", metavar="D", help="the card as it was shown")
-    x.add_argument("--via", default="cli", metavar="WORD")
-    x.add_argument(
-        "--for", dest="for_", metavar="NAME",
-        help="answer FOR this person (the manager, a script): recorded as given for them; they can undo it",
-    )  # fmt: skip
-
-    x = s.add_parser("undo", parents=[common], help="take back an answer someone gave for you")
-    x.add_argument("ticket")
-    x.add_argument("key", help="the answered question (q3)")
     x.add_argument("--via", default="cli", metavar="WORD")
 
     x = s.add_parser("wait", parents=[common], help="wait until a card is answered")
@@ -439,18 +427,14 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
 # ------------------------------------------------------------------ list
 
 
-def _answered(root: Path, for_me: bool = False) -> list[dict]:
-    """The answers already given, newest first. for_me: only those someone gave FOR the person (ORCH-547),
-    the list the person looks through and undoes."""
+def _answered(root: Path) -> list[dict]:
     out = []
     for t in history.shown_json(root, tickets.list_all(root)):
         if t.get("general") is True or not isinstance(t.get("id"), str):
             continue
         for q in t.get("questions") or []:
-            if q.get("answer") is None or q.get("taken_back"):
+            if q.get("answer") is None or not isinstance(q.get("decision"), dict):
                 continue
-            if not isinstance(q.get("decision"), dict) and not tickets.answered_for_person(q):
-                continue  # a plain answer has no card record; one given FOR the person is listed to undo it
             out.append(
                 {
                     "id": f"core:q:{t['id']}:{q['id']}",
@@ -460,39 +444,26 @@ def _answered(root: Path, for_me: bool = False) -> list[dict]:
                     "text": q.get("text") or "",
                     "key": q["id"],
                     "by": q.get("answered_by"),
-                    "for": tickets.answered_for_person(q),
-                    "who": history.answered_words(q.get("answered_by"), tickets.answered_for_person(q)),
-                    "undone": bool(q.get("undone")),
                     "via": q.get("via"),
-                    "at": q.get("at") or q.get("answered_at"),
+                    "at": q.get("at"),
                     "card": q.get("card") or {},
                     "shown": q.get("shown"),
-                    "decision": q.get("decision") or {"summary": str(q.get("answer")), "action": "answer"},
+                    "decision": q["decision"],
                 }
             )
-    if for_me:
-        out = [e for e in out if e["for"]]
     out.sort(key=lambda e: (e["at"] or "", e["id"]), reverse=True)
     return out
 
 
 def _list(args, root: Path) -> None:
-    if getattr(args, "for_me", False) and not args.answered:
-        raise Refused("--for-me goes with --answered.")
     if args.answered:
-        rows = _answered(root, getattr(args, "for_me", False))
+        rows = _answered(root)
         lines = [
             f"  {e['ticket_key'] or e['ticket']}  {e['key']}  {e['decision'].get('summary', '')}"
-            f"  ({e['who']}, {e['via']}, {_when(e['at'])})" + ("  undone" if e["undone"] else "")
+            f"  ({re.sub(r'^(human|agent):', '', e['by'] or 'someone')}, {e['via']}, {_when(e['at'])})"
             for e in rows
         ]
-        head = (
-            "Answered for you (newest first; undo: orch review undo <ticket> <q>)"
-            if args.for_me
-            else ("Answered (newest first)")
-        )
-        empty = "Nothing was answered for you." if args.for_me else "Nothing answered yet."
-        _out(args, rows, "\n".join([head, *lines]) if rows else empty)
+        _out(args, rows, "\n".join(["Answered (newest first)", *lines]) if rows else "Nothing answered yet.")
         return
     cards = review.stack(root)
     n = len(cards)
@@ -518,8 +489,6 @@ def _answer(args, root: Path) -> None:
         raise ReviewError("not_found", f"'{key[:20]}' is not a question of {tid}. Use q3 or review.")
     if args.note is not None and len(args.note.encode("utf-8")) > review.MAX_NOTE_BYTES:
         raise ReviewError("too_large", "A note is at most 8 KB.")
-    if getattr(args, "for_", None):  # a helper never answers for the person on its own ticket: said first
-        _guard(tickets.refuse_own_ticket_stand_in, root, tid)
     if key == "review":
         q = None
         if (
@@ -538,12 +507,13 @@ def _answer(args, root: Path) -> None:
         raise ReviewError("changed", "This card changed or can't be checked. Look at it again.")
     if given is not None and given != current:
         raise ReviewError("changed", f"{key} changed after it was shown. Look at it again, then answer.")
-    if getattr(args, "for_", None) is None and (tickets.agent_tool() or (args.by or "").startswith("agent:")):
-        # an answer on a card is the person's; a helper or role answers only FOR them, saying so (--for)
+    if tickets.agent_tool() or (args.by or "").startswith(
+        "agent:"
+    ):  # an answer on a card is a person's, never an agent's (a label check)
         raise ReviewError("needs_person", review_server.AGENT_REFUSED)
-    who, for_ = _guard(tickets.answer_actor, args)  # the person, or a role for them (ORCH-547)
-    if for_:
-        _guard(tickets.refuse_own_ticket_stand_in, root, tid)
+    who = tickets.current_actor(
+        args.by
+    )  # the person chosen in orch (--by human:<name>), else the computer's user
     digest = given or current
     # ORCH-582: a draft, or the Check of a ticket that carries one, needs the signed-in dashboard's one-time
     # person grant (a paired phone answers through the relay); never a script or a helper's shell
@@ -551,40 +521,24 @@ def _answer(args, root: Path) -> None:
     needs = ownerpick.is_draft_card(q) if q is not None else ownerpick.carries_draft(t)
     person = needs and granted
     fn = review.change if q is not None and q.get("answer") is not None else review.decide
-    with tickets.standing_in(for_):
-        entry = _guard(
-            fn,
-            root,
-            tid,
-            key,
-            args.verdict,
-            args.picked,
-            args.note,
-            by=who,
-            via=args.via,
-            digest=digest,
-            person=person,
-        )
+    entry = _guard(
+        fn,
+        root,
+        tid,
+        key,
+        args.verdict,
+        args.picked,
+        args.note,
+        by=who,
+        via=args.via,
+        digest=digest,
+        person=person,
+    )
     import contextlib
 
     with contextlib.suppress(Refused):  # saved; a busy run only delays it reaching the agent
         runs_live.pass_answer(root, tid, entry, who)
     _out(args, entry, f"Answered {entry['id']}: {entry.get('answer')}")
-
-
-def _undo(args, root: Path) -> None:
-    t = _ticket(root, args)
-    if not KEY_RE.fullmatch(args.key) or args.key == "review":
-        raise ReviewError("not_found", f"'{args.key[:20]}' is not an answered question. Use q3.")
-    who = tickets.current_actor(args.by)
-    res = _guard(tickets.undo_answer, root, t["id"], args.key, who, args.via)
-    _out(
-        args,
-        res,
-        f"Undid {res['undone']}: asked again as {res['again']}."
-        if res["again"]
-        else f"Undid {res['undone']}: the ticket is back in Review.",
-    )
 
 
 # ------------------------------------------------------------------ show, wait, link
@@ -707,7 +661,6 @@ def dispatch(args, root: Path) -> bool:
     {
         "list": _list,
         "answer": _answer,
-        "undo": _undo,
         "wait": _wait,
         "link": _link,
         "tend": _tend,

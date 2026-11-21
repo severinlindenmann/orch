@@ -9,15 +9,8 @@ shown ticket itself is listed too, and the lint checks that it calls `history.sh
 
 ## Fields
 
-`history[].by` (and its text, and `for`: whom a helper worked for, ORCH-417, or whom a role answered for, ORCH-547),
-`checklist[].evidence[].by`, `checklist[].by`, `checklist[].wont_by`, `verdicts[].person`, `questions[].answered_by`,
-`questions[].answered_for` (ORCH-547: bound into the answer's proof when present; dropped when unproven), `refs[].by`,
-`plan.by`, `description_by`.
-
-An answer given for a person by someone else carries the real author in `answered_by` (`agent:manager`,
-`agent:reviewer` shown as "Away mode", `agent:script`, `agent:<tool>`) and the person in `answered_for`; its
-"Answered" history line has the same `by` and `for: <name>`. A person's answer typed in the terminal (`--via cli`)
-by a process with no terminal is recorded as `agent:script` for that person.
+`history[].by` (and its text), `checklist[].evidence[].by`, `checklist[].by`, `checklist[].wont_by`,
+`verdicts[].person`, `questions[].answered_by`, `refs[].by`, `plan.by`, `description_by`.
 
 A value that is a plain agent label (`agent:` + `[a-z0-9._-]{1,40}` in ASCII, not `relay`, `phone`, `ph_`) needs no
 proof. Every other value is shown as written only when this core proves it **here**; otherwise it is shown as

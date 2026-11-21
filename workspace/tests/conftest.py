@@ -13,7 +13,7 @@ from pathlib import Path
 import ci_parts
 import pytest
 
-from orch import addons, cli, tickets, winfinish
+from orch import addons, cli, winfinish
 
 
 def _own_new_files_as_this_user() -> None:
@@ -244,16 +244,6 @@ def _no_bundled_catalogue(request, monkeypatch):
     if request.node.get_closest_marker("real_bundle"):
         return
     monkeypatch.setattr(addons, "bundled_manifests", lambda: {})
-
-
-@pytest.fixture(autouse=True)
-def _answers_at_a_terminal(request, monkeypatch):
-    """A person's answer typed in the terminal (`--via cli`) from a process with no terminal is recorded as a
-    script answering for them (ORCH-547). Tests run with no terminal: by default they stand for the person at
-    one; tests marked `no_terminal` (test_answered_for) see the real check."""
-    if request.node.get_closest_marker("no_terminal"):
-        return
-    monkeypatch.setattr(tickets, "answer_terminal", lambda: True)
 
 
 @pytest.fixture(autouse=True)

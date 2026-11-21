@@ -46,7 +46,6 @@ from orch import (
     net,
     nextstep,
     ownerpick,
-    people,
     refs,
     relay,
     review,
@@ -341,7 +340,7 @@ def _show(t: dict, root: Path) -> str:
     if shown_lines := history.lines(root, t):
         out.append("\nRecent:")
         out += [
-            f"  {net.when(h['at'])}  {history.author(h)}: {tickets.history_line(h['text'], t['checklist'])}"
+            f"  {net.when(h['at'])}  {h['by']}: {tickets.history_line(h['text'], t['checklist'])}"
             for h in shown_lines[-3:]
         ]
     return "\n".join(out)
@@ -912,10 +911,6 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("question")
     x.add_argument("answer")
     x.add_argument("--via", default="cli", metavar="WORD", help="where the answer comes from (default cli)")
-    x.add_argument(
-        "--for", dest="for_", metavar="NAME",
-        help="answer FOR this person (the manager, a script): recorded as given for them; they can undo it",
-    )  # fmt: skip
     x.add_argument(
         "--question-digest", metavar="D", help=argparse.SUPPRESS
     )  # the question as the page showed it (bound into the person's proof)
@@ -1542,7 +1537,7 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "log":
         t = tickets.log(root, args.id, args.text, by())
         h = history.lines(root, t)[-1]
-        _out(args, h, f"{h['at']} {history.author(h)}: {tickets.history_line(h['text'], t['checklist'])}")
+        _out(args, h, f"{h['at']} {h['by']}: {tickets.history_line(h['text'], t['checklist'])}")
     elif cmd == "ask" and args.in_conversation:
         if (
             args.take_back
@@ -1646,25 +1641,22 @@ def run(args: argparse.Namespace) -> None:
             raise Refused(
                 f"{args.question} changed after it was shown. Look at the question again, then answer."
             )
-        who, for_ = tickets.answer_actor(args)  # who really answers, and for whom (ORCH-547)
-        if for_:
-            tickets.refuse_own_ticket_stand_in(root, args.id)
+        who = tickets.acting_by(args)
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
         # ORCH-582: a draft is answered only with the signed-in dashboard's one-time person grant
         granted = ownerpick.person_granted(root, who)  # always used up, so no child inherits it
         person = ownerpick.is_draft_card(shown_q) and granted
-        with tickets.standing_in(for_):
-            t, q = tickets.answer(
-                root,
-                args.id,
-                args.question,
-                args.answer,
-                who,
-                args.via,
-                expected_question_digest=shown_digest,
-                person=person,
-            )
+        t, q = tickets.answer(
+            root,
+            args.id,
+            args.question,
+            args.answer,
+            who,
+            args.via,
+            expected_question_digest=shown_digest,
+            person=person,
+        )
         with contextlib.suppress(
             Refused
         ):  # the answer is saved; a busy run only delays it reaching the agent
@@ -2038,7 +2030,6 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
 
     try:
         root = _find_root()  # an invalid ORCH_ROOT is refused here, before anything is read or written
-        people.bind(root)  # who works here: the person picked in the dashboard (orch.people)
         diag.bind(root, "cli")  # the debug log: one trace per invocation (joins an inherited TRACEPARENT)
         diag.new_trace(os.environ.get("TRACEPARENT"))
         lines = addons.help_lines(root) if ("-h" in argv or "--help" in argv or not argv) else None

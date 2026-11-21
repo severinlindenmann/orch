@@ -356,10 +356,13 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
 
 
 def _actor() -> str:
-    """The person picked in the dashboard ("You: <name>", orch.people), else the computer's user."""
-    from orch import people
+    import getpass
 
-    return people.person_actor()
+    try:
+        who = re.sub(r"[^A-Za-z0-9_.@ -]", "_", getpass.getuser())[:58]
+    except (OSError, KeyError, ImportError):
+        who = ""
+    return f"human:{who or 'user'}"
 
 
 def _child(argv: list[str], root: Path, env: dict, fds: tuple[int, ...] = ()):

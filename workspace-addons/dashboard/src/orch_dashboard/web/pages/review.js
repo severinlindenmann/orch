@@ -198,13 +198,6 @@ function reviewApi() {
     },
     hold: (it, verdict) => acceptHold(it, verdict),
     release: it => acceptRelease(it, false),
-    // ORCH-547: take back an answer someone gave for the person (the Answered list's "Answered for me"); the card waits again.
-    undo: async ({id}) => {
-      const m = REVIEW_ID.exec(String(id || ''));
-      if (snapshot || !m || !m[2]) return {ok:false, error:{code:'not_found', message:'That answer is not here any more.'}};
-      const r = await act('review.undo', {ticket:m[1], key:m[2]});
-      return r.ok ? {ok:true} : {ok:false, error:{code:r.status === 403 ? 'needs_person' : 'error', message:String(r.text || 'Could not undo it.').slice(0, 300)}};
-    },
     answer: async ({id, digest, verdict, picked, note}) => {
       if (STUCK_CARD.test(String(id || ''))) return snapshot ? {ok:false, error:{code:'refused', message:'Nothing can be changed here.'}} : reviewStuckAnswer(id, digest, picked);
       const m = REVIEW_ID.exec(String(id || ''));

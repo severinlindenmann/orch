@@ -114,7 +114,7 @@ def _digest(kind: str, obj) -> str | None:
             orig, obj = obj, {k: obj.get(k) for k in _ANSWER_MARK}
             # Review stack (RULE A): bound only when present, so an answer without them keeps its digest;
             # decision.replaced_by changes later (a newer answer) and is never part of the binding
-            for k in ("decision", "card", "shown", "answered_for"):
+            for k in ("decision", "card", "shown"):
                 v = orig.get(k)
                 if k == "decision" and isinstance(v, dict):
                     v = {a: b for a, b in v.items() if a != "replaced_by"} or None
@@ -154,57 +154,6 @@ def created(kind: str, obj) -> None:
             for k in list(_CREATED)[: _CREATED_MAX // 2]:
                 del _CREATED[k]
         _CREATED[id(obj)] = (kind, obj)
-
-
-def created_lines(ticket: dict) -> list[dict]:
-    """The history lines of `ticket` core made in this process and has not written yet (by identity), kept
-    marked: tickets._write adds who a helper works for (`for`) before the line is recorded."""
-    with _CREATED_LOCK:
-        if not _CREATED:
-            return []
-        out = []
-        for h in ticket.get("history") if isinstance(ticket.get("history"), list) else []:
-            hit = _CREATED.get(id(h))
-            if hit is not None and hit[1] is h and hit[0] == "lines":
-                out.append(h)
-        return out
-
-
-# Who answered for the person (ORCH-547): a role standing in carries the person in `for` (a history line) or
-# `answered_for` (an answer). The shown word names the role, so a script never reads as the person.
-STAND_IN_WORDS = {"manager": "Manager", "reviewer": "Away mode", "script": "Script"}
-
-
-def stand_in_word(by) -> str:
-    """The word for an agent label that answered for a person: Manager, Away mode, Script, else Helper."""
-    role = by[len("agent:") :] if isinstance(by, str) and by.startswith("agent:") else ""
-    return STAND_IN_WORDS.get(role.casefold(), "Helper")
-
-
-def _plain(who) -> str:
-    return str(who)[len("human:") :] if str(who).startswith("human:") else str(who)
-
-
-def answered_words(by, for_=None) -> str:
-    """Who gave an answer, in plain words: "Severin", "Manager for Severin", "Away mode for Severin",
-    "Script for Severin". `for_` is the person stood in for (human:<name> or a plain name)."""
-    if isinstance(for_, str) and for_ and _plain(for_):
-        return f"{stand_in_word(by)} for {_plain(for_)}"
-    return _plain(by or "someone") or "someone"
-
-
-def author(h) -> str:
-    """Who a SHOWN history line is by, for plain text: `agent:<tool> for Severin` when a helper worked for a
-    person (`for`, orch.people), else its `by` as written."""
-    by = str(h.get("by", "?")) if isinstance(h, dict) else "?"
-    who = h.get("for") if isinstance(h, dict) else None
-    return f"{by} for {who}" if isinstance(who, str) and who and by.startswith("agent:") else by
-
-
-def line_needs_proof(h) -> bool:
-    """A history line is believed as written only with proof when its author is not a plain agent label, or
-    when it says whom a helper worked for (`for`, a person's name)."""
-    return isinstance(h, dict) and (needs_proof(h.get("by")) or h.get("for") is not None)
 
 
 def _take_created(ticket: dict) -> dict[str, list]:
@@ -578,7 +527,6 @@ class _Proof:
 
 
 def _demoted_line(h: dict) -> dict:
-    h = {k: v for k, v in h.items() if k != "for"}  # whom a helper worked for is a person field too
     out = {**h, "by": SYNC_BY, "text": SYNCED_UNVERIFIED + str(h.get("text", ""))}
     out.pop("by_name", None)  # a typed name on a line nobody here can vouch for is not shown
     return out
@@ -592,10 +540,10 @@ def _shown(proof: _Proof, t: dict) -> dict:
     changed = False
 
     hist = t.get("history") if isinstance(t.get("history"), list) else None
-    if hist is not None and any(line_needs_proof(h) for h in hist):
+    if hist is not None and any(isinstance(h, dict) and needs_proof(h.get("by")) for h in hist):
         new_hist = []
         for h in hist:
-            if line_needs_proof(h) and not has("lines", h):
+            if isinstance(h, dict) and needs_proof(h.get("by")) and not has("lines", h):
                 new_hist.append(_demoted_line(h))
                 continue
             new_hist.append(h)
@@ -651,8 +599,6 @@ def _shown(proof: _Proof, t: dict) -> dict:
                 )
             ):
                 q = {**q, "answered_by": SYNC_BY}
-            if isinstance(q, dict) and q.get("answered_for") is not None and not has("answers", q):
-                q = {k: v for k, v in q.items() if k != "answered_for"}  # whom it was for is a person field
             new_q.append(q)
         if any(a is not b for a, b in zip(new_q, questions, strict=True)):
             out["questions"], changed = new_q, True
@@ -729,7 +675,9 @@ def shown_ticket(root: Path, ticket, _proof: _Proof | None = None):
 def _all_demoted(t: dict) -> dict:
     out = dict(t)
     if isinstance(t.get("history"), list):
-        out["history"] = [_demoted_line(h) if line_needs_proof(h) else h for h in t["history"]]
+        out["history"] = [
+            _demoted_line(h) if isinstance(h, dict) and needs_proof(h.get("by")) else h for h in t["history"]
+        ]
     if isinstance(t.get("checklist"), list):
         out["checklist"] = [
             {
@@ -751,11 +699,6 @@ def _all_demoted(t: dict) -> dict:
                 else x
                 for x in t[field]
             ]
-    if isinstance(out.get("questions"), list):  # whom an answer was for is a person field too
-        out["questions"] = [
-            {k: v for k, v in x.items() if k != "answered_for"} if isinstance(x, dict) else x
-            for x in out["questions"]
-        ]
     if "description_by" in t:
         out["description_by"] = SYNC_BY if needs_proof(t.get("description_by")) else t["description_by"]
     if isinstance(t.get("plan"), dict) and "by" in t["plan"] and needs_proof(t["plan"].get("by")):

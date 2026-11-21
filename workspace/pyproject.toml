@@ -42,5 +42,4 @@ markers = [
     "slow: starts a local server",
     "real_start_guard: keep the real adapters.check_start_folder (see conftest)",
     "real_bundle: keep the real bundled shipped add-on manifests (see conftest)",
-    "no_terminal: answers see the real no-terminal check (ORCH-547, see conftest)",
 ]

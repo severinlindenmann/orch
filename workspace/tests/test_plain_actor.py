@@ -83,9 +83,6 @@ def test_an_agent_answer_is_recorded_as_the_agent(proj, run, new_ticket, monkeyp
     tid, qid = _question(run, new_ticket)
     monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")
     code, out, err = run("answer", tid, qid, "b", "--by", "human:pat")
-    assert code == 2 and "--for" in out + err  # ORCH-547: a helper never answers as a person
-    assert tickets.load(proj, tid)["questions"][0]["answer"] is None
-    code, out, err = run("answer", tid, qid, "b")
     assert code == 0, out + err
     assert tickets.load(proj, tid)["questions"][0]["answered_by"] == "agent:claude"
 
