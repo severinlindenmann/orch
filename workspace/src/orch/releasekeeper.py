@@ -762,17 +762,19 @@ class World:
         }
 
     def winvm_results(self) -> list[tuple[str, str]]:
-        """[(sha, state)] of the status 'windows (winvm)' on the newest develop commits, newest first, only the
-        commits that have one (ORCH-1127: e2e/winvm/dispatch.py posts it). One GraphQL call."""
+        """[(sha, state)] of the status 'windows (winvm)' on the newest develop commits, newest first, only
+        the commits that have one (ORCH-1127: e2e/winvm/dispatch.py posts it). One GraphQL call."""
         if self.sim is not None:
             return [tuple(x) for x in self.sim.get("winvm", [])]
         owner, name = self.cfg.repo.split("/", 1)
         q = (
-            "query($o:String!,$n:String!){repository(owner:$o,name:$n){ref(qualifiedName:\"refs/heads/develop\")"
-            "{target{... on Commit{history(first:60){nodes{oid status{context(name:\"%s\"){state}}}}}}}}}" % WINVM_CONTEXT
+            'query($o:String!,$n:String!){repository(owner:$o,name:$n){ref(qualifiedName:"refs/heads/develop")'
+            "{target{... on Commit{history(first:60){nodes{oid status{context(name:"
+            + json.dumps(WINVM_CONTEXT)
+            + "){state}}}}}}}}}"
         )
         d = self._gh_json(["api", "graphql", "-f", f"query={q}", "-F", f"o={owner}", "-F", f"n={name}"])
-        nodes = (((((d or {}).get("data") or {}).get("repository") or {}).get("ref") or {}).get("target") or {})
+        nodes = ((((d or {}).get("data") or {}).get("repository") or {}).get("ref") or {}).get("target") or {}
         out = []
         for n in (nodes.get("history") or {}).get("nodes") or []:
             c = (n.get("status") or {}).get("context") if n.get("status") else None
@@ -1547,9 +1549,9 @@ WINVM_CONTEXT = "windows (winvm)"
 
 
 def winvm_red(w: World, st: dict, role: str) -> list[str]:
-    """The Windows checks on our own Windows VM (ORCH-1127) report as a commit status, not a workflow run: the
-    newest develop commit with a FINISHED result that failed (after the dispatcher's one re-run) opens the same
-    red-develop ticket as a red run, once per commit."""
+    """The Windows checks on our own Windows VM (ORCH-1127) report as a commit status, not a workflow run:
+    the newest develop commit with a FINISHED result that failed (after the dispatcher's one re-run) opens
+    the same red-develop ticket as a red run, once per commit."""
     for sha, state in w.winvm_results():
         if state == "pending":
             continue
@@ -1562,9 +1564,9 @@ def winvm_red(w: World, st: dict, role: str) -> list[str]:
             role,
             f"windows (winvm) is red on develop ({sha[:8]})",
             "windows (winvm) is red on develop",
-            f"The Windows checks on our own Windows VM failed on develop {sha[:8]} (status '{WINVM_CONTEXT}', after "
-            "one re-run; logs on the Mac under ~/.orch-test/winvm-runs). Fix it on develop with a normal pull "
-            "request (orch pull-requests queue add --first).",
+            f"The Windows checks on our own Windows VM failed on develop {sha[:8]} (status "
+            f"'{WINVM_CONTEXT}', after one re-run; logs on the Mac under ~/.orch-test/winvm-runs). Fix it on "
+            "develop with a normal pull request (orch pull-requests queue add --first).",
             "The next windows (winvm) result on develop is green",
         )
     return []
