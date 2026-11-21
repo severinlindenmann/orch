@@ -39,17 +39,24 @@ while [ -n "$p" ] && [ "$p" -gt 1 ]; do keep="$keep$p "; p=$(ps -p "$p" -o ppid=
 # The runner is recognised by the program it runs (its own bin folder), never by words in a command line a job
 # could copy.
 RBIN=$(cd "$REAL_HOME/actions-runner/bin" 2>/dev/null && pwd -P)
+mgr=$(systemctl show "user@$ME.service" -p MainPID --value 2>/dev/null)
+bus=$(systemctl --user show dbus.service -p MainPID --value 2>/dev/null)
+SYSTEM_PIDS=""
+for x in $mgr $bus; do [ "$x" -gt 0 ] 2>/dev/null && SYSTEM_PIDS="$SYSTEM_PIDS $x"; done
+if [ "${mgr:-0}" -gt 0 ] 2>/dev/null; then   # (sd-pam): the manager's child in the manager's own scope
+  for c in $(ps -o pid= --ppid "$mgr" 2>/dev/null); do
+    [ "$(cat "/proc/$c/cgroup" 2>/dev/null)" = "0::/user.slice/user-$ME.slice/user@$ME.service/init.scope" ] && SYSTEM_PIDS="$SYSTEM_PIDS $c"
+  done
+fi
 leftovers() {
   local pid exe
   ps -u "$ME" -o pid= | while read -r pid; do
     case "$keep" in (*" $pid "*) continue;; esac
     exe=$(readlink "/proc/$pid/exe" 2>/dev/null)
     case $exe in ("$RBIN"/Runner.Listener|"$RBIN"/Runner.Worker) [ -n "$RBIN" ] && continue;; esac
-    # the user service manager (systemd --user, (sd-pam)) and its session bus, by their control group (set by
-    # systemd, a job cannot change it; their program file is not readable for a non-dumpable process)
-    case $(cat "/proc/$pid/cgroup" 2>/dev/null) in
-      (*"/user@$ME.service/init.scope"|*"/user@$ME.service/app.slice/dbus.service"|*"/user@$ME.service/dbus.service") continue;;
-    esac
+    # the user service manager, its (sd-pam) helper and its session bus: by the main PIDs systemd reports, never by a
+    # control group (the user owns its own cgroup tree, so a job could move a process into init.scope)
+    case " $SYSTEM_PIDS " in (*" $pid "*) continue;; esac
     [ "$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ')" = "$$" ] && continue   # this hook's own helpers
     echo "$pid"
   done
