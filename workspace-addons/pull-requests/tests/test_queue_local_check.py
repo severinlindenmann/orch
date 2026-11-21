@@ -254,6 +254,9 @@ def test_check_runs_in_a_clean_copy_with_a_throwaway_home(ws, check_repo):
         "import os, pathlib, sys;"
         "assert pathlib.Path('b.txt').read_text() == 'b\\n';"
         "assert os.environ['ORCH_HOME'].startswith(os.environ['HOME']) and os.environ['ORCH_HOME_STRICT'] == '1';"
+        # the suites' real-home guard watches the throwaway home, which sits under <real home>/.orch-test (ORCH-1180)
+        "assert os.environ['ORCH_TEST_GUARD_ONLY'] == os.environ['HOME'];"
+        "assert pathlib.Path(os.environ['HOME']).parent.parent.name == '.orch-test';"
         "assert sys.argv[1] == os.environ['ORCH_CHECK_BASE']"
     )
     res = localcheck.run(git, heads["1"], heads["base"], [*_cmd(code), "{base}"])

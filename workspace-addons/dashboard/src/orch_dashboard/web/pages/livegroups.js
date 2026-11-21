@@ -170,6 +170,7 @@ function liveMsgComposer(sess) {
   const who = () => { const s = liveLayerSession(sess.id); return s?.key || s?.title || 'the helper'; };
   const composer = window.UI.composer(root, {...box, voice:false, layout:'row', interrupt:false, enterSends:true,
     label:'Message to ' + (sess.key || sess.title || 'the helper'), placeholder:'Message the helper', attachLabel:'Add files',
+    sendStyle:'outline',  // a pane keeps one filled button: a question's first choice, the page's own (draft D, ORCH-1357)
     maxLength:typeof TALK_TYPED_MAX === 'number' ? TALK_TYPED_MAX : LIVE_MSG_MAX, hint:LIVE_MSG_HINT, sendLabel:'Send',
     emptyError:'Write something or add a file.', dropLabel:'Drop to add to ' + (sess.key || sess.title || 'this ticket'), sendingText:'Sending…',
     draft:liveMsgDraft.get(sess.id) || '', onDraft:v => { if (v) liveMsgDraft.set(sess.id, v); else liveMsgDraft.delete(sess.id); },

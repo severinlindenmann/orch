@@ -69,6 +69,25 @@ field is demoted, with the same agent-label rule) and its mobile/Chat views, aut
 CLI JSON, which is shown already). Each takes the shown ticket at its entry, not only for the history. `root` is
 required: a CLI command without one looks it up (`history.here`).
 
+## Chat lines
+
+A history line with `chat_message: true` is a real Chat or group message. Since 21 Nov 2026 core writes two more
+fields on every chat line (only in `tickets.add_history`, the one append point):
+
+- `id`: the line's stable id, `m_` + 16 lowercase letters or digits (the form of a relay message id). When the
+  message already has an id (a Chat text, a helper's Chat answer, a phone text, a group message: its origin id)
+  the line takes that one, so the
+  message has one id everywhere; otherwise core makes a new one. Set once, never changed; later steps (a chat list,
+  other workspaces in one chat) refer to a message by it.
+- `by_name` (optional): the name the person typed for this message, one line, 1-60 characters after cleaning
+  (control and invisible characters go, spaces collapse). It is shown as typed and marked "not signed in". It is
+  NOT a person field: it proves nothing, `by` stays the actor and every rule above reads only `by`. A line shown
+  as `agent:sync` (not proven here) is shown without its `by_name`.
+
+Neither field is allowed on a line that is not a chat line (ticket.schema.json). Old lines have neither and stay
+valid; readers never require them (example `examples/ticket/valid-chat-line-name-and-id.json` holds a new chat
+line, an old chat line and an old line from before the flag).
+
 ## The reserved label
 
 `agent:sync` (any case) is written only by core and the sync merge. `tickets.current_actor` refuses it as an actor,
