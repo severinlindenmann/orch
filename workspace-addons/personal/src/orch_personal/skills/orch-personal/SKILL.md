@@ -1,6 +1,9 @@
 ---
 name: orch-personal
 description: Use when a ticket needs something from the person's own notes (and later their meetings, calendar, messages or mail), when the person asks what helpers may see in Personal, or to put a note a helper wrote into their notes folder. Not for changing what helpers may see (only the person does that) and not for files of the workspace itself.
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch personal
 
