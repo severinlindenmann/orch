@@ -93,7 +93,7 @@ def budget(cands: list[Candidate], at: datetime) -> dict:
     for c in cands:
         if c.use.disabled:
             continue
-        caps = dict(_limits(c.account))
+        caps = {w: full for w, _, full in _limits(c.account)}  # the full mark (rule value, else 100 %)
         week, short = c.use.windows.get("week"), c.use.windows.get("5h")
         if week is None or week.pct is None:
             continue
