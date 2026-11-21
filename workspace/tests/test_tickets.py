@@ -851,7 +851,11 @@ def test_closed_ticket_repeat_off_needs_the_addon_to_declare_a_repeat(proj, new_
         lambda: tickets.ext_set(proj, tid, "notes", '{"recurring": false}', "agent:claude"),
         lambda: tickets.ext_unset(proj, tid, "notes", "agent:claude", schema={"properties": {}}),
         lambda: tickets.ext_set(  # declared fields without the switch-off mark are not enough
-            proj, tid, "notes", '{"recurring": false}', "agent:claude",
+            proj,
+            tid,
+            "notes",
+            '{"recurring": false}',
+            "agent:claude",
             schema={"properties": {"recurring": {"type": "boolean"}}},
         ),
     ):

@@ -3559,7 +3559,8 @@ def validate_ext(schema: dict, obj: dict, addon: str) -> None:
         raise Refused(f"ext.{addon}{'.' + where if where else ''}: {e.message}")
 
 
-OFF_MARK = "x-orch-off"  # an add-on marks a boolean field of its ticket_ext schema with the value that switches it off
+# an add-on marks a boolean field of its ticket_ext schema with the value that switches it off
+OFF_MARK = "x-orch-off"
 
 
 def _off_values(schema: dict | None) -> dict:
