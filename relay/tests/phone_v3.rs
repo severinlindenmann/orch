@@ -1357,3 +1357,83 @@ async fn send_human_review_off_only_on_a_new_topic() {
     let (s, _) = send(&t, &p, body).await;
     assert_eq!(s, 422);
 }
+
+#[tokio::test]
+async fn send_team_choice_reaches_the_workspace() {
+    // ORCH-1175: the person's Add / @ choice in a ticket chat is copied unchanged; the reply says it was kept.
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    let team = json!({"add": "ws_sales00001", "mentions": ["ws_bank000001"]});
+    let body = json!({"to": a.id, "client_id": "a0000000-0000-4000-8000-000000001175", "text": "Add Sales",
+        "ticket": "t_7k3f9q", "team": team});
+    let (s, v) = send(&t, &p, body).await;
+    assert_eq!(s, 201, "{v}");
+    assert_eq!(v["team"], json!(true), "{v}");
+    let id = v["id"].clone();
+    let m = t
+        .inbox(&a)
+        .await
+        .into_iter()
+        .find(|m| m["id"] == id)
+        .expect("stored");
+    assert_eq!(m["body"]["team"], team, "{m}");
+    // A text without the field: no team in the reply or the body.
+    let body = json!({"to": a.id, "client_id": "b0000000-0000-4000-8000-000000001175", "text": "hi", "ticket": "t_7k3f9q"});
+    let (s, v) = send(&t, &p, body).await;
+    assert_eq!(s, 201, "{v}");
+    assert!(v.get("team").is_none(), "{v}");
+    let id = v["id"].clone();
+    let m = t
+        .inbox(&a)
+        .await
+        .into_iter()
+        .find(|m| m["id"] == id)
+        .expect("stored");
+    assert!(m["body"].get("team").is_none(), "{m}");
+}
+
+#[tokio::test]
+async fn send_team_choice_needs_text_ticket_and_a_valid_form() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    let bad = [
+        // no ticket, General, no text
+        json!({"to": a.id, "text": "x", "team": {"add": "ws_sales00001"}}),
+        json!({"to": a.id, "text": "x", "general": true, "team": {"add": "ws_sales00001"}}),
+        json!({"to": a.id, "ticket": "t_7k3f9q", "location": {"lat": 47.0, "lon": 8.0}, "team": {"add": "ws_sales00001"}}),
+        // empty, unknown key, bad ids, too many or doubled mentions
+        json!({"to": a.id, "text": "x", "ticket": "t_7k3f9q", "team": {}}),
+        json!({"to": a.id, "text": "x", "ticket": "t_7k3f9q", "team": {"remove": "ws_sales00001"}}),
+        json!({"to": a.id, "text": "x", "ticket": "t_7k3f9q", "team": {"add": "ph_sales00001"}}),
+        json!({"to": a.id, "text": "x", "ticket": "t_7k3f9q", "team": {"mentions": []}}),
+        json!({"to": a.id, "text": "x", "ticket": "t_7k3f9q", "team": {"mentions": ["ws_bank000001", "ws_bank000001"]}}),
+        json!({"to": a.id, "text": "x", "ticket": "t_7k3f9q", "team": {"mentions": ["ws_a000000001", "ws_a000000002", "ws_a000000003",
+            "ws_a000000004", "ws_a000000005", "ws_a000000006", "ws_a000000007", "ws_a000000008"]}}),
+        json!({"to": a.id, "text": "x", "ticket": "t_7k3f9q", "team": "ws_sales00001"}),
+    ];
+    for body in bad {
+        let (s, v) = send(&t, &p, body.clone()).await;
+        assert_eq!(s, 422, "{body} -> {v}");
+    }
+    assert!(t.inbox(&a).await.iter().all(|m| m["type"] != "text"));
+}
+
+#[tokio::test]
+async fn workspace_cannot_send_a_team_choice() {
+    // Only the relay sets `team`, on a phone's text: a workspace claiming the person's Add is refused.
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    let (s, v) = ws_text(
+        &t,
+        &a,
+        "phones",
+        json!({"ticket": "t_7k3f9q"}),
+        json!({"text": "Add Sales", "team": {"add": "ws_sales00001"}}),
+    )
+    .await;
+    assert_eq!(s, 422, "{v}");
+    assert!(messages(&t, &p).await.is_empty());
+}

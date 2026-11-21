@@ -733,7 +733,7 @@ async fn send(
     body: Bytes,
 ) -> Res<(StatusCode, Json<Value>)> {
     let v = parse_body(&body)?;
-    let id = {
+    let (id, team) = {
         let c = app.db.lock().unwrap();
         let (pid, _, ws) = auth::phone(&c, &h)?;
         if let Some(cid) = v["client_id"].as_str() {
@@ -811,6 +811,12 @@ async fn send(
                 b.insert("human_review".into(), on.into());
             }
         }
+        // ORCH-1175: the person's Add / @ choice in a ticket chat, copied unchanged (the schema checked its form
+        // and that it comes with text and a ticket); the ticket's workspace decides what it does.
+        let team = !v["team"].is_null();
+        if team {
+            b.insert("team".into(), v["team"].clone());
+        }
         let body = Value::Object(b);
         // Same schema check as workspace messages.
         let mut cand = json!({"schema": "orch.msg/1", "id": rand_id("m_", 16), "from": pid, "to": to,
@@ -836,14 +842,15 @@ async fn send(
             )?;
         }
         tx.commit()?;
-        id
+        (id, team)
     };
     app.notify.notify_waiters();
     let cid = v["client_id"].clone();
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({"id": id, "client_id": cid})),
-    ))
+    let mut out = json!({"id": id, "client_id": cid});
+    if team {
+        out["team"] = true.into();
+    }
+    Ok((StatusCode::CREATED, Json(out)))
 }
 
 /// Largest phone upload: 25 MB.
