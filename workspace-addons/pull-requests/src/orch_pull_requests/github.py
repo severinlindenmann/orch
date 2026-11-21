@@ -10,7 +10,7 @@ from .store import Refused
 
 VIEW = (
     "state,isDraft,baseRefName,headRefOid,number,title,closingIssuesReferences,isCrossRepository,"
-    "reviewDecision,reviews,files"
+    "reviewDecision,reviews,labels,files"
 )
 # the commit status the queue sets on what it checked (a develop rule can require it)
 MARK = "orch/merge-queue"
@@ -169,6 +169,15 @@ class GitHub:
         ]  # fmt: skip
         if target:
             args += ["-f", f"target_url={target}"]
+        return self._run(*args).returncode == 0
+
+    def post_status(self, repo: str, sha: str, context: str, state: str, description: str) -> bool:
+        """One commit status under any name (the required checks a green local check stands for, ORCH-1124). A write: the
+        caller takes a slot."""
+        args = [
+            "api", "-X", "POST", f"repos/{repo}/statuses/{sha}", "-f", f"state={state}",
+            "-f", f"context={context}", "-f", f"description={description[:140]}",
+        ]  # fmt: skip
         return self._run(*args).returncode == 0
 
     def has_mark(self, repo: str, sha: str) -> bool | None:

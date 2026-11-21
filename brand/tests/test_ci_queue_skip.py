@@ -70,7 +70,8 @@ def test_windows_parts_skip_queue_groups_and_run_on_every_develop_push():
     windows = line(ws, "windows")
     assert "!startsWith(github.head_ref, 'orch-queue/')" in windows
     assert "(github.event_name == 'push' && github.ref == 'refs/heads/develop')" in windows
-    assert unwrap(line(ws, "if")).startswith("needs.changes.outputs.proven == 'true' ||")
+    # (unless the Windows parts run on our own Windows VM, ORCH-1127, test_winvm_windows.py)
+    assert unwrap(line(ws, "if")).startswith("(needs.changes.outputs.proven != 'true' || vars.WINDOWS_RUNNER != 'winvm') && (needs.changes.outputs.proven == 'true' ||")
     # on a proven push only the Windows parts run: no Linux, no macOS again
     assert line(ws, "linux") == "${{ needs.changes.outputs.proven != 'true' }}"
     assert "needs.changes.outputs.proven != 'true'" in line(ws, "full")
@@ -82,6 +83,12 @@ def test_both_still_count_for_the_final_check():
     last = list(CI_JOBS.values())[
         -1
     ]  # the roll-up job GitHub requires: green when every called job passed or was skipped
-    assert line(last, "if") == "always()"
+    cond = line(last, "if")
+    # always(), except a queue group the local check already decided (group_check = local, ORCH-1124): the queue
+    # posts the roll-up status itself there
+    assert cond == "always()" or (
+        cond.startswith('"${{ always() && !(')
+        and "contains(github.event.pull_request.body, 'orch-group-check: local')" in cond
+    ), cond
     needs = line(last, "needs")
     assert "addons" in needs and "workspace" in needs
