@@ -15,3 +15,4 @@ workspace/tests/conftest.py  # test helper ensure_signing stays until P4 (#799) 
 workspace-addons/dashboard-tester/src/orch_dashboard_tester/never_words.json  # the never-use list of docs/wording.md, shipped for the daily dashboard look
 workspace/src/orch/releasekeeper.py  # the CI roll-up job's own name and the release phase the keeper stores
 workspace/tests/test_releasekeeper.py  # recorded check lists that name that job
+scripts/mac-runner/setup.sh          # reads GitHub's fork setting; its API path and field name contain the word

@@ -96,12 +96,12 @@ fi
 echo "== 5/7 outside contributors wait for your click (a fork's workflow file can name any runner)"
 policy=$(sudo -u "$OWNER" gh api "repos/$REPO/actions/permissions/fork-pr-contributor-approval" --jq .approval_policy 2>/dev/null || true)
 if [ "$policy" = all_external_contributors ]; then
-  echo "  ok: every outside contributor's run waits for approval"
+  echo "  ok: every outside contributor's run waits for your click"
 elif [ -n "$policy" ]; then
-  echo "Settings > Actions > General: 'Require approval for all external contributors' is not chosen ($policy). Choose it, then run this again." >&2; exit 1
+  echo "Settings > Actions > General > 'Fork pull request workflows from outside collaborators' is $policy, not the strictest choice (all external contributors). Choose it, then run this again." >&2; exit 1
 else
   echo "  Could not read the setting (gh as $OWNER). Settings > Actions > General > 'Fork pull request workflows from"
-  echo "  outside collaborators' must be 'Require approval for all external contributors'."
+  echo "  outside collaborators' must be the strictest choice (all external contributors)."
   printf '  Is it? [y/N] '; IFS= read -r ans; [ "$ans" = y ] || [ "$ans" = Y ] || { echo "Stopped; choose it first." >&2; exit 1; }
 fi
 

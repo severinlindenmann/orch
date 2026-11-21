@@ -125,12 +125,12 @@ ci.yml's `route` job (`scripts/mac_route.py`) decides once per run:
 - **No job setting runs before the hook**: the runner starts its hooks with `bash` from its own PATH, and that is
   `scripts/mac-runner/bash`: privileged bash with an empty environment, so `BASH_ENV`, `SHELLOPTS` or functions a
   job sets (a fork's workflow file can name any runner) never run before the hook refuses the job.
-- **What stays open** (owner's choice, no admin key on the Mac): a job can read the runner's own sign-up and could
+- **What stays open** (owner's choice, no admin key on the Mac): a job can read the runner's own registration and could
   take jobs with it elsewhere until it is removed; after anything suspicious run `uninstall.sh`, remove the runner
   on GitHub and run `setup.sh` again. pf covers TCP and UDP only (ping still works) and not a LAN host with a public
-  IPv6 address; services on this Mac's own 127.0.0.1 stay reachable, so they must ask for a sign-in. Each round
+  IPv6 address; services on this Mac's own 127.0.0.1 stay reachable, so they must ask for a login. Each round
   ends after 4 hours at the latest, so a job cannot keep the runner for itself.
-- **GitHub's own lock**: every outside contributor's run waits for an approval click (step 1 below; `setup.sh`
+- **GitHub's own lock**: every outside contributor's run waits until the owner clicks (step 1 below; `setup.sh`
   checks it). Helper accounts never approve a workflow run from a fork; only the owner does, after reading it.
 - **Shares the Mac with helpers**: each job holds the shared `heavy` lock, xcodebuild the `xcode` lock
   (`scripts/mac-runner/lock.sh`, folder `/Users/Shared/orch-locks`, group `orch-locks`); the macOS workspace suite
