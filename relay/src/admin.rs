@@ -390,12 +390,17 @@ async fn new_token(
     guard(&app, &h)?;
     let token = rand_token("orn_", 32);
     let n = app.db.lock().unwrap().execute(
-        "UPDATE workspaces SET token_hash=?2, pending_description=NULL, pending_tags=NULL, pending_at=NULL, pending_rev=NULL WHERE id=?1",
+        "UPDATE workspaces SET token_hash=?2, pending_description=NULL, pending_tags=NULL, pending_at=NULL, pending_rev=NULL, sign_key=NULL, sign_key_at=NULL WHERE id=?1",
         params![id, token_hash(&token)],
     )?;
     if n == 0 {
         return Err(not_found("No such workspace."));
     }
+    // a key change waiting for approval belonged to the dropped key
+    app.db
+        .lock()
+        .unwrap()
+        .execute("DELETE FROM sign_key_change WHERE ws=?1", [&id])?;
     let described: bool = app.db.lock().unwrap().query_row(
         "SELECT description_by='admin' AND description<>'' FROM workspaces WHERE id=?1",
         [&id],
@@ -454,6 +459,8 @@ async fn del_ws(
         "DELETE FROM rules WHERE from_id=?1 OR to_id=?1",
         "DELETE FROM assign WHERE ws=?1",
         "DELETE FROM ws_group WHERE ws=?1",
+        "DELETE FROM sign_key_change WHERE ws=?1",
+        "DELETE FROM sign_key_ended WHERE ws=?1",
         "DELETE FROM webhooks WHERE workspace=?1",
         "DELETE FROM problem_readers WHERE ws=?1",
         "DELETE FROM phone_mutes WHERE ws=?1",

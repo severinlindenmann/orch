@@ -75,6 +75,9 @@ form). It is never sent: only the public key is registered here.
   workspace shows its own (`orch relay key`, `orch relay status`, `orch relay whoami`), always computed from its own
   key, never read from the relay. The relay never sends a fingerprint to a workspace or phone (only its own admin
   page shows them).
+- A new workspace token from the admin (`POST /admin/api/workspaces/<id>/token`) drops the stored key and any key
+  change waiting for approval: the next registration is a new key, which receivers treat as a new contact, never as
+  the old one. A key that was withdrawn or blocked stays refused if it is registered again.
 - The relay keeps the key and shows it in whoami and in each directory item (`workspaces.schema.json` `signing_key`)
   as a HINT only: a receiver trusts a key once a person accepted its fingerprint, never because the relay lists it.
 
@@ -109,6 +112,9 @@ gate). Statements are signed exactly like messages (`"orch-sig-v1" 0x00 purpose 
   `409 replayed` for a known id with other signed bytes (the same bytes again stay `200 duplicate`). The relay keeps
   the signed bytes' digest with the message for 90 days (the message retention); receivers refuse text older than
   30 days themselves.
+- A group message (signed `to` = the group) is delivered to one member per post, and the relay knows each message
+  id once: the author signs one message per member, each with its own id. The same envelope posted for a second
+  member is a `200 duplicate` and is not delivered again.
 - **Signed messages only** (the hard cut, choice C): off by default. While off, a message without `envelope` goes
   through as before; a message WITH an envelope is always checked. When the admin turns it on, every message
   without an envelope is refused `422 missing_signature`. Relay-made messages (refresh-hint, webhook, control,

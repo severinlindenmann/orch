@@ -572,3 +572,37 @@ async fn admin_blocked_key_is_refused() {
     let (_, me) = t.call(&a, "GET", "/v1/whoami", None).await;
     assert_eq!(me["signing_key_state"]["state"], "blocked");
 }
+
+#[tokio::test]
+async fn new_token_drops_a_waiting_key_change() {
+    let (t, a, _b, k) = setup().await;
+    let k2 = sk(26);
+    assert_eq!(
+        t.call(
+            &a,
+            "POST",
+            "/v1/me/signing-key/change",
+            Some(rotate_body(Some(&k), &k2, &a))
+        )
+        .await
+        .0,
+        202
+    );
+    let (s, _) = t
+        .admin_json(
+            "POST",
+            &format!("/admin/api/workspaces/{}/token", a.id),
+            None,
+        )
+        .await;
+    assert!(s == 200 || s == 201, "{s}");
+    let (_, list) = t.admin_json("GET", "/admin/api/signing-keys", None).await;
+    let row = list["workspaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["workspace"] == a.id.as_str())
+        .unwrap()
+        .clone();
+    assert!(row["key"].is_null() && row["pending"].is_null(), "{row}");
+}
