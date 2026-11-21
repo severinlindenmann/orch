@@ -73,6 +73,7 @@ const act={
     h('ul',null,
      h('li',null,s.state==='stopped'?'It stays stopped and leaves this list.':'It stops now and leaves this list.'),
      h('li',null,'It will not start by itself again.'),
+     h('li',null,'Its log stays on this computer.'),
      things.length?h('li',null,'These stop working: '+things.join(', ').toLowerCase()+'.'):null,
      h('li',null,s.madeBy.kind==='ticket'?'Ticket '+s.madeBy.text+' and its files stay as they are.':'Its files on this computer stay as they are.')),
     h('div',{class:'dlg-f'},

@@ -121,6 +121,7 @@
           "lines": [
            "It stops now and leaves this list.",
            "It will not start by itself again.",
+           "Its log stays on this computer.",
            "Its files on this computer stay as they are."
           ],
           "keep": "Keep it"
@@ -290,6 +291,7 @@
           "lines": [
            "It stops now and leaves this list.",
            "It will not start by itself again.",
+           "Its log stays on this computer.",
            "Its files on this computer stay as they are."
           ],
           "keep": "Keep it"
@@ -387,6 +389,7 @@
           "lines": [
            "It stays stopped and leaves this list.",
            "It will not start by itself again.",
+           "Its log stays on this computer.",
            "Its files on this computer stay as they are."
           ],
           "keep": "Keep it"

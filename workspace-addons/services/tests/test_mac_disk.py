@@ -91,9 +91,11 @@ def test_log_reads_the_newer_of_the_home_and_the_old_workspace_log(cli, fake, ws
     code, out = jrun(cli, "log", "web")
     assert out["lines"] == ["from the old place"]
     code, out = jrun(cli, "remove", "web")
-    # the newer one, moved aside
-    assert code == 0 and ".orch/addons/services/logs/removed/web-" in out["next"]
-    assert not old.exists() and not new.exists()  # both places are cleared (ORCH-847)
+    assert code == 0 and ".orch/addons/services/logs/web.log" in out["next"]
+    code, out = _add(cli)
+    assert (
+        code == 0 and not old.exists() and not new.exists()
+    )  # a re-added id moves both places aside (ORCH-1131)
 
 
 def test_no_route_to_host_names_the_local_network(cli, fake, ws, mac, clock):

@@ -10,7 +10,6 @@ import os
 import re
 import secrets
 import sys
-import time
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
@@ -72,38 +71,32 @@ def home_dir(wid: str) -> Path:
     return Path.home() / "Library" / "Application Support" / "orch" / wid
 
 
-def retire_log(root: Path, sid: str, wid: str | None = None) -> Path | None:
-    """Move a removed service's log aside to removed/<id>-<UTC time>.log next to it, so a new service with the same
-    id starts with an empty log instead of showing the old one's last lines (ORCH-847). Both places are moved (macOS:
-    the home log and a workspace log from before the move). Returns where the log to read went; None when there was
-    no log or it could not be moved (then it stays where it was)."""
+def set_aside_old_log(root: Path, sid: str, wid: str | None = None) -> Path | None:
+    """A new service must not show the lines of a removed one with the same id (ORCH-1131): move the old log into
+    removed/<sid>-<time>.log next to it (both places on macOS), so the new service starts with an empty log. Returns
+    where the log to read went; refused when one could not be moved."""
     shown = read_log_path(root, sid, wid)
     moved: Path | None = None
-    for src in dict.fromkeys((log_path(root, sid, wid), logs_dir(root) / f"{sid}.log")):
-        if not src.is_file():
+    for log in dict.fromkeys((log_path(root, sid, wid), logs_dir(root) / f"{sid}.log")):
+        if not log.is_file():
             continue
-        dest = _retire_one(src, sid)
-        if dest and src == shown:
-            moved = dest
-    return moved
-
-
-def _retire_one(src: Path, sid: str) -> Path | None:
-    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    dest = src.parent / "removed" / f"{sid}-{stamp}.log"
-    n = 1
-    while dest.exists():
-        n += 1
-        dest = dest.with_name(f"{sid}-{stamp}-{n}.log")
-    for attempt in range(5):  # Windows: the stopped program may hold the file for a moment
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        dest = log.parent / "removed" / f"{sid}-{stamp}.log"
+        n = 1
+        while dest.exists():
+            n += 1
+            dest = log.parent / "removed" / f"{sid}-{stamp}-{n}.log"
         try:
             dest.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(src, dest)
-            return dest
-        except OSError:
-            if attempt < 4:
-                time.sleep(0.2)
-    return None
+            os.replace(log, dest)
+        except OSError as e:
+            raise Refused(
+                f"The old log of an earlier service {sid} could not be moved aside ({e.strerror or e}). "
+                "Close what has it open and try again, or pick another id."
+            ) from e
+        if log == shown:
+            moved = dest
+    return moved
 
 
 def state_path(root: Path, sid: str) -> Path:

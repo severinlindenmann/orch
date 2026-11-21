@@ -206,7 +206,7 @@ def test_windows_add_start_restart_auto_stop_remove(wcli, st, ws):
     code, out = jrun(wcli, "remove", "sleeper")
     assert code == 0, out
     assert st.task("sleeper") is None and not settings.exists()
-    assert not log.is_file() and len(list((log.parent / "removed").glob("sleeper-*.log"))) == 1  # kept, aside
+    assert log.is_file()  # kept until the id is added again (ORCH-1131)
     verbs = [c[0] for c in st.calls()]
     assert verbs.count("/Run") == 2 and "/Delete" in verbs
     name = f"\\orch\\orch-svc-{WID}-sleeper"

@@ -60,6 +60,11 @@ ALLOW = {
         "usage": "the account switcher's JSON key for an account's use, not the Usage add-on",
     },
     "orch/look.py": {"services": _KEY},
+    "orch/limitstop.py": {
+        "usage": "ORCH-943: every workspace reads the computer's switch log <tool home>/usage/switched.jsonl "
+        "(a folder in the tool home, not the add-on package) so its helpers are carried on; "
+        "follow-up like #837"
+    },
     "orch/winfinish.py": {"services": _KEY},
 }
 

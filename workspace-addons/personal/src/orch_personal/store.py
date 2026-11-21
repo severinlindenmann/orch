@@ -1,7 +1,7 @@
 """Personal's own files: which parts are on, their rules, what was handed to which ticket, what helpers did.
 
 All plain JSON under `.orch/addons/personal/` (gitignored), written atomically. Rules are checked here, in the
-workspace, before a helper sees anything (the notebook checks them again once ORCH-649 brings the connection).
+workspace, before a helper sees anything; ways in (ways.py) check theirs on every run.
 """
 
 from __future__ import annotations
@@ -25,13 +25,14 @@ PARTS = {
         "text": "Your knowledge as linked notes that helpers can look things up in.",
         "through": "the notes folder on this computer",
     },
+    "meetings": {
+        "label": "Meetings",
+        "text": "Record calls on this computer; get the transcript, a summary and next steps here.",
+        "through": "the recorder on this computer",
+    },
 }
 # Shown on Add so the person sees what comes next; they cannot be added yet.
 SOON = {
-    "meetings": (
-        "Meetings",
-        "Record calls on your notebook; get the transcript, a summary and next steps here.",
-    ),
     "calendar": ("Calendar", "All your calendars in one week view."),
     "messages": ("Messages", "Work chats and the private chats you choose to bring in."),
     "mail": ("Mail", "Only the mails that need you, from every mailbox."),
@@ -44,7 +45,11 @@ LATER = {
 
 READ = ("never", "attached", "all")
 WRITE = ("never", "add", "change")
-DEFAULTS = {"notes": {"on": True, "folder": "", "read": "attached", "write": "add"}}
+DEFAULTS = {
+    "notes": {"on": True, "folder": "", "read": "attached", "write": "add"},
+    # Meetings: write "add" lets a helper write a summary and next steps where the recorder gave none.
+    "meetings": {"on": True, "folder": "", "read": "attached", "write": "add"},
+}
 READ_WORDS = {
     "never": "Never",
     "attached": "Only in a ticket you attach it to",
@@ -123,7 +128,8 @@ def part(root: Path, name: str) -> dict:
 def add_part(root: Path, name: str) -> dict:
     if name not in PARTS:
         if name in SOON or name in LATER:
-            raise Refused(f"{(SOON.get(name) or LATER[name])[0]} is not ready yet. Notes can be added now.")
+            ready = " and ".join(m["label"] for m in PARTS.values())
+            raise Refused(f"{(SOON.get(name) or LATER[name])[0]} is not ready yet. {ready} can be added now.")
         raise Refused(f"There is no part called {name}. Parts: {', '.join(PARTS)}.")
     data = settings(root)
     data["parts"][name] = {**DEFAULTS[name], **data["parts"].get(name, {}), "on": True}

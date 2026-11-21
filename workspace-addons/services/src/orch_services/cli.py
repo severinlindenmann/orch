@@ -310,20 +310,49 @@ def _masked_command(root: Path, argv: list[str]) -> list[str]:
 # ---------------------------------------------------------------- log lines
 
 
+# While masking, a hidden value is the core's own placeholder: the scan knows "password=[hidden]" is already
+# hidden, but reads "password=••••••" as a new value and would hide the whole line (ORCH-933). The •••••• is
+# put in only for display, after every scan.
+HIDDEN = "[hidden]"
+
+
 def _mask_line(line: str, root: Path) -> str:
-    """The line with the secret value replaced by ••••••; the whole line when the value cannot be told apart."""
-    from orch import secretscan
+    """The line with the secret value replaced by [hidden]; the whole line (MASK) when the value cannot be told
+    apart."""
+    from orch import phone_view, secretscan
+
+    def clean(text: str) -> bool:
+        try:
+            return not secretscan.find(text, root)
+        except Exception:  # noqa: BLE001 - never a pass
+            return False
 
     out = line
     for _kind, rx in secretscan.PATTERNS:
-        out = rx.sub(MASK, out)
-    # key=value, key: value, --flag value: keep the name, hide what follows it
-    out = re.sub(r"(?i)([\w.-]*(?:[=:]\s*|\s+--?[\w-]+\s+))(\S+)", lambda m: m.group(1) + MASK, out)
+        out = rx.sub(HIDDEN, out)
+    # The scan's own line rules first: they know where a value ends (a quoted value with spaces, a cookie
+    # header to the end of the line), so no part of it stays.
+    out = phone_view._scrub_text(out)
+    if clean(out):
+        return out
+    # key=value, key: value, --flag value: keep the name, hide what follows it (a quoted value as a whole)
+    out = re.sub(
+        r"(?i)([\w.-]*(?:[=:]\s*|\s+--?[\w-]+\s+))(\"[^\"]*\"?|'[^']*'?|\S+)",
+        lambda m: m.group(1) + HIDDEN,
+        out,
+    )
+    return out if clean(out) else MASK
+
+
+def _shown_is_safe(shown: str, root: Path) -> bool:
+    """The line as shown (dots in place of [hidden]) once more through the scan: only a password-like value
+    may hit (the dots after a label read as one); a token shape or a stored key value must not appear."""
+    from orch import secretscan
+
     try:
-        still = secretscan.find(out, root)
+        return all(h["kind"] == "secret-value" for h in secretscan.find(shown, root))
     except Exception:  # noqa: BLE001 - never a pass
-        still = [{"line": 1}]
-    return out if not still else MASK
+        return False
 
 
 def tail_masked(root: Path, path: Path, lines: int) -> list[str]:
@@ -357,16 +386,24 @@ def mask_lines(root: Path, got: list[str]) -> list[str]:
     got = [re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", ln) for ln in got]
     text = "\n".join(got)
     try:
-        hits = {h["line"] for h in secretscan.find(text, root)}
+        found = secretscan.find(text, root)
     except Exception:  # noqa: BLE001 - never a pass: hide everything
         return [MASK for _ in got]
-    out = [_mask_line(ln, root) if (i + 1) in hits else ln for i, ln in enumerate(got)]
+    hits = {h["line"] for h in found}
+    # A stored key value is hidden with its whole line: masking a part inside it (its own "password=x") could
+    # cut it so the rest no longer matches and stays shown.
+    whole = {h["line"] for h in found if h["kind"] in ("stored-key", "keys-unreadable")}
+    out = [
+        (MASK if (i + 1) in whole else _mask_line(ln, root)) if (i + 1) in hits else ln
+        for i, ln in enumerate(got)
+    ]
     try:
         if secretscan.find("\n".join(out), root):  # e.g. a stored value split over lines: hide everything
             return [MASK for _ in out]
     except Exception:  # noqa: BLE001 - never a pass
         return [MASK for _ in out]
-    return out
+    shown = [ln.replace(HIDDEN, MASK) if (i + 1) in hits else ln for i, ln in enumerate(out)]
+    return [ln if (i + 1) not in hits or _shown_is_safe(ln, root) else MASK for i, ln in enumerate(shown)]
 
 
 # ---------------------------------------------------------------- commands
@@ -524,10 +561,9 @@ def cmd_add(args, root: Path) -> int:
     wid = _workspace_id(root)
     spec = _spec(root, rec, wid)
     _refuse_protected(drv, spec)
+    old_log = store.set_aside_old_log(root, sid, wid)  # a re-used id starts with an empty log (ORCH-1131)
     store.save(root, rec)
     spec.log.parent.mkdir(parents=True, exist_ok=True)
-    # a new service starts with an empty log; an old one is kept aside (ORCH-847)
-    store.retire_log(root, sid, wid)
     try:
         drv.install(spec)
     except Refused:
@@ -553,6 +589,8 @@ def cmd_add(args, root: Path) -> int:
         )
     else:
         nxt = f"Added {rec['name']}. Start it: orch services start {sid}"
+    if old_log is not None:
+        nxt += f"\nIt starts with an empty log; the log of the earlier service {sid} was moved to {_shown_log(root, old_log)}."
     return _emit_kept(args, drv, {"service": row, "next": nxt}, nxt, _external_note(drv, spec))
 
 
@@ -607,8 +645,8 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
         spec = _spec(root, rec, wid, strict=False)
         drv.uninstall(spec)
         store.delete(root, sid)
-        moved = store.retire_log(root, sid, wid)
-        nxt = f"Removed {rec['name']}. Its log stays in {_shown_log(root, moved or store.read_log_path(root, sid, wid))}."
+        # the log stays; a new service with this id moves it aside when it is added (ORCH-1131)
+        nxt = f"Removed {rec['name']}. Its log stays in {_shown_log(root, store.read_log_path(root, sid, wid))}."
         return _emit(args, {"removed": sid, "next": nxt}, nxt)
     spec = _spec(root, rec, wid, strict=verb != "stop")
     was_stopped = verb == "stop" and _state(root, drv, rec, wid)["state"] == "stopped"

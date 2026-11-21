@@ -135,6 +135,7 @@ def _remove_lines(r: dict, depends: list[str]) -> list[str]:
     lines = [
         "It stays stopped and leaves this list." if stopped else "It stops now and leaves this list.",
         "It will not start by itself again.",
+        "Its log stays on this computer.",
     ]
     if depends:
         lines.append(_plain("These stop working: " + ", ".join(depends) + "."))

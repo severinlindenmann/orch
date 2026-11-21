@@ -15,11 +15,11 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 ## Files (all under `.orch/addons/services/`, gitignored, local to this computer)
 - `services/<id>.json`: one record per service (`orch.services.service/1`), written as a new file + rename (R8.2).
   Fields this version does not know are kept on rewrite. A file that cannot be read is skipped and counted.
-- `logs/<id>.log`: stdout and stderr of the service, appended. On remove it moves to
-  `logs/removed/<id>-<UTC time>.log`, so a new service with the same id starts with an empty log. macOS:
-  `~/Library/Logs/orch/<workspace id>/<id>.log` instead (launchd cannot open a log on an external disk; removed logs
-  go to `removed/` next to it); `log` and the page read the newer of the two, and a job loaded before the move gets
-  the new place at its next start.
+- `logs/<id>.log`: stdout and stderr of the service, appended. Kept when the service is removed; `add` of the same id
+  moves it to `removed/<id>-<UTC time>.log` next to it, so the new service starts with an empty log (ORCH-1131).
+  macOS: `~/Library/Logs/orch/<workspace id>/<id>.log` instead (launchd cannot open a log on an external disk);
+  `log` and the page read the newer of the two, and a job loaded before the move gets the new place at its next
+  start.
 - `keeper/<id>.json`, `keeper/<id>.run.json`: Windows only, see below.
 - `state/<id>.json`: `{"running", "since"}` of the last start or stop through orch (the `since` of a stopped
   service when the platform does not say it; `running` = what the person last asked for), and `watch` written by
@@ -62,7 +62,7 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 | `start \| stop \| status` (no id) | the regular check (see Health check): `{"running": true, "pid"}` \| `{"stopped": bool}` \| `{"running": bool, "pid"?}` (status exits 1 when it does not run); `orch start` / `orch stop` call these |
 | `auto <id> on \| off` | `{"service": row, "next"}` |
 | `important <id> on \| off` | `{"service": row, "next"}`; only the record changes (the job keeps running). On the page, Stop on a job marked important asks once first (ORCH-641) |
-| `remove <id>` | `{"removed": id, "next"}`: stops it, removes the platform entry and the record, moves the log to `logs/removed/` |
+| `remove <id>` | `{"removed": id, "next"}`: stops it, removes the platform entry and the record, keeps the log |
 | `log <id> [--lines N]` (default 20, max 1000) | `{"id", "lines": [...]}`; every line goes through the core secret scan, a hit shows `••••••` in place of the value (the whole line when the value cannot be told apart) |
 | `found` | `{"found": [item]}`; item = `id` (`launchd:<label>` \| `systemd:<unit>`; plain programs are no items), `name`, `running`, `since`, `what` (one plain line), `how` (`kind`, `label`/`unit`, `path`, `pid`?), `command` (secret scan hits as `••••••`), `auto`. Nothing found = `[]` and one plain sentence; `others`? = number of plain programs running in the workspace folder (shown as one line "N other programs run here", only when > 0); Windows: `[]` and `"note"`. Reads only |
 | `adopt <found-id> [--name X] [--id SLUG] [--ticket ID]` | `{"service": row, "next"}`: Manage with orch (see below) |

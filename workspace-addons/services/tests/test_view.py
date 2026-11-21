@@ -72,6 +72,7 @@ def test_remove_says_what_happens(cli):
     assert d["confirm"]["lines"] == [
         "It stops now and leaves this list.",
         "It will not start by itself again.",
+        "Its log stays on this computer.",
         "Ticket DM1-12 and its files stay as they are.",
     ]
 

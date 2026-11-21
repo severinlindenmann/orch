@@ -3,6 +3,7 @@ merged only after the group before it merged. Real git and the real core waiter,
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 
@@ -110,3 +111,43 @@ def test_trouble_with_the_group_on_top_uses_no_try(ws, world):
     assert built and states(ws) == {1: "merged", 2: "merged", 3: "merged", 4: "merged"}
     rows = {x["number"]: x for x in store.read(ws)}
     assert not rows[3].get("tries") and not rows[4].get("tries")
+
+
+def test_a_lone_pull_request_first_in_line_is_never_passed_by_groups_on_top(ws, world, monkeypatch):
+    """ORCH-545, 20 Nov: a pull request that runs alone was skipped by every group built on top of a running
+    one; with a group always running it waited 9.5 h. First in line, it stops the stacking and runs next."""
+    real = runner.Runner.lone_reason
+    monkeypatch.setattr(
+        runner.Runner,
+        "lone_reason",
+        lambda self, v, proof: "it changes CI" if v.get("number") == 3 else real(self, v, proof),
+    )
+    seen: dict = {}
+    logs: list[str] = []
+    add(ws, 1, 2, 3, 4)
+    make(ws, world, waiter=overlapping(world, seen), logs=logs).run()
+    assert states(ws) == {1: "merged", 2: "merged", 3: "merged", 4: "merged"}
+    members = [g["members"] for g in world.groups.values()]
+    assert members[:2] == [[1, 2], [3]], members  # nothing built on top of [1, 2] past it
+    assert any("is first in line: waits until the running groups end" in x for x in logs), logs
+    nothing_left_behind(ws, world)
+
+
+def test_the_list_line_says_why_the_lone_one_waits(ws, world, monkeypatch):
+    real = runner.Runner.lone_reason
+    monkeypatch.setattr(
+        runner.Runner,
+        "lone_reason",
+        lambda self, v, proof: "it changes CI" if v.get("number") == 3 else real(self, v, proof),
+    )
+    add(ws, 3, 4)
+    r = make(ws, world)
+    r.sign_in()
+    repo = store.read(ws)[0]["repo"]
+    lead = runner.Lead(
+        repo=repo, base="develop", url="https://github.com/o/r/pull/99", sha="0" * 40, done=threading.Event()
+    )
+    assert r.next_batch(follow=lead) == []
+    rows = {x["number"]: x for x in store.read(ws)}
+    assert rows[3]["state"] == "waiting" and rows[3]["why"].startswith("first in line: waits until")
+    assert rows[4]["state"] == "waiting"  # not stacked past it
