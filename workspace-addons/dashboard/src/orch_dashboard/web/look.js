@@ -170,10 +170,10 @@
     if (!svc) return null;
     const where = svc === 'publish' ? 'publish' : 'relay';
     const pend = look.waiting;
-    return n('div', {className: 'card-row', 'data-key': 'pf-relay-row'}, n('span', {className: 'set-label'}, 'On the ' + where),
+    return n('div', {className: 'card-row', 'data-key': 'pf-relay-row'}, n('span', {className: 'set-label'}, 'On the ' + (where === 'relay' ? 'phone link' : where)),
       n('div', {className: 'grow'},
-        look.relay_name ? n('p', {className: 'set-ctl', 'data-testid': 'profile-relay-name'}, 'Name on ' + where + ': ' + look.relay_name + ' — set by the ' + where + ' owner') : null,
-        n('p', {className: 'meta lk-pending', 'data-testid': 'profile-relay-state'}, pend ? 'Waiting for ' + where + ' approval' : 'Live on ' + where),
+        look.relay_name ? n('p', {className: 'set-ctl', 'data-testid': 'profile-relay-name'}, 'Name on ' + (where === 'relay' ? 'phone link' : where) + ': ' + look.relay_name + ' — set by the ' + (where === 'relay' ? 'phone link' : where) + ' owner') : null,
+        n('p', {className: 'meta lk-pending', 'data-testid': 'profile-relay-state'}, pend ? 'Waiting for ' + (where === 'relay' ? 'phone link' : where) + ' approval' : 'Live on ' + (where === 'relay' ? 'phone link' : where)),
         pend && look.pending != null ? n('p', {className: 'meta'}, look.pending ? 'Proposed: “' + look.pending + '”' : 'Proposed: remove the description') : null,
         pend && look.pending_tags ? n('p', {className: 'meta'}, look.pending_tags.length ? 'Proposed tags: ' + look.pending_tags.join(', ') : 'Proposed: remove all tags') : null));
   }
@@ -196,7 +196,7 @@
           n('p', {className: 'meta'}, 'The name shown for this workspace, up to 60 characters. Your folder keeps its own name.')], 'name'),
         profileRow('Description', n('p', {className: shownDescription() ? '' : 'meta', 'data-key': 'pf-description-value'}, shownDescription() || 'Not set'),
           [n('input', {className: 'input', type: 'text', maxlength: 280, 'data-key': 'pf-description', 'data-lk-input': 'description', 'aria-label': 'Description', value: pd.description, placeholder: 'For example: our website and newsletter'}),
-            n('p', {className: 'meta'}, 'One short line about what this workspace is for. Up to 280 characters.' + (svc ? ' It is sent to the ' + (svc === 'publish' ? 'publish' : 'relay') + ' too, for your phone and shared pages.' : ''))], 'description'),
+            n('p', {className: 'meta'}, 'One short line about what this workspace is for. Up to 280 characters.' + (svc ? ' It is sent to the ' + (svc === 'publish' ? 'publish' : 'phone link') + ' too, for your phone and shared pages.' : ''))], 'description'),
         profileRow('Tags', tagsNow.length ? chips(tagsNow, false) : n('p', {className: 'meta'}, 'None'),
           [chips(pd.tags, true), pd.tags.length < TAGMAX ? n('div', {className: 'row'}, n('input', {className: 'input', type: 'text', maxlength: 24, 'data-key': 'pf-tag', 'data-lk-input': 'tag', 'aria-label': 'New tag', value: pd.tag, placeholder: 'tag'}),
             n('button', {type: 'button', className: 'btn sm', 'data-lk': 'tag-add', 'data-key': 'pf-tag-add'}, 'Add')) : null,
