@@ -13,7 +13,7 @@ HARNESS = Path(__file__).parent / "blocks_harness.js"
 node = pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 
 
-def run(tmp_path, view, urls=None, own=None, inapp=False, links=False, click=()):
+def run(tmp_path, view, urls=None, own=None, inapp=False, links=False, click=(), repaint=False):
     f = tmp_path / "v.json"
     f.write_text(json.dumps(view))
     extra = [own or "", "inapp"] if inapp else ([own] if own else [])
@@ -22,7 +22,12 @@ def run(tmp_path, view, urls=None, own=None, inapp=False, links=False, click=())
         capture_output=True,
         text=True,
         check=True,
-        env={**__import__("os").environ, "LINKS": "1" if links else "0", "CLICK": "|".join(click)},
+        env={
+            **__import__("os").environ,
+            "LINKS": "1" if links else "0",
+            "CLICK": "|".join(click),
+            "REPAINT": "1" if repaint else "0",
+        },
     )
     return json.loads(out.stdout)
 
@@ -824,6 +829,17 @@ def test_table_tabs_count_each_state_and_fold_shows_the_rest_on_a_click(tmp_path
     picked = run(tmp_path, v, click=["In line"])
     assert [bool(r.get("hidden")) for r in _rows(picked)] == [True, False, False]
     assert "Show 1 more" not in texts(picked)  # a tab shows all of its rows
+
+
+@node
+def test_a_table_keeps_its_tab_when_the_page_is_painted_again(tmp_path):
+    """The dashboard paints an add-on page again on every poll; the chosen tab and its rows stay (ORCH-746)."""
+    v = _visual()
+    again = run(tmp_path, v, click=["In line"], repaint=True)
+    tabs = {texts(t): t["attrs"]["aria-selected"] for t in walk(again) if t["attrs"].get("role") == "tab"}
+    assert tabs == {"All 3": "false", "Checks failed 1": "false", "In line 2": "true"}
+    assert [bool(r.get("hidden")) for r in _rows(again)] == [True, False, False]
+    assert [r["data"].get("f") for r in _rows(again)] == ["Checks failed", "In line", "In line"]
 
 
 @node

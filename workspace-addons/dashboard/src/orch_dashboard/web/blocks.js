@@ -9,6 +9,7 @@ const OrchBlocks = (() => {
   const TICKET = /^t_[a-z0-9]{6,16}$/;
   const HTTPS = /^https:\/\/[^\s<>"'`]+$/;
   const arr = v => Array.isArray(v) ? v : [];
+  const picked = new Map();   // a table's chosen tab and Show more, kept over repaints (title|filter column)
   const ADDON = /^addon:([a-z][a-z0-9-]{1,31})(\/[A-Za-z0-9_./-]{0,100})?$/;
   const OWN = /^addon:(?![/\\])(?!.*\.\.)([A-Za-z0-9_./?=&%-]{0,300})$/;   // a page of the add-on whose view this is
   const APP = /^app:(home|tickets|notes|chat|settings|addon)(\/[a-z][a-z0-9-]{0,31}){0,2}$/;   // a page of the dashboard (hash route)
@@ -639,27 +640,45 @@ const OrchBlocks = (() => {
       const fcol = cols.find(c => c.key === b.filter && c.type === 'text');
       const fold = Number.isInteger(b.fold) && b.fold > 0 ? b.fold : 0;
       const foot = el('div', 'blk-table-foot');
-      let pick = null, open = false;
-      const apply = () => {
+      // The page is painted again on every poll and the dashboard keeps the nodes already shown (with the
+      // listeners of the first paint), so the handlers read rows and tabs from the live page, never from this
+      // paint's records, and the chosen tab and "Show more" outlive a repaint (picked, per table).
+      const tkey = `${b.title || ''}|${b.filter || ''}`;
+      const mem = picked.get(tkey) || {pick: null, open: false};
+      if (fcol) for (const [tr, r] of trs) tr.dataset.f = String((r.cells || {})[fcol.key] ?? '');
+      if (mem.pick != null && !trs.some(([tr]) => tr.dataset.f === mem.pick)) mem.pick = null;  // that tab is gone
+      const apply = (box, pick, open) => {
+        const rows = [...box.querySelectorAll('tbody > tr')];
         let shown = 0;
-        for (const [tr, r] of trs) {
-          const hit = pick == null || String((r.cells || {})[fcol ? fcol.key : ''] ?? '') === pick;
+        for (const tr of rows) {
+          const hit = pick == null || tr.dataset.f === pick;
           const fits = hit && (pick != null || open || !fold || shown < fold);
           tr.hidden = !fits; if (fits) shown += 1;
         }
-        const left = pick == null && fold && !open ? trs.length - shown : 0;
-        foot.replaceChildren();
-        if (left > 0) { const m = el('button', 'btn ghost sm', `Show ${left} more`); m.type = 'button'; on(m, 'click', () => { open = true; apply(); }); foot.append(m); }
-        foot.hidden = !left;
+        const left = pick == null && fold && !open ? rows.length - shown : 0;
+        const ft = box.querySelector('.blk-table-foot') || foot;
+        ft.replaceChildren();
+        if (left > 0) {
+          const m = el('button', 'btn ghost sm', `Show ${left} more`); m.type = 'button';
+          on(m, 'click', () => { const now = picked.get(tkey) || {pick: null, open: false}; now.open = true; picked.set(tkey, now); apply(m.closest('.blk') || box, now.pick, true); });
+          ft.append(m);
+        }
+        ft.hidden = !left;
       };
       if (fcol) {
         const counts = new Map();
         for (const [, r] of trs) { const k = String((r.cells || {})[fcol.key] ?? ''); if (k) counts.set(k, (counts.get(k) || 0) + 1); }
         const tabs = el('div', 'tabs blk-tabs'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', String(fcol.label));
         const tab = (label, n, key) => {
-          const x = el('button'); x.type = 'button'; x.setAttribute('role', 'tab'); x.setAttribute('aria-selected', key == null ? 'true' : 'false');
+          const x = el('button'); x.type = 'button'; x.setAttribute('role', 'tab'); x.setAttribute('aria-selected', key === mem.pick ? 'true' : 'false');
+          if (key != null) x.dataset.f = key;
           x.append(String(label), el('sup', '', String(n)));
-          on(x, 'click', () => { pick = key; for (const y of tabs.childNodes) y.setAttribute('aria-selected', y === x ? 'true' : 'false'); apply(); });
+          on(x, 'click', () => {
+            const box = x.closest('.blk') || s, now = picked.get(tkey) || {pick: null, open: false};
+            now.pick = 'f' in x.dataset ? x.dataset.f : null; picked.set(tkey, now);
+            for (const y of x.parentNode.childNodes) y.setAttribute('aria-selected', y === x ? 'true' : 'false');
+            apply(box, now.pick, now.open);
+          });
           return x;
         };
         tabs.append(tab('All', trs.length, null));
@@ -667,7 +686,8 @@ const OrchBlocks = (() => {
         s.append(tabs);
       }
       wrap.append(t); s.append(wrap);
-      if (fold) { apply(); s.append(foot); }
+      if (fold || mem.pick != null) { s.append(foot); apply(s, mem.pick, mem.open); }
+      if (!fold) foot.hidden = true;
       if (b.more > 0) s.append(el('p', 'blk-more', `+${b.more} more`));
       return s;
     },
