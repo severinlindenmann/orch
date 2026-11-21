@@ -523,6 +523,8 @@ struct ConversationView: View {
         let retry: () -> Void = { Task { await model.retrySend(item.clientId ?? "") } }
         let discard: () -> Void = { model.discardSend(item.clientId ?? "") }
         let replyHere: () -> Void = { reply = ReplyPreview(messageId: item.id, title: "Answering \(workspaceName)", quote: item.preview) }
+        // Only a message with a real id can be answered (reply_to); an old chat line from the computer has none.
+        let canReply = historyDay == nil && !ChatNames.isLocalId(item.id)
         // The banner says "offline" and the clock marks the message: only a throttle note is worth a caption.
         let wait = item.clientId.flatMap { waiting[$0] }.flatMap { $0 == QueuedNote.waiting ? nil : $0 }
         if let question = item.question, question.isMakeTicket {
@@ -536,14 +538,34 @@ struct ConversationView: View {
             }, onOpenArtifact: openArtifact, isStale: stale, position: ConversationRules.openPosition(of: item.id, in: items))
         } else if item.side == .me && item.voice != nil {
             OwnVoiceBubble(item: item, conversationLanguage: language, onRetry: historyDay == nil ? retry : {}, onDiscard: historyDay == nil ? discard : {}, onReply: historyDay == nil ? replyHere : nil, waitNote: wait)
-        } else if item.side == .them && item.label == nil && item.canPlay && item.speak != nil {
-            AgentMemoBubble(item: item, conversationId: resolved, workspaceName: workspaceName, onReply: historyDay == nil ? replyHere : nil)
         } else {
-            MessageBubble(item: item, conversationId: resolved, conversationLanguage: language, workspaceName: workspaceName,
-                          quotedText: item.replyTo.flatMap { key in items.first { $0.id == key }?.preview },
-                          onRetry: historyDay == nil ? retry : nil, onDiscard: historyDay == nil ? discard : nil, onOpenArtifact: openArtifact, attachments: ticket?.view?.attachments ?? [], onReply: historyDay == nil ? replyHere : nil, waitNote: wait,
-                          hugsContent: MessageBubble.hugs(item))
+            VStack(alignment: .leading, spacing: 4) {
+                // Ticket chats name who wrote each incoming message (team chat step 1); General is one-to-one.
+                if resolved.ticket != nil && ChatNames.showsCaption(at: index, in: items) {
+                    senderCaption(item)
+                }
+                if item.side == .them && item.label == nil && item.canPlay && item.speak != nil {
+                    AgentMemoBubble(item: item, conversationId: resolved, workspaceName: workspaceName, onReply: canReply ? replyHere : nil)
+                } else {
+                    MessageBubble(item: item, conversationId: resolved, conversationLanguage: language, workspaceName: workspaceName,
+                                  quotedText: item.replyTo.flatMap { key in items.first { $0.id == key }?.preview },
+                                  onRetry: historyDay == nil ? retry : nil, onDiscard: historyDay == nil ? discard : nil, onOpenArtifact: openArtifact, attachments: ticket?.view?.attachments ?? [], onReply: canReply ? replyHere : nil, waitNote: wait,
+                                  hugsContent: MessageBubble.hugs(item))
+                }
+            }
         }
+    }
+    /// "Claude · Marketing" / "Nina Weber · not signed in" above an incoming bubble, with the workspace mark.
+    private func senderCaption(_ item: ConvItem) -> some View {
+        let text = ChatNames.caption(item, workspaceName: workspaceName)
+        let ws = model.workspace(resolved.workspace)
+        return HStack(spacing: 6) {
+            WorkspaceBadge(name: item.typedName ? (item.sender ?? workspaceName) : workspaceName, icon: item.typedName ? nil : ws?.icon,
+                           color: item.typedName ? nil : ws?.color, size: 18)
+                .accessibilityHidden(true)
+            Text(text).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.tail)
+        }.padding(.leading, 4).frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .ignore).accessibilityLabel("From " + text).accessibilityIdentifier("chat-sender-\(item.id)")
     }
     @ViewBuilder private var emptyState: some View {
         if topicSummary != nil {

@@ -157,6 +157,12 @@ function liveAskModel(t) {
   const options = Array.isArray(q.options) ? q.options.filter(o => typeof o === 'string' && o.trim()).slice(0, 6) : [];
   return {id:q.id, digest:q.digest, text:String(q.text || ''), options, plain:q.kind == null};
 }
+// ORCH-1362 (UX checklist D5): Add beside is never greyed. When nothing can go beside, its menu says why and what to
+// do instead; '' when there are sessions to pick.
+function liveBesideNote(total, others) {
+  if (total >= LIVE_MAX) return 'Three sessions show at once, the most. Close one to show another here.';
+  return others > 0 ? '' : 'No other session is live. Start one from the wall or New on the bar, then add it here.';
+}
 // --- the page ---
 let liveLayer = null;
 let liveLayerPainted = '';
@@ -305,11 +311,11 @@ function livePlaceMenu(where, inPane) {
     opt('side', 'dock-side', 'Closed to the side', where === 'side'));
 }
 // Add beside's menu: which live session shows next to this one (ORCH-463: it used to take the first one unasked).
-function liveBesideMenu(key, label, others) {
+function liveBesideMenu(key, label, others, note) {
   const head = 'Show beside ' + label;
   return h('div', {className:'live-pop live-pop-scroll', role:'group', 'aria-label':head, 'data-key':'live-beside-menu'},
     h('p', {className:'live-pop-h'}, head),
-    others.map(id => {
+    note ? h('p', {className:'meta', role:'status', 'data-key':'live-beside-none'}, note) : others.map(id => {
       const o = liveLayerSession(id), name = o ? (o.key ? o.key + ' ' : '') + o.title : id;
       const word = o?.live?.status === 'needs-you' ? 'Needs you' : clean(o?.live?.word || '');
       return h('button', {type:'button', className:'live-opt', 'data-live':'beside-pick', 'data-session':id, 'data-key':'live-beside-pick', 'aria-label':'Show ' + name + ' beside ' + label},
@@ -338,7 +344,8 @@ function liveMoreEnd(key) {
   const m = typeof liveEndModel === 'function' ? liveEndModel(window.LiveSessions?.get(key) || null) : {on:false};
   if (!m.on) return null;
   return fragment(h('p', {className:'live-pop-h'}, 'This session'),
-    m.stop ? h('button', {type:'button', className:'live-opt', 'data-live-end':'stop', 'data-id':key, 'data-key':'live-more-stop', disabled:!m.busy}, liveIc('stop'), h('span', {}, 'Stop')) : null,
+    m.stop ? h('button', {type:'button', className:'live-opt', 'data-live-end':'stop', 'data-id':key, 'data-key':'live-more-stop'}, liveIc('stop'),
+      h('span', {className:'live-opt-t'}, h('span', {}, 'Stop'), h('span', {className:'meta'}, m.busy ? 'Ends the current step. The session stays.' : 'Nothing is running right now.'))) : null,
     h('button', {type:'button', className:'live-opt', 'data-live-end':'ask', 'data-where':'pane:' + key, 'data-id':key, 'data-key':'live-more-end'}, liveIc('power'), h('span', {}, 'End session')));
 }
 // ORCH-817: Stop (the current step) and End session (asks once) of every kind of session: pages/live-end.js. In a
@@ -350,7 +357,7 @@ function livePane(key, where, s, o) {
   const title = sess ? sess.title : 'This session has ended', label = sess?.key || title, on = key === s.cur;
   const pinned = o.pins.includes(key), placeMenu = 'pane:' + key, moreMenu = 'more:' + key, besideMenu = 'beside:' + key;
   const leave = where === 'full' ? livePaneBtn('leave-full', 'Leave full screen', 'full-exit', 'Leave full screen', {'data-key':'live-full'}) : null;
-  const besideWhy = o.total >= LIVE_MAX ? 'Three sessions is the most' : o.others.length ? 'Add beside: pick a session to show next to this one' : 'Add beside: no other session is live';
+  const besideNone = liveBesideNote(o.total, o.others.length), besideWhy = besideNone ? 'Add beside: ' + besideNone : 'Add beside: pick a session to show next to this one';
   const group = sess && !sess.kind && typeof liveGroupOf === 'function' ? liveGroupOf(liveGroups(), sess.id) : null;
   return h('section', {className:'live-pane', 'data-key':'live-pane', 'data-session':key, 'data-on':on && n > 1 ? '' : null,
     'data-new':o.fresh ? '' : null, 'data-group':group ? '' : null, 'data-narrow':o.narrow ? '' : null, tabindex:'-1', 'aria-label':(sess?.key ? sess.key + ', ' : '') + title},
@@ -367,14 +374,14 @@ function livePane(key, where, s, o) {
         compact || typeof liveHistButton !== 'function' ? null : liveHistButton(sess, label),
         ...(sess ? liveEndHere(key, label, o.narrow) : []),
         compact ? null : livePaneBtn('pin', (pinned ? 'Unpin ' : 'Pin ') + label, 'pinned', pinned ? 'Unpin' : 'Pin', {'data-session':key, 'aria-pressed':String(pinned), 'data-key':'live-pin'}),
-        o.phone ? null : livePaneBtn('menu', besideWhy, 'plus', 'Add beside', {'data-menu':besideMenu, 'aria-expanded':String(s.menu === besideMenu), 'aria-haspopup':'true', 'data-key':'live-beside', disabled:o.total >= LIVE_MAX || !o.others.length}),
+        o.phone ? null : livePaneBtn('menu', besideWhy, 'plus', 'Add beside', {'data-menu':besideMenu, 'aria-expanded':String(s.menu === besideMenu), 'aria-haspopup':'true', 'data-key':'live-beside'}),
         compact || where === 'full' ? null : livePaneBtn('menu', 'Place: where ' + name + ' sits', where === 'right' ? 'dock-right' : 'dock-bottom', 'Place', {'data-menu':placeMenu, 'aria-expanded':String(s.menu === placeMenu), 'data-key':'live-pane-place'}),
         leave || (compact ? null : livePaneBtn('full', 'Full screen', 'full-screen', 'Full screen', {'data-key':'live-full'})),
         o.narrow && n > 1 && !o.phone ? null : livePaneBtn('min', 'Minimise to the bar', 'chevron-down', 'Minimise', {'data-key':'live-min'}),
         livePaneBtn('close', o.total > 1 ? 'Close this pane' : 'Close (the bar stays)', 'x', 'Close', {'data-session':key, 'data-key':'live-close'}),
         compact ? livePaneBtn('menu', 'More for ' + label, 'more', 'More', {'data-menu':moreMenu, 'aria-expanded':String(s.menu === moreMenu), 'data-key':'live-pane-more'}) : null,
         s.menu === placeMenu ? livePlaceMenu(where, true) : null,
-        s.menu === besideMenu && o.others.length ? liveBesideMenu(key, label, o.others) : null,
+        s.menu === besideMenu ? liveBesideMenu(key, label, o.others, besideNone) : null,
         s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned, o.narrow, o.narrow && n > 1 && !o.phone) : null)),
     sess?.running && (!sess.kind || sess.kind === 'empty') && typeof window.liveModelRow === 'function' ? window.liveModelRow(sess, s) : null,
     sess?.running && sess.kind && typeof window.livePermPaneRow === 'function' ? window.livePermPaneRow(sess, s) : null,
@@ -406,13 +413,17 @@ function liveEndedBody(sess, label) {
     h('div', {className:'row'}, h('button', {type:'button', className:'btn outline sm', 'data-live-again':sess.kind, 'data-key':'live-start-again'}, 'Continue')),
     typeof liveHistBody === 'function' ? liveHistBody(sess) : null);
 }
-document.addEventListener('click', async e => {
+async function liveStartAgain(kind, b) {
+  if (b) b.disabled = true;
+  const r = await act('session.new', {kind}, {quiet:true});
+  if (b) b.disabled = false;
+  if (r.ok) window.orch?.toast?.('It goes on with the same conversation.', 'ok');
+  else (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(r.text, 'Could not start it again.', () => liveStartAgain(kind));
+}
+document.addEventListener('click', e => {
   const b = e.target.closest?.('#live-dock [data-live-again]');
   if (!b || b.disabled) return;
-  b.disabled = true;
-  const r = await act('session.new', {kind:b.dataset.liveAgain}, {quiet:true});
-  b.disabled = false;
-  window.orch?.toast?.(r.ok ? 'It goes on with the same conversation.' : r.text || 'Could not start it again.', r.ok ? 'ok' : 'error');
+  liveStartAgain(b.dataset.liveAgain, b);
 });
 // The waiting question of a ticket's pane: its words, one button per option and a field for an own answer, so it is
 // answered where it is shown (ORCH-675). Written only when the question changes, so a typed answer stays.
@@ -431,7 +442,8 @@ function liveAskFill(box, id) {
     box.dataset.busy = '1'; box.querySelectorAll('button,input').forEach(c => { c.disabled = true; });
     const r = await act('answer', {ticket:id, question:q.id, digest:q.digest, answer:text});
     delete box.dataset.busy;
-    window.orch?.toast?.(r.ok ? 'Answered: ' + text : r.text || 'Could not send your answer.', r.ok ? 'ok' : 'error');
+    if (r.ok) window.orch?.toast?.('Answered: ' + text, 'ok');
+    else (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(r.text, 'Could not send your answer.', () => { if (liveAskModel(ticketOf(id))?.id === q.id) send(text); }, 'Send again');  // only while that question still waits
     if (r.ok) { liveAskDrafts.delete(id + '/' + q.id); box.dataset.sig = ''; liveAskFill(box, id); }
     else box.querySelectorAll('button,input').forEach(c => { c.disabled = false; });  // the typed words stay
     const now = document.activeElement;  // still waiting on the box (or dropped by a repaint): not moved by the person meanwhile
@@ -440,10 +452,12 @@ function liveAskFill(box, id) {
   box.append(h('p', {className:'live-ask-q'}, q.text));
   if (!q.plain) { box.append(h('a', {className:'btn primary sm', href:'#ticket/' + encodeURIComponent(id), 'data-key':'live-ask-open'}, 'Answer on the ticket')); return; }
   const row = h('div', {className:'live-ask-opts'});
-  q.options.forEach((o, i) => { const b = h('button', {type:'button', className:'btn outline sm', 'data-key':'live-ask-option-' + i}, o); b.addEventListener('click', () => send(o)); row.append(b); });
+  // one filled button per pane, as in draft D (ORCH-1357): the first choice is filled; with choices the own answer's
+  // Send stays outlined, without any it is the pane's one filled button (the message box's Send is always outlined)
+  q.options.forEach((o, i) => { const b = h('button', {type:'button', className:'btn ' + (i ? 'outline' : 'primary') + ' sm', 'data-key':'live-ask-option-' + i}, o); b.addEventListener('click', () => send(o)); row.append(b); });
   const input = h('input', {type:'text', className:'input', 'data-key':'live-ask-text', placeholder:q.options.length ? 'Or write an answer' : 'Write an answer', 'aria-label':'Your answer', value:liveAskDrafts.get(id + '/' + q.id) || ''});
   input.addEventListener('input', () => liveAskDrafts.set(id + '/' + q.id, input.value));  // a redraw of the pane keeps it
-  const go = h('button', {type:'button', className:'btn primary sm', 'data-key':'live-ask-send'}, 'Send');
+  const go = h('button', {type:'button', className:'btn ' + (q.options.length ? 'outline' : 'primary') + ' sm', 'data-key':'live-ask-send'}, 'Send');
   go.addEventListener('click', () => send(input.value)); input.addEventListener('keydown', e => { if (e.key === 'Enter') send(input.value); });
   if (q.options.length) box.append(row);
   box.append(h('div', {className:'live-ask-line'}, input, go));

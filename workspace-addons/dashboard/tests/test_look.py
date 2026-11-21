@@ -222,15 +222,28 @@ def test_web_files_are_served_and_hooked(server):
     for name, marker in (
         ("look.js", "OrchLook"),
         ("switcher.js", "ws-switch"),
+        ("places.js", "OrchPlaces"),
         ("look-icons.js", "OrchLookData"),
         ("kit/widgets.css", ".wsb:where"),
         ("look-colors.css", "data-c=teal"),
     ):
         assert marker in urllib.request.urlopen(f"{server}/{name}").read().decode(), name
     page = urllib.request.urlopen(f"{server}/").read().decode()
-    for tag in ("look-icons.js", "look.js", "switcher.js", "kit/widgets.css", "look-colors.css"):
+    for tag in ("look-icons.js", "look.js", "places.js", "switcher.js", "kit/widgets.css", "look-colors.css"):
         assert tag in page
     assert page.index("look.js") < page.index("app.js")
+    assert page.index("places.js") < page.index("switcher.js")
+
+
+def test_place_id_is_a_hash_of_the_local_id_never_the_id(tmp_path):
+    from orch.addons import put_local_id
+
+    (tmp_path / ".orch").mkdir()
+    assert look.place_id(tmp_path) is None  # a copy without a local id
+    put_local_id(tmp_path, "a" * 32)
+    pid = look.place_id(tmp_path)
+    assert pid and pid.startswith("ws_") and len(pid) == 27 and "a" * 8 not in pid
+    assert look.place_id(tmp_path) == pid  # stable
 
 
 def test_generated_files_match_the_contract():

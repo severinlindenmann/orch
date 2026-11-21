@@ -220,6 +220,7 @@ Must be seen:
 
 - Two, then three panes sit next to each other; on the right they are stacked.
 - Every pane has pin, add beside, place, minimise and close.
+- With three panes Add beside is not greyed: its menu says three is the most and to close one first.
 - The split stays while the page changes.
 - Closing a pane gives its room to the others.
 - On a phone one session shows at a time and there is no add beside.
@@ -531,7 +532,7 @@ Do:
 Must be seen:
 
 - The wall shows with that session open in the layer, the keyboard in its pane.
-- An unknown ticket shows the wall, opens nothing and says "There is no ticket with this address."
+- An unknown ticket shows the wall, opens nothing and says "There is no ticket with this address. Find it on the Tickets page." with an Open Tickets button
 
 ## 30. Keyboard only: wall, layer and back to the bar
 

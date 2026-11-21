@@ -227,6 +227,16 @@ def pytest_configure(config):
 
 
 @pytest.fixture(autouse=True)
+def _no_source_catalog(monkeypatch):
+    """orch update asks the source which add-ons the new orch ships (addons._fetch_source_catalog, a network
+    read for a GitHub source): never from a test. None = unknown, the running orch's own catalog is used."""
+    monkeypatch.setattr(addons, "_fetch_source_catalog", lambda r, at: None)
+    addons._source_catalog_cache.clear()
+    yield
+    addons._source_catalog_cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_bundled_catalogue(request, monkeypatch):
     """The bundled manifests of the shipped add-ons (shipped_addons.json) would list six not-installed
     add-ons in every `addon list` of a test without a source folder. Off by default; the catalogue tests
