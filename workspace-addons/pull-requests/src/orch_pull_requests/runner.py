@@ -67,7 +67,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import blame, settings, store
+from . import blame, broken, settings, store
 from .store import FINISHED, MERGED, OUT, RUNNING, WAITING, Refused
 
 MAX_GROUP = settings.DEFAULT_MAX_GROUP  # the setting max_group wins (settings.max_group)
@@ -273,14 +273,22 @@ class Runner:
         self, repo: str, base: str, url: str, entries: list[dict], failed: frozenset[str] | None = None
     ) -> bool:
         """When every failed check of url also failed on the red base branch, the entries are not blamed: they
-        wait for the fix (no try used, except for a fix, which did not fix it). True when that happened."""
+        wait for the fix (no try used, except for a fix, which did not fix it). True when that happened.
+        The same when it failed only in tests a person set aside (broken.py, ORCH-455), matched by the failing
+        tests of its logs: not their change."""
         red = self.red_base(repo, base)
-        if not red:
+        if not red and not broken.set_aside(self.root, repo):
             return False
         failed = self.failed_checks(url) if failed is None else failed
-        if not failed or not failed <= red:
+        if not failed:
             return False
-        why = f"{base} itself is red in the same checks ({_names(failed)}); waits for the fix"
+        if red and failed <= red:
+            why = f"{base} itself is red in the same checks ({_names(failed)}); waits for the fix"
+        else:
+            tests = broken.only_set_aside(self.root, self.gh, repo, url, red)
+            if not tests:
+                return False
+            why = f"it failed only in tests a person set aside ({', '.join(tests[:3])}); waits for the fix"
         for e in entries:
             if self.is_fix(e):  # it was meant to fix those very checks: a counted try
                 self.retry([e], f"{url} is still red in the checks {base} fails ({_names(failed)})")

@@ -390,7 +390,8 @@ def test_no_rerun_while_twenty_jobs_wait_for_a_machine_and_one_count_per_pass(on
 
 def test_one_pass_wakes_at_most_two_helpers(on):
     tids = [ticket(on, n) for n in (1, 2, 3)]
-    gh, waker = FakeGitHub({n: [job("test", "FAILURE", 10 + n)] for n in (1, 2, 3)}), Waker()
+    # a different check on each: the same failure on three pull requests would be a broken test (ORCH-455)
+    gh, waker = FakeGitHub({n: [job(f"test-{n}", "FAILURE", 10 + n)] for n in (1, 2, 3)}), Waker()
     tend(on, gh, waker=waker)
     assert len(waker.calls) == checks.WAKES_PER_PASS == 2
     tend(on, gh, waker=waker, clock=lambda: 1060.0)
