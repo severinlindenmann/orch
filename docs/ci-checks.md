@@ -50,7 +50,7 @@ about two full runs at once, pull requests waited up to two hours and the queue 
 | headless-launch (rules): every browser start goes through `e2e/headless.cjs` / `.py` (ORCH-615) | runs (the queue stops on it) | required | | | runs |
 | workspace, Linux (2 parts) | only with Windows ² | required, always | runs unless proven | runs | required |
 | workspace, macOS (5 parts) | | | runs | runs | required |
-| workspace, Windows (16 parts) | not while known red ¹ | not run ³ | shown (known red), also when proven ³ | shown (known red) | shown (known red), in the release check |
+| workspace, Windows (20 parts, split by measured time, 20-minute limit) | not while known red ¹ | not run ³ | shown (known red), also when proven ³ | shown (known red) | shown (known red), in the release check |
 | Windows install as a standard user | not while Windows is known red ¹ | | runs | runs | required, in the release check |
 | CLI smoke, Windows + macOS | | required, always | | | required |
 | e2e smoke (5 minutes) | | required, always | | | required |
@@ -84,6 +84,14 @@ are done and 20 groups in a row were green with them: the note at the top of `ci
 `brand/tests/test_ci_queue_skip.py`.
 
 A draft pull request gets no CI run; marking it ready starts one.
+
+Time limits (ORCH-1050): every workspace part has a limit (15 minutes, Windows 20) and a "Time used" step that writes
+a warning once a part passes 70 percent of it. Windows parts are split by measured time
+(`workspace/tests/ci_times_windows.json`, `--part-times`); every Windows part uploads its test times as the
+`ci-times-windows-<K>` artifact. When a part nears its limit, refresh the file from one run's artifacts:
+`python tests/ci_parts.py merge tests/ci_times_windows.json <downloaded ci-times.json files>`. The release keeper runs
+a develop job that hit its time limit with no failed test once more before it blocks a release; a red release check
+already gets one more try (ORCH-1023).
 
 ## Known red
 
