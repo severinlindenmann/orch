@@ -90,11 +90,28 @@ AWAY_STAYS = {
     "logins or keys": "logins? log\\s?in sig[n][-\\s]?in passwords? tokens? keys? secrets? credentials?"
     " accounts?"
     " auth\\w* ssh oauth api",
+    # security review of #1646 (ORCH-1375): what others can see or reach is sending out too
+    "outside-visible": "shar(e|es|ed|ing) links? urls? https? www invit\\w* expos\\w* grant\\w* access\\w*"
+    " permission\\w* ports? network\\w* export\\w* external\\w* upload\\w* download\\w* open\\sto"
+    " webhooks? domains? dns firewall\\w* clients? users? guests? members? teams? visible online internet"
+    " phones? tunnel\\w* forward\\w* broadcast\\w* announc\\w* notif(y|ies|ied|ying|ication|ications)"
+    " messag(e|es|ed|ing) tweets? social let\\s\\w+\\s(see|view|read|edit|open|use|join|in|into|have)"
+    " give\\w* gave rights views? viewers? editors? roles? others? anyone everyone people person someone"
+    " colleagues? partners? vendors? third\\sparty",
+    # a go-ahead that points at steps it does not show: what would happen is not in the words, so it stays
+    "a go-ahead without the steps": "proceed\\w* go\\s?ahead carry\\son continu(e|es|ed|ing) as\\splanned"
+    " as\\sdiscussed as\\sproposed as\\sabove as\\sbefore as\\sagreed as\\sdescribed the\\splan"
+    " planned next\\ssteps? steps?\\s?\\d+ c\\d+ do\\sit run\\sit start\\sit ship\\w* go\\sfor\\sit"
+    " all\\sof\\sit everything the\\srest good\\sto\\sgo ready sounds\\sgood lgtm approv\\w* confirm\\w*"
+    " fine\\sby",
 }
 # no boundary in front: a word with any prefix still counts (redeploy, pre-delete, unpublish); a hit only ever
 # leaves the question for the owner, so a word that merely contains one fails safe
 AWAY_RE = {k: re.compile(rf"({'|'.join(v.split())})(?![a-z0-9_])", re.I) for k, v in AWAY_STAYS.items()}
 MONEY_MARK = re.compile(r"[$€£]")
+GAPS = re.compile(r"[\s_-]+")  # 'go-ahead', 'do  it' and 'go_ahead' read as 'go ahead' and 'do it'
+AWAY_MIN_WORDS = 4  # 'Is that OK?' or 'Ready?' does not say what the yes does: it stays
+LONG_WORD = re.compile(r"[a-z]{3,}", re.I)
 PLAIN_TEXT = re.compile(r"[\x20-\x7e\n\t]*")
 AWAY_TEXT_MAX = 2000
 AWAY_CARDS = ("choice",)  # a plan or link card is approve/don't: always the owner's
@@ -391,10 +408,28 @@ def away_answerable(ticket: dict, q: dict) -> tuple[bool, str]:
     text = unicodedata.normalize("NFKC", " ".join(bits))
     if not PLAIN_TEXT.fullmatch(text) or len(text) > AWAY_TEXT_MAX:
         return False, "not plain short text"
-    hits = [k for k, rx in AWAY_RE.items() if rx.search(text) or (k == "money" and MONEY_MARK.search(text))]
+    hits = _away_hits(text)
     if hits:
         return False, "names " + ", ".join(hits)
+    if len(LONG_WORD.findall(str(q.get("text") or ""))) < AWAY_MIN_WORDS:
+        return False, "too short to say what the yes does"
+    # what the yes sets going: the open steps are read too (a short question can stand for a step that
+    # sends something out); each step on its own, so a long list does not count against the length rule
+    for c in ticket.get("checklist") or []:
+        if not isinstance(c, dict) or c.get("done") or c.get("wont_do"):
+            continue
+        step = unicodedata.normalize("NFKC", str(c.get("text") or ""))
+        if not PLAIN_TEXT.fullmatch(step):
+            return False, "an open step that is not plain text"
+        hits = _away_hits(step)
+        if hits:
+            return False, "an open step names " + ", ".join(hits)
     return True, AWAY_WHY
+
+
+def _away_hits(text: str) -> list[str]:
+    text = GAPS.sub(" ", text)
+    return [k for k, rx in AWAY_RE.items() if rx.search(text) or (k == "money" and MONEY_MARK.search(text))]
 
 
 def _strings(v, depth: int = 0) -> list[str]:

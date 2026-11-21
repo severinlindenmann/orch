@@ -417,6 +417,22 @@ def test_away_answers_a_plain_question_and_a_choice_card_at_once(proj, run, new_
         "Run the pre-delete step?",
         "Truncate the table?",
         "Buy the bigger plan for $20?",  # money
+        # security review of #1646 (ORCH-1375): outside-visible and go-aheads that hide what they start
+        "Share the report by private link?",
+        "Invite the client to the workspace?",
+        "Expose the preview port to the network?",
+        "Grant the helper access to the Documents folder?",
+        "Proceed with step 3 as planned?",
+        "Go ahead?",
+        "Continue with c4?",
+        "Upload the export to the drive?",
+        "Notify the team on their phones?",
+        "Go-ahead with the sorting?",  # a hyphen or two spaces do not hide a word
+        "Do  it for the sorted list?",
+        "Let Alice view the sorted list?",
+        "Give Alice read rights on the list?",
+        "Is that OK?",  # too short to say what the yes does
+        "Ready?",
     ],
 )
 def test_away_never_answers_what_the_owner_keeps(proj, run, new_ticket, text):
@@ -543,3 +559,31 @@ def test_away_leaves_a_card_too_deep_to_read():
         "card": card,
     }
     assert autoreview.away_answerable(t, q)[0] is False
+
+
+def _away_ticket(steps):
+    checklist = [{"id": f"c{i + 1}", "text": t, "done": d} for i, (t, d) in enumerate(steps)]
+    return {"id": "t_aaaaaa", "title": "Sort the list", "status": "active", "human_review": False,
+            "questions": [], "checklist": checklist}  # fmt: skip
+
+
+def _away_q(text):
+    return {"id": "q1", "text": text, "options": ["Yes", "No"], "recommended": "Yes", "answer": None}
+
+
+def test_away_reads_the_open_steps_a_short_yes_would_start():
+    """ORCH-1375: 'Is the list right?' can stand for an open step that sends it out: that step keeps it."""
+    q = _away_q("Is the sorted list right?")
+    assert autoreview.away_answerable(_away_ticket([("Sort by date", False)]), q) == (
+        True,
+        autoreview.AWAY_WHY,
+    )
+    ok, why = autoreview.away_answerable(_away_ticket([("Send the list to the public link", False)]), q)
+    assert ok is False and why.startswith("an open step names")
+    # a step that is done or won't be done no longer starts anything
+    assert autoreview.away_answerable(_away_ticket([("Share the list by link", True)]), q)[0] is True
+    t = _away_ticket([("Share the list by link", False)])
+    t["checklist"][0]["wont_do"] = {"reason": "x"}
+    assert autoreview.away_answerable(t, q)[0] is True
+    weird = _away_ticket([("Sort by date \u202e", False)])
+    assert autoreview.away_answerable(weird, q)[0] is False  # not plain text: stays
