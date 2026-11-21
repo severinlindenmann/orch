@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
+from orch_dashboard import framepass
 from orch_dashboard.data import load_state
 from orch_dashboard.server import make_server
 
@@ -535,6 +536,7 @@ def test_the_dashboard_page_gets_a_pass_for_a_shipped_page_only(stack, monkeypat
     code, body, _ = _mint(base, headers={"X-Orch-Page": "secret"})
     got = json.loads(body)
     assert code == 200 and got["act"] is True and len(got["pass"]) >= 40 and len(got["file"]) >= 40
+    assert got["life"] == framepass.LIFE  # the page asks again before the pass ends (ORCH-1004)
     code, body, _ = _mint(base)  # no sign-in on this computer: a read-only pass (it could read anyway)
     assert code == 200 and json.loads(body)["act"] is False
     assert _mint(base, headers=REMOTE)[0] == 403  # another computer without sign-in: none
@@ -767,7 +769,6 @@ def test_the_file_pass_is_taken_off_however_its_name_is_written(stack, monkeypat
 
 
 def test_only_focus_makes_dashboard_calls_from_its_frame():
-    from orch_dashboard import framepass
 
     assert set(framepass.FRAME_ROOT) == {"focus"}  # Insights and Factory get no dashboard call at all
     assert "/api/frame-pass" not in framepass.ALL_ROOT_PATHS and "/session" not in framepass.ALL_ROOT_PATHS

@@ -155,10 +155,15 @@ def _glance(pv: dict, where: str) -> None:
     diff = pv.get("diff", [])
     if not isinstance(diff, list) or len(diff) > 30:
         raise Refused(f"{where}.diff is a list of at most 30 lines.")
-    for d in diff:
-        if not isinstance(d, dict) or set(d) != {"op", "text"} or d["op"] not in ("+", "-"):
-            raise Refused(f"{where}.diff: each line is {{op: + or -, text}}.")
+    for d in diff:  # ORCH-429: file (a name shown above its lines) and risk (why the line is marked red)
+        ok = isinstance(d, dict) and {"op", "text"} <= set(d) <= {"op", "text", "file", "risk"}
+        if not ok or d["op"] not in ("+", "-"):
+            raise Refused(f"{where}.diff: each line is {{op: + or -, text, file?, risk?}}.")
         _text(d["text"], "diff.text", 200, required=True)
+        if "file" in d:
+            _text(d["file"], "diff.file", 120, required=True)
+        if "risk" in d:
+            _text(d["risk"], "diff.risk", 60, required=True)
     det = pv.get("details", [])
     if not isinstance(det, list) or len(det) > 50:
         raise Refused(f"{where}.details is a list of at most 50 texts.")
@@ -208,7 +213,12 @@ def _plain_doc(p: dict) -> dict:
         f"{b['label']}: {b['value']}{(p['chart'].get('unit') or '')}"
         for b in (p.get("chart") or {}).get("bars", [])
     ]
-    rows += [f"{d['op']} {d['text']}" for d in p.get("diff") or []]
+    last = None
+    for d in p.get("diff") or []:  # the phone: a file's name before its lines, a marked line says why
+        if d.get("file") and d["file"] != last:
+            rows.append(d["file"])
+        last = d.get("file") or last
+        rows.append(f"{d['op']} {d['text']}" + (f"  (look: {d['risk']})" if d.get("risk") else ""))
     paras += [p["foot"]] if p.get("foot") else []
     paras += list(p.get("details") or [])
     if paras:

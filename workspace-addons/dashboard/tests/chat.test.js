@@ -353,6 +353,15 @@ test('the heading counts helpers like Home: the same helper rows and words, not 
   assert.doesNotMatch(head, /15/);
 });
 
+test('the welcome block is never scrolled to the bottom (phone width cut the icon and Today line)', () => {
+  const c = context();
+  const log = state => ({scrollTop:50, scrollHeight:900, clientHeight:400, textContent:'x', querySelector:() => state ? {} : null});
+  const welcome = log(true); c.chatFollowLog(welcome);
+  assert.equal(welcome.scrollTop, 0);
+  const messages = log(false); c.chatFollowLog(messages);
+  assert.equal(messages.scrollTop, 900);
+});
+
 // Report r-1119-2059 (ORCH-968): the relay add-on is labelled Contacts now, so the old /phone/ label match never found
 // it; the link showed while the add-on was off and fell back to Settings > General.
 test('the Contacts link shows only while the add-on with the phone panel is on, and opens that add-on', () => {
