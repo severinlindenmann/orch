@@ -13,13 +13,14 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 ME=$(id -u)
 REAL_HOME=$(getent passwd "$ME" | cut -d: -f6)
 export XDG_RUNTIME_DIR="/run/user/$ME"
-# User services, timers, sockets, overrides and the manager's environment: the job could have changed any of them, so
-# its unit and settings folders go, and then the user service manager is RESTARTED from the system side (the one
-# command setup.sh allows this user with sudo). That ends every user unit and starts the manager from scratch.
-for d in "$REAL_HOME/.config/systemd" "$REAL_HOME/.config/environment.d" "$REAL_HOME/.local/share/systemd"; do
-  [ -e "$d" ] || [ -L "$d" ] && rm -rf "$d"
-done
-if ! sudo -n /usr/bin/systemctl restart "user@$ME.service" 2>/dev/null; then
+# User services, timers, sockets, overrides and the manager's environment: the job could have changed any of them.
+# In this order, so nothing of the job can write again while the next step runs:
+#   1. RESTART the user service manager from the system side (the one command setup.sh allows this user with sudo):
+#      every user unit and its processes end.
+#   2. Stop every other leftover process of the user (below).
+#   3. Remove the unit, environment and settings folders, then restart the manager once more so it starts from them.
+restarted=0
+if sudo -n /usr/bin/systemctl restart "user@$ME.service" 2>/dev/null; then restarted=1; else
   # not set up for it (an older setup.sh): stop what the user manager runs, as well as it can from inside
   echo "edge runner: could not restart the user service manager; stopping its units one by one" >&2
   rm -rf "$XDG_RUNTIME_DIR/systemd/user.control" "$XDG_RUNTIME_DIR/systemd/user" 2>/dev/null
@@ -73,4 +74,8 @@ if [ -n "$stray" ]; then
   stray=$(leftovers); [ -n "$stray" ] && kill -9 $stray 2>/dev/null
 fi
 find /tmp /var/tmp /dev/shm -mindepth 1 -maxdepth 1 -user "$ME" ! -name 'dotnet-diagnostic-*' ! -name 'clr-debug-pipe-*' -exec rm -rf {} + 2>/dev/null
+for d in "$REAL_HOME/.config/systemd" "$REAL_HOME/.config/environment.d" "$REAL_HOME/.local/share/systemd"; do
+  { [ -e "$d" ] || [ -L "$d" ]; } && rm -rf "$d"
+done
+[ "$restarted" = 1 ] && sudo -n /usr/bin/systemctl restart "user@$ME.service" 2>/dev/null
 exit 0
