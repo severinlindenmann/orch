@@ -429,6 +429,10 @@ def test_away_answers_a_plain_question_and_a_choice_card_at_once(proj, run, new_
         "Notify the team on their phones?",
         "Go-ahead with the sorting?",  # a hyphen or two spaces do not hide a word
         "Do  it for the sorted list?",
+        "Go.ahead with the sorting?",  # any mark between the words, not only a hyphen
+        "Do,it for the sorted list?",
+        "Share/send the sorted list?",
+        "Let the client team view the sorted list?",  # several words before the verb
         "Let Alice view the sorted list?",
         "Give Alice read rights on the list?",
         "Is that OK?",  # too short to say what the yes does

@@ -95,7 +95,7 @@ AWAY_STAYS = {
     " permission\\w* ports? network\\w* export\\w* external\\w* upload\\w* download\\w* open\\sto"
     " webhooks? domains? dns firewall\\w* clients? users? guests? members? teams? visible online internet"
     " phones? tunnel\\w* forward\\w* broadcast\\w* announc\\w* notif(y|ies|ied|ying|ication|ications)"
-    " messag(e|es|ed|ing) tweets? social let\\s\\w+\\s(see|view|read|edit|open|use|join|in|into|have)"
+    " messag(e|es|ed|ing) tweets? social let(\\s\\w+){1,4}\\s(see|view|read|edit|open|use|join|in|into|have)"
     " give\\w* gave rights views? viewers? editors? roles? others? anyone everyone people person someone"
     " colleagues? partners? vendors? third\\sparty",
     # a go-ahead that points at steps it does not show: what would happen is not in the words, so it stays
@@ -109,7 +109,8 @@ AWAY_STAYS = {
 # leaves the question for the owner, so a word that merely contains one fails safe
 AWAY_RE = {k: re.compile(rf"({'|'.join(v.split())})(?![a-z0-9_])", re.I) for k, v in AWAY_STAYS.items()}
 MONEY_MARK = re.compile(r"[$€£]")
-GAPS = re.compile(r"[\s_-]+")  # 'go-ahead', 'do  it' and 'go_ahead' read as 'go ahead' and 'do it'
+# any other mark reads as one space: 'go-ahead', 'go.ahead' and 'do  it' are 'go ahead' and 'do it'
+GAPS = re.compile(r"[^a-z0-9$€£]+", re.I)
 AWAY_MIN_WORDS = 4  # 'Is that OK?' or 'Ready?' does not say what the yes does: it stays
 LONG_WORD = re.compile(r"[a-z]{3,}", re.I)
 PLAIN_TEXT = re.compile(r"[\x20-\x7e\n\t]*")
