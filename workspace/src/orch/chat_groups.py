@@ -69,7 +69,7 @@ ORIGINS_KEEP = 3000
 COPIES_KEEP = 300
 PROCESSED_KEEP = 4000
 HOST_ONLY = ("group_event", "shared_ticket", "origin", "echo_of", "shared_files", "question_kind", "own_seq")
-MEMBER_ONLY = ("seen", "leave")
+MEMBER_ONLY = ("seen", "leave", "member_version")
 TASK_RANK = {
     "waiting_start": 0,
     "waiting_approval": 1,
@@ -193,12 +193,15 @@ def message_errors(m: dict, ctx: dict | None = None) -> list[str]:
     if isinstance(ge0, dict) and "mode" in ge0 and ge0["mode"] not in ("once", "always"):
         out.append("group_event.mode is once or always")
     if not isinstance(g, dict):
+        if "mentions" in b or "member_version" in b:
+            out.append("mentions and member_version ride only on a group message (body.group)")
         return out
     host, frm, to = g.get("host"), m.get("from"), m.get("to")
     if len(set(members_of(g))) != len(members_of(g)):
         out.append("group.members: each ws once")
     if host not in members_of(g):
         out.append("group.members must include the host")
+    out += v2_errors(m, g)
     if len(members_of(g)) > MAX_MEMBERS:
         out.append("a group has at most 8 members")
     if frm == host:
@@ -298,6 +301,55 @@ def message_errors(m: dict, ctx: dict | None = None) -> list[str]:
     return out
 
 
+ORCH_VERSION_RE = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+-]{0,39}")
+
+
+def _version_ok(x: dict) -> bool:
+    """v2 orch_version / chat_groups, where present: a short version string, an int 1..99 (no bool)."""
+    ov, cgv = x.get("orch_version"), x.get("chat_groups")
+    if "orch_version" in x and not (isinstance(ov, str) and ORCH_VERSION_RE.fullmatch(ov)):
+        return False
+    return "chat_groups" not in x or (isinstance(cgv, int) and not isinstance(cgv, bool) and 1 <= cgv <= 99)
+
+
+def v2_errors(m: dict, g: dict) -> list[str]:
+    """Version 2 rules (chat-groups.md §6): mentions, who changed the member list, member versions."""
+    b, host, out = m.get("body") or {}, g.get("host"), []
+    ms = members_of(g)
+    if "mentions" in b:
+        men = b["mentions"] if isinstance(b["mentions"], list) else []
+        if not (1 <= len(men) <= MAX_MEMBERS - 1 and len(set(map(str, men))) == len(men)):
+            out.append("mentions: 1 to 7 workspaces, each once")
+        if m.get("type") != "text":
+            out.append("mentions ride only on a group text")
+        if any(x not in ms for x in men):
+            out.append("mentions: every named workspace is a member of the group")
+        if str(b.get("by")).startswith("ws_") and b.get("by") in men:
+            out.append("mentions: the writer never names itself")
+    for x in g.get("members", []):
+        if isinstance(x, dict) and "added_by" in x:
+            if x.get("ws") == host:
+                out.append("group.members: the host's own entry has no added_by")
+            elif x["added_by"] not in ("you", host):
+                out.append("group.members: added_by is you or the host")
+        if isinstance(x, dict) and not _version_ok(x):
+            out.append("group.members: orch_version is a short version string, chat_groups 1 to 99")
+    if "member_version" in b and not (
+        isinstance(b["member_version"], dict)
+        and {"orch_version", "chat_groups"} <= set(b["member_version"])
+        and _version_ok(b["member_version"])
+    ):
+        out.append("member_version needs orch_version (a short version string) and chat_groups (1 to 99)")
+    ev = b.get("group_event")
+    if isinstance(ev, dict):
+        if "added_by" in ev and (ev.get("kind") != "member_added" or ev["added_by"] not in ("you", host)):
+            out.append("group_event.added_by: only on member_added, and it is you or the host")
+        removal = ev.get("kind") == "member_left" and ev.get("reason") == "removed"
+        if "removed_by" in ev and not (removal and ev["removed_by"] in ("you", host)):
+            out.append("group_event.removed_by: only on a removal (reason removed), by you or the host")
+    return out
+
+
 def receive_errors(m: dict, ctx: dict) -> list[str]:
     """What a receiver checks against what it already holds. `ctx`: known_groups {id: host}; host_state
     {ticket,
@@ -333,6 +385,8 @@ def receive_errors(m: dict, ctx: dict) -> list[str]:
             m.get("type") == "file" and rate.get("files", 0) >= RATE["files_per_min"]
         ):
             out.append("dropped: member over its rate limit")
+        if isinstance(b.get("mentions"), list) and any(x not in hs.get("members", []) for x in b["mentions"]):
+            out.append("mentions: every named workspace is a current member (the host's own list)")
         t = b.get("task")
         if isinstance(t, dict):
             if t.get("delegate") not in hs.get("delegates_sent", {}).get(frm, []):
