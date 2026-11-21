@@ -433,3 +433,79 @@ def test_the_outbox_sends_in_the_order_the_messages_were_saved(proj, run, rel, g
     up()
     relay.resend_outbox(proj)
     assert [m["body"]["text"] for m in sent(rel, to=BANK)] == [f"part {i}" for i in range(6)]
+
+
+# ---- found by the outside review ---------------------------------------------------------------------------
+
+
+def test_a_replay_after_a_crash_skips_a_member_removed_before_the_sweep(proj, run, rel, grp, monkeypatch):
+    host, gid, _ = grp
+    real = cg._send
+    monkeypatch.setattr(cg, "_send", lambda *a, **k: (_ for _ in ()).throw(SystemExit("crash")))
+    with pytest.raises(SystemExit):
+        cg.say(proj, host, "Please send the PDF")  # the seq and the send intent are saved, nothing went out
+    monkeypatch.setattr(cg, "_send", real)
+    st = _state(proj)  # the removal was saved, then a crash before the pending intents were swept
+    st["hosted"][gid]["members"][HOME].update(left_at="2026-11-08T10:05:00Z", reason="removed")
+    (proj / ".orch/secrets/groups.json").write_text(json.dumps(st))
+    run("relay", "inbox")  # sync replays the intent
+    assert sent(rel, to=HOME) == [] and [m["body"]["text"] for m in sent(rel, to=BANK)] == [
+        "Please send the PDF"
+    ]
+
+
+def test_a_member_that_leaves_by_itself_gets_none_of_the_copies_still_waiting(
+    proj, run, rel, grp, monkeypatch
+):
+    host, gid, _ = grp
+    up = _down(monkeypatch)
+    cg.say(proj, host, "Please send the PDF")
+    assert HOME in {m["to"] for m in _outbox(proj)}
+    up()
+    monkeypatch.setattr(
+        relay, "resend_outbox", lambda root: {"sent": [], "waiting": [], "dropped": [], "failed": []}
+    )  # keep the outbox as it is until the leave is handled
+    leave = group_msg(HOME, gid, host, MEMBERS, {"text": "Left", "leave": True, "update": {"kind": "note"}})
+    leave["id"] = mid("leave1")
+    inbox(run, rel, leave)
+    assert HOME not in {m["to"] for m in _outbox(proj)}  # its waiting copy was deleted
+    assert all(m["to"] != HOME for m in rel.sent)
+
+
+def test_a_removed_member_takes_part_again_when_the_host_adds_it_back(proj, run, rel, member):
+    inbox(run, rel, _added(1))
+
+    def removed(seq):
+        ev = {"kind": "member_left", "at": "2026-11-08T10:01:00Z", "ws": WS, "reason": "removed"}
+        return from_host("text", {"text": "removed", "group_event": ev}, seq=seq, id=mid(f"rm{seq}"))
+
+    inbox(run, rel, removed(2))
+    assert _joined(proj)["left"] is True
+    hello = from_host("text", {"text": "not for you"}, seq=3, id=mid("not-yet"))
+    assert "dropped" in inbox(run, rel, hello)[0]["note"]
+    back = _added(4)
+    assert "dropped" not in inbox(run, rel, back)[0].get("note", "")
+    assert _joined(proj)["left"] is False
+    inbox(run, rel, from_host("text", {"text": "welcome back"}, seq=5, id=mid("wb")))
+    j = _joined(proj)
+    assert [x["text"] for x in j["log"]][-1] == "welcome back" and not j["log"][-1].get("late")
+    # an old add replayed after a new removal never brings it back
+    inbox(run, rel, removed(6))
+    old = _added(4)
+    old["id"] = mid("old-add")
+    assert "dropped" in inbox(run, rel, old)[0]["note"] and _joined(proj)["left"] is True
+
+
+def test_a_crash_between_the_add_and_the_card_still_sends_the_chat_so_far(proj, run, rel, host, monkeypatch):
+    _say(proj, host, "human:owner", "Who has the 2025 letter?")
+    real = cg._send_card
+    monkeypatch.setattr(cg, "_send_card", lambda *a, **k: (_ for _ in ()).throw(SystemExit("crash")))
+    with pytest.raises(SystemExit):
+        cg.add_member(proj, host, HOME, "human:owner")
+    monkeypatch.setattr(cg, "_send_card", real)
+    assert _kinds(sent(rel, to=HOME)) == ["member_added"]
+    run("relay", "inbox")  # sync sends the joining card, with the chat so far
+    card = [m for m in sent(rel, to=HOME) if "shared_ticket" in m["body"]]
+    assert len(card) == 1 and card[0]["body"]["shared_chat"]["lines"][0]["text"] == "Who has the 2025 letter?"
+    run("relay", "inbox")
+    assert len([m for m in sent(rel, to=HOME) if "shared_chat" in m["body"]]) == 1  # once

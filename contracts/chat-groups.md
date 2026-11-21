@@ -387,7 +387,10 @@ workspace's chat cannot be used to add or remove there (`orch relay group add` s
   still pending (§5 crash replay) and deletes what still waits for it in the outbox; only the news of its own
   removal still goes to it. When the outbox is sent later, a copy for a workspace that is no longer a member is
   dropped. Copies the relay already took cannot be taken back (the Add dialog says so). The news of a member's
-  own removal still lists that member in the header of its own copy, so it accepts the news and stops.
+  own removal still lists that member in the header of its own copy, so it accepts the news and stops. A replay
+  after a crash and the leave a member sends itself follow the same rule (nothing more for a member that is gone).
+- **Added back**: a member that left or was removed takes part again only on a `member_added` for itself with a
+  `seq` above the one it left at; its order starts afresh from that `seq`. An older add never counts.
 - **Refused**: a message from a workspace that is not a current member (never added, left or removed), a forged
   host (`from` ≠ `group.host` at a member), a replayed origin (already stored), and an old `seq` (shown, no state,
   §5) so a replayed `member_added` never adds anyone back.

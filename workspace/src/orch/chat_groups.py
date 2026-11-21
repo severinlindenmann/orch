@@ -1601,6 +1601,7 @@ def add_member(
             "joined_at": tickets.now(),
             "from_seq": g["seq"] + 1,
             "added_by": added_by,
+            "chat_due": True,  # cleared once the joining card went out (a crash before: sync sends it)
         }
         g["card"].get("sent", {}).pop(ws, None)  # added back: it gets the card again
         _event(
@@ -2002,7 +2003,9 @@ def _send_card(root: Path, g: dict, ws: str, force: bool = False, joined: bool =
         g["card"] = {"sig": sig, "rev": int(g["card"].get("rev", 0)) + 1, "sent": {}}
     rev = g["card"]["rev"]
     sent = g["card"].setdefault("sent", {})
-    if sent.get(ws) == rev and not force:
+    entry = g["members"].get(ws) or {}
+    joined = joined or bool(entry.get("chat_due"))
+    if sent.get(ws) == rev and not force and not joined:
         return None
     card = fit_card({**card, "rev": rev})
     body = {
@@ -2017,6 +2020,7 @@ def _send_card(root: Path, g: dict, ws: str, force: bool = False, joined: bool =
     msg = _send(root, ws, "text", body, g["ticket"])
     if msg:
         sent[ws] = rev
+        entry.pop("chat_due", None)
     return msg
 
 
@@ -2150,7 +2154,7 @@ def _publish(
         base["update"] = update
     if members:
         for ws in snap["recipients"]:
-            if ws == origin_from or ws in exclude:
+            if ws == origin_from or ws in exclude or _gone(g, ws, base):
                 continue
             _send(
                 root,
@@ -2178,6 +2182,16 @@ def _publish(
     if g.get("pending", {}).pop(origin_id, None) is not None:
         g["msgs"] += 1  # counted when the intent completes (also after a crash), never twice
     return seq
+
+
+def _gone(g: dict, ws: str, base: dict) -> bool:
+    """A recipient that left or was removed after the send was planned (a replay after a crash): it gets
+    nothing more, only the news of its own removal."""
+    m = g["members"].get(ws)
+    if not m or not m.get("left_at"):
+        return False
+    ev = base.get("group_event")
+    return not (isinstance(ev, dict) and ev.get("kind") == "member_left" and ev.get("ws") == ws)
 
 
 def _with_leaver(g: dict, base: dict, ws: str) -> dict:
@@ -2537,7 +2551,7 @@ def _publish_file(
     by, via, _ = _by_via(origin_from, host)
     gw = {**snap["gw"], "seq": seq}
     for ws in snap["recipients"]:
-        if ws == origin_from or (only and ws != only):
+        if ws == origin_from or (only and ws != only) or _gone(g, ws, {}):
             continue
         body = {
             "blob_id": blob_id,
@@ -2688,6 +2702,8 @@ def _host_receive(root: Path, st: dict, g: dict, m: dict) -> dict:
     if b.get("leave") is True:
         g["members"][frm]["left_at"] = tickets.now()
         g["members"][frm]["reason"] = "left"
+        _persist(root)
+        _drop_queued(root, g, frm)
         _event(root, st, g, "member_left", f"{name} left this group", ws=frm, reason="left")
         _mirror(root, g, "agent:relay")
         return {"handled": True, "auto": True, "note": f"{name} left the group", "applied": g["ticket"]}
@@ -3067,10 +3083,14 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
             "seen_seq": 0,
             "joined_at": tickets.now(),
         }
-    if j["left"] or j["closed"]:
-        return _drop(st, m, "this group is closed for this workspace")
     ev = b.get("group_event") if isinstance(b.get("group_event"), dict) else None
     seq = gw.get("seq")
+    if j["left"] and not j["closed"] and _added_back(j, ev, me, seq):
+        # the host added us again after a removal or leave: a new membership, the order starts afresh
+        j.update(left=False, from_seq=None, next_seq=None, buf={}, own_guess=[], chat_before=None)
+        j.pop("ended_at", None)
+    if j["left"] or j["closed"]:
+        return _drop(st, m, "this group is closed for this workspace")
     j["title"], j["members"] = cw["title"], cw["members"]  # the latest list from the host ("per <host>")
     if ev and ev.get("kind") == "member_added" and ev.get("ws") == me and j["from_seq"] is None:
         j["from_seq"] = int(ev.get("from_seq") or seq or 1)
@@ -3121,6 +3141,18 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
     j["next_seq"] = seq + 1
     _drain(st, j, me)
     return res
+
+
+def _added_back(j: dict, ev: dict | None, me: str, seq) -> bool:
+    """A member_added for this workspace numbered after the one it left at (an old or replayed add never
+    counts: its seq is not higher)."""
+    return (
+        isinstance(ev, dict)
+        and ev.get("kind") == "member_added"
+        and ev.get("ws") == me
+        and valid_seq(seq)
+        and seq > int(j.get("left_seq") or j.get("seq_max") or 0)
+    )
 
 
 def _drain(st: dict, j: dict, me: str) -> None:
@@ -3304,6 +3336,7 @@ def _member_apply(st: dict, j: dict, m: dict, me: str, late: bool = False, guess
         and not (late and _added_after(j, me, seq))
     ):
         j["left"], j["ended_at"] = True, _now_epoch()
+        j["left_seq"] = max(int(j.get("left_seq") or 0), seq or j.get("seq_max", 0))
     if isinstance(b.get("shared_ticket"), dict):
         old = j.get("card") or {}
         card = b["shared_ticket"]
@@ -3764,6 +3797,7 @@ def leave(root: Path, host: str, gid: str) -> dict:
         }
         _send(root, host, "text", body, j.get("ticket"))
         j["left"], j["ended_at"] = True, _now_epoch()
+        j["left_seq"] = max(int(j.get("left_seq") or 0), j.get("seq_max", 0))
     return {"group": gid, "host": host, "left": True}
 
 
