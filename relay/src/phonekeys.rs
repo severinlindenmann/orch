@@ -77,7 +77,9 @@ pub fn add_workspace_key(c: &Connection, card: &mut Value) {
 /// The phone's registered raw key, for the signature check of what it sends.
 pub fn raw_key(c: &Connection, pid: &str) -> Option<[u8; 32]> {
     let k: Option<String> = c
-        .query_row("SELECT sign_key FROM phones WHERE id=?1", [pid], |r| r.get(0))
+        .query_row("SELECT sign_key FROM phones WHERE id=?1", [pid], |r| {
+            r.get(0)
+        })
         .optional()
         .ok()
         .flatten()

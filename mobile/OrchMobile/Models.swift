@@ -137,6 +137,8 @@ struct QuestionMessage: Codable, Sendable, Equatable {
     let body: QuestionBody
     /// Display key like PIL-12 (optional: older workspaces do not send it).
     var key: String? = nil
+    /// The workspace's signature (ORCH-1296), passed through by the relay unchanged; nil = unsigned.
+    var envelope: SignedEnvelope? = nil
 }
 
 enum AnswerWord: String, Equatable {
@@ -759,6 +761,8 @@ struct SignedEnvelope: Codable, Sendable, Equatable {
     let keyId: String
     let signed: String
     let sig: String
+    /// The wire object `MessageSignature.readEnvelope` reads.
+    var wire: [String: Any] { ["sig_v": sigV, "key_id": keyId, "signed": signed, "sig": sig] }
 }
 struct BlobUpload: Codable, Sendable, Equatable { let blobId: String; let size: Int; let sha256: String }
 /// `POST /v1/phone/send` and `/answer`: `duplicate` is true when the relay already had this client_id.

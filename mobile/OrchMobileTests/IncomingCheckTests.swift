@@ -25,9 +25,12 @@ final class IncomingCheckTests: XCTestCase {
         XCTAssertEqual(IncomingCheck.check(m, me: ph, accepted: [ws: [raw]], hints: [ws: raw]), .ok)
     }
 
-    func testTextTheRelayChangedIsRefused() throws {
+    func testTextTheRelayChangedShowsWhatTheWorkspaceSigned() throws {
         let m = try message("Do not deploy", relayText: "Deploy now")
-        XCTAssertEqual(IncomingCheck.check(m, me: ph, accepted: [ws: [raw]], hints: [:]), .refused("signed_mismatch"))
+        let (v, shown) = IncomingCheck.shown(m, me: ph, accepted: [ws: [raw]], hints: [:])
+        XCTAssertEqual(v, .ok)
+        XCTAssertEqual(shown?.body.text, "Do not deploy", "rebuilt from the signed bytes, not the relay's JSON (ORCH-1296)")
+        XCTAssertEqual(shown?.ticket, "t_abc123")
     }
 
     func testChangedSignedBytesAreRefused() throws {
@@ -107,17 +110,23 @@ final class AcceptOnPhoneTests: XCTestCase {
         XCTAssertEqual(model.fingerprint(of: ws), MessageSignature.fingerprint(raw))
         let good = try incoming("Hello")
         let changed = try incoming("Stop", relayText: "Go")
-        model.testMerge([good, changed])
+        var forged = try incoming("Pay now")
+        forged = PhoneMessage(message: { var m = forged.message; m.envelope = SignedEnvelope(sigV: 1, keyId: m.envelope!.keyId, signed: m.envelope!.signed,
+                                                                                            sig: MessageSignature.b64urlEncode([UInt8](repeating: 1, count: 64))); return m }(),
+                              workspaceName: "Dev")
+        model.testMerge([good, changed, forged])
         XCTAssertFalse(model.messages.contains { $0.id == good.id }, "held before Accept")
-        XCTAssertEqual(model.held[ws]?.map(\.id), [good.id])
-        XCTAssertEqual(model.notValid[ws], [changed.id])
+        XCTAssertEqual(model.held[ws]?.map(\.id), [good.id, changed.id])
+        XCTAssertEqual(model.notValid[ws], [forged.id])
         XCTAssertFalse(model.acceptWorkspace(ws, shownFingerprint: "0000 0000 0000 0000 0000 0000 0000 0000"),
                        "a fingerprint other than the listed key accepts nothing")
         XCTAssertEqual(model.senderState(ws), .notAcceptedYet)
         XCTAssertTrue(model.acceptWorkspace(ws, shownFingerprint: MessageSignature.fingerprint(raw)))
         XCTAssertEqual(model.senderState(ws), .accepted)
         XCTAssertTrue(model.messages.contains { $0.id == good.id }, "shown after Accept")
-        XCTAssertFalse(model.messages.contains { $0.id == changed.id })
+        XCTAssertEqual(model.messages.first { $0.id == changed.id }?.message.body.text, "Stop",
+                       "the chat shows what the workspace signed, not the relay's changed copy (ORCH-1296)")
+        XCTAssertFalse(model.messages.contains { $0.id == forged.id })
         model.testMerge([good])
         XCTAssertNil(model.held[ws], "accepted once: not held again")
         // A message that claims to come from another phone is never shown.

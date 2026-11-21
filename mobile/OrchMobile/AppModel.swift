@@ -143,7 +143,7 @@ final class AppModel {
         // The keychain outlives deleting the app. No marker in this app container = a fresh install: drop the stale pairing
         // quietly and show the welcome screen (the red "signed out" message is only for a real sign-out/revoke while installed).
         if !defaults.bool(forKey: AppModel.installedMarkerKey) {
-            Keychain.delete(); PhoneKey.delete(); trust.clear()
+            Keychain.delete(); PhoneKey.delete(); trust.clear(); if !useMock { TrustStore.savePhoneId(nil) }
             defaults.removeObject(forKey: "pairedPhoneId")
             defaults.set(true, forKey: AppModel.installedMarkerKey)
         }
@@ -154,7 +154,7 @@ final class AppModel {
         self.outbox = box
         self.speech = SpeechPlayer(fetch: { id, lang in try await holder.client().speech(messageId: id, lang: lang) },
                                    cacheDirectory: speechCache, systemControls: systemAudioControls)
-        if let c = creds { credentials = c; phase = .ready } else { box.wipe() }
+        if let c = creds { credentials = c; phase = .ready; if !useMock { TrustStore.savePhoneId(c.phoneId) } } else { box.wipe() }
         if creds == nil, defaults.object(forKey: "pairedPhoneId") != nil {
             message = AppModel.pairAgainMessage
             defaults.removeObject(forKey: "pairedPhoneId")
@@ -384,6 +384,7 @@ final class AppModel {
             let r = try await client.pair(code: invite.code, name: phoneName, publicKey: PhoneKey.publicKeyText(key))
             let c = Credentials(relay: invite.relay, phoneId: r.phoneId, token: r.token, phoneName: phoneName)
             Keychain.save(c); credentials = c
+            if !useMock { TrustStore.savePhoneId(c.phoneId) }   // the notification extension checks "for this phone"
             defaults.set(c.phoneId, forKey: "pairedPhoneId")
             if outbox.phone != c.phoneId { LocalSnapshotStore.delete(at: snapshotURL); outbox.wipe(); outbox = Outbox(directory: outboxDirectory, phone: c.phoneId) }
             pairedWorkspaces = r.workspaces
@@ -458,8 +459,9 @@ final class AppModel {
             async let u = (try? await client.updates()) ?? beforeUpdates  // an older relay without /updates must not break the rest
             async let st = try? await client.settings()
             // Assign only what changed: an unchanged poll must not redraw (XCUITest idle, battery).
-            let newWorkspaces = try await w, newQuestions = try await q.deduplicated(), newUpdates = await u
+            let newWorkspaces = try await w, newQuestions0 = try await q.deduplicated(), newUpdates = await u
             if workspaces != newWorkspaces { workspaces = newWorkspaces }
+            let newQuestions = checkedQuestions(newQuestions0)   // after the workspaces: their listed keys are the hints
             if questions != newQuestions { questions = newQuestions }
             if updates != newUpdates { updates = newUpdates }
             if let st = await st, settings != st { settings = st }
@@ -529,17 +531,37 @@ final class AppModel {
     private func checked(_ items: [PhoneMessage]) -> [PhoneMessage] {
         guard let me = credentials?.phoneId ?? (useMock ? "ph_mock000000" : nil) else { return items.filter(\.fromPhone) }
         let accepted = trust.accepted(), hints = keyHints
-        return items.filter { m in
+        return items.compactMap { m in
             // Only this phone's own messages skip the check; one that claims another phone is never shown.
-            if m.fromPhone { return m.message.from == me }
-            switch IncomingCheck.check(m.message, me: me, accepted: accepted, hints: hints) {
-            case .ok, .unsigned: return true
-            case .held:
-                if !(held[m.workspaceId]?.contains { $0.id == m.id } ?? false) { held[m.workspaceId, default: []].append(m) }
-                return false
-            case .refused:
+            if m.fromPhone { return m.message.from == me ? m : nil }
+            // What is shown is rebuilt from the signed bytes, never the relay's JSON fields (ORCH-1296).
+            let (verdict, signed) = IncomingCheck.shown(m.message, me: me, accepted: accepted, hints: hints)
+            let shown = signed.map { PhoneMessage(message: $0, workspaceName: m.workspaceName, deliveredAt: m.deliveredAt, clientId: m.clientId) }
+            switch (verdict, shown) {
+            case (.ok, let s?), (.unsigned, let s?): return s
+            case (.held, let s?):
+                if !(held[m.workspaceId]?.contains { $0.id == m.id } ?? false) { held[m.workspaceId, default: []].append(s) }
+                return nil
+            default:
                 notValid[m.workspaceId, default: []].insert(m.id)
-                return false
+                return nil
+            }
+        }
+    }
+
+    /// Questions get the same check (ORCH-1296): the card shows the question as the workspace signed it. A question
+    /// from a workspace not accepted yet stays off the list until Accept; the next refresh brings it back.
+    private func checkedQuestions(_ items: [Question]) -> [Question] {
+        guard let me = credentials?.phoneId ?? (useMock ? "ph_mock000000" : nil) else { return [] }
+        let accepted = trust.accepted(), hints = keyHints
+        return items.compactMap { q in
+            let (verdict, signed) = IncomingCheck.shown(q.message, me: me, accepted: accepted, hints: hints)
+            switch (verdict, signed) {
+            case (.ok, let s?), (.unsigned, let s?): return Question(message: s, workspaceName: q.workspaceName)
+            case (.held, _): return nil
+            default:
+                notValid[q.message.from, default: []].insert(q.id)
+                return nil
             }
         }
     }
@@ -566,12 +588,14 @@ final class AppModel {
         let waiting = held.removeValue(forKey: workspaceId) ?? []
         revision &+= 1
         merge(waiting)
+        Task { await refresh() }   // its held questions come back with the next list
         return true
     }
 
     #if DEBUG
     func testSetWorkspaces(_ w: [Workspace]) { workspaces = w }
     func testMerge(_ items: [PhoneMessage]) { merge(items) }
+    func testCheckQuestions(_ items: [Question]) -> [Question] { checkedQuestions(items) }
     #endif
 
     private func merge(_ items: [PhoneMessage]) {
@@ -1004,7 +1028,7 @@ final class AppModel {
 
     func signOut() async {
         try? await client.signOut()
-        Keychain.delete(); PhoneKey.delete(); trust.clear()
+        Keychain.delete(); PhoneKey.delete(); trust.clear(); if !useMock { TrustStore.savePhoneId(nil) }
         reset()
     }
 
@@ -1025,7 +1049,7 @@ final class AppModel {
 
     private func handle(_ error: Error) {
         if Self.isOffline(error) { transportDown = true }
-        if case RelayError.unauthorized = error { Keychain.delete(); PhoneKey.delete(); trust.clear(); reset(); message = error.localizedDescription }
+        if case RelayError.unauthorized = error { Keychain.delete(); PhoneKey.delete(); trust.clear(); if !useMock { TrustStore.savePhoneId(nil) }; reset(); message = error.localizedDescription }
         else if error is URLError { message = "Can't reach the server. Check your connection, then try again." }
         else if error is RelayError { message = error.localizedDescription }
         else { message = "Something went wrong. Try again in a moment." }
@@ -1036,7 +1060,7 @@ final class AppModel {
     func seedIfRequested() async {
         let d = UserDefaults.standard
         path = []   // a cold start always lands on the Chats list; only a push or `-open` below opens something
-        if d.bool(forKey: "resetState") { Keychain.delete(); PhoneKey.delete(); trust.clear(); reset() }
+        if d.bool(forKey: "resetState") { Keychain.delete(); PhoneKey.delete(); trust.clear(); if !useMock { TrustStore.savePhoneId(nil) }; reset() }
         if d.bool(forKey: "seedPaired"), credentials == nil, useMock {
             openSampleInvite(); await connect(phoneName: "Severin's iPhone"); await finishSetup(allowNotifications: false)
         }

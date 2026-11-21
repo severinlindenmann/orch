@@ -829,7 +829,8 @@ async fn send(
         }
         crate::rules::validate_schema(&cand).map_err(invalid)?;
         let blob_ids: Vec<String> = blobs.iter().map(|(b, _)| b.clone()).collect();
-        let gate = crate::phonegate::check(&c, &pid, envelope, to, ticket, reply_to, &body, &blob_ids)?;
+        let gate =
+            crate::phonegate::check(&c, &pid, envelope, to, ticket, reply_to, &body, &blob_ids)?;
         if let crate::phonegate::Gate::Duplicate(old) = gate {
             return Ok((
                 StatusCode::OK,
@@ -837,10 +838,20 @@ async fn send(
             ));
         }
         let tx = c.unchecked_transaction()?;
-        let id = if let crate::phonegate::Gate::Signed { id, envelope, digest } = gate {
+        let id = if let crate::phonegate::Gate::Signed {
+            id,
+            envelope,
+            digest,
+        } = gate
+        {
             // The signed id and body as the phone wrote them; the envelope goes to the workspace unchanged.
-            if c.query_row("SELECT 1 FROM messages WHERE id=?1", [&id], |_| Ok(())).optional()?.is_some() {
-                return Err(conflict("This message id was already used for another message."));
+            if c.query_row("SELECT 1 FROM messages WHERE id=?1", [&id], |_| Ok(()))
+                .optional()?
+                .is_some()
+            {
+                return Err(conflict(
+                    "This message id was already used for another message.",
+                ));
             }
             cand["id"] = id.clone().into();
             cand["envelope"] = envelope;
@@ -1401,7 +1412,31 @@ pub async fn push_message(app: &AppState, q: &Value) {
         payload["type"] = "text".into();
         payload["text_id"] = q["id"].clone();
     }
+    add_signed(&mut payload, q);
     send_pushes(app, targets, &payload).await;
+}
+
+/// APNs refuses an alert payload over 4 KB.
+pub const PUSH_MAX_BYTES: usize = 4096;
+
+/// Lets the phone check the push before it shows the text (ORCH-1296, design section 7): `mutable-content` starts
+/// its notification extension, `msg_type` names the signed type of a text push, and the workspace's `envelope`
+/// rides along unchanged when the payload stays within the APNs limit. Without it (unsigned, or too long) the phone
+/// shows only "New message from <workspace>"; the text itself is always in the app.
+pub fn add_signed(payload: &mut Value, q: &Value) {
+    payload["aps"]["mutable-content"] = 1.into();
+    if q["type"] != "question" {
+        payload["msg_type"] = q["type"].clone();
+    }
+    if q["envelope"].is_object() {
+        payload["envelope"] = q["envelope"].clone();
+        let fits = serde_json::to_vec(&*payload)
+            .map(|b| b.len() <= PUSH_MAX_BYTES)
+            .unwrap_or(false);
+        if !fits {
+            payload.as_object_mut().map(|o| o.remove("envelope"));
+        }
+    }
 }
 
 /// Send one payload to each (sandbox, device token); a dead token is forgotten.

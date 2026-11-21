@@ -26,7 +26,13 @@ async fn new_code(t: &T, ws: &Ws) -> String {
         )
         .await;
     assert!(s == 200 || s == 201, "{v}");
-    v["link"].as_str().unwrap().split("code=").nth(1).unwrap().to_string()
+    v["link"]
+        .as_str()
+        .unwrap()
+        .split("code=")
+        .nth(1)
+        .unwrap()
+        .to_string()
 }
 
 async fn redeem(t: &T, code: &str, pk: Option<&str>) -> (u16, Value) {
@@ -71,14 +77,25 @@ async fn pairing_stores_the_key_and_the_workspace_sees_it() {
     assert_eq!(sk["public_key"], k1.as_str());
     assert_eq!(sk["alg"], "ed25519");
     assert_eq!(sk["key_id"].as_str().unwrap().len(), 16);
-    assert!(sk.get("fingerprint").is_none(), "the relay never sends a fingerprint");
+    assert!(
+        sk.get("fingerprint").is_none(),
+        "the relay never sends a fingerprint"
+    );
 
     // The token alone cannot set or swap it: no such route.
     let (s, _) = t
-        .phone(&p, "PUT", "/v1/phone/signing-key", Some(json!({"alg": "ed25519", "public_key": k2})))
+        .phone(
+            &p,
+            "PUT",
+            "/v1/phone/signing-key",
+            Some(json!({"alg": "ed25519", "public_key": k2})),
+        )
         .await;
     assert!(s == 404 || s == 405, "{s}");
-    assert_eq!(phone_key_in_directory(&t, &a).await["public_key"], k1.as_str());
+    assert_eq!(
+        phone_key_in_directory(&t, &a).await["public_key"],
+        k1.as_str()
+    );
 }
 
 #[tokio::test]
@@ -101,7 +118,12 @@ async fn a_new_pairing_replaces_the_key() {
     let code = new_code(&t, &a).await;
     assert_eq!(redeem(&t, &code, Some(&k2)).await.0, 201);
     let (_, d) = t.call(&a, "GET", "/v1/refresh", None).await;
-    let keys: Vec<&Value> = d["workspaces"]["phones"].as_array().unwrap().iter().map(|p| &p["signing_key"]["public_key"]).collect();
+    let keys: Vec<&Value> = d["workspaces"]["phones"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| &p["signing_key"]["public_key"])
+        .collect();
     assert!(keys.contains(&&json!(k2)), "{d}");
 }
 
@@ -110,7 +132,14 @@ async fn the_phone_sees_each_workspace_key_as_a_hint() {
     let t = start().await;
     let a = t.add_ws("A").await;
     let (k1, _, _) = keys();
-    let (s, _) = t.call(&a, "PUT", "/v1/me/signing-key", Some(json!({"alg": "ed25519", "public_key": k1}))).await;
+    let (s, _) = t
+        .call(
+            &a,
+            "PUT",
+            "/v1/me/signing-key",
+            Some(json!({"alg": "ed25519", "public_key": k1})),
+        )
+        .await;
     assert_eq!(s, 201);
     let p = t.pair_phone(&[&a]).await;
     let (s, w) = t.phone(&p, "GET", "/v1/phone/workspaces", None).await;
