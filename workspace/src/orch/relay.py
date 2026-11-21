@@ -457,7 +457,16 @@ def _write_outbox(root: Path, mid: str, raw: bytes) -> Path:
     fd = os.open(p, flags, 0o600)
     with os.fdopen(fd, "wb") as f:
         f.write(raw)
+    # the write time is the send order (outbox_list): a precise, strictly rising time, because a file system
+    # may keep coarse times and two messages saved in a row must never share one
+    global _LAST_SAVED_NS
+    _LAST_SAVED_NS = max(time.time_ns(), _LAST_SAVED_NS + 1)
+    with contextlib.suppress(OSError):
+        os.utime(p, ns=(_LAST_SAVED_NS, _LAST_SAVED_NS))
     return p
+
+
+_LAST_SAVED_NS = 0
 
 
 def _own_key(root: Path, tid: str) -> str | None:

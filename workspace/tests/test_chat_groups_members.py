@@ -58,7 +58,8 @@ def _down(monkeypatch):
 
 
 def _outbox(proj):
-    return [json.loads(p.read_text()) for p in sorted((proj / ".orch/outbox").glob("m_*.json"))]
+    """What waits in the outbox, in the order it will be sent."""
+    return [json.loads((proj / f".orch/outbox/{x['id']}.json").read_text()) for x in relay.outbox_list(proj)]
 
 
 def _kinds(msgs):
@@ -420,3 +421,15 @@ def test_adding_and_removing_while_the_relay_is_out_of_reach(proj, run, rel, grp
     for m in rel.sent:
         if m["body"].get("group") and m["to"] != WS:
             assert contract_errors(m) == [], (contract_errors(m), m)
+
+
+def test_the_outbox_sends_in_the_order_the_messages_were_saved(proj, run, rel, grp, monkeypatch):
+    host, gid, _ = grp
+    up = _down(monkeypatch)
+    for i in range(6):
+        cg.say(proj, host, f"part {i}")
+    seqs = [m["body"]["group"]["seq"] for m in _outbox(proj) if m["to"] == BANK]
+    assert seqs == sorted(seqs) and len(seqs) == 6
+    up()
+    relay.resend_outbox(proj)
+    assert [m["body"]["text"] for m in sent(rel, to=BANK)] == [f"part {i}" for i in range(6)]
