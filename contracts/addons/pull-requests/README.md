@@ -20,6 +20,9 @@ merges, so sync holds a changed block until a person allows it.
   login gh uses, or when that login is not the set `login`. `--wait`: exit 0 = merged, 1 = left the queue (the
   last line says why), 2 = refused.
 - `orch pull-requests queue list [--json]`: `{"entries": [...], "running": bool}`.
+- `orch pull-requests queue local-checks [--last N] [--json]`: the local check (`group_check`): groups checked side by side
+  and how many gave the same verdict as GitHub, and for `local` the minutes from built to merged at the middle over
+  the last N groups (default 20) and how many went to GitHub because the check broke.
 - `orch pull-requests queue audit [--hours H] [--json]` (default 14 hours, one night): for each repository in
   the queue file and each base branch, the merges GitHub lists in that time, sorted into checked in a queue group
   (a group pull request on an `orch-queue/` branch or a member named in its title), checked alone and merged by a
@@ -30,6 +33,10 @@ merges, so sync holds a changed block until a person allows it.
   on pushes and other, and that total per merge; and the minutes from joining the queue to merged of the entries
   the queue merged (middle and longest). JSON adds `runs` per repository (null: GitHub did not answer) and
   `waited_minutes`.
+  Also (ORCH-1129): the busiest hour, the most pull requests the queue merged (in a group or alone) within any
+  60 minutes, with their links (goal 20); and group start to merged, the minutes from opening a group pull request
+  to its merge (GitHub's created and merged times), the middle over the last 20 merged groups (goal under 6).
+  `--json` adds `hour` {count, goal, start, end, prs} and `group_minutes` {groups, middle}.
 - `orch pull-requests queue remove <url>`: only a waiting entry.
 - `orch pull-requests queue run`: the runner (one per workspace, lock folder `runner.lock`).
 - `orch pull-requests failed-checks on|off|status|tend [--json]`: the failed-checks part (below). `on`/`off` write
@@ -52,6 +59,26 @@ merges, so sync holds a changed block until a person allows it.
   the base did not change is merged on its own checks (below). false = it always runs as a group of one on top of
   the base first: for a repository whose pull requests run only a light set of checks of their own while queue
   groups run the full set (orch development, ORCH-545). Anything but true or false means true.
+
+- `overlap` (true/false, default true, ORCH-432): while a group's checks run, the next group is built on top of it and
+  checked at the same time; it merges only after the group before it merged, and when that one does not, its pull
+  requests go back to the front of the line without a try used. `false`: one group at a time.
+
+- `group_check` (`github`, `shadow` or `local`, default `github`, ORCH-1124): how a queue group is checked.
+  `github`: GitHub's checks of the group pull request. `shadow`: the same, and the local check runs next to it on the
+  same group commit; both verdicts go to `local-checks.jsonl` (GitHub's decides). `local`: the local check runs on this
+  computer before the group pull request is opened. Green: the queue posts the required checks (`required_checks.py`) and its mark
+  as commit statuses and opens the group pull request with the line `orch-group-check: local`, which makes ci.yml and
+  rules.yml skip it (such a run never counts as proof for the push to develop, `scripts/ci_proven.py`). Red: no
+  group pull request, the group is split as a red one. The check broke, did not end in 15 minutes or the group changes
+  the check's own scripts (`scripts/check_banned_words.py`, the files `check_command` names): that group is checked
+  on GitHub. A status GitHub did not take: no group pull request, the group is built and checked again after a
+  pause (no try used). A pull request that runs alone (`alone_paths`) or one a person
+  merges is always checked on GitHub. Anything else means `github`.
+- `check_command` (list of words, default `["python3", "scripts/ci_light.py", "--base", "{base}"]`): the local
+  check's command, run in a clean copy of the group commit with a throwaway home (`HOME`, `ORCH_HOME`,
+  `ORCH_HOME_STRICT=1`); `{base}` and `ORCH_CHECK_BASE` are the commit the group was built on. Exit 0 = green,
+  1 = red, anything else = broken. It may write the failed check names, one per line, to `ORCH_CHECK_FAILED`.
 
 - `act_on_failed_checks` (true/false, default false): act on failed checks (below). Any other value is off.
 - `queue_when_helper_stops` (true/false, default false, ORCH-433): the Merge when green pass also puts in the

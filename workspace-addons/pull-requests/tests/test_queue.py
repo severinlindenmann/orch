@@ -317,8 +317,9 @@ def test_a_red_group_is_split_and_the_good_ones_still_merge(ws):
     r, calls = make(ws, gh, FakeGit(), bad={3})
     r.run()
     assert states(ws) == {1: "merged", 2: "merged", 3: "out", 4: "merged"}
-    assert len(gh.closed) == 2  # [1,2,3,4] and [3,4] were red; #3 alone is red in its own checks: no group
-    assert url(3) in gh.direct  # #3 alone: red in its own checks
+    # [1,2,3,4] and [3,4] were red; #3 left alone is checked in a group of its own (ORCH-909): red too
+    assert len(gh.closed) == 3
+    assert url(3) not in gh.direct  # #3 alone is never merged on its own light checks (ORCH-909)
     assert gh.groups[calls[-1]] == [4]  # #4: develop changed its files, a group of one
 
 
@@ -352,6 +353,9 @@ def test_a_pull_request_red_on_top_of_its_base_leaves_the_queue(ws):
     r.run()
     row = store.read(ws)[0]
     assert states(ws) == {1: "out"} and len(calls) == 1 and "queue group was red" in row["why"]
+    assert row[
+        "red_head"
+    ]  # the commit it was dropped on: the Pull requests page keeps "checks failed" for it
     assert gh.closed == [calls[0]]  # its group pull request is closed, the branch deleted
 
 
@@ -668,3 +672,46 @@ def test_unreadable_tickets_merge_nothing(ws, monkeypatch):
 
 def test_card_keys_ignore_case():
     assert runner.pr_key("https://github.com/Acme/App/pull/007") == runner.pr_key(url(7)) == "acme/app#7"
+
+
+def test_a_wake_with_no_free_slot_waits_in_line_at_high_priority(ws, monkeypatch):
+    """ORCH-688: a pull request the queue dropped holds up the line; its helper must not wait behind new work."""
+    from orch import runs
+
+    from orch_pull_requests import checks
+
+    seen = {}
+
+    def start(root, tid, by, **kw):
+        seen.update(kw)
+        raise runs.Busy("waits in line", {})
+
+    monkeypatch.setattr(runs, "read", lambda root, tid: None)
+    monkeypatch.setattr(runs, "pending_add", lambda *a: None)
+    monkeypatch.setattr(runs, "start", start)
+    assert checks.wake(ws, "t_abc123", "fix it") == "the helper waits in line for a free slot"
+    assert seen["priority"] == "high"
+
+
+def test_a_full_write_limit_is_said_on_the_running_entries_while_the_queue_waits(ws, monkeypatch):
+    """ORCH-941: 30 of 30 writes this hour: the queue list says it waits for room and for how long."""
+    from orch import ghlimit
+
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    store.add(ws, url(2), None, "agent:t", login="bot")
+    [store.set_state(ws, url(n), store.RUNNING, "in the group being checked") for n in (1, 2)]
+    logs, seen = [], []
+
+    def fake_take(kind, what="", on_wait=None, **_):
+        on_wait(1500, 0)  # 25 minutes to the next room
+        seen.append({r["number"]: r["why"] for r in store.read(ws)})
+        on_wait(1440, 60)  # 24 minutes: the text changes, the log does not repeat
+        return True
+
+    monkeypatch.setattr(ghlimit, "take", fake_take)
+    r = runner.Runner(ws, object(), lambda repo: None, log=logs.append)
+    r.me = "bot"
+    assert r.take("other", "acme/app push x") is True
+    assert all("GitHub write limit, about 25 min" in why for why in seen[0].values())
+    assert len(logs) == 1 and "write limit" in logs[0]
+    assert {r_["why"] for r_ in store.read(ws)} == {"in the group being checked"}  # back to plain after

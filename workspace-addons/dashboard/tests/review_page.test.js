@@ -253,3 +253,120 @@ test('ORCH-422: Add note and Send back on Review carry screenshots, files and vo
   // empty: no words and no files is refused before anything is sent
   assert.equal((await api.note({ticket:'t_abcdef', text:' ', files:[]})).ok, false);
 });
+test('ORCH-420 follow-up: files of an answer go in the ticket\'s feedback folder, so the Check card does not change under the answer', async () => {
+  const calls = [];
+  const c = ctx({review:{cards:[CARD]}}, {FEEDBACK_BOX:{accept:['png'], voice:true, maxBytes:1}, ticketTalkText:t => t,
+    ticketAttachFiles:async (tid, files, feedback) => { calls.push([tid, feedback === true]); return {ok:true, names:files.map(f => f.name)}; }});
+  await c.reviewApi().attach({ticket:'t_abcdef', files:[{name:'shot.png', url:'data:image/png;base64,iVBO'}]});
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [['t_abcdef', true]]);
+});
+
+// ORCH-1108 (owner's pick on ORCH-1102: "4 things wait" over 1 card): work that stopped is a card on Review too, with
+// Home's buttons, so the number and the Waiting cards are the same count.
+const STUCK = (kind, tid, extra = {}) => ({id:'core:' + kind.split(':')[1] + ':' + tid, source:'core', kind, ticket:tid, title:'T ' + tid, since:'2026-11-15T10:00:00Z', text:'Stopped: ' + kind, ...extra});
+function stuckHome(runs = {}) {
+  const tickets = [
+    {id:'t_abcdef', key:'DT-41', title:'Newsletter', status:'waiting', questions:[{id:'q3', text:'Home block'}]},
+    {id:'t_aaaa01', key:'DT-1', title:'Invoice export', status:'review', questions:[]},
+    {id:'t_aaaa02', key:'DT-2', title:'Docs', status:'active', questions:[], description:'Write the setup guide for new staff.\nMore lines.',
+      checklist:[{id:'c1', text:'Collect the steps', done:true}, {id:'c2', text:'Write the guide'}, {id:'c3', text:'Skip', wont_do:true}]},
+    {id:'t_aaaa03', key:'DT-3', title:'Booking', status:'active', questions:[]},
+    {id:'t_aaaa04', key:'DT-4', title:'Menu', status:'active', questions:[]},
+    {id:'t_aaaa05', key:'DT-5', title:'Report', status:'review', questions:[]},
+    {id:'t_aaaa06', key:'DT-6', title:'Survey', status:'active', questions:[]}];
+  const rows = [
+    {id:'core:q:t_abcdef:q3', source:'core', ticket:'t_abcdef', since:'2026-11-15T09:00:00Z', title:'Newsletter', answer:{question:'q3', digest:ID, options:['A', 'B']}},
+    STUCK('helper:unmerged', 't_aaaa01', {pull:{url:'https://github.com/acme/app/pull/12', head:'a'.repeat(40)}}),
+    STUCK('helper:idle', 't_aaaa02'), STUCK('helper:failing', 't_aaaa03'), STUCK('helper:permission', 't_aaaa04'),
+    STUCK('reviewer:unsure', 't_aaaa05'),   // waits in Check: its Check card is the card, counted once
+    STUCK('reviewer:unsure', 't_aaaa06')];  // not in Check (any more): a stuck card of its own
+  const check = id => ({...CARD, id:'core:review:' + id, ticket:id, key:'review', kind:'check', card:{kind:'check', title:'Result'}});
+  return home({settings:{}, runs, services:[], review:{cards:[CARD, check('t_aaaa01'), check('t_aaaa05')], answered:[]}}, tickets, rows);
+}
+test('ORCH-1108: Review\'s number and its Waiting cards are the same count, stuck work included', async () => {
+  const c = stuckHome();
+  const n = c.needsToday();
+  assert.equal(n.stuck.length, 6, 'Home lists six rows of stopped work');
+  assert.equal(n.count, 1 + 2 + 6 - 1, 'one question, two results, six stopped, the unsure one in Check once');
+  const stack = await c.reviewApi().stack();
+  assert.equal(stack.length, n.count, 'one card per thing counted');
+  assert.equal(c.reviewCount(), n.count);
+  assert.equal(c.reviewSubtitle(), n.count + ' things wait on you, most urgent first.');
+  const stuck = stack.filter(x => x.card.kind === 'stuck');
+  assert.deepEqual([...stuck.map(x => x.ticket)], ['t_aaaa01', 't_aaaa02', 't_aaaa03', 't_aaaa04', 't_aaaa06'], 'first in line, as on Home; the unsure ticket in Check has only its Check card');
+  assert.equal(stack.indexOf(stuck[0]), 0);
+  const by = id => stuck.find(x => x.ticket === id);
+  assert.equal(JSON.stringify(by('t_aaaa01').answers), JSON.stringify([{label:'Merge', picked:'merge'}, {label:'Start helper', picked:'nudge'}]), 'no helper running: Start helper, as on Home');
+  assert.equal(JSON.stringify(by('t_aaaa02').answers), JSON.stringify([{label:'Nudge', picked:'nudge'}, {label:'Start fresh', picked:'fresh'}]));
+  assert.equal(by('t_aaaa04').answers.length, 0, 'a helper waiting for an OK on its screen: Open only');
+  assert.equal(by('t_aaaa02').href, '#ticket/t_aaaa02'); assert.equal(by('t_aaaa02').ticket_key, 'DT-2');
+  // the context the owner asked for (q1 sent back: "not enough context what it is about"): the ticket's name, what was
+  // asked, where it stopped, what the buttons do
+  assert.equal(by('t_aaaa02').card.title, 'Docs'); assert.equal(by('t_aaaa02').text, 'Stopped: helper:idle');
+  assert.equal(by('t_aaaa02').about, 'Write the setup guide for new staff.');
+  assert.equal(by('t_aaaa02').card.why, 'Stopped at: Write the guide · 1 of 2 steps done.');
+  assert.match(by('t_aaaa02').card.hint, /^Nudge asks the helper .* Start fresh stops it/);
+  assert.match(by('t_aaaa04').card.hint, /^Open the ticket/);
+  assert.equal(by('t_aaaa03').about, undefined, 'no description: no About line');
+  assert.equal(stuckHome({t_aaaa01:{running:true}}).reviewStuckCards()[0].answers[1].label, 'Nudge', 'a helper running: Nudge');
+  // the shared kit draws it as a Stuck card with those buttons and the Open link
+  const reviewKit = {}; vm.runInContext(fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/review.js'), 'utf8'), vm.createContext({window:reviewKit}));
+  const item = reviewKit.UI.review.mapCard(by('t_aaaa01'), {fileUrl:() => ''}, new Date('2026-11-15T12:00:00Z'));
+  assert.equal(item.kindLabel, 'Stuck'); assert.equal(item.ticket, 'DT-1'); assert.equal(item.href, '#ticket/t_aaaa01');
+  assert.equal(item.title, 'Invoice export'); assert.equal(item.text, 'Stopped: helper:unmerged'); assert.match(item.hint, /^Merge puts the pull request in\. Start helper/);
+});
+test('ORCH-1108: a stuck card\'s buttons do what Home\'s do; a row that is gone, changed or without that button does nothing', async () => {
+  const c = stuckHome(), api = c.reviewApi(), stuck = (await api.stack()).filter(x => x.card.kind === 'stuck');
+  const card = t => stuck.find(x => x.ticket === t), press = (t, picked, extra = {}) => api.answer({id:card(t).id, digest:card(t).digest, verdict:'ok', picked, ...extra});
+  assert.deepEqual({...await press('t_aaaa01', 'merge')}, {ok:true});
+  assert.deepEqual(JSON.parse(JSON.stringify(c.acts.at(-1))), ['pull.merge', {ticket:'t_aaaa01', url:'https://github.com/acme/app/pull/12', head:'a'.repeat(40)}]);
+  await press('t_aaaa02', 'nudge');
+  assert.deepEqual(c.acts.slice(-2).map(a => a[0]), ['run.send', 'run.start'], 'Nudge: the words, then a start when no helper runs');
+  assert.match(c.acts.at(-2)[1].text, /idle for a while/);
+  await press('t_aaaa03', 'fresh');
+  assert.deepEqual(JSON.parse(JSON.stringify(c.acts.at(-1))), ['run.start', {ticket:'t_aaaa03', fresh:true}]);
+  // the work is still stopped: the card stays in Waiting (a new digest, so the deck shows it again) and says what was done
+  const after = (await api.stack()).filter(x => x.card.kind === 'stuck');
+  assert.equal(after.length, stuck.length, 'still one card per thing counted');
+  const idle = after.find(x => x.ticket === 't_aaaa02');
+  assert.notEqual(idle.digest, card('t_aaaa02').digest);
+  assert.match(idle.card.why, /^Helper started /, 'no helper was running, so Nudge started one');
+  assert.equal(after.find(x => x.ticket === 't_aaaa04').card.why, undefined);
+  const before = c.acts.length;
+  assert.equal((await press('t_aaaa02', 'nudge')).error.code, 'changed', 'the old card (shown before the press) is not pressed twice');
+  assert.equal((await press('t_aaaa04', 'nudge')).error.code, 'refused', 'no Nudge on a helper waiting for an OK on its screen');
+  assert.equal((await press('t_aaaa01', 'fresh', {digest:after[0].digest})).error.code, 'refused', 'Start fresh is not on a pull request card');
+  assert.equal((await api.answer({id:'stuck:core:idle:t_zzzzzz', verdict:'ok', picked:'nudge'})).error.code, 'decided', 'gone: the page says so and reloads');
+  assert.equal(c.acts.length, before, 'nothing was sent');
+  const shared = stuckHome(); shared.snapshot = true;
+  assert.equal(shared.reviewStuckCards().length, 0, 'a shared copy shows no buttons that change things');
+});
+// Outside review (OpenAI credit): what was done belongs to one stop; two quick presses run one action.
+test('ORCH-1108: "Helper started" stays with the stop it was pressed on; a later stop of the same ticket starts clean', async () => {
+  const row = STUCK('helper:idle', 't_aaaa02');
+  const c = home({settings:{}, runs:{}, services:[], review:{cards:[], answered:[]}}, [{id:'t_aaaa02', key:'DT-2', title:'Docs', status:'active', questions:[]}], [row]);
+  const api = c.reviewApi(), [card] = await api.stack();
+  assert.deepEqual({...await api.answer({id:card.id, digest:card.digest, verdict:'ok', picked:'fresh'})}, {ok:true});
+  assert.match((await api.stack())[0].card.why, /^Helper started fresh /);
+  row.since = '2026-11-16T08:00:00Z';  // it went idle again later: the same row id, a new stop
+  const later = (await api.stack())[0];
+  assert.equal(later.card.why, undefined, 'the earlier press is not shown on the new stop');
+  assert.notEqual(later.digest, card.digest);
+});
+test('ORCH-1108: two presses at once on a stuck card run its action once', async () => {
+  let release; const hold = new Promise(r => { release = r; });
+  const c = home({settings:{}, runs:{t_aaaa03:{running:true}}, services:[], review:{cards:[], answered:[]}}, [{id:'t_aaaa03', key:'DT-3', title:'Booking', status:'active', questions:[]}], [STUCK('helper:failing', 't_aaaa03')]);
+  const calls = []; c.act = async (op, args) => { calls.push(op); await hold; return {ok:true, status:200}; };
+  const api = c.reviewApi(), [card] = await api.stack(), press = () => api.answer({id:card.id, digest:card.digest, verdict:'ok', picked:'fresh'});
+  const first = press(), second = await press();
+  assert.equal(second.error.code, 'busy', 'the second press does nothing while the first runs');
+  release(); assert.deepEqual({...await first}, {ok:true});
+  assert.deepEqual(calls, ['run.stop', 'run.start'], 'one stop, one fresh start');
+});
+test('ORCH-1108: Merge on a card shown before a newer commit arrived merges nothing', async () => {
+  const c = stuckHome(), api = c.reviewApi();
+  const shown = (await api.stack())[0];
+  c.needsList().find(r => r.kind === 'helper:unmerged').pull.head = 'b'.repeat(40);
+  assert.equal((await api.answer({id:shown.id, digest:shown.digest, verdict:'ok', picked:'merge'})).error.code, 'changed');
+  assert.equal(c.acts.length, 0);
+});

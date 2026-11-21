@@ -26,6 +26,11 @@
   is the limit error, or its run ended on it) is noted with the reset time (limitstop). Until then nobody is
   reminded, started fresh or woken, and automatic starts wait in line; after it, each noted ticket that is
   still worked on starts again on its earlier conversation (a live session still at the limit is ended first).
+  ORCH-642: the tool's own notice counts too ("Usage limit reached · continuing automatically at 7:10pm"),
+  also when the session still shows as working (the tool ends such a turn without the Stop hook) for
+  STUCK_WORKING_SECONDS. When the login changed meanwhile (Usage switched the account: "Automatic continue
+  stopped · your login changed"), nothing continues it by itself: it gets one message to carry on at once
+  (at most once per CARRY_AGAIN_SECONDS), and the hold is lifted for every other ticket too.
 
 Every action is a line in the ticket's history. Nothing happens while automation is paused (`orch pause`). No
 daemon: a repeating automation script runs the pass. A session with input still waiting to go in, a running
@@ -58,6 +63,9 @@ RESTART_EVERY = 6 * 3600  # at most one fresh start per ticket in this time
 FINISHED = runs_live.FINISHED
 WAIT_KINDS = ("person", "time", "ticket")  # something wakes these; "external" gets the reminder instead
 STATE_MAX = 256 * 1024
+# ORCH-642: "working" this long with no hook: look whether it stopped on the limit
+STUCK_WORKING_SECONDS = 2 * 60
+CARRY_AGAIN_SECONDS = 10 * 60  # a carry-on that did not take is sent again after this
 
 
 def _state_path(root: Path) -> Path:
@@ -211,8 +219,17 @@ def _waits(info: dict) -> list[dict]:
 def limit_of(root: Path, rec: dict) -> dict | None:
     """The usage-limit stop a live session shows (the last answer in its saved conversation), or None."""
     sid = rec.get("session")
-    if not isinstance(sid, str) or not rec.get("agent"):
+    if not rec.get("agent"):
         return None
+    if not isinstance(sid, str):  # ORCH-642: a live run record holds no session id; the ticket keeps it
+        try:
+            sid = tickets.sessions_for(
+                root, rec["ticket"], tickets.load(root, rec["ticket"]), rec["agent"], runs.host()
+            )
+        except Exception:  # noqa: BLE001 - a broken ticket: no limit seen
+            sid = None
+        if not isinstance(sid, str):
+            return None
     try:
         path = adapters.transcript_path(
             rec["agent"], sid, root, folder=runs.workdir_for(root, rec, rec["ticket"])
@@ -237,9 +254,21 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
             continue
         tid = rec["ticket"]
         live = rec.get("live") or {}
-        if live.get("state") in ("idle", "attention") and tid not in noted:
+        since = _ts(live.get("since"))
+        stuck_working = (
+            live.get("state") == "working" and since is not None and now - since >= STUCK_WORKING_SECONDS
+        )
+        if live.get("state") in ("idle", "attention") or stuck_working:
             hit = limit_of(root, rec)
-            if hit is not None:  # stopped on the usage limit: note it, nothing else until the reset
+            if hit is not None and hit.get("switched"):
+                # the account changed while it waited at the limit: carry it on now
+                seen = state.get(f"carry:{tid}") or {}
+                if seen.get("run") != rec["run"] or now - (_ts(seen.get("at")) or 0) >= CARRY_AGAIN_SECONDS:
+                    key = runs_live.ref(root, tid)
+                    out.append({"ticket": tid, "key": key, "run": rec["run"], "action": "carry", "rec": rec})
+                continue
+            if hit is not None and tid not in noted:
+                # stopped on the usage limit: note it, nothing else until the reset
                 key = runs_live.ref(root, tid)
                 out.append({"ticket": tid, "key": key, "run": rec["run"], "action": "limit", "info": hit})
                 continue
@@ -395,6 +424,91 @@ def _restart(root: Path, row: dict) -> str:
     return f"run {r['run']}"
 
 
+def _carry(root: Path, row: dict, now: float) -> str:
+    """ORCH-642: the session waits at the limit and the account changed: mark it at its prompt (the tool
+    ended the turn without the Stop hook) and send it on. The hold is lifted: the new account has room."""
+    tid, rec = row["ticket"], row["rec"]
+    runs_live._set_state(root, tid, rec["run"], "idle")
+    limitstop.forget(root, [tid])
+    limitstop.lift(root, now)
+    r = runs_live.send(root, tid, BY, limitstop.switched_text())
+    later = "" if r.get("delivered") else " It goes in when the session takes input."
+    line = "Sent the helper on: the account was switched while it waited at the usage limit."
+    return line + later + _by(now)
+
+
+def _by(now: float) -> str:
+    """ORCH-948: name the workspace that switched, when this computer's switch log has a recent one."""
+    row = limitstop.computer_switch()
+    at = _ts(row.get("at") if isinstance(row.get("at"), str) else None)
+    if at is None or now - at > limitstop.COMPUTER_SWITCH_FRESH:
+        return ""
+    return f" Account switched by {str(row.get('name') or 'another workspace')[:80]}."
+
+
+SWITCH_KEY = "computer-switch"
+
+
+def _computer_switch(root: Path, state: dict, now: float) -> list[dict]:
+    """ORCH-943: another workspace's Usage (or this one's) switched the account on this computer. The logins
+    belong to the computer, so the new account has room for every workspace: lift the limit hold here, and
+    each noted ticket gets one line saying who switched. Sessions that stopped with "login changed" are
+    carried on by plan()."""
+    row = limitstop.computer_switch()
+    n = row.get("n")
+    if not isinstance(n, int):
+        return []
+    seen = (state.get(SWITCH_KEY) or {}).get("n")
+    state[SWITCH_KEY] = {"n": n}
+    if seen == n:
+        return []
+    if seen is None:  # the first look here: only a switch from the last minutes counts
+        first = _ts(row.get("at") if isinstance(row.get("at"), str) else None)
+        if first is None or now - first > limitstop.COMPUTER_SWITCH_FRESH:
+            return []
+    at = _ts(row.get("at") if isinstance(row.get("at"), str) else None)
+    ticks = limitstop.read(root).get("tickets") or {}
+    # only helpers held before that switch: a hold noted after it is about the new account's own limit
+    noted = [t for t, v in ticks.items() if at is not None and (_ts_num(v) or 0) < at + 1]  # whole seconds
+    if not noted:
+        return []
+    if len(noted) < len(ticks):  # a newer hold stays: start only the older ones again, one by one
+        limitstop.forget(root, noted)
+        for tid in noted:
+            runs.pending_add(root, tid, BY, "event", limitstop.computer_switched_text(row), VIA)
+        return [_restart_after_switch(root, tid, row) for tid in noted]
+    limitstop.lift(root, now)
+    line = limitstop.computer_switched_text(row)
+    out = []
+    for tid in noted:
+        with contextlib.suppress(Exception):
+            tickets.log(root, tid, line, BY)
+        out.append(
+            {"ticket": tid, "key": runs_live.ref(root, tid), "action": "switched", "done": True, "text": line}
+        )
+    return out
+
+
+def _ts_num(v: object) -> float | None:
+    at = v.get("at") if isinstance(v, dict) else None
+    return float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) else None
+
+
+def _restart_after_switch(root: Path, tid: str, row: dict) -> dict:
+    """A ticket held before the switch, while a newer hold stays for the others: start it again on its own."""
+    try:
+        r = runs.start(root, tid, runs_live.AUTOMATION_BY)
+        how = f"run {r['run']}"
+    except runs.Busy:
+        how = "it waits in line for a free slot"
+    except Exception as e:  # noqa: BLE001 - the reason goes into the history
+        how = f"it could not start: {e}"
+    line = f"{limitstop.computer_switched_text(row)} ({how})"
+    with contextlib.suppress(Exception):
+        tickets.log(root, tid, line, BY)
+    return {"ticket": tid, "key": runs_live.ref(root, tid), "action": "switched", "done": True, "text": line}
+
+
 def _resume(root: Path, row: dict) -> str:
     """Start a ticket again after the usage limit reset (ending its session first when it still sits at the
     limit). Returns the history line, or "" when its session could not be ended (the next pass tries
@@ -420,9 +534,11 @@ def run(root: Path, dry_run: bool = False, now: float | None = None) -> dict:
     now = time.time() if now is None else now
     if brake.paused(root) is not None:
         return {"paused": True, "actions": [], "queue": queue(root)}
-    rows = plan(root, now)
     state = _read_state(root)
     done = []
+    if not dry_run:
+        done += _computer_switch(root, state, now)
+    rows = plan(root, now)
     for row in rows:
         tid, action = row["ticket"], row["action"]
         public = {k: row[k] for k in ("ticket", "key", "action", "idle_seconds") if k in row}
@@ -436,6 +552,9 @@ def run(root: Path, dry_run: bool = False, now: float | None = None) -> dict:
                 line = limitstop.stopped_text(row["info"])
         elif action == "unlimit":
             limitstop.forget(root, [tid])
+        elif action == "carry":
+            line = _carry(root, row, now)
+            state[f"carry:{tid}"] = {"run": row["run"], "at": _iso(now)}
         elif action == "resume":
             line = _resume(root, row)
         elif action == "end" and _end(root, row):
@@ -499,6 +618,10 @@ def run(root: Path, dry_run: bool = False, now: float | None = None) -> dict:
     live_runs = {r["ticket"]: r["run"] for r in runs_live.records(root)}
     for tid in list(state):
         s = state[tid]
+        if tid.startswith("carry:"):
+            if live_runs.get(tid[6:]) != s.get("run"):
+                state.pop(tid)
+            continue
         if "nudged_at" in s and live_runs.get(tid) != s.get("run"):
             if "restarted_at" in s:
                 state[tid] = {"restarted_at": s["restarted_at"]}
@@ -531,6 +654,8 @@ WORDS = {
     "wake": "started again (the ticket it waited on is finished)",
     "limit": "held until the usage limit resets",
     "resume": "started again (the usage limit reset)",
+    "carry": "sent on (the account was switched at the usage limit)",
+    "switched": "no longer held (the account was switched on this computer)",
 }
 
 

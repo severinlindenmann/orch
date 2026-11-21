@@ -344,7 +344,7 @@ def test_messages_page_pairs_half_lists_with_empty_states(tmp_path):
     pairs = [x for x in walk(tree) if x["cls"] == "blk-pair"]
     assert len(pairs) == 1 and len(pairs[0]["kids"]) == 2
     t = texts(tree)
-    assert "No messages yet" in t and "No workspaces allowed" in t and "Open phone settings" in t
+    assert "No messages yet" in t and "No workspaces allowed" in t and "Open Contacts settings" in t
     assert "Allow a workspace" in t
 
 
@@ -731,3 +731,19 @@ def test_split_checks_match_the_schema_on_bad_input():
         bad = json.loads(json.dumps(good))
         mutate(bad["blocks"][0])
         assert check_view(bad) is None
+
+
+def test_split_log_takes_as_many_lines_as_the_contract_and_no_more():
+    """ORCH-639: the contract allowed 100 log lines, the dashboard still refused more than 20 ('Can't show Services')."""
+    from orch_dashboard.views import check_view
+
+    schema = json.loads(
+        (Path(__file__).resolve().parents[3] / "contracts/addon-view.schema.json").read_text()
+    )
+    panel = schema["$defs"]["splitItem"]["properties"]["panel"]["properties"]
+    most = panel["log"]["properties"]["lines"]["maxItems"]
+    page = _services()
+    page["blocks"][0]["groups"][0]["items"][0]["panel"]["log"]["lines"] = [f"line {i}" for i in range(most)]
+    assert check_view(page) is not None
+    page["blocks"][0]["groups"][0]["items"][0]["panel"]["log"]["lines"].append("one more")
+    assert check_view(page) is None

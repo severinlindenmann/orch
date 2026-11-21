@@ -135,7 +135,7 @@ class Tracker:
             return hit[1]
         data = None
         try:
-            code, out, _ = actions.orch(self.root, self.orch_bin, argv, timeout=5)
+            code, out, _ = actions.read(self.root, self.orch_bin, argv, timeout=5)
             if code == 0:
                 data = json.loads(out)
         except (actions.Unavailable, ValueError, RecursionError):
@@ -372,7 +372,7 @@ class Tracker:
             return hit[1]
         doc = None
         try:
-            code, out, _ = actions.orch(
+            code, out, _ = actions.read(
                 self.root, self.orch_bin, ["ticket", "show", tid, "--json"], timeout=15
             )
             if code == 0:
@@ -397,7 +397,7 @@ class Tracker:
             return hit[1]
         data: dict = {"running": False}
         try:
-            code, out, _ = actions.orch(
+            code, out, _ = actions.read(
                 self.root, self.orch_bin, ["run", "status", tid, "--json"], timeout=15
             )
             if code == 0:
@@ -576,7 +576,7 @@ class Tracker:
         """The always-on Manager (ORCH-147): {ticket, running} from `orch manager status`; None when this orch
         has no Manager yet (an older core), so the start page shows no Manager row."""
         try:
-            code, out, _ = actions.orch(self.root, self.orch_bin, ["manager", "status", "--json"], timeout=15)
+            code, out, _ = actions.read(self.root, self.orch_bin, ["manager", "status", "--json"], timeout=15)
             d = json.loads(out) if code == 0 else None
         except (actions.Unavailable, ValueError, RecursionError):
             d = None
@@ -590,7 +590,7 @@ class Tracker:
 
     def tickets_list(self) -> list[dict]:
         try:
-            code, out, _ = actions.orch(
+            code, out, _ = actions.read(
                 self.root, self.orch_bin, ["ticket", "list", "--all", "--json"], timeout=15
             )
             rows = json.loads(out) if code == 0 else []
@@ -646,10 +646,12 @@ class Tracker:
 
 
 def _link_msg(session, name: str) -> bytes:
-    from orch.pagesession import REVOKED_MSG
+    from orch.pagesession import REVOKED_MSG, WATCH_ONLY_MSG
 
     if session.revoked:
         return REVOKED_MSG.encode()
+    if getattr(session, "active", True) is False:  # a helper started this server: watch-only
+        return WATCH_ONLY_MSG.encode()
     return f"This link was already used. Open {name} again from orch.".encode()
 
 
@@ -777,7 +779,7 @@ class Handler(BaseHTTPRequestHandler):
             sid = parse_qs(self.path.partition("?")[2]).get("session", [None])[0]
             args = ["run", "history", m.group(1), "--json"] + (["--session", sid] if sid else [])
             try:
-                code, out, err = actions.orch(self.root, self.orch_bin, args, timeout=15)
+                code, out, err = actions.read(self.root, self.orch_bin, args, timeout=15)
             except actions.Unavailable as e:
                 return self._json(503, {"error": str(e)})
             if code != 0:
@@ -957,9 +959,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.root, self.orch_bin, body.get("op"), args, session=session
             )
         except actions.NeedsPerson as e:
-            from orch.pagesession import REVOKED_MSG
+            from orch.pagesession import REVOKED_MSG, WATCH_ONLY_MSG
 
             msg = REVOKED_MSG if self.session is not None and self.session.revoked else str(e)
+            if self.session is not None and getattr(self.session, "active", True) is False:
+                msg = WATCH_ONLY_MSG  # a helper started this server: no click can act as the person here
             return self._send(403, msg.encode(), "text/plain; charset=utf-8")
         except actions.BadRequest as e:
             return self._send(400, str(e).encode(), "text/plain; charset=utf-8")

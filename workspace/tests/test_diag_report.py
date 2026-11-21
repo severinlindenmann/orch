@@ -107,6 +107,33 @@ def test_secrets_are_hidden_in_every_file(proj, hid):
     assert "[hidden" in (f / f"content/ticket-{tid}.json").read_text()
 
 
+def test_report_carries_the_end_of_the_install_log(proj, hid):
+    """ORCH-871: a failed add-on install on Windows ran in the detached finisher; `orch addon add` ended fine,
+    so the report had no trace of uv's words. The end of finish.log goes into logs/, keys hidden."""
+    from orch import addons, winfinish
+
+    made = diag_report.make(proj, note="x")
+    assert not (Path(made["path"]) / "logs" / "finish.log").exists()  # no install log: no file
+    log = winfinish.log_path(addons.home())
+    log.parent.mkdir(parents=True, exist_ok=True)
+    # the cut lands 10 bytes into a line with a key and a two-byte letter: that partial line is dropped whole
+    first = f"é {SECRET}\n".encode()
+    tail = (
+        f"uv: Package metadata name `orch-automation` does not match `orch-workspace` {SECRET}\n"
+        "RESULT fail: The reinstall failed - orch is still the old version. Try again later.\n"
+    ).encode()
+    room = diag_report.INSTALL_LOG_MAX - len(first) + 10 - len(tail)
+    filler = b"old line\n" * (room // 9) + b"\n" * (room % 9)
+    log.write_bytes(first + filler + tail)
+    assert log.stat().st_size - diag_report.INSTALL_LOG_MAX == 10
+    made = diag_report.make(proj, note="y")
+    got = (Path(made["path"]) / "logs" / "finish.log").read_text()
+    assert "does not match" in got and "RESULT fail: The reinstall failed" in got and SECRET not in got
+    assert len(got.encode()) <= diag_report.INSTALL_LOG_MAX and got.startswith("old line\n")
+    assert "0123456789abcdef" not in got  # not even the part of the key after the cut
+    assert "logs/finish.log" in (Path(made["path"]) / "SUMMARY.md").read_text()
+
+
 def test_no_hider_means_no_report(proj, monkeypatch):
     monkeypatch.setattr(diag, "_hider", lambda root: None)
     with pytest.raises(Exception, match="hidden"):

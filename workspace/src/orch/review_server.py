@@ -30,8 +30,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
 
-from orch import history, review, runs, safefile
+from orch import history, review, runs, safefile, tickets
 from orch.errors import Refused
+from orch.httpbody import ReadsWholeBody
 
 DEFAULT_PORT = 8432
 PORT_TRIES = 40
@@ -150,7 +151,7 @@ def _forwarded(headers) -> bool:
     return any(k.lower().startswith("x-forwarded-") or k.lower() == "forwarded" for k in headers)
 
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
     timeout = 10
 
     def __init__(self, *a, root: Path, session, **kw):
@@ -274,16 +275,23 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = self.path.split("?", 1)[0]
         if path not in ("/session", "/api/answer"):
-            return self._text(405, "not allowed")
+            return self._refuse(405, "not allowed")
         why = self._origin_check("POST", True)
         if why:
-            return self._text(403, why)
+            return self._refuse(403, why)
         if (self.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):
-            return self._text(403, "This request came from another website and was refused.")
+            return self._refuse(403, "This request came from another website and was refused.")
         body = self._body()
         if path == "/session":
             return self._session(body)
         self._answer(body)
+
+    def _refuse(self, code: int, text: str):
+        """Refuse a POST. Its unread body is read after the answer (ReadsWholeBody): closing a socket with
+        unread bytes makes Windows reset the connection, and the client never sees the refusal (WinError
+        10053)."""
+        self.close_connection = True
+        self._text(code, text)
 
     def _body(self) -> dict | None:
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
@@ -357,13 +365,29 @@ def _actor() -> str:
     return f"human:{who or 'user'}"
 
 
-def _child(argv: list[str], root: Path, env: dict):
+def _child(argv: list[str], root: Path, env: dict, fds: tuple[int, ...] = ()):
     import subprocess
 
     return subprocess.run(
         [sys.executable, "-I", "-P", "-m", "orch", *argv],
         cwd=root, env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL,
+        **({"pass_fds": fds} if fds else {}),
     )  # fmt: skip
+
+
+def _person_grant(root: Path, env: dict) -> tuple[int, ...]:
+    """ORCH-582: the signed-in page hands its one answer a one-time person grant, so a draft can be picked
+    here (as on the dashboard). Never when this server runs under an agent tool: a helper's page picks no
+    draft."""
+    if tickets.agent_tool():
+        return ()
+    from orch import renew
+
+    try:
+        fd = renew.hand_over(env, renew.GRANT_ENV, renew.grant(root))
+    except Exception:  # noqa: BLE001 - no guarded orch home: drafts stay unanswerable here
+        return ()
+    return () if fd is None else (fd,)
 
 
 def run_answer(root: Path, argv: list[str]) -> tuple[int, dict]:
@@ -377,12 +401,17 @@ def run_answer(root: Path, argv: list[str]) -> tuple[int, dict]:
         env = {**human_environ(os.environ), "ORCH_ROOT": str(root), "ORCH_VIA": "page"}
     except Exception:  # noqa: BLE001 - cannot tell whose environment this is: refuse
         return 1, _err("refused", "orch could not check who is acting here.")
+    fds = _person_grant(root, env)
     try:
-        r = _child(argv, root, env)
+        r = _child(argv, root, env, fds)
     except subprocess.TimeoutExpired:
         return 1, _err("busy", "That took too long. Please try again.")
     except OSError:
         return 1, _err("refused", "The orch command could not be started.")
+    finally:
+        for fd in fds:
+            with contextlib.suppress(OSError):
+                os.close(fd)
     if r.returncode == 0:
         return 0, {"ok": True}
     try:

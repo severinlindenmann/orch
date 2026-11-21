@@ -34,6 +34,7 @@ $pub = "C:\Users\Public\orchsmoke"; New-Item -ItemType Directory -Force $pub | O
 Copy-Item -Path (@($Flows | % { "$PSScriptRoot\$_-flow.ps1" }) + $Installer) -Destination $pub -Force
 Copy-Item "$PSScriptRoot\..\fixtures\generic-agent\agent.py" $pub -Force  # the fake agent (scheduler flow)
 Copy-Item "$PSScriptRoot\*.mjs" $pub -Force  # node helpers of a flow (dashboard-smoke.mjs)
+Copy-Item "$PSScriptRoot\..\headless.cjs" $pub -Force  # the browser start options dashboard-smoke.mjs imports (ORCH-615)
 $installerName = Split-Path $Installer -Leaf
 # No git for the user: PATH without any folder that holds git.exe
 $path = ([Environment]::GetEnvironmentVariable("Path", "Machine") -split ";" |

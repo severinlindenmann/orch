@@ -10,7 +10,7 @@ const services=[
   log:['16:39:02 started','16:39:40 could not read the budget file, stopping','16:40:11 started','16:40:13 key loaded: ••••••',
        '16:40:52 could not read the budget file, stopping','16:41:20 started','16:41:58 could not read the budget file, stopping']},
  {id:'forwarder',name:'Private-network forwarder',what:'Makes your shared pages reachable on the private network',state:'running',
-  since:'since Mon 16 Nov, 09:12',auto:true,madeBy:{text:'Found, now managed',kind:'outside'},
+  since:'since Mon 16 Nov, 09:12',auto:true,madeBy:{text:'Found, now managed',kind:'outside'},address:'http://127.0.0.1:8790',
   health:{ok:true,how:'answers on its address',text:'Answers on its address'},depends:['The dashboard link','The demo'],
   log:['09:12:03 started','09:12:04 key loaded: ••••••','09:12:04 listening on the private network','12:30:41 shared page opened: weekly report',
        '16:44:10 answered on its address']},
@@ -25,7 +25,7 @@ const services=[
   log:['07:58:10 started','07:58:31 demo is on the newest version','12:14:02 new version found, updating the demo',
        '12:15:40 demo updated (download key ••••••)','16:30:00 demo is on the newest version']},
  {id:'dashboard-front',name:'Dashboard front',what:'Shows this dashboard at its short address',state:'stopped',
-  since:'since this computer restarted, today 06:30',auto:false,madeBy:{text:'Dashboard add-on',href:'../settings/settings.html',kind:'addon'},
+  since:'since this computer restarted, today 06:30',auto:false,madeBy:{text:'Dashboard add-on',href:'../settings/settings.html',kind:'addon'},address:'http://127.0.0.1:8781',
   health:{ok:false,how:'answers on its address',text:'Does not answer on its address'},depends:['The short dashboard address'],
   log:['Mon 21:02:11 started','Mon 21:02:12 session key loaded: ••••••','Mon 21:02:12 answering on its address','today 06:30:02 this computer restarted, not started again']}
 ];
@@ -65,6 +65,7 @@ const act={
     h('ul',null,
      h('li',null,s.state==='stopped'?'It stays stopped and leaves this list.':'It stops now and leaves this list.'),
      h('li',null,'It will not start by itself again.'),
+     h('li',null,'Its log stays on this computer.'),
      things.length?h('li',null,'These stop working: '+things.join(', ').toLowerCase()+'.'):null,
      h('li',null,s.madeBy.kind==='ticket'?'Ticket '+s.madeBy.text+' and its files stay as they are.':'Its files on this computer stay as they are.')),
     h('div',{class:'dlg-f'},
@@ -81,6 +82,8 @@ const pill=s=>{const state=s.state||'found';
  if(state==='stopped')return h('span',{class:'pill'},window.UI.statusIcon('todo'),'Stopped');
  return h('span',{class:'pill'},h('span',{class:'dot-ok','aria-hidden':'true'}),'Running, not managed')};
 const madeBy=s=>!s.madeBy?document.createTextNode('Not made by orch'):s.madeBy.href?h('a',{href:s.madeBy.href},s.madeBy.text):document.createTextNode(s.madeBy.text);
+/* the app's own address (ORCH-846): a link while it runs, plain text when stopped */
+const addressLine=s=>s.state==='stopped'?document.createTextNode(s.address):h('a',{href:s.address,target:'_blank',rel:'noopener noreferrer'},s.address);
 const logBox=s=>h('div',{class:'term',role:'group','aria-label':'Last log lines of '+s.name,tabindex:'-1','data-log':s.id},
  h('div',{class:'term-h'},'Last log lines'),h('div',{class:'term-b'},s.log.slice(-6).map(l=>h('span',null,l))));
 const facts=s=>h('dl',null,
@@ -94,7 +97,7 @@ const mainButton=s=>s.state==='stopped'?btn(s,'start','Start'):btn(s,'stop','Sto
 const stateButtons=s=>s.state==='stopped'?[mainButton(s)]:[mainButton(s),btn(s,'restart','Restart')];
 const logBtn=(s,show)=>h('button',{class:'btn ghost sm',type:'button','data-k':s.id+':log','aria-label':'Open log of '+s.name,onclick:()=>show()},'Open log');
 const removeRow=(s,after)=>h('div',{class:'row between quiet-note'},h('span',{class:'meta'},'Remove takes it off this list for good.'),h('button',{class:'btn danger sm',type:'button','data-k':s.id+':remove','aria-label':'Remove '+s.name,onclick:()=>act.remove(s.id,after)},'Remove'));
-/* everything about one service, plainly, top to bottom: state, starts by itself, made by, health check, depends on it, last log lines, Remove.
+/* everything about one service, plainly, top to bottom: state, starts by itself, made by, address, health check, depends on it, last log lines, Remove.
    A found service shows what was found and only Manage with orch. */
 const about=(s,o)=>{o=o||{};
  if(!s.state)return h('div',{class:'stack-lg','data-about':s.id},
@@ -106,6 +109,7 @@ const about=(s,o)=>{o=o||{};
    h('div',null,h('dt',null,'State'),h('dd',null,stateLine(s))),
    h('div',null,h('dt',null,'Starts by itself'),h('dd',null,h('label',{class:'row'},autoSwitch(s),h('span',null,autoWords(s))))),
    h('div',null,h('dt',null,'Made by'),h('dd',null,madeBy(s))),
+   s.address?h('div',null,h('dt',null,'Address'),h('dd',null,addressLine(s))):null,
    h('div',null,h('dt',null,'Health check'),h('dd',null,h('span',{class:s.health.ok?'dot-ok':'dot-err','aria-hidden':'true'}),' '+s.health.text)),
    h('div',null,h('dt',null,'Depends on it'),h('dd',null,s.depends.join(', ')))),
   logBox(s),
