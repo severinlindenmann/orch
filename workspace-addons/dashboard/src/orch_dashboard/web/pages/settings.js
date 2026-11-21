@@ -214,9 +214,11 @@ function peopleCard(settings) {
       h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-remove-cancel', 'data-key':'settings-people-remove-cancel'}, 'Cancel'));
     return h('div', {className:'card-row', 'data-key':'settings-people-row-' + p.id},
       h('span', {className:'avatar sm', 'aria-hidden':'true'}, (String(p.name).trim()[0] || '?').toUpperCase()),
-      h('div', {className:'grow'}, h('h3', {}, String(p.name), p.owner ? ' ' : null, p.owner ? h('span', {className:'badge'}, 'Owner') : null), rights),
-      snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-rename', 'data-id':p.id, 'data-key':'settings-people-rename-' + p.id, 'aria-label':'Rename ' + p.name, disabled:busy}, 'Rename'),
-      snapshot || p.owner ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-remove', 'data-id':p.id, 'data-key':'settings-people-remove-' + p.id, 'aria-label':'Remove ' + p.name, disabled:busy}, 'Remove'));
+      // the actions sit under the rights, so the rights keep the whole width at phone size
+      h('div', {className:'grow'}, h('h3', {}, String(p.name), p.owner ? ' ' : null, p.owner ? h('span', {className:'badge'}, 'Owner') : null), rights,
+        snapshot ? null : h('div', {className:'row'},
+          h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-rename', 'data-id':p.id, 'data-key':'settings-people-rename-' + p.id, 'aria-label':'Rename ' + p.name, disabled:busy}, 'Rename'),
+          p.owner ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-remove', 'data-id':p.id, 'data-key':'settings-people-remove-' + p.id, 'aria-label':'Remove ' + p.name, disabled:busy}, 'Remove'))));
   };
   const add = snapshot ? null : h('div', {className:'card-row', 'data-key':'settings-people-add'},
     h('input', {type:'text', className:'input grow', maxLength:40, placeholder:'Name', 'aria-label':'Name of the new person', autocomplete:'off', 'data-key':'settings-people-name', 'data-people-enter':'people-add', disabled:busy}),
