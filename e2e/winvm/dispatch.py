@@ -8,7 +8,8 @@ the status 'windows (winvm)' (bot rights only; no runner, no admin key on this M
   1. the head of every open release pull request (into main) without a status of its own,
   2. the nightly run: the develop head once per day after 01:00 UTC (the time of ci.yml's schedule),
   3. the newest develop commit without a status (commits pushed while the clone was busy are skipped).
-The scripts used for a run come from the tested commit itself, so a change to them is tested by its own run.
+The scripts that run on this Mac are the dispatcher's own copy; only the tested source goes into the VM.
+Only release pull requests develop -> main of this repository count (public repository: never a fork).
 The release keeper reads a failed status on develop like a red develop run (releasekeeper.winvm_red).
 
     dispatch.py [--once] [--dry-run]       env: ORCH_REPO_DIR (git clone to fetch into), WINVM_OUT (results)
@@ -22,7 +23,6 @@ import json
 import os
 import subprocess
 import sys
-import tarfile
 import time
 from pathlib import Path
 
@@ -30,6 +30,8 @@ REPO = "severinlindenmann/orch"
 CONTEXT = "windows (winvm)"
 VARIABLE = "WINDOWS_RUNNER"
 NIGHTLY_HOUR_UTC = 1
+HERE = Path(__file__).resolve().parent
+TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
 
 
 def pick(mode: str, release_heads: list[str], develop_head: str | None, statuses: dict[str, str],
@@ -61,8 +63,15 @@ def runner_mode() -> str:
 
 
 def release_heads() -> list[str]:
-    r = gh("pr", "list", "--repo", REPO, "--base", "main", "--state", "open", "--json", "headRefOid,isDraft")
-    return [p["headRefOid"] for p in json.loads(r.stdout or "[]") if not p.get("isDraft")]
+    """Heads of open release pull requests: develop -> main of THIS repository only. The repository is public: a
+    pull request from a fork (or any other branch) never reaches this Mac."""
+    r = gh("pr", "list", "--repo", REPO, "--base", "main", "--head", "develop", "--state", "open", "--json",
+           "headRefOid,headRefName,isDraft,isCrossRepository")
+    return [p["headRefOid"] for p in json.loads(r.stdout or "[]") if trusted_release(p)]
+
+
+def trusted_release(p: dict) -> bool:
+    return p.get("headRefName") == "develop" and p.get("isCrossRepository") is False and not p.get("isDraft")
 
 
 def develop_head() -> str | None:
@@ -90,21 +99,17 @@ def post(sha: str, state: str, text: str) -> None:
 
 
 def run(sha: str, why: str, repo_dir: Path, out_root: Path) -> tuple[bool, str]:
-    """Run e2e/winvm/run.sh of commit sha in a fresh clone; (passed, one-line text)."""
+    """Run e2e/winvm/run.sh on commit sha in a fresh clone; (passed, one-line text). The scripts that run on this
+    Mac are this dispatcher's own (its checkout, updated by deploying develop), never the tested commit's: the
+    tested code only runs inside the throwaway VM. No GitHub login reaches the run."""
     subprocess.run(["git", "-C", str(repo_dir), "fetch", "-q", "origin", sha], check=True)
     out = out_root / f"{dt.datetime.now(dt.timezone.utc):%Y%m%dT%H%M%SZ}-{sha[:10]}"
-    scripts = out / "scripts"
-    scripts.mkdir(parents=True)
-    tar = subprocess.run(["git", "-C", str(repo_dir), "archive", "--format=tar", sha, "e2e/winvm"],
-                         capture_output=True, check=True).stdout
-    tar_path = out / "winvm.tar"
-    tar_path.write_bytes(tar)
-    with tarfile.open(tar_path) as t:
-        t.extractall(scripts, filter="data")
-    env = {**os.environ, "WINVM_REPO": str(repo_dir)}
+    out.mkdir(parents=True)
+    env = {k: v for k, v in os.environ.items() if k not in TOKEN_VARS}
+    env["WINVM_REPO"] = str(repo_dir)
     t0 = time.monotonic()
     with open(out / "run.log", "w") as log:
-        rc = subprocess.run(["bash", str(scripts / "e2e/winvm/run.sh"), sha, str(out)], env=env,
+        rc = subprocess.run(["bash", str(HERE / "run.sh"), sha, str(out)], env=env, stdin=subprocess.DEVNULL,
                             stdout=log, stderr=subprocess.STDOUT).returncode
     mins = round((time.monotonic() - t0) / 60)
     return rc == 0, f"{why}: {'passed' if rc == 0 else f'failed (exit {rc})'} in {mins} min on a fresh Windows VM"

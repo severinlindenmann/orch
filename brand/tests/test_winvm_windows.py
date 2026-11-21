@@ -70,3 +70,17 @@ def test_the_vm_run_keeps_the_standard_user_install_and_the_junction_check():
     run_sh = (ROOT / "e2e" / "winvm" / "run.sh").read_text(encoding="utf-8")
     assert "standard-user.ps1" in run_sh and "smoke.ps1" in run_sh and "tests.ps1" in run_sh
     assert "junction" in (ROOT / "e2e" / "winvm" / "smoke.ps1").read_text(encoding="utf-8")
+
+
+def test_only_own_develop_release_pull_requests_reach_the_mac():
+    ok = _dispatch().trusted_release
+    assert ok({"headRefName": "develop", "isCrossRepository": False, "isDraft": False})
+    assert not ok({"headRefName": "develop", "isCrossRepository": True, "isDraft": False})  # a fork's "develop"
+    assert not ok({"headRefName": "feature", "isCrossRepository": False, "isDraft": False})
+    assert not ok({"headRefName": "develop", "isDraft": False})  # unknown = not trusted
+
+
+def test_the_host_scripts_never_come_from_the_tested_commit():
+    src = (ROOT / "e2e" / "winvm" / "dispatch.py").read_text(encoding="utf-8")
+    assert "tarfile" not in src and '"archive", "--format=tar"' not in src
+    assert 'HERE / "run.sh"' in src and "TOKEN_VARS" in src
