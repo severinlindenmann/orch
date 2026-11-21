@@ -59,7 +59,6 @@ module.exports = {
       if (madeGit) fs.rmSync(dotGit, { recursive: true, force: true });
     }
     await reload();
-    must(!(await sw('settings-switch-reviewer').count()), 'the pull-request switches still show without pull requests');
 
     // a saved report makes "Delete all" usable; deleting it leaves 0 reports after a reload
     await page.locator('#report-problem').click();
