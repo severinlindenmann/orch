@@ -46,6 +46,8 @@
 /* table, facts */
 .result-tablebox{display:grid;gap:var(--s2)}
 .result-table{overflow:auto;max-width:100%}
+/* more columns to the side: a soft edge shows on the side that scrolls (covers move with the content, shadows stay) */
+.result-table{background:linear-gradient(to right,var(--surface) 40%,transparent) left center/32px 100% no-repeat local,linear-gradient(to left,var(--surface) 40%,transparent) right center/32px 100% no-repeat local,linear-gradient(to right,var(--border-strong),transparent) left center/12px 100% no-repeat scroll,linear-gradient(to left,var(--border-strong),transparent) right center/12px 100% no-repeat scroll}
 .result-table table{width:100%;border-collapse:collapse;font-size:var(--fs-meta);line-height:16px}
 .result-table th,.result-table td{height:auto;padding:var(--s1) var(--s2);border-top:1px solid var(--border);border-bottom:0;text-align:left;font-weight:400;white-space:nowrap}
 .result-table thead th{position:sticky;top:0;background:var(--surface);color:var(--text-muted);font-weight:600}
