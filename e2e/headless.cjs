@@ -2,12 +2,17 @@
 //
 // Every browser gets '--use-mock-keychain' and '--password-store=basic'. Without them macOS shows the person at the
 // computer a keychain password window ("headless_shell wants to use ... Chromium Safe Storage"). The CI check
-// scripts/check_headless_launch.py fails any file that calls launch() / launchPersistentContext() itself.
+// scripts/check_headless_launch.py fails any file that calls launch() itself.
+//
+// Never a profile folder (launchPersistentContext, userDataDir, --user-data-dir; ORCH-1101): the headless shell
+// ignores '--use-mock-keychain' once it keeps a profile on disk, fetches the cookie key from the login keychain and
+// macOS asks the owner for his password. A context from launch() + newContext() keeps cookies in memory and never
+// asks. A sign-in that must survive between runs goes in a storageState file: newContext({ storageState: file }).
 //
 //   const { launch } = require('./headless.cjs');               // CommonJS
 //   import headless from './headless.cjs';                      // ES module: headless.launch(chromium, {...})
 //   const browser = await launch(chromium, { headless: true });
-//   const ctx = await headless.launchPersistent(chromium, profileDir, { viewport });
+//   const ctx = await browser.newContext({ viewport, acceptDownloads: true });
 //
 // Python twin: e2e/headless.py.
 
@@ -25,8 +30,4 @@ function launch(browserType, opts) {
   return browserType.launch(withArgs(opts));
 }
 
-function launchPersistent(browserType, userDataDir, opts) {
-  return browserType.launchPersistentContext(userDataDir, withArgs(opts));
-}
-
-module.exports = { ARGS, withArgs, launch, launchPersistent };
+module.exports = { ARGS, withArgs, launch };
