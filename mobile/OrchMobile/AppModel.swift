@@ -98,6 +98,8 @@ final class AppModel {
 
 
     let useMock: Bool
+    /// Face ID before an allow answer (ORCH-1204). The mock relay (demo, UI tests) skips it.
+    var personCheck: PersonCheck
     /// The in-process fake when `useMock` (tests flip its offline/delivery switches).
     let mock: MockRelay?
     private let session: URLSession
@@ -123,6 +125,7 @@ final class AppModel {
          speechCache: URL = SpeechPlayer.defaultCacheDirectory, systemAudioControls: Bool = true,
          defaults: UserDefaults = .standard) {
         self.useMock = useMock
+        self.personCheck = useMock ? .always : .device
         let mock = useMock ? MockRelay() : nil
         self.mock = mock
         self.session = session
@@ -575,6 +578,12 @@ final class AppModel {
 
     func answer(_ q: Question, with option: String) async {
         if q.isAllow && !q.message.body.options.contains(option) { return }
+        if q.isAllow {
+            guard await personCheck.run(PersonCheck.reason) else {
+                announcement = "Not sent. Confirm it is you to allow this."
+                return
+            }
+        }
         let me = credentials?.phoneId
         outbox.enqueueAnswer(question: q, answer: option)
         let events = await outbox.flush(using: client)

@@ -194,3 +194,45 @@ final class PhonePairingKeyTests: XCTestCase {
         XCTAssertNil(PhoneKey.current())
     }
 }
+
+/// Choice G: Face ID (or the phone's code) before an allow answer; other answers never ask.
+@MainActor
+final class AllowNeedsThePersonTests: XCTestCase {
+    override func setUp() async throws { Keychain.delete(); PhoneKey.delete(); UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.set(true, forKey: "mockFail") }
+    override func tearDown() async throws { Keychain.delete(); PhoneKey.delete(); UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.removeObject(forKey: "mockFail") }
+
+    private final class Count: @unchecked Sendable { var n = 0 }
+
+    private func paired(_ check: PersonCheck) async -> AppModel {
+        let model = AppModel(useMock: true)
+        model.openSampleInvite(); await model.connect(phoneName: "Test phone"); await model.finishSetup(allowNotifications: false)
+        model.personCheck = check
+        return model
+    }
+
+    func testARefusedCheckSendsNothing() async {
+        let model = await paired(.never)
+        let q = MockRelay.allowQuestion
+        await model.answer(q, with: q.message.body.options[0])
+        XCTAssertFalse(model.outbox.items.contains { $0.kind == .answer })
+        XCTAssertEqual(model.announcement, "Not sent. Confirm it is you to allow this.")
+    }
+
+    func testAPassedCheckSendsTheAllow() async {
+        let asked = Count()
+        let model = await paired(PersonCheck { _ in asked.n += 1; return true })
+        let q = MockRelay.allowQuestion
+        await model.answer(q, with: q.message.body.options[0])
+        XCTAssertEqual(asked.n, 1)
+        XCTAssertTrue(model.outbox.items.contains { $0.kind == .answer && $0.questionMessageId == q.id })
+    }
+
+    func testANormalAnswerNeverAsks() async {
+        let asked = Count()
+        let model = await paired(PersonCheck { _ in asked.n += 1; return false })
+        let q = MockRelayTestsFixtures.question
+        await model.answer(q, with: q.message.body.options[0])
+        XCTAssertEqual(asked.n, 0)
+        XCTAssertTrue(model.outbox.items.contains { $0.kind == .answer })
+    }
+}
