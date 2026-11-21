@@ -662,17 +662,17 @@ class Runner:
             res = self.local_check(repo, sha, on)
             if res.verdict == localcheck.RED:
                 return self._local_red(repo, base, sha, inside, res, built)
-            if res.verdict == localcheck.GREEN and self._post_local(repo, sha, res.line):
+            if res.verdict == localcheck.GREEN:
+                if not self._post_local(repo, sha, res.line):
+                    # some statuses may stand on the commit: it never gets a pull request (tidy deletes the
+                    # branch); the group is built and checked again after a pause, no try used
+                    self.retry(inside, "the local check's result could not be posted on GitHub", count=False)
+                    return []
                 local = res
-            else:  # broken, or GitHub took no status: this group is checked on GitHub as before
-                why = (
-                    res.line
-                    if res.verdict != localcheck.GREEN
-                    else "its result could not be posted on GitHub"
-                )
-                self.log(f"Local check of {sha[:12]}: {why}; this group is checked on GitHub.")
+            else:  # broken: this group is checked on GitHub as before
+                self.log(f"Local check of {sha[:12]}: {res.line}; this group is checked on GitHub.")
                 localcheck.record(self.root, mode="local", sha=sha, local=localcheck.BROKEN, secs=res.secs,
-                                 line=why, built_at=built)  # fmt: skip
+                                 line=res.line, built_at=built)  # fmt: skip
         elif mode == "shadow":  # next to GitHub's run; GitHub's verdict decides
             shadow = _Shadow(self, repo, sha, on)
         # the develop rule requires the mark (a green local check has set it already)

@@ -149,16 +149,19 @@ def test_local_broken_check_falls_back_to_github(ws):
     assert localcheck.rows(ws)[-1]["local"] == "broken"
 
 
-def test_local_status_not_posted_falls_back_to_github(ws):
+def test_local_status_not_posted_opens_no_group_and_tries_again(ws):
+    """Some statuses may stand on the commit: it never gets a pull request, nobody merges it; built again later."""
     _set(ws, group_check="local")
     _add(ws, 1, 2)
     gh, git = StatusHub({1: {}, 2: {}}, post_ok=False), BuiltGit()
-    r, _ = make(ws, gh, git)
+    r, calls = make(ws, gh, git)
     fake_check(r, git)
-    r.run()
-    assert states(ws) == {1: "merged", 2: "merged"}
-    assert localcheck.LOCAL_LINE not in gh.bodies[0]
-    assert gh.marks == [("c" * 40, "Built by the orch merge queue")]
+    r.process(r.next_batch())
+    assert calls == [] and gh.groups == {} and gh.marks == []
+    rows = {x["number"]: x for x in store.read(ws)}
+    assert {n: x["state"] for n, x in rows.items()} == {1: "waiting", 2: "waiting"}
+    assert all(int(x.get("tries") or 0) == 0 for x in rows.values())
+    assert "could not be posted" in rows[1]["why"]
 
 
 def test_a_ci_change_is_checked_on_github_even_when_local(ws):
@@ -227,7 +230,7 @@ def check_repo(tmp_path):
     _git(work, "add", ".")
     _git(work, "commit", "-q", "-m", "base")
     base = _git(work, "rev-parse", "HEAD")
-    for n, name in ((1, "b.txt"), (2, "bad.txt"), (3, "c.txt"), (4, "d.txt")):
+    for n, name in ((1, "b.txt"), (2, "bad.txt"), (3, "c.txt"), (4, "scripts/check_banned_words.py")):
         _git(work, "checkout", "-q", "-B", f"pr{n}", base)
         (work / name).write_text("b\n", encoding="utf-8")
         _git(work, "add", name)
@@ -242,7 +245,7 @@ def _cmd(code: str) -> list[str]:
 
 def _copy(ws, repo_url):
     git = Git(store.folder(ws), REPO, url=str(repo_url))
-    return git, git.fetch("develop", [1, 2])
+    return git, git.fetch("develop", [1, 2, 4])
 
 
 def test_check_runs_in_a_clean_copy_with_a_throwaway_home(ws, check_repo):
@@ -262,6 +265,12 @@ def test_banned_words_run_on_their_own_before_the_check(ws, check_repo):
     git, heads = _copy(ws, check_repo)
     res = localcheck.run(git, heads["2"], heads["base"], _cmd("raise SystemExit(0)"))
     assert res.verdict == localcheck.RED and res.failed == ["banned-words"]
+
+
+def test_a_group_that_changes_the_check_itself_goes_to_github(ws, check_repo):
+    git, heads = _copy(ws, check_repo)
+    res = localcheck.run(git, heads["4"], heads["base"], _cmd("pass"))
+    assert res.verdict == localcheck.BROKEN and "changes the check itself" in res.line
 
 
 def test_a_repository_without_the_banned_words_check_goes_to_github(ws, bare):  # noqa: F811

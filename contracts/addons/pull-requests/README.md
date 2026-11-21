@@ -66,8 +66,10 @@ merges, so sync holds a changed block until a person allows it.
   computer before the group pull request is opened. Green: the queue posts the required checks (`required_checks.py`) and its mark
   as commit statuses and opens the group pull request with the line `orch-group-check: local`, which makes ci.yml and
   rules.yml skip it (such a run never counts as proof for the push to develop, `scripts/ci_proven.py`). Red: no
-  group pull request, the group is split as a red one. The check broke, did not end in 15 minutes or a status could
-  not be posted: that group is checked on GitHub. A pull request that runs alone (`alone_paths`) or one a person
+  group pull request, the group is split as a red one. The check broke, did not end in 15 minutes or the group changes
+  the check's own scripts (`scripts/check_banned_words.py`, the files `check_command` names): that group is checked
+  on GitHub. A status GitHub did not take: no group pull request, the group is built and checked again after a
+  pause (no try used). A pull request that runs alone (`alone_paths`) or one a person
   merges is always checked on GitHub. Anything else means `github`.
 - `check_command` (list of words, default `["python3", "scripts/ci_light.py", "--base", "{base}"]`): the local
   check's command, run in a clean copy of the group commit with a throwaway home (`HOME`, `ORCH_HOME`,

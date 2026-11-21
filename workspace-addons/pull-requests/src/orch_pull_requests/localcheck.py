@@ -9,7 +9,8 @@ The setting `[pull_requests] group_check` (settings.group_check) says how a queu
   posts the required checks (required_checks.py, and its mark `orch/merge-queue`) as commit statuses and opens
   the group pull request with a line that tells ci.yml and rules.yml to skip it; the core waiter merges it on
   those statuses. Red: no group pull request; the group is split as a red one. The check crashed, did not finish
-  in time or a status could not be posted: that group falls back to GitHub's checks (the old way).
+  in time or the group changes the check's own scripts: that group falls back to GitHub's checks (the old way).
+  A status GitHub did not take: no group pull request; the group is built and checked again after a pause.
 
 The check runs in a clean copy of the group commit (a worktree of the queue's own copy of the repository) with a
 throwaway home, so it never touches the orch this computer uses. First the repository's own banned-words check
@@ -86,10 +87,17 @@ def _run(git, sha: str, base_sha: str, command: list[str], timeout: float, start
     try:
         try:
             git.worktree_add(copy, sha)
+            # a group that changes the check itself is never checked by its own changed check: GitHub checks it
             # banned-words is posted under its own name, so it runs on its own: the very check rules.yml runs
             words = copy / WORDS_SCRIPT
             if not words.is_file():
                 return Result(BROKEN, time.monotonic() - start, f"the copy has no {WORDS_SCRIPT}")
+            # a group that changes the check itself is never checked by its own changed check: GitHub checks it
+            own = [WORDS_SCRIPT] + [
+                a for a in command if not a.startswith("-") and not os.path.isabs(a) and (copy / a).is_file()
+            ]
+            if base_sha != sha and git.changes(base_sha, sha, own):
+                return Result(BROKEN, time.monotonic() - start, "the group changes the check itself")
             code, out = _call(
                 ["python3", WORDS_SCRIPT, "--base", base_sha, "--labels", ""], copy, env, timeout
             )
