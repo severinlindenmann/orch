@@ -518,7 +518,7 @@ def _answer(args, root: Path) -> None:
         # ORCH-921: a card the page showed open, answered meanwhile in the terminal, on the phone or in
         # another tab. Its digest still matches (it is what was shown, not whether it was answered): say
         # who answered and when, and change nothing. Changing an answer on purpose works without --digest.
-        raise ReviewError("decided", review.answered_elsewhere(t, q, who))
+        raise ReviewError("decided", review.answered_elsewhere(root, t, q, who))
     digest = given or current
     # ORCH-582: a draft, or the Check of a ticket that carries one, needs the signed-in dashboard's one-time
     # person grant (a paired phone answers through the relay); never a script or a helper's shell
