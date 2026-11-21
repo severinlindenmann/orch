@@ -1244,7 +1244,7 @@ function overviewMore(entries, limit) {
 // the day is the group's label already: only the time of day (a time in the future keeps its date)
 const overviewTime = entry => entry.at == null ? null : h('time', {className:'meta', datetime:new Date(entry.at).toISOString()},
   (iso => entry.at > Date.now() + 86400000 || !window.UI?.clock ? time(iso) : window.UI.clock(iso))(new Date(entry.at).toISOString()));
-// "lume · Claude started" reads as a sentence: "lume started the helper (Claude)"
+// "lume · <tool> started" reads as a sentence: "lume started the helper (<tool>)"
 const overviewSentence = (e, view) => view.sentence ? clean(view.sentence)
   : (m => m && isPerson(e) ? (ticketActor(e.by) || 'Someone') + ' started the helper (' + clean(m[1]) + ')' : null)(/^(\S+) started$/.exec(String(e.text || '').trim()))
   || [ticketActor(e.by), clean(view.line)].filter(Boolean).join(' · ');
