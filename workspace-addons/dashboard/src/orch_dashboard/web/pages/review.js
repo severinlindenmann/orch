@@ -29,7 +29,7 @@ function reviewStuckAnswers(row) {
   return [{label:'Nudge', picked:'nudge'}, {label:'Start fresh', picked:'fresh'}];
 }
 // A button pressed on a stuck card does not end the stopped work (Home keeps its row too): the card comes back in
-// Waiting with what was done and when, so the number and the cards stay the same count (Codex review). Kept per page.
+// Waiting with what was done and when, so the number and the cards stay the same count. Kept per page.
 const reviewStuckDone = new Map();  // card id -> {word, at, stop}: stop = the stop it was pressed on (a later stop starts clean)
 const reviewStuckBusy = new Set();  // card ids whose button is running now: a second press waits for nothing and does nothing
 const STUCK_WORDS = {merge:'Merged', nudge:'Message sent', start:'Helper started', fresh:'Helper started fresh'};
