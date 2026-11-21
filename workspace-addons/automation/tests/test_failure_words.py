@@ -22,5 +22,5 @@ def test_no_helper_chosen_is_plain_words(tmp_path, monkeypatch):
     monkeypatch.setattr(orchcli, "sync_refusal", lambda root, tid: None)
     got = orchcli.run_start(tmp_path, "t_abc123")
     assert got["result"] == "failed"
-    assert "Settings > Helper" in got["reason"] and "Try again" in got["reason"]
+    assert got["reason"] == orchcli.NO_HELPER  # what is missing and where to fix it (Settings, Helper)
     assert "orch config" not in got["reason"] and "workspace.agent" not in got["reason"]

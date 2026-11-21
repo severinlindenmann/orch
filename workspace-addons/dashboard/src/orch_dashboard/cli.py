@@ -136,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 AGENT_RESTART_WARNING = (
-    "an agent restart of a dashboard that other computers open leaves them locked out. "
+    "a helper's restart of a dashboard that other computers open leaves them locked out. "
     "Restart it yourself: orch stop, then orch start."
 )
 

@@ -221,7 +221,7 @@ def allow(root: Path, tid: str, key: str) -> dict:
     from . import syncapproval
 
     if scripts.an_agent():
-        raise Refused("Only a person can allow a repeat on this computer, not an agent.")
+        raise Refused("Only a person can allow a repeat on this computer, not a helper.")
     want = tid.strip().upper()
     t = next(
         (x for x in orchcli.tickets(root) if x["id"] == tid or str(x.get("key") or "").upper() == want), None
