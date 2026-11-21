@@ -192,7 +192,9 @@ jobs:
     needs: [changes, route]
     # light pull requests skip it, except one that changes file, process or path code while Windows is green (oscode)
     # A push to develop that a green queue group proved runs only the Windows parts (ORCH-1106: groups skip them).
-    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.proven == 'true' || (needs.changes.outputs.light != 'true' && (needs.changes.outputs.workspace == 'true' || needs.changes.outputs.queue == 'true')) || needs.changes.outputs.oscode == 'true' || github.event_name == 'schedule') }}
+    # With the Windows parts on our own Windows VM (vars.WINDOWS_RUNNER == 'winvm', ORCH-1127) a proven push has nothing
+    # left here (no Linux, no macOS, no Windows): skipped, else the empty part list fails the run.
+    if: ${{ !cancelled() && needs.changes.result == 'success' && ((needs.changes.outputs.proven != 'true' || vars.WINDOWS_RUNNER != 'winvm') && (needs.changes.outputs.proven == 'true' || (needs.changes.outputs.light != 'true' && (needs.changes.outputs.workspace == 'true' || needs.changes.outputs.queue == 'true')) || needs.changes.outputs.oscode == 'true' || github.event_name == 'schedule')) }}
     uses: ./.github/workflows/workspace.yml
     with:
       linux: ${{ needs.changes.outputs.proven != 'true' }}
@@ -206,7 +208,10 @@ jobs:
       # Windows: every push to develop, the nightly run, a manual run with windows=true and pull requests that
       # change file, process or path code while Windows is not known red (scripts/touches_os_code.py --pr), except
       # merge queue groups. Which check is required where: docs/ci-checks.md.
-      windows: ${{ github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/develop') || (github.event_name == 'workflow_dispatch' && inputs.windows) || (needs.changes.outputs.oscode == 'true' && !startsWith(github.head_ref, 'orch-queue/')) }}
+      # ORCH-1127: the repository variable WINDOWS_RUNNER=winvm moves the develop pushes and the nightly run to a fresh
+      # Windows VM clone on our own machine (e2e/winvm/, result as the commit status 'windows (winvm)'); unset or any other
+      # value = GitHub's machines (the switch back). Release checks and pull requests stay on GitHub (x86-64).
+      windows: ${{ (vars.WINDOWS_RUNNER != 'winvm' && (github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/develop'))) || (github.event_name == 'workflow_dispatch' && inputs.windows) || (needs.changes.outputs.oscode == 'true' && !startsWith(github.head_ref, 'orch-queue/')) }}
       mac_runs_on: ${{ needs.route.outputs.mac || '"macos-latest"' }}
   # Fast CLI smoke on Windows + macOS for PRs that touch the CLI or an add-on (R1.6, R3.4); the full suite is nightly.
   # Queue groups always; pull requests into main when they touch it. Not on a pull request into develop alone.
