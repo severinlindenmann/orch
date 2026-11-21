@@ -1,9 +1,10 @@
 # Workspace tests in a winvm clone (ORCH-1127), the same flags as the Windows job in workspace.yml.
 # Runs after setup.ps1. -Part K/N runs every N-th test (ci_parts.py); default: the whole suite.
+# Positional order matters: run.sh passes "<part> <workers>" (winvm quotes arguments, so names never bind).
 param(
     [string]$Part = "1/1",
-    [string]$Python = "cpython-3.13-windows-x86_64-none",
-    [int]$Workers = 4
+    [int]$Workers = 4,
+    [string]$Python = "cpython-3.13-windows-x86_64-none"
 )
 $ErrorActionPreference = "Stop"
 Set-Location "C:\ci\src\workspace"
