@@ -34,6 +34,7 @@ def test_the_phones_add_adds_the_workspace_and_tells_everyone(proj, run, rel, ho
     assert cg._is_member(proj, host, HOME)
     added = [m for m in rel.sent if (m["body"].get("group_event") or {}).get("kind") == "member_added"]
     assert {m["to"] for m in added} >= {HOME, "phones"}
+    assert {m["body"]["group_event"].get("added_by") for m in added} == {"you"}  # the person added it
     all_contract_clean(rel)
     # The same message again (a retry) adds nothing twice.
     rel.sent.clear()
