@@ -166,13 +166,11 @@ _STAND_IN: contextvars.ContextVar[str | None] = contextvars.ContextVar("orch_sta
 STAND_IN_SCRIPT = "agent:script"  # a program answering with no helper around and no terminal
 
 
-OWNER_ONLY_CARDS = ("draft", "choice")  # drafts, designs and picks among them: only the person (owner 18 Nov)
-
-
 def refuse_stand_in_on(card) -> None:
     """Drafts, mockups and designs are accepted only by the person: never by the manager, Away mode or a
     script standing in for them (AGENTS.md, owner 18 Nov)."""
-    if _STAND_IN.get() and isinstance(card, dict) and card.get("kind") in OWNER_ONLY_CARDS:
+    # the one draft rule (ORCH-582, ownerpick.is_draft_card): a draft card, or a choice whose options show files
+    if _STAND_IN.get() and isinstance(card, dict) and ownerpick.is_draft_card({"card": card}):
         who = _STAND_IN.get() or ""
         raise Refused(f"Drafts and designs wait for {who.removeprefix('human:')}'s own answer.")
 

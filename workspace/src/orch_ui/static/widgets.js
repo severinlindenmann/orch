@@ -285,12 +285,13 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(!plainOpts(it)){const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer(null,it)};pv.append(ex)}
   (pins[it.id]||[]).forEach((pn,i)=>pv.append(pinEl(pn,i)));}
   const fl=filesRow(it);
-  const ft=el('footer','swipe-foot');/* "If you approve" (or why Looks good is off) is in the pinned answers bar (ORCH-477, ORCH-548) */
+  const ft=el('footer','swipe-foot');/* "If you approve" is in the pinned answers bar (ORCH-477); why Looks good is off stays on the card (ORCH-548) */
+  if(it.blocked){const t=el('span','swipe-then');t.append(el('b','','Looks good is off: '),it.blocked);ft.append(t)}
   const row=el('div','swipe-foot-row');
   row.append(el('span','grow'));const pc=(pins[it.id]||[]).length;if(pc){const s=el('span','swipe-pins');s.append(ic('pin',14),pc+(pc===1?' spot marked':' spots marked'));row.append(s)}
   (it.links||[]).forEach(l=>{const a=el('a','btn ghost sm swipe-link');a.href=l.url;a.target='_blank';a.rel='noopener';a.append(ic('link',14),l.label);a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)});/* the helper's links: a mockup, a reference */
   if(it.open){const a=el('a','btn ghost sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
-  ft.append(row);if(row.children.length<2)ft.classList.add('empty');/* nothing in it: no empty strip under a short card */
+  ft.append(row);if(row.children.length<2&&!it.blocked)ft.classList.add('empty');/* nothing in it: no empty strip under a short card */
   c.append(...[h,pv,fl,ft].filter(Boolean));return c};
  /* The result's own files (a picture, a page, a PDF): tiles that open the file large inside the page, ← → to the card's
     other files, with "Open in new tab" in the viewer (UI.reviewViewer, ORCH-477). A PDF tile shows its first page through
@@ -322,7 +323,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   cur=card(items[idx]);const a=ans[items[idx].id];
   if(a){const t=el('div','swipe-was');t.append(ic('check',14),'You answered: '+ansWord(a)+'. A new answer is added, the old one stays on the ticket.');const sf=cur.querySelector('.swipe-foot');sf.classList.remove('empty');sf.prepend(t)}
   stage.append(cur);syncWords();wire(cur);change()};
- const thenLine=(t,it)=>{t.replaceChildren();t.hidden=!(it&&(it.then||it.blocked));if(t.hidden)return;if(it.blocked){t.append(el('b','','Looks good is off: '),it.blocked);return}t.append(el('b','',isOpt(it)?'If you pick one: ':'If you approve: '),it.then)};
+ const thenLine=(t,it)=>{t.replaceChildren();t.hidden=!(it&&it.then&&!it.blocked);if(t.hidden)return;t.append(el('b','',isOpt(it)?'If you pick one: ':'If you approve: '),it.then)};
  /* ---- compare (ORCH-477): a side is a card ("<id>") or one option of a choice ("<id>\n<option id>") */
  const SEP='\n',optsWithPreview=it=>isOpt(it)?(it.preview.options||[]).filter(op=>op&&op.preview):[];
  const optionRefs=it=>{const ops=optsWithPreview(it);return ops.length>1?ops.map(op=>({ref:it.id+SEP+op.id,label:(optLetter(op)?optLetter(op)+': ':'')+(op.title||op.id)})):[]};
