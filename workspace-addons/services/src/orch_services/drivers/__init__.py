@@ -83,6 +83,11 @@ class Driver:
         """Stop it and remove the platform entry (the log file stays)."""
         raise NotImplementedError
 
+    def switched_off(self, spec: Spec) -> bool:
+        """True when the computer's service tool will not start this entry by itself, whatever the entry says
+        (a launchd label switched off with `launchctl disable`). Only asked for adopted jobs."""
+        return False
+
     def runs(self, spec: Spec) -> int | None:
         """How often the computer's service tool started it so far (a growing count), or None when it cannot say.
         The health check counts the starts orch did not ask for as failures."""

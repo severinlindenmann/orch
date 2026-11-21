@@ -33,6 +33,8 @@ def empty_prompt(ticket: dict, news: str = "") -> str:
         "make its ticket first (orch ticket list, orch ticket new) and track the steps there.",
         "Ask before anything the orch skill's ask list names (cannot be undone, costs money, production, "
         "deletes real data, visible outside).",
+        f"You start on a small model. When the person's work turns hard here (design, security, several "
+        f'parts), move up first: orch ticket model {tid} up --why "<what makes it hard>".',
     ]
     if news:
         out.append("New since you last looked:\n" + news)
@@ -62,7 +64,19 @@ def one(root: Path, kind: str) -> dict | None:
         return None
     on = runs.running(root, tid) if kind != "terminal" else False
     is_open = on if kind != "terminal" else not _closed(root, tid)
-    return {"id": tid, "kind": kind, "title": TITLES[kind], "running": on, "open": is_open}
+    out = {"id": tid, "kind": kind, "title": TITLES[kind], "running": on, "open": is_open}
+    if kind == "empty":
+        out["model"] = start_model(root, tid)
+    return out
+
+
+def start_model(root: Path, tid: str) -> str | None:
+    """The model the Empty helper starts on (or runs on), read only: the New menu shows it and preselects it
+    (ORCH-710). None when its ticket cannot be read."""
+    try:
+        return tickets.next_model(tickets.load(root, tid))
+    except Exception:  # noqa: BLE001 - a broken ticket shows no model
+        return None
 
 
 def listing(root: Path) -> list[dict]:
@@ -70,11 +84,14 @@ def listing(root: Path) -> list[dict]:
     return [s for k in KINDS if (s := one(root, k)) is not None]
 
 
-def new(root: Path, kind: str, by: str) -> dict:
+def new(root: Path, kind: str, by: str, model: str | None = None) -> dict:
     """Start (or go to) the session without a ticket of this kind: {id, kind, title, running, open, started,
-    notes}. Already on: nothing new starts (started False)."""
+    notes}. Already on: nothing new starts (started False). model: the person's pick for the Empty helper
+    (haiku, sonnet, opus, fable), set before it starts (ORCH-710); one already running keeps its model."""
     if kind not in KINDS:
         raise Refused(f"No such session without a ticket: {kind}. Choose one of: {', '.join(KINDS)}.")
+    if model and kind != "empty":
+        raise Refused("Only the Empty helper takes a model here. Pick the others' model in their own place.")
     notes: list[str] = []
     started = False
     if kind == "manager":
@@ -90,7 +107,11 @@ def new(root: Path, kind: str, by: str) -> dict:
         tid = (
             tickets.ensure_general(root, by) if kind == "chat" else tickets.ensure_session(root, "empty", by)
         )
-        if not runs.running(root, tid):
+        on = runs.running(root, tid)
+        # the pick is for the start; a running one keeps its model (its pane's model line switches it)
+        if model and not on and model != start_model(root, tid):
+            tickets.set_model(root, tid, model, by)
+        if not on:
             r = runs.start(root, tid, by, mode="live")
             started, notes = True, list(r.get("notes") or [])
     return {**(one(root, kind) or {}), "started": started, "notes": notes}

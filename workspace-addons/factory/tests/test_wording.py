@@ -88,7 +88,7 @@ PINNED = {
     "factory:start": "ad9bdd52ad260da8",
     "factory:autopilot": "69d8e3b493c86e3f",
     "factory:change": "471baa7e5747fd32",
-    "factory:stop": "87f177129af0f92b",
+    "factory:stop": "190c04dc7b10fc9c",
 }
 EXAMPLES = {
     "factory:start": "valid-run.json",
