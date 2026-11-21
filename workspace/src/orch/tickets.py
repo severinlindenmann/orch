@@ -952,13 +952,53 @@ def _env_via() -> str:
     return v if re.fullmatch(r"[a-z][a-z0-9-]{1,23}", v) else "cli"
 
 
+CHAT_LINE_ID_RE = re.compile(r"m_[a-z0-9]{16}")
+BY_NAME_MAX = 60
+
+
+def chat_line_id() -> str:
+    """A new stable id for a chat line (contracts/history.md "Chat lines"), in the form of a message id."""
+    return "m_" + "".join(secrets.choice(_ALPHABET) for _ in range(16))
+
+
+def clean_by_name(name: str | None) -> str | None:
+    """The name a person typed for a chat line: one line, 1 to 60 characters, or None. Never an identity."""
+    if name is None:
+        return None
+    name = " ".join(clean_untrusted(str(name)).split())
+    if not name:
+        return None
+    if len(name) > BY_NAME_MAX:
+        raise Refused(f"A name has 1 to {BY_NAME_MAX} characters.")
+    return name
+
+
 def add_history(
-    ticket: dict, by: str, text: str, via: str | None = None, chat: bool = False, *, at: str | None = None
+    ticket: dict,
+    by: str,
+    text: str,
+    via: str | None = None,
+    chat: bool = False,
+    *,
+    at: str | None = None,
+    mid: str | None = None,
+    by_name: str | None = None,
 ) -> None:
     """THE one point where core appends a history line (contracts/history.md). chat=True marks a real Chat or
-    group message (`chat_message: true`): the only lines the Chat shows. The exact line object made here is
+    group message (`chat_message: true`): the only lines the Chat shows. A chat line also gets a stable `id`
+    (`mid` when the message already has one, else a new one) and, when given, the name the person typed
+    (`by_name`, shown as typed and never trusted; `by` stays the actor). The exact line object made here is
     marked as core's own (history.created); _write records it when the ticket is written."""
     entry = {"at": at or now(), "by": by, "via": via or _env_via(), "text": text, "chat_message": chat}
+    if chat:
+        if mid is not None and not CHAT_LINE_ID_RE.fullmatch(mid):
+            raise Refused("A chat line id is m_ and 16 lowercase letters or digits.")
+        entry["id"] = mid or chat_line_id()
+        name = clean_by_name(by_name)
+        if name:
+            entry["by_name"] = name
+    elif mid is not None or by_name is not None:
+        raise Refused("Only a chat line carries an id and a typed name.")
     ticket["history"].append(entry)
     history.created("lines", entry)
 

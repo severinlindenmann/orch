@@ -822,9 +822,23 @@ def _log(a):
 
 
 def _chat_say(a):
-    """The person writes in Chat (history by "you", via dashboard; the background host starts the helper)."""
-    _only(a, ("text", "new"))
+    """The person writes in Chat (history by "you", via dashboard; the background host starts the helper).
+    With `ticket`: in that ticket's chat on the Chats page (a chat line on the ticket, handed to its helper)."""
+    _only(a, ("text", "new", "ticket"))
+    if a.get("ticket") is not None:
+        if _flag(a.get("new")):
+            raise BadRequest("A ticket chat has no new conversation.")
+        return ["chat", "say"], ["--ticket", _tid(a.get("ticket"))], [_text(a.get("text"))]
     return ["chat", "say"], ["--new"] if _flag(a.get("new")) else [], [_text(a.get("text"))]
+
+
+TICKET_CHAT_READER = "dashboard"  # data.DASHBOARD_READER: one read mark for this computer's dashboard
+
+
+def _chat_read(a):
+    """The person opened a ticket chat on the Chats page: its unread count starts again from now."""
+    _only(a, ("ticket",))
+    return ["chat", "read", _tid(a.get("ticket"))], ["--reader", TICKET_CHAT_READER], []
 
 
 def _chat_make_ticket(a):
@@ -1231,6 +1245,7 @@ OPS = {
     "ticket.model": _ticket_model,
     "log": _log,
     "chat.say": _chat_say,
+    "chat.read": _chat_read,
     "chat.make_ticket": _chat_make_ticket,
     "check.add": _check_add,
     "check.set": _check_set,
