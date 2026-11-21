@@ -1565,6 +1565,36 @@ button.gtree-row:hover{background:var(--surface-2)}
 }
 @keyframes rail-in{from{transform:translateX(var(--s5));opacity:0}to{transform:none;opacity:1}}
 @media(prefers-reduced-motion:reduce){.rail-sheet{animation:none}}
+
+/* Panes: one framed surface split into columns by hairlines (a list, the main view, a side panel), each column
+   scrolls on its own. Desktop: --pane-cols (list 248, main, side --panel-width) at --pane-height; under 900 px the
+   columns stack and the frame grows with its content. .pane-side is the quiet side column (no card of its own).
+   Gallery: #panes. Pages that already size their own grid read --pane-cols, --pane-height, --pane-frame, --pane-radius, --pane-bg and
+   --pane-pad (the list column's inner padding). */
+.panes{--pane-cols:248px minmax(0,1fr) var(--panel-width);--pane-height:calc(100vh - 168px);--pane-frame:1px solid var(--border);--pane-radius:12px;--pane-bg:var(--surface);--pane-pad:var(--s2);display:grid;grid-template-columns:var(--pane-cols);height:var(--pane-height);min-height:480px;border:var(--pane-frame);border-radius:var(--pane-radius);background:var(--pane-bg);overflow:hidden}
+.panes>*{min-width:0;min-height:0}
+.panes>*:not(:last-child){border-right:1px solid var(--border)}
+.pane-side{display:grid;gap:var(--s5);align-content:start;padding:var(--s4);overflow-y:auto}
+.pane-side[hidden]{display:none}
+.pane-side h3{font-size:13px;line-height:20px;font-weight:600;margin:0 0 var(--s1)}
+.pane-side .card-row{padding:var(--s2) 0}
+.panes:has(>.pane-side[hidden]){--pane-cols:248px minmax(0,1fr)}
+@media(min-width:1600px){.panes{--pane-cols:288px minmax(0,1fr) 336px}.panes:has(>.pane-side[hidden]){--pane-cols:288px minmax(0,1fr)}}
+@media(max-width:899px){
+  .panes{--pane-cols:minmax(0,1fr);--pane-height:auto;min-height:0}
+  .panes>*:not(:last-child){border-right:0;border-bottom:1px solid var(--border)}
+}
+/* Thread line: one message as a chat line (avatar, name and time on top, the text below; no bubble). A line right
+   after one by the same writer is .thread-line.cont: no name row, the avatar column stays empty.
+   Gallery: #panes. */
+.thread-line{display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:var(--s3);align-items:start;padding:var(--s1) var(--s2);border-radius:8px}
+.thread-line.cont{margin-top:calc(var(--s2) * -1)}
+.thread-line.cont>.avatar{visibility:hidden}
+.thread-line>.avatar{width:28px;height:28px;font-size:12px}
+.thread-line-head{display:flex;align-items:baseline;flex-wrap:wrap;gap:var(--s2);font-size:13px;line-height:20px;font-weight:600}
+.thread-line-head .meta{font-size:12px;font-weight:400}
+.thread-line-text{font-size:14px;line-height:20px;white-space:pre-wrap;overflow-wrap:anywhere}
+.thread-line>.thread-line-body{min-width:0;max-width:72ch;display:grid;gap:var(--s1)}
 /* Form page (ORCH-1037): one form as its own page (New ticket), a centred column the width of a dialog */
 .form-page{width:100%;max-width:640px;margin:0 auto;padding-top:var(--s5)}
 /* Launch (ORCH-1037, UI.launch): the starting moment after Start, a spinning ring around a breathing dot and the steps */
