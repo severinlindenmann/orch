@@ -205,10 +205,14 @@ function offAddonName(hash) {
   const row = m && array(state?.settings?.addons).find(a => a && a.name === m[1]);
   return row && !row.active && !addons().some(a => a.name === m[1]) ? m[1] : null;
 }
+// The name a person sees for an add-on row: its menu label (Contacts), not its folder name (relay).
+function addonRowLabel(row) {
+  return String(row?.label || '').trim() || capitalise(row?.name || '');
+}
 function notFoundPage() {
   const off = offAddonName(location.hash);
   if (off) {
-    const label = capitalise(off);
+    const label = addonRowLabel(array(state?.settings?.addons).find(a => a && a.name === off));
     return fragment(heading(label + ' is turned off', 'Turn it on in Settings to use this page.'),
       h('div', {className:'state-frame', 'data-key':'addon-off'}, h('section', {className:'card pad stack'},
         h('p', {className:'muted'}, label + ' is turned off, so it has no page right now.'),
@@ -312,17 +316,17 @@ function accept(next) {
 }
 function route() {
   const r = pageRoute();
-  // The Preview switch (the live-session add-on's settings): on, its addresses show the new live page (pages/live.js)
-  return r.kind === 'page' && typeof livePreviewOn === 'function' && livePreviewOn() && livePageOf(r.id) ? {...r, kind:'live'} : r;
+  // The live-session add-on's addresses show the live page (pages/live.js)
+  return r.kind === 'page' && typeof liveFocusOn === 'function' && liveFocusOn() && livePageOf(r.id) ? {...r, kind:'live'} : r;
 }
 function pageRoute() {
   const full = location.hash || '#home', query = full.indexOf('?'), hash = query < 0 ? full : full.slice(0, query) || '#home';
-  // #new (linked from the one-ticket view) opens the new-ticket form on Home.
+  // #new is the New ticket page (ORCH-1037: its own page, no longer a window over Home).
   // The Notes page is gone: its "What changed" is on Home, and old note links land there.
   if (hash === '#notes' || hash.startsWith('#note/')) { history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // `orch review link` prints .../#/review: the same page
   if (hash === '#/review') { history.replaceState(null, '', '#review'); return {kind:'review', hash:'#review'}; }
-  if (hash === '#new') { if (!snapshot) setTimeout(() => ticketForm(), 0); history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
+  if (hash === '#new') { if (!snapshot) return {kind:'new', hash:'#new'}; history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
   const settingsHash = /^#settings(?:\/(general|agent|helper|phone|contacts|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
   if (settingsHash && !snapshot && state?.settings) { const [named, addon] = (settingsHash[1] || 'general').split('/'), tab = {helper:'agent', contacts:'phone'}[named] || named; return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
@@ -376,7 +380,7 @@ function render(arrived = new Set()) {
   const scroll = [window.scrollX, window.scrollY];
   const active = document.activeElement;
   const activeKey = nodeKey(active);
-  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page' || r.kind === 'live') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'notfound' ? (offAddonName(r.hash) ? 'Add-on turned off' : 'Page not found') : 'Home';
+  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page' || r.kind === 'live') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'new' ? 'New ticket' : r.kind === 'notfound' ? (offAddonName(r.hash) ? 'Add-on turned off' : 'Page not found') : 'Home';
   document.getElementById('workspace-name').textContent = clean(state.settings?.ws_name || state.workspace || 'Workspace');
   document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
   const crumb = document.getElementById('crumb');
@@ -392,7 +396,8 @@ function render(arrived = new Set()) {
     const last = r.path.split('/').filter(Boolean).pop() || '', tk = /^t_[A-Za-z0-9]+$/.test(last) ? ticketOf(last) : null;
     title = clean(tk?.title) || last || pageName;
     crumb.replaceChildren(...(last ? [h('a', {href:'#addon/' + encodeURIComponent(r.id)}, pageName), ' › ', title] : [pageName]));
-  } else crumb.textContent = pageName;
+  } else if (r.kind === 'new') crumb.replaceChildren(h('a', {href:'#tickets'}, 'Tickets'), ' › ', pageName);
+  else crumb.textContent = pageName;
   document.title = title + ' · orch';
   paintUpdated();
   // On a narrow screen the header is one row: workspace icon, page name, New ticket, "Menu · N".
@@ -414,9 +419,10 @@ function render(arrived = new Set()) {
   // Review all included (report r-1116-1748, ORCH-61)
   const newTicket = document.querySelector('#new-ticket'), newCls = 'btn outline sm';
   if (newTicket && newTicket.className !== newCls) newTicket.className = newCls;
+  if (newTicket) newTicket.hidden = snapshot || r.kind === 'new';  // on its own page the button would go nowhere
   const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
-  const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' || r.kind === 'live' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
+  const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' || r.kind === 'new' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' || r.kind === 'live' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
   const navLink = (url, text, glyph, tail = null) => navEntry(here, url, text, glyph, tail);
   const needsWords = window.DashHelpers.needsYou(needCount), contactsAddon = addons().find(a => a.dashboard?.panel === 'phone' && a.dashboard);
   // The needs-you number sits on Review (the page that lists exactly those questions and results), not on Home (ORCH-63)
@@ -437,18 +443,19 @@ function render(arrived = new Set()) {
     for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
     main.replaceChildren();
   }
-  // Preview on: a page that cannot be drawn softly loads once the normal way (pages/soft.js)
+  // a page that cannot be drawn softly loads once the normal way (pages/soft.js)
   try {
-  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'live' ? liveNextPage(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
+  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'new' ? newTicketPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'live' ? liveNextPage(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
   } catch (err) {
     if (changed && typeof SoftNav === 'object' && SoftNav.fallBack(r.hash)) return;
     throw err;
   }
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
-  if (typeof liveDockSync === 'function') liveDockSync();  // the layer of the new live page (Preview), outside main
+  if (typeof liveDockSync === 'function') liveDockSync();  // the layer of the live page, outside main
   if (typeof liveOpenFromAddress === 'function') liveOpenFromAddress(r);  // a ticket's address opens its session (ORCH-465)
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'ticket') mountTicketTalk(main);
+  if (r.kind === 'new') mountNewTicket(main);
   if (typeof startMount === 'function') startMount(main);  // every Start button (pages/start.js)
   main.querySelectorAll('[data-question]').forEach(host => {
     if (!mounts.has(host)) {
@@ -467,7 +474,7 @@ function render(arrived = new Set()) {
     main.querySelectorAll('[data-need-row]').forEach(row => { if (arrived.has(row.dataset.needRow)) window.orch.needsIn(row); });
   }
   if (changed) window.orch.enter(main);
-  window.paintLiveBar?.();  // the live bar under every page while the Preview switch is on (pages/livebar.js)
+  window.paintLiveBar?.();  // the live bar under every page (pages/livebar.js)
   renderedRoute = r.hash;
   if (!active?.isConnected && activeKey && !document.querySelector('dialog[open]')) {
     [...document.querySelectorAll('a,button,summary')].find(n => nodeKey(n) === activeKey)?.focus({preventScroll:true});
@@ -504,47 +511,71 @@ async function actRetry(op, args, applies) {
 }
 window.orchAct = (op, args, opts) => act(op, args, opts);
 window.orchActId = () => newActId();  // one id a form keeps for its retries (ORCH-580)
-// Turning an add-on on or off restarts the running services, this page's server too. When the answer is lost on
-// the way (the server restarted), read the state again once it is back: the add-on's switch says if it worked.
-async function addonSet(name, on, tries = 20, pause = 1500) {
-  const result = await act('addon.set', {name, on}, {check:false});  // the server restarts: its click ids are gone
-  if (result.ok || result.status !== 0 || snapshot) return result;
-  for (let i = 0; i < tries; i++) {
-    await new Promise(done => setTimeout(done, pause));
-    let next = null;
-    try {
-      const res = await fetch('/api/state', {cache:'no-store'});
-      if (res.ok) next = await res.json();
-    } catch (_) { /* still restarting */ }
-    if (!next) continue;
-    accept(next);
-    const row = array(next.settings?.addons).find(a => a && a.name === name);
-    return row && !!row.active === on ? {ok:true, status:200, state:next, recovered:true} : result;
-  }
-  return result;
+// An add-on change restarts the running services about a second after its answer (orch.restartlater), this
+// page's server too. Until the new server answers, nothing on the page asks it: the poll, the live sessions and the
+// debug log wait (window.orchQuiet), and this one wait reads the state once it is back (ORCH-1034: every poll hit
+// the closed port, the browser logged refused connections and the page said it could not reach the workspace).
+// The same run answering twice (`boot` unchanged) means nothing restarted: its answer is taken.
+let restartHold = 0, restartWaits = 0;  // two changes at once: the page stays quiet until the last wait ends
+window.orchQuiet = () => restartWaits > 0 && Date.now() < restartHold;
+async function afterRestart(boot, tries = 24, pause = 1500, head = 2500) {
+  const wait = ms => new Promise(done => setTimeout(done, ms));
+  restartWaits++;  // never longer than the waits, even if one is cut short
+  restartHold = Math.max(restartHold, Date.now() + head + (tries + 2) * pause);
+  try {
+    await wait(head);
+    let same = 0;
+    for (let i = 0; i < tries; i++) {
+      if (i) await wait(pause);
+      let now = null, next = null;
+      try {
+        const res = await fetch('/api/state?fresh=1', {cache:'no-store'});
+        if (!res.ok) continue;
+        now = res.headers?.get?.('X-Orch-Boot') || null;
+        if (boot && now === boot && ++same < 2) continue;  // the old run, not stopped yet
+        next = await res.json();  // the body can break off too while the server stops
+      } catch (_) { continue; }  // still restarting
+      serverBoot = now || serverBoot;
+      if (next && !next.delta) accept(next);
+      return next && !next.delta ? next : null;
+    }
+    return null;
+  } finally { if (--restartWaits <= 0) { restartWaits = 0; restartHold = 0; } }
 }
-// Uninstall an add-on (`orch addon uninstall`, refused while it is on: turn it off first). The
-// services restart like for the switch, so a lost answer is checked by reading the state again.
-async function addonUninstall(name, tries = 20, pause = 1500) {
+// Turning an add-on on or off: when the answer is lost on the way (the server restarted), the state read once the
+// server is back says if it worked (the add-on's switch). `settle` false: an answered change returns at once, the
+// caller sends its next step before the restart and waits once after it (Remove: off, then uninstall).
+// Back but not changed: the click never reached the server (it was still restarting, e.g. from a Remove just before:
+// ORCH-1045), so it is sent once more; turning on or off twice does no harm.
+async function addonSet(name, on, tries = 24, pause = 1500, settle = true, again = true) {
+  const boot = serverBoot;
+  const result = await act('addon.set', {name, on}, {check:false});  // the server restarts: its click ids are gone
+  if (snapshot || (!result.ok && result.status !== 0)) return result;
+  if (result.ok && !settle) return result;
+  const next = await afterRestart(boot, tries, pause);
+  if (result.ok || !next) return result;
+  const row = array(next.settings?.addons).find(a => a && a.name === name);
+  if (row && !!row.active === on) return {ok:true, status:200, state:next, recovered:true};
+  return again ? addonSet(name, on, tries, pause, settle, false) : result;
+}
+// Uninstall an add-on (`orch addon uninstall`, refused while it is on: turn it off first). The services restart
+// like for the switch; the row leaves the list at once and the state read after the restart confirms it. The
+// uninstall goes right after an answered turn-off, before that restart: a wait in between left a page that was
+// reloaded meanwhile with the add-on only turned off (seen in the walk of this change).
+async function addonUninstall(name, tries = 24, pause = 1500, again = true) {
   const still = rows => array(rows).some(a => a && a.name === name);
   if (array(state.settings?.addons).find(a => a && a.name === name)?.active) {
-    const off = await addonSet(name, false);
+    const off = await addonSet(name, false, tries, pause, false);
     if (!off.ok) return off;
   }
+  const boot = serverBoot;  // after a lost turn-off this is already the restarted run
   const result = await act('addon.uninstall', {name}, {check:false});
-  if (result.ok || result.status !== 0 || snapshot) return result;
-  for (let i = 0; i < tries; i++) {
-    await new Promise(done => setTimeout(done, pause));
-    let next = null;
-    try {
-      const res = await fetch('/api/state', {cache:'no-store'});
-      if (res.ok) next = await res.json();
-    } catch (_) { /* still restarting */ }
-    if (!next) continue;
-    accept(next);
-    return still(next.settings?.addons) ? result : {ok:true, status:200, state:next, recovered:true};
-  }
-  return result;
+  if (snapshot || (!result.ok && result.status !== 0)) return result;
+  if (result.ok && state?.settings) { state.settings.addons = array(state.settings.addons).filter(a => !(a && a.name === name)); render(); }
+  const next = await afterRestart(boot, tries, pause);
+  if (result.ok || !next) return result;
+  if (!still(next.settings?.addons)) return {ok:true, status:200, state:next, recovered:true};
+  return again ? addonUninstall(name, tries, pause, false) : result;  // never arrived: once more, like the switch
 }
 // The button a person just pressed shows the kit's busy state at once (aria-busy + aria-disabled), before the
 // answer comes, and until it came (ORCH-102: a click showed nothing for seconds while helpers ran).
@@ -675,6 +706,7 @@ let refreshAgain = false;
 let wantFull = false;  // the last delta did not fit the state held: ask for the whole state once
 async function refresh() {
   if (snapshot) return;
+  if (window.orchQuiet()) return;  // an add-on change restarts the server: afterRestart reads the state once it is back
   if (fetching || writing) { refreshAgain = true; return; }
   fetching = true;
   refreshAgain = false;
@@ -738,7 +770,7 @@ function dialog(title, cls = 'dialog', lock = '') {
   return {d, actions};
 }
 document.getElementById('new-ticket').hidden = snapshot;
-document.getElementById('new-ticket').addEventListener('click', () => ticketForm());
+document.getElementById('new-ticket').addEventListener('click', () => openNewTicket());
 // Keyboard shortcuts (persona test F6): "/" goes to the ticket search, "n" opens New ticket. Never while typing or with a window open.
 function shortcutFor(e, typing, windowOpen) {
   if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || typing || windowOpen) return '';
@@ -749,7 +781,7 @@ document.addEventListener('keydown', e => {
   const what = shortcutFor(e, typing, !!document.querySelector('dialog[open]'));
   if (!what || snapshot) return;
   e.preventDefault();
-  if (what === 'new') { ticketForm(); return; }
+  if (what === 'new') { openNewTicket(); return; }
   const focusSearch = () => document.querySelector('[data-key="ticket-search"]')?.focus();
   if (route().kind !== 'tickets') { location.hash = '#tickets'; setTimeout(focusSearch, 0); } else focusSearch();
 });
@@ -938,18 +970,18 @@ main.addEventListener('click', async event => {
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
   if (action === 'auto-update-note-ok') { const r = await act('update.note.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
-  if (action === 'live-preview') {
-    if (settingsBusy.has('live-preview')) return;
-    const on = state.settings?.focus_preview_on !== true;
-    const result = await settingsSend('focus_preview.set', {on}, 'live-preview'), label = addonLabel(addons().find(a => a.page?.live_session === true));
-    if (result.ok) window.orch.toast(on ? label + ' now shows the new ' + label + ' (Preview).' : label + ' is back to today\u2019s ' + label + '.', 'ok');
-    return;
-  }
   if (action === 'session-typing') {
     if (settingsBusy.has('session-typing')) return;
     const on = state.settings?.typing_on !== true;
     const result = await settingsSend('typing.set', {on}, 'session-typing');
     if (result.ok) window.orch.toast(on ? 'You can type into the helper\u2019s screen.' : 'Typing into the helper\u2019s screen is off.', 'ok');
+    return;
+  }
+  if (action === 'terminal-typing') {
+    if (settingsBusy.has('terminal-typing')) return;
+    const on = state.settings?.terminal_typing_on !== true;
+    const result = await settingsSend('terminal-typing.set', {on}, 'terminal-typing');
+    if (result.ok) window.orch.toast(on ? 'You can type into the plain terminal.' : 'Typing into the plain terminal is off.', 'ok');
     return;
   }
   if (action === 'diag-delete-reports') { await diagDelete(); return; }
@@ -995,7 +1027,7 @@ main.addEventListener('click', async event => {
       return result;
     };
     if (addon.active) await send();
-    else settingsConfirm('Turn on ' + capitalise(addon.name) + '?', addon.consent, 'preserve-lines', 'Turn on', send);
+    else settingsConfirm('Turn on ' + addonRowLabel(addon) + '?', addon.consent, 'preserve-lines', 'Turn on', send);
     return;
   }
   if (action === 'addon-remove') {
@@ -1009,7 +1041,7 @@ main.addEventListener('click', async event => {
       if (result.ok) location.hash = '#settings/addons';
       render();
     };
-    settingsConfirm('Remove ' + capitalise(addon.name) + '?', 'It is turned off and taken off this computer. Your tickets stay as they are. You can add it again any time.', '', 'Remove', send);
+    settingsConfirm('Remove ' + addonRowLabel(addon) + '?', 'It is turned off and taken off this computer. Your tickets stay as they are. You can add it again any time.', '', 'Remove', send);
     return;
   }
   if (action === 'agent') {
@@ -1035,7 +1067,7 @@ main.addEventListener('click', async event => {
   }
   if (action === 'board-more') { const lane = control.dataset.lane || 'done'; if (boardMore.has(lane)) boardMore.delete(lane); else boardMore.add(lane); render(); return; }
   if (action === 'file-preview') { previewFile(control.dataset.ticket, control.dataset.kind, control.dataset.name); return; }
-  if (action === 'new') ticketForm();
+  if (action === 'new') openNewTicket();
   if (action === 'inline') startInline(control);
   if (action === 'ref-preview') { previewReference(control); return; }
   if (action === 'copies-mode') { settingsSend('copies.set', {mode:control.dataset.mode}, 'copies'); return; }
@@ -1091,7 +1123,7 @@ main.addEventListener('click', async event => {
 });
 window.addEventListener('hashchange', async () => {
   if (document.querySelector('.sidebar')?.dataset.open === 'true') setMenu(false);
-  // Preview on: a dialog in the keep place (the layer) stays open across the page change (pages/soft.js)
+  // a dialog in the keep place (the layer) stays open across the page change (pages/soft.js)
   const soft = typeof SoftNav === 'object' ? SoftNav : null;
   soft?.hold(true);
   for (const d of soft ? soft.dialogsToClose() : document.querySelectorAll('dialog[open]')) await window.orch.close(d);

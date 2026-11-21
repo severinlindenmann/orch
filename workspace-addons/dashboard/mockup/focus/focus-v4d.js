@@ -14,7 +14,7 @@
     [9, 'Pin and name', 'Pin any session to keep it first on the wall and in the bar. Click its name to give it your own.', 'To build: a pinned flag and a display name per session, kept next to the session id.', 'Small', 'two small values to store', { page: 'focus', view: 'zoom', cur: 'Manager', ren: 'Manager' }],
     [10, 'Result widgets with a big preview', 'Every kind of result gets a small widget and a big preview on top of the page: documents, code, tables, pages, PDFs, pictures, recordings, charts, changes. The Widgets page is the proposal, one real example each.', 'Files and evidence attached to the ticket, and the links on it. The style guide already previews pictures, PDFs, pages, tables, Markdown, code, text, audio and video; charts, changes and the tree view are new.', 'Medium', 'one widget and one preview per type, built once in the style guide', { page: 'focus', view: 'zoom', cur: 'ORCH-228', term: false, ov: { src: 'ORCH-228', i: 0 } }, ['See the widget proposal', { page: 'widgets' }]],
     [11, 'Works with 20 to 30 sessions', 'The bar shows the sessions that need you and your pinned ones; everything else is a count such as "9 in line" that opens a list you can search. The wall bands collapse, scroll and filter.', 'The same run list, grouped by signal. Live places are limited (8 in this demo): the other tickets wait in line and start by themselves.', 'Small', 'grouping and a search box', { page: 'home', mode: 'bar', many: true, list: 'queue' }],
-    [12, 'Tool and model, seen and chosen', 'Every session shows its tool and model (' + window.MW_TOOLS.t1.label + ' · Opus, ' + window.MW_TOOLS.t2.label + ' · GPT-5), how long it has been open and when it closes for being idle. A new session or a fresh start lets you pick tool and model; the usual one is preselected, so it stays one click.', 'orch picks a model per ticket (the small one first) and a person can move it up. Built (ORCH-362): tool and model at a fresh start (orch run start --agent, orch ticket model) and on the line of every pane. A new model applies when the helper finishes its current step (or at its next start).', 'Medium', 'a choice at the start and a label per session', { page: 'home', mode: 'bar', menu: 'new' }],
+    [12, 'Tool and model, seen and chosen', 'Every session shows its tool and model (' + window.MW_TOOLS.t1.label + ' · Opus, ' + window.MW_TOOLS.t2.label + ' · GPT-5), how long it has been open and when it closes for being idle. A new session or a fresh start lets you pick tool and model; the usual one is preselected, so it stays one click.', 'orch picks a model per ticket (the small one first) and a person can move it up. Built (ORCH-362): tool and model at a fresh start (orch run start --agent, orch ticket model) and on the line of every pane. A new model applies when the helper finishes its current step (or at its next start). Built (ORCH-710): the Empty helper\'s model in the New menu (orch session new empty --model); its tool stays the usual one.', 'Medium', 'a choice at the start and a label per session', { page: 'home', mode: 'bar', menu: 'new' }],
     [13, 'Files, screenshots and voice in the message box', 'Attach files, paste or drop a screenshot, and see each one as a small preview before you send. Speak instead of typing: the words land in the box for you to check and edit, never sent by themselves.', 'Attachments to a helper message exist today (the composer: paste a screenshot or drop files, up to 25 MB each). Voice needs the relay turned on, which has a speech-to-text key, so the microphone only shows then. To build and to check: recording in the browser and the text coming back.', 'Medium', 'previews before sending; voice is new', { page: 'focus', view: 'zoom', cur: 'ORCH-228', term: false, att: true, voice: 'done' }]
   ];
   var HIST = [['Yesterday 16:40', 'step 2 of 4', 'Made the sketch, then stopped'], ['12 Nov 10:15', 'step 1 of 4', 'Read the ticket and asked about the size of the job'], ['11 Nov 09:02', 'step 1 of 4', 'First try, went off track']];
@@ -57,7 +57,7 @@
   var PAGES = { focus: 'Focus', home: 'Home', tickets: 'Tickets', ticket: 'Tickets', review: 'Review', widgets: 'Widgets' };
   var AG = window.MW_TOOLS, TOOL = { t1: AG.t1.label, t2: AG.t2.label, shell: 'Plain terminal' };
   var NEW = [['Empty helper', 'A helper with no ticket and no task yet'], ['Chat helper', 'Ask anything, no ticket'], ['Plain terminal', 'An empty terminal in this workspace'], ['Manager', 'Looks after all helpers']];
-  var st = { page: 'focus', view: 'wall', cur: 'ORCH-238', term: false, mode: 'bar', last: 'bottom', full: false, ask: false, ren: '', menu: '', list: '', lq: '', f: '', col: {}, panes: ['ORCH-238'], act: 0, pm: '', ov: null, nt: 't1', nm: 'Sonnet', voice: '', vk: '', many: false, sheet: false, feat: 0, marks: false, tk: 'ORCH-238' };
+  var st = { page: 'focus', view: 'wall', cur: 'ORCH-238', term: false, mode: 'bar', last: 'bottom', full: false, ask: false, ren: '', menu: '', list: '', lq: '', f: '', col: {}, panes: ['ORCH-238'], act: 0, pm: '', ov: null, nt: 't1', nm: 'Sonnet', np: '', voice: '', vk: '', many: false, sheet: false, feat: 0, marks: false, tk: 'ORCH-238' };
   var drafts = {}, picks = {}, uid = 0, feedAt = 0;
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   try { picks = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { picks = {}; }
@@ -130,7 +130,20 @@
   /* tool and model for a new session or a fresh start: the usual choice is preselected, so starting stays one click */
   function pickHTML() {
     var sg = function (label, list, cur, act, name) { return '<span class="segmented" role="group" aria-label="' + label + '">' + list.map(function (x) { return btn('btn sm', act, name ? name(x) : x, { 'data-v': x, 'aria-pressed': String(cur === x) }); }).join('') + '</span>'; };
-    return '<div class="mw-pick" role="group" aria-label="Runs on"><span class="mw-bl">Runs on</span>' + sg('Tool', ['t1', 't2'], st.nt, 'ntool', function (x) { return TOOL[x]; }) + sg('Model', MODELS[st.nt], st.nm, 'nmodel') + mk(12) + '</div>';
+    return '<div class="mw-pick" role="group" aria-label="Runs on"><span class="mw-bl">Runs on</span>' + sg('Tool', ['t1', 't2'], st.nt, 'ntool', function (x) { return TOOL[x]; }) + sg('Model', MODELS[st.nt], st.nm, 'nmodel') + mk(12) + '</div>' + permHTML();
+  }
+  /* ORCH-818: the permission row of the Start choice (Manager, Empty helper, Chat helper). The tool's own modes; a mode
+     the workspace does not allow is off and says why; Bypass permissions shows one plain warning the first time. */
+  var PERM = { t1: [['ask', 'Default'], ['edits', 'Accept edits'], ['auto', 'Auto'], ['full', 'Bypass permissions']], t2: [['ask', 'This folder only'], ['full', 'Full access']] };
+  var PERM_TOP = 'auto'; /* demo: workspace.permissions = auto, so Bypass permissions is off */
+  var PERM_RANK = { ask: 0, edits: 1, auto: 2, full: 3 };
+  function permWord(tl, m) { var x = (PERM[tl || 't1'] || []).filter(function (p) { return p[0] === m; })[0]; return x ? x[1] : ''; }
+  function permHTML() {
+    var cur = st.np || PERM_TOP, list = PERM[st.nt] || [];
+    if (!list.some(function (p) { return p[0] === cur; })) cur = list[0][0];
+    var seg = '<span class="segmented" role="group" aria-label="Permissions">' + list.map(function (p) { var off = PERM_RANK[p[0]] > PERM_RANK[PERM_TOP]; return btn('btn sm', 'nperm', p[1], { 'data-v': p[0], 'aria-pressed': String(cur === p[0]), disabled: off ? 'disabled' : null, title: off ? 'Not allowed in this workspace. A person can allow it in Settings.' : null }); }).join('') + '</span>';
+    var warn = cur === 'full' ? '<p class="meta">Bypass permissions: the helper runs every command without asking, also risky ones. Use it only in a workspace you trust.</p>' : '';
+    return '<div class="mw-pick" role="group" aria-label="Permissions"><span class="mw-bl">Permissions</span>' + seg + '</div>' + warn;
   }
   function meta(s, bare) { return '<span class="mw-meta meta">' + (bare ? '' : tool(s)) + (live(s) && s.up !== undefined ? '<span>open ' + dur(s.up) + '</span>' : '') + '<span>' + warm(s) + '</span></span>'; }
 
@@ -347,7 +360,7 @@
   }
   function mdlBtn(s, can) {
     if (s.kind === 'shell') return tool(s);
-    var t = I[s.tool || 't1'] + tlabel(s) + (s.next && s.next !== mdl(s) ? ' → ' + s.next + ' after this step' : '');
+    var t = I[s.tool || 't1'] + tlabel(s) + (s.next && s.next !== mdl(s) ? ' → ' + s.next + ' after this step' : '') + (s.kind === 'free' && s.perm ? ' · ' + permWord(s.tool, s.perm) : '');
     return can ? btn('mw-mdl', 'pm', t, { 'data-k': s.k, 'data-kind': 'model', 'aria-expanded': String(pmOpen(s.k, 'model')), title: 'See or change the model' }) : '<span class="mw-tool">' + t + '</span>';
   }
   function histBtn(s) { return s.kind !== 'shell' ? btn('btn sm ghost', st.ask ? 'askoff' : 'ask', 'History', { 'aria-pressed': String(!!st.ask && live(s)) }) : ''; }
@@ -635,7 +648,7 @@
       if (k === 'Plain terminal') S.push({ k: k, t: 'No helper, just a terminal', kind: 'shell', s: 'open', up: 0, pin: true, now: 'An empty terminal, ready for you.', lines: ['Last login: today 15:06', 'demo@workspace ~ %'], chat: [], files: [] });
       else {
         var fullUp = used() >= max(), t = T[k] || T['Empty helper'];
-        S.push({ k: k, t: t[0], kind: 'free', tool: st.nt, model: st.nm, s: fullUp ? 'queue' : 'run', up: 0, pin: true, now: fullUp ? 'Waits in line for a free helper place.' : t[1], lines: [t[2]], chat: [['h', t[2].slice(2), 'now']], files: [] });
+        S.push({ k: k, t: t[0], kind: 'free', tool: st.nt, model: st.nm, perm: st.np || PERM_TOP, s: fullUp ? 'queue' : 'run', up: 0, pin: true, now: fullUp ? 'Waits in line for a free helper place.' : t[1], lines: [t[2]], chat: [['h', t[2].slice(2), 'now']], files: [] });
       }
       say(k + ' opened and pinned.');
     }
@@ -743,6 +756,7 @@
     if (st.pm) { st.pm = ''; if (k && has(k) && (a === 'ask' || a === 'view')) st.cur = k; }
     if (a === 'ntool') { st.nt = b.dataset.v; st.nm = AG[st.nt].usual; render('[data-act=ntool][data-v=' + st.nt + ']'); return; }
     if (a === 'nmodel') { st.nm = b.dataset.v; render('[data-act=nmodel][aria-pressed=true]'); return; }
+    if (a === 'nperm') { st.np = b.dataset.v; render('[data-act=nperm][aria-pressed=true]'); return; }
     if (a === 'smodel') { s = by(k); s.next = b.dataset.v === mdl(s) ? '' : b.dataset.v; render('[data-act=pm][data-k="' + k + '"][data-kind=model]'); say(s.next ? 'Model ' + s.next + ' chosen for ' + s.k + '.' : 'The model stays ' + mdl(s) + '.'); return; }
     if (a === 'min') { setMode('bar'); return; }
     if (a === 'attach') { attach(by(k), DEMO.filter(function (d) { return !(by(k).att || []).some(function (x) { return x[1] === d[1]; }); })); render('.mw-comp[data-k="' + k + '"] input'); return; }

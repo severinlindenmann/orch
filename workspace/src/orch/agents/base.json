@@ -6,7 +6,7 @@
       "label": "Claude",
       "detect": { "binary": "claude", "env_any": ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"] },
       "prompt_via": "arg",
-      "api_key": { "fd_env": "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "set": { "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1" }, "drop": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"], "spend": "result-cost" },
+      "api_key": { "fd_env": "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "set": { "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "0" }, "drop": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"], "spend": "result-cost" },
       "model_args": ["--model", "{model}"],
       "oneshot": {
         "fresh": ["claude", "-p", "--session-id", "{new_session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket outcome:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch ticket plan:*),Bash(orch ticket model:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--", "{prompt}"],
@@ -37,9 +37,11 @@
       },
       "permissions": {
         "ask": ["--disallowedTools", "Bash(orch private:*),Bash(orch config agent:*),Bash(*agent-approvals*),Edit(**/agent-approvals.json)"],
+        "edits": { "args": ["--permission-mode", "acceptEdits"], "with": "ask" },
         "auto": { "args": ["--permission-mode", "auto", "--disallowedTools", "Bash(orch private:*),Bash(orch config agent:*),Bash(*agent-approvals*),Edit(**/agent-approvals.json)"], "if_help_has": "\"auto\"", "else": ["--permission-mode", "acceptEdits", "--disallowedTools", "Bash(orch private:*),Bash(orch config agent:*),Bash(*agent-approvals*),Edit(**/agent-approvals.json)"] },
         "full": ["--dangerously-skip-permissions"]
       },
+      "permission_choices": [{ "mode": "ask", "label": "Default" }, { "mode": "edits", "label": "Accept edits" }, { "mode": "auto", "label": "Auto" }, { "mode": "full", "label": "Bypass permissions" }],
       "hooks": { "SessionStart": "orch run event --kind session", "Stop": "orch run event --kind idle", "StopFailure": "orch run event --kind idle", "Notification": "orch run event --kind attention", "UserPromptSubmit": "orch run event --kind working" },
       "session": { "id": "chosen-by-orch", "hand_started": "hook:SessionStart", "missing": "No conversation found with session ID", "transcript": { "dir_env": "CLAUDE_CONFIG_DIR", "home": ".claude", "path": ["projects", "{folder}", "{session}.jsonl"] }, "chat_files": { "dir_env": "CLAUDE_CONFIG_DIR", "home": ".claude", "glob": "projects/*/{session}.jsonl", "lines": "chat" } },
       "capabilities": { "resume": true, "choose_session_id": true, "interactive_tmux": true, "hooks": true, "stream": true, "permission_retry": true, "subagents": true, "usage": true },
@@ -60,6 +62,7 @@
         "auto": { "args": ["-c", "sandbox_mode=\"workspace-write\""], "approval_args": ["-c", "approval_policy=\"never\""], "unless_config": { "home_env": "CODEX_HOME", "home": ".codex", "file": "config.toml", "key": "sandbox_mode", "value": "read-only", "approval_key": "approval_policy", "approval_value": "never", "profile_key": "profile", "profiles": "profiles" }, "say": "Codex is set to read-only on this computer: it can't change files.", "note": "Codex can change files only in this folder and has no network at this permission level: no other folders, no GitHub. A person can allow it with: orch config set workspace.permissions full" },
         "full": { "args": ["-c", "sandbox_mode=\"danger-full-access\""], "approval_args": ["-c", "approval_policy=\"never\""], "unless_config": { "home_env": "CODEX_HOME", "home": ".codex", "file": "config.toml", "key": "sandbox_mode", "value": "read-only", "approval_key": "approval_policy", "approval_value": "never", "profile_key": "profile", "profiles": "profiles" }, "say": "Codex is set to read-only on this computer: it can't change files." }
       },
+      "permission_choices": [{ "mode": "ask", "label": "This folder only" }, { "mode": "full", "label": "Full access" }],
       "store_args": { "after": "exec", "args": ["--add-dir", "{store}"] },
       "hooks": null,
       "session": { "id": "from-output", "parse": "codex-exec-json/1", "missing": "no rollout found for thread id", "chat_files": { "dir_env": "CODEX_HOME", "home": ".codex", "glob": "sessions/*/*/*/rollout-*-{session}.jsonl", "lines": "items" } },

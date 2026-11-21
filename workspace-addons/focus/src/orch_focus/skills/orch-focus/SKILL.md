@@ -52,6 +52,9 @@ plain terminal (no process yet) or the Manager; one of each, a second New goes t
     orch session list                                # which ones exist and are open
     orch session close <kind>                        # a helper's conversation is kept; the terminal closes
 
+The Manager, empty helper and chat helper start in the permission mode picked in the New menu (remembered per kind,
+at most what workspace.permissions allows). Never raise it yourself: only the signed-in person can, on the dashboard.
+
 Focus adds rows to `orch needs` only for a live run waiting for an OK and for a refused tool nobody answered yet.
 `orch focus view --json` feeds the Live tab of the dashboard.
 

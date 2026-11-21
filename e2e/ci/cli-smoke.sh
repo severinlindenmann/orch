@@ -48,6 +48,17 @@ orch ticket summary "$ID" "Smoke run on $(uname -s)"
 step "ask"
 orch ask "$ID" "Which colour?" --option red --option blue --recommend red
 orch ticket show "$ID"
+# ORCH-897 (first run): init is safe to repeat, and orch uninstall keeps the tickets so init brings the folder back
+step "init again"
+ORCH_AGENT=claude orch init
+orch ticket show "$ID" >/dev/null
+step "uninstall keeps tickets, init again"
+orch uninstall </dev/null
+test ! -f .agents/skills/orch/SKILL.md
+orch ticket show "$ID" >/dev/null 2>&1 || test -f ".orch/tickets/$ID.json"
+ORCH_AGENT=claude orch init
+test -f .agents/skills/orch/SKILL.md
+orch ticket show "$ID"
 step "addon add $ADDON"
 run_wait orch addon add "$ADDON" --yes
 orch addon list

@@ -58,7 +58,7 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 | `auto <id> on \| off` | `{"service": row, "next"}` |
 | `remove <id>` | `{"removed": id, "next"}`: stops it, removes the platform entry and the record, keeps the log |
 | `log <id> [--lines N]` (default 20, max 1000) | `{"id", "lines": [...]}`; every line goes through the core secret scan, a hit shows `••••••` in place of the value (the whole line when the value cannot be told apart) |
-| `found` | `{"found": [item]}`; item = `id` (`launchd:<label>` \| `systemd:<unit>` \| `process:<pid>`), `name`, `running`, `since`, `what` (one plain line), `how` (`kind`, `label`/`unit`, `path`, `pid`?), `command` (secret scan hits as `••••••`), `auto`. Nothing found = `[]` and one plain sentence; Windows: `[]` and `"note"`. Reads only |
+| `found` | `{"found": [item]}`; item = `id` (`launchd:<label>` \| `systemd:<unit>`; plain programs are no items), `name`, `running`, `since`, `what` (one plain line), `how` (`kind`, `label`/`unit`, `path`, `pid`?), `command` (secret scan hits as `••••••`), `auto`. Nothing found = `[]` and one plain sentence; `others`? = number of plain programs running in the workspace folder (shown as one line "N other programs run here", only when > 0); Windows: `[]` and `"note"`. Reads only |
 | `adopt <found-id> [--name X] [--id SLUG] [--ticket ID]` | `{"service": row, "next"}`: Manage with orch (see below) |
 | `act <verb> [--by X] -- <id>` | verbs `start, stop, restart, auto-on, auto-off, remove, adopt` (adopt takes a found id); same answers as the commands |
 | `view` | `orch.addon-view/1`: one `split` block (list and panel: every service with its state, starts by itself, made by, last 20 log lines masked, Remove with what happens; "Found on this computer" when there are found items) and a footnote to Automation |
@@ -67,7 +67,8 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 `found` lists background jobs of the person's own account that orch did not make; it only reads, nothing about a
 found job changes until the person chooses Manage with orch (`adopt`).
 - macOS: plists in `~/Library/LaunchAgents` (Label, `ProgramArguments`/`Program`, `RunAtLoad`) plus
-  `launchctl print gui/<uid>/<label>`; labels `ch.orch.svc.*` (orch's own) and `com.apple.`, `com.google.`,
+  `launchctl print gui/<uid>/<label>`; starts by itself = `RunAtLoad` and the label not switched off in
+  `launchctl print-disabled gui/<uid>` (also asked for an adopted job in list and on the page); labels `ch.orch.svc.*` (orch's own) and `com.apple.`, `com.google.`,
   `com.microsoft.` are left out (one list in `found.py`).
 - Linux: `systemctl --user list-units --type=service --all` and `~/.config/systemd/user/*.service`, then one
   `systemctl --user show`; only units whose file is in `~/.config/systemd/user` or `~/.local/share/systemd/user`, never

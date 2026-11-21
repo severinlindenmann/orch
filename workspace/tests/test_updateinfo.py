@@ -126,3 +126,65 @@ def test_announce_lines_empty_when_up_to_date_or_unknown(proj, monkeypatch):
         assert updateinfo.announce_lines() == []
     monkeypatch.setattr(updateinfo, "info", lambda use_cache=True: 1 / 0)
     assert updateinfo.announce_lines() == []
+
+
+def test_pending_install_gets_its_commit_and_release_later(proj, monkeypatch):
+    """An update GitHub did not answer: the next look-up finds the commit at that time and its release."""
+    addons.home().mkdir(parents=True, exist_ok=True)
+    (addons.home() / "installed.json").write_text(
+        json.dumps({"sha": None, "pending": {"ref": "main", "at": 1_700_000_000}})
+    )
+    asked = []
+    monkeypatch.setattr(updateinfo, "_commit_at", lambda ref, at: asked.append((ref, at)) or NEW)
+    monkeypatch.setattr(addons, "_source_sha", lambda: NEW)
+    monkeypatch.setattr(
+        updateinfo,
+        "_fetch_messages",
+        lambda kind, a, b=None: ["Merge pull request #9 from u/release/part34\n\nR"],
+    )
+    info = updateinfo.info(use_cache=False)
+    assert asked == [("main", 1_700_000_000)]
+    assert info["installed"]["label"] == "orch 34" and info["update_available"] is False
+    assert json.loads((addons.home() / "installed.json").read_text()) == {"sha": NEW, "release": 34}
+
+
+def test_pending_install_still_no_answer_keeps_waiting(proj, monkeypatch):
+    addons.home().mkdir(parents=True, exist_ok=True)
+    record = {"sha": None, "pending": {"ref": "main", "at": 1_700_000_000}}
+    (addons.home() / "installed.json").write_text(json.dumps(record))
+    monkeypatch.setattr(updateinfo, "_commit_at", lambda ref, at: None)
+    monkeypatch.setattr(addons, "_source_sha", lambda: None)
+    updateinfo.info(use_cache=False)
+    assert json.loads((addons.home() / "installed.json").read_text()) == record
+    # the commit answers but the history does not: still waiting, not saved without its release
+    monkeypatch.setattr(updateinfo, "_commit_at", lambda ref, at: NEW)
+    monkeypatch.setattr(updateinfo, "_fetch_messages", lambda *a, **k: None)
+    updateinfo.info(use_cache=False)
+    assert json.loads((addons.home() / "installed.json").read_text()) == record
+
+
+@pytest.mark.parametrize("bad", ["null", "[]", '"x"', '{"sha": null, "pending": {"ref": 5, "at": 1}}'])
+def test_pending_hostile_records_are_left_alone(proj, monkeypatch, bad):
+    addons.home().mkdir(parents=True, exist_ok=True)
+    (addons.home() / "installed.json").write_text(bad)
+    monkeypatch.setattr(updateinfo, "_commit_at", lambda ref, at: 1 / 0)
+    updateinfo.resolve_pending()
+    assert (addons.home() / "installed.json").read_text() == bad
+
+
+def test_commit_at_asks_github_for_the_ref_at_that_time(proj, monkeypatch):
+    import io
+    import urllib.request
+
+    monkeypatch.setattr(addons, "_github_api", lambda: "https://api.github.com/repos/o/orch")
+    urls = []
+
+    def urlopen(req, timeout):
+        urls.append(req.full_url)
+        return io.BytesIO(json.dumps([{"sha": NEW}]).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    assert updateinfo._commit_at("main", 1_700_000_000) == NEW
+    assert urls == [
+        "https://api.github.com/repos/o/orch/commits?sha=main&until=2023-11-14T22:13:20Z&per_page=1"
+    ]

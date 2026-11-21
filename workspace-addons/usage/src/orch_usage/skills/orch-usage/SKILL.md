@@ -35,10 +35,13 @@ The person sees and changes the same on the Usage page of the dashboard; its cli
     orch usage on <account>
     orch usage off <account>
 
-**Temporary rules**: add `--end YYYY-MM-DD` (to the end of that day) to a change, or end the current rule:
+**Temporary rules**: add `--end <when>` to a change, or end the current rule. `<when>` is a day (to the end of that
+day) or a day and a time, in the workspace's time zone, to the minute: `tomorrow`, `tomorrow 08:00`, `today 18:00`,
+`2026-11-19 07:59`; or `reset` for the account's next reset.
 
-    orch usage limit <account> 20% --end 2026-11-20
-    orch usage end <account> 2026-11-20
+    orch usage limit <account> 20% --end "tomorrow 08:00"
+    orch usage end <account> "2026-11-19 07:59"
+    orch usage end <account> reset                 # at its next reset
     orch usage end <account> none                  # keep the rule, no end
 
 When a rule ends it falls back to the rule before its last change, and the history says so.

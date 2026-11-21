@@ -246,6 +246,20 @@ def _waiting_input(root: Path, tid: str) -> list[dict]:
     ][-20:]
 
 
+def _sent_input(root: Path, tid: str) -> list[dict]:
+    """The person's own messages to the helper, read or not (the newest 20): the chat shows them on reload."""
+    return [
+        {
+            "id": i["id"],
+            "text": i["text"][:2000],
+            "at": i.get("at"),
+            "by": i.get("by"),
+            "read": bool(i.get("delivered_at")),
+        }
+        for i in runs.human_sent(root, tid)
+    ][-20:]
+
+
 def _status(args, root: Path) -> None:
     ids = args.ticket if isinstance(args.ticket, list) else [args.ticket]
     if len(ids) == 1:  # the one-ticket answer is unchanged
@@ -278,6 +292,7 @@ def status_of(root: Path, tid: str) -> tuple[dict, str]:
         data = {"ticket": tid, "running": False, "pending": waiting, "human_pending_ids": human}
         data.update(runwatch.describe(root, tid, rec))
         data["waiting_input"] = _waiting_input(root, tid)
+        data["sent_input"] = _sent_input(root, tid)
         data["stop_held_ids"] = runs_live.stop_held(root, tid, human)  # a person stopped: no restart for them
         if waiting:  # input is really queued for a run
             text = (
@@ -292,6 +307,7 @@ def status_of(root: Path, tid: str) -> tuple[dict, str]:
     watch = runwatch.describe(root, tid, rec)  # waiting on / idle since: the stuck signal a monitor reads
     data.update(watch)
     data["waiting_input"] = _waiting_input(root, tid)
+    data["sent_input"] = _sent_input(root, tid)
     if st == "alive" and rec.get("mode") == "live" and runs_live.hold_text(rec):
         data["hold"] = runs_live.hold_text(rec)  # why orch waits; gone when the hold clears
     if st == "alive" and (others := sharedfolder.others_in_folder(root, tid)):
@@ -457,7 +473,10 @@ def dispatch(args, root: Path) -> bool:
         )
     if sub == "list":  # read-only: no cleanup, no writes
         rows = runwatch.list_runs(root)
-        _out(args, {"runs": rows}, runwatch.list_text(rows))
+        line = tend.queue(
+            root
+        )  # tickets waiting for a free helper place (ORCH-1026: invisible during the move)
+        _out(args, {"runs": rows, "line": line}, runwatch.list_text(rows, line))
         return True
     if sub == "tend":  # the helper watcher's pass (ORCH-78): end, remind, start fresh, start the line
         # the watcher first, so a session at the idle limit gets its history line (or its fresh start)

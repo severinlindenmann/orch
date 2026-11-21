@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from orch.errors import Refused as CoreRefused
+from orch.net import when as local_when
 
 from . import repo
 from .settings import DEFAULTS, minutes
@@ -68,9 +69,9 @@ def consent(settings):
 def status_line(s):
     if s["mode"] == "off":
         return "Sync is off."
-    run = f"running, next {s['next_run']}" if s["running"] else "not running (orch sync start)"
+    run = f"running, next {local_when(s['next_run'])}" if s["running"] else "not running (orch sync start)"
     return (
-        f"Sync: {s['mode']}, every {s['interval']} minutes, {run}. Last synced: {s['last_ok'] or 'never'}. "
+        f"Sync: {s['mode']}, every {s['interval']} minutes, {run}. Last synced: {local_when(s['last_ok']) if s['last_ok'] else 'never'}. "
         f"Paused: {'yes' if s['paused'] else 'no'}."
         + (f" Problem: {s['last_error']}" if s["last_error"] else "")
     )

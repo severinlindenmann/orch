@@ -47,7 +47,7 @@ def test_wait_cleared_only_after_run_start_worked(ws):
     t = tk(ws, "t_wake002")
     assert t["waiting_on"] is not None
     (q,) = t["questions"]
-    assert q["kind"] == "automation:failure" and "orch config set workspace.agent <name>" in q["text"]
+    assert q["kind"] == "automation:failure" and "No helper is set yet" in q["text"]
     assert q["options"] == ["Try again", "Leave it"]
     s.tick(T(8, 1))  # asked once, not again
     assert len(tk(ws, "t_wake002")["questions"]) == 1

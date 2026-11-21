@@ -16,6 +16,8 @@ one hash part of the suite (--part 1/BROAD_PARTS) instead: a sample in about 4 m
 
 Usage: python3 scripts/ci_light.py --base origin/develop --plan   prints the steps as JSON, runs nothing
        python3 scripts/ci_light.py --base origin/develop          runs the steps in order, stops at the first red
+       python3 scripts/ci_light.py --rules                        only the whole-tree rule checks (seconds; the
+                                                                  merge queue's precheck on a group's tree)
 Plain Python, no packages.
 """
 
@@ -64,6 +66,22 @@ RULE_TESTS = (
     "test_no_ui_import.py",
     "test_record_io.py",
 )
+# Every rule test by its name, so a new one runs on each pull request by itself (owner 19 Nov: of 20 red queue
+# groups, 7 were tool names and others history lint, core names, skills lint and spawn argv): a file named
+# test_no_<thing>.py, test_<thing>_lint.py, test_<thing>_seams.py, test_<thing>_scan_doors.py, test_<...>names<...>.py
+# or test_spawn_argv.py (not test_relay_secret_scan.py: it tests the scanner itself, 10 s). A rule test that sits in a
+# bigger file is named here by its node id.
+RULE_NAME = re.compile(r"^test_(no_.+|.+_lint|.+_seams|.+_scan_doors|.*names.*|spawn_argv)\.py$")
+RULE_NODES = ("test_cli_status_start.py::test_no_function_reimports_a_module_level_orch_name",)
+CLICK = re.compile(r"^workspace-addons/dashboard/clickthrough/features/([^/]+)\.cjs$")
+PAGE_SMOKE = re.compile(r"^(workspace-addons/(focus|insights)/|e2e/focus_insights)")
+PLAYWRIGHT = "1.64.1"  # the version of the page-smoke and dashboard-clickthroughs jobs (addons.yml)
+
+
+def rule_tests(texts: dict[str, str]) -> list[str]:
+    """The rule tests over the whole tree (pytest arguments relative to workspace/), in a stable order."""
+    names = list(RULE_TESTS) + sorted(n for n in texts if RULE_NAME.match(n) and n not in RULE_TESTS)
+    return names + [n for n in RULE_NODES if n.split("::")[0] not in names]
 
 
 def changed(base: str) -> list[str]:
@@ -162,12 +180,12 @@ def plan(
             {
                 "name": "rule tests over the whole tree",
                 "cwd": "workspace",
-                "cmd": "uv run pytest -q -n auto --budget 90 " + " ".join(f"tests/{t}" for t in RULE_TESTS),
+                "cmd": "uv run pytest -q -n auto --budget 90 " + " ".join(f"tests/{t}" for t in rule_tests(texts)),
             }
         )
     if any(f.startswith("workspace/") for f in files):
         tests, broad = pick_tests(files, texts)
-        tests = [t for t in tests if t not in RULE_TESTS]  # they ran in the step above
+        tests = [t for t in tests if t not in rule_tests(texts)]  # they ran in the step above
         if broad:
             steps.append(
                 {
@@ -212,6 +230,49 @@ def plan(
                 " && node --test tests/*.test.js ../../workspace/src/orch_ui/tests/*.test.mjs"
             )
         steps.append({"name": f"add-on {name}", "cwd": f"workspace-addons/{name}", "cmd": cmd})
+    clicks = sorted({m.group(1) for f in files if (m := CLICK.match(f))})
+    smoke = any(PAGE_SMOKE.match(f) for f in files)
+    if clicks or smoke:  # the browser only when a page test of this pull request needs it (about a minute)
+        steps.append(
+            {
+                "name": "headless Chromium for the page tests",
+                "cwd": ".",
+                "cmd": f"npm install -g -s playwright@{PLAYWRIGHT} && playwright install --with-deps chromium",
+            }
+        )
+    if clicks:  # deleted ones are left out: run.cjs refuses a name it does not know
+        clicks = [c for c in clicks if (ROOT / f"workspace-addons/dashboard/clickthrough/features/{c}.cjs").is_file()]
+    if clicks:
+        steps.append(
+            {
+                "name": f"dashboard: the {len(clicks)} click-through(s) this pull request changed",
+                "cwd": ".",
+                "cmd": 'PW_DIR="$(npm root -g)" node workspace-addons/dashboard/clickthrough/run.cjs --only '
+                + ",".join(clicks),
+            }
+        )
+    if smoke:
+        steps.append(
+            {
+                "name": "Focus and Insights pages load in a browser",
+                "cwd": ".",
+                "cmd": 'PW_DIR="$(npm root -g)" node e2e/focus_insights_smoke.cjs',
+            }
+        )
+    return steps
+
+
+def rules_plan(texts: dict[str, str]) -> list[dict]:
+    """--rules: the checks of the whole tree that take seconds and need no browser (words, style, generated files,
+    ruff, every rule test), whatever changed. The merge queue runs them on a group's merged tree before it pushes
+    the group (setting pull_requests.precheck, ORCH-545), so a pull request that breaks one leaves the group at
+    once instead of after a 16 minute run."""
+    every = plan(["workspace/", "workspace-addons/"], texts, set())
+    keep = ("brand:", "style rules", "generated files", "workspace: ruff", "rule tests")
+    steps = [s for s in every if s["name"].startswith(keep)]
+    for s in steps:  # the computer's own orch writes ~/.orch-tool meanwhile: the guard warns (tests/conftest.py)
+        if s["name"].startswith("rule tests"):
+            s["cmd"] = "ORCH_TEST_GUARD=warn " + s["cmd"]
     return steps
 
 
@@ -227,9 +288,13 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--base", default="origin/develop")
     ap.add_argument("--plan", action="store_true", help="print the steps as JSON, run nothing")
+    ap.add_argument("--rules", action="store_true", help="only the whole-tree rule checks (the merge queue's precheck)")
     a = ap.parse_args(argv)
     addons = addons_known()
-    steps = plan(changed(a.base), test_texts(), addons, addon_test_texts(addons))
+    if a.rules:
+        steps = rules_plan(test_texts())
+    else:
+        steps = plan(changed(a.base), test_texts(), addons, addon_test_texts(addons))
     if a.plan:
         print(json.dumps(steps, indent=1))
         return 0

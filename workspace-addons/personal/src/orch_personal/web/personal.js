@@ -37,6 +37,7 @@
     return host;
   }
 
+  const SIGN_IN = 'Personal is private. Open the dashboard with a sign-in link from orch (run orch start on the computer).';
   const NO_REACH = 'Personal does not answer. Reload the page; if it stays, run orch start.';
   async function read(path) {
     let r;
@@ -44,7 +45,9 @@
     catch (e) { throw new Error(NO_REACH); }
     const body = await r.json().catch(() => null);
     if (r.status === 409 && body && body.error) throw new Error(body.error);
-    if (!r.ok || !body) throw new Error(r.status === 403 ? 'Open Personal from the dashboard.' : 'Personal could not be read. Reload the page.');
+    // 401: the dashboard knows no sign-in in this browser; 403: Personal refused it. Neither is fixed by a reload.
+    if (r.status === 401 || r.status === 403) { const e = new Error(SIGN_IN); e.signIn = true; throw e; }
+    if (!r.ok || !body) throw new Error('Personal could not be read. Reload the page.');
     return body;
   }
   async function act(op, args) {
@@ -65,7 +68,7 @@
     for (const n of needs) {
       const row = el('div', 'list-row');
       row.append(el('span', 'dot-warn'), el('div', 'grow', el('strong', null, n.title), el('p', 'meta', n.text)));
-      row.append(button(n.action, 'btn outline sm', () => openFolder()));
+      row.append(button(n.action, 'btn outline sm', () => n.part === 'ways' ? wayAct(n.changed ? 'way_on' : 'way_check', n.way, n.name) : openFolder()));
       card.append(row);
     }
     return card;
@@ -79,12 +82,37 @@
     card.append(body, el('div', 'part-tile-foot meta', 'Helpers can use: ' + t.uses));
     return card;
   }
+  // Ways in: the person's own scripts that reach a source on this computer; each is off until turned on here
+  async function wayAct(op, way, name) {
+    try {
+      const r = await act(op, {way});
+      const row = Array.isArray(r) ? r[0] : r;
+      say(row ? name + ': ' + row.words : 'Done.');
+      today = null; route();
+    } catch (e) { say(e.message); }
+  }
+  function waysCard(rows) {
+    const card = el('section', 'card');
+    card.append(el('div', 'card-h', el('h2', null, 'Ways in'), el('span', 'meta', 'Each checks itself once a day')));
+    const pill = {works: ['done', 'ok'], permission: ['needs', 'needs'], stopped: ['failed', 'bad'], off: ['', 'idle']};
+    for (const w of rows) {
+      // one line: the reason when it needs you (the fix button is in Needs you now), else when it last worked
+      const seen = !w.on ? 'off until you turn it on' : w.problem ? w.problem : w.last_worked ? 'last worked ' + when(w.last_worked) : 'has not worked yet';
+      const [pc, dc] = pill[w.status] || pill.off;
+      const text = el('div', 'grow', el('p', null, el('strong', null, w.name), ' ', el('span', ('pill ' + pc).trim(), el('span', 'dot ' + dc), w.words)),
+        el('p', 'meta', seen));
+      const btn = w.on ? button('Turn off', 'btn outline sm', () => wayAct('way_off', w.way, w.name))
+        : button('Turn on', 'btn outline sm', () => wayAct('way_on', w.way, w.name));
+      card.append(el('div', 'list-row', text, btn));
+    }
+    return card;
+  }
   function activityCard(rows) {
     const card = el('section', 'card');
     card.append(el('div', 'card-h', el('h2', null, 'What helpers did with it lately'), el('span', 'meta', 'Last 7 days')));
     if (!rows.length) card.append(el('p', 'pad muted', 'Helpers have not used Personal yet.'));
     for (const a of rows) {
-      card.append(el('div', 'list-row', el('span', 'meta', when(a.at)), el('span', 'grow', (a.part === 'notes' ? 'Notes: ' : '') + a.what),
+      card.append(el('div', 'list-row', el('span', 'meta', when(a.at)), el('span', 'grow', ({notes: 'Notes: ', ways: 'Ways in: '}[a.part] || '') + a.what),
         a.ticket_key ? el('span', 'chip', a.ticket_key) : null));
     }
     return card;
@@ -96,6 +124,7 @@
     today.parts.forEach(t => grid.append(tile(t)));
     grid.append(link('#parts', 'part-tile-add', el('strong', null, 'Add a part'), el('span', 'meta', 'Meetings, Calendar, Messages and Mail come next')));
     out.push(grid);
+    if (today.ways && today.ways.length) out.push(waysCard(today.ways));
     if (!today.parts.length) out.unshift(state('empty', 'Nothing is added yet', 'Add Notes first: your notes folder, with the links between notes.'));
     out.push(activityCard(today.activity));
     out.push(el('p', 'footnote meta', 'Helpers use: orch personal today · They get only what the rules of each part allow.'));
@@ -227,7 +256,7 @@
     yours.append(partRow('Notes', 'Your knowledge as linked notes that helpers can look things up in.', 'the notes folder on this computer',
       notesOn ? el('span', 'badge done', 'On') : button('Add Notes', 'btn primary sm', addNotes)));
     const soon = el('section', 'card');
-    soon.append(el('div', 'card-h', el('h2', null, 'Coming next'), el('span', 'meta', 'Through one private connection to your notebook')));
+    soon.append(el('div', 'card-h', el('h2', null, 'Coming next'), el('span', 'meta', 'Each through a way in on this computer')));
     today.soon.forEach(s => soon.append(partRow(s.label, s.text, null, el('span', 'badge', 'Soon'))));
     const later = el('section', 'card');
     later.append(el('div', 'card-h', el('h2', null, 'Coming later')));
@@ -284,7 +313,9 @@
     const h = decodeURIComponent(location.hash.slice(1)) || (['notes', 'parts'].includes(start) ? start : '');
     view.setAttribute('aria-busy', 'true');
     try { if (!today) today = await read('/api/today'); }
-    catch (e) { view.replaceChildren(state('error', 'Personal can’t be shown right now', e.message)); view.setAttribute('aria-busy', 'false'); return; }
+    catch (e) {
+      view.replaceChildren(e.signIn ? state('empty', 'Sign in to see Personal', e.message) : state('error', 'Personal can’t be shown right now', e.message));
+      view.setAttribute('aria-busy', 'false'); return; }
     let out;
     const [screen, ...rest] = h.split('/');
     const head = (title, sub) => { $('page-title').firstChild.textContent = title + ' '; $('page-sub').textContent = sub; };

@@ -35,6 +35,8 @@ enum ReviewCardLimits {
     static let maxFiles = 20
     static let maxCardBytes = 65_536
     static let maxVerdictBytes = 8_192
+    /// Voice recordings, pictures and files one answer may carry (verdict note.files, ORCH-444).
+    static let maxAnswerFiles = 5
     /// A card's files together (phone budget, M3).
     static let maxFileBytes = 20 * 1024 * 1024
 }
@@ -110,8 +112,43 @@ indirect enum CardPreview: Codable, Equatable, Sendable {
     }
 }
 
+/// `card.run` of a run card (message.schema.json `$defs/card_run`, ORCH-860): the command as the computer shows it, never
+/// what runs. The computer runs only the command it stored and checks it again. `phone` = this phone may offer Run it now.
+struct CardRun: Codable, Equatable, Sendable {
+    enum Class: String, Codable, Sendable { case orch, other, login, copy }
+    var command: String
+    var cls: Class
+    var changes: String? = nil
+    var undo: String? = nil
+    var phone: Bool
+    enum CodingKeys: String, CodingKey { case command, cls = "class", changes, undo, phone }
+
+    /// Run it now shows on the phone only for orch's own commands the computer marked for the phone (the computer checks again).
+    var runsHere: Bool { phone && cls == .orch }
+    /// The one line under the command when the phone cannot run it (plain words, ORCH-848 draft A).
+    var whyNotHere: String? {
+        if runsHere { return nil }
+        switch cls {
+        case .orch: return "Run this one at your computer."
+        case .other: return "The phone runs only orch’s own commands. Run this one at your computer."
+        case .login: return "This is a sign-in. Run it in a terminal on your computer."
+        case .copy: return "orch did not check this command. Read it before you run it in your terminal."
+        }
+    }
+    /// Same rules as the schema: one line of printable ASCII, at most 300, no shell operator; phone only with orch.
+    var isValid: Bool {
+        guard !command.trimmingCharacters(in: .whitespaces).isEmpty, command.count <= 300 else { return false }
+        let bad = CharacterSet(charactersIn: ";|&<>`$\\")
+        guard command.unicodeScalars.allSatisfy({ (0x20...0x7e).contains($0.value) && !bad.contains($0) }) else { return false }
+        return !phone || cls == .orch
+    }
+}
+
 struct ReviewCard: Codable, Equatable, Sendable {
-    enum Kind: String, Codable, Sendable { case draft, check, link, choice, plan }
+    enum Kind: String, Codable, Sendable { case draft, check, link, choice, plan, run }
+    /// A run card's other answer: orch's own fixed words only (runcard.NO_LABELS).
+    static let runNoLabels = ["Not now", "Leave it off for now", "Leave it as it is", "Skip it", "Do it later"]
+    static let runOkLabel = "I ran it"
     var kind: Kind
     var title: String
     var why: String? = nil
@@ -120,6 +157,8 @@ struct ReviewCard: Codable, Equatable, Sendable {
     var okLabel: String? = nil
     var open: String? = nil
     var preview: CardPreview? = nil
+    var run: CardRun? = nil
+    var noLabel: String? = nil
     var fileIndexes: [Int] { preview?.fileIndexes ?? [] }
 
     /// The kinds that need a preview per the schema (choice, link); the card is refused otherwise.
@@ -137,11 +176,20 @@ struct ReviewCard: Codable, Equatable, Sendable {
             guard case .options? = preview else { throw DecodingError.dataCorruptedError(forKey: .preview, in: c, debugDescription: "choice needs options") }
         }
         if kind == .link, preview == nil { throw DecodingError.dataCorruptedError(forKey: .preview, in: c, debugDescription: "link needs a preview") }
+        run = try c.decodeIfPresent(CardRun.self, forKey: .run)
+        noLabel = try c.decodeIfPresent(String.self, forKey: .noLabel)
+        if kind == .run {
+            guard let r = run, r.isValid, let n = noLabel, Self.runNoLabels.contains(n), okLabel == nil || okLabel == Self.runOkLabel else {
+                throw DecodingError.dataCorruptedError(forKey: .run, in: c, debugDescription: "a run card needs its command and orch's own answers")
+            }
+        } else if run != nil || noLabel != nil {
+            throw DecodingError.dataCorruptedError(forKey: .run, in: c, debugDescription: "only a run card carries a command")
+        }
     }
     init(kind: Kind, title: String, then: String, why: String? = nil, need: String? = nil, okLabel: String? = nil,
-         open: String? = nil, preview: CardPreview? = nil) {
+         open: String? = nil, preview: CardPreview? = nil, run: CardRun? = nil, noLabel: String? = nil) {
         self.kind = kind; self.title = title; self.then = then; self.why = why; self.need = need; self.okLabel = okLabel
-        self.open = open; self.preview = preview
+        self.open = open; self.preview = preview; self.run = run; self.noLabel = noLabel
     }
 }
 
@@ -162,7 +210,9 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
     struct Voice: Codable, Equatable, Sendable { let blobId: String; var transcript: String; var lang: String; var duration: Double }
     struct Words: Codable, Equatable, Sendable { var text: String? = nil; var voice: [Voice]? = nil }
     struct Pin: Codable, Equatable, Sendable { var n: Int; var on: String? = nil; var x: Double; var y: Double; var text: String? = nil }
-    struct Note: Codable, Equatable, Sendable { var changes: [String]? = nil; var words: Words? = nil; var pins: [Pin]? = nil }
+    /// A voice recording, picture or file the person added (a phone upload; ORCH-444). Filled in from the Outbox item when it is sent.
+    struct File: Codable, Equatable, Sendable { let blobId: String; let kind: MessageAttachment.Kind; let name: String; let size: Int; let mime: String; var duration: Double? = nil }
+    struct Note: Codable, Equatable, Sendable { var changes: [String]? = nil; var words: Words? = nil; var files: [File]? = nil; var pins: [Pin]? = nil }
     var verdict: Word
     var picked: String? = nil
     var digest: String
@@ -179,11 +229,14 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
             // talk needs words, changes or pins
             let n = note
             let has = !(n?.changes ?? []).isEmpty || !(n?.words?.text ?? "").isEmpty || !(n?.words?.voice ?? []).isEmpty || !(n?.pins ?? []).isEmpty
+                || !(n?.files ?? []).isEmpty
             if !has { return false }
         }
         if let n = note {
             if (n.changes ?? []).count > 20 || (n.changes ?? []).contains(where: { $0.count > 500 }) { return false }
             if (n.words?.text?.count ?? 0) > 2000 || (n.words?.voice?.count ?? 0) > 3 { return false }
+            if (n.files ?? []).count > ReviewCardLimits.maxAnswerFiles
+                || (n.files ?? []).contains(where: { $0.name.isEmpty || $0.name.count > 120 || $0.size < 1 || $0.size > SendRequest.maxBlobBytes || ($0.duration ?? 0) > 600 }) { return false }
             if (n.pins ?? []).count > 30 || (n.pins ?? []).contains(where: { !(0...1).contains($0.x) || !(0...1).contains($0.y) || ($0.text?.count ?? 0) > 500 || ($0.on?.count ?? 0) > 120 }) { return false }
         }
         return true

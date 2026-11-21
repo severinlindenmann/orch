@@ -3,7 +3,7 @@ name = "orch-dashboard-tester"
 version = "0.1.0"
 description = "Looks at every dashboard page once a day and reports what is broken, without clicking anything."
 requires-python = ">=3.11"
-dependencies = ["playwright>=1.49"]
+dependencies = ["playwright==1.64.1"]
 
 # Module only: orch finds orch-addon.toml next to it (find_spec) and never imports it.
 [project.entry-points."orch.addons"]

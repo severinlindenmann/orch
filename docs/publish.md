@@ -70,7 +70,7 @@ publish/
   web/{portal.html, file.html, file.js, frame.html, frame.js, private.html, style.css, favicon.svg, apple-touch-icon.png}
   onboarding/{onboarding.sh, onboarding.ps1}   (the orch-publish skill lives in workspace/skills/)
   templates/{static, python, node}   (from orch core publish templates)
-  deploy/{Caddyfile, orch-publish.service, orch-app@.service, install.sh}
+  deploy/{orch-publish.service, install.sh, publish.caddy}
   tests/
 ```
 
@@ -93,8 +93,23 @@ publish/
 - CI: `publish/**`, `contracts/**`; `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `node --test`.
 
 ## Deploy
-`publish-deploy.yml` on push to `main`: build for linux x86_64, copy binary + web + scripts to the VPS over SSH,
-`systemctl restart orch-publish`, check `/health`. First install: `deploy/install.sh` (user, folders, admin token, Caddy route).
+Built by the `publish` CI job (artifact `orch-publish-linux-x86_64`), copied to the server and `systemctl restart orch-publish`, check `/health`. First install: `publish/deploy/install.sh` (user, folders, admin token, settings, service); the Caddy site is `publish/deploy/publish.caddy`. Moving to a new server: `relay/deploy/MOVE.md`.
+
+## Command line
+`orch-publish --help` (`-h`) prints help, `--version` (`-V`) the version; neither reads settings, writes to the data
+folder (no admin token, no apps folder) or binds a port. Unknown arguments are refused (exit 2). The server refuses to
+start as root (`--allow-root`, `ORCH_PUBLISH_ALLOW_ROOT=1` or the `systemd` sandbox, which needs root, allows it), when its ports are taken, or when another
+orch-publish holds the data folder (`<data dir>/.orch-publish.lock`); the ports and the lock come before anything is
+written.
+
+Admin commands talk to the running server's admin port; they read the admin token (environment, `--env-file`, default
+`/etc/orch-publish/env`, then `/etc/orch-publish/admin-token` or `<data dir>/admin-token`) and never make one:
+```
+orch-publish admin workspaces list
+orch-publish admin workspaces remove <id> --dry-run   # then without --dry-run: its files and apps go with it
+```
+Publish has no groups (they live on the relay). `GET /admin/api/workspaces/<id>/removal` answers
+`removes: {files, apps}` (a separate route, so an older server answers 404 instead of deleting).
 
 ## Private-network listener (app reach)
 An app with `reach = "private"` in `app.toml` is served only on a third listener, on the private network. Two settings, both
@@ -148,7 +163,7 @@ Host setup on the VPS (Linux only):
   same image (512 MB). Stack `docker` (needs `ORCH_PUBLISH_SANDBOX=container` AND `ORCH_PUBLISH_DOCKER_APPS=1`, off by default because image builds run in a privileged builder; otherwise "This server doesn't run apps with their own Dockerfile."): the bundle has
   a `Dockerfile`; the host builds `orch-app-<instance>-<name>:<version>-<random>`, runs it, and removes the old image after the switch.
   The Dockerfile may not use `--mount`, `--network`, `--security`, `--device` or parser directives; a built image with `dev.kiri.*` / `orch.*` labels or a `VOLUME` is refused. One image build runs at a time.
-  Containers carry the labels `orch.publish.app` and `orch.publish.instance` (a hash of the data folder, so a second server on the same engine never touches them). At server start, before the listeners bind, leftover step containers and containers of unknown apps of this instance are removed.
+  Containers carry the labels `orch.publish.app` and `orch.publish.instance` (a hash of the data folder, so a second server on the same engine never touches them). At server start, before it answers requests, leftover step containers and containers of unknown apps of this instance are removed.
   Real-engine test: `ORCH_PUBLISH_TEST_ENGINE=1 cargo test --test container -- --ignored`.
   Scale to zero: `ORCH_PUBLISH_IDLE_SECS` (default 900 in container mode, 0 = never; other modes never sleep) stops a python/node/docker
   app that got no request for that long (the sweeper looks every `ORCH_PUBLISH_SLEEP_SWEEP_SECS`, default 30). The next request starts it

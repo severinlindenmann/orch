@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import store
+from . import store, when
 from .readers import SubscriptionUse, cswap
 
 EVERY_SECONDS = 30
@@ -366,6 +366,13 @@ def choose(
 # ---------------------------------------------------------------- one look
 
 
+def _nowhere_to_go(ch: Choice) -> bool:
+    """Every account is at or near a limit and Usage has no other account to go to. A choice that leaves the active
+    account for one that has room is not stuck: the warning would say "no account to switch to" while it switches."""
+    leaving = ch.target is not None and (ch.active is None or ch.target.use.key != ch.active.use.key)
+    return ch.all_at_limit and not leaving
+
+
 def _switch(slot: int) -> bool:
     cmd = cswap.command()
     if not cmd:
@@ -406,11 +413,14 @@ def _recent_failures(memory: dict, at: datetime) -> dict[str, str]:
     return out
 
 
+ALL_AT_LIMIT_ALERT = "Every account is at or near its limit."
+
+
 def alerts(accounts: list[dict], ch: Choice, failed: dict[str, str]) -> list[str]:
     """What the person should see now (list, status, the page), in plain words; empty when all is well."""
     out = []
-    if ch.all_at_limit:
-        out.append("Every account is at or near its limit.")
+    if _nowhere_to_go(ch):
+        out.append(ALL_AT_LIMIT_ALERT)
     names = {a["id"]: a["label"] for a in accounts}
     for k in failed:
         out.append(f"Could not switch to {names.get(k, k)}; Usage tries the next account in order.")
@@ -446,10 +456,16 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     except cswap.ReaderError as e:
         found, error = None, str(e)
     if found is None:
-        return {"at": _iso(at), "switcher": False, "did": "nothing", "note": error or "no account switcher"}
+        return {
+            "at": _iso(at),
+            "switcher": cswap.command() is not None,  # installed but not answering is not "missing"
+            "did": "nothing",
+            "note": error or "no account switcher",
+        }
 
+    tz = when.zone(root)
     with store.change(root) as (accounts, rows):
-        store.expire(accounts, rows, at)
+        store.expire(accounts, rows, at, say=lambda ends: when.words(ends, tz))
         store.sync_found(accounts, rows, found, provider="anthropic", reader="cswap")
     accounts = store.load(root)["accounts"]
 
@@ -463,7 +479,9 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     did = "stay"
 
     # all at a limit: one warning when it starts, none while it lasts
-    if ch.all_at_limit and not memory.get("all_at_limit"):
+    # a look that switches to an account with room warns about nothing
+    stuck = _nowhere_to_go(ch)
+    if stuck and not memory.get("all_at_limit"):
         where = ch.target or ch.active
         state = "; ".join(_use_words(c) for c in ch.candidates) or "no account to read"
         hist.append(
@@ -476,7 +494,7 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
                 at,
             )
         )
-    memory["all_at_limit"] = ch.all_at_limit
+    memory["all_at_limit"] = stuck
 
     t = ch.target
     why = ch.why
@@ -569,7 +587,7 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     # at a limit = by the limits alone: an account left out only because a switch to it failed still has room
     limits = choose(accounts, found, pace, ahead) if failed else ch
     warn_now: dict = {}
-    if limits.all_at_limit:
+    if _nowhere_to_go(limits):
         warn_now["all-at-limit"] = {}
     if failed:
         first = min(failed, key=lambda k: failed[k])  # the account that failed first names the warning
@@ -631,7 +649,7 @@ def warning_rows(root: Path, at: datetime | None = None) -> list[dict]:
         if k == "all-at-limit":
             title, tone = "Usage: every account is at or near its limit", "bad"
             text = (
-                "Every account is at or near its limit, so Usage has no account to switch to. Helpers may stop "
+                "Usage has no account to switch to, so helpers may stop "
                 "until a limit resets. Raise a limit or turn on another account in Usage."
             )
         else:
@@ -652,7 +670,7 @@ def warning_rows(root: Path, at: datetime | None = None) -> list[dict]:
                 "text": text[:500],
                 "tone": tone,
                 "since": w["since"],
-                "cli": f"orch usage list   (Got it: orch usage seen {k})",
+                "cli": f"orch usage list; hide it with: orch usage seen {k}",
                 "actions": [
                     {
                         "label": "Got it",
