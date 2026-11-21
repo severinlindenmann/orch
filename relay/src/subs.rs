@@ -493,9 +493,20 @@ pub fn event_label(e: &Value) -> String {
 
 /// The seq of a stored message (an event id used as a cursor).
 fn seq_of(c: &Connection, id: &str) -> Res<i64> {
-    c.query_row("SELECT seq FROM messages WHERE id=?1", [id], |r| r.get(0))
+    if let Some(s) = c
+        .query_row("SELECT seq FROM messages WHERE id=?1", [id], |r| r.get(0))
         .optional()?
-        .ok_or_else(|| invalid("`after` is not a known event."))
+    {
+        return Ok(s);
+    }
+    // The event went with a deleted workspace: its place in the order is kept (crate::wipe).
+    c.query_row(
+        "SELECT seq FROM gone_events WHERE h=?1",
+        [crate::wipe::event_hash(id)],
+        |r| r.get(0),
+    )
+    .optional()?
+    .ok_or_else(|| invalid("`after` is not a known event."))
 }
 
 // ---------- public routes ----------

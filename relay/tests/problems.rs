@@ -349,7 +349,8 @@ async fn admin_readers_patch_delete() {
         .admin_json("PATCH", &p, Some(json!({"status": "new"})))
         .await;
     assert_eq!(v["taken_by"], Value::Null);
-    // deleting a workspace keeps its problems and drops it from readers
+    // deleting a reader keeps the problems it took and drops it from readers
+    // (deleting the sharer removes its problems: tests/wipe.rs)
     t.call(
         &b,
         "POST",
@@ -359,12 +360,6 @@ async fn admin_readers_patch_delete() {
     .await;
     assert_eq!(
         t.admin_json("DELETE", &format!("/admin/api/workspaces/{}", b.id), None)
-            .await
-            .0,
-        204
-    );
-    assert_eq!(
-        t.admin_json("DELETE", &format!("/admin/api/workspaces/{}", a.id), None)
             .await
             .0,
         204

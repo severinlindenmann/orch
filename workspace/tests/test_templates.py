@@ -82,12 +82,25 @@ def _run(folder: Path, data: Path):
     return proc, f"http://127.0.0.1:{port}"
 
 
+def _node_has_sqlite() -> bool:
+    """Whether the node on PATH can load node:sqlite as the sqlite template's store does (no extra flag)."""
+    r = subprocess.run(
+        ["node", "--input-type=module", "-e", "import 'node:sqlite'"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=30,
+    )
+    return r.returncode == 0
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("stack", ["python", "node", "docker"])
 @pytest.mark.parametrize("store", templates.STORES)
 def test_server_answers(tmp_path, stack, store):
     if stack == "node" and not shutil.which("node"):
         pytest.skip("node not on PATH")
+    if stack == "node" and store == "sqlite" and not _node_has_sqlite():
+        pytest.skip("this node has no node:sqlite (it came in Node 22.5; CI's light job runs Node 20)")
     folder, data = tmp_path / "app-x", tmp_path / "data"
     data.mkdir()
     templates.create(stack, store, folder)

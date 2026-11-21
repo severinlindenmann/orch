@@ -426,3 +426,63 @@ async fn review_question_verdict_cases_pass_through_when_the_digest_matches() {
         }
     }
 }
+
+/// ORCH-860: run cards (`$defs/card_run`). Every run shape of the vector is replayed against the relay itself (201 for
+/// the valid ones, 422 for the rest: phone on a command that is not orch's own, shell operators, hidden characters, a
+/// folder or argv on the wire, a free other answer), and a phone's Run it now (verdict ok) passes through unchanged.
+#[tokio::test]
+async fn run_cards_are_taken_only_in_their_shape_and_a_run_verdict_passes_through() {
+    let vec = vec_json("review-card-v1.json");
+    let f = F::new(&vec).await;
+    let mut n = 0;
+    for (i, s) in vec["question_shapes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| {
+            let name = s["name"].as_str().unwrap();
+            name.starts_with("card-run-") || name.starts_with("run-") || name == "no-label-on-draft"
+        })
+        .enumerate()
+    {
+        let name = s["name"].as_str().unwrap();
+        let mut m = s["message"].clone();
+        m["id"] = json!(format!("m_run{i:013}"));
+        let (st, v) = f.post_ws("ws_pilatus001", &m).await;
+        if s["schema"] == true {
+            assert_eq!(st, 201, "{name}: {v}");
+        } else {
+            assert_eq!((st, err_of(&v)), (422, Some("invalid")), "{name}: {v}");
+        }
+        n += 1;
+    }
+    assert!(n >= 20, "run shapes in the vector: {n}");
+    // Run it now on the phone: a plain ok verdict with the digest it was shown
+    let q = &vec["question_shapes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"] == "card-run-orch")
+        .unwrap()["message"];
+    let mut q = q.clone();
+    q["id"] = json!("m_runanswer0000001");
+    let (st, v) = f.post_ws("ws_pilatus001", &q).await;
+    assert_eq!(st, 201, "{v}");
+    let verdict = json!({"verdict": "ok", "digest": q["body"]["digest"]});
+    let req = json!({"question_message_id": "m_runanswer0000001", "answer": "I ran it",
+        "client_id": "66666666-6666-4666-8666-666666666666", "verdict": verdict});
+    let (st, v) =
+        f.t.phone(&f.iphone, "POST", "/v1/phone/answer", Some(req))
+            .await;
+    assert_eq!(st, 201, "{v}");
+    let c2 = f.t.app.db.lock().unwrap();
+    let id: String = c2
+        .query_row(
+            "SELECT id FROM messages WHERE reply_to='m_runanswer0000001' AND type='answer'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let (b, _) = store::open_payload(&f.t.app.key, &store::get_msg(&c2, &id).unwrap().unwrap());
+    assert_eq!(b["verdict"], verdict);
+}

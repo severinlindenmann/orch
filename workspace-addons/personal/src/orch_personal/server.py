@@ -60,6 +60,10 @@ OPS = (
     "cal_check",
     "cal_accept",
     "cal_decline",
+    "meet_pickup",
+    "meet_agree",
+    "meet_tickets",
+    "meet_delete",
 )
 
 
@@ -162,6 +166,7 @@ class Handler(BaseHTTPRequestHandler):
             "/notes",
             "/calendar",
             "/parts",
+            "/meetings",
         ):  # the screens: one page, the path picks the first screen
             prefix = self.headers.get("X-Forwarded-Prefix") or ""
             prefix = prefix if PREFIX.fullmatch(prefix) else ""
@@ -189,9 +194,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(api.notes_find(self.root, who, one("q")))
             if path == "/api/note":
                 return self._json(api.notes_show(self.root, who, one("id")))
+            if path == "/api/meetings":
+                return self._json(api.meetings_list(self.root, who))
+            if path == "/api/meeting":
+                return self._json(api.meetings_show(self.root, who, one("id")))
             if path == "/api/rules":
-                s = store.settings(self.root)["parts"].get("notes")
-                return self._json({"notes": s, "read": store.READ_WORDS, "write": store.WRITE_WORDS})
+                parts = store.settings(self.root)["parts"]
+                return self._json(
+                    {
+                        "notes": parts.get("notes"),
+                        "meetings": parts.get("meetings"),
+                        "read": store.READ_WORDS,
+                        "write": store.WRITE_WORDS,
+                    }
+                )
             if path == "/api/calendar":
                 p = store.settings(self.root)["parts"].get("calendar")
                 if not p or not p["on"]:
@@ -261,10 +277,11 @@ def _act(root: Path, op: str, args: dict):
         return api.set_folder(root, who, _s(args, "path"))
     if op == "rules":
         read, write = args.get("read"), args.get("write")
+        part = args.get("part") if args.get("part") in ("notes", "meetings") else "notes"
         return api.set_rules(
             root,
             who,
-            "notes",
+            part,
             read if isinstance(read, str) else None,
             write if isinstance(write, str) else None,
         )
@@ -289,7 +306,21 @@ def _act(root: Path, op: str, args: dict):
             or not (root / ".orch" / "tickets" / f"{ticket}.json").is_file()
         ):
             raise Refused("That ticket is not there any more. Reload the page and pick another.")
-        return api.use(root, who, ticket, "notes", _s(args, "id"))
+        part = "meetings" if args.get("part") == "meetings" else "notes"
+        return api.use(root, who, ticket, part, _s(args, "id"))
+    if op == "meet_pickup":
+        return api.meetings_pickup(root, who)
+    if op == "meet_agree":
+        return api.meetings_agree(root, who, _s(args, "key"), args.get("yes") is True)
+    if op == "meet_delete":
+        return api.meetings_delete(root, who, _s(args, "id"))
+    if op == "meet_tickets":
+        steps = args.get("steps")
+        if steps is not None and (
+            not isinstance(steps, list) or not all(isinstance(n, int) and 0 < n < 100 for n in steps)
+        ):
+            raise Refused("Something is missing in that click. Reload the page and try again.")
+        return api.meetings_tickets(root, who, _s(args, "id"), steps)
     raise Refused("Unknown action.")
 
 

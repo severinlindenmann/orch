@@ -2,8 +2,6 @@
 names a fake (or a missing one) through ORCH_USAGE_SWITCHER."""
 
 import json
-import sys
-import textwrap
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -19,78 +17,6 @@ T0 = datetime(2026, 11, 16, 18, 0, 0, tzinfo=UTC)
 @pytest.fixture(autouse=True)
 def never_the_real_switcher(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_USAGE_SWITCHER", str(tmp_path / "no-switcher-here"))
-
-
-@pytest.fixture
-def switcher(tmp_path, monkeypatch):
-    """A fake `cswap` that lists from a file and really moves `active` on `switch N` (and logs every call)."""
-    d = tmp_path / "bin"
-    d.mkdir()
-    answer = tmp_path / "switcher.json"
-    calls = tmp_path / "switcher-calls.txt"
-    fail = tmp_path / "switcher-fails"
-    answer.write_text(json.dumps(switcher_data()), encoding="utf-8")
-    exe = d / "cswap"
-    exe.write_text(
-        textwrap.dedent(f"""\
-            #!{sys.executable}
-            import json, os, sys
-            a = sys.argv[1:]
-            open({str(calls)!r}, "a").write(" ".join(a) + "\\n")
-            if a == ["list", "--json"]:
-                sys.stdout.write(open({str(answer)!r}).read()); sys.exit(0)
-            if len(a) == 2 and a[0] in ("enable", "switch"):
-                if os.path.exists({str(fail)!r}):
-                    sys.exit(1)
-                if a[0] == "switch":
-                    d = json.load(open({str(answer)!r}))
-                    n = int(a[1])
-                    d["activeAccountNumber"] = n
-                    for x in d["accounts"]:
-                        x["active"] = x["number"] == n
-                    json.dump(d, open({str(answer)!r}, "w"))
-                sys.exit(0)
-            sys.exit(3)
-            """),
-        encoding="utf-8",
-    )
-    exe.chmod(0o755)
-    monkeypatch.setenv("ORCH_USAGE_SWITCHER", str(exe))
-
-    class Fake:
-        @staticmethod
-        def use(active=None, **acc):
-            """Set use per account: first=(5h, week), second=..., third=...; keeps the active one unless given."""
-            cur = json.loads(answer.read_text())
-            act = active if active is not None else cur["activeAccountNumber"]
-            data = switcher_data(active=act, **acc)
-            answer.write_text(json.dumps(data), encoding="utf-8")
-
-        @staticmethod
-        def reset_5h(n, at="2026-11-16T23:00:00+00:00"):
-            cur = json.loads(answer.read_text())
-            for x in cur["accounts"]:
-                if x["number"] == n:
-                    x["usage"]["fiveHour"]["resetsAt"] = at
-            answer.write_text(json.dumps(cur), encoding="utf-8")
-
-        @staticmethod
-        def active():
-            return json.loads(answer.read_text())["activeAccountNumber"]
-
-        @staticmethod
-        def calls():
-            return calls.read_text().splitlines() if calls.exists() else []
-
-        @staticmethod
-        def changes():
-            return [c for c in Fake.calls() if not c.startswith("list")]
-
-        @staticmethod
-        def failing(on=True):
-            fail.write_text("x") if on else fail.unlink(missing_ok=True)
-
-    return Fake
 
 
 def seed(cli):
@@ -300,6 +226,9 @@ def test_every_account_at_its_limit_reaches_the_person_once_as_one_row(cli, swit
         assert _warn_ids(ws, 30 * n) == first
     (row,) = [r for r in switching.needs_rows(ws, at(150)) if r["id"] == first[0]]
     assert row["source"] == "usage" and row["ticket"] is None and row["tone"] == "bad"
+    # the title is not said again in the text, and the hint has no brackets inside brackets
+    assert not row["text"].lower().startswith("every account is at or near")
+    assert "(" not in row["cli"]
     assert (
         row["actions"][0]["verb"] == "seen" and row["actions"][0]["target"] == f"all-at-limit:{row['since']}"
     )
@@ -480,7 +409,7 @@ def test_nothing_secret_is_written(cli, switcher, ws):
     seed(cli)
     jrun(cli, "switching", "on", "--by", "human:owner")
     switching.look(ws, at(0))
-    d = ws / ".orch/addons/usage"
+    d = store.usage_dir(ws)
     text = "".join(p.read_text() for p in d.iterdir() if p.is_file())
     assert "@" not in text and "example.test" not in text
 
@@ -497,7 +426,7 @@ def test_loop_looks_every_30_seconds_and_stops_when_usage_is_turned_off(cli, swi
     )
     assert slept == [30, 30, 30]
     assert (
-        json.loads((ws / ".orch/addons/usage/switching.json").read_text())["last"]["at"]
+        json.loads((store.usage_dir(ws) / "switching.json").read_text())["last"]["at"]
         == "2026-11-16T18:01:00Z"
     )
 
@@ -514,7 +443,10 @@ def test_loop_reads_its_pace_from_config_and_survives_a_bad_look(cli, ws, monkey
     switching.run_forever(
         ws, clock=lambda: T0, sleep=slept.append, log=logs.append, active=lambda r: next(on)
     )
-    assert slept == [45, 45] and logs[0] == "skipped: OSError: disk"
+    assert slept == [45, 45] and logs[:2] == [
+        "This workspace switches the accounts.",
+        "skipped: OSError: disk",
+    ]
 
 
 def test_start_status_stop(ws, cli):
@@ -590,7 +522,6 @@ def test_an_account_turned_off_in_the_switcher_is_never_a_target():
 
 
 def test_reader_keeps_the_switchers_disabled_flag():
-    from conftest import switcher_data
 
     from orch_usage.readers import cswap
 
@@ -634,3 +565,11 @@ def test_a_5_hour_limit_of_the_account_wins_over_the_default():
         key="k_main", label="main", slot=1, windows={"5h": Window(93.0), "week": Window(1.0)}
     )
     assert switching.judge(a, use, {}, 10).good
+
+
+def test_a_look_with_a_failing_switcher_says_it_did_not_answer(cli, fake_switcher, ws):
+    fake_switcher.answer("not json")
+    code, d = jrun(cli, "run", "--once")
+    assert code == 0 and d["switcher"] is True and d["did"] == "nothing"
+    code, out, _ = cli("run", "--once")
+    assert "not installed" not in out and "looks again" in out

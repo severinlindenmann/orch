@@ -54,3 +54,35 @@ def test_override_only_adds_a_location(tmp_path, monkeypatch):
     (real / ".orch-tool" / "f").write_text("a")
     files, _ = conftest._snapshot_real_tool_home()
     assert str(real / ".orch-tool" / "f") in files  # the real home is still watched
+
+
+def test_guard_only_watches_a_throwaway_home_inside_the_local_check(tmp_path, monkeypatch):
+    """ORCH-1180: the local check runs with a throwaway home under ~/.orch-test while the production orch
+    keeps writing the real home; ORCH_TEST_GUARD_ONLY moves the guard there, only with ORCH_HOME_STRICT=1."""
+    import conftest
+
+    real = tmp_path / "realacct"
+    throwaway = real / ".orch-test" / "commit-ab12" / "home"
+    throwaway.mkdir(parents=True)
+    monkeypatch.setattr(conftest, "_REAL_HOME_FN", lambda: real)
+    monkeypatch.delenv("ORCH_TEST_GUARD_HOME", raising=False)
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    monkeypatch.setenv("ORCH_TEST_GUARD_ONLY", str(throwaway))
+    assert conftest._guard_bases() == [throwaway.resolve() / ".orch-tool"]
+    monkeypatch.setenv("ORCH_HOME_STRICT", "0")  # not strict: the real home stays watched
+    assert conftest._guard_bases() == [real / ".orch-tool"]
+
+
+def test_guard_only_refuses_a_folder_outside_orch_test(tmp_path, monkeypatch):
+    import conftest
+
+    real = tmp_path / "realacct"
+    (real / ".orch-test").mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.setattr(conftest, "_REAL_HOME_FN", lambda: real)
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    top = real / ".orch-test"
+    for bad in (elsewhere, top, top / "missing", top / ".." / ".."):
+        monkeypatch.setenv("ORCH_TEST_GUARD_ONLY", str(bad))
+        assert conftest.guard_only_home(real) == real, bad

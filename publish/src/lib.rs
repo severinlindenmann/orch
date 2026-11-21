@@ -2,6 +2,7 @@
 pub mod admin;
 pub mod api;
 pub mod apps;
+pub mod cli;
 pub mod config;
 pub mod db;
 pub mod err;

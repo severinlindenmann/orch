@@ -1,5 +1,5 @@
 """Live sessions (ORCH-359): one list of every session that the live page (draft D: the wall, the bar and the
-panes) reads, served as GET /api/sessions and polled while the Preview switch is on.
+panes) reads, served as GET /api/sessions and polled while Focus is shown.
 
 Nothing here asks orch anything new. Status, what a session waits on, tool, model and open time come from the
 state the page already polls (the state cache: `orch run status` rows, the tickets and the start line); the
@@ -13,8 +13,9 @@ The shape (the wall builds on it; keep it in step with the PR text):
     Session = {
       "id": "t_7k3f9q", "key": "ORCH-12", "title": "...",
       "status": "needs-you" | "working" | "in-line" | "idle" | "closed",
-      "word": "Waits for you" | "Working" | "Starting" | "On hold" | "Stuck" | "In line" | "Idle" | "No session",
+      "word": "Waits for you" | "Working" | "Starting" | "On hold" | "Stuck" | "Stopped: usage limit" | "In line" | "Idle" | "No session",
       "detail": "Your answer" | "Running pytest" | "" ...,          # the core's one-line detail
+      "step": "<the step it works on now>" | "",                    # orch check start; the live line when no detail
       "waiting_on": [{"kind": "person"|"time"|"ticket"|"external"|"command"|"hold", "what": "<plain words>"}],
       "question": "<the open question>" | null,                    # what Needs you shows
       "lines": ["<last screen line>", ...],                        # [] when nothing is live or no screen
@@ -139,6 +140,14 @@ def _int(v) -> int | None:
     return v if isinstance(v, int) and not isinstance(v, bool) else None
 
 
+def _step(ticket: dict) -> str:
+    """The step the helper marked it works on now (orch check start), in one line; '' when none (ORCH-463)."""
+    for c in ticket.get("checklist") or []:
+        if isinstance(c, dict) and c.get("state") == "doing" and not c.get("done") and not c.get("wont_do"):
+            return " ".join(str(c.get("text") or c.get("title") or "").split())[:200]
+    return ""
+
+
 def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> dict:
     """One session from the state: the ticket, its `orch run status` row and whether it waits in line."""
     run = run if isinstance(run, dict) else {}
@@ -190,6 +199,7 @@ def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> 
         "needs": needs,
         "detail": helper.get("detail") if alive and isinstance(helper.get("detail"), str) else "",
         "waiting_on": waits if alive else [],
+        "step": _step(ticket) if alive else "",
         "question": _question(ticket) if status == "needs-you" else None,
         "lines": [],
         "tool": tool if alive else None,

@@ -25,6 +25,11 @@ PARTS = {
         "text": "Your knowledge as linked notes that helpers can look things up in.",
         "through": "the notes folder on this computer",
     },
+    "meetings": {
+        "label": "Meetings",
+        "text": "Record calls on this computer; get the transcript, a summary and next steps here.",
+        "through": "the recorder on this computer",
+    },
     "calendar": {
         "label": "Calendar",
         "text": "Work, private and family calendars in one week view.",
@@ -33,10 +38,6 @@ PARTS = {
 }
 # Shown on Add so the person sees what comes next; they cannot be added yet.
 SOON = {
-    "meetings": (
-        "Meetings",
-        "Record calls on this computer; get the transcript, a summary and next steps here.",
-    ),
     "messages": ("Messages", "Work chats and the private chats you choose to bring in."),
     "mail": ("Mail", "Only the mails that need you, from every mailbox."),
 }
@@ -50,6 +51,8 @@ READ = ("never", "attached", "all")
 WRITE = ("never", "add", "change")
 DEFAULTS = {
     "notes": {"on": True, "folder": "", "read": "attached", "write": "add"},
+    # Meetings: write "add" lets a helper write a summary and next steps where the recorder gave none.
+    "meetings": {"on": True, "folder": "", "read": "attached", "write": "add"},
     # Calendar: per calendar what helpers may use (missing = nothing); one rule for adding or moving events.
     "calendar": {"on": True, "source": "app", "cals": {}, "moves": "suggest"},
 }
@@ -107,7 +110,7 @@ def settings(root: Path) -> dict:
         if name in PARTS and isinstance(value, dict):
             p = {**DEFAULTS[name], **{k: v for k, v in value.items() if k in DEFAULTS[name]}}
             p["on"] = bool(p["on"])
-            parts[name] = _clean_notes(p) if name == "notes" else _clean_calendar(p)
+            parts[name] = _clean_calendar(p) if name == "calendar" else _clean_notes(p)
     return {"parts": parts}
 
 

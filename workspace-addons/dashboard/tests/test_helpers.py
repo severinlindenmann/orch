@@ -897,7 +897,7 @@ def test_failed_agent_start_is_plain_with_a_retry():
     w = call("agentLine", t, None, now, None, settings)
     assert w["state"] == "failed" and w["startFailed"] is True
     assert w["status"] == "Claude could not start: the claude program was not found"
-    assert w["primary"] == {"label": "Retry", "op": "run.start", "args": {"ticket": "t_a"}}
+    assert w["primary"] == {"label": "Try again", "op": "run.start", "args": {"ticket": "t_a"}}
     assert "Errno" not in w["status"]
     assert call("startFailure", {**t, "status": "active"}, None, settings) is None
     t["waiting_on"] = {"kind": "question", "ref": "q1"}

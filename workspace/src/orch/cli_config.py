@@ -51,7 +51,7 @@ KEYS = (
     "diag.enabled",
     "diag.report_tickets",
     "focus.session_typing",
-    "focus.preview",
+    "focus.terminal_typing",
     "update.auto",
     *config.INSIGHTS_KEYS,
     *ghlimit.SETTING_KEYS,
@@ -306,7 +306,7 @@ def _config(args, root: Path) -> None:
             "diag.enabled": lambda: config.diag_enabled(root),
             "diag.report_tickets": lambda: report_tickets.enabled(root),
             "focus.session_typing": lambda: config.focus_session_typing(root),
-            "focus.preview": lambda: config.focus_preview_on(root),
+            "focus.terminal_typing": lambda: config.focus_terminal_typing(root),
             "update.auto": lambda: autoupdate.enabled(),
             "insights.share_counts": lambda: config.insights_share_counts(root),
             "insights.share_names": lambda: config.insights_share_names(root),
@@ -448,14 +448,14 @@ def _config(args, root: Path) -> None:
             {"focus.session_typing": value},
             "Saved: typing into the helper's screen is " + ("on." if value else "off."),
         )
-    elif args.sub == "set" and args.key == "focus.preview":
+    elif args.sub == "set" and args.key == "focus.terminal_typing":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")
-        value = config.set_focus_preview(root, args.value == "on")
+        value = config.set_focus_terminal_typing(root, args.value == "on")
         _out(
             args,
-            {"focus.preview": value},
-            "Saved: Focus shows " + ("the new Focus (Preview)." if value else "today's Focus."),
+            {"focus.terminal_typing": value},
+            "Saved: typing into the plain terminal is " + ("on." if value else "off."),
         )
     elif args.sub == "set" and args.key == "update.auto":
         if args.value not in ("on", "off"):
