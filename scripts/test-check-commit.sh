@@ -23,7 +23,7 @@ cat > "$S/probe.sh" <<'EOF'
 #!/bin/sh
 out=$1; code=$2
 { echo "pwd=$(pwd)"; echo "head=$(git rev-parse HEAD)"; echo "base=$(git rev-parse -q --verify origin/develop)"
-  echo "home=$HOME"; echo "orch_home=$ORCH_HOME"; echo "strict=$ORCH_HOME_STRICT"; echo "uv=$UV_CACHE_DIR"
+  echo "home=$HOME"; echo "orch_home=$ORCH_HOME"; echo "strict=$ORCH_HOME_STRICT"; echo "guard_only=$ORCH_TEST_GUARD_ONLY"; echo "uv=$UV_CACHE_DIR"
   echo "npm=$npm_config_cache"; echo "user=${USER:-unset}"; } > "$out"
 mkdir -p "$ORCH_HOME" && echo x > "$ORCH_HOME/config" && touch "$HOME/marker" "$(pwd)/made-by-check"
 exit "$code"
@@ -42,6 +42,7 @@ run "$A" -- "$S/probe.sh" "$S/out" 0 > "$S/log" 2>&1 || { cat "$S/log"; fail "pa
 case "$(v pwd)" in "$R"/.orch-test/commit-*/copy) ;; *) fail "command did not run in a fresh copy: $(v pwd)";; esac
 case "$(v home)" in "$R"/.orch-test/commit-*/home) ;; *) fail "home is not throwaway: $(v home)";; esac
 [ "$(v orch_home)" = "$(v home)/.orch-tool" ] && [ "$(v strict)" = 1 ] || fail "ORCH_HOME / ORCH_HOME_STRICT wrong"
+[ "$(v guard_only)" = "$(v home)" ] || fail "ORCH_TEST_GUARD_ONLY is not the throwaway home"
 [ "$(v uv)" = "$R/.cache/uv" ] && [ "$(v npm)" = "$R/.npm" ] || fail "caches are not the shared ones"
 [ "$(v user)" = unset ] || fail "environment not cleared (env -i)"
 [ ! -e "$(v pwd)" ] && [ ! -e "$(v home)" ] || fail "copy or home left after pass"
