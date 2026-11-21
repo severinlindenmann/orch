@@ -1424,7 +1424,7 @@ function ticketTalk(host, tid) {
     emptyError:'Write something or add a file.',
     dropTarget:host, dropLabel:'Drop to add to this ticket', sendingText:'Sending…',
     onSend:async message => { const result = await ticketTalkSend(tid, message); render(); return result; }});
-  box.classList.add('one-line');  // ORCH-777: one line until it has focus, text or files (kit composer.css)
+  box.classList.add('one-line');  // ORCH-777: one line until it is selected or has text or files (kit composer.css)
   let timer = null, last = null, busy = false;
   const show = (live, text) => {
     // ORCH-777: the box is one line; the helper's screen shows above it only while a helper is live (the send button
