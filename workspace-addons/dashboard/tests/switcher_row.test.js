@@ -21,7 +21,7 @@ function mk(tag) {
 }
 function load(workspaces, displayName = 'ORCH Development') {
   const box = mk('div');
-  const doc = {querySelector: s => s === '.workspace' ? box : null, getElementById: () => null, createElement: mk,
+  const doc = {querySelector: s => s === '.workspace' ? box : null, querySelectorAll: () => [], getElementById: () => null, createElement: mk,
     createElementNS: (_, t) => mk(t), addEventListener() {}};
   const win = {listeners: {}, addEventListener(n, f) { this.listeners[n] = f; },
     OrchLook: {badge: (_, label) => Object.assign(mk('span'), {className: 'wsb', label}), name: () => displayName}};
