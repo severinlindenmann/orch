@@ -39,6 +39,14 @@ try:  # the core's debug log; a dashboard that cannot import it simply writes no
 except ImportError:  # pragma: no cover
     diag = None
 
+try:  # reads a refused request's unread body before the close (Windows resets the connection otherwise)
+    from orch.httpbody import ReadsWholeBody
+except ImportError:  # pragma: no cover
+
+    class ReadsWholeBody:  # an older core: no draining
+        pass
+
+
 DEFAULT_PORT = 8420
 MAX_BODY = 16384  # every action but the ones below
 MAX_BIG_BODY = (
@@ -270,7 +278,7 @@ def _client_gone(sock) -> bool:
         return True
 
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
     timeout = 10  # a short body must not hold a thread
 
     def __init__(self, *a, root: Path, orch_bin: str | None, puller: ViewPuller, session=None, **kw):
@@ -334,14 +342,7 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def _refuse_type(self):
-        """415 for a body that is not JSON. Reads a small body first: Windows resets a connection closed with
-        unread data, and the client then sees an abort instead of the answer."""
-        try:
-            n = int(self.headers.get("Content-Length") or "0")
-            if 0 < n <= 65536:
-                self.rfile.read(n)
-        except (ValueError, OSError):
-            pass
+        """415 for a body that is not JSON (its unread body is read after the answer: ReadsWholeBody)."""
         return self._send(415, b"send JSON", "text/plain")
 
     def _send(self, code, body: bytes, ctype: str, extra: dict | None = None, csp: str | None = None):
