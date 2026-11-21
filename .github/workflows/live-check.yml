@@ -1,0 +1,30 @@
+name: live-check
+# Live check of relay.severin.io and publish.severin.io from OUTSIDE the private network (ORCH-950):
+# health, TLS valid for 14 days or more, admin paths 404 on the public sites and the admin ports
+# closed on the server's public address. The inside part (admin open over the private network,
+# round trips) runs as an orch automation script on develop, which also reads this job's newest
+# result (scripts/live_check.py --where inside --outside-from ...). No AI.
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  outside:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/live_check.py
+          sparse-checkout-cone-mode: false
+      - name: Check from outside
+        run: python3 scripts/live_check.py --where outside --out live-check.json | tee -a "$GITHUB_STEP_SUMMARY"
+        shell: bash -o pipefail {0}
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: live-check
+          path: live-check.json
+          retention-days: 14

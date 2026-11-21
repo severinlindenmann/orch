@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 const SRC = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/composer.js'), 'utf8');
 const tick = () => new Promise(r => setTimeout(r, 0));
-function load({media = true, recorder = true, speech = null, deny = false, type = 'audio/webm;codecs=opus'} = {}) {
+function load({media = true, recorder = true, speech = null, deny = false, pending = false, type = 'audio/webm;codecs=opus'} = {}) {
   const made = [];
   class FakeRec {
     constructor(stream, o) { this.state = 'inactive'; this.mimeType = (o && o.mimeType) || type; made.push(this); }
@@ -19,7 +19,7 @@ function load({media = true, recorder = true, speech = null, deny = false, type 
   const tracks = [];
   const button = () => ({classList:{add(){}, remove(){}}, setAttribute(){}, lastChild:{textContent:''}, set innerHTML(v) { this._html = v; this.lastChild = {textContent:''}; }, get innerHTML() { return this._html; }});
   const win = {UI:{}, MediaRecorder:recorder ? FakeRec : undefined, ...(speech || {})};
-  const ctx = {window:win, navigator:{language:'en-US', mediaDevices:media ? {getUserMedia:async () => { if (deny) { const e = new Error('no'); e.name = 'NotAllowedError'; throw e; } const t = {stopped:false, stop() { this.stopped = true; }}; tracks.push(t); return {getTracks:() => [t]}; }} : undefined},
+  const ctx = {window:win, navigator:{language:'en-US', mediaDevices:media ? {getUserMedia:async () => { if (pending) return new Promise(() => {}); if (deny) { const e = new Error('no'); e.name = 'NotAllowedError'; throw e; } const t = {stopped:false, stop() { this.stopped = true; }}; tracks.push(t); return {getTracks:() => [t]}; }} : undefined},
     document:{createElement:button, addEventListener(){}}, File:class { constructor(parts, name, o) { this.name = name; this.type = o.type; } }, Event:class {}, setTimeout, setInterval:() => 1, clearInterval(){}, Date};
   ctx.UI = win.UI;  // the browser global UI is window.UI
   vm.createContext(ctx); vm.runInContext(SRC, ctx);
@@ -83,4 +83,47 @@ test('on-device recognition: its words come back with the file', async () => {
   assert.equal(inst.processLocally, true, 'asked to stay on this computer');
   r.button.onclick(); await new Promise(res => setTimeout(res, 450));
   assert.deepEqual(got, ['make the button bigger']);
+});
+// ORCH-696: a page that draws its own controls (the new Focus message box) starts, stops and cancels by itself, is
+// told when listening starts and ends, and gets the reason of a refusal as a code.
+test('start() and stop() from the page: onState says when listening starts and ends, then the file', async () => {
+  const {UI} = load();
+  const seen = [];
+  const r = UI.voiceRecorder({words:false, onState:(on, how) => seen.push([on, how]), onDone:f => seen.push(['file', f.type])});
+  r.start(); await tick();
+  assert.equal(r.recording, true);
+  r.stop(); await tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(seen)), [[true, {}], [false, {cancelled:false, empty:false}], ['file', 'audio/webm']]);
+});
+test('cancel() drops the recording: no file, the microphone released', async () => {
+  const {UI, tracks} = load();
+  const seen = [];
+  const r = UI.voiceRecorder({onState:(on, how) => seen.push([on, how && how.cancelled]), onDone:() => seen.push('file')});
+  r.start(); await tick();
+  r.cancel(); await tick();
+  assert.deepEqual(seen, [[true, undefined], [false, true]]);
+  assert.equal(tracks[0].stopped, true);
+});
+test('cancel() while the browser still asks for the microphone: nothing starts', async () => {
+  const {UI, made, tracks} = load();
+  const seen = [];
+  const r = UI.voiceRecorder({onState:(on, how) => seen.push([on, how && how.cancelled]), onDone:() => seen.push('file')});
+  r.start(); r.cancel(); await tick();
+  assert.deepEqual(seen, [[false, true]]);
+  assert.equal(made.length, 0);
+  assert.equal(tracks[0].stopped, true);
+});
+test('a refusal comes with its code', async () => {
+  const codes = [];
+  load({deny:true}).UI.voiceRecorder({onError:(m, c) => codes.push(c)}).start(); await tick();
+  assert.deepEqual(codes, ['blocked']);
+});
+test('cancel() while the question of the browser stays open: the page is told at once and may try again', async () => {
+  const {UI} = load({pending:true});
+  const seen = [];
+  const r = UI.voiceRecorder({onState:(on, how) => seen.push([on, how && how.cancelled])});
+  r.start(); await tick();
+  r.cancel();
+  assert.deepEqual(seen, [[false, true]]);
+  assert.equal(r.button.disabled, false, 'not stuck on asking');
 });

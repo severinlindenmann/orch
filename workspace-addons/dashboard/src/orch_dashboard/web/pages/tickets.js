@@ -47,6 +47,84 @@ function syncTicketAddress() {
   if (p.get('layout') === 'board') ticketView = 'board';
   else if (at < 0 || !p.has('layout')) { try { ticketView = localStorage.getItem('orch.tickets.view') === 'board' ? 'board' : 'list'; } catch (_) { ticketView = 'list'; } }
 }
+// ORCH-523: with 10,000 tickets the page can neither hold nor draw every ticket. /api/state carries the open and
+// recently finished ones (ORCH-522); /api/tickets brings older finished tickets a page at a time and searches every
+// ticket on the server. Each group and lane draws its first rows and the next ones when its end scrolls into view.
+const ROWS_STEP = 50, LANE_STEP = 30, rowsCap = new Map(), moreHandlers = new Map();
+const capOf = (key, step = ROWS_STEP) => rowsCap.get(key) || step;
+const finished = {key:null, rows:new Map(), next:0, total:null, busy:false, end:false};
+const hits = {key:null, want:null, rows:[], next:null, total:0, busy:false, timer:null};
+const pagingOn = () => !snapshot && typeof fetch === 'function';
+function filterParams() { const p = {}; if (ticketPerson) p.who = ticketPerson; if (ticketMine) p.mine = '1'; if (ticketGroup) p.group = ticketGroup; return p; }
+async function fetchTickets(params) {
+  const r = await fetch('/api/tickets?' + new URLSearchParams(params), {credentials:'same-origin'});
+  if (!r.ok) throw new Error('tickets ' + r.status);
+  return r.json();
+}
+// The next page of finished tickets for the shown filters (newest finished first); rows already in the state win.
+function loadFinished() {
+  if (!pagingOn()) return;
+  const key = JSON.stringify(filterParams());
+  if (finished.key !== key) Object.assign(finished, {key, rows:new Map(), next:0, total:null, end:false});
+  if (finished.busy || finished.end) return;
+  finished.busy = true;
+  fetchTickets({...filterParams(), status:'done', offset:finished.next, limit:ROWS_STEP}).then(out => {
+    if (finished.key !== key) return;
+    const items = array(out.items);
+    for (const t of items) finished.rows.set(t.id, t);
+    finished.total = Number(out.total) || 0; finished.next += items.length; finished.end = out.next == null || !items.length;
+  }).catch(() => { finished.end = true; }).finally(() => { finished.busy = false; render(); });
+}
+const finishedHere = () => finished.key === JSON.stringify(filterParams());
+// How many finished tickets there are for the shown filters: the server's count, else the state's (no filter), else null.
+function finishedTotal() {
+  if (finishedHere() && finished.total != null) return finished.total;
+  const n = state?.counts?.by_status?.done;
+  return !ticketPerson && !ticketMine && !ticketGroup && Number.isFinite(n) ? n : null;
+}
+function moreFinished(loaded) {
+  if (!pagingOn() || savedView() || String(ticketSearch).trim()) return false;
+  if (finishedHere() && finished.end) return false;
+  const total = finishedTotal();
+  return total == null ? !finishedHere() : total > loaded;
+}
+function pageRows() {
+  const own = tickets();
+  if (!finished.rows.size || !finishedHere()) return own;
+  const have = new Set(own.map(t => t.id));
+  return [...own, ...[...finished.rows.values()].filter(t => !have.has(t.id))];
+}
+// A typed search runs on the server over every ticket (ORCH-523); until its answer arrives the page filters what it holds.
+function searchKey() { const q = String(ticketSearch).trim(); return q ? JSON.stringify([q, filterParams()]) : ''; }
+const searchServed = () => !!hits.key && hits.key === searchKey();
+function wantSearch() {
+  const key = searchKey();
+  if (!key || !pagingOn() || hits.want === key) return;
+  hits.want = key; clearTimeout(hits.timer);
+  hits.timer = setTimeout(() => searchPage(key, 0), 250);
+}
+function searchPage(key, offset) {
+  if (offset && hits.busy) return;
+  hits.busy = true;
+  const [q, params] = JSON.parse(key);
+  fetchTickets({...params, q, offset, limit:ROWS_STEP}).then(out => {
+    if (hits.want !== key) return;
+    hits.rows = offset ? [...hits.rows, ...array(out.items)] : array(out.items);
+    hits.key = key; hits.next = out.next ?? null; hits.total = Number(out.total) || 0;
+  }).catch(() => { if (hits.want === key && !offset) hits.want = null; }).finally(() => { hits.busy = false; render(); });
+}
+// The mark at the end of a cut group: drawn as "Loading more…", it shows the next rows (or fetches them) once seen.
+function moreMark(key, hidden, fetchMore, step = ROWS_STEP) {
+  moreHandlers.set(key, () => { if (hidden > 0) { rowsCap.set(key, capOf(key, step) + step); render(); } else if (fetchMore) fetchMore(); });
+  return h('p', {className:'meta load-more', role:'status', 'data-more':key, 'data-key':'more-' + key}, 'Loading more…');
+}
+let moreWatch = null;
+function armLoadMore(root) {
+  if (!root || typeof IntersectionObserver !== 'function') return;
+  moreWatch ||= new IntersectionObserver(entries => { for (const e of entries) if (e.isIntersecting) moreHandlers.get(e.target.dataset.more)?.(); }, {rootMargin:'400px 0px'});
+  moreWatch.disconnect();
+  root.querySelectorAll('[data-more]').forEach(el => moreWatch.observe(el));
+}
 const changesPending = t => t?.bring_back?.state === 'waiting';
 function inView(t, view, nowMs = Date.now()) {
   const status = window.DashHelpers.columnOf(shown(t).status);
@@ -85,10 +163,15 @@ function boardChildren(all, t) {
 function boardParent(all, t) {
   return window.DashHelpers.parentOf ? window.DashHelpers.parentOf(all, t) : all.find(parent => parent.id !== t.id && t.parent && (parent.id === t.parent || parent.key === t.parent));
 }
-function ticketParents(items) {
+function ticketParents(items) {  // boardParent for every ticket, with maps (ORCH-523: thousands of rows)
+  const byId = new Map(), byKey = new Map(), holder = new Map();
+  for (const t of items) { if (!byId.has(t.id)) byId.set(t.id, t); if (t.key && !byKey.has(String(t.key).toLowerCase())) byKey.set(String(t.key).toLowerCase(), t); }
+  // like boardParent: the children lists count only with the shared helper (DashHelpers.parentOf)
+  if (window.DashHelpers?.parentOf) for (const t of items) for (const c of Array.isArray(t.children) ? t.children : []) if (!holder.has(c)) holder.set(c, t);
   return items.map(t => {
-    const parent = boardParent(items, t);
-    return parent ? {...t, parent:parent.id} : t;
+    const named = t.parent ? byId.get(t.parent) || byKey.get(String(t.parent).toLowerCase()) : null;
+    const parent = named && named.id !== t.id ? named : holder.get(t.id);
+    return parent && parent.id !== t.id ? {...t, parent:parent.id} : t;
   });
 }
 // ORCH-62: a waiting ticket without an open question only waits (for another ticket, a time or the outside): its own
@@ -138,7 +221,7 @@ function waitsLine(t) {
   return text ? h('p', {className:'meta ticket-sub', 'data-key':'waits-' + t.id}, text) : null;
 }
 function boardParentLine(t) {
-  const parent = boardParent(tickets(), t);
+  const parent = familyOf().parent.get(t.id);
   return parent ? h('p', {className:'meta board-parent'}, h('a', {href:href(parent.id)}, (parent.release ? 'Part of the release ' : parent.epic ? 'Part of the epic ' : 'Sub-ticket of ') + clean(parent.title))) : null;
 }
 // `section`: the group or column the row sits in; its own status chip is left out there. Done shows when it finished.
@@ -152,7 +235,15 @@ function ticketAttentionChip(t, section) {
 const localDay = at => window.UI?.stamp ? window.UI.stamp(at, {time:false}) : '';
 // A helper worked on it before (sessions) but it is not running now: paused, not new. Typed tasks alone are not.
 const ticketIsPaused = t => array(t.sessions).length > 0;
-function filteredTickets() { return filterTickets(ticketParents(tickets()), ticketSearch, ticketMine, typeof state?.who === 'string' ? state.who : '', ticketPerson, savedView(), ticketGroup); }
+function filteredTickets() {
+  const me = typeof state?.who === 'string' ? state.who : '';
+  wantSearch();
+  if (searchServed()) {  // the server searched every ticket for these words, person and group; the view is chosen here
+    const own = new Map(tickets().map(t => [t.id, t]));
+    return filterTickets(ticketParents(hits.rows.map(t => own.get(t.id) || t)), '', false, me, '', savedView(), '');
+  }
+  return filterTickets(ticketParents(pageRows()), ticketSearch, ticketMine, me, ticketPerson, savedView(), ticketGroup);
+}
 // A native select styled with the kit's input class (the kit has no custom select yet).
 function ticketSelect(label, key, choices, value, onChange) {
   const select = h('select', {className:'input ticket-select', 'aria-label':label, 'data-key':key}, choices.map(([id, text]) => h('option', {value:id, selected:id === value ? '' : null}, text)));
@@ -177,7 +268,7 @@ function ticketFilters() {
   input.addEventListener('input', event => { ticketSearch = event.currentTarget.value; searchFolds.clear(); writeTicketAddress(); render(); });
   const owners = [...new Set(tickets().map(t => String(t.owner || '')).filter(Boolean))].sort();
   const person = owners.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...owners.map(o => [o, name(o) || o])], ticketPerson, value => { ticketPerson = value; writeTicketAddress(); render(); }) : null;
-  const all = tickets(), heads = all.filter(t => all.some(c => c.parent === t.id || (c.parent && c.parent === t.key))).sort((a, b) => String(a.title).localeCompare(String(b.title)));
+  const all = tickets(), parents = new Set(all.map(c => c.parent).filter(Boolean)), heads = all.filter(t => parents.has(t.id) || (t.key && parents.has(t.key))).sort((a, b) => String(a.title).localeCompare(String(b.title)));
   const group = heads.length || ticketGroup ? ticketSelect('Part of', 'ticket-group', [['', 'Any ticket'], ...heads.map(t => [t.id, clean(t.title).slice(0, 40)])], ticketGroup, value => { ticketGroup = value; writeTicketAddress(); render(); }) : null;
   return [h('span', {className:'grow'}), group, person, h('label', {className:'search-field'}, input)];
 }
@@ -299,7 +390,7 @@ const viewToggle = () => h('div', {className:'board-toolbar row', 'data-key':'bo
   h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters());
 function boardCard(t, nested = false, column = '', here = null) {
   const tasks = array(t.checklist), done = tasks.filter(window.DashHelpers.resolved).length;
-  const parts = boardChildren(tickets(), t);
+  const parts = familyOf().kids.get(t.id) || [];
   return h('article', {className:'card ticket-card' + (nested ? ' board-child' : ''), 'data-col':column || null, draggable:snapshot ? null : 'true', 'data-ticket':t.id, 'data-key':'card-' + t.id},
     h('div', {className:'row'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)), parts.length ? null : window.DashHelpers.kindTag(t, h), titleTag(t)),
       snapshot ? null : h('details', {className:'menu', 'data-key':'card-menu-' + t.id}, h('summary', {className:'btn ghost icon sm move-button', 'aria-label':'Move ' + clean(t.title) + ' to another column'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, statusItems(t, 'card', BOARD_MOVES), laneOrderItems(t, column)))),
@@ -327,17 +418,21 @@ function board() {
   const lanes = window.DashHelpers.LANES.map(([status, label]) => {
     const mine = window.DashHelpers.laneSorted(visible.filter(t => boardLane(t) === status), status);  // ORCH-156: the person's order
     const rows = window.DashHelpers.treeRows(mine), roots = rows.filter(r => !r.depth);
-    const capped = CAPPED_LANES.includes(status) && roots.length > 3 && !String(ticketSearch).trim();  // a search shows every hit
-    return {status, label, mine, rows, roots, capped, cap:capped && !boardMore.has(status) ? 3 : roots.length};
+    // ORCH-523: Done counts every finished ticket (most are not on the page) and loads more as its end scrolls into view
+    const fetchMore = status === 'done' && moreFinished(mine.length) ? loadFinished : null, total = groupCount(status, mine.length);
+    const capped = CAPPED_LANES.includes(status) && (roots.length > 3 || !!fetchMore) && !String(ticketSearch).trim();  // a search shows every hit
+    const cap = capped && !boardMore.has(status) ? 3 : Math.min(roots.length, capOf('lane-' + status, LANE_STEP));
+    return {status, label, mine, rows, roots, capped, cap, total, fetchMore:capped && !boardMore.has(status) ? null : fetchMore};
   }).filter(l => l.mine.length || !['dropped', 'superseded'].includes(l.status));  // ORCH-240: empty set-aside lanes take no room
   const shownHere = new Set(lanes.flatMap(l => l.cap >= l.roots.length ? l.mine.map(t => t.id) : []));
-  const cols = lanes.map(({status, label, mine, rows, roots, capped, cap}) => {
+  const cols = lanes.map(({status, label, mine, rows, roots, capped, cap, total, fetchMore}) => {
     const branch = row => h('div', {className:'board-family', 'data-key':'family-' + row.ticket.id}, boardCard(row.ticket, row.depth > 0, status, shownHere),
       rows.filter(child => child.depth === row.depth + 1 && [row.ticket.id, row.ticket.key].includes(child.ticket.parent)).map(branch));
-    return h('section', {className:'kanban-col' + (mine.length ? '' : ' col-collapsed'), 'data-status':status, 'data-key':'col-' + status, 'aria-label':label + ', ' + mine.length},
-      h('div', {className:'col-head'}, h('h2', {className:'grow'}, (STATUS_BADGE[status] || STATUS_BADGE.open)[0] + ' ' + label), h('span', {className:'status-count'}, String(mine.length))),
-      h('div', {className:'col-body', 'data-key':'col-body-' + status}, roots.slice(0, cap).map(branch), !mine.length ? h('p', {className:'meta board-none', title:COLUMN_EMPTY[status]}, COLUMN_EMPTY[status]) : null,
-        capped ? h('button', {type:'button', className:'btn ghost sm show-done', 'data-action':'board-more', 'data-lane':status, 'data-key':'board-more-' + status}, boardMore.has(status) ? 'Show fewer' : 'Show ' + (roots.length - 3) + ' more') : null));
+    return h('section', {className:'kanban-col' + (total ? '' : ' col-collapsed'), 'data-status':status, 'data-key':'col-' + status, 'aria-label':label + ', ' + total},
+      h('div', {className:'col-head'}, h('h2', {className:'grow'}, (STATUS_BADGE[status] || STATUS_BADGE.open)[0] + ' ' + label), h('span', {className:'status-count'}, String(total))),
+      h('div', {className:'col-body', 'data-key':'col-body-' + status}, roots.slice(0, cap).map(branch), !total ? h('p', {className:'meta board-none', title:COLUMN_EMPTY[status]}, COLUMN_EMPTY[status]) : null,
+        (!capped || boardMore.has(status)) && (roots.length > cap || fetchMore) ? moreMark('lane-' + status, roots.length - cap, fetchMore, LANE_STEP) : null,
+        capped ? h('button', {type:'button', className:'btn ghost sm show-done', 'data-action':'board-more', 'data-lane':status, 'data-key':'board-more-' + status}, boardMore.has(status) ? 'Show fewer' : 'Show ' + (Math.max(roots.length, total) - 3) + ' more') : null));
   });
   return h('div', {className:'board', 'data-key':'board'}, h('div', {className:'board-track', title:snapshot ? null : 'Drag a card to move it, or use its ⋯ menu'}, cols));
 }
@@ -349,6 +444,28 @@ function replacedLine(t) {
 }
 /* ORCH-156: the order inside a lane. The whole lane is sent first to last (every card keeps its place); the cards
    move at once and go back when the save fails. `before`: the card it lands above, null = the end of the lane. */
+// Parents and parts of every ticket, worked out once per state (ORCH-523: each board card asked over all tickets).
+// The same rules as DashHelpers.parentOf / childrenOf: the parent field (id or key), else a parent's children list.
+let familyMemo = {of:null};
+function familyOf() {
+  if (familyMemo.of === state?.tickets) return familyMemo;
+  const all = tickets(), byId = new Map(all.map(t => [t.id, t])), kids = new Map(), parent = new Map();
+  for (const t of ticketParents(all)) if (t.parent && byId.has(t.parent)) parent.set(t.id, byId.get(t.parent));
+  const add = (pid, c) => { if (pid === c.id) return; const list = kids.get(pid) || []; if (!list.includes(c)) list.push(c); kids.set(pid, list); };
+  const byKey = new Map(all.filter(t => t.key).map(t => [String(t.key).toLowerCase(), t]));
+  for (const c of all) { const p = c.parent && (byId.get(c.parent) || byKey.get(String(c.parent).toLowerCase())); if (p) add(p.id, c); }
+  for (const p of all) for (const id of array(p.children)) if (byId.has(id)) add(p.id, byId.get(id));
+  for (const list of kids.values()) list.sort(window.DashHelpers.creationOrder);
+  familyMemo = {of:state?.tickets, kids, parent};
+  return familyMemo;
+}
+// The ids of a lane in its order, once per state (every card's Move up / Move down asks).
+let laneMemo = {of:null, runs:null, lanes:new Map()};
+function laneIds(lane) {
+  if (laneMemo.of !== state?.tickets || laneMemo.runs !== state?.runs) laneMemo = {of:state?.tickets, runs:state?.runs, lanes:new Map()};
+  if (!laneMemo.lanes.has(lane)) laneMemo.lanes.set(lane, laneTickets(lane).map(t => t.id));
+  return laneMemo.lanes.get(lane);
+}
 function laneTickets(lane) {
   return window.DashHelpers.laneSorted(sorted(array(state?.tickets).filter(t => boardLane(t) === lane)), lane);
 }
@@ -378,7 +495,7 @@ function laneStep(id, lane, step) {
 }
 function laneOrderItems(t, lane) {
   if (!lane) return null;
-  const ids = laneTickets(lane).map(x => x.id), at = ids.indexOf(t.id);
+  const ids = laneIds(lane), at = ids.indexOf(t.id);
   if (at < 0 || ids.length < 2) return null;
   return [['up', 'Move up', at > 0], ['down', 'Move down', at < ids.length - 1]].filter(x => x[2]).map(([dir, label]) =>
     h('button', {type:'button', className:'menu-item', role:'menuitem', 'data-action':'lane-' + dir, 'data-ticket':t.id, 'data-lane':lane, 'data-key':'lane-' + dir + '-' + t.id}, label));
@@ -537,10 +654,13 @@ function groupAction(status, group, folded = foldedGroups.has(status)) {
   if (status === 'review' && group.length) return h('a', {className:'btn outline sm group-action', href:href(group[0].id)}, 'Check ' + group.length + (group.length === 1 ? ' result' : ' results'));
   return null;
 }
-const searchHead = n => { const q = String(ticketSearch).trim(); return q ? n + (n === 1 ? ' ticket matches “' : ' tickets match “') + q + '”' : 'Ticket · ' + n; };
+const searchHead = n => { const q = String(ticketSearch).trim(); if (q && searchServed() && !savedView()) n = Math.max(n, hits.total); return q ? n + (n === 1 ? ' ticket matches “' : ' tickets match “') + q + '”' : 'Ticket · ' + n; };
+// The number on a group: for Done the server's count when only part of the finished tickets are here (ORCH-523).
+const groupCount = (status, n) => status === 'done' && !savedView() && !String(ticketSearch).trim() ? Math.max(n, finishedTotal() || 0) : n;
+const searchMore = () => searchServed() && hits.next != null ? () => searchPage(hits.key, hits.next) : null;
 function ticketTable(visible) {
   const rel = releaseGroups(visible), groups = ticketGroups(visible.filter(t => !rel.inRelease.has(t.id)));
-  if (!foldSeen) { foldSeen = true; if ((groups.find(g => g.status === 'done')?.tickets.length || 0) > 5) foldedGroups.add('done'); }
+  if (!foldSeen) { foldSeen = true; if (groupCount('done', groups.find(g => g.status === 'done')?.tickets.length || 0) > 5) foldedGroups.add('done'); }
   const body = [];
   releaseFolds(rel.groups);
   for (const group of rel.groups) {
@@ -549,20 +669,28 @@ function ticketTable(visible) {
     const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, (folded ? '› ' : '⌄ ') + group.title + ' ', h('span', {className:'meta'}, releaseCount(group)));
     toggle.addEventListener('click', () => { if (folded) folds.delete(status); else folds.add(status); render(); });
     body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:6}, h('div', {className:'group-head'}, toggle, folded ? null : releaseOpen(group)))));
-    if (!folded) rows.forEach((row, i) => { if (row.depth === 0) body.push(treeBranch(rows, i, status)); });
+    if (folded) continue;
+    const roots = rows.map((row, i) => ({row, i})).filter(({row}) => row.depth === 0), cap = capOf('list-' + status);
+    for (const {i} of roots.slice(0, cap)) body.push(treeBranch(rows, i, status));
+    if (roots.length > cap) body.push(h('tr', {className:'group-row', 'data-key':'more-row-' + status}, h('td', {colSpan:6}, moreMark('list-' + status, roots.length - cap))));
   }
   for (const status of GROUP_ORDER) {
     const group = groups.find(g => g.status === status), rows = window.DashHelpers.treeRows(group.tickets);
     const roots = rows.map((row, i) => ({row, i})).filter(({row}) => row.depth === 0);
-    if (!roots.length) continue;
+    if (!roots.length && !(status === 'done' && moreFinished(0))) continue;  // Done shows with the server's count (ORCH-523)
     // a search shows its hits: every group opens while a search is typed; folding then lasts for that search (ORCH-58)
     const folds = String(ticketSearch).trim() ? searchFolds : foldedGroups;
     const [icon] = STATUS_BADGE[status] || STATUS_BADGE.open, folded = folds.has(status);
-    const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, (folded ? '› ' : '⌄ ') + icon + ' ' + group.title + ' ', h('span', {className:'meta'}, String(group.tickets.length)));
+    const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, (folded ? '› ' : '⌄ ') + icon + ' ' + group.title + ' ', h('span', {className:'meta'}, String(groupCount(status, group.tickets.length))));
     toggle.addEventListener('click', () => { if (folded) folds.delete(status); else folds.add(status); render(); });
     body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:6}, h('div', {className:'group-head'}, toggle, groupAction(status, group.tickets, folded)))));
-    if (!folded) for (const {i} of roots) body.push(treeBranch(rows, i, status));
+    if (folded) continue;
+    const cap = capOf('list-' + status), fetchMore = status === 'done' && moreFinished(group.tickets.length) ? loadFinished : null;
+    for (const {i} of roots.slice(0, cap)) body.push(treeBranch(rows, i, status));
+    if (roots.length > cap || fetchMore) body.push(h('tr', {className:'group-row', 'data-key':'more-row-' + status}, h('td', {colSpan:6}, moreMark('list-' + status, roots.length - cap, fetchMore))));
   }
+  const more = searchMore();
+  if (more) body.push(h('tr', {className:'group-row', 'data-key':'more-row-search'}, h('td', {colSpan:6}, moreMark('search', 0, more))));
   // This week: one total line of helper time and money under the table
   if (savedView() === 'this-week') {
     const total = window.DashHelpers.spendTotal(visible);
@@ -618,21 +746,25 @@ function phoneList(visible) {
   for (const group of order) {
     const status = group.status, rows = window.DashHelpers.treeRows(group.tickets), isRel = !!group.release;
     const roots = rows.filter(row => row.depth === 0);
-    if (!roots.length) continue;
+    if (!roots.length && !(!isRel && status === 'done' && moreFinished(0))) continue;
     const folds = String(ticketSearch).trim() ? searchFolds : foldedGroups, folded = folds.has(status);
-    const shownRows = rows.filter(row => row.depth <= 1), all = phoneMore.has(status), cut = all ? shownRows : shownRows.slice(0, PHONE_ROWS);
-    const sec = window.UI.shortGroup({key:'short-' + status, title:isRel ? group.title + ' · ' + releaseCount(group) : group.title, icon:isRel ? (group.finished ? 'done' : 'todo') : SHORT_ICON[status], count:group.tickets.length, folded,
+    const shownRows = rows.filter(row => row.depth <= 1), all = phoneMore.has(status), cut = shownRows.slice(0, all ? capOf('phone-' + status) : PHONE_ROWS);
+    const fetchMore = !isRel && status === 'done' && moreFinished(group.tickets.length) ? loadFinished : null, total = isRel ? group.tickets.length : groupCount(status, group.tickets.length);
+    const sec = window.UI.shortGroup({key:'short-' + status, title:isRel ? group.title + ' · ' + releaseCount(group) : group.title, icon:isRel ? (group.finished ? 'done' : 'todo') : SHORT_ICON[status], count:total, folded,
       onToggle:() => { if (folded) folds.delete(status); else folds.add(status); render(); },
       rows:cut.map(row => ({key:typeof row.ticket.key === 'string' ? row.ticket.key : '', title:clean(row.ticket.title), href:href(row.ticket.id), child:row.depth > 0,
         fact:[window.DashHelpers.kindWord(row.ticket), shortFact(row.ticket, isRel ? {...row, parentMissing:false} : row)].filter(Boolean).join(' · '), side:shortSide(row.ticket, row, isRel ? ticketColumn(row.ticket) : status), dataKey:'short-' + row.ticket.id})),
-      more:cut.length < shownRows.length ? {label:(shownRows.length - cut.length) + ' more', onClick:() => { phoneMore.add(status); render(); }} : null});
+      more:!all && (cut.length < shownRows.length || fetchMore) ? {label:Math.max(shownRows.length - cut.length, total - cut.length) + ' more', onClick:() => { phoneMore.add(status); render(); }} : null});
     sec.querySelectorAll('.short-row').forEach(rowEl => rowEl.addEventListener('click', e => {
       if (e.target.closest('a,button')) return;
       const link = rowEl.querySelector('a.short-title'); if (link) location.hash = link.getAttribute('href');
     }));
     sec.querySelector('.card-h button')?.setAttribute('data-key', 'short-toggle-' + status);
     out.push(sec);
+    if (all && !folded && (cut.length < shownRows.length || fetchMore)) out.push(moreMark('phone-' + status, shownRows.length - cut.length, fetchMore));
   }
+  const more = searchMore();
+  if (more) out.push(moreMark('phone-search', 0, more));
   return h('div', {className:'phone-only short-list', 'data-key':'ticket-short'}, out);
 }
 function list() {

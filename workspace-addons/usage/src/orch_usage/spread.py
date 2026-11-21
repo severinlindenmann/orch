@@ -41,7 +41,7 @@ PERIOD_WORDS = {
 def _starts(root: Path) -> list[dict]:
     """The start entries of the starts file; nothing when it is missing, broken or of another schema."""
     try:
-        data = json.loads((store.usage_dir(root) / STARTS).read_text(encoding="utf-8"))
+        data = json.loads((store.ensure(root) / STARTS).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
     if not isinstance(data, dict) or data.get("schema") != SCHEMA or not isinstance(data.get("starts"), dict):
@@ -115,6 +115,14 @@ def build(root: Path, accounts: list[dict], at: datetime | None = None) -> dict:
             kind = KIND_WORDS.get(str(e.get("kind")), "Helpers")
             p["kinds"][kind] = p["kinds"].get(kind, 0) + 1
     total = sum(p["starts"][-1] for p in per.values())
+    # ORCH-943: every workspace on this computer counts toward the same limits; the split shows who used what today
+    split: dict[str, dict] = {}
+    for e in _starts(root):
+        if e.get("day") != days[-1]:
+            continue
+        w = split.setdefault(str(e.get("workspace") or "This workspace"), {"starts": 0, "dollars": 0.0})
+        w["starts"] += 1
+        w["dollars"] = round(w["dollars"] + _money(e), 4)
     rows = []
     known = set()
     for a in accounts:
@@ -133,6 +141,12 @@ def build(root: Path, accounts: list[dict], at: datetime | None = None) -> dict:
         "starts": total,
         "dollars": money,
         "sources": rows,
+        "workspaces": [
+            {"name": k, "starts": v["starts"], "dollars": round(v["dollars"], 2)}
+            for k, v in sorted(split.items(), key=lambda kv: (-kv[1]["starts"], kv[0]))
+        ]
+        if len(split) > 1
+        else [],
     }
 
 

@@ -13,6 +13,7 @@ import pytest
 
 from orch import cli, history, review, review_server, tickets
 from orch.errors import Refused
+from orch.httpbody import ReadsWholeBody
 
 TOKENS = {}  # port -> page token of the servers made in this module
 PNG = b"\x89PNG\r\n\x1a\nXX"
@@ -526,15 +527,12 @@ def test_talk_answer_with_text_only_note_is_recorded(srv, ws, card):
     assert q["answer"] is not None and "Move the title up." in q["answer"]
 
 
-def test_a_refused_post_reads_its_body_first():
+def test_a_refused_post_reads_its_body_first(srv, ws):
     # Windows resets a socket closed with unread bytes: the caller then saw an aborted connection, not the 403
-    sent = []
-    h = review_server.Handler.__new__(review_server.Handler)
-    h.headers = {"Content-Length": "11"}
-    h.rfile = io.BytesIO(b'{"token":1}rest')
-    h._text = lambda code, text: sent.append((code, h.rfile.tell()))
-    h._refuse(403, "no")
-    assert sent == [(403, 11)]
-    h.headers, h.rfile = {"Content-Length": str(review_server.MAX_BODY + 1)}, io.BytesIO(b"x")
-    h._refuse(403, "no")  # a body over the limit is not read
-    assert sent[-1] == (403, 0)
+    # or 400 (WinError 10053 on CI, 21 Nov, a body over the limit). ReadsWholeBody reads the rest after the
+    # answer.
+    assert issubclass(review_server.Handler, ReadsWholeBody)
+    port = srv.server_address[1]
+    for _ in range(20):
+        assert req(port, "POST", "/api/answer", "x" * 20000)[0] in (400, 403)
+        assert req(port, "POST", "/api/nope", "x" * 2000)[0] == 405

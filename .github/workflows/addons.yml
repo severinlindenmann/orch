@@ -158,6 +158,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # the browser download (16-27 s) is kept between runs; the system packages it needs are still installed (ORCH-1118)
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('e2e/walkthrough/package-lock.json') }}-${{ runner.os }}
       - name: Real Linux click-through of the Services tab (e2e SVC-1, ORCH-272)
         working-directory: e2e/walkthrough
         run: |
@@ -182,22 +187,6 @@ jobs:
     defaults:
       run:
         working-directory: workspace-addons/pull-requests
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-      - run: uv sync
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run pytest -q -n 2
-  dashboard-tester:
-    if: inputs.suites
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    defaults:
-      run:
-        working-directory: workspace-addons/dashboard-tester
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -263,6 +252,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      # the browser download (16-27 s) is kept between runs; the system packages it needs are still installed (ORCH-1118)
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.64.1-${{ runner.os }}
       - run: npm install -g playwright@1.64.1
       - run: playwright install --with-deps chromium
       - run: node e2e/focus_insights_smoke.cjs
@@ -281,6 +275,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      # the browser download (16-27 s) is kept between runs; the system packages it needs are still installed (ORCH-1118)
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.64.1-${{ runner.os }}
       - run: npm install -g playwright@1.64.1
       - run: playwright install --with-deps chromium
       - run: PW_DIR="$(npm root -g)" node workspace-addons/dashboard/clickthrough/run.cjs

@@ -287,7 +287,7 @@
               "type": "object", "required": ["lines"], "additionalProperties": false,
               "properties": {
                 "title": { "$ref": "#/$defs/text", "maxLength": 40, "default": "Last log lines" },
-                "lines": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/text" } },
+                "lines": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/text" } },
                 "empty": { "$ref": "#/$defs/text", "description": "Shown when there are no lines yet." }
               }
             },

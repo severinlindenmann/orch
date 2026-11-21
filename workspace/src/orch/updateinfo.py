@@ -17,7 +17,10 @@ from pathlib import Path
 from orch import addons
 from orch.services import _printable
 
-RELEASE_MERGE = re.compile(r"^Merge pull request #\d+ from \S*?/?release/part(\d+)", re.MULTILINE)
+RELEASE_MERGE = re.compile(
+    r"^Merge pull request #\d+ from \S*?/?release/part(\d+)(?:\.(\d+))?", re.MULTILINE
+)  # part33 = release 33, part33.1 = its first fix release (ORCH-552)
+VERSION_RE = re.compile(r"[1-9][0-9]{0,5}(?:\.[1-9][0-9]{0,3})?")
 PR_MERGE = re.compile(r"^Merge pull request #\d+ from \S+\n+(?P<title>[^\n]+)")
 PREFIX = re.compile(r"^[A-Za-z][\w /()-]{0,24}:\s+")
 # issue and ticket numbers ("#1393", "ORCH-411"), with a "closes" or "fixes" before them
@@ -31,12 +34,39 @@ _cache: dict = {"at": -1e9, "value": None}
 _lock = threading.Lock()
 
 
-def release_in(messages: list[str]) -> int | None:
-    """The release number of the newest release merge in these commit messages (newest first)."""
+def version(n: int, fix: int | None = None) -> int | str:
+    """A release as a person reads it: 33, or "33.1" for the first fix release of 33."""
+    return f"{n}.{fix}" if fix else n
+
+
+def as_version(v, stored: bool = False) -> int | str | None:
+    """33, "33" or "33.1" as a release value (33 or "33.1"); anything else None. stored: as written to a
+    file, where a plain release is a number and only a fix release is text ("9" there is no release)."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v if 0 < v < 10**6 else None
+    if isinstance(v, str) and VERSION_RE.fullmatch(v) and not (stored and "." not in v):
+        n, _, fix = v.partition(".")
+        return version(int(n), int(fix) if fix else None)
+    return None
+
+
+def vkey(v) -> tuple[int, int]:
+    """Order of releases: 33 < 33.1 < 33.2 < 34. Unknown values sort first."""
+    v = as_version(v)
+    if v is None:
+        return (0, 0)
+    n, _, fix = str(v).partition(".")
+    return (int(n), int(fix or 0))
+
+
+def release_in(messages: list[str]) -> int | str | None:
+    """The release of the newest release merge in these commit messages (newest first): 33 or "33.1"."""
     for m in messages:
         hit = RELEASE_MERGE.match(m or "")
         if hit:
-            return int(hit[1])
+            return version(int(hit[1]), int(hit[2]) if hit[2] else None)
     return None
 
 
@@ -68,7 +98,7 @@ def changes_from(messages: list[str]) -> list[str]:
         for m in messages:
             hit = PR_MERGE.match(m or "")
             t = (
-                _plain(re.sub(r"^Release \d+:\s*", "", hit["title"]))
+                _plain(re.sub(r"^Release \d+(?:\.\d+)?:\s*", "", hit["title"]))
                 if hit and RELEASE_MERGE.match(m)
                 else ""
             )
@@ -83,7 +113,7 @@ def changes_from(messages: list[str]) -> list[str]:
 def _local_messages(kind: str, a: str, b: str | None) -> list[str] | None:
     from orch import safegit
 
-    folder = Path(addons.repo())
+    folder = addons.file_repo(addons.repo()) or Path(addons.repo())
     # 'at' follows the main line (release merges); 'between' sees every merged pull request in the range
     args = ["log", *(["--first-parent"] if kind == "at" else []), "-n", "100" if kind == "at" else "250"]
     args.append("--format=%B%x00")
@@ -121,11 +151,74 @@ def _github_messages(kind: str, a: str, b: str | None) -> list[str] | None:
 def _fetch_messages(kind: str, a: str, b: str | None = None) -> list[str] | None:
     """Commit messages, newest first. kind 'at': the history up to commit/ref `a`; 'between': a..b."""
     try:
-        if addons._is_local(addons.repo()):
+        if addons._is_local(addons.repo()) or addons.file_repo(addons.repo()) is not None:
             return _local_messages(kind, a, b)
         return _github_messages(kind, a, b)
     except Exception:  # noqa: BLE001 - best effort: no network, rate limit, odd answer
         return None
+
+
+RELEASE_BRANCH = re.compile(r"^release/part(\d+)(?:\.(\d+))?(?:-|$)")
+
+
+def _github_release_line() -> list[tuple[int | str, str]] | None:
+    from urllib.request import Request, urlopen
+
+    api = addons._github_api()
+    if not api:
+        return None
+    url = f"{api}/pulls?state=closed&base={addons.RELEASE_REF}&sort=updated&direction=desc&per_page=100"
+    with urlopen(Request(url, headers={"Accept": "application/vnd.github+json"}), timeout=8) as r:  # noqa: S310
+        rows = json.load(r)
+    if not isinstance(rows, list):
+        return None
+    out = []
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("merged_at"):
+            continue
+        head = row.get("head") if isinstance(row.get("head"), dict) else {}
+        hit = RELEASE_BRANCH.match(head.get("ref") or "")
+        sha = addons._sha_or_none(row.get("merge_commit_sha"))
+        if hit and sha:
+            out.append((version(int(hit[1]), int(hit[2]) if hit[2] else None), sha))
+    return out
+
+
+def _git_release_line(folder: Path) -> list[tuple[int | str, str]] | None:
+    from orch import safegit
+
+    args = ["log", "--first-parent", "-n", "400", "--format=%H%x01%B%x00", addons.RELEASE_REF]
+    rc, out, _ = safegit.run(args, folder, 10, read_only=True, filters=True, root=folder)
+    if rc != 0:
+        return None
+    line = []
+    for chunk in out.split("\x00"):
+        sha, _, msg = chunk.strip().partition("\x01")
+        hit = RELEASE_MERGE.match(msg)
+        if hit and addons._sha_or_none(sha):
+            line.append((version(int(hit[1]), int(hit[2]) if hit[2] else None), sha.strip()))
+    return line
+
+
+def release_line() -> list[tuple[int | str, str]] | None:
+    """The releases of the install source's release branch as (release, merge commit), newest first (33.1
+    after 33), one entry per release; None when they cannot be read (no network, unknown host)."""
+    try:
+        r = addons.repo()
+        if addons.file_repo(r) is not None:
+            got = _git_release_line(addons.file_repo(r))
+        elif addons._is_local(r):
+            got = _git_release_line(Path(r))
+        else:
+            got = _github_release_line()
+    except Exception:  # noqa: BLE001 - best effort: no network, rate limit, odd answer
+        return None
+    if got is None:
+        return None
+    seen: dict = {}
+    for n, sha in got:
+        seen.setdefault(n, sha)  # the newest merge of a number wins (a release merged twice)
+    return sorted(seen.items(), key=lambda x: vkey(x[0]), reverse=True)
 
 
 def installed() -> dict:
@@ -135,14 +228,10 @@ def installed() -> dict:
     except (OSError, ValueError):
         d = None
     d = d if isinstance(d, dict) else {}
-    rel = d.get("release")
-    return {
-        "sha": addons._sha_or_none(d.get("sha")),
-        "release": rel if isinstance(rel, int) and not isinstance(rel, bool) and rel > 0 else None,
-    }
+    return {"sha": addons._sha_or_none(d.get("sha")), "release": as_version(d.get("release"), stored=True)}
 
 
-def label(release: int | None, sha: str | None, ref: str) -> str:
+def label(release: int | str | None, sha: str | None, ref: str) -> str:
     if release:
         return f"orch {release}"
     if sha:
@@ -168,12 +257,34 @@ def build_words() -> str:
         return ""
 
 
-def release_now(sha: str | None) -> int | None:
-    """The release number the install source has at this commit (read from its history)."""
+def release_now(sha: str | None) -> int | str | None:
+    """The release the install source has at this commit (read from its history): 33 or "33.1"."""
     if not sha:
         return None
     msgs = _fetch_messages("at", sha)
     return release_in(msgs) if msgs else None
+
+
+def _compute_held(held: dict, have: dict) -> dict:
+    """Held at a release it went back to: an update is offered only once a release newer than the one left
+    is out (that update leaves the hold and takes the release branch again)."""
+    out = {
+        "installed": {**have, "label": label(have["release"] or held["release"], have["sha"], "main")},
+        "newest": None,
+        "update_available": False,
+        "changes": [],
+        "held": {"release": held["release"], "left": held["left"]},
+    }
+    line = release_line()
+    if not line:
+        return out
+    n, sha = line[0]
+    out["newest"] = {"sha": sha, "release": n, "label": label(n, sha, "main")}
+    if vkey(n) > vkey(held["left"]):
+        out["update_available"] = True
+        if have["sha"]:
+            out["changes"] = changes_from(_fetch_messages("between", have["sha"], sha) or [])
+    return out
 
 
 def _commit_at(ref: str, at: int) -> str | None:
@@ -221,6 +332,9 @@ def _compute() -> dict:
     resolve_pending()
     ref = addons.ref()
     have = installed()
+    held = addons.pinned()
+    if held:
+        return _compute_held(held, have)
     newest_sha = addons._source_sha()
     out = {
         "installed": {**have, "label": label(have["release"], have["sha"], ref)},
@@ -266,8 +380,8 @@ def _ticket_lines(root, messages: list[str] | None, heading: str) -> list[str]:
 
 
 def after_update(
-    old_sha: str | None, old_release: int | None, new_sha: str | None, root=None
-) -> tuple[int | None, list[str]]:
+    old_sha: str | None, old_release: int | str | None, new_sha: str | None, root=None
+) -> tuple[int | str | None, list[str]]:
     """After an update: the new release number and the lines to print under the update text
     ('Updated orch 15 → 16', then 'What changed:' and the list, then the tickets of this workspace that
     arrived). Nothing when the commit did not change."""

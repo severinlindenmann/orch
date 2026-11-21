@@ -1128,6 +1128,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         copy_setup,
         diag_enabled,
         focus_session_typing,
+        focus_terminal_typing,
         live_max,
         release_merge_on,
         reviewer_on,
@@ -1159,6 +1160,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "ws_description": workspace_description(root) or "",
         "ws_tags": _ws_tags(root),  # the workspace's own tags (Settings > Workspace profile)
         "typing_on": focus_session_typing(root),  # Settings > Add-ons: "Let me type into the helper's screen"
+        "terminal_typing_on": focus_terminal_typing(root),  # "Let me type into the plain terminal" (ORCH-261)
         "diag_enabled": diag_enabled(root),  # the debug log switch (Settings > Report a problem)
         "diag": _diag_stats(root),
         "copies_disk": copies_disk(root),
@@ -1293,6 +1295,10 @@ def load_runs(
         # one process for all tickets (a process per ticket was most of the idle cost of an open page)
         batch = run_orch(orch_bin, ["run", "status", *todo, "--json"], root, timeout=5.0 + 0.5 * len(todo))
         rows = batch.get("runs") if isinstance(batch, dict) else None
+        if rows is None and len(todo) == 1 and isinstance(batch, dict) and batch:
+            rows = {
+                todo[0]: batch
+            }  # one ticket: the core answers its run itself, not {runs: {...}} (ORCH-884)
         rows = rows if isinstance(rows, dict) else {}
         got = [
             rows.get(i) if isinstance(rows.get(i), dict) and "error" not in rows[i] else None for i in todo
@@ -1425,6 +1431,22 @@ def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dic
             for x in tickets
         ]
     out["tickets"] = tickets
+    # ORCH-1047: a question of this ticket that is no longer open (answered, taken back) leaves the needs list at
+    # once; the cached list would bring an answered question back on Home until the background build runs, and a
+    # click on it is refused ("q1 is already answered.").
+    open_qs = {
+        q.get("id") for q in raw.get("questions") or [] if isinstance(q, dict) and q.get("answer") is None
+    }
+    mine = f"core:q:{tid}:"
+    out["needs"] = [
+        n
+        for n in state.get("needs") or []
+        if not (
+            isinstance(n, dict)
+            and str(n.get("id", "")).startswith(mine)
+            and n["id"][len(mine) :] not in open_qs
+        )
+    ]
     out["runs"] = {k: v for k, v in (state.get("runs") or {}).items() if k != tid}
     if runs.get(tid):
         out["runs"][tid] = runs[tid]
@@ -1525,6 +1547,7 @@ def load_state(
         "settings": settings,  # only the live local server: it holds the folder path
         # Home: the note after an automatic update (new version and what changed, or why it failed); live page only
         "auto_update_note": _auto_update_note() if with_settings else None,
+        "update_check": _update_check() if with_settings else None,
         # Where this orch came from ('release' / 'development'): the top bar marks a development build; live page only
         "build": _build() if with_settings else None,
         # Home and Settings > Helper: what helpers need (tool logins, connections, keys); live page only
@@ -1598,6 +1621,12 @@ def _auto_update_note() -> dict | None:
     from . import update
 
     return update.auto_note()
+
+
+def _update_check() -> dict | None:
+    from . import update
+
+    return update.check_card()
 
 
 def hide_unset_sharing(addons: list[dict], root: Path, orch_bin: str | None) -> list[dict]:
