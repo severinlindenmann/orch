@@ -60,7 +60,7 @@ def test_rows_with_ticket_checks_and_merge_state(prws):
     assert rows[0]["cells"] == {
         "num": "#3",
         "pr": "Change 3",
-        "why": "Checks failed: lint. Open the ticket to fix it.",
+        "why": "Checks failed: lint. Waits for a helper place.",
         "ticket": "DM-2",
         "state": "Checks failed",
         "in_line": None,
@@ -79,6 +79,14 @@ def test_rows_with_ticket_checks_and_merge_state(prws):
         "type": "footnote",
         "text": "The merge queue checks up to 5 pull requests together and merges them when the checks pass.",
     }
+
+
+def test_repair_note_says_who_fixes_a_red_pull_request():
+    tk = {"id": "t_a", "key": "DM-2"}
+    assert view.repair_note(tk, {"t_a": "claude"}, {"t_a": "active"}) == "Being repaired by claude."
+    assert view.repair_note(tk, {}, {"t_a": "ready"}) == "Waits for a helper place."
+    assert "No helper is on it" in view.repair_note(tk, {}, {"t_a": "review"})
+    assert "No ticket" in view.repair_note(None, {}, {})
 
 
 def test_github_trouble_is_the_notice(prws):
@@ -232,6 +240,16 @@ def test_with_no_open_pull_request_the_queues_recent_work_still_shows(prws):
     assert [b["type"] for b in v["blocks"]] == ["flow", "chart", "chart", "list", "footnote"]
     assert v["blocks"][0]["stages"][2]["value"] == "1 of 1 groups"
     assert v["blocks"][3]["empty"]["title"] == "No pull requests yet"
+
+
+def test_a_queued_pull_request_with_failed_checks_is_in_the_queue_not_failed(prws):
+    add_ticket(prws, "t_aaaaa1", [{"url": PR.format(1)}])
+    poll.once(prws, fetch=FakeGitHub({"acme/app": [gql_pr(1, merge="BLOCKED", checks=fail_run("lint"))]}))
+    _queue(prws, 1, ticket="t_aaaaa1")
+    v = valid(view.build(prws, running=True, queue_alive=True))
+    (table,) = [b for b in v["blocks"] if b["type"] == "table"]
+    assert table["rows"][0]["cells"]["state"] == "1st in line"
+    assert "failed" not in table["rows"][0].get("subtitle", "").lower()
 
 
 def test_an_empty_queue_still_says_where_it_is(prws):

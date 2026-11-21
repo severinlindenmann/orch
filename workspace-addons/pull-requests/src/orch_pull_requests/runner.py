@@ -25,7 +25,8 @@ branch, in line order:
   words with the failed checks' names are the suspects; the others run again together first (they merge on
   green), the suspects after. When that tells nobody apart it is split in halves. So one bad pull request in a
   group of 10 that touches the failing area costs two more runs, not about four. A red group of one leaves the
-  queue.
+  queue. A member left alone by the split is never merged on its own light checks, whatever `merge_alone` says
+  (ORCH-909): it runs in a group of its own on top of the base, so the check that failed runs on it.
 - a change to CI or to the queue itself (settings.alone_paths) runs alone in its own group: its green run is the
   proof before it counts. One a person merges (a Merge card, or a CI workflow change GitHub holds for the
   code owner) is only checked: on green its head gets the mark and the person merges it with the Merge card.
@@ -68,6 +69,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import blame, broken, settings, store
+from . import precheck as prechecks
 from .store import FINISHED, MERGED, OUT, RUNNING, WAITING, Refused
 
 MAX_GROUP = settings.DEFAULT_MAX_GROUP  # the setting max_group wins (settings.max_group)
@@ -139,6 +141,7 @@ class Runner:
         wake=None,
         ask=None,
         stamp=code_stamp,
+        precheck=None,
     ):
         from orch import ghlimit, prwait
 
@@ -150,14 +153,44 @@ class Runner:
                 url, merge, before_merge=before_merge, queue=True, stop=stop
             )
         )
-        self.take = take or ghlimit.take
+        self._take = take
+        self._limit_take = ghlimit.take
         self.wake = wake or _wake
         self.ask = ask or _ask_merge
+        self.pre = precheck or prechecks.run
         self.me: str | None = None
         self.red_checks: frozenset[str] = frozenset()  # failed check names of the last red group
         self._red: dict[tuple[str, str], tuple[float, frozenset[str]]] = {}
         self._ahead: Lead | None = None  # set while a group is built and checked on top of a running one
         self._live: set[str] = set()  # group branches whose checks run now: tidy leaves them alone
+
+    def take(self, kind: str, what: str = "") -> bool:
+        """A slot of this computer's GitHub write limit. While it waits for room, the running entries say so
+        (queue list, Pull requests page) with the time left, instead of looking like checks are running."""
+        if self._take is not None:
+            return self._take(kind, what)
+        said: list[str] = []
+
+        def on_wait(left: float, waited: float) -> None:
+            mins = max(1, round(left / 60))
+            text = f"waiting for room in this computer's GitHub write limit, about {mins} min"
+            if text in said:
+                return
+            first = not said
+            said[:] = [text]
+            if first:
+                self.log(f"The merge queue {text} ({what}).")
+            for r in store.read(self.root):
+                if r.get("state") == RUNNING and settings.same_login(r.get("login"), self.me):
+                    store.set_state(self.root, r["url"], RUNNING, text)
+
+        try:
+            return self._limit_take(kind, what, on_wait=on_wait)
+        finally:
+            if said:  # back to the plain text of a group being checked
+                for r in store.read(self.root):
+                    if r.get("state") == RUNNING and r.get("why") == said[0]:
+                        store.set_state(self.root, r["url"], RUNNING, "in the group being checked")
 
     # -- the loop ----------------------------------------------------------------------------------------
     def run(self) -> int:
@@ -365,6 +398,11 @@ class Runner:
             if lone and batch:  # it runs in a group of its own, in a later round
                 continue
             if follow is not None and (lone or v.get("isCrossRepository") or b != follow.base):
+                if not batch:  # first in line: stack no group past it, or it waits as long as one runs
+                    why = "first in line: waits until the running groups end, then runs in a round of its own"
+                    store.set_state(self.root, r["url"], WAITING, why)
+                    self.log(f"No group on top of {follow.url}: {r['url']} is {why}")
+                    break
                 continue  # never on top of another group: it waits for a round of its own
             if not base and b != guess:  # moved to another base branch since it was added: that one counts
                 most = 1 if self.red_base(repo, b) else size
@@ -523,9 +561,9 @@ class Runner:
                 if len(left) == 1:  # group() looks at members again; one alone is looked at here
                     left = self.check_members(left, left[0]["base"])
                 if left:
-                    self.process(left)
+                    self.process([dict(e, red=True) for e in left])
         elif red:
-            self.alone(red[0])
+            self.alone(dict(red[0], red=True))
 
     def split(self, red: list[dict], failed: frozenset[str]) -> list[list[dict]]:
         """The parts a red group runs again in, in order: the members that do not touch what failed first, then
@@ -557,8 +595,9 @@ class Runner:
         helper's branch never takes the base in. A fork is never put on a branch of the repository: merged
         directly when it may be, else it leaves the queue and a person merges it."""
         base = e.get("base") or ""
-        if e.get("lone") or e.get("proof") or not settings.merge_alone(self.root):
-            self.on_base(e, why)  # merge_alone off: its own checks are only the light set, a group run counts
+        if e.get("lone") or e.get("proof") or e.get("red") or not settings.merge_alone(self.root):
+            # merge_alone off, or its group was red (ORCH-909): its light checks never ran what failed
+            self.on_base(e, why)
             return
         marked: list[str] = []
         o = None
@@ -666,7 +705,12 @@ class Runner:
             for e in inside:
                 self.alone(e)
         else:
-            red = self._check_group(repo, base, sha, inside, alone)
+            out = self.precheck(git, start, sha, inside, heads)
+            if out:  # red on its own in the quick checks: left the queue; the others are built again
+                left = [e for e in inside if e not in out]
+                red = self.group(left, alone) if left else []
+            else:
+                red = self._check_group(repo, base, sha, inside, alone)
         for e in apart:
             if ahead is not None:  # it conflicts with the group before it: a round of its own, no try used
                 why = f"it conflicted with the group {ahead.url} before it; waits again"
@@ -677,6 +721,55 @@ class Runner:
             else:  # conflicts with the group: in a group of its own, after it
                 self.alone(e, "it conflicted with other pull requests in the merge queue")
         return red
+
+    def precheck(self, git, start: str, sha: str, inside: list[dict], heads: dict[str, str]) -> list[dict]:
+        """The quick checks on the merged tree before the group is pushed (setting precheck, ORCH-545). Green, not
+        set or trouble: []. Red: the base (start) alone first; red there too (a broken command, a red base) blames
+        nobody: []. Else each member on its own on top of start; those red alone leave the queue now with the
+        failing lines and are returned. Red only together: [] (the group run and its split decide)."""
+        cmd = settings.precheck(self.root)
+        if not cmd:
+            return []
+        got = self.pre(git, sha, cmd)
+        if got.ok is not False:
+            if got.ok is None:
+                self.log(f"The precheck did not run ({got.tail}); the group run decides.")
+            return []
+        # red on the base itself (a broken command, or a base already red in it): nobody in the group is blamed
+        if self.pre(git, start, cmd).ok is not True:
+            self.log(
+                "The precheck is red on the base itself; the group run decides. Look at the precheck setting."
+            )
+            return []
+        if len(inside) == 1:
+            bad = [(inside[0], got)]
+        else:
+            bad = []
+            for e in inside:
+                try:
+                    one, included, _ = git.build(start, [(e["number"], heads[str(e["number"])])])
+                except Refused:
+                    continue
+                if included and (own := self.pre(git, one, cmd)).ok is False:
+                    bad.append((e, own))
+            if not bad:
+                self.log("The precheck was red only for the group together; the group run decides.")
+                return []
+        for e, r in bad:
+            base = e.get("base") or ""
+            line = (
+                f"The quick checks of the merge queue (precheck) failed for {e['url']} on top of {base}, before "
+                f"its group run: fix it, push, then add it to the merge queue again."
+            )
+            if r.tail:
+                line += " What failed: " + " | ".join(r.tail.splitlines())
+            self.finish(e, OUT, line, "checks failed")
+        self.log(
+            "Precheck red: "
+            + ", ".join(f"#{e['number']}" for e, _ in bad)
+            + " left the queue before the group run."
+        )
+        return [e for e, _ in bad]
 
     def _check_group(
         self, repo: str, base: str, sha: str, inside: list[dict], alone: bool = False
@@ -957,7 +1050,10 @@ class Runner:
 
     # -- the ticket --------------------------------------------------------------------------------------
     def finish(self, e: dict, state: str, line: str, status: str) -> None:
-        store.set_state(self.root, e["url"], state, line)
+        extra = (
+            {"red_head": e["head"]} if state == OUT and status == "checks failed" and e.get("head") else {}
+        )
+        store.set_state(self.root, e["url"], state, line, **extra)
         self.log(line)
         tid = e.get("ticket")
         if not tid:

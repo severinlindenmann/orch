@@ -607,7 +607,7 @@
         "pr": "Add CSV export for invoices",
         "state": "Checks failed",
         "ticket": "BIL-1",
-        "why": "billing · Checks failed: lint. Open the ticket to fix it."
+        "why": "billing · Checks failed: lint. Waits for a helper place."
        },
        "link": "t_inv012",
        "links": {
@@ -900,7 +900,7 @@
         "pr": "Add CSV export for invoices",
         "state": "Checks failed",
         "ticket": "BIL-1",
-        "why": "billing · Checks failed: lint. Open the ticket to fix it."
+        "why": "billing · Checks failed: lint. Waits for a helper place."
        },
        "link": "t_inv012",
        "links": {

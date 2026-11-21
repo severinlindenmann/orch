@@ -84,7 +84,9 @@ set aside (it still runs and shows, but no longer counts) until its issue is clo
     orch pull-requests queue audit [--hours 14]
 
 Merges into develop checked in a queue group, checked alone and merged by a person, or past the queue; and the times
-the queue stood still (30 minutes or more with a pull request in line and no merge) with the reasons.
+the queue stood still (30 minutes or more with a pull request in line and no merge) with the reasons; the busiest
+hour (most merges within 60 minutes, goal 20) and the middle minutes from group start to merged over the last 20
+groups (goal under 6).
 
 ## Rules
 - Every merge into develop goes through the queue; it sets the mark `orch/merge-queue` on each group commit it

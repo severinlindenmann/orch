@@ -21,11 +21,12 @@ REPO_RE = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
 NO_GH = "GitHub isn't set up on this computer: install gh and run gh auth login once."
 NOT_SIGNED_IN = "GitHub isn't signed in on this computer: run gh auth login once."
 
-FIELDS = """number title url state isDraft mergeable mergeStateStatus baseRefName headRefName updatedAt createdAt mergedAt
+FIELDS = """number title url state isDraft mergeable mergeStateStatus baseRefName headRefName headRefOid updatedAt
+createdAt mergedAt
 author { login }
 commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
   __typename
-  ... on CheckRun { name status conclusion }
+  ... on CheckRun { name status conclusion startedAt checkSuite { workflowRun { workflow { name } } } }
   ... on StatusContext { context state }
 } } } } } }"""
 

@@ -93,7 +93,29 @@ def _plain_why(why: str) -> str:
     return why[:1].upper() + why[1:] if why else ""
 
 
-def _pr_state(r: dict) -> tuple[int, str, str]:
+def repair_note(tk: dict | None, runs: dict[str, str], status: dict[str, str]) -> str:
+    """Who is fixing a red pull request: the helper on its ticket, a helper place it waits for, or nobody."""
+    if not tk:
+        return "No ticket is linked, so no helper fixes it."
+    if tk["id"] in runs:
+        return f"Being repaired by {_clean(runs[tk['id']])[:40] or 'a helper'}."
+    if status.get(tk["id"]) in ("open", "ready", "active"):
+        return "Waits for a helper place."
+    return "No helper is on it. Open the ticket to fix it."
+
+
+def _runs(root) -> dict[str, str]:
+    """{ticket id: helper name} of every live helper run (empty when orch cannot list them)."""
+    got = poll.orch(root, "run", "list")
+    rows = got.get("runs") if isinstance(got, dict) else None
+    return {
+        r["ticket"]: str(r.get("agent") or "")
+        for r in rows or []
+        if isinstance(r, dict) and isinstance(r.get("ticket"), str) and r.get("state") == "alive"
+    }
+
+
+def _pr_state(r: dict, repair: str = "") -> tuple[int, str, str]:
     """(order, state, note) of an open pull request that is not in the merge queue."""
     status, merge, checks = r.get("status"), r.get("merge"), r.get("checks") or {}
     if status == "draft" or merge == "draft":
@@ -101,7 +123,7 @@ def _pr_state(r: dict) -> tuple[int, str, str]:
     if status == "checks failed":
         names = ", ".join((checks.get("failed_names") or [])[:2])
         what = f"Checks failed: {names}." if names else "A check failed."
-        return NEEDS, "Checks failed", f"{what} Open the ticket to fix it."
+        return NEEDS, "Checks failed", f"{what} {repair or 'Open the ticket to fix it.'}"
     if status == "conflict" or merge == "conflict":
         return NEEDS, "Has a conflict", "Open the ticket to sort out the conflict."
     if status == "checks running":
@@ -476,6 +498,7 @@ def build(
         ]
     qrows = _queue_rows(root)
     queue = _queue_state(qrows, queue_alive, now)
+    runs, status = _runs(root), {t["id"]: str(t.get("status") or "") for t in ts}
     seen = {r["url"] for r in every}
     for q in qrows:  # in the queue but not read from a ticket's links: still shown, with what the queue knows
         if q["url"] not in seen:
@@ -489,7 +512,7 @@ def build(
         tk = owner.get(r["url"])
         q = queue.get(r["url"])
         if q is None:
-            order, state, note = _pr_state(r)
+            order, state, note = _pr_state(r, repair_note(tk, runs, status))
             key, waited = (order, 0, -(r.get("number") or 0)), None
         else:
             state, note, waited = q["state"], q["note"], q["in_line"]

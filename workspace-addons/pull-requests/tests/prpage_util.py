@@ -69,7 +69,7 @@ def calls(root: Path) -> list[dict]:
 
 
 def gql_pr(
-    n: int, state="OPEN", draft=False, merge="CLEAN", mergeable="MERGEABLE", checks=None, title=None,
+    n: int, state="OPEN", draft=False, merge="CLEAN", mergeable="MERGEABLE", checks=None, title=None, sha=None,
     created="2026-11-16T09:00:00Z", merged=None,
 ):  # fmt: skip
     """One pull request as GitHub's GraphQL API answers it."""
@@ -85,6 +85,7 @@ def gql_pr(
         "mergeStateStatus": merge,
         "baseRefName": "develop",
         "headRefName": f"feat/x{n}",
+        "headRefOid": sha or f"{n:040x}",
         "updatedAt": "2026-11-17T09:00:00Z",
         "createdAt": created,
         "mergedAt": merged,

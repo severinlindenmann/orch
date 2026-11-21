@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -12,9 +13,21 @@ BY = "agent:automation"
 ID_RE = re.compile(r"^t_[a-z0-9]{6,16}$")
 
 
+def _run(*args, **kwargs):
+    """subprocess.run, looked up at each call: tests patch this (or this module's subprocess), never the global."""
+    return subprocess.run(*args, check=False, **kwargs)
+
+
+READS = {"here": 0}  # reads answered without a new process (tests count them)
+
+
 def call(root: Path, *args: str, by: bool | str = True):
     """Run `orch <args> --json`. Returns parsed JSON, or None on failure / no JSON.
     `by`: True = the scheduler (BY), a string = that actor (a person pressing a dashboard button), False = no --by."""
+    if by is False and "--" not in args:
+        got = _here(root, args)
+        if got is not None:
+            return got
     actor = by if isinstance(by, str) else BY
     head = list(args)
     tail = []
@@ -23,7 +36,7 @@ def call(root: Path, *args: str, by: bool | str = True):
         head, tail = head[:cut], head[cut:]
     cmd = [os.environ.get("ORCH_BIN") or "orch", *head, "--json"] + (["--by", actor] if by else []) + tail
     try:
-        p = subprocess.run(cmd, check=False, cwd=root, capture_output=True, text=True, timeout=120)
+        p = _run(cmd, cwd=root, capture_output=True, text=True, timeout=120)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if p.returncode != 0:
@@ -32,6 +45,35 @@ def call(root: Path, *args: str, by: bool | str = True):
         return json.loads(p.stdout)
     except ValueError:
         return None
+
+
+def _here(root: Path, args):
+    """A read the core answers in this process (orch.reads.answer, no worker) when ORCH_BIN is this very orch:
+    the parsed JSON, or None to start the command as before (a write, a long wait, a test's fake orch, an older
+    core, a read the core does not answer here or a refusal). One process per read was most of the machine
+    load with many helpers (ORCH-634)."""
+    try:
+        from orch import reads
+    except ImportError:
+        return None
+    if not (hasattr(reads, "answer") and hasattr(reads, "same_orch")):
+        return None
+    try:
+        if not reads.same_orch(_launcher(root, os.environ.get("ORCH_BIN") or "orch")):
+            return None
+        value = reads.answer(Path(root), [*args, "--json"])
+    except Exception:  # noqa: BLE001 - NotHere, Refused or anything else: the command gets its chance
+        return None
+    READS["here"] += 1
+    return value
+
+
+def _launcher(root: Path, orch_bin: str) -> str | None:
+    """The file `orch_bin` runs as the command starts it (cwd=root): a bare name through PATH, a relative path
+    from the workspace."""
+    if os.sep not in orch_bin and (os.altsep is None or os.altsep not in orch_bin):
+        return shutil.which(orch_bin)
+    return str(Path(root) / orch_bin)
 
 
 def log(root: Path, tid: str, text: str) -> None:
@@ -148,7 +190,7 @@ def run_start(
     if text:
         cmd += ["--text", text]
     try:
-        p = subprocess.run(cmd, check=False, cwd=root, capture_output=True, text=True, timeout=120)
+        p = _run(cmd, cwd=root, capture_output=True, text=True, timeout=120)
     except (OSError, subprocess.TimeoutExpired) as e:
         return {"result": "failed", "reason": f"orch could not be run ({e.__class__.__name__})"}
     try:
