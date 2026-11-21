@@ -5,6 +5,38 @@ Same watcher as the dashboard's orch_dashboard/events.py (add-ons share no code,
 import hashlib
 import os
 import threading
+import time
+
+# A scan takes this share of the watcher's time at most: the wait after a scan is the scan's own time times
+# SCAN_GAP, within WAIT_MIN..WAIT_MAX seconds (ORCH-609: at about 1,000 tickets a scan takes 10-30 ms, four scans a
+# second were 4-12% of a core while a page was open). A small workspace keeps the 0.25 s wait.
+WAIT_MIN, WAIT_MAX, SCAN_GAP = 0.25, 2.0, 50
+
+
+def next_wait(scan_seconds):
+    return max(WAIT_MIN, min(WAIT_MAX, scan_seconds * SCAN_GAP))
+
+
+def json_rows(folder, nested, rows):
+    """(path, mtime_ns, size) of every .json file in `folder` (and below it when `nested`), symlinked folders
+    left out: os.walk's answer with one system call per file (scandir knows the entry type), not three."""
+    todo = [str(folder)]
+    while todo:
+        top = todo.pop()
+        try:  # opening the folder or reading its next entry can fail (os.walk skipped such a folder too)
+            with os.scandir(top) as it:
+                for e in it:
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            if nested:
+                                todo.append(e.path)
+                        elif e.name.endswith(".json"):
+                            st = e.stat(follow_symlinks=False)
+                            rows.append((e.path, st.st_mtime_ns, st.st_size))
+                    except OSError:
+                        pass
+        except OSError:
+            continue
 
 
 class Revisions:
@@ -19,19 +51,8 @@ class Revisions:
     def signature(self):
         rows = []
         for folder in (self.root / ".orch" / "tickets", self.root / ".orch" / "run"):
-            for parent, dirs, files in os.walk(folder, followlinks=False):
-                dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(parent, d))]
-                # Ticket artifacts are not state; run records can be nested.
-                if folder.name == "tickets":
-                    dirs[:] = []
-                for name in sorted(files):
-                    if name.endswith(".json"):
-                        path = os.path.join(parent, name)
-                        try:
-                            st = os.stat(path, follow_symlinks=False)
-                            rows.append((path, st.st_mtime_ns, st.st_size))
-                        except OSError:
-                            pass
+            # Ticket artifacts are not state; run records can be nested.
+            json_rows(folder, folder.name != "tickets", rows)
         return hashlib.sha256(repr(sorted(rows)).encode()).hexdigest()
 
     def join(self):
@@ -53,7 +74,9 @@ class Revisions:
 
     def watch(self):
         while True:
+            began = time.monotonic()
             rev = self.signature()  # the folder walk happens outside the lock; the lock only publishes
+            wait = next_wait(time.monotonic() - began)
             with self.condition:
                 if not self.clients or self.closed:
                     self.thread = None
@@ -61,7 +84,7 @@ class Revisions:
                 if rev != self.rev:
                     self.rev = rev
                     self.condition.notify_all()
-                self.condition.wait(0.25)
+                self.condition.wait(wait)
 
     def close(self):
         with self.condition:
