@@ -657,7 +657,7 @@ def run_relay(args, root: Path, out) -> None:
         n = w["phones"]
         fp = _own_fingerprint(root)
         if fp:
-            w["fingerprint"] = fp  # computed from this computer's own key, never read from the relay
+            w["fingerprint"] = fp  # computed from the workspace's own key, never read from the relay
         out(
             args,
             w,
