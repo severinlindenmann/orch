@@ -509,3 +509,20 @@ def test_a_crash_between_the_add_and_the_card_still_sends_the_chat_so_far(proj, 
     assert len(card) == 1 and card[0]["body"]["shared_chat"]["lines"][0]["text"] == "Who has the 2025 letter?"
     run("relay", "inbox")
     assert len([m for m in sent(rel, to=HOME) if "shared_chat" in m["body"]]) == 1  # once
+
+
+def test_adding_back_counts_against_the_open_groups_cap(proj, run, rel, member, monkeypatch):
+    from test_chat_groups import _new_group_msg
+
+    clock = [10_000.0]
+    monkeypatch.setattr(cg, "_now_epoch", lambda: clock[0])
+    inbox(run, rel, _added(1))
+    ev = {"kind": "member_left", "at": "2026-11-08T10:01:00Z", "ws": WS, "reason": "removed"}
+    inbox(run, rel, from_host("text", {"text": "removed", "group_event": ev}, seq=2, id=mid("cap-rm")))
+    assert _joined(proj)["left"] is True
+    for i in range(cg.MAX_OPEN_GROUPS_PER_HOST):  # the host fills the cap with other groups
+        clock[0] += 3601
+        inbox(run, rel, _new_group_msg(i))
+    back = _added(3)
+    assert "20 open groups" in inbox(run, rel, back)[0]["note"]
+    assert _joined(proj)["left"] is True

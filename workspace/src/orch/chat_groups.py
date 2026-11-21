@@ -3086,7 +3086,13 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
     ev = b.get("group_event") if isinstance(b.get("group_event"), dict) else None
     seq = gw.get("seq")
     if j["left"] and not j["closed"] and _added_back(j, ev, me, seq):
-        # the host added us again after a removal or leave: a new membership, the order starts afresh
+        # the host added us again after a removal or leave: a new membership, the order starts afresh. It
+        # opens the group again, so the cap of open groups per host applies as for a new group.
+        open_now = sum(
+            1 for x in st["joined"].values() if x["host"] == host and not x["closed"] and not x["left"]
+        )
+        if open_now >= MAX_OPEN_GROUPS_PER_HOST:
+            return _drop(st, m, f"this host already has {MAX_OPEN_GROUPS_PER_HOST} open groups here")
         j.update(left=False, from_seq=None, next_seq=None, buf={}, own_guess=[], chat_before=None)
         j.pop("ended_at", None)
     if j["left"] or j["closed"]:
