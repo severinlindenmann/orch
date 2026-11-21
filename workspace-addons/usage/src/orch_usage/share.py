@@ -96,6 +96,13 @@ PRESETS = {
 FIELDS = tuple(PRESETS["even"]["share"])
 
 
+def ordinal(n: int) -> str:
+    """2 -> 2nd, 3 -> 3rd, 11 -> 11th, 21 -> 21st."""
+    if 10 <= n % 100 <= 20:
+        return f"{n}th"
+    return f"{n}" + {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+
+
 def path(root: Path) -> Path:
     return store.ensure(root) / "share.json"
 
@@ -328,7 +335,7 @@ def counts(s: dict | None, resets: dict[str, str] | None = None) -> list[str]:
     ]
     if s["tool_one_in"] > 1:
         out.append(
-            f"One in {s['tool_one_in']} counts helper starts of Code tickets: every {s['tool_one_in']}th Code start "
+            f"One in {s['tool_one_in']} counts helper starts of Code tickets: every {ordinal(s['tool_one_in'])} Code start "
             "goes to {tool}. The count starts again every day at midnight, this computer's time."
         )
     elif s["tool_one_in"] == 1:

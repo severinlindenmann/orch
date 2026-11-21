@@ -14,7 +14,7 @@
   "agent": 6
  },
  "workspace-addons/automation/src/orch_automation/orchcli.py": {
-  "agent": 2
+  "agent": 1
  },
  "workspace-addons/automation/src/orch_automation/scripts.py": {
   "agent": 1

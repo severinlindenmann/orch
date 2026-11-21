@@ -73,6 +73,9 @@ def _bars(row: dict) -> list[dict]:
         if lim:
             bar["limit"] = lim["value"]
             bar["limit_unit"] = lim["unit"]
+        elif "pct" in u and switching.DEFAULT_EARLY.get(name, 100.0) < 100.0:
+            # ORCH-643: no own limit for this window: Usage still switches early here (the default)
+            bar["early"] = switching.DEFAULT_EARLY[name]
         bars.append(bar)
     return bars
 

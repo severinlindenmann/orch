@@ -75,6 +75,23 @@ def _send(req, timeout, limit=None):
             return r.status, raw
 
 
+GATEWAY = (502, 503, 504)  # a proxy or load balancer answered, not the server itself
+
+
+def _status_text(url: str, code: int) -> str:
+    """The refusal for an error answer that carries no message of its own. A gateway answer names the address
+    and the likely causes (server move 19 Nov, ORCH-1026: a stale DNS cache sent the relay to an old proxy for
+    30 minutes)."""
+    if code not in GATEWAY:
+        return f"The server answered {code}."
+    host = urllib.parse.urlsplit(url).hostname or url
+    return (
+        f"{host} answered {code}: something in between (a proxy or gateway) could not reach the server. "
+        "It is often a short outage, or a moved server whose new address has not reached this computer yet "
+        "(DNS). Try again in a few minutes."
+    )
+
+
 def call(
     method: str,
     url: str,
@@ -97,7 +114,7 @@ def call(
         return _send(req, timeout, limit)
     except urllib.error.HTTPError as e:
         raw = e.read()
-        msg, out = f"The server answered {e.code}.", ""
+        msg, out = _status_text(url, e.code), ""
         try:
             obj = json.loads(raw)
             msg = obj.get("message") or obj.get("error") or msg

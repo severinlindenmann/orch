@@ -15,8 +15,9 @@ says (agents/*.json `api_key`):
                      helper starts later finds it empty. Never in the arguments, the environment or a file.
   {"env": NAME}      the helper process's environment only (for a tool whose shell leaves out *KEY* names).
                      The wrapper's own environment never holds it.
-  "set": {..}        plain extra settings for the helper (e.g. one that makes the tool strip credentials
-                     from the commands it runs).
+  "set": {..}        plain extra settings for the helper. Never one that changes what the helper may do: a
+                     key start keeps the workspace's permission level like any start (ORCH-913: a setting that
+                     strips credentials from its commands also forced one tool to ask for everything).
   "drop": [..]       sign-in names removed from the helper's environment, so the picked key is the only one.
 
 Every read is recorded in the run's record as a key use (no value) before the helper starts; a use that cannot

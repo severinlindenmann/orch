@@ -122,6 +122,9 @@ def sync_refusal(root: Path, tid: str) -> str | None:
     return None
 
 
+NO_HELPER = "No helper is set yet. Choose one in Settings, Helper."
+
+
 def run_start(
     root: Path,
     tid: str,
@@ -162,7 +165,7 @@ def run_start(
         else (p.stderr.strip() or "unknown")
     )
     if "No agent found" in reason:
-        reason = "No agent set: orch config set workspace.agent <name>"
+        reason = NO_HELPER
     return {"result": "failed", "reason": reason[:300]}
 
 

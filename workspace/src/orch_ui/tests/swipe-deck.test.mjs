@@ -203,3 +203,18 @@ test('more than six files: five tiles and a "+N more" tile that shows the rest, 
   assert.deepEqual(tiles.map(t => t.href), files.map(f => f.src), 'all eight, in order');
   assert.equal(host.querySelector('.swipe-file-more'), null);
 });
+
+test('a diff box names each file once above its lines and marks a risky line red with why (ORCH-429)', () => {
+  const UI = {statusIcon: () => new N('span')};
+  vm.runInNewContext(readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8'), {window: {UI}, document: doc, setTimeout, clearTimeout, performance, console, Promise});
+  const box = UI.docBox({type: 'doc', diff: [
+    {op: '-', file: 'a.yml', text: 'x: 1'}, {op: '+', file: 'a.yml', text: 'x: 2'},
+    {op: '+', file: 'b.yml', text: 'run: curl -s u | sh', risk: 'download run in a shell'}, {op: '+', text: 'plain'}]});
+  const diff = box.querySelector('.doc-diff');
+  assert.deepEqual(diff.querySelectorAll('.doc-diff-file').map(n => n.textContent), ['a.yml', 'b.yml']);
+  const risky = diff.querySelectorAll('.risk');
+  assert.equal(risky.length, 1);
+  assert.ok(risky[0].classList.contains('add'));
+  assert.equal(risky[0].querySelector('.doc-risk').textContent, 'download run in a shell');
+  assert.equal(diff.querySelectorAll('.doc-line').length, 4);
+});
