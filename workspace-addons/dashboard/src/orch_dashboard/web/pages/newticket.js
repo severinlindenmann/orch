@@ -81,7 +81,7 @@ function ticketFromText(typed, short, longText, files) {
   const firstLine = ticketTextTitle(typed, Infinity), wordy = firstLine.length > TITLE_MAX;
   const title = ticketTextTitle(typed.trim() ? typed : longText || files[0]?.name.replace(/\.[^.]+$/, '') || '', longText || files.length || wordy ? TITLE_PLACEHOLDER : TITLE_MAX);
   const titleAuto = typed.trim() ? firstLine.length >= TITLE_PLACEHOLDER : true;
-  // A one-sentence wish stays under "What you asked" too, not only a title (a short label such as "Fix login" is just the title).
+  // A one-sentence wish stays under "What was asked" too, not only a title (a short label such as "Fix login" is just the title).
   const note = short.length <= 1500 && (/[\r\n]/.test(short) || short.trim() !== title || short.trim().length > WISH_MIN) ? short : '';
   return {title, title_auto:titleAuto, ...(note ? {note} : {}), ...(longText ? {long_text:longText} : {}), ...(files.length ? {files:ticketSendFiles(files)} : {})};
 }

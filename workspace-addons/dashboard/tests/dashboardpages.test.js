@@ -684,7 +684,8 @@ test('the Automation page heading is the add-on menu name, not a second name', (
 
 test('ticket page: brief heading, Repeats in Properties, plain values with a pencil, no Edit text (UX round 5)', () => {
   const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
-  assert.match(ticket, /h\('h2', \{\}, 'What you asked'\)/);
+  assert.match(ticket, /h\('h2', \{\}, 'What was asked'\)/);
+  assert.doesNotMatch(ticket, /'What you asked'/, 'ORCH-415: one heading for the ask');
   assert.match(ticket, /field\('Done when', inlineField\(t, 'done_when'\), 'done-when'\) : null,\s+costValue\(t\) \? field\('Time · cost', costValue\(t\)\) : null, addonPropertyRows\(t\)/);
   assert.match(ticket, /'Set a due date'/);
   assert.match(ticket, /iconEl\('pencil'\)/);
@@ -896,4 +897,15 @@ test('ORCH-158: the shared ticket word for a new ticket is Backlog, not To do', 
   assert.equal(ticketState({status:'open'}).word, 'Backlog');
   assert.equal(ticketState({status:'ready'}).word, 'To do');
   assert.equal(ticketState({status:'dropped'}).word, "Won't do");
+});
+test('ORCH-415: Working only while a helper runs; In progress with none, so the pill agrees with the No helper line', () => {
+  const { ticketState } = require('./kit_state.js');
+  assert.equal(ticketState({status:'active'}).word, 'In progress');
+  assert.equal(ticketState({status:'active'}, {state:'working'}).word, 'Working');
+  assert.equal(helpers.startCostWords({estimate:{cost:1.2}, spend:{cost:0.4}}, 'Opus'), 'On Opus · estimate about $1.20, $0.40 used so far');
+  assert.equal(helpers.startCostWords({}, ''), 'A start uses paid helper time');
+  assert.equal(helpers.startCostWords({spend:{cost:0}}, 'Sonnet'), 'On Sonnet · a start uses paid helper time');
+  // before the first start the server's range is shown; tiny amounts never print $0.00
+  assert.equal(helpers.startCostWords({range:'about 20-40 min · $2.00-$4.00'}, 'Opus'), 'On Opus · about 20-40 min · $2.00-$4.00');
+  assert.equal(helpers.startCostWords({spend:{cost:0.004}}, 'Opus'), 'On Opus · a start uses paid helper time');
 });
