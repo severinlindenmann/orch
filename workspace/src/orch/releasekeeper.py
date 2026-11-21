@@ -1792,7 +1792,16 @@ def prep_line(part: str, p: dict) -> str:
     if not p.get("ready"):
         return f"The {part} server is not prepared ({p.get('why') or 'unknown'}); the helper fetches it."
     needs = "; ".join(p.get("needs") or []) or "no new settings or data changes"
-    return f"The {part} server is fetched and checked ({needs})."
+    line = f"The {part} server is fetched and checked ({needs})."
+    if not p.get(
+        "prod"
+    ):  # after the 19 Nov server move the deploy host pointed at the stopped server, unnoticed
+        line += (
+            f" Production's {part} program could not be read over ssh: check that the deploy host and key "
+            "settings (github.release_deploy_host, github.release_deploy_key) point at the server that runs "
+            "it now."
+        )
+    return line
 
 
 def helper_steps(prep: dict, script: str | None = None) -> str:
@@ -1985,12 +1994,27 @@ def run(
         root, tickets.resolve(root, cfg.role)
     )  # the role ticket was removed: Refused, plain words
     role = str(t.get("key") or t["id"])
+    reopened = None
+    if t.get("status") == "done" and not dry_run:
+        # A person moved the role ticket to Done but its repeat goes on (a repeat survives Done): every
+        # card of this pass would be refused ("This ticket is closed") and nothing reaches Home.
+        # Open it again.
+        tickets.set_status(root, t["id"], "open", tickets.SYSTEM)
+        tickets.log(
+            root,
+            t["id"],
+            "The role ticket was Done but its repeat still runs: opened it again so the cards reach you.",
+            tickets.SYSTEM,
+        )
+        reopened = f"{role} was Done while its repeat runs: opened it again"
     st = read_state(cfg)
     w = world or World(root, cfg, dry=dry_run, known=known)
     try:
         lines = pass_once(w, st, role, hold_text(cfg))
     except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError) as e:
         lines = [f"pass stopped: {e}"]
+    if reopened:
+        lines.insert(0, reopened)
     if not dry_run:
         _write_state(cfg, st)
     return {"off": False, "paused": False, "role": role, "lines": lines, "did": w.did, "state": st}
