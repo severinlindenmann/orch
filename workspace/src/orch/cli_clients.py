@@ -523,6 +523,7 @@ def _add_contacts(rel, common) -> None:
     y.add_argument(
         "--fingerprint", required=True, help="the fingerprint it shows on its own Settings page (must match)"
     )
+    y.add_argument("--name", help="your own name for it (empty keeps the relay's name)")
     y = x.add_parser("withdraw", parents=[common], help="take your Accept back (a person only)")
     y.add_argument("peer")
     x.add_parser("refused", parents=[common], help="messages refused as forged or changed")
@@ -536,6 +537,7 @@ _STATE_WORDS = {
     "new_key": "New key without the old one",
     "not_valid": "Not valid",
     "withdrawn": "Withdrawn",
+    "changed": "Changed",
 }
 
 
@@ -543,10 +545,12 @@ def run_contacts(args, root: Path, out) -> None:
     from orch import msgtrust
 
     sub = getattr(args, "csub", None) or "list"
-    by = tickets.current_actor()
+    by = tickets.current_actor(getattr(args, "by", None))
     if sub == "accept":
-        msgtrust.require_person("accepting a workspace")
-        r = msgtrust.accept(root, relay.resolve(root, args.peer), by, "cli", args.fingerprint)
+        via = "dashboard" if msgtrust.require_person_via("accepting a workspace", root, by) else "cli"
+        r = msgtrust.accept(
+            root, relay.resolve(root, args.peer), by, via, args.fingerprint, getattr(args, "name", None)
+        )
         n = sum(1 for x in r["released"] if x["result"] == "released")
         out(
             args,
@@ -554,8 +558,8 @@ def run_contacts(args, root: Path, out) -> None:
             f"Accepted {relay.name_of(root, r['peer'])} ({r['fingerprint']}). {n} held message(s) let in.",
         )
     elif sub == "withdraw":
-        msgtrust.require_person("taking an Accept back")
-        r = msgtrust.withdraw(root, relay.resolve(root, args.peer), by, "cli")
+        via = "dashboard" if msgtrust.require_person_via("taking an Accept back", root, by) else "cli"
+        r = msgtrust.withdraw(root, relay.resolve(root, args.peer), by, via)
         out(
             args,
             r,
@@ -591,8 +595,12 @@ def run_unsigned_switch(args, root: Path, out) -> None:
             "Unsigned messages are refused." if on else "Unsigned messages still let in.",
         )
         return
-    msgtrust.require_person("changing what this computer lets in")
-    r = msgtrust.set_refuse_unsigned(root, args.state == "refuse", tickets.current_actor())
+    msgtrust.require_person(
+        "changing what this computer lets in", root, tickets.current_actor(getattr(args, "by", None))
+    )
+    r = msgtrust.set_refuse_unsigned(
+        root, args.state == "refuse", tickets.current_actor(getattr(args, "by", None))
+    )
     out(
         args,
         r,
@@ -745,7 +753,13 @@ def run_relay(args, root: Path, out) -> None:
         from orch import relay_view
 
         v = relay_view.view(root)
-        rows = [f"{i['title']}  {i['subtitle']}" for b in v["blocks"] for i in b["items"]]
+        rows = [
+            f"{i['title']}  {i['subtitle']}"
+            if b["type"] == "list"
+            else f"{i['name']}  {i['fingerprint']}  {_STATE_WORDS.get(i['state'], i['state'])}"
+            for b in v["blocks"]
+            for i in b["items"]
+        ]
         out(args, v, "\n".join([v.get("notice", ""), *rows]).strip())
     elif sub == "whoami":
         w = relay.whoami(root)

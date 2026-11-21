@@ -60,6 +60,7 @@ NOT_VALID_CODES = {
 }
 _WS = re.compile(r"ws_[a-z0-9]{10}")
 _PEER = re.compile(r"(ws|ph)_[a-z0-9]{10}")
+_HIDDEN = re.compile(r"[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]")
 
 _ORIGIN: contextvars.ContextVar[str | None] = contextvars.ContextVar("orch_msg_origin", default=None)
 
@@ -692,9 +693,26 @@ def inbox_slot_free(dest: Path, m: dict) -> bool:
 # ---------------------------------------------------------------- Accept, withdraw, the list
 
 
-def accept(root: Path, peer: str, by: str, via: str, fingerprint: str | None = None) -> dict:
+def _own_name(name: str | None) -> str | None:
+    """The person's own name for a contact (ORCH-1203): one plain line, at most 60 characters; empty = the
+    relay's name."""
+    if name is None:
+        return None
+    if _HIDDEN.search(str(name)):
+        raise Refused("Use plain text for the name, on one line.")
+    n = " ".join(str(name).split())
+    if len(n) > 60:
+        raise Refused("A name has at most 60 characters.")
+    return n
+
+
+def accept(
+    root: Path, peer: str, by: str, via: str, fingerprint: str | None = None, name: str | None = None
+) -> dict:
     """A person accepts `peer`'s key: the one the relay lists now, after they saw its fingerprint. With
-    `fingerprint` it must be that one (so a key swapped meanwhile is never the one accepted)."""
+    `fingerprint` it must be that one (so a key swapped meanwhile is never the one accepted). `name` is the
+    person's own name for the contact (empty keeps the relay's name)."""
+    own = _own_name(name)
     if not _PEER.fullmatch(peer):
         raise Refused("Accept takes a workspace or phone id (ws_… or ph_…).")
     if peer == own_id(root):
@@ -713,6 +731,11 @@ def accept(root: Path, peer: str, by: str, via: str, fingerprint: str | None = N
         c["keys"] = [{"pub": raw.hex(), "accepted_at": _iso(_now_ms()), "by": by, "via": via}]
         c.pop("withdrawn", None)
         c["accepted_after_bad"] = int(c.get("not_valid", 0))
+        if own is not None:
+            if own:
+                c["name"] = own
+            else:
+                c.pop("name", None)
     notes = release(root, peer)
     return {"peer": peer, "fingerprint": fp, "state": "accepted", "released": notes}
 
@@ -762,10 +785,17 @@ def contacts(root: Path) -> list[dict]:
         hint = _hint_key(root, peer)
         acc = _accepted(st, peer)
         shown = hint or (acc[0] if acc else None)
+        c = st["contacts"].get(peer) or {}
+        relay_name = relay._shown_name(root, peer, peer)
+        keys = c.get("keys") or [{}]
         out.append(
             {
                 "id": peer,
-                "name": relay._shown_name(root, peer, peer),
+                "name": c.get("name") or relay_name,
+                "relay_name": relay_name,
+                "kind": "phone" if peer.startswith("ph_") else "workspace",
+                "accepted_at": keys[0].get("accepted_at"),
+                "withdrawn_at": (c.get("withdrawn") or {}).get("at"),
                 "fingerprint": msgsig.fingerprint(shown) if shown else None,
                 "accepted_fingerprint": msgsig.fingerprint(acc[0]) if acc else None,
                 "state": state_of(st, peer, hint),
@@ -780,10 +810,19 @@ def refused(root: Path) -> list[dict]:
     return list(_load(root).get("refused", []))
 
 
-def require_person(what: str) -> None:
-    """Accept, withdraw and the signed-only switch are a person's own action: never from a helper, and from
-    the CLI only at a terminal."""
-    from orch import tickets
+def require_person(what: str, root: Path | None = None, by: str | None = None) -> None:
+    require_person_via(what, root, by)
 
-    if tickets.agent_tool() is not None or not _is_tty():
+
+def require_person_via(what: str, root: Path | None = None, by: str | None = None) -> bool:
+    """Accept, withdraw and the signed-only switch are a person's own action: never from a helper. The proof
+    is the one-time grant the dashboard's signed-in page session hands this call (the Contacts page,
+    ORCH-1203), or a terminal. The grant is always used up first, so no child inherits it. True = the
+    dashboard's grant."""
+    from orch import ownerpick, tickets
+
+    if root is not None and ownerpick.person_granted(root, by):
+        return True
+    if tickets.agent_tool() is not None or (by or "").startswith("agent:") or not _is_tty():
         raise Refused(f"Only a person can do this ({what}), on the Contacts page or at a terminal.")
+    return False

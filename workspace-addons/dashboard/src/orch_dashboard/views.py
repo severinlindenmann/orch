@@ -18,7 +18,19 @@ from .data import _argv0, _child_env
 TIMEOUT = 10.0  # a view that starts other orch commands (Focus with live sessions) needs more than 2 s on a busy machine
 MAX_BYTES = 256 * 1024
 TONES = ("neutral", "good", "warn", "needs-you", "bad")
-BLOCKS = ("stat", "list", "calendar", "timeline", "chips", "table", "footnote", "settings", "radio", "split")
+BLOCKS = (
+    "stat",
+    "list",
+    "calendar",
+    "timeline",
+    "chips",
+    "table",
+    "footnote",
+    "settings",
+    "radio",
+    "split",
+    "contacts",
+)
 # Same pattern as `link` in contracts/addon-view.schema.json (tests/test_views.py compares them).
 _LINK = re.compile(
     r"""^(t_[a-z0-9]{6,16}|https://[^\s<>"'`]+|http://(127\.0\.0\.1|localhost):[0-9]{1,5}/?|addon:(?![/\\])(?!.*\.\.)[A-Za-z0-9_./?=&%-]{0,300}|app:(home|tickets|notes|chat|settings|addon)(/[a-z][a-z0-9-]{0,31}){0,2})$"""
@@ -436,6 +448,8 @@ def _block_ok(b) -> bool:
         )
     if t == "split":
         return _split_ok(b)
+    if t == "contacts":
+        return _contacts_ok(b)
     if t == "radio":
         opts = b.get("options")
         return (
@@ -453,6 +467,70 @@ def _block_ok(b) -> bool:
             )
         )
     return False
+
+
+# Contacts with fingerprint and state (ORCH-1203; contracts/addon-view.schema.json $defs/contacts)
+_PEER = re.compile(r"^(ws|ph)_[a-z0-9]{10}$")
+_FP = re.compile(r"^[0-9A-Z]{4}( [0-9A-Z]{4}){7}$")
+TRUST_STATES = ("new_key", "changed", "not_accepted", "not_valid", "withdrawn", "accepted")
+
+
+def _fp(v):
+    return isinstance(v, str) and bool(_FP.match(v))
+
+
+def _contact_ok(c):
+    return (
+        _keys_only(
+            c,
+            (
+                "id",
+                "name",
+                "relay_name",
+                "kind",
+                "state",
+                "fingerprint",
+                "old_fingerprint",
+                "held",
+                "refused",
+                "accepted_at",
+                "withdrawn_at",
+            ),
+        )
+        and isinstance(c.get("id"), str)
+        and bool(_PEER.match(c["id"]))
+        and _text(c.get("name"), 60)
+        and _opt(c, "relay_name", lambda v: _text(v, 60))
+        and c.get("kind") in ("workspace", "phone")
+        and c.get("state") in TRUST_STATES
+        and _fp(c.get("fingerprint"))
+        and _opt(c, "old_fingerprint", _fp)
+        and _int(c.get("held"))
+        and _opt(c, "refused", _int)
+        and all(
+            _opt(c, k, lambda v: isinstance(v, str) and bool(_TIME.match(v)))
+            for k in ("accepted_at", "withdrawn_at")
+        )
+    )
+
+
+def _contacts_ok(b):
+    items, own = b.get("items"), b.get("own")
+    return (
+        _keys_only(b, ("type", "title", "own", "items"))
+        and _opt(b, "title", lambda v: _text(v, 60))
+        and (
+            own is None
+            or (
+                _keys_only(own, ("name", "fingerprint"))
+                and _fp(own.get("fingerprint"))
+                and _opt(own, "name", lambda v: _text(v, 60))
+            )
+        )
+        and isinstance(items, list)
+        and len(items) <= 200
+        and all(map(_contact_ok, items))
+    )
 
 
 def _row_button(b):

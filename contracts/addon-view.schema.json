@@ -45,12 +45,12 @@
     "block": {
       "type": "object",
       "required": ["type"],
-      "properties": { "type": { "enum": ["stat", "list", "calendar", "timeline", "chips", "table", "footnote", "settings", "radio", "split"] } },
+      "properties": { "type": { "enum": ["stat", "list", "calendar", "timeline", "chips", "table", "footnote", "settings", "radio", "split", "contacts"] } },
       "oneOf": [
         { "$ref": "#/$defs/stat" }, { "$ref": "#/$defs/list" }, { "$ref": "#/$defs/calendar" },
         { "$ref": "#/$defs/timeline" }, { "$ref": "#/$defs/chips" }, { "$ref": "#/$defs/table" },
         { "$ref": "#/$defs/footnote" }, { "$ref": "#/$defs/settings" }, { "$ref": "#/$defs/radio" },
-        { "$ref": "#/$defs/split" }
+        { "$ref": "#/$defs/split" }, { "$ref": "#/$defs/contacts" }
       ]
     },
     "stat": {
@@ -218,6 +218,35 @@
         }
       }
     },
+    "contacts": {
+      "type": "object", "required": ["type", "items"], "additionalProperties": false,
+      "description": "Contacts with fingerprint and state (added 21 Nov, ORCH-1203; signed messages, contracts/crypto.md): the contacts that need an Accept on top, each with its fingerprint, the check line, a name field and one Accept; this workspace's own fingerprint beside them; every other contact in a table. The dashboard says every word itself (the state names, the check line, the buttons); the add-on gives only ids, names, fingerprints, states, counts and times. Accept and Stop trusting are the dashboard's own ops `contact.accept` / `contact.withdraw`, a signed-in person's click only. Only the core relay view sends it; older dashboards skip it.",
+      "properties": {
+        "type": { "const": "contacts" },
+        "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+        "own": { "type": "object", "required": ["fingerprint"], "additionalProperties": false, "properties": {
+          "name": { "$ref": "#/$defs/text", "maxLength": 60 },
+          "fingerprint": { "$ref": "#/$defs/fingerprint" }
+        } },
+        "items": { "type": "array", "maxItems": 200, "items": {
+          "type": "object", "required": ["id", "name", "kind", "state", "fingerprint", "held"], "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string", "pattern": "^(ws|ph)_[a-z0-9]{10}$" },
+            "name": { "$ref": "#/$defs/text", "maxLength": 60, "description": "The person's own name for it, else the relay's." },
+            "relay_name": { "$ref": "#/$defs/text", "maxLength": 60, "description": "Only when it differs from `name`." },
+            "kind": { "enum": ["workspace", "phone"] },
+            "state": { "enum": ["new_key", "changed", "not_accepted", "not_valid", "withdrawn", "accepted"] },
+            "fingerprint": { "$ref": "#/$defs/fingerprint" },
+            "old_fingerprint": { "$ref": "#/$defs/fingerprint", "description": "The accepted key's fingerprint, for new_key and changed." },
+            "held": { "type": "integer", "minimum": 0, "description": "Messages that wait for the Accept." },
+            "refused": { "type": "integer", "minimum": 0, "description": "Messages refused as forged or changed (not_valid)." },
+            "accepted_at": { "$ref": "#/$defs/time" },
+            "withdrawn_at": { "$ref": "#/$defs/time" }
+          }
+        } }
+      }
+    },
+    "fingerprint": { "type": "string", "pattern": "^[0-9A-Z]{4}( [0-9A-Z]{4}){7}$", "description": "8 groups of 4 (contracts/crypto.md)." },
     "split": {
       "type": "object", "required": ["type", "groups"], "additionalProperties": false,
       "description": "List and panel (added 17 Nov, ORCH-326): a slim list of things on the left (state mark, title, state word, one optional main button) and the chosen one in full on the right; on a phone the list first, then the panel with a way back. The chosen item has an address (`?<param>=<id>` after the page's hash). Every action of an item must name that item's own `id` as its target. Older dashboards skip this block.",

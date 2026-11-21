@@ -192,6 +192,66 @@ def _peers(root: Path) -> list[dict]:
     return rows
 
 
+TRUST_STATES = ("new_key", "changed", "not_accepted", "not_valid", "withdrawn", "accepted")
+
+
+def _trust_block(root: Path) -> dict | None:
+    """Signed messages (ORCH-1203): this workspace's own fingerprint and every contact's fingerprint and
+    state, for the Contacts page's `contacts` block. The page says the words; this gives only checked
+    values. None while signing is not on this computer (the page then looks as before)."""
+    try:
+        from orch import msgtrust, signkey
+    except ImportError:
+        return None
+    try:
+        items = msgtrust.contacts(root)
+        me = msgtrust.own_id(root)
+    except (Refused, OSError, ValueError, KeyError):
+        return None
+    try:
+        raw = signkey.public_key(root)
+    except (Refused, OSError):
+        raw = None
+    own = None
+    if raw:
+        from orch import config
+
+        name = config.workspace_name(root) or relay._shown_name(root, me, root.resolve().name)
+        own = {"name": plain(name, 60), "fingerprint": signkey.fingerprint(raw)}
+    rows = []
+    for c in items:
+        state = str(c.get("state") or "")
+        if state not in TRUST_STATES or not c.get("fingerprint"):
+            continue
+        row = {
+            "id": c["id"],
+            "name": plain(c.get("name") or c["id"], 60),
+            "kind": "phone" if c.get("kind") == "phone" else "workspace",
+            "state": state,
+            "fingerprint": str(c["fingerprint"]),
+            "held": int(c.get("held") or 0),
+        }
+        relay_name = plain(c.get("relay_name") or "", 60)
+        if relay_name and relay_name != row["name"]:
+            row["relay_name"] = relay_name
+        old = c.get("accepted_fingerprint")
+        if state in ("new_key", "changed") and old and old != row["fingerprint"]:
+            row["old_fingerprint"] = str(old)
+        if state == "not_valid":
+            row["refused"] = int(c.get("not_valid") or 0)
+        for k in ("accepted_at", "withdrawn_at"):
+            if c.get(k):
+                row[k] = str(c[k])[:40]
+        rows.append(row)
+    if not rows and not own:
+        return None
+    rows.sort(key=lambda r: (TRUST_STATES.index(r["state"]), r["name"].lower()))
+    out: dict = {"type": "contacts", "title": "Contacts", "items": rows[:200]}
+    if own:
+        out["own"] = own
+    return out
+
+
 def _arg(name: str) -> str:
     """A name as one shell word in a hint (quoted when it has spaces)."""
     name = plain(name, 60)
@@ -387,6 +447,9 @@ def view(root: Path) -> dict:
                 ],
             }
         )
+    trust = _trust_block(root)
+    if trust:
+        out["blocks"].append(trust)
     out["blocks"] += [
         {
             "type": "list",

@@ -1406,6 +1406,38 @@ async function addonRadio(input) {
   window.orch.toast(result.ok ? 'Saved.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
   await loadAddon(id);
 }
+// Contacts (signed messages, ORCH-1203): Accept sends the fingerprint the person saw (the core refuses it when the
+// key changed meanwhile) and their own name for the contact; Stop trusting asks once, with the action's own word.
+const CONTACT_ID = /^(ws|ph)_[a-z0-9]{10}$/;
+async function contactAccept(control) {
+  const id = shownAddon();
+  if (snapshot || !id || locks.has('addon-act') || !CONTACT_ID.test(control.dataset.contactAccept || '')) return;
+  const name = (control.closest('form')?.querySelector('input[name=name]')?.value || '').trim().slice(0, 60);
+  locks.add('addon-act'); control.disabled = true;
+  const result = await act('contact.accept', {peer:control.dataset.contactAccept, fingerprint:control.dataset.fingerprint, name});
+  locks.delete('addon-act'); if (control.isConnected) control.disabled = false;
+  window.orch.toast(result.ok ? 'Accepted ' + clean(name || control.dataset.who || '').slice(0, 60) + '.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+  await loadAddon(id);
+}
+function contactWithdraw(control) {
+  const id = shownAddon(), peer = control.dataset.contactWithdraw;
+  if (snapshot || !id || locks.has('addon-act') || !CONTACT_ID.test(peer || '')) return;
+  const who = clean(control.dataset.who || '').slice(0, 60);
+  const {d, actions} = dialog('Stop trusting ' + who + '?', 'dialog');
+  const list = el('ul');
+  ['Its messages wait and nothing from it runs.', 'You can accept it again here at any time.'].forEach(line => list.append(el('li', '', line)));
+  d.append(el('p', '', 'This is what happens:'), list);
+  actions.firstChild.textContent = 'Keep trusting';
+  actions.append(button('Stop trusting', 'danger', async () => {
+    await window.orch.close(d);
+    locks.add('addon-act');
+    const result = await act('contact.withdraw', {peer});
+    locks.delete('addon-act');
+    window.orch.toast(result.ok ? 'Stopped trusting ' + who + '.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    await loadAddon(id);
+  }));
+  d.append(actions); window.orch.open(d);
+}
 // Workspace messages are composed in their persistent Chat thread.
 function messageSend(control) {
   if (snapshot) return;
