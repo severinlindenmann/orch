@@ -182,3 +182,21 @@ test('the Focus add-on page shows the typing switch with one plain line, only wh
   assert.equal(find(mk({typing_on: false}).page({name: 'focus', page: {live_session: true}, active: false, description: 'd'}), byKey('addon-detail-typing')), null);
   assert.equal(find(mk({typing_on: true}).page({name: 'sync', active: true, description: 'd'}), byKey('addon-detail-typing')), null);
 });
+
+// ORCH-261 (owner): the plain terminal is a shell, so typing into it has its own switch, off by default
+test('the Focus add-on page shows a separate plain terminal switch that says it is a shell', () => {
+  const mk = (settings) => {
+    const ctx = settingsCtx({addons: () => [], state: {look: null, settings}, heading: t => el('h1', {}, t)});
+    vm.runInContext(head + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+    return ctx;
+  };
+  const focus = {name: 'focus', page: {live_session: true}, active: true, description: 'd'};
+  const on = mk({typing_on: true, terminal_typing_on: false}).page(focus);
+  const sw = find(on, byKey('addon-detail-terminal-typing'));
+  assert.equal(sw.props['data-action'], 'terminal-typing');
+  assert.equal(sw.props['aria-checked'], false, 'helper typing on leaves the plain terminal off');
+  assert.match(text(find(on, byKey('addon-detail-terminal-typing-row'))), /Let me type into the plain terminal.*shell on this computer/);
+  assert.ok(find(on, byKey('addon-detail-typing')), 'the helper switch stays as it was');
+  assert.equal(find(mk({typing_on: true}).page(focus), byKey('addon-detail-terminal-typing')), null, 'an older core without the setting: no row');
+  assert.equal(find(mk({terminal_typing_on: true}).page({...focus, active: false}), byKey('addon-detail-terminal-typing')), null);
+});

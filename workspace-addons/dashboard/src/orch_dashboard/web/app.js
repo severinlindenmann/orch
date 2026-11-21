@@ -969,6 +969,13 @@ main.addEventListener('click', async event => {
     if (result.ok) window.orch.toast(on ? 'You can type into the helper\u2019s screen.' : 'Typing into the helper\u2019s screen is off.', 'ok');
     return;
   }
+  if (action === 'terminal-typing') {
+    if (settingsBusy.has('terminal-typing')) return;
+    const on = state.settings?.terminal_typing_on !== true;
+    const result = await settingsSend('terminal-typing.set', {on}, 'terminal-typing');
+    if (result.ok) window.orch.toast(on ? 'You can type into the plain terminal.' : 'Typing into the plain terminal is off.', 'ok');
+    return;
+  }
   if (action === 'diag-delete-reports') { await diagDelete(); return; }
   if (action === 'copies-switch') { settingsReviewOpen('copies-switch', control); return; }
   if (action === 'copies-clean') { settingsReviewOpen('copies-clean', control); return; }

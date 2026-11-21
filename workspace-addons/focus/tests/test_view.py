@@ -209,3 +209,18 @@ def test_a_live_session_is_counted_under_any_mac_language(ws, fake_orch, monkeyp
     claim(ws, pid_started=core_form)
     v = build(ws, str(fake_orch))
     assert v["blocks"][0]["value"] == 1
+
+
+def test_needs_reads_in_this_process_when_orch_bin_is_this_orch(tmp_path, fake_orch, monkeypatch):
+    """ORCH-634: `orch_focus needs` (started for the needs answer) reads through this process's core when its
+    orch is this very orch; a test's fake orch stays a process."""
+    import sys
+
+    pytest.importorskip("orch.reads")
+    from orch_focus.actions import SELF
+
+    assert cli._same_orch_bin(str(fake_orch)) == str(fake_orch)
+    if sys.platform != "win32":
+        mine = tmp_path / "orch"
+        mine.write_text(f"#!{sys.executable}\nfrom orch_entry import main\n")
+        assert cli._same_orch_bin(str(mine)) == SELF

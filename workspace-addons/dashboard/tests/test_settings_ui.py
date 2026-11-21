@@ -409,3 +409,20 @@ def test_typing_on_is_a_plain_setting_the_dashboard_can_switch(ws, monkeypatch):
     assert "Let me type into the helper's screen" in server.TYPING_OFF and "Add-ons" in server.TYPING_OFF
     monkeypatch.setattr(data, "run_orch", lambda b, args, root: [] if args[:2] == ["addon", "list"] else None)
     assert data.load_settings(ws, "orch")["typing_on"] is False
+
+
+def test_the_plain_terminal_switch_is_its_own_setting(ws, monkeypatch):
+    """ORCH-261 (owner): typing into the plain terminal (a shell) is `orch config set focus.terminal_typing`, off."""
+    from orch_dashboard import actions, data, server
+
+    assert actions.build_argv("terminal-typing.set", {"on": True})[:4] == [
+        "config",
+        "set",
+        "focus.terminal_typing",
+        "on",
+    ]
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("terminal-typing.set", {"on": 1})
+    assert "Let me type into the plain terminal" in server.TERMINAL_OFF and "is off" in server.TERMINAL_OFF
+    monkeypatch.setattr(data, "run_orch", lambda b, args, root: [] if args[:2] == ["addon", "list"] else None)
+    assert data.load_settings(ws, "orch")["terminal_typing_on"] is False

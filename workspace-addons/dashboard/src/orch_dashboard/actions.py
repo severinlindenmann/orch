@@ -715,6 +715,17 @@ def _typing_set(a):
     return ["config", "set", SESSION_TYPING_KEY, "on" if a["on"] else "off"], [], []
 
 
+def _terminal_typing_set(a):
+    """Settings > Add-ons: may the person type into the plain terminal (a shell on this computer), its own switch
+    apart from the helper's screen (owner, ORCH-261), a plain `orch config set` (core names the key)."""
+    from orch.config import TERMINAL_TYPING_KEY
+
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", TERMINAL_TYPING_KEY, "on" if a["on"] else "off"], [], []
+
+
 def _diag_delete(what):
     def build(a):
         _only(a, ())
@@ -1252,6 +1263,7 @@ OPS = {
     "live.set": _live_set,
     "diag.set": _diag_set,
     "typing.set": _typing_set,
+    "terminal-typing.set": _terminal_typing_set,
     "update.auto": _update_auto,
     "diag.delete_reports": _diag_delete("reports"),
     "copies.set": _copies_set,
