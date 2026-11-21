@@ -87,3 +87,82 @@ and `brand/tests/test_ci_known_red.py` fails when this table and `KNOWN_RED` dis
 |---|---|---|---|---|
 
 When a system turns green: empty `KNOWN_RED` (or remove the system) and remove its row here in the same pull request.
+
+## Mac jobs on this Mac's own runner (ORCH-1125)
+
+The phone build and UI tests, the macOS workspace part, the dashboard click-throughs, the page smoke, the dashboard
+pictures and the Python 3.11 checks can run on a GitHub runner on the development Mac instead of GitHub's machines.
+ci.yml's `route` job (`scripts/mac_route.py`) decides once per run:
+
+- **Only trusted runs**: a push to develop, the nightly run, a manual run and a release pull request (into main, from
+  a branch of this repository). Pull requests into develop, merge queue groups and every pull request from a fork
+  stay on GitHub's machines. The runner's job hook refuses the same again on the Mac.
+- **One setting moves them back**: repository variable `MAC_RUNNER`. `this-mac` = this Mac; anything else or unset
+  = GitHub's machines (the default).
+- **Offline = GitHub by itself**: the route reads the runner list with the repository secret
+  `MAC_RUNNER_STATUS_TOKEN` (a fine-grained token for this repository only, "Administration: read"; it lives in
+  GitHub, never on the Mac). No secret, no answer or no online runner with the label `orch-mac`: GitHub's machines.
+- **Busy**: a develop push while the runner is busy goes to GitHub's machines; set `MAC_RUNNER_WHEN_BUSY=wait` to
+  queue it on the Mac instead. The nightly run, manual runs and release pull requests always wait for the Mac.
+- **Clean run per job**: own hidden macOS user `orch-ci` (cannot read the owner's home or `~/.orch-tool`), a
+  throwaway home in the job's temp folder (`.github/actions/mac-job-home`), leftovers stopped and the temp folder
+  emptied after every job (`scripts/mac-runner/job-completed.sh`). No owner secrets on the Mac.
+- **A refused job never runs a step**: the job-started hook stops the job's worker process at once (a failed hook
+  alone would still run later `if: always()` steps).
+- **Shares the Mac with helpers**: each job holds the shared `heavy` lock, xcodebuild the `xcode` lock
+  (`scripts/mac-runner/lock.sh`, folder `/Users/Shared/orch-locks`, group `orch-locks`); the macOS workspace suite
+  is one part at `-n 6` there.
+
+Turn it on (owner, admin rights):
+1. Settings > Actions > General > "Fork pull request workflows from outside collaborators": pick the strictest
+   choice, the one for all external contributors (a fork's workflow file can name any runner; nothing runs until
+   you click).
+2. On the Mac: `sudo bash scripts/mac-runner/setup.sh` (asks for the runner registration token from
+   Settings > Actions > Runners > New self-hosted runner; used once, never stored).
+3. A fine-grained token for this repository only, permission "Administration: read", as the Actions secret
+   `MAC_RUNNER_STATUS_TOKEN`.
+4. The Actions variable `MAC_RUNNER` = `this-mac`. Back to GitHub's machines: change or delete it.
+
+Undo on the Mac: `sudo bash scripts/mac-runner/uninstall.sh`, then remove the runner under Settings > Actions >
+Runners.
+
+## Linux jobs on the orch edge test server (ORCH-1126)
+
+The clock tests (fake wall clock), relay, publish, the short e2e set and the Services add-on with its real Linux run
+can run on a GitHub runner on the orch edge test server (Debian, ARM64, 8 cores, 8 GB) instead of GitHub's machines.
+Never on a production server. There the jobs use uv's own Python builds (`UV_PYTHON_PREFERENCE=only-managed`), and
+the clock tests keep real file times as on GitHub (`NO_FAKE_STAT=1`: libfaketime would shift the file times a
+program reads but not the ones it sets).
+The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
+
+- **Only trusted runs**: a push to develop, the nightly run, a manual run and a release pull request. Pull requests
+  into develop, queue groups and forks stay on GitHub's machines; the runner's job hook refuses them again.
+- **One setting moves them back**: repository variable `EDGE_RUNNER`. `orch-edge` = orch edge; anything else or
+  unset = GitHub's machines (the default), with every job exactly as before.
+- **Offline = GitHub by itself**: the route reads the runner list with the same secret `MAC_RUNNER_STATUS_TOKEN`.
+  No secret, no answer or no online runner with the label `orch-edge`: GitHub's machines.
+- **Busy**: a develop push while the runner is busy goes to GitHub's machines (`EDGE_RUNNER_WHEN_BUSY=wait` queues
+  it instead). The nightly run, manual runs and release pull requests always wait for orch edge.
+- **All of them after every merge**: when the jobs go to orch edge they all run, whatever files changed (a queue
+  group no longer has to have run them).
+- **x86-64 before every release**: orch edge is ARM64, so a release pull request runs the Linux jobs on orch edge
+  AND on GitHub's x86-64 machines. Binaries are named by their machine (`orch-relay-linux-aarch64` / `-x86_64`).
+- **Clean run per job**: own user `orch-ci` (cannot read the other homes), a throwaway home and temp folder in the
+  job's work folder on disk (`.github/actions/edge-job-home`; Debian keeps `/tmp` in memory), 4 test workers and 4
+  build jobs, the runner capped at 5 GB and its user services at 1.5 GB so the test copies of relay, publish and hub keep running. After every job
+  `scripts/edge-runner/job-completed.sh` stops leftovers, removes throwaway user services and cleans `/tmp`.
+
+Set up (done once; `sudo bash scripts/edge-runner/setup.sh` again is safe): packages (faketime, build tools, tmux,
+Chromium's libraries), the user, Rust in the runner's cache, the runner and its hooks.
+Before registering, REQUIRED (the repository is public): Settings > Actions > General > "Fork pull request workflows
+from outside collaborators" on the strictest choice (every outside contributor waits for a click), as in the Mac step. A
+fork's own workflow file can name the `orch-edge` label and set environment variables the runner's shell reads
+before the job hook can refuse it; only that setting stops such a run before it starts.
+Register the runner (manager, with the owner's login; the token is used once and never stored):
+
+    gh api -X POST repos/severinlindenmann/orch/actions/runners/registration-token --jq .token \
+      | ssh orch-edge 'sudo bash /opt/orch-edge-runner-src/setup.sh register'
+
+Then the Actions variable `EDGE_RUNNER` = `orch-edge` (the secret `MAC_RUNNER_STATUS_TOKEN` from the Mac step serves
+both). Back to GitHub's machines: change or delete the variable. Undo on orch edge:
+`sudo bash scripts/edge-runner/uninstall.sh`, then remove the runner under Settings > Actions > Runners.

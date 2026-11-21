@@ -30,6 +30,14 @@ def line(block: str, key: str) -> str:
     return (m.group(1) or m.group(2)).strip()
 
 
+# A job that also waits for the Mac route keeps running when the route failed (ORCH-1125): its condition is wrapped.
+ROUTE_WRAP = "${{ !cancelled() && needs.changes.result == 'success' && ("
+
+
+def unwrap(cond: str) -> str:
+    return cond[len(ROUTE_WRAP) : -len(") }}")] if cond.startswith(ROUTE_WRAP) else cond
+
+
 CI = (WORKFLOWS / "ci.yml").read_text()
 CI_JOBS = jobs(CI)
 
@@ -45,14 +53,15 @@ def test_queue_groups_skip_the_click_throughs_and_every_other_place_runs_them():
     assert line(addons, "clickthroughs") == "${{ needs.changes.outputs.queue != 'true' }}"
     assert line(addons, "suites") == "${{ needs.changes.outputs.proven != 'true' }}"
     # a push to develop that a green group proved still calls the add-on workflow (for the click-throughs)
-    assert line(addons, "if").startswith("needs.changes.outputs.proven == 'true' ||")
+    assert unwrap(line(addons, "if")).startswith("needs.changes.outputs.proven == 'true' ||")
 
 
 def test_the_addon_workflow_honours_both_inputs():
     text = (WORKFLOWS / "addons.yml").read_text()
     assert "clickthroughs:" in text.split("\njobs:", 1)[0]
     for name, block in jobs(text).items():
-        want = "inputs.clickthroughs" if name == "dashboard-clickthroughs" else "inputs.suites"
+        # services: its own input, so it also runs after a merge when it goes to orch edge (ORCH-1126)
+        want = {"dashboard-clickthroughs": "inputs.clickthroughs", "services": "inputs.services"}.get(name, "inputs.suites")
         assert line(block, "if") == want, name
 
 
@@ -61,7 +70,7 @@ def test_windows_parts_skip_queue_groups_and_run_on_every_develop_push():
     windows = line(ws, "windows")
     assert "!startsWith(github.head_ref, 'orch-queue/')" in windows
     assert "(github.event_name == 'push' && github.ref == 'refs/heads/develop')" in windows
-    assert line(ws, "if").startswith("needs.changes.outputs.proven == 'true' ||")
+    assert unwrap(line(ws, "if")).startswith("needs.changes.outputs.proven == 'true' ||")
     # on a proven push only the Windows parts run: no Linux, no macOS again
     assert line(ws, "linux") == "${{ needs.changes.outputs.proven != 'true' }}"
     assert "needs.changes.outputs.proven != 'true'" in line(ws, "full")
