@@ -2994,3 +2994,75 @@ def test_refused_answer_history_note_only_for_a_member_and_only_once(proj, run, 
         "ansn3" in h["text"] or "not applied" in h["text"]
         for h in tickets.load(proj, host)["history"][before:]
     )
+
+
+AT = "2026-11-08T10:00:00Z"
+
+
+def _v2_members(bank_version=None):
+    """group.members as a version 2 host sends it: added_by, joined_at, orch_version, chat_groups."""
+    return [
+        {"ws": FIN, "name": "Finance", "joined_at": AT, "orch_version": "0.9.4", "chat_groups": 2},
+        {"ws": WS, "name": "Pilatus Workspace", "added_by": "you", "joined_at": AT, **(bank_version or {})},
+    ]
+
+
+def test_older_member_ignores_version_2_fields(proj, run, rel, member):
+    # chat-groups.md §6: a member that does not know version 2 keeps today's behaviour. Its receive rules and
+    # its stored header ignore added_by, joined_at, orch_version, chat_groups, mentions and removed_by.
+    added = _added(1)
+    added["body"]["group"]["members"] = _v2_members({"orch_version": "0.8.2", "chat_groups": 1})
+    added["body"]["group_event"]["added_by"] = "you"
+    inbox(run, rel, added)
+    j = _joined(proj)
+    assert j["members"] == [{"ws": FIN, "name": "Finance"}, {"ws": WS, "name": "Pilatus Workspace"}]
+    talk = from_host(
+        "text",
+        {
+            "text": "@Pilatus can you check the letter?",
+            "mentions": [WS],
+            "origin": {"id": mid("v2o1"), "from": "dashboard", "at": "2026-11-08T10:01:00Z"},
+            "by": "you",
+            "via": "dashboard",
+        },
+        seq=2,
+        id=cg.fanout_id(FIN, mid("v2o1"), WS),
+    )
+    talk["body"]["group"]["members"] = _v2_members()
+    inbox(run, rel, talk)
+    j = _joined(proj)
+    assert [x["seq"] for x in j["log"]] == [1, 2] and not any(x.get("late") for x in j["log"])
+    assert "mentions" not in json.dumps(j)  # nothing of version 2 is kept by an older member
+    removed = from_host(
+        "text",
+        {
+            "text": "You removed Pilatus Workspace from this group",
+            "group_event": {
+                "kind": "member_left",
+                "at": "2026-11-08T10:02:00Z",
+                "ws": WS,
+                "reason": "removed",
+                "removed_by": "you",
+            },
+        },
+        seq=3,
+        id=mid("v2rm"),
+    )
+    removed["body"]["group"]["members"] = _v2_members()
+    inbox(run, rel, removed)
+    assert _joined(proj)["left"] is True  # a removal is still member_left: the older member applies it
+
+
+def test_version_2_fields_are_optional():
+    # every version 1 message stays valid in version 2: the v2 vectors without the new fields still pass
+    for f in sorted((CONTRACTS / "vectors" / "chat-groups").glob("valid-v2-*.json")):
+        m = json.loads(f.read_text())["message"]
+        b = m["body"]
+        b.pop("mentions", None)
+        b.pop("member_version", None)
+        for x in b["group"]["members"]:
+            for k in ("added_by", "joined_at", "orch_version", "chat_groups"):
+                x.pop(k, None)
+        for k in ("added_by", "removed_by"):
+            (b.get("group_event") or {}).pop(k, None)
+        assert cg.message_errors(m) == [], f.name

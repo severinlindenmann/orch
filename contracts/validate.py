@@ -2458,7 +2458,7 @@ V_CG = Draft202012Validator(
     format_checker=FormatChecker(),
 )
 CG_HOST_ONLY = ("group_event", "shared_ticket", "origin", "echo_of", "shared_files", "question_kind", "own_seq")
-CG_MEMBER_ONLY = ("seen", "leave")
+CG_MEMBER_ONLY = ("seen", "leave", "member_version")
 CG_FILE_MAX = 26214400
 # task.status order: a status may repeat or move right, never left; the last column is final.
 CG_TASK_RANK = {"waiting_start": 0, "waiting_approval": 1, "queued": 2, "working": 3, "done": 4, "failed": 4, "denied": 4}
@@ -2512,6 +2512,7 @@ def cg_rules(m, ctx=None):
         out.append("group.members: each ws once")
     if host not in cg_members(g):
         out.append("group.members must include the host")
+    out += cg_v2_rules(m, g)
     if frm == host:
         if g.get("id") != "grp_" + str(m.get("ticket")):
             out.append("host message: group.id must be grp_ + the message's ticket (the host ticket)")
@@ -2579,6 +2580,35 @@ def cg_rules(m, ctx=None):
         out.append("allow messages carry no body.group (the host matches them by reply_to)")
     if m.get("type") == "file" and "share" in b and int(b.get("size", 0)) > CG_FILE_MAX:
         out.append("a shared file is at most 25 MB")
+    return out
+
+
+def cg_v2_rules(m, g):
+    """Version 2 rules (chat-groups.md §6): mentions, who changed the member list, member versions."""
+    b, host, out = m.get("body") or {}, g.get("host"), []
+    ms = cg_members(g)
+    if "mentions" in b:
+        men = b["mentions"] if isinstance(b["mentions"], list) else []
+        if m.get("type") != "text":
+            out.append("mentions ride only on a group text")
+        if any(x not in ms for x in men):
+            out.append("mentions: every named workspace is a member of the group")
+        if str(b.get("by")).startswith("ws_") and b.get("by") in men:
+            out.append("mentions: the writer never names itself")
+    for x in g.get("members", []):
+        if isinstance(x, dict) and "added_by" in x:
+            if x.get("ws") == host:
+                out.append("group.members: the host's own entry has no added_by")
+            elif x["added_by"] not in ("you", host):
+                out.append("group.members: added_by is you or the host")
+    ev = b.get("group_event")
+    if isinstance(ev, dict):
+        if "added_by" in ev and (ev.get("kind") != "member_added" or ev["added_by"] not in ("you", host)):
+            out.append("group_event.added_by: only on member_added, and it is you or the host")
+        if "removed_by" in ev and (
+            ev.get("kind") != "member_left" or ev.get("reason") != "removed" or ev["removed_by"] not in ("you", host)
+        ):
+            out.append("group_event.removed_by: only on member_left with reason removed, and it is you or the host")
     return out
 
 
