@@ -473,6 +473,19 @@ def changed_files(root: Path, tid: str, shown: dict) -> list[str]:
 # ---------------------------------------------------------------- the card on the phone (wire shape)
 
 _CARD_TOP = {"kind", "title", "why", "need", "then", "ok_label", "open", "preview"}
+# A run card on the wire (ORCH-860, $defs/card_run): what the phone shows, never what runs (no folder or argv)
+_RUN_KEYS = {"command", "class", "changes", "undo", "phone"}
+_RUN_CLASSES = ("orch", "other", "login", "copy")
+_RUN_NO = (
+    "Not now",
+    "Leave it off for now",
+    "Leave it as it is",
+    "Skip it",
+    "Do it later",
+)  # runcard.NO_LABELS
+# printable ASCII only, no shell operator (runcard._SHELL): a search for a bad character, not anchored
+_RUN_CMD_BAD = re.compile(r"[^ -~]|[;|&<>`$\\]")
+_RUN_OK = "I ran it"  # runcard.OK_LABEL: a run card's yes is orch's own words, never a look-alike of its no
 _LIMITS = {"title": 200, "why": 500, "need": 200, "then": 500, "ok_label": 40, "open": 500}
 _WHY = ("too_large", "held_back")
 
@@ -545,6 +558,8 @@ def wire_card(card: dict, refs: dict) -> dict:
         return o
 
     out = {k: v for k, v in card.items() if k in _CARD_TOP and v is not None and v != "" and k != "preview"}
+    if card.get("kind") == "run":  # ORCH-860: the command as the phone shows it; runcard decides what runs
+        out.update(_wire_run(card))
     if isinstance(card.get("blocked"), str) and card["blocked"]:  # ORCH-548: the phone's card says why, too
         out["then"] = _clip("Looks good is off: " + card["blocked"], _LIMITS["then"])
     if isinstance(card.get("preview"), dict):
@@ -600,14 +615,62 @@ def _wleaf(p, where: str, nfiles: int) -> None:
                 _wtext(c, f"{where}.rows", 500, empty_ok=True)
 
 
+def _wire_run(card: dict) -> dict:
+    """A run card's `run` and `no_label` for the phone ($defs/card_run). The spec's folder, argv, program and
+    operation stay on this computer. `phone` is True only when runcard says a paired phone may run it."""
+    spec = card.get("run") if isinstance(card.get("run"), dict) else {}
+    phone = False
+    try:
+        from orch import runcard
+
+        phone = bool(getattr(runcard, "phone_ok", lambda q: False)({"card": card}))
+    except ImportError:
+        pass
+    run = {
+        k: spec[k]
+        for k in ("command", "class", "changes", "undo")
+        if isinstance(spec.get(k), str) and spec[k]
+    }
+    run["phone"] = phone and spec.get("class") == "orch"
+    return {"run": run, "no_label": card.get("no_label", "Not now")}
+
+
+def _check_wire_run(card: dict) -> None:
+    run = card.get("run")
+    if card.get("kind") != "run":
+        if "run" in card or "no_label" in card:
+            raise Refused("Only a run card carries a command.")
+        return
+    if not isinstance(run, dict):
+        raise Refused("A run card needs its command.")
+    _only(run, _RUN_KEYS, "card.run")
+    cmd = run.get("command")
+    if not isinstance(cmd, str) or not cmd.strip() or len(cmd) > 300 or _RUN_CMD_BAD.search(cmd):
+        raise Refused("card.run.command: one line of plain ASCII, at most 300 characters, no shell operator.")
+    if run.get("class") not in _RUN_CLASSES:
+        raise Refused("card.run.class is not a class.")
+    if not isinstance(run.get("phone"), bool):
+        raise Refused("card.run.phone is true or false.")
+    if run["phone"] and run["class"] != "orch":
+        raise Refused("Only orch's own commands run from the phone.")
+    for k, n in (("changes", 200), ("undo", 300)):
+        if k in run:
+            _wtext(run[k], f"card.run.{k}", n)
+    if card.get("ok_label", _RUN_OK) != _RUN_OK:
+        raise Refused("A run card's yes is I ran it.")
+    if card.get("no_label") not in _RUN_NO:
+        raise Refused("A run card's other answer is one of orch's own words.")
+
+
 def check_wire_card(card, nfiles: int) -> None:
     """message.schema.json $defs/review_card, by hand (the schema file is not shipped): Refused when the wire
     card would not pass it. nfiles = how many card_files the question carries."""
     if not isinstance(card, dict):
         raise Refused("A card is an object.")
-    _only(card, _CARD_TOP, "card")
-    if card.get("kind") not in KINDS:
+    _only(card, _CARD_TOP | {"run", "no_label"}, "card")
+    if card.get("kind") not in (*KINDS, "run"):
         raise Refused("card.kind is not a kind.")
+    _check_wire_run(card)
     for k in ("title", "then"):
         if k not in card:
             raise Refused(f"card.{k} is needed.")
