@@ -510,7 +510,9 @@ window.orchAct = (op, args, opts) => act(op, args, opts);
 window.orchActId = () => newActId();  // one id a form keeps for its retries (ORCH-580)
 // Turning an add-on on or off restarts the running services, this page's server too. When the answer is lost on
 // the way (the server restarted), read the state again once it is back: the add-on's switch says if it worked.
-async function addonSet(name, on, tries = 20, pause = 1500) {
+// Back but not changed: the click never reached the server (it was still restarting, e.g. from a Remove just
+// before: ORCH-1045), so it is sent once more; turning on or off twice does no harm.
+async function addonSet(name, on, tries = 20, pause = 1500, again = true) {
   const result = await act('addon.set', {name, on}, {check:false});  // the server restarts: its click ids are gone
   if (result.ok || result.status !== 0 || snapshot) return result;
   for (let i = 0; i < tries; i++) {
@@ -523,13 +525,15 @@ async function addonSet(name, on, tries = 20, pause = 1500) {
     if (!next) continue;
     accept(next);
     const row = array(next.settings?.addons).find(a => a && a.name === name);
-    return row && !!row.active === on ? {ok:true, status:200, state:next, recovered:true} : result;
+    if (row && !!row.active === on) return {ok:true, status:200, state:next, recovered:true};
+    return again ? addonSet(name, on, tries, pause, false) : result;
   }
   return result;
 }
 // Uninstall an add-on (`orch addon uninstall`, refused while it is on: turn it off first). The
-// services restart like for the switch, so a lost answer is checked by reading the state again.
-async function addonUninstall(name, tries = 20, pause = 1500) {
+// services restart like for the switch, so a lost answer is checked by reading the state again, and a click that
+// never arrived (still there once the server is back) is sent once more, like for the switch.
+async function addonUninstall(name, tries = 20, pause = 1500, again = true) {
   const still = rows => array(rows).some(a => a && a.name === name);
   if (array(state.settings?.addons).find(a => a && a.name === name)?.active) {
     const off = await addonSet(name, false);
@@ -546,7 +550,8 @@ async function addonUninstall(name, tries = 20, pause = 1500) {
     } catch (_) { /* still restarting */ }
     if (!next) continue;
     accept(next);
-    return still(next.settings?.addons) ? result : {ok:true, status:200, state:next, recovered:true};
+    if (!still(next.settings?.addons)) return {ok:true, status:200, state:next, recovered:true};
+    return again ? addonUninstall(name, tries, pause, false) : result;
   }
   return result;
 }

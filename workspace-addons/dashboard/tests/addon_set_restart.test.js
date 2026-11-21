@@ -5,19 +5,22 @@ const vm = require('node:vm');
 const path = require('node:path');
 const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
 const start = src.indexOf('async function addonSet('), end = src.indexOf('\n}\n', start) + 3;
+const ustart = src.indexOf('async function addonUninstall('), uend = src.indexOf('\n}\n', ustart) + 3;
 
-function page(actResult, states) {
-  const accepted = [];
+// actResult: one answer for every click, or a list (one per click, in order); c.sent counts the clicks sent
+function page(actResult, states, current = {settings: {addons: []}}) {
+  const accepted = [], sent = [], answers = Array.isArray(actResult) ? actResult : null;
   const c = vm.createContext({
-    snapshot: false, accepted, setTimeout: f => f(),
+    snapshot: false, accepted, sent, setTimeout: f => f(), state: current,
     array: v => Array.isArray(v) ? v : [],
-    act: async () => actResult,
-    accept: s => accepted.push(s),
+    act: async (op, args) => { sent.push({op, args}); return answers ? answers.shift() : actResult; },
+    accept: s => { accepted.push(s); c.state = s; },
     fetch: async () => { const s = states.shift(); if (s === 'down') throw new Error('Failed to fetch'); return {ok: true, json: async () => s}; },
   });
-  vm.runInContext(src.slice(start, end) + '\nthis.addonSet = addonSet;', c);
+  vm.runInContext(src.slice(start, end) + src.slice(ustart, uend) + '\nthis.addonSet = addonSet; this.addonUninstall = addonUninstall;', c);
   return c;
 }
+const lost = {ok: false, status: 0, text: 'Failed to fetch'};
 
 test('a lost answer during the restart: the state after reconnect says it worked', async () => {
   const on = {settings: {addons: [{name: 'factory', active: true}]}};
@@ -28,11 +31,42 @@ test('a lost answer during the restart: the state after reconnect says it worked
   assert.equal(c.accepted.length, 1);
 });
 
-test('reachable but not changed: the original error stays', async () => {
+test('Add right after a Remove: the click never arrived, so it is sent once more and the add-on is added (ORCH-1045)', async () => {
+  const gone = {settings: {addons: []}}, on = {settings: {addons: [{name: 'factory', active: true}]}};
+  const c = page([lost, {ok: true, status: 200, state: on}], ['down', 'down', gone]);
+  const r = await c.addonSet('factory', true);
+  assert.equal(r.ok, true);
+  assert.equal(c.sent.length, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(c.sent[1])), {op: 'addon.set', args: {name: 'factory', on: true}});
+});
+
+test('the second click is lost too and the server is back unchanged: one error, no third click', async () => {
   const off = {settings: {addons: [{name: 'factory', active: false}]}};
-  const r = await page({ok: false, status: 0, text: 'Failed to fetch'}, [off]).addonSet('factory', true);
+  const c = page(lost, [off, off]);
+  const r = await c.addonSet('factory', true);
   assert.equal(r.ok, false);
   assert.equal(r.text, 'Failed to fetch');
+  assert.equal(c.sent.length, 2);
+});
+
+test('the second click lands during the restart and the state then shows it on: recovered', async () => {
+  const off = {settings: {addons: [{name: 'factory', active: false}]}}, on = {settings: {addons: [{name: 'factory', active: true}]}};
+  const c = page(lost, [off, 'down', on]);
+  const r = await c.addonSet('factory', true);
+  assert.equal(r.ok, true);
+  assert.equal(r.recovered, true);
+  assert.equal(c.sent.length, 2);
+});
+
+test('Remove during a restart: a click that never arrived is sent once more; a lost answer is not', async () => {
+  const there = {settings: {addons: [{name: 'factory', active: false}]}}, gone = {settings: {addons: []}};
+  const again = page([lost, {ok: true, status: 200}], [there], there);
+  assert.equal((await again.addonUninstall('factory')).ok, true);
+  assert.deepEqual(again.sent.map(x => x.op), ['addon.uninstall', 'addon.uninstall']);
+  const answered = page(lost, ['down', gone], there);
+  const r = await answered.addonUninstall('factory');
+  assert.equal(r.recovered, true);
+  assert.equal(answered.sent.length, 1);
 });
 
 test('a real refusal is not retried', async () => {
