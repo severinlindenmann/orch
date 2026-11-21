@@ -173,7 +173,7 @@ iframe.embed.embed-shell{width:100%;margin:0;height:calc(100vh - var(--topbar-he
 /* Ticket board and Files tab (drafts-v5) */
 .board-tools{justify-content:space-between}
 .board-hint{font-size:12px;color:var(--text-faint)}
-.status-count{font:12px var(--font-mono);padding:1px 6px;border-radius:20px;color:var(--text-muted);background:var(--surface-2)}
+.status-count{font-size:12px;font-variant-numeric:tabular-nums;padding:1px 6px;border-radius:20px;color:var(--text-muted);background:var(--surface-2)}
 .owner-line{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted)}
 .due{margin-left:auto;font-size:12px;white-space:nowrap}.due.bad{color:var(--warning)}
 .task-progress{display:flex;gap:10px;align-items:center;margin-top:12px}
