@@ -59,6 +59,8 @@ struct ReviewStackView: View {
     @State private var reopened: Set<String> = []
     @State private var picked: [String: String] = [:]
     @State private var drafts: [String: String] = [:]
+    /// Voice recordings, pictures and files added on the comment sheet, per card (temp copies until the Outbox has them).
+    @State private var attached: [String: [DraftFile]] = [:]
     @State private var pins: [String: PinStore] = [:]
     @State private var history: [(id: String, later: Bool)] = []
     @State private var offset: CGSize = .zero
@@ -117,8 +119,9 @@ struct ReviewStackView: View {
         .sheet(isPresented: $showComment) {
             if let item = current {
                 ReviewCommentSheet(item: item, about: $commentAbout, text: Binding(get: { drafts[item.id] ?? "" }, set: { drafts[item.id] = $0 }),
+                                   files: Binding(get: { attached[item.id] ?? [] }, set: { attached[item.id] = $0 }),
                                    pins: store(for: item.id)) { word, pick in
-                    send(item, word, picked: pick, note: note(for: item))
+                    send(item, word, picked: pick, note: note(for: item), files: attached[item.id] ?? [])
                 }
             }
         }
@@ -273,7 +276,7 @@ struct ReviewStackView: View {
         }
     }
 
-    private func send(_ item: ReviewItem, _ word: ReviewVerdict.Word, picked pick: String?, note: ReviewVerdict.Note?) {
+    private func send(_ item: ReviewItem, _ word: ReviewVerdict.Word, picked pick: String?, note: ReviewVerdict.Note?, files: [DraftFile] = []) {
         guard !flyOut else { return }
         showComment = false
         Task { @MainActor in
@@ -281,7 +284,9 @@ struct ReviewStackView: View {
                 if let digest = item.digest {
                     guard let v = ReviewStackRules.verdict(item, word, picked: pick, note: note) else { return }
                     _ = digest
-                    try await model.submitVerdict(item, v)
+                    try await model.submitVerdict(item, v, files: files)
+                    MediaSelection.files(files, caption: nil).cleanUp()   // the Outbox has its own copies
+                    if !files.isEmpty { attached[item.id] = nil }
                 } else if let legacy = word == .ok ? ReviewStackRules.legacyAnswer(item, picked: pick) : (item.kind == .check ? "changes" : nil) {
                     await model.answer(item.question, with: legacy)
                 } else { say("This needs the computer."); reset(); return }

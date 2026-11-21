@@ -97,6 +97,32 @@ final class ReviewStackUITests: XCTestCase {
         XCTAssertTrue(waitProgress(app, "1 answered"), progress(app))
     }
 
+    /// ORCH-444: a voice note and a picture go with Send back.
+    func testSendBackWithAVoiceNoteAndAPicture() {
+        let app = launch(["-fakePhoto", "YES"])
+        openStack(app)
+        app.buttons["review-comment"].tap()
+        XCTAssertTrue(any(app, "comment-sheet").waitForExistence(timeout: 5))
+        shot(app, "orch444-1-sheet")
+        let mic = app.buttons["comment-mic"]
+        mic.tap(); mic.tap()                                  // scripted voice: the recording stays, its words land in the field
+        XCTAssertTrue(any(app, "comment-file").waitForExistence(timeout: 10), "the voice note is listed")
+        let add = app.buttons["comment-add-file"]
+        XCTAssertTrue(add.waitForExistence(timeout: 5)); add.tap()
+        XCTAssertTrue(any(app, "media-fake-photo").waitForExistence(timeout: 5))
+        XCTAssertFalse(any(app, "media-location").exists, "no location in an answer")
+        shot(app, "orch444-2-picker")
+        any(app, "media-fake-photo").tap()
+        let done = app.buttons["media-send"]
+        XCTAssertTrue(done.waitForExistence(timeout: 10)); XCTAssertEqual(done.label, "Add to the answer")
+        XCTAssertFalse(any(app, "media-caption").exists)
+        done.tap()
+        XCTAssertTrue(app.buttons["Remove photo.jpg"].waitForExistence(timeout: 5))
+        shot(app, "orch444-3-sheet-with-files")
+        app.buttons["comment-send"].tap()
+        XCTAssertTrue(waitProgress(app, "1 answered"), progress(app))
+    }
+
     func testOverviewJumpAndAllDone() {
         let app = launch()
         openStack(app)

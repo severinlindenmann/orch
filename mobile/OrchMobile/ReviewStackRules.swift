@@ -154,7 +154,7 @@ enum ReviewStackRules {
     // MARK: Verdict
 
     /// The plain line sent as `answer` (old readers; the contract's examples: "Send it", "Use C", "Use C with 2 changes").
-    static func summary(_ item: ReviewItem, verdict: ReviewVerdict) -> String {
+    static func summary(_ item: ReviewItem, verdict: ReviewVerdict, files: Int = 0) -> String {
         let note = verdict.note
         let changes = (note?.changes ?? []).count
         let words = [note?.words?.text].compactMap { $0 }.first { !$0.isEmpty } ?? note?.words?.voice?.first?.transcript
@@ -166,6 +166,7 @@ enum ReviewStackRules {
         case .talk:
             if let p = verdict.picked { return changes > 0 ? "Use \(p) with \(changes) change\(changes == 1 ? "" : "s")" : "Use \(p) with changes" }
             if let w = words, changes == 0 { return "Send back for changes: " + w }
+            if changes == 0, files > 0 { return "Send back for changes (\(files == 1 ? "1 file" : "\(files) files"))" }
             return changes > 0 ? "Send back for changes (\(changes))" : "Send back for changes"
         }
     }
