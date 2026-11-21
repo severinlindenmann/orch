@@ -244,15 +244,19 @@ TEST_INSTALL = (
 
 def _real_tool_in_test(binary: str) -> bool:
     """A test install (ORCH_HOME_STRICT) never runs the real tool's sign-in (ORCH-1101): it opens the sign-in
-    page in the browser of the person at the computer. Only a stand-in in the system temp folder (a test's own
-    fake) may run there; the real tool, also when linked into the test home, may not."""
+    page in the browser of the person at the computer. Only a stand-in in the system temp folder or in the
+    account's own ~/.orch-test (a test's own fake, as the dashboard click-throughs make) may run there; the
+    real tool, also when linked into the test home, may not (the link is followed first)."""
     from orch import launchenv
 
     if not launchenv.strict():
         return False
-    tmp = os.path.realpath(tempfile.gettempdir())
     real = os.path.realpath(binary)
-    return not (real == tmp or real.startswith(tmp.rstrip(os.sep) + os.sep))
+    roots = [os.path.realpath(tempfile.gettempdir())]
+    home = launchenv.user_home()  # the account's home from the password database, never the test's HOME
+    if home is not None:
+        roots.append(os.path.realpath(home / ".orch-test"))
+    return not any(real == r or real.startswith(r.rstrip(os.sep) + os.sep) for r in roots)
 
 
 def spec(root: Path, name: str) -> dict | None:
