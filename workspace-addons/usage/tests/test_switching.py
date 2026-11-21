@@ -637,3 +637,11 @@ def test_a_5_hour_limit_of_the_account_wins_over_the_default():
         key="k_main", label="main", slot=1, windows={"5h": Window(93.0), "week": Window(1.0)}
     )
     assert switching.judge(a, use, {}, 10).good
+
+
+def test_a_look_with_a_failing_switcher_says_it_did_not_answer(cli, fake_switcher, ws):
+    fake_switcher.answer("not json")
+    code, d = jrun(cli, "run", "--once")
+    assert code == 0 and d["switcher"] is True and d["did"] == "nothing"
+    code, out, _ = cli("run", "--once")
+    assert "not installed" not in out and "looks again" in out
