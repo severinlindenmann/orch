@@ -28,7 +28,7 @@ struct AcceptWorkspaceCard: View {
                         Text(waiting == 1 ? "1 message waits until you accept." : "\(waiting) messages wait until you accept.")
                             .themeFont(13).foregroundStyle(Theme.muted)
                     }
-                    Button("Accept") { model.acceptWorkspace(workspaceId) }
+                    Button("Accept") { model.acceptWorkspace(workspaceId, shownFingerprint: fingerprint) }
                         .buttonStyle(WideButtonStyle(color: Theme.brand)).accessibilityIdentifier("accept-workspace")
                 }.orchCard().accessibilityElement(children: .contain).accessibilityIdentifier("accept-card-\(workspaceId)")
             }

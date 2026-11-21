@@ -530,7 +530,8 @@ final class AppModel {
         guard let me = credentials?.phoneId ?? (useMock ? "ph_mock000000" : nil) else { return items.filter(\.fromPhone) }
         let accepted = trust.accepted(), hints = keyHints
         return items.filter { m in
-            if m.fromPhone { return true }
+            // Only this phone's own messages skip the check; one that claims another phone is never shown.
+            if m.fromPhone { return m.message.from == me }
             switch IncomingCheck.check(m.message, me: me, accepted: accepted, hints: hints) {
             case .ok, .unsigned: return true
             case .held:
@@ -554,13 +555,18 @@ final class AppModel {
         keyHints[workspaceId].map(MessageSignature.fingerprint)
     }
 
-    /// The person accepts the workspace's listed key (a tap in its chat). Held messages are checked again and shown.
-    func acceptWorkspace(_ workspaceId: String) {
+    /// The person accepts the key whose fingerprint the card showed (a tap in its chat). If the listed key changed
+    /// meanwhile nothing is accepted and the card shows the new fingerprint. Held messages are checked again.
+    @discardableResult
+    func acceptWorkspace(_ workspaceId: String, shownFingerprint: String) -> Bool {
         guard let w = workspaces.first(where: { $0.id == workspaceId }), let k = w.signingKey,
-              trust.accept(workspaceId, key: k.publicKey) else { return }
+              let raw = MessageSignature.b64urlDecodeStrict(k.publicKey),
+              MessageSignature.fingerprint(raw) == shownFingerprint,
+              trust.accept(workspaceId, key: k.publicKey) else { return false }
         let waiting = held.removeValue(forKey: workspaceId) ?? []
         revision &+= 1
         merge(waiting)
+        return true
     }
 
     #if DEBUG

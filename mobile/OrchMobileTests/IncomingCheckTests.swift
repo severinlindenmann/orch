@@ -111,11 +111,20 @@ final class AcceptOnPhoneTests: XCTestCase {
         XCTAssertFalse(model.messages.contains { $0.id == good.id }, "held before Accept")
         XCTAssertEqual(model.held[ws]?.map(\.id), [good.id])
         XCTAssertEqual(model.notValid[ws], [changed.id])
-        model.acceptWorkspace(ws)
+        XCTAssertFalse(model.acceptWorkspace(ws, shownFingerprint: "0000 0000 0000 0000 0000 0000 0000 0000"),
+                       "a fingerprint other than the listed key accepts nothing")
+        XCTAssertEqual(model.senderState(ws), .notAcceptedYet)
+        XCTAssertTrue(model.acceptWorkspace(ws, shownFingerprint: MessageSignature.fingerprint(raw)))
         XCTAssertEqual(model.senderState(ws), .accepted)
         XCTAssertTrue(model.messages.contains { $0.id == good.id }, "shown after Accept")
         XCTAssertFalse(model.messages.contains { $0.id == changed.id })
         model.testMerge([good])
         XCTAssertNil(model.held[ws], "accepted once: not held again")
+        // A message that claims to come from another phone is never shown.
+        let other: [String: Any] = ["message": ["id": "m_otherphone000001", "from": "ph_zzzzzzzzzz", "to": ws, "type": "text",
+                                                "created_at": "2026-11-21T10:00:00Z", "body": ["text": "hi"]], "workspace_name": "Dev"]
+        let fake = try JSONCoding.decoder.decode(PhoneMessage.self, from: JSONSerialization.data(withJSONObject: other))
+        model.testMerge([fake])
+        XCTAssertFalse(model.messages.contains { $0.id == fake.id })
     }
 }
