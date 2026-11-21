@@ -770,6 +770,105 @@ def test_closed_ticket_refuses_agent_ext_attach_and_attach_file_before_writing(p
     tickets.ext_unset(proj, tid, "demo.a", "human:t")
 
 
+REPEAT_SCHEMA = {
+    "properties": {
+        "recurring": {"type": "boolean", "x-orch-off": False},
+        "paused": {"type": "boolean", "x-orch-off": True},
+    }
+}
+OFF = {"recurring": False, "paused": True}
+
+
+@pytest.mark.parametrize("status", ["done", "dropped"])
+def test_closed_ticket_lets_an_agent_switch_a_repeat_off_and_nothing_else(proj, new_ticket, status):
+    """#2051: `orch automation repeat <t> --off` and `act off|delete` from a helper on a closed ticket:
+    switching
+    the repeat off (recurring false, paused true, removing it or its next start) goes through; switching it on
+    or changing anything else stays refused."""
+    tid = new_ticket()
+    rep = {"recurring": True, "cron": "0 * * * *", "next_run": "2026-11-20T17:00:00Z", "each_run": True}
+    tickets.ext_set(proj, tid, "automation", json.dumps(rep), "human:t", schema=REPEAT_SCHEMA)
+    tickets.ext_set(proj, tid, "demo", '{"a": 1}', "human:t")
+    tickets.set_status(proj, tid, status, "human:t")
+    msg = "This ticket is closed, so the agent can't change it."
+    for write in (
+        lambda: tickets.ext_set(
+            proj, tid, "automation", '{"cron": "*/5 * * * *"}', "agent:claude", schema=REPEAT_SCHEMA
+        ),
+        lambda: tickets.ext_set(
+            proj, tid, "automation", '{"recurring": false, "agent": "x"}', "agent:claude"
+        ),
+        lambda: tickets.ext_set(
+            proj, tid, "automation", '{"paused": false}', "agent:automation", schema=REPEAT_SCHEMA
+        ),
+        lambda: tickets.ext_set(proj, tid, "demo", '{"paused": true}', "agent:claude"),
+        lambda: tickets.ext_unset(proj, tid, "automation.cron", "agent:claude", schema=REPEAT_SCHEMA),
+        lambda: tickets.ext_unset(proj, tid, "demo", "agent:claude"),
+    ):
+        with pytest.raises(Refused, match=msg):
+            write()
+    off = {**rep, "recurring": False}
+    tickets.ext_set(proj, tid, "automation", json.dumps(off), "agent:automation", schema=REPEAT_SCHEMA)
+    tickets.ext_set(proj, tid, "automation", '{"paused": true}', "agent:claude", schema=REPEAT_SCHEMA)
+    tickets.ext_set(
+        proj, tid, "automation", '{"paused": true}', "agent:claude", schema=REPEAT_SCHEMA
+    )  # already off: fine
+    assert tickets.load(proj, tid)["ext"]["automation"]["recurring"] is False
+    tickets.ext_unset(proj, tid, "automation.next_run", "agent:claude", schema=REPEAT_SCHEMA)
+    assert "next_run" not in tickets.load(proj, tid)["ext"]["automation"]
+    other = new_ticket()  # a repeat that is not paused: its whole block may go
+    tickets.ext_set(proj, other, "automation", json.dumps(rep), "human:t", schema=REPEAT_SCHEMA)
+    tickets.set_status(proj, other, status, "human:t")
+    tickets.ext_unset(proj, other, "automation", "agent:automation", schema=REPEAT_SCHEMA)
+    t = tickets.load(proj, other)
+    assert "automation" not in t.get("ext", {}) and t["status"] == status
+
+
+def test_closed_ticket_keeps_a_paused_repeat_block_against_an_agent(proj, new_ticket):
+    """Removing the whole block of a paused repeat would undo its switch-off: refused for an agent on a
+    closed ticket; switching it further off still works, and a person may remove it."""
+    tid = new_ticket()
+    tickets.ext_set(
+        proj, tid, "automation", '{"recurring": true, "paused": true}', "human:t", schema=REPEAT_SCHEMA
+    )
+    tickets.set_status(proj, tid, "done", "human:t")
+    with pytest.raises(Refused, match="This ticket is closed"):
+        tickets.ext_unset(proj, tid, "automation", "agent:claude", schema=REPEAT_SCHEMA)
+    with pytest.raises(Refused, match="This ticket is closed"):  # removing the mark itself would switch it on
+        tickets.ext_unset(proj, tid, "automation.paused", "agent:claude", schema=REPEAT_SCHEMA)
+    tickets.ext_set(proj, tid, "automation", '{"recurring": false}', "agent:claude", schema=REPEAT_SCHEMA)
+    tickets.ext_unset(proj, tid, "automation", "human:t", schema=REPEAT_SCHEMA)
+
+
+def test_closed_ticket_repeat_off_needs_the_addon_to_declare_a_repeat(proj, new_ticket):
+    """Stored data with a recurring field is not enough (an agent could have written it while the ticket was
+    open): without the active add-on's schema declaring the repeat, a closed ticket refuses the agent."""
+    tid = new_ticket()
+    tickets.ext_set(proj, tid, "notes", '{"recurring": true, "text": "x"}', "agent:claude")
+    tickets.set_status(proj, tid, "done", "human:t")
+    for write in (
+        lambda: tickets.ext_unset(proj, tid, "notes", "agent:claude"),
+        lambda: tickets.ext_set(proj, tid, "notes", '{"recurring": false}', "agent:claude"),
+        lambda: tickets.ext_unset(proj, tid, "notes", "agent:claude", schema={"properties": {}}),
+        lambda: tickets.ext_set(  # declared fields without the switch-off mark are not enough
+            proj, tid, "notes", '{"recurring": false}', "agent:claude",
+            schema={"properties": {"recurring": {"type": "boolean"}}},
+        ),
+    ):
+        with pytest.raises(Refused, match="This ticket is closed"):
+            write()
+
+
+def test_repeat_off_only():
+    cur = {"recurring": True, "paused": False, "cron": "0 * * * *"}
+    assert tickets.repeat_off_only(cur, {**cur, "recurring": False}, OFF)
+    assert tickets.repeat_off_only(cur, {**cur, "paused": True, "recurring": False}, OFF)
+    assert tickets.repeat_off_only(cur, dict(cur), OFF)
+    assert not tickets.repeat_off_only(cur, {**cur, "recurring": False, "cron": "*/5 * * * *"}, OFF)
+    assert not tickets.repeat_off_only({**cur, "recurring": False}, {**cur, "recurring": True}, OFF)
+    assert not tickets.repeat_off_only(cur, {**cur, "paused": 1}, OFF)
+
+
 def test_agent_ext_attach_and_attach_file_work_on_an_open_ticket(proj, new_ticket):
     tid = new_ticket()
     (proj / "proof.txt").write_text("proof\n")
