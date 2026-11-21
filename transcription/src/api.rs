@@ -27,6 +27,7 @@ const SILENCE_RMS: f32 = 1e-4;
 pub struct App {
     pub engine: Arc<dyn Engine>,
     pub tokens: crate::tokens::Tokens,
+    pub jobs: crate::jobs::Jobs,
     /// One transcription at a time: the engine uses all its threads for one clip.
     pub run: Arc<Semaphore>,
     waiting: AtomicUsize,
@@ -39,6 +40,7 @@ impl App {
         Arc::new(App {
             engine,
             tokens: crate::tokens::Tokens::open(data_dir),
+            jobs: crate::jobs::Jobs::open(data_dir),
             run: Arc::new(Semaphore::new(1)),
             waiting: AtomicUsize::new(0),
         })
@@ -108,6 +110,7 @@ pub fn transcribe_blocking(
         let t = Transcript {
             text: String::new(),
             language: language.map(String::from),
+            segments: vec![],
         };
         return Ok((t, duration));
     }
@@ -158,6 +161,100 @@ pub async fn transcribe(
         "language": t.language,
         "duration": (duration * 100.0).round() / 100.0,
     })))
+}
+
+// ---------- encrypted jobs ----------
+
+use crate::jobs::JobError;
+use crate::Caller;
+use axum::extract::{Extension, Path};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+
+fn job_err(e: JobError) -> ApiError {
+    match e {
+        JobError::NotFound => not_found(),
+        JobError::BadKey => invalid(
+            "X-Orch-Job-Key is missing or does not open the recording. Send the job's key (base64url, 43 characters).",
+        ),
+        JobError::BadBlob => invalid(
+            "The body must be an OPF1 blob (crypto.md) whose type is an audio type such as audio/m4a.",
+        ),
+        JobError::TooLarge => too_large("The recording is larger than 200 MB."),
+        JobError::Busy => busy(),
+        JobError::Conflict => conflict(
+            "Not possible in this job's state. Look at it with GET /v1/jobs/<id>.",
+        ),
+        JobError::Io => failed(),
+    }
+}
+
+fn job_key_header(h: &HeaderMap) -> Option<String> {
+    h.get("x-orch-job-key")
+        .and_then(|v| v.to_str().ok())
+        .map(String::from)
+}
+
+pub async fn job_create(
+    State(app): State<AppState>,
+    Extension(who): Extension<Caller>,
+    h: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+    body: Body,
+) -> Res<Response> {
+    let lang = language_code(q.get("language").map(String::as_str), app.engine.as_ref())?;
+    let blob = axum::body::to_bytes(body, crate::jobs::MAX_BLOB + 1)
+        .await
+        .map_err(|_| too_large("The recording is larger than 200 MB."))?;
+    let key = job_key_header(&h);
+    let app2 = app.clone();
+    let m =
+        tokio::task::spawn_blocking(move || app2.jobs.create(&who.0, key.as_deref(), &blob, lang))
+            .await
+            .map_err(|_| failed())?
+            .map_err(job_err)?;
+    Ok((StatusCode::ACCEPTED, Json(m.public())).into_response())
+}
+
+pub async fn job_get(
+    State(app): State<AppState>,
+    Extension(who): Extension<Caller>,
+    Path(id): Path<String>,
+) -> Res<Json<Value>> {
+    Ok(Json(app.jobs.get(&who.0, &id).map_err(job_err)?.public()))
+}
+
+pub async fn job_key(
+    State(app): State<AppState>,
+    Extension(who): Extension<Caller>,
+    Path(id): Path<String>,
+    h: HeaderMap,
+) -> Res<Json<Value>> {
+    let key = job_key_header(&h);
+    let app2 = app.clone();
+    let m = tokio::task::spawn_blocking(move || app2.jobs.resupply(&who.0, &id, key.as_deref()))
+        .await
+        .map_err(|_| failed())?
+        .map_err(job_err)?;
+    Ok(Json(json!({"id": m.id, "status": m.status})))
+}
+
+pub async fn job_result(
+    State(app): State<AppState>,
+    Extension(who): Extension<Caller>,
+    Path(id): Path<String>,
+) -> Res<Response> {
+    let blob = app.jobs.result(&who.0, &id).map_err(job_err)?;
+    Ok(([("content-type", "application/octet-stream")], blob).into_response())
+}
+
+pub async fn job_delete(
+    State(app): State<AppState>,
+    Extension(who): Extension<Caller>,
+    Path(id): Path<String>,
+) -> Res<StatusCode> {
+    app.jobs.delete(&who.0, &id).map_err(job_err)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn health() -> Json<Value> {

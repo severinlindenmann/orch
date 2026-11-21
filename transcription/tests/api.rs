@@ -207,6 +207,7 @@ impl Engine for Slow {
         Ok(Transcript {
             text: "ok".into(),
             language: None,
+            segments: vec![],
         })
     }
     fn knows_language(&self, _: &str) -> bool {

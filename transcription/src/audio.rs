@@ -74,7 +74,11 @@ pub fn decode(data: Vec<u8>, ext: &str, max_seconds: f64) -> Result<Vec<f32>, Au
         .make_audio_decoder(&params, &AudioDecoderOptions::default())
         .map_err(|_| AudioError::Unreadable)?;
 
+    // Mono at the source rate, turned into 16 kHz every 10 s: a 2-hour recording never needs a
+    // full-rate copy in memory (48 kHz x 2 h = 1.4 GB of samples).
     let mut mono: Vec<f32> = Vec::new();
+    let mut out: Vec<f32> = Vec::new();
+    let mut frames: u64 = 0;
     let mut rate: u32 = 0;
     let mut buf: Vec<f32> = Vec::new();
     loop {
@@ -83,7 +87,7 @@ pub fn decode(data: Vec<u8>, ext: &str, max_seconds: f64) -> Result<Vec<f32>, Au
             Ok(None) => break,
             // A truncated tail ends the stream; what was decoded so far still counts.
             Err(SymError::IoError(_)) => break,
-            Err(_) if !mono.is_empty() => break,
+            Err(_) if frames > 0 => break,
             Err(_) => return Err(AudioError::Unreadable),
         };
         if packet.track_id != track_id {
@@ -110,14 +114,22 @@ pub fn decode(data: Vec<u8>, ext: &str, max_seconds: f64) -> Result<Vec<f32>, Au
         for frame in buf.chunks(ch) {
             mono.push(frame.iter().sum::<f32>() / ch as f32);
         }
-        if mono.len() as f64 > max_seconds * rate as f64 {
+        frames += (buf.len() / ch) as u64;
+        if frames as f64 > max_seconds * rate as f64 {
             return Err(AudioError::TooLong);
+        }
+        // 10 s of source = exactly 160 000 samples at 16 kHz, so the pieces join without a gap
+        let piece = rate as usize * 10;
+        while mono.len() >= piece {
+            out.extend(resample(&mono[..piece], rate, RATE));
+            mono.drain(..piece);
         }
     }
     if rate == 0 {
         return Err(AudioError::Unreadable);
     }
-    Ok(resample(&mono, rate, RATE))
+    out.extend(resample(&mono, rate, RATE));
+    Ok(out)
 }
 
 /// Windowed-sinc low-pass, then linear interpolation. Good enough for speech; no extra dependency.

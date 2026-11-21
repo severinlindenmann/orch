@@ -122,3 +122,59 @@ async fn noise_gives_no_made_up_text() {
         assert_eq!(v["text"], "", "{secs}s noise gave {v}");
     }
 }
+
+/// An encrypted job end to end with the real model: transcript with times, only the result key opens it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_encrypted_job_gives_an_encrypted_transcript_with_times() {
+    use base64::Engine as _;
+    use orch_transcription::opf1;
+    let e = need_model!();
+    let h = common::harness(e);
+    let key = [5u8; 32];
+    let kb = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key);
+    let blob = opf1::seal(&key, "jfk.m4a", "audio/m4a", &fixture("jfk.m4a"));
+    let (s, b) = h
+        .call(
+            "POST",
+            "/v1/jobs",
+            Some(&h.token),
+            &[("x-orch-job-key", &kb)],
+            blob,
+        )
+        .await;
+    assert_eq!(s, StatusCode::ACCEPTED);
+    let id = serde_json::from_slice::<Value>(&b).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    tokio::spawn(orch_transcription::jobs::worker(h.app.clone()));
+    let mut out = vec![];
+    for _ in 0..600 {
+        let (s, b) = h
+            .call(
+                "GET",
+                &format!("/v1/jobs/{id}/result"),
+                Some(&h.token),
+                &[],
+                vec![],
+            )
+            .await;
+        if s == StatusCode::OK {
+            out = b;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let (_, body) =
+        opf1::open(&opf1::result_key(&key), &out).expect("result opens with the result key");
+    let r: Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        words(&r).contains("ask not what your country can do for you"),
+        "{r}"
+    );
+    assert_eq!(r["language"], "en");
+    let segs = r["segments"].as_array().unwrap();
+    assert!(!segs.is_empty());
+    let last = segs.last().unwrap()["end"].as_f64().unwrap();
+    assert!((8.0..12.0).contains(&last), "last segment ends at {last}");
+}

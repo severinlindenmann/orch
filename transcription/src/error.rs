@@ -63,6 +63,9 @@ pub fn failed() -> ApiError {
         "The transcription failed. Try again; if it keeps failing, tell the admin.",
     )
 }
+pub fn conflict(m: impl Into<String>) -> ApiError {
+    e(StatusCode::CONFLICT, "conflict", m)
+}
 pub fn not_found() -> ApiError {
     e(StatusCode::NOT_FOUND, "not_found", "No such address.")
 }

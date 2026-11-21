@@ -2,11 +2,20 @@
 //! Calls block (seconds of CPU or graphics chip work); the API runs them on the blocking pool.
 use std::sync::Mutex;
 
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Segment {
+    /// Seconds from the start of the audio given to the engine.
+    pub start: f64,
+    pub end: f64,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Transcript {
     pub text: String,
     /// The language the engine heard or was told (`en`, `de`, ...).
     pub language: Option<String>,
+    pub segments: Vec<Segment>,
 }
 
 pub trait Engine: Send + Sync {
@@ -31,6 +40,7 @@ impl Default for FakeEngine {
             result: Mutex::new(Ok(Transcript {
                 text: "hello world".into(),
                 language: Some("en".into()),
+                segments: vec![],
             })),
         }
     }
@@ -42,7 +52,15 @@ impl Engine for FakeEngine {
             .lock()
             .unwrap()
             .push((samples.len(), language.map(String::from)));
-        self.result.lock().unwrap().clone()
+        // one segment over the whole piece, as a real engine gives for a short clip
+        self.result.lock().unwrap().clone().map(|mut t| {
+            t.segments = vec![Segment {
+                start: 0.0,
+                end: samples.len() as f64 / 16_000.0,
+                text: t.text.clone(),
+            }];
+            t
+        })
     }
     fn knows_language(&self, code: &str) -> bool {
         matches!(code, "en" | "de" | "fr" | "it")
@@ -57,7 +75,7 @@ pub use whisper::WhisperEngine;
 
 #[cfg(feature = "whisper")]
 mod whisper {
-    use super::{Engine, Transcript};
+    use super::{Engine, Segment, Transcript};
     use std::path::{Path, PathBuf};
     use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
@@ -123,6 +141,7 @@ mod whisper {
             }
             st.full(p, samples).map_err(|e| e.to_string())?;
             let mut text = String::new();
+            let mut segments = vec![];
             for i in 0..st.full_n_segments() {
                 let Some(seg) = st.get_segment(i) else {
                     continue;
@@ -137,6 +156,12 @@ mod whisper {
                             text.push(' ');
                         }
                         text.push_str(s);
+                        // whisper.cpp times are in hundredths of a second
+                        segments.push(Segment {
+                            start: seg.start_timestamp() as f64 / 100.0,
+                            end: seg.end_timestamp() as f64 / 100.0,
+                            text: s.to_string(),
+                        });
                     }
                 }
             }
@@ -144,6 +169,7 @@ mod whisper {
             Ok(Transcript {
                 text,
                 language: language.map(String::from).or(heard),
+                segments,
             })
         }
         fn knows_language(&self, code: &str) -> bool {

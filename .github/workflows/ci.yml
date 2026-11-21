@@ -93,7 +93,7 @@ jobs:
             addons: ['workspace-addons/**', 'workspace/**', 'contracts/**', 'e2e/focus_insights*', 'e2e/scenarios_services.py', 'e2e/dash_services_tab.cjs', '.github/workflows/addons.yml']
             publish: ['publish/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', 'workspace/src/orch/templates/**', '.github/workflows/publish.yml']
             relay: ['relay/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', '.github/workflows/relay.yml']
-            transcription: ['transcription/**', 'contracts/transcription*', '.github/workflows/transcription.yml']
+            transcription: ['transcription/**', 'contracts/transcription*', 'contracts/vectors/transcription*', 'contracts/vectors/publish-blob*', '.github/workflows/transcription.yml']
             # only the contracts the phone tests read (blocks, crypto, look, relay-api, message, chat-groups, vectors, examples, review)
             mobile: ['mobile/**', 'contracts/blocks*', 'contracts/crypto.md', 'contracts/look*/**', 'contracts/look*', 'contracts/relay-api*', 'contracts/message.schema.json', 'contracts/chat-groups*', 'contracts/vectors/**', 'contracts/examples/**', 'contracts/review/**', '.github/workflows/mobile.yml']
             # the dashboard's pages and what takes their pictures (ORCH-312)

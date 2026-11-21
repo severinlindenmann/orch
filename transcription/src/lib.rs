@@ -5,6 +5,8 @@ pub mod audio;
 pub mod config;
 pub mod engine;
 pub mod error;
+pub mod jobs;
+pub mod opf1;
 pub mod tokens;
 
 use axum::extract::{Request, State};
@@ -39,6 +41,10 @@ async fn signed_in(
 pub fn router(app: AppState) -> Router {
     let signed = Router::new()
         .route("/v1/transcribe", post(api::transcribe))
+        .route("/v1/jobs", post(api::job_create))
+        .route("/v1/jobs/:id", get(api::job_get).delete(api::job_delete))
+        .route("/v1/jobs/:id/key", post(api::job_key))
+        .route("/v1/jobs/:id/result", get(api::job_result))
         .route_layer(middleware::from_fn_with_state(app.clone(), signed_in));
     Router::new()
         .route("/v1/health", get(api::health))

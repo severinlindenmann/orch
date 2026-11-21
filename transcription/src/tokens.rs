@@ -1,6 +1,6 @@
 //! Sign-in: `Authorization: Bearer ort_<43 chars>`. Tokens are made by the admin on the service machine
 //! (`orch-transcription token add <name>`), shown once, stored as a SHA-256 hash only in `<data>/tokens.json`.
-//! The running service rereads the file when it changes, so add and remove work without a restart.
+//! The running service reads the file on every check, so add and remove work at once, without a restart.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -28,12 +28,8 @@ struct File {
     tokens: Vec<Entry>,
 }
 
-/// When the token file last changed: modified time and size.
-type Stamp = (SystemTime, u64);
-
 pub struct Tokens {
     path: PathBuf,
-    cache: Mutex<(Option<Stamp>, Vec<Entry>)>,
     rate: Mutex<HashMap<String, (i64, u32)>>,
 }
 
@@ -105,28 +101,17 @@ impl Tokens {
     pub fn open(data_dir: &Path) -> Tokens {
         Tokens {
             path: data_dir.join("tokens.json"),
-            cache: Mutex::new((None, vec![])),
             rate: Mutex::new(HashMap::new()),
         }
     }
 
-    /// The current list (reread when the file changed).
+    /// The current list, read from the file on every call (a few hundred bytes): a removed token can never
+    /// stay valid through a cache. A broken file refuses everyone.
     pub fn list(&self) -> Vec<Entry> {
-        let mtime = std::fs::metadata(&self.path)
-            .and_then(|m| Ok((m.modified()?, m.len())))
-            .ok();
-        let mut c = self.cache.lock().unwrap();
-        if c.0 != mtime || mtime.is_none() {
-            match read(&self.path) {
-                Ok(t) => *c = (mtime, t),
-                // A broken file refuses everyone rather than keep a removed token working.
-                Err(e) => {
-                    tracing::error!("{e}");
-                    *c = (None, vec![]);
-                }
-            }
-        }
-        c.1.clone()
+        read(&self.path).unwrap_or_else(|e| {
+            tracing::error!("{e}");
+            vec![]
+        })
     }
 
     /// The entry for an `Authorization` header value, or None.
