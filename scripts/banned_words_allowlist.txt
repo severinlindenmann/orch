@@ -11,9 +11,10 @@ brand/tests/wording_allowlist.json   # counts the never-use words still in UI te
 workspace/tests/fixtures/prwait/*.json  # recorded GitHub check lists of this repository: they name that job
 workspace-addons/sync/tests/test_pause.py  # imports the sync approval module until P3 (#799) replaces it
 workspace/tests/conftest.py  # test helper ensure_signing stays until P4 (#799) removes the Done signing
-workspace-addons/dashboard-tester/src/orch_dashboard_tester/never_words.json  # the never-use list of docs/wording.md, shipped for the daily dashboard look
 workspace/src/orch/releasekeeper.py  # the CI roll-up job's own name and the release phase the keeper stores
 workspace/tests/test_releasekeeper.py  # recorded check lists that name that job
+scripts/ci_proven.py  # reads the conclusion of ci.yml's roll-up job by its name (ORCH-1124)
+workspace-addons/pull-requests/src/orch_pull_requests/required_checks.py  # the required checks' names, one of them the roll-up job (ORCH-1124)
 workspace/tests/ci_times_windows.json  # measured seconds per existing test, keyed by the tests' own names (ORCH-1050)
 # Signed messages (owner request 20 Nov 2026, ORCH-1027; design choices taken 21 Nov, ORCH-1198): R4.1 lists signing
 # as an owner-only concept and he asked for this one. Only the files that are about it:
