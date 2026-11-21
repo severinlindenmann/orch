@@ -353,7 +353,7 @@ def gather(root: Path) -> dict:
         )
     mem = switching._read(switching.memory_path(root))  # what the loop's last look found (ORCH-620)
     warnings += [w for w in mem.get("alerts") or [] if isinstance(w, str)]
-    return {"accounts": out, "switcher": found is not None, "warnings": warnings}
+    return {"accounts": out, "switcher": cswap.command() is not None, "warnings": warnings}
 
 
 # ---------------------------------------------------------------- output
@@ -635,6 +635,8 @@ def _loop_cmd(args, root: Path) -> int:
 def _look_text(r: dict) -> str:
     if not r.get("switcher"):
         return NO_SWITCHER
+    if r.get("did") == "nothing":  # installed, but it did not answer: say so, Usage looks again by itself
+        return (r.get("note") or "The account switcher did not answer.") + " Usage looks again in a minute."
     text = {
         "stay": f"Staying on {r.get('active')}.",
         "switched": f"Switched from {r.get('active')} to {r.get('target')}.",
@@ -647,47 +649,65 @@ def _look_text(r: dict) -> str:
     return text
 
 
+class _Parser(argparse.ArgumentParser):
+    """A wrong word is refused in plain words, never with argparse's raw "error: argument ..." line."""
+
+    def error(self, message):
+        m = re.search(r"argument (\S+): invalid choice: '([^']*)' \(choose from (.*)\)", message)
+        if m:
+            what, word, allowed = m.groups()
+            allowed = ", ".join(a.strip().strip("'") for a in allowed.split(","))
+            if what in ("command", "cmd") or what.startswith("{"):  # the command word itself
+                self.exit(2, f'Refused: "{word}" is not an {self.prog} command. Run {self.prog} --help.\n')
+            self.exit(2, f'Refused: "{word}" is not a {what} here. Use one of: {allowed}.\n')
+        m = re.search(r"required: (.*)", message)
+        if m:
+            usage = self.format_usage().replace("usage: ", "").strip()
+            self.exit(2, f"Refused: missing {m.group(1)}. Usage: {usage}\n")
+        self.exit(2, f"Refused: {message}. Run {self.prog} --help.\n")
+
+
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="orch usage")
+    ap = _Parser(prog="orch usage")
     ap.add_argument("--dir", default=os.environ.get("ORCH_ROOT", "."))
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub = ap.add_subparsers(dest="cmd", required=True, parser_class=_Parser, metavar="command")
 
     def p(name, **kw):
         s = sub.add_parser(name, **kw)
         s.add_argument("--json", action="store_true")
         return s
 
-    p("list")
-    p("needs")
-    s = p("seen")
+    p("list", help="The accounts, how far each is used, and its limits")
+    p("needs", help="What needs a person now: a warning, an account at its limit")
+    s = p("seen", help="Mark a warning as seen so it stops showing")
     s.add_argument("warning", choices=("all-at-limit", "switch-failed"))
     s.add_argument("--since")
     s.add_argument("--by")
-    s = p("history")
+    s = p("history", help="Every rule change and switch, newest first")
     s.add_argument("--account")
-    s = p("limit")
+    s = p("limit", help="Set how far an account may go: a %% or dollars")
     s.add_argument("account")
     s.add_argument("value")
     s.add_argument("--period")
     s.add_argument("--until")
     s.add_argument("--end")
     s.add_argument("--by")
-    s = p("period")
+    s = p("period", help="Change the time a limit counts over")
     s.add_argument("account")
     s.add_argument("new")
     s.add_argument("--of")
     s.add_argument("--until")
     s.add_argument("--end")
     s.add_argument("--by")
-    s = p("order")
+    s = p("order", help="Move an account to a place in the order")
     s.add_argument("account")
     s.add_argument("place", type=int)
     s.add_argument("--by")
-    for name in ("on", "off"):
-        s = p(name)
+    for name, word in (("on", "Use an account again"), ("off", "Stop using an account")):
+        s = p(name, help=word)
         s.add_argument("account")
         s.add_argument("--by")
-    s = p("end")
+    s = p("end", help="Make a rule end at a time")
     s.add_argument("account")
     s.add_argument("when")
     s.add_argument("--by")
@@ -702,18 +722,22 @@ def main(argv=None) -> int:
     s.add_argument("--order", help="all or the first accounts in order: 'Personal 1, Company'")
     s.add_argument("--clear", action="store_true", help="remove the share")
     s.add_argument("--by")
-    s = p("switching")
+    s = p("switching", help="Turn switching accounts by itself on or off")
     s.add_argument("state", choices=("on", "off"))
     s.add_argument("--by")
-    s = p("act")
+    s = p("act", help="A change from the Usage page (the page uses it)")
     s.add_argument("verb")
     s.add_argument("target")
     s.add_argument("--by")
-    s = p("run")
+    s = p("run", help="Run the Usage page and the switcher in this window")
     s.add_argument("--once", action="store_true")
     s.add_argument("--port", type=int, default=None, help=argparse.SUPPRESS)
-    for name in ("start", "stop", "status"):
-        p(name)
+    for name, word in (
+        ("start", "Start the Usage page and the switcher in the background"),
+        ("stop", "Stop them"),
+        ("status", "Say whether they run and where the page is"),
+    ):
+        p(name, help=word)
     args = ap.parse_args(argv)
     args.json = bool(getattr(args, "json", False)) or "--json" in (argv if argv is not None else sys.argv)
     try:
