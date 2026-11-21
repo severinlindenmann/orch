@@ -49,6 +49,10 @@ if ! dscl . -read "/Users/$U" >/dev/null 2>&1; then
 fi
 chmod 700 "$H"
 dseditgroup -o edit -a "$U" -t user _developer 2>/dev/null || true
+# no timed jobs for it (a job could leave one behind for later)
+for f in /usr/lib/cron/cron.deny /usr/lib/cron/at.deny; do
+  if [ -d "${f%/*}" ] && ! grep -qx "$U" "$f" 2>/dev/null; then echo "$U" >> "$f"; fi
+done
 DevToolsSecurity -enable >/dev/null 2>&1 || true
 # it must NOT be able to read your home or the orch you use
 for d in /Users/*; do

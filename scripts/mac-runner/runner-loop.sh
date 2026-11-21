@@ -13,6 +13,7 @@ set -u
 PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH
 B=/usr/local/orch-mac-runner; J=$B/job; U=orch-ci; H=/Users/orch-ci
 SVC=system/io.orch.mac-runner
+MAX=$((4 * 3600))   # longest round: the longest Mac job (timeout-minutes) is far shorter
 [ "$(id -u)" = 0 ] || { echo "runner-loop.sh: runs as root only (setup.sh starts it); did nothing" >&2; exit 1; }
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') runner-loop: $*"; }
 running() { launchctl print "$SVC" 2>/dev/null | grep -q 'state = running'; }
@@ -28,35 +29,56 @@ network_closed() { # pf: orch-ci never reaches the private network or the local 
     [ -n "$(pfctl -a com.apple/orch-ci -s rules 2>/dev/null)" ]
 }
 
-clean_dir() { # clean_dir <dir> <name to keep>: remove everything else in <dir>; never follows a link
-  [ -d "$1" ] && [ ! -L "$1" ] || return 0
-  find "$1" -mindepth 1 -maxdepth 1 ! -name "$2" -exec rm -rf {} + 2>/dev/null
-  return 0
+gone() { # gone <path>: remove a whole tree as root and make sure it is gone. rm walks the tree itself and never
+  # follows a link inside it; the flags a user may set (uchg, uappnd) are cleared first so nothing survives
+  [ -e "$1" ] || [ -L "$1" ] || return 0
+  if [ -L "$1" ]; then rm -f "$1"; else chflags -R nouchg,nouappnd "$1" 2>/dev/null; fi   # -R: links stay unfollowed
+  rm -rf "$1" 2>/dev/null
+  [ ! -e "$1" ] && [ ! -L "$1" ] || { log "could not remove $1"; return 1; }
+}
+
+realdir() { # realdir <parent> <a/b/c>: true when every step below <parent> is a real folder, not a link
+  local p=$1 part; local IFS=/
+  for part in $2; do p=$p/$part; [ -d "$p" ] && [ ! -L "$p" ] || return 1; done
 }
 
 fresh() {
-  # 2. nothing of the last job keeps running (the runner itself included)
+  # 2. nothing of the last job keeps running (the runner itself included), nothing of it is set to start again
   running && launchctl kill SIGKILL "$SVC" >/dev/null 2>&1
+  local uid k d; uid=$(id -u "$U") || return 1
+  launchctl bootout "user/$uid" >/dev/null 2>&1; launchctl bootout "gui/$uid" >/dev/null 2>&1
+  crontab -u "$U" -r >/dev/null 2>&1   # setup.sh also puts it in cron.deny and at.deny
   pkill -KILL -U "$U" 2>/dev/null; sleep 1
   pkill -KILL -U "$U" 2>/dev/null
   # 3. a fresh runner folder; its parent belongs to root, so a job can never put a link in its place
-  rm -rf "$J"
-  cp -Rc "$B/template" "$J" 2>/dev/null || { rm -rf "$J"; cp -R "$B/template" "$J"; } || return 1
+  gone "$J" || return 1
+  cp -Rc "$B/template" "$J" 2>/dev/null || { gone "$J" && cp -R "$B/template" "$J"; } || return 1
   for f in .runner .credentials .credentials_rsaparams; do
     if [ -f "$B/creds/$f" ]; then cp "$B/creds/$f" "$J/$f" || return 1; fi
   done
   [ -f "$J/.runner" ] || { log "no runner sign-up in $B/creds (run setup.sh again)"; return 1; }
   chown -R "$U:$U" "$J" && chmod 700 "$J" || return 1
-  # 4. a fresh home: only the Simulators stay (they take minutes to make); the temp and cache folders macOS gives it
-  clean_dir "$H" Library
-  clean_dir "$H/Library" Developer
-  clean_dir "$H/Library/Developer" CoreSimulator
-  local k d
+  # 4. a fresh home: the old one is moved aside whole (a rename never follows a link) and removed; only its
+  #    Simulators move over, and only when every folder on the way is a real folder (Library could be a link to /Library)
+  local old=/Users/.orch-ci-old
+  gone "$old" || return 1
+  [ -L "$H" ] && { log "$H is a link"; return 1; }
+  if [ -e "$H" ]; then mv "$H" "$old" || return 1; fi
+  mkdir -p "$H/Library/Developer" || return 1
+  if realdir "$old" Library/Developer/CoreSimulator; then mv "$old/Library/Developer/CoreSimulator" "$H/Library/Developer/"; fi
+  chown -R "$U:$U" "$H" && chmod 700 "$H" || return 1
+  gone "$old" || return 1
+  # the temp and cache folders macOS gives the user (their parent belongs to root or is not the user's to replace)
   for k in DARWIN_USER_TEMP_DIR DARWIN_USER_CACHE_DIR; do
     d=$(sudo -u "$U" /usr/bin/getconf "$k" 2>/dev/null); d=${d%/}
-    case $d in (/var/folders/?*|/private/var/folders/?*) clean_dir "$d" "-" ;; esac
+    case $d in (/var/folders/?*|/private/var/folders/?*) gone "$d" && mkdir "$d" && chown "$U" "$d" && chmod 700 "$d" || return 1 ;; esac
   done
-  pkill -KILL -U "$U" 2>/dev/null   # the getconf calls above
+  # its files in the shared temp folders and in /Users/Shared; the apps and data in its Simulators
+  for d in /private/tmp /private/var/tmp /Users/Shared; do
+    find "$d" -xdev -mindepth 1 -maxdepth 3 -user "$U" -prune -print 2>/dev/null | while IFS= read -r f; do gone "$f"; done
+  done
+  /usr/bin/perl -e 'alarm 300; exec @ARGV' sudo -u "$U" /usr/bin/xcrun simctl erase all >/dev/null 2>&1
+  pkill -KILL -U "$U" 2>/dev/null   # the calls above
   return 0
 }
 
@@ -68,7 +90,12 @@ while :; do
   t0=$(date +%s)
   if ! launchctl kickstart "$SVC" >/dev/null 2>&1; then log "could not start $SVC"; sleep 60; continue; fi
   sleep 5
-  while running; do sleep 5; done
+  # the runner is the job's own process: a job could keep it alive and take more jobs without a fresh start, so
+  # the loop ends every round after MAX seconds whatever the runner says (no job here runs that long)
+  while running; do
+    if [ $(( $(date +%s) - t0 )) -gt "$MAX" ]; then log "round longer than ${MAX}s; stopping it"; break; fi
+    sleep 5
+  done
   # a runner that ends at once, again and again (no network, sign-up removed on GitHub): wait longer each time
   if [ $(( $(date +%s) - t0 )) -lt 60 ]; then fails=$((fails + 1)); else fails=0; fi
   if [ "$fails" -gt 0 ]; then

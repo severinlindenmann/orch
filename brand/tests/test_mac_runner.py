@@ -448,7 +448,7 @@ def test_every_job_gets_a_fresh_runner_folder_from_a_root_owned_copy():
     assert 'chown -R root:wheel "$B/template.new"' in setup and 'chown -R root:wheel "$B/creds.new"' in setup
     assert "UserName" not in setup[setup.index('cat > "$LOOP.new"'):]  # the loop runs as root
     # the loop: fresh folder, home emptied, then start; it runs as root only
-    order = [loop.index(s) for s in ('rm -rf "$J"', 'cp -Rc "$B/template" "$J"', 'clean_dir "$H" Library',
+    order = [loop.index(s) for s in ('gone "$J" || return 1', 'cp -Rc "$B/template" "$J"', 'mv "$H" "$old"',
                                      'launchctl kickstart "$SVC"')]
     assert order == sorted(order)
     assert 'pkill -KILL -U "$U"' in loop and "ci-cache" not in setup
@@ -487,3 +487,56 @@ def test_the_docs_name_the_real_off_switch():
     doc = (ROOT / "docs" / "ci-checks.md").read_text()
     assert "it does not close the" in doc and "uninstall.sh" in doc
     assert "Helper accounts never approve a workflow run from a fork" in doc
+
+
+def test_nothing_the_runner_user_leaves_outside_its_home_starts_again():
+    """Automated review: a crontab, files in shared temp folders or Simulator apps would outlive the round."""
+    loop = (RUNNER / "runner-loop.sh").read_text()
+    fresh = loop[loop.index("fresh() {"):loop.index("fails=0")]
+    assert 'crontab -u "$U" -r' in fresh and "simctl erase all" in fresh
+    for d in ("/private/tmp", "/private/var/tmp", "/Users/Shared"):
+        assert d in fresh
+    assert "cron.deny" in (RUNNER / "setup.sh").read_text()
+
+
+def _loop_functions(tmp_path):
+    """gone() and realdir() of the loop, without its root check and endless loop."""
+    loop = (RUNNER / "runner-loop.sh").read_text()
+    lib = tmp_path / "lib.sh"
+    lib.write_text("log() { echo \"$*\" >&2; }\n" + loop[loop.index("gone() {"):loop.index("fresh() {")])
+    return lib
+
+
+def test_root_never_follows_a_link_the_job_planted_in_its_home(tmp_path):
+    """Outside review: ~/Library -> /Library made the old clean-up delete /Library/Developer as root."""
+    victim = tmp_path / "system" / "Developer" / "CoreSimulator"
+    victim.mkdir(parents=True)
+    (victim / "keep").write_text("x")
+    home = tmp_path / "old"
+    home.mkdir()
+    (home / "Library").symlink_to(tmp_path / "system")
+    lib = _loop_functions(tmp_path)
+    r = subprocess.run(["bash", "-c", f'. "{lib}"; realdir "{home}" Library/Developer/CoreSimulator && echo follows;'
+                        f' gone "{home}" && echo removed'], capture_output=True, text=True, timeout=30)
+    assert "follows" not in r.stdout and "removed" in r.stdout, (r.stdout, r.stderr)
+    assert (victim / "keep").read_text() == "x" and not home.exists()
+
+
+@pytest.mark.skipif(not Path("/usr/bin/chflags").exists(), reason="macOS file flags")
+def test_a_file_the_job_locked_does_not_survive_the_round(tmp_path):
+    d = tmp_path / "job"
+    d.mkdir()
+    f = d / "payload"
+    f.write_text("x")
+    subprocess.run(["chflags", "uchg", str(f)], check=True)
+    lib = _loop_functions(tmp_path)
+    r = subprocess.run(["bash", "-c", f'. "{lib}"; gone "{d}"'], capture_output=True, text=True, timeout=30)
+    if d.exists():
+        subprocess.run(["chflags", "-R", "nouchg", str(d)])
+    assert r.returncode == 0 and not d.exists(), r.stderr
+
+
+def test_a_round_has_a_hard_end_and_nothing_of_the_user_is_set_to_start_again():
+    loop = (RUNNER / "runner-loop.sh").read_text()
+    assert 'log "round longer than ${MAX}s; stopping it"' in loop
+    assert 'launchctl bootout "user/$uid"' in loop
