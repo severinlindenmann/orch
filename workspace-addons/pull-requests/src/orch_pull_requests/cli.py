@@ -355,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     hs.add_argument("state", nargs="?", choices=("on", "off", "status"), default="status")
     hs.add_argument("--json", action="store_true")
-    w = sub.add_parser("watch", help=argparse.SUPPRESS)
+    w = sub.add_parser("watch")  # hidden: no help= keeps it out of the --help list
     w.add_argument("--root", help=argparse.SUPPRESS)
     args = p.parse_args(argv)
     try:
