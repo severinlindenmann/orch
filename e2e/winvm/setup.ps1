@@ -16,6 +16,14 @@ $ProgressPreference = "SilentlyContinue"
 $ci = "C:\ci"
 New-Item -ItemType Directory -Force $ci | Out-Null
 
+# Windows PowerShell 5.1 with "Stop" turns any line a program writes to stderr (progress, warnings) into a
+# fatal error: run programs through Invoke-Native, which judges them by their exit code only.
+function Invoke-Native {
+    $ErrorActionPreference = "Continue"
+    & $args[0] @($args | Select-Object -Skip 1) 2>&1 | ForEach-Object { "$_" } | Write-Host
+    return $LASTEXITCODE
+}
+
 function Get-Checked($url, $out, $sha) {
     Invoke-WebRequest -UseBasicParsing $url -OutFile $out
     $got = (Get-FileHash -Algorithm SHA256 $out).Hash.ToLower()
@@ -32,7 +40,7 @@ Step "git" {
     $exe = "$ci\PortableGit.7z.exe"
     $url = "https://github.com/git-for-windows/git/releases/download/v$GitVersion.windows.1/PortableGit-$GitVersion-arm64.7z.exe"
     Get-Checked $url $exe $GitSha256
-    & $exe "-o$ci\git" -y | Out-Null
+    $null = Invoke-Native $exe "-o$ci\git" -y
     if (-not (Test-Path "$ci\git\cmd\git.exe")) { throw "PortableGit did not unpack" }
 }
 # Machine-wide PATH so later winvm runs (new sessions) find git, bash and uv.
@@ -48,16 +56,16 @@ Step "uv" {
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw "uv not on PATH" }
 }
 Step "python" {
-    uv python install $Python
-    if ($LASTEXITCODE -ne 0) { throw "uv python install failed" }
+    if ((Invoke-Native uv python install $Python) -ne 0) { throw "uv python install failed" }
 }
 Step "source" {
     if (Test-Path "$ci\src") { Remove-Item -Recurse -Force "$ci\src" }
     Expand-Archive "$ci\src.zip" "$ci\src"
     Set-Location "$ci\src"
-    git -c init.defaultBranch=develop init -q
-    git -c user.name=ci -c user.email=ci@localhost add -A
-    git -c user.name=ci -c user.email=ci@localhost commit -q -m "ci source"
-    if ($LASTEXITCODE -ne 0) { throw "git commit of the source failed" }
+    if ((Invoke-Native git -c init.defaultBranch=develop init -q) -ne 0) { throw "git init failed" }
+    if ((Invoke-Native git -c core.autocrlf=false add -A) -ne 0) { throw "git add failed" }
+    if ((Invoke-Native git -c user.name=ci -c user.email=ci@localhost commit -q -m "ci source") -ne 0) {
+        throw "git commit of the source failed"
+    }
 }
 "SETUP OK" | Write-Host
