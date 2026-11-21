@@ -547,6 +547,21 @@ def init(root: Path) -> dict:
     return {"made": made, "folder": ".orch/checks", "set_up_here": used}
 
 
+def drop_untouched_template(root: Path) -> bool:
+    """`orch uninstall`: delete the template init wrote while it is still exactly orch's bytes, then the check
+    folder when nothing else is in it. A changed template and every check the workspace added stay."""
+    path = folder(root) / TEMPLATE_FILE
+    want = (json.dumps(TEMPLATE, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    try:
+        if path.is_symlink() or not path.is_file() or path.read_bytes() != want:
+            return False
+        path.unlink()
+        folder(root).rmdir()  # only when empty
+    except OSError:
+        pass
+    return not path.exists()
+
+
 def notice(root: Path) -> str | None:
     """For a workspace without a check folder on a computer with known tools set up: one line naming them
     (not checked here) and how to add the ones this workspace uses."""
