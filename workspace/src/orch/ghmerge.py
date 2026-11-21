@@ -41,11 +41,14 @@ NET_ERROR = re.compile(
     r"|no such host|network is unreachable|could not resolve host|temporary failure in name resolution"
     r"|error connecting to|check your internet connection|unexpected eof|context deadline exceeded"
     r"|HTTP 5[0-9][0-9]\b|\b50[234] (?:bad gateway|service unavailable|gateway time-?out)"
-    r"|something went wrong while executing your query",
-    re.I,
+    r"|something went wrong while executing your query|proxyconnect tcp|:\s*EOF\s*$",
+    re.I | re.M,
 )
 UNREACHABLE = "GitHub did not answer; press Merge again."
-RETRY_FOR = 150  # seconds a Merge click keeps trying while GitHub gives no answer (the page waits up to 240)
+# seconds in which a Merge click starts new tries while GitHub gives no answer. A refused connection fails at
+# once; a try of slow timeouts can take about 130 s more, so the pages wait 300 s for a card answer.
+RETRY_FOR = 120
+RETRY_PHONE = 30  # a phone answer is applied by the relay inbox, which must not stand still for minutes
 RETRY_WAITS = (3, 6, 12, 24, 30)  # pause before each next try; the last one repeats until RETRY_FOR is used
 
 
@@ -528,7 +531,7 @@ def workflow_check(url: str, head: str, own: bool = False) -> dict | None:
         return None
     repo, _ = _parts(url)
     try:
-        read = _gh if own else _gh_plain
+        read = (lambda *a: _answered(_gh(*a))) if own else _gh_plain  # own: a Merge click retries
         v = read(gh, ["pr", "view", url, "--json", "baseRefName"], 15)
         base = (json.loads(v.stdout) if v.returncode == 0 else {}).get("baseRefName")
         if not isinstance(base, str) or not base:
@@ -541,6 +544,10 @@ def workflow_check(url: str, head: str, own: bool = False) -> dict | None:
         ):
             return None
         whole = _whole_texts(read, gh, repo, head, files)
+    except GitHubUnreachable:
+        if own:  # ORCH-1415: a blip here would skip the review and make the merge look refused
+            raise
+        return None
     except (Refused, ValueError, AttributeError):
         return None
     return check_workflows(files, whole)
@@ -634,16 +641,23 @@ def _unfinished_checks(gh: str, url: str, excused: frozenset = frozenset()) -> s
     return None if tone == "done" else words
 
 
-def merge(url: str, head: str, add_review: bool = True, excused: frozenset = frozenset()) -> dict:
+def merge(
+    url: str,
+    head: str,
+    add_review: bool = True,
+    excused: frozenset = frozenset(),
+    retry_for: int | None = None,
+) -> dict:
     """Merge the pull request at `url` as the person signed in to gh, only while its newest commit is still
     `head` (what the card showed). Returns {"login", "already"}: already is True when it was merged before (a
     second click, or a retry after a crash), which is not an error. add_review False (`orch ref merge`): the
     person's review is never added; where the branch rules want one, GitHub refuses and says so. excused:
     (check name, conclusion) pairs that may be red (only the release keeper's named exceptions, ORCH-178).
-    ORCH-1415: while GitHub gives no answer the whole merge is tried again from the start for RETRY_FOR
-    seconds (a try that merged before its answer got lost then reads MERGED: already); still no answer:
-    GitHubUnreachable (the card stays open), never MergeFailed (that sends the card back)."""
-    end, n = time.monotonic() + RETRY_FOR, 0
+    ORCH-1415: while GitHub gives no answer the whole merge is tried again from the start; new tries start
+    for RETRY_FOR seconds (retry_for: other seconds, a phone answer). A try that merged before its answer got
+    lost then reads MERGED: already. Still no answer: GitHubUnreachable (the card stays open), never
+    MergeFailed (that sends the card back)."""
+    end, n = time.monotonic() + (RETRY_FOR if retry_for is None else retry_for), 0
     while True:
         try:
             return _merge_once(url, head, add_review, excused)
@@ -695,6 +709,8 @@ def _merge_once(url: str, head: str, add_review: bool, excused: frozenset) -> di
             15,
         ))  # fmt: skip
     done = _answered(_gh(gh, ["pr", "merge", url, "--merge", "--match-head-commit", head], 25))
+    if done.returncode != 0 and _view(gh, url, env_own=True)[0] == "MERGED":
+        return {"login": login, "already": True}  # an earlier try landed, GitHub only showed it late
     if done.returncode != 0:
         raise MergeFailed(f"GitHub did not merge it: {_first_line(done.stderr or done.stdout)}. {OPEN_IT}")
     ghlimit.count("merge", url)  # the person's own click never waits, but it uses up the hour too

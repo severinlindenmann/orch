@@ -887,3 +887,42 @@ def test_no_answer_from_github_is_told_apart(stderr):
 def test_a_refusal_by_github_is_not_a_network_error(stderr):
     assert not ghmerge.unreachable(subprocess.CompletedProcess([], 1, "", stderr))
     assert not ghmerge.unreachable(subprocess.CompletedProcess([], 0, "", REFUSED_CONNECTION))
+
+
+def test_a_blip_in_the_workflow_check_is_no_answer_on_a_merge_click(gh):
+    """ORCH-1415 review: the Merge click's workflow check must not read a blip as "no workflow change" (the
+    review would be skipped and GitHub's refusal would send the card back)."""
+    gh.offline = 1
+    with pytest.raises(ghmerge.GitHubUnreachable):
+        ghmerge.workflow_check(PR, HEAD, own=True)
+    gh.offline = 1
+    assert ghmerge.workflow_check(PR, HEAD) is None  # the card's read when it is made: shows nothing
+
+
+def test_a_merge_github_shows_late_is_not_sent_back(tk, run, gh, clock, monkeypatch):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    gh.merge_rc, gh.merge_err = 1, "X Pull request acme/app#12 is not mergeable: it was merged already.\n"
+
+    def merged_meanwhile(argv, **kw):
+        cp = gh(argv, **kw)
+        if argv[1:3] == ["pr", "merge"]:
+            gh.state = "MERGED"  # an earlier try (or another click) landed; GitHub showed it only now
+        return cp
+
+    monkeypatch.setattr(ghmerge.subprocess, "run", merged_meanwhile)
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, out + err
+    q = _q(root, tid)
+    assert q["decision"]["action"] == "approve" and clock.slept == [] and len(gh.merges) == 1
+
+
+def test_a_phone_answer_tries_only_a_short_while(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        ghmerge, "merge", lambda url, head, **kw: seen.append(kw) or {"login": "p", "already": 0}
+    )
+    monkeypatch.setattr(review.tickets, "note_history", lambda *a, **k: None)
+    q = {"action": {"merge": PR, "head": HEAD}, "card": {"kind": "link", "open": PR, "ok_label": "Merge"}}
+    review._merge_first(None, "t1", q, {"action": "approve"}, "human:pat", "phone")
+    assert seen == [{"retry_for": ghmerge.RETRY_PHONE}]

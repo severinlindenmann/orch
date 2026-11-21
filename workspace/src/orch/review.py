@@ -1311,7 +1311,8 @@ def _merge_first(root: Path, tid: str, q: dict, d: dict, by: str, via: str) -> N
         raise Refused("Only a person merges this. Ask the human to click Merge on the card.")
     from orch import ghmerge
 
-    got = ghmerge.merge(url, q["action"].get("head"))
+    retry = ghmerge.RETRY_PHONE if via == "phone" else None  # the relay inbox waits for this answer
+    got = ghmerge.merge(url, q["action"].get("head"), retry_for=retry)
     line = (
         f"The pull request was merged already on GitHub ({got['login']}): {url}"
         if got["already"]
