@@ -10,6 +10,10 @@ on:
         description: "also run Windows (push to develop, PRs that change file, process or path code, nightly, manual)"
         type: boolean
         default: false
+      linux:
+        description: "the Linux parts (off only on a push to develop that a green queue group proved, ORCH-1106)"
+        type: boolean
+        default: true
 jobs:
   # Which systems and how many parts each (ORCH-315). Every part has a 15-minute limit; the full suite
   # takes about 12 min on Ubuntu, 22-40 min on macOS and ~95 min on Windows (ORCH-32), so the slow systems get
@@ -25,6 +29,7 @@ jobs:
         env:
           FULL: ${{ inputs.full }}
           WINDOWS: ${{ inputs.windows }}
+          LINUX: ${{ inputs.linux }}
         run: |
           python3 - <<'PY2'
           import json, os
@@ -34,7 +39,7 @@ jobs:
           # continue-on-error still reports a FAILURE check on the pull request, and the merge queue drops every
           # group with a failed check (18 Nov, after PR 1428). brand/tests/test_ci_known_red.py keeps it so.
           KNOWN_RED = set()
-          parts = {"ubuntu-latest": 2}
+          parts = {"ubuntu-latest": 2} if os.environ["LINUX"] == "true" else {}
           if os.environ["FULL"] == "true":
               parts["macos-latest"] = 5
           if os.environ["WINDOWS"] == "true":
