@@ -56,9 +56,9 @@ about two full runs at once, pull requests waited up to two hours and the queue 
 | e2e smoke (5 minutes) | | required, always | | | required |
 | add-on suites, page smoke | in light (changed add-ons only) | required, always | runs unless proven | | required |
 | dashboard click-throughs | in light (changed add-ons only) | not run, for now ³ | runs, also when proven ³ | | required |
-| clock (suites at 22:30 and 23:59:40 UTC) | | required, always | runs unless proven | runs | required |
+| clock (suites at 22:30 and 23:59:40 UTC, 4 parts each: ORCH-1118) | | required, always | runs unless proven | runs | required |
 | contracts, publish, relay | required | required (contracts always) | runs unless proven | | required |
-| mobile | required | required | runs unless proven | runs, with phone UI tests | required |
+| mobile | required (smoke set) | not run (owner, 20 Nov: ORCH-1118) | runs, full suite, also when proven | runs, with phone UI tests | required |
 | brand (words, tokens, CI time limits, Windows-safe paths: ORCH-872) | in light | required, always | runs unless proven | runs | required |
 | full e2e (`e2e` workflow, 03:17 UTC) | | | | runs | |
 
