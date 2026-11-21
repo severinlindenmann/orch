@@ -106,20 +106,27 @@ ci.yml's `route` job (`scripts/mac_route.py`) decides once per run:
   a branch of this repository). Pull requests into develop, merge queue groups and every pull request from a fork
   stay on GitHub's machines. The runner's job hook refuses the same again on the Mac.
 - **One setting moves them back**: repository variable `MAC_RUNNER`. `this-mac` = this Mac; anything else or unset
-  = GitHub's machines (the default).
+  = GitHub's machines (the default). It only steers orch's own workflows: it does not close the runner. The off
+  switch in an emergency is `sudo bash scripts/mac-runner/uninstall.sh` plus removing the runner on GitHub.
 - **Offline = GitHub by itself**: the route reads the runner list with the repository secret
   `MAC_RUNNER_STATUS_TOKEN` (a fine-grained token for this repository only, "Administration: read"; it lives in
   GitHub, never on the Mac). No secret, no answer or no online runner with the label `orch-mac`: GitHub's machines.
 - **Busy**: a develop push while the runner is busy goes to GitHub's machines; set `MAC_RUNNER_WHEN_BUSY=wait` to
   queue it on the Mac instead. The nightly run, manual runs and release pull requests always wait for the Mac.
-- **Clean run per job**: own hidden macOS user `orch-ci` (cannot read the owner's home or `~/.orch-tool`), a
-  throwaway home in the job's temp folder (`.github/actions/mac-job-home`), leftovers stopped and the temp folder
-  emptied after every job (`scripts/mac-runner/job-completed.sh`). No owner secrets on the Mac.
+- **Clean run per job**: own hidden macOS user `orch-ci` (cannot read the owner's home or `~/.orch-tool`). A loop
+  owned by root (`scripts/mac-runner/runner-loop.sh`) starts the runner for ONE job at a time and, before each job,
+  stops everything of `orch-ci`, makes a fresh runner folder from a read-only copy owned by root and empties
+  `orch-ci`'s home (only the Simulators stay). Each job also gets a throwaway home with its own download caches
+  (`.github/actions/mac-job-home`). Nothing a job changes or leaves reaches the next job. No owner secrets on the Mac.
+- **No private network**: a pf rule (`scripts/mac-runner/pf-orch-ci.conf`) closes the private network and the local
+  network to `orch-ci`; the internet stays open. The loop starts no runner while the rule is not in place.
 - **A refused job never runs a step**: the job-started hook stops the job's worker process at once (a failed hook
   alone would still run later `if: always()` steps).
-- **The hooks are the second lock, not the first**: they start themselves again in a clean environment, so functions
-  a job exports cannot replace their commands; but bash reads `BASH_ENV` before any hook line runs. The first lock
-  is GitHub holding every outside contributor's run until you click (step 1 below) and the route job.
+- **No job setting runs before the hook**: the runner starts its hooks with `bash` from its own PATH, and that is
+  `scripts/mac-runner/bash`: privileged bash with an empty environment, so `BASH_ENV`, `SHELLOPTS` or functions a
+  job sets (a fork's workflow file can name any runner) never run before the hook refuses the job.
+- **GitHub's own lock**: every outside contributor's run waits for an approval click (step 1 below; `setup.sh`
+  checks it). Helper accounts never approve a workflow run from a fork; only the owner does, after reading it.
 - **Shares the Mac with helpers**: each job holds the shared `heavy` lock, xcodebuild the `xcode` lock
   (`scripts/mac-runner/lock.sh`, folder `/Users/Shared/orch-locks`, group `orch-locks`); the macOS workspace suite
   is one part at `-n 6` there.
@@ -129,10 +136,11 @@ Turn it on (owner, admin rights):
    choice, the one for all external contributors (a fork's workflow file can name any runner; nothing runs until
    you click).
 2. On the Mac: `sudo bash scripts/mac-runner/setup.sh` (asks for the runner registration token from
-   Settings > Actions > Runners > New self-hosted runner; used once, never stored).
+   Settings > Actions > Runners > New self-hosted runner; used once, never stored). Run it again to take a new
+   runner version: the runner does not update itself.
 3. A fine-grained token for this repository only, permission "Administration: read", as the Actions secret
    `MAC_RUNNER_STATUS_TOKEN`.
 4. The Actions variable `MAC_RUNNER` = `this-mac`. Back to GitHub's machines: change or delete it.
 
-Undo on the Mac: `sudo bash scripts/mac-runner/uninstall.sh`, then remove the runner under Settings > Actions >
-Runners.
+Off and undo on the Mac: `sudo bash scripts/mac-runner/uninstall.sh`, then remove the runner under Settings >
+Actions > Runners.

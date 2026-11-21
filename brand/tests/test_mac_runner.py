@@ -272,7 +272,7 @@ def test_the_job_hook_refuses_what_must_never_run_on_the_mac(tmp_path, event, re
 
 
 def test_scripts_parse():
-    for f in RUNNER.glob("*.sh"):
+    for f in [*RUNNER.glob("*.sh"), RUNNER / "bash"]:
         assert subprocess.run(["bash", "-n", str(f)], capture_output=True).returncode == 0, f.name
 
 
@@ -376,3 +376,114 @@ def test_functions_from_the_job_s_environment_never_replace_a_command_in_the_hoo
 def test_installed_hooks_use_a_fixed_path():
     for name in ("job-started.sh", "job-completed.sh"):
         assert "PATH=/usr/bin:/bin:/usr/sbin:/sbin" in (RUNNER / name).read_text(), name
+
+
+# --- security review ORCH-1233: nothing of a job runs before the hook, a fresh runner per job, no private network ---
+
+
+def _install_shim(tmp_path):
+    """The installed layout: <base>/bin/bash (the shim) next to <base>/job-started.sh and job-completed.sh."""
+    base = tmp_path / "base"
+    (base / "bin").mkdir(parents=True)
+    shim = base / "bin" / "bash"
+    shim.write_text((RUNNER / "bash").read_text())
+    shim.chmod(0o755)
+    return base, shim
+
+
+@pytest.mark.skipif(not Path("/bin/bash").exists() or not Path("/usr/bin/env").exists(), reason="needs /bin/bash")
+def test_settings_of_the_job_never_run_before_the_hook(tmp_path):
+    """The runner starts a hook as `bash --noprofile --norc -e -o pipefail <hook>` with the job's environment."""
+    base, shim = _install_shim(tmp_path)
+    seen = tmp_path / "seen"
+    hook = base / "job-started.sh"
+    hook.write_text(f'env > "{seen}"\n')
+    flag = tmp_path / "ran-first"
+    evil = tmp_path / "evil.sh"
+    evil.write_text(f'echo x >> "{flag}"\n')
+    env = {"PATH": "/usr/bin:/bin", "BASH_ENV": str(evil), "ENV": str(evil), "SHELLOPTS": "xtrace",
+           "PS4": f"$(echo x >> {flag})", "BASH_FUNC_env%%": f"() {{ echo x >> {flag}; }}",
+           "GITHUB_REPOSITORY": REPO, "GITHUB_EVENT_NAME": "push", "ORCH_LOCK_DIR": "/tmp/elsewhere"}
+    r = subprocess.run([str(shim), "--noprofile", "--norc", "-e", "-o", "pipefail", str(hook)], env=env,
+                       capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    assert not flag.exists()
+    got = dict(line.split("=", 1) for line in seen.read_text().splitlines() if "=" in line)
+    assert got["GITHUB_REPOSITORY"] == REPO and got["GITHUB_EVENT_NAME"] == "push"
+    assert "BASH_ENV" not in got and "SHELLOPTS" not in got and "ORCH_LOCK_DIR" not in got and "PS4" not in got
+
+
+@pytest.mark.skipif(not Path("/bin/bash").exists(), reason="needs /bin/bash")
+def test_the_job_s_own_bash_steps_pass_through_unchanged(tmp_path):
+    _, shim = _install_shim(tmp_path)
+    step = tmp_path / "step.sh"
+    step.write_text('echo "args:$*" "v:$MY_VALUE"\n')
+    r = subprocess.run([str(shim), "--noprofile", "--norc", "-e", "-o", "pipefail", str(step), "a b", "c"],
+                       env={"PATH": "/usr/bin:/bin", "MY_VALUE": "kept"}, capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0 and r.stdout.strip() == "args:a b c v:kept", (r.stdout, r.stderr)
+    # a file with the hook's name elsewhere is a normal step: only the installed hooks start clean
+    other = tmp_path / "job-started.sh"
+    other.write_text('echo "v:$MY_VALUE"\n')
+    r = subprocess.run([str(shim), str(other)], env={"PATH": "/usr/bin:/bin", "MY_VALUE": "kept"},
+                       capture_output=True, text=True, timeout=30)
+    assert r.stdout.strip() == "v:kept"
+
+
+def test_the_runner_finds_the_clean_bash_first_and_the_hooks_start_privileged():
+    setup = (RUNNER / "setup.sh").read_text()
+    assert "<key>PATH</key><string>$B/bin:" in setup
+    assert 'install -m 0755 -o root -g wheel "$SRC/bash" "$B/bin/bash"' in setup
+    assert (RUNNER / "bash").read_text().startswith("#!/bin/bash -p\n")
+    for name in ("job-started.sh", "job-completed.sh", "runner-loop.sh"):
+        assert (RUNNER / name).read_text().startswith("#!/bin/bash -p\n"), name
+
+
+def test_every_job_gets_a_fresh_runner_folder_from_a_root_owned_copy():
+    setup = (RUNNER / "setup.sh").read_text()
+    loop = (RUNNER / "runner-loop.sh").read_text()
+    # one job per start, never an update into the copy, started by the root loop (not by launchd on its own)
+    assert "<string>$B/job/run.sh</string><string>--once</string>" in setup and "--disableupdate" in setup
+    assert "<key>RunAtLoad</key><false/>" in setup and "<key>KeepAlive</key><false/>" in setup
+    assert "<string>$B/runner-loop.sh</string>" in setup
+    assert 'chown -R root:wheel "$B/template.new"' in setup and 'chown -R root:wheel "$B/creds.new"' in setup
+    assert "UserName" not in setup[setup.index('cat > "$LOOP.new"'):]  # the loop runs as root
+    # the loop: fresh folder, home emptied, then start; it runs as root only
+    order = [loop.index(s) for s in ('rm -rf "$J"', 'cp -Rc "$B/template" "$J"', 'clean_dir "$H" Library',
+                                     'launchctl kickstart "$SVC"')]
+    assert order == sorted(order)
+    assert 'pkill -KILL -U "$U"' in loop and "ci-cache" not in setup
+
+
+def test_the_loop_starts_no_runner_while_the_network_rule_is_missing():
+    loop = (RUNNER / "runner-loop.sh").read_text()
+    body = loop[loop.index("while :; do"):]
+    assert body.index("network_closed") < body.index("launchctl kickstart")
+    assert "the runner stays off" in body
+    conf = (RUNNER / "pf-orch-ci.conf").read_text()
+    for net in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16", "fc00::/7"):
+        assert net in conf
+    assert conf.count("user orch-ci") == 2 and "127.0.0.0" not in conf
+
+
+def test_the_loop_never_acts_as_a_person():
+    r = subprocess.run(["bash", str(RUNNER / "runner-loop.sh")], capture_output=True, text=True, timeout=30)
+    if os.geteuid() != 0:
+        assert r.returncode == 1 and "root only" in r.stderr
+
+
+def test_no_download_cache_is_shared_between_jobs():
+    action = (ROOT / ".github" / "actions" / "mac-job-home" / "action.yml").read_text()
+    assert "ci-cache" not in action and "real_home" not in action
+    assert 'cache="$h/Library/Caches"' in action
+
+
+def test_a_refused_job_with_no_worker_found_stops_the_runner_programs():
+    hook = (RUNNER / "job-started.sh").read_text()
+    refuse = hook[hook.index("refuse() {"):hook.index("# The repository comes from")]
+    assert '("$HERE"/job/bin/Runner.*) kill -9' in refuse
+
+
+def test_the_docs_name_the_real_off_switch():
+    doc = (ROOT / "docs" / "ci-checks.md").read_text()
+    assert "it does not close the" in doc and "uninstall.sh" in doc
+    assert "Helper accounts never approve a workflow run from a fork" in doc

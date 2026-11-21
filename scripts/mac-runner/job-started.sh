@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -p
 # Runner hook before every job on this Mac's CI runner (ACTIONS_RUNNER_HOOK_JOB_STARTED, set by setup.sh; ORCH-1125).
 # 1. Refuses a job that must never run here: anything but a push to develop, the nightly run, a manual run or a
 #    release pull request (into main, from a branch of this repository). ci.yml's route job already sends nothing
@@ -9,8 +9,9 @@
 # A job sets its own environment, and bash loads shell functions from it: a function (find, ps, kill) would replace
 # that command here, whatever PATH says. So the hook first starts itself again as privileged bash (-p never loads
 # functions from the environment) with only the values it needs. Only paths with a slash run before that line.
-# Limit: bash reads BASH_ENV before any line of this file, so a job whose settings reach the hook can still run code
-# first. The hook is the second lock; the first: GitHub holds every outside contributor's run until the owner clicks (docs/ci-checks.md).
+# The runner starts this file through /usr/local/orch-mac-runner/bin/bash (setup.sh puts it first on the runner's
+# PATH): privileged bash with an empty environment, so BASH_ENV, SHELLOPTS and the job's functions never run before
+# line 1 (security review ORCH-1233 M1). The #! line above does the same when the file is started directly.
 if [[ ${1-} != --orch-clean ]]; then   # the runner starts hooks without arguments; a job cannot add one
   pass=(PATH=/usr/bin:/bin:/usr/sbin:/sbin)
   for v in GITHUB_REPOSITORY GITHUB_EVENT_NAME GITHUB_REF GITHUB_EVENT_PATH GITHUB_JOB GITHUB_RUN_ID ORCH_RUNNER_REPO \
@@ -32,7 +33,15 @@ refuse() {
   echo "mac runner: refused this job ($1). Only pushes to develop, the nightly run, manual runs and release pull requests run on this Mac." >&2
   # Only the copy setup.sh installed stops the job: its repo file is owned by root, which no job can fake. Run from
   # the repository (the tests on GitHub's machines run inside a real Runner.Worker) it only fails.
-  if [ -n "$worker" ] && [ -n "$(find "$HERE/repo" -maxdepth 0 -user 0 2>/dev/null)" ]; then kill -9 "$worker" 2>/dev/null; fi
+  if [ -n "$(find "$HERE/repo" -maxdepth 0 -user 0 2>/dev/null)" ]; then
+    if [ -n "$worker" ]; then kill -9 "$worker" 2>/dev/null
+    else
+      # no worker among the ancestors: stop every runner program of this user (the loop starts a fresh runner)
+      ps -U "$(id -u)" -o pid=,comm= | while read -r pid comm; do
+        case $comm in ("$HERE"/job/bin/Runner.*) kill -9 "$pid" 2>/dev/null;; esac
+      done
+    fi
+  fi
   exit 1
 }
 # The repository comes from the root-owned file setup.sh writes next to the hooks. A job can set its own environment
