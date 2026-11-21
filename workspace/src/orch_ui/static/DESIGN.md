@@ -23,7 +23,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `motion.css`, `motion.js` | Motion tokens in use (see Motion contract). |
 | `icons.js` | One icon set, `icon('check', 16)`. |
 | `preview.css`, `fileviewer.*`, `evidence.js`, `blocks.*` | File and result previews, viewer, proof, blocks. |
-| `results.css`, `results.js` (17 Nov, ORCH-263) | Result widgets, look from Focus draft D: `UI.result(item, {size: 'sm' \| 'lg', state})` for the 16 kinds (Markdown, text and logs, code, JSON and YAML, table, web page, PDF, picture, video, audio, chart, change, pull request link, archive, plain link, unknown file), each loaded, empty, loading, error and too big; `UI.resultOverlay(list, i)` the big overlay (← → between results, × Close, Esc, a click outside). `UI.result.kindOf(name)` picks the kind. No fetching: the page hands in the content. Gallery: Result widgets. |
+| `results.css`, `results.js` (17 Nov, ORCH-263) | Result widgets, look from Focus draft D: `UI.result(item, {size: 'sm' \| 'lg', state})` for the 16 kinds (Markdown, text and logs, code, JSON and YAML, table, web page, PDF, picture, video, audio, chart, change, pull request link, archive, plain link, unknown file), each loaded, empty, loading, error and too big; `UI.resultOverlay(list, i)` the big overlay (← → between results, × Close, Esc, a click outside). `UI.result.kindOf(name)` picks the kind. No fetching: the page hands in the content. Gallery: Result widgets. The dashboard feeds them from a ticket's real files, evidence, check runs and links in one place (`pages/results-feed.js`, ORCH-697: `resultsHost(ticket)` on wall tiles, in a session's chat and on the ticket page); `.results-host`, `.result-links` and `.result-more` lay them out. |
 | `question-card*.js`, `composer.*` | Question card, chat composer (`UI.composer`: words, pasted screenshots, picked or dropped files; `voice:true` adds Record, `UI.voiceRecorder`, words only from on-device speech to text; `send:false` inside the Review comment sheet, ORCH-422; `layout:'row'` is draft D's message box in a Focus pane: previews above one line of clip, words and Send, ORCH-695). |
 | `gallery.html`, `gallery.js`, `gallery.css`, `state-controls.js`, `samples/` | The living style guide, its fixtures, and the Loaded / Loading / Empty / Error switcher the mockup pages use. |
 | `mockup.css` | Mockup-only layout, linked only by the dashboard mockup pages (merged from the former per-draft sheets, #795 D1). Every rule is scoped with `body.mk-<draft>`; not for product pages, no new rules (R6.2). |
@@ -346,6 +346,15 @@ done: … · 14:21"); the helper's words are `.live-chat-msg` on the left (`surf
 (`data-w=y`, `brand-soft`), each with "Helper · 14:38" or "You · 14:55" above, and its links (`.live-links`) inside.
 The waiting question is never a message: it is the orange card (`.live-ask`, `needs-you` edge, `warning-soft`) above
 the chat, answered there with its options or own words.
+
+### Voice into the message box (ORCH-696)
+Only while the relay is on: a microphone (`btn icon sm ghost`, "Speak") sits in `.live-msg-row` between the words and
+Send. While listening `.live-voice` (`role=status`, `surface-2`, `r1`) above the row shows a moving level
+(`.live-voice-wave`, still with reduced motion), "Listening 0:04", Stop and Cancel; Esc cancels and the microphone is
+hidden. Then "Writing down your words…", then the words land in the box and `.live-vhint` under it says "From your
+voice. Check the words, change what is wrong, then send." (gone on the first key). Nothing is sent by itself. A
+refusal (microphone blocked, nothing heard, the relay said no) is one plain sentence in the same place (`role=alert`).
+The recording itself is `UI.voiceRecorder` (composer.js) with `words:false`, its own controls drawn by the page.
 
 ## Loading, errors and performance
 

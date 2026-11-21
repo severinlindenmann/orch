@@ -175,9 +175,10 @@ async function main() {
     }
     const { chromium } = playwright();
     profile = fs.mkdtempSync(path.join(os.tmpdir(), 'focus-d-prof-'));
-    // launch() + newContext(), never a profile folder: that asks the macOS keychain even with the mock flags
-    chrome = await headless.launch(chromium, { headless: true });
-    browser = await chrome.newContext(o.video ? { recordVideo: { dir: path.join(profile, 'video'), size: { width: 1280, height: 800 } } } : undefined);
+    // a fake microphone that is always allowed (step 19 speaks into the message box with it, ORCH-696)
+    // launch() + newContext(), never a profile folder: with one macOS may show a keychain window (AGENTS.md, 20 Nov)
+    chrome = await headless.launch(chromium, { headless: true, args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
+    browser = await chrome.newContext(o.video ? { recordVideo: { dir: path.join(profile, 'video'), size: { width: 1280, height: 800 } } } : {});
     if (o.target !== 'draft') await browser.addInitScript(() => {
       const f = window.fetch;
       window.fetch = (u, opts) => f(typeof u === 'string' && u.startsWith('/api/state') ? u.replace(/([?&])have=[^&]*&?/, '$1').replace(/[?&]$/, '') : u, opts);

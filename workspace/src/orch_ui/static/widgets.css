@@ -1047,7 +1047,8 @@ button.live-pt:hover{color:var(--brand)}
 .live-ren{display:flex;flex:1 1 0;gap:var(--s2);align-items:center;min-width:0}
 .live-ren .input{flex:1 1 0;min-width:0}
 .live-ctl{position:relative;display:flex;flex:none;gap:var(--s1);align-items:center}
-.live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0}
+.live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0;max-height:calc(var(--live-h) - var(--touch) - var(--s3));overflow-y:auto;overscroll-behavior:contain}
+.live-dock[data-mode=full] .live-ctl .live-pop{max-height:calc(100dvh - var(--live-bottom,0px) - var(--touch) * 2)}  /* More stays above the phone tab bar and scrolls (ORCH-817) */
 /* Pane buttons carry their word (ORCH-463). A compact pane (split, narrow, small): the title keeps a full row, the
    buttons go on a second row and wrap when even that is short */
 .live-pbtn{gap:var(--s1);padding-inline:var(--s1)}
@@ -1431,8 +1432,41 @@ button.gtree-row:hover{background:var(--surface-2)}
 .live-to{font-size:var(--fs-meta);line-height:16px;color:var(--text-muted)}
 /* a pane takes dropped files into its message box (ORCH-695): the pane says so while files are over it */
 .live-pane[data-drop]{outline:2px dashed var(--brand);outline-offset:-2px}
+/* voice into the message box (ORCH-696, draft D feature 13): the strip while listening (a moving level, the time, Stop,
+   Cancel) sits above the row; the line after the words, or one plain refusal, sits under it. Still with reduced motion. */
+.live-voice{display:flex;gap:var(--s2);align-items:center;min-width:0;padding:var(--s1) var(--s2);border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2)}
+.live-voice>span:not(.live-voice-wave){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.live-voice-wave{display:flex;flex:none;align-items:center;gap:2px;height:24px}
+.live-voice-wave i{display:block;width:3px;height:20%;border-radius:2px;background:var(--brand)}
+.live-voice[data-rec] .live-voice-wave i{animation:live-voice-bar .7s ease-in-out infinite alternate}
+.live-voice[data-rec] .live-voice-wave i:nth-child(3n+2){animation-delay:-.25s}
+.live-voice[data-rec] .live-voice-wave i:nth-child(3n){animation-delay:-.5s}
+.live-voice-t{font-variant-numeric:tabular-nums}
+.live-vhint{margin:0}
+.live-vhint[role=alert]{color:var(--text)}
+@keyframes live-voice-bar{from{height:20%}to{height:100%}}
+@media(prefers-reduced-motion:reduce){.live-voice[data-rec] .live-voice-wave i{animation:none;height:60%}}
 .lbar-n{min-width:16px;padding:0 var(--s1);border-radius:var(--r1);background:var(--surface-3);color:var(--text-muted);font-variant-numeric:tabular-nums;text-align:center}
 @media(prefers-reduced-motion:reduce){.gtree-row{transition:none}}
+/* ORCH-817: Stop and End session in the pane header, a wall tile's More and the bar; the idle note of a helper pane */
+.live-end-menu,.live-end-ask{width:min(300px,calc(100vw - var(--s5)))}
+.live-end-ask p{margin:0}
+.live-end-opt{align-items:flex-start;min-height:var(--touch)}
+.live-end-opt .ic-wrap{margin-top:2px}
+.live-end-row{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.live-end-idle{display:grid;flex:none;gap:var(--s2);padding:var(--s3);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2)}
+.live-end-idle p{margin:0}
+.live-end-idle[hidden]{display:none}
+.live-ended{display:grid;gap:var(--s3)}
+.live-ended h3,.live-ended>p{margin:0}
+.wall-foot,.wall-line{position:relative}
+.wall-tile:has(.live-end-menu,.live-end-ask),.wall-line:has(.live-end-menu,.live-end-ask){z-index:7}
+.lbar-rw{display:flex;gap:var(--s1);align-items:center}
+.lbar-rw .lbar-row{flex:1;min-width:0}
+.lbar-endwrap{position:absolute;left:var(--s3);bottom:100%;z-index:6}
+.lbar-endwrap .live-pop{right:auto;left:0}
+.lbar-newrow{display:flex;gap:var(--s1);align-items:stretch}
+.lbar-newrow .live-opt{flex:1;min-width:0}
 /* Side rail that is a sheet on smaller screens (ORCH-581, ticket page draft E). The same element serves both widths, so
    every control exists once: from 1100 px it sits in the page; below, it shows only while [data-open=true], as a sheet
    from the right over a scrim, and a closed rail is out of the tab order. .narrow-only marks what only small screens
@@ -1455,3 +1489,20 @@ button.gtree-row:hover{background:var(--surface-2)}
 }
 @keyframes rail-in{from{transform:translateX(var(--s5));opacity:0}to{transform:none;opacity:1}}
 @media(prefers-reduced-motion:reduce){.rail-sheet{animation:none}}
+/* Form page (ORCH-1037): one form as its own page (New ticket), a centred column the width of a dialog */
+.form-page{width:100%;max-width:640px;margin:0 auto;padding-top:var(--s5)}
+/* Launch (ORCH-1037, UI.launch): the starting moment after Start, a spinning ring around a breathing dot and the steps */
+.launch{display:grid;justify-items:center;gap:var(--s3);padding:var(--s7) var(--s5);text-align:center;animation:orch-page var(--dur-slow) var(--ease-enter) both}
+.launch-mark{position:relative;width:64px;height:64px;margin-bottom:var(--s2)}
+.launch-ring{position:absolute;inset:0;border-radius:50%;border:3px solid var(--border);border-top-color:var(--brand);animation:orch-spin 900ms linear infinite;transition:border-color var(--dur-settle) var(--ease-move)}
+.launch-core{position:absolute;inset:22px;border-radius:50%;background:var(--brand);animation:launch-breathe 1.4s var(--ease-move) infinite}
+.launch[data-done=true] .launch-ring{border-color:var(--success);animation:none}.launch[data-done=true] .launch-core{background:var(--success);animation:none}
+.launch-title{margin:0}.launch-sub{margin:0;max-width:44ch;overflow-wrap:anywhere}
+.launch-steps{list-style:none;margin:var(--s3) 0 0;padding:0;display:grid;gap:var(--s2);text-align:left}
+.launch-steps li{display:flex;align-items:center;gap:var(--s2);color:var(--text-faint);transition:color var(--dur-base) var(--ease-move)}
+.launch-steps li[data-state=active],.launch-steps li[data-state=needs]{color:var(--text)}.launch-steps li[data-state=done]{color:var(--text-muted)}
+.launch-steps .st{width:18px;height:18px;flex:none}
+.launch-out{animation:launch-out var(--dur-slow) var(--ease-exit) 160ms forwards}
+@keyframes launch-breathe{50%{transform:scale(.7);opacity:.7}}
+@keyframes launch-out{to{opacity:0;transform:translateY(-4px) scale(.98)}}
+@media(prefers-reduced-motion:reduce){.launch,.launch-ring,.launch-core,.launch-out{animation:none}}

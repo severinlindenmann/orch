@@ -325,6 +325,22 @@ def test_second_use_of_a_link_ends_the_session_and_says_so(live):
     assert st == 403 and b"Someone else tried" in body  # the first page's cookie no longer works
 
 
+def test_a_watch_only_server_says_a_helper_started_it_not_that_the_link_was_used(live):
+    """A server started from a helper session is watch-only; the words name that cause and the way out."""
+    root, port = live
+    SERVERS[port].RequestHandlerClass.keywords["session"].active = False
+    tok = pagelaunch.write_launch_token(root, "dashboard")
+    st, ck, body = post(port, "/session", {"token": tok})
+    assert st == 403 and ck is None
+    assert body.decode() == pagesession.WATCH_ONLY_MSG and b"already used" not in body
+    st, _, body = post(
+        port,
+        "/api/act",
+        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}},
+    )
+    assert st == 403 and b"watch-only" in body
+
+
 def test_a_sandboxed_addon_page_cannot_use_the_session(live):
     """A page of a local add-on runs in an opaque origin: its requests carry Origin "null" and the fence refuses
     them, even with the person's cookie in the jar."""
@@ -437,6 +453,8 @@ ACT_ARGS = {
     "session.name": {"session": TID, "name": "Lunch money"},
     "session.new": {"kind": "empty"},
     "run.stop": {"ticket": TID},
+    "run.interrupt": {"ticket": TID},
+    "session.end": {"kind": "empty"},
     "run.send": {"ticket": TID, "text": "x"},
     "pull.merge": {"ticket": TID, "url": "https://github.com/acme/app/pull/12", "head": "a" * 40},
     "run.take_back": {"ticket": TID, "id": "p_abcdef12"},
@@ -462,6 +480,7 @@ ACT_ARGS = {
     "triage.start": {"lanes": ["backlog"]},
     "diag.set": {"on": False},
     "typing.set": {"on": True},
+    "terminal-typing.set": {"on": True},
     "update.auto": {"on": True},
     "diag.delete_reports": {},
     "copies.remove_orphaned": {"ws8": "abcd1234"},

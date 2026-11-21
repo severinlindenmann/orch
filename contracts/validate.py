@@ -1686,6 +1686,12 @@ def rc_relay_answer(req, phone, paired, questions, answered, blobs, vreq):
             st = blobs.get(vo["blob_id"])
             if st is None or st["uploader"] != phone:
                 return 404, "not_found"
+        for f in (v.get("note") or {}).get("files") or []:
+            st = blobs.get(f["blob_id"])
+            if st is None or st["uploader"] != phone:
+                return 404, "not_found"
+            if st["size"] != f["size"]:
+                return 422, "invalid"
     return 201, None
 
 
@@ -2753,6 +2759,22 @@ for f in cg_files:
 for prefix in ("valid-", "invalid-"):
     if not any(f.name.startswith(prefix) for f in cg_files):
         fails.append(f"vectors/chat-groups: needs at least one {prefix}* vector")
+
+# Message envelope v1 (msgsig.md): the phone tests read a copy that must be the same file,
+# and every case family the contract names is there. The behaviour itself runs in the three languages' tests.
+_sig_path = HERE / "vectors" / "msgsig-v1.json"
+_sig_copy = HERE.parent / "mobile" / "OrchMobileTests" / "Fixtures" / "msgsig-v1.json"
+if not _sig_copy.exists() or _sig_copy.read_bytes() != _sig_path.read_bytes():
+    fails.append("vectors/msgsig-v1.json: the phone copy in mobile/OrchMobileTests/Fixtures differs (run scripts/gen_msgsig_vectors.py)")
+_sig = json.loads(_sig_path.read_text(encoding="utf-8"))
+_sig_names = [c["name"] for c in _sig["messages"]]
+for _fam in ("good_", "wrong_", "missing_", "changed_", "replayed", "redirected", "strict_", "field_", "envelope_"):
+    if not any(n.startswith(_fam) for n in _sig_names):
+        fails.append(f"vectors/msgsig-v1.json: no {_fam}* case")
+if len(set(_sig_names)) != len(_sig_names):
+    fails.append("vectors/msgsig-v1.json: duplicate case names")
+if _sig["wycheproof"]["count"] != len(_sig["wycheproof"]["cases"]) or _sig["wycheproof"]["count"] < 200:
+    fails.append("vectors/msgsig-v1.json: Wycheproof cases missing")
 
 for _fn in KINDS.values():
     _fn()

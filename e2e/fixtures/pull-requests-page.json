@@ -319,7 +319,7 @@
         "ticket": "BIL-1"
        },
        "link": "t_inv012",
-       "subtitle": "Checks failed: lint. Open the ticket to fix it."
+       "subtitle": "Checks failed: lint. Waits for a helper place."
       },
       {
        "cells": {
@@ -428,7 +428,7 @@
         "ticket": "BIL-1"
        },
        "link": "t_inv012",
-       "subtitle": "Checks failed: lint. Open the ticket to fix it."
+       "subtitle": "Checks failed: lint. Waits for a helper place."
       },
       {
        "cells": {

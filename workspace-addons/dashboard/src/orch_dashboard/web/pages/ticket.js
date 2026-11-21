@@ -415,7 +415,7 @@ function agentBar(t) {
     helper && window.UI?.helperPill ? window.UI.helperPill(helper.state, helper.word) : null, line.startFailed ? null : ticketWarmth(t, run, session),
     snapshot ? null : h('div', {className:'ab-actions'}, liveLink && alive ? h('a', {className:'btn primary sm', href:liveLink.url, 'data-key':'watch-live'}, 'Watch live') : null,
       alive ? ticketButton(idle ? 'Stop idle helper' : 'Stop', 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'})
-        // a plain start (Start, Continue, Retry, Try again) is the header's one Start button (ORCH-475), never a second one
+        // a plain start (Start, Continue, Try again) is the header's one Start button (ORCH-475), never a second one
         // here; Start anyway takes over a stuck run
         : line.primary?.op === 'run.start' && !line.primary.args?.take_over ? null
         : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
@@ -1694,6 +1694,18 @@ function ticketResultsCard(t) {
     notes.map(n => ticketCompletionNote(n, t)),
     all.length ? (t.status === 'done' ? ticketResultFrame(t, all[0].kind, all[0].file) : ticketFileRow(t, all[0].kind, all[0].file)) : null, all.slice(1, 4).map(x => ticketFileRow(t, x.kind, x.file)), files.length ? headerProof(t) : null);
 }
+// The ticket's results as the same widgets as on the live wall (ORCH-697, draft D), the notes of its finished steps above
+// them; a click opens the big overlay. A read-only copy keeps the Result card above, and so does a ticket that hosts an
+// open group: its file rows carry Share with group, which the widgets do not have yet (bundle ORCH-1185, issue 2280).
+function ticketWidgets(t) {
+  return !snapshot && typeof resultsHost === 'function' && !!window.UI?.result && !ticketHostsOpenGroup(t);
+}
+function ticketWidgetsCard(t) {
+  const notes = t.status === 'review' ? [] : completionNotes(t);
+  return h('section', {className:'card results', 'data-key':'results-widgets'}, h('div', {className:'section-head'}, h('h2', {}, 'Results')),
+    notes.map(n => ticketCompletionNote(n, t)),
+    resultsHost(t.id, {key:'ticket-results-' + t.id, empty:'Nothing yet. Pictures, pages and tables show up here.'}));
+}
 // A change you asked for: what you asked, and that new changes wait for your approval.
 function ticketRequestCard(t) {
   const open = openChanges(t);
@@ -1991,7 +2003,7 @@ function detail(t) {
     // also without a note: the screenshots, files and voice notes a person sent with Send back or Add note (ORCH-422)
     note || inputFiles(t).length ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note, inputFiles(t).map(f => ticketFileRow(t, 'artifacts', f))) : null,
     working && helperLive ? sharedFolderLine(t) : null,
-    t.status !== 'review' ? ticketResultsCard(t) : null,
+    ticketWidgets(t) ? ticketWidgetsCard(t) : t.status !== 'review' ? ticketResultsCard(t) : null,
     ticketHelperDid(t),
     ticketOutcomeCard(t),
     planQ || ['review', 'done'].includes(t.status) ? null : ticketProgress(t, run),

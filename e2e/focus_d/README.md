@@ -22,7 +22,8 @@ Reference pictures of the same steps in the draft D mockup, to put beside the bu
     node e2e/focus_d/clickthrough.cjs --target draft --out ~/.orch-test/focus-d-draft
 
 (`--repo <checkout>` when the mockup is not in this checkout yet.) `--only 1,9,12` runs some steps,
-`--list` prints the script without a browser.
+`--list` prints the script without a browser, `--video <folder>` keeps a recording of every page it opened (a short
+recording of the flow for the ticket).
 
 The CI job `page-smoke` runs the dashboard target (from `e2e/focus_insights_smoke.cjs`) on every change to the
 workspace or its add-ons.

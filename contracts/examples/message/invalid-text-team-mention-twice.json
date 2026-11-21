@@ -1,0 +1,19 @@
+{
+ "schema": "orch.msg/1",
+ "created_at": "2026-11-21T08:10:00Z",
+ "id": "m_7eam0000000000b2",
+ "from": "ph_iphone0001",
+ "to": "ws_pilatus001",
+ "type": "text",
+ "ticket": "t_7k3f9q",
+ "body": {
+  "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e1175",
+  "text": "Add Sales, please check the prices",
+  "team": {
+   "mentions": [
+    "ws_bank000001",
+    "ws_bank000001"
+   ]
+  }
+ }
+}

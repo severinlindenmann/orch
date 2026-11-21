@@ -322,12 +322,15 @@ def main(argv: list[str] | None = None) -> int:
     ls.add_argument("--json", action="store_true")
     au = q.add_parser(
         "audit",
-        help="merges past the queue, times it stood still, check runs per merge and minutes to merged, for the last hours",
+        help="merges past the queue, times it stood still, check runs per merge, minutes to merged, the busiest hour and group start to merged, for the last hours",
     )
     au.add_argument("--hours", type=float, default=14, help="how far back (default 14: one night)")
     au.add_argument("--json", action="store_true")
     rm = q.add_parser("remove", help="take a waiting pull request out of the queue")
     rm.add_argument("url")
+    q.add_parser(
+        "check", help="exit 1 when pull requests wait and no runner is alive (the check after an update)"
+    )
     r = q.add_parser("run", help="the runner (add starts it by itself)")
     r.add_argument("--root", help=argparse.SUPPRESS)
     t = sub.add_parser("tend", help="Merge when green: one pass over the switched-on tickets")
@@ -355,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     hs.add_argument("state", nargs="?", choices=("on", "off", "status"), default="status")
     hs.add_argument("--json", action="store_true")
-    w = sub.add_parser("watch", help=argparse.SUPPRESS)
+    w = sub.add_parser("watch")  # hidden: no help= keeps it out of the --help list
     w.add_argument("--root", help=argparse.SUPPRESS)
     args = p.parse_args(argv)
     try:
@@ -370,6 +373,13 @@ def main(argv: list[str] | None = None) -> int:
             return _switch_cmd(args, root)
         if args.sub == "run":
             return _run(root)
+        if args.sub == "check":
+            waiting = [x for x in store.read(root) if x.get("state") in (store.WAITING, store.RUNNING)]
+            if waiting and not runner_alive(root):
+                print(f"{len(waiting)} pull requests wait and no merge queue runner is running.")
+                return 1
+            print("The merge queue runner is fine.")
+            return 0
         if args.sub == "list":
             rows = store.read(root)
             if args.json:
@@ -395,13 +405,15 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             print(f"{args.url} does not wait in the merge queue.")
             return 1
-        from .runner import admit
+        from .runner import _release_fix, admit
 
         url = store.canonical(args.url)
         ticket = _ticket(root, args.ticket, url)
         old = store.find(store.read(root), url)
         seen = {} if old and old.get("state") not in FINISHED else admit(root, _github(), url)
-        row, new = store.add(root, url, ticket, _actor(), first=args.first, **seen)
+        # a release keeper's red-run fix goes first by itself (ORCH-1023)
+        first = args.first or _release_fix(root, ticket)
+        row, new = store.add(root, url, ticket, _actor(), first=first, **seen)
         start_runner(root)
         if not args.wait:
             ahead = [x for x in store.read(root) if x.get("state") not in FINISHED and x["url"] != url]

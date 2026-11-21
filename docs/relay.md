@@ -68,6 +68,11 @@ Details and the event format: `contracts/relay-api.md` (Subscribers), `contracts
 ## What it does
 Workspaces and phones send each other messages on `relay.severin.io`, under pair rules set by the admin.
 Delegate/start need an allow on the receiving side. Webhooks become inbox messages.
+A plain text from another workspace starts work by itself (#2051, no setup): core passes it to the ticket it names when that ticket is linked to the sender (it came
+from them, or we sent them a message about it),
+else to the ticket of the message it answers, else to the General ticket (Chat), as queued input framed as outside
+data, and records it in `.orch/run/relay/pickups.json`; the automation host starts one helper run per ticket and
+records the run on each message (`orch relay pickups`). Status updates and group copies are not passed on.
 The admin hands out shared skills, MCP servers and credentials per workspace, and can read all messages.
 Each workspace has a description and tags; refresh gives every workspace a directory (`workspaces.json`) of who it can work with.
 
@@ -82,7 +87,7 @@ relay/
   web/{portal.html, style.css}
   onboarding/{onboarding.sh, onboarding.ps1}   (the orch-relay skill lives in workspace/skills/;
   its SKILL.md says: read inbox at session start; before handing work over, read workspaces.json next to it)
-  deploy/{Caddyfile, orch-relay.service, install.sh}
+  deploy/{relay.caddy, orch-relay.service, install.sh, MOVE.md}
   tests/
 ```
 
@@ -144,8 +149,9 @@ sudo -u orch-relay orch-relay admin cleanup --dry-run                  # back up
 ```
 
 ## Deploy
-`relay-deploy.yml` on push to `main`: build, copy over SSH, `systemctl restart orch-relay`, check `/health`.
-First install: `deploy/install.sh` (user, folders, master key, admin token, Caddy route). Same VPS as publish.
+Built by the `relay` CI job (artifact `orch-relay-linux-x86_64`), copied to the server and `systemctl restart orch-relay`, check `/health`.
+First install: `deploy/install.sh` (user, folders, master key, admin token, service; Caddy site in `deploy/relay.caddy`). Same server as publish.
+Moving to a new server: `deploy/MOVE.md`.
 
 ## Groups
 Each workspace is in one group (Private, Work, ...). A group's defaults say which kinds of shared tools its members get

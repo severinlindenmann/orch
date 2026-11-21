@@ -473,9 +473,20 @@ def list_runs(root: Path) -> list[dict]:
     return out
 
 
-def list_text(rows: list[dict]) -> str:
+def line_text(line: list[dict]) -> str:
+    """The tickets waiting for a free helper place, in the order they start ('' when none)."""
+    if not line:
+        return ""
+    names = ", ".join(
+        q["key"] + (f" ({q['priority']})" if q.get("priority") not in (None, "normal") else "") for q in line
+    )
+    return f"Waiting for a free helper place, in this order: {names}."
+
+
+def list_text(rows: list[dict], line: list[dict] | None = None) -> str:
+    waits = line_text(line or [])
     if not rows:
-        return "No runs right now."
+        return "No runs right now." + (f"\n{waits}" if waits else "")
     head = ("TICKET", "RUN", "MODEL", "AGE", "SIGNAL", "IDLE", "WAITING ON")
     body = [
         (
@@ -491,7 +502,7 @@ def list_text(rows: list[dict]) -> str:
     ]
     widths = [max(len(str(x[i])) for x in [head, *body]) for i in range(len(head) - 1)]
     fmt = "  ".join(f"{{:<{w}}}" for w in widths) + "  {}"
-    return "\n".join(fmt.format(*row) for row in [head, *body])
+    return "\n".join(fmt.format(*row) for row in [head, *body]) + (f"\n\n{waits}" if waits else "")
 
 
 def screen(root: Path, tid: str, lines: int = SCREEN_LINES) -> dict:

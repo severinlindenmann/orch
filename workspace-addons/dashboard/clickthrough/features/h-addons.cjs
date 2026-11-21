@@ -14,8 +14,8 @@ const clickConfirm = async page => {
 };
 
 module.exports = {
-  name: 'Add-ons: start Factory, Focus needs no start, its Typing switch, a Lessons button, uninstall refused',
-  covers: ['addon.start', 'typing.set', 'addon.act', 'addon.uninstall'],
+  name: 'Add-ons: start Factory, Focus needs no start, its Typing and Plain terminal switches, a Lessons button, uninstall refused',
+  covers: ['addon.start', 'typing.set', 'terminal-typing.set', 'addon.act', 'addon.uninstall'],
   async run({ page, open, reload, act, must, text, orchAsPerson, addonOn, until, addonOff, shot }) {
     addonOn('factory');
     addonOn('focus');
@@ -36,9 +36,9 @@ module.exports = {
     await reload();
     must(await page.locator('[data-key="background"]').count() === 0, 'the "not running" note is still on Home after Start and a reload');
 
-    // the Focus Typing switch, and no Preview switch
+    // the Focus Typing switch and the plain terminal's own switch (ORCH-261), and no Preview switch
     await open('#settings/addons/focus');
-    for (const [key, op] of [['addon-detail-typing', 'typing.set']]) {
+    for (const [key, op] of [['addon-detail-typing', 'typing.set'], ['addon-detail-terminal-typing', 'terminal-typing.set']]) {
       const sw = page.locator(`[data-key="${key}"]`);
       await sw.waitFor({ timeout: 20000 });
       const before = await sw.getAttribute('aria-checked');
@@ -49,6 +49,8 @@ module.exports = {
     }
     must(await page.locator('[data-key="addon-detail-live-preview"]').count() === 0, 'Focus settings still show a Preview switch');
     await shot('focus-switches');
+    const shell = page.locator('[data-key="addon-detail-terminal-typing"]');  // put the shell switch back off
+    if (await shell.getAttribute('aria-checked') === 'true') { await act('terminal-typing.set', () => shell.click()); await reload(); }
 
     // a button of the Lessons page (the add-on's own action)
     await open('#addon/lessons');
