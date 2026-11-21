@@ -1,0 +1,248 @@
+{
+ "schema": "orch.addon-view/1",
+ "generated_at": "2026-11-19T09:41:00Z",
+ "blocks": [
+  {
+   "type": "flow",
+   "title": "Merge queue: acme/app",
+   "link": "https://github.com/acme/app/pulls",
+   "meta": "into develop \u00b7 groups of up to 5",
+   "stages": [
+    {
+     "label": "Being checked",
+     "value": "Group of 2",
+     "text": "checks running 7 min \u00b7 usually done in about 12 min",
+     "active": true,
+     "items": [
+      {
+       "label": "#12",
+       "link": "https://github.com/acme/app/pull/12",
+       "hint": "Add CSV export"
+      },
+      {
+       "label": "#13",
+       "link": "https://github.com/acme/app/pull/13",
+       "hint": "Round tax per line"
+      }
+     ],
+     "progress": {
+      "value": 7,
+      "max": 12,
+      "label": "Checks running 7 of about 12 minutes"
+     }
+    },
+    {
+     "label": "In line",
+     "value": "2 waiting",
+     "text": "longest 40 min \u00b7 1 paused",
+     "items": [
+      {
+       "label": "#14",
+       "place": 1,
+       "link": "https://github.com/acme/app/pull/14",
+       "tone": "warn",
+       "hint": "New pricing page (paused)"
+      },
+      {
+       "label": "#15",
+       "place": 2,
+       "link": "https://github.com/acme/app/pull/15"
+      }
+     ],
+     "more": 3
+    },
+    {
+     "label": "Merged lately",
+     "value": "2 of 3 groups",
+     "text": "1 sent back \u00b7 typical wait 38 min",
+     "items": [
+      {
+       "label": "#9",
+       "tone": "good",
+       "link": "https://github.com/acme/app/pull/9"
+      }
+     ],
+     "bars": [
+      {
+       "value": 2,
+       "tone": "good",
+       "hint": "09:40: group of 2, merged after 12 min"
+      },
+      {
+       "value": 1,
+       "tone": "bad",
+       "hint": "10:22: group of 1, sent back after 12 min"
+      },
+      {
+       "value": 3,
+       "tone": "warn"
+      }
+     ],
+     "bars_label": "2 of the last 3 groups merged all or in part"
+    }
+   ]
+  },
+  {
+   "type": "chart",
+   "title": "Opened and merged per day",
+   "meta": "last 7 days",
+   "span": "half",
+   "labels": [
+    "13 Nov",
+    "14 Nov",
+    "15 Nov",
+    "16 Nov",
+    "17 Nov",
+    "18 Nov",
+    "Today"
+   ],
+   "series": [
+    {
+     "name": "Opened",
+     "tone": "neutral",
+     "values": [
+      -1,
+      1,
+      0,
+      4,
+      2,
+      5,
+      1
+     ]
+    },
+    {
+     "name": "Merged",
+     "tone": "good",
+     "values": [
+      2,
+      1,
+      1,
+      3,
+      2,
+      4,
+      0
+     ]
+    }
+   ],
+   "empty": {
+    "title": "Nothing in the last week"
+   }
+  },
+  {
+   "type": "chart",
+   "title": "How the merge queue went",
+   "span": "half",
+   "stacked": true,
+   "labels": [
+    "13 Nov",
+    "14 Nov",
+    "15 Nov",
+    "16 Nov",
+    "17 Nov",
+    "18 Nov",
+    "Today"
+   ],
+   "series": [
+    {
+     "name": "Merged",
+     "tone": "good",
+     "values": [
+      2,
+      1,
+      1,
+      3,
+      2,
+      4,
+      0
+     ]
+    },
+    {
+     "name": "Sent back",
+     "tone": "bad",
+     "values": [
+      0,
+      1,
+      0,
+      0,
+      1,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "type": "table",
+   "title": "Open pull requests",
+   "meta": "3 open",
+   "compact": true,
+   "filter": "state",
+   "fold": 2,
+   "columns": [
+    {
+     "key": "num",
+     "label": "#",
+     "type": "text"
+    },
+    {
+     "key": "pr",
+     "label": "Pull request",
+     "type": "text"
+    },
+    {
+     "key": "ticket",
+     "label": "Ticket",
+     "type": "text"
+    },
+    {
+     "key": "state",
+     "label": "State",
+     "type": "text"
+    }
+   ],
+   "rows": [
+    {
+     "cells": {
+      "num": "#12",
+      "pr": "Add CSV export",
+      "ticket": "APP-1",
+      "state": "Checks failed"
+     },
+     "link": "t_aaaaa1",
+     "links": {
+      "num": "https://github.com/acme/app/pull/12",
+      "ticket": "t_aaaaa1"
+     },
+     "tones": {
+      "state": "bad"
+     }
+    },
+    {
+     "cells": {
+      "num": "#14",
+      "pr": "New pricing page",
+      "ticket": null,
+      "state": "In line"
+     },
+     "link": "https://github.com/acme/app/pull/14",
+     "links": {
+      "num": "https://github.com/acme/app/pull/14"
+     }
+    },
+    {
+     "cells": {
+      "num": "#15",
+      "pr": "Rename customer",
+      "ticket": "APP-3",
+      "state": "In line"
+     },
+     "link": "t_aaaaa3",
+     "links": {
+      "num": "https://github.com/acme/app/pull/15",
+      "ticket": "t_aaaaa3"
+     }
+    }
+   ]
+  }
+ ]
+}
