@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import plistlib
+import shutil
 import sys
 from pathlib import Path
 
@@ -547,3 +548,136 @@ def test_orchs_own_background_pages_are_never_found(cli, mac, tools, ws):
     out = jrun(cli, "found")[1]
     assert out["found"] == [] or all(not i["id"].startswith("process:") for i in out["found"])
     assert out["others"] == 1  # only watcher.py; orch's own pages are not counted
+
+
+def test_a_test_home_with_the_real_account_home_finds_no_real_jobs(cli, mac, tools, monkeypatch):
+    """ORCH-637: a test install (own ORCH_HOME) whose process still has the real HOME must not list the account's jobs."""
+    from orch_services import found
+
+    # the mac fixture's HOME stands for the real account home here
+    monkeypatch.setattr(found, "_real_account_home", lambda: Path.home())
+    code, out = jrun(cli, "found")
+    assert code == 0, out
+    assert out["found"] == []
+    # a person's real install (ORCH_HOME is the real ~/.orch-tool) still sees its jobs
+    monkeypatch.setenv("ORCH_HOME", str(Path.home() / ".orch-tool"))
+    code, out = jrun(cli, "found")
+    assert {i["id"] for i in out["found"]} >= {"launchd:com.example.web-preview"}
+    # a test home with its own HOME (not the account's) still sees what is under that HOME
+    monkeypatch.setenv("ORCH_HOME", str(Path.home() / "elsewhere"))
+    monkeypatch.setattr(found, "_real_account_home", lambda: Path("/nonexistent-real-home"))
+    code, out = jrun(cli, "found")
+    assert {i["id"] for i in out["found"]} >= {"launchd:com.example.web-preview"}
+
+
+def _process_ids(ws) -> set[str]:
+    """The plain programs Found would explain (adopt looks one up): scan with processes on, ids only."""
+    from orch_services import found
+
+    return {i["id"] for i in found.scan(ws, processes=True) if i["id"].startswith("process:")}
+
+
+def test_a_program_started_by_a_managed_service_is_not_found_again(cli, mac, tools, ws):
+    # ORCH-847: the service runs a shell script; the program the script starts is a child of launchd's main pid
+    code, out = jrun(cli, "add", "Abacus", "--id", "abacus", "--start", "--", "/bin/sh", "app.sh")
+    assert code == 0, out
+    pid = next(
+        j["pid"]
+        for k, j in tools.read()["launchd"].items()
+        if k.startswith("ch.orch.svc.") and j.get("running")
+    )
+    tools.set(
+        ps=[
+            {"pid": pid, "ppid": 1, "tty": "??", "argv": ["/bin/sh", "app.sh"]},
+            {"pid": 7001, "ppid": pid, "tty": "??", "argv": ["shadow-abacus"]},
+            {"pid": 7002, "ppid": 7001, "tty": "??", "argv": ["shadow-abacus-worker"]},
+            {"pid": 7003, "ppid": 1, "tty": "??", "argv": ["other-tool"]},
+        ],
+        lsof={str(pid): str(ws), "7001": str(ws), "7002": str(ws), "7003": str(ws)},
+    )
+    out = jrun(cli, "found")[1]
+    assert all(not i["id"].startswith("process:") for i in out["found"])
+    assert out["others"] == 1  # only other-tool; the service's own children are not counted
+    assert _process_ids(ws) == {"process:7003"}
+
+
+def test_orchs_add_on_servers_are_never_found_by_their_recorded_pid(
+    cli, mac, tools, ws, monkeypatch, tmp_path
+):
+    # r-1119-1255-ws-3: a program path with a space splits in `ps`, so the command line alone cannot tell orch's own
+    # servers; the pids orch recorded when it started them can.
+    from orch import services as core
+
+    p = (
+        tmp_path / "running.json"
+    )  # the core's record of running add-ons (its home is not set up in this test)
+    monkeypatch.setattr(core, "running_path", lambda: p)
+    p.write_text(
+        json.dumps([{"workspace": str(ws), "addon": "focus", "pid": 965, "url": None}]), encoding="utf-8"
+    )
+    py = "/Users/x/Library/Application Support/orch/bin/python3"
+    tools.set(
+        ps=[
+            {"pid": 965, "ppid": 1, "tty": "??", "argv": py.split(" ") + ["-P", "-m", "orch_focus", "serve"]},
+            {"pid": 966, "ppid": 965, "tty": "??", "argv": ["node", "helper.js"]},
+            {"pid": 967, "ppid": 1, "tty": "??", "argv": ["python3", "watcher.py"]},
+        ],
+        lsof={"965": str(ws), "966": str(ws), "967": str(ws)},
+    )
+    out = jrun(cli, "found")[1]
+    assert all(not i["id"].startswith("process:") for i in out["found"])
+    assert out["others"] == 1  # only watcher.py (967); the focus server and its child are not counted
+    assert _process_ids(ws) == {"process:967"}
+    # a recorded pid that another program took over after a restart hides nothing
+    p.write_text(
+        json.dumps([{"workspace": str(ws), "addon": "focus", "pid": 967, "url": None}]), encoding="utf-8"
+    )
+    assert (
+        jrun(cli, "found")[1]["others"] == 3
+    )  # 967 does not name orch: still counted (965 and its child too now)
+    assert "process:967" in _process_ids(ws)
+
+
+def test_what_a_managed_service_started_is_not_found_again(cli, mac, tools, ws, monkeypatch):
+    # r-1119-1255-ws-3: the kept service's main pid is a /bin/sh wrapper; its program runs as a child of it
+    monkeypatch.setattr("orch_services.found._managed", lambda root: ({970}, frozenset()))
+    tools.set(
+        ps=[
+            {"pid": 970, "ppid": 1, "tty": "??", "argv": ["/bin/sh", "run.sh"]},
+            {"pid": 971, "ppid": 970, "tty": "??", "argv": ["shadow-abacus", "--port", "8000"]},
+        ],
+        lsof={"970": str(ws), "971": str(ws)},
+    )
+    assert jrun(cli, "found")[1].get("others", 0) == 0
+    assert not _process_ids(ws) & {"process:970", "process:971"}
+
+
+def test_a_managed_services_own_processes_are_never_found(cli, mac, tools, ws):
+    # ORCH-935 point 4: launchd brings a crashing service back with a new pid that orch has not seen yet, and the
+    # service's own children (sleep) have other pids again; Found listed them as "Running, not managed".
+    (ws / "crash.sh").write_text("#!/bin/sh\necho boom\nsleep 5\nexit 1\n", encoding="utf-8")
+    code, out = jrun(cli, "add", "Crashy job", "--id", "crash", "--start", "--", "sh", "crash.sh")
+    assert code == 0, out
+    (ws / "run.sh").write_text("#!/bin/sh -e\nsleep 5\n", encoding="utf-8")
+    (ws / "run.sh").chmod(0o755)
+    assert jrun(cli, "add", "Runner", "--id", "runner", "--start", "--", "./run.sh")[0] == 0
+    assert (
+        jrun(cli, "add", "Worker", "--id", "worker", "--", "/usr/bin/python3", "worker.py")[0] == 0
+    )  # stopped
+    sh = shutil.which("sh")  # launchd runs the full path the plist names
+    tools.set(
+        ps=[
+            {"pid": 970, "ppid": 1, "tty": "??", "argv": [sh, "crash.sh"]},  # started again after a crash
+            {"pid": 971, "ppid": 970, "tty": "??", "argv": ["sleep", "5"]},  # what the service started
+            {"pid": 972, "ppid": 1, "tty": "??", "argv": ["/bin/sh", "-e", str((ws / "run.sh").resolve())]},
+            {"pid": 973, "ppid": 1, "tty": "??", "argv": ["/usr/bin/python3", "other.py"]},
+            {"pid": 974, "ppid": 1, "tty": "??", "argv": ["/usr/bin/python3", "worker.py"]},
+        ],
+        lsof={str(n): str(ws) for n in (970, 971, 972, 973, 974)},
+    )
+    out = jrun(cli, "found")[1]
+    assert all(not i["id"].startswith("process:") for i in out["found"])
+    # only 973 (a program orch does not keep) and 974 (a stopped service's command started by hand) are counted;
+    # 970-972 are the kept services' own processes, a shebang with a flag too
+    assert out["others"] == 2
+    assert _process_ids(ws) == {"process:973", "process:974"}
