@@ -1346,3 +1346,11 @@ def test_proposal_time_and_budget_show_only_values_and_your_time_once():
         ["meta", "Time limit (active time): 2 h. AI cost is a target, not a limit."],
     ]
     assert "—" not in out and "Your time" not in out
+
+
+def test_proposal_names_tools_and_putting_live_in_plain_words(srv):
+    """Report r-1118-0907: the proposal said "Manager · claude" and "What Ship does"."""
+    js = get(srv, "/web/factory.js")[1].decode()
+    assert "What Ship does" not in js and "node('h3','What putting it live does')" in js
+    assert "roleName(c.role) + ' · ' + toolName(c.agent)" in js
+    assert "const toolName = agent => capital(text(agent));" in js  # "claude" shows as "Claude"

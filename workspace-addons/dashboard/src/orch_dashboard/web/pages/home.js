@@ -518,16 +518,20 @@ function backgroundBanner() {
 function autoUpdateNote() {
   const n = state.auto_update_note;
   if (!n || (n.state !== 'updated' && n.state !== 'failed')) return null;
-  const num = v => String(v || '').replace(/^orch /, '');
+  // "orch 17" is a release ("17", as drawn); a development build ("orch develop 5d59166f") is a test version: never a
+  // branch name or commit id on Home (report r-1118-0907)
+  const rel = v => (/^orch (\d+)$/.exec(String(v || '')) || [])[1];
+  const to = rel(n.to) || 'the newest test version';
   const got = snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'auto-update-note-ok', 'data-key':'auto-update-note-ok'}, 'Got it');
   if (n.state === 'failed') {
     return h('div', {className:'banner attn', 'data-key':'auto-update-note', role:'status'}, h('p', {className:'grow'},
-      'orch could not update itself to ' + num(n.to) + (n.reason ? ': ' + clean(n.reason).replace(/[.\s]+$/, '') : '') + '. It is still ' + num(n.from) + ' and tries again later.'), got);
+      'orch could not update itself to ' + to + (n.reason ? ': ' + clean(n.reason).replace(/[.\s]+$/, '') : '') + '. ' +
+      (rel(n.from) ? 'It is still ' + rel(n.from) : 'It keeps the version it has') + ' and tries again later.'), got);
   }
   const changes = array(n.changes);
   return h('section', {className:'card home-card', 'data-key':'auto-update-note'},
-    h('div', {className:'card-h row between'}, h('h2', {}, 'orch updated itself to ' + num(n.to)), got),
-    h('div', {className:'pad'}, changes.length ? h('ul', {className:'upd-changes', 'data-key':'auto-update-changes'}, changes.map(c => h('li', {}, clean(c)))) : h('p', {className:'muted'}, 'Updated from ' + num(n.from) + '.')));
+    h('div', {className:'card-h row between'}, h('h2', {}, 'orch updated itself to ' + to), got),
+    h('div', {className:'pad'}, changes.length ? h('ul', {className:'upd-changes', 'data-key':'auto-update-changes'}, changes.map(c => h('li', {}, clean(c)))) : h('p', {className:'muted'}, rel(n.from) ? 'Updated from ' + rel(n.from) + '.' : 'Nothing to do for you.')));
 }
 // "What changed": what the helper wrote when work finished (the outcome, else the completion note), newest first.
 function doneAt(t) {
