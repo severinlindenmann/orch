@@ -286,7 +286,11 @@ def _storm(procs: list[tuple[float, str]]) -> tuple[str, int] | None:
 
 def _load_words() -> str | None:
     """'the computer is very busy' while the load is high AND the programs really use the cores; a high load
-    from a stream of short commands is not work and holds nothing. Unknown CPU use: the load alone counts."""
+    from a stream of short commands is not work and holds nothing. Unknown CPU use: the load alone counts.
+    ORCH_NO_LOAD_HOLD=1 (set by the end-to-end runners only): never held by the machine's load, so a busy computer
+    does not fail a test that has nothing to do with load."""
+    if os.environ.get("ORCH_NO_LOAD_HOLD") == "1":
+        return None
     try:
         load = os.getloadavg()[0]
     except (OSError, AttributeError):
