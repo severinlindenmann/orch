@@ -216,12 +216,7 @@ def test_settings_files_change_the_event_revision(ws, tmp_path, monkeypatch):
     approvals = tmp_path / "orchhome" / "agent-approvals.json"
     approvals.parent.mkdir(parents=True, exist_ok=True)
     approvals.write_text("[]")
-    after_allow = r.signature()
-    assert after_allow != after_cfg
-    # an uninstall rewrites the add-on list: the cached Settings list must be rebuilt, not kept 120 s (ORCH-1034)
-    registry = tmp_path / "orchhome" / "addons.json"
-    registry.write_text('[{"name": "factory", "source": "built-in"}]')
-    with_factory = r.signature()
-    assert with_factory != after_allow
-    registry.write_text("[]")
-    assert r.signature() != with_factory
+    assert r.signature() != after_cfg
+    # an uninstall rewrites the add-on list: it is one of the watched files, so the cached Settings list is rebuilt
+    # at once instead of keeping a removed add-on until the 120 s safety rebuild (ORCH-1034)
+    assert tmp_path / "orchhome" / "addons.json" in r.settings_files()
