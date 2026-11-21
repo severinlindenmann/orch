@@ -110,3 +110,67 @@ def test_merge_alone_is_on_by_default_and_reads_only_true_or_false(ws):
     (ws / ".orch").mkdir(exist_ok=True)
     (ws / ".orch" / "config.toml").write_text('[pull_requests]\nmerge_alone = "no"\n')
     assert settings.merge_alone(ws) is True
+
+
+CT_LOG = """addons / dashboard-clickthroughs\tRun\t2026-11-20T20:44:32Z FAILED  Relay: message a workspace (m-relay-chat.cjs, 34.9s)
+addons / dashboard-clickthroughs\tRun\t2026-11-20T20:44:32Z         no Share with group button (at m-relay-chat.cjs:63: await x)
+workspace / test\tRun\t2026-11-20T20:44:33Z FAILED tests/test_sessions.py::test_one - assert 1 == 2
+workspace / test\tRun\t2026-11-20T20:44:33Z ERROR workspace-addons/sync/tests/test_card.py::test_x
+workspace / test\tRun\t2026-11-20T20:44:33Z some line naming other.py that is not a failure
+"""
+
+
+def test_failed_tests_are_read_from_the_failure_lines_of_a_log():
+    """As `gh run view --log-failed` prints them (job, step, time in front) and as plain lines."""
+    want = ["m-relay-chat.cjs", "test_sessions.py", "test_card.py"]
+    assert blame.failed_tests(CT_LOG) == want  # other.py is on no failure line
+    assert blame.failed_tests("\n".join(x.split("Z ", 1)[1] for x in CT_LOG.splitlines())) == want
+    assert blame.failed_tests("") == []
+
+
+def test_the_failed_test_file_picks_the_suspect_where_the_check_name_matches_everyone():
+    """ORCH-1118: 'dashboard-clickthroughs' shares 'dashboard' with every dashboard member; the failed
+    click-through m-relay-chat.cjs names the one that changed the relay chat."""
+    failed = ["addons / dashboard-clickthroughs"]
+    members = [
+        ("a", ["workspace-addons/dashboard/src/orch_dashboard/static/home.js"]),
+        ("b", ["workspace-addons/dashboard/src/orch_dashboard/static/relay_chat.js"]),
+        ("c", ["workspace-addons/dashboard/src/orch_dashboard/static/sync.js"]),
+    ]
+    assert blame.suspects(failed, members) == []  # the check name alone tells nobody apart
+    assert blame.suspects(failed, members, ["m-relay-chat.cjs"]) == ["b"]
+    # a test file nobody touches: the check names decide as before
+    assert blame.suspects(["addons / sync"], [("a", ["workspace-addons/sync/x.py"]), ("b", ["docs/y.md"])],
+                          ["test_zzz.py"]) == ["a"]  # fmt: skip
+
+
+class FailedTests(NamedChecks):
+    def failed_tests(self, u):
+        return ["m-relay-chat.cjs"] if u in self.groups else []
+
+
+def test_a_red_group_splits_off_the_member_its_failed_test_names(ws):
+    prs = {
+        n: {"files": (f"workspace-addons/dashboard/src/orch_dashboard/static/p{n}.js",)} for n in range(1, 5)
+    }
+    prs[3] = {"files": ("workspace-addons/dashboard/src/orch_dashboard/static/relay_chat.js",)}
+    for n in range(1, 5):
+        store.add(ws, url(n), None, "agent:t", login="bot")
+    gh = FailedTests(prs, frozenset({"addons / dashboard-clickthroughs"}))
+    lines = []
+    r, calls = make(ws, gh, FakeGit(), red_on_base={3}, log=lines.append)
+    r.run()
+    assert [gh.groups[c] for c in calls][:3] == [[1, 2, 3, 4], [1, 2, 4], [3]]
+    assert any("(m-relay-chat.cjs)" in x and "#3 touch that" in x for x in lines)
+
+
+def test_a_member_of_a_red_group_is_never_merged_alone_on_its_light_checks(ws):
+    """ORCH-909: merge_alone on (default): the one that broke the group is checked again in a group of its own."""
+    for n in (2, 3):
+        store.add(ws, url(n), None, "agent:t", login="bot")
+    gh = NamedChecks({n: {"fresh": True} for n in (2, 3)}, frozenset({"clock / suites"}))
+    r, calls = make(ws, gh, FakeGit(), red_on_base={3})
+    r.run()
+    assert gh.direct == []  # neither merged on its own light checks
+    assert [gh.groups[c] for c in calls][:3] == [[2, 3], [2], [3]]
+    assert states(ws) == {2: "merged", 3: "out"}

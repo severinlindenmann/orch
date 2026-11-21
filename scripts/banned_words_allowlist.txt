@@ -13,3 +13,4 @@ workspace-addons/sync/tests/test_pause.py  # imports the sync approval module un
 workspace/tests/conftest.py  # test helper ensure_signing stays until P4 (#799) removes the Done signing
 workspace/src/orch/releasekeeper.py  # the CI roll-up job's own name and the release phase the keeper stores
 workspace/tests/test_releasekeeper.py  # recorded check lists that name that job
+workspace/tests/ci_times_windows.json  # measured seconds per existing test, keyed by the tests' own names (ORCH-1050)

@@ -16,7 +16,7 @@
   const nameOf = target => model?.accounts.find(a => a.id === target.split(':')[0])?.label || 'Account';
   const WHAT = {limit: t => nameOf(t) + ': limit', period: t => nameOf(t) + ': what the limit counts', order: t => nameOf(t) + ': order',
     on: t => nameOf(t) + ': on', off: t => nameOf(t) + ': off', end: t => nameOf(t) + ': end', switching: () => 'Switching by itself',
-    share: () => 'How work is spread'};
+    share: () => 'How work is spread', switcher: t => t === 'follow' ? 'Follow' : 'Take over'};
 
   function h(tag, props, ...kids) {
     const n = document.createElement(tag);
@@ -46,11 +46,12 @@
   const whenWords = iso => stamp(iso);
   const dateWords = iso => stamp(iso, {time: false});
   // A date choice with the kit's calendar (UI.date): a button that opens it, the value in a hidden field.
-  function datePick(label, value, onPick) {
+  // withTime: the calendar also takes an optional time; the value is then YYYY-MM-DD or YYYY-MM-DDTHH:MM.
+  function datePick(label, value, onPick, withTime) {
     const field = h('input', {type: 'hidden', value: value || ''});
     const toggle = h('button', {type: 'button', className: 'btn outline sm', 'aria-label': label});
-    field.addEventListener('change', () => { if (field.value) onPick(field.value.slice(0, 10)); });
-    queueMicrotask(() => window.UI.date(field, toggle, null));
+    field.addEventListener('change', () => { if (field.value) onPick(withTime ? field.value.slice(0, 16) : field.value.slice(0, 10)); });
+    queueMicrotask(() => window.UI.date(field, toggle, null, withTime ? {time: true} : undefined));
     return {field, toggle, node: h('span', {className: 'row'}, field, toggle)};
   }
   const num = v => (Math.round(v * 100) / 100).toString();
@@ -105,7 +106,8 @@
     fill.style.setProperty('--value', pct + '%');
     return h('div', {className: 'progress-labeled'},
       h('div', {className: 'progress-text'},
-        h('span', {}, b.label + ' · ' + head + ' ', b.limit != null ? h('span', {className: 'meta', text: 'of ' + amount(b.limit, b.limit_unit)}) : null),
+        h('span', {}, b.label + ' · ' + head + ' ', b.limit != null ? h('span', {className: 'meta', text: 'of ' + amount(b.limit, b.limit_unit)})
+          : b.early != null ? h('span', {className: 'meta', text: 'switches at ' + num(b.early) + '% (default)'}) : null),
         h('span', {text: right})),
       h('div', {className: 'progress', role: 'progressbar', 'aria-label': b.label, 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round(pct))}, fill));
   }
@@ -156,19 +158,26 @@
     return row;
   }
 
+  // The rule's end: a day (to the end of that day) or a day and a time, in the workspace's time zone. The server
+  // gives the end as the workspace's wall clock (ends_local), so the words match `orch usage list` on any device.
   function endRow(a) {
+    const pick = datePick('End date and time for ' + a.label, a.ends_local || '', v => act('end', a.id + ':' + v, pick.toggle), true);
+    pick.node.hidden = true;
+    const reset = a.next_reset_local
+      ? h('button', {type: 'button', className: 'btn ghost sm', onclick: e => act('end', a.id + ':reset', e.currentTarget)},
+        'At its next reset (' + stamp(a.next_reset_local) + ')')
+      : null;
     if (a.ends) {
       return h('div', {className: 'row'},
-        h('span', {className: 'pill', text: 'Ends ' + dateWords(a.ends)}),
+        h('span', {className: 'pill', text: 'Ends ' + stamp(a.ends_local || a.ends)}),
         h('span', {className: 'meta', text: a.falls_back ? 'Then the rule before it again.' : 'Then no limit.'}),
+        h('button', {type: 'button', className: 'btn ghost sm', onclick: () => pick.toggle.click()}, 'Change the end'), pick.node,
         h('button', {type: 'button', className: 'btn ghost sm', onclick: e => act('end', a.id + ':none', e.currentTarget)}, 'Keep it, no end'));
     }
-    // "Add an end" opens the kit's calendar at once; the picked day is saved (the rule ends at the end of that day).
-    const pick = datePick('End date for ' + a.label, '', d => act('end', a.id + ':' + d, pick.toggle));
-    pick.node.hidden = true;
+    // "Add an end" opens the kit's calendar at once: a day, and a time if wanted (no time: to the end of that day).
     const add = h('button', {type: 'button', className: 'btn ghost sm', disabled: !a.limits.length || null,
       onclick: () => pick.toggle.click()}, 'Add an end');
-    return h('div', {className: 'row'}, add, pick.node,
+    return h('div', {className: 'row'}, add, a.limits.length ? reset : null, pick.node,
       a.limits.length ? null : h('span', {className: 'meta', text: 'Set a limit first.'}));
   }
 
@@ -179,7 +188,8 @@
       'aria-label': (way === 'up' ? 'Use ' + a.label + ' earlier' : 'Use ' + a.label + ' later'),
       onclick: e => act('order', a.id + ':' + to.order, e.currentTarget)}, way === 'up' ? '↑' : '↓');
     const on = h('input', {className: 'switch', type: 'checkbox', checked: a.on || null, 'aria-label': 'Use ' + a.label});
-    on.addEventListener('change', () => act(on.checked ? 'on' : 'off', a.id, on));
+    const onWord = h('span', {className: 'meta', text: a.on ? 'On' : 'Off'});
+    on.addEventListener('change', () => { onWord.textContent = on.checked ? 'On' : 'Off'; act(on.checked ? 'on' : 'off', a.id, on); });
     const rows = a.limits.map(l => limitRow(a, l, false));
     if (!a.limits.length) rows.push(limitRow(a, null, true));
     const room = a.limits.length && a.limits.length < 2 && a.periods.some(p => !a.limits.some(l => l.period === p));
@@ -193,7 +203,7 @@
         list.length > 1 ? h('div', {className: 'row'}, move('up', list[i - 1]), move('down', list[i + 1])) : null),
       a.bars.length ? a.bars.map(bar) : h('p', {className: 'meta', text: 'No use read yet.'}),
       h('div', {className: 'row between'}, h('div', {className: 'row'}, rows, addLimit),
-        h('label', {className: 'row'}, h('span', {className: 'meta', text: 'On'}), on)),
+        h('label', {className: 'row'}, onWord, on)),
       endRow(a));
   }
 
@@ -225,7 +235,9 @@
     const head = sp.starts ? startsWord(sp.starts).replace('start', 'helper start') + ' · ' + money(sp.dollars) : 'No helper starts yet today';
     return h('section', {className: 'stack', 'aria-label': 'Today'},
       h('div', {className: 'row between'}, h('h2', {text: 'Today'}), h('span', {className: 'meta', text: head + (sp.sources.some(s => s.week_starts) ? ' · the line shows the last 7 days' : '')})),
-      h('div', {className: 'stat-row four', role: 'list'}, sp.sources.map(todayTile)));
+      h('div', {className: 'stat-row four', role: 'list'}, sp.sources.map(todayTile)),
+      // ORCH-943: every workspace on this computer counts toward the same limits
+      (sp.workspaces || []).length ? h('p', {className: 'meta', text: 'By workspace: ' + sp.workspaces.map(w => w.name + ' ' + startsWord(w.starts) + (w.dollars ? ' · ' + money(w.dollars) : '')).join('; ')}) : null);
   }
 
   // ---- how work is spread (ORCH-657): three ready-made spreads, the share as one sentence, Adjust for the rest ----
@@ -319,6 +331,18 @@
     note.textContent = m.switcher ? '' : 'Switching needs the account switcher on this computer. Usage shows and warns.';
     const subs = m.accounts.filter(a => a.type === 'subscription'), other = m.accounts.filter(a => a.type !== 'subscription');
     const parts = [];
+    // ORCH-943: another workspace on this computer switches the accounts; this one follows it, or a person takes over
+    const own = m.switcher_owner, elsewhere = !!(own && !own.mine && own.running && own.words);
+    $('auto-row').hidden = elsewhere;
+    $('owner-tag').hidden = !elsewhere;
+    $('owner-tag').textContent = elsewhere ? own.words.tag : '';
+    if (elsewhere && !own.followed) {
+      parts.push(h('div', {className: 'banner', role: 'status'}, h('div', {className: 'grow'},
+        h('h3', {text: own.words.title}), h('p', {text: own.words.text}),
+        h('div', {className: 'row space-top'},
+          h('button', {className: 'btn primary sm', type: 'button', text: own.words.follow, onclick: e => act('switcher', 'follow', e.currentTarget)}),
+          h('button', {className: 'btn outline sm', type: 'button', text: own.words.take, onclick: e => act('switcher', 'take-over', e.currentTarget)})))));
+    }
     if (m.all_at_limit) {
       parts.push(h('div', {className: 'banner attn', role: 'alert'}, h('div', {className: 'grow'},
         h('h3', {text: 'Every account is at or near its limit'}),

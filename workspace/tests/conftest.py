@@ -274,6 +274,11 @@ def pytest_sessionfinish(session, exitstatus):
         session.exitstatus = 1
     files, trace = _snapshot_real_tool_home()
     bad = False
+    # ORCH_TEST_GUARD=warn: a changed file only warns. For the merge queue's precheck
+    # (ORCH-545, scripts/ci_light.py --rules): it runs on the computer whose own orch
+    # writes ~/.orch-tool all the time, so a change there says nothing about the tests;
+    # their HOME and ORCH_HOME are a throw-away folder anyway. CI never sets it.
+    warn = os.environ.get("ORCH_TEST_GUARD") == "warn"
     for k in sorted(set(files) | set(_REAL_AT_START)):
         before, after = _REAL_AT_START.get(k), files.get(k)
         if before != after:
@@ -282,8 +287,11 @@ def pytest_sessionfinish(session, exitstatus):
                 if (before and after and before[:2] != after[:2])
                 else "only touched or (re)created/removed"
             )
-            print(f"\nREAL ~/.orch-tool CHANGED: {k}: {kind}", file=sys.stderr)
-            bad = True
+            print(
+                f"\nREAL ~/.orch-tool CHANGED: {k}: {kind}" + (" (warning only)" if warn else ""),
+                file=sys.stderr,
+            )
+            bad = bad or not warn
     new = [x for x in trace if x not in _TRACE_AT_START]
     for raw in new:
         try:
@@ -592,6 +600,17 @@ def _no_update_info_network(monkeypatch):
     from orch import updateinfo
 
     monkeypatch.setattr(updateinfo, "_fetch_messages", lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_selfcheck_after_update(request, monkeypatch):
+    """The check after an update runs the installed orch as child processes: tests of the update itself skip
+    it (test_selfcheck tests it on its own)."""
+    if request.module.__name__.rsplit(".", 1)[-1] == "test_selfcheck":
+        return
+    from orch import selfcheck
+
+    monkeypatch.setattr(selfcheck, "after_update", lambda *a, **k: [])
 
 
 @pytest.fixture

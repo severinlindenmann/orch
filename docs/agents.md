@@ -59,13 +59,16 @@ $ orch check add <id> "Export the file"
 $ orch run start <id>
 $ orch run status <id>
 $ orch run attach <id>  # skip
+$ orch run interrupt <id>
 $ orch run stop <id>
 ```
 
 - `run start` starts the chosen agent on the ticket. Only one agent works on a ticket at a time. If one is busy, your text is
   queued and goes in when it is ready. `--agent <name>` uses another agent for this run.
 - `run attach` shows the agent's live screen (a tmux session). `--watch` only watches. Detach with Ctrl+B then D; the agent keeps working.
-- `run stop` stops it. The work done so far stays on the ticket.
+- `run interrupt` stops only the current step (like pressing Esc in the agent); the session stays and waits for your next message.
+- `run stop` ends the session. The work done so far stays on the ticket, and the conversation stays in the ticket's History.
+- Sessions without a ticket (empty helper, chat helper, plain terminal, Manager) have the same two: `orch session stop <kind>` and `orch session end <kind>`.
 - Add-ons (automation, Focus, the phone) start work through the same `orch run start`, so there is never a second agent on a ticket.
 
 ## Sessions: Continue or Start fresh

@@ -154,3 +154,11 @@ example `sudo -E`, or in a container where the password database has no entry fo
 gets your terminal's `HOME` instead and the update says so; if a service then misbehaves, run `orch stop` and
 `orch start` in the shell you want it to use.
 
+## Go back one release
+
+`orch update --to <N>` goes back to release N of the source orch was installed from (for example `orch update
+--to 32` after release 33 broke something). It is the same update as any other, so orch, every add-on and the
+running services come back on release N. orch then stays on N: a plain `orch update` (and automatic updates)
+waits until a release newer than the one you left is out, then takes it. `orch update --to release` takes the
+newest release at once. A folder install has no releases to go back to.
+

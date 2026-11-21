@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import re
+import secrets
 import sys
 import threading
 import time
@@ -57,7 +58,6 @@ SETTINGS_OPS = (
     "release_merge.set",
     "diag.set",
     "typing.set",
-    "focus_preview.set",
     "update.auto",
     "copies.set",
     "mobile.set",
@@ -201,26 +201,38 @@ def _services_stamp():
 
 
 STATIC_EXT = (".css", ".js", ".svg", ".png", ".ico", ".woff", ".woff2")
+# /api/file with its version in the link (ORCH-524): fetched once, then served from the browser's cache
+FILE_KEPT = "private, max-age=31536000, immutable"
+FILE_STAMP_MAX = 64
 
 
+TERMINAL_OFF = (
+    "Typing into the plain terminal is off. "
+    "Turn on 'Let me type into the plain terminal' in Settings \u2192 Add-ons, on the page of the add-on that shows it."
+)
 TYPING_OFF = (
     "Typing into the helper's screen is off. "
     "Turn on 'Let me type into the helper's screen' in Settings \u2192 Add-ons, on the page of the add-on that shows this screen."
 )
 
 
-def _typing_allowed(root) -> bool:
-    """The session_typing setting, a plain one (off unless the workspace turned it on)."""
+def _typing_allowed(root, plain: bool = False) -> bool:
+    """The session_typing setting, a plain one (off unless the workspace turned it on). plain: the plain terminal, a
+    shell on this computer, has its own switch, terminal_typing (off by default; owner, ORCH-261)."""
     from orch import config
 
+    if plain:
+        return bool(config.focus_terminal_typing(root))
     return bool(config.focus_session_typing(root))  # an unreadable config file counts as off (the default)
 
 
 def _link_msg(session, name: str) -> bytes:
-    from orch.pagesession import REVOKED_MSG
+    from orch.pagesession import REVOKED_MSG, WATCH_ONLY_MSG
 
     if session.revoked:
         return REVOKED_MSG.encode()
+    if getattr(session, "active", True) is False:  # a helper started this server: watch-only
+        return WATCH_ONLY_MSG.encode()
     return f"This link was already used. Open the {name} again from orch.".encode()
 
 
@@ -305,11 +317,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _refused_text(self, text: str) -> str:
         """The words of a 403 for a missing page session: a sign-in link that was used twice, else sign in."""
-        from orch.pagesession import REVOKED_MSG
+        from orch.pagesession import REVOKED_MSG, WATCH_ONLY_MSG
 
         session = getattr(self, "session", None)
         if session is not None and session.revoked:
             return REVOKED_MSG
+        if session is not None and getattr(session, "active", True) is False:
+            return WATCH_ONLY_MSG
         return text
 
     def _act_log(self, text: str) -> None:
@@ -556,7 +570,11 @@ class Handler(BaseHTTPRequestHandler):
         if passes is None:
             return self._send(503, b"Try again in a moment.", "text/plain")
         header, file = passes.issue(name, act, self._pass_tag())
-        self._send(200, json.dumps({"pass": header, "file": file, "act": act}).encode(), "application/json")
+        self._send(
+            200,
+            json.dumps({"pass": header, "file": file, "act": act, "life": framepass.LIFE}).encode(),
+            "application/json",
+        )
 
     def do_OPTIONS(self):
         """The preflight of a sandboxed add-on page's call (origin "null", the X-Orch-Frame header). It carries
@@ -770,6 +788,17 @@ class Handler(BaseHTTPRequestHandler):
             from . import update
 
             return self._send(200, json.dumps(update.update_info()).encode(), "application/json")
+        if (
+            path == "/api/session-state"
+        ):  # this browser: signed in, view only, or started by a helper (no secrets)
+            session = getattr(self, "session", None)
+            if session is None or not session.active:
+                st = "helper"
+            else:
+                st = "signed-in" if self._can_act() else "view-only"
+            return self._send(
+                200, json.dumps({"state": st}).encode(), "application/json", {"Cache-Control": "no-store"}
+            )
         if path == "/api/tool-updates":  # the tools' versions and notes: same-origin only, no secrets
             from . import update
 
@@ -800,6 +829,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps(snap).encode(), "application/json", {"Cache-Control": "no-store"}
             )
+        if (
+            path == "/api/term/stream"
+        ):  # the terminal bridge (ORCH-743): the real screen, live, wherever the person is signed in
+            if not (self._frame or self._same_origin()):
+                return self._send(403, b"forbidden", "text/plain")
+            if not (self._frame or self._signed_in()):  # a helper's screen or a shell: the sign-in, always
+                from orch.pagesession import SIGNIN_MSG
+
+                return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+            return self._term_stream(query)
         if path == "/api/sessions":  # every session for the live page (ORCH-359): built from the cached state
             if not (self._frame or self._same_origin()):
                 return self._send(403, b"forbidden", "text/plain")
@@ -944,12 +983,15 @@ class Handler(BaseHTTPRequestHandler):
                 # ORCH-517: the same pictures were sent again on every redraw (no-store). Now the browser keeps
                 # them and asks "still this?" by content hash; an unchanged file answers 304 with no body, and
                 # with the file's own sandbox rule (a 304's headers update the kept copy's headers).
+                # ORCH-524: a link that names its version (a reviewed copy's content folder, or `v`: the file's
+                # time and size, which the page adds) is kept a year without asking again: a new version of the
+                # file has a new link. A link without one keeps asking by content hash.
+                kept = one("dl") != "1" and (one("k") == "reviewed" or 0 < len(one("v")) <= FILE_STAMP_MAX)
+                cache = FILE_KEPT if kept else "private, no-cache"
                 tag = '"' + hashlib.blake2b(body, digest_size=12).hexdigest() + '"'
-                extra = {**extra, "ETag": tag, "Cache-Control": "private, no-cache"}
+                extra = {**extra, "ETag": tag, "Cache-Control": cache}
                 if tag in [t.strip() for t in (self.headers.get("If-None-Match") or "").split(",")]:
-                    return self._send(
-                        304, b"", ctype, {"ETag": tag, "Cache-Control": "private, no-cache"}, csp=csp
-                    )
+                    return self._send(304, b"", ctype, {"ETag": tag, "Cache-Control": cache}, csp=csp)
             if one("k") == "reviewed":
                 return self._send(code, body, ctype, extra, csp=csp)
             rng = re.fullmatch(r"bytes=(\d{0,15})-(\d{0,15})", self.headers.get("Range") or "")
@@ -1017,7 +1059,7 @@ class Handler(BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|live|soft|live-layer|live-history|live-start|live-model|livebar|livesessions|livegroups|livewall|livechat)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|live|soft|live-layer|live-history|live-start|live-end|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat|results-feed|livevoice)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
@@ -1175,6 +1217,136 @@ class Handler(BaseHTTPRequestHandler):
         code, text = termsession.keys(self.root, self.orch_bin, str(body["ticket"]), body["items"])
         self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
 
+    def _term_stream(self, query: str):
+        """GET /api/term/stream?ticket=<id>: server-sent events of the live session's screen (termbridge.stream),
+        after a `hello` that says whether typing is on. A session that is not there: `end` with why."""
+        from . import termbridge
+
+        tid = (parse_qs(query).get("ticket") or [""])[0]
+        # this stream's id: the one page that types is named by it (ORCH-883)
+        page = secrets.token_urlsafe(12)
+        w = termbridge.join(self.root, self.orch_bin, tid, page)
+        if w == "busy":
+            return self._send(503, b"Too many open terminals.", "text/plain")
+
+        def write(b: bytes) -> None:
+            self.wfile.write(b)
+            self.wfile.flush()
+
+        def gone() -> bool:  # the page closed, or its sign-in ended (Sign out everywhere, a link used twice)
+            return _client_gone(getattr(self, "connection", None)) or not (self._frame or self._signed_in())
+
+        try:  # from here on the watch is given back whatever happens, also when the page left before the headers
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Accel-Buffering", "no")
+            if getattr(self, "_frame_cors", False):
+                self.send_header("Access-Control-Allow-Origin", "null")
+                self.send_header("Vary", "Origin")
+            self.end_headers()
+            # the setting only, as /api/term says it: a stream cannot carry the page secret, typing checks it
+            write(
+                f"event: hello\ndata: {json.dumps({'typing_allowed': _typing_allowed(self.root, getattr(w, 'plain', False)), 'page': page})}\n\n".encode()
+            )
+            if isinstance(w, str):
+                write(f"event: end\ndata: {json.dumps({'state': w})}\n\n".encode())
+                return
+            termbridge.stream(w, write, gone, page=page)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            if not isinstance(w, str):
+                termbridge.leave(w, page)
+
+    def _term_post(self, path: str):
+        """POST /api/term/input {ticket, data, page?}, /api/term/size {ticket, cols, rows, page?} and /api/term/typing
+        {ticket, page, on} (one page types at a time, ORCH-883; page: the id its stream's hello gave): the person's own dashboard
+        session (as /api/term/keys; the sign-in is the only check, R4.1a) and the typing setting on; only into a session a page
+        of this server watches now (termbridge)."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            return self._refuse_type()
+        from . import termbridge
+
+        want = (
+            {"ticket", "data"}
+            if path.endswith("/input")
+            else {"ticket", "page", "on"}
+            if path.endswith("/typing")
+            else {"ticket", "cols", "rows"}
+        )
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= termbridge.MAX_INPUT * 6 + 1024:  # a long paste, every character escaped in JSON
+                raise ValueError
+            body = json.loads(self.rfile.read(n))
+            if (
+                not isinstance(body, dict)
+                or set(body) - {"page"} != want - {"page"}
+                or not want <= set(body)
+                or not isinstance(body["ticket"], str)
+                or not isinstance(body.get("page", ""), str)
+            ):
+                raise ValueError
+        except (ValueError, RecursionError, OSError):
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        off = path.endswith("/typing") and body.get("on") is False  # giving the typing back: always
+        root = self.root
+
+        def may(plain: bool) -> str:
+            """The setting, checked here and not only hidden in the page, for the very watch that takes the keys
+            (termbridge asks it under that watch's lock); the plain terminal has its own switch (ORCH-261)."""
+            if off or _typing_allowed(root, plain):
+                return ""
+            return TERMINAL_OFF if plain else TYPING_OFF
+
+        if not off and not _typing_allowed(root) and not _typing_allowed(root, True):
+            return self._send(
+                403, TYPING_OFF.encode(), "text/plain; charset=utf-8"
+            )  # both off: nothing to look up
+        if path.endswith("/input"):
+            code, text = termbridge.type_text(body["ticket"], body["data"], body.get("page"), may)
+        elif path.endswith("/typing"):
+            code, text = termbridge.claim(body["ticket"], body["page"], body["on"], may)
+        else:
+            code, text = termbridge.resize(body["ticket"], body["cols"], body["rows"], body.get("page"), may)
+        self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
+
+    def _voice_words(self):
+        """POST /api/voice/words (ORCH-696): the sound of the message box's microphone in, its words out, through
+        the connected speech service (voice.py). The person's own dashboard session only, as typing; nothing is sent on."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+        from . import voice
+
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= voice.MAX_AUDIO:
+                raise ValueError
+        except ValueError:
+            return self._send(413, voice.LONG.encode(), "text/plain; charset=utf-8")
+        try:
+            with _BIG_READS:  # one big body in memory at a time
+                audio = self.rfile.read(n)
+        except OSError:
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        code, body, kind = voice.words(
+            self.root, self.orch_bin, audio, self.headers.get("Content-Type") or ""
+        )
+        self._send(code, body, kind)
+
     def _standing_link(self, sent: str):
         """GET /go/<secret>: the person's standing sign-in link (a bookmark, see pagelaunch). Right secret: a
         redirect to a fresh one-time launch link, which the page spends as with any sign-in link. Anything else
@@ -1233,6 +1405,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._session_post()
         if path == "/api/term/keys":
             return self._term_keys()
+        if path in ("/api/term/input", "/api/term/size", "/api/term/typing"):
+            return self._term_post(path)
+        if path == "/api/voice/words":
+            return self._voice_words()
         if path in ("/api/diag", "/api/diag/report", "/api/diag/open", "/api/diag/share"):
             return self._diag_post(path)
         px = PROXY.fullmatch(path)
@@ -1356,8 +1532,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise actions.NeedsPerson(actions.SIGNIN)
                 args = body.get("args") or {}
                 to = args.get("to") if isinstance(args, dict) else None
-                if to is not None and to not in update.BUILDS:
-                    raise actions.BadRequest("Choose release or development build.")
+                if not update.target_ok(to):
+                    raise actions.BadRequest("Choose release, development build or a release number.")
                 code, text = update.start_update(
                     self.root,
                     self.orch_bin,
