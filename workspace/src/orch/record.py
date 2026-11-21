@@ -737,9 +737,10 @@ def _lock(ws, run, wait=None):
         try:
             fd = _open(ws, rel, "create_excl", create_dirs=True)
         except RecordUnavailable as error:
-            if os.name != "nt" or error.reason != "io":
+            if os.name != "nt" or error.reason not in ("io", "missing"):
                 raise
-            # Windows answers "access denied" for a lock file another writer is deleting right now
+            # Windows answers "access denied" for a lock file another writer is deleting right now, or (the
+            # pre-open lstat) shows it with no links left: either way it is gone in a moment, so try again
             if time.monotonic() >= deadline:
                 raise RecordBusy("The record is busy.") from None
             time.sleep(0.005)

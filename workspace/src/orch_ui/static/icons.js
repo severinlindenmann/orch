@@ -10,6 +10,7 @@
     play: '<path d="M7 4v16l13-8z"/>',
     pause: '<path d="M8 5v14M16 5v14"/>',
     stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+    power: '<path d="M12 3v8"/><path d="M6.4 6.6a8 8 0 1 0 11.2 0"/>',
     compare: '<path d="M12 3v18M8 7H4v10h4M16 7h4v10h-4"/>',
     download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
     external: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',

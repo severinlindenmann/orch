@@ -219,6 +219,40 @@ async fn phone_question_push_answer_first_wins() {
 }
 
 #[tokio::test]
+async fn phone_without_a_workspace_gets_no_code() {
+    // Report r-1119-1758: Show code with nothing under Can reach paired a phone that reached nothing.
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let (s, v) = t
+        .admin_json(
+            "POST",
+            "/admin/api/phones",
+            Some(json!({"name": "P", "workspaces": []})),
+        )
+        .await;
+    assert_eq!(s, 422, "{v}");
+    assert!(v.to_string().contains("Pick at least one workspace"), "{v}");
+    assert!(
+        v.get("link").is_none(),
+        "no pair code for a phone that reaches nothing"
+    );
+    let (_, l) = t.admin_json("GET", "/admin/api/phones", None).await;
+    assert_eq!(
+        l["items"].as_array().unwrap().len(),
+        0,
+        "no phone row left behind"
+    );
+    let (s, _) = t
+        .admin_json(
+            "POST",
+            "/admin/api/phones",
+            Some(json!({"name": "P", "workspaces": [a.id]})),
+        )
+        .await;
+    assert_eq!(s, 201);
+}
+
+#[tokio::test]
 async fn phone_access_edit_and_remove_by_admin() {
     let t = start().await;
     let (a, b) = (t.add_ws("A").await, t.add_ws("B").await);

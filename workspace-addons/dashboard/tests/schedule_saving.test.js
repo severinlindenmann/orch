@@ -11,10 +11,10 @@ const dialogBody = () => { const i = src.indexOf('function repeatsDialog'); retu
 // e2e 15 Nov (item 3/4): Save closes the dialog at once; the list shows the repeat as "Saving…" until it is stored
 test('Save and Delete close the dialog before the request and show the change in the list', () => {
   const body = sendBody();
-  const close = body.indexOf('window.orch.close(d)'), pend = body.indexOf('pendingRepeat = pending'), call = body.indexOf("act('addon.act'");
+  const close = body.indexOf('window.orch.close(d)'), pend = body.indexOf('pendingRepeat = mine;'), call = body.indexOf("act('addon.act'");
   assert.ok(close > 0 && close < call, 'the dialog closes before the request');
   assert.ok(pend > close && pend < call, 'the pending row is set before the request');
-  assert.ok(body.indexOf('pendingRepeat = null') > call, 'the pending row ends with the answer');
+  assert.ok(body.indexOf('pendingRepeat = result.ok') > call, 'the pending row changes with the answer');
   const dlg = dialogBody();
   assert.match(dlg, /repeatSend\(d, \{addon:[^}]*verb:'repeat'/);
   assert.match(dlg, /repeatSend\(d, \{addon:[^}]*verb:'delete'/);
@@ -25,8 +25,8 @@ test('the repeat change gives up waiting after 30 s and always clears the pendin
   const body = sendBody();
   assert.match(body, /Promise\.race\(\[act\('addon\.act', args\), late\]\)/);
   assert.match(body, /30000/);
-  assert.match(body, /finally \{[^}]*pendingRepeat = null;/);
-  assert.ok(body.indexOf('pendingRepeat = null') < body.indexOf('loadAddon('), 'the list reloads after the pending row ends');
+  assert.match(body, /finally \{ clearTimeout\(timer\); \}/);
+  assert.match(body, /pendingRepeat = result\.ok \? \{\.\.\.mine, savedAt:Date\.now\(\)\} : null;/, 'a failure or the 30 s limit clears the row');
 });
 
 // e2e 15 Nov: the reload after Save was dropped while a poll was loading, so the new row stayed missing until the next poll
@@ -99,4 +99,31 @@ test('item 7: Delete asks first in the window and only the second click sends it
   const second = dlg.slice(dlg.indexOf("const yes = button('Delete repeat', 'danger'"), dlg.indexOf("sure.append("));
   assert.match(second, /verb:'delete'/);
   assert.match(dlg, /actions\.prepend\(remove, h\('span', \{className:'grow'/, 'Delete sits apart from Save');
+});
+
+// ---- ORCH-1006 (release 35 walk): "Saving…" stayed for seconds after the toast said "Repeat saved." ----
+test('ORCH-1006: a stored repeat loses its Saving word at once, before the toast and the slow reload', () => {
+  const c = load();
+  assert.deepEqual([...c.pendingCells(4, {title:'WLK-9 · Thank-you notes', plan:'Repeats every day at 08:00', savedAt:1})],
+    ['WLK-9 · Thank-you notes', 'Repeats every day at 08:00', '', '']);
+  assert.deepEqual([...c.pendingCells(1, {title:'WLK-9 · X', plan:'Repeats every day at 08:00', savedAt:1})], ['WLK-9 · X · Repeats every day at 08:00']);
+  const body = sendBody();
+  const saved = body.indexOf('savedAt:Date.now()'), paint = body.indexOf('paintAddon(', saved), toast = body.indexOf('window.orch.toast('), reload = body.indexOf('loadAddon(');
+  assert.ok(saved > 0 && saved < paint && paint < toast && toast < reload, 'stored -> repaint without the word -> toast -> reload');
+});
+
+test('ORCH-1006: the stored row stays until a reload asked after the save has the list', () => {
+  const i = src.indexOf('async function loadAddon');
+  const body = src.slice(i, src.indexOf('// The view of an add-on tab costs', i));
+  assert.ok(body.indexOf('const asked = Date.now()') < body.indexOf('fetch('), 'the time is taken before the fetch');
+  assert.match(body, /if \(pendingRepeat\?\.savedAt && pendingRepeat\.addon === id && asked >= pendingRepeat\.savedAt\) pendingRepeat = null;/);
+  assert.ok(body.indexOf('pendingRepeat = null') < body.indexOf('paintAddon(id)'), 'cleared before the fresh list paints');
+});
+
+test('ORCH-1006: the first repeat takes the place of the No schedules yet card, never above it', () => {
+  const body = src.slice(src.indexOf('function paintAddon'), src.indexOf('const addonAgain'));
+  assert.match(body, /pendingRepeat\.addon === id/, 'only on the add-on that saved it');
+  assert.match(body, /const empty = blocks\.querySelector\('\.blk-empty'\);\s*if \(empty\) \{/);
+  assert.match(body, /empty\.replaceWith\(h\('ul', \{className:'blk-list'\}/, 'the empty card gives way to a list row');
+  assert.match(body, /if \(pendingRepeat\.removing && pendingRepeat\.savedAt\) own\?\.remove\(\);/, 'a removed repeat leaves the list at once');
 });

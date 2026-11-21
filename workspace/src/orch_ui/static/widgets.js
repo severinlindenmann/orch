@@ -101,6 +101,21 @@ UI.state=o=>{o=o||{};const kind=o.kind||'empty';
  if(o.title)b.append(el('strong','',o.title));if(o.text)b.append(el('p','',o.text));
  if(o.action){const a=el('button','btn '+(kind==='error'?'primary':'outline')+' sm',o.action.label);a.type='button';if(o.action.onClick)a.onclick=o.action.onClick;b.append(a)}
  return b};
+/* Launch (ORCH-1037): the short "starting" moment between pressing Start in a form and landing on what it made.
+   UI.launch({title, sub, steps:['Creating the ticket','Starting your helper','Opening it']}) -> {el, step(i), warn(i, text), finish(title), fail()}.
+   step(i) marks the steps before i done and step i working; warn(i, text) marks step i as needing you, with new words; finish() marks all done and fades the box out. role=status, so a
+   screen reader hears each step. Text only (textContent). Reduced motion: no spin, no fade (motion.css). */
+UI.launch=o=>{o=o||{};const box=el('div','launch');box.setAttribute('role','status');box.setAttribute('aria-live','polite');
+ const mark=el('div','launch-mark');mark.setAttribute('aria-hidden','true');mark.append(el('span','launch-ring'),el('span','launch-core'));
+ const title=el('h2','launch-title',o.title||'Starting');box.append(mark,title);if(o.sub)box.append(el('p','launch-sub meta',o.sub));
+ const list=el('ol','launch-steps'),rows=(o.steps||[]).map(t=>{const li=el('li');li.dataset.state='todo';li.append(UI.statusIcon('todo'),el('span','',t));list.append(li);return li});
+ if(rows.length)box.append(list);
+ const mark_=(li,st)=>{if(li.dataset.state===st||li.dataset.state==='needs')return;li.dataset.state=st;li.firstChild.replaceWith(UI.statusIcon(st==='active'?'working':st))};
+ const api={el:box,step(i){rows.forEach((li,n)=>mark_(li,n<i?'done':n===i?'active':'todo'))},
+  warn(i,t){const li=rows[i];if(!li)return;mark_(li,'needs');if(t)li.lastChild.textContent=t},
+  finish(t){rows.forEach(li=>mark_(li,'done'));box.dataset.done='true';if(t)title.textContent=t;box.classList.add('launch-out')},
+  fail(){box.remove()}};
+ api.step(0);return api};
 /* Stat tile: UI.stat('Done this week', '12', {delta:'+3 vs last week', dir:'up'}) */
 UI.stat=(label,value,o)=>{o=o||{};const t=el('div','stat-tile');t.append(el('span','stat-label',label),el('span','stat-value',String(value)));if(o.delta)t.append(el('span','stat-delta'+(o.dir?' '+o.dir:''),o.delta));return t};
 /* 7-day line: UI.spark([3,5,4,0,2,6,4], {label:'Last 7 days: …', tone:1..7}); an svg with one line, highest value at the top */
@@ -123,6 +138,9 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
    item.files: [{label, type:'img'|'page'|'file', src}] the result's own files (a Check card), as tiles that open them
    item.answers: [{label, picked}] the card's own answer buttons in place of the three (a Factory start: Not now, Change it,
        Start); all outlined, so the costly one is never the easiest click; each answers ok with that pick
+   item.kind 'stuck' (ORCH-1108): work that stopped; never Looks good / Don't do / Comment, only its own buttons (Nudge,
+       Start fresh, Merge) or none; item.href (a link in this page, '#ticket/<id>') is its Open button, same tab
+   item.hint: one plain line in the foot saying what the card's own buttons do
    Answers are buttons and keys only, no swipe (owner 16 Nov: "we already have the arrows or buttons to click"):
    → approve (the button names the action: it.okLabel, "Use C"), ← Don't do / Send back / None of these,
    ↓ comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
@@ -179,6 +197,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  /* words */
  const isOpt=it=>!!(it&&it.preview&&it.preview.type==='options');
  const ownAnswers=it=>{const a=it&&Array.isArray(it.answers)?it.answers.filter(x=>x&&x.label&&x.picked):[];return a.length?a:null};
+ const ownOnly=it=>!!ownAnswers(it)||!!it&&it.kind==='stuck';/* a stuck card (ORCH-1108) has no Looks good / Don't do: its own buttons, or Open alone */
  const answerOwn=a=>{if(!cur||overlay||busy)return;const c=cur;busy=true;c.classList.add('leaving');setTimeout(()=>{busy=false;commit('ok',{picked:a.picked})},120)};
  const sendsBack=it=>!!it&&it.kind==='check';/* its "no" is Send back, which needs words: the comment sheet, and no second Comment button */
  const noWord=it=>it.noLabel||(isOpt(it)?'None of these':it.kind==='check'?'Send back':"Don't do");
@@ -233,7 +252,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const sugOf=it=>it&&it.suggest&&!isOpt(it)?it.suggest:null;
  const syncWords=()=>{const it=items[idx];if(!it)return;[[okBtn,'ok'],[noBtn,'no']].forEach(([b,v])=>{b.classList.toggle('suggested',sugOf(it)===v);b.querySelector('.act-sug')?.remove();if(sugOf(it)===v)b.append(el('span','opt-sug act-sug','Suggested'))});okBtn.querySelector('.act-word').textContent=okWord(it);noBtn.querySelector('.act-word').textContent=noWord(it);
   okBtn.classList.toggle('wait',okWord(it)==='Pick one'||!!it.blocked);okBtn.setAttribute('aria-disabled',String(!!it.blocked));talkBtn.hidden=sendsBack(it);
-  const own=ownAnswers(it);[noBtn,okBtn].forEach(b=>{b.hidden=!!own});if(own)talkBtn.hidden=true;ownRow.hidden=!own;
+  const own=ownAnswers(it),only=ownOnly(it);[noBtn,okBtn].forEach(b=>{b.hidden=only});if(only)talkBtn.hidden=true;ownRow.hidden=!own;
   ownRow.replaceChildren(...(own||[]).map(a=>{const b=mk('own',null,a.label,null,()=>answerOwn(a));b.dataset.picked=a.picked;return b}));
   const st=cur&&cur.querySelector('.swipe-stamp.right');if(st)st.textContent=okWord(it)==='Pick one'?'Pick one first':okWord(it)};
  /* card */
@@ -253,10 +272,12 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   const ft=el('footer','swipe-foot');
   if(it.blocked){const t=el('span','swipe-then');t.append(el('b','','Looks good is off: '),it.blocked);ft.append(t)}
   else if(it.then){const t=el('span','swipe-then');t.append(el('b','',(isOpt(it)?'If you pick one: ':'If you approve: ')),it.then);ft.append(t)}
+  else if(it.hint)ft.append(el('span','swipe-then',it.hint));/* what the card's own buttons do (a stuck card) */
   const row=el('div','swipe-foot-row');
   row.append(el('span','grow'));const pc=(pins[it.id]||[]).length;if(pc){const s=el('span','swipe-pins');s.append(ic('pin',14),pc+(pc===1?' spot marked':' spots marked'));row.append(s)}
   (it.links||[]).forEach(l=>{const a=el('a','btn ghost sm swipe-link');a.href=l.url;a.target='_blank';a.rel='noopener';a.append(ic('link',14),l.label);a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)});/* the helper's links: a mockup, a reference */
   if(it.open){const a=el('a','btn ghost sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
+  if(it.href&&!it.open){const a=el('a','btn outline sm swipe-here');a.href=it.href;a.append(ic('ticket',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}/* a page of this site (the ticket): same tab */
   ft.append(row);
   c.append(...[h,pv,fl,ft].filter(Boolean));return c};
  /* The result's own files (a picture, a page, a PDF): tiles that open the file in a new tab */
@@ -305,7 +326,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const shortName=it=>{const t=String(it.title||'').trim();if(t.length<=48)return t;if(it.ticket)return it.ticket;const c=t.slice(0,48),sp=c.lastIndexOf(' ');return (sp>20?c.slice(0,sp):c).replace(/[\s,;:.-]+$/,'')+'…'};
  const nudge=(c,msg)=>{reset(c);c.classList.remove('nudge');void c.offsetWidth;c.classList.add('nudge');live.textContent=msg;if(!o.quiet)say(msg)};
  const fly=(verdict,dx,dy)=>{if(!cur||overlay||busy)return;const c=cur,it=items[idx],w=stage.clientWidth,h=stage.clientHeight;
-  if(ownAnswers(it)&&verdict!=='later')return;/* its own buttons answer it */
+  if(ownOnly(it)&&verdict!=='later')return;/* its own buttons answer it */
   if(verdict==='talk'||(verdict==='no'&&sendsBack(it)))return openComment();/* a Check sent back always says what should change */
   if(verdict==='ok'&&isOpt(it)&&!picked[it.id])return nudge(c,'Tap the option you want first.');
   if(verdict==='ok'&&it.blocked)return nudge(c,it.blocked);/* ORCH-548: Looks good is off; the card says why and what to press */

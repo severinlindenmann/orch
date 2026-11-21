@@ -48,7 +48,7 @@ Removed 16 Nov (owner decision, #945).
 ```
 
 - **Guarded orch home (decision N11/N14, rationale below).** The key store, the hider, `human.key`, the nonce store,
-  `human-settings.json`, `proposals.json`, the relay record and the dev record live in the *guarded home* of a workspace:
+  `human-settings.json`, `proposals.json`, the relay record, the dev record and the signing key `signing.key` (relay-api.md, Signing key) live in the *guarded home* of a workspace:
   - a **real workspace** uses only the account's default home, `<account home>/.orch-tool`, where the account home comes
     from the account database (`pwd.getpwuid`; Windows: the profile folder from the OS), never from `HOME` or `ORCH_HOME`;
   - a **test workspace** uses only a test home (`ORCH_HOME`, else `HOME/.orch-tool`, that is itself a test path);
