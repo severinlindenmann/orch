@@ -390,7 +390,7 @@ function liveShelfWrap(body, sess, label, n) {
       resultsHost(sess.id, {key:'shelf-results-' + sess.id, cls:'live-shelf-list', empty:LIVE_SHELF_EMPTY, label:'Results of ' + label})));
 }
 // A repaint draws the panel anew; the shelf a pane already showed is put back as it was, so its widgets do not flash
-// empty while they load again (the paint gives a widget that had the keyboard its focus back).
+// empty while they load again (the paint gives the keyboard back to a widget that had it).
 function liveShelfKeep(old, host) {
   old.forEach(el => {
     const fresh = host.querySelector(`[data-results-host][data-key="${el.dataset.key.replace(/["\\]/g, '')}"]`);
