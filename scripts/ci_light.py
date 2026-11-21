@@ -430,7 +430,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--plan", action="store_true", help="print the steps as JSON, run nothing")
     ap.add_argument("--rules", action="store_true", help="only the whole-tree rule checks (the merge queue's precheck)")
     ap.add_argument("--group", action="store_true", help="the before-merge set of a merge queue group")
-    ap.add_argument("--labels", default="", help="--group: the pull request labels, comma separated")
+    # the merge queue's local check hands a member's owner-approved label over in ORCH_CHECK_LABELS (ORCH-1363)
+    ap.add_argument(
+        "--labels",
+        default=os.environ.get("ORCH_CHECK_LABELS", ""),
+        help="--group: the pull request labels, comma separated (default: ORCH_CHECK_LABELS)",
+    )
     ap.add_argument(
         "--all-tests", action="store_true", help="--group: every not-slow workspace test, not the picked ones"
     )

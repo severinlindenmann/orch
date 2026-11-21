@@ -48,7 +48,7 @@ class BuiltGit(FakeGit):
 
 
 def fake_check(r, git, red=(), broken=False, seen=None):
-    def local_check(repo, sha, on):
+    def local_check(repo, sha, on, labels=""):
         nums = list(getattr(git, "last", []))
         if seen is not None:
             seen.append(nums)

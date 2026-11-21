@@ -149,14 +149,43 @@ class GitHub:
             got = self._run("run", "view", "--job", str(int(job)), "--repo", repo, "--log", timeout=90)
         return (got.stdout or "") if got.returncode == 0 else ""
 
-    def create_pr(self, repo: str, base: str, branch: str, title: str, body: str) -> str | None:
-        got = self._run(
-            "pr", "create", "--repo", repo, "--base", base, "--head", branch, "--title", title, "--body", body
-        )
+    def create_pr(
+        self, repo: str, base: str, branch: str, title: str, body: str, labels: tuple[str, ...] = ()
+    ) -> str | None:
+        args = [
+            "pr",
+            "create",
+            "--repo",
+            repo,
+            "--base",
+            base,
+            "--head",
+            branch,
+            "--title",
+            title,
+            "--body",
+            body,
+        ]
+        for name in labels:  # the owner-approved label of a member (ORCH-1363, runner.owner_label)
+            args += ["--label", name]
+        got = self._run(*args)
         lines = [
             x.strip() for x in (got.stdout or "").splitlines() if x.strip().startswith("https://github.com/")
         ]
         return lines[-1] if got.returncode == 0 and lines else None
+
+    def check_state(self, repo: str, sha: str, name: str) -> str | None:
+        """The newest check run called name on one commit: its conclusion (success, failure, skipped ...) once it
+        ended, "pending" while it runs, None when there is none or GitHub did not answer. A rerun or a label
+        change runs it again; the newest one is the one that counts."""
+        v = self._json("api", f"repos/{repo}/commits/{sha}/check-runs?check_name={quote(name)}&per_page=100")
+        runs = [r for r in (v.get("check_runs") or []) if isinstance(r, dict)] if isinstance(v, dict) else []
+        if not runs:
+            return None
+        newest = max(runs, key=lambda r: r.get("id") or 0)
+        if newest.get("status") != "completed":
+            return "pending"
+        return newest.get("conclusion") or None
 
     def set_status(
         self, repo: str, sha: str, description: str, target: str = "", state: str = "success"
