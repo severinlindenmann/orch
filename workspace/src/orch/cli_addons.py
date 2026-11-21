@@ -71,10 +71,10 @@ def dispatch(args, root: Path) -> bool:
     elif sub == "remove":
         if args.name not in addons.listed(root) and addons.installed_here(args.name):
             # off here but still installed on this computer (e.g. an add-on orch no longer ships): the person
-            # wants it gone, so take it off this computer instead of refusing (ORCH-1369)
+            # wants it gone, so uninstall it instead of refusing (ORCH-1369)
             addons.tool_env_change_ok()
             addons.uninstall(root, args.name)
-            _out(args, {"ok": True, "uninstalled": True}, f"{args.name} is removed from this computer.")
+            _out(args, {"ok": True, "uninstalled": True}, f"{args.name} is uninstalled.")
             return True
         addons.remove(root, args.name, args.purge)
         _out(args, {"ok": True}, f"{args.name} is turned off in this workspace.")

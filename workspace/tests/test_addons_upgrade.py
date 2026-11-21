@@ -229,7 +229,7 @@ def test_remove_uninstalls_an_addon_that_is_off(proj, run, github, uv_calls, mon
     p = _write_registry([OLD[0], {"name": "dashboard-tester", "source": "built-in", "version": "0.1.0"}])
     code, out, err = run("addon", "remove", "dashboard-tester")
     assert code == 0, err
-    assert "dashboard-tester is removed from this computer." in out
+    assert "dashboard-tester is uninstalled." in out
     assert [e["name"] for e in json.loads(p.read_text(encoding="utf-8"))] == ["dashboard"]
     assert _withs(uv_calls[-1]) == ["workspace-addons/dashboard"]
 
