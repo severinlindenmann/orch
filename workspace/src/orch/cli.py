@@ -134,7 +134,8 @@ def _progress(t: dict) -> str:
 
 
 def _line(t: dict) -> str:
-    bits = [tickets.STATUS_WORDS[t["status"]]] + ([_progress(t)] if _progress(t) else [])
+    kind = ["Release"] if t.get("release") else ["Epic"] if t.get("epic") else []  # ORCH-906
+    bits = kind + [tickets.STATUS_WORDS[t["status"]]] + ([_progress(t)] if _progress(t) else [])
     if due := tickets.due_label(t.get("due"), t["status"]):
         bits.append(due)  # only a due with a time shows in the list; a day-only due stays as it was
     if quiet := tickets.quiet_label(t.get("quiet_since")):
@@ -242,13 +243,19 @@ def _show(t: dict, root: Path) -> str:
     out.append(f"Status: {tickets.status_word(t)}" + (f" - {_progress(t)}" if _progress(t) else ""))
     if t["status"] == "dropped" and t.get("superseded_by"):
         out.append(f"Replaced by: {_ticket_name(root, t['superseded_by'])}")
+    prep = tickets.prepare_state(root, t)  # Save without starting (ORCH-738)
+    if prep:
+        out.append(prep["words"] + (f": {prep['why']}" if prep.get("why") else ""))
     if n and d == n:
         out.append(
             f"✓ All done · {_progress(t)}"
             if tickets.checks_split(t)[1] == 0
             else f"✓ All resolved · {_progress(t)}"
         )
-    out.append(f"Evidence: {tickets.proof_state(t, root)['line']}")
+    proof = tickets.proof_state(t, root)
+    failed = [c for c in t.get("checklist") or [] if proof["per_item"].get(c.get("id")) == "failed"]
+    named = "".join(f" ({c['id']}: {c.get('text', '')})" for c in failed[:3])
+    out.append(f"Evidence: {proof['line']}{named}")
     extra = [f"Owner: {t['owner']}"] if t.get("owner") else []
     if t.get("due"):
         extra.append(tickets.due_label(t["due"], t["status"]) or f"Due: {t['due']}")
@@ -273,6 +280,8 @@ def _show(t: dict, root: Path) -> str:
                 out.append(f"{label}: {t['outcome'][k]}")
     if t.get("release"):
         out.append("Release: the epics and tickets under it ship together")
+    elif t.get("epic"):  # ORCH-906: an epic says so too, as a release does
+        out.append("Epic: its sub-tickets are the work; a run goes through them in order")
     if t.get("parent"):
         p = _lookup(root, t["parent"])
         out.append(
@@ -437,6 +446,9 @@ class _Parser(argparse.ArgumentParser):
 
         m = re.search(r"invalid choice: '([^']*)'", message)
         if m:
+            if self.prog == "orch ticket status":  # a status is a value, not a command
+                names = ", ".join(tickets.STATUSES)
+                self.exit(2, f'"{m.group(1)}" is not a ticket status. Choose one of: {names}.\n')
             what = self.prog + " command" if self.prog != "orch" else "orch command"
             self.exit(2, f'"{m.group(1)}" is not an {what}. Run {self.prog} --help.\n')
         if self.prog in _EXAMPLES:
@@ -446,6 +458,16 @@ class _Parser(argparse.ArgumentParser):
             usage = self.format_usage().replace("usage: ", "").strip()
             self.exit(2, f"Missing {m.group(1)}. Usage: {usage}\nMore help: {self.prog} --help\n")
         self.exit(2, f"{message}. Run {self.prog} --help.\n")
+
+
+def _drop_hidden(parser: argparse.ArgumentParser) -> None:
+    """argparse prints a subcommand added with help=SUPPRESS as "name  ==SUPPRESS==" in --help.
+    Leave such subcommands out of every help list, at every level (they still run)."""
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            action._choices_actions[:] = [a for a in action._choices_actions if a.help != argparse.SUPPRESS]
+            for child in {id(c): c for c in action.choices.values()}.values():
+                _drop_hidden(child)
 
 
 def _hide_advanced(parser: argparse.ArgumentParser) -> None:
@@ -520,8 +542,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     u.add_argument("--after-install", action="store_true", help=argparse.SUPPRESS)
     u.add_argument(
         "--to",
-        choices=("release", "development"),
-        help="switch to the release or to the development build (the official source)",
+        metavar="release|development|N",
+        help="switch to the release or to the development build (the official source), or go back to "
+        "release number N (later updates wait for a release newer than the one you left)",
     )
 
     cli_status.add_parsers(sub, common)
@@ -956,10 +979,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     # publish and relay are built-in add-ons: listed under "Add-ons" only when on (never as core commands)
     top = p._subparsers._group_actions[0]
     top._choices_actions[:] = [
-        a
-        for a in top._choices_actions
-        if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS and a.help != argparse.SUPPRESS
+        a for a in top._choices_actions if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS
     ]
+    _drop_hidden(p)
     return p
 
 
@@ -1116,6 +1138,13 @@ def run(args: argparse.Namespace) -> None:
             if args.project_only or args.after_install:
                 raise Refused("--to goes with a plain orch update.")
             addons.switch_to(args.to)
+        elif not args.project_only and not args.after_install:
+            how, text = addons.leave_pin_if_newer()
+            if how == "stay":
+                _out(args, {"ok": True, "updated": False, "held": addons.pinned()}, text)
+                return
+            if text:
+                print(text, file=sys.stderr)
         if not args.project_only and not args.after_install and not args.json:
             from orch import updateinfo
 
@@ -1187,7 +1216,7 @@ def run(args: argparse.Namespace) -> None:
             release=args.release,
             human_review=None if args.human_review is None else args.human_review == "yes",
         )
-        part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
+        part = f" (sub-ticket of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
             args,
             t,
@@ -1479,13 +1508,14 @@ def run(args: argparse.Namespace) -> None:
                 )
                 shorthand.append(json.dumps(attached))
         t, c = tickets.check_done(root, args.id, args.check, args.evidence + shorthand, by(), args.proves)
-        ev = c["evidence"][-1]
-        copied = args.file and tickets.proof_present(root, ev)
+        kept = c["evidence"][-len(args.file) :] if args.file else []  # the files of this call, in order
+        shown = kept or c["evidence"][-1:]
+        copied = [e for e in kept if tickets.proof_present(root, e)]
         _out(
             args,
             history.shown_item(root, t, "checklist", c),
-            f"Done: {c['text']} (evidence: {ev['ref']})"
-            + (f"\nEvidence copied: {ev['ref']} ({ev['text']})" if copied else ""),
+            f"Done: {c['text']} (evidence: {', '.join(e['ref'] for e in shown)})"
+            + "".join(f"\nEvidence copied: {e['ref']} ({e['text']})" for e in copied),
         )
     elif cmd == "log":
         t = tickets.log(root, args.id, args.text, by())
@@ -1996,6 +2026,8 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
         ):
             if argv[0] in addons.active(root) or argv[0] in addons.discover():
                 return addons.dispatch(root, argv[0], argv[1:])
+            if argv[0] in addons.SHIPPED_ADDONS:  # a shipped add-on that is off here: say how to turn it on
+                raise Refused(addons.not_on_message(root, argv[0]))
         args = parser.parse_args(argv)
         _resolve_keys(args, root)
         with diag.span(

@@ -161,6 +161,20 @@ def test_list_with_no_runs(proj, run):
     assert code == 0 and "No runs right now." in out
 
 
+def test_list_shows_the_tickets_waiting_for_a_helper_place(proj, new_ticket, run):
+    """ORCH-1026: during the server move the owner could not see which tickets waited for a slot."""
+    from orch import runs_live
+
+    a, b = new_ticket("A"), new_ticket("B")
+    runs_live._queue_for_slot(proj, a, "human:tester", "Start when a slot is free.", "normal")
+    runs_live._queue_for_slot(proj, b, "human:tester", "Start when a slot is free.", "high")
+    code, out, _ = run("run", "list")
+    assert code == 0 and "No runs right now." in out
+    assert f"Waiting for a free helper place, in this order: {_key(proj, b)} (high), {_key(proj, a)}." in out
+    line = json.loads(run("run", "list", "--json")[1])["line"]
+    assert [(q["ticket"], q["priority"]) for q in line] == [(b, "high"), (a, "normal")]
+
+
 def test_screen_refuses_without_a_live_session(proj, new_ticket, run):
     tid = new_ticket()
     code, _, err = run("run", "screen", _key(proj, tid))
@@ -270,6 +284,44 @@ def test_status_carries_the_helper_state_and_last_activity(proj, new_ticket, run
     assert rows[0]["helper"]["word"] == "Waits for you"  # orch run list says the same
     data = json.loads(run("run", "status", new_ticket("B"), "--json")[1])
     assert data["helper"] is None and data["last_activity"] is None
+
+
+def test_a_helper_noted_at_the_usage_limit_shows_stopped_with_the_time_it_continues(
+    proj, new_ticket, run, monkeypatch, child
+):
+    """ORCH-643 (report r-1118-1812-ws): a helper the watcher noted as stopped on the usage limit showed as
+    working or waiting for an OK on Home. Now every page reads 'Stopped: usage limit' and when it goes on."""
+    from orch import limitstop
+
+    tid, other = new_ticket(), new_ticket("B")
+    _live(proj, tid, "attention", child)
+    monkeypatch.setattr(runwatch, "_table", lambda: [])
+    at = time.time() + 3600
+    limitstop.note(proj, tid, {"until": at, "text": "Usage limit reached"})
+    data = json.loads(run("run", "status", tid, "--json")[1])
+    assert data["helper"] == {
+        "state": "limit",
+        "word": "Stopped: usage limit",
+        "detail": f"Continues at {limitstop.clock(at + limitstop.GRACE)}",
+    }
+    rows = json.loads(run("run", "list", "--json")[1])["runs"]
+    assert rows[0]["helper"]["word"] == "Stopped: usage limit"
+    # the reset passed but the watcher has not started it yet; a ticket that is not noted keeps its state
+    assert runwatch.limit_state(proj, tid, now=at + limitstop.GRACE + 1)["detail"] == "Continues shortly"
+    # a helper that works again after the note (a person's prompt) is no longer shown as stopped
+    rec = runs.read(proj, tid)
+    working = {**rec, "live": {"state": "working", "since": _since(-5)}}
+    assert runwatch.limit_state(proj, tid, working) is None
+    # still "working" from before the note (the tool ended the turn without its hook, ORCH-642): stopped
+    assert (
+        runwatch.limit_state(proj, tid, {**rec, "live": {"state": "working", "since": _since(600)}})["state"]
+        == "limit"
+    )
+    assert runwatch.limit_state(proj, other) is None
+    # no helper runs: no state at all, also when the ticket is still noted
+    assert json.loads(run("run", "status", other, "--json")[1])["helper"] is None
+    limitstop.forget(proj, [tid])
+    assert json.loads(run("run", "status", tid, "--json")[1])["helper"]["state"] == "you"
 
 
 def test_label_names_the_pull_request_wait_in_plain_words():

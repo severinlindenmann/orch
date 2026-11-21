@@ -332,9 +332,9 @@
   }
 
   /* ORCH-61: the ONE state of a running helper, as the core words it (orch run status "helper"):
-     {state: working|starting|you|waiting|idle|stuck, word, detail}; null when no helper runs. An older core without
+     {state: working|starting|you|waiting|idle|stuck|limit, word, detail}; null when no helper runs. An older core without
      the field: the same words from the claim, so the page never shows a second set. */
-  const HELPER_WORDS = {working: 'Working', starting: 'Starting', you: 'Waits for you', waiting: 'On hold', idle: 'Idle', stuck: 'Stuck'};
+  const HELPER_WORDS = {working: 'Working', starting: 'Starting', you: 'Waits for you', waiting: 'On hold', idle: 'Idle', stuck: 'Stuck', limit: 'Stopped: usage limit'};
   function helperState(run, ticket) {
     const r = run || null;
     if (!r || (r.running !== true && r.state !== 'maybe-stale')) return null;
@@ -346,8 +346,8 @@
     return {state: key, word: HELPER_WORDS[key], detail: key === 'you' ? (asks ? 'Your answer' : 'Your OK on the screen') : ''};
   }
   /* Rows of the Helpers list (Home side panel; the live add-on page draws the same widget): one per running helper, in the order
-     working, starting, waits for you, waiting, idle, stuck. Each: {ticket, state, word, detail, step, minutes, idle, finished}. */
-  const HELPER_ORDER = ['working', 'starting', 'you', 'waiting', 'idle', 'stuck'];
+     working, starting, waits for you, waiting, idle, stuck, stopped on the usage limit. Each: {ticket, state, word, detail, step, minutes, idle, finished}. */
+  const HELPER_ORDER = ['working', 'starting', 'you', 'waiting', 'idle', 'stuck', 'limit'];
   function helperRows(tickets, runs) {
     const out = [];
     for (const t of arr(tickets)) {
@@ -481,7 +481,7 @@
       return {state: 'working', agent, status: 'working' + by + since, primary: live || stop, items: live ? [stop] : []};
     }
     const sf = startFailure(t, r, settings);
-    if (sf) return {state: 'failed', agent, status: sf.text, startFailed: true, primary: start('Retry'), items: []};
+    if (sf) return {state: 'failed', agent, status: sf.text, startFailed: true, primary: start('Try again'), items: []};
     if (r && r.state === 'dead') return {state: 'failed', agent, status: 'the last run ended without finishing',
       primary: start('Try again'), items: [fresh]};
     if (asks) return {state: 'needs', agent, status: 'needs your answer', primary: {label: 'Answer', op: 'answer'}, items: [fresh]};
@@ -757,6 +757,10 @@
   // `make` is the page's element maker h(); the result is [<span class="key">ORCH-58</span>, ' '] or null.
   const ticketKey = t => t && typeof t.key === 'string' ? t.key.trim() : '';
   const keyTag = (t, make) => { const k = ticketKey(t); return k ? [make('span', {className:'key'}, k), ' '] : null; };
+  // ORCH-906 (owner picked it, 20 Nov): an epic or a release says so wherever the ticket shows, not only on its board
+  // card. `make` is the page's h(); the result is [' ', <span class="chip kind">Epic</span>] or null for a plain ticket.
+  const kindWord = t => t && t.release ? 'Release' : t && t.epic ? 'Epic' : '';
+  const kindTag = (t, make) => { const w = kindWord(t); return w ? [' ', make('span', {className:'chip kind', 'data-key':'kind-' + w.toLowerCase()}, w)] : null; };
   // "x of y tasks": one pattern for every task counter (owner, 17 Nov: the to-do lines are "tasks" everywhere).
   const stepsText = (done, total) => (Number(done) || 0) + ' of ' + (Number(total) || 0) + (Number(total) === 1 ? ' task' : ' tasks');
   // Topbar freshness: when /api/state last answered. Under a minute is "just now".
@@ -877,5 +881,5 @@
     next.tickets = order.map(id => byId.get(id));
     return next;
   }
-  return {historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
+  return {historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
 });

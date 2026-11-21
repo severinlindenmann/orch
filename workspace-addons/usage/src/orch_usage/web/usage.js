@@ -16,7 +16,7 @@
   const nameOf = target => model?.accounts.find(a => a.id === target.split(':')[0])?.label || 'Account';
   const WHAT = {limit: t => nameOf(t) + ': limit', period: t => nameOf(t) + ': what the limit counts', order: t => nameOf(t) + ': order',
     on: t => nameOf(t) + ': on', off: t => nameOf(t) + ': off', end: t => nameOf(t) + ': end', switching: () => 'Switching by itself',
-    share: () => 'How work is spread'};
+    share: () => 'How work is spread', switcher: t => t === 'follow' ? 'Follow' : 'Take over'};
 
   function h(tag, props, ...kids) {
     const n = document.createElement(tag);
@@ -106,7 +106,8 @@
     fill.style.setProperty('--value', pct + '%');
     return h('div', {className: 'progress-labeled'},
       h('div', {className: 'progress-text'},
-        h('span', {}, b.label + ' · ' + head + ' ', b.limit != null ? h('span', {className: 'meta', text: 'of ' + amount(b.limit, b.limit_unit)}) : null),
+        h('span', {}, b.label + ' · ' + head + ' ', b.limit != null ? h('span', {className: 'meta', text: 'of ' + amount(b.limit, b.limit_unit)})
+          : b.early != null ? h('span', {className: 'meta', text: 'switches at ' + num(b.early) + '% (default)'}) : null),
         h('span', {text: right})),
       h('div', {className: 'progress', role: 'progressbar', 'aria-label': b.label, 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round(pct))}, fill));
   }
@@ -187,7 +188,8 @@
       'aria-label': (way === 'up' ? 'Use ' + a.label + ' earlier' : 'Use ' + a.label + ' later'),
       onclick: e => act('order', a.id + ':' + to.order, e.currentTarget)}, way === 'up' ? '↑' : '↓');
     const on = h('input', {className: 'switch', type: 'checkbox', checked: a.on || null, 'aria-label': 'Use ' + a.label});
-    on.addEventListener('change', () => act(on.checked ? 'on' : 'off', a.id, on));
+    const onWord = h('span', {className: 'meta', text: a.on ? 'On' : 'Off'});
+    on.addEventListener('change', () => { onWord.textContent = on.checked ? 'On' : 'Off'; act(on.checked ? 'on' : 'off', a.id, on); });
     const rows = a.limits.map(l => limitRow(a, l, false));
     if (!a.limits.length) rows.push(limitRow(a, null, true));
     const room = a.limits.length && a.limits.length < 2 && a.periods.some(p => !a.limits.some(l => l.period === p));
@@ -201,7 +203,7 @@
         list.length > 1 ? h('div', {className: 'row'}, move('up', list[i - 1]), move('down', list[i + 1])) : null),
       a.bars.length ? a.bars.map(bar) : h('p', {className: 'meta', text: 'No use read yet.'}),
       h('div', {className: 'row between'}, h('div', {className: 'row'}, rows, addLimit),
-        h('label', {className: 'row'}, h('span', {className: 'meta', text: 'On'}), on)),
+        h('label', {className: 'row'}, onWord, on)),
       endRow(a));
   }
 
@@ -233,7 +235,9 @@
     const head = sp.starts ? startsWord(sp.starts).replace('start', 'helper start') + ' · ' + money(sp.dollars) : 'No helper starts yet today';
     return h('section', {className: 'stack', 'aria-label': 'Today'},
       h('div', {className: 'row between'}, h('h2', {text: 'Today'}), h('span', {className: 'meta', text: head + (sp.sources.some(s => s.week_starts) ? ' · the line shows the last 7 days' : '')})),
-      h('div', {className: 'stat-row four', role: 'list'}, sp.sources.map(todayTile)));
+      h('div', {className: 'stat-row four', role: 'list'}, sp.sources.map(todayTile)),
+      // ORCH-943: every workspace on this computer counts toward the same limits
+      (sp.workspaces || []).length ? h('p', {className: 'meta', text: 'By workspace: ' + sp.workspaces.map(w => w.name + ' ' + startsWord(w.starts) + (w.dollars ? ' · ' + money(w.dollars) : '')).join('; ')}) : null);
   }
 
   // ---- how work is spread (ORCH-657): three ready-made spreads, the share as one sentence, Adjust for the rest ----
@@ -327,6 +331,18 @@
     note.textContent = m.switcher ? '' : 'Switching needs the account switcher on this computer. Usage shows and warns.';
     const subs = m.accounts.filter(a => a.type === 'subscription'), other = m.accounts.filter(a => a.type !== 'subscription');
     const parts = [];
+    // ORCH-943: another workspace on this computer switches the accounts; this one follows it, or a person takes over
+    const own = m.switcher_owner, elsewhere = !!(own && !own.mine && own.running && own.words);
+    $('auto-row').hidden = elsewhere;
+    $('owner-tag').hidden = !elsewhere;
+    $('owner-tag').textContent = elsewhere ? own.words.tag : '';
+    if (elsewhere && !own.followed) {
+      parts.push(h('div', {className: 'banner', role: 'status'}, h('div', {className: 'grow'},
+        h('h3', {text: own.words.title}), h('p', {text: own.words.text}),
+        h('div', {className: 'row space-top'},
+          h('button', {className: 'btn primary sm', type: 'button', text: own.words.follow, onclick: e => act('switcher', 'follow', e.currentTarget)}),
+          h('button', {className: 'btn outline sm', type: 'button', text: own.words.take, onclick: e => act('switcher', 'take-over', e.currentTarget)})))));
+    }
     if (m.all_at_limit) {
       parts.push(h('div', {className: 'banner attn', role: 'alert'}, h('div', {className: 'grow'},
         h('h3', {text: 'Every account is at or near its limit'}),

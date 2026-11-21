@@ -32,6 +32,18 @@ def _root(start: str) -> Path:
     raise Refused("No orch workspace here. Run orch init first, or go to your workspace folder.")
 
 
+def _helper_run() -> bool:
+    """Is this command run by a helper (inside an orch run or a helper tool), whatever --by says?"""
+    if os.environ.get("ORCH_RUN") or os.environ.get("ORCH_AGENT"):
+        return True
+    try:
+        from orch import tickets
+
+        return bool(tickets.agent_tool())
+    except Exception:  # noqa: BLE001 - no core to ask: the environment said no
+        return False
+
+
 def _actor(explicit: str | None) -> str:
     if explicit:
         if not store.valid_actor(explicit) or explicit == store.USAGE:
@@ -349,11 +361,11 @@ def gather(root: Path) -> dict:
         out.append(row)
     if d["unreadable"]:
         warnings.append(
-            f"{d['unreadable']} account(s) in .orch/addons/usage could not be read and are skipped."
+            f"{d['unreadable']} account(s) in the Usage folder could not be read and are skipped."
         )
     mem = switching._read(switching.memory_path(root))  # what the loop's last look found (ORCH-620)
     warnings += [w for w in mem.get("alerts") or [] if isinstance(w, str)]
-    return {"accounts": out, "switcher": found is not None, "warnings": warnings}
+    return {"accounts": out, "switcher": cswap.command() is not None, "warnings": warnings}
 
 
 # ---------------------------------------------------------------- output
@@ -438,6 +450,8 @@ def run(args) -> int:
         lines.append("Next: orch usage limit <account> <number>  (or period / order / on / off / end)")
         print("\n".join(lines))
         return 0
+    if cmd in ("follow", "take-over"):
+        return _switcher_cmd(args, root)
     if cmd == "history":
         rows = store.history(root)
         if args.account and args.account.strip().lower() in (share_mod.ACCOUNT, share_mod.LABEL.lower()):
@@ -448,10 +462,15 @@ def run(args) -> int:
         if args.json:
             print(json.dumps({"history": rows}, ensure_ascii=False))
             return 0
+        from . import computer
+
+        here = computer.label(root)
         out = [
             f"{_local(r.get('at', ''))}  {r.get('label', r.get('account'))}: {r.get('what')}"
             + (f" ({r['why']})" if r.get("why") else "")
-            + f"  (by {str(r.get('who', '')).split(':', 1)[-1]})"
+            + f"  (by {str(r.get('who', '')).split(':', 1)[-1]}"
+            + (f" in {r['workspace']}" if r.get("workspace") and r["workspace"] != here else "")
+            + ")"
             for r in rows
         ] or ["No changes yet."]
         print("\n".join(out))
@@ -611,6 +630,9 @@ def _loop_cmd(args, root: Path) -> int:
         line += "".join(
             f"\nWarning: {w}" for w in (switching._read(switching.memory_path(root)).get("alerts") or [])
         )
+        owner_line = _owner_line(root)
+        if owner_line:
+            line += "\n" + owner_line
         if last:
             line += f"\nLast look {_local(last.get('at', ''))}: {last.get('did')} ({last.get('why')})."
         print(json.dumps(data, ensure_ascii=False) if args.json else line)
@@ -625,6 +647,10 @@ def _loop_cmd(args, root: Path) -> int:
         nxt = "Usage now switches by itself before an account reaches a limit."
     else:
         nxt = "Usage only shows and warns; it does not switch."
+    nxt += " This setting counts for every workspace on this computer."
+    owner_line = _owner_line(root)
+    if owner_line and on:
+        nxt += " " + owner_line
     return _emit(
         args,
         {"switching": on, "changed": changed, "next": nxt},
@@ -632,9 +658,52 @@ def _loop_cmd(args, root: Path) -> int:
     )
 
 
+def _owner_line(root: Path) -> str | None:
+    """'<workspace> switches the accounts on this computer' when another workspace's loop switches, else None."""
+    from . import computer
+
+    v = computer.view(root, computer.shared_dir(root))
+    if not v or v["mine"] or not v.get("running"):
+        return None
+    w = v["words"]
+    return f"{w['title']}. {w['text']} To switch from here: orch usage take-over."
+
+
+def _switcher_cmd(args, root: Path) -> int:
+    from . import computer
+
+    shared = computer.shared_dir(root)
+    if shared is None:
+        raise Refused(
+            "Usage keeps its settings in this workspace only here; there is no other workspace to follow."
+        )
+    who = _actor(args.by)
+    if args.cmd == "follow":
+        changed = computer.follow(root, shared, who)
+        v = computer.view(root, shared)
+        return _emit(
+            args,
+            {"changed": changed, "switcher": v},
+            (SAVED + " " if changed else "Already like that. ") + (v["words"]["tag"] + "."),
+        )
+    if _helper_run():  # a helper may name a person with --by; the take-over is the person's own click
+        raise Refused("Only a person can move account switching to another workspace.")
+    changed = computer.take_over(root, shared, who)
+    text = (
+        "This workspace switches the accounts now. The other workspace follows from its next look (within a minute)."
+        if changed
+        else "This workspace already switches the accounts."
+    )
+    return _emit(args, {"changed": changed, "switcher": computer.view(root, shared)}, text)
+
+
 def _look_text(r: dict) -> str:
     if not r.get("switcher"):
         return NO_SWITCHER
+    if r.get("did") == "follow":
+        return f"{r.get('owner')} switches the accounts on this computer; this workspace follows."
+    if r.get("did") == "nothing":  # installed, but it did not answer: say so, Usage looks again by itself
+        return (r.get("note") or "The account switcher did not answer.") + " Usage looks again in a minute."
     text = {
         "stay": f"Staying on {r.get('active')}.",
         "switched": f"Switched from {r.get('active')} to {r.get('target')}.",
@@ -647,47 +716,65 @@ def _look_text(r: dict) -> str:
     return text
 
 
+class _Parser(argparse.ArgumentParser):
+    """A wrong word is refused in plain words, never with argparse's raw "error: argument ..." line."""
+
+    def error(self, message):
+        m = re.search(r"argument (\S+): invalid choice: '([^']*)' \(choose from (.*)\)", message)
+        if m:
+            what, word, allowed = m.groups()
+            allowed = ", ".join(a.strip().strip("'") for a in allowed.split(","))
+            if what in ("command", "cmd") or what.startswith("{"):  # the command word itself
+                self.exit(2, f'Refused: "{word}" is not an {self.prog} command. Run {self.prog} --help.\n')
+            self.exit(2, f'Refused: "{word}" is not a {what} here. Use one of: {allowed}.\n')
+        m = re.search(r"required: (.*)", message)
+        if m:
+            usage = self.format_usage().replace("usage: ", "").strip()
+            self.exit(2, f"Refused: missing {m.group(1)}. Usage: {usage}\n")
+        self.exit(2, f"Refused: {message}. Run {self.prog} --help.\n")
+
+
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="orch usage")
+    ap = _Parser(prog="orch usage")
     ap.add_argument("--dir", default=os.environ.get("ORCH_ROOT", "."))
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub = ap.add_subparsers(dest="cmd", required=True, parser_class=_Parser, metavar="command")
 
     def p(name, **kw):
         s = sub.add_parser(name, **kw)
         s.add_argument("--json", action="store_true")
         return s
 
-    p("list")
-    p("needs")
-    s = p("seen")
+    p("list", help="The accounts, how far each is used, and its limits")
+    p("needs", help="What needs a person now: a warning, an account at its limit")
+    s = p("seen", help="Mark a warning as seen so it stops showing")
     s.add_argument("warning", choices=("all-at-limit", "switch-failed"))
     s.add_argument("--since")
     s.add_argument("--by")
-    s = p("history")
+    s = p("history", help="Every rule change and switch, newest first")
     s.add_argument("--account")
-    s = p("limit")
+    s = p("limit", help="Set how far an account may go: a %% or dollars")
     s.add_argument("account")
     s.add_argument("value")
     s.add_argument("--period")
     s.add_argument("--until")
     s.add_argument("--end")
     s.add_argument("--by")
-    s = p("period")
+    s = p("period", help="Change the time a limit counts over")
     s.add_argument("account")
     s.add_argument("new")
     s.add_argument("--of")
     s.add_argument("--until")
     s.add_argument("--end")
     s.add_argument("--by")
-    s = p("order")
+    s = p("order", help="Move an account to a place in the order")
     s.add_argument("account")
     s.add_argument("place", type=int)
     s.add_argument("--by")
-    for name in ("on", "off"):
-        s = p(name)
+    for name, word in (("on", "Use an account again"), ("off", "Stop using an account")):
+        s = p(name, help=word)
         s.add_argument("account")
         s.add_argument("--by")
-    s = p("end")
+    s = p("end", help="Make a rule end at a time")
     s.add_argument("account")
     s.add_argument("when")
     s.add_argument("--by")
@@ -702,18 +789,28 @@ def main(argv=None) -> int:
     s.add_argument("--order", help="all or the first accounts in order: 'Personal 1, Company'")
     s.add_argument("--clear", action="store_true", help="remove the share")
     s.add_argument("--by")
-    s = p("switching")
+    s = p("switching", help="Turn switching accounts by itself on or off")
     s.add_argument("state", choices=("on", "off"))
     s.add_argument("--by")
-    s = p("act")
+    for name in ("follow", "take-over"):
+        s = p(
+            name,
+            help="another workspace switches the accounts: follow it, or switch from here (a person only)",
+        )
+        s.add_argument("--by")
+    s = p("act", help="A change from the Usage page (the page uses it)")
     s.add_argument("verb")
     s.add_argument("target")
     s.add_argument("--by")
-    s = p("run")
+    s = p("run", help="Run the Usage page and the switcher in this window")
     s.add_argument("--once", action="store_true")
     s.add_argument("--port", type=int, default=None, help=argparse.SUPPRESS)
-    for name in ("start", "stop", "status"):
-        p(name)
+    for name, word in (
+        ("start", "Start the Usage page and the switcher in the background"),
+        ("stop", "Stop them"),
+        ("status", "Say whether they run and where the page is"),
+    ):
+        p(name, help=word)
     args = ap.parse_args(argv)
     args.json = bool(getattr(args, "json", False)) or "--json" in (argv if argv is not None else sys.argv)
     try:

@@ -294,6 +294,7 @@ def test_never_writes_a_key(tmp_path):
         "ahead",
         "why",
         "tries",
+        "workspace",
     }  # labels, numbers and times only
 
 

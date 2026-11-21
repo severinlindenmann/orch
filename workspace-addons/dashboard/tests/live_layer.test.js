@@ -295,11 +295,25 @@ test('a button with a word is named by the word unless its label starts with it'
   assert.equal(ctx.f('b', 'x', 'Where it sits', 'g')['aria-label'], 'Where it sits');
 });
 
-test('ORCH-679: a running helper has Stop in its pane (run.stop, "Stop idle helper" when idle); no helper, no Stop', () => {
-  assert.match(source, /sess\.kind \|\| !sess\.running \? null : h\('button'[^\n]*'data-live-stop':sess\.id\}, liveStopLabel\(sess\)\)/);
-  assert.match(source, /\['idle', 'stuck'\]\.includes\(h2\.state\) \? 'Stop idle helper' : 'Stop'/);
-  assert.match(source, /#live-dock \[data-live-stop\][\s\S]{0,200}act\('run\.stop', \{ticket:b\.dataset\.liveStop\}\)/);
-  assert.match(source, /x\.running && !x\.kind \? liveStopLabel\(x\) : ''/);  // the dock repaints when idle turns into working
+test('ORCH-817: every pane has Stop and End session in its header (More when narrow); the old body Stop is gone', () => {
+  assert.doesNotMatch(source, /data-live-stop/);
+  assert.match(source, /\.\.\.\(sess \? liveEndHere\(key, label, o\.narrow\) : \[\]\)/);
+  assert.match(source, /narrow \? \[window\.liveEndOpenAt\?\.\('pane'\) === key \? window\.liveEndMenu\(key, 'pane:' \+ key\) : null\] : window\.liveEndButtons\(key, label\)/);
+  assert.match(source, /narrow && sess && typeof window\.liveEndMenu === 'function' \? liveMoreEnd\(key\) : null/);
+  assert.match(source, /typeof window\.liveEndKey === 'function' \? window\.liveEndKey\(\) : null\]\);/, 'the dock repaints when a Stop or End menu opens');
+});
+
+test('ORCH-817: an ended helper without a ticket keeps its pane with Start again and History; an ended terminal does not', () => {
+  assert.match(source, /o\.open === true \|\| o\.kind !== 'terminal'/);
+  assert.match(source, /ended:!running && x\.kind !== 'terminal' && \(x\.open !== true \|\| \(!!window\.LiveSessions\?\.ready && !live\)\)/);
+  assert.match(source, /sess\?\.ended \? h\('div', \{className:'live-pb live-pb-start'\}, liveEndedBody\(sess, label\)\)/);
+  assert.match(source, /act\('session\.new', \{kind:b\.dataset\.liveAgain\}/);
+  assert.match(source, /liveHistBody\(sess\)/);
+});
+
+test('ORCH-817: an idle helper pane gets the idle note instead of one status line', () => {
+  assert.match(source, /sess\.kind === 'terminal' \? null : h\('div', \{className:'live-end-idle', 'data-live-idle':''/);
+  assert.match(source, /window\.liveEndIdleFill\(idle, body\.dataset\.liveBody, text\)/);
 });
 
 test('the pane shows the waiting question with its options and answers it there (ORCH-675)', () => {
@@ -310,6 +324,12 @@ test('the pane shows the waiting question with its options and answers it there 
   assert.equal(liveAskModel({}), null);
   assert.equal(liveAskModel({questions:[{id:'q3', kind:'plan', text:'Plan?'}]}).plain, false);
   assert.match(source, /liveAskFill[^]*?act\('answer', \{ticket:id, question:q\.id, digest:q\.digest/, 'the answer is the same op a question card sends');
+});
+
+test('the waiting question shows once: the now line steps back while the question box shows it (ORCH-708)', () => {
+  // ORCH-817 adds the idle note between the fill and the hide; the now line still steps back for the question box
+  assert.match(source, /liveAskFill\(askBox, body\.dataset\.liveBody\);[^]{0,300}?now\.hidden = \(?!!askBox && !askBox\.hidden\)?/,
+    'the fill hides the now line after the question box is written');
 });
 
 test('after an answer in the pane the keyboard stays in the pane, so Esc still steps the layer back (ORCH-709)', () => {

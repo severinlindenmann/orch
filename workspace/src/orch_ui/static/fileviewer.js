@@ -1,6 +1,6 @@
 /* The shared file viewer: one wide dialog for every kind of ticket file (picture, PDF, web page, table, spreadsheet,
    note, code, text or log, sound, video, archive). × Close, Esc and a click outside close it; ← → move between the
-   files of the list; Open in new tab, Download and Copy link for this computer are always there. Text is only ever added with
+   files of the list; Open in new tab, Download and Copy link are always there. Text is only ever added with
    textContent, a web page only inside a sandboxed frame. */
 (() => {
   'use strict';
@@ -383,7 +383,7 @@
     const actions = el('div', 'fv-actions'), left = el('div', 'row fv-left'), right = el('div', 'row fv-right');
     const open1 = el('a', 'btn outline sm', 'Open in new tab ↗'); open1.target = '_blank'; open1.rel = 'noopener noreferrer';
     const dl = el('a', 'btn ghost sm', 'Download');
-    const copy = btn('Copy link for this computer', 'ghost sm', async () => {
+    const copy = btn('Copy link', 'ghost sm', async () => {
       const link = new URL(urlOf(files[index]), location.href).href;
       if (await window.UI.copyText(link)) window.orch.toast('Link copied', 'ok'); else window.UI.showLink(link);
     });

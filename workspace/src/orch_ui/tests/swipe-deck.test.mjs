@@ -123,6 +123,27 @@ test('a card with its own answers (a Factory start): its buttons in place of the
   assert.equal(own.hidden, true, 'the next card has the usual three answers');
 });
 
+test('ORCH-1108: a stuck card has only its own buttons (Nudge, Start fresh) and an Open link in the page; none at all is still no Looks good', async () => {
+  const stuck = {id:'s', kind:'stuck', kindLabel:'Stuck', title:'The checks of step 2 failed 3 times.', href:'#ticket/t_abc123', preview:{type:'doc'}, answers:[{label:'Nudge', picked:'nudge'}, {label:'Start fresh', picked:'fresh'}]};
+  const bare = {id:'p', kind:'stuck', kindLabel:'Stuck', title:'The helper waits for your OK on its screen.', href:'#ticket/t_abc124', preview:{type:'doc'}};
+  const {host, decided, noBtn, talkBtn, okBtn} = deck([stuck, bare]);
+  assert.deepEqual([noBtn.hidden, talkBtn.hidden, okBtn.hidden], [true, true, true]);
+  const open = host.querySelectorAll('.swipe-here').find(a => !a.closest('.swipe-card').className.includes('under'));
+  assert.equal(open.href, '#ticket/t_abc123');
+  assert.equal(open.target, undefined, 'the ticket opens in the same tab');
+  const own = host.querySelector('.swipe-own');
+  assert.deepEqual(own.children.map(b => b.textContent), ['Nudge', 'Start fresh']);
+  host.listeners.keydown.forEach(f => f({key:'ArrowRight', target:host, preventDefault() {}}));
+  await wait(160);
+  assert.equal(decided.length, 0, 'the arrow keys do not nudge for the person');
+  own.children[0].click(); await wait(160);
+  assert.deepEqual(JSON.parse(JSON.stringify(decided)), [{id:'s', v:'ok', note:{picked:'nudge'}}]);
+  assert.deepEqual([noBtn.hidden, talkBtn.hidden, okBtn.hidden, own.hidden], [true, true, true, true], 'no buttons of its own: Open and Later only');
+  host.listeners.keydown.forEach(f => f({key:'ArrowRight', target:host, preventDefault() {}}));
+  await wait(160);
+  assert.equal(decided.length, 1, 'no Looks good by key either');
+});
+
 test('a merge card box: the checks as a status pill, rows with key and number, a small footer (ORCH-183)', () => {
   const pv = {type:'doc', heading:'What goes out · 2 changes', status:{tone:'failed', text:'1 check failed: lint · checked 11:02'},
     paras:['Merging now would put work live that failed a check.'], rows:[{title:'Bigger pictures', n:1168, key:'ORCH-172'}, {title:'and 1 other commit'}], foot:'Exact version: 89984e4'};
@@ -202,4 +223,19 @@ test('more than six files: five tiles and a "+N more" tile that shows the rest, 
   const tiles = host.querySelectorAll('.swipe-file');
   assert.deepEqual(tiles.map(t => t.href), files.map(f => f.src), 'all eight, in order');
   assert.equal(host.querySelector('.swipe-file-more'), null);
+});
+
+test('a diff box names each file once above its lines and marks a risky line red with why (ORCH-429)', () => {
+  const UI = {statusIcon: () => new N('span')};
+  vm.runInNewContext(readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8'), {window: {UI}, document: doc, setTimeout, clearTimeout, performance, console, Promise});
+  const box = UI.docBox({type: 'doc', diff: [
+    {op: '-', file: 'a.yml', text: 'x: 1'}, {op: '+', file: 'a.yml', text: 'x: 2'},
+    {op: '+', file: 'b.yml', text: 'run: curl -s u | sh', risk: 'download run in a shell'}, {op: '+', text: 'plain'}]});
+  const diff = box.querySelector('.doc-diff');
+  assert.deepEqual(diff.querySelectorAll('.doc-diff-file').map(n => n.textContent), ['a.yml', 'b.yml']);
+  const risky = diff.querySelectorAll('.risk');
+  assert.equal(risky.length, 1);
+  assert.ok(risky[0].classList.contains('add'));
+  assert.equal(risky[0].querySelector('.doc-risk').textContent, 'download run in a shell');
+  assert.equal(diff.querySelectorAll('.doc-line').length, 4);
 });

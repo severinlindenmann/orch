@@ -1,4 +1,4 @@
-"""How helper work is spread (ORCH-657): the owner's share, kept in .orch/addons/usage/share.json.
+"""How helper work is spread (ORCH-657): the owner's share, kept in share.json in the Usage folder of this computer (computer.py).
 
 One small file next to accounts.json, schema `orch.usage-share/1`:
 
@@ -96,8 +96,15 @@ PRESETS = {
 FIELDS = tuple(PRESETS["even"]["share"])
 
 
+def ordinal(n: int) -> str:
+    """2 -> 2nd, 3 -> 3rd, 11 -> 11th, 21 -> 21st."""
+    if 10 <= n % 100 <= 20:
+        return f"{n}th"
+    return f"{n}" + {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+
+
 def path(root: Path) -> Path:
-    return store.usage_dir(root) / "share.json"
+    return store.ensure(root) / "share.json"
 
 
 def tool_name(accounts: list[dict]) -> str:
@@ -195,7 +202,7 @@ def newer_format(root: Path) -> bool:
 
 
 def _write(root: Path, s: dict | None) -> None:
-    d = store.usage_dir(root)
+    d = store.ensure(root)
     d.mkdir(parents=True, exist_ok=True)
     if s is None:
         path(root).unlink(missing_ok=True)
@@ -328,7 +335,7 @@ def counts(s: dict | None, resets: dict[str, str] | None = None) -> list[str]:
     ]
     if s["tool_one_in"] > 1:
         out.append(
-            f"One in {s['tool_one_in']} counts helper starts of Code tickets: every {s['tool_one_in']}th Code start "
+            f"One in {s['tool_one_in']} counts helper starts of Code tickets: every {ordinal(s['tool_one_in'])} Code start "
             "goes to {tool}. The count starts again every day at midnight, this computer's time."
         )
     elif s["tool_one_in"] == 1:
@@ -434,7 +441,7 @@ def view(root: Path, rows: list[dict]) -> dict:
     notes = warnings(s, rows)
     if unreadable(root):
         notes.insert(
-            0, "The share file .orch/addons/usage/share.json could not be read; the next change replaces it."
+            0, "The share file share.json in the Usage folder could not be read; the next change replaces it."
         )
     return {
         "share": s,
