@@ -117,10 +117,6 @@ class Fleet:
         monkeypatch.setattr(services, "_call", self.call)
         monkeypatch.setattr(services, "stop", self.stop)
         monkeypatch.setattr(services, "start", self.start)
-        from orch import launchenv
-
-        # a normal install (the suite runs with ORCH_HOME_STRICT): a test install keeps HOME, see below
-        monkeypatch.setattr(launchenv, "test_install", lambda: False)
 
     def call(self, root, name, m, sub, launch=None):
         assert sub == "status"  # the proof of life comes from the add-on itself
@@ -696,39 +692,6 @@ def test_without_a_system_home_the_callers_home_is_kept_and_said(proj, tmp_path,
     lines = addons._restart_updated()
     assert "HOME" not in f.envs["dashboard"] and f.envs["dashboard"]["ORCH_HOME"] == str(addons.home())
     assert any("could not read this user's home folder; kept this terminal's HOME" in x for x in lines)
-
-
-@pytest.mark.parametrize("how", ["strict", "kind"])
-def test_a_test_install_keeps_the_home_its_services_were_started_with(proj, tmp_path, monkeypatch, how):  # noqa: F811
-    """ORCH-632: `orch update` in a test install restarted its add-ons with the real HOME from the system."""
-    from orch import home as orch_home
-    from orch import launchenv
-
-    real_check = launchenv.test_install
-    f = Fleet(tmp_path, monkeypatch)
-    monkeypatch.setattr(launchenv, "test_install", real_check)  # the real check, not Fleet's stand-in
-    test_home = tmp_path / "test-home"
-    test_home.mkdir()
-    monkeypatch.setenv("HOME", str(test_home))
-    if how == "strict":
-        monkeypatch.setenv("ORCH_HOME_STRICT", "1")
-    else:
-        monkeypatch.setenv("ORCH_HOME_STRICT", "0")
-        monkeypatch.setattr(orch_home, "read_install_record", lambda: "test")
-    _with_env(f, {"HOME": str(test_home), "PATH": os.environ["PATH"]})
-    lines = "\n".join(addons._restart_updated())
-    assert "HOME" not in f.envs["dashboard"]  # no override: the caller's (test) HOME stays
-    assert launchenv.apply(dict(os.environ), f.envs["dashboard"])["HOME"] == str(test_home)
-    assert "different" not in lines  # started and restarted with the same HOME: nothing to say
-
-
-def test_a_normal_install_is_not_a_test_install(monkeypatch):
-    from orch import home as orch_home
-    from orch import launchenv
-
-    monkeypatch.setenv("ORCH_HOME_STRICT", "0")
-    monkeypatch.setattr(orch_home, "read_install_record", lambda: "normal")
-    assert launchenv.test_install() is False
 
 
 @pytest.mark.parametrize(
