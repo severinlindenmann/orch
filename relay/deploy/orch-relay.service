@@ -1,12 +1,17 @@
 [Unit]
 Description=orch-relay
 After=network-online.target
+Wants=network-online.target
+# the admin listener may name the private-network interface (wt0:8412); until it is up the start fails
+# and is tried again every 10 s, never on another address
+StartLimitIntervalSec=0
 
 [Service]
 User=orch-relay
 EnvironmentFile=/etc/orch-relay/env
 ExecStart=/opt/orch/bin/orch-relay
 Restart=on-failure
+RestartSec=10
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=/var/lib/orch-relay
