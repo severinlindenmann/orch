@@ -92,6 +92,7 @@ SHOWN = {
         "workspace/src/orch/reviewer.py",
         "_answered_for",
     ): "history.shown_ticket(root, ticket) first (morning list)",
+    ("workspace/src/orch/tickets.py", "worked_since_prepare"): "history.shown_ticket(...) for the steps",
     ("workspace/src/orch/cli.py", "_show"): "t = history.shown_ticket(...) first",
     (
         "workspace/src/orch/review.py",
