@@ -58,3 +58,7 @@
   asks once more in a strip with one way out (Cancel, the other answer is hidden meanwhile); a sign-in or copy-only
   command has Copy only; the phone runs only orch's own commands. The review mockup shows one run card first (Run it
   now answers after 1.2 s). The draft folder `draft-848/` stays as it was.
+- 18 Nov (ORCH-425): an "Auto Reviewer" card on top of the rail with two switches that save at once: "Check finished work"
+  (workflow.auto_reviewer) and "Away for the night" (workflow.away). Hidden in a read-only copy. "Accepted for you" now lists every
+  decision of the Reviewer, the Auto Reviewer and Away mode with who and what ("Auto Reviewer · Accepted", "Away mode · Answered",
+  "Auto Reviewer · Sent back to the helper"), the why line, and Undo while it can still be undone (then "Undone").
