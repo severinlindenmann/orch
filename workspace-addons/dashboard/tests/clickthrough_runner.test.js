@@ -46,3 +46,60 @@ test('a failed step names the line of the click-through it waited on', () => {
   assert.match(where(e), /^ \(at f-session-new\.cjs:31: .+\)$/);
   assert.equal(where(new Error('no stack frame in a feature')), '');
 });
+
+// ORCH-1132: a click-through that fails by chance no longer turns the job red; it is tried once more on a fresh server
+// and named in the summary. One that hangs is stopped by its time limit.
+const { runAll, withTimeout } = require('../clickthrough/run.cjs');
+const ct = file => ({ file, name: file });
+const pass = c => ({ c, problems: [] });
+const fail = c => ({ c, problems: ['boom'] });
+
+test('a click-through that fails once and passes on the second try counts as passed and is named', async () => {
+  const freshCalls = [], log = [];
+  let between = 0;
+  const { results, secondTry } = await runAll([ct('a.cjs'), ct('b.cjs'), ct('c.cjs')], {
+    first: async c => (c.file === 'b.cjs' ? fail(c) : pass(c)),
+    fresh: async c => { freshCalls.push(c.file); assert.equal(between, 1, 'the second try runs after the shared server stopped'); return pass(c); },
+    between: async () => { between++; },
+    log: l => log.push(l),
+  });
+  assert.deepEqual(freshCalls, ['b.cjs'], 'only the failed one is tried again');
+  assert.deepEqual(secondTry, ['b.cjs']);
+  assert.deepEqual(results.map(r => r.problems.length), [0, 0, 0]);
+  assert.deepEqual(results.map(r => r.c.file), ['a.cjs', 'b.cjs', 'c.cjs'], 'the order stays');
+});
+
+test('a click-through that fails twice stays failed', async () => {
+  const { results, secondTry } = await runAll([ct('a.cjs'), ct('b.cjs')], {
+    first: async c => (c.file === 'a.cjs' ? fail(c) : pass(c)),
+    fresh: async c => fail(c),
+    log: () => {},
+  });
+  assert.deepEqual(secondTry, []);
+  assert.deepEqual(results.filter(r => r.problems.length).map(r => r.c.file), ['a.cjs']);
+});
+
+test('more failures than the limit are a real break: none is tried again', async () => {
+  let fresh = 0;
+  const log = [];
+  const { results } = await runAll(['a', 'b', 'c'].map(f => ct(f + '.cjs')), {
+    first: async c => fail(c), fresh: async c => { fresh++; return pass(c); }, maxRetries: 2, log: l => log.push(l),
+  });
+  assert.equal(fresh, 0);
+  assert.equal(results.filter(r => r.problems.length).length, 3);
+  assert.match(log.join('\n'), /3 click-throughs failed: more than 2/);
+});
+
+test('no second try starts after the deadline', async () => {
+  let fresh = 0;
+  const { results } = await runAll([ct('a.cjs')], {
+    first: async c => fail(c), fresh: async c => { fresh++; return pass(c); }, deadline: 10, now: () => 11, log: () => {},
+  });
+  assert.equal(fresh, 0);
+  assert.equal(results[0].problems.length, 1);
+});
+
+test('a hang is stopped by the time limit with a message that names it', async () => {
+  await assert.rejects(withTimeout(new Promise(() => {}), 20, 'x-hang.cjs'), /x-hang\.cjs took longer than 0s and was stopped/);
+  assert.equal(await withTimeout(Promise.resolve(7), 1000, 'quick'), 7);
+});
