@@ -68,7 +68,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| POST | `/v1/phone/pair` | `{code, name}` (no auth; one-time code from the link) | `201 {phone_id, token, workspaces: [{id, name}]}` |
+| POST | `/v1/phone/pair` | `{code, name}` (no auth; one-time code from the link) | `201 {phone_id, token, workspaces: [{id, name}]}`. A browser keeps the admin's name (`name` is ignored for it) |
 | POST | `/v1/phone/push` | `{apns_token, sandbox: bool}` | `204` |
 | GET | `/v1/phone/workspaces` | – | list of `{id, name, description, tags, icon, color, online, last_seen, open_questions, muted_until}` (only workspaces this phone may reach; `icon`/`color` = the workspace look or `null`, look.md: unknown values and missing fields fall back to letter + Automatic colour). `online` = called the relay in the last 2 minutes (unchanged); the phone itself shows a workspace as online while `last_seen` is at most 5 minutes old. `muted_until`: `null`, a time, or `"forever"`; plus `mobile_mode` = `{on, since, ends_at, machine}` (always present; `on: false` and the other three `null` when off; see **Mobile mode**); `can` = `{chat, files, tasks}` booleans (optional; absent = the phone shows no permission chips), derived only from this phone’s pairing list and workspace existence, as for `/v1/phone/send`: `chat` and `files` true for an existing workspace on its list, `files` is a UI hint, not authorization (uploads are checked on send); `tasks` follows `chat` (a phone gives work as a chat text; the relay has no separate task rule). Order of keys is not significant; all three true = no chips on the phone, all false = no access |
 | PATCH | `/v1/phone/workspaces/<ws>` | `{muted_until: <time> \| null \| "forever"}` | `200` the workspace item as listed. While muted (`"forever"`, or a time in the future) the relay sends this phone no push for anything from that workspace (texts and questions); messages are still stored and listed. `null` or a past time = not muted. A workspace not on the phone's list → `404` |
@@ -87,7 +87,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | GET | `/v1/phone/speech/<message_id>` | optional `?lang=de\|en` | `200` `audio/mpeg`: the text read aloud (see Speech). `404` unless the message is a text to this phone or to `phones` from a workspace on its list (the `/v1/phone/messages` filter) **and** (it has `body.speak` and the phone's `speak` setting is not `never`, or the setting is `always`). Empty spoken text → `404`. `?lang` other than `de`/`en` → `422 invalid`. `402 tts_cap_reached`, `503 tts_off`, `502 tts_failed` |
 | GET | `/v1/phone/settings` | – | `{speak, swiss_german, tts_cap_usd, tts_used_usd_month, mute_all_until, group_mutes}` (`mute_all_until`: `null`, a time or `"forever"`; `group_mutes`: the ACTIVE group mutes `[{host, id, muted_until}]`; both absent from an older relay = off/none). Defaults: `auto`, `false`, `10`. `tts_used_usd_month` = read-aloud cost of this phone in the current calendar month (UTC) |
 | PATCH | `/v1/phone/settings` | `{speak?: auto\|always\|never, swiss_german?: bool, tts_cap_usd?: 0..100, mute_all_until?: <time> \| null \| "forever"}` (at least one) | `200` the settings as for GET. A bad value → `422 invalid`; unknown fields are ignored (common.md) |
-| POST | `/v1/phone/invitations/redeem` | `{code}` (phone auth) | `200 {workspaces: [{id, name}]}` = the invitation's workspaces, now all on this phone's list (ones already there stay). The code comes from the same `orch://pair?relay=…&code=pc_…` link or QR as pairing and works once: unknown → `404 not_found`, used or expired → `410 gone`. The phone entry the admin made with that invitation is removed (it was never paired); the added workspaces get a refresh-hint. At most 10 calls a minute per phone, else `429 rate_limited` |
+| POST | `/v1/phone/invitations/redeem` | `{code}` (phone auth) | `200 {workspaces: [{id, name}]}` = the invitation's workspaces, now all on this phone's list (ones already there stay). The code comes from the same `orch://pair?relay=…&code=pc_…` link or QR as pairing and works once: unknown → `404 not_found`, used or expired → `410 gone` (also an invitation of the other kind: a phone never redeems a browser's invitation, nor back). The phone entry the admin made with that invitation is removed (it was never paired); the added workspaces get a refresh-hint. At most 10 calls a minute per phone, else `429 rate_limited` |
 
 ## Mobile mode
 
@@ -558,7 +558,7 @@ Auth: `X-Orch-Admin: <admin token>` (file `/etc/orch-relay/admin-token`); the po
 | GET / PUT / DELETE | `/admin/api/voice` | PUT: `{deepgram_key}` (sets or replaces the one relay-wide Deepgram key) | `{deepgram: {set: bool, last4: string \| null}}`; DELETE `204`. The key is never returned in full, never sent to phones or workspaces, and is not part of `/admin/api/shared`; it does not raise `version` |
 | GET | `/admin/api/webhooks` | – | list of all webhooks with workspace |
 | DELETE | `/admin/api/webhooks/<id>` | – | `204` |
-| GET / POST | `/admin/api/phones` | POST: `{name, workspaces: [ws…]}` | list / `201 {phone_id, link, qr_svg}` |
+| GET / POST | `/admin/api/phones` | POST: `{name, workspaces: [ws…], kind?: "phone"\|"browser"}` (default `phone`, anything else `422`) | list (each item has `kind`) / `201 {phone_id, kind, link, qr_svg}`. A phone's `link` is `orch://pair?relay=…&code=pc_…`; a browser's is `<public origin>/app#code=pc_…` (the code after `#` is never sent to a server). See **Browser sign-in** |
 | PATCH | `/admin/api/phones/<id>` | `{workspaces: [ws…]}` | `200`. Workspaces added or removed get a refresh-hint |
 | DELETE | `/admin/api/phones/<id>` | – | `204` (same effect as sign-out). Its workspaces get a refresh-hint |
 | GET / POST | `/admin/api/subscribers` | POST: `{name, workspaces?: [ws…], groups?: [grp…], kinds?: {updates?, questions?, results?, files?}, can_answer?, can_download?, push_url?}` | `{items: [subscriber], next: null}` by name / `201 {subscriber, token, link, push_secret}`. subscriber = `{id: "sub_…", name, workspaces, groups, kinds: {updates, questions, results, files}, can_answer, can_download, push: null \| {url, state: ok\|retrying\|failing, fails, next_try_at, last_ok_at}, created_at, last_seen, streams}` (`streams` = open streams now). `name`: one line of plain text (description rule), 1–40 characters. At least one workspace or group, all existing (else `422`). `kinds` default: questions and results on, updates and files off; `can_answer` and `can_download` default `false` (read-only). `can_answer: true` needs `kinds.questions` on (else `422`, also on PATCH). `link` = `<public origin>/v1/sub/<token>` and `token` are shown once; `push_secret` (`whsec_…`) only when `push_url` is set, else `null`. A `push_url` that is not `https://`, has a user name or password, or names a non-public IP → `422 invalid` (host names are checked on every delivery, see Subscribers) |
@@ -586,3 +586,18 @@ they are:
   other's directory, and messages and files between them pass rule 2 (Pair rule) above. `/admin/api/rules`
   lists only the rules the owner set.
 So do pairing a phone (`POST /v1/phone/pair`), signing it out, and editing or deleting it: its workspaces refresh their `phones` list.
+
+## Browser sign-in (ORCH-1197)
+
+A browser is a device like a phone: the admin makes it on the relay admin page (Phones, kind `browser`), it gets a
+`ph_…` id, signs in once with the invitation code and from then on uses the same `/v1/phone/*` API with its own token
+(`X-Orch-Phone` + `Authorization: Bearer`). Workspaces see it in the `phones` list of `GET /v1/refresh` with
+`kind: "browser"`; cutting it (admin delete, sign-out) works exactly as for a phone.
+
+- The invitation link is `<public origin>/app#code=pc_…`. The code is after `#`, so it is never sent to a server
+  and stays out of request logs; the relay's page sends it only when the person presses Sign in (`POST /v1/phone/pair`),
+  so a link preview cannot use it up. One use, 24 hours, like a phone's.
+- **Origin rule** for every `/v1/phone/*` route: a request with an `Origin` header other than the relay's own public
+  origin is refused with `403 forbidden` before any handler runs (the phone app sends no `Origin`). The relay never
+  sends CORS headers, so no other site can read a device answer.
+- A browser's name is the admin's label; the browser cannot rename itself at sign-in.

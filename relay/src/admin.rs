@@ -976,10 +976,10 @@ async fn list_phones(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Valu
     guard(&app, &h)?;
     let c = app.db.lock().unwrap();
     let items: Vec<Value> = c
-        .prepare("SELECT id,name,workspaces,token_hash IS NOT NULL,last_seen FROM phones ORDER BY created_at, id")?
+        .prepare("SELECT id,name,workspaces,token_hash IS NOT NULL,last_seen,kind FROM phones ORDER BY created_at, id")?
         .query_map([], |r| {
             let last: Option<i64> = r.get(4)?;
-            Ok(json!({"id": r.get::<_, String>(0)?, "name": r.get::<_, String>(1)?,
+            Ok(json!({"id": r.get::<_, String>(0)?, "name": r.get::<_, String>(1)?, "kind": r.get::<_, String>(5)?,
                 "workspaces": store::parse_ws_list(&r.get::<_, String>(2)?), "paired": r.get::<_, bool>(3)?,
                 "online": store::online(last)}))
         })?
@@ -998,6 +998,12 @@ async fn add_phone(
     if name.is_empty() {
         return Err(invalid("Give the phone a name."));
     }
+    // A browser signs in on the relay's own page (ORCH-1197); everything after pairing is the same as a phone.
+    let kind = match v.get("kind").map(|k| k.as_str()) {
+        None | Some(Some("phone")) => "phone",
+        Some(Some("browser")) => "browser",
+        _ => return Err(invalid("`kind` is phone or browser.")),
+    };
     let c = app.db.lock().unwrap();
     let ws = check_ws_list(&c, &v["workspaces"])?;
     // A phone with no workspace pairs fine and then reaches nothing.
@@ -1007,8 +1013,8 @@ async fn add_phone(
     let pid = rand_id("ph_", 10);
     let code = rand_token("pc_", 16);
     c.execute(
-        "INSERT INTO phones(id,name,workspaces,created_at) VALUES(?1,?2,?3,?4)",
-        params![pid, name, serde_json::to_string(&ws).unwrap(), now()],
+        "INSERT INTO phones(id,name,workspaces,created_at,kind) VALUES(?1,?2,?3,?4,?5)",
+        params![pid, name, serde_json::to_string(&ws).unwrap(), now(), kind],
     )?;
     c.execute(
         "INSERT INTO pair_codes(hash,phone_id,expires_at) VALUES(?1,?2,?3)",
@@ -1018,7 +1024,16 @@ async fn add_phone(
         &app.cfg.public_url,
         percent_encoding::NON_ALPHANUMERIC,
     );
-    let link = format!("orch://pair?relay={enc}&code={code}");
+    // The browser link keeps the code after `#`: a browser never sends that part to a server, so the code stays
+    // out of request logs, and the page uses it only when the person presses Sign in (a POST).
+    let link = if kind == "browser" {
+        format!(
+            "{}/app#code={code}",
+            app.cfg.public_url.trim_end_matches('/')
+        )
+    } else {
+        format!("orch://pair?relay={enc}&code={code}")
+    };
     let qr = qrcode::QrCode::new(link.as_bytes())
         .map_err(internal)?
         .render::<qrcode::render::svg::Color>()
@@ -1026,7 +1041,7 @@ async fn add_phone(
         .build();
     Ok((
         StatusCode::CREATED,
-        Json(json!({"phone_id": pid, "link": link, "qr_svg": qr})),
+        Json(json!({"phone_id": pid, "kind": kind, "link": link, "qr_svg": qr})),
     ))
 }
 

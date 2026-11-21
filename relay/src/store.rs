@@ -80,6 +80,11 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
     }
     // When the phone paired (L3): broadcasts to `phones` from before are not shown to it.
     let _ = c.execute("ALTER TABLE phones ADD COLUMN paired_at INTEGER", []);
+    // Browser sign-in (ORCH-1197): a device is a phone (the app) or a browser (the relay's own page).
+    let _ = c.execute(
+        "ALTER TABLE phones ADD COLUMN kind TEXT NOT NULL DEFAULT 'phone'",
+        [],
+    );
     crate::groups::init(c)?;
     crate::subs::init(c)?;
     Ok(())
@@ -603,11 +608,12 @@ pub fn directory(c: &Connection, me: &str) -> rusqlite::Result<Value> {
     )
 }
 
-/// Paired phones (signed in) whose list holds workspace `ws`: `[{id, name, online, last_seen}]` by name.
+/// Paired devices (signed in) whose list holds workspace `ws`: `[{id, name, kind, online, last_seen}]` by name;
+/// `kind` is `phone` or `browser`.
 /// The admin's phone pairing is the rule: these phones may reach `ws` and `ws` may send text/questions to them.
 pub fn phones_of(c: &Connection, ws: &str) -> rusqlite::Result<Vec<Value>> {
     let mut st = c.prepare(
-        "SELECT id,name,workspaces,last_seen FROM phones WHERE token_hash IS NOT NULL ORDER BY name, id",
+        "SELECT id,name,workspaces,last_seen,kind FROM phones WHERE token_hash IS NOT NULL ORDER BY name, id",
     )?;
     let rows = st.query_map([], |r| {
         Ok((
@@ -615,13 +621,14 @@ pub fn phones_of(c: &Connection, ws: &str) -> rusqlite::Result<Vec<Value>> {
             r.get::<_, String>(1)?,
             r.get::<_, String>(2)?,
             r.get::<_, Option<i64>>(3)?,
+            r.get::<_, String>(4)?,
         ))
     })?;
     let mut out = vec![];
     for row in rows {
-        let (id, name, list, last) = row?;
+        let (id, name, list, last, kind) = row?;
         if parse_list(&list).iter().any(|w| w == ws) {
-            out.push(json!({"id": id, "name": name, "online": online(last), "last_seen": last.map(fmt_time)}));
+            out.push(json!({"id": id, "name": name, "kind": kind, "online": online(last), "last_seen": last.map(fmt_time)}));
         }
     }
     Ok(out)

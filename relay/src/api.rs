@@ -55,7 +55,12 @@ pub fn router(app: AppState) -> Router {
                 .layer(DefaultBodyLimit::max(crate::transcribe::MAX_AUDIO + 1024)),
         )
         .merge(crate::problems::router())
-        .merge(crate::phone::router())
+        .merge(
+            crate::phone::router().route_layer(axum::middleware::from_fn_with_state(
+                app.clone(),
+                crate::phone::same_origin_only,
+            )),
+        )
         .merge(crate::subs::router())
         .merge(icon_routes())
         .fallback(not_found_page)
