@@ -48,7 +48,9 @@ winvm run "$NAME" "$HERE/setup.ps1" | tee "$OUT/setup.log"
 stamp setup $t
 
 t=$SECONDS; set +e
-job="$(winvm run "$NAME" --detach "$HERE/tests.ps1" -Part "$PART" -Workers "$CPUS" | tail -1)"
+# winvm passes arguments as quoted strings ('-Part' never binds as a name): positional arguments only.
+job="$(winvm run "$NAME" --detach "$HERE/tests.ps1" "$PART" "$CPUS" | sed -n 's/.*job \([0-9A-Za-z_-]*\) started.*/\1/p' | tail -1)"
+[ -n "$job" ] || { echo "no job id from winvm run --detach"; exit 1; }
 # A hung job must not hold the only clone: the tests get WINVM_TEST_MAX seconds (default 3 h), then count as failed.
 max="${WINVM_TEST_MAX:-10800}"
 while :; do
@@ -64,7 +66,7 @@ winvm run "$NAME" "$HERE/smoke.ps1" > "$OUT/smoke.log" 2>&1; src=$?
 set -e; stamp smoke $t
 
 t=$SECONDS; set +e
-winvm run "$NAME" "$HERE/standard-user.ps1" -Ref "$COMMIT" > "$OUT/standard-user.log" 2>&1; urc=$?
+winvm run "$NAME" "$HERE/standard-user.ps1" "$COMMIT" > "$OUT/standard-user.log" 2>&1; urc=$?
 set -e; stamp standard-user $t
 stamp total $t0
 echo "tests rc=$trc smoke rc=$src standard-user rc=$urc" | tee -a "$OUT/timings.txt"
