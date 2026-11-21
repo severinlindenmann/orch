@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import plistlib
+import shutil
 import sys
 from pathlib import Path
 
@@ -627,7 +628,7 @@ def test_orchs_add_on_servers_are_never_found_by_their_recorded_pid(
 
 def test_what_a_managed_service_started_is_not_found_again(cli, mac, tools, ws, monkeypatch):
     # r-1119-1255-ws-3: the kept service's main pid is a /bin/sh wrapper; its program runs as a child of it
-    monkeypatch.setattr("orch_services.found._record_pids", lambda root: {970})
+    monkeypatch.setattr("orch_services.found._managed", lambda root: ({970}, frozenset()))
     tools.set(
         ps=[
             {"pid": 970, "ppid": 1, "tty": "??", "argv": ["/bin/sh", "run.sh"]},
@@ -636,3 +637,33 @@ def test_what_a_managed_service_started_is_not_found_again(cli, mac, tools, ws, 
         lsof={"970": str(ws), "971": str(ws)},
     )
     assert jrun(cli, "found")[1].get("others", 0) == 0
+
+
+def test_a_managed_services_own_processes_are_never_found(cli, mac, tools, ws):
+    # ORCH-935 point 4: launchd brings a crashing service back with a new pid that orch has not seen yet, and the
+    # service's own children (sleep) have other pids again; Found listed them as "Running, not managed".
+    (ws / "crash.sh").write_text("#!/bin/sh\necho boom\nsleep 5\nexit 1\n", encoding="utf-8")
+    code, out = jrun(cli, "add", "Crashy job", "--id", "crash", "--start", "--", "sh", "crash.sh")
+    assert code == 0, out
+    (ws / "run.sh").write_text("#!/bin/sh -e\nsleep 5\n", encoding="utf-8")
+    (ws / "run.sh").chmod(0o755)
+    assert jrun(cli, "add", "Runner", "--id", "runner", "--start", "--", "./run.sh")[0] == 0
+    assert (
+        jrun(cli, "add", "Worker", "--id", "worker", "--", "/usr/bin/python3", "worker.py")[0] == 0
+    )  # stopped
+    sh = shutil.which("sh")  # launchd runs the full path the plist names
+    tools.set(
+        ps=[
+            {"pid": 970, "ppid": 1, "tty": "??", "argv": [sh, "crash.sh"]},  # started again after a crash
+            {"pid": 971, "ppid": 970, "tty": "??", "argv": ["sleep", "5"]},  # what the service started
+            {"pid": 972, "ppid": 1, "tty": "??", "argv": ["/bin/sh", "-e", str((ws / "run.sh").resolve())]},
+            {"pid": 973, "ppid": 1, "tty": "??", "argv": ["/usr/bin/python3", "other.py"]},
+            {"pid": 974, "ppid": 1, "tty": "??", "argv": ["/usr/bin/python3", "worker.py"]},
+        ],
+        lsof={str(n): str(ws) for n in (970, 971, 972, 973, 974)},
+    )
+    out = jrun(cli, "found")[1]
+    assert all(not i["id"].startswith("process:") for i in out["found"])
+    # only 973 (a program orch does not keep) and 974 (a stopped service's command started by hand) are counted;
+    # 970-972 are the kept services' own processes, a shebang with a flag too
+    assert out["others"] == 2

@@ -353,7 +353,23 @@ def _is_orch(argv: list[str]) -> bool:
     return False
 
 
-def _processes(root: Path, skip: set[int], managed: set[int] = frozenset()) -> list[dict]:
+def _same_command(argv: list[str], commands: frozenset[str]) -> bool:
+    """The process runs a managed service's own command: exactly, or behind its interpreter (a script with a
+    shebang shows in ps as `/bin/sh /path/crash.sh`, or `/bin/sh -e /path/crash.sh` with a shebang flag).
+    ps joins the words with spaces, so whole command lines are compared (a path may hold a space)."""
+    if " ".join(argv) in commands:
+        return True
+    if len(argv) < 2 or not _interpreter(Path(argv[0]).name):
+        return False
+    i = 1
+    while i < len(argv) - 1 and argv[i].startswith("-"):
+        i += 1
+    return " ".join(argv[i:]) in commands
+
+
+def _processes(
+    root: Path, skip: set[int], managed: set[int] = frozenset(), commands: frozenset[str] = frozenset()
+) -> list[dict]:
     cp = _tool(["ps", "-ww", "-U", str(os.getuid()), "-o", "pid=,ppid=,tty=,lstart=,command="])
     if not cp or cp.returncode != 0:
         return []
@@ -378,11 +394,18 @@ def _processes(root: Path, skip: set[int], managed: set[int] = frozenset()) -> l
     addons = _addon_pids()
 
     def from_orch(pid: int) -> bool:
+        """orch started it, or a service orch keeps runs it (its main process, the same command started again
+        by launchd after a crash with a new pid, or anything those started): never a found item."""
         seen = set()
         while pid in rows and pid not in seen:
             seen.add(pid)
             argv = rows[pid]["argv"]
-            if pid in skip or _is_orch(argv) or (pid in addons and "orch" in " ".join(argv).lower()):
+            if (
+                pid in skip
+                or _is_orch(argv)
+                or (pid in addons and "orch" in " ".join(argv).lower())
+                or _same_command(argv, commands)
+            ):
                 return True
             pid = rows[pid]["ppid"]
         return False
@@ -453,8 +476,8 @@ def scan(root: Path, processes: bool = False) -> list[dict]:
         return []
     done = _adopted(root)
     units = [u for u in units if u["id"] not in done]
-    managed = _record_pids(root)
-    items = units + (_processes(root, pids | managed, managed) if processes else [])
+    kept, commands = _managed(root)
+    items = units + (_processes(root, pids | kept, kept, commands) if processes else [])
     items.sort(key=lambda i: (i["name"].lower(), i["id"]))
     return items
 
@@ -464,8 +487,8 @@ def others(root: Path) -> int:
     if not (sys.platform == "darwin" or sys.platform.startswith("linux")):
         return 0
     _units, pids = _launchd(root) if sys.platform == "darwin" else _systemd(root)
-    managed = _record_pids(root)
-    return len(_processes(root, pids | managed, managed))
+    kept, commands = _managed(root)
+    return len(_processes(root, pids | kept, kept, commands))
 
 
 def _addon_pids() -> set[int]:
@@ -481,29 +504,40 @@ def _addon_pids() -> set[int]:
     return {e["pid"] for e in data if isinstance(e, dict) and isinstance(e.get("pid"), int) and e["pid"] > 0}
 
 
-def _record_pids(root: Path) -> set[int]:
-    """Main pids of the services orch keeps (made or adopted): their processes are not found again."""
+def _managed(root: Path) -> tuple[set[int], frozenset[str]]:
+    """The services orch keeps (made or adopted): their main pids and the commands they run. Their processes,
+    and what those start, are not found again, also while launchd brings a crashing one back with a new pid."""
     from . import drivers
     from .cli import _spec, _workspace_id
 
-    out: set[int] = set()
+    pids: set[int] = set()
+    argvs: set[str] = set()  # whole command lines, as ps shows them
     recs, _bad = store.load_all(root)
     if not recs:
-        return out
+        return pids, frozenset()
     try:
         drv = drivers.get()
         drv.check()
         wid = _workspace_id(root)
     except Refused:
-        return out
+        return pids, frozenset()
     for r in recs:
         try:
-            st = drv.status(_spec(root, r, wid, strict=False))
+            spec = _spec(root, r, wid, strict=False)
+        except Refused:
+            continue
+        # The command counts only while the person wants the service running (started, or starts by itself): a
+        # stopped service's command run by hand is not orch's. An adopted job's words are only shown.
+        wanted = store.read_state(root, r["id"]).get("running") is True or bool(r.get("auto"))
+        if wanted and not spec.external:
+            argvs.add(" ".join(spec.argv))
+        try:
+            st = drv.status(spec)
         except Refused:
             continue
         if st.running and st.pid:
-            out.add(st.pid)
-    return out
+            pids.add(st.pid)
+    return pids, frozenset(argvs)
 
 
 def note() -> str | None:

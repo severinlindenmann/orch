@@ -660,6 +660,8 @@ def test_split_buttons_switch_log_and_remove(tmp_path):
     sw = next(x for x in walk(web) if x["cls"] == "switch")
     assert sw["attrs"]["role"] == "switch" and sw["attrs"]["aria-checked"] == "true"
     assert [x["text"] for x in walk(web) if x["data"].get("splitLog")] == ["Open log"]
+    # ORCH-935: on a wide screen the log lines are already in view; Open log is only for the phone width
+    assert [x["cls"] for x in walk(web) if x["data"].get("splitLog")] == ["btn ghost sm phone-only"]
     log = next(x for x in walk(web) if x["cls"] == "log-lines")
     assert [x["text"] for x in walk(log) if x["tag"] == "li"][-1] == "12:15:40 key loaded: ••••••"
     rm = next(x for x in walk(web) if x["data"].get("verb") == "remove")

@@ -65,6 +65,9 @@ async function until(what, fn, ms = T) {
     await pick(WEB);
     out.noOverflow = out.noOverflow && await p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
     await shot('390-panel');
+    // Open log (phone width only, ORCH-935): the log of that service gets the focus
+    await panel(WEB).locator('[data-split-log]').click();
+    await until('log focused', () => p.evaluate(id => document.activeElement?.dataset?.log === id, WEB)); step('Open log');
     await panel(WEB).locator('.phone-only [data-split-pick=""]').click();   // ← All services
     await until('phone list again', async () => !(await panel(WEB).isVisible()) && await row(WEB).isVisible());
     step('390: list, panel and back to the list');
@@ -97,9 +100,9 @@ async function until(what, fn, ms = T) {
     await press(sw());
     await until('switch off', async () => (await sw().getAttribute('aria-checked').catch(() => '')) === 'false'); step('switch off');
 
-    // Open log: the log of that service gets the focus
-    await panel(TICK).locator('[data-split-log]').click();
-    await until('log focused', () => p.evaluate(id => document.activeElement?.dataset?.log === id, TICK)); step('Open log');
+    // a wide screen shows the log lines already: no Open log button there (ORCH-935)
+    check(!(await panel(TICK).locator('[data-split-log]').isVisible()), 'no Open log at 1280');
+    check(await panel(TICK).locator('[data-log]').isVisible(), 'log lines shown at 1280'); step('no Open log at 1280');
 
     // Made by opens the ticket
     await pick(WEB);

@@ -461,7 +461,7 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
         nxt = (
             f"{rec['name']} starts by itself after this computer restarts."
             if want
-            else f"{rec['name']} no longer starts by itself; you start it by hand."
+            else f"{rec['name']} no longer starts by itself after this computer restarts; after a crash it still starts again."
         )
         return _emit(args, {"service": _state(root, drv, rec, wid), "next": nxt}, nxt)
     if verb == "remove":
@@ -670,13 +670,37 @@ def cmd_checker(args, root: Path) -> int:
     if args.cmd == "stop":
         stopped = service.stop(root)
         text = "The regular check stopped." if stopped else "The regular check was not running."
-        return _emit(args, {"stopped": stopped}, text)
+        keep = _still_running(root)
+        if keep:  # the computer's service tool keeps them; only orch's watching ends (ORCH-935)
+            what, them = ("1 service keeps", "it") if keep == 1 else (f"{keep} services keep", "them")
+            text += f"\n{what} running on this computer; orch does not watch {them} while the check is off."
+        return _emit(args, {"stopped": stopped, "still_running": keep}, text)
     pid = service.running_pid(root)
     if pid:
         return _emit(args, {"running": True, "pid": pid}, f"The regular check runs (pid {pid}).")
     text = "The regular check is off. Start it: orch start (or orch services start)"
     _emit(args, {"running": False}, text)
     return 1
+
+
+def _still_running(root: Path) -> int:
+    """How many of this workspace's services run now (or are being started again): stopping the regular check
+    leaves them running. 0 when that cannot be told."""
+    recs, _bad = store.load_all(root)
+    if not recs:
+        return 0
+    try:
+        drv, wid = _driver(), _workspace_id(root)
+    except (Refused, OSError):
+        return 0
+    n = 0
+    for r in recs:
+        try:
+            st = drv.status(_spec(root, r, wid, strict=False))
+        except (Refused, OSError):
+            continue
+        n += bool(st.running or st.starting)
+    return n
 
 
 def _checker_round(root: Path) -> None:
