@@ -42,6 +42,14 @@
         "registered_at": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] }
       }
     },
+    "signing_key_state": {
+      "type": "object",
+      "required": ["state", "pending_change"],
+      "properties": {
+        "state": { "enum": ["active", "withdrawn", "blocked"], "description": "withdrawn = the workspace withdrew its key (signed); blocked = the relay admin blocked it. The relay refuses messages signed with a withdrawn or blocked key" },
+        "pending_change": { "type": "boolean", "description": "A key change waits for the relay admin's approval" }
+      }
+    },
     "workspace": {
       "type": "object",
       "required": ["id", "name", "description", "tags", "online", "last_seen"],
@@ -56,7 +64,8 @@
         "last_seen": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
         "can_send": { "$ref": "#/$defs/can", "description": "What THIS workspace may send to it (pair rule self → it)" },
         "accepts_from": { "$ref": "#/$defs/can", "description": "What it may send to THIS workspace (pair rule it → self)" },
-        "signing_key": { "oneOf": [{ "$ref": "#/$defs/signing_key" }, { "type": "null" }], "description": "The public key it registered with the relay (relay-api.md, Signing key). A HINT only: a receiver trusts a key after a person accepted its fingerprint, never because the relay lists it. null or missing = none registered yet" }
+        "signing_key": { "oneOf": [{ "$ref": "#/$defs/signing_key" }, { "type": "null" }], "description": "The public key it registered with the relay (relay-api.md, Signing key). A HINT only: a receiver trusts a key after a person accepted its fingerprint, never because the relay lists it. null or missing = none registered yet" },
+        "signing_key_state": { "oneOf": [{ "$ref": "#/$defs/signing_key_state" }, { "type": "null" }], "description": "What the relay knows about that key (relay-api.md, Signing keys: change and withdraw). A HINT only, like signing_key: a broken relay can hide a withdrawal. null = no key" }
       }
     }
   }

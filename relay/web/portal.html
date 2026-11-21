@@ -12,8 +12,8 @@
 'use strict';
 // The visible name of the problems page lives only here; rename it in this one line.
 const PROBLEMS_LABEL='Report a problem';
-const screens=[['overview','Overview'],['add','Add workspace'],['groups','Groups'],['rules','Who can do what'],['messages','Messages'],['config','Shared tools'],['webhooks','Webhooks'],['subscribers','Subscribers'],['phones','Phones'],['problems',PROBLEMS_LABEL]];
-function uiIcon(k){const span=document.createElement('span');span.innerHTML=window.icon(({overview:'home',add:'plus',groups:'group',rules:'swap',messages:'message',config:'tools',webhooks:'webhook',subscribers:'antenna',phones:'phone',problems:'file'})[k]||k,16);return span.firstElementChild}
+const screens=[['overview','Overview'],['add','Add workspace'],['groups','Groups'],['rules','Who can do what'],['messages','Messages'],['config','Shared tools'],['webhooks','Webhooks'],['subscribers','Subscribers'],['phones','Phones'],['signatures','Signatures'],['problems',PROBLEMS_LABEL]];
+function uiIcon(k){const span=document.createElement('span');span.innerHTML=window.icon(({overview:'home',add:'plus',groups:'group',rules:'swap',messages:'message',config:'tools',webhooks:'webhook',subscribers:'antenna',phones:'phone',signatures:'lock',problems:'file'})[k]||k,16);return span.firstElementChild}
 const $=s=>document.querySelector(s), app=$('#app'), enc=encodeURIComponent;
 let token='', epoch=0, workspaces=[], phoneList=[], subList=[], groupList=[], mapGroup='', toastTimer;
 try{token=sessionStorage.getItem('orch_admin')||''}catch{}
@@ -304,6 +304,30 @@ async function webhooks(v){
  filter.onchange=render;render();show(...head('','Webhooks'),el('div',{class:'filters'},field('Workspace',filter)),list);
 }
 
+// ---------- signatures (signed messages, ORCH-1201) ----------
+const SIG_STATE={active:['Valid','success'],withdrawn:['Withdrawn by the workspace','danger'],blocked:['Blocked by you','danger'],replaced:['Replaced','outline']};
+function sigChip(st){const [t,c]=SIG_STATE[st]||[st,'outline'];return el('span',{class:'chip '+c},t)}
+function fp(k){return el('span',{class:'mono'},k&&k.fingerprint?k.fingerprint:'—')}
+async function signaturesPage(v){
+ const data=await api('/signing-keys');if(v!==epoch)return;const rows=data.workspaces||[];const on=!!data.require_signed;
+ const sigAct=(w,path,label,busyLabel,done,cls,key)=>button(label,async()=>{await api('/signing-keys/'+enc(w.workspace)+'/'+path,'POST',{key_id:key.key_id});toast(done);await route();focusMain()},cls,busyLabel);
+ let filled=false;const pend=rows.filter(w=>w.pending).map(w=>{const p=w.pending,lost=p.kind==='no_old_key';const main=!lost&&!filled;if(main)filled=true;
+  return el('div',{class:'card-row'},el('div',{class:'grow'},el('h3',{},w.name),sub('New signature '),fp(p),sub(lost?'Not confirmed with its old signature: a lost computer, or someone else. Check with the workspace owner before you approve.':'Confirmed with its old signature. Requested '+ago(p.requested_at)+'.')),
+   lost?el('span',{class:'chip danger'},'Without the old signature'):el('span',{class:'chip warning'},'Changed'),
+   el('div',{class:'actions'},sigAct(w,'approve','Approve','Approving…','Approved. The new signature is now in use.',main?'primary':'small',p),sigAct(w,'reject','Keep current','Keeping…','Kept the current signature.','small',p)))});
+ const list=rows.map(w=>{const k=w.key;
+  const earlier=(w.ended||[]).map(e=>sub('Earlier: '+(e.fingerprint||'—')+' · '+(SIG_STATE[e.state]||[e.state])[0]+' '+time(e.at)));
+  return el('div',{class:'card-row'},el('div',{class:'grow'},el('h3',{},w.name),k?fp(k):sub('No signature yet: this workspace has not updated orch.'),k?sub('Since '+time(k.registered_at)):null,...earlier),
+   k?sigChip(k.state):el('span',{class:'chip outline'},'Not signed'),
+   k&&k.state==='active'?moreMenu(w.name,button('Block this signature',async()=>{if(!await confirmDialog('Block the signature of '+w.name+'?','Its messages are refused until you approve a new signature. Use this when its computer is lost or taken over.','Block'))return;await api('/signing-keys/'+enc(w.workspace)+'/block','POST',{key_id:k.key_id});toast('Signature blocked');await route();focusMain()},'ghost danger')):null)});
+ const unsigned=rows.filter(w=>!w.key||w.key.state!=='active').length;
+ const sw=panel('Signed messages only',el('div',{class:'form-body'},el('p',{class:'voice-status'},el('span',{class:'badge'+(on?' success':' neutral')},on?'On':'Off'),' '+(on?'The relay refuses every message without a valid signature.':'Messages without a signature still go through. Turn this on once every workspace shows a valid signature.')),
+  on?button('Turn off',async()=>{if(!await confirmDialog('Let unsigned messages through again?','Messages without a signature will be delivered again.','Turn off'))return;await api('/signing-keys/settings','PUT',{require_signed:false});toast('Unsigned messages go through again');await route();focusMain()},'small danger')
+   :button('Turn on',async()=>{if(unsigned&&!await confirmDialog('Turn on signed messages only?',unsigned+(unsigned===1?' workspace has':' workspaces have')+' no valid signature. Their messages will be refused.','Turn on'))return;await api('/signing-keys/settings','PUT',{require_signed:true});toast('Only signed messages go through now');await route();focusMain()},'small')));
+ show(el('header',{class:'page-heading'},el('h1',{tabindex:-1},'Signatures'),el('p',{class:'muted'},'Each workspace signs what it sends. The relay passes on only messages that match the workspace’s signature.')),
+  pend.length?panel('Waiting for your approval · '+pend.length,...pend):null,
+  panel('Workspaces · '+rows.length,...(list.length?list:[empty('No workspaces yet','Add a workspace first.')])),sw);
+}
 // ---------- subscribers ----------
 const subscriberKinds=[['updates','Updates','Started, working, notes — can be a lot'],['questions','Questions','Asked by helpers'],['results','Results','Done, failed, stopped'],['files','Files','Evidence files attached to results']];
 const subscriberPath=s=>'/subscribers/'+enc(s.id);
@@ -751,7 +775,7 @@ document.body.classList.remove('menu-open');$('#menu').setAttribute('aria-expand
  if(!token){auth();return}document.body.classList.remove('signedout');const v=++epoch;
  const topAdd=$('#top-add');topAdd.hidden=!['overview','subscribers'].includes(key);topAdd.textContent=key==='subscribers'?'Add subscriber':'Add workspace';topAdd.href=key==='subscribers'?'#subscribers':'#add';topAdd.onclick=key==='subscribers'?e=>{e.preventDefault();subscriberDialog()}:null;document.querySelectorAll('dialog[open]').forEach(d=>orch.close(d));const changed=lastRoute!==null&&lastRoute!==key;lastRoute=key;
  const slow=loadingTimer=setTimeout(()=>{if(v===epoch)app.replaceChildren(skeleton())},300);
- try{const ws=await all('/workspaces');if(v!==epoch)return;workspaces=ws;phoneList=await all('/phones');if(v!==epoch)return;groupList=(await api('/groups')).items||[];if(v!==epoch)return;const subs=await api('/subscribers').catch(e=>{if(e.status===404)return {items:[]};throw e});if(v!==epoch)return;subList=subs.items||[];await ({overview,add,groups:groupsPage,rules,messages,config,webhooks,subscribers:subscribersPage,phones,problems:problemsPage}[key])(v);if(v===epoch){touched();if(changed)orch.enter(app)}}catch(e){if(v!==epoch||!token)return;show(panel('This page could not be loaded',empty('Could not load this page',e.message,button('Try again',()=>route()))))}finally{clearTimeout(slow)}
+ try{const ws=await all('/workspaces');if(v!==epoch)return;workspaces=ws;phoneList=await all('/phones');if(v!==epoch)return;groupList=(await api('/groups')).items||[];if(v!==epoch)return;const subs=await api('/subscribers').catch(e=>{if(e.status===404)return {items:[]};throw e});if(v!==epoch)return;subList=subs.items||[];await ({overview,add,groups:groupsPage,rules,messages,config,webhooks,subscribers:subscribersPage,phones,signatures:signaturesPage,problems:problemsPage}[key])(v);if(v===epoch){touched();if(changed)orch.enter(app)}}catch(e){if(v!==epoch||!token)return;show(panel('This page could not be loaded',empty('Could not load this page',e.message,button('Try again',()=>route()))))}finally{clearTimeout(slow)}
 }
 for(const [key,title,hidden]of screens)if(!hidden)$('#nav').append(el('a',{href:'#'+key,class:'nav-item'},uiIcon(key),title));
 $('#menu').addEventListener('click',()=>{const o=document.body.classList.toggle('menu-open');$('#menu').setAttribute('aria-expanded',String(o))});

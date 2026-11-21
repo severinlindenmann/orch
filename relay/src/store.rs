@@ -84,6 +84,7 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
     let _ = c.execute("ALTER TABLE phones ADD COLUMN paired_at INTEGER", []);
     crate::groups::init(c)?;
     crate::subs::init(c)?;
+    crate::signgate::init(c)?;
     Ok(())
 }
 
@@ -597,6 +598,7 @@ pub fn directory(c: &Connection, me: &str) -> rusqlite::Result<Value> {
             w["can_send"] = can(rule_flags(c, me, &id));
             w["accepts_from"] = can(rule_flags(c, &id, me));
             w["signing_key"] = crate::signkeys::info(c, &id);
+            w["signing_key_state"] = crate::signgate::state_info(c, &id);
             w
         })
         .collect();

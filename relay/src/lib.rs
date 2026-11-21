@@ -13,6 +13,7 @@ pub mod problems;
 pub mod push;
 pub mod rules;
 pub mod shared;
+pub mod signgate;
 pub mod signkeys;
 pub mod speech;
 pub mod state;

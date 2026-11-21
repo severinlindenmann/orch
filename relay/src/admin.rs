@@ -105,6 +105,23 @@ pub fn router(app: AppState) -> Router {
         )
         .route("/admin/api/webhooks", get(webhooks))
         .route("/admin/api/webhooks/:id", delete(del_webhook))
+        .route("/admin/api/signing-keys", get(crate::signgate::admin_list))
+        .route(
+            "/admin/api/signing-keys/settings",
+            put(crate::signgate::admin_settings),
+        )
+        .route(
+            "/admin/api/signing-keys/:id/approve",
+            post(crate::signgate::admin_approve),
+        )
+        .route(
+            "/admin/api/signing-keys/:id/reject",
+            post(crate::signgate::admin_reject),
+        )
+        .route(
+            "/admin/api/signing-keys/:id/block",
+            post(crate::signgate::admin_block),
+        )
         .route("/admin/api/phones", get(list_phones).post(add_phone))
         .route(
             "/admin/api/phones/:id",

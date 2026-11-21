@@ -39,7 +39,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| GET | `/v1/whoami` | – | `{id, name, description, tags, icon, color, look_by, phones: n, pending, signing_key}` (`signing_key`: see Signing key below, `null` = none registered yet) (`icon`/`color`/`look_by`: look.md): the approved values, plus `pending` = `{description: string\|null, tags: [..]\|null, at}` (only the proposed fields are set; `rev` identifies this exact proposal) or `null` |
+| GET | `/v1/whoami` | – | `{id, name, description, tags, icon, color, look_by, phones: n, pending, signing_key, signing_key_state}` (`signing_key`: see Signing key below, `null` = none registered yet; `signing_key_state`: see Signing keys: change and withdraw) (`icon`/`color`/`look_by`: look.md): the approved values, plus `pending` = `{description: string\|null, tags: [..]\|null, at}` (only the proposed fields are set; `rev` identifies this exact proposal) or `null` |
 | PATCH | `/v1/me` | `{description?: string ≤ 280, tags?: [string ≤ 24, ≤ 8 items]}` (at least one) | `202 {…whoami, status: "pending"}`. The change is only a proposal: the owner must approve it in the admin panel, and until then the old values stay in effect everywhere (directory, refresh snapshot, phones). One pending change per workspace; a new one replaces it. `description` is one line of plain text, characters from Unicode categories L, M, N, P, S and Zs only (no control, newline, bidi or zero-width characters), NFC-normalised, no Default_Ignorable_Code_Point characters (variation selectors, U+034F, U+3164, ...) or U+2800, at most 2 combining marks in a row; tags are lowercase `[a-z0-9-]`, 1–24 characters. Admin-set values follow the same rules. Writes only the pending fields, only while the calling token is still current (else `401`). Bad input → `422 invalid` |
 | PATCH | `/v1/me` (look) | `{icon?: <id>\|null, color?: <token>\|null}` (at least one; look.schema.json `me_look_patch`) | `200 {…whoami}`. Applied at once, not pending; sets `look_by = workspace`. Left out = unchanged, `null` = default. One bad value → `422 invalid`, nothing stored. Look fields mixed with `description`/`tags` or any other field → `422` (send them on their own). Not part of `workspaces.json`: no version bump, no refresh-hint (look.md, vectors/look-v1.json `me_patch`) |
 | PUT | `/v1/me/signing-key` | `{alg: "ed25519", public_key: <43 characters>}` (no other field) | `201 {alg, public_key, key_id, registered_at, status: "stored"}`; the same key again → `200 {…, status: "unchanged"}`; a different key while one is stored → `409 key_exists` (a key change is a statement signed by the old key, a later step: the token alone never swaps it); a bad key or body → `422 invalid`, nothing stored. See **Signing key** below |
@@ -68,9 +68,59 @@ form). It is never sent: only the public key is registered here.
 - `key_id`: the first 16 hex characters of SHA-256(`"ed25519"` + raw key). An index, never the trust decision.
 - Fingerprint (what people compare): the same hash in Crockford base32, the first 32 characters as 8 groups of 4. A
   workspace shows its own (`orch relay key`, `orch relay status`, `orch relay whoami`), always computed from its own
-  key, never read from the relay. The relay never sends a fingerprint.
+  key, never read from the relay. The relay never sends a fingerprint to a workspace or phone (only its own admin
+  page shows them).
 - The relay keeps the key and shows it in whoami and in each directory item (`workspaces.schema.json` `signing_key`)
   as a HINT only: a receiver trusts a key once a person accepted its fingerprint, never because the relay lists it.
+
+### Signing keys: change and withdraw (ORCH-1201)
+
+The relay is the first gate for signed messages (design note ORCH-1027 section 4.1; the receiver is the deciding
+gate). Statements are signed exactly like messages (`"orch-sig-v1" 0x00 purpose 0x00 bytes`, envelope
+`{sig_v, key_id, signed, sig}`) and read with the same strict JSON reader.
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| POST | `/v1/me/signing-key/change` | `{envelope, new_sig?}`, purpose `key-rotate` | `202 {status: "pending", kind: "signed"\|"no_old_key", key_id}`; held until the relay admin approves |
+| POST | `/v1/me/signing-key/withdraw` | `{envelope}`, purpose `key-withdraw` | `200 {status: "withdrawn", key_id}` |
+
+- Key change statement: `{"v":1,"type":"key-rotate","from":<ws>,"old_key_id":<id or null>,"new_public_key":<43
+  chars>,"created_ms":<int>}`, no other fields. Signed by the current key (`old_key_id` = its id) with `new_sig` = the
+  new key's signature over the same input (proof the workspace holds the new key): kind `signed`. Without the old key
+  (lost computer): `old_key_id` null, the envelope signed by the new key, no `new_sig`: kind `no_old_key`, shown to
+  the admin in red. A newer request replaces a pending one. Refused (422): a wrong signature or proof, a new key
+  this workspace already used, a statement whose `old_key_id` is not the current key (an old statement replayed),
+  and a change signed by a withdrawn or blocked key (`key_withdrawn` / `key_blocked`: such a key never vouches for
+  a replacement; send the change without it). A workspace with no key registers with `PUT /v1/me/signing-key`.
+- Until the admin approves, messages signed with the new key are refused (`unknown_key`) and the old key keeps
+  working. On approval the old key ends as `replaced` and is refused from then on. Relay approval is a speed bump
+  against a stolen token, never proof: every receiver shows Changed and needs its own Accept again.
+- Withdraw statement: `{"v":1,"type":"key-withdraw","from":<ws>,"key_id":<the key's id>,"created_ms":<int>}`,
+  signed by the key it withdraws. Final for that key.
+- whoami and each directory item carry `signing_key_state` `{state: active|withdrawn|blocked, pending_change}`
+  (`null` = no key), a hint like `signing_key`.
+- `POST /v1/messages` with an `envelope` (section Signed messages (v1)): refused `422 key_withdrawn` /
+  `422 key_blocked` when the sender's key ended; `422 unknown_key` when it has none or signs with another key;
+  `409 replayed` for a known id with other signed bytes (the same bytes again stay `200 duplicate`). The relay keeps
+  the signed bytes' digest with the message for 90 days (the message retention); receivers refuse text older than
+  30 days themselves.
+- **Signed messages only** (the hard cut, choice C): off by default. While off, a message without `envelope` goes
+  through as before; a message WITH an envelope is always checked. When the admin turns it on, every message
+  without an envelope is refused `422 missing_signature`. Relay-made messages (refresh-hint, webhook, control,
+  subscriber answers) never carry an envelope and are not affected. Receivers keep their own local "signed only"
+  setting, which no relay switch can undo.
+
+Admin API (admin token; the relay admin page **Signatures** uses it):
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| GET | `/admin/api/signing-keys` | – | `{require_signed, workspaces: [{workspace, name, key: {public_key, key_id, fingerprint, state, registered_at}\|null, pending: {public_key, key_id, fingerprint, kind, requested_at}\|null, ended: [{public_key, key_id, fingerprint, state, at}]}]}` |
+| PUT | `/admin/api/signing-keys/settings` | `{require_signed: bool}` | `200 {require_signed}` |
+| POST | `/admin/api/signing-keys/<ws>/approve` | `{key_id}` of the pending key | `200`; `409 stale` when that is not the pending key any more |
+| POST | `/admin/api/signing-keys/<ws>/reject` | `{key_id}` of the pending key | `200`; `409 stale` |
+| POST | `/admin/api/signing-keys/<ws>/block` | `{key_id}` of the current key | `200`; also drops a pending change signed by it; `409 stale` |
+
+Only the admin page shows fingerprints from the relay; a workspace or phone never reads a fingerprint from the relay.
 
 ## Usage counts and policy (draft 02; usage-counts.md, counts.schema.json)
 
