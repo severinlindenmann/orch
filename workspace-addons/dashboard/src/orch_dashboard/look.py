@@ -167,7 +167,7 @@ def place_id(root: Path) -> str | None:
         from orch.addons import read_local_id
 
         local = read_local_id(root)
-    except Exception:
+    except (ImportError, OSError, ValueError):
         return None
     if not local:
         return None

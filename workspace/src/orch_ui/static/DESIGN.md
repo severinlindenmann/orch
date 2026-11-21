@@ -25,6 +25,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `preview.css`, `fileviewer.*`, `evidence.js`, `blocks.*` | File and result previews, viewer, proof, blocks. |
 | `results.css`, `results.js` (17 Nov, ORCH-263) | Result widgets, look from Focus draft D: `UI.result(item, {size: 'sm' \| 'lg', state})` for the 16 kinds (Markdown, text and logs, code, JSON and YAML, table, web page, PDF, picture, video, audio, chart, change, pull request link, archive, plain link, unknown file), each loaded, empty, loading, error and too big; `UI.resultOverlay(list, i)` the big overlay (← → between results, × Close, Esc, a click outside). `UI.result.kindOf(name)` picks the kind. No fetching: the page hands in the content. Gallery: Result widgets. The dashboard feeds them from a ticket's real files, evidence, check runs and links in one place (`pages/results-feed.js`, ORCH-697: `resultsHost(ticket)` on wall tiles, in a session's chat and on the ticket page); `.results-host`, `.result-links` and `.result-more` lay them out. |
 | `qr.js` | QR code picture for a link (`OrchQR.svg(text)`, byte mode, ECC M, null when too long), used by Share my places (ORCH-1273). |
+| `term.css`, `term.js`, `xterm*.js`, `LICENSE-xterm.txt` (19 Nov, ORCH-744) | The helper's real screen, `UI.term({label, onInput, onSize})` on the terminal bridge: xterm.js 5.5.0 with its WebGL renderer and fit addon, vendored unchanged (licence and checksums in `LICENSE-xterm.txt`; the xterm.css rules it needs are in `term.css` on tokens). Watching only by default, **Let me type** switch, Copy, a paste with a line end asks once, the screen follows its box while typing. Gallery: Terminal. |
 | `question-card*.js`, `composer.*` | Question card, chat composer (`UI.composer`: words, pasted screenshots, picked or dropped files; `voice:true` adds Record, `UI.voiceRecorder`, words only from on-device speech to text; `send:false` inside the Review comment sheet, ORCH-422; `layout:'row'` is draft D's message box in a Focus pane: previews above one line of clip, words and Send, ORCH-695). |
 | `gallery.html`, `gallery.js`, `gallery.css`, `state-controls.js`, `samples/` | The living style guide, its fixtures, and the Loaded / Loading / Empty / Error switcher the mockup pages use. |
 | `mockup.css` | Mockup-only layout, linked only by the dashboard mockup pages (merged from the former per-draft sheets, #795 D1). Every rule is scoped with `body.mk-<draft>`; not for product pages, no new rules (R6.2). |
@@ -352,6 +353,20 @@ done: … · 14:21"); the helper's words are `.live-chat-msg` on the left (`surf
 (`data-w=y`, `brand-soft`), each with "Helper · 14:38" or "You · 14:55" above, and its links (`.live-links`) inside.
 The waiting question is never a message: it is the orange card (`.live-ask`, `needs-you` edge, `warning-soft`) above
 the chat, answered there with its options or own words.
+
+### Terminal (ORCH-744)
+`.term` is the helper's real screen wherever a page shows it (the new Focus pane in Terminal view, dashboard
+`pages/liveterm.js`, fed by the terminal bridge's stream). One line on top says what you can do now ("Watching ·
+select text to copy it", "Typing: your keys go to the helper · Shift+Tab stops", "Watching only · typing is off in
+Settings"), then **Let me type** (a `.switch`, shown only when the workspace allows typing) and Copy (the selection,
+else all of the terminal's text). Typing on gives the box a brand edge and a blinking cursor (still with reduced
+motion). Nothing goes out while watching; a paste with a line end shows `.term-ask` ("Paste 3 lines into the helper's
+screen?" Paste / Cancel) first; Ctrl+C or Cmd+C with a selection copies. The screen is xterm.js on a canvas (WebGL,
+loaded before the terminal opens so no inline style is added); its colours are read from the tokens. A program's
+clipboard writes and title changes are ignored; links open only for http and https, with noopener. While watching the
+screen keeps the helper's size and scrolls; while typing it follows its box. States: loading (skeleton), live,
+reconnecting (the last screen stays, typing off until the person turns it on again), typing off, closed, no screen
+(one sentence why), no WebGL (one sentence, the chat view instead).
 
 ### Voice into the message box (ORCH-696)
 Only while the relay is on: a microphone (`btn icon sm ghost`, "Speak") sits in `.live-msg-row` between the words and

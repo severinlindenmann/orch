@@ -368,3 +368,52 @@ def test_one_bad_pass_counts_once_even_when_it_was_also_started_again(
     _crash(fake)
     assert _check(cli)["failing"] is True and len(orch.asks()) == 1
     assert "3 times" in orch.ticket()["questions"][0]["text"]
+
+
+def test_a_silent_port_just_after_a_start_is_starting_not_a_failure(monkeypatch):
+    """ORCH-639: Restart on a web preview showed 'does not answer' while it was only starting."""
+    from orch_services import watch
+
+    rec = {"id": "web", "port": 59999}
+    st = watch.drivers.Status(running=True, pid=1)
+    monkeypatch.setattr(watch, "port_answers", lambda port: False)
+    h = watch.health(rec, st, True, starting=True)
+    assert h["text"] == "Starting…" and h["starting"] is True and h["ok"] is False
+    h = watch.health(rec, st, True, starting=False)
+    assert h["text"] == "Alive, but does not answer on its address" and not h.get("starting")
+
+
+def test_just_started_is_true_only_in_the_grace_after_a_start(ws, clock):
+    from orch_services import store, watch
+
+    store.mark(ws, "web", True)
+    since = store.last_change(ws, "web")
+    from datetime import UTC, datetime
+
+    t = datetime.strptime(since, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+    clock["t"] = t + 30
+    assert watch.just_started(ws, "web") is True
+    clock["t"] = t + watch.START_GRACE + 5
+    assert watch.just_started(ws, "web") is False
+
+
+def test_starting_is_not_counted_as_running_fine_again(monkeypatch):
+    """A failing service restarted through orch reads Starting… for a while: that is no recovery yet (ORCH-1130)."""
+    from types import SimpleNamespace
+
+    from orch_services import watch
+
+    q = {"id": "q1", "open": True}
+    w = {"events": [1, 2, 3], "failing": True, "healthy_since": None, "runs": None, "question": q}
+    monkeypatch.setattr(watch, "clock", lambda: 700)
+    monkeypatch.setattr(watch, "read_state", lambda *a: {"running": True, "watch": w})
+    monkeypatch.setattr(watch, "_act_on_answer", lambda *a: None)
+    monkeypatch.setattr(watch, "just_started", lambda *a: True)
+    monkeypatch.setattr(watch, "port_answers", lambda port: False)
+    monkeypatch.setattr(watch, "_save_watch", lambda root, sid, state: w.update(state))
+    monkeypatch.setattr(watch, "_ticket_for", lambda *a: "T-1")
+    monkeypatch.setattr(watch, "orch", lambda *a, **k: {})
+    drv = SimpleNamespace(status=lambda spec: watch.drivers.Status(running=True, pid=1))
+    r = watch.check_one(None, drv, {"id": "web", "name": "Web", "port": 8000}, None)
+    assert r["health"]["starting"] is True and r["failing"] is True and r["did"] is None
+    assert w["healthy_since"] is None and w["question"] is q

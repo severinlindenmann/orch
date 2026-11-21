@@ -68,8 +68,10 @@
     for (const n of needs) {
       const row = el('div', 'list-row');
       row.append(el('span', 'dot-warn'), el('div', 'grow', el('strong', null, n.title), el('p', 'meta', n.text)));
-      row.append(button(n.action, 'btn outline sm', () => n.part === 'ways' ? wayAct(n.changed ? 'way_on' : 'way_check', n.way, n.name)
-        : n.part === 'meetings' ? (location.hash = '#meetings') : openFolder()));
+      const acts = el('div', 'row-acts', button(n.action, 'btn outline sm', () => n.part === 'ways' ? wayAct(n.changed ? 'way_on' : 'way_check', n.way, n.name)
+        : n.part === 'calendar' ? calNeed(n) : n.part === 'meetings' ? (location.hash = '#meetings') : openFolder()));
+      if (n.suggestion) acts.append(button('Not now', 'btn ghost sm', () => calAct('cal_decline', {id: n.suggestion}, 'Turned down.')));
+      row.append(acts);
       card.append(row);
     }
     return card;
@@ -113,7 +115,7 @@
     card.append(el('div', 'card-h', el('h2', null, 'What helpers did with it lately'), el('span', 'meta', 'Last 7 days')));
     if (!rows.length) card.append(el('p', 'pad muted', 'Helpers have not used Personal yet.'));
     for (const a of rows) {
-      card.append(el('div', 'list-row', el('span', 'meta', when(a.at)), el('span', 'grow', ({notes: 'Notes: ', meetings: 'Meetings: ', ways: 'Ways in: '}[a.part] || '') + a.what),
+      card.append(el('div', 'list-row', el('span', 'meta', when(a.at)), el('span', 'grow', ({notes: 'Notes: ', meetings: 'Meetings: ', ways: 'Ways in: ', calendar: 'Calendar: '}[a.part] || '') + a.what),
         a.ticket_key ? el('span', 'chip', a.ticket_key) : null));
     }
     return card;
@@ -123,10 +125,10 @@
     if (today.needs_you.length) out.push(needsCard(today.needs_you));
     const grid = el('div', 'tile-grid');
     today.parts.forEach(t => grid.append(tile(t)));
-    grid.append(link('#parts', 'part-tile-add', el('strong', null, 'Add a part'), el('span', 'meta', 'Calendar, Messages and Mail come next')));
+    grid.append(link('#parts', 'part-tile-add', el('strong', null, 'Add a part'), el('span', 'meta', 'Messages and Mail come next')));
     out.push(grid);
     if (today.ways && today.ways.length) out.push(waysCard(today.ways));
-    if (!today.parts.length) out.unshift(state('empty', 'Nothing is added yet', 'Add Notes first: your notes folder, with the links between notes.'));
+    if (!today.parts.length) out.unshift(state('empty', 'Nothing is added yet', 'Add Notes or Calendar first. Helpers can use nothing until you choose.'));
     out.push(activityCard(today.activity));
     out.push(el('p', 'footnote meta', 'Helpers use: orch personal today · They get only what the rules of each part allow.'));
     return out;
@@ -246,6 +248,196 @@
     return [split, rulesCard(rules), el('p', 'footnote meta', 'Helpers use: orch personal notes find "Helvetia" · Notes are data for helpers, never orders.')];
   }
 
+
+  // --- Calendar --------------------------------------------------------------------------------------------
+  // Times come in the calendar's own zone as text (2026-11-18T09:00+01:00): read straight from the text, so the page
+  // shows the same hours as the Calendar app whatever the browser's zone is.
+  const DAY = 864e5;
+  const iso = d => d.toISOString().slice(0, 10);
+  const dayOf = s => new Date(s.slice(0, 10) + 'T12:00:00Z');
+  const addDays = (s, n) => iso(new Date(dayOf(s).getTime() + n * DAY));
+  const monday = s => addDays(s, -((dayOf(s).getUTCDay() + 6) % 7));
+  const hm = s => s.slice(11, 16);
+  const mins = s => +s.slice(11, 13) * 60 + +s.slice(14, 16);
+  const fmtDay = (s, opts) => dayOf(s).toLocaleDateString('en-GB', {timeZone: 'UTC', ...opts});
+  const weekNo = s => { const d = dayOf(s); d.setUTCDate(d.getUTCDate() + 3 - (d.getUTCDay() + 6) % 7);
+    const y = new Date(Date.UTC(d.getUTCFullYear(), 0, 4)); return 1 + Math.round(((d - y) / DAY - 3 + (y.getUTCDay() + 6) % 7) / 7); };
+  let calFrom = null, calHidden = new Set();
+  // a timed event is on day d when it starts that day, or started before and runs past its midnight
+  const onDay = (e, d) => e.start.slice(0, 10) === d || (e.start.slice(0, 10) < d && (e.end.slice(0, 10) > d || (e.end.slice(0, 10) === d && mins(e.end) > 0)));
+
+  async function calAct(op, args, ok) {
+    try { const r = await act(op, args); say(ok || (r && r.words ? 'Calendar: ' + r.words : 'Saved.')); today = null; route(); }
+    catch (e) { say(e.message); }
+  }
+  function calNeed(n) {
+    if (n.suggestion) return calAct('cal_accept', {id: n.suggestion}, 'Opened in the Calendar app. Save it there.');
+    return calAct(n.action === 'Allow calendars' ? 'cal_allow' : 'cal_check', {});
+  }
+  async function addCalendar() {
+    try { await act('add', {part: 'calendar'}); today = null; say('Calendar is on. Allow calendars once on this Mac.'); location.hash = '#calendar'; route(); }
+    catch (e) { say(e.message); }
+  }
+  function calEvent(e, cals, cls) {
+    const c = cals[e.cal] || {};
+    const a = el('div', ('cal-ev cal-' + (c.color % 6) + ' ' + (cls || '') + (e.declined ? ' declined' : '') + (e.free && !e.all_day ? ' free' : '')).trim(),
+      el('span', 'cal-ev-t', e.title || 'Busy'), el('span', 'meta', (e.all_day ? '' : hm(e.start) + ' · ') + (c.title || '')));
+    a.dataset.cal = e.cal;
+    a.title = (e.all_day ? 'All day' : hm(e.start) + '–' + hm(e.end)) + ' · ' + (e.title || 'Busy') + ' · ' + (c.title || '') + (e.declined ? ' · declined' : '');
+    return a;
+  }
+  function calWeek(w, cals) {
+    const days = [...Array(7)].map((_, i) => addDays(w.from, i));
+    const todayIso = iso(new Date());
+    const timed = w.events.filter(e => !e.all_day);
+    let lo = 8, hi = 18;
+    timed.forEach(e => { if (e.start.slice(0, 10) >= w.from) lo = Math.min(lo, Math.floor(mins(e.start) / 60));
+      hi = Math.max(hi, e.end.slice(0, 10) > e.start.slice(0, 10) ? 24 : Math.ceil(mins(e.end) / 60)); });
+    const grid = el('div', 'cal-week');
+    grid.style.setProperty('--rows', String((hi - lo) * 4));
+    const head = el('div', 'cal-week-head', el('span'));
+    const all = el('div', 'cal-week-all', el('span', 'meta', 'All day'));
+    const body = el('div', 'cal-week-body');
+    const hours = el('div', 'cal-hours');
+    for (let h = lo; h < hi; h++) hours.append(el('span', 'meta', String(h).padStart(2, '0') + ':00'));
+    body.append(hours);
+    for (const d of days) {
+      const isToday = d === todayIso;
+      head.append(el('div', 'cal-day-h' + (isToday ? ' today' : ''), el('strong', null, fmtDay(d, {weekday: 'short', day: 'numeric'}))));
+      const allDay = el('div', 'cal-day-all' + (isToday ? ' today' : ''));
+      w.events.filter(e => e.all_day && e.start <= d && e.end > d).forEach(e => allDay.append(calEvent(e, cals)));
+      all.append(allDay);
+      const col = el('div', 'cal-day' + (isToday ? ' today' : ''));
+      // events that overlap share the day side by side; one alone takes the whole width
+      const lanes = [], placed = [];
+      let cluster = [], clusterEnd = -1;
+      const close = () => { const k = Math.max(...cluster.map(x => x.lane)) + 1; cluster.forEach(x => { x.k = k; }); cluster = []; };
+      timed.filter(e => onDay(e, d)).forEach(e => {
+        // an event over midnight shows on each day it covers, cut to that day
+        const s = e.start.slice(0, 10) === d ? mins(e.start) : lo * 60;
+        const end = e.end.slice(0, 10) > d ? hi * 60 : Math.max(mins(e.end), s + 15);
+        if (s >= clusterEnd && cluster.length) { close(); lanes.length = 0; }
+        let lane = lanes.findIndex(x => x <= s); if (lane < 0) { lane = lanes.length; lanes.push(0); } lanes[lane] = end;
+        clusterEnd = Math.max(clusterEnd, end);
+        const x = {e, s, end, lane}; cluster.push(x); placed.push(x);
+      });
+      if (cluster.length) close();
+      const gcd = (a, b) => b ? gcd(b, a % b) : a;
+      const n = placed.reduce((m, x) => m * x.k / gcd(m, x.k), 1);  // every cluster's share is a whole number of columns
+      col.style.gridTemplateColumns = 'repeat(' + n + ', minmax(0, 1fr))';
+      placed.forEach(x => {
+        const ev = calEvent(x.e, cals);
+        ev.style.gridRow = (Math.floor((x.s - lo * 60) / 15) + 1) + ' / span ' + Math.max(2, Math.ceil((x.end - x.s) / 15));
+        const w = n / x.k;
+        ev.style.gridColumn = (x.lane * w + 1) + ' / span ' + w;
+        col.append(ev);
+      });
+      body.append(col);
+    }
+    grid.append(head, all, body);
+    // phone: one list per day
+    const list = el('div', 'cal-days');
+    for (const d of days) {
+      const evs = w.events.filter(e => e.all_day ? e.start <= d && e.end > d : onDay(e, d));
+      if (!evs.length) continue;
+      const card = el('section', 'card');
+      card.append(el('div', 'card-h', el('h2', null, fmtDay(d, {weekday: 'short', day: 'numeric', month: 'short'})), d === todayIso ? el('span', 'badge working', 'Today') : null));
+      evs.forEach(e => { const c = cals[e.cal] || {};
+        const row = el('div', 'list-row', el('span', 'when meta', e.all_day ? 'All day' : (e.start.slice(0, 10) === d ? hm(e.start) : '') + '–' + (e.end.slice(0, 10) === d ? hm(e.end) : '')),
+          el('div', 'grow', el('strong', null, e.title || 'Busy'), el('p', 'meta', c.title || '')), el('span', 'cal-dot cal-' + (c.color % 6)));
+        row.dataset.cal = e.cal; card.append(row); });
+      list.append(card);
+    }
+    if (!list.children.length) list.append(el('p', 'muted', 'Nothing in this week.'));
+    return [grid, list];
+  }
+  function calHide() {
+    document.querySelectorAll('#view [data-cal]').forEach(n => { n.hidden = calHidden.has(n.dataset.cal); });
+  }
+  function sourcesCard(w, levels) {
+    const card = el('section', 'card');
+    card.append(el('div', 'card-h', el('h2', null, 'Sources'), el('span', 'meta', 'You see all of them. Each one starts closed to helpers.')));
+    for (const c of w.calendars) {
+      const sel = el('select', 'input');
+      sel.setAttribute('aria-label', 'Helpers can use from ' + c.title);
+      for (const [k, word] of Object.entries(levels)) { const o = el('option', null, word); o.value = k; o.selected = k === c.level; sel.append(o); }
+      sel.addEventListener('change', () => calAct('cal_level', {id: c.id, level: sel.value}, c.title + ': helpers can use ' + levels[sel.value].toLowerCase() + '.'));
+      const text = el('div', 'grow', el('p', null, el('span', 'cal-dot cal-' + (c.color % 6)), ' ', el('strong', null, c.title)),
+        el('p', 'meta', [c.account, c.shared ? 'shared' : null, 'through the Calendar app on this computer'].filter(Boolean).join(' · ')));
+      const right = el('div', 'row');
+      if (c.suggest_level && c.level === 'nothing') {
+        right.append(button('Share ' + levels[c.suggest_level].toLowerCase(), 'btn outline sm', () => calAct('cal_level', {id: c.id, level: c.suggest_level}, c.title + ': saved.')));
+      }
+      right.append(sel);
+      card.append(el('div', 'list-row', text, right));
+    }
+    return card;
+  }
+  function calRulesCard(moves, words) {
+    const card = el('section', 'card');
+    card.append(el('div', 'card-h', el('h2', null, 'What helpers may do'), el('span', 'meta', 'Changes apply at once')));
+    card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'See when you are busy'), el('p', 'meta', 'Only in calendars you share above. Helpers plan around your meetings without seeing what they are.')), el('span', 'meta', 'Per calendar')));
+    card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'Read titles and people'), el('p', 'meta', 'Only in calendars set to “Busy times, titles and people”. People by name, never their email. Never places, notes or links.')), el('span', 'meta', 'Per calendar')));
+    const sel = el('select', 'input');
+    sel.setAttribute('aria-label', 'Add or move an event');
+    for (const [k, word] of Object.entries(words)) { const o = el('option', null, word); o.value = k; o.selected = k === moves; sel.append(o); }
+    sel.addEventListener('change', () => calAct('cal_moves', {moves: sel.value}, 'Saved. Helpers follow it from now on.'));
+    card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'Add or move an event'), el('p', 'meta', 'A helper suggests a time; it is in your calendar only after you add it.')), sel));
+    return card;
+  }
+  async function calendarScreen() {
+    if (!today.parts.some(p => p.part === 'calendar')) {
+      return [state('empty', 'Calendar is not added yet', 'Add it to see work, private and family calendars in one week. Helpers see nothing until you choose.', {label: 'Add Calendar', onClick: addCalendar})];
+    }
+    calFrom = calFrom || monday(iso(new Date()));
+    let d;
+    try { d = await read('/api/calendar?from=' + calFrom); }
+    catch (e) {
+      const st = (today.parts.find(p => p.part === 'calendar') || {}).status;
+      if (/permission|Allow calendars|System Settings|access/i.test(e.message) || st === 'Needs your permission') {
+        const why = /choose Allow calendars/.test(e.message) ? 'macOS asks you once. Your calendars stay on this computer.' : e.message;
+        return [state('empty', 'Allow orch to read your calendars', why,
+          {label: 'Allow calendars', onClick: () => calAct('cal_allow', {})})];
+      }
+      return [state('error', 'Your calendars can’t be read', e.message, {label: 'Try again', onClick: () => calAct('cal_check', {})})];
+    }
+    if (!d.on) return [state('empty', 'Calendar is not added yet', 'Add it to see your week.', {label: 'Add Calendar', onClick: addCalendar})];
+    const w = d.week, cals = {};
+    w.calendars.forEach(c => { cals[c.id] = c; });
+    const out = [];
+    const end = addDays(w.from, 6);
+    const bar = el('div', 'row between');
+    const legend = el('div', 'cal-legend', el('span', 'meta', 'Show here:'));
+    for (const c of w.calendars) {
+      const box = el('input'); box.type = 'checkbox'; box.checked = !calHidden.has(c.id);
+      box.addEventListener('change', () => { box.checked ? calHidden.delete(c.id) : calHidden.add(c.id); calHide(); });
+      legend.append(el('label', 'cal-' + (c.color % 6), box, el('span', 'cal-dot'), c.title, el('span', 'meta', c.account)));
+    }
+    const nav = el('div', 'row',
+      button('Previous', 'btn ghost sm', () => { calFrom = addDays(calFrom, -7); route(); }),
+      button('This week', 'btn outline sm', () => { calFrom = null; route(); }),
+      button('Next', 'btn ghost sm', () => { calFrom = addDays(calFrom, 7); route(); }));
+    nav.firstChild.setAttribute('aria-label', 'Previous week');
+    nav.lastChild.setAttribute('aria-label', 'Next week');
+    bar.append(el('div', null, el('h2', null, fmtDay(w.from, {day: 'numeric'}) + ' to ' + fmtDay(end, {day: 'numeric', month: 'short', year: 'numeric'})),
+      el('p', 'meta', 'Week ' + weekNo(w.from) + ' · read from your Calendar app ' + when(w.read_at))), nav);
+    const top = el('section', 'card pad stack');
+    top.append(bar, legend);
+    out.push(top);
+    if (w.note) out.push(el('p', 'note', w.note));
+    for (const o of w.overlaps.slice(0, 3)) {
+      out.push(el('div', 'banner attn', el('strong', null, fmtDay(o.at, {weekday: 'short'}) + ' ' + hm(o.at) + ': two things at once. '),
+        o.a.title + ' (' + o.a.calendar + ') and ' + o.b.title + ' (' + o.b.calendar + ') overlap by ' + o.minutes + ' minutes.'));
+    }
+    const weekCard = el('section', 'card');
+    weekCard.append(...calWeek(w, cals));
+    out.push(weekCard, sourcesCard(w, d.levels), calRulesCard(w.moves, d.moves_words));
+    const acts = (today.activity || []).filter(a => a.part === 'calendar');
+    out.push(activityCard(acts));
+    out.push(el('p', 'footnote meta', 'Helpers use: orch personal calendar week · Calendar text is data for helpers, never orders.'));
+    setTimeout(calHide);
+    return out;
+  }
   // --- Meetings --------------------------------------------------------------------------------------------
   const MEET_SUB = 'Calls recorded on this computer arrive here with who said what, a summary and the next steps. Ask everyone on the call before you record.';
   function meetWhen(m) {
@@ -404,6 +596,9 @@
     const meetOn = today.parts.some(p => p.part === 'meetings');
     yours.append(partRow('Meetings', 'Record calls on this computer; get the transcript, a summary and next steps here. Ask everyone on the call before you record.',
       'the recorder on this computer', meetOn ? el('span', 'badge done', 'On') : button('Add Meetings', 'btn primary sm', () => addPart('meetings'))));
+    const calOn = today.parts.some(p => p.part === 'calendar');
+    yours.append(partRow('Calendar', 'Work, private and family calendars in one week view.', 'the Calendar app on this computer',
+      calOn ? el('span', 'badge done', 'On') : button('Add Calendar', 'btn primary sm', addCalendar)));
     const soon = el('section', 'card');
     soon.append(el('div', 'card-h', el('h2', null, 'Coming next'), el('span', 'meta', 'Each through a way in on this computer')));
     today.soon.forEach(s => soon.append(partRow(s.label, s.text, null, el('span', 'badge', 'Soon'))));
@@ -467,7 +662,7 @@
   }
   async function route() {
     const start = location.pathname.split('/').pop();  // /addon/personal/notes opens Notes (the dashboard's deep link)
-    const h = decodeURIComponent(location.hash.slice(1)) || (['notes', 'meetings', 'parts'].includes(start) ? start : '');
+    const h = decodeURIComponent(location.hash.slice(1)) || (['notes', 'meetings', 'calendar', 'parts'].includes(start) ? start : '');
     view.setAttribute('aria-busy', 'true');
     try { if (!today) today = await read('/api/today'); }
     catch (e) {
@@ -476,7 +671,8 @@
     let out;
     const [screen, ...rest] = h.split('/');
     const head = (title, sub) => { $('page-title').firstChild.textContent = title + ' '; $('page-sub').textContent = sub; };
-    if (screen === 'notes') { head('Notes', 'What you and your helpers know, as linked notes. Click a link to follow it.'); out = await notesScreen(rest.join('/') || null); }
+    if (screen === 'calendar') { head('Calendar', 'Work, private and family in one week. What helpers may see is set under Sources.'); out = await calendarScreen(); }
+    else if (screen === 'notes') { head('Notes', 'What you and your helpers know, as linked notes. Click a link to follow it.'); out = await notesScreen(rest.join('/') || null); }
     else if (screen === 'meetings') { head('Meetings', MEET_SUB); out = await meetingsScreen(rest.join('/') || null); }
     else if (screen === 'parts') { head('Add a part', 'One click adds it. You choose what helpers may do before anything is read.'); out = addScreen(); }
     else { head('Personal', 'What needs you, then each part at a glance. You see everything; helpers use only what you turned on.'); out = home(); }

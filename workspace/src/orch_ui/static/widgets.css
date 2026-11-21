@@ -1006,7 +1006,7 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .split-list .list-row>a:hover{text-decoration:underline}
 .split-list .list-row>a:focus-visible{outline:none;box-shadow:var(--focus-ring);border-radius:var(--r1)}
 .split-view .subline{display:block;font-size:var(--fs-meta);line-height:16px;font-weight:400;color:var(--text-faint)}
-.split-panel{min-width:0;padding:var(--s4)}
+.split-panel{min-width:0;padding:var(--s4);align-content:start}
 .split-panel[hidden]{display:none}
 .split-panel:focus{outline:none}
 .split-panel:focus-visible{box-shadow:inset var(--focus-ring)}
@@ -1021,6 +1021,8 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .log-lines ol{list-style:none;margin:0;padding:var(--s3);display:grid;gap:2px;overflow-x:auto}
 .log-lines li{white-space:pre-wrap;overflow-wrap:anywhere}
 .log-lines>p{padding:var(--s3);margin:0}
+.log-lines.log-short li:nth-last-child(n+7){display:none}
+.log-lines.log-full ol{max-height:60vh;overflow:auto}
 @media(max-width:720px){
   .split-view{grid-template-columns:minmax(0,1fr)}
   .split-view>*+*{border-left:0}
@@ -1399,6 +1401,43 @@ body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:
 .rule-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--s4);align-items:center;padding:var(--s3) var(--s4);border-top:1px solid var(--border)}
 .rule-row:first-child{border-top:0}
 @media(max-width:600px){.rule-row{grid-template-columns:minmax(0,1fr);gap:var(--s2)}}
+/* Calendar week (Personal Calendar, ORCH-651 from draft A): every calendar in one grid, a quarter hour per row. The
+   page sets --rows (quarter hours shown) on .cal-week and grid-row on each event; .cal-0 … .cal-5 give one colour per
+   calendar; [data-cal][hidden] hides a calendar ticked off. Phone: .cal-days, one list per day. Gallery: #cal-week. */
+.cal-0{--cal:var(--info);--cal-soft:var(--info-soft)}
+.cal-1{--cal:var(--chart-4);--cal-soft:var(--surface-3)}
+.cal-2{--cal:var(--success);--cal-soft:var(--success-soft)}
+.cal-3{--cal:var(--warning);--cal-soft:var(--warning-soft)}
+.cal-4{--cal:var(--brand);--cal-soft:var(--brand-soft)}
+.cal-5{--cal:var(--text-muted);--cal-soft:var(--surface-2)}
+.cal-dot{display:inline-block;flex:none;width:var(--s2);height:var(--s2);border-radius:var(--space-0);background:var(--cal);align-self:center}
+.cal-legend{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);align-items:center}
+.cal-legend label{display:inline-flex;align-items:center;gap:var(--s2);min-height:var(--s6);cursor:pointer}
+.cal-week{--cal-time:var(--s8);--rows:44;overflow-x:auto}
+.cal-week-head,.cal-week-all,.cal-week-body{display:grid;grid-template-columns:var(--cal-time) repeat(7,minmax(var(--s9),1fr))}
+.cal-week-head{border-bottom:1px solid var(--border)}
+.cal-day-h{padding:var(--s2);border-left:1px solid var(--border)}
+.cal-day-h.today strong{color:var(--brand)}
+.cal-week-all{border-bottom:1px solid var(--border);min-height:var(--s7)}
+.cal-week-all>.meta{padding:var(--s2) var(--s1);align-self:center}
+.cal-day-all{display:grid;align-content:start;gap:var(--s1);padding:var(--s1);border-left:1px solid var(--border)}
+.cal-hours{display:grid;grid-template-rows:repeat(var(--rows),var(--s4))}
+.cal-hours .meta{grid-row:span 4;padding:0 var(--s1);font-variant-numeric:tabular-nums}
+.cal-day{display:grid;grid-template-rows:repeat(var(--rows),var(--s4));grid-auto-columns:minmax(0,1fr);border-left:1px solid var(--border);background:repeating-linear-gradient(to bottom,var(--border) 0 1px,transparent 1px calc(var(--s4)*4))}
+.cal-day.today,.cal-day-all.today{background-color:var(--surface-2)}
+.cal-ev{display:block;min-width:0;overflow:hidden;margin:0 var(--space-0) var(--space-0);padding:var(--space-0) var(--s1) var(--space-0) var(--s2);border-left:var(--s1) solid var(--cal);border-radius:var(--s1);background:var(--cal-soft);color:var(--text);font-size:var(--fs-meta);line-height:var(--s4)}
+.cal-ev-t{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;font-weight:500;overflow:hidden;overflow-wrap:anywhere}
+.cal-ev .meta{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cal-ev.declined .cal-ev-t{text-decoration:line-through;color:var(--text-muted)}
+.cal-ev.free{background:transparent;border-left-style:dashed}
+[data-cal][hidden]{display:none}
+.cal-days{display:none}
+.cal-days .list-row{align-items:flex-start}
+.cal-days .when{flex:none;min-width:calc(var(--s9) + var(--s2));font-variant-numeric:tabular-nums}
+@media(max-width:720px){.cal-week{display:none}.cal-days{display:grid;gap:var(--s4)}}
+/* a row's buttons as one group (.row-acts): on a phone they move under the words instead of squeezing them */
+.row-acts{display:flex;flex:none;align-items:center;gap:var(--s2)}
+@media(max-width:600px){.list-row:has(>.row-acts){flex-wrap:wrap}.list-row>.row-acts{width:100%;justify-content:flex-end}}
 /* A choice card that fills its grid cell: a two-line .live-opt, pressed when in use (Usage "How work is spread", ORCH-657) */
 .live-opt.tall{align-items:flex-start;height:100%;padding:var(--s4)}
 .live-opt.tall .live-opt-t{gap:var(--s1)}
