@@ -41,6 +41,7 @@ SUBCOMMANDS = (
     "take-back",
     "attach",
     "stop",
+    "interrupt",
     "event",
     "done",
     "input",
@@ -475,7 +476,8 @@ def dispatch(args, root: Path) -> bool:
         return True
     if sub is None:
         raise Refused(
-            "Say what to do: orch run list, or orch run start|status|screen|send|attach|stop <ticket>"
+            "Say what to do: orch run list, or "
+            "orch run start|status|screen|send|attach|interrupt|stop <ticket>"
         )
     if sub == "list":  # read-only: no cleanup, no writes
         rows = runwatch.list_runs(root)
@@ -552,6 +554,14 @@ def dispatch(args, root: Path) -> bool:
             f"Stopped {_name(root, tid)}. The work done so far is kept."
             if ok
             else f"Nothing is running on {_name(root, tid)}.",
+        )
+    elif sub == "interrupt":
+        if not runs_live.interrupt(root, tid):
+            raise Refused(f"No live session on {_name(root, tid)}, so there is no step to stop.")
+        _out(
+            args,
+            {"interrupted": True},
+            f"Stopped the current step of {_name(root, tid)}. The session stays; send it a message to go on.",
         )
     elif sub == "claim":
         name = args.agent or adapters.detect_env(os.environ) or _chosen_or_generic(root)
