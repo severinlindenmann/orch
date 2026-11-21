@@ -1544,8 +1544,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise actions.NeedsPerson(actions.SIGNIN)
                 args = body.get("args") or {}
                 to = args.get("to") if isinstance(args, dict) else None
-                if to is not None and to not in update.BUILDS:
-                    raise actions.BadRequest("Choose release or development build.")
+                if not update.target_ok(to):
+                    raise actions.BadRequest("Choose release, development build or a release number.")
                 code, text = update.start_update(
                     self.root,
                     self.orch_bin,

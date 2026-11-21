@@ -10,7 +10,7 @@ from .store import Refused
 
 VIEW = (
     "state,isDraft,baseRefName,headRefOid,number,title,closingIssuesReferences,isCrossRepository,"
-    "reviewDecision,reviews,files"
+    "reviewDecision,reviews,labels,files"
 )
 # the commit status the queue sets on what it checked (a develop rule can require it)
 MARK = "orch/merge-queue"
