@@ -1408,3 +1408,17 @@ def test_refused_ticket_is_listed_as_failed(tmp_path, monkeypatch):
     w.root, w.sim, w.dry, w.did = tmp_path, None, False, []
     assert w.new_ticket("ORCH-1", "Develop is red", "n", "d").startswith("not opened")
     assert w.did == ["ticket:Develop is red failed"]
+
+
+def test_a_done_role_ticket_is_opened_again_so_its_cards_are_not_refused(proj, on):
+    tickets.set_status(proj, tickets.resolve(proj, on), "done", tickets.SYSTEM)
+    res = rk.run(proj, world=sim_world(proj))
+    assert "opened it again" in res["lines"][0]
+    assert tickets.load(proj, tickets.resolve(proj, on))["status"] == "open"
+    assert rk.run(proj, world=sim_world(proj))["lines"][0] != res["lines"][0]  # only once
+
+
+def test_a_dry_run_leaves_a_done_role_ticket_alone(proj, on):
+    tickets.set_status(proj, tickets.resolve(proj, on), "done", tickets.SYSTEM)
+    rk.run(proj, dry_run=True, world=sim_world(proj))
+    assert tickets.load(proj, tickets.resolve(proj, on))["status"] == "done"
