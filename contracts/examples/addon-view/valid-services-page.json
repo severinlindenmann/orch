@@ -210,6 +210,11 @@
           "link": "t_m2x8p0q"
          },
          {
+          "label": "Address",
+          "value": "http://127.0.0.1:5173",
+          "link": "http://127.0.0.1:5173"
+         },
+         {
           "label": "Depends on it",
           "value": "The demo workspace"
          }

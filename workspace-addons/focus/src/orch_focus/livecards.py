@@ -27,6 +27,7 @@ WORDS = {
     "waiting": "On hold",
     "idle": "Idle",
     "stuck": "Stuck",
+    "limit": "Stopped: usage limit",  # ORCH-643
 }
 ORDER = list(WORDS)  # working first, stuck last: the order of the Helpers list on Home
 
