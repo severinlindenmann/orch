@@ -141,7 +141,9 @@ UI.docBox=(p,hTag)=>{p=p||{};const d=el('div','doc');const st=p.status;
  if(Array.isArray(p.flow)&&p.flow.length){const r=el('div','doc-flow');p.flow.forEach((t,i)=>{if(i)r.append(el('span','doc-arrow','→'));r.append(el('span','doc-box',t))});d.append(r)}
  if(p.chart&&Array.isArray(p.chart.bars)){const max=Math.max(...p.chart.bars.map(b=>Math.abs(b.value)),1),r=el('div','doc-chart');r.setAttribute('role','img');r.setAttribute('aria-label',p.chart.bars.map(b=>b.label+' '+b.value+(p.chart.unit||'')).join(', '));
    p.chart.bars.forEach(b=>{const row=el('div','doc-bar'),t=el('div','progress'),f=el('span');f.style.width=Math.round(Math.abs(b.value)/max*100)+'%';t.append(f);row.append(el('span','',b.label),t,el('b','',b.value+(p.chart.unit||'')));r.append(row)});d.append(r)}
- if(Array.isArray(p.diff)&&p.diff.length){const r=el('div','doc-diff');p.diff.forEach(l=>r.append(el('div','doc-line '+(l.op==='+'?'add':'del'),l.op+' '+l.text)));d.append(r)}
+/* diff lines (ORCH-429): a file's name above its lines, a risky line marked red with why (l.risk) */
+ if(Array.isArray(p.diff)&&p.diff.length){const r=el('div','doc-diff');let last=null;p.diff.forEach(l=>{if(l.file&&l.file!==last)r.append(el('div','doc-diff-file',l.file));last=l.file||last;
+   const row=el('div','doc-line '+(l.op==='+'?'add':'del')+(l.risk?' risk':''),l.op+' '+l.text);if(l.risk)row.append(el('span','doc-risk',l.risk));r.append(row)});d.append(r)}
  if(p.heading)d.append(el(hTag||'h4','',p.heading));(p.paras||[]).forEach(x=>d.append(el('p','',x)));
  if(Array.isArray(p.rows)&&p.rows.length){const ul=el('ul','doc-rows');p.rows.forEach(r=>{if(!r||!r.title)return;const li=el('li','doc-row');li.append(el('span','doc-row-title',r.title));
    if(r.key)li.append(el('span','chip doc-row-key',r.key));if(r.n)li.append(el('span','doc-row-n','#'+r.n));ul.append(li)});d.append(ul)}
