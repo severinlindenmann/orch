@@ -139,6 +139,7 @@ GREEN = {
     "head_branch": "orch-queue/develop-1-abc",
     "status": "completed",
     "conclusion": "success",
+    "rollup": "success",
 }
 
 
@@ -155,6 +156,21 @@ def test_not_proven_without_a_merge_commit_same_files_or_a_green_group_run():
     assert not proven.decide(["p1", "p2"], "T", "T", [dict(GREEN, name="rules")])[0]
     assert not proven.decide(["p1", "p2"], "T", "T", [dict(GREEN, event="workflow_dispatch")])[0]
     assert not proven.decide(["p1", "p2"], "T", "T", [])[0]
+
+
+def test_a_queue_group_the_local_check_checked_proves_nothing():
+    """ORCH-1124: ci.yml skips every job of such a group, the run still ends 'success'; the push runs the suite."""
+    assert not proven.decide(["p1", "p2"], "T", "T", [dict(GREEN, rollup="skipped")])[0]
+    assert not proven.decide(["p1", "p2"], "T", "T", [dict(GREEN, rollup="")])[0]  # GitHub did not say
+
+
+def test_ci_and_rules_skip_only_a_local_check_queue_group():
+    rules = (ROOT / ".github" / "workflows" / "rules.yml").read_text(encoding="utf-8")
+    skip = (
+        "startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == "
+        "github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')"
+    )
+    assert CI.count(skip) == 2 and rules.count(skip) == 1
 
 
 # -- ci.yml wiring ---------------------------------------------------------------------------------------------

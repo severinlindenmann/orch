@@ -38,7 +38,9 @@ permissions:
   contents: read
 jobs:
   changes:
-    if: github.event.pull_request.draft != true
+    # A merge queue group the local gate already checked (group_check = local, ORCH-1124): the queue posted gate and
+    # banned-words itself, so nothing runs here. ci_proven.py never counts such a run as proof for the push.
+    if: "${{ github.event.pull_request.draft != true && !(startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')) }}"
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -232,7 +234,7 @@ jobs:
     if: needs.changes.outputs.dashshots == 'true' && github.event_name == 'pull_request'
     uses: ./.github/workflows/dash-shots.yml
   gate:
-    if: always()
+    if: "${{ always() && !(startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')) }}"
     needs: [changes, light, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, mobile, clock, brand, dash-shots]
     runs-on: ubuntu-latest
     timeout-minutes: 5
