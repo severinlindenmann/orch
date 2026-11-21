@@ -69,6 +69,10 @@ ORIGINS_KEEP = 3000
 COPIES_KEEP = 300
 PROCESSED_KEEP = 4000
 CHAT_GROUPS_VERSION = 2  # the chat groups contract version this orch speaks (chat-groups.md §6)
+# A workspace added to a ticket chat gets no earlier chat lines, only the ticket card and the messages
+# from then on (security review of PR 2274: earlier lines can hold places, voice note text and file
+# names the person never meant for it). Receive side, contract field and limits stay for an opt-in.
+SHARE_EARLIER_CHAT = False
 CHAT_LINES_MAX = 200  # body.shared_chat: at most this many chat lines, newest kept
 CHAT_LINE_MAX = 2000
 CHAT_BYTES_MAX = 32 * 1024
@@ -1999,8 +2003,8 @@ def fit_card(card: dict) -> dict:
 
 def _send_card(root: Path, g: dict, ws: str, force: bool = False, joined: bool = False) -> dict | None:
     """The ticket card to one member (rev +1 when the content changed since the last one; `force`: again).
-    `joined`: the member was just added, so the card also carries the chat so far (`shared_chat`). It rides
-    on the card, a message older members already accept, and they simply ignore the new field."""
+    `joined`: the member was just added. With SHARE_EARLIER_CHAT (off) the card would also carry the chat so
+    far (`shared_chat`); by default the new member gets only the card and the messages from then on."""
     card = card_for(root, g)
     if card is None:
         return None
@@ -2021,7 +2025,7 @@ def _send_card(root: Path, g: dict, ws: str, force: bool = False, joined: bool =
         "via": "helper",
         "shared_ticket": card,
     }
-    if joined and (sc := chat_of_ticket(root, g["ticket"], g))["lines"]:
+    if joined and SHARE_EARLIER_CHAT and (sc := chat_of_ticket(root, g["ticket"], g))["lines"]:
         body["shared_chat"] = sc
     msg = _send(root, ws, "text", body, g["ticket"])
     if msg:

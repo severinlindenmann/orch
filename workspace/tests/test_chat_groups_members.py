@@ -79,7 +79,19 @@ def _kinds(msgs):
 # ---- only the ticket's workspace adds or removes --------------------------------------------------------
 
 
-def test_the_person_adds_a_workspace_and_it_gets_the_ticket_and_the_whole_chat_only(proj, run, rel, host):
+def test_a_new_member_gets_no_earlier_chat_lines_by_default(proj, run, rel, host):
+    # security review of PR 2274: earlier lines (places, voice note text, file names) stay with this workspace
+    _say(proj, host, "human:owner", "I am at Bahnhofstrasse 12, call me there")
+    cg.add_member(proj, host, HOME, "human:owner")
+    to_home = sent(rel, to=HOME)
+    assert _kinds(to_home) == ["member_added", "card"]
+    assert "Bahnhofstrasse" not in json.dumps(to_home)
+
+
+def test_the_person_adds_a_workspace_and_it_gets_the_ticket_and_the_whole_chat_only(
+    proj, run, rel, host, monkeypatch
+):
+    monkeypatch.setattr(cg, "SHARE_EARLIER_CHAT", True)  # the opt-in path; off by default
     _say(proj, host, "human:owner", "Can someone check the 2025 letter?")
     _say(proj, host, "agent:claude", "I found it, the amount is 412 CHF.")
     _say(proj, host, "agent:claude", "Internal note: looked in the tax folder", chat=False)
@@ -112,7 +124,8 @@ def test_the_person_adds_a_workspace_and_it_gets_the_ticket_and_the_whole_chat_o
     assert {m["ws"]: m.get("added_by") for m in rec} == {WS: None, HOME: "you", BANK: WS}
 
 
-def test_a_long_chat_keeps_the_newest_lines_within_the_limits(proj, run, rel, host):
+def test_a_long_chat_keeps_the_newest_lines_within_the_limits(proj, run, rel, host, monkeypatch):
+    monkeypatch.setattr(cg, "SHARE_EARLIER_CHAT", True)  # the opt-in path; off by default
     for i in range(cg.CHAT_LINES_MAX + 5):
         _say(proj, host, "human:owner", f"line {i} " + "x" * 150)
     cg.add_member(proj, host, HOME, "human:owner")
@@ -399,14 +412,14 @@ def test_adding_and_removing_while_the_relay_is_out_of_reach(proj, run, rel, grp
     _say(proj, host, "human:owner", "Who has the 2025 letter?")
     up = _down(monkeypatch)
     cg.add_member(proj, host, STRANGER, "human:owner")
-    assert _kinds([m for m in _outbox(proj) if m["to"] == STRANGER]) == ["member_added", "card+chat"]
+    assert _kinds([m for m in _outbox(proj) if m["to"] == STRANGER]) == ["member_added", "card"]
     cg.remove_member(proj, host, BANK, "human:owner")
     up()
     res = relay.resend_outbox(proj)
     assert res["waiting"] == [] and res["failed"] == []
-    # delivered later, in the order they were saved: the new member gets its add, the card with the chat so
-    # far, then the news that Bank was removed; Bank, removed before anything went out, gets only its removal
-    assert _kinds(sent(rel, to=STRANGER)) == ["member_added", "card+chat", "member_left"]
+    # delivered later, in the order they were saved: the new member gets its add, the card (no earlier chat),
+    # then the news that Bank was removed; Bank, removed before anything went out, gets only its removal
+    assert _kinds(sent(rel, to=STRANGER)) == ["member_added", "card", "member_left"]
     assert _kinds(sent(rel, to=BANK)) == ["member_left"]
     # removed while still offline: the queued add, card and chat for the new member are dropped
     up = _down(monkeypatch)
@@ -513,6 +526,7 @@ def test_a_member_added_back_reports_its_version_again(proj, run, rel, member, m
 
 
 def test_a_crash_between_the_add_and_the_card_still_sends_the_chat_so_far(proj, run, rel, host, monkeypatch):
+    monkeypatch.setattr(cg, "SHARE_EARLIER_CHAT", True)  # the opt-in path; off by default
     _say(proj, host, "human:owner", "Who has the 2025 letter?")
     real = cg._send_card
     monkeypatch.setattr(cg, "_send_card", lambda *a, **k: (_ for _ in ()).throw(SystemExit("crash")))
