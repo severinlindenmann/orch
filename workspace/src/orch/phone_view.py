@@ -1370,13 +1370,15 @@ def _status(ticket: dict) -> str:
     return s if s in STATUSES else "open"
 
 
-CHAT_KEEP = 20  # chat lines kept in the phone's history window even when newer plain lines would push them out
+CHAT_KEEP = (
+    20  # chat lines kept in the phone's history window even when newer plain lines would push them out
+)
 
 
 def _tail(lines: list[dict]) -> list[dict]:
-    """The phone's history window (at most HISTORY lines, oldest first): the newest CHAT_KEEP chat lines are kept
-    first, so a ticket chat on the phone does not lose its messages while a helper writes many plain lines;
-    the rest of the window is the newest plain lines."""
+    """The phone's history window (at most HISTORY lines, oldest first): the newest CHAT_KEEP chat lines are
+    kept first, so a ticket chat on the phone does not lose its messages while a helper writes many plain
+    lines; the rest of the window is the newest plain lines."""
     if len(lines) <= HISTORY:
         return lines
     idx = [i for i, e in enumerate(lines) if e.get("chat_message") is True][-CHAT_KEEP:]
@@ -1389,9 +1391,10 @@ def _tail(lines: list[dict]) -> list[dict]:
 
 
 def _chat_fields(entry: dict, line: dict, h) -> dict:
-    """A chat line (`chat_message: true`) is a real message: the phone's ticket chat shows it as a bubble with its
-    stable id (so a relay copy of the same message is shown once) and the typed name, if any. The name is shown
-    as typed and marked "not signed in" on the phone; it proves nothing (contracts/history.md "Chat lines")."""
+    """A chat line (`chat_message: true`) is a real message: the phone's ticket chat shows it as a bubble with
+    its stable id (so a relay copy of the same message is shown once) and the typed name, if any. The name is
+    shown as typed and marked "not signed in" on the phone; it proves nothing (contracts/history.md
+    "Chat lines")."""
     if entry.get("chat_message") is not True:
         return line
     line["chat"] = True

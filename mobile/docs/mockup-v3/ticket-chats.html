@@ -1,40 +1,5 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ticket chats</title><link rel="stylesheet" href="archive.css">
-<style>
-/* Ticket chats page only (team chat step 1, ORCH-1169). Phone frame and rows come from archive.css. */
-.tc-grid .phone{height:610px}
-.tc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px}
-.tc-h{padding:6px 12px 2px;font-size:11px;font-weight:600;color:var(--text-muted)}
-.tc-list{margin:4px 10px 8px;background:var(--surface);border-radius:var(--r-m);overflow:hidden}
-.tc-list .row{flex-wrap:nowrap;align-items:flex-start;padding:9px 10px;gap:10px}
-.tc-list .row+.row{border-top:1px solid var(--border)}
-.tc-list .m small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tc-list .end{display:flex;flex-direction:column;align-items:flex-end;gap:6px;font-size:11px;color:var(--text-muted)}
-.av.s{width:26px;height:26px;border-radius:var(--r-s);font-size:11px;background:#1e3a5f;color:#93c5fd}
-.av.s.g{background:var(--brand-soft);color:var(--brand)}
-.tc-needs{margin:6px 10px;padding:8px 10px;border:1px solid var(--warning);background:var(--warning-soft);border-radius:var(--r-m);font-size:12px}
-.tc-needs b{color:var(--warning);display:block}
-.tc-chat{padding:6px 10px;display:flex;flex-direction:column;gap:4px;overflow:hidden;flex:1}
-.tc-who{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted);margin-top:6px}
-.tc-who .av.s{width:auto;min-width:16px;height:16px;padding:0 3px;font-size:9px;border-radius:5px}
-.tc-b{max-width:86%;background:var(--surface-2);border-radius:16px 16px 16px 6px;padding:8px 10px;font-size:12.5px;line-height:1.4}
-.tc-b.mine{margin-left:auto;background:#173e35;border-radius:16px 16px 6px 16px}
-.tc-b time{display:block;text-align:right;font-size:10px;color:var(--text-muted);margin-top:2px}
-.tc-q{border:1px solid var(--warning);border-radius:14px;padding:10px;font-size:12.5px;max-width:92%;margin-top:6px}
-.tc-q small{display:block;color:var(--text-muted);margin:3px 0 8px}
-.tc-q .row{gap:6px;flex-wrap:nowrap}
-.tc-q .btn{min-height:28px;padding:3px 10px;font-size:12px}
-.tc-comp{display:flex;gap:8px;align-items:center;padding:8px 10px 14px;border-top:1px solid var(--border)}
-.tc-comp .tc-in{flex:1;border:1px solid var(--border-strong);border-radius:var(--r-pill);padding:7px 12px;color:var(--text-faint);font-size:12px}
-.tc-send{width:30px;height:30px;border-radius:50%;background:var(--brand);color:var(--on-brand);display:grid;place-items:center;font-weight:700}
-.tc-sub{font-size:11px;color:var(--text-muted)}
-.tc-plus{width:30px;height:30px;border-radius:50%;background:var(--surface-2);display:grid;place-items:center;font-weight:700;color:var(--text-muted)}
-.tc-info{margin-left:auto;width:26px;height:26px;border-radius:50%;border:1px solid var(--border-strong);display:grid;place-items:center;font-size:12px;color:var(--text-muted)}
-.tc-att{max-width:70%;margin-left:auto;background:#173e35;border-radius:16px 16px 6px 16px;padding:8px 10px;font-size:12px}
-.tc-tabs{display:flex;flex-wrap:wrap;gap:4px;margin:4px 10px}
-.tc-tabs span{white-space:nowrap;padding:3px 8px;border-radius:var(--r-pill);background:var(--surface-2);font-size:11px}
-.tc-tabs span.on{background:var(--brand-soft);color:var(--brand)}
-.tc-day{text-align:center;font-size:11px;color:var(--text-muted);margin:4px 0}
-</style></head><body><div class="page"><div class="top"><a href="index.html">&larr; Phone app v3</a></div>
+</head><body><div class="page"><div class="top"><a href="index.html">&larr; Phone app v3</a></div>
 <h1>Ticket chats</h1>
 <p class="muted">Team chat step 1 (ORCH-1114, draft picked in ORCH-1098). Every ticket's chat in one list on Chats, newest first, next to the workspace chats. Ticket chats replace the topic list of the workspace screen (owner 21 Nov): the workspace screen keeps only its own chat (Your helper) and New topic. A ticket chat shows who wrote each message, the helper's questions as cards and the box to write. The same messages show in the Chats page on the computer. Only you and your helpers in this step; adding workspaces or people comes later.</p>
 <div class="tc-grid">
