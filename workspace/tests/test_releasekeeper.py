@@ -250,6 +250,106 @@ def test_gate_red_and_develop_moved_closes_and_recuts(tmp_path, capsys):
     assert out["did"] == ["close:release 31 PR 9031"] and out["state"]["release"] is None
 
 
+RUN_URL = "https://github.com/o/r/actions/runs/{}/job/7"
+
+
+def test_gate_red_runs_the_failed_jobs_once_more_before_a_ticket(tmp_path, capsys):
+    """ORCH-1023: a flaky test each closed releases 35 and 36 in one night; red checks get one more try."""
+    bad = [
+        {
+            "name": "macos 3/5",
+            "status": "COMPLETED",
+            "conclusion": "FAILURE",
+            "detailsUrl": RUN_URL.format(11),
+        },
+        {
+            "name": "macos 4/5",
+            "status": "COMPLETED",
+            "conclusion": "FAILURE",
+            "detailsUrl": RUN_URL.format(11),
+        },
+        {"name": "linux", "status": "COMPLETED", "conclusion": "SUCCESS", "detailsUrl": RUN_URL.format(12)},
+        ROLLUP_DONE,
+    ]
+    moved = {"develop": "e" * 40, "main": MAIN, "unreleased": UN3}
+    out = go(
+        tmp_path,
+        capsys,
+        state={"release": gate()},
+        open_release={"number": 9031},
+        prs=pr(checks=bad),
+        heads=moved,
+    )
+    assert out["did"] == ["rerun:11"]  # not closed although develop moved: the run gets its one more try
+    assert out["state"]["release"]["reran"]["runs"] == ["11"] and "once more" in out["lines"][-1]
+    st, rel = out["state"], dict(open_release={"number": 9031}, heads=moved)
+    wait = go(tmp_path, capsys, state=st, prs=pr(checks=bad), **rel)  # GitHub still shows the old failure
+    assert wait["did"] == [] and "waits for the failed jobs" in wait["lines"][-1]
+    later = "2999-01-01T00:00:00Z"  # the new try started after the rerun and is red again
+    red_again = [dict(c, startedAt=later) if c.get("conclusion") == "FAILURE" else c for c in bad]
+    again = go(tmp_path, capsys, state=wait["state"], prs=pr(checks=red_again), **rel)
+    assert again["did"] == ["close:release 31 PR 9031"]  # red again: as before, no second rerun
+
+
+def test_gate_rerun_that_never_reports_stops_waiting(tmp_path, capsys):
+    bad = [{"name": "m", "status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": RUN_URL.format(5)}]
+    st = {"release": dict(gate(), reran={"runs": ["5"], "at": "2000-01-01T00:00:00Z"})}
+    heads = {"develop": DEV, "main": MAIN, "unreleased": UN3}
+    out = go(
+        tmp_path,
+        capsys,
+        state=st,
+        open_release={"number": 9031},
+        prs=pr(checks=bad + [ROLLUP_DONE]),
+        heads=heads,
+    )
+    assert out["did"] == ["ticket:Release 31 checks are red: m"]  # waited longer than the test timeout
+
+
+def test_gate_refused_rerun_goes_on_to_the_ticket(tmp_path, capsys, monkeypatch):
+    def refuse(self, run_id):
+        raise Refused("no write")
+
+    monkeypatch.setattr(rk.World, "rerun_failed", refuse)
+    bad = [{"name": "m", "status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": RUN_URL.format(5)}]
+    heads = {"develop": DEV, "main": MAIN, "unreleased": UN3}
+    out = go(
+        tmp_path,
+        capsys,
+        state={"release": gate()},
+        open_release={"number": 9031},
+        prs=pr(checks=bad + [ROLLUP_DONE]),
+        heads=heads,
+    )
+    assert out["did"] == ["ticket:Release 31 checks are red: m"] and out["state"]["release"]["reran"]
+    assert any("could not run 5 again" in line for line in out["lines"])
+
+
+def test_failed_runs_reads_the_newest_try_of_each_check():
+    old = {
+        "name": "a",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "startedAt": "1",
+        "detailsUrl": RUN_URL.format(1),
+    }
+    new = {
+        "name": "a",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "startedAt": "2",
+        "detailsUrl": RUN_URL.format(1),
+    }
+    status = {
+        "context": "ext",
+        "state": "FAILURE",
+        "targetUrl": "https://ci.example/9",
+    }  # no Actions run: none
+    assert rk.failed_runs([old, new, status]) == []
+    assert rk.failed_runs([old]) == ["1"]
+    assert rk.failed_runs([old], ignore=frozenset({"a"})) == []
+
+
 def test_merged_updates_notes_highlights_and_asks_deploy(tmp_path, capsys):
     out = go(
         tmp_path,
@@ -996,6 +1096,7 @@ def test_a_known_red_job_covers_its_parts():
     assert rk.known_name("workspace / test (windows-latest)", known) == "workspace / test (windows-latest)"
     assert rk.known_name("workspace / test (macos-latest, 1/5)", known) is None
     assert rk.known_name("workspace / test (windows-latest-arm, 1/2)", known) is None
+    assert rk.known_name("workspace / test (windows-latest, arm64)", known) is None  # another axis, no part
     red = {"name": "workspace / test (windows-latest, 2/6)", "status": "COMPLETED", "conclusion": "FAILURE"}
     green = {"name": "workspace / test (ubuntu-latest, 1/2)", "status": "COMPLETED", "conclusion": "SUCCESS"}
     assert rk.checks_green([red, green], frozenset(known)) == "green"
@@ -1393,6 +1494,86 @@ def test_walks_start_at_the_cut_with_the_commit_in_the_note(tmp_path, monkeypatc
     assert out["state"]["release"]["phase"] == "gate" and len(out["state"]["release"]["walks"]) == 3
     assert [t for t, _ in notes] == [f"Release 31: {k} walk" for k in ("install", "services", "clickthrough")]
     assert f"--commit {DEV[:12]}" in notes[0][1] and "Use the skill release-walk." in notes[0][1]
+
+
+def _red_ticket(refs, status="active", key="ORCH-900"):
+    return {
+        "id": "t_red",
+        "key": key,
+        "title": f"Release 31 checks are red: {MAC}",
+        "status": status,
+        "refs": refs,
+    }
+
+
+FIX = "https://github.com/severinlindenmann/orch/pull/1454"
+MINE = {"ticket": "ORCH-900", "checks": [MAC]}  # what the keeper put on its own red ticket
+
+
+def test_the_keeper_remembers_which_checks_it_put_on_its_red_ticket(tmp_path):
+    out = go(tmp_path, state={"release": gate()}, open_release={"number": 9031}, prs=pr(checks=red_mac()))
+    assert out["did"] == [f"ticket:Release 31 checks are red: {MAC}"]
+    assert out["state"]["release"]["red_checks"] == {"ticket": "t_sim", "checks": [MAC]}
+
+
+def test_a_fix_pull_request_on_the_red_ticket_records_the_exception_and_the_card_follows(tmp_path):
+    """Owner 20 Nov (ORCH-178, from ORCH-431): the keeper's red ticket links a fix pull request -> the keeper
+    records the named exception itself (that ticket, two days), and the next pass puts the Merge card that
+    names it."""
+    t = _red_ticket([{"url": FIX}])
+    out = go(tmp_path, state={"release": gate(red_checks=MINE)}, open_release={"number": 9031},
+             prs=pr(checks=red_mac()), tickets=[t])  # fmt: skip
+    until = (rk.now().date() + rk.timedelta(days=2)).isoformat()
+    assert out["did"][0] == f"exception:{MAC}"
+    assert out["did"][1].startswith(f"note:Release keeper: recorded a named exception until {until}")
+    assert "card:release 31" not in out["did"] and "links the fix" in out["lines"][-1]
+    assert out["state"]["release"]["phase"] == "gate"
+    w = rk.World(None, cfg(tmp_path), {"tickets": [t], "exceptions": {}}, known=KNOWN)
+    rk.fix_exceptions(w, gate(red_checks=MINE), [MAC])
+    exc = w.sim["exceptions"][MAC]
+    assert exc["ticket"] == "ORCH-900" and exc["by"] == rk.BY and FIX in exc["why"] and exc["until"] == until
+    again = go(tmp_path, state=out["state"], open_release={"number": 9031}, prs=pr(checks=red_mac()),
+               tickets=[t], exceptions=w.sim["exceptions"])  # fmt: skip
+    assert "card:release 31" in again["did"]
+
+
+@pytest.mark.parametrize(
+    ("t", "mine"),
+    [
+        (_red_ticket([]), MINE),  # no fix linked yet
+        (_red_ticket([{"url": "https://github.com/x/y/pull/9031"}]), MINE),  # only the release itself
+        (_red_ticket([{"url": "https://github.com/other/repo/pull/5"}]), MINE),  # another repository
+        (
+            _red_ticket([{"url": FIX}]),
+            {"ticket": "ORCH-900", "checks": ["lint"]},
+        ),  # the keeper put another check
+        (_red_ticket([{"url": FIX}], status="done"), MINE),  # closed: no open fix ticket
+        (_red_ticket([{"url": FIX}], key="ORCH-901"), MINE),  # a look-alike ticket the keeper did not open
+        (_red_ticket([{"url": FIX}]), None),  # no record of the keeper's: a title alone never counts
+    ],
+)
+def test_no_exception_without_the_keepers_open_red_ticket_naming_the_check_and_a_fix(tmp_path, t, mine):
+    rel = gate(red_checks=mine) if mine else gate()
+    out = go(tmp_path, state={"release": rel}, open_release={"number": 9031}, prs=pr(checks=red_mac()),
+             tickets=[t], heads={"develop": DEV, "main": MAIN, "unreleased": UN3, "green": DEV})  # fmt: skip
+    assert not any(d.startswith("exception:") for d in out["did"]) and "card:release 31" not in out["did"]
+
+
+def test_the_keeper_writes_its_exception_to_the_same_file_a_person_uses(tmp_path):
+    c = cfg(tmp_path)
+    w = rk.World(None, c, None, known=KNOWN)
+    w.record_exception(MAC, {"ticket": "ORCH-900", "until": "2099-01-01", "by": rk.BY})
+    assert json.loads(c.exceptions_path.read_text())[MAC]["ticket"] == "ORCH-900"
+
+
+def test_the_keepers_exception_is_never_renewed_for_the_same_ticket(tmp_path):
+    t = _red_ticket([{"url": FIX}])
+    ended = {
+        MAC: {"ticket": "ORCH-900", "until": "2020-01-01", "by": rk.BY, "why": f"fix pull request {FIX}"}
+    }
+    out = go(tmp_path, state={"release": gate(red_checks=MINE)}, open_release={"number": 9031},
+             prs=pr(checks=red_mac()), tickets=[t], exceptions=ended)  # fmt: skip
+    assert not any(d.startswith("exception:") for d in out["did"]) and "card:release 31" not in out["did"]
 
 
 def test_dry_run_text_says_would_not_did():
