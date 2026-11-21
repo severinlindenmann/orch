@@ -527,7 +527,9 @@ class _Proof:
 
 
 def _demoted_line(h: dict) -> dict:
-    return {**h, "by": SYNC_BY, "text": SYNCED_UNVERIFIED + str(h.get("text", ""))}
+    out = {**h, "by": SYNC_BY, "text": SYNCED_UNVERIFIED + str(h.get("text", ""))}
+    out.pop("by_name", None)  # a typed name on a line nobody here can vouch for is not shown
+    return out
 
 
 def _shown(proof: _Proof, t: dict) -> dict:
