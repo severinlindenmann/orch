@@ -38,7 +38,7 @@ FULL_CHROME = {"workspace/src/orch/cli_shot.py", "workspace/tests/test_shot.py"}
 # This check and its test name the patterns on purpose.
 SKIP = {"scripts/check_headless_launch.py", "brand/tests/test_headless_launch.py"}
 SUFFIXES = {".js", ".cjs", ".mjs", ".ts", ".py", ".sh"}
-BROWSER = re.compile(r"playwright|puppeteer|chromium|webkit|firefox", re.IGNORECASE)
+BROWSER = re.compile(r"playwright|puppeteer|chromium|chrome|headless_shell|webkit|firefox", re.IGNORECASE)
 LAUNCH = re.compile(
     r"(?<![\w$.])((?:[\w$]+\s*\.\s*)*?[\w$]+)\s*\.\s*"
     r"(launch|launchPersistentContext|launch_persistent_context|launchServer|launch_server)\s*\("

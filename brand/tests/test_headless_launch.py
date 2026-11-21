@@ -59,7 +59,8 @@ def test_fine_files_pass(rel, text):
     ("e2e/l.cjs", "const h = require('./headless.cjs'); // chromium\nawait h.launch(chromium, { userDataDir: d });\n"),
     ("x/m.py", "import headless  # chromium\nb = headless.launch(p.chromium, user_data_dir=d)\n"),
     ("x/n.py", "CHROME = 'chromium'\nA = [CHROME, '--use-mock-keychain', '--password-store=basic', f'--user-data-dir={d}']\n"),
-    ("scripts/o.sh", "C=chrome-headless-shell  # chromium\n\"$C\" --use-mock-keychain --user-data-dir=\"$P\" --screenshot\n"),
+    ("scripts/o.sh", "C=chrome-headless-shell\n\"$C\" --use-mock-keychain --user-data-dir=\"$P\" --screenshot\n"),
+    ("x/q.py", "B = '/Applications/Google Chrome.app'\nsubprocess.run([B, '--use-mock-keychain', '--user-data-dir=' + d])\n"),
     # the two keychain options do not make a profile folder safe
     ("e2e/p.cjs", f"require('playwright');\nawait chromium.launchPersistentContext(d, {{{OPTS}}});\n"),
 ])
