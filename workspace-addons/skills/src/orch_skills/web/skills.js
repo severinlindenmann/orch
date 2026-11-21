@@ -1,0 +1,310 @@
+// The Skills page (ORCH-834, draft A): tabs for skills, instructions, connected services and logins; a filter, a
+// search, one list with an on/off switch per row; a click opens the side panel with what helpers see.
+// It only reads from its own server (GET api/page, api/item). Turn off / Turn on is a click the dashboard runs as the
+// person: the page names a verb and an item id (postMessage `orch.act`), the dashboard runs `orch skills act` and answers.
+// Edit (ORCH-840): the panel's form; Save is `orch.save` with the opaque edit id, the loaded revision and the text.
+// All text is set with textContent; the look is the master kit only (no page sheet).
+(() => {
+  'use strict';
+  const P = document.documentElement.dataset.prefix || '';
+  const $ = id => document.getElementById(id);
+  const embedded = window.parent !== window;
+  const TABS = [['skills', 'Skills'], ['instructions', 'Instructions'], ['services', 'Connected services'], ['logins', 'Logins']];
+  const WHERE = {orch: 'Comes with orch', workspace: 'This workspace', admin: 'Shared by your admin', mine: 'Your computer'};
+  const RANK = {workspace: 0, admin: 1, mine: 2, orch: 3};
+  const FIELDS = [['version', 'Version'], ['owner', 'Owner'], ['status', 'State'], ['platforms', 'Runs on'], ['requires', 'Needs'],
+    ['requires-logins', 'Needs logins'], ['review-by', 'Look again on'], ['replaced-by', 'Use instead'], ['tags', 'Tags']];
+  const STATUS = {active: 'In use', draft: 'Draft', deprecated: 'Old', retired: 'Retired'};
+  const PLATFORM = {macos: 'Mac', windows: 'Windows', linux: 'Linux'};
+  let model = null, busy = false;
+  const params = new URLSearchParams(location.search);
+  const FILTERS = ['all', 'on', 'off', 'needs'];
+  let tab = TABS.some(t => t[0] === params.get('tab')) ? params.get('tab') : 'skills';
+  let filter = FILTERS.includes(params.get('show')) ? params.get('show') : 'all', query = '';
+
+  function h(tag, props, ...kids) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(props || {})) {
+      if (v == null || v === false) continue;
+      if (k === 'className') n.className = v;
+      else if (k === 'text') n.textContent = v;
+      else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+      else n.setAttribute(k, v === true ? '' : v);
+    }
+    n.append(...kids.flat().filter(x => x != null && x !== false));
+    return n;
+  }
+
+  // ---- talking to the dashboard ----
+  const asked = new Map();
+  addEventListener('message', e => {
+    const d = e.data;
+    if ((e.origin !== location.origin && !(window.OrchFrame || {}).on) || e.source !== window.parent || !d || typeof d !== 'object' || !asked.has(d.id)) return;
+    if (d.type === 'orch.act.done') asked.get(d.id)({ok: true, answer: d.answer});
+    else if (d.type === 'orch.act.failed') asked.get(d.id)({ok: false, error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
+    else if (d.type === 'orch.save.done') asked.get(d.id)({ok: true, revision: String(d.revision || ''), changed: d.changed !== false});
+    else if (d.type === 'orch.save.failed') asked.get(d.id)({ok: false, stale: d.stale === true, error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
+  });
+  // Save in the editor: the page names the item's opaque edit id, the revision it loaded and the text; the dashboard
+  // runs `orch skills act save` as the person, only right after this Save click.
+  function askSave(target, revision, text) {
+    return new Promise(resolve => {
+      const id = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => (b % 36).toString(36)).join('');
+      const timer = setTimeout(() => finish({ok: false, error: 'The dashboard did not answer. Reload the page and look whether it was saved.'}), 60000);
+      function finish(r) { clearTimeout(timer); asked.delete(id); resolve(r); }
+      asked.set(id, finish);
+      window.parent.postMessage({type: 'orch.save', id, target, revision, text, chan: (window.OrchFrame || {}).chan}, location.origin);
+    });
+  }
+  function askDashboard(verb, target) {
+    return new Promise(resolve => {
+      const id = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => (b % 36).toString(36)).join('');
+      const timer = setTimeout(() => finish({ok: false, error: 'The dashboard did not answer. Reload the page and try again.'}), 30000);
+      function finish(r) { clearTimeout(timer); asked.delete(id); resolve(r); }
+      asked.set(id, finish);
+      window.parent.postMessage({type: 'orch.act', id, verb, target, chan: (window.OrchFrame || {}).chan}, location.origin);
+    });
+  }
+  function say(text, kind, undo) {
+    $('local-feedback').textContent = text;
+    if (window.UI?.toast) window.UI.toast(text, undo || null, kind);
+  }
+  async function turn(it, on, control) {
+    if (!embedded) { say('Open Skills from the dashboard to change it.', 'error'); return load(); }
+    if (busy) return;
+    busy = true;
+    if (control) control.disabled = true;
+    const r = await askDashboard(on ? 'on' : 'off', it.id);
+    busy = false;
+    if (r.ok && r.answer?.changed === false) say(it.name + ' was already ' + (on ? 'on' : 'off') + '.');
+    else if (r.ok) say((on ? 'Turned on: ' : 'Turned off: ') + it.name + (on ? '' : '. Helpers no longer see it here.'), null, () => turn(it, !on));
+    else say(r.error || 'That could not be saved. Nothing was changed.', 'error');
+    await load(true);
+  }
+
+  // ---- drawing ----
+  const items = k => (model && model[k]) || [];
+  const needs = it => (it.problems || []).length > 0;
+  function badge(it) {
+    if (needs(it)) return h('span', {className: 'badge needs', text: 'Needs a look'});
+    if (!it.on) return h('span', {className: 'badge paused', text: 'Off'});
+    const st = it.fields?.status;
+    if (st === 'draft') return h('span', {className: 'badge dashed', text: 'Draft'});
+    if (st === 'retired' || st === 'deprecated') return h('span', {className: 'badge paused', text: STATUS[st]});
+    return h('span', {className: 'badge done', text: 'On'});
+  }
+  function control(it) {
+    if (!it.can_off) return it.locked && it.on && it.kind === 'skill' ? h('span', {className: 'chip outline', title: it.locked, text: 'Always on'}) : null;
+    const s = h('input', {className: 'switch', type: 'checkbox', role: 'switch', 'aria-label': (it.on ? 'Turn off ' : 'Turn on ') + it.name});
+    s.checked = it.on;
+    s.addEventListener('click', e => { e.stopPropagation(); turn(it, s.checked, s); });
+    return s;
+  }
+  function line(it) {
+    if (needs(it)) return it.problems.join(' · ');
+    if (it.note) return it.note;
+    return it.description || '';
+  }
+  function rows() {
+    return items(tab).slice()
+      .sort((a, b) => (needs(b) - needs(a)) || (RANK[a.where] - RANK[b.where]) || a.name.localeCompare(b.name))
+      .filter(it => filter === 'all' || (filter === 'on' && it.on) || (filter === 'off' && !it.on) || (filter === 'needs' && needs(it)))
+      .filter(it => !query || (it.name + ' ' + (it.description || '')).toLowerCase().includes(query));
+  }
+
+  function drawTabs() {
+    return h('div', {className: 'tabs', role: 'tablist', 'aria-label': 'What helpers get'}, TABS.map(([k, t]) => {
+      const n = items(k).filter(needs).length;
+      return h('button', {role: 'tab', type: 'button', 'aria-selected': String(k === tab), onclick: () => { tab = k; filter = 'all'; draw(); }},
+        t + ' ', h('span', {className: 'meta', text: String(items(k).length)}), n ? h('sup', {className: 'count', 'aria-label': n + ' need a look', text: String(n)}) : null);
+    }));
+  }
+  function drawTools() {
+    const seg = h('div', {className: 'segmented', role: 'group', 'aria-label': 'Show'},
+      [['all', 'All'], ['on', 'On'], ['off', 'Off'], ['needs', 'Needs a look']].map(([k, t]) =>
+        h('button', {className: 'btn', type: 'button', 'aria-pressed': String(filter === k), text: t, onclick: () => { filter = k; draw(); }})));
+    const search = h('input', {className: 'input', type: 'search', placeholder: 'Find by name or words', 'aria-label': 'Find', value: query});
+    search.addEventListener('input', () => { query = search.value.toLowerCase(); $('list').replaceWith(drawList()); });
+    return h('div', {className: 'list-tools'}, seg, search);
+  }
+  function drawList() {
+    const list = rows();
+    if (!list.length) {
+      return h('div', {id: 'list', className: 'empty-state'}, h('h3', {text: filter === 'needs' ? 'Nothing needs a look' : 'Nothing here'}),
+        h('p', {className: 'muted', text: query ? 'No name or words match “' + query + '”.' : (filter === 'all' ? 'Helpers get nothing of this kind here.' : 'Show All to see everything.')}));
+    }
+    return h('div', {id: 'list', className: 'table-wrap'}, h('table', {className: 'data-table switch-table'},
+      h('caption', {className: 'sr-only', text: TABS.find(t => t[0] === tab)[1]}),
+      h('thead', {}, h('tr', {}, h('th', {scope: 'col'}, h('span', {className: 'sr-only', text: 'On'})), h('th', {scope: 'col', text: 'Name'}),
+        h('th', {scope: 'col', text: 'From'}), h('th', {scope: 'col', text: 'State'}))),
+      h('tbody', {}, list.map(it => h('tr', {tabindex: '0', 'aria-label': it.name, onclick: () => open(it), onkeydown: e => { if (e.key === 'Enter') open(it); }},
+        h('td', {}, control(it)),
+        h('td', {}, h('strong', {text: it.name}), h('div', {className: 'meta truncate', text: line(it)})),
+        h('td', {className: 'nowrap', text: WHERE[it.where] || ''}),
+        h('td', {}, badge(it)))))));
+  }
+
+  function facts(list) {
+    return h('dl', {className: 'facts'}, list.filter(([, v]) => v).map(([k, v]) => [h('dt', {text: k}), h('dd', {text: v})]).flat());
+  }
+  function open(it) {
+    const tools = Object.entries(it.tools || {});
+    const f = it.fields || {};
+    const sees = it.on ? h('div', {className: 'doc-box'}, h('strong', {text: it.name}), h('p', {className: 'meta', text: it.description || ''}))
+      : h('p', {className: 'muted', text: it.note ? 'Off here. ' + it.note + '.' : 'Nothing: it is off here.'});
+    const box = h('div', {className: 'stack'},
+      h('div', {className: 'row'}, badge(it), h('span', {className: 'meta', text: WHERE[it.where] || ''})),
+      needs(it) ? h('div', {className: 'banner warn', role: 'status'}, it.problems.map(p => h('p', {text: p}))) : null,
+      it.kind === 'login' ? null : [h('p', {className: 'eyebrow', text: 'What helpers see'}), sees],
+      facts([['File', it.file], ['Words', it.words ? String(it.words) : ''],
+        ...tools.map(([t, s]) => [t, s === 'on' ? 'Sees it' : 'Off here']),
+        ...FIELDS.map(([k, label]) => [label, k === 'status' ? (STATUS[f[k]] || f[k]) : k === 'platforms' && f[k] ? f[k].split(',').map(x => PLATFORM[x.trim()] || x.trim()).join(', ') : f[k]]),
+        ...Object.entries(f).filter(([k]) => !FIELDS.some(x => x[0] === k))]),
+      h('div', {className: 'row'},
+        it.edit ? h('button', {className: 'btn primary', type: 'button', text: 'Edit', onclick: () => edit(it, d)}) : null,
+        it.can_off ? h('button', {className: 'btn outline', type: 'button', text: it.on ? 'Turn off' : 'Turn on',
+          onclick: e => { d.close(); turn(it, !it.on, e.currentTarget); }}) : null),
+      it.locked ? h('p', {className: 'meta', text: it.locked + '.'}) : null,
+      !it.edit && it.edit_why ? h('p', {className: 'meta', text: 'Edit: ' + it.edit_why + '.'}) : null);
+    const d = h('dialog', {className: 'sheet', 'aria-label': it.name}, h('div', {className: 'sheet-h'}, h('h2', {text: it.name})), box);
+    d.addEventListener('close', () => d.remove(), {once: true});
+    // × Close, Esc and a click outside all close through d.close(): with unsaved changes the panel stays and says so
+    d.close = value => {
+      if (d.dataset.dirty === '1') {
+        const u = d.querySelector('[data-unsaved]');
+        if (u) { u.hidden = false; u.scrollIntoView?.({block: 'nearest'}); }
+        return;
+      }
+      HTMLDialogElement.prototype.close.call(d, value);
+    };
+    document.body.append(d);
+    d.showModal();
+  }
+
+  // ---- the editor (ORCH-840) ----
+  // Everything from the file is put into form fields as their value (never as HTML), so a skill's text cannot run.
+  const STATE_WORDS = [['', 'Not set'], ['active', 'In use'], ['draft', 'Draft'], ['deprecated', 'Old'], ['retired', 'Retired']];
+  const FORM = [['owner', 'Owner', ''], ['requires', 'Needs these programs', 'for example node, uv'], ['requires-logins', 'Needs these logins', 'for example github'],
+    ['version', 'Version', ''], ['tags', 'Tags', 'for example ui, design'], ['replaced-by', 'Use instead', 'name of the newer skill']];
+  function field(label, control, hint) {
+    return h('label', {className: 'field'}, label, control, hint ? h('span', {className: 'meta', text: hint}) : null);
+  }
+  function input(value, extra) { const i = h('input', {className: 'input', type: 'text', ...extra}); i.value = value || ''; return i; }
+  function area(value, extra) { const t = h('textarea', {className: 'input', spellcheck: 'false', ...extra}); t.value = value || ''; return t; }
+  async function edit(it, d) {
+    const box = d.querySelector('.stack');
+    box.replaceChildren(h('p', {className: 'muted', text: 'Loading…'}));
+    let item;
+    try {
+      const r = await fetch(P + '/api/item/' + encodeURIComponent(it.edit.id), {cache: 'no-store'});
+      if (!r.ok) throw new Error((await r.text()).slice(0, 300) || 'No answer.');
+      item = await r.json();
+    } catch (e) {
+      box.replaceChildren(h('div', {className: 'banner error', role: 'alert'}, h('p', {text: e.message || 'It could not be opened.'})));
+      return;
+    }
+    d.querySelector('.sheet-h h2').textContent = 'Edit ' + item.name;
+    const banner = h('div', {className: 'banner error', role: 'alert', hidden: true});
+    const unsaved = h('div', {className: 'banner attn', role: 'status', hidden: true, 'data-unsaved': ''},
+      h('p', {text: 'Your changes are not saved yet. Save them, or press Cancel to drop them.'}));
+    const ctl = {};
+    let parts;
+    if (item.mode === 'skill') {
+      const f = item.fields || {};
+      ctl.description = area(f.description, {rows: '4', maxlength: '1024'});
+      ctl.status = h('select', {}, STATE_WORDS.concat(STATE_WORDS.some(([k]) => k === f.status) ? [] : [[f.status, f.status]]).map(([k, t]) => h('option', {value: k, text: t})));
+      ctl.status.value = f.status || '';
+      const known = (f.platforms || '').split(',').map(x => x.trim()).filter(Boolean);
+      const plain = known.every(x => PLATFORM[x]);
+      if (plain) {
+        ctl.platforms = h('div', {className: 'row', role: 'group', 'aria-label': 'Runs on'}, Object.entries(PLATFORM).map(([k, t]) => {
+          const c = h('input', {type: 'checkbox', value: k}); c.checked = known.includes(k);
+          return h('label', {className: 'check-label'}, c, t);
+        }));
+        ctl.platforms.read = () => Array.from(ctl.platforms.querySelectorAll('input:checked'), c => c.value).join(', ');
+      } else {
+        const i = input(f.platforms); ctl.platforms = i; i.read = () => i.value;
+      }
+      ctl['review-by'] = input(f['review-by'], {type: 'date'});
+      for (const [k] of FORM) ctl[k] = input(f[k], {placeholder: FORM.find(x => x[0] === k)[2] || null});
+      ctl.body = area(item.body, {rows: '16', className: 'input mono', 'aria-label': 'Steps for the helper'});
+      parts = [
+        field('What it does and when to use it', ctl.description, 'Helpers read this in every session, so keep it short.'),
+        h('div', {className: 'grid-2'}, field('State', ctl.status), field('Owner', ctl.owner)),
+        h('div', {className: 'field'}, h('span', {text: 'Runs on'}), ctl.platforms),
+        h('div', {className: 'grid-2'}, field('Needs these programs', ctl.requires), field('Needs these logins', ctl['requires-logins'])),
+        h('div', {className: 'grid-2'}, field('Look at it again on', ctl['review-by']), field('Version', ctl.version)),
+        h('div', {className: 'grid-2'}, field('Tags', ctl.tags), field('Use instead', ctl['replaced-by'])),
+        field('Steps for the helper', ctl.body),
+      ];
+    } else {
+      ctl.text = area(item.text, {rows: '22', className: 'input mono', 'aria-label': 'What helpers read'});
+      parts = [field(it.kind === 'skill' ? 'The whole skill file' : 'What helpers read', ctl.text,
+        it.kind === 'skill' ? 'Its header could not be shown as a form, so it is edited as text.' : 'Helpers in this workspace read this file at every start.')];
+    }
+    const payload = () => {
+      if (item.mode !== 'skill') return {text: ctl.text.value};
+      const fields = {description: ctl.description.value, status: ctl.status.value, platforms: ctl.platforms.read()};
+      for (const k of ['review-by', ...FORM.map(x => x[0])]) fields[k] = ctl[k].value;
+      return {fields, body: ctl.body.value};
+    };
+    const first = JSON.stringify(payload());
+    const dirty = () => JSON.stringify(payload()) !== first;
+    box.oninput = box.onchange = () => { d.dataset.dirty = dirty() ? '1' : ''; if (!dirty()) unsaved.hidden = true; };
+    const save = h('button', {className: 'btn primary', type: 'button', text: 'Save'});
+    const cancel = h('button', {className: 'btn ghost', type: 'button', text: 'Cancel', onclick: () => { d.dataset.dirty = ''; d.close(); }});
+    save.addEventListener('click', async () => {
+      if (busy) return;
+      if (!dirty()) { say('Nothing changed.'); d.dataset.dirty = ''; d.close(); return; }
+      if (!embedded) { banner.replaceChildren(h('p', {text: 'Open Skills from the dashboard to save.'})); banner.hidden = false; return; }
+      busy = true; save.disabled = true; save.textContent = 'Saving…'; banner.hidden = true;
+      const fields = Array.from(box.querySelectorAll('input, select, textarea'));
+      for (const f of fields) f.disabled = true;   // nothing typed meanwhile can be lost
+      const r = await askSave(item.id, item.revision, JSON.stringify(payload()));
+      for (const f of fields) f.disabled = false;
+      busy = false; save.disabled = false; save.textContent = 'Save';
+      if (r.ok) {
+        d.dataset.dirty = '';
+        d.close();
+        say(r.changed ? 'Saved ' + item.name + '. The old version is kept in the bin.' : 'Nothing changed in ' + item.name + '.');
+        await load(true);
+        return;
+      }
+      banner.replaceChildren(h('p', {text: r.error || 'That could not be saved. Nothing was changed.'}));
+      if (r.stale) banner.append(h('div', {className: 'row'}, h('button', {className: 'btn outline sm', type: 'button', text: 'Load the newer version',
+        onclick: () => { d.dataset.dirty = ''; edit(it, d); }})));
+      banner.hidden = false;
+      banner.scrollIntoView?.({block: 'nearest'});
+    });
+    box.replaceChildren(banner, unsaved, ...parts, h('div', {className: 'sheet-actions'}, save, cancel));
+    (ctl.description || ctl.text).focus();
+  }
+
+  function draw() {
+    try {  // the dashboard's sandboxed frame may refuse; its own history state (the frame channel) is kept
+      const u = new URL(location.href);
+      u.searchParams.set('tab', tab);
+      if (filter === 'all') u.searchParams.delete('show'); else u.searchParams.set('show', filter);
+      history.replaceState(history.state, '', u);
+    } catch (_) { /* the view still draws; only the address does not follow */ }
+    $('loaded').replaceChildren(drawTabs(), drawTools(), drawList());
+  }
+  function show(which) {
+    for (const id of ['loading', 'error', 'loaded']) $(id).hidden = id !== which;
+    $('view-region').setAttribute('aria-busy', String(which === 'loading'));
+  }
+  async function load(fresh) {
+    try {
+      const r = await fetch(P + '/api/page' + (fresh ? '?fresh=1' : ''), {cache: 'no-store'});
+      if (!r.ok) throw new Error((await r.text()).slice(0, 200) || 'No answer.');
+      model = await r.json();
+      show('loaded');
+      draw();
+    } catch (e) {
+      $('error-text').textContent = e.message || 'No answer.';
+      show('error');
+    }
+  }
+  $('retry').addEventListener('click', () => { show('loading'); load(true); });
+  load();
+})();
