@@ -917,6 +917,12 @@ def _retry_with_fresh_blobs(root, to, body, tv, ticket, reply_to, mid) -> dict |
         return None
 
 
+def _line_mid(msg: dict) -> str | None:
+    """The relay message id as the chat line's id (one id for the message everywhere), if it has that form."""
+    mid = msg.get("id")
+    return mid if isinstance(mid, str) and tickets.CHAT_LINE_ID_RE.fullmatch(mid) else None
+
+
 def _record_general(root: Path, msg: dict, text: str, body: dict, reply_to, refs) -> None:
     from orch import chat
 
@@ -924,7 +930,7 @@ def _record_general(root: Path, msg: dict, text: str, body: dict, reply_to, refs
     tickets.apply_op(
         root,
         gid,
-        lambda t: tickets.add_history(t, tickets.current_actor(), text, chat=True),
+        lambda t: tickets.add_history(t, tickets.current_actor(), text, chat=True, mid=_line_mid(msg)),
         by=tickets.current_actor(),
     )
     chat.record(root, msg["id"], body["by"], body["via"], text, msg["created_at"], reply_to, refs=refs)

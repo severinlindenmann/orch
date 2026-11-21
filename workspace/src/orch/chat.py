@@ -389,7 +389,7 @@ def say(root: Path, text: str, by: str | None = None, new: bool = False) -> dict
     mid = relay.new_id()
     entry = record(root, mid, "you", tickets.PERSON_VIA, text, convo_start=new)
     tickets.apply_op(
-        root, gid, lambda t: tickets.add_history(t, who, text, tickets.PERSON_VIA, chat=True), by=who
+        root, gid, lambda t: tickets.add_history(t, who, text, tickets.PERSON_VIA, chat=True, mid=mid), by=who
     )
     runs.pending_add(root, gid, who, "message", text, tickets.PERSON_VIA, "p_" + mid[2:])
     sent = None
@@ -431,7 +431,7 @@ def reply(
                 raise
     who = tickets.current_actor()
     mid = relay.new_id()
-    tickets.apply_op(root, gid, lambda t: tickets.add_history(t, who, text, chat=True), by=who)
+    tickets.apply_op(root, gid, lambda t: tickets.add_history(t, who, text, chat=True, mid=mid), by=who)
     record(root, mid, "helper", "helper", text, reply_to=reply_to, refs=refs)
     return {"id": mid, "sent": False}
 
