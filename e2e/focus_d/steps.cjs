@@ -342,9 +342,11 @@ function widgetFiles() {
     size: f.sample ? fs.statSync(path.join(samples, f.sample)).size : Buffer.byteLength(f.text) }));
 }
 // The overlay: open from a widget, step through with the arrow keys, Esc closes and the keyboard is back on the opener.
-async function overlayRound(page, opener, want) {
+async function overlayRound(page, opener, want, keys = false) {
   await page.locator(opener).first().scrollIntoViewIfNeeded();
-  await page.locator(opener).first().click();
+  // keys: open it from the keyboard (a phone sheet with the Results strip leaves the chat a few lines; the message box
+  // stays over the lower part of a widget there, so a click in its middle would land on the box)
+  if (keys) { await page.locator(opener).first().focus(); await page.keyboard.press('Enter'); } else await page.locator(opener).first().click();
   const dlg = 'dialog.result-overlay[open]';
   await page.waitForSelector(dlg, { timeout: 5000 });
   const titles = [await page.textContent(`${dlg} .result-ov-title`)];
@@ -477,7 +479,7 @@ async function widgetsTicket(page, dash, width) {
   await page.waitForFunction(c => document.querySelectorAll(c + ' .live-chat-msg .results-host [data-type]').length >= 7, chat, { timeout: 15000 });
   const inChat = await page.$$eval(`${chat} .live-chat-msg`, els => els.map(m => [...m.querySelectorAll('.results-host [data-type]')].map(r => r.dataset.type).sort().join(',')).filter(Boolean));
   if (inChat.join(' | ') !== 'md,pr,text | link,page,picture,video') throw new Error('the chat messages carry: ' + inChat.join(' | '));
-  await overlayRound(page, `${chat} .live-chat-msg .result[data-type="picture"] .result-open`, 15);
+  await overlayRound(page, `${chat} .live-chat-msg .result[data-type="picture"] .result-open`, 15, width <= 720);
   await extraShot(page, 'fd-21b-chat', width);
   // the layer goes to the bar, so the ticket page is seen whole (the session stays open in the bar)
   await page.click(`#live-dock .live-pane[data-session="${WIDGET_ID}"] [data-key="live-min"]`).catch(() => page.keyboard.press('Escape'));
