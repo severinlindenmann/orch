@@ -113,6 +113,8 @@ An active add-on with `background = true` runs one process per workspace, starte
 - `orch stop`: in a workspace → that workspace; outside one (or `--pick`) → the running workspaces as a numbered list, the user
   picks a number or `all`; `orch stop <path|name>` / `--all` without asking. It calls `stop` on each active background add-on there.
   An add-on that is no longer on there is never run; its process ends by itself.
+- `orch restart [--json]`: in a workspace, `stop` then `start` on each active background add-on there, so each runs the code
+  installed now (after an update or a fixed add-on file). Unlike `orch stop` it never ends a helper's session.
 - `orch status [--json]`: `running.json` grouped by workspace `[{"workspace", "name", "addons": [{"addon", "pid", "url"?}]}]`.
 - Runtime files of the background process (pid, port, nonce, log) live in `.orch/run/<name>/` (gitignored, 0700). A repo can
   still force-add files there, so an add-on never trusts them alone: no symlinks are followed (`.orch/run` or the folder being a
@@ -213,7 +215,14 @@ host. The only ways back are list rows' `toggle`/`actions` (fixed ops) and one o
 the right of the page heading), block `meta` (quiet text at the right of a block heading), `calendar.title`, list `count`,
 `span: "half"` (two consecutive half lists sit side by side), `compact` (one line per row, `meta` cells, `actions` on hover) and
 `empty` (mark, title, sentence, one button or link when a list has no rows), blocks `footnote` (one quiet line plus a link),
-`settings` (label / value / note rows) and `radio` (one choice, drawn in the card of the `settings` block before it). Links may
+`settings` (label / value / note rows) and `radio` (one choice, drawn in the card of the `settings` block before it). Visuals (ORCH-746): block `chart` (bars per label, e.g. per day: up to 31 labels, up to 3 series each with a name, a tone as
+its colour and one number per label; `stacked`; two `half` charts sit side by side; each column says its numbers on hover or
+focus), block `flow` (work moving left to right through up to 4 stages, each with a label, a headline, a quiet line, linked chips
+with an optional place number, a progress bar and a row of small bars; `active` marks the stage where work happens now), and
+for a `table`: `compact` (one line per row, long text ends in an ellipsis), `filter` (a text column whose values become tabs
+with counts), `fold` (under All only the first N rows, then "Show N more"), a row's `links` (a link of its own per cell, e.g. a
+pull request number to GitHub; the row's `link` then sits on its first cell without one) and `tones` (a cell drawn as a chip
+in that tone). Links may
 also be `app:<page>[/<sub>]`, a page of the dashboard (`app:settings/phone`). The extra ops the dashboard draws are fixed:
 `addon.edit` (the schedule dialog of a ticket), `addon.prompt` (args `verb`, `target`, `value`, `label`: a small dialog with one text line prefilled with `value`, titled `label`; Save sends `addon.act` with that verb and target and the new text as `value` (plain text, 1–200 characters, no control characters); used by Lessons' Edit), `addon.refresh` (read the view again), `addon.allow` (a row's "Allow on this computer": the person signs sync's Allow for that ticket and this add-on's block), `link.share|copy|extend|stop` (the shared
 links of the publish add-on) and, for `radio`, `addon.act` with a plain verb and a plain-word target.

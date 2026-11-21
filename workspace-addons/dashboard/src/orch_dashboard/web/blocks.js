@@ -9,6 +9,7 @@ const OrchBlocks = (() => {
   const TICKET = /^t_[a-z0-9]{6,16}$/;
   const HTTPS = /^https:\/\/[^\s<>"'`]+$/;
   const arr = v => Array.isArray(v) ? v : [];
+  const picked = new Map();   // a table's chosen tab and Show more, kept over repaints (title|filter column)
   const ADDON = /^addon:([a-z][a-z0-9-]{1,31})(\/[A-Za-z0-9_./-]{0,100})?$/;
   const OWN = /^addon:(?![/\\])(?!.*\.\.)([A-Za-z0-9_./?=&%-]{0,300})$/;   // a page of the add-on whose view this is
   const APP = /^app:(home|tickets|notes|chat|settings|addon)(\/[a-z][a-z0-9-]{0,31}){0,2}$/;   // a page of the dashboard (hash route)
@@ -67,6 +68,13 @@ const OrchBlocks = (() => {
   const toneDot = t => { const d = el('span', 'tdot t-' + tone(t)); d.setAttribute('role', 'img'); d.setAttribute('aria-label', TONE_WORD[tone(t)] || 'Normal'); return d; };
   const toneTag = t => TONE_WORD[tone(t)] ? el('span', 'tone-word t-' + tone(t), TONE_WORD[tone(t)]) : null;
   const chip = c => { const s = el('span', 'chip' + (c.tone && c.tone !== 'neutral' ? ' t-' + tone(c.tone) : ''), c.label); return s; };
+  const CHIP_TONE = {good: 'success', warn: 'warning', 'needs-you': 'attn', bad: 'danger', neutral: ''};
+  const toneChip = (t, text, extra) => el('span', ['chip', CHIP_TONE[tone(t)], extra].filter(Boolean).join(' '), text);
+  const shownLink2 = l => typeof l === 'string' && (TICKET.test(l) || HTTPS.test(l) || APP.test(l));
+  const on = (node, ev, fn) => { if (node && typeof node.addEventListener === 'function') node.addEventListener(ev, fn); };
+  const NICE = [2, 4, 6, 8, 10, 20, 30, 40, 50, 60, 80, 100, 150, 200, 300, 400, 500, 1000];   // even: the middle line is a whole number
+  const nice = v => NICE.find(x => x >= v) || Math.ceil(v / 1000) * 1000;
+  const pct = (v, max) => Math.max(0, Math.min(100, max > 0 ? v / max * 100 : 0)).toFixed(1) + '%';
   const parseDate = v => { const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(v) ? v + 'T00:00:00' : v); return Number.isNaN(d.getTime()) ? null : d; };
   const hm = d => typeof window !== 'undefined' && window.UI?.clock ? window.UI.clock(d) : d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit', hour12: false});
   const dayLabel = d => typeof window !== 'undefined' && window.UI?.stamp ? window.UI.stamp(d, {time: false}) : d.toLocaleDateString('en-GB', {weekday: 'short', day: 'numeric', month: 'short'});
@@ -407,6 +415,86 @@ const OrchBlocks = (() => {
       return s;
     },
     split: drawSplit,
+    // Bars per label (e.g. per day), side by side or stacked; each column says its numbers on hover or focus.
+    chart(b) {
+      const s = el('section', 'blk card blk-chart'), head = blkHead(b); if (head) s.append(head);
+      const labels = arr(b.labels), series = arr(b.series).slice(0, 3), n = labels.length;
+      const val = (x, i) => { const v = Number(arr(x.values)[i]); return Number.isFinite(v) && v > 0 ? v : 0; };
+      const tops = labels.map((_, i) => b.stacked ? series.reduce((a, x) => a + val(x, i), 0) : Math.max(0, ...series.map(x => val(x, i))));
+      const top = Math.max(0, ...tops);
+      if (!top && b.empty) { s.append(emptyState(b.empty)); return s; }
+      const legend = el('div', 'chart-legend');
+      for (const x of series) { const k = el('span', 'chart-key c-' + tone(x.tone)); k.append(el('i', 'chart-sw'), String(x.name)); legend.append(k); }
+      s.append(legend);
+      const max = nice(Math.max(1, top));
+      const box = el('div', 'chart' + (n > 16 ? ' dense' : '')); box.setAttribute('role', 'group'); box.setAttribute('aria-label', String(b.title || 'Chart'));
+      const axis = el('div', 'chart-axis'); axis.setAttribute('aria-hidden', 'true');
+      axis.append(el('span', '', String(max)), el('span', '', String(max / 2)), el('span', '', '0'));
+      const plot = el('div', 'chart-plot'), tip = el('div', 'chart-tip'); tip.hidden = true; tip.setAttribute('aria-hidden', 'true');
+      labels.forEach((lab, i) => {
+        const said = String(lab) + ': ' + series.map(x => x.name + ' ' + val(x, i)).join(', ');
+        const col = el('div', 'chart-col'); col.tabIndex = 0; col.setAttribute('role', 'img'); col.setAttribute('aria-label', said);
+        const bars = el('div', 'chart-bars' + (b.stacked ? ' stacked' : ''));
+        for (const x of (b.stacked ? [...series].reverse() : series)) {
+          const bar = el('span', 'chart-bar c-' + tone(x.tone)); bar.style.height = pct(val(x, i), max); bars.append(bar);
+        }
+        col.append(bars, el('span', 'chart-label' + ((n - 1 - i) % (n > 16 ? 3 : n > 9 ? 2 : 1) ? ' quiet' : ''), lab));
+        const show = () => {
+          tip.replaceChildren(el('strong', '', lab));
+          for (const x of series) { const k = el('span', 'chart-key c-' + tone(x.tone)); k.append(el('i', 'chart-sw'), x.name + ': ' + val(x, i)); tip.append(k); }
+          tip.hidden = false;
+          const w = tip.offsetWidth || 0, pw = plot.clientWidth || 0, cx = (col.offsetLeft || 0) + (col.offsetWidth || 0) / 2;
+          tip.style.left = Math.max(0, Math.min(pw - w, cx - w / 2)) + 'px';
+        };
+        on(col, 'pointerenter', show); on(col, 'focus', show);
+        on(col, 'pointerleave', () => { tip.hidden = true; }); on(col, 'blur', () => { tip.hidden = true; });
+        plot.append(col);
+      });
+      plot.append(tip); box.append(axis, plot); s.append(box);
+      return s;
+    },
+    // Work moving left to right through a few stages (a merge queue: being checked -> in line -> merged lately).
+    flow(b) {
+      const s = el('section', 'blk card blk-flow'), d = el('div', 'blk-head');
+      const title = el('h2', 'blk-title'); title.append(shownLink2(b.link) ? linked('flow-title', b.link, [String(b.title)]) : String(b.title));
+      d.append(title); if (b.meta) d.append(el('span', 'meta', b.meta)); s.append(d);
+      const row = el('div', 'flow-stages');
+      for (const st of arr(b.stages).slice(0, 4)) {
+        const box = el('div', 'flow-stage' + (st.active ? ' active' : '') + (st.tone && st.tone !== 'neutral' ? ' t-' + tone(st.tone) : ''));
+        const h = el('div', 'flow-head'); h.append(el('span', 'meta', st.label), el('strong', 'flow-value', st.value)); box.append(h);
+        if (st.text) box.append(el('span', 'flow-text', st.text));
+        const items = arr(st.items);
+        if (items.length) {
+          const chips = el('div', 'flow-items');
+          for (const it of items) {
+            const parts = [];
+            if (Number.isInteger(it.place)) parts.push(el('span', 'flow-place', String(it.place)));
+            parts.push(String(it.label));
+            const cls = ['chip', 'flow-chip', st.active && (!it.tone || it.tone === 'neutral') ? 'info' : CHIP_TONE[tone(it.tone)]].filter(Boolean).join(' ');
+            const c = shownLink2(it.link) ? linked(cls, it.link, parts) : (() => { const x = el('span', cls); x.append(...parts); return x; })();
+            if (it.hint) c.title = String(it.hint);
+            chips.append(c);
+          }
+          if (st.more > 0) chips.append(el('span', 'chip outline flow-chip', '+' + st.more));
+          box.append(chips);
+        }
+        const p = st.progress;
+        if (p && Number(p.max) > 0) {
+          const bar = el('progress', 'flow-progress'); bar.max = Number(p.max); bar.value = Math.min(Number(p.value) || 0, Number(p.max));
+          bar.setAttribute('aria-label', String(p.label)); box.append(bar);
+        }
+        const bars = arr(st.bars);
+        if (bars.length) {
+          const most = Math.max(1, ...bars.map(x => Number(x.value) || 0));
+          const g = el('div', 'flow-bars'); g.setAttribute('role', 'img'); g.setAttribute('aria-label', String(st.bars_label || st.label));
+          for (const x of bars) { const k = el('span', 'flow-bar t-' + tone(x.tone)); k.style.height = pct(Math.max(Number(x.value) || 0, most / 8), most); if (x.hint) k.title = String(x.hint); g.append(k); }
+          box.append(g);
+        }
+        row.append(box);
+      }
+      s.append(row);
+      return s;
+    },
     footnote(b) {
       const p = el('p', 'blk-footnote'); p.append(el('span', '', b.text));
       if (b.link && shownLink(b.link.to)) p.append(linked('', b.link.to, [b.link.label + ' \u2192']));
@@ -500,8 +588,8 @@ const OrchBlocks = (() => {
       return s;
     },
     table(b) {
-      const s = el('section', 'blk'), head = blkHead(b); if (head) s.append(head);
-      const wrap = el('div', 'table-wrap'), t = el('table', 'blk-table data-table'), cols = arr(b.columns);
+      const s = el('section', 'blk' + (b.filter || b.compact ? ' card' : '')), head = blkHead(b); if (head) s.append(head);
+      const wrap = el('div', 'table-wrap'), t = el('table', 'blk-table data-table' + (b.compact ? ' compact' : '')), cols = arr(b.columns);
       const hr = el('tr');
       const rowsList = arr(b.rows), hasActions = rowsList.some(r => arr(r.actions).length), hasToggle = rowsList.some(r => r.toggle);
       // The switch column is named by what it turns on (the add-on's `text`, e.g. Repeats); at phone width the same
@@ -512,14 +600,27 @@ const OrchBlocks = (() => {
       if (hasToggle) { const th = el('th', '', toggleText); th.scope = 'col'; hr.append(th); }
       const thead = el('thead'); thead.append(hr); t.append(thead);
       const tb = el('tbody');
+      const trs = [];
+      // compact: the row's own column (where its link goes) and long text columns end in an ellipsis
+      const long = new Set(cols.filter(c => c.type === 'text' && rowsList.some(r => String((r.cells || {})[c.key] ?? '').length > 40)).map(c => c.key));
       for (const r of arr(b.rows)) {
-        const tr = el('tr');
+        const tr = el('tr'), links = r.links && typeof r.links === 'object' ? r.links : {}, tones = r.tones && typeof r.tones === 'object' ? r.tones : {};
+        // the row's link sits on its first cell that has no link of its own
+        const mainKey = (cols.find(c => !(Object.prototype.hasOwnProperty.call(links, c.key) && shownLink2(links[c.key]))) || cols[0] || {}).key;
         cols.forEach((c, i) => {
-          const td = cell(c, (r.cells || {})[c.key]); td.dataset.label = c.label || '';
-          if (i === 0 && typeof r.link === 'string' && (TICKET.test(r.link) || HTTPS.test(r.link))) {
+          const v = (r.cells || {})[c.key];
+          const td = cell(c, v); td.dataset.label = c.label || '';
+          if (c.type === 'text' && v != null && TONES.includes(tones[c.key])) td.replaceChildren(toneChip(tones[c.key], String(v)));
+          if (b.compact && c.type === 'text' && typeof v === 'string') td.title = v;
+          const own = Object.prototype.hasOwnProperty.call(links, c.key) ? links[c.key] : null;
+          if (own != null && shownLink2(own)) {
+            const a = linked(i === 0 ? 'cell-link' : 'cell-ref', own, [...td.childNodes]); td.replaceChildren(a);
+          } else if (c.key === mainKey && typeof r.link === 'string' && (TICKET.test(r.link) || HTTPS.test(r.link))) {
             const a = linked('cell-link', r.link, [...td.childNodes]); td.replaceChildren(a);
           }
-          if (i === 0 && r.subtitle) td.append(el('span', 'subline', r.subtitle));
+          if (b.compact && c.key === mainKey) td.className = (td.className + ' cell-main').trim();
+          else if (b.compact && long.has(c.key)) td.className = (td.className + ' cell-long').trim();
+          if (c.key === mainKey && r.subtitle) td.append(el('span', 'subline', r.subtitle));
           tr.append(td);
         });
         if (hasActions) {
@@ -532,9 +633,61 @@ const OrchBlocks = (() => {
           if (sw) { td.dataset.label = toggleText; td.append(sw); }
           tr.append(td);
         }
-        tb.append(tr);
+        tb.append(tr); trs.push([tr, r]);
       }
-      t.append(tb); wrap.append(t); s.append(wrap);
+      t.append(tb);
+      // Tabs by one text column (All, then each value with its count) and a fold under All: plain show/hide of rows.
+      const fcol = cols.find(c => c.key === b.filter && c.type === 'text');
+      const fold = Number.isInteger(b.fold) && b.fold > 0 ? b.fold : 0;
+      const foot = el('div', 'blk-table-foot');
+      // The page is painted again on every poll and the dashboard keeps the nodes already shown (with the
+      // listeners of the first paint), so the handlers read rows and tabs from the live page, never from this
+      // paint's records, and the chosen tab and "Show more" outlive a repaint (picked, per table).
+      const tkey = `${b.title || ''}|${b.filter || ''}`;
+      const mem = picked.get(tkey) || {pick: null, open: false};
+      if (fcol) for (const [tr, r] of trs) tr.dataset.f = String((r.cells || {})[fcol.key] ?? '');
+      if (mem.pick != null && !trs.some(([tr]) => tr.dataset.f === mem.pick)) mem.pick = null;  // that tab is gone
+      const apply = (box, pick, open) => {
+        const rows = [...box.querySelectorAll('tbody > tr')];
+        let shown = 0;
+        for (const tr of rows) {
+          const hit = pick == null || tr.dataset.f === pick;
+          const fits = hit && (pick != null || open || !fold || shown < fold);
+          tr.hidden = !fits; if (fits) shown += 1;
+        }
+        const left = pick == null && fold && !open ? rows.length - shown : 0;
+        const ft = box.querySelector('.blk-table-foot') || foot;
+        ft.replaceChildren();
+        if (left > 0) {
+          const m = el('button', 'btn ghost sm', `Show ${left} more`); m.type = 'button';
+          on(m, 'click', () => { const now = picked.get(tkey) || {pick: null, open: false}; now.open = true; picked.set(tkey, now); apply(m.closest('.blk') || box, now.pick, true); });
+          ft.append(m);
+        }
+        ft.hidden = !left;
+      };
+      if (fcol) {
+        const counts = new Map();
+        for (const [, r] of trs) { const k = String((r.cells || {})[fcol.key] ?? ''); if (k) counts.set(k, (counts.get(k) || 0) + 1); }
+        const tabs = el('div', 'tabs blk-tabs'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', String(fcol.label));
+        const tab = (label, n, key) => {
+          const x = el('button'); x.type = 'button'; x.setAttribute('role', 'tab'); x.setAttribute('aria-selected', key === mem.pick ? 'true' : 'false');
+          if (key != null) x.dataset.f = key;
+          x.append(String(label), el('sup', '', String(n)));
+          on(x, 'click', () => {
+            const box = x.closest('.blk') || s, now = picked.get(tkey) || {pick: null, open: false};
+            now.pick = 'f' in x.dataset ? x.dataset.f : null; picked.set(tkey, now);
+            for (const y of x.parentNode.childNodes) y.setAttribute('aria-selected', y === x ? 'true' : 'false');
+            apply(box, now.pick, now.open);
+          });
+          return x;
+        };
+        tabs.append(tab('All', trs.length, null));
+        for (const [k, n] of counts) tabs.append(tab(k, n, k));
+        s.append(tabs);
+      }
+      wrap.append(t); s.append(wrap);
+      if (fold || mem.pick != null) { s.append(foot); apply(s, mem.pick, mem.open); }
+      if (!fold) foot.hidden = true;
       if (b.more > 0) s.append(el('p', 'blk-more', `+${b.more} more`));
       return s;
     },
@@ -553,7 +706,7 @@ const OrchBlocks = (() => {
       const node = f(b);
       if (b.type === 'radio' && settings) { settings.append(...node.childNodes); continue; }   // a choice sits in the card above it
       settings = b.type === 'settings' ? node : null;
-      if (b.type === 'list' && b.span === 'half') {   // two half lists side by side
+      if ((b.type === 'list' || b.type === 'chart') && b.span === 'half') {   // two half blocks side by side
         if (!pair || pair.childNodes.length >= 2) { pair = el('div', 'blk-pair'); root.append(pair); }
         pair.append(node); continue;
       }

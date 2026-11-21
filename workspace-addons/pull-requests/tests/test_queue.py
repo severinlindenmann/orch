@@ -488,7 +488,23 @@ def test_add_list_remove_commands(ws, monkeypatch, capsys):
     assert cli.main(["queue", "list", "--json"]) == 0
     assert [r["number"] for r in json.loads(capsys.readouterr().out)["entries"]] == [1, 2]
     assert cli.main(["queue", "remove", url(1)]) == 0
+    assert cli.main(["queue", "remove", url(1)]) == 2  # not in the queue: a refusal, not exit 1
+    assert "does not wait in the merge queue" in capsys.readouterr().err
     assert cli.main(["queue", "add", "not a url"]) == 2
+
+
+def test_list_shows_the_ticket_key(ws, monkeypatch, capsys):
+    from orch import tickets
+
+    monkeypatch.setattr(cli, "start_runner", lambda root: None)
+    monkeypatch.setattr(cli, "_github", lambda: FakeGitHub({1: {}}))
+    monkeypatch.setattr(cli, "_ticket", lambda root, ref, u: "t_abc123")
+    monkeypatch.setattr(tickets, "load", lambda root, tid: {"id": tid, "key": "QE-1"})
+    assert cli.main(["queue", "add", url(1), "--ticket", "t_abc123"]) == 0
+    capsys.readouterr()
+    assert cli.main(["queue", "list"]) == 0
+    out = capsys.readouterr().out
+    assert "[QE-1]" in out and "t_abc123" not in out
 
 
 @pytest.mark.parametrize("platform", ["darwin", "linux", "win32"])
@@ -687,3 +703,67 @@ def test_a_wake_with_no_free_slot_waits_in_line_at_high_priority(ws, monkeypatch
     monkeypatch.setattr(runs, "start", start)
     assert checks.wake(ws, "t_abc123", "fix it") == "the helper waits in line for a free slot"
     assert seen["priority"] == "high"
+
+
+def test_new_code_stops_the_runner_between_rounds(ws):
+    """An orch update or a fixed add-on file: the runner stops before its next round and leaves the line as it
+    is, so a fresh runner (cli._run starts it) goes on with the new code (ORCH-435)."""
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    store.add(ws, url(2), None, "agent:t", login="bot")
+    gh = FakeGitHub({1: {}, 2: {}})
+    r, calls = make(ws, gh, FakeGit())
+    r.stamp = lambda: "new"
+    lines = []
+    r.log = lines.append
+    r.run()
+    assert r.new_code and calls == [] and states(ws) == {1: "waiting", 2: "waiting"}
+    assert any("New orch code" in s for s in lines)
+
+
+def test_the_same_code_keeps_the_runner_going(ws):
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    r, calls = make(ws, FakeGitHub({1: {}}), FakeGit())
+    r.run()
+    assert not r.new_code and len(calls) == 1 and states(ws) == {1: "merged"}  # one group run, merged
+
+
+def test_code_stamp_changes_when_a_code_file_changes(monkeypatch, tmp_path):
+    pkg = tmp_path / "orch_pull_requests"
+    pkg.mkdir()
+    (pkg / "a.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(runner, "__file__", str(pkg / "runner.py"))
+    before = runner.code_stamp()
+    assert runner.code_stamp() == before
+    (pkg / "a.py").write_text("x = 22\n", encoding="utf-8")
+    assert runner.code_stamp() != before
+
+
+def test_a_runner_on_old_code_hands_the_line_to_a_fresh_one(ws, monkeypatch):
+    started = []
+
+    class Stops:
+        new_code = True
+
+        def __init__(self, *a, **k):
+            pass
+
+        def run(self):
+            return 0
+
+        def has_work(self):
+            return True  # still work: without the hand-over this process would loop on its old code
+
+    monkeypatch.setattr(runner, "Runner", Stops)
+    monkeypatch.setattr(cli, "_github", lambda: None)
+    monkeypatch.setattr(cli, "start_runner", lambda root: started.append(root))
+    assert cli._run(ws) == 0
+    assert started == [ws] and not cli.runner_alive(ws)
+
+
+def test_code_that_is_still_being_written_waits_until_it_settles(ws):
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    r, calls = make(ws, FakeGitHub({1: {}}), FakeGit())
+    seq = iter(["a", "b", "c", "c"])
+    r.stamp = lambda: next(seq)
+    r.run()
+    assert r.new_code and calls == [] and states(ws) == {1: "waiting"}

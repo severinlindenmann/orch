@@ -184,6 +184,43 @@ class GitHub:
                 out.append(v)
         return out
 
+    def create_issue(self, repo: str, title: str, body: str) -> str | None:
+        """Open an issue (a write: the caller takes a slot of the write limit first); its address or None."""
+        got = self._run("issue", "create", "--repo", repo, "--title", title, "--body", body)
+        lines = [
+            x.strip() for x in (got.stdout or "").splitlines() if x.strip().startswith("https://github.com/")
+        ]
+        return lines[-1] if got.returncode == 0 and lines else None
+
+    def find_issue(self, repo: str, mark: str) -> str | None:
+        """The open issue whose text carries `mark` (a broken test's key) and that this computer's own GitHub
+        login opened (anyone can write the mark into an issue); None: none, or GitHub did not answer."""
+        me = self.login()
+        if not me:
+            return None
+        v = self._json(
+            "issue", "list", "--repo", repo, "--state", "open", "--author", me, "--search", f"{mark} in:body",
+            "--json", "url,body,author", "--limit", "5",
+        )  # fmt: skip
+        for i in v if isinstance(v, list) else []:
+            if (
+                isinstance(i, dict)
+                and str((i.get("author") or {}).get("login") or "").lower() == me.lower()
+                and mark in str(i.get("body") or "")
+                and str(i.get("url") or "").startswith("https://")
+            ):
+                return i["url"]
+        return None
+
+    def issue_state(self, url: str) -> str | None:
+        """OPEN or CLOSED, None when GitHub did not answer (one read)."""
+        v = self._json("issue", "view", url, "--json", "state")
+        return v.get("state") if isinstance(v, dict) and isinstance(v.get("state"), str) else None
+
+    def set_variable(self, repo: str, name: str, value: str) -> bool:
+        """Set a repository's Actions variable (a write: the caller takes a slot of the write limit first)."""
+        return self._run("variable", "set", name, "--repo", repo, "--body", value).returncode == 0
+
     def close(self, url: str) -> bool:
         """Close a group pull request (its branch is deleted on its own, one more write)."""
         return self._run("pr", "close", url).returncode == 0
