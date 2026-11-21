@@ -181,3 +181,28 @@ def test_without_any_record_a_synced_schedule_stays_refused(root, monkeypatch):
     ticket = {"id": TID, "ext": {"automation": {"enabled": True}}}
     no_start(monkeypatch, ticket)  # no local-ext.json, no local-blocks.json
     assert orchcli.run_start(root, TID)["result"] == "failed"
+
+
+def test_the_refusal_names_the_command_and_a_person_allows_it_here(root, monkeypatch):
+    """Owner 20 Nov (ORCH-1097): the card said only "needs local approval"; it names the one command now, and that
+    command allows a block that is no held sync change (sync off again, no local-ext.json)."""
+    from orch_automation import cli, scripts
+
+    block = {"script": "keeper", "recurring": True}
+    ticket = {"id": TID, "key": "ORCH-178", "ext": {"automation": block}}
+    no_start(monkeypatch, ticket)
+    monkeypatch.setattr(orchcli, "tickets", lambda *a: [ticket])
+    why = orchcli.sync_refusal(root, TID)
+    key = syncapproval.allow_key(ticket)
+    assert f"orch automation allow ORCH-178 --key {key}" in why
+    monkeypatch.setattr(scripts, "an_agent", lambda: "claude")
+    with pytest.raises(cli.Refused, match="Only a person"):
+        cli.allow(root, "ORCH-178", key)
+    monkeypatch.setattr(scripts, "an_agent", lambda: None)
+    with pytest.raises(cli.Refused, match=f"changed.*--key {key}"):
+        cli.allow(root, "orch-178", "000000000000")
+    assert cli.allow(root, "orch-178", key)["allowed"] is True
+    assert syncapproval.allowed(root, ticket) and orchcli.sync_refusal(root, TID) is None
+    block["script"] = "other"  # a later change asks again, with a new key
+    assert not syncapproval.allowed(root, ticket)
+    assert syncapproval.allow_key(ticket) != key

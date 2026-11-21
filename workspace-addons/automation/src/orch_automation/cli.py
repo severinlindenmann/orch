@@ -216,6 +216,25 @@ def repeat(
     return {"ticket": tid, **changes}
 
 
+def allow(root: Path, tid: str, key: str) -> dict:
+    """`orch automation allow <ticket> --key <key>`: a person (never an agent) allows the ticket's repeat on this computer."""
+    from . import syncapproval
+
+    if scripts.an_agent():
+        raise Refused("Only a person can allow a repeat on this computer, not an agent.")
+    want = tid.strip().upper()
+    t = next(
+        (x for x in orchcli.tickets(root) if x["id"] == tid or str(x.get("key") or "").upper() == want), None
+    )
+    if t is None:
+        raise Refused(f"There is no ticket {tid}.")
+    try:
+        syncapproval.allow_here(root, t, key)
+    except ValueError as e:
+        raise Refused(str(e)) from None
+    return {"ticket": t["id"], "key": t.get("key"), "allowed": True}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="orch automation",
@@ -259,6 +278,11 @@ def main(argv: list[str] | None = None) -> int:
         help="start only when this git branch moved since the last run, e.g. orch@origin/develop (off: any time)",
     )
     rp.add_argument("--off", action="store_true")
+    al = sub.add_parser(
+        "allow", parents=[common], help="a person allows a repeat that came by sync on this computer"
+    )
+    al.add_argument("ticket")
+    al.add_argument("--key", required=True, help="the key the refusal on the ticket shows")
     sc = sub.add_parser(
         "script", parents=[common], help="commands a repeat can run instead of an agent (this computer only)"
     )
@@ -406,6 +430,9 @@ def _run(args, root: Path) -> int:
         except actions.Bad as e:
             raise Refused(str(e)) from None
         out(res, res["text"])
+    elif args.cmd == "allow":
+        res = allow(root, args.ticket, args.key)
+        out(res, f"Allowed on this computer. The repeat of {res['key'] or res['ticket']} runs again.")
     elif args.cmd == "script":
         return _script(args, root, out)
     elif args.cmd == "repeat":
