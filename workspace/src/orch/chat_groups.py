@@ -3029,10 +3029,11 @@ def phone_text(root: Path, tid: str, msg: dict) -> bool:
 
 
 def phone_team(root: Path, tid: str, msg: dict, by: str) -> dict | None:
-    """Team chat step 2 (ORCH-1175): the person's Add in a ticket chat on the phone. The relay sets `body.team`
-    only on a phone's text (it refuses it from workspaces); this workspace still acts only for a phone paired to
-    it and adds only a workspace it may add (add_member: connected, at most 8, a removed one only after asking).
-    `mentions` from the phone are not used yet (the app has no @ list in this step). None = nothing to do."""
+    """Team chat step 2 (ORCH-1175): the person's Add in a ticket chat on the phone. The relay sets
+    `body.team` only on a phone's text (it refuses it from workspaces); this workspace still acts only for a
+    phone paired to it and adds only a workspace it may add (add_member: connected, at most 8, a removed one
+    only after asking). `mentions` from the phone are not used yet (no @ list in the app in this step).
+    None = nothing to do."""
     team = (msg.get("body") or {}).get("team") if isinstance(msg.get("body"), dict) else None
     if not isinstance(team, dict) or not str(msg.get("from", "")).startswith("ph_"):
         return None
@@ -3045,7 +3046,8 @@ def phone_team(root: Path, tid: str, msg: dict, by: str) -> dict | None:
         return add_member(root, tid, ws, by)
     except Refused as e:
         # In the chat, so the person sees why on the phone and the computer.
-        _history(root, tid, "agent:relay", f"Could not add the workspace: {clean_untrusted(str(e), 200)}", chat=True)
+        why = clean_untrusted(str(e), 200)
+        _history(root, tid, "agent:relay", f"Could not add the workspace: {why}", chat=True)
         return {"added": False, "error": str(e)}
 
 
