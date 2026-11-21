@@ -567,3 +567,26 @@ def test_a_test_home_with_the_real_account_home_finds_no_real_jobs(cli, mac, too
     monkeypatch.setattr(found, "_real_account_home", lambda: Path("/nonexistent-real-home"))
     code, out = jrun(cli, "found")
     assert {i["id"] for i in out["found"]} >= {"launchd:com.example.web-preview"}
+
+
+def test_a_program_started_by_a_managed_service_is_not_found_again(cli, mac, tools, ws):
+    # ORCH-847: the service runs a shell script; the program the script starts is a child of launchd's main pid
+    code, out = jrun(cli, "add", "Abacus", "--id", "abacus", "--start", "--", "/bin/sh", "app.sh")
+    assert code == 0, out
+    pid = next(
+        j["pid"]
+        for k, j in tools.read()["launchd"].items()
+        if k.startswith("ch.orch.svc.") and j.get("running")
+    )
+    tools.set(
+        ps=[
+            {"pid": pid, "ppid": 1, "tty": "??", "argv": ["/bin/sh", "app.sh"]},
+            {"pid": 7001, "ppid": pid, "tty": "??", "argv": ["shadow-abacus"]},
+            {"pid": 7002, "ppid": 7001, "tty": "??", "argv": ["shadow-abacus-worker"]},
+            {"pid": 7003, "ppid": 1, "tty": "??", "argv": ["other-tool"]},
+        ],
+        lsof={str(pid): str(ws), "7001": str(ws), "7002": str(ws), "7003": str(ws)},
+    )
+    out = jrun(cli, "found")[1]
+    assert all(not i["id"].startswith("process:") for i in out["found"])
+    assert out["others"] == 1  # only other-tool; the service's own children are not counted
