@@ -129,6 +129,8 @@ def _exit(run, capsys, *argv):
 def test_plain_usage_errors(proj, run, capsys):
     code, err = _exit(run, capsys, "nonsense")
     assert code == 2 and '"nonsense" is not an orch command' in err and "invalid choice" not in err
+    code, err = _exit(run, capsys, "ticket", "status", "t_x", "nonsense")
+    assert code == 2 and '"nonsense" is not a ticket status' in err and "command" not in err
     code, err = _exit(run, capsys, "ticket", "new")
     assert code == 2 and 'orch ticket new "Fix the login"' in err and "positional" not in err
 
