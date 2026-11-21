@@ -57,7 +57,7 @@
     if (typeof p.icon === 'string' && ICON.test(p.icon)) out.icon = p.icon;
     if (typeof p.wsid === 'string' && WSID.test(p.wsid)) out.wsid = p.wsid;
     if (num(p.opened)) out.opened = num(p.opened);
-    if (p.signed === true) out.signed = true;
+    if (p.visited === true) out.visited = true;
     return out;
   }
   const live = list => list.filter(p => !p.removed);
@@ -127,7 +127,7 @@
     const wsid = typeof self.wsid === 'string' && WSID.test(self.wsid) ? self.wsid : null;
     return tidy(tidy(list, now).map(p => {
       if (p.removed || (p.url !== a.url && !(wsid && p.wsid === wsid))) return p;
-      const q = Object.assign({}, p, {opened: now, signed: true, changed: now});
+      const q = Object.assign({}, p, {opened: now, visited: true, changed: now});
       if (wsid) q.wsid = wsid;
       if (p.url !== a.url && (isSecure(a.url) || !isSecure(p.url))) q.url = a.url;  // the address that last worked
       const name = cleanName(self.name);

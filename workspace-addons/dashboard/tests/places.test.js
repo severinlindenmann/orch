@@ -113,7 +113,7 @@ test('a page describes itself: name, colour and workspace id update its row', ()
   assert.equal(list[0].name, 'Fernscout');
   assert.equal(list[0].color, 'teal');
   assert.equal(list[0].wsid, 'ws_fern');
-  assert.equal(list[0].signed, true);
+  assert.equal(list[0].visited, true);
   assert.equal(list[0].opened, NOW + 5);
   const bad = P.describe(list, 'https://fs.office.example.ch', {name: '', color: 'url(javascript:x)', icon: '<svg>'}, NOW + 6);
   assert.equal(bad[0].name, 'Fernscout');

@@ -3,7 +3,7 @@
 // QR code, and places that come in a link wait for the keep question and leave the address bar.
 module.exports = {
   name: 'Workspace switcher: Saved places, Add place, keep question and Share my places',
-  covers: [],
+  covers: ['page:home'],
   async run({ page, open, must }) {
     await open('#home');
     const box = page.getByTestId('ws-switch');
