@@ -505,7 +505,7 @@ def _author_bound(s, m, host, author, g, o, chat_groups, phone_view) -> bool:
     )
 
 
-def gate(root: Path, m: dict, now_ms: int | None = None) -> Verdict:
+def check_incoming(root: Path, m: dict, now_ms: int | None = None) -> Verdict:
     """The receiver's whole decision for one message from the relay (see the module text)."""
     now_ms = _now_ms() if now_ms is None else now_ms
     typ, frm = m.get("type"), str(m.get("from", ""))
@@ -648,7 +648,7 @@ def release(root: Path, peer: str) -> list[dict]:
                 {"id": x["id"], "result": "dropped", "why": "a held person action is never run by itself"}
             )
             continue
-        v = gate(root, m)
+        v = check_incoming(root, m)
         if v.kind == "ok":
             dest = root / ".orch" / "inbox" / f"{x['id']}.json"
             if not inbox_slot_free(dest, m):

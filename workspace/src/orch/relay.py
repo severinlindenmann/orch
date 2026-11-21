@@ -390,8 +390,8 @@ def give_allow(root: Path, mid: str, mode: str, by: str | None = None, via: str 
     _save_allows(root, a)
     from orch import msgtrust
 
-    # signed as a person's action only when a person gave it (answered_by is proven; the CLI only at a
-    # terminal outside a helper): a receiver refuses an allow signed as a helper's (ORCH-1202)
+    # marked as a person's action only when a person gave it (answered_by is proven; the CLI only at a
+    # terminal outside a helper): a receiver refuses an allow marked as a helper's (ORCH-1202)
     person = str(by or "").startswith("human:") and (via != "cli" or msgtrust.current_origin() == "person")
     try:
         with msgtrust.as_person(person):
@@ -594,8 +594,8 @@ def _message(
         return {**msg, "dry_run": True}
     from orch import msgtrust
 
-    signed = msgtrust.sign_outgoing(root, msg)  # every message carries its signature (ORCH-1202)
-    raw = json.dumps(signed).encode("utf-8")
+    sealed = msgtrust.sign_outgoing(root, msg)  # every message carries its envelope (ORCH-1202)
+    raw = json.dumps(sealed).encode("utf-8")
     path = _write_outbox(root, msg["id"], raw)
     from orch import relay_view
 
@@ -2214,7 +2214,7 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
         # the decisive check, here and not on the relay: only a verified (or, before the cut-over, unsigned)
         # message is ever saved where the rest of orch reads it (ORCH-1202)
         try:
-            v = msgtrust.gate(root, m)
+            v = msgtrust.check_incoming(root, m)
         except Refused as e:  # the trust list cannot be read: leave it on the relay for the next pull
             log_send_failure(root, "check of a received message", e)
             continue
@@ -2227,7 +2227,7 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
             acked.append(m["id"])
             continue
         acked.append(m["id"])
-        # refused, or the same signed message again (a lost ack or a replay): never saved or handled twice
+        # refused, or the same exact message again (a lost ack or a replay): never saved or handled twice
         if v.kind in ("refused", "duplicate"):
             continue
         m = v.message

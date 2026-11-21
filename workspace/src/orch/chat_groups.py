@@ -2224,8 +2224,8 @@ def _host_receive(root: Path, st: dict, g: dict, m: dict) -> dict:
         via=tickets.PERSON_VIA if b.get("via") == tickets.PERSON_VIA else "helper",
         update=update,
         task=task,
-        # the member's own signed envelope rides along unchanged: every other member checks the author's
-        # signature itself, not only the host's (ORCH-1202)
+        # the member's own envelope rides along unchanged: every other member checks the author's own
+        # envelope itself, not only the host's (ORCH-1202)
         extra={**(ev_extra or {}), "author": m["envelope"]}
         if isinstance(m.get("envelope"), dict)
         else ev_extra or None,
@@ -3239,7 +3239,7 @@ def say_member(root: Path, host: str, gid: str, text: str, via: str = "helper") 
         body = {"text": phone_view.redact(text)[:TEXT_MAX], "group": _wire_joined(j), "by": me, "via": via}
         from orch import msgtrust
 
-        # callers pass PERSON_VIA only after their own person check: signed as the person's words (ORCH-1202)
+        # callers pass PERSON_VIA only after their own person check: marked as the person's words (ORCH-1202)
         with msgtrust.as_person(via == tickets.PERSON_VIA):
             msg = _send(root, host, "text", body, j.get("ticket"))
         _own_sent(j, msg)

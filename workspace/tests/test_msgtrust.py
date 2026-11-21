@@ -191,7 +191,7 @@ def test_missing_signature_refused_once_signed_only_is_on(ws, run, rel, person):
     rel.inbox.append(plain)
     inbox(run)
     assert plain["id"] in handled_ids(ws)  # before the cut-over an unsigned message still goes through
-    assert run("relay", "signing", "on")[0] == 0
+    assert run("relay", "contacts", "unsigned", "refuse")[0] == 0
     plain2 = signed_msg(SEED_PEER)
     plain2.pop("envelope")
     rel.inbox.append(plain2)
@@ -284,7 +284,7 @@ def test_accept_is_a_person_action(ws, run, rel):
     tickets_agent = tickets.agent_tool
     assert tickets_agent is not None
     assert next(c for c in msgtrust.contacts(ws) if c["id"] == PEER)["state"] == "not_accepted"
-    assert run("relay", "signing", "on")[0] == 2
+    assert run("relay", "contacts", "unsigned", "refuse")[0] == 2
 
 
 def test_accept_refuses_a_fingerprint_that_does_not_match(ws, person):
@@ -408,7 +408,7 @@ def test_an_allow_signed_as_a_helper_is_refused(ws, run, rel, person):
 
 
 def test_relay_made_types_pass_unsigned_and_never_act(ws, run, rel, person):
-    run("relay", "signing", "on")
+    run("relay", "contacts", "unsigned", "refuse")
     hint = {
         "schema": "orch.msg/1",
         "id": _mid(),
@@ -419,13 +419,13 @@ def test_relay_made_types_pass_unsigned_and_never_act(ws, run, rel, person):
         "body": {"version": 1},
     }
     rel.inbox.append(hint)
-    assert msgtrust.gate(ws, hint).kind == "plain"
+    assert msgtrust.check_incoming(ws, hint).kind == "plain"
     # a relay-made type is never one of the types that act on a person's behalf
     assert not set(msgtrust.RELAY_MADE_TYPES) & {"allow", "answer", "start", "delegate"}
     # an unsigned answer, delegate or text is not on the list: refused with signed_only on
     for t in ("answer", "delegate", "allow", "text"):
         m = dict(hint, id=_mid(), type=t, **{"from": PEER})
-        assert msgtrust.gate(ws, m).code == "missing_signature"
+        assert msgtrust.check_incoming(ws, m).code == "missing_signature"
 
 
 # ---------------------------------------------------------------- sending
@@ -498,26 +498,26 @@ def test_two_workspaces_relay_bypassed(ws, run, rel, person, tmp_path, homes):
     assert run("relay", "send", PEER, "Please check the report", "--json")[0] == 0
     wire = json.loads(json.dumps(rel.sent[-1]))  # what the relay would hand over, byte for byte
     # B has not accepted A: held, nothing handled
-    v = msgtrust.gate(b, wire)
+    v = msgtrust.check_incoming(b, wire)
     assert v.kind == "held" and v.code == "not_accepted"
     msgtrust.hold(b, v)
     r = msgtrust.accept(b, WS, "human:tester", "dashboard", fingerprint=msgsig.fingerprint(pub_a))
     assert [x["result"] for x in r["released"]] == ["released"]
     assert (b / ".orch/inbox" / f"{wire['id']}.json").is_file()
     # the same bytes again: a duplicate, never handled twice
-    assert msgtrust.gate(b, wire).kind == "duplicate"
+    assert msgtrust.check_incoming(b, wire).kind == "duplicate"
     # changed on the way: refused
     assert run("relay", "send", PEER, "Second", "--json")[0] == 0
     bad = json.loads(json.dumps(rel.sent[-1]))
     bad["body"]["text"] = "Delete everything"
-    assert msgtrust.gate(b, bad).code == "signed_mismatch"
+    assert msgtrust.check_incoming(b, bad).code == "signed_mismatch"
     # signature taken off: refused once B is signed-only
     msgtrust.set_signed_only(b, True, "human:tester")
     bare = json.loads(json.dumps(rel.sent[-1]))
     bare.pop("envelope")
-    assert msgtrust.gate(b, bare).code == "missing_signature"
+    assert msgtrust.check_incoming(b, bare).code == "missing_signature"
     good = json.loads(json.dumps(rel.sent[-1]))
-    assert msgtrust.gate(b, good).kind == "ok"
+    assert msgtrust.check_incoming(b, good).kind == "ok"
 
 
 # ---------------------------------------------------------------- groups carry the author's signature
@@ -558,22 +558,24 @@ def _author_env(text: str, seed: bytes = SEED_OTHER) -> dict:
 def test_group_copy_carries_and_checks_the_authors_signature(ws, person):
     accept(ws, PEER)
     accept(ws, OTHER)
-    assert msgtrust.gate(ws, _host_copy(_author_env("Draft is ready"), "Draft is ready")).kind == "ok"
+    assert (
+        msgtrust.check_incoming(ws, _host_copy(_author_env("Draft is ready"), "Draft is ready")).kind == "ok"
+    )
     # the host changed the member's words: refused
-    v = msgtrust.gate(ws, _host_copy(_author_env("Draft is ready"), "Draft is NOT ready"))
+    v = msgtrust.check_incoming(ws, _host_copy(_author_env("Draft is ready"), "Draft is NOT ready"))
     assert v.kind == "refused" and v.code == "author_mismatch"
     # the host dropped the author's signature
-    assert msgtrust.gate(ws, _host_copy(None, "Draft is ready")).code == "missing_signature"
+    assert msgtrust.check_incoming(ws, _host_copy(None, "Draft is ready")).code == "missing_signature"
     # the host forged the member's signature
-    assert msgtrust.gate(ws, _host_copy(_author_env("Hi", SEED_EVIL), "Hi")).kind == "refused"
+    assert msgtrust.check_incoming(ws, _host_copy(_author_env("Hi", SEED_EVIL), "Hi")).kind == "refused"
     # the author is not in the member list the host signed
-    v = msgtrust.gate(ws, _host_copy(_author_env("Hi"), "Hi", members=(WS, PEER)))
+    v = msgtrust.check_incoming(ws, _host_copy(_author_env("Hi"), "Hi", members=(WS, PEER)))
     assert v.code == "author_mismatch"
 
 
 def test_group_copy_from_an_author_not_accepted_is_held(ws, person):
     accept(ws, PEER)  # the host, not the author
-    v = msgtrust.gate(ws, _host_copy(_author_env("Hello group"), "Hello group"))
+    v = msgtrust.check_incoming(ws, _host_copy(_author_env("Hello group"), "Hello group"))
     assert v.kind == "held" and v.peer == OTHER
     msgtrust.hold(ws, v)
     r = accept(ws, OTHER)
@@ -634,10 +636,10 @@ def test_host_passes_the_members_signature_on_and_every_member_checks_it(
     addons.put_local_id(bank, "c" * 32)
     msgtrust.accept(bank, WS, "human:tester", "dashboard")
     wire = json.loads(json.dumps(copy))
-    v = msgtrust.gate(bank, wire)
+    v = msgtrust.check_incoming(bank, wire)
     assert v.kind == "held" and v.peer == PEER  # the host is accepted, the author not yet
     msgtrust.accept(bank, PEER, "human:tester", "dashboard")
-    assert msgtrust.gate(bank, json.loads(json.dumps(copy))).kind == "ok"
+    assert msgtrust.check_incoming(bank, json.loads(json.dumps(copy))).kind == "ok"
     changed = json.loads(json.dumps(copy))
     changed["id"] = "m_" + "e" * 16
     changed["body"]["text"] = "Found it: CHF 9412."
@@ -651,7 +653,7 @@ def test_host_passes_the_members_signature_on_and_every_member_checks_it(
         "signed": msgsig.b64url(raw),
         "sig": msgsig.b64url(signkey.sign_bytes(proj, msgsig.signature_input("msg", raw))),
     }
-    assert msgtrust.gate(bank, changed).code == "author_mismatch"
+    assert msgtrust.check_incoming(bank, changed).code == "author_mismatch"
 
 
 def test_after_a_lost_list_old_actions_are_refused(ws, person, homes):
@@ -668,7 +670,7 @@ def test_after_a_lost_list_old_actions_are_refused(ws, person, homes):
         body={"key": "k", "text": "go"},
         created_ms=msgtrust._load(ws)["floor_ms"] - 60_000,
     )
-    assert msgtrust.gate(ws, m).code == "before_floor"
+    assert msgtrust.check_incoming(ws, m).code == "before_floor"
 
 
 def test_a_dropped_held_allow_sent_again_is_never_run(ws, run, rel, person):
@@ -692,7 +694,7 @@ def test_unsigned_messages_never_look_verified(ws, run, rel):
     m = signed_msg(SEED_PEER, body={"text": "hi", "author": {"sig_v": 1}})
     m.pop("envelope")
     m["signed"] = {"origin": "person"}
-    v = msgtrust.gate(ws, m)
+    v = msgtrust.check_incoming(ws, m)
     assert v.kind == "plain" and "signed" not in v.message and "author" not in v.message["body"]
 
 
@@ -713,8 +715,10 @@ def test_the_host_cannot_hand_a_members_words_over_twice(ws, person):
     accept(ws, PEER)
     accept(ws, OTHER)
     env = _author_env("Draft is ready")
-    assert msgtrust.gate(ws, _host_copy(env, "Draft is ready")).kind == "ok"
-    v = msgtrust.gate(ws, _host_copy(env, "Draft is ready"))  # a new copy id, the same member message
+    assert msgtrust.check_incoming(ws, _host_copy(env, "Draft is ready")).kind == "ok"
+    v = msgtrust.check_incoming(
+        ws, _host_copy(env, "Draft is ready")
+    )  # a new copy id, the same member message
     assert v.kind == "refused" and v.code == "replayed"
 
 
@@ -729,7 +733,7 @@ def test_a_stale_author_signature_is_refused_not_held(ws, person):
         created_ms=old,
         body={"text": "Hi", "group": {"id": "grp_t_abc123", "host": PEER}, "by": OTHER},
     )
-    v = msgtrust.gate(ws, _host_copy(m["envelope"], "Hi"))
+    v = msgtrust.check_incoming(ws, _host_copy(m["envelope"], "Hi"))
     assert v.kind == "refused" and v.code == "too_old"
 
 
@@ -740,16 +744,28 @@ def test_a_host_cannot_drop_or_bend_the_members_fields(ws, person):
     # `origin` dropped while `by` still names the member
     m = _host_copy(env, "Draft is ready")
     body = {k: v for k, v in m["body"].items() if k != "origin"}
-    assert msgtrust.gate(ws, signed_msg(SEED_PEER, body=body, ticket="t_abc123")).code == "author_mismatch"
+    assert (
+        msgtrust.check_incoming(ws, signed_msg(SEED_PEER, body=body, ticket="t_abc123")).code
+        == "author_mismatch"
+    )
     # `by` names someone else than the signed author
     body = dict(_host_copy(env, "Draft is ready")["body"], by=PEER)
-    assert msgtrust.gate(ws, signed_msg(SEED_PEER, body=body, ticket="t_abc123")).code == "author_mismatch"
+    assert (
+        msgtrust.check_incoming(ws, signed_msg(SEED_PEER, body=body, ticket="t_abc123")).code
+        == "author_mismatch"
+    )
     # "written by the person" added by the host to a helper's words
     body = dict(_host_copy(_author_env("Draft is ready"), "Draft is ready")["body"], via="dashboard")
-    assert msgtrust.gate(ws, signed_msg(SEED_PEER, body=body, ticket="t_abc123")).code == "author_mismatch"
+    assert (
+        msgtrust.check_incoming(ws, signed_msg(SEED_PEER, body=body, ticket="t_abc123")).code
+        == "author_mismatch"
+    )
     # a task status the member never sent
     body = dict(
         _host_copy(_author_env("Draft is ready"), "Draft is ready")["body"],
         task={"delegate": "m_0000000000000abc", "ws": OTHER, "status": "done", "title": "x"},
     )
-    assert msgtrust.gate(ws, signed_msg(SEED_PEER, body=body, ticket="t_abc123")).code == "author_mismatch"
+    assert (
+        msgtrust.check_incoming(ws, signed_msg(SEED_PEER, body=body, ticket="t_abc123")).code
+        == "author_mismatch"
+    )
