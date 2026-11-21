@@ -52,7 +52,7 @@ module.exports = {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole('button', { name: '‹ Chats' }).first().click();
     must(await row.isVisible(), 'at 390 the back button does not show the list');
-    must(!(await panel.count()), 'at 390 the ticket panel stays over the list');
+    must(!(await panel.isVisible()), 'at 390 the ticket panel stays over the list');
     await row.click();  // nothing new now: no read mark is written
     must(await page.locator('[data-key="ticket-chat-' + tid + '"]').isVisible(), 'at 390 the chat does not open from the list');
     await page.setViewportSize({ width: 1280, height: 800 });

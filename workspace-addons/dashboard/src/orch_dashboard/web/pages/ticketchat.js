@@ -20,15 +20,18 @@ const tcOpen = () => tcId(chatUi.open) ? ticketOf(chatUi.open) : null;
 // The address of a ticket's chat (the ticket page's Open chat links here).
 const tcHash = id => '#chat/' + encodeURIComponent(String(id || ''));
 
+// Today's time as "14:19", an older one as its day, with a time inside a thread (the list stays one short word).
+const tcToday = at => at && chatLocalDay(new Date(at)) === chatLocalDay(new Date(state?.now || Date.now()));
+const tcWhen = (at, inThread = false) => !at ? '' : tcToday(at) && window.UI?.clock ? window.UI.clock(at) : inThread ? time(at) : date(at);
 function tcRow(r) {
   const unread = tcUnread(r);
   return h('button', {type:'button', className:'chat-list-row', 'data-chat-action':'select-ticket', 'data-id':r.id, 'data-key':'row-' + r.id,
     'aria-current':chatUi.open === r.id ? 'true' : null},
     h('span', {className:'avatar chat-avatar', 'aria-hidden':'true'}, '#'),
     h('span', {className:'chat-row-text'}, chatText('strong', '', r.title || r.key),
-      chatText('small', 'chat-row-meta', [r.key, r.open_questions ? (r.open_questions === 1 ? 'a question for you' : r.open_questions + ' questions for you') : ''].filter(Boolean).join(' · ')),
-      chatText('small', '', chatPreview(r.last?.text))),
-    h('span', {className:'chat-row-time'}, chatWhen(r.last_at), unread ? h('span', {className:'count', 'aria-label':unread + ' unread'}, unread) : null));
+      chatText('small', 'chat-row-meta', [r.key, chatPreview(r.last?.text)].filter(Boolean).join(' · ')),
+      r.open_questions ? chip('Needs you', 'attn') : null),
+    h('span', {className:'chat-row-time'}, tcWhen(r.last_at), unread ? h('span', {className:'count', 'aria-label':unread + ' unread'}, unread) : null));
 }
 
 // The list: "Ticket chats" first (as in the draft), then the workspace chats chat.js draws.
@@ -40,6 +43,7 @@ chatList = function () {
   drawn.forEach(row => { row.hidden = !history && !row.textContent.toLowerCase().includes(query); });
   const first = aside.querySelector('h2') || aside.querySelector('.chat-list-row');
   const heading = drawn.some(row => !row.hidden) ? h('h2', {'data-key':'ticket-chats-heading'}, 'Ticket chats') : null;
+  if (tcId(chatUi.open)) aside.querySelectorAll('.chat-list-row[aria-current]').forEach(row => row.removeAttribute('aria-current'));
   aside.insertBefore(fragment(heading, ...drawn), first);
   // chat.js said "No chats match." looking only at its own rows
   if (drawn.some(row => !row.hidden)) aside.querySelector(':scope > p.chat-muted:last-child')?.remove();
@@ -54,13 +58,15 @@ chatBadge = function () {
 };
 
 // One thread: chat lines and questions in time order. A question still open is a card to answer here; an answered
-// one is a quiet line (the answer itself is listed under Decided beside the chat).
+// one is the helper's line with the question, then the answer as a line of whoever answered (also under Decided).
 function tcItems(t) {
   const lines = array(t.history).filter(e => e && e.in_chat === true && typeof e.text === 'string' && e.text.trim())
     .map((e, i) => ({kind:'line', at:e.at, key:e.id || 'h-' + i + '-' + (e.at || ''), e}));
-  const asks = array(t.questions).filter(q => q && typeof q.text === 'string' && (q.kind == null || q.kind === 'plain'))
-    .map(q => ({kind:'question', at:q.asked_at || t.updated_at, key:'q-' + q.id, q}));
-  return [...lines, ...asks].sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
+  const asks = array(t.questions).filter(q => q && typeof q.text === 'string' && (q.kind == null || q.kind === 'plain'));
+  const asked = asks.map(q => ({kind:'question', at:q.asked_at || t.updated_at, key:'q-' + q.id, q, e:{by:'helper', at:q.asked_at}}));
+  const answers = asks.filter(q => q.answer != null && !q.taken_back)
+    .map(q => ({kind:'answer', at:q.answered_at || q.asked_at || t.updated_at, key:'a-' + q.id, q, e:{by:q.answered_by, at:q.answered_at}}));
+  return [...lines, ...asked, ...answers].sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
 }
 // Who wrote a line: the person ("You", or the name typed on the dashboard, marked not signed in), else the helper.
 function tcWho(e) {
@@ -69,30 +75,40 @@ function tcWho(e) {
   const label = name(e.by);
   return {mine:false, name:/^(relay|phone|ph_)/.test(label) ? 'Your phone' : CHAT_HELPER, typed:''};
 }
-function tcLine(item, previous) {
-  const e = item.e, who = tcWho(e), prev = previous?.kind === 'line' ? tcWho(previous.e) : null;
-  const grouped = prev && prev.mine === who.mine && prev.name === who.name;
-  return h('article', {className:'chat-message' + (who.mine ? ' chat-out' : '') + (grouped ? ' chat-grouped' : ''), 'data-key':'message-' + item.key, 'data-message-id':e.id || null, tabindex:'-1'},
-    !who.mine && !grouped ? h('div', {className:'chat-who'}, chatAvatar(who.name === CHAT_HELPER ? 'Helper' : who.name, who.name === CHAT_HELPER), who.name) : null,
-    chatText('div', 'chat-bubble chat-message-text', e.text),
-    chatText('small', 'chat-message-time', [who.mine ? (who.typed ? who.typed + ' (not signed in)' : 'You') : '', time(e.at), e.via === 'phone' ? 'from your phone' : ''].filter(Boolean).join(' · ')));
+// One line of the thread (the master's .thread-line): avatar, name and time, then the text. A line within five
+// minutes of one by the same writer drops its name row.
+const TC_GROUP_MS = 5 * 60 * 1000;
+function tcLineShell(item, previous, ...body) {
+  const e = item.e, who = tcWho(e), prev = previous ? tcWho(previous.e) : null;
+  const near = previous && Math.abs((Date.parse(item.at) || 0) - (Date.parse(previous.at) || 0)) < TC_GROUP_MS;
+  const grouped = prev && near && prev.mine === who.mine && prev.name === who.name && previous.kind !== 'question' && item.kind !== 'answer';
+  const helper = !who.mine && who.name === CHAT_HELPER;
+  const label = who.mine ? (who.typed ? who.typed + ' (not signed in)' : 'You') : who.name;
+  return h('article', {className:'thread-line' + (grouped ? ' cont' : ''), 'data-key':'message-' + item.key, 'data-message-id':e.id || null, tabindex:'-1'},
+    chatAvatar(helper ? 'Helper' : who.mine ? (who.typed || 'You') : who.name, helper),
+    h('div', {className:'thread-line-body'},
+      grouped ? null : h('div', {className:'thread-line-head'}, label,
+        chatText('span', 'meta', [tcWhen(e.at, true), e.via === 'phone' ? 'from your phone' : ''].filter(Boolean).join(' · '))),
+      ...body));
 }
-function tcQuestion(t, item) {
+function tcLine(item, previous) {
+  return tcLineShell(item, previous, chatText('div', 'thread-line-text chat-message-text', item.e.text));
+}
+function tcQuestion(t, item, previous) {
   const q = item.q;
-  if (q.answer != null) return chatText('div', 'chat-system', 'Decided: ' + clean(q.text) + ' · ' + clean(q.answer));
+  if (q.answer != null || snapshot) return tcLineShell(item, previous, chatText('div', 'thread-line-text', q.text));
   // the kit's question card, mounted by the page after drawing (app.js mounts every [data-question] host)
-  return h('article', {className:'chat-message', 'data-key':'message-' + item.key},
-    h('div', {className:'chat-who'}, chatAvatar('Helper', true), CHAT_HELPER),
-    snapshot ? chatText('div', 'chat-bubble chat-message-text', q.text)
-      : h('div', {className:'chat-bubble', 'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}),
-    chatText('small', 'chat-message-time', time(q.asked_at)));
+  return tcLineShell(item, previous, h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
+}
+function tcAnswer(item, previous) {
+  const q = item.q;
+  return tcLineShell(item, previous, chatText('div', 'thread-line-text', q.answer), chatText('p', 'meta', 'Answer to: ' + clean(q.text)));
 }
 function tcHeader(t) {
   return h('header', {className:'chat-thread-head', 'data-key':'thread-head'},
     h('div', {className:'chat-head-top'}, chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}),
       h('div', {className:'chat-head-text'}, chatText('p', 'chat-eyebrow', (t.key || '') + ' · You and your helper'),
-        h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(t.title)))),
-    h('a', {className:'chat-ticket-link', href:href(t.id), 'data-key':'ticket-chat-open-ticket'}, 'Open the ticket ›'));
+        h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(t.title)))));
 }
 function tcComposer(t) {
   if (snapshot) return chatText('p', 'chat-readonly', 'This is a shared copy.');
@@ -108,7 +124,7 @@ function tcThread(t) {
   const items = tcItems(t);
   return h('div', {className:'chat-main', 'data-key':'ticket-chat-' + t.id}, tcHeader(t),
     h('div', {className:'chat-log', 'data-key':'log-' + t.id, role:'log', 'aria-live':'polite', 'aria-label':'Ticket chat'},
-      items.length ? items.map((item, i) => item.kind === 'line' ? tcLine(item, items[i - 1]) : tcQuestion(t, item))
+      items.length ? items.map((item, i) => item.kind === 'line' ? tcLine(item, items[i - 1]) : item.kind === 'answer' ? tcAnswer(item, items[i - 1]) : tcQuestion(t, item, items[i - 1]))
         : chatText('p', 'chat-empty', 'No messages yet. Write to your helper below.')),
     tcComposer(t));
 }
@@ -133,11 +149,11 @@ function tcWork(t) {
   return tcPanelSection('Tasks', 'tasks', h('p', {className:'meta'}, done + ' of ' + tasks.length + ' done'),
     tasks.map((c, i) => h('div', {className:'card-row', 'data-key':'task-' + (c.id || i)}, h('span', {className:'grow'}, clean(c.text)), c.done ? chip('Done', 'success') : c.wont_do ? chip("Won't do") : null)));
 }
-function tcPanel(t) {
-  return h('aside', {className:'side-panel stack', 'aria-label':'The ticket', 'data-key':'ticket-chat-panel'},
-    h('p', {className:'meta'}, 'The ticket · everyone in this chat sees it'),
-    h('h3', {}, h('a', {href:href(t.id), 'data-key':'ticket-chat-panel-title'}, [t.key, clean(t.title)].filter(Boolean).join(' · '))),
-    t.description ? h('p', {className:'preserve-lines'}, clean(t.description)) : null,
+function tcPanel(t, hidden = false) {
+  return h('aside', {className:'pane-side', 'aria-label':'The ticket', 'data-key':'ticket-chat-panel', hidden},
+    h('div', {className:'stack'}, h('p', {className:'meta'}, 'The ticket · everyone in this chat sees it'),
+      h('h3', {}, h('a', {href:href(t.id), 'data-key':'ticket-chat-panel-title'}, [t.key, clean(t.title)].filter(Boolean).join(' · '))),
+      t.description ? h('p', {className:'preserve-lines'}, clean(t.description)) : null),
     t.done_when ? tcPanelSection('Done when', 'done-when', h('p', {}, clean(t.done_when))) : null,
     tcWork(t), tcDecided(t));
 }
@@ -146,15 +162,17 @@ const tcPageWithoutTickets = chatPage;
 chatPage = function () {
   const t = tcOpen();
   if (!t) return tcPageWithoutTickets();
-  const page = h('section', {className:'chat-page' + (chatUi.listOpen ? ' chat-list-open' : ' chat-thread-open'), 'data-key':'chat-page'}, chatList(), tcThread(t));
+  // the master's panes: the list, the chat and the ticket in one frame (stacked under 900 px; the open list hides the
+  // ticket, and the frame drops its column)
+  const page = h('section', {className:'chat-page panes' + (chatUi.listOpen ? ' chat-list-open' : ' chat-thread-open'), 'data-key':'chat-page'},
+    chatList(), tcThread(t), tcPanel(t, chatUi.listOpen));
   page.addEventListener('click', chatClick); page.addEventListener('input', chatInput); page.addEventListener('keydown', chatKeydown);
   // only the chat box: a question card's own answer form submits by itself
   page.addEventListener('submit', e => { if (e.target.matches('.chat-compose')) { e.preventDefault(); chatSend(); } });
   page.addEventListener('scroll', event => {
     if (event.target.matches('.chat-log')) chatScroll.set(event.target, {near:event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80, stamp:chatLogStamp(event.target)});
   }, true);
-  // the master's two columns: the chat, the ticket beside it (stacked below it under 900 px); on a phone the open list hides it
-  return fragment(chatHeading(), h('div', {className:'columns', 'data-key':'ticket-chat-columns'}, page, chatUi.listOpen ? null : tcPanel(t)));
+  return fragment(heading('Chat'), page);
 };
 
 async function tcMarkRead(id) {
