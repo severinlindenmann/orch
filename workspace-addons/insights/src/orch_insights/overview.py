@@ -183,13 +183,22 @@ def _entries(counts, inventory):
     return entries
 
 
-def _cards(entries, rows):
+def _cards(entries, rows, inventory=None):
     skills, refusals, idle = [], [], []
     for key, item in entries.items():
         row = rows[key]
         kind = "connection" if key[0] == "mcp" else key[0]
         card = {"kind": kind, "button": "Look", "tone": "warn", "target": row["name"]}
-        if kind == "skill" and row["health"] == "look":
+        lacks = ((inventory or {}).get(key) or {}).get("missing") if kind == "skill" else None
+        if lacks:  # ORCH-534: needs something this computer lacks
+            skills.append(
+                {
+                    **card,
+                    "title": f"{row['name']} is not ready here",
+                    "text": f"{', '.join(lacks)} missing on this computer.",
+                }
+            )
+        elif kind == "skill" and row["health"] == "look":
             skills.append(
                 {
                     **card,
@@ -271,7 +280,7 @@ def build_overview(counts) -> dict:
     # The connected services are measured only when the counts carry their list. Without it the count holds only
     # the services a helper happened to use, and the page says "Not measured yet" instead of a false 0 (ORCH-72).
     tabs["connections"]["known"] = bool(counts["inventory"]["connections"])
-    cards = _cards(entries, rows)
+    cards = _cards(entries, rows, ready["inventory"])
     sharing = counts["sharing"]["counts"] == "on"
     return {
         "window": "last 30 days",
