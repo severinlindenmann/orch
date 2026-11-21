@@ -170,10 +170,12 @@ struct ReviewStackView: View {
 
     /// The words under the buttons (and on the swipe stamps): left = no, right = the action's name.
     private func noLabel(_ item: ReviewItem) -> String {
-        item.kind == .draft || item.kind == .plan ? "Don't do" : (item.isChoice ? "None of these" : "Send back")
+        if item.kind == .run { return item.card.noLabel ?? "Not now" }
+        return item.kind == .draft || item.kind == .plan ? "Don't do" : (item.isChoice ? "None of these" : "Send back")
     }
     private func okLabel(_ item: ReviewItem) -> String {
         if item.isChoice { return picked[item.id].map { "Use \($0)" } ?? "Pick one" }
+        if item.kind == .run { return item.card.run?.runsHere == true ? "Run it now" : "At your computer" }
         let label = (item.card.okLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return label.isEmpty ? "Looks good" : label
     }
@@ -193,7 +195,8 @@ struct ReviewStackView: View {
         let stamp = dist > 24 ? actions(item)[dir] : nil
         let tilt = reduceMotion ? 0 : Double(offset.width / max(size.width, 1)) * 10
         return ReviewCardView(item: item, picked: Binding(get: { picked[item.id] }, set: { picked[item.id] = $0 }),
-                              state: stateText(for: item), workspaceName: showWorkspace ? item.question.workspaceName : nil, onOpen: { viewing = item })
+                              state: stateText(for: item), workspaceName: showWorkspace ? item.question.workspaceName : nil, onOpen: { viewing = item },
+                              onRun: { commit(item, .right) })
             .overlay(alignment: .top) {
                 if let stamp {
                     Text(stamp.stamp).themeFont(22, .heavy).foregroundStyle(stamp.color).padding(.horizontal, 14).padding(.vertical, 6)
@@ -263,6 +266,8 @@ struct ReviewStackView: View {
         case .right:
             switch ReviewStackRules.okOutcome(item, picked: picked[item.id]) {
             case .pickFirst: UINotificationFeedbackGenerator().notificationOccurred(.warning); say("Pick one first."); reset()
+            case .atComputer:
+                UINotificationFeedbackGenerator().notificationOccurred(.warning); say(item.card.run?.whyNotHere ?? "Run this one at your computer."); reset()
             case .allowed: send(item, .ok, picked: picked[item.id], note: nil)
             }
         case .left:
@@ -321,7 +326,7 @@ struct ReviewStackView: View {
             HStack(alignment: .top, spacing: 8) {
                 roundButton("xmark", noLabel(item), id: "review-no", color: Theme.danger, filled: false) { commit(item, .left) }
                 roundButton("mic.fill", "Comment", id: "review-comment", color: Theme.warn, filled: false) { commit(item, .down) }
-                roundButton("checkmark", okLabel(item), id: "review-ok", color: Theme.brand, filled: okActionable(item), dim: !okActionable(item) && item.isChoice) { commit(item, .right) }
+                roundButton("checkmark", okLabel(item), id: "review-ok", color: Theme.brand, filled: okActionable(item), dim: !okActionable(item) && (item.isChoice || item.kind == .run)) { commit(item, .right) }
             }.frame(maxWidth: .infinity)
             Button { commit(item, .up) } label: { Text("Later").themeFont(14).foregroundStyle(Theme.muted).frame(minWidth: 88, minHeight: 44) }
                 .buttonStyle(PressStyle()).accessibilityIdentifier("review-later").accessibilityLabel("Later")
