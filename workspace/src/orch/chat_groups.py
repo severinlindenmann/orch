@@ -121,7 +121,7 @@ UNCHECKED_ASK_IMAGE = "We couldn't check this image's hidden data. Share it anyw
 HIDDEN_FOLDER = "Files in hidden or secrets folders are not shared"
 # @ asks one helper (chat-groups v2 §6, G13, `body.mentions`): 1-7 member ids picked from the @ list. A group
 # text wakes only the helpers it names; a text without the field (no one named) leaves every helper quiet.
-NOT_PICKED_S = 3600  # after this long without a sign from a named helper, the chat says "not picked up yet"
+NOT_PICKED_S = 3600  # after this long without a reply from a named helper, the chat says "not picked up yet"
 ASKS_KEEP = 100  # open @ asks remembered per group (the newest)
 QUIET_HINT = "No helper was asked. Write @ and a name to ask one."
 ADD_YES, ADD_NO = "Add", "Not now"
@@ -1814,7 +1814,7 @@ def _host_item_read(root: Path, tid: str, item: str) -> bool:
 
 
 def _not_picked(root: Path, g: dict, now: float | None = None) -> list[dict]:
-    """Named helpers that gave no sign for NOT_PICKED_S: [{origin, ws, name, since}] (read-only)."""
+    """Named helpers that gave no reply for NOT_PICKED_S: [{origin, ws, name, since}] (read-only)."""
     now = _now_epoch() if now is None else now
     out = []
     for oid, a in g.get("asks", {}).items():
@@ -1837,7 +1837,7 @@ def _not_picked(root: Path, g: dict, now: float | None = None) -> list[dict]:
 
 
 def _check_asks(root: Path, st: dict, g: dict) -> None:
-    """Host, on every pull: a named helper that gave no sign for an hour gets ONE quiet line in the chat
+    """Host, on every pull: a named helper that gave no reply for an hour gets ONE quiet line in the chat
     ("<name> helper has not picked this up yet") and on the ticket. Picked-up asks are forgotten."""
     from orch import relay
 
