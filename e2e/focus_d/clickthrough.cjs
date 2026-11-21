@@ -25,6 +25,11 @@ const { STEPS, SIZES } = require('./steps.cjs');
 const REPO = path.resolve(__dirname, '..', '..');
 const MD = path.join(__dirname, 'CLICKTHROUGH.md');
 const MOCKUP = 'workspace-addons/dashboard/mockup/focus/focus-v4d.html';
+// Runs in the page: the filled buttons a person sees on the screen (UX checklist B2: one at most, as in draft D).
+const FILLED = () => [...document.querySelectorAll('.btn.primary')].filter(b => {
+  const r = b.getBoundingClientRect(), cs = getComputedStyle(b);
+  return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
+}).map(b => `"${(b.getAttribute('aria-label') || b.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 40)}"`);
 
 function args(argv) {
   const o = { target: 'dashboard', out: path.join(os.tmpdir(), 'focus-d-clickthrough'), repo: REPO, only: null };
@@ -137,6 +142,9 @@ async function runOne(ctx, step, [w, h], o, urls) {
       await step.run({ page, dash: urls.dash, width: w });
     }
     await page.waitForTimeout(400); // let any move end before the picture
+    // one filled button on a screen, as in draft D (UX checklist B2, ORCH-1357): built and draft alike
+    const filled = await page.evaluate(FILLED);
+    if (filled.length > 1) problems.push(`${filled.length} filled buttons on one screen: ${filled.join(', ')}`);
     await page.screenshot({ path: path.join(o.out, shot(step, w, o.target === 'draft')), fullPage: false });
   } catch (e) {
     problems.push(String(e.message).split('\n')[0]);
