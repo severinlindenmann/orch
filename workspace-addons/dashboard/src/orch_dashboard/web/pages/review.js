@@ -135,43 +135,12 @@ function reviewApi() {
     }
   };
 }
-// The deck list: one section per set of cards (the helper's group, else the ticket) with its own count, one line
-// per card, the one on screen in bold, answered ones quiet with their word.
-function reviewGroupOf(it) { return it.group || it.ticketTitle || it.ticket || ''; }
+// The "All cards" list beside the deck is the kit's own (deck.drawList, ORCH-477 round 2): a row opens its card; the
+// "Compare" button in its header turns on the ticks (at most two), then Compare opens them side by side and Cancel ends
+// it. One section per set (the helper's group, else the ticket); the phone's full list draws the same rows.
 function reviewDrawSide(queue, deck) {
-  if (!queue || !deck) return;
-  const groups = new Map();
-  deck.items.forEach((it, i) => {
-    const key = reviewGroupOf(it);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(i);
-  });
-  const row = i => {
-    const it = deck.items[i], a = deck.answers[it.id], r = el('button', 'btn ghost sm review-queue-row' + (i === deck.index && !a ? ' is-now' : '') + (a ? ' is-done' : ''));
-    r.type = 'button'; r.setAttribute('role', 'listitem');
-    const label = [it.ticket, it.title].filter(Boolean).join(' · '), title = el('span', 'review-queue-title', label); title.title = label;  // two lines, and the whole title on hover (F4: cut titles looked repeated)
-    r.append(iconEl(it.icon), title);
-    const word = a ? reviewWord(a) : i === deck.index ? 'Now' : '';
-    if (word) r.append(el('span', 'swipe-ov-state ' + (a ? a.verdict : 'wait'), word));
-    r.onclick = () => deck.jump(i);
-    return r;
-  };
-  const one = groups.size < 2;
-  queue.replaceChildren(...[...groups].map(([name, rows]) => {
-    const sec = el('div', 'review-group');
-    sec.setAttribute('role', 'list');
-    sec.setAttribute('aria-label', name || 'Cards');
-    // a set of one card under a heading of its own ticket says the same thing twice (ORCH-420): no heading then,
-    // unless the helper grouped it on purpose
-    if ((!one || name) && (rows.length > 1 || deck.items[rows[0]]?.group)) {
-      const left = rows.filter(i => !deck.answers[deck.items[i].id]).length;
-      const head = el('h3', 'review-group-head');
-      head.append(el('span', '', name || 'Cards'), el('span', 'meta', left ? left + ' of ' + rows.length + ' waiting' : 'All ' + rows.length + ' answered'));
-      sec.append(head);
-    }
-    sec.append(...rows.map(row));
-    return sec;
-  }));
+  if (!queue || !deck || typeof deck.drawList !== 'function') return;
+  deck.drawList(queue);
 }
 // "Accepted for you" (ORCH-77): what the Reviewer marked Done today; one tap sends a ticket back with a short note.
 // A phone width keeps this card (the "All cards" aside hides there), so it sits under the deck.
@@ -231,15 +200,15 @@ function reviewAcceptedCard() {
   return card('review-accepted', 'Accepted for you', '', rows.map(reviewAcceptedRow));
 }
 function reviewPage() {
-  const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':''},
-    h('h2', {}, 'All cards'),
-    h('p', {className:'meta'}, 'Click one to jump there.'),
-    h('div', {className:'review-queue', 'aria-label':'All cards', 'data-review-queue':''}));
+  // the kit draws the list's header ("All cards", Compare / Cancel) and its rows into the queue (ORCH-477 round 2)
+  const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':'', 'aria-label':'All cards'},
+    h('div', {className:'review-queue', 'data-review-queue':''}));
   return fragment(
     heading('Review', reviewSubtitle()),
+    // the list on the left, the card (or the two ticked side by side) on the right (ORCH-477)
     h('div', {className:'review-layout', 'data-key':'review-layout'},
-      h('div', {className:'review-main', 'data-key':'review-main'}, h('div', {'data-review-host':'', 'data-key':'review-host'})),
-      h('div', {className:'stack', 'data-key':'review-rail'}, side, reviewAcceptedCard())));
+      h('div', {className:'stack review-rail', 'data-key':'review-rail'}, side, reviewAcceptedCard()),
+      h('div', {className:'review-main', 'data-key':'review-main'}, h('div', {'data-review-host':'', 'data-key':'review-host'}))));
 }
 // Mount the kit page once per host (render() calls this after every reconcile; the mounted host is left alone).
 function mountReview(main) {
