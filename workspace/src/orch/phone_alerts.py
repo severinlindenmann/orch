@@ -102,9 +102,10 @@ def known(root: Path, items: list) -> list[dict]:
     out = []
     for item in items:
         r = by_name.get(item.get("name")) if isinstance(item, dict) else None
-        if r and isinstance(r.get("label"), str) and r.get("kind") in KINDS:
+        kind = "login" if r and r.get("kind") == "tool" else (r or {}).get("kind")  # the phone knows 3 kinds
+        if r and isinstance(r.get("label"), str) and kind in KINDS:
             sign_in = r.get("sign_in") if health.sign_in_ok(r.get("sign_in")) and not r.get("renew") else None
-            out.append({**item, "label": r["label"], "kind": r["kind"], "sign_in": sign_in})
+            out.append({**item, "label": r["label"], "kind": kind, "sign_in": sign_in})
     return out
 
 

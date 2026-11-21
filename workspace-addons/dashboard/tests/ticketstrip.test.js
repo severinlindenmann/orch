@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
+const startSource = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/start.js'), 'utf8');  // the one Start button (ORCH-475)
 const helpers = require('../src/orch_dashboard/web/helpers.js');
 const kit = {}; vm.runInContext(fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/date.js'), 'utf8'), vm.createContext({window:kit}));
 const h = (tag, attrs = {}, ...children) => { const n = {tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false)}; n.append = (...c) => n.children.push(...c); n.dataset = {}; n.setAttribute = () => {}; n.addEventListener = () => {}; n.classList = {add(){}, remove(){}}; return n; };
@@ -22,7 +23,7 @@ function ctx(extra = {}) {
     surface:v => v, inlineField:(t, f) => h('span', {}, String(t[f] ?? '')), ticketHistoryPanel:() => null, artifactsPanel:() => null, ticketParts:() => null, taskRows:() => null, addTaskRow:() => null, artifactCount:() => 0,
     linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false, repeatsAddon:() => null, act:async () => ({ok:true}),
     fetch:() => new Promise(() => {}), ...extra};
-  vm.createContext(c); vm.runInContext(source, c); return c;
+  vm.createContext(c); vm.runInContext(source, c); vm.runInContext(startSource, c); return c;
 }
 const base = {id:'t_one', title:'Update the opening hours', owner:'human:Anna', created_at:'2026-11-02T08:15:00Z', updated_at:'2026-11-14T10:32:00Z', questions:[]};
 const STATES = [
@@ -78,8 +79,11 @@ test('Done: "What the helper did" lists the finished tasks; Properties are compa
   assert.match(text(did), /Changed 3 lines/);
   assert.doesNotMatch(text(did), /Skipped bit/);
   const props = nodes(tree).find(n => n.tag === 'aside' && /properties/.test(n.attrs.className || ''));
-  assert.match(text(props), /Finished/);
   assert.doesNotMatch(text(props), /What happens next|Updated/);
+  // ORCH-581: created and finished are one quiet line at the foot of the rail
+  const stamp = nodes(tree).find(n => /^ticket-stamp-/.test(n.attrs?.['data-key'] || ''));
+  assert.match(text(stamp), /finished/);
+  assert.doesNotMatch(text(stamp), /updated/);
 });
 
 test('G2: a quiet ticket shows one line, "No news since" replaces "Updated"', () => {
@@ -96,9 +100,12 @@ test('ORCH-415: In progress with no helper says so in the pill and the line; the
   const all = nodes(tree), sentence = all.find(n => n.attrs?.['data-key'] === 'ticket-sentence');
   assert.equal(text(sentence), 'No helper is working on it right now.');
   assert.match(text(all.find(n => /^status-/.test(n.attrs?.['data-key'] || ''))), /In progress/);
-  const go = all.find(n => n.attrs?.['data-key'] === 'ticket-continue'), cheaper = all.find(n => n.attrs?.['data-key'] === 'ticket-continue-cheaper');
+  const go = nodes(all.find(n => n.attrs?.['data-key'] === 'ticket-start')).find(n => n.attrs?.['data-start'] === 'main');
+  const cheaper = all.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper');
   assert.match(go.attrs.className, /\boutline\b/);
-  assert.equal(text(cheaper), 'Continue on Sonnet');
+  assert.equal(text(cheaper), 'Start helper on Sonnet');
+  const again = nodes(c.detail({...base, status:'active', sessions:[{id:'s1'}], model:{name:'opus', by:'orch'}}));
+  assert.equal(text(again.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper')), 'Continue on Sonnet');
   assert.equal(text(all.find(n => n.attrs?.['data-key'] === 'ticket-start-cost')), 'On Opus · estimate about $1.20');
   assert.ok(!all.some(n => n.tag === 'button' && /\bprimary\b/.test(n.attrs?.className || '') && /Continue|Start|Resume/.test(text(n))), 'no filled start');
 });
@@ -107,26 +114,29 @@ test('ORCH-415: a helper that may be stuck never reads "No helper"; no plain sta
   const c = ctx({state:{runs:{t_one:{running:false, state:'maybe-stale', claim:{agent:'claude'}}}}});
   const all = nodes(c.detail({...base, status:'active', model:{name:'opus', by:'orch'}}));
   assert.doesNotMatch(text(all.find(n => n.attrs?.['data-key'] === 'ticket-sentence')), /No helper/);
-  assert.ok(!all.find(n => n.attrs?.['data-key'] === 'ticket-continue'), 'no plain Continue while it may be stuck');
+  assert.ok(!all.find(n => n.attrs?.['data-key'] === 'ticket-start'), 'no plain Continue while it may be stuck');
 });
 
 test('ORCH-415: next to Reopen the Continue is plain, with no cost line or cheaper choice; Sonnet has no cheaper choice', () => {
   const c = ctx({state:{runs:{}}});
   const done = nodes(c.detail({...base, status:'done', model:{name:'opus', by:'orch'}}));
-  assert.ok(done.find(n => n.attrs?.['data-key'] === 'ticket-continue'));
-  assert.ok(!done.find(n => n.attrs?.['data-key'] === 'ticket-continue-cheaper'));
+  assert.ok(done.find(n => n.attrs?.['data-key'] === 'ticket-start'));
+  assert.ok(!done.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper'));
   assert.ok(!done.find(n => n.attrs?.['data-key'] === 'ticket-start-cost'));
   const sonnet = nodes(c.detail({...base, status:'active', model:{name:'sonnet', by:'orch'}}));
   assert.ok(sonnet.find(n => n.attrs?.['data-key'] === 'ticket-start-cost'));
-  assert.ok(!sonnet.find(n => n.attrs?.['data-key'] === 'ticket-continue-cheaper'));
+  assert.ok(!sonnet.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper'));
 });
 
-test('ORCH-415: the cost line is tied to both start buttons for screen readers', () => {
+test('ORCH-415: the cost line is read with the start choice for screen readers', () => {
   const c = ctx({state:{runs:{}}});
   const all = nodes(c.detail({...base, status:'active', model:{name:'opus', by:'orch'}}));
   const cost = all.find(n => n.attrs?.['data-key'] === 'ticket-start-cost');
-  for (const key of ['ticket-continue', 'ticket-continue-cheaper']) assert.equal(all.find(n => n.attrs?.['data-key'] === key).attrs['aria-describedby'], cost.attrs.id);
-  assert.match(all.find(n => n.attrs?.['data-key'] === 'ticket-continue-cheaper').attrs.title, /Sets this ticket to Sonnet, then starts/);
+  const pick = all.find(n => n.attrs?.['data-key'] === 'ticket-start-pick');
+  assert.equal(pick.attrs.role, 'group');
+  assert.equal(pick.children[0], cost, 'the cost line comes first in the group');
+  assert.equal(all.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper').attrs['aria-describedby'], cost.attrs.id);
+  assert.match(all.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper').attrs.title, /Sets this ticket to Sonnet, then starts/);
 });
 
 test('Needs you: the strip names the agent that asked (as Home does), not always "Helper" (ORCH-65)', () => {
@@ -189,11 +199,12 @@ test('waitWords: a date with a reason, another ticket, the outside, nothing', ()
   assert.equal(w({kind:'external', ref:'the supplier'}), 'Waits: the supplier');
   assert.equal(w(null), '');
 });
-test('ORCH-255: Continue is on the ticket page in every state while no helper runs', () => {
+test('ORCH-255/475: a start (Continue, or Start helper with no earlier session) is on the ticket page in every state while no helper runs', () => {
   const label = (patch, st) => { const cc = st ? ctx({state:st}) : ctx(); const strip = nodes(cc.detail({...base, ...patch})).find(n => /(^| )strip( |$)/.test(n.attrs.className || '')); return nodes(strip).filter(n => n.tag === 'button').map(text); };
-  assert.ok(label({status:'waiting', questions:[{id:'q', text:'?'}]}).includes('Continue'), 'Needs you');
-  assert.ok(label({status:'review'}).includes('Continue'), 'Check');
-  assert.ok(label({status:'done'}).includes('Continue'), 'Done');
+  // ORCH-483 (owner): with no earlier session there is nothing to continue, so the one Start button says Start helper
+  assert.ok(label({status:'waiting', questions:[{id:'q', text:'?'}]}).includes('Start helper'), 'Needs you');
+  assert.ok(label({status:'review', sessions:[{id:'s'}]}).includes('Continue'), 'Check');
+  assert.ok(label({status:'done', sessions:[{id:'s'}]}).includes('Continue'), 'Done');
   assert.ok(label({status:'active', sessions:[{id:'s'}]}).includes('Continue'), 'active, helper not running');
   const todo = label({status:'open'});
   assert.ok(todo.includes('Start helper') && !todo.includes('Continue'), 'To do keeps Start helper only');

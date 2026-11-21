@@ -15,6 +15,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const headless = require('./headless.cjs'); // the keychain options (ORCH-615)
 
 const PW = process.env.PW_DIR || path.join(os.homedir(), 'orch-dev', 'e2e', 'dashboard', 'node_modules');
 const OUT = process.env.SHOTS_DIR || path.join(os.tmpdir(), 'dash-same-numbers');
@@ -101,7 +102,7 @@ test('same numbers: every page shows the same count, date and state for the same
   const {chromium} = require(path.join(PW, 'playwright'));
   fs.mkdirSync(OUT, {recursive: true});
   const state = makeState();
-  const browser = await chromium.launch({args: ['--use-mock-keychain', '--password-store=basic']});
+  const browser = await headless.launch(chromium);
   const facts = [];                                   // {what, where, value}: one row per number a page shows
   const note = (what, where, value) => facts.push({what, where, value});
   try {

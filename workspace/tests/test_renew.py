@@ -19,6 +19,10 @@ from orch.errors import Refused
 HIDDEN = "other-text-the-tool-prints-that-must-not-be-kept"
 LINK = "https://claude.com/cai/oauth/authorize?code=true&state=abc"
 
+# The renew worker leads its own process group, hands its token over in a pipe descriptor and runs the tool
+# as a script with a #! line: none of that exists on Windows yet (follow-up issue: renew on Windows).
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="renew needs POSIX process groups and pipes")
+
 
 def _tool(tmp_path, body: str):
     """A stand-in for the tool's own sign-in command (a small Python program)."""
@@ -697,3 +701,76 @@ def test_a_terminal_is_no_proof(proj, run, monkeypatch):
     for argv in (["renew", "claude"], ["replace", "payments"], ["renew", "claude", "--code", "-"]):
         code, out, err = run("logins", *argv, "--by", "human:owner")
         assert code == 2 and "Only a person" in out + err and "own login command" in out + err, argv
+
+
+# ----------------------------------------------------------------------------- never a real sign-in in a test
+
+
+@pytest.fixture
+def real_tool(proj, monkeypatch):
+    """renew.spec points at a tool outside the temp folder, as the real claude is (here: Python itself)."""
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    real = os.path.realpath(sys.executable)
+    doc = {
+        "binary": real,
+        "argv": [real, "auth", "login"],
+        "links": ["https://claude.com/"],
+        "helper": "claude",
+        "label": "Main helper",
+    }
+    monkeypatch.setattr(renew, "spec", lambda root, name: doc)
+    return real
+
+
+def test_a_test_install_never_starts_the_real_sign_in(proj, real_tool, monkeypatch):
+    """ORCH-1101: `claude auth login` from a test home opened the sign-in page on the owner's screen."""
+    monkeypatch.setattr(renew.subprocess, "Popen", lambda *a, **k: pytest.fail("started"))
+    with pytest.raises(Refused, match="test install"):
+        renew.start(proj, "claude")
+    assert _work(proj) == 1 and renew.status(proj, "claude")["state"] == "failed"
+
+
+def test_a_test_install_may_run_a_stand_in_from_the_temp_folder(proj, fake, monkeypatch):
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    calls = []
+    monkeypatch.setattr(renew.subprocess, "Popen", lambda argv, **kw: calls.append(argv))
+    assert renew.start(proj, "claude")["state"] == "starting" and len(calls) == 1
+
+
+def test_a_real_install_still_starts_the_real_sign_in(proj, real_tool, monkeypatch):
+    monkeypatch.delenv("ORCH_HOME_STRICT")
+    calls = []
+    monkeypatch.setattr(renew.subprocess, "Popen", lambda argv, **kw: calls.append(argv))
+    assert renew.start(proj, "claude")["state"] == "starting" and len(calls) == 1
+
+
+@pytest.fixture
+def account_test_root(tmp_path, monkeypatch):
+    """The account's ~/.orch-test (where the dashboard click-throughs keep their stand-ins), with the system
+    temp folder moved elsewhere so only that root can let a stand-in through."""
+    from orch import launchenv
+
+    acct = tmp_path / "account"
+    (acct / ".orch-test").mkdir(parents=True)
+    other_tmp = tmp_path / "other-tmp"
+    other_tmp.mkdir()
+    monkeypatch.setattr(launchenv, "user_home", lambda: acct)
+    monkeypatch.setattr(renew.tempfile, "gettempdir", lambda: str(other_tmp))
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    return acct / ".orch-test"
+
+
+def test_a_test_install_may_run_a_stand_in_from_the_account_test_folder(account_test_root):
+    """The click-through j-renew.cjs: its stand-in lives under ~/.orch-test/<run>/bin, not in temp."""
+    stand_in = account_test_root / "run1" / "bin" / "claude"
+    stand_in.parent.mkdir(parents=True)
+    stand_in.write_text("#!/bin/sh\n")
+    assert not renew._real_tool_in_test(str(stand_in))
+
+
+def test_a_link_in_the_account_test_folder_to_the_real_tool_is_refused(account_test_root):
+    real = os.path.realpath(sys.executable)
+    link = account_test_root / "run1" / "bin" / "claude"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(real)
+    assert renew._real_tool_in_test(str(link))

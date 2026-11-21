@@ -26,6 +26,36 @@ def _checks(*pairs):
     ]
 
 
+def _ts(stamp: str) -> float:
+    from datetime import UTC, datetime
+
+    return datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+
+
+def _queue(root: Path) -> None:
+    """The merge queue on the loaded page: a group of two being checked, one paused, one waiting (ORCH-432)."""
+    from orch_pull_requests import store
+
+    group = "https://github.com/acme/billing/pull/530"
+    rows = [  # repo, number, ticket, added, state, why, paused until, group
+        ("acme/billing", 421, "t_pdf014", "2026-11-17T09:12:00Z", "running", "in the group being checked", None, group),
+        ("acme/billing", 420, "t_tax015", "2026-11-17T09:15:00Z", "running", "in the group being checked", None, group),
+        ("acme/website", 88, None, "2026-11-17T08:52:00Z", "waiting", "waits again: GitHub did not answer",
+         _ts(AT) + 360, None),
+    ]  # fmt: skip
+    entries = []
+    for repo, n, tid, added, state, why, later, grp in rows:
+        e = {"url": f"https://github.com/{repo}/pull/{n}", "repo": repo, "number": n, "ticket": tid,
+             "by": "agent:claude", "added": added, "state": state, "why": why, "base": "develop", "login": "bot"}  # fmt: skip
+        if later:
+            e["not_before"] = later
+        if grp:
+            e.update(group=grp, taken="2026-11-17T09:29:00Z")
+        entries.append(e)
+    store.folder(root).mkdir(parents=True, exist_ok=True)
+    (store.folder(root) / "queue.json").write_text(json.dumps({"entries": entries}), encoding="utf-8")
+
+
 def build() -> dict:
     from orch import addons, refs, tickets
     from prpage_util import FakeGitHub, gql_pr
@@ -81,8 +111,9 @@ def build() -> dict:
         orig_tickets = poll.tickets
         poll.tickets = lambda _root: [tickets.load(root, tid) for tid in made]
         try:
-            loaded = view.build(root, running=True)
-            stopped = view.build(root, running=False)
+            stopped = view.build(root, running=False, queue_alive=True)
+            _queue(root)
+            loaded = view.build(root, running=True, queue_alive=True, now=_ts(AT))
         finally:
             poll.tickets = orig_tickets
         m = addons.folder_manifest(HERE.parent)

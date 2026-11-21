@@ -63,6 +63,16 @@ def test_several_files_on_one_step_are_all_kept(proj, run, tid):
     assert [(proj / e["ref"]).read_bytes() for e in files] == [b"png1280", b"png1920", b"png390"]
 
 
+def test_done_line_names_every_kept_file(proj, run, tid):
+    for n in ("a.txt", "b.txt"):
+        (proj / n).write_text(n)
+    code, text, _ = run("check", "done", tid, "c1", "--file", "a.txt", "--file", "b.txt")
+    assert code == 0
+    assert text.count("Evidence copied:") == 2
+    done = text.splitlines()[0]
+    assert "a.txt" in done and "b.txt" in done
+
+
 def test_more_than_ten_files_refused(proj, run, tid):
     (proj / "a.png").write_bytes(b"x")
     code, _, err = run("check", "done", tid, "c1", *(["--file", "a.png"] * 11))
@@ -291,8 +301,9 @@ def test_record_refusals(proj, run, tid, tmp_path):
     (proj / "ok.txt").write_text("fine", encoding="utf-8")
     (proj / "hard.txt").hardlink_to(proj / "ok.txt")
     assert refused("--output", "hard.txt")  # two names: refused
-    os.mkfifo(proj / "pipe.txt")
-    assert refused("--output", "pipe.txt")  # a FIFO never blocks us
+    if hasattr(os, "mkfifo"):  # no FIFOs on Windows
+        os.mkfifo(proj / "pipe.txt")
+        assert refused("--output", "pipe.txt")  # a FIFO never blocks us
     (proj / "dir.txt").mkdir()
     assert refused("--output", "dir.txt")
     assert read(proj, tid)["checklist"][0]["evidence"] == []

@@ -10,7 +10,18 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from orch import ghmerge, history, nextstep, review, review_server, runs_live, safefile, tickets
+from orch import (
+    dashshots,
+    ghmerge,
+    history,
+    nextstep,
+    ownerpick,
+    review,
+    review_server,
+    runs_live,
+    safefile,
+    tickets,
+)
 from orch.errors import Refused
 
 SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict", "security")
@@ -80,12 +91,21 @@ def add_parsers(sub, common) -> None:
     x = s.add_parser(
         "security",
         parents=[common],
-        help="the security review of one pull request records its verdict (ok or problems)",
+        help="the security review of one pull request records its verdict (ok or problems), or the pull "
+        "request that fixes its finding (fixed-by)",
     )
     x.add_argument("pr", type=int, help="the pull request number")
-    x.add_argument("word", choices=("ok", "problems"), help="ok: nothing High or Medium left; else problems")
-    x.add_argument("why", help="one line: the worst finding, or what was checked")
-    x.add_argument("--sha", required=True, metavar="COMMIT", help="the commit you reviewed (from the brief)")
+    x.add_argument(
+        "word",
+        choices=("ok", "problems", "fixed-by"),
+        help="ok: nothing High or Medium left; else problems; fixed-by <M>: pull request M fixes the finding",
+    )
+    x.add_argument(
+        "why", help="one line: the worst finding, or what was checked; for fixed-by the fix's number"
+    )
+    x.add_argument(
+        "--sha", metavar="COMMIT", help="the commit you reviewed (from the brief); needed for ok and problems"
+    )
     x = s.add_parser("accepted", parents=[common], help="what the Reviewer accepted for you")
     x.add_argument(
         "--since", default="today", metavar="WHEN", help="today (default), yesterday or YYYY-MM-DD"
@@ -293,6 +313,18 @@ def _with_workflow(pv: dict, wf: dict | None) -> dict:
     if not wf:
         return pv
     pv["paras"] = [ghmerge.workflow_words(wf), *(pv.get("paras") or [])]
+    # ORCH-429: the label a script check gives, and the changed lines themselves with the risky ones marked
+    if wf.get("safe"):
+        pv["chips"] = [{"text": "Safe to merge", "tone": "ok"}]
+    elif any(x.get("risk") for x in wf.get("lines") or []):
+        pv["chips"] = [{"text": "Look at the red lines", "tone": "bad"}]
+    if wf.get("lines"):
+        pv["diff"] = wf["lines"]
+        if wf.get("lines_more"):
+            n = wf["lines_more"]
+            pv["paras"].append(
+                f"And {n} more changed line{'' if n == 1 else 's'}: Workflow changes shows all."
+            )
     rows = [{"title": f"{f['name']} (+{f['add']} −{f['del']})"[:200]} for f in wf["files"][:5]]
     if len(wf["files"]) > 5:
         rows.append({"title": f"and {len(wf['files']) - 5} more workflow files"})
@@ -355,6 +387,16 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
     """`orch ask TICKET TEXT --draft|--link|--plan|--choose TITLE ...`: the question with a card on it."""
     if not args.then:
         raise Refused("A card needs --then: what happens after the answer.")
+    if getattr(args, "ci_shots", None):  # ORCH-312: the pictures CI took, never the helper's own
+        if args.file or args.before or args.after or getattr(args, "choose", None) is not None:
+            raise Refused(
+                "--ci-shots shows the pictures by itself: leave out --file, --before, --after and --choose."
+            )
+        if getattr(args, "merge", False):
+            raise Refused("--ci-shots goes on its own card, not on a Merge card.")
+        args.file = _guard(dashshots.card_file, root, tid, args.ci_shots)
+        if not args.open:
+            args.open = args.ci_shots
     card, options, suggest, _title = _guard(build_card, root, args)
     links = _guard(links_of, getattr(args, "ref", None) or [])
     if getattr(args, "merge_workflow", None) and len(links or []) < LINKS_MAX:  # ORCH-305: the diff itself
@@ -449,6 +491,10 @@ def _answer(args, root: Path) -> None:
         raise ReviewError("too_large", "A note is at most 8 KB.")
     if key == "review":
         q = None
+        if (
+            t.get("status") != "review"
+        ):  # decided elsewhere (the Reviewer, the phone, another tab): say who and when
+            raise ReviewError("decided", review.not_in_review(root, t))
         current = review.check_digest(t, root)
     else:
         q = next((x for x in t.get("questions") or [] if x.get("id") == key), None)
@@ -469,9 +515,24 @@ def _answer(args, root: Path) -> None:
         args.by
     )  # the person chosen in orch (--by human:<name>), else the computer's user
     digest = given or current
+    # ORCH-582: a draft, or the Check of a ticket that carries one, needs the signed-in dashboard's one-time
+    # person grant (a paired phone answers through the relay); never a script or a helper's shell
+    granted = ownerpick.person_granted(root, who)  # always used up, so no child inherits it
+    needs = ownerpick.is_draft_card(q) if q is not None else ownerpick.carries_draft(t)
+    person = needs and granted
     fn = review.change if q is not None and q.get("answer") is not None else review.decide
     entry = _guard(
-        fn, root, tid, key, args.verdict, args.picked, args.note, by=who, via=args.via, digest=digest
+        fn,
+        root,
+        tid,
+        key,
+        args.verdict,
+        args.picked,
+        args.note,
+        by=who,
+        via=args.via,
+        digest=digest,
+        person=person,
     )
     import contextlib
 
@@ -537,12 +598,13 @@ def _accepted(args, root: Path) -> None:
     from orch import relay, reviewer
 
     rows = reviewer.accepted(root, reviewer.since_time(args.since))
-    word = args.since if args.since in ("today", "yesterday") else "since " + args.since
-    text = reviewer.accepted_text(rows, word)
-    data: dict = {"since": args.since, "accepted": rows}
+    picks = ownerpick.waiting_rows(root)  # ORCH-582: drafts waiting for the owner, shown on their own
+    word = "today" if args.since == "today" else "since " + args.since  # issue 1920: yesterday AND today
+    text = reviewer.accepted_text(rows, word, picks)
+    data: dict = {"since": args.since, "accepted": rows, "waiting_pick": picks}
     if args.phone:
         data["sent"] = False
-        if rows:  # nothing accepted: no message
+        if rows or picks:  # nothing accepted and no draft waiting: no message
             try:
                 relay.send_text(root, "phones", text, general=True)
                 data["sent"] = True
@@ -568,9 +630,22 @@ def _verdict(args, root: Path) -> None:
 def _security(args, root: Path) -> None:
     from orch import secreview
 
-    res = _guard(
-        secreview.verdict, root, args.pr, args.word, args.why, tickets.current_actor(args.by), args.sha
-    )
+    by = tickets.current_actor(args.by)
+    if args.word == "fixed-by":
+        fix = str(args.why or "").strip().lstrip("#")
+        if not fix.isdigit():
+            raise ReviewError(
+                "refused", "Give the number of the pull request that fixes it, e.g. fixed-by 1566."
+            )
+        res = _guard(secreview.link_fix, root, args.pr, int(fix), by)
+        _out(
+            args,
+            res,
+            f"Pull request #{res['pr']}: its finding is fixed by #{res['fixed_by']}. The release waits until "
+            f"#{res['fixed_by']} is merged with a security OK.",
+        )
+        return
+    res = _guard(secreview.verdict, root, args.pr, args.word, args.why, by, args.sha or "")
     words = "OK: the release may include it" if res["verdict"] == "ok" else "problems: releases wait"
     _out(args, res, f"Pull request #{res['pr']}: security review {words}. {res['line']}")
 

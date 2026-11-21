@@ -2,6 +2,7 @@
 a paired phone's "make" is the dashboard's Make ticket (contracts/vectors/proposal-question-v1.json)."""
 
 import json
+import os
 from pathlib import Path
 
 import jsonschema
@@ -76,7 +77,9 @@ def test_one_question_instead_of_a_text(proj, conn):
         "recommended": None,
         "proposal": "make_ticket",
     }
-    jsonschema.Draft202012Validator(json.loads((CONTRACTS / "message.schema.json").read_text())).validate(q)
+    jsonschema.Draft202012Validator(
+        json.loads((CONTRACTS / "message.schema.json").read_text(encoding="utf-8"))
+    ).validate(q)
     assert not [m for m in conn.sent if m["type"] == "text"], "no separate text"
     assert relay._asked_edit(proj, lambda a: a[q["id"]]["to"]) == "phones"
     # the dashboard History keeps it with its Make ticket card
@@ -232,7 +235,7 @@ def test_other_words_do_nothing(proj, run, conn):
 
 
 def test_vector(proj, run, conn):
-    vec = json.loads((CONTRACTS / "vectors" / "proposal-question-v1.json").read_text())
+    vec = json.loads((CONTRACTS / "vectors" / "proposal-question-v1.json").read_text(encoding="utf-8"))
     for i, case in enumerate(vec["cases"]):
         propose(proj, n=i + 1)
         q = proposals(conn)[-1]
@@ -333,7 +336,9 @@ def test_the_failure_log_is_ignored_by_git_and_private(proj, conn):
         proj, "phones", SENTENCE, None, None, None, general=True, refs=[{"kind": "proposal", "title": "T"}]
     )
     (log,) = (proj / ".orch" / "diag").glob("*.jsonl")
-    assert (log.stat().st_mode & 0o077) == 0 and "diag/" in harness.CONTRACT_IGNORE
+    assert "diag/" in harness.CONTRACT_IGNORE
+    if os.name == "posix":  # Windows has no file modes: its rights are ACLs
+        assert (log.stat().st_mode & 0o077) == 0
     out = subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=all"], cwd=proj, capture_output=True, text=True
     ).stdout

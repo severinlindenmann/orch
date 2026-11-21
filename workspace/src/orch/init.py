@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from orch import adapters, net, reminder_settings, skills
+from orch import adapters, harness, net, reminder_settings, skills
 from orch.errors import Refused
 
 
@@ -50,9 +50,10 @@ def init(root: Path, code: str | None = None) -> list[str]:
         lines.append(warn or f"Reminder    {rel} (local; {label} is reminded of work with no ticket)")
     lines += [
         "Local only  orch files stay out of git (.git/info/exclude)",
-        "Tickets     .orch/tickets/",
+        "Tickets     .orch/tickets/ (stay on this computer, never committed)",
         f"Ticket keys {code}-1, {code}-2, ... (change the code: orch config set workspace.code <code>)",
         adapters.permission_line(root),
+        *([w] if (w := harness.git_visible_warning(root)) else []),
         "Your agent can now use tickets.",
         "Your agent will be allowed to work in this folder.",  # consent for a live start's folder trust
     ]

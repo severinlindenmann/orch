@@ -10,6 +10,7 @@ import base64
 import binascii
 import contextlib
 import heapq
+import io
 import json
 import re
 import sys
@@ -102,13 +103,13 @@ def add_parsers(sub, common) -> None:
             r.add_parser(name, parents=[common], help=argparse.SUPPRESS).add_argument("rest", nargs="*")
 
 
-def _run_hook(find_root, strict: bool, before_write=lambda: None) -> int:
+def _run_hook(find_root, strict: bool, before_write=lambda: None, stream=None) -> int:
     """The hook's exit-0 wrapper: ANY failure (a SystemExit from argparse or sys.exit included) ends with one
     stderr line and exit 0; only --strict gives 2. Never re-raises."""
     try:
         from orch import record_hook
 
-        record_hook.cli(find_root(), strict=strict, before_write=before_write)
+        record_hook.cli(find_root(), stream=stream, strict=strict, before_write=before_write)
         return 0
     except BaseException as e:  # noqa: BLE001 - a tool's hook: exit 2 would block the tool call
         note = str(e) if isinstance(e, Refused) and str(e) else "nothing was recorded."
@@ -122,13 +123,99 @@ def _hook_end(note: str, strict: bool) -> int:
     return 2 if strict else 0
 
 
+_TOOL = re.compile(r"[a-z][a-z0-9-]{0,31}")
+
+
+def _with_tool(argv: list[str]) -> str | None:
+    """The tool named by `--with <tool>` (an adapter name), or None."""
+    if "--with" not in argv[:-1]:
+        return None
+    tool = argv[argv.index("--with") + 1]
+    return tool if _TOOL.fullmatch(tool) else None
+
+
+def _payload(limit: int) -> str:
+    """The tool's hook payload, read once for the record and the tool's own hooks: one line (what the record
+    takes); when that line is not a whole JSON object (a payload written over several lines) the rest too,
+    read in a thread so a stdin that never closes cannot hang the hook."""
+    text = sys.stdin.readline(limit)
+    try:
+        json.loads(text)
+        return text
+    except (ValueError, RecursionError):
+        pass
+    if len(text) >= limit:
+        return text
+    box: list[str] = []
+
+    def rest():
+        with contextlib.suppress(Exception):
+            box.append(sys.stdin.read(limit - len(text)))
+
+    import threading
+
+    t = threading.Thread(target=rest, daemon=True)
+    t.start()
+    t.join(1.0)
+    return text + (box[0] if box else "")
+
+
+def _tool_event(tool: str, text: str):
+    """(adapter data, parsed payload or None, event name or None) for `--with <tool>`."""
+    from orch import adapters
+
+    a = adapters.load(tool)
+    names = (a.get("reminder") or {}).get("input") or {}
+    try:
+        data = json.loads(text) if text.strip() else None
+    except (ValueError, RecursionError):
+        data = None
+    event = data.get(names.get("event", "hook_event_name")) if isinstance(data, dict) else None
+    return a, data, event
+
+
+def _say(line) -> None:
+    if line:
+        sys.stdout.write(line + "\n")
+        sys.stdout.flush()
+
+
+def _tool_guard(tool: str, text: str) -> None:
+    """`--with <tool>`, before the record write: the tool's guard (protected machines) answers first, so a
+    slow record write can never let a refused command through. Never raises."""
+    try:
+        from orch import protected
+
+        a, data, event = _tool_event(tool, text)
+        if event in (a.get("guard_hooks") or {}):
+            _say(protected.hook_answer(data))
+    except BaseException:  # noqa: BLE001 - a tool's hook never blocks the call
+        pass
+
+
+def _tool_notice(tool: str, text: str) -> None:
+    """`--with <tool>`, after the record write: the waiting-input notice after a tool step. Never raises."""
+    try:
+        from orch import workcheck
+
+        a, _, event = _tool_event(tool, text)
+        steps = a.get("step_hooks") or {}
+        if event in steps or (event is None and steps):
+            _say(workcheck.step_answer(tool, text))
+    except BaseException:  # noqa: BLE001 - a tool's hook never blocks the call
+        pass
+
+
 def hook_main(argv: list[str], watchdog=None) -> int:
     """`orch record [flags] hook [anything]` (orch.is_record_hook), called from cli.main before the parser,
     the chat guard and the notices: a tool's hook runs before every tool call and exit 2 would block it.
     Flags (--json, --by, unknown ones) are not understood here and are ignored; the root comes from ORCH_ROOT
-    or the working folder. Never raises and never writes to stdout: 0 (2 only with --strict) and at most one
-    stderr line."""
+    or the working folder. Never raises; nothing of its own on stdout: 0 (2 only with --strict) and at most
+    one stderr line. `--with <tool>`: the payload is read once; before a call the tool's guard answers
+    first (_tool_guard), then the record write; after a call the step notice follows it (_tool_notice). Their
+    one JSON line is the only stdout."""
     strict = "--strict" in argv
+    tool = _with_tool(argv)
     timer = None
     try:
         from orch import workcheck
@@ -141,8 +228,18 @@ def hook_main(argv: list[str], watchdog=None) -> int:
             watchdog.cancel()
         from orch import cli
 
-        # the timer is cancelled before the first write: os._exit never lands in the middle of one
-        return _run_hook(cli._find_root, strict, before_write=timer.cancel)
+        if tool is None:
+            # the timer is cancelled before the first write: os._exit never lands in the middle of one
+            return _run_hook(cli._find_root, strict, before_write=timer.cancel)
+        from orch import record_hook
+
+        text = _payload(record_hook.MAX_LINE + 1)  # read once: the record and the tool's hooks share it
+        _tool_guard(tool, text)  # first: the refusal never waits for the record
+        code = _run_hook(cli._find_root, strict, before_write=timer.cancel, stream=io.StringIO(text))
+        timer.cancel()
+        timer = workcheck.start_watchdog()  # the notice ends quietly too if it hangs
+        _tool_notice(tool, text)
+        return code
     except BaseException:  # noqa: BLE001 - _run_hook never raises; this is anything around it
         return _hook_end("nothing was recorded.", strict)
     finally:
@@ -381,12 +478,20 @@ def _problems(run: str, result) -> list[dict]:
     return out
 
 
-def _events(root: Path, runs: list[str], ticket, *, explicit: bool = False, tell: bool = True):
+def _events(
+    root: Path, runs: list[str], ticket, *, explicit: bool = False, tell: bool = True, cached: bool = False
+):
     """(events per run, problems). An explicit run that cannot be read is an error, never empty.
-    `tell=False` leaves the alerts to the caller (a followed stream tells each one once)."""
+    `tell=False` leaves the alerts to the caller (a followed stream tells each one once). `cached`: a reader
+    that lives long (orch.reads) does not parse a run file again that did not change (record.read_run_for);
+    only for one ticket's lines."""
     out, problems = {}, []
+    dirs = record._quick_dirs(root) if cached and ticket is not None else None  # once per query
     for run in runs:
-        result = record.read_run(root, run)
+        if cached and ticket is not None:
+            result = record.read_run_for(root, run, ticket, dirs=dirs)
+        else:
+            result = record.read_run(root, run)
         if result.status != "ok":
             if explicit:
                 _show_alert(result.alert)
@@ -558,7 +663,7 @@ def _kinds(values, allowed: tuple[str, ...]) -> set[str] | None:
     return set(values)
 
 
-def query(root: Path, args) -> dict:
+def query(root: Path, args, *, cached: bool = False) -> dict:
     _check_filters(args.ticket, args.run)
     if args.detail is not None:
         return _detail(root, args)
@@ -573,7 +678,11 @@ def query(root: Path, args) -> dict:
             raise RecordError("That page position is not valid.")
         after = next(iter(pos.items()))
     by_run, problems = _events(
-        root, [args.run] if args.run else _known(root), args.ticket, explicit=args.run is not None
+        root,
+        [args.run] if args.run else _known(root),
+        args.ticket,
+        explicit=args.run is not None,
+        cached=cached,
     )
     rows = [e for events in by_run.values() for e in events]
     rows = [
@@ -974,6 +1083,18 @@ def _unused(inv: dict, runs: list[dict], kinds) -> list[dict]:
     return out
 
 
+def _runs_started(root: Path, day_from: str, day_to: str) -> int:
+    """Helper runs orch itself started in the window (ORCH-966), whether or not the helper wrote record lines:
+    a custom helper may write none, and Insights then says "not measured" instead of "no runs"."""
+    from orch import runs_live
+
+    try:
+        recs = runs_live.records(root)
+    except Exception:  # noqa: BLE001 - an unreadable run folder is "unknown", never a false count
+        return 0
+    return sum(day_from <= str(r.get("started_at") or "")[:10] <= day_to for r in recs)
+
+
 def counts(root: Path, args) -> dict:
     from orch import config
 
@@ -1004,6 +1125,7 @@ def counts(root: Path, args) -> dict:
     inv = inventory.document(root, stamp)
     return {
         "schema": "orch.counts/1",
+        "started": _runs_started(root, day_from, day_to),
         "generated_at": stamp,
         "since": since,
         "from": day_from,

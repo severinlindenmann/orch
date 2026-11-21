@@ -1,16 +1,15 @@
 'use strict';
-// The new live page (draft D, ORCH-261), behind the Preview switch on the settings page of the add-on whose page has
-// live sessions (one setting in the core config). Off, the default: that add-on's addresses show its own page,
-// exactly as before. On: the same addresses show this page. It is an empty shell for now; the wall, the bar and the
-// layer fill it in later tasks. The dashboard names no add-on: the page is found by its live_session capability.
-function livePreviewOn() {
-  return !snapshot && state?.settings?.focus_preview_on === true;
+// The live page (draft D, ORCH-261; the only one since ORCH-816): the addresses of the add-on whose page has live sessions
+// show this page: the wall of every session (pages/livewall.js), with the bar and the layer under every page. Never in
+// a shared copy (it has no live sessions). The dashboard names no add-on: the page is found by its live_session capability.
+function liveFocusOn() {
+  return !snapshot;
 }
 function livePageOf(id) {
   return addons().find(a => a.name === id && a.page?.live_session === true) || null;
 }
 // Sessions without a ticket (ORCH-364): the four New buttons at the top (the bar's New menu does the same,
-// pages/livebar.js window.LiveNew) and the open ones, pinned first, until the wall shows them as tiles.
+// pages/livebar.js window.LiveNew); the open ones show on the wall, pinned until unpinned (ORCH-361).
 const liveWin = () => (typeof window === 'object' ? window : {});
 const liveSessions = () => (typeof state === 'object' && state && Array.isArray(state.sessions) ? state.sessions : []);
 function liveNewButtons() {
@@ -23,25 +22,31 @@ function liveNewButtons() {
         title:open ? 'Already open: go to it' : n.what}, open ? null : iconEl('plus'), h('span', {}, n.title));
     }));
 }
-function liveNoTicketList(addon) {
-  const open = liveSessions().filter(x => x && x.open === true);
-  if (!open.length) return null;
-  const all = typeof liveBarModel === 'function' ? liveBarModel(liveWin().LiveSessions?.list, []).filter(o => o.kind) : [];
-  return h('section', {className:'card pad stack-sm', 'data-key':'live-no-ticket', 'aria-label':'Sessions without a ticket'},
-    h('h2', {}, 'Sessions without a ticket (' + open.length + ')'),
-    h('div', {className:'lbar-list'}, all.map(o => h('a', {className:'lbar-row', href:'#addon/' + encodeURIComponent(addon) + '/t/' + encodeURIComponent(o.id), 'data-live-open':o.id, 'data-key':'live-nt-' + o.id},
-      h('span', {className:'lbar-st', 'data-s':o.s}, h('span', {className:'lbar-sym', 'aria-hidden':'true'}, typeof LIVEBAR_LISTS === 'object' ? LIVEBAR_LISTS[o.s]?.sym || '' : ''), o.word),
-      h('span', {className:'lbar-key'}, ''), h('span', {className:'lbar-rn'}, o.title)))));
-}
 function liveNextPage(r) {
   const label = addonLabel(livePageOf(r.id));
-  return fragment(heading(label, '', {actions:h('span', {className:'badge info', 'data-key':'live-next-tag'}, 'Preview')}),
+  window.LiveSessions?.sync();
+  return fragment(heading(label, ''),
     liveNewButtons(),
-    liveNoTicketList(r.id),
-    h('section', {className:'card', 'data-key':'live-next', 'data-path':r.path || ''},
-      h('div', {className:'empty'},
-        h('p', {}, 'The new ' + label + ' is being built; your helpers’ sessions will show here.'),
-        h('a', {className:'btn ghost sm', href:'#settings/addons/' + encodeURIComponent(r.id), 'data-key':'live-next-off'}, 'Back to today’s ' + label))));
+    h('section', {'data-key':'live-next', 'data-path':r.path || '', 'aria-label':'Sessions'}, liveWall()));
+}
+// One ticket's address (#addon/<page>/t/<ticket>, as Home, a ticket page or an old link names it): the page
+// underneath and that ticket's session opened in the layer with the keyboard in it (ORCH-465). Once per address: closed again, it stays closed until the address changes.
+function liveAddressTicket(r) {
+  const m = r && r.kind === 'live' ? /^t\/([A-Za-z0-9_-]{1,64})$/.exec(r.path || '') : null;
+  return m ? m[1] : null;
+}
+let liveAddressOpened = '';
+function liveOpenFromAddress(r, layer = liveWin().LiveLayer, known = typeof liveLayerSession === 'function' ? liveLayerSession : null, say = text => liveWin().orch?.toast?.(text, 'error')) {
+  const id = liveAddressTicket(r);
+  if (!id) { liveAddressOpened = ''; return false; }
+  if (liveAddressOpened === r.hash || typeof layer?.open !== 'function') return false;
+  if (!known?.(id)) {  // the tickets are loaded and this one is not among them: say so once (ORCH-677); else the next render tries again
+    if (typeof state === 'object' && Array.isArray(state?.tickets) && state.tickets.length) { liveAddressOpened = r.hash; say('There is no ticket with this address.'); }
+    return false;
+  }
+  liveAddressOpened = r.hash;
+  layer.open(id, true);
+  return true;
 }
 if (typeof document === 'object') document.addEventListener('click', e => {
   const b = e.target.closest?.('[data-live-new]');

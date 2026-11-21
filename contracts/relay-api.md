@@ -35,6 +35,11 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 3. **Same id twice:** identical message → `200 {id, duplicate: true}`, nothing new is stored. Same id, different content (or another sender) → `409 conflict`.
 4. **Only the receiver** can fetch and ack its inbox messages.
 
+## Message envelope (v1)
+
+Messages from workspaces and phones carry an Ed25519 envelope in the top-level field `envelope`: format, reading
+rules, who checks what and the error codes are in `msgsig.md` (vectors: `vectors/msgsig-v1.json`).
+
 ## Workspace API
 
 | Method | Path | Request | Response |
@@ -47,7 +52,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | GET | `/v1/inbox?wait=0..30` | – | `{items: [message…], next: null}` not yet acked, oldest first, max 100. `wait` = long-poll seconds |
 | POST | `/v1/inbox/ack` | `{ids: [m_…]}` | `204`. Acked messages are no longer delivered (the admin can still read them). The relay keeps the ack time; for a phone's text it is that text's `delivered_at` (Phone API) |
 | POST | `/v1/blobs` | raw bytes, max 100 MB | `201 {blob_id, size, sha256}` |
-| GET | `/v1/blobs/<blob_id>` | – | raw bytes; only for the uploader, receivers of a `file` message with this blob, and the workspace a stored phone text names it in (`body.attachments[].blob_id`, `body.voice.blob_id`, `body.feedback.pins[].voice_blob_id` of a phone text whose `to` is exactly the calling workspace; never via `to: phones`), the workspace a phone answer names it in (`body.verdict.note.words.voice[].blob_id` of a stored phone `answer` whose `to` is exactly the calling workspace), else `404`. That access lasts as long as the phone text is stored: removing the workspace from the phone or signing the phone out does not take it back. Always served as `application/octet-stream` |
+| GET | `/v1/blobs/<blob_id>` | – | raw bytes; only for the uploader, receivers of a `file` message with this blob, and the workspace a stored phone text names it in (`body.attachments[].blob_id`, `body.voice.blob_id`, `body.feedback.pins[].voice_blob_id` of a phone text whose `to` is exactly the calling workspace; never via `to: phones`), the workspace a phone answer names it in (`body.verdict.note.words.voice[].blob_id` or `body.verdict.note.files[].blob_id` of a stored phone `answer` whose `to` is exactly the calling workspace), else `404`. That access lasts as long as the phone text is stored: removing the workspace from the phone or signing the phone out does not take it back. Always served as `application/octet-stream` |
 | POST | `/v1/webhooks` | `{mode: "once"\|"permanent", ticket?}` | `201 {id, url}`; `url` = `https://relay.severin.io/webhook/<id>?token=whk_…` (shown once) |
 | GET | `/v1/webhooks` | – | list of `{id, mode, ticket, created_at, last_call_at}` (own only) |
 | DELETE | `/v1/webhooks/<id>` | – | `204` |
@@ -80,7 +85,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | POST | `/v1/phone/blobs` | Body = the raw bytes, any `Content-Type` (image/jpeg, image/png, image/heic, application/pdf, audio/m4a, text/plain, application/octet-stream, …), max 25 MB | `201 {blob_id, size, sha256}`. `413 too_large` over 25 MB, `422 invalid` when empty. Stored like workspace blobs (encrypted at rest), kept **90 days** after the upload, then deleted (`404`). Readable only by this phone (`GET /v1/phone/blobs/<id>`) and by the workspace a text of this phone names it in (`GET /v1/blobs/<id>`). A retried upload makes a new blob; an unused one simply expires. The `Content-Type` is not stored or checked: every blob is served as `application/octet-stream`. No upload rate limit or storage cap in v3 besides the 25 MB per blob |
 | GET | `/v1/phone/blobs/<blob_id>` | – | raw bytes (`application/octet-stream`) of a proof file a workspace on the phone's list named in a `body.ticket_view` attachment of a text it sent to this phone or to `phones` (the same filter as `/v1/phone/messages`), of a card file such a workspace named in `body.card_files[].blob_id` of a **question** it sent to this phone or to `phones` (same filter: uploaded by that workspace, the workspace on the list at read time, a question to `phones` only when stored after this phone was paired; answered or not, while the question is stored), or of a blob this phone uploaded; anything else, an unknown id included, answers `404` |
 | POST | `/v1/phone/answer` | `{question_message_id, answer, client_id, verdict?}` | `201 {id, client_id}`. The relay builds the `answer` message (`from: ph_…`, `answered_by: human:<phone name>`, `body.client_id`, `body.verdict` copied as is when sent (rules in "Review cards on the phone"), routed as above). Same `client_id` from this phone again → `200 {id, client_id, duplicate: true}` with the first answer's id (checked before the 409, so a retry of the winning answer is not a conflict). First answer wins; later answers from any phone → `409 already_answered`. A question the workspace took back ("Question taken back") is closed: `409 taken_back` with the message `This question was taken back: <reason>`, nothing stored |
-| POST | `/v1/phone/send` | `{to: ws_…, client_id, text?, ticket?, general?, reply_to?, attachments?, voice?, location?, feedback?}` (phone-api.schema.json `send_request`) | `201 {id, client_id}`. A `text` message from the phone, built by the relay (see Phone app v3). `to` must be on the phone's list (`403 not_allowed`). Same `client_id` from this phone again → `200 {id, client_id, duplicate: true}`, no second message (the relay does not compare the content) |
+| POST | `/v1/phone/send` | `{to: ws_…, client_id, text?, ticket?, general?, reply_to?, attachments?, voice?, location?, feedback?, human_review?, team?}` (phone-api.schema.json `send_request`) | `201 {id, client_id, team?}`. `team` (ORCH-1175, team chat step 2) = `{add?: ws_…, mentions?: [ws_…]}`, the person's Add / @ choice in a ticket chat: needs `text` and a `ticket`, copied into the body unchanged, and the reply then carries `team: true` (an older relay drops the field and answers without it). The ticket's workspace decides: it adds only a workspace it may add and keeps only current members in `mentions`. A workspace's own message with `body.team` → `422 invalid`. A `text` message from the phone, built by the relay (see Phone app v3). `human_review` (true or false, ORCH-424) is copied into the body only on a new topic (no ticket, no general): the person's Human review needed choice for the ticket it starts; no field = the workspace default. `to` must be on the phone's list (`403 not_allowed`). Same `client_id` from this phone again → `200 {id, client_id, duplicate: true}`, no second message (the relay does not compare the content) |
 | POST | `/v1/phone/control` | `{to: ws_…, control: "mobile_mode_off", client_id?}` (phone-api.schema.json `control_request`) | `201 {id, client_id}`. The relay stores a `control` message `from: ph_…`, `to` the workspace, `body: {control, client_id?}`. `to` must be on the phone's list (`403 not_allowed`), an unknown `control` value → `422 invalid`. Same `client_id` again → `200 {id, client_id, duplicate: true}`. Not listed in any phone view (`/v1/phone/messages` shows `text` only). See **Mobile mode** |
 | POST | `/v1/phone/transcribe` | Body = the audio bytes, `Content-Type: audio/m4a` (also `audio/wav`, `audio/webm`), max 10 MB / 2 min, optional `?language=de` (`de`, `en`, `de-CH`, …; else the language is detected, or `de-CH` when the phone's `swiss_german` setting is on: Deepgram nova-3 with `language=de-CH`) | `200 {text, language, duration}` (`duration` in seconds). `503 transcription_off` when the admin set no Deepgram key (the app then uses on-device speech), `502 transcription_failed` when Deepgram fails or is unreachable, `429 rate_limited` after 30 calls a minute per phone, `413 too_large`, `422 invalid` (type, empty, language) |
 | POST | `/v1/phone/signout` | – | `204`. Deletes the token and the push registration; the old token gets `401` from now on |
@@ -265,17 +270,32 @@ has one cell per column (the two rules the schema cannot say); every `{"file": i
 `card_files` blob was uploaded by the sender (`404 not_found` otherwise, unknown ids included) with exactly that `size` and
 `sha256`; the sizes add up to at most 20 MB.
 
+*Run cards on the phone* (ORCH-848/860; `$defs/card_run`, the `card-run-*` and `run-*` shapes of vectors/review-card-v1.json).
+A card of kind `run` asks the person to run one command. It carries `run` = `{command, class, changes?, undo?, phone}` and
+`no_label` (one of orch's own fixed words for the other answer); every other kind carries neither. `run` is what the phone
+shows, never what runs: no folder, program path or argv goes on the wire; the computer runs only the command it stored and
+checks it again at run time (`runcard.check_spec`, the digest). `command` is one line of at most 300 characters with no
+control, zero-width or bidi character and no shell operator. `phone: true` (Run it now on this phone) is allowed only with
+`class: orch` (orch's own operations); any other class shows the command with Copy and one line why. The phone's Run it now
+is a plain `verdict: ok` with the digest it was shown; `no` is the `no_label` answer. The relay checks only the shape; the
+workspace decides (`relay._apply_run`: a paired phone, orch's own operations only, the digest, one run at a time) and answers
+with the review result (`applied` = it ran and the setting is in place; `refused` = it did not run or did not work).
+
 *Answer (phone → relay → workspace).* `POST /v1/phone/answer` takes an optional `verdict` = `{verdict: ok|no|talk, picked?,
 digest, note?}` (`$defs/verdict`: changes ≤ 20 × 500, words.text ≤ 2000, words.voice ≤ 3 `{blob_id, transcript ≤ 2000, lang,
-duration ≤ 120}`, pins ≤ 30 `{n, on?, x 0..1, y 0..1, text?}`; `picked` null with `no`; no other keys, so it cannot name a
+duration ≤ 120}`, files ≤ 5 `{blob_id, kind: image|file|voice, name ≤ 120, size, mime, duration?}` (what the person recorded or
+added to the answer), pins ≤ 30 `{n, on?, x 0..1, y 0..1, text?}`; `picked` null with `no`; no other keys, so it cannot name a
 ticket or question). `answer` stays required: the phone's own plain line for the swipe, for old readers only. The relay
 refuses the verdict (`422 invalid`) on a question without `body.digest`, when `verdict.digest` is not exactly that
-`body.digest`, or when it is over **8192 bytes** as compact UTF-8 JSON (`review.MAX_NOTE_BYTES`); every voice `blob_id` must be
-an upload of **this** phone (`404 not_found` for another phone's, a workspace's or an unknown blob; the same rule as `send`).
+`body.digest`, or when it is over **8192 bytes** as compact UTF-8 JSON (`review.MAX_NOTE_BYTES`); every voice and files `blob_id`
+must be an upload of **this** phone (`404 not_found` for another phone's, a workspace's or an unknown blob; the same rule as
+`send`), and a file's `size` must be the uploaded size (`422 invalid`).
 It then copies `verdict` unchanged into the answer body (`ticket`, `key`, `question_id` from the question, as for every
 answer). First answer wins (`409 already_answered`), as for every question: a phone cannot change its verdict once the relay
 stored it; until then it sits in the phone's Outbox and may be changed there (M4). A blob named in an answer counts as used
-(not deleted after 24 h).
+(not deleted after 24 h). Before it decides, the workspace saves every voice and `files` blob of a verdict it can still use in the
+ticket's files and adds one line naming them to the person's words, so the helper reads them (a file it cannot fetch is named as
+not downloaded).
 
 *Workspace rules* (vectors/review-card-v1.json `workspace`, review-question-v1.json `verdict_cases`). It acts on a verdict only
 as for every phone answer (human-proof.md "Phone actions"): fetched itself, `from` a phone of its `phones` list, not

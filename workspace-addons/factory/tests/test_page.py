@@ -8,7 +8,9 @@ import sys
 import threading
 import time
 
+import jsonschema
 import pytest
+from conftest import CONTRACTS
 from test_flow import (
     ask_stop,
     autopilot_order,
@@ -240,6 +242,24 @@ def test_a_draft_says_whether_an_agent_works_on_it_and_its_newest_version(ws, ru
     (ws / "live-runs").write_text(order)  # a one-step run is on it
     row = next(x for x in get(srv, "/api/home")[1]["orders"] if x["id"] == order)
     assert row["working"] is True
+
+
+def test_an_empty_draft_never_waits_for_you(ws, run, srv):
+    """Persona test 18 Nov: an order from before ORCH-231 kept an empty v1, so Factory counted it as waiting and offered
+    Plan the run on "This draft is empty". An empty newest draft is not the agent's draft; a written one is."""
+    order = run("idea", "Idea", "--file", "-", data=b"v1")["order"]
+    put_file(ws, f"drafts/{order}/v1.md", b"  \n")  # the old empty file
+    assert _home_row(srv, order)["agent_draft"] is False
+    assert get(srv, f"/api/order/{order}")[1]["agent_draft"] is False
+    run("draft", order, "--file", "-", data=b"v2 written")
+    assert _home_row(srv, order)["agent_draft"] is True
+
+
+def test_an_empty_draft_is_refused(ws, run):
+    order = run("idea", "Idea", "--file", "-", data=b"v1")["order"]
+    r = run("draft", order, "--file", "-", data=b" \n", code=2)
+    assert r["code"] == "invalid", r
+    assert not (Store(ws).path(f"drafts/{order}/v2.md")).exists()
 
 
 def _set_status(ws, order, status):
@@ -924,6 +944,53 @@ def test_one_review_per_stage_shows_the_built_result(ws, run, srv):
     assert _home_row(srv, order)["reviews"] == o["reviews"]  # Factory home shows the same review
 
 
+def test_a_pull_request_closed_without_merging_is_not_waiting(ws, run, srv):
+    """ORCH-419: a task with one merged and one closed (replaced) pull request reads Merged, not Not merged yet."""
+    order, _ = started(ws, run)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    _built(ws, tid, pulls=(("merged", 1), ("closed", 2)))
+    (review,) = get(srv, f"/api/order/{order}")[1]["reviews"]
+    assert review["code"] == {"merged": 1, "waiting": 0}
+    assert review["tasks"][0]["code"] == {"merged": 1, "waiting": 0}
+
+
+def test_needs_lists_the_stage_review_with_the_commands_that_answer_it(ws, run):
+    """ORCH-419: `orch factory needs` lists the same stage review the page shows (needs contract), answered in a
+    terminal by moving each built task to done; a change goes to the helper on the order."""
+    order, _ = started(ws, run)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    _built(ws, tid)
+    rows = run("needs")
+    jsonschema.validate(rows, json.loads((CONTRACTS / "needs.schema.json").read_text()))
+    (row,) = rows
+    assert row["id"] == f"factory:review:{order}:build" and row["kind"] == "factory:review"
+    assert row["ticket"] == order and row["tickets"] == [tid] and row["tone"] == "needs-you"
+    assert row["cli"] == f"orch ticket status {tid} done"
+    assert "1 task waits for your Looks good" in row["text"] and f"orch run send {order}" in row["text"]
+    from test_flow import edit
+
+    edit(ws, tid, lambda t: t.update(status="done"))  # Looks good given: nothing waits any more
+    assert run("needs") == []
+
+
+def test_needs_reads_only_the_factory_tickets(ws, run):
+    """ORCH-603: at 10,000 tickets a full ticket list took 43 s and needs gave no answer in its 2 s: needs asks
+    core only for the tickets with Factory's data (orders, crew); an older core without that falls back."""
+    order, _ = started(ws, run)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    _built(ws, tid)
+    (ws / "no-full-list").touch()
+    (row,) = run("needs")
+    assert row["id"] == f"factory:review:{order}:build" and row["tickets"] == [tid]
+    (ws / "no-full-list").unlink()
+    (ws / "old-core").touch()
+    (row,) = run("needs")
+    assert row["id"] == f"factory:review:{order}:build"
+
+
 def test_a_review_without_proof_says_nothing_was_recorded(ws, run, srv):
     order, _ = started(ws, run)
     run("next", order)
@@ -1003,7 +1070,8 @@ def test_the_stage_review_has_one_looks_good_and_change_and_no_look_at_buttons()
     """ORCH-335 (owner 17 Nov): one review per stage with the result itself; no per-task Look at button."""
     js = _page_js()
     assert "Look at" not in js and "Looks good, all" not in js
-    assert "askDashboard({type: 'orch.looksgood', tickets})" in js
+    assert "askDashboard({type: 'orch.looksgood', tickets}, 20000)" in js
+    assert "say('Saving…')" in js  # the click shows at once (ORCH-419)
     assert "toAgent(order.id, 'Change at ' + stageName(order, review.stage) + ': ' + words)" in js
     assert "'Looks good'" in js and "'Change'" in js and "'What should change?'" in js
     assert (
@@ -1196,3 +1264,73 @@ def test_budget_health_is_measured_when_the_page_reads_it(ws, run, srv):
     code, home, _ = get(srv, "/api/home")
     by = {o["id"]: o for o in home["orders"]}
     assert code == 200 and by[order]["budget"]["used"] == 12
+
+
+# Report r-1119-2059 (ORCH-965): the proposal's Time + budget card showed "AI cost about $—", "Ready around —" and
+# repeated your time from the summary line above it.
+
+
+def test_proposal_time_and_budget_show_only_values_and_your_time_once():
+    import shutil
+
+    js = _page_js()
+    body = js[js.index("  function proposal(order) {") : js.index("  // A task handed to another workspace")]
+    assert "Your time" not in body and "'~' + duration(time.active_min)];" not in body
+    # the builder words of the report are gone from the proposal; its top button says Run details (owner, ORCH-965 q1)
+    for word in (
+        "API target",
+        "'ETA '",
+        "Budget preset",
+        "card('The line'",
+        "Crew + what it needs",
+        "Active time cap",
+    ):
+        assert word not in body, word
+    assert "orderLink(order, 'Run details')" in body
+    if not shutil.which("node"):
+        return
+    names = (
+        "const text",
+        "const capital",
+        "function parseWhen",
+        "function dayWord",
+        "function hhmm",
+        "function when(",
+        "function whenRange",
+        "function duration",
+        "function timeBudget",
+    )
+    src = []
+    for name in names:
+        if name not in js:
+            continue
+        start = js.index(name)
+        end = js.index("\n  }\n", start) + 4 if name.startswith("function") else js.index("\n", start)
+        src.append(js[start:end])
+    cases = (
+        "[[{}, {}], [{active_min: 45}, {preset: 'small', active_min_cap: 60}],"
+        " [{active_min: 90, owner_min: 5}, {api_usd_target: 12, preset: 'standard', active_min_cap: 120}]]"
+    )
+    out = subprocess.run(
+        [
+            "node",
+            "-e",
+            "\n".join(src) + f"\nconsole.log(JSON.stringify({cases}.map(([t, b]) => timeBudget(t, b))))",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    empty, no_cost, full = json.loads(out)
+    assert empty == [["meta", "Time and budget are not planned yet."]]
+    assert no_cost == [
+        ["p", "~45 min active"],
+        ["meta", "Budget · Small"],
+        ["meta", "Time limit (active time): 1 h."],
+    ]
+    assert full == [
+        ["p", "~1 h 30 min active · AI cost about $12"],
+        ["meta", "Budget · Standard"],
+        ["meta", "Time limit (active time): 2 h. AI cost is a target, not a limit."],
+    ]
+    assert "—" not in out and "Your time" not in out

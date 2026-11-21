@@ -19,9 +19,9 @@ from orch.errors import Refused
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 PHONE = "ph_iphone0001"
-VEC = json.loads((CONTRACTS / "vectors" / "review-card-v1.json").read_text())
-RQ = json.loads((CONTRACTS / "vectors" / "review-question-v1.json").read_text())
-SCHEMA = json.loads((CONTRACTS / "message.schema.json").read_text())
+VEC = json.loads((CONTRACTS / "vectors" / "review-card-v1.json").read_text(encoding="utf-8"))
+RQ = json.loads((CONTRACTS / "vectors" / "review-question-v1.json").read_text(encoding="utf-8"))
+SCHEMA = json.loads((CONTRACTS / "message.schema.json").read_text(encoding="utf-8"))
 MSG_V = jsonschema.Draft202012Validator(SCHEMA)
 
 
@@ -89,6 +89,9 @@ def question(proj, tid, qid):
 
 
 def test_workspace_vector_cases(proj, run, new_ticket, conn):
+    for bid, b in VEC["relay"]["blobs"].items():  # the phones' uploads the relay serves to this workspace
+        if b["uploader"].startswith("ph_"):
+            conn.blobs[bid] = b"\0" * b["size"]
     for i, case in enumerate(VEC["workspace"]):
         tid = new_ticket(case["name"])
         install(proj, tid)
@@ -101,12 +104,15 @@ def test_workspace_vector_cases(proj, run, new_ticket, conn):
 
             tickets.apply_op(proj, tid, edit, by="agent:claude")
         if st.get("answered"):
-            review.decide(proj, tid, case["question"], "ok", "B", None, by=st["answered"]["by"], via="page")
+            review.decide(
+                proj, tid, case["question"], "ok", "B", None, by=st["answered"]["by"], via="page", person=True
+            )
             assert question(proj, tid, case["question"])["decision"]["summary"] == st["answered"]["summary"]
         before = len(results(conn))
         put_answer(conn, qmsg, case, i)
         run("relay", "inbox")
-        q = question(proj, tid, case["question"])
+        # a saved file's path names this ticket; the vector writes <ticket>
+        q = json.loads(json.dumps(question(proj, tid, case["question"])).replace(tid, "<ticket>"))
         want = case["expect"]
         label = case["name"]
         if want["do"] == "decide":
@@ -144,7 +150,7 @@ def test_no_change_from_the_phone_after_a_computer_answer(proj, run, new_ticket,
     qmsg = send_card(proj, conn, tid, "q4")
     calls = []
     monkeypatch.setattr(review, "change", lambda *a, **k: calls.append(1))
-    review.decide(proj, tid, "q4", "ok", "A", None, by="human:me", via="page")
+    review.decide(proj, tid, "q4", "ok", "A", None, by="human:me", via="page", person=True)
     case = next(c for c in VEC["workspace"] if c["name"] == "choice-ok-picked")
     put_answer(conn, qmsg, case, 1)
     run("relay", "inbox")
@@ -497,3 +503,39 @@ def test_file_names_with_bidi_or_marks_are_refused_at_prepare(proj, new_ticket, 
 def test_card_name_pattern_holds_back_spoofed_names(name):
     assert phone_view._CARD_NAME.fullmatch(name) is None
     assert phone_view._CARD_NAME.fullmatch("invoice.png")
+
+
+def test_wire_run_card_keeps_the_folder_and_program_on_this_computer():
+    """ORCH-860: a run card goes to the phone with the command and orch's words only; phone is never on for a
+    command that is not one of orch's own."""
+    spec = {"v": 1, "command": "brew install jq", "argv": ["brew", "install", "jq"],
+            "cwd": "/Users/anna/work", "class": "other", "exe": "/opt/homebrew/bin/brew",
+            "changes": "Installs jq with Homebrew", "undo": "brew uninstall jq"}  # fmt: skip
+    card = {"kind": "run", "title": "Install jq", "then": "The helper goes on.", "ok_label": "I ran it",
+            "run": spec, "no_label": "Not now"}  # fmt: skip
+    wire = review.wire_card(card, {})
+    assert wire["run"] == {"command": "brew install jq", "class": "other",
+                           "changes": "Installs jq with Homebrew", "undo": "brew uninstall jq",
+                           "phone": False}  # fmt: skip
+    assert wire["no_label"] == "Not now"
+    assert "/Users/anna" not in json.dumps(wire)
+    errs = list(MSG_V.iter_errors({**VEC["question_shapes"][0]["message"], "body": {
+        **VEC["question_shapes"][0]["message"]["body"], "card": wire}}))  # fmt: skip
+    errs = [e for e in errs if "card_files" not in str(e.path)]
+    assert not errs
+
+
+@pytest.mark.parametrize("mut", [
+    lambda r: r.update(phone=True, **{"class": "copy"}),
+    lambda r: r.update(command="orch config set workflow.reviewer_look on && id"),
+    lambda r: r.update(command="a\\b"),
+    lambda r: r.update(cwd="/tmp"),
+    lambda r: r.pop("phone"),
+])  # fmt: skip
+def test_check_wire_card_refuses_a_bad_run(mut):
+    shape = next(s for s in VEC["question_shapes"] if s["name"] == "card-run-orch")
+    card = json.loads(json.dumps(shape["message"]["body"]["card"]))
+    review.check_wire_card(card, 0)
+    mut(card["run"])
+    with pytest.raises(Refused):
+        review.check_wire_card(card, 0)

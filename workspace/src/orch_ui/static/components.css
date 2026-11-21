@@ -330,6 +330,40 @@ details.menu>summary::-webkit-details-marker,.dropdown summary::-webkit-details-
 /* A menu that holds a short form (a title, choices, one action): wide enough for one-line choices, never past the screen. */
 .menu-pop.menu-pop-wide{min-width:320px;max-width:min(380px,calc(100vw - 32px));padding:8px;gap:8px}
 .menu-pop-wide .grid-2{grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 16px}
+/* Start button (ORCH-475): one click starts the usual way (Continue, or Start with no earlier session); the caret opens the
+   Start choice (.live-start from widgets.css). While it starts both halves are disabled and the main half says Starting… */
+.start-split{display:inline-flex;align-items:stretch;position:relative}
+.start-split>.btn{border-top-right-radius:0;border-bottom-right-radius:0}
+.start-split>details.menu{position:static}
+.start-split[data-align=start] .start-pop{left:0;right:auto}
+.start-split>details.menu>summary.btn{height:100%;border-top-left-radius:0;border-bottom-left-radius:0;border-left-color:color-mix(in srgb,currentColor 35%,transparent);padding-inline:6px}
+.start-split .btn[aria-busy=true] .spinner{width:14px;height:14px}
+/* The Start choice is a compact list (owner, ORCH-484): one row per way to start, the button on the right, tool and model as two
+   small pickers; earlier sessions show the newest one and fold the rest behind Show more. */
+.start-pop.menu-pop{width:min(400px,calc(100vw - 32px));max-width:none;padding:var(--s2);text-align:left}
+.start-pop .live-start{gap:var(--s1)}
+.start-pop-h{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 var(--s2);padding:var(--s1) var(--s2)}
+.start-pop-h .live-places{margin-left:auto}
+.start-pop-h .live-places[data-full]{margin-left:0;flex-basis:100%}
+.start-opts{display:grid;margin:0;padding:0;list-style:none}
+.start-opt{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--s3);align-items:center;padding:var(--s2);border-radius:var(--radius)}
+.start-opt:hover{background:var(--surface-3)}
+.start-opt-t{display:grid;gap:2px}
+.start-run{display:flex;flex-wrap:wrap;gap:var(--s1);margin-top:var(--s1)}
+.start-run .ui-select{width:auto}
+.start-run .ui-select-trigger,.start-run select{width:auto;min-height:28px;padding:2px var(--s2);font-size:var(--fs-meta)}
+.start-pop .live-hist{gap:0;padding:var(--s2) var(--s2) 0}
+.start-pop .live-hist-h{color:var(--text-muted);font-size:var(--fs-meta);font-weight:600}
+.start-pop .live-hist-row{min-height:0;padding:var(--s1) 0}
+.live-start .live-hist-row[hidden]{display:none}
+.start-pop .live-hist-list{max-height:200px;overflow:auto}
+.start-more{align-self:flex-start;margin-top:var(--s1)}
+.start-why{margin:0;color:var(--text-muted);font-size:var(--fs-meta)}
+/* an open Start choice is never cut off by the card it sits in (the composer's Send and start helper) */
+.card:has(.start-split>details[open]){overflow:visible}
+/* Phone: the choice spans the screen under its button wherever the button sits in a row. */
+@media (max-width:720px){.start-pop.menu-pop{position:fixed;left:var(--s4,16px);right:var(--s4,16px);top:auto;width:auto;max-height:70vh;overflow:auto}
+  .start-opt:has(.start-run){row-gap:2px}.start-opt:has(.start-run)>.start-opt-t{display:contents}.start-opt:has(.start-run)>.start-opt-t>:not(.start-run){grid-column:1}.start-opt:has(.start-run)>.start-opt-t>.start-run{grid-column:1/-1}.start-opt:has(.start-run)>.btn{grid-column:2;grid-row:1/3}}
 .dropdown>.menu{position:absolute;right:0;top:calc(100% + 8px);z-index:40}
 .menu-item{display:flex;align-items:center;gap:8px;min-height:36px;width:100%;padding:8px 12px;border:0;border-radius:4px;background:none;color:var(--text);font-size:14px;text-decoration:none;text-align:left}
 .menu-item:hover,.menu-item:focus-visible{background:var(--surface-3)}

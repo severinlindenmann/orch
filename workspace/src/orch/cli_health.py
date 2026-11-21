@@ -51,6 +51,8 @@ def add_parsers(sub, common) -> None:
     a.add_argument("--sign-in", dest="sign_in", help=argparse.SUPPRESS)  # the terminal command (ORCH-218)
     d = acts.add_parser("remove", parents=[common], help=argparse.SUPPRESS)
     d.add_argument("name")
+    # ORCH-529: the background run checks only what is due (each check keeps its own interval)
+    p.add_argument("--due-only", action="store_true", dest="due_only", help=argparse.SUPPRESS)
 
 
 def line(r: dict) -> str:
@@ -72,6 +74,10 @@ def line(r: dict) -> str:
         return text + how
     if r["state"] == "works":
         return f"The {label} {kind} works until {when}." if when else f"The {label} {kind} works."
+    if r.get("approve") == "broken":
+        return f"{label}: {r.get('how') or 'the check file cannot be read.'}"
+    if r.get("approve"):
+        return f"{label} waits until you approve it: run {r.get('sign_in') or 'orch checks list'}"
     return f"{label} did not answer, so orch cannot tell whether its {kind} works."
 
 
@@ -153,6 +159,7 @@ def dispatch(args, root: Path) -> bool:
             text += " Helpers go on with " + ", ".join(res["went_on"]) + "."
         _out(args, res, text)
         return True
-    doc = health.check(root)
-    _out(args, doc, "\n".join(line(r) for r in doc["items"]) or NONE_SET)
+    doc = health.check(root, due_only=bool(getattr(args, "due_only", False)))
+    text = "\n".join(line(r) for r in doc["items"]) or NONE_SET
+    _out(args, doc, text + (f"\n{doc['notice']}" if doc.get("notice") else ""))
     return True

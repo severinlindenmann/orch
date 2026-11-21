@@ -14,6 +14,7 @@
 <script src="__P__/kit/overlay.js" defer></script>
 <script src="__P__/kit/components.js" defer></script>
 <script src="__P__/kit/date.js" defer></script>
+<script src="__P__/kit/widgets.js" defer></script>
 <script src="__P__/web/usage.js" defer></script>
 </head>
 <body>
@@ -21,7 +22,8 @@
 <header class="page-header">
 <div><h1>Usage</h1><p>Which account your helpers use, how far each may go, and when it starts again.</p></div>
 <div class="actions">
-<label class="row"><span>Switch by itself</span>
+<span id="owner-tag" class="pill" hidden></span>
+<label id="auto-row" class="row"><span>Switch by itself</span>
 <input id="auto" class="switch" type="checkbox" disabled aria-label="Switch accounts by itself" aria-describedby="auto-note"></label>
 </div>
 </header>
