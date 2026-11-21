@@ -1138,7 +1138,8 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._send(
                 code, body, ctype, {"Content-Disposition": "inline"}, csp="default-src 'none'; sandbox"
             )
-        if path == "/api/docs":  # the Documentation page: every page and this workspace's live facts (no secrets)
+        # the Documentation page: every page and this workspace's live facts (no secrets)
+        if path == "/api/docs":
             from . import docspage
 
             state, _age = self.server.state_cache.get()
