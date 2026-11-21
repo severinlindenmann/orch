@@ -1133,6 +1133,8 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         diag_enabled,
         focus_session_typing,
         live_max,
+        prepare_daily_limit,
+        prepare_on_save_on,
         release_merge_on,
         reviewer_kinds,
         reviewer_on,
@@ -1152,6 +1154,8 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     return {
         "agents_may_finish": agents_may_finish(root),
         "release_merge_on": release_merge_on(root),  # Settings: "Merge releases without my click"
+        "prepare_on_save": prepare_on_save_on(root),  # Settings: "Prepare tickets when I save" (ORCH-741)
+        "prepare_daily_limit": prepare_daily_limit(root),
         "auto_reviewer_on": auto_reviewer_on(root),  # ORCH-424: new tickets start without human review
         "reviewer_kinds": reviewer_kinds(root),  # ORCH-645: the kinds it accepts by itself
         "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)

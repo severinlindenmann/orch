@@ -473,6 +473,7 @@ ACT_ARGS = {
     "reviewer.set": {"on": True},
     "reviewer.kinds": {"kinds": ["bug"]},
     "release_merge.set": {"on": False},
+    "prepare.set": {"on": False},
     "live.set": {"max": 3},
     "copies.set": {"mode": "off"},
     "workspace.set": {"field": "name", "text": "Demo"},

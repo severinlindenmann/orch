@@ -750,6 +750,44 @@ def set_release_merge(root: Path, value: bool, by: str | None = None) -> bool:
     return value
 
 
+def prepare_on_save_on(root: Path | None) -> bool:
+    """[workflow] prepare_on_save (default ON, owner 19 Nov, ORCH-741): Save without starting prepares the
+    ticket with a helper (ORCH-738). Off: a saved ticket stays as the person wrote it until Start."""
+    if root is None:
+        return False
+    return file_switch(root, "workflow", "prepare_on_save", True) is True
+
+
+def set_prepare_on_save(root: Path, value: bool, by: str | None = None) -> bool:
+    set_key(root, "workflow", "prepare_on_save", value)
+    return value
+
+
+DEFAULT_PREPARE_DAILY_LIMIT = 30  # prepare runs per workspace in a rolling 24 hours (ORCH-741)
+MAX_PREPARE_DAILY_LIMIT = 1000
+
+
+def prepare_daily_limit(root: Path | None) -> int:
+    """[workflow] prepare_daily_limit: how many prepare runs this workspace starts in 24 hours (0 = none)."""
+    try:
+        v = read(root).get("workflow", {}).get("prepare_daily_limit") if root is not None else None
+    except (Refused, OSError, AttributeError):
+        v = None
+    ok = isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= MAX_PREPARE_DAILY_LIMIT
+    return v if ok else DEFAULT_PREPARE_DAILY_LIMIT
+
+
+def set_prepare_daily_limit(root: Path, value: str) -> int:
+    try:
+        n = int(str(value).strip())
+    except ValueError:
+        n = -1
+    if not 0 <= n <= MAX_PREPARE_DAILY_LIMIT:
+        raise Refused(f"The daily Prepare limit is a whole number from 0 to {MAX_PREPARE_DAILY_LIMIT}.")
+    set_key(root, "workflow", "prepare_daily_limit", n)
+    return n
+
+
 def set_live_idle_minutes(root: Path, value: str) -> int:
     if not value.isdigit() or not 1 <= int(value) <= 10080:
         raise Refused("Give a whole number of minutes, from 1 to 10080 (one week).")

@@ -46,6 +46,8 @@ KEYS = (
     "workflow.reviewer_kinds",
     "workflow.reviewer_look",
     "workflow.release_merge",
+    "workflow.prepare_on_save",
+    "workflow.prepare_daily_limit",
     "workflow.copies",
     "workflow.copies_max",
     "workflow.copy_setup",
@@ -301,6 +303,8 @@ def _config(args, root: Path) -> None:
             "workflow.reviewer_kinds": lambda: ",".join(config.reviewer_kinds(root)) or "none",
             "workflow.reviewer_look": lambda: config.reviewer_look_on(root),
             "workflow.release_merge": lambda: config.release_merge_on(root),
+            "workflow.prepare_on_save": lambda: config.prepare_on_save_on(root),
+            "workflow.prepare_daily_limit": lambda: config.prepare_daily_limit(root),
             "workflow.copies": lambda: config.copies_mode(root),
             "workflow.copies_max": lambda: config.copies_max(root),
             "workflow.copy_setup": lambda: config.copy_setup(root),
@@ -415,6 +419,36 @@ def _config(args, root: Path) -> None:
             {"workflow.reviewer_look": value},
             f"The Reviewer gives bigger finished work a second look: {args.value}."
             + ("" if config.reviewer_on(root) else " It works once workflow.reviewer is on too."),
+        )
+    elif args.sub == "set" and args.key == "workflow.prepare_on_save":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        who = _actor(args)
+        if args.value == "on" and not who.startswith("human:"):  # it starts helpers that cost money
+            raise Refused("Only a person turns this on: orch config set in their own terminal or Settings.")
+        value = config.set_prepare_on_save(root, args.value == "on", who)
+        _out(
+            args,
+            {"workflow.prepare_on_save": value},
+            "Saved: Save without starting "
+            + ("prepares the ticket with a helper." if value else "keeps the ticket as written until Start."),
+        )
+    elif args.sub == "set" and args.key == "workflow.prepare_daily_limit":
+        who = _actor(args)
+        old = config.prepare_daily_limit(root)
+        try:
+            want = int(str(args.value).strip())
+        except ValueError:
+            want = -1
+        if want > old and not who.startswith("human:"):  # a higher limit spends more
+            raise Refused(
+                "Only a person raises the daily Prepare limit: orch config set in their own terminal."
+            )
+        value = config.set_prepare_daily_limit(root, args.value)
+        _out(
+            args,
+            {"workflow.prepare_daily_limit": value},
+            f"Saved: at most {value} tickets are prepared in 24 hours.",
         )
     elif args.sub == "set" and args.key == "workflow.auto_reviewer":
         if args.value not in ("on", "off"):
