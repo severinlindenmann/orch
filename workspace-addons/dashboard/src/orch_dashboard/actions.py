@@ -241,6 +241,16 @@ REVIEW_VERDICTS = ("ok", "no", "talk")
 MAX_REVIEW_NOTE = 8 * 1024  # the same cap as `orch review answer --note`
 
 
+def _review_undo(a):
+    """`orch review undo <ticket> <q> --via dashboard`: the person takes back an answer someone gave for them
+    (ORCH-547). The core refuses an answer that was not given for them."""
+    _only(a, ("ticket", "key"))
+    key = a.get("key")
+    if not (isinstance(key, str) and QID.fullmatch(key)):
+        raise BadRequest("That is not a question.")
+    return ["review", "undo", _tid(a.get("ticket")), key], ["--via", "dashboard"], []
+
+
 def _review_answer(a):
     """`orch review answer <ticket> <key> --verdict v [--picked ID] [--note JSON] --digest D --via dashboard`.
     The core re-checks the digest and the size of the note; this only keeps the argv plain."""
@@ -628,12 +638,42 @@ def _reviewer_set(a):
     return ["config", "set", "workflow.reviewer", "on" if a["on"] else "off"], [], []
 
 
+REVIEWER_KINDS = ("bug", "small_bug", "feature", "small_feature", "other")  # never draft (ORCH-645)
+TICKET_KINDS = ("bug", "small_bug", "feature", "small_feature", "draft", "other")
+
+
+def _reviewer_kinds(a):
+    """Settings > Accept small finished work for me > kinds: `orch config set workflow.reviewer_kinds`
+    (only a person; draft is refused by orch itself)."""
+    _only(a, ("kinds",))
+    kinds = a.get("kinds")
+    if not isinstance(kinds, list) or any(k not in REVIEWER_KINDS for k in kinds):
+        raise BadRequest("Pick kinds from: Bug, Small bug, New feature, Small feature, Other.")
+    return ["config", "set", "workflow.reviewer_kinds", ",".join(dict.fromkeys(kinds)) or "none"], [], []
+
+
+def _ticket_kind(a):
+    """What kind of work a ticket is (ORCH-645): `orch ticket kind`."""
+    _only(a, ("ticket", "kind"))
+    if a.get("kind") not in TICKET_KINDS:
+        raise BadRequest("Pick a kind: Bug, Small bug, New feature, Small feature, Draft or design, Other.")
+    return ["ticket", "kind", _tid(a.get("ticket")), a["kind"]], [], []
+
+
 def _release_merge_set(a):
     """Settings > Merge releases without my click: `orch config set workflow.release_merge` (only a person)."""
     _only(a, ("on",))
     if type(a.get("on")) is not bool:
         raise BadRequest("Say on or off.")
     return ["config", "set", "workflow.release_merge", "on" if a["on"] else "off"], [], []
+
+
+def _prepare_set(a):
+    """Settings > Prepare tickets when I save: `orch config set workflow.prepare_on_save` (ORCH-741)."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "workflow.prepare_on_save", "on" if a["on"] else "off"], [], []
 
 
 def _live_set(a):
@@ -836,8 +876,13 @@ def _chat_make_ticket(a):
 
 def _run_start(a):
     """Start a helper on the ticket: continue its last conversation, or fresh; the Start choice (ORCH-362) can
-    name the tool (`--agent`, a name from `orch agents`); orch refuses a tool it does not know."""
-    _only(a, ("ticket", "fresh", "take_over", "agent"))
+    name the tool (`--agent`, a name from `orch agents`); orch refuses a tool it does not know.
+    prepare: Save without starting (ORCH-738) only prepares the ticket; it goes alone, with no other flag."""
+    _only(a, ("ticket", "fresh", "take_over", "agent", "prepare"))
+    if _flag(a.get("prepare")):
+        if any(a.get(k) is not None for k in ("fresh", "take_over", "agent")):
+            raise BadRequest("Prepare goes alone: no tool, fresh start or take-over with it.")
+        return ["run", "start", _tid(a.get("ticket"))], ["--prepare"], []
     flags = (["--fresh"] if _flag(a.get("fresh")) else []) + (
         ["--take-over"] if _flag(a.get("take_over")) else []
     )
@@ -1192,6 +1237,7 @@ OPS = {
     "link.stop": _link,
     "answer": _answer,
     "review.answer": _review_answer,
+    "review.undo": _review_undo,
     "ticket.new": _ticket_new,
     "ticket.paste": _ticket_paste,
     "ticket.attach": _ticket_attach,
@@ -1200,6 +1246,7 @@ OPS = {
     "ticket.edit": _ticket_edit,
     "ticket.order": _ticket_order,
     "ticket.model": _ticket_model,
+    "ticket.kind": _ticket_kind,
     "log": _log,
     "chat.say": _chat_say,
     "chat.make_ticket": _chat_make_ticket,
@@ -1236,7 +1283,9 @@ OPS = {
     "ref.rm": _ref_rm,
     "workflow.set": _workflow_set,
     "reviewer.set": _reviewer_set,
+    "reviewer.kinds": _reviewer_kinds,
     "release_merge.set": _release_merge_set,
+    "prepare.set": _prepare_set,
     "live.set": _live_set,
     "diag.set": _diag_set,
     "typing.set": _typing_set,
@@ -1286,8 +1335,8 @@ def build_argv(op, args, root: Path | None = None) -> list[str]:
         "logins.check",
     ):  # read-only answers: nothing changes, so no --by
         return [*words, "--json"]
-    if op == "review.answer":  # a card answer is the current person's plain answer: no proof, no --by
-        return [*words, *flags, "--json"]
+    if op == "review.answer":  # a card answer is the current person's plain answer: no proof, by the person
+        return [*words, *flags, "--by", actor(root), "--json"]
     return [*words, *flags, "--by", actor(root), "--json", *(["--", *tail] if tail else [])]
 
 
@@ -1687,7 +1736,9 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             "workspace.set",
             "workflow.set",
             "reviewer.set",
+            "reviewer.kinds",
             "release_merge.set",
+            "prepare.set",
             "live.set",
             "copies.set",
             "copies.clean",

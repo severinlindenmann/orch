@@ -91,6 +91,30 @@ def test_the_dashboard_vouches_only_with_the_private_key(tws):
     assert not f.can_act({pagesession.VOUCH_HEADER: key}, 8430)
 
 
+def test_every_read_needs_the_sign_in_and_the_read_word_never_acts(tws):
+    """ORCH-481 (owner 18 Nov): a read needs the cookie or the dashboard's word, on any host name, this
+    computer's own too. The read word is made from the vouch key, differs from it and never acts."""
+    f = pagesession.PageSession(tws, "focus", 8430)
+    f.active = True
+    for host in ("127.0.0.1:8430", "localhost:8430", "[::1]:8430", "orch.team.example"):
+        assert not f.may_read({"Host": host}, 8430)
+        assert f.may_read({"Host": host, "Cookie": f"{f.cookie_name(8430)}={f.cookie}"}, 8430)
+    key = pagesession.vouch_key(tws, create=True)
+    read = pagesession.read_vouch_key(tws)
+    assert read and read != key and pagesession.read_vouch_key(tws) == read
+    assert f.may_read({pagesession.READ_VOUCH_HEADER: read}, 8430)
+    assert f.may_read({pagesession.VOUCH_HEADER: key}, 8430)
+    assert not f.may_read({pagesession.READ_VOUCH_HEADER: key}, 8430)
+    assert not f.may_read({pagesession.READ_VOUCH_HEADER: read + "x"}, 8430)
+    assert not f.can_act({pagesession.READ_VOUCH_HEADER: read}, 8430)
+    assert not f.can_act({pagesession.VOUCH_HEADER: read}, 8430)
+    d = pagesession.PageSession(tws, "dashboard", 8420)
+    d.active = True
+    assert not d.may_read({pagesession.READ_VOUCH_HEADER: read}, 8420)  # never its own word
+    f.active = False  # a server started by an agent: nobody signs in, so nobody reads
+    assert not f.may_read({"Cookie": f"{f.cookie_name(8430)}={f.cookie}"}, 8430)
+
+
 # The texts and checks the owner ruled out. A product file that brings one back fails here.
 FORBIDDEN = (
     re.compile(r"from this computer", re.I),

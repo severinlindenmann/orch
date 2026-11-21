@@ -18,7 +18,11 @@ D, PORT = Path(sys.argv[1]).resolve(), int(sys.argv[2])
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "workspace-addons" / "insights" / "src"))
 sys.path.insert(0, str(ROOT / "workspace" / "src"))
-from orch_insights.server import make_server  # noqa: E402
+from orch_insights.server import Handler, make_server  # noqa: E402
+
+# A fixture server with no page session (nobody could sign in): the test browser counts as signed in to READ.
+# The real servers need the sign-in for every data read (ORCH-481); this fixture only listens on 127.0.0.1.
+Handler._may_read = lambda self: True
 
 ws = D / "Pilatus"
 (ws / ".orch").mkdir(parents=True, exist_ok=True)

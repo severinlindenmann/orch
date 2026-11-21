@@ -178,8 +178,30 @@ function reviewerCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-reviewer'},
     h('div', {className:'card'}, h('div', {className:'card-row'},
       h('div', {className:'grow'}, settingsText('h3', {}, 'Accept small finished work for me'),
-        settingsText('p', {className:'meta'}, 'Merged bug fixes with green checks and no change to looks, words or rules are marked Done for you. You see them on Review and can send any back.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Accept small finished work for me', 'aria-checked':!!settings.reviewer_on, 'data-key':'settings-switch-reviewer', 'data-action':'reviewer-set', disabled:snapshot || settingsBusy.has('reviewer')}))));
+        settingsText('p', {className:'meta'}, 'Merged work with green checks and no change to looks, words or rules is marked Done for you. You see it on Review and can send any back.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Accept small finished work for me', 'aria-checked':!!settings.reviewer_on, 'data-key':'settings-switch-reviewer', 'data-action':'reviewer-set', disabled:snapshot || settingsBusy.has('reviewer')})),
+      reviewerKindsRow(settings)));
+}
+// ORCH-645: which kinds of tickets it accepts by itself (the helper sets a ticket's kind). Draft or design is shown
+// and never on: drafts, mockups and designs are only accepted by a person.
+const REVIEWER_KINDS = [['bug', 'Bug'], ['small_bug', 'Small bug'], ['feature', 'New feature'], ['small_feature', 'Small feature'], ['other', 'Other']];
+function reviewerKindsRow(settings) {
+  const on = new Set(Array.isArray(settings.reviewer_kinds) ? settings.reviewer_kinds : []);
+  const busy = snapshot || settingsBusy.has('reviewer_kinds');
+  return h('div', {className:'card-row', 'data-key':'settings-reviewer-kinds'},
+    h('div', {className:'grow stack'}, settingsText('p', {}, 'Which kinds of tickets'),
+      h('div', {className:'grid-2', role:'group', 'aria-label':'Kinds accepted for me'},
+        REVIEWER_KINDS.map(([k, label]) => h('label', {className:'check-label'},
+          h('input', {type:'checkbox', value:k, checked:on.has(k) || null, disabled:busy, 'data-action':'reviewer-kind', 'data-kind':k}), label)),
+        h('label', {className:'check-label'}, h('input', {type:'checkbox', disabled:true}), 'Draft or design')),
+      settingsText('p', {className:'meta'}, 'Drafts, mockups and designs always wait for you.')));
+}
+// h() writes every value but null as an attribute, so an unticked box gets no checked at all.
+// From the saved list, never from the box: the click handler reads the box after the browser may have put it back.
+async function reviewerKindToggle(box) {
+  const now = new Set(state.settings?.reviewer_kinds || []), k = box.dataset.kind;
+  if (now.has(k)) now.delete(k); else now.add(k);
+  await settingsSend('reviewer.kinds', {kinds:REVIEWER_KINDS.map(([x]) => x).filter(x => now.has(x))}, 'reviewer_kinds');
 }
 async function reviewerSwitch() {
   await settingsSend('reviewer.set', {on:state.settings?.reviewer_on !== true}, 'reviewer');
@@ -192,6 +214,18 @@ function releaseMergeCard(settings) {
       h('div', {className:'grow'}, settingsText('h3', {}, 'Merge releases without my click'),
         settingsText('p', {className:'meta'}, 'A release whose checks are all green goes in by itself with your GitHub login. You get the short highlights afterwards. Off: you click Merge on the card.')),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Merge releases without my click', 'aria-checked':!!settings.release_merge_on, 'data-key':'settings-switch-release-merge', 'data-action':'release-merge-set', disabled:snapshot || settingsBusy.has('release_merge')}))));
+}
+// Prepare tickets when I save (ORCH-741, draft ORCH-730 section 4): on by default; off = Save without starting
+// keeps the ticket as written until Start. Only a person turns it on (it starts helpers).
+function prepareCard(settings) {
+  return h('div', {className:'stack', 'data-key':'settings-prepare'},
+    h('div', {className:'card'}, h('div', {className:'card-row'},
+      h('div', {className:'grow'}, settingsText('h3', {}, 'Prepare tickets when I save'),
+        settingsText('p', {className:'meta'}, 'When you save a ticket without starting it, a helper writes the title, description, done-when, estimate and first steps. It does no work until you press Start. At most ' + (settings.prepare_daily_limit ?? 30) + ' tickets a day.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Prepare tickets when I save', 'aria-checked':settings.prepare_on_save !== false, 'data-key':'settings-switch-prepare', 'data-action':'prepare-set', disabled:snapshot || settingsBusy.has('prepare')}))));
+}
+async function prepareSwitch() {
+  await settingsSend('prepare.set', {on:state.settings?.prepare_on_save === false}, 'prepare');
 }
 async function releaseMergeSwitch() {
   await settingsSend('release_merge.set', {on:state.settings?.release_merge_on !== true}, 'release_merge');
@@ -698,7 +732,7 @@ function settingsPage() {
       h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), reviewerCard(settings), releaseMergeCard(settings), copiesCard(settings)), diagCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
-      helperNeedsCard(), permissionsCard(settings), helpersAtOnceCard(settings)]),
+      helperNeedsCard(), permissionsCard(settings), helpersAtOnceCard(settings), prepareCard(settings)]),
     phoneAddon ? panel('phone', phonePanel(phoneAddon, settings)) : null,
     panel('addons', addonsPanel),
     panel('about', aboutPanel())))

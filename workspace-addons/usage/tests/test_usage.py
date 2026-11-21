@@ -317,3 +317,50 @@ def test_a_switcher_that_fails_is_not_called_missing(cli, fake_switcher, ws):
     code, d = jrun(cli, "list")
     assert code == 0 and d["switcher"] is True
     assert d["warnings"] and "not installed" not in d["warnings"][0]
+
+
+def test_usage_shows_how_many_tickets_were_prepared_of_the_daily_limit(cli, fake_switcher, ws):
+    """ORCH-741: the daily Prepare limit per workspace is shown in Usage (orch core counts and enforces it)."""
+    import time
+
+    from orch_usage.cli import PREPARE_DEFAULT_LIMIT, prepare_use
+
+    assert prepare_use(ws) == {"on": True, "used": 0, "limit": PREPARE_DEFAULT_LIMIT}
+    now = time.time()
+    run = ws / ".orch" / "run"
+    run.mkdir(parents=True, exist_ok=True)
+    (run / "prepare-starts.json").write_text(json.dumps({"starts": [now - 25 * 3600, now - 60, now - 5]}))
+    (ws / ".orch" / "config.toml").write_text("[workflow]\nprepare_daily_limit = 12\n")
+    assert prepare_use(ws, now) == {"on": True, "used": 2, "limit": 12}
+    code, d = jrun(cli, "list")
+    assert code == 0 and d["prepare"] == {"on": True, "used": 2, "limit": 12}
+    code, out, _ = cli("list")
+    assert "Preparing tickets on Save: 2 of 12 in the last 24 hours" in out
+    (ws / ".orch" / "config.toml").write_text(
+        "[workflow]\nprepare_on_save = false\nprepare_daily_limit = -3\n"
+    )
+    assert prepare_use(ws, now) == {"on": False, "used": 2, "limit": PREPARE_DEFAULT_LIMIT}
+    assert "Preparing tickets on Save: off" in cli("list")[1]
+
+
+def test_a_full_prepare_limit_says_when_the_next_ticket_can_be_prepared(ws):
+    """ORCH-811: when the daily Prepare limit is used up, Usage gives the time the oldest counted start is a day old."""
+    import time
+    from datetime import UTC, datetime
+
+    from orch_usage.cli import prepare_use
+
+    now = time.time()
+    run = ws / ".orch" / "run"
+    run.mkdir(parents=True, exist_ok=True)
+    (ws / ".orch" / "config.toml").write_text("[workflow]\nprepare_daily_limit = 2\n")
+    (run / "prepare-starts.json").write_text(json.dumps({"starts": [now - 600]}))
+    assert "free_at" not in prepare_use(ws, now)
+    (run / "prepare-starts.json").write_text(
+        json.dumps({"starts": [now - 30 * 3600, now - 3600, now - 7200, now - 60]})
+    )
+    got = prepare_use(ws, now)
+    assert got["used"] == 3
+    assert datetime.fromisoformat(got["free_at"]) == datetime.fromtimestamp(int(now - 3600 + 24 * 3600), UTC)
+    (ws / ".orch" / "config.toml").write_text("[workflow]\nprepare_daily_limit = 0\n")
+    assert "free_at" not in prepare_use(ws, now)

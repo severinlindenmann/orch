@@ -320,7 +320,7 @@
   // While it loads, and when it fails, the icon under it stays. A file that failed once is remembered for the tab.
   const THUMB_MAX = 14;
   let thumbLive = 0, thumbWatch = null;
-  const thumbKey = f => [f.tid, f.kind, f.name, f.size, f.mtime].join('|');
+  const thumbKey = f => [f.tid, f.kind, f.name, f.size, f.mtime, f.src].join('|');
   const failed = new Set();
   try { for (const k of JSON.parse(sessionStorage.getItem('orch.thumb.fail') || '[]')) failed.add(k); } catch (_) { /* no storage */ }
   const rememberFail = k => { failed.add(k); try { sessionStorage.setItem('orch.thumb.fail', JSON.stringify([...failed].slice(-200))); } catch (_) { /* no storage */ } };
@@ -330,8 +330,8 @@
     if (failed.has(key)) return;
     thumbLive++;
     const fr = kind === 'pdf' ? el('object', 'fv-pframe') : el('iframe', 'fv-pframe');
-    if (kind === 'pdf') { fr.type = 'application/pdf'; fr.data = urlOf(f) + '#toolbar=0&navpanes=0&scrollbar=0&view=FitH'; }
-    else { fr.setAttribute('sandbox', 'allow-scripts'); fr.setAttribute('referrerpolicy', 'no-referrer'); fr.tabIndex = -1; fr.src = pageUrl(f); }
+    if (kind === 'pdf') { fr.type = 'application/pdf'; fr.data = (f.src || urlOf(f)) + '#toolbar=0&navpanes=0&scrollbar=0&view=FitH'; }
+    else { fr.setAttribute('sandbox', 'allow-scripts'); fr.setAttribute('referrerpolicy', 'no-referrer'); fr.tabIndex = -1; fr.src = f.src || pageUrl(f); }
     fr.setAttribute('aria-hidden', 'true');
     const W = kind === 'pdf' ? 900 : 1280;
     const fit = () => { const w = box.clientWidth, h = box.clientHeight; if (!w || !h) return; const s = w / W; fr.style.width = (W + (kind === 'pdf' ? 24 : 0)) + 'px'; fr.style.height = Math.ceil(h / s) + 'px'; fr.style.transform = 'scale(' + s + ')'; };
@@ -355,7 +355,8 @@
     const ro = new ResizeObserver(list => list.forEach(e => { if (!e.target.isConnected) { ro.unobserve(e.target); io.unobserve(e.target); thumbStop(e.target); } else e.target._fit?.(); }));
     return (thumbWatch = {io, ro});
   }
-  // f: {tid, kind, name, size, mtime}. Returns an overlay to put inside a positioned box that already shows the icon,
+  // f: {tid, kind, name, size, mtime} (or {src, name}: a file the page already has a URL for, e.g. a Review card's PDF,
+  // ORCH-477). Returns an overlay to put inside a positioned box that already shows the icon,
   // or null for a file that has no picture of itself.
   function thumb(f) {
     const kind = kindOf(f.name);

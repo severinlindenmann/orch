@@ -1,4 +1,5 @@
 import json
+import re
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -289,6 +290,16 @@ def _get(base, path, headers=None):
     c.request("GET", path, headers={"Host": f"127.0.0.1:{port}", **(headers or {})})
     r = c.getresponse()
     return r.status, r.read(), dict(r.getheaders())
+
+
+def _view(base, path, headers=None):
+    """A ticket page as the signed-in dashboard frame opens it: /view/... is sent on to the address with the key
+    (ORCH-481), which the page's own files then use."""
+    code, body, h = _get(base, path, headers)
+    if code != 302:
+        return code, body, h
+    assert re.fullmatch(r"/view/t_[a-z0-9]+/k/[0-9a-f]{16}/.+", h["Location"])
+    return _get(base, h["Location"], headers)
 
 
 @pytest.fixture
@@ -968,10 +979,10 @@ def test_a_web_page_tells_the_viewer_when_esc_is_pressed_inside_it(art, ws):
     d.mkdir(exist_ok=True)
     (d / "a.html").write_text("<html><body><p>x</p></body></html>")
     (d / "b.html").write_text("<p>no body tag</p>")
-    code, body, _ = _get(art, "/view/t_other000x/artifacts/a.html")
+    code, body, _ = _view(art, "/view/t_other000x/artifacts/a.html")
     text = body.decode() if isinstance(body, bytes) else body
     assert code == 200 and "orch-viewer-escape" in text and text.index("<script>") < text.index("</body>")
-    code, body, _ = _get(art, "/view/t_other000x/artifacts/b.html")
+    code, body, _ = _view(art, "/view/t_other000x/artifacts/b.html")
     assert code == 200 and b"orch-viewer-escape" in (body if isinstance(body, bytes) else body.encode())
 
 
@@ -982,7 +993,9 @@ def test_a_web_page_is_served_sandboxed_with_its_own_stylesheet_and_script(art, 
     (d / "style.css").write_text("body{color:red}")
     (d / "app.js").write_text("1")
     (d / "secret.pem").write_text("no")
-    base = "/view/t_other000x/artifacts/site/"
+    first = _get(art, "/view/t_other000x/artifacts/site/index.html")
+    assert first[0] == 302  # signed in: on to the address with the key
+    base = first[2]["Location"].rsplit("/", 1)[0] + "/"
     code, _, h = _get(art, base + "index.html")
     assert code == 200 and h["Content-Type"].startswith("text/html")
     csp = h["Content-Security-Policy"]
@@ -1010,9 +1023,11 @@ def test_a_web_page_is_served_sandboxed_with_its_own_stylesheet_and_script(art, 
     )
     assert _get(art, base + "index.html", {"Sec-Fetch-Site": "none", "Sec-Fetch-Dest": "document"})[0] == 200
     assert _get(art, base + "secret.pem")[0] == 404  # only what a page may load
-    assert _get(art, "/view/t_other000x/artifacts/link.txt")[0] == 404
-    assert _get(art, "/view/t_other000x/artifacts/..%2f..%2fsecret.txt")[0] == 404
-    assert _get(art, "/view/t_other000x/other/site/index.html")[0] == 404
+    assert _view(art, "/view/t_other000x/artifacts/link.txt")[0] == 404
+    assert _view(art, "/view/t_other000x/artifacts/..%2f..%2fsecret.txt")[0] == 404
+    assert _get(art, "/view/t_other000x/other/site/index.html")[0] in (401, 404)
+    wrong = base.replace(base.split("/k/")[1].split("/")[0], "0" * 16)
+    assert _get(art, wrong + "style.css")[0] in (401, 404)  # another key: nothing
 
 
 def test_a_crafted_workbook_cannot_grow_memory_through_a_far_cell_reference(art, ws):

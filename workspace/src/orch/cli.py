@@ -46,6 +46,7 @@ from orch import (
     net,
     nextstep,
     ownerpick,
+    people,
     refs,
     relay,
     review,
@@ -243,6 +244,9 @@ def _show(t: dict, root: Path) -> str:
     out.append(f"Status: {tickets.status_word(t)}" + (f" - {_progress(t)}" if _progress(t) else ""))
     if t["status"] == "dropped" and t.get("superseded_by"):
         out.append(f"Replaced by: {_ticket_name(root, t['superseded_by'])}")
+    prep = tickets.prepare_state(root, t)  # Save without starting (ORCH-738)
+    if prep:
+        out.append(prep["words"] + (f": {prep['why']}" if prep.get("why") else ""))
     if n and d == n:
         out.append(
             f"✓ All done · {_progress(t)}"
@@ -261,6 +265,8 @@ def _show(t: dict, root: Path) -> str:
     if modelpick.label(t):
         reason = modelpick.why(t)
         extra.append(f"Model: {modelpick.label(t)}" + (f": {reason}" if reason else ""))
+    if tickets.kind(t):  # ORCH-645
+        extra.append(f"Kind: {tickets.KINDS[tickets.kind(t)]}")
     extra.append("Human review needed: " + ("yes" if tickets.human_review(t) else "no"))  # ORCH-424
     if extra:
         out.append("  ".join(extra))
@@ -335,7 +341,7 @@ def _show(t: dict, root: Path) -> str:
     if shown_lines := history.lines(root, t):
         out.append("\nRecent:")
         out += [
-            f"  {net.when(h['at'])}  {h['by']}: {tickets.history_line(h['text'], t['checklist'])}"
+            f"  {net.when(h['at'])}  {history.author(h)}: {tickets.history_line(h['text'], t['checklist'])}"
             for h in shown_lines[-3:]
         ]
     return "\n".join(out)
@@ -687,6 +693,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         dest="needs_ok",
         help="what the plan will need the person's OK for (production, money...)",
     )
+    x.add_argument(
+        "--kind",
+        choices=("bug", "small_bug", "feature", "small_feature", "draft", "other"),
+        help="what kind of work it is (draft = drafts, mockups, designs, look changes)",
+    )
     x = t.add_parser(
         "found",
         parents=[common],
@@ -698,6 +709,13 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         "prepared", parents=[common], help="end Prepare: one history line of what was read and filled"
     )
     x.add_argument("id")
+    x = t.add_parser(
+        "kind",
+        parents=[common],
+        help="what kind of work a ticket is: bug, small_bug, feature, small_feature, draft or other",
+    )
+    x.add_argument("id")
+    x.add_argument("name", choices=("bug", "small_bug", "feature", "small_feature", "draft", "other"))
     x = t.add_parser(
         "model",
         parents=[common],
@@ -893,6 +911,10 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("question")
     x.add_argument("answer")
     x.add_argument("--via", default="cli", metavar="WORD", help="where the answer comes from (default cli)")
+    x.add_argument(
+        "--for", dest="for_", metavar="NAME",
+        help="answer FOR this person (the manager, a script): recorded as given for them; they can undo it",
+    )  # fmt: skip
     x.add_argument(
         "--question-digest", metavar="D", help=argparse.SUPPRESS
     )  # the question as the page showed it (bound into the person's proof)
@@ -1330,7 +1352,7 @@ def run(args: argparse.Namespace) -> None:
             "cost": tickets.parse_range(args.estimate_cost, "cost"),
         }
         extra = {k: getattr(args, k) for k in tickets.PREPARE_FIELDS if getattr(args, k)}
-        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est, extra)
+        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est, extra, args.kind)
         _out(args, t, f'Tidied: "{t["title"]}"')
     elif cmd == "ticket" and sub == "found":
         raw = sys.stdin.read() if not term.is_terminal(sys.stdin) else ""
@@ -1352,6 +1374,9 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "prepared":
         t = tickets.prepared(root, args.id, by())
         _out(args, t, history.lines(root, t)[-1].get("text", "Prepared"))
+    elif cmd == "ticket" and sub == "kind":
+        t = tickets.set_kind(root, args.id, args.name, by())
+        _out(args, t, f"Kind: {tickets.KINDS[tickets.kind(t)]}")
     elif cmd == "ticket" and sub == "model" and args.name == "up":
         from orch import modelpick
         from orch import runs_live as _live
@@ -1509,7 +1534,7 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "log":
         t = tickets.log(root, args.id, args.text, by())
         h = history.lines(root, t)[-1]
-        _out(args, h, f"{h['at']} {h['by']}: {tickets.history_line(h['text'], t['checklist'])}")
+        _out(args, h, f"{h['at']} {history.author(h)}: {tickets.history_line(h['text'], t['checklist'])}")
     elif cmd == "ask" and args.in_conversation:
         if (
             args.take_back
@@ -1613,22 +1638,25 @@ def run(args: argparse.Namespace) -> None:
             raise Refused(
                 f"{args.question} changed after it was shown. Look at the question again, then answer."
             )
-        who = tickets.acting_by(args)
+        who, for_ = tickets.answer_actor(args)  # who really answers, and for whom (ORCH-547)
+        if for_:
+            tickets.refuse_own_ticket_stand_in(root, args.id)
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
         # ORCH-582: a draft is answered only with the signed-in dashboard's one-time person grant
         granted = ownerpick.person_granted(root, who)  # always used up, so no child inherits it
         person = ownerpick.is_draft_card(shown_q) and granted
-        t, q = tickets.answer(
-            root,
-            args.id,
-            args.question,
-            args.answer,
-            who,
-            args.via,
-            expected_question_digest=shown_digest,
-            person=person,
-        )
+        with tickets.standing_in(for_):
+            t, q = tickets.answer(
+                root,
+                args.id,
+                args.question,
+                args.answer,
+                who,
+                args.via,
+                expected_question_digest=shown_digest,
+                person=person,
+            )
         with contextlib.suppress(
             Refused
         ):  # the answer is saved; a busy run only delays it reaching the agent
@@ -2002,6 +2030,7 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
 
     try:
         root = _find_root()  # an invalid ORCH_ROOT is refused here, before anything is read or written
+        people.bind(root)  # who works here: the person picked in the dashboard (orch.people)
         diag.bind(root, "cli")  # the debug log: one trace per invocation (joins an inherited TRACEPARENT)
         diag.new_trace(os.environ.get("TRACEPARENT"))
         lines = addons.help_lines(root) if ("-h" in argv or "--help" in argv or not argv) else None

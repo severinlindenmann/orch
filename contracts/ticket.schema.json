@@ -112,6 +112,14 @@
     "asked_by": { "type": "string", "maxLength": 100, "description": "Optional (ORCH-740). Who asked for the work (e.g. the sender of the email), filled by Prepare (orch ticket tidy --asked-by). The owner stays the person who does or answers for it." },
     "maybe_same": { "type": "string", "description": "Optional (ORCH-740). The id of a ticket that looks like the same work, found by Prepare (orch ticket tidy --maybe-same). Shown only; never blocks, never merges." },
     "needs_ok": { "type": "string", "maxLength": 300, "description": "Optional (ORCH-740). What the plan will need the person's OK for (production, money, real data, outside), named up front by Prepare (orch ticket tidy --needs-ok). The question at the moment of doing it still comes." },
+    "kind": {
+      "type": "object", "required": ["name", "by"], "additionalProperties": false,
+      "description": "Optional (ORCH-645). What kind of work the ticket is: bug, small_bug, feature, small_feature, draft (drafts, mockups, designs, look changes) or other. Set by the helper that tidies a new ticket (orch ticket tidy --kind) or later (orch ticket kind); once a person set it (by human:...), only a person changes it. The Reviewer accepts work by itself only for the kinds the workspace lists in workflow.reviewer_kinds; draft never. Older orch versions ignore it.",
+      "properties": {
+        "name": { "enum": ["bug", "small_bug", "feature", "small_feature", "draft", "other"] },
+        "by": { "type": "string", "minLength": 1, "maxLength": 100 }
+      }
+    },
     "plan": {
       "type": "object",
       "additionalProperties": false,
@@ -123,6 +131,17 @@
       "description": "Optional. Written by the agent for a Show plan first ticket (orch ticket plan): the goal and what is not included, in its own field. Never merged into the person's note."
     },
     "title_auto": { "type": "boolean", "description": "Optional. True while the title is only a placeholder (the first words of what a person wrote); the agent writes the real title (orch ticket title), which clears it. A person's own title edit clears it too." },
+    "prepare": {
+      "type": "object",
+      "description": "Optional. Where the prepare-only run of Save without starting stands (ORCH-738): waiting (in the low-priority line), preparing, prepared (title, description, done-when, estimate and suggested steps were filled; the ticket stayed in Backlog and a later Start continues that conversation) or not_prepared (it could not run or stopped early; the ticket stays as saved and Start still works). Written only while the ticket is in Backlog.",
+      "required": ["state", "at"],
+      "properties": {
+        "state": { "enum": ["waiting", "preparing", "prepared", "not_prepared"] },
+        "at": { "$ref": "#/$defs/time" },
+        "run": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "why": { "type": "string", "maxLength": 200 }
+      }
+    },
     "plan_first": { "type": "boolean", "description": "Optional. True when the person chose \"Show plan first\": the agent makes the plan (parent and steps), asks one question \"Plan ready\" and waits for the answer before work starts. Set at creation only." },
     "release": { "type": "boolean", "description": "Optional. True when the ticket is a release (ORCH-37): the epics and tickets that ship together sit under it as sub-tickets (parent). Set at creation (orch ticket new --release) or later (orch ticket edit --release yes|no). Older orch versions read it as a plain ticket." },
     "epic": { "type": "boolean", "description": "Optional. True when the person made this ticket with several tickets inside it at once (New ticket, Add a ticket to this epic): its sub-tickets are the work and one run goes through them in order. Set at creation only." },
@@ -441,6 +460,9 @@
         "recommended": { "type": ["string", "null"] },
         "answer": { "type": ["string", "null"] },
         "answered_by": { "oneOf": [{ "$ref": "#/$defs/who" }, { "type": "null" }] },
+        "answered_for": { "type": "string", "pattern": "^human:[A-Za-z0-9_.@ -]{1,64}$", "description": "Optional (ORCH-547). The answer was given FOR this person by someone else: answered_by is who really gave it (agent:manager, agent:reviewer = Away mode, agent:script, agent:<tool>). Shown as '<Role> for <name>'; the person lists and undoes these (orch review list --answered --for-me, orch review undo). A person field: unproven once sync is on, it is never shown." },
+        "undone": { "type": "object", "required": ["at", "by"], "properties": { "at": { "$ref": "#/$defs/time" }, "by": { "$ref": "#/$defs/who" }, "again": { "type": ["string", "null"], "pattern": "^q[0-9]{1,4}$" } }, "description": "Optional (ORCH-547, orch review undo). The person took back this answer given for them; `again` is the question asked again (null: a Check result went back to Review)." },
+        "again": { "type": "string", "pattern": "^q[0-9]{1,4}$", "description": "Optional (ORCH-547). This question asks again a question whose answer given for the person was undone." },
         "sent_at": { "$ref": "#/$defs/time", "description": "Optional. When the question was sent to the person's phones. Set once by the core; absent when it never went to a phone." },
         "asked_at": { "$ref": "#/$defs/time", "description": "Optional. When the question was asked (set by the core in orch ask; absent on questions from older versions). The Reviewer's routine answers wait from this time." },
         "answered_at": { "$ref": "#/$defs/time", "description": "Optional. When the question was answered (set by the core with the answer, whatever `via` says)." },
@@ -469,7 +491,8 @@
     "history": {
       "type": "object",
       "required": ["at", "by", "text"],
-      "properties": { "at": { "$ref": "#/$defs/time" }, "by": { "anyOf": [{ "$ref": "#/$defs/who" }, { "const": "orch", "description": "orch itself (a system note such as 'The agent stopped before the work was finished'). Not a person and not an agent; sync treats it like any other line that needs no proof." }] }, "text": { "type": "string", "minLength": 1 }, "via": { "$ref": "#/$defs/token", "description": "Optional. Surface the change came from (free word)." } }
+      "properties": { "at": { "$ref": "#/$defs/time" }, "by": { "anyOf": [{ "$ref": "#/$defs/who" }, { "const": "orch", "description": "orch itself (a system note such as 'The agent stopped before the work was finished'). Not a person and not an agent; sync treats it like any other line that needs no proof." }] }, "text": { "type": "string", "minLength": 1 }, "via": { "$ref": "#/$defs/token", "description": "Optional. Surface the change came from (free word)." },
+        "for": { "type": "string", "minLength": 1, "maxLength": 40, "description": "Optional (ORCH-417). On a helper's line (by agent:<tool>): the person it worked for, the one who started its run (orch.people). Absent: it ran on its own. A person field: unproven once sync is on, it is never shown." } }
     },
     "tid": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" },
     "code": { "type": "string", "pattern": "^[A-Z0-9]{2,4}$", "description": "Workspace code: 2-4 uppercase letters or digits, e.g. DM1, MEC." },

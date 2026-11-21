@@ -485,19 +485,19 @@ def test_gets_never_write(server, fake_orch):
 
 def test_get_settings_view(start_server, fake_orch, fake_session):
     srv = start_server(session=fake_session)
-    code, headers, body = request(srv, "/api/settings")
+    assert request(srv, "/api/settings")[0] == 401  # no read without the sign-in (ORCH-481)
+    cookie = {"Cookie": f"orch_page_insights_{srv.server_address[1]}=good-cookie-value"}
+    code, headers, body = request(srv, "/api/settings", headers=cookie)
     view = json.loads(body)
     assert code == 200 and headers["Content-Type"] == "application/json"
-    assert view["can_act"] is False and view["share_counts"]["locked"] is False
+    assert view["can_act"] is False and view["share_counts"]["locked"] is False  # cookie alone: reads only
     assert view["tickets"]["rows"][1]["title"] == "<img src=x onerror=alert(1)>"
-    cookie = {"Cookie": f"orch_page_insights_{srv.server_address[1]}=good-cookie-value"}
-    assert json.loads(request(srv, "/api/settings", headers=cookie)[2])["can_act"] is False  # cookie alone
     view = json.loads(request(srv, "/api/settings", headers={**cookie, "X-Orch-Page": link(srv)})[2])
     assert view["can_act"] is True
     (fake_orch.parent / "tickets_exit").touch()
-    assert json.loads(request(srv, "/api/settings")[2])["tickets"]["error"] == TICKETS_ERROR
+    assert json.loads(request(srv, "/api/settings", headers=cookie)[2])["tickets"]["error"] == TICKETS_ERROR
     (fake_orch.parent / "settings_exit").touch()
-    assert json.loads(request(srv, "/api/settings")[2]) == {"error": ERROR}
+    assert json.loads(request(srv, "/api/settings", headers=cookie)[2]) == {"error": ERROR}
     assert request(srv, "/api/settings", headers={"Host": "evil.example:1"})[0] == 403
 
 

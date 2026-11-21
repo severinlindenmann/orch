@@ -5,8 +5,11 @@ concept, technical) wait for his answer. A program decides from facts, never a m
 
 - **Accept for you** (Review -> Done) when every task is done with evidence, every part of Done when has a
   task, no question waits, every linked pull request is merged with its checks green, and the change is
-  small by its files (`size_reasons`).
-- **Leave it for you** when the change is not small, there is no pull request to check, a part of Done when
+  small by its files (`size_reasons`), and the ticket's kind is one the workspace lists
+  (`workflow.reviewer_kinds`, default bugs; ORCH-645). A ticket without a kind (made before kinds)
+  counts as a small bug.
+- **Leave it for you** when a ticket is a draft, mockup or design (kind `draft`, never accepted), its kind
+  is not listed, or when the change is not small, there is no pull request to check, a part of Done when
   has no task (ORCH-220: a missing link is a question for you, not work for a helper), or it was already sent
   back once. One line in the history says why.
 - **Send it back to the helper** when work is missing (a pull request not merged, checks not green, a task
@@ -267,16 +270,41 @@ def review_result(root: Path | None, ticket: dict) -> dict | None:
         if got is not None:
             got["line"] = " ".join(str(got.get("line") or "").split())[:300] or "no details given"
             return got
+
+
+def kind_block(root: Path, ticket: dict) -> str | None:
+    """ORCH-645: why no automation may accept this ticket by its kind (a draft, an empty list, a kind the
+    workspace does not list; no kind counts as a small bug), or None. One check for the Reviewer and its
+    second look."""
+    kind = tickets.kind(ticket)
+    if kind == "draft":
+        return "drafts, mockups and designs are only accepted by you."
+    allowed = config.reviewer_kinds(root)
+    if not allowed:
+        return "this workspace lets the Reviewer accept no kind of work by itself."
+    if (kind or "small_bug") not in allowed:
+        return f"{tickets.KINDS[kind or 'small_bug'].lower()} work is not accepted by itself here (Settings)."
     return None
 
 
 def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
+    """The verdict below, marked kind_block when the ticket's kind keeps every automation away (the second
+    look then leaves it too, whatever the verdict's reason)."""
+    res = _decide(root, ticket, facts, sent_back)
+    if res.get("verdict") == "leave" and kind_block(root, ticket):
+        res["kind_block"] = True
+    return res
+
+
+def _decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
     """{"verdict": accept | leave | back | wait, "why": one line}. `facts`: pr_facts per linked pull request
     (None = could not be read: wait, look again next pass). Pure apart from reading the ticket's evidence."""
     items = [c for c in ticket.get("checklist") or [] if isinstance(c, dict) and not c.get("wont_do")]
     proof = tickets.proof_state(ticket, root)
     if ownerpick.carries_draft(ticket):  # ORCH-582: never accepted, sent back or put in line by the Reviewer
         return {"verdict": "leave", "why": ownerpick.LEFT_WHY, "owner": True}
+    if tickets.kind(ticket) == "draft":  # ORCH-645: never accepted by an automation, never sent back
+        return {"verdict": "leave", "why": kind_block(root, ticket), "owner": True}
     if tickets._open_questions(ticket):
         return {"verdict": "leave", "why": "a question on this ticket waits for your answer."}
     gaps = [c["text"] for c in items if not c.get("done") or not c.get("evidence")]
@@ -329,6 +357,9 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
         return _back_or_leave("; ".join(missing[:2]), sent_back)
     if open_part:
         return {"verdict": "leave", "why": open_part}
+    blocked = kind_block(root, ticket)  # ORCH-645: which kinds this workspace lets the Reviewer accept
+    if blocked:
+        return {"verdict": "leave", "why": blocked}
     why: list[str] = []
     files = lines = all_files = all_lines = 0
     for f in facts:
@@ -435,6 +466,7 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
     state = _read_state(root)
     actions = []
     in_review = set()
+    kinds = config.reviewer_kinds(root)  # a changed list decides every waiting ticket again (ORCH-645)
     for t in tickets.list_all(root):
         if t.get("status") != "review":
             continue
@@ -442,8 +474,12 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
         in_review.add(tid)
         mine = state.get(tid, {})
         ok_now = bool((review_result(root, t) or {}).get("ok"))
-        if mine.get("rev") == t.get("revision") and not (ok_now and not mine.get("ok")):
-            continue  # decided already and nothing changed since (an ok recorded since: look once more)
+        if (
+            mine.get("rev") == t.get("revision")
+            and mine.get("kinds", kinds) == kinds
+            and not (ok_now and not mine.get("ok"))
+        ):
+            continue  # decided already and nothing changed since (the ticket, the kinds it accepts, or an ok)
         facts = [facts_of(u) for u in pr_urls(root, t)]
         res = decide(root, t, facts, int(mine.get("back") or 0))
         if (
@@ -471,6 +507,7 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
         mine["rev"] = after.get("revision")
         if ok_now:
             mine["ok"] = True
+        mine["kinds"] = kinds
         remember_left(mine, res["verdict"], res["why"])
         state[tid] = mine
         row["done"] = True
@@ -634,8 +671,9 @@ def _answered_words(raw: str) -> str:
 
 
 def accepted(root: Path, since: str) -> list[dict]:
-    """Tickets the Reviewer accepted for the owner since `since` (ISO), newest first: {ticket, key, title, at,
-    why, sent_back} (sent_back: the owner sent it back since)."""
+    """The morning list: tickets the Reviewer accepted for the owner and every answer given for them (by Away
+    mode, the manager or a script) since `since` (ISO), newest first: {ticket, key, title, at, why, sent_back}
+    (sent_back: the owner sent it back since); an answer also has answer, who and question."""
     start = _at(since)
     out = []
     for t in tickets.list_all(root):
@@ -646,19 +684,7 @@ def accepted(root: Path, since: str) -> list[dict]:
             at = _at(h.get("at"))
             if at is None or (start is not None and at < start):
                 continue
-            if txt.startswith(tickets.ANSWERED_LINE):
-                out.append(
-                    {
-                        "ticket": t["id"],
-                        "key": t.get("key") or t["id"],
-                        "title": t.get("title") or "",
-                        "at": h.get("at"),
-                        "why": _answered_words(txt[len(tickets.ANSWERED_LINE) :]),
-                        "sent_back": False,
-                        "answer": True,
-                    }
-                )
-            elif txt.startswith(tickets.ACCEPTED_LINE):
+            if txt.startswith(tickets.ACCEPTED_LINE):
                 out.append(
                     {
                         "ticket": t["id"],
@@ -669,6 +695,7 @@ def accepted(root: Path, since: str) -> list[dict]:
                         "sent_back": not tickets.accepted_by_reviewer(root, t),
                     }
                 )
+        out += _answered_for(root, t, start)
     out.sort(key=lambda r: str(r["at"]), reverse=True)
     return out
 
@@ -680,6 +707,37 @@ def picks_text(picks: list[dict]) -> list[str]:
         return []
     out = [f"Waiting for your pick: {_n('draft', len(picks))}"]
     out += [f"- {r['key']} {r['title']}: {r['card']}" for r in picks]
+    return out
+
+
+def _answered_for(root: Path, ticket: dict, start) -> list[dict]:
+    """The answers someone gave FOR the person (Away mode, the manager, a script; ORCH-547) since `start`,
+    as SHOWN here: each says who gave it, so the morning list never shows a stand-in as the person."""
+    shown = history.shown_ticket(root, ticket)
+    out = []
+    for q in shown.get("questions") or []:
+        who = tickets.answered_for_person(q)
+        at = _at(q.get("answered_at") or q.get("at"))
+        if not who or q.get("answer") is None or at is None or (start is not None and at < start):
+            continue
+        out.append(
+            {
+                "ticket": shown["id"],
+                "key": shown.get("key") or shown["id"],
+                "title": shown.get("title") or "",
+                "at": q.get("answered_at") or q.get("at"),
+                "why": (
+                    f"{q['id']} = {q['answer']} ({history.answered_words(q.get('answered_by'), who)})"
+                    if q.get("answered_by") != BY
+                    else f'answered "{q["answer"]}" ({history.answered_words(q.get("answered_by"), who)})'
+                )
+                + (" (you undid it)" if q.get("undone") else ""),
+                "who": history.answered_words(q.get("answered_by"), who),
+                "question": q["id"],
+                "sent_back": False,
+                "answer": True,
+            }
+        )
     return out
 
 

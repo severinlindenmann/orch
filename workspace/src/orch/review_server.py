@@ -360,13 +360,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def _actor() -> str:
-    import getpass
+    """The person picked in the dashboard ("You: <name>", orch.people), else the computer's user."""
+    from orch import people
 
-    try:
-        who = re.sub(r"[^A-Za-z0-9_.@ -]", "_", getpass.getuser())[:58]
-    except (OSError, KeyError, ImportError):
-        who = ""
-    return f"human:{who or 'user'}"
+    return people.person_actor()
 
 
 def _child(argv: list[str], root: Path, env: dict, fds: tuple[int, ...] = ()):

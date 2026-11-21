@@ -6,7 +6,7 @@ Unknown fields are kept: a ticket is loaded as a plain dict, changed, saved whol
 from __future__ import annotations
 
 import contextlib
-import getpass
+import contextvars
 import hashlib
 import json
 import os
@@ -134,17 +134,16 @@ def require_human(question: str, what: str) -> None:
 
 
 def current_actor(explicit: str | None = None) -> str:
-    """--by, else the agent tool seen in the environment, else human:<os user>."""
+    """--by, else the agent tool seen in the environment, else the person picked in the dashboard
+    ("You: <name>", orch.people), else human:<os user>."""
     if explicit:
         who = explicit
     elif agent_tool():
         who = "agent:" + str(agent_tool())
     else:
-        try:
-            user = getpass.getuser()
-        except Exception:
-            user = "user"
-        who = "human:" + re.sub(r"[^A-Za-z0-9_.@ -]", "_", user)[:64]
+        from orch import people
+
+        who = people.person_actor()
     if not re.fullmatch(r"(agent|human):[A-Za-z0-9_.@ -]{1,64}", who):
         raise Refused(f"'{who}' is not a valid actor. Use agent:<tool> or human:<name>.")
     if history.is_reserved_label(who):
@@ -159,6 +158,106 @@ def acting_by(args) -> str:
     if tool:
         return "agent:" + str(tool)
     return current_actor(getattr(args, "by", None))
+
+
+# ORCH-547: an answer given FOR a person (the manager, a script, Away mode) records who really gave it
+# (answered_by: agent:<role>) and whom it was for (answered_for: human:<name>; a history line's `for`).
+_STAND_IN: contextvars.ContextVar[str | None] = contextvars.ContextVar("orch_stand_in", default=None)
+STAND_IN_SCRIPT = "agent:script"  # a program answering with no helper around and no terminal
+
+
+def refuse_stand_in_on(card) -> None:
+    """Drafts, mockups and designs are accepted only by the person: never by the manager, Away mode or a
+    script standing in for them (AGENTS.md, owner 18 Nov)."""
+    # the one draft rule (ORCH-582, ownerpick.is_draft_card): a draft, or a choice whose options show files
+    if _STAND_IN.get() and isinstance(card, dict) and ownerpick.is_draft_card({"card": card}):
+        who = _STAND_IN.get() or ""
+        raise Refused(f"Drafts and designs wait for {who.removeprefix('human:')}'s own answer.")
+
+
+def stand_in_for() -> str | None:
+    """human:<name> while an answer is given for that person in this process (standing_in), else None."""
+    return _STAND_IN.get()
+
+
+@contextlib.contextmanager
+def standing_in(person: str | None):
+    """Answers and history lines made inside are given for `person` (human:<name>). None: no-op."""
+    if not person:
+        yield
+        return
+    tok = _STAND_IN.set(person)
+    try:
+        yield
+    finally:
+        _STAND_IN.reset(tok)
+
+
+def refuse_own_ticket_stand_in(root: Path, tid: str) -> None:
+    """A helper never answers FOR the person on the ticket it works on itself: that would accept or decide
+    its own work (ORCH-547). Called before every stand-in answer."""
+    mine = os.environ.get("ORCH_TICKET")
+    if not mine or not (agent_tool() or os.environ.get("ORCH_RUN")):
+        return
+    try:
+        own = resolve(root, mine)
+    except Refused:
+        return
+    if own == resolve(root, tid):
+        raise Refused("A helper never answers for the person on its own ticket. Ask them: orch ask.")
+
+
+def answer_terminal() -> bool:
+    """Is a person at a terminal for this answer? (stdin is one). A seam: the core tests set it."""
+    return term.is_terminal(sys.stdin)
+
+
+def answer_actor(args, *, terminal: bool | None = None) -> tuple[str, str | None]:
+    """Who gives an answer from the CLI, and for whom: (answered_by, answered_for or None).
+
+    - `--for <name>`: a stand-in. By the helper's own label (agent:<tool>, or its role `--by agent:<role>`),
+      else `--by agent:<role>`, else agent:script.
+    - A helper's shell never answers as a person: `--by human:<name>` there is refused.
+    - With no helper around, a person's answer via the terminal (`--via cli`) from a process with no terminal
+      is a program answering for that person: recorded as agent:script for them (18 Nov: a script picked a
+      draft as the owner). The dashboard, the review page and the phones (another `--via`) are the person."""
+    from orch import people
+
+    given = getattr(args, "by", None)
+    for_name = people.clean(getattr(args, "for_", None)) if getattr(args, "for_", None) else None
+    if getattr(args, "for_", None) is not None and not for_name:
+        raise Refused("--for needs the person's name, e.g. --for Severin.")
+    tool = agent_tool()
+    if tool and given and given.startswith("human:"):
+        raise Refused(
+            "A helper never answers as a person. To answer for someone, say so: --for <name> (recorded as "
+            "given for them, and they can undo it)."
+        )
+    if given and given.startswith("agent:"):
+        role = current_actor(given)
+        if role.casefold() in (
+            REVIEWER,
+            "agent:release-keeper",
+            STAND_IN_SCRIPT,
+        ) or history.is_reserved_label(role):
+            raise Refused(f"'{role}' is orch's own role. Use agent:manager or agent:<tool>.")
+        if tool and role.casefold() not in ("agent:manager", f"agent:{tool}".casefold()):
+            raise Refused("A helper answers as itself or as the manager: --by agent:manager, or no --by.")
+    else:
+        role = None
+    if for_name:
+        by = role or (f"agent:{tool}" if tool else STAND_IN_SCRIPT)
+        return current_actor(by), f"human:{for_name}"
+    if tool:
+        return role or f"agent:{tool}", None
+    if role:
+        return role, None
+    who = current_actor(given)
+    if terminal is None:
+        terminal = answer_terminal()
+    if who.startswith("human:") and getattr(args, "via", "cli") == "cli" and not terminal:
+        return STAND_IN_SCRIPT, who
+    return who, None
 
 
 def tickets_dir(root: Path) -> Path:
@@ -451,9 +550,38 @@ def _get(ticket: dict, path: str):
     return cur
 
 
+def own_agent_label() -> str | None:
+    """agent:<tool> of the helper this process runs in (its tool's environment, else the run's ORCH_AGENT)."""
+    tool = agent_tool() or os.environ.get("ORCH_AGENT")
+    label = f"agent:{tool}" if tool else None
+    return label if label and re.fullmatch(r"agent:[A-Za-z0-9_.-]{1,40}", label) else None
+
+
+def _stamp_for(root: Path, ticket: dict) -> None:
+    """A helper's own new history lines get `for: <person>` when a person started its run (orch.people):
+    shown as "Agent - <person>". A helper that runs on its own (automation, factory, reviewer) gets none."""
+    try:
+        label = own_agent_label()
+        lines = (
+            [h for h in history.created_lines(ticket) if h.get("by") == label and "for" not in h]
+            if label
+            else []
+        )
+        if not lines:
+            return
+        from orch import people
+
+        who = people.acting_for(root)
+        for h in lines if who else ():
+            h["for"] = who
+    except Exception:  # noqa: BLE001 - attribution only: a line without `for` reads "Agent"
+        return
+
+
 def _write(root: Path, ticket: dict) -> None:
     """Lock-free atomic write (tmp + os.replace). Callers hold the lock."""
     p = ticket_path(root, ticket["id"])
+    _stamp_for(root, ticket)  # whom a helper works for, on its new lines (before they are recorded)
     history.register_written(root, ticket)  # the lines/evidence/refs core made for it (only once sync is on)
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
@@ -484,6 +612,12 @@ def _wont_view(ticket: dict) -> dict:
         for c in ticket.get("checklist") or []
         if isinstance(c, dict) and (c.get("wont_do") or c.get("reason"))
     }
+
+
+def _stand_in_role(by: str) -> bool:
+    """`by` is a role answering FOR a person right now (standing_in): recorded as such, so it may do what the
+    person could undo (answer, accept, send back), never pass for the person (ORCH-547)."""
+    return bool(_STAND_IN.get()) and isinstance(by, str) and by.startswith("agent:")
 
 
 def _is_person(by: str) -> bool:
@@ -544,11 +678,14 @@ def apply_op(
     if_revision: int | None = None,
     by: str,
     person_click: bool = False,
+    keep_revision: bool = False,
 ):
     """person_click: a person's click on the dashboard or a phone, whatever tool started that server.
+    keep_revision: a background note nobody edits on a page (where Prepare stands) keeps the revision, so
+    a person's edit of what they saw is not refused as changed meanwhile (ORCH-741).
     Every attempt leaves one decision event in the debug log (diag.md): ticket.op_applied or
     ticket.op_refused (actor, op, status and revision before/after, the refusing guard; no ticket text)."""
-    info: dict = {"person_click": person_click}
+    info: dict = {"person_click": person_click, "keep_revision": keep_revision}
     try:
         out = _apply_op(root, tid, fn, expect, if_revision, by, info)
     except BaseException as e:
@@ -617,7 +754,8 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
             from orch import phone_view  # phone_view imports tickets
 
             phone_view.close_rounds(root, tid)
-        ticket["revision"] = revision(ticket) + 1
+        if not info.get("keep_revision"):
+            ticket["revision"] = revision(ticket) + 1
         ticket["updated_at"] = now()
         _write(root, ticket)
         info.update(status_to=ticket.get("status"), revision_to=revision(ticket), written=True)
@@ -951,6 +1089,9 @@ def add_history(
     group message (`chat_message: true`): the only lines the Chat shows. The exact line object made here is
     marked as core's own (history.created); _write records it when the ticket is written."""
     entry = {"at": at or now(), "by": by, "via": via or _env_via(), "text": text, "chat_message": chat}
+    person = _STAND_IN.get()
+    if person and not str(by).startswith("human:"):  # a role standing in for the person (ORCH-547)
+        entry["for"] = person[len("human:") :] if person.startswith("human:") else person
     ticket["history"].append(entry)
     history.created("lines", entry)
 
@@ -1015,7 +1156,13 @@ def create(
     if parent is not None:
         # the parent must exist (a new ticket has no children, so no loop; set_parent checks loops later)
         parent_ticket = load(root, parent)
-    fields = fields or {}
+    fields = dict(fields or {})
+    if not fields.get("owner") and (by.startswith("human:") or by == own_agent_label()):
+        from orch import people
+
+        owner = people.owner_for(root, by)  # the person who makes it, or whom the helper works for
+        if owner:
+            fields["owner"] = owner
     for k, v in fields.items():
         clean_field(k, v)
     t = now()
@@ -1282,9 +1429,26 @@ GENERAL_REFUSED = (
 DRAFT_TO_CHECK = "a ticket with a draft, mockup or design waits for the owner's Check"
 
 
+PREPARE_NO_STATUS = (
+    "This ticket is being prepared: Prepare never changes its status. It stays in Backlog until a person "
+    "starts it."
+)
+
+
+def _preparing_agent(root: Path, tid: str, by: str, person: bool = False) -> bool:
+    """A helper (not a person) acts on a ticket a prepare-only run works on now (ORCH-741)."""
+    if person or not (agent_tool() or by.startswith("agent:")):
+        return False
+    from orch import prepare
+
+    return prepare.running_prepare(root, tid)
+
+
 def _finish_status(root: Path, ticket: dict, status: str, by: str, person: bool = False) -> tuple[str, str]:
     """person: a signed-in person (the dashboard's one-time grant); only then does a ticket that carries a
     draft become Done (ORCH-582). An agent's Done goes to Review instead, also with agents may finish on."""
+    if status != ticket.get("status") and _preparing_agent(root, ticket["id"], by, person):
+        raise Refused(PREPARE_NO_STATUS)  # every status write of set_status and patch passes here
     if hidden_kind(ticket) and status in GENERAL_REFUSED:  # the ONE status guard (agent, person, wrapper)
         raise Refused(_hidden_refusal(ticket))
     if agent_tool():  # an agent in the environment counts as an agent whatever --by says
@@ -1346,7 +1510,7 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone", *, person: 
     second accept is refused. The relay's phone path calls it for an answer to the current review question
     (relay._apply_review_answer). person: a signed-in person or a paired phone; a ticket that carries a draft
     is accepted only then, checked under the ticket's lock (ORCH-582)."""
-    if not by.startswith("human:") or agent_tool():
+    if (not by.startswith("human:") or agent_tool()) and not _stand_in_role(by):
         raise Refused("Only a person can accept.")
 
     def op(ticket):
@@ -1437,6 +1601,7 @@ def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str) -> d
         if not rec or rec not in q["options"]:
             raise Refused(f"{qid} has no recommended answer.")
         q["answer"], q["answered_by"], q["via"] = rec, REVIEWER, REVIEWER_VIA
+        q["answered_for"] = person  # Away mode for the owner (ORCH-547)
         q["answered_at"] = now()
         _release_wait(root, tid, ticket, qid)
         add_history(ticket, REVIEWER, f"Answered {qid}: {rec}", REVIEWER_VIA)
@@ -1444,7 +1609,11 @@ def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str) -> d
         history.created("answers", q)
         return q
 
-    return apply_op(root, tid, op, by=REVIEWER)[0]
+    from orch import people
+
+    person = people.person_actor(root)
+    with standing_in(person):
+        return apply_op(root, tid, op, by=REVIEWER)[0]
 
 
 RELEASE_KEEPER = "agent:release-keeper"  # merges a green release for the owner (review.tend_releases)
@@ -1502,7 +1671,7 @@ def ask_for_changes(
     A ticket the Reviewer accepted for the person (Done) can be sent back the same way.
     The Reviewer itself (by REVIEWER) sends a Review ticket back once when work is missing (reviewer.py)."""
     role = by == REVIEWER
-    if not role and (not by.startswith("human:") or agent_tool()):
+    if not role and (not by.startswith("human:") or agent_tool()) and not _stand_in_role(by):
         raise Refused("Only a person can ask for changes.")
     note = (text or "").strip()
     if not note:
@@ -1722,6 +1891,7 @@ PROTECTED_FIELDS = (
     "description",
     "description_by",
     "model",
+    "kind",
 )
 
 
@@ -2202,6 +2372,89 @@ def tidied(root: Path, ticket: dict) -> bool:
     return any(t.startswith((TIDY_LINE, "Ticket tidied")) for t in texts)
 
 
+# Prepare on Save without starting (ORCH-738, draft ORCH-730 section 3): a prepare-only helper run fills the
+# ticket and stops; the ticket stays in Backlog. `prepare` on the ticket says where that stands.
+PREPARE_STATES = ("waiting", "preparing", "prepared", "not_prepared")
+PREPARED_LINE = "Prepared: title, description, done-when, estimate and suggested steps"
+NOT_PREPARED = "Not prepared yet"
+
+
+def set_prepare(
+    root: Path,
+    tid: str,
+    state: str,
+    by: str,
+    why: str | None = None,
+    run: str | None = None,
+    line: str | None = None,
+) -> bool:
+    """Write where the prepare run stands. Prepared and Not prepared yet get one history line. Only a ticket
+    still in Backlog changes: one a person or a helper moved on meanwhile keeps its newer state, and an older
+    run's result never overwrites a newer run's. Returns True when written."""
+    if state not in PREPARE_STATES:
+        raise ValueError(state)
+
+    def op(ticket):
+        if hidden_kind(ticket) or ticket.get("status") != "open":
+            return NO_WRITE
+        cur = ticket.get("prepare") if isinstance(ticket.get("prepare"), dict) else {}
+        if run and cur.get("run") and cur["run"] != run and state in ("prepared", "not_prepared"):
+            return NO_WRITE
+        rec: dict = {"state": state, "at": now()}
+        if run:
+            rec["run"] = run
+        if why:
+            rec["why"] = " ".join(str(why).split())[:200]
+        ticket["prepare"] = rec
+        if state == "prepared":
+            add_history(ticket, by, PREPARED_LINE)
+        elif state == "not_prepared":
+            add_history(ticket, by, f"{NOT_PREPARED}: {rec['why']}" if why else NOT_PREPARED)
+        elif line:  # waiting or preparing: a line for the Activity, written with the note
+            add_history(ticket, by, line)
+        return True
+
+    # waiting and preparing are a background note (with at most the line saying so): the revision stays, so a
+    # person who opens the ticket right after Save can still change it (their later edit wins)
+    quiet = state in ("waiting", "preparing")
+    try:
+        return apply_op(root, tid, op, by=SYSTEM, keep_revision=quiet)[1] is True
+    except (Refused, FileNotFoundError):
+        if ticket_path(root, tid).exists():
+            raise
+        return False
+
+
+def prepare_state(root: Path, ticket: dict) -> dict | None:
+    """Where Prepare stands for a reader ({"state", "words", "why"?}), or None when it never ran. A ticket in
+    Backlog still marked preparing or waiting whose run is gone and that waits in no line was left by a run
+    that died: it reads Not prepared yet (Prepare fails quietly; Start still works)."""
+    p = ticket.get("prepare")
+    if not isinstance(p, dict) or p.get("state") not in PREPARE_STATES:
+        return None
+    state, why = p["state"], p.get("why")
+    if state in ("waiting", "preparing", "not_prepared") and ticket.get("status") != "open":
+        return None  # a person started the work meanwhile: Prepare is over, nothing to show
+    if state in ("waiting", "preparing"):
+        from orch import runs, runs_live
+
+        try:
+            gone = not runs.running(root, ticket["id"]) and ticket["id"] not in {
+                t for t, _ in runs_live.waiting_line(root)
+            }
+        except Exception:  # noqa: BLE001 - a reader never fails on this
+            gone = False
+        if gone:
+            state, why = "not_prepared", "the helper stopped"
+    words = {
+        "waiting": "Waits in line to be prepared",
+        "preparing": "Preparing",
+        "prepared": "Prepared",
+        "not_prepared": NOT_PREPARED,
+    }[state]
+    return {"state": state, "words": words, **({"why": why} if why else {})}
+
+
 def _minutes_words(m: int) -> str:
     return (f"{m // 60} h" + (f" {m % 60} min" if m % 60 else "")) if m >= 60 else f"{m} min"
 
@@ -2281,6 +2534,75 @@ def _estimate(minutes: object, cost: object) -> dict | None:
     return out
 
 
+# ORCH-645 (owner 18 Nov): what kind of work a ticket is. The tidy helper sets it; the Reviewer accepts work
+# by itself only for the kinds the workspace lists (workflow.reviewer_kinds), never a draft.
+KINDS = {
+    "bug": "Bug",
+    "small_bug": "Small bug",
+    "feature": "New feature",
+    "small_feature": "Small feature",
+    "draft": "Draft or design",
+    "other": "Other",
+}
+
+
+def clean_kind(name) -> str:
+    name = str(name or "").strip().lower().replace(" ", "_").replace("-", "_")
+    if name not in KINDS:
+        raise Refused("Pick a kind: " + ", ".join(KINDS) + ".")
+    return name
+
+
+def kind(ticket: dict) -> str | None:
+    """The ticket's kind, or None (not set yet, or a value orch does not know)."""
+    k = ticket.get("kind") if isinstance(ticket, dict) else None
+    name = k.get("name") if isinstance(k, dict) else None
+    return name if name in KINDS else None
+
+
+def kind_by_person(ticket: dict) -> bool:
+    k = ticket.get("kind")
+    return kind(ticket) is not None and str(k.get("by") or "").startswith("human:")
+
+
+def _put_kind(ticket: dict, name: str, by: str) -> bool:
+    """Set the kind (a history line); False when it already is that. A person's kind stays: only a person
+    changes it."""
+    if kind(ticket) == name:
+        return False
+    old = kind(ticket)
+    person = _is_person(by)
+    ask = (
+        f'Ask instead: orch ask {ticket.get("id", "<id>")} "Change the kind to {KINDS[name]}?" '
+        "--option yes --option no"
+    )
+    if not person:
+        if kind_by_person(ticket):
+            raise Refused(f"A person set this ticket's kind ({KINDS[old]}); only a person changes it. {ask}")
+        if old == "draft":  # a helper never turns a draft into work the Reviewer may accept
+            raise Refused(f"Only a person moves a ticket out of Draft or design. {ask}")
+        if ticket.get("status") in ("review", "done", "dropped"):
+            raise Refused(f"The work is finished: only a person changes its kind now. {ask}")
+        if by.startswith(
+            "human:"
+        ):  # --by human:... from inside a helper: stored as the helper (never a lock)
+            by = "agent:" + str(agent_tool() or "helper")
+    ticket["kind"] = {"name": name, "by": by[:100]}
+    add_history(ticket, by, f"Kind: {KINDS[name]}" + (f" (was: {KINDS[old]})" if old else ""))
+    return True
+
+
+def set_kind(root: Path, tid: str, name: str, by: str) -> dict:
+    """`orch ticket kind`: change what kind of work the ticket is."""
+    name = clean_kind(name)
+
+    def op(ticket):
+        if not _put_kind(ticket, name, by):
+            raise Refused(f"This ticket already is: {KINDS[name]}.")
+
+    return apply_op(root, tid, op, by=by)[0]
+
+
 def tidy(
     root: Path,
     tid: str,
@@ -2290,6 +2612,7 @@ def tidy(
     description: str | None = None,
     estimate: dict | None = None,
     extra: dict | None = None,
+    kind_name: str | None = None,
 ) -> dict:
     """Tidy a new ticket when work starts, without asking: a short clear title (the person's own words stay in
     the history: "Title tidied from: ...") and owner / due / done_when,
@@ -2310,6 +2633,7 @@ def tidy(
     for k, v in fields.items():
         clean_field(k, v)
     more = _prepare_fields(root, tid, extra or {})
+    kind_name = clean_kind(kind_name) if kind_name else None
 
     def op(ticket):
         if tidied(root, ticket):
@@ -2350,7 +2674,15 @@ def tidy(
         for k in added:
             ticket[k] = more[k]
             add_history(ticket, by, PREPARE_FIELDS[k] + ": " + _field_words(root, k, more[k]))
-        if (title == old or edited) and not filled and not wrote and not estimated and not added:
+        kinded = bool(kind_name and not kind(ticket) and _put_kind(ticket, kind_name, by))
+        if (
+            (title == old or edited)
+            and not filled
+            and not wrote
+            and not estimated
+            and not added
+            and not kinded
+        ):
             add_history(ticket, by, "Ticket tidied: nothing to change")
 
     return apply_op(root, tid, op, by=by)[0]
@@ -3737,6 +4069,8 @@ def ask(
                 "and say in the ticket summary what is missing."
             )
 
+    preparing = _preparing_agent(root, tid, by)  # ORCH-741: asked during Prepare
+
     def op(ticket):
         for old in ticket["questions"]:  # the same open question is not asked twice
             if old["answer"] is None and old["text"] == text.strip() and old["options"] == list(options):
@@ -3767,12 +4101,88 @@ def ask(
             if links:  # part of what the person is shown: in the digest (question_digest)
                 q["links"] = [dict(x) for x in links]
         ticket["questions"].append(q)
+        if preparing and ticket["status"] == "open":  # Prepare's one question: the ticket stays in Backlog
+            add_history(ticket, by, f"Asked {q['id']}")
+            return q
         ticket["status"] = "waiting"
         ticket["waiting_on"] = {"kind": "question", "ref": q["id"]}
         add_history(ticket, by, f"Asked {q['id']}, waiting")
         return q
 
     return apply_op(root, tid, op, by=by)
+
+
+_ASK_AGAIN_KEYS = (
+    "text",
+    "options",
+    "recommended",
+    "kind",
+    "action",
+    "check",
+    "card",
+    "shown",
+    "group",
+    "links",
+)
+
+
+def answered_for_person(q) -> str | None:
+    """human:<name> when this answer was given for that person by someone else (ORCH-547), else None."""
+    who = q.get("answered_for") if isinstance(q, dict) else None
+    return who if isinstance(who, str) and who.startswith("human:") else None
+
+
+def _stand_in_shown(root: Path, ticket: dict, qid: str) -> tuple[str | None, str]:
+    """(whom answer `qid` was given for, who gave it in words), as SHOWN here: an unproven synced stand-in
+    is no stand-in."""
+    shown = next((x for x in history.shown_ticket(root, ticket)["questions"] if x.get("id") == qid), {})
+    who = answered_for_person(shown)
+    return who, history.answered_words(shown.get("answered_by"), who)
+
+
+def undo_answer(root: Path, tid: str, qid: str, by: str, via: str = "cli") -> dict:
+    """The person takes back an answer someone gave FOR them (answered_for): the question is asked again as a
+    new open question (same words, options and card), the old answer stays in the history marked undone.
+    A Check result accepted for them goes back to Review. Only a person undoes; a merge is never given for
+    anyone, so there is none to undo. Returns {"undone": qid, "again": new qid or None, "ticket": status}."""
+    if not VIA_RE.fullmatch(via):
+        raise Refused("via must be a short word (a-z, 0-9, -), e.g. cli or dashboard.")
+    if not by.startswith("human:") or agent_tool():
+        raise Refused("Only the person undoes an answer given for them.")
+
+    def op(ticket):
+        q = next((x for x in ticket["questions"] if x["id"] == qid), None)
+        if q is None:
+            raise Refused(f"Ticket {tid} has no question {qid}.")
+        refuse_if_taken_back(q)
+        who, words = _stand_in_shown(root, ticket, qid)
+        if q.get("answer") is None or who is None:
+            raise Refused(f"{qid} was not answered for you. Answer it again on its card instead.")
+        d = q.get("decision") if isinstance(q.get("decision"), dict) else None
+        if q.get("undone") or (d and d.get("replaced_by")):
+            raise Refused(f"{qid} was already undone or answered again.")
+        again = None
+        if (q.get("card") or {}).get("kind") == "check":
+            if ticket["status"] != "done":
+                raise Refused("The helper already has this note. Send it back or accept it on the ticket.")
+            ticket["status"] = "review"
+            add_history(ticket, by, "Status done -> review", via)
+        else:
+            again = {"id": _next_id(ticket["questions"], "q")}
+            again.update({k: q[k] for k in _ASK_AGAIN_KEYS if k in q})
+            again.update({"answer": None, "answered_by": None, "via": None, "asked_at": now(), "again": qid})
+            ticket["questions"].append(again)
+            ticket["status"] = "waiting" if ticket["status"] not in ("done", "review") else ticket["status"]
+            if ticket["status"] == "waiting":
+                ticket["waiting_on"] = {"kind": "question", "ref": again["id"]}
+        q["undone"] = {"at": now(), "by": by, "again": again["id"] if again else None}
+        if d is not None:
+            q["decision"] = {**d, "replaced_by": again["id"] if again else "undone"}
+        tail = f": asked again as {again['id']}" if again else ": back in Review"
+        add_history(ticket, by, f"Undid {qid} (answered by {words}){tail}", via)
+        return {"undone": qid, "again": again["id"] if again else None, "ticket": ticket["status"]}
+
+    return apply_op(root, tid, op, by=by)[1]
 
 
 GROUP_MAX = 80
@@ -3949,11 +4359,12 @@ def answer(
         refuse_if_taken_back(q)
         if q["answer"] is not None:
             raise Refused(f"{qid} is already answered.")
-        if isinstance(q.get("card"), dict) and not str(by).startswith("human:"):
+        if isinstance(q.get("card"), dict) and not str(by).startswith("human:") and not _STAND_IN.get():
             raise Refused(
                 "This card waits for the owner. Ask with orch review add and wait with orch review wait."
             )
         ownerpick.refuse_card(q, person and str(by).startswith("human:"))
+        refuse_stand_in_on(q.get("card"))
         if decision is None and isinstance(q.get("action"), dict) and "merge" in q["action"]:
             raise Refused(f"{qid} merges a pull request: answer it on the card (Merge or Not now).")
         if expected_question_digest is not None and (
@@ -3966,6 +4377,8 @@ def answer(
                 ans = opt
                 break
         q["answer"], q["answered_by"], q["via"] = ans, by, via
+        if _STAND_IN.get() and not by.startswith("human:"):
+            q["answered_for"] = _STAND_IN.get()  # given for the person, by a role (ORCH-547)
         q["answered_at"] = now()  # when, whatever `via` says (a page shows "Answered on your phone 12:34")
         if decision is not None:
             q["decision"], q["at"] = dict(decision), now()
@@ -4007,11 +4420,12 @@ def record_answered(
         raise Refused("via must be a short word (a-z, 0-9, -), e.g. cli or dashboard.")
     if not isinstance(entry.get("answer"), str) or not entry["answer"].strip():
         raise Refused("An answer needs text.")
-    if isinstance(entry.get("card"), dict) and not str(by).startswith("human:"):
+    if isinstance(entry.get("card"), dict) and not str(by).startswith("human:") and not _STAND_IN.get():
         raise Refused(
             "This card waits for the owner. Ask with orch review add and wait with orch review wait."
         )
     ownerpick.refuse_card(entry, person and str(by).startswith("human:"))
+    refuse_stand_in_on(entry.get("card"))
 
     def op(ticket):
         old = None
@@ -4025,10 +4439,12 @@ def record_answered(
             "answer": None,
             "answered_by": None,
             "via": None,  # fixed key order, like ask()
-            **{k: v for k, v in entry.items() if k not in ("id", "answered_by", "via", "at")},
+            **{k: v for k, v in entry.items() if k not in ("id", "answered_by", "answered_for", "via", "at")},
         }
         q = {"id": _next_id(ticket["questions"], "q"), **q}
         q["answer"], q["answered_by"], q["via"], q["at"] = entry["answer"], by, via, now()
+        if _STAND_IN.get() and not by.startswith("human:"):
+            q["answered_for"] = _STAND_IN.get()  # given for the person, by a role (ORCH-547)
         q["answered_at"] = q["at"]
         if replaces is not None:
             q["decision"] = {**(q.get("decision") or {}), "replaces": replaces, "replaced_by": None}
@@ -4085,6 +4501,9 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
             raise Refused("--on needs <kind>:<ref>, kind ticket, question or external. For a time: --until.")
         w = waiting_value(kind, ref)
         note = f"Waiting on {kind} {w['ref']}"
+
+    if _preparing_agent(root, tid, by):
+        raise Refused(PREPARE_NO_STATUS)
 
     def op2(ticket):
         ticket["waiting_on"] = w

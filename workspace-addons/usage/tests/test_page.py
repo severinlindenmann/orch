@@ -6,6 +6,7 @@ import threading
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from conftest import jrun, switcher_data
@@ -311,3 +312,29 @@ def test_a_5_hour_window_without_its_own_limit_shows_the_default_early_switch(cl
     _seed(cli)  # first now has its own 5-hour limit (95 %)
     bars = {b["period"]: b for b in page.build(usage_cli.gather(ws), ws)["accounts"][0]["bars"]}
     assert bars["5h"]["limit"] == 95 and "early" not in bars["5h"] and "early" not in bars["week"]
+
+
+def test_the_page_draws_the_daily_prepare_limit_under_today(cli, fake_switcher, ws):
+    """ORCH-811 (owner picked draft C): the page model carries the Prepare use, and the page draws it as one line
+    under Today with a way to Settings; a full limit says until when."""
+    import time
+
+    run = ws / ".orch" / "run"
+    run.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    (ws / ".orch" / "config.toml").write_text("[workflow]\nprepare_daily_limit = 2\n")
+    (run / "prepare-starts.json").write_text(json.dumps({"starts": [now - 7200, now - 60]}))
+    m = page.build(usage_cli.gather(ws), ws)
+    assert m["prepare"]["used"] == 2 and m["prepare"]["limit"] == 2 and m["prepare"]["on"] is True
+    assert "free_at" in m["prepare"]
+    js = (Path(page.__file__).parent / "web" / "usage.js").read_text(encoding="utf-8")
+    assert "if (m.prepare) parts.push(prepareLine(m.prepare));" in js
+    assert js.index("parts.push(today(m.spread))") < js.index("parts.push(prepareLine(m.prepare))")
+    for words in (
+        "Preparing new tickets: ",
+        "Change in Settings",
+        "/#settings/helper",
+        " in the last 24 hours",
+        "full until ",
+    ):
+        assert words in js

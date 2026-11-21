@@ -73,6 +73,9 @@ const parse = value => {
 const date = value => window.UI?.stamp ? window.UI.stamp(value, {time:false}) : (parse(value)?.toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'}) || '');
 const time = value => window.UI?.stamp ? window.UI.stamp(value) : (parse(value)?.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) || '');
 let state, renderedRoute = '', fetching = false, writing = 0, serial = 0, mutation = 0;
+// Not signed in: every data read needs the sign-in (ORCH-481). The page then shows only the sign-in notice
+// (session.js) and stops asking; a sign-in link reloads the page.
+let signedOut = false;
 const now = () => parse(state?.now) || new Date();
 const today = () => {
   const d = now();
@@ -603,7 +606,8 @@ function busyOff(busy) {
 async function act(op, args, opts = {}) {
   if (snapshot) return {ok:false, status:0, text:'This is a shared copy.'};
   const busy = busyOn();
-  const before = op === 'run.start' ? ticketOf(args.ticket)?.status : null;
+  // Prepare (Save without starting, ORCH-738) keeps the ticket in Backlog: it is never shown as Working at once
+  const before = op === 'run.start' && !args.prepare ? ticketOf(args.ticket)?.status : null;
   let succeeded = false, queued = false;
   if (before) { starting.add(args.ticket); state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:'active'} : t); render(); }
   writing++;
@@ -705,7 +709,7 @@ async function actAnswer(next) {
 let refreshAgain = false;
 let wantFull = false;  // the last delta did not fit the state held: ask for the whole state once
 async function refresh() {
-  if (snapshot) return;
+  if (snapshot || signedOut) return;
   if (window.orchQuiet()) return;  // an add-on change restarts the server: afterRestart reads the state once it is back
   if (fetching || writing) { refreshAgain = true; return; }
   fetching = true;
@@ -718,6 +722,12 @@ async function refresh() {
     const have = state?.rev && !wantFull ? '?have=' + encodeURIComponent(state.rev) : '';
     wantFull = false;
     const res = await fetch('/api/state' + have, {cache:'no-store'});
+    if (res.status === 401) {  // no sign-in: not a lost connection, and no loading shapes that never fill
+      signedOut = true;
+      connection.hidden = true;
+      if (!state) main.replaceChildren();
+      return;
+    }
     if (!res.ok) throw new Error('Could not load the workspace.');
     serverBoot = res.headers?.get?.('X-Orch-Boot') || serverBoot;
     let next = await res.json();
@@ -966,7 +976,9 @@ main.addEventListener('click', async event => {
   if (action === 'settings-share') { settingsReviewOpen('share', control); return; }
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
   if (action === 'reviewer-set') { await reviewerSwitch(); return; }
+  if (action === 'reviewer-kind') { await reviewerKindToggle(control); return; }
   if (action === 'release-merge-set') { await releaseMergeSwitch(); return; }
+  if (action === 'prepare-set') { await prepareSwitch(); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
   if (action === 'auto-update-note-ok') { const r = await act('update.note.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }

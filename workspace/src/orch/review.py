@@ -1307,7 +1307,10 @@ def _merge_first(root: Path, tid: str, q: dict, d: dict, by: str, via: str) -> N
     url = merge_url(q)
     if url is None or d.get("action") != "approve":
         return
-    if not (by.startswith("human:") and (via == "phone" or not tickets.agent_tool())):
+    if tickets.stand_in_for() or not (
+        by.startswith("human:") and (via == "phone" or not tickets.agent_tool())
+    ):
+        # a merge cannot be undone, so nobody merges FOR the person (ORCH-547: answers for them can be undone)
         raise Refused("Only a person merges this. Ask the human to click Merge on the card.")
     from orch import ghmerge
 
@@ -1497,7 +1500,7 @@ def _decide_check(
     person: bool = False,
 ) -> dict:
     tid = ticket["id"]
-    if not by.startswith("human:"):  # a verdict on a Check result is a person's (label check)
+    if not by.startswith("human:") and not tickets._stand_in_role(by):  # a person's, or for them (ORCH-547)
         raise Refused("Only a person can decide this. Ask the human to do it themselves.")
     ownerpick.refuse_ticket(ticket, person)  # ORCH-582: a ticket with a draft is accepted only by a person
     if verdict not in VERDICTS:

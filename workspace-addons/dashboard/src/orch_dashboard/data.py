@@ -278,8 +278,12 @@ def _demote_all(t: dict) -> dict:
     out = dict(t)
     if isinstance(t.get("history"), list):
         out["history"] = [
-            {**h, "by": SYNC_BY, "text": SYNCED_UNVERIFIED + str(h.get("text", ""))}
-            if isinstance(h, dict) and not agent(h.get("by"))
+            {
+                **{k: v for k, v in h.items() if k != "for"},  # whom a helper worked for is a person field
+                "by": SYNC_BY,
+                "text": SYNCED_UNVERIFIED + str(h.get("text", "")),
+            }
+            if isinstance(h, dict) and (not agent(h.get("by")) or h.get("for") is not None)
             else h
             for h in t["history"]
         ]
@@ -1130,7 +1134,10 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         focus_session_typing,
         focus_terminal_typing,
         live_max,
+        prepare_daily_limit,
+        prepare_on_save_on,
         release_merge_on,
+        reviewer_kinds,
         reviewer_on,
         workspace_description,
         workspace_name,
@@ -1148,7 +1155,10 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     return {
         "agents_may_finish": agents_may_finish(root),
         "release_merge_on": release_merge_on(root),  # Settings: "Merge releases without my click"
+        "prepare_on_save": prepare_on_save_on(root),  # Settings: "Prepare tickets when I save" (ORCH-741)
+        "prepare_daily_limit": prepare_daily_limit(root),
         "auto_reviewer_on": auto_reviewer_on(root),  # ORCH-424: new tickets start without human review
+        "reviewer_kinds": reviewer_kinds(root),  # ORCH-645: the kinds it accepts by itself
         "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)
         "copies": copies_mode(root),
         "copies_max": copies_max(root),

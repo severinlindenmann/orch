@@ -47,12 +47,14 @@ def _actor(explicit: str | None) -> str:
     if inside_run or tool:
         name = re.sub(r"[^A-Za-z0-9_.@-]", "_", os.environ.get("ORCH_AGENT") or tool or "helper")[:64]
         return f"agent:{name or 'helper'}"
-    try:
+    try:  # the person picked in the dashboard ("You: <name>", orch.people), else the computer's user
+        from orch import people
+
+        return people.person_actor().replace(" ", "_")
+    except Exception:  # noqa: BLE001 - an old core
         import getpass
 
         user = getpass.getuser()
-    except Exception:  # noqa: BLE001
-        user = "user"
     return "human:" + (re.sub(r"[^A-Za-z0-9_.@-]", "_", user)[:64] or "user")
 
 
@@ -298,6 +300,45 @@ def _period_start(period: str, lim: dict, at: datetime) -> str | None:
     return lim.get("since")
 
 
+PREPARE_DEFAULT_LIMIT = 30  # = orch.config.DEFAULT_PREPARE_DAILY_LIMIT (this add-on does not import orch)
+
+
+def prepare_use(root: Path, now: float | None = None) -> dict:
+    """Preparing tickets on Save (ORCH-741): {"on", "used" in the last 24 hours, "limit" per day}. Read from
+    the files orch core writes (.orch/config.toml [workflow], .orch/run/prepare-starts.json)."""
+    import time
+    import tomllib
+
+    now = time.time() if now is None else now
+    try:
+        wf = tomllib.loads((root / ".orch" / "config.toml").read_text(encoding="utf-8")).get("workflow", {})
+    except (OSError, ValueError):
+        wf = {}
+    wf = wf if isinstance(wf, dict) else {}
+    lim = wf.get("prepare_daily_limit")
+    ok = isinstance(lim, int) and not isinstance(lim, bool) and 0 <= lim <= 1000
+    try:
+        starts = json.loads((root / ".orch" / "run" / "prepare-starts.json").read_text(encoding="utf-8"))
+        starts = starts.get("starts") if isinstance(starts, dict) else []
+    except (OSError, ValueError):
+        starts = []
+    day = sorted(x for x in starts or [] if isinstance(x, (int, float)) and 0 <= now - x < 24 * 3600)
+    limit = lim if ok else PREPARE_DEFAULT_LIMIT
+    out = {"on": wf.get("prepare_on_save", True) is True, "used": len(day), "limit": limit}
+    if limit and len(day) >= limit:
+        # full: the next ticket can be prepared once enough of these are older than a day (ORCH-811)
+        out["free_at"] = datetime.fromtimestamp(day[len(day) - limit] + 24 * 3600, UTC).isoformat(
+            timespec="seconds"
+        )
+    return out
+
+
+def prepare_text(p: dict) -> str:
+    if not p["on"]:
+        return "Preparing tickets on Save: off (Settings)"
+    return f"Preparing tickets on Save: {p['used']} of {p['limit']} in the last 24 hours"
+
+
 def _now() -> datetime:
     """The clock (a test sets a fixed one)."""
     return datetime.now(UTC)
@@ -353,7 +394,12 @@ def gather(root: Path) -> dict:
         )
     mem = switching._read(switching.memory_path(root))  # what the loop's last look found (ORCH-620)
     warnings += [w for w in mem.get("alerts") or [] if isinstance(w, str)]
-    return {"accounts": out, "switcher": cswap.command() is not None, "warnings": warnings}
+    return {
+        "accounts": out,
+        "switcher": cswap.command() is not None,
+        "warnings": warnings,
+        "prepare": prepare_use(root),
+    }
 
 
 # ---------------------------------------------------------------- output
@@ -434,6 +480,7 @@ def run(args) -> int:
                 lines.append(f"   {use}")
         if not lines:
             lines = ["No accounts yet."]
+        lines.append(prepare_text(data["prepare"]))
         lines += [f"Warning: {w}" for w in data["warnings"]]
         lines.append("Next: orch usage limit <account> <number>  (or period / order / on / off / end)")
         print("\n".join(lines))
