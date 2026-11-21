@@ -310,6 +310,9 @@ def cmd_share(args, root: Path) -> int:
             rec["made_by"] = {"ticket": ticket}
         cli._no_secret(root, rec)
         spec = cli._spec(root, rec, wid)
+        cli._refuse_protected(
+            drv, spec
+        )  # as add and start: launchd cannot use Documents, Desktop, iCloud Drive
         store.save(root, rec)
         store.logs_dir(root).mkdir(parents=True, exist_ok=True)
         try:

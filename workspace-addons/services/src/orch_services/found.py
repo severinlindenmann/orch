@@ -367,9 +367,7 @@ def _same_command(argv: list[str], commands: frozenset[str]) -> bool:
     return " ".join(argv[i:]) in commands
 
 
-def _processes(
-    root: Path, skip: set[int], managed: set[int] = frozenset(), commands: frozenset[str] = frozenset()
-) -> list[dict]:
+def _processes(root: Path, skip: set[int], commands: frozenset[str] = frozenset()) -> list[dict]:
     cp = _tool(["ps", "-ww", "-U", str(os.getuid()), "-o", "pid=,ppid=,tty=,lstart=,command="])
     if not cp or cp.returncode != 0:
         return []
@@ -410,24 +408,13 @@ def _processes(
             pid = rows[pid]["ppid"]
         return False
 
-    def under_managed(pid: int) -> bool:
-        # a program a managed service started (its script's child): it is that service, not a found job (ORCH-847)
-        seen = set()
-        while pid in rows and pid not in seen:
-            seen.add(pid)
-            pid = rows[pid]["ppid"]
-            if pid in managed:
-                return True
-        return False
-
     cand = [
         pid
         for pid, r in rows.items()
         if pid not in mine
         and pid not in skip
         and r["tty"] in ("?", "??", "-")
-        and not from_orch(pid)
-        and not under_managed(pid)
+        and not from_orch(pid)  # also what a kept service started (ORCH-847): its main pid is in skip
     ]
     if sys.platform.startswith("linux"):
         cwds = {pid: c for pid in cand if (c := _cwd_linux(pid))}
@@ -477,7 +464,7 @@ def scan(root: Path, processes: bool = False) -> list[dict]:
     done = _adopted(root)
     units = [u for u in units if u["id"] not in done]
     kept, commands = _managed(root)
-    items = units + (_processes(root, pids | kept, kept, commands) if processes else [])
+    items = units + (_processes(root, pids | kept, commands) if processes else [])
     items.sort(key=lambda i: (i["name"].lower(), i["id"]))
     return items
 
@@ -488,7 +475,7 @@ def others(root: Path) -> int:
         return 0
     _units, pids = _launchd(root) if sys.platform == "darwin" else _systemd(root)
     kept, commands = _managed(root)
-    return len(_processes(root, pids | kept, kept, commands))
+    return len(_processes(root, pids | kept, commands))
 
 
 def _addon_pids() -> set[int]:

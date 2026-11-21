@@ -457,7 +457,7 @@ def cmd_add(args, root: Path) -> int:
     _refuse_protected(drv, spec)
     store.save(root, rec)
     store.log_path(root, sid).parent.mkdir(parents=True, exist_ok=True)
-    store.log_path(root, sid).unlink(missing_ok=True)  # a new service starts with an empty log (ORCH-847)
+    store.retire_log(root, sid)  # a new service starts with an empty log; an old one is kept aside (ORCH-847)
     try:
         drv.install(spec)
     except Refused:

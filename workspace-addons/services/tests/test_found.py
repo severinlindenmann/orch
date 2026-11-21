@@ -570,6 +570,13 @@ def test_a_test_home_with_the_real_account_home_finds_no_real_jobs(cli, mac, too
     assert {i["id"] for i in out["found"]} >= {"launchd:com.example.web-preview"}
 
 
+def _process_ids(ws) -> set[str]:
+    """The plain programs Found would explain (adopt looks one up): scan with processes on, ids only."""
+    from orch_services import found
+
+    return {i["id"] for i in found.scan(ws, processes=True) if i["id"].startswith("process:")}
+
+
 def test_a_program_started_by_a_managed_service_is_not_found_again(cli, mac, tools, ws):
     # ORCH-847: the service runs a shell script; the program the script starts is a child of launchd's main pid
     code, out = jrun(cli, "add", "Abacus", "--id", "abacus", "--start", "--", "/bin/sh", "app.sh")
@@ -591,6 +598,7 @@ def test_a_program_started_by_a_managed_service_is_not_found_again(cli, mac, too
     out = jrun(cli, "found")[1]
     assert all(not i["id"].startswith("process:") for i in out["found"])
     assert out["others"] == 1  # only other-tool; the service's own children are not counted
+    assert _process_ids(ws) == {"process:7003"}
 
 
 def test_orchs_add_on_servers_are_never_found_by_their_recorded_pid(
@@ -619,6 +627,7 @@ def test_orchs_add_on_servers_are_never_found_by_their_recorded_pid(
     out = jrun(cli, "found")[1]
     assert all(not i["id"].startswith("process:") for i in out["found"])
     assert out["others"] == 1  # only watcher.py (967); the focus server and its child are not counted
+    assert _process_ids(ws) == {"process:967"}
     # a recorded pid that another program took over after a restart hides nothing
     p.write_text(
         json.dumps([{"workspace": str(ws), "addon": "focus", "pid": 967, "url": None}]), encoding="utf-8"
@@ -626,6 +635,7 @@ def test_orchs_add_on_servers_are_never_found_by_their_recorded_pid(
     assert (
         jrun(cli, "found")[1]["others"] == 3
     )  # 967 does not name orch: still counted (965 and its child too now)
+    assert "process:967" in _process_ids(ws)
 
 
 def test_what_a_managed_service_started_is_not_found_again(cli, mac, tools, ws, monkeypatch):
@@ -639,6 +649,7 @@ def test_what_a_managed_service_started_is_not_found_again(cli, mac, tools, ws, 
         lsof={"970": str(ws), "971": str(ws)},
     )
     assert jrun(cli, "found")[1].get("others", 0) == 0
+    assert not _process_ids(ws) & {"process:970", "process:971"}
 
 
 def test_a_managed_services_own_processes_are_never_found(cli, mac, tools, ws):
@@ -669,3 +680,4 @@ def test_a_managed_services_own_processes_are_never_found(cli, mac, tools, ws):
     # only 973 (a program orch does not keep) and 974 (a stopped service's command started by hand) are counted;
     # 970-972 are the kept services' own processes, a shebang with a flag too
     assert out["others"] == 2
+    assert _process_ids(ws) == {"process:973", "process:974"}
