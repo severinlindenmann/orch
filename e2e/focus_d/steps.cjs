@@ -222,7 +222,8 @@ async function paneData(page, dash) {
   const stop = `${pane} [data-key="${inMore ? 'live-more-stop' : 'live-stop'}"]`;
   if (inMore) await page.click(`${pane} [data-key="live-pane-more"]`);
   const word = (await page.textContent(stop, { timeout: 5000 }).catch(() => '')).trim();
-  if (word !== 'Stop') throw new Error(`the pane of a helper that waits has no Stop (it says "${word}")`);
+  // in More, Stop carries its line next to it (ORCH-1362): "Stop" + what it does
+  if (!/^Stop(Ends the current step|$)/.test(word)) throw new Error(`the pane of a helper that waits has no Stop (it says "${word}")`);
   await page.click(stop);
   for (let i = 0; i < 20 && !acts.length; i++) await page.waitForTimeout(100);
   if (acts.length !== 1 || acts[0].join() !== 'run.interrupt,t_bar238') throw new Error('Stop did not ask orch to stop the current step: ' + JSON.stringify(acts));
@@ -1220,7 +1221,14 @@ async function split(page, dash, width) {
     list = await count(3);
     if (!sideBySide(list)) throw new Error('three panes do not sit next to each other');
     if (!list[2].on || list.filter(p => p.on).length !== 1) throw new Error('the new pane is not the selected one');
-    if (!await page.$eval(inPane(list[0].key, 'live-beside'), b => b.disabled)) throw new Error('add beside still works with three panes');
+    // ORCH-1362: with three panes Add beside is not greyed; its menu says why and offers no session
+    if (await page.$eval(inPane(list[0].key, 'live-beside'), b => b.disabled)) throw new Error('add beside is greyed with three panes');
+    await page.click(inPane(list[0].key, 'live-beside'));
+    const none = (await page.textContent('[data-key="live-beside-menu"] [data-key="live-beside-none"]', { timeout: 5000 }).catch(() => '')).trim();
+    if (!/^Three sessions show at once/.test(none)) throw new Error(`add beside with three panes does not say why (it says "${none}")`);
+    if (await page.$('[data-key="live-beside-menu"] [data-key="live-beside-pick"]')) throw new Error('add beside offers a fourth session');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('[data-key="live-beside-menu"]', { state: 'detached', timeout: 5000 });
     await controls();
   }
   // the split stays while the page changes (the same element, never painted again)
@@ -2206,6 +2214,7 @@ const STEPS = [
     n: 12, pic: 'fd-12-split', area: 'split', title: 'Split into two and three sessions with the pane controls', feature: [7],
     do: ['In the layer press Add beside twice.', 'Change to Tickets, Review and Home.', 'On one pane use pin, Place, minimise and close.'],
     see: ['Two, then three panes sit next to each other; on the right they are stacked.', 'Every pane has pin, add beside, place, minimise and close.',
+      'With three panes Add beside is not greyed: its menu says three is the most and to close one first.',
       'The split stays while the page changes.', 'Closing a pane gives its room to the others.',
       'On a phone one session shows at a time and there is no add beside.'],
     async run({ page, dash, width }) {
@@ -2387,7 +2396,7 @@ const STEPS = [
     n: 29, pic: 'fd-29-address', area: 'layer', title: 'The address of a ticket opens its session', feature: [3],
     do: ['Open the address of a ticket\'s session (#addon/focus/t/<ticket>) in a new tab.', 'Open the address of a ticket that does not exist.'],
     see: ['The wall shows with that session open in the layer, the keyboard in its pane.',
-      'An unknown ticket shows the wall, opens nothing and says "There is no ticket with this address."'],
+      'An unknown ticket shows the wall, opens nothing and says "There is no ticket with this address. Find it on the Tickets page." with an Open Tickets button'],
     async run({ page, dash }) {
       await address(page, dash);
     },

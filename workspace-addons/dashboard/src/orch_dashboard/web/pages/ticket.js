@@ -1291,7 +1291,7 @@ function ticketTalk(host, tid) {
     const slot = el('span');
     submit.before(slot);
     caret = window.UI.startButton(slot, {ticket:tid, caretOnly:true, mainEl:submit, label:'Send and start helper', send:(op, args) => act(op, args, {quiet:true}),
-      toast:(text, kind) => window.orch.toast(text, kind || 'ok'), ...caretFacts(),
+      toast:(text, kind, again) => window.orch.toast(text, kind || 'ok', again), ...caretFacts(),
       before:async ops => {
         const typed = box.querySelector('textarea')?.value.trim(), staged = box.querySelectorAll('.attachment-tile').length;
         if (!typed && !staged) return [];  // nothing to send: just start that way
