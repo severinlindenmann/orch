@@ -391,7 +391,7 @@ test('ORCH-14: Start makes the epic, then one ticket inside it per box with its 
   assert.deepEqual(JSON.parse(JSON.stringify(s.calls[2].args)), {title:'Larger buttons', title_auto:false, files:[{name:'Screenshot 09-13.png', data:'YQ=='}], parent:'t_1'});
   assert.equal(s.calls[3].args.ticket, 't_1');
   assert.equal(s.c.location.hash, '#ticket/t_1');
-  assert.ok(s.toasts.some(x => x[0] === 'Epic created'));
+  assert.ok(s.toasts.some(x => x[0] === 'Ticket and its parts created'));
 });
 test('ORCH-14: a long ticket text is kept as its note.md; a ticket over 139 MB is refused before anything is made', async () => {
   const s = setup();
@@ -424,7 +424,7 @@ test('ORCH-14: a ticket that fails keeps the window open; pressing again sends o
   walk(stepBoxes(s)[1]).find(n => n.tag === 'textarea').value = 'Second';
   await s.form.fire('submit');
   assert.equal(s.d.open, true);
-  assert.match(walk(s.d).find(n => n.role === 'alert' && n.className === 'bad').textContent, /not every ticket in it\. Ticket 1: busy/);
+  assert.match(walk(s.d).find(n => n.role === 'alert' && n.className === 'bad').textContent, /not all of its parts\. Ticket 1: busy/);
   assert.equal(stepBoxes(s).length, 1, 'the step that was made left the list');
   assert.equal(walk(s.d).find(n => n.type === 'submit').textContent, 'Send the rest');
   await s.form.fire('submit');
@@ -514,7 +514,7 @@ test('ORCH-185: an epic and its tickets go in ONE request, none of them naming a
   assert.deepEqual(s.calls.map(c => c.op), ['ticket.new', 'run.start']);
   assert.equal(s.calls[0].args.epic, true);
   assert.deepEqual(JSON.parse(JSON.stringify(s.calls[0].args.steps.map(x => [x.title, 'parent' in x]))), [['Fix the header', false], ['Larger buttons', false]]);
-  assert.ok(s.toasts.some(x => x[0] === 'Epic created'));
+  assert.ok(s.toasts.some(x => x[0] === 'Ticket and its parts created'));
 });
 test('ORCH-185: when one ticket of the epic is not made, the window says which and pressing again sends only that one', async () => {
   const s = await epicSetup(args => ({steps:{made:[{index:0}], failed:[{index:1, message:'Too long'}]}}));
@@ -522,7 +522,7 @@ test('ORCH-185: when one ticket of the epic is not made, the window says which a
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(stepBoxes(s).length, 1, 'the ticket that was made left the list');
   const err = walk(s.d).find(n => n.className === 'bad');
-  assert.match(err.textContent, /not every ticket in it\. Ticket 2: Too long/);
+  assert.match(err.textContent, /not all of its parts\. Ticket 2: Too long/);
   s.calls.length = 0;
   await s.form.fire('submit');
   await new Promise(resolve => setImmediate(resolve));

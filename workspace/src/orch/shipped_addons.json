@@ -118,7 +118,7 @@
   "background": true,
   "dashboard": {
    "icon": "hammer",
-   "label": "Factory",
+   "label": "Projects",
    "order": 15
   },
   "description": "Turn an idea into finished work: your helper proposes the run, you press Start.",
@@ -127,7 +127,7 @@
   "needs": true,
   "orch_api": 1,
   "page": {
-   "label": "Open Factory",
+   "label": "Open Projects",
    "path": "/"
   },
   "recommended": false,
@@ -149,7 +149,7 @@
    {
     "field": "eta",
     "format": "time",
-    "label": "ETA"
+    "label": "Ready around"
    }
   ],
   "version": "0.1.0"
@@ -160,7 +160,7 @@
   "background": true,
   "dashboard": {
    "icon": "target",
-   "label": "Focus",
+   "label": "Live",
    "order": 20
   },
   "description": "A live page for one ticket: watch the helper work, answer its questions, send it a message.",
@@ -169,7 +169,7 @@
   "needs": true,
   "orch_api": 1,
   "page": {
-   "label": "Open Focus",
+   "label": "Open Live",
    "live_session": true,
    "path": "/"
   },
@@ -483,7 +483,7 @@
   "background": true,
   "dashboard": {
    "icon": "cloud",
-   "label": "Sync",
+   "label": "Backup",
    "order": 50,
    "subtitle": "Keep another copy of tickets and their files."
   },
