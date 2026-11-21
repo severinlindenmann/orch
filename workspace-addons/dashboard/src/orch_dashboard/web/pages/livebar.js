@@ -107,7 +107,9 @@ if (typeof module === 'object' && module.exports) {
   module.exports = {liveBarNewModel, liveBarNewOwnModel, liveBarNewArgs, LIVEBAR_MODELS, LIVEBAR_EMPTY_MODEL, liveBarNeedText, liveBarModel, liveFocusVerb, liveBarIn, liveBarSessions, liveBarCountText, liveBarNewOpen, LIVEBAR_LISTS, LIVEBAR_NEW};
 } else {
   (() => {
-    const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0, menu:false, model:'', busy:''};
+    const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0, menu:false, model:'', busy:'', perm:''};
+    // ORCH-818: the Permissions row of the New menu (pages/live-perm.js): the tool's modes for the next start
+    const permRow = kind => typeof livePermRow === 'function' ? livePermRow(state?.session_modes, kind, bar.perm) : null;
     const liveAddon = () => array(state?.addons).find(a => a.page?.live_session === true) || null;
     const sessions = () => window.LiveSessions?.list || [];
     const groups = () => window.LiveSessions?.groups || [];
@@ -171,20 +173,35 @@ if (typeof module === 'object' && module.exports) {
         h('div', {className:'lbar-list', 'data-lbar-rows':'1'}, rows(a, all)));
     }
     // New (draft D): a session without a ticket. One that is open already is offered as "go to it".
+    // The Permissions row: one segment per mode of the tool; a mode the workspace does not allow is off and says why.
+    // Nothing picked: each helper starts in its own remembered mode (its line says which).
+    function permSegs() {
+      const r = permRow('manager');
+      if (!r) return null;
+      return [h('div', {className:'live-prow', role:'group', 'aria-label':'Permissions', 'data-key':'lbar-perm'},
+        h('span', {className:'meta'}, 'Permissions'),
+        h('span', {className:'segmented', role:'group', 'aria-label':'Permissions'}, r.choices.map(c => h('button', {type:'button', className:'btn sm',
+          'data-lbar-perm':c.mode, 'data-key':'lbar-perm-' + c.mode, 'aria-pressed':String(bar.perm === c.mode), disabled:!c.allowed || !!bar.busy,
+          title:c.allowed ? null : LIVE_PERM_OFF}, c.label)))),
+      r.warn ? h('p', {className:'meta', 'data-key':'lbar-perm-warn'}, r.warn) : null];
+    }
     // ORCH-710 (draft D feature 12): the model the Empty helper runs on, the usual one preselected so it stays one click.
     function newMenu() {
       const m = liveBarNewModel(state.sessions, state?.settings?.agents), picked = bar.model || m?.name;
       return h('div', {className:'live-pop', role:'group', 'aria-label':'New session without a ticket', 'data-key':'lbar-new-menu'},
         h('p', {className:'live-pop-h'}, 'New session without a ticket'),
+        permSegs(),
         m ? h('label', {className:'meta', for:'lbar-new-model'}, 'Empty helper runs on')
           : liveBarNewOwnModel(state?.settings?.agents) ? h('p', {className:'meta'}, 'Empty helper: this tool uses its own model.') : null,
         m ? h('select', {className:'input', id:'lbar-new-model', 'data-lbar-model':'1', 'data-key':'lbar-new-model', disabled:!!bar.busy},
           LIVEBAR_MODELS.map(([v, word]) => h('option', {value:v, selected:v === picked ? '' : null}, word + (v === m.name ? ' (usual)' : '')))) : null,
         LIVEBAR_NEW.map(n => {
-          const open = liveBarNewOpen(state.sessions, n.kind);
+          const open = liveBarNewOpen(state.sessions, n.kind), r = permRow(n.kind);
+          const moved = open && r && bar.perm && r.running && r.cur !== r.running;  // goes on in the picked mode
+          const what = moved ? 'Open: goes on in ' + r.label : open ? 'Already open: go to it' : n.what + (r ? ' · ' + r.label : '');
           return h('button', {type:'button', className:'live-opt', 'data-lbar-kind':n.kind, 'data-key':'lbar-new-' + n.kind,
             'aria-busy':bar.busy === n.kind ? 'true' : null, disabled:!!bar.busy},
-          h('span', {className:'live-opt-t'}, h('strong', {}, n.title), h('span', {className:'meta'}, open ? 'Already open: go to it' : n.what)));
+          h('span', {className:'live-opt-t'}, h('strong', {}, n.title), h('span', {className:'meta'}, what)));
         }));
     }
     function newButton(fold) {
@@ -212,17 +229,21 @@ if (typeof module === 'object' && module.exports) {
     async function startNew(kind, fromMenu) {
       const a = liveAddon();
       if (!a || bar.busy) return;
-      const open = liveBarNewOpen(state.sessions, kind);
-      if (open) { bar.menu = false; paint(true); openSession(a, open.id); return; }
-      const usual = kind === 'empty' ? liveBarNewModel(state.sessions, state?.settings?.agents) : null;
+      const open = liveBarNewOpen(state.sessions, kind), pr = permRow(kind);
+      const pick = pr && bar.perm && pr.cur === bar.perm ? bar.perm : '';  // a mode this kind can take, else its own
+      if (open && !(pick && pr.running && pick !== pr.running)) { bar.menu = false; paint(true); openSession(a, open.id); return; }
+      // a running one keeps its model (ORCH-710): the model step is only for a start
+      const usual = kind === 'empty' && !open ? liveBarNewModel(state.sessions, state?.settings?.agents) : null;
       if (usual && !fromMenu) {  // a button at the top of the live page: the menu shows the model first (ORCH-710)
         bar.menu = true; bar.model = ''; bar.list = ''; bar.q = ''; paint(true);
         bar.el?.querySelector('[data-lbar-model]')?.focus();
         return;
       }
       bar.busy = kind; paint(true);
-      const r = await act('session.new', liveBarNewArgs(kind, bar.model, usual));
+      const args = {...liveBarNewArgs(kind, bar.model, usual), ...(typeof livePermArgs === 'function' ? livePermArgs(kind, pick) : {})};
+      const r = await act('session.new', args);
       bar.busy = ''; bar.model = '';
+      if (r.ok) bar.perm = '';
       const made = r.ok ? liveBarNewOpen(state.sessions, kind) : null;
       bar.menu = !made && !r.ok;
       if (made) {
@@ -257,7 +278,7 @@ if (typeof module === 'object' && module.exports) {
       window.LiveSessions?.sync();
       if (!window.LiveSessions?.ready && !bar.el) return;  // no "All calm" flash before the first answer
       const all = liveBarModel(sessions(), pins(), groups());
-      const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, bar.list, bar.menu, bar.model, bar.busy, bar.panes, bar.docked, phone(), window.innerWidth, needTotal()]);
+      const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, state.session_modes, bar.perm, bar.list, bar.menu, bar.model, bar.busy, bar.panes, bar.docked, phone(), window.innerWidth, needTotal()]);
       if (!force && sig === bar.sig && bar.el?.parentNode === host) return;
       bar.sig = sig;
       const active = document.activeElement, focusKey = bar.el?.contains(active) ? (active.dataset.key || (active.dataset.lbarQ ? 'q' : '')) : '';
@@ -302,6 +323,12 @@ if (typeof module === 'object' && module.exports) {
       }
       const k = e.target.closest?.('[data-lbar-kind]');
       if (k && bar.el?.contains(k)) { startNew(k.dataset.lbarKind, true); return; }
+      const pm = e.target.closest?.('[data-lbar-perm]');
+      if (pm && bar.el?.contains(pm)) {  // pick (or unpick) the mode of the next start; nothing starts yet
+        bar.perm = bar.perm === pm.dataset.lbarPerm ? '' : pm.dataset.lbarPerm;
+        paint(true); bar.el?.querySelector('[data-lbar-perm="' + pm.dataset.lbarPerm + '"]')?.focus();
+        return;
+      }
       // (a New button at the top of the live page opens this menu at the Empty helper's model: that click keeps it open)
       if (bar.menu && !bar.el?.querySelector('[data-key="lbar-new-wrap"]')?.contains(e.target) && !e.target.closest?.('[data-live-new]')) {
         bar.menu = false; bar.model = ''; paint(true);
