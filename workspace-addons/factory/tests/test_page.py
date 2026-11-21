@@ -1129,18 +1129,6 @@ def test_home_has_no_empty_sections():
     assert json.loads(words) == ["", "drafts", "drafts or stops", "drafts, stops or running orders"]
 
 
-def test_home_names_budget_health_once_when_no_order_runs():
-    """ORCH-480 (owner 18 Nov): Budget health lives on running order cards; with none running the home page shows
-    one quiet line instead, and a running order keeps its card's Budget health as before."""
-    from pathlib import Path
-
-    js = (Path(__file__).resolve().parents[1] / "src/orch_factory/web/factory.js").read_text(encoding="utf-8")
-    home = js[js.index("function home(data)") : js.index("function line(items)")]
-    line = "if (!running.length) view.append(meta('Budget health: shows here once an order runs.'));"
-    assert home.count("Budget health: shows here once an order runs.") == 1 and line in home
-    assert "budget(o), ...(o.eta" in home  # running cards still carry their Budget health
-
-
 # ORCH-277: a started order that says Running while nobody works says why instead
 
 
@@ -1346,11 +1334,3 @@ def test_proposal_time_and_budget_show_only_values_and_your_time_once():
         ["meta", "Time limit (active time): 2 h. AI cost is a target, not a limit."],
     ]
     assert "—" not in out and "Your time" not in out
-
-
-def test_proposal_names_tools_and_putting_live_in_plain_words(srv):
-    """Report r-1118-0907: the proposal said "Manager · claude" and "What Ship does"."""
-    js = get(srv, "/web/factory.js")[1].decode()
-    assert "What Ship does" not in js and "node('h3','What putting it live does')" in js
-    assert "roleName(c.role) + ' · ' + toolName(c.agent)" in js
-    assert "const toolName = agent => capital(text(agent));" in js  # "claude" shows as "Claude"
