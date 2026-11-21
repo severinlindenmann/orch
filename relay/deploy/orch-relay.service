@@ -5,7 +5,7 @@ After=network-online.target
 [Service]
 User=orch-relay
 EnvironmentFile=/etc/orch-relay/env
-ExecStart=/usr/local/bin/orch-relay
+ExecStart=/opt/orch/bin/orch-relay
 Restart=on-failure
 NoNewPrivileges=true
 ProtectSystem=strict

@@ -1,0 +1,409 @@
+#!/usr/bin/env python3
+"""A fake `gh` for end-to-end runs of the merge queue and the Pull requests page, with no GitHub (ORCH-894).
+
+"GitHub" is a local bare git repository plus one JSON state file ($FAKE_GH_STATE). git reaches the repository through
+an `insteadOf` rule in the test HOME's .gitconfig (see e2e/fake_github.py), so the queue's real git fetch and push
+work unchanged. Every call is appended to calls.jsonl next to the state file.
+
+CI in this fake: every commit gets the check `light` (each pull request) and, on queue group branches, `suites`.
+A check passes unless the commit's tree has a file named `breaks-<check>` (e.g. `breaks-suites`). A check stays
+pending for state["check_secs"] (else $FAKE_GH_CHECK_SECS, default 3) seconds after GitHub first saw the commit.
+
+Faults: state["down"] = true answers every call with a connection error (exit 1).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+STATE = Path(os.environ.get("FAKE_GH_STATE") or "fake-gh-state.json")
+CHECK_SECS = float(os.environ.get("FAKE_GH_CHECK_SECS") or 3)
+CHECKS = ("light", "suites")
+
+
+def load() -> dict:
+    return json.loads(STATE.read_text(encoding="utf-8"))
+
+
+def save(s: dict) -> None:
+    tmp = STATE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(s, indent=1), encoding="utf-8")
+    tmp.replace(STATE)
+
+
+def git(s: dict, *args: str, ok=(0,)) -> str:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(GIT_AUTHOR_NAME="fake", GIT_AUTHOR_EMAIL="fake@x.invalid", GIT_COMMITTER_NAME="fake",
+               GIT_COMMITTER_EMAIL="fake@x.invalid")  # fmt: skip
+    got = subprocess.run(["git", f"--git-dir={s['git']}", *args], capture_output=True, text=True, env=env)
+    if got.returncode not in ok:
+        raise SystemExit(f"fake gh: git {' '.join(args)} failed: {got.stderr.strip()}")
+    return got.stdout.strip()
+
+
+def sha_of(s: dict, ref: str) -> str | None:
+    out = git(s, "rev-parse", "--verify", "-q", ref, ok=(0, 1))
+    return out or None
+
+
+def pr_url(s: dict, n: int) -> str:
+    return f"https://github.com/{s['repo']}/pull/{n}"
+
+
+def num_of(url: str) -> int:
+    m = re.search(r"/pull/(\d+)", url)
+    if not m:
+        raise SystemExit(f"fake gh: not a pull request url: {url}")
+    return int(m[1])
+
+
+def head(s: dict, p: dict) -> str | None:
+    if p.get("state") == "MERGED" and p.get("merged_head"):
+        return p["merged_head"]
+    sha = sha_of(s, f"refs/heads/{p['head']}")
+    if sha and p.get("state") == "OPEN":
+        git(s, "update-ref", f"refs/pull/{p['number']}/head", sha)
+        p["last_head"] = sha
+    return sha or p.get("last_head")  # GitHub keeps a closed pull request's last commit and its checks
+
+
+def seen(s: dict, sha: str) -> float:
+    first = s.setdefault("seen", {})
+    if sha not in first:
+        first[sha] = time.time()
+    return first[sha]
+
+
+def check_runs(s: dict, sha: str, branch: str) -> list[dict]:
+    """The fake CI's checks of one commit: name, status, conclusion."""
+    names = ["light"] + (["suites"] if branch.startswith("orch-queue/") else [])
+    files = set(git(s, "ls-tree", "-r", "--name-only", sha).splitlines())
+    done = time.time() - seen(s, sha) >= float(s.get("check_secs", CHECK_SECS))
+    out = []
+    for n in names:
+        if not done:
+            out.append({"name": n, "status": "IN_PROGRESS", "conclusion": None})
+        else:
+            out.append({"name": n, "status": "COMPLETED",
+                        "conclusion": "FAILURE" if f"breaks-{n}" in files else "SUCCESS"})  # fmt: skip
+    return out
+
+
+def bucket(c: dict) -> tuple[str, str]:
+    if c["status"] != "COMPLETED":
+        return "PENDING", "pending"
+    return ("SUCCESS", "pass") if c["conclusion"] == "SUCCESS" else ("FAILURE", "fail")
+
+
+def files_of(s: dict, base: str, h: str) -> list[str]:
+    mb = git(s, "merge-base", base, h, ok=(0, 1))
+    return [x for x in git(s, "diff", "--name-only", mb or base, h).splitlines() if x] if mb else []
+
+
+def view(s: dict, p: dict, fields: list[str]) -> dict:
+    h = head(s, p)
+    base_sha = sha_of(s, f"refs/heads/{p['base']}") or ""
+    runs = check_runs(s, h, p["head"]) if h else []
+    v = {
+        "number": p["number"], "title": p["title"], "url": pr_url(s, p["number"]), "state": p["state"],
+        "isDraft": bool(p.get("draft")), "baseRefName": p["base"], "headRefName": p["head"], "headRefOid": h,
+        "isCrossRepository": bool(p.get("fork")), "reviewDecision": p.get("review") or "",
+        "reviews": [], "closingIssuesReferences": [],
+        "files": [{"path": f} for f in files_of(s, base_sha, h)] if h and base_sha else [],
+        "statusCheckRollup": [
+            {"__typename": "CheckRun", "name": c["name"], "status": c["status"], "conclusion": c["conclusion"] or "",
+             "detailsUrl": f"https://github.com/{s['repo']}/actions/runs/{run_id(s, h, c['name'])}/job/1"}
+            for c in runs
+        ],
+        "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+        "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "author": {"login": p.get("author") or s["login"]}, "mergedAt": p.get("merged_at"),
+    }  # fmt: skip
+    return {k: v.get(k) for k in fields} if fields else v
+
+
+def run_id(s: dict, sha: str, name: str) -> int:
+    ids = s.setdefault("run_ids", {})
+    key = f"{sha}:{name}"
+    if key not in ids:
+        ids[key] = 9000 + len(ids)
+    return ids[key]
+
+
+def workflow_runs(s: dict, sha: str) -> list[dict]:
+    branch = next((p["head"] for p in s["prs"].values() if head(s, p) == sha), "")
+    out = []
+    for c in check_runs(s, sha, branch):
+        out.append({
+            "id": run_id(s, sha, c["name"]), "name": c["name"], "event": "pull_request", "head_sha": sha,
+            "head_branch": branch, "status": "completed" if c["status"] == "COMPLETED" else "in_progress",
+            "conclusion": (c["conclusion"] or "").lower() or None,
+        })  # fmt: skip
+    return out
+
+
+def find(s: dict, url: str) -> dict:
+    p = s["prs"].get(str(num_of(url)))
+    if p is None:
+        print("GraphQL: Could not resolve to a PullRequest (not found)", file=sys.stderr)
+        raise SystemExit(1)
+    return p
+
+
+def opt(args: list[str], name: str, default=None):
+    return args[args.index(name) + 1] if name in args else default
+
+
+def mark_merged(s: dict) -> None:
+    """GitHub marks every open pull request whose head landed on its base branch merged."""
+    for p in s["prs"].values():
+        if p["state"] != "OPEN":
+            continue
+        h, b = head(s, p), sha_of(s, f"refs/heads/{p['base']}")
+        if h and b and _anc(s, h, b):
+            p.update(state="MERGED", merged_head=h, merged_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+
+
+def _anc(s: dict, a: str, b: str) -> bool:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return subprocess.run(["git", f"--git-dir={s['git']}", "merge-base", "--is-ancestor", a, b], env=env).returncode == 0
+
+
+def pr(s: dict, args: list[str]) -> int:
+    cmd = args[0]
+    if cmd == "view":
+        p = find(s, args[1])
+        fields = (opt(args, "--json") or "").split(",")
+        print(json.dumps(view(s, p, [f for f in fields if f])))
+        return 0
+    if cmd == "checks":
+        p = find(s, args[1])
+        h = head(s, p)
+        rows = []
+        for c in check_runs(s, h, p["head"]):
+            state, b = bucket(c)
+            rows.append({"name": c["name"], "state": state, "bucket": b})
+        fields = (opt(args, "--json") or "name,state,bucket").split(",")
+        print(json.dumps([{k: r[k] for k in fields if k in r} for r in rows]))
+        pending = any(r["bucket"] == "pending" for r in rows)
+        failed = any(r["bucket"] == "fail" for r in rows)
+        return 8 if pending else (1 if failed else 0)
+    if cmd == "diff":
+        p = find(s, args[1])
+        print("\n".join(files_of(s, sha_of(s, f"refs/heads/{p['base']}"), head(s, p))))
+        return 0
+    if cmd == "create":
+        n = max([int(k) for k in s["prs"]] + [s.get("next", 100)]) + 1
+        s["prs"][str(n)] = {"number": n, "title": opt(args, "--title"), "base": opt(args, "--base"),
+                            "head": opt(args, "--head"), "state": "OPEN", "author": s["login"]}  # fmt: skip
+        print(pr_url(s, n))
+        return 0
+    if cmd == "close":
+        find(s, args[1])["state"] = "CLOSED"
+        return 0
+    if cmd == "merge":
+        p = find(s, args[1])
+        h = head(s, p)
+        want = opt(args, "--match-head-commit")
+        if p["state"] != "OPEN":
+            print("Pull request is not open", file=sys.stderr)
+            return 1
+        if want and want != h:
+            print("Head branch was modified. Review and try the merge again.", file=sys.stderr)
+            return 1
+        base = sha_of(s, f"refs/heads/{p['base']}")
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        got = subprocess.run(["git", f"--git-dir={s['git']}", "merge-tree", "--write-tree", "--no-messages", base, h],
+                             capture_output=True, text=True, env=env)  # fmt: skip
+        if got.returncode != 0:  # a conflict: GitHub refuses the merge and changes nothing
+            print("Pull request is not mergeable: the merge commit cannot be cleanly created.", file=sys.stderr)
+            return 1
+        tree = got.stdout.splitlines()[0]
+        new = git(s, "commit-tree", tree, "-p", base, "-p", h, "-m", f"Merge pull request #{p['number']}")
+        git(s, "update-ref", f"refs/heads/{p['base']}", new)
+        p.update(state="MERGED", merged_head=h, merge_commit=new,
+                 merged_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))  # fmt: skip
+        mark_merged(s)
+        return 0
+    if cmd == "list":
+        state = (opt(args, "--state") or "open").upper()
+        base, label = opt(args, "--base"), opt(args, "--label")
+        rows = [view(s, p, []) | {"headRefOid": head(s, p)} for p in s["prs"].values()
+                if (state == "ALL" or p["state"] == state) and (not base or p["base"] == base)
+                and (not label or label in (p.get("labels") or []))]  # fmt: skip
+        fields = (opt(args, "--json") or "number,title,url").split(",")
+        print(json.dumps([{k: r.get(k) for k in fields} for r in rows]))
+        return 0
+    print(f"fake gh: pr {cmd} is not faked", file=sys.stderr)
+    return 1
+
+
+def graphql(s: dict, args: list[str]) -> int:
+    q = next((a[6:] for a in args if a.startswith("query=")), "")
+    nums = [int(x) for x in re.findall(r"p(\d+): pullRequest", q)]
+
+    def node(p: dict) -> dict:
+        v = view(s, p, [])
+        ctx = [{"__typename": "CheckRun", "name": c["name"], "status": c["status"], "conclusion": c["conclusion"]}
+               for c in check_runs(s, v["headRefOid"], p["head"])] if v["headRefOid"] else []  # fmt: skip
+        v["commits"] = {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {"nodes": ctx}}}}]}
+        return {k: v[k] for k in ("number", "title", "url", "state", "isDraft", "mergeable", "mergeStateStatus",
+                                  "baseRefName", "headRefName", "updatedAt", "author", "commits")}  # fmt: skip
+
+    repo = {"open": {"nodes": [node(p) for p in s["prs"].values() if p["state"] == "OPEN"]}}
+    for n in nums:
+        p = s["prs"].get(str(n))
+        repo[f"p{n}"] = node(p) if p else None
+    print(json.dumps({"data": {"repository": repo}}))
+    return 0
+
+
+def api(s: dict, args: list[str]) -> int:
+    method = opt(args, "-X") or "GET"
+    path = next(a for a in args if not a.startswith("-") and a not in (method,) and args[args.index(a) - 1] not in
+                ("-X", "-f", "-F", "--jq"))  # fmt: skip
+    fields = dict(args[i + 1].split("=", 1) for i, a in enumerate(args) if a in ("-f", "-F"))
+    jq = opt(args, "--jq")
+    if path == "graphql":
+        return graphql(s, args)
+    if path == "user":
+        print(s["login"] if jq == ".login" else json.dumps({"login": s["login"]}))
+        return 0
+    repo = s["repo"]
+    rest = path.removeprefix(f"repos/{repo}").lstrip("/")
+    if rest == "":
+        print(json.dumps({"full_name": repo, "default_branch": s.get("default", "develop")}))
+        return 0
+    if rest.startswith("rules/branches/"):
+        req = s.get("required", ["light"])
+        print(json.dumps([{"type": "required_status_checks",
+                           "parameters": {"required_status_checks": [{"context": c} for c in req]}}]))  # fmt: skip
+        return 0
+    if rest.startswith("statuses/") and method == "POST":
+        s.setdefault("statuses", {}).setdefault(rest.split("/", 1)[1], []).insert(0, fields)
+        print("{}")
+        return 0
+    m = re.fullmatch(r"commits/([0-9a-f]{40})/status", rest)
+    if m:
+        print(json.dumps({"statuses": s.get("statuses", {}).get(m[1], [])}))
+        return 0
+    m = re.fullmatch(r"commits/([0-9a-f]{40})/pulls", rest)
+    if m:
+        rows = [{"number": p["number"], "html_url": pr_url(s, p["number"]), "title": p["title"],
+                 "merged_at": p.get("merged_at"), "base": {"ref": p["base"]}, "head": {"sha": p.get("merged_head")}}
+                for p in s["prs"].values() if m[1] in (p.get("merge_commit"), p.get("merged_head"))]  # fmt: skip
+        print(json.dumps(rows))
+        return 0
+    m = re.fullmatch(r"commits/([0-9a-f]{40})", rest)
+    if m:
+        parents = git(s, "rev-list", "--parents", "-n", "1", m[1]).split()[1:]
+        print(json.dumps({"sha": m[1], "parents": [{"sha": x} for x in parents]}))
+        return 0
+    m = re.fullmatch(r"compare/(.+)\.\.\.(.+)", rest)
+    if m:
+        a, b = (sha_of(s, x) or sha_of(s, f"refs/heads/{x}") for x in (m[1], m[2]))
+        if not a or not b:
+            print("Not Found (HTTP 404)", file=sys.stderr)
+            return 1
+        ahead = int(git(s, "rev-list", "--count", f"{a}..{b}"))
+        print(json.dumps({"ahead_by": ahead, "files": [{"filename": f} for f in files_of(s, a, b)] if ahead else []}))
+        return 0
+    if rest.startswith("actions/runs"):
+        m = re.search(r"head_sha=([0-9a-f]{40})", rest)
+        if m:
+            print(json.dumps({"workflow_runs": workflow_runs(s, m[1])}))
+            return 0
+        rows = [r for sha in list(s.get("seen", {})) for r in workflow_runs(s, sha)]
+        if jq:
+            for r in rows:
+                print(json.dumps({k: r[k] for k in ("head_sha", "event", "head_branch", "name")}))
+        else:
+            print(json.dumps({"workflow_runs": rows}))
+        return 0
+    m = re.fullmatch(r"git/refs/heads/(.+)", rest)
+    if m and method == "DELETE":
+        if not sha_of(s, f"refs/heads/{m[1]}"):
+            print("Reference does not exist (HTTP 422)", file=sys.stderr)
+            return 1
+        git(s, "update-ref", "-d", f"refs/heads/{m[1]}")
+        for p in s["prs"].values():
+            if p["head"] == m[1] and p["state"] == "OPEN":
+                p["state"] = "CLOSED"
+        return 0
+    if re.fullmatch(r"pulls/\d+/update-branch", rest):
+        print("merge conflict between base and head (HTTP 422)", file=sys.stderr)
+        return 1
+    print(f"Not Found (HTTP 404): fake gh has no {method} {path}", file=sys.stderr)
+    return 1
+
+
+def red_base(s: dict) -> list[str]:
+    """The checks develop's own push run fails: state["red_base"], or each `breaks-<check>` file on develop."""
+    dev = sha_of(s, "refs/heads/develop")
+    files = set(git(s, "ls-tree", "--name-only", dev).splitlines()) if dev else set()
+    return list(s.get("red_base") or []) + [c for c in CHECKS if f"breaks-{c}" in files]
+
+
+def run(s: dict, args: list[str]) -> int:
+    cmd = args[0]
+    if cmd == "list" and "--workflow" in args:  # the release keeper: runs of one workflow on develop's head
+        dev = sha_of(s, "refs/heads/develop")
+        red = red_base(s)
+        ev = opt(args, "--event") or "push"
+        rows = [{"databaseId": 7000 + i, "headSha": sha, "event": ev, "status": "completed",
+                 "conclusion": "failure" if red and i == 0 else "success",
+                 "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - i * 600)),
+                 "url": f"https://github.com/{s['repo']}/actions/runs/{7000 + i}"}
+                for i, sha in enumerate(git(s, "rev-list", "--first-parent", "-n", "3", dev).split())]  # fmt: skip
+        print(json.dumps(rows))
+        return 0
+    if cmd == "list":  # the base branch's push runs: red when its tree breaks a check (or state["red_base"])
+        red = red_base(s)
+        print(json.dumps([{"databaseId": 1, "workflowName": "CI", "status": "completed",
+                           "conclusion": "failure" if red else "success"}]))  # fmt: skip
+        return 0
+    if cmd == "view":
+        if "--json" in args:
+            jobs = [{"name": j, "conclusion": "failure", "status": "completed"} for j in red_base(s)]
+            print(json.dumps({"jobs": jobs or [{"name": "test", "conclusion": "success", "status": "completed"}]}))
+        else:
+            print("Run tests\tFAILED test_example - AssertionError: fake failure\n")
+        return 0
+    if cmd == "rerun":
+        return 0
+    return 1
+
+
+def main(argv: list[str]) -> int:
+    if argv[:2] == ["auth", "git-credential"]:
+        return 0
+    if argv[:2] == ["auth", "status"]:
+        print("Logged in to github.com (fake)")
+        return 0
+    import fcntl
+
+    lock = (STATE.parent / "state.lock").open("w")
+    fcntl.flock(lock, fcntl.LOCK_EX)  # the queue calls gh from several threads at once
+    s = load()
+    with (STATE.parent / "calls.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"t": time.time(), "argv": argv}) + "\n")
+    if s.get("down"):
+        print("error connecting to api.github.com", file=sys.stderr)
+        return 1
+    handler = {"pr": pr, "api": api, "run": run}.get(argv[0] if argv else "")
+    if handler is None:
+        print(f"fake gh: {' '.join(argv[:2])} is not faked", file=sys.stderr)
+        return 1
+    rc = handler(s, argv[1:])
+    save(s)
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

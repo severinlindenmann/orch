@@ -791,3 +791,15 @@ def test_a_red_group_whose_run_did_not_stop_is_red_without_a_re_run():
     src.cancel_runs = lambda: False
     v = prwait.wait(src, queue=True)
     assert not v.green and not v.retried and not hasattr(src, "reran")
+
+
+def test_counting_a_retry_never_breaks_the_wait_when_the_orch_folder_is_refused(monkeypatch):
+    """ORCH-1118: a refused orch folder (Refused, not OSError) made the queue's one re-run break the wait."""
+    from orch import addons, checkretry
+    from orch.errors import Refused
+
+    def refused():
+        raise Refused("ORCH_HOME is not a trusted folder")
+
+    monkeypatch.setattr(addons, "home", refused)
+    checkretry.record("acme/app", "1", "test", "flaky")  # no exception

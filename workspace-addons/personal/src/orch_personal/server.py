@@ -44,7 +44,7 @@ TYPES = {"html": "text/html; charset=utf-8", "css": "text/css; charset=utf-8", "
 PREFIX = re.compile(r"/addon/[a-z][a-z0-9-]{1,31}")
 CSP = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'"
 FROM_DASHBOARD = "Open Personal from the dashboard: orch start, then Add-ons > Personal."
-OPS = ("add", "remove", "folder", "rules", "use")
+OPS = ("add", "remove", "folder", "rules", "use", "way_on", "way_off", "way_check")
 
 
 def _web(name: str) -> bytes:
@@ -232,6 +232,10 @@ def _act(root: Path, op: str, args: dict):
             read if isinstance(read, str) else None,
             write if isinstance(write, str) else None,
         )
+    if op in ("way_on", "way_off"):
+        return api.way_turn(root, who, _s(args, "way"), op == "way_on")
+    if op == "way_check":
+        return api.way_check(root, who, _s(args, "way"))
     if op == "use":
         ticket = _s(args, "ticket")
         if (

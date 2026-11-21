@@ -312,6 +312,11 @@ test('the pane shows the waiting question with its options and answers it there 
   assert.match(source, /liveAskFill[^]*?act\('answer', \{ticket:id, question:q\.id, digest:q\.digest/, 'the answer is the same op a question card sends');
 });
 
+test('the waiting question shows once: the now line steps back while the question box shows it (ORCH-708)', () => {
+  assert.match(source, /liveAskFill\(askBox, body\.dataset\.liveBody\);\s*now\.hidden = !!askBox && !askBox\.hidden;/,
+    'the fill hides the now line after the question box is written');
+});
+
 test('after an answer in the pane the keyboard stays in the pane, so Esc still steps the layer back (ORCH-709)', () => {
   const fill = source.slice(source.indexOf('function liveAskFill'), source.indexOf('// The live part of a pane'));
   assert.match(fill, /const had = box\.contains\(document\.activeElement\);[^]*?box\.focus\([^]*?c\.disabled = true/, 'the keyboard waits on the box before its buttons are disabled');

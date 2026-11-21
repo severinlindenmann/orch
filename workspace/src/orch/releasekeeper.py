@@ -14,9 +14,11 @@ One pass moves the release one phase on (state: .orch/run/release-keeper.json):
            into main -> its checks. A red run -> one top ticket (a helper starts at once) and the candidate is
            skipped until develop moves.
   gate     the release pull request's checks: green -> the Merge card on the role ticket (orch ask
-           --merge --release) -> card. Red -> one top ticket; when develop moves past it the old pull
+           --merge --release) -> card. Red -> its failed jobs run once more (a flaky test, ORCH-1023); red
+           again -> one top ticket; when develop moves past it the old pull
            request is closed and the release is cut again from scratch.
-  card     `orch review tend-releases` merges it when the owner allowed it (workflow.release_merge);
+  card     `orch review tend-releases` merges it when the owner allowed it (workflow.release_merge), also
+           when its only red checks have a named exception (ORCH-178);
            otherwise the owner clicks Merge. Merged -> installed.
   merged   `orch update` here; when a server folder (github.release_servers) changed the deploy is prepared
            (the CI-built program fetched and checked, production's program read over ssh, read only, new
@@ -25,10 +27,18 @@ One pass moves the release one phase on (state: .orch/run/release-keeper.json):
            the release worktree removed -> idle.
 Release proof (ORCH-456): a red check holds the release unless a person recorded a named exception for it
 (`orch github release-exception "<check>" --ticket <key> --until <date>`, shown on the Merge card and in the
-note); and the walks named in github.release_walks (install walk, services test, click-through pass) each get
-a helper ticket when the release is cut; the Merge card waits until every walk recorded a pass
+note; the keeper records one itself, for FIX_DAYS, when its "Release N checks are red" ticket links a fix pull
+request, ORCH-178); and the walks named in github.release_walks (install walk, services test, click-through
+pass) each get a helper ticket when the release is cut; the Merge card waits until every walk recorded a pass
 (`orch github release-walk <N> <walk> pass|fail "<line>"`). A release that reached main without that proof
 is written on the role ticket.
+A red after-merge run on develop (ORCH-1128; the workflows of github.release_after_merge, default the first
+release workflow): its failed jobs run once more (GitHub's attempt counter, so never twice); still red opens
+the red-develop fix ticket, whose pull request goes first in the merge queue (pull-requests add-on); when no
+pull request of that ticket is in the queue REVERT_AFTER_H (2) hours after it opened, the pull request that
+broke develop is undone by a revert pull request through the queue (never a push), only when one suspect is
+clear (the only merge since the last green commit, or the only one that touched what the failed tests name).
+A release is cut only from a develop commit where every after-merge workflow finished green.
 Every pass also runs the security check (secreview.py, ORCH-317): pull requests touching the servers, sign-in,
 secrets or what leaves this computer get a security review helper by themselves, and the idle phase cuts
 nothing until each of them in the release has an OK.
@@ -53,7 +63,7 @@ import re
 import shutil
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from orch import brake, config, runs, secreview, tickets
@@ -76,6 +86,9 @@ ROLLUP_JOBS = {"gate"}  # a roll-up of the other jobs: the jobs themselves are j
 # INTO (main). main has none of its own today, so the roll-up. Never develop's: develop's banned-words is
 # skipped on release/* into main by design.
 REQUIRED_FALLBACK = ["gate"]
+REVERT_AFTER_H = 2  # a red develop with no fix in the merge queue this long: revert the suspect (ORCH-1128)
+QUEUE_ADDON = "pull-requests"  # the merge queue add-on: its queue file is read, its add command run
+TAKE_IN = re.compile(r"^Merge queue: take in #(\d+)$")  # a member of a merge queue group
 TEST_TIMEOUT_H = 4  # dispatched runs that have not finished after this: say it once, dispatch again next pass
 KEEP_STAGED = 2  # newest prepared programs kept per server (rollback)
 PASSED = ("SUCCESS", "SKIPPED", "NEUTRAL")
@@ -107,6 +120,10 @@ SETTINGS = {
     f"(default {secreview.PER_DAY}; counts again after each release)",
     "github.release_walks": "walks every release needs before its Merge card, each a name or name=skill, "
     "e.g. install=release-walk,services,clickthrough",
+    "github.release_after_merge": "the workflows every develop commit must pass after the merge, e.g. "
+    "ci.yml,after-merge.yml (default: the first release workflow)",
+    "github.release_revert_hours": f"hours a red develop waits for a fix in the merge queue before the "
+    f"keeper opens a revert pull request (default {REVERT_AFTER_H}; never: no revert)",
 }
 SETTING_KEYS = tuple(SETTINGS)
 
@@ -173,6 +190,20 @@ def set_setting(root: Path, key: str, value: str) -> str | None:
         v = secreview.check_patterns(v)
     elif name == "security_reviews_per_day":
         v = secreview.check_limit(v)
+    elif name == "release_after_merge":
+        parts = [x.strip() for x in v.split(",") if x.strip()]
+        if not parts or any(not WORKFLOW_RE.match(x) or ":" in x for x in parts):
+            raise Refused("Give workflow files separated by commas: ci.yml,after-merge.yml")
+        v = ",".join(parts)
+    elif name == "release_revert_hours":
+        v = v.lower()
+        if v != "never":
+            try:
+                ok = 0 < float(v) <= 72
+            except ValueError:
+                ok = False
+            if not ok:
+                raise Refused("Give the hours as a number from 0.5 to 72, or never.")
     elif name == "release_walks":
         parts = [x.strip() for x in v.split(",") if x.strip()]
         if not parts or any(not WALK_RE.match(x) for x in parts):
@@ -229,6 +260,13 @@ class Cfg:
         self.security_paths = g("security_paths")
         self.security_limit = over.get("security_limit", _raw(root, "security_reviews_per_day"))
         self.walks = walks(g("walks"))
+        am = [x.strip() for x in str(g("after_merge") or "").split(",") if x.strip()]
+        self.after_merge = am or [self.workflows[0][0] if self.workflows else "ci.yml"]
+        rh = str(g("revert_hours") or REVERT_AFTER_H).strip().lower()
+        try:
+            self.revert_hours: float | None = None if rh == "never" else float(rh)
+        except ValueError:
+            self.revert_hours = float(REVERT_AFTER_H)
         self.run_dir = runs.run_dir(root) if root is not None else Path(over.get("run_dir") or ".")
 
     @property
@@ -271,14 +309,17 @@ def ts(s) -> datetime | None:
     return d if d is None or d.tzinfo else d.replace(tzinfo=UTC)
 
 
+SHARD = re.compile(r", [0-9]{1,3}/[0-9]{1,3}\)")
+
+
 def known_name(name: str, names) -> str | None:
     """The entry of `names` that covers job `name`: the same name, or the job without its part. A job split
     into parts (ORCH-315, "workspace / test (windows-latest, 3/6)") is covered by "workspace / test
     (windows-latest)", so a known-red entry keeps working when CI splits the job."""
     if name in names:
         return name
-    for n in names:
-        if n.endswith(")") and name.startswith(n[:-1] + ", "):
+    for n in names:  # only a part number ("3/6") is added; another matrix axis is another job
+        if n.endswith(")") and name.startswith(n[:-1] + ", ") and SHARD.fullmatch(name[len(n) - 1 :]):
             return n
     return None
 
@@ -313,6 +354,46 @@ def checks_green(rollup, ignore=frozenset()) -> str:
     return state if good or state != "green" else "pending"
 
 
+RUN_URL = re.compile(r"/actions/runs/(\d+)")
+
+
+def _newest_failed(rollup, ignore=frozenset()) -> list[dict]:
+    """The failed checks, the newest try of each (not ignored)."""
+    last: dict = {}
+    for n, c in enumerate(rollup or []):
+        name = c.get("name") or c.get("context") or ""
+        if known_name(name, ignore) is not None:
+            continue
+        key, when = (c.get("workflowName"), name or n), str(c.get("startedAt") or "")
+        if key not in last or when >= last[key][0]:
+            last[key] = (when, c)
+    out = []
+    for _, c in last.values():
+        word = c.get("conclusion") if "status" in c else c.get("state")
+        if c.get("status") in (None, "COMPLETED") and word not in PASSED and word not in (None, "PENDING"):
+            out.append(c)
+    return out
+
+
+def failed_runs(rollup, ignore=frozenset()) -> list[str]:
+    """The Actions run ids of the failed checks (newest try of each check counts), for one more try."""
+    out = []
+    for c in _newest_failed(rollup, ignore):
+        m = RUN_URL.search(str(c.get("detailsUrl") or c.get("targetUrl") or ""))
+        if m and m.group(1) not in out:
+            out.append(m.group(1))
+    return out
+
+
+def failed_before(rollup, since: datetime, ignore=frozenset()) -> bool:
+    """A failed check whose newest try started before `since`: the run again has not reported it yet."""
+    for c in _newest_failed(rollup, ignore):
+        started = ts(c.get("startedAt"))
+        if started is None or started < since:
+            return True
+    return False
+
+
 def not_reported(rollup, names) -> list[str]:
     """The checks in `names` the pull request has not reported as finished yet (newest run of each counts)."""
     last: dict = {}
@@ -343,6 +424,59 @@ def failed_checks(rollup, ignore=frozenset()) -> list[str]:
         if (c.get("status") in (None, "COMPLETED")) and word not in PASSED and word not in (None, "PENDING"):
             out.append(str(c.get("name") or c.get("context") or "?"))
     return sorted(set(out))
+
+
+# a failure line of a failed job's log (pytest -rfE, node --test, the click-throughs);
+# `gh run view --log-failed` puts "<job>\t<step>\t<time> " in front of each line
+_FAILED_LINE = re.compile(r"^(?:[^\t\n]*\t[^\t\n]*\t\S+ )?\s*(?:FAILED|ERROR|not ok|✖)\s.*$", re.MULTILINE)
+_TEST_FILE = re.compile(r"[\w./-]*?([\w-]+\.(?:py|cjs|mjs|js|ts|swift|rs))\b")
+_WORD = re.compile(r"[a-z0-9]+")
+_NOISE = frozenset(
+    {"test", "tests", "spec", "src", "py", "js", "cjs", "mjs", "ts", "rs", "swift", "the", "and"}
+)
+
+
+def failed_test_files(log: str, most: int = 20) -> list[str]:
+    """The test file names a failed job's log names on its failure lines, in order, each once."""
+    out: list[str] = []
+    for line in _FAILED_LINE.findall(log or ""):
+        for name in _TEST_FILE.findall(line):
+            if name not in out:
+                out.append(name)
+    return out[:most]
+
+
+def queue_merge(subject: str, repo: str) -> bool:
+    """The merge commit of a merge queue group: GitHub's merge line for a branch orch-queue/... of the
+    repository itself (a fork's branch of the same name is not the queue's)."""
+    owner = repo.split("/", 1)[0]
+    return (
+        re.fullmatch(rf"Merge pull request #\d+ from {re.escape(owner)}/orch-queue/\S+", subject) is not None
+    )
+
+
+def _words(text: str) -> frozenset[str]:
+    return frozenset(w for w in _WORD.findall(text.lower()) if len(w) >= 3 and w not in _NOISE)
+
+
+def suspect(members: list[dict], tests: list[str]) -> dict | None:
+    """The one pull request that broke develop, or None when that is not clear (no guessing: a wrong revert
+    costs more than the wait). The only one merged since the last green commit; else the only one that changed
+    a failed test file; else the only one whose changed paths share the most words with the failed tests'
+    names (test_sessions.py -> sessions)."""
+    if len(members) == 1:
+        return members[0]
+    if not members or not tests:
+        return None
+    names = set(tests)
+    touched = [m for m in members if names & {Path(f).name for f in m.get("files") or []}]
+    if len(touched) == 1:
+        return touched[0]
+    want = frozenset().union(*(_words(t) for t in tests))
+    got = [(len(want & frozenset().union(*(_words(f) for f in m.get("files") or []))), m) for m in members]
+    top = max(n for n, _ in got)
+    best = [m for n, m in got if n == top]
+    return best[0] if top and len(best) == 1 else None
 
 
 def parse_known(items: list[str] | None) -> dict[str, str]:
@@ -433,18 +567,20 @@ class World:
 
     # ---- reads
     def green_develop(self) -> str | None:
-        """The newest develop commit whose own push run finished green (ORCH-314), judged job by job like any
-        other run (known-red jobs and the roll-up do not count). develop's push runs are never cancelled, so
-        every commit has an answer. None when none of the last ten push runs is green."""
-        wf = self.cfg.workflows[0][0] if self.cfg.workflows else "ci.yml"
+        """The newest develop commit whose own push runs finished green (ORCH-314), judged job by job like any
+        other run (known-red jobs and the roll-up do not count): every workflow of the after-merge set
+        (github.release_after_merge, ORCH-1128), so a commit with one of them red, running or missing is never
+        a release candidate. develop's push runs are never cancelled, so every commit has an answer. None when
+        none of the last ten push runs is green."""
+        first, *rest = self.cfg.after_merge
         known = self.known_red()
         seen: set[str] = set()
-        for r in sorted(self.runs(wf, "push"), key=lambda x: str(x.get("createdAt")), reverse=True):
+        for r in sorted(self.runs(first, "push"), key=lambda x: str(x.get("createdAt")), reverse=True):
             sha = r.get("headSha")
             if not sha or sha in seen:
                 continue
             seen.add(sha)
-            if run_state(self, wf, sha, None, ("push",), known)[0] == "green":
+            if all(run_state(self, wf, sha, None, ("push",), known)[0] == "green" for wf in (first, *rest)):
                 return sha
         return None
 
@@ -679,6 +815,19 @@ class World:
             return dict(self.sim.get("exceptions") or {})
         return _read_json(self.cfg.exceptions_path)
 
+    def record_exception(self, check: str, entry: dict) -> None:
+        """A named exception the keeper records itself for a fix ticket (ORCH-178, owner 20 Nov)."""
+        self.did.append(f"exception:{check}")
+        if self.sim is not None:
+            self.sim.setdefault("exceptions", {})[check] = entry
+            return
+        if self.dry:
+            return
+        data = _read_json(self.cfg.exceptions_path)
+        data[check] = entry
+        self.cfg.run_dir.mkdir(parents=True, exist_ok=True)
+        runs._atomic(self.cfg.exceptions_path, json.dumps(data, indent=1) + "\n")
+
     def walk_results(self) -> dict[str, dict]:
         """{release number: {walk: {verdict, line, at, by}}} as the walk helpers recorded them."""
         if self.sim is not None:
@@ -722,7 +871,7 @@ class World:
                     "--limit",
                     "10",
                     "--json",
-                    "databaseId,headSha,event,status,conclusion,createdAt,url",
+                    "databaseId,headSha,event,status,conclusion,createdAt,url,attempt",
                 ]
             )
             or []
@@ -1079,9 +1228,147 @@ class World:
 
         self.act(f"close:release {rel['n']} PR {rel['pr']}", go)
 
+    def rerun_failed(self, run_id: str):
+        """Run the failed jobs of one Actions run once more (a red release check gets one more try).
+        Raises Refused when GitHub refused it."""
+
+        def go():
+            self.bot_ok()
+            r = self._run([self.gh, "run", "rerun", str(run_id), "--failed", "--repo", self.cfg.repo])
+            if r.returncode != 0:
+                raise Refused(f"rerun {run_id}: {(r.stderr or r.stdout).strip()[:200]}")
+            return True
+
+        return self.act(f"rerun:{run_id}", go)
+
     def remove_wt(self, wt: str | None) -> None:
         if wt and (self.sim is not None or Path(wt).exists()):
             self.act(f"rmwt:{wt}", lambda: self._git("worktree", "remove", "--force", wt))
+
+    # ---- a red after-merge run on develop (ORCH-1128)
+    def rerun_once(self, run_id) -> bool:
+        """rerun_failed, as yes/no: False when GitHub refused it (the refusal stays in the log)."""
+        try:
+            got = self.rerun_failed(run_id)
+        except Refused:
+            self.did[-1] += " failed"
+            return False
+        return got is not False
+
+    def failed_tests(self, run_id) -> list[str]:
+        """The test file names the failed jobs' log names on its failure lines (reads only)."""
+        if self.sim is not None:
+            return list(self.sim.get("failed_tests", {}).get(str(run_id), []))
+        r = self._run(
+            [self.gh, "run", "view", str(run_id), "--repo", self.cfg.repo, "--log-failed"], timeout=120
+        )
+        return failed_test_files(r.stdout[-400_000:] if r.returncode == 0 else "")
+
+    def merged_between(self, good: str, bad: str) -> list[dict] | None:
+        """The pull requests that reached develop after `good` up to `bad`, each {pr, sha, files}: a merge
+        queue group counts as its members (the queue's "take in #N" commits), any other merge as itself. sha
+        is the commit whose first-parent diff is that pull request's change (git revert -m 1). None when git
+        cannot tell (good is not before bad)."""
+        if self.sim is not None:
+            got = self.sim.get("merged_between")
+            return None if got is None else list(got)
+        if self._git("merge-base", "--is-ancestor", good, bad).returncode != 0:
+            return None
+        lg = self._git("log", "--first-parent", "--merges", "--format=%H%x1f%s", f"{good}..{bad}").stdout
+        out: list[dict] = []
+        for line in lg.splitlines():
+            sha, _, subject = line.partition("\x1f")
+            group = queue_merge(subject, self.cfg.repo)  # only the queue's own group merges
+            members = [
+                (m[1], x.split("\x1f", 1)[0])
+                for x in self._git(
+                    "log", "--first-parent", "--format=%H\x1f%s", f"{sha}^1..{sha}^2"
+                ).stdout.splitlines()
+                if group and (m := TAKE_IN.match(x.partition("\x1f")[2]))
+            ]
+            if not members and (m := MERGE_LINE.match(subject)):
+                members = [(m[1], sha)]
+            if not members:
+                return None  # a merge the keeper cannot name: no guessing
+            for pr, c in members:
+                files = self._git("diff", "--name-only", f"{c}^1", c).stdout.split()
+                out.append({"pr": int(pr), "sha": c, "files": files})
+        return out
+
+    def queue_entries(self) -> list[dict] | None:
+        """The merge queue's entries (the pull-requests add-on's file, read only); None: no queue here."""
+        if self.sim is not None:
+            got = self.sim.get("queue")
+            return None if got is None else list(got)
+        if self.root is None:
+            return None
+        try:
+            data = json.loads(
+                (self.root / ".orch" / "addons" / QUEUE_ADDON / "queue.json").read_text("utf-8")
+            )
+        except (OSError, ValueError):
+            return None
+        rows = data.get("entries") if isinstance(data, dict) else None
+        return [r for r in rows or [] if isinstance(r, dict)]
+
+    def revert(self, pr: int, sha: str, title: str, body: str, ticket: str) -> str | None:
+        """A revert pull request into develop for one merged pull request, put first in the merge queue on the
+        red-develop ticket (never a push to develop). The pull request's url, or None."""
+        br = f"revert/pr-{pr}-{sha[:8]}"
+        wt = (self.cfg.worktrees or Path(".")) / f"revert-{pr}"
+
+        def go():
+            self.bot_ok()
+            if wt.exists():
+                raise Refused(f"{wt} exists already: look at it, remove it by its path")
+            if not self.secret_free(body):
+                raise Refused("the revert text looks like it holds a secret: stop")
+            wt.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                for argv in (
+                    ["-C", str(self.cfg.clone), "worktree", "add", "-q", str(wt), "-b", br, "origin/develop"],
+                    ["-C", str(wt), "revert", "--no-edit", "-m", "1", sha],
+                    ["-C", str(wt), "push", "-q", "-u", "origin", br],
+                ):
+                    r = self._run(["git", *argv], timeout=300)
+                    if r.returncode != 0:
+                        raise Refused(f"git {argv[2]}: {(r.stderr or r.stdout).strip()[:200]}")
+                r = self._run(
+                    [
+                        self.gh,
+                        "pr",
+                        "create",
+                        "--repo",
+                        self.cfg.repo,
+                        "--base",
+                        "develop",
+                        "--head",
+                        br,
+                        "--title",
+                        title,
+                        "--body",
+                        body,
+                    ]
+                )
+                if r.returncode != 0:
+                    raise Refused(f"pr create: {(r.stderr or r.stdout).strip()[:200]}")
+                url = r.stdout.strip().splitlines()[-1]
+            finally:
+                if wt.exists():
+                    self._git("worktree", "remove", "--force", str(wt))
+            q = self.orch([QUEUE_ADDON, "queue", "add", url, "--ticket", ticket, "--first"])
+            if q.returncode != 0:
+                self.note(
+                    ticket,
+                    f"Release keeper: the revert {url} could not join the merge queue: "
+                    f"{(q.stderr or q.stdout).strip()[:300]}",
+                )
+            return url
+
+        got = self.act(f"revert:#{pr}", go)
+        if got is None and self.sim is not None:
+            got = f"https://github.com/{self.cfg.repo}/pull/{8000 + pr}"
+        return got
 
 
 def is_linux_x86_64(head: bytes) -> bool:
@@ -1256,6 +1543,71 @@ def open_red_ticket(rows: list[dict], words: str) -> dict | None:
     )
 
 
+FIX_DAYS = 2  # how long an exception the keeper records for a fix ticket lasts (owner 20 Nov, ORCH-178)
+
+
+def fix_exceptions(w: World, rel: dict, bad: list[str]) -> list[str]:
+    """Owner 20 Nov (ORCH-178, from ORCH-431): once the keeper's own "Release N checks are red" ticket links a
+    fix pull request (orch ref add), the keeper records the named exception itself for each red check it put
+    on that ticket: that ticket, ending FIX_DAYS later or when the ticket is done. The ticket and its checks
+    come from the keeper's own record (rel["red_checks"], written when it opened or noted the ticket), never
+    from a title or note anyone can edit. It shows on the Merge card and in the release note like one a person
+    recorded; it is never renewed for the same ticket. Returns the lines when it recorded any (the release is
+    judged again next pass)."""
+    mine = rel.get("red_checks") or {}
+    if not bad or not mine.get("ticket"):
+        return []
+    t = next(
+        (
+            x
+            for x in w.tickets()
+            if mine["ticket"] in (x.get("key"), x.get("id")) and (x.get("status") or "") not in DONE
+        ),
+        None,
+    )
+    if t is None:
+        return []
+    fix = next(
+        (
+            u
+            for r in t.get("refs") or []
+            if (
+                m := re.search(
+                    rf"github\.com/{re.escape(w.cfg.repo)}/pull/(\d+)", u := (r or {}).get("url") or ""
+                )
+            )
+            and int(m[1]) != rel.get("pr")
+        ),
+        None,
+    )
+    if fix is None:
+        return []
+    key = str(t.get("key") or t["id"])
+    have = w.exceptions()
+    names = [
+        c
+        for c in bad
+        if c in (mine.get("checks") or [])
+        and not ((have.get(c) or {}).get("by") == BY and (have.get(c) or {}).get("ticket") == key)
+    ]
+    if not names:
+        return []
+    until = (now().date() + timedelta(days=FIX_DAYS)).isoformat()
+    for c in names:
+        w.record_exception(
+            c,
+            {"ticket": key, "until": until, "why": f"fix pull request {fix} linked to {key}"[:300], "by": BY,
+             "at": now().isoformat(timespec="seconds")},
+        )  # fmt: skip
+    w.note(
+        key, f"Release keeper: recorded a named exception until {until} for {', '.join(names)} (fix {fix})."
+    )
+    return [
+        f"release {rel['n']}: {key} links the fix {fix}: recorded named exceptions until {until} for "
+        f"{', '.join(names)}; judged again next pass"
+    ]
+
+
 def recut(w: World, st: dict, rel: dict, h: dict, what: str) -> bool:
     """A release held by red `what` (checks, walks) whose fix ticket is closed while develop moved on: close
     its pull request so the next pass cuts it again from the new develop. True when it did."""
@@ -1344,47 +1696,184 @@ def red(w: World, st: dict, role: str, title: str, words: str, note: str, done_w
     """One top ticket per red thing: never a second while one with the same words is open."""
     cur = open_red_ticket(w.tickets(), words)
     if cur:
+        st["red_ticket"] = str(cur.get("key") or cur["id"])
         if st.get("red_logged") != title:
             w.note(cur.get("key") or cur["id"], f"Release keeper: still red. {note[:600]}")
             st["red_logged"] = title
         return [f"red, ticket {cur.get('key') or cur['id']} is open"]
     tid = w.new_ticket(role, title, note, done_when, over_limit=True)  # a red base starts at once (ORCH-699)
+    st["red_ticket"] = tid if tid and not str(tid).startswith("not opened") else None
     st["red_logged"] = title
     return [f"red: opened top ticket {tid} ({title})"]
 
 
 def develop_red(w: World, st: dict, role: str) -> list[str]:
-    """macOS and Windows run on develop only (every push, at night, the release check), not in the merge
-    queue (ORCH-315): the newest FINISHED push or nightly run on develop that is red opens the red-develop
-    ticket, once per commit (the same words as a red release run, so it is one ticket). Judged job by job."""
-    wf = w.cfg.workflows[0][0] if w.cfg.workflows else "ci.yml"
+    """The after-merge runs on develop (every push, at night; the workflows of github.release_after_merge):
+    macOS and Windows run only there, not in the merge queue (ORCH-315), with ORCH-1120 the heavy checks too.
+    For the newest FINISHED push or nightly run of each workflow that is red (judged job by job, ORCH-1128):
+      1. its failed jobs run once more (GitHub's attempt counter: a run already tried again is not);
+      2. still red: the red-develop ticket opens (one per workflow; the same words as a red release run, so
+         one ticket), and its pull request goes first in the merge queue (the add-on knows the keeper's
+         red-run tickets);
+      3. no pull request of that ticket in the queue github.release_revert_hours (2) after it opened: the one
+         suspect pull request is undone by a revert pull request, first in the queue on that ticket."""
     known = w.known_red()
-    rows = [r for e in ("push", "schedule") for r in w.runs(wf, e) if r.get("event") == e]
-    seen: set[str] = set()
-    for r in sorted(rows, key=lambda x: str(x.get("createdAt")), reverse=True):
-        sha = r.get("headSha")
-        if not sha or sha in seen:
-            continue
-        seen.add(sha)
-        state, run_, _ = run_state(w, wf, sha, None, ("push", "schedule"), known)
-        if state in ("pending", "none"):
-            continue
-        if state == "green" or st.get("develop_red_sha") == sha:
-            return []
+    out: list[str] = []
+    mem = st.setdefault("after_merge", {})
+    for wf in w.cfg.after_merge:
+        rows = [r for e in ("push", "schedule") for r in w.runs(wf, e) if r.get("event") == e]
+        rows.sort(key=lambda x: str(x.get("createdAt")), reverse=True)
+        seen: set[str] = set()
+        for r in rows:
+            sha = r.get("headSha")
+            if not sha or sha in seen:
+                continue
+            seen.add(sha)
+            state, run_, _ = run_state(w, wf, sha, None, ("push", "schedule"), known)
+            if state in ("pending", "none"):
+                continue
+            if state == "green":
+                mem.pop(wf, None)
+            else:
+                out += _red_after_merge(w, st, role, wf, sha, run_ or r, rows, known)
+            break
+    return out
+
+
+def _red_after_merge(
+    w: World, st: dict, role: str, wf: str, sha: str, run_: dict, rows: list[dict], known: dict
+) -> list[str]:
+    mem = st["after_merge"]
+    rec = mem.get(wf) or {}
+    name = _wf_name(wf)
+    words = f"{name} run is red on develop"
+    cur = open_red_ticket(w.tickets(), words)
+    if rec.get("ticket") and (w.ticket(rec["ticket"]).get("status") or "") in DONE:
+        # its ticket was closed while develop is still red: a fresh round
+        rec = {k: rec[k] for k in ("first_red", "rid") if k in rec}
+    rid = run_.get("databaseId")
+    # 1. one more try, only for the first red run (a ticket already open: develop is known red, no reruns)
+    if not cur and not rec.get("ticket") and rid is not None and int(run_.get("attempt") or 1) < 2:
+        asked = ts(rec.get("rerun_at"))
+        if rec.get("rerun") == rid and asked and (now() - asked).total_seconds() < TEST_TIMEOUT_H * 3600:
+            return [f"{name} on develop {sha[:8]} is red; waits for its failed jobs to run once more"]
+        if rec.get("rerun") != rid and w.rerun_once(rid):
+            mem[wf] = {**rec, "rerun": rid, "rerun_at": now().isoformat(timespec="seconds")}
+            return [f"{name} on develop {sha[:8]} is red: ran its failed jobs once more"]
+    # 2. still red: the red-develop ticket (once per commit; the fix goes first in the merge queue)
+    lines: list[str] = []
+    if rec.get("red_sha") != sha:
         st["develop_red_sha"] = sha
-        name = _wf_name(wf)
-        return red(
+        lines = red(
             w,
             st,
             role,
-            f"{name} run is red on develop ({sha[:8]})",
-            f"{name} run is red on develop",
-            f"The {name} run on develop {sha[:8]} failed: {(run_ or {}).get('url')}. macOS and Windows run "
-            "only on develop (not in the merge queue), so fix it on develop with a normal pull request "
-            "(orch pull-requests queue add --first).",
+            f"{words} ({sha[:8]})",
+            words,
+            f"The {name} run on develop {sha[:8]} failed (and once more): {run_.get('url')}. It runs only on "
+            "develop (after the merge), so fix it on develop with a normal pull request linked to this "
+            "ticket: it goes first in the merge queue (orch pull-requests queue add --first). With no pull "
+            f"request of this ticket in the queue {_hours(w.cfg.revert_hours)} after it opened, the release "
+            "keeper opens a revert pull request for the pull request that broke it.",
             f"The next {name} run on develop is green",
         )
-    return []
+        if not (rec.get("ticket") or st.get("red_ticket")):
+            return lines  # the ticket was not opened: no record, so the next pass tries again
+        rec = {
+            **rec,
+            "red_sha": sha,
+            "first_red": rec.get("first_red") or sha,
+            "rid": rec.get("rid") or rid,
+            "ticket": rec.get("ticket") or st.get("red_ticket"),
+            "opened_at": rec.get("opened_at") or now().isoformat(timespec="seconds"),
+        }
+        rec.pop("rerun", None)
+        rec.pop("rerun_at", None)
+        mem[wf] = rec
+    return lines + _revert_if_due(w, role, wf, rec, rows, known, str(run_.get("createdAt") or ""))
+
+
+def last_green_before(w: World, wf: str, rows: list[dict], sha: str, known: dict) -> str | None:
+    """The newest commit before `sha` whose run of wf finished green (from the runs listed, newest first)."""
+    at = [str(r.get("createdAt")) for r in rows if r.get("headSha") == sha]
+    if not at:
+        return None
+    for r in rows:
+        c = r.get("headSha")
+        if c and c != sha and str(r.get("createdAt")) < min(at):
+            if run_state(w, wf, c, None, ("push", "schedule"), known)[0] == "green":
+                return c
+    return None
+
+
+def _hours(h: float | None) -> str:
+    return "never" if h is None else (f"{h:g} hours" if h != 1 else "1 hour")
+
+
+def _revert_if_due(
+    w: World, role: str, wf: str, rec: dict, rows: list[dict], known: dict, red_at: str
+) -> list[str]:
+    """3. The revert rule: the ticket open for revert_hours and none of its pull requests in the queue."""
+    name = _wf_name(wf)
+    key, opened = rec.get("ticket"), ts(rec.get("opened_at"))
+    if w.cfg.revert_hours is None or not key or not opened or rec.get("revert"):
+        return []
+    if (now() - opened).total_seconds() < w.cfg.revert_hours * 3600:
+        return []
+    t = w.ticket(key)
+    if (t.get("status") or "") in DONE:
+        return []
+    ids = {str(x) for x in (key, t.get("id"), t.get("key")) if x}
+    queue = w.queue_entries()
+    if queue is None:
+        return [f"{name} red on develop: no merge queue here, so no revert pull request"]
+    for e in queue:
+        if str(e.get("ticket") or "") not in ids or e.get("state") == "out":
+            continue
+        # a fix waits or runs; a merged one counts until a red run started after its merge (it did not fix it)
+        if e.get("state") != "merged" or (ts(e.get("ended")) or now()) > (ts(red_at) or now()):
+            return []
+    rec["revert"] = "looked"  # one look per red streak: never a second revert, never a retry loop
+    good = last_green_before(w, wf, rows, rec["first_red"], known)
+    members = w.merged_between(good, rec["first_red"]) if good else None
+    if not members:
+        why = "the last green commit is too far back" if not good else "git could not name the merges"
+        w.note(
+            key,
+            f"Release keeper: no fix in the merge queue after {_hours(w.cfg.revert_hours)}, but no "
+            f"revert: {why}. Fix it on develop.",
+        )
+        return [f"{name} red on develop: no revert ({why})"]
+    tests = w.failed_tests(rec.get("rid") or "") if len(members) > 1 else []
+    bad = suspect(members, tests)
+    if bad is None:
+        nums = ", ".join(f"#{m['pr']}" for m in members)
+        w.note(
+            key,
+            f"Release keeper: no fix in the merge queue after {_hours(w.cfg.revert_hours)}; the merges "
+            f"since the last green commit ({nums}) do not point at one pull request, so no revert. Fix it "
+            "on develop or revert the right one by a pull request.",
+        )
+        return [f"{name} red on develop: no revert (not one clear suspect among {nums})"]
+    pr = int(bad["pr"])
+    body = (
+        f"Reverts #{pr}: the {name} run on develop has been red since {rec['first_red'][:8]} and no fix "
+        f"reached the merge queue within {_hours(w.cfg.revert_hours)} (release keeper, ticket {key}). "
+        f"Failed tests: {', '.join(tests) or 'see the run'}. Bring the change back in a new pull request "
+        "with the fix.\n\nOpened by the orch release keeper (no AI call)."
+    )
+    try:
+        url = w.revert(pr, bad["sha"], f"Revert #{pr}: {name} red on develop", body, str(key))
+    except Refused as e:
+        w.note(key, f"Release keeper: the revert of #{pr} could not be opened: {e}")
+        return [f"{name} red on develop: the revert of #{pr} failed ({e})"]
+    rec["revert"] = url or "asked"
+    w.note(
+        key,
+        f"Release keeper: no fix in the merge queue after {_hours(w.cfg.revert_hours)}: opened {url}, "
+        f"which reverts #{pr}; it goes first in the merge queue.",
+    )
+    return [f"{name} red on develop: opened revert pull request {url} for #{pr}"]
 
 
 def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
@@ -1432,12 +1921,39 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
                 return out + [f"release {rel['n']}: release checks still running"]
             if g == "red":
                 bad = ", ".join(failed_checks(p.get("statusCheckRollup"), ignore)) or "see the pull request"
+                runs = failed_runs(p.get("statusCheckRollup"), ignore)
+                again = rel.get("reran") or {}
+                if runs and not again:  # one more try: a flaky test must not close it (ORCH-1023)
+                    # written before the call: the new try starts after this time at GitHub
+                    rel["reran"] = {"runs": runs, "at": now().isoformat()}
+                    asked = []
+                    for run_id in runs:
+                        try:
+                            w.rerun_failed(run_id)
+                            asked.append(run_id)
+                        except Refused as e:  # refused: no endless retries, the red path below goes on
+                            out.append(f"release {rel['n']}: could not run {run_id} again: {e}")
+                    if asked:
+                        return out + [
+                            f"release {rel['n']}: checks red on {bad}; ran the failed jobs once more"
+                        ]
+                elif again:
+                    since = ts(again.get("at"))
+                    if (
+                        since
+                        and now() - since < timedelta(hours=TEST_TIMEOUT_H)
+                        and failed_before(p.get("statusCheckRollup"), since, ignore)
+                    ):
+                        return out + [f"release {rel['n']}: waits for the failed jobs to finish once more"]
                 if recut(w, st, rel, h, "checks"):
                     return out + [
                         f"release {rel['n']}: checks were red, develop moved and the fix ticket is closed: "
                         "closed the pull request; cut again next pass"
                     ]
-                return out + red(
+                names = failed_checks(p.get("statusCheckRollup"), ignore)
+                if fixed := fix_exceptions(w, rel, names):
+                    return out + fixed
+                lines = red(
                     w,
                     st,
                     role,
@@ -1446,11 +1962,20 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
                     f"The release pull request {p.get('url')} into main is red on: {bad}. Fix it on "
                     "develop (a normal pull request); the release keeper closes this release and cuts it "
                     "again once develop "
-                    "has the fix and this ticket is done. A red check ships only with a named exception a "
-                    'person records: orch github release-exception "<check>" --ticket <key> --until '
-                    "<YYYY-MM-DD>.",
+                    "has the fix and this ticket is done. A red check ships only with a named exception: "
+                    "link the fix pull request to this ticket (orch ref add) and the release keeper records "
+                    f"one for the checks named here until {FIX_DAYS} days later, so the release goes without "
+                    'a new cut; or a person records one: orch github release-exception "<check>" --ticket '
+                    "<key> --until <YYYY-MM-DD>.",
                     f"Release {rel['n']}'s checks are green (after a fix on develop)",
                 )
+                mine = rel.get("red_checks") or {}  # which checks the keeper put on which ticket (ORCH-178)
+                if st.get("red_ticket") and mine.get("ticket") != st["red_ticket"]:
+                    mine = {"ticket": st["red_ticket"], "checks": []}
+                if mine:
+                    mine["checks"] = sorted(set(mine.get("checks") or []) | set(names))
+                    rel["red_checks"] = mine
+                return out + lines
             wv = walk_verdicts(w, rel)
             if wv["failed"]:
                 bad = "; ".join(wv["failed"])
@@ -1613,7 +2138,7 @@ def tend_releases(w: World) -> dict:
     from orch import review
 
     try:
-        return review.tend_releases(w.root)
+        return review.tend_releases(w.root, known_red=w.known_red())
     except Refused as e:  # inside a helper, or GitHub said no: the owner's click still works
         return {"refused": str(e)}
 
@@ -1792,7 +2317,16 @@ def prep_line(part: str, p: dict) -> str:
     if not p.get("ready"):
         return f"The {part} server is not prepared ({p.get('why') or 'unknown'}); the helper fetches it."
     needs = "; ".join(p.get("needs") or []) or "no new settings or data changes"
-    return f"The {part} server is fetched and checked ({needs})."
+    line = f"The {part} server is fetched and checked ({needs})."
+    if not p.get(
+        "prod"
+    ):  # after the 19 Nov server move the deploy host pointed at the stopped server, unnoticed
+        line += (
+            f" Production's {part} program could not be read over ssh: check that the deploy host and key "
+            "settings (github.release_deploy_host, github.release_deploy_key) point at the server that runs "
+            "it now."
+        )
+    return line
 
 
 def helper_steps(prep: dict, script: str | None = None) -> str:
@@ -1985,12 +2519,27 @@ def run(
         root, tickets.resolve(root, cfg.role)
     )  # the role ticket was removed: Refused, plain words
     role = str(t.get("key") or t["id"])
+    reopened = None
+    if t.get("status") == "done" and not dry_run:
+        # A person moved the role ticket to Done but its repeat goes on (a repeat survives Done): every
+        # card of this pass would be refused ("This ticket is closed") and nothing reaches Home.
+        # Open it again.
+        tickets.set_status(root, t["id"], "open", tickets.SYSTEM)
+        tickets.log(
+            root,
+            t["id"],
+            "The role ticket was Done but its repeat still runs: opened it again so the cards reach you.",
+            tickets.SYSTEM,
+        )
+        reopened = f"{role} was Done while its repeat runs: opened it again"
     st = read_state(cfg)
     w = world or World(root, cfg, dry=dry_run, known=known)
     try:
         lines = pass_once(w, st, role, hold_text(cfg))
     except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError) as e:
         lines = [f"pass stopped: {e}"]
+    if reopened:
+        lines.insert(0, reopened)
     if not dry_run:
         _write_state(cfg, st)
     return {"off": False, "paused": False, "role": role, "lines": lines, "did": w.did, "state": st}

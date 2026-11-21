@@ -33,7 +33,7 @@ def record(repo: str, pr: str, check: str, reason: str, now: float | None = None
         p.parent.mkdir(parents=True, exist_ok=True)
         with p.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
-    except OSError:
+    except Exception:  # noqa: BLE001 - an unwritable or refused orch folder (Refused) too (ORCH-1118)
         pass
 
 
