@@ -88,6 +88,20 @@ test('Remove: the row leaves the Settings list at once and the restarted server 
   assert.deepEqual(c.accepted, [gone]);
 });
 
+test('Remove of a switched-on add-on: the uninstall goes right after the answered turn-off, one wait after both', async () => {
+  const listed = {settings: {addons: [{name: 'factory', active: true}]}};
+  const gone = {settings: {addons: []}};
+  const steps = [];
+  const c = page({ok: true, status: 200}, ['down', [gone, 'b2']], {boot: 'b1', state: listed});
+  c.act = async (op, args) => { steps.push(op + (op === 'addon.set' ? ':' + args.on : '')); return {ok: true, status: 200}; };
+  const realFetch = c.fetch;
+  c.fetch = async url => { steps.push('read'); return realFetch(url); };
+  const r = await c.addonUninstall('factory');
+  assert.equal(r.ok, true);
+  assert.deepEqual(steps, ['addon.set:false', 'addon.uninstall', 'read', 'read']);
+  assert.deepEqual(c.accepted, [gone]);
+});
+
 test('Remove with a lost answer: recovered when the restarted server no longer lists it', async () => {
   const gone = {settings: {addons: []}};
   const c = page({ok: false, status: 0, text: 'Failed to fetch'}, ['down', [gone, 'b2']], {boot: 'b1', state: {settings: {addons: [{name: 'factory', active: false}]}}});

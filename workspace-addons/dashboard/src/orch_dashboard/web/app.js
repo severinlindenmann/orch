@@ -536,25 +536,29 @@ async function afterRestart(boot, tries = 24, pause = 1500, head = 2500) {
   } finally { if (--restartWaits <= 0) { restartWaits = 0; restartHold = 0; } }
 }
 // Turning an add-on on or off: when the answer is lost on the way (the server restarted), the state read once the
-// server is back says if it worked (the add-on's switch).
-async function addonSet(name, on, tries = 24, pause = 1500) {
+// server is back says if it worked (the add-on's switch). `settle` false: an answered change returns at once, the
+// caller sends its next step before the restart and waits once after it (Remove: off, then uninstall).
+async function addonSet(name, on, tries = 24, pause = 1500, settle = true) {
   const boot = serverBoot;
   const result = await act('addon.set', {name, on}, {check:false});  // the server restarts: its click ids are gone
   if (snapshot || (!result.ok && result.status !== 0)) return result;
+  if (result.ok && !settle) return result;
   const next = await afterRestart(boot, tries, pause);
   if (result.ok || !next) return result;
   const row = array(next.settings?.addons).find(a => a && a.name === name);
   return row && !!row.active === on ? {ok:true, status:200, state:next, recovered:true} : result;
 }
 // Uninstall an add-on (`orch addon uninstall`, refused while it is on: turn it off first). The services restart
-// like for the switch; the row leaves the list at once and the state read after the restart confirms it.
+// like for the switch; the row leaves the list at once and the state read after the restart confirms it. The
+// uninstall goes right after an answered turn-off, before that restart: a wait in between left a page that was
+// reloaded meanwhile with the add-on only turned off (seen in the walk of this change).
 async function addonUninstall(name, tries = 24, pause = 1500) {
   const still = rows => array(rows).some(a => a && a.name === name);
   if (array(state.settings?.addons).find(a => a && a.name === name)?.active) {
-    const off = await addonSet(name, false);
+    const off = await addonSet(name, false, tries, pause, false);
     if (!off.ok) return off;
   }
-  const boot = serverBoot;
+  const boot = serverBoot;  // after a lost turn-off this is already the restarted run
   const result = await act('addon.uninstall', {name}, {check:false});
   if (snapshot || (!result.ok && result.status !== 0)) return result;
   if (result.ok && state?.settings) { state.settings.addons = array(state.settings.addons).filter(a => !(a && a.name === name)); render(); }
