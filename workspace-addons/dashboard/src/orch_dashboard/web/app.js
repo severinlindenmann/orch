@@ -359,6 +359,8 @@ function pageRoute() {
   const docsHash = /^#docs(?:\/([a-z][a-z0-9-]{1,41}))?$/.exec(hash);
   if (docsHash && !snapshot) return {kind:'docs', at:docsHash[1] || '', hash};
   if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
+  // a ticket's chat on the Chats page (pages/ticketchat.js, ORCH-1168)
+  if (/^#chat\/t_[a-z0-9]{6,16}$/.test(hash) && !snapshot && (state?.chat || state?.general || Array.isArray(state?.ticket_chats))) return {kind:'chat', hash};
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
   try {
     if (hash.startsWith('#ticket/')) return {kind:'ticket', id:decodeURIComponent(hash.slice(8)), hash};
