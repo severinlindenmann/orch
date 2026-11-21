@@ -1936,6 +1936,14 @@ function ticketStartPick(t, compact = false) {
   const verb = array(t.sessions).length ? 'Continue' : 'Start helper';
   let alt = null;
   alt = cheaper ? ticketButton(verb + ' on ' + MODEL_NAMES[cheaper], 'outline sm', async () => {
+    // the kit's Start button may be greyed (no tool, already in line) or starting: then this one starts nothing and
+    // changes no model either; it says the kit's reason
+    const main = host.querySelector?.('[data-start="main"]');
+    if (window.UI?.startStarter?.starting(t.id) || main?.disabled || main?.getAttribute?.('aria-disabled') === 'true') {
+      const why = main?.getAttribute?.('aria-describedby') ? document.getElementById(main.getAttribute('aria-describedby'))?.textContent : '';
+      window.orch.toast(why || 'The helper cannot start right now.', 'error');
+      return;
+    }
     alt.disabled = true;
     try {
       const result = await act('ticket.model', {ticket:t.id, model:cheaper});

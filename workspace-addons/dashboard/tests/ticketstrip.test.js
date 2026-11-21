@@ -139,6 +139,18 @@ test('ORCH-415: the cost line is read with the start choice for screen readers',
   assert.match(all.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper').attrs.title, /Sets this ticket to Sonnet, then starts/);
 });
 
+test('ORCH-415: the Sonnet choice changes nothing while the Start button is greyed', async () => {
+  const sent = [], toasts = [];
+  const c = ctx({state:{runs:{}}, act:async (op, args) => { sent.push(op); return {ok:true}; }});
+  c.window.orch.toast = (text, kind) => toasts.push([text, kind]);
+  const all = nodes(c.detail({...base, status:'active', model:{name:'opus', by:'orch'}}));
+  const host = all.find(n => n.attrs?.['data-key'] === 'ticket-start'), alt = all.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper');
+  host.querySelector = () => ({disabled:true, getAttribute:() => null});
+  await alt.onclick();
+  assert.deepEqual(sent, []);
+  assert.equal(toasts[0][1], 'error');
+});
+
 test('Needs you: the strip names the agent that asked (as Home does), not always "Helper" (ORCH-65)', () => {
   const c = ctx({state:{runs:{t_one:{claim:{agent:'manager', label:'Manager'}}}}});
   const tree = c.detail({...base, status:'waiting', questions:[{id:'q1', text:'Build the new card look?'}]});
