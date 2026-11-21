@@ -5,7 +5,8 @@ import UIKit
 
 /// The phone side of orch-relay. `URLSessionRelayClient` is the real thing, `MockRelay` the in-process fake.
 protocol RelayAPI: Sendable {
-    func pair(code: String, name: String) async throws -> PairResponse
+    /// `publicKey`: this phone's own signing key (PhoneKey), registered with the relay by this pairing (ORCH-1204).
+    func pair(code: String, name: String, publicKey: String?) async throws -> PairResponse
     func registerPush(apnsToken: String, sandbox: Bool) async throws
     func workspaces() async throws -> [Workspace]
     func questions() async throws -> [Question]
@@ -35,6 +36,7 @@ protocol RelayAPI: Sendable {
 }
 
 extension RelayAPI {
+    func pair(code: String, name: String) async throws -> PairResponse { try await pair(code: code, name: name, publicKey: nil) }
     func messages() async throws -> [PhoneMessage] { try await messages(after: nil, limit: nil).items }
     /// A plain text: `ticket` nil = a new topic (see Phone app v3). Fresh client_id; the Outbox is what retries.
     func send(to: String, text: String, ticket: String?) async throws -> String {
@@ -114,9 +116,9 @@ struct URLSessionRelayClient: RelayAPI {
         throw RelayError.api(status: status, code: e?.error ?? "error", message: e?.message ?? "Something went wrong (\(status)). Try again.")
     }
 
-    func pair(code: String, name: String) async throws -> PairResponse {
-        struct Req: Encodable { let code: String; let name: String }
-        let d = try await request("POST", "/v1/phone/pair", body: Req(code: code, name: name), auth: false)
+    func pair(code: String, name: String, publicKey: String?) async throws -> PairResponse {
+        struct Req: Encodable { let code: String; let name: String; let publicKey: String? }
+        let d = try await request("POST", "/v1/phone/pair", body: Req(code: code, name: name, publicKey: publicKey), auth: false)
         return try JSONCoding.decoder.decode(PairResponse.self, from: d)
     }
     func registerPush(apnsToken: String, sandbox: Bool) async throws {

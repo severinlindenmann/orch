@@ -10,6 +10,7 @@ pub mod mobile;
 pub mod msgsig;
 pub mod onboarding;
 pub mod phone;
+pub mod phonekeys;
 pub mod problems;
 pub mod push;
 pub mod rules;

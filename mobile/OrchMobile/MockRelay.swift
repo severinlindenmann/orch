@@ -292,7 +292,9 @@ actor MockRelay: RelayAPI {
     private static func now() -> String { ISO8601DateFormatter().string(from: Date()) }
     private static func invalid(_ m: String) -> RelayError { .api(status: 422, code: "invalid", message: m) }
 
-    func pair(code: String, name: String) async throws -> PairResponse {
+    private(set) var pairedPublicKey: String?
+    func pair(code: String, name: String, publicKey: String?) async throws -> PairResponse {
+        pairedPublicKey = publicKey
         try? await Task.sleep(for: latency)
         guard code.hasPrefix("pc_") else { throw RelayError.api(status: 404, code: "not_found", message: "This invitation is not valid any more.") }
         // The live relay answers 401 (not 404) for an unknown or used pair code.

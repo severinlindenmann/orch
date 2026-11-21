@@ -79,6 +79,17 @@ form). It is never sent: only the public key is registered here.
 - The relay keeps the key and shows it in whoami and in each directory item (`workspaces.schema.json` `signing_key`)
   as a HINT only: a receiver trusts a key once a person accepted its fingerprint, never because the relay lists it.
 
+### Signing key of a phone (ORCH-1204)
+
+The phone makes its own Ed25519 key with CryptoKit, kept as one keychain item for this device only and readable only
+while the phone is unlocked. It sends the public half (same `public_key` form and refusals as a workspace key) with
+`POST /v1/phone/pair`, so the admin's pairing on the relay admin page is what ties the key to the phone. Each pairing
+makes a new key and replaces the stored one; signing out deletes it on the phone. A pairing without `public_key` (an
+older app) clears the stored key. A phone paired before keys may register one key once with
+`PUT /v1/phone/signing-key`; replacing it needs a new pairing, so a stolen phone token never swaps it. Its workspaces
+see the key in the directory (`phones[].signing_key`, `workspaces.schema.json`) as a HINT only and accept the phone
+once by its fingerprint; the phone shows its own fingerprint in Settings, computed from its own key.
+
 ## Usage counts and policy (draft 02; usage-counts.md, counts.schema.json)
 
 | Method | Path | Request | Response |
@@ -93,7 +104,8 @@ form). It is never sent: only the public key is registered here.
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| POST | `/v1/phone/pair` | `{code, name}` (no auth; one-time code from the link) | `201 {phone_id, token, workspaces: [{id, name}]}` |
+| POST | `/v1/phone/pair` | `{code, name, public_key?}` (no auth; one-time code from the link; `public_key`: the phone's own signing key, see **Signing key of a phone**; a bad key → `422 invalid` and the code stays unused) | `201 {phone_id, token, workspaces: [{id, name}]}` |
+| PUT | `/v1/phone/signing-key` | `{alg: "ed25519", public_key}` (phone auth; once, for a phone paired before keys) | `201 {alg, public_key, key_id, registered_at, status: "stored"}`; the same key → `200 {…, status: "unchanged"}`; another key → `409 key_exists` (needs a new pairing); bad → `422 invalid` |
 | POST | `/v1/phone/push` | `{apns_token, sandbox: bool}` | `204` |
 | GET | `/v1/phone/workspaces` | – | list of `{id, name, description, tags, icon, color, online, last_seen, open_questions, muted_until}` (only workspaces this phone may reach; `icon`/`color` = the workspace look or `null`, look.md: unknown values and missing fields fall back to letter + Automatic colour). `online` = called the relay in the last 2 minutes (unchanged); the phone itself shows a workspace as online while `last_seen` is at most 5 minutes old. `muted_until`: `null`, a time, or `"forever"`; plus `mobile_mode` = `{on, since, ends_at, machine}` (always present; `on: false` and the other three `null` when off; see **Mobile mode**); `can` = `{chat, files, tasks}` booleans (optional; absent = the phone shows no permission chips), derived only from this phone’s pairing list and workspace existence, as for `/v1/phone/send`: `chat` and `files` true for an existing workspace on its list, `files` is a UI hint, not authorization (uploads are checked on send); `tasks` follows `chat` (a phone gives work as a chat text; the relay has no separate task rule). Order of keys is not significant; all three true = no chips on the phone, all false = no access |
 | PATCH | `/v1/phone/workspaces/<ws>` | `{muted_until: <time> \| null \| "forever"}` | `200` the workspace item as listed. While muted (`"forever"`, or a time in the future) the relay sends this phone no push for anything from that workspace (texts and questions); messages are still stored and listed. `null` or a past time = not muted. A workspace not on the phone's list → `404` |

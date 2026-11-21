@@ -29,7 +29,8 @@
         "id": { "type": "string", "pattern": "^ph_[a-z0-9]{10}$" },
         "name": { "type": "string", "minLength": 1, "description": "Name given at pairing (the phone's own name or the admin's label)" },
         "online": { "type": "boolean", "description": "Called the relay in the last 2 minutes, at refresh time" },
-        "last_seen": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] }
+        "last_seen": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
+        "signing_key": { "oneOf": [{ "$ref": "#/$defs/signing_key" }, { "type": "null" }], "description": "The public key the phone sent when it was paired (relay-api.md, Signing key of a phone). A HINT only: the workspace trusts it after a person accepted its fingerprint. null or missing = none" }
       }
     },
     "signing_key": {

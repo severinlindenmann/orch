@@ -133,7 +133,7 @@ final class AppModel {
         // The keychain outlives deleting the app. No marker in this app container = a fresh install: drop the stale pairing
         // quietly and show the welcome screen (the red "signed out" message is only for a real sign-out/revoke while installed).
         if !defaults.bool(forKey: AppModel.installedMarkerKey) {
-            Keychain.delete()
+            Keychain.delete(); PhoneKey.delete()
             defaults.removeObject(forKey: "pairedPhoneId")
             defaults.set(true, forKey: AppModel.installedMarkerKey)
         }
@@ -369,7 +369,9 @@ final class AppModel {
         guard let invite else { return }
         inviteState = .connecting; message = nil
         do {
-            let r = try await client.pair(code: invite.code, name: phoneName)
+            // A new pairing makes a new key in this phone's keychain; only its public half goes to the relay.
+            let key = try PhoneKey.makeNew()
+            let r = try await client.pair(code: invite.code, name: phoneName, publicKey: PhoneKey.publicKeyText(key))
             let c = Credentials(relay: invite.relay, phoneId: r.phoneId, token: r.token, phoneName: phoneName)
             Keychain.save(c); credentials = c
             defaults.set(c.phoneId, forKey: "pairedPhoneId")
@@ -929,7 +931,7 @@ final class AppModel {
 
     func signOut() async {
         try? await client.signOut()
-        Keychain.delete()
+        Keychain.delete(); PhoneKey.delete()
         reset()
     }
 
@@ -950,7 +952,7 @@ final class AppModel {
 
     private func handle(_ error: Error) {
         if Self.isOffline(error) { transportDown = true }
-        if case RelayError.unauthorized = error { Keychain.delete(); reset(); message = error.localizedDescription }
+        if case RelayError.unauthorized = error { Keychain.delete(); PhoneKey.delete(); reset(); message = error.localizedDescription }
         else if error is URLError { message = "Can't reach the server. Check your connection, then try again." }
         else if error is RelayError { message = error.localizedDescription }
         else { message = "Something went wrong. Try again in a moment." }
@@ -961,7 +963,7 @@ final class AppModel {
     func seedIfRequested() async {
         let d = UserDefaults.standard
         path = []   // a cold start always lands on the Chats list; only a push or `-open` below opens something
-        if d.bool(forKey: "resetState") { Keychain.delete(); reset() }
+        if d.bool(forKey: "resetState") { Keychain.delete(); PhoneKey.delete(); reset() }
         if d.bool(forKey: "seedPaired"), credentials == nil, useMock {
             openSampleInvite(); await connect(phoneName: "Severin's iPhone"); await finishSetup(allowNotifications: false)
         }
