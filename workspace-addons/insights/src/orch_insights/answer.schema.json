@@ -331,6 +331,16 @@
               "shadowed": {
                 "type": "boolean",
                 "description": "true = another source has the same name and wins (workspace > admin > marketplace > builtin > harness)."
+              },
+              "missing": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 64,
+                "items": {
+                  "type": "string",
+                  "pattern": "^((login|add-on) )?[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$"
+                },
+                "description": "ORCH-534: what this computer lacks for the skill (metadata requires, requires-logins, requires-addons) in plain words: a program (gh), login <name>, add-on <name>. Absent = ready."
               }
             }
           }
