@@ -4065,7 +4065,9 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
         raise Refused("Use exactly one of --until <time> or --on <kind>:<ref>.")
     if until:
         w = waiting_value("time", until=until)
-        note = f"Waiting until {w['until']}"
+        from .net import when as _local_when
+
+        note = f"Waiting until {_local_when(w['until'])}"
     else:
         kind, sep, ref = on.partition(":")
         if not sep or kind not in WAIT_KINDS or kind == "time":

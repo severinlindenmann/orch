@@ -68,6 +68,24 @@ test('add-on off: one switch row that turns it on through the add-on switch path
   assert.equal(all(row, n => n.tag === 'fieldset').length, 0);
 });
 
+test('turned off: the 15 s status look stops and reads no status (ORCH-960)', async () => {
+  const cleared = [];
+  const {c, calls, ui} = context({settings:ON, answers:{status:{...BASE}}});
+  c.clearTimeout = id => cleared.push(id);
+  await c.syncLoad();
+  assert.deepEqual(calls.map(([, a]) => a.verb), ['status']);
+  assert.ok(ui.timer, 'while on it looks again in 15 s');
+  const OFF = {addons:[{name:'sync', active:false, consent:'sync 1.0'}]};
+  c.state.settings = OFF;
+  const timer = ui.timer;
+  c.syncCard(OFF);
+  assert.equal(ui.timer, null);
+  assert.ok(cleared.includes(timer), 'the waiting look is cancelled');
+  await c.syncLoad();  // a look that was already due when Sync went off
+  assert.deepEqual(calls.map(([, a]) => a.verb), ['status'], 'no status read while Sync is off');
+  assert.equal(ui.timer, null);
+});
+
 test('Settings › General: the Sync card comes right after Workspace', () => {
   const {c, ui} = context({settings:{...ON, folder:'/Users/mia/close'}});
   ui.card = {...BASE};

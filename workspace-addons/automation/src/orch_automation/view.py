@@ -13,6 +13,7 @@ from . import listen, needs, orchcli, scripts, service
 from .cron import fmt, next_after, parse
 from .loop import scheduled
 from .plain import zone
+from .runner import load_state
 from .syncapproval import allowed
 
 DAYS = (
@@ -363,17 +364,22 @@ def _last_result(runs: list[dict], tid: str) -> str | None:
         return None
     r = mine[-1]
     when = parse(r["at"]).astimezone().strftime("%a %H:%M")
+    newest = {x["script"]: x for x in mine if x.get("script")}  # a group: each script's own newest run
+    if len(newest) > 1 and any(x["exit"] != 0 for x in newest.values()):
+        return f"A script failed · {when}"
     return f"{'Done' if r['exit'] == 0 else 'Stopped'} · {when}"
 
 
-def _started(tickets: list[dict], runs: list[dict]) -> list[tuple[datetime, dict]]:
+def _started(tickets: list[dict], runs: list[dict], state: dict | None = None) -> list[tuple[datetime, dict]]:
     """Scheduled tickets whose newest run started after the newest finished run: nothing recorded it yet, but it
     did start ("Last result" shows it, so "Recent starts" must too)."""
     out = []
     for t in tickets:
         if not scheduled(t):
             continue
-        last = parse(((t.get("ext") or {}).get("automation") or {}).get("last_run"))
+        last = parse(((t.get("ext") or {}).get("automation") or {}).get("last_run")) or parse(
+            ((state or {}).get(t["id"]) or {}).get("last_run")  # a wake-up started with Start now has no ext
+        )
         done = [parse(r["at"]) for r in runs if r.get("ticket") == t["id"]]
         if last and not any(d >= last for d in done):
             out.append((last, t))
@@ -618,7 +624,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
 
     recent = []
     events_ = [(parse(r["at"]), r, None) for r in runs[-5:]] + [
-        (at, None, t) for at, t in _started(tickets, runs)
+        (at, None, t) for at, t in _started(tickets, runs, load_state(root))
     ]
     for _at, r, started in sorted(events_, key=lambda e: e[0], reverse=True)[:5]:
         if started:
