@@ -3559,28 +3559,38 @@ def validate_ext(schema: dict, obj: dict, addon: str) -> None:
         raise Refused(f"ext.{addon}{'.' + where if where else ''}: {e.message}")
 
 
-REPEAT_OFF = {"recurring": False, "paused": True}  # the values that switch an add-on's repeat off
+OFF_MARK = "x-orch-off"  # an add-on marks a boolean field of its ticket_ext schema with the value that switches it off
 
 
-def _repeat_block(ticket: dict, addon: str, schema: dict | None) -> dict | None:
-    """The ext block of an ACTIVE add-on whose own ticket_ext schema declares a repeat (boolean recurring and
-    paused fields), else None. Declared by the add-on, never inferred from stored data an agent could write;
-    core names no add-on (R1.2)."""
+def _off_values(schema: dict | None) -> dict:
+    """The fields an add-on's ticket_ext schema marks with x-orch-off, and the value that switches its repeat
+    off: {field: True|False}. Declared by the add-on, never inferred from stored data; core names no field."""
     props = (schema or {}).get("properties") if isinstance(schema, dict) else None
-    if not isinstance(props, dict) or not all(
-        isinstance(props.get(k), dict) and props[k].get("type") == "boolean" for k in REPEAT_OFF
-    ):
+    if not isinstance(props, dict):
+        return {}
+    return {
+        k: v[OFF_MARK]
+        for k, v in props.items()
+        if isinstance(v, dict) and v.get("type") == "boolean" and isinstance(v.get(OFF_MARK), bool)
+    }
+
+
+def _repeat_block(ticket: dict, addon: str, schema: dict | None) -> tuple[dict, dict] | None:
+    """(ext block, off values) of an ACTIVE add-on whose own ticket_ext schema marks fields that switch a
+    repeat off, else None (R1.2: core names no add-on)."""
+    off = _off_values(schema)
+    if not off:
         return None
     cur = (ticket.get("ext") or {}).get(addon)
-    return cur if isinstance(cur, dict) else None
+    return (cur, off) if isinstance(cur, dict) else None
 
 
-def repeat_off_only(cur: dict, new: dict) -> bool:
-    """#2051: the change from cur to new only switches a repeat off (recurring false, paused true), nothing
-    else. An agent may do that on a done or dropped ticket (a helper turns off a repeat on a ticket in
-    Review); it never switches one on there or changes anything else."""
+def repeat_off_only(cur: dict, new: dict, off: dict) -> bool:
+    """#2051: the change from cur to new only sets fields to their switch-off values (`off`), nothing else.
+    An agent may do that on a done or dropped ticket (a helper turns off a repeat on a ticket in Review); it
+    never switches one on there or changes anything else."""
     changed = {k for k in set(cur) | set(new) if cur.get(k) != new.get(k)}
-    return all(k in REPEAT_OFF and new.get(k) is REPEAT_OFF[k] for k in changed)
+    return all(k in off and new.get(k) is off[k] for k in changed)
 
 
 def ext_set(
@@ -3612,8 +3622,8 @@ def ext_set(
         add_history(ticket, by, f"Set ext.{addon}")
 
     def only_off(ticket) -> bool:
-        cur = _repeat_block(ticket, addon, schema)
-        return cur is not None and repeat_off_only(cur, {**cur, **obj})
+        block = _repeat_block(ticket, addon, schema)
+        return block is not None and repeat_off_only(block[0], {**block[0], **obj}, block[1])
 
     return apply_op(root, tid, op, if_revision=if_revision, by=by, closed_ok=only_off)[0]
 
@@ -3660,10 +3670,14 @@ def ext_unset(
     def only_off(ticket) -> bool:
         """Removing a repeat (or its next planned start) only switches work off, so it is allowed on a closed
         ticket too; but not the whole block of a paused one: that would also undo its switch-off."""
-        cur = _repeat_block(ticket, addon, schema)
-        if cur is None:
+        block = _repeat_block(ticket, addon, schema)
+        if block is None:
             return False
-        return key in ("next_run", "each_run") or (not key and cur.get("paused") is not True)
+        cur, off = block
+        # a field whose switch-off value is true (absent = on) must not be removed while it is set
+        return key in ("next_run", "each_run") or (
+            not key and not any(v is True and cur.get(k) is True for k, v in off.items())
+        )
 
     return apply_op(root, tid, op, if_revision=if_revision, by=by, closed_ok=only_off)[0]
 

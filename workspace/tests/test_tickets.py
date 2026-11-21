@@ -770,7 +770,13 @@ def test_closed_ticket_refuses_agent_ext_attach_and_attach_file_before_writing(p
     tickets.ext_unset(proj, tid, "demo.a", "human:t")
 
 
-REPEAT_SCHEMA = {"properties": {"recurring": {"type": "boolean"}, "paused": {"type": "boolean"}}}
+REPEAT_SCHEMA = {
+    "properties": {
+        "recurring": {"type": "boolean", "x-orch-off": False},
+        "paused": {"type": "boolean", "x-orch-off": True},
+    }
+}
+OFF = {"recurring": False, "paused": True}
 
 
 @pytest.mark.parametrize("status", ["done", "dropped"])
@@ -842,6 +848,10 @@ def test_closed_ticket_repeat_off_needs_the_addon_to_declare_a_repeat(proj, new_
         lambda: tickets.ext_unset(proj, tid, "notes", "agent:claude"),
         lambda: tickets.ext_set(proj, tid, "notes", '{"recurring": false}', "agent:claude"),
         lambda: tickets.ext_unset(proj, tid, "notes", "agent:claude", schema={"properties": {}}),
+        lambda: tickets.ext_set(  # declared fields without the switch-off mark are not enough
+            proj, tid, "notes", '{"recurring": false}', "agent:claude",
+            schema={"properties": {"recurring": {"type": "boolean"}}},
+        ),
     ):
         with pytest.raises(Refused, match="This ticket is closed"):
             write()
@@ -849,12 +859,12 @@ def test_closed_ticket_repeat_off_needs_the_addon_to_declare_a_repeat(proj, new_
 
 def test_repeat_off_only():
     cur = {"recurring": True, "paused": False, "cron": "0 * * * *"}
-    assert tickets.repeat_off_only(cur, {**cur, "recurring": False})
-    assert tickets.repeat_off_only(cur, {**cur, "paused": True, "recurring": False})
-    assert tickets.repeat_off_only(cur, dict(cur))
-    assert not tickets.repeat_off_only(cur, {**cur, "recurring": False, "cron": "*/5 * * * *"})
-    assert not tickets.repeat_off_only({**cur, "recurring": False}, {**cur, "recurring": True})
-    assert not tickets.repeat_off_only(cur, {**cur, "paused": 1})
+    assert tickets.repeat_off_only(cur, {**cur, "recurring": False}, OFF)
+    assert tickets.repeat_off_only(cur, {**cur, "paused": True, "recurring": False}, OFF)
+    assert tickets.repeat_off_only(cur, dict(cur), OFF)
+    assert not tickets.repeat_off_only(cur, {**cur, "recurring": False, "cron": "*/5 * * * *"}, OFF)
+    assert not tickets.repeat_off_only({**cur, "recurring": False}, {**cur, "recurring": True}, OFF)
+    assert not tickets.repeat_off_only(cur, {**cur, "paused": 1}, OFF)
 
 
 def test_agent_ext_attach_and_attach_file_work_on_an_open_ticket(proj, new_ticket):
