@@ -3123,6 +3123,7 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
         if open_now >= MAX_OPEN_GROUPS_PER_HOST:
             return _drop(st, m, f"this host already has {MAX_OPEN_GROUPS_PER_HOST} open groups here")
         j.update(left=False, from_seq=None, next_seq=None, buf={}, own_guess=[], chat_before=None)
+        j["version_sent"] = None  # the host forgot our version with the removal: report it again
         j.pop("ended_at", None)
     if j["left"] or j["closed"]:
         return _drop(st, m, "this group is closed for this workspace")

@@ -496,6 +496,22 @@ def test_a_removed_member_takes_part_again_when_the_host_adds_it_back(proj, run,
     assert "dropped" in inbox(run, rel, old)[0]["note"] and _joined(proj)["left"] is True
 
 
+def test_a_member_added_back_reports_its_version_again(proj, run, rel, member, monkeypatch):
+    """The host forgets a removed member's version; its first seen after being added back carries it again
+    (else the host shows it as older orch for good)."""
+    monkeypatch.setattr(cg, "SEEN_EVERY", 0)
+    inbox(run, rel, _added(1))
+    run("relay", "inbox")
+    assert _joined(proj).get("version_sent")
+    ev = {"kind": "member_left", "at": "2026-11-08T10:01:00Z", "ws": WS, "reason": "removed"}
+    inbox(run, rel, from_host("text", {"text": "removed", "group_event": ev}, seq=2, id=mid("rm2")))
+    rel.sent.clear()
+    inbox(run, rel, _added(3))
+    run("relay", "inbox")
+    seen = [m for m in sent(rel, to=FIN) if "seen" in m["body"]]
+    assert seen and seen[0]["body"]["member_version"]["chat_groups"] == cg.CHAT_GROUPS_VERSION
+
+
 def test_a_crash_between_the_add_and_the_card_still_sends_the_chat_so_far(proj, run, rel, host, monkeypatch):
     _say(proj, host, "human:owner", "Who has the 2025 letter?")
     real = cg._send_card
