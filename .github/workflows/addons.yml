@@ -1,5 +1,11 @@
 name: addons
-on: workflow_call
+on:
+  workflow_call:
+    inputs:
+      mac_jobs_runs_on:
+        description: "where py311, page-smoke and dashboard-clickthroughs run, as JSON: \"ubuntu-latest\" or this Mac's runner labels (ci.yml job route, ORCH-1125)"
+        type: string
+        default: '"ubuntu-latest"'
 jobs:
   dashboard:
     runs-on: ubuntu-latest
@@ -217,10 +223,11 @@ jobs:
       - run: uv run pytest -q tests/test_adapters.py::test_no_tool_names_outside_the_adapter
   py311:
     # The installer's tool Python is 3.11: argparse there is stricter (fb14, `-- <text>` after an optional positional).
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    runs-on: ${{ fromJSON(inputs.mac_jobs_runs_on) }}
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/mac-job-home
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
@@ -229,31 +236,33 @@ jobs:
   page-smoke:
     # Loads every Focus (and Insights) screen in headless Chromium and fails on a console error, an uncaught exception,
     # a failed request or a missing window global: a page that throws at load must never reach develop.
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.mac_jobs_runs_on) }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/mac-job-home
       - uses: astral-sh/setup-uv@v5
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - run: npm install -g playwright@1.64.1
-      - run: playwright install --with-deps chromium
+      - run: playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
       - run: node e2e/focus_insights_smoke.cjs
   dashboard-clickthroughs:
     # Every dashboard feature done like a person on a seeded workspace with the real dashboard server and local
     # stand-ins for relay, publish, GitHub and add-ons (workspace-addons/dashboard/clickthrough, ORCH-308/384); a
     # feature nobody clicked fails by name. Its own job: next to the page checks it no longer fit in 10 minutes.
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.mac_jobs_runs_on) }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # the Update click-through reads this checkout as the update source: orch refuses a shallow one
+      - uses: ./.github/actions/mac-job-home
       - uses: astral-sh/setup-uv@v5
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - run: npm install -g playwright@1.64.1
-      - run: playwright install --with-deps chromium
+      - run: playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
       - run: PW_DIR="$(npm root -g)" node workspace-addons/dashboard/clickthrough/run.cjs

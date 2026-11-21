@@ -79,3 +79,40 @@ and `brand/tests/test_ci_known_red.py` fails when this table and `KNOWN_RED` dis
 |---|---|---|---|---|
 
 When a system turns green: empty `KNOWN_RED` (or remove the system) and remove its row here in the same pull request.
+
+## Mac jobs on this Mac's own runner (ORCH-1125)
+
+The phone build and UI tests, the macOS workspace part, the dashboard click-throughs, the page smoke, the dashboard
+pictures and the Python 3.11 checks can run on a GitHub runner on the development Mac instead of GitHub's machines.
+ci.yml's `route` job (`scripts/mac_route.py`) decides once per run:
+
+- **Only trusted runs**: a push to develop, the nightly run, a manual run and a release pull request (into main, from
+  a branch of this repository). Pull requests into develop, merge queue groups and every pull request from a fork
+  stay on GitHub's machines. The runner's job hook refuses the same again on the Mac.
+- **One setting moves them back**: repository variable `MAC_RUNNER`. `this-mac` = this Mac; anything else or unset
+  = GitHub's machines (the default).
+- **Offline = GitHub by itself**: the route reads the runner list with the repository secret
+  `MAC_RUNNER_STATUS_TOKEN` (a fine-grained token for this repository only, "Administration: read"; it lives in
+  GitHub, never on the Mac). No secret, no answer or no online runner with the label `orch-mac`: GitHub's machines.
+- **Busy**: a develop push while the runner is busy goes to GitHub's machines; set `MAC_RUNNER_WHEN_BUSY=wait` to
+  queue it on the Mac instead. The nightly run, manual runs and release pull requests always wait for the Mac.
+- **Clean run per job**: own hidden macOS user `orch-ci` (cannot read the owner's home or `~/.orch-tool`), a
+  throwaway home in the job's temp folder (`.github/actions/mac-job-home`), leftovers stopped and the temp folder
+  emptied after every job (`scripts/mac-runner/job-completed.sh`). No owner secrets on the Mac.
+- **A refused job never runs a step**: the job-started hook stops the job's worker process at once (a failed hook
+  alone would still run later `if: always()` steps).
+- **Shares the Mac with helpers**: each job holds the shared `heavy` lock, xcodebuild the `xcode` lock
+  (`scripts/mac-runner/lock.sh`, folder `/Users/Shared/orch-locks`, group `orch-locks`); the macOS workspace suite
+  is one part at `-n 6` there.
+
+Turn it on (owner, admin rights):
+1. Settings > Actions > General > "Fork pull request workflows from outside collaborators": **Require approval for
+   all external contributors** (a fork's workflow file can name any runner; nothing runs without that approval).
+2. On the Mac: `sudo bash scripts/mac-runner/setup.sh` (asks for the runner registration token from
+   Settings > Actions > Runners > New self-hosted runner; used once, never stored).
+3. A fine-grained token for this repository only, permission "Administration: read", as the Actions secret
+   `MAC_RUNNER_STATUS_TOKEN`.
+4. The Actions variable `MAC_RUNNER` = `this-mac`. Back to GitHub's machines: change or delete it.
+
+Undo on the Mac: `sudo bash scripts/mac-runner/uninstall.sh`, then remove the runner under Settings > Actions >
+Runners.
