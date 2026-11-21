@@ -23,6 +23,10 @@ ALLOW = {
         "pull-requests": "ORCH-450: `orch ref wait --merge` refuses merges past the merge queue only while "
         "the queue add-on is on; follow-up like #837 (a manifest key instead of the name)",
     },
+    "orch/releasekeeper.py": {
+        "pull-requests": "ORCH-1128: a red develop reads the merge queue file for a fix and puts the revert "
+        "pull request first in it; follow-up like #837 (a manifest key instead of the name)",
+    },
     "orch/cli_chat.py": {"sync": "core `orch chat sync` command; not the add-on"},
     "orch/people.py": {
         "dashboard": "r-1119-1255-ws-8: the names list stays where the dashboard kept it "
