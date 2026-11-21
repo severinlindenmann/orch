@@ -32,5 +32,7 @@ mobile/OrchMobile/PhoneKey.swift
 mobile/OrchMobile/MessageSigner.swift
 mobile/OrchMobileTests/PhoneSigningTests.swift
 relay/src/phonekeys.rs
+relay/src/phonegate.rs
+relay/tests/phone_signed_send.rs
 relay/tests/phone_signing_key.rs
 relay/Cargo.lock                     # crate names of the Ed25519 library (ed25519, signature)

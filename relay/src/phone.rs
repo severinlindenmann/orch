@@ -735,7 +735,9 @@ async fn send(
     h: HeaderMap,
     body: Bytes,
 ) -> Res<(StatusCode, Json<Value>)> {
-    let v = parse_body(&body)?;
+    let mut v = parse_body(&body)?;
+    // The phone's signature (ORCH-1204), checked below once the body is built.
+    let envelope = v.as_object_mut().and_then(|o| o.remove("envelope"));
     let id = {
         let c = app.db.lock().unwrap();
         let (pid, _, ws) = auth::phone(&c, &h)?;
@@ -825,9 +827,29 @@ async fn send(
             cand["reply_to"] = r.into();
         }
         crate::rules::validate_schema(&cand).map_err(invalid)?;
+        let blob_ids: Vec<String> = blobs.iter().map(|(b, _)| b.clone()).collect();
+        let gate = crate::phonegate::check(&c, &pid, envelope, to, ticket, reply_to, &body, &blob_ids)?;
+        if let crate::phonegate::Gate::Duplicate(old) = gate {
+            return Ok((
+                StatusCode::OK,
+                Json(json!({"id": old, "client_id": v["client_id"], "duplicate": true})),
+            ));
+        }
         let tx = c.unchecked_transaction()?;
-        let m = store::system_message(&c, &app.key, &pid, to, "text", ticket, reply_to, body)?;
-        let id = m["id"].as_str().unwrap().to_string();
+        let id = if let crate::phonegate::Gate::Signed { id, envelope, digest } = gate {
+            // The signed id and body as the phone wrote them; the envelope goes to the workspace unchanged.
+            if c.query_row("SELECT 1 FROM messages WHERE id=?1", [&id], |_| Ok(())).optional()?.is_some() {
+                return Err(conflict("This message id was already used for another message."));
+            }
+            cand["id"] = id.clone().into();
+            cand["envelope"] = envelope;
+            store::insert_message(&c, &app.key, &cand, "")?;
+            crate::phonegate::mark(&c, &id, &digest)?;
+            id
+        } else {
+            let m = store::system_message(&c, &app.key, &pid, to, "text", ticket, reply_to, body)?;
+            m["id"].as_str().unwrap().to_string()
+        };
         if let Some(cid) = cid {
             remember_client_id(&c, &pid, cid, &id)?;
         }
