@@ -47,7 +47,11 @@ plain terminal (no process yet) or the Manager; one of each, a second New goes t
 
     orch session new <empty|chat|terminal|manager>   # already open: nothing new starts
     orch session list                                # which ones exist and are open
-    orch session close <kind>                        # a helper's conversation is kept; the terminal closes
+    orch session stop <kind>                         # stops the current step; the session stays open
+    orch session end <kind>                          # ends it; a helper's conversation stays in History, the terminal closes
+
+`orch session close <kind>` is the older name of `orch session end <kind>` and does the same.
+On a ticket's helper the same two are `orch run interrupt <ticket>` (stop the current step) and `orch run stop <ticket>` (end the session).
 
 The Manager, empty helper and chat helper start in the permission mode picked in the New menu (remembered per kind,
 at most what workspace.permissions allows). Never raise it yourself: only the signed-in person can, on the dashboard.
