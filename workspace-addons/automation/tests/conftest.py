@@ -68,6 +68,9 @@ elif args[:2] == ["ticket", "new"]:
     for i, a in enumerate(args):
         if a == "--ext": k, _, v = args[i + 1].partition("="); t.setdefault("ext", {{}})[k] = json.loads(v)
     save(t); print(json.dumps(t))
+elif args[:2] == ["ticket", "attach"]:
+    (root / "attached.txt").write_text(args[args.index("--name") + 1] + chr(10) + sys.stdin.read())
+    print("{{}}")
 elif args[:2] == ["ticket", "status"]:
     t = load(args[2]); t["status"] = args[3]; note(t, "Status"); save(t); print(json.dumps(t))
 elif args[:2] == ["ext", "set"]:

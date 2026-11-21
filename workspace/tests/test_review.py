@@ -405,3 +405,20 @@ def test_card_question_keeps_agent_blocking(tk):
     q = tickets.load(root, tid)["questions"][0]
     assert q.get("kind") is None and tickets._open_questions(tickets.load(root, tid)) == ["q1"]
     assert q["card"]["kind"] == "draft" and q["shown"]["digest"]
+
+
+def test_plan_ready_card_shows_goal_not_included_and_steps(tk):
+    root, tid = tk
+    tickets.set_plan(root, tid, "A faster home page", "The phone app", "agent:claude")
+    tickets.create(root, "Cache the list", ME, parent=tid)
+    tickets.create(root, "Measure it", ME, parent=tid)
+    _, q = tickets.ask(root, tid, "Plan ready", ["Start work", "Change a step"], "Start work", "agent:claude")
+    item = next(i for i in review.stack(root) if i["id"] == f"core:q:{tid}:q1")
+    why = item["card"]["why"]
+    assert "Home layout" in why and "Goal: A faster home page" in why and "Not included: The phone app" in why
+    assert "1. Cache the list" in why and "2. Measure it" in why
+    assert item["digest"] == tickets.question_digest(tickets.load(root, tid)["questions"][0])  # render only
+    other = tickets.create(root, "Other", ME)["id"]
+    tickets.ask(root, other, "Send it now?", ["Yes", "No"], "Yes", "agent:claude")
+    plain = next(i for i in review.stack(root) if i["id"] == f"core:q:{other}:q1")
+    assert "why" not in plain["card"]

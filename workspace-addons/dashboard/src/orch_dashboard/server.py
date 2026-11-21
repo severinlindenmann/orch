@@ -219,10 +219,12 @@ def _typing_allowed(root) -> bool:
 
 
 def _link_msg(session, name: str) -> bytes:
-    from orch.pagesession import REVOKED_MSG
+    from orch.pagesession import REVOKED_MSG, WATCH_ONLY_MSG
 
     if session.revoked:
         return REVOKED_MSG.encode()
+    if getattr(session, "active", True) is False:  # a helper started this server: watch-only
+        return WATCH_ONLY_MSG.encode()
     return f"This link was already used. Open the {name} again from orch.".encode()
 
 
@@ -307,11 +309,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _refused_text(self, text: str) -> str:
         """The words of a 403 for a missing page session: a sign-in link that was used twice, else sign in."""
-        from orch.pagesession import REVOKED_MSG
+        from orch.pagesession import REVOKED_MSG, WATCH_ONLY_MSG
 
         session = getattr(self, "session", None)
         if session is not None and session.revoked:
             return REVOKED_MSG
+        if session is not None and getattr(session, "active", True) is False:
+            return WATCH_ONLY_MSG
         return text
 
     def _act_log(self, text: str) -> None:
@@ -558,7 +562,11 @@ class Handler(BaseHTTPRequestHandler):
         if passes is None:
             return self._send(503, b"Try again in a moment.", "text/plain")
         header, file = passes.issue(name, act, self._pass_tag())
-        self._send(200, json.dumps({"pass": header, "file": file, "act": act}).encode(), "application/json")
+        self._send(
+            200,
+            json.dumps({"pass": header, "file": file, "act": act, "life": framepass.LIFE}).encode(),
+            "application/json",
+        )
 
     def do_OPTIONS(self):
         """The preflight of a sandboxed add-on page's call (origin "null", the X-Orch-Frame header). It carries
@@ -772,6 +780,17 @@ class Handler(BaseHTTPRequestHandler):
             from . import update
 
             return self._send(200, json.dumps(update.update_info()).encode(), "application/json")
+        if (
+            path == "/api/session-state"
+        ):  # this browser: signed in, view only, or started by a helper (no secrets)
+            session = getattr(self, "session", None)
+            if session is None or not session.active:
+                st = "helper"
+            else:
+                st = "signed-in" if self._can_act() else "view-only"
+            return self._send(
+                200, json.dumps({"state": st}).encode(), "application/json", {"Cache-Control": "no-store"}
+            )
         if path == "/api/tool-updates":  # the tools' versions and notes: same-origin only, no secrets
             from . import update
 
@@ -1034,7 +1053,7 @@ class Handler(BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|live|soft|live-layer|live-history|live-start|live-model|livebar|livesessions|livegroups|livewall|livechat)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|live|soft|live-layer|live-history|live-start|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])

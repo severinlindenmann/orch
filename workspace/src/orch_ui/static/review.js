@@ -223,7 +223,9 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
    if(code==='decided'){UI.toast((res.error.message)||'This was decided already.');load(true);return}
    gone.delete(sig(it));
    if(code==='changed')UI.toast('This card changed. Showing the new version.');
-   else if(code==='needs_person')UI.toast('Sign in to answer: run orch review in your terminal.',null,'error');
+   /* the server's own sign-in words when it sent them (the dashboard: a sign-in link; drafts are refused in the
+      terminal, #1918); the orch review page's own fallback otherwise */
+   else if(code==='needs_person'){const m=String((res.error&&res.error.message)||'');UI.toast(/^Sign in to /.test(m)?m:'Sign in to answer: run orch review in your terminal.',null,'error')}
    else UI.toast((res&&res.error&&res.error.message)||'Could not save your answer. It is waiting again.',null,'error');
    dirty=true;load(true)})};
  const build=(items,start,later,pins)=>{deckEl.replaceChildren();
