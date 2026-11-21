@@ -547,7 +547,12 @@ async function layer(page, dash, width) {
   } else await press('Escape');
   const docked = phone ? 'bottom' : 'right';
   // full screen; Esc goes back one step at a time: full screen, the panel, the bar
-  await page.click('[data-key="live-full"]');
+  // a compact pane (on the right, on a phone) keeps Full screen in More (ORCH-463)
+  if (await page.$('#live-dock .live-pane [data-key="live-full"]')) await page.click('[data-key="live-full"]');
+  else {
+    await page.click('#live-dock .live-pane [data-key="live-pane-more"]');
+    await page.click('[data-key="live-more-menu"] [data-key="live-more-full"]');
+  }
   await page.waitForSelector(panel('full'), { timeout: 5000 });
   // the page behind full screen takes no keyboard (ORCH-340)
   if (!(await page.evaluate(() => document.getElementById('content').inert))) throw new Error('the page behind full screen still takes Tab');
@@ -823,15 +828,22 @@ async function split(page, dash, width) {
       const more = await has('live-pane-more');
       if (!more && !(await has('live-pin') && await has('live-pane-place'))) throw new Error(`the pane of ${p.key} has no pin or place`);
       if (!phone && !await has('live-beside')) throw new Error(`the pane of ${p.key} has no add beside`);
-      if (!await has('live-min') || !await has('live-close')) throw new Error(`the pane of ${p.key} has no minimise or close`);
+      if (!(await has('live-min') || more) || !await has('live-close')) throw new Error(`the pane of ${p.key} has no minimise or close`);
       if (more) {
         await page.click(inPane(p.key, 'live-pane-more'));
         await page.waitForSelector('[data-key="live-more-menu"] [data-key="live-pin"]', { timeout: 5000 });
         if (!await page.$('[data-key="live-more-menu"] [data-live="place"][data-mode="bottom"]')) throw new Error(`More of ${p.key} has no place`);
+        if (!await has('live-min') && !await page.$('[data-key="live-more-menu"] [data-key="live-more-min"]')) throw new Error(`the pane of ${p.key} has no minimise`);
         await page.keyboard.press('Escape');
         await page.waitForSelector('[data-key="live-more-menu"]', { state: 'detached', timeout: 5000 });
       }
     }
+  };
+  // Add beside asks which session (ORCH-463): open its menu, pick the first one offered
+  const addBeside = async sel => {
+    await page.click(sel);
+    await page.waitForSelector('[data-key="live-beside-menu"] [data-key="live-beside-pick"]', { timeout: 5000 });
+    await page.click('[data-key="live-beside-menu"] [data-key="live-beside-pick"]');
   };
   const sideBySide = (list, stacked) => list.every((p, i) => !i || (stacked ? p.y > list[i - 1].y && p.x === list[0].x : p.x > list[i - 1].x && p.y === list[0].y));
   await liveBarState(page);
@@ -851,10 +863,10 @@ async function split(page, dash, width) {
     if (list[0].key !== 't_bar232') throw new Error('on a phone the second session does not take the pane');
   } else {
     // Add beside twice: two, then three panes next to each other; the third is the most
-    await page.click('[data-key="live-beside"]');
+    await addBeside('[data-key="live-beside"]');
     list = await count(2);
     if (!sideBySide(list)) throw new Error('two panes do not sit next to each other');
-    await page.click(inPane(list[0].key, 'live-beside'));
+    await addBeside(inPane(list[0].key, 'live-beside'));
     list = await count(3);
     if (!sideBySide(list)) throw new Error('three panes do not sit next to each other');
     if (!list[2].on || list.filter(p => p.on).length !== 1) throw new Error('the new pane is not the selected one');
@@ -893,7 +905,11 @@ async function split(page, dash, width) {
     await place('bottom');
   } else await page.keyboard.press('Escape');
   // minimise to the bar; Open brings the split back
-  await page.click(inPane(one, 'live-min'));
+  if (await page.$(inPane(one, 'live-min'))) await page.click(inPane(one, 'live-min'));
+  else {  // a narrow pane keeps Minimise in More (ORCH-463)
+    await page.click(inPane(one, 'live-pane-more'));
+    await page.click('[data-key="live-more-menu"] [data-key="live-more-min"]');
+  }
   await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
   await page.click('[data-key="live-open"]');
   list = await count(list.length);
@@ -906,7 +922,7 @@ async function split(page, dash, width) {
     const now = left.reduce((a, p) => a + p.w, 0);
     if (Math.abs(now - room) > 2) throw new Error(`the others did not take the room (${room} px before, ${now} px after)`);
     // the picture: three panes again, as in draft D
-    await page.click(inPane(left[0].key, 'live-beside'));
+    await addBeside(inPane(left[0].key, 'live-beside'));
     await count(3);
   } else {
     await page.click(inPane(list[0].key, 'live-close'));
@@ -916,6 +932,104 @@ async function split(page, dash, width) {
   }
   await page.waitForTimeout(300);
   await noSideways(page);
+}
+
+// Step 33. Permission mode of a session without a ticket (ORCH-818). Like step 15 the test dashboard has no orch to
+// start helpers, so the step answers session.new like the core does (`orch session new <kind> --permission-mode <m>`,
+// tested in workspace/tests/test_sessionmode.py) and the next state carries state.session_modes as the server builds
+// it (data.load_session_modes). Everything else is the real page: the New menu's Permissions row, the pane's line.
+async function permModes(page, dash, width) {
+  // FD_SHOTS=<folder>: also pictures of the warning and the pane's line (for the ticket), not only the end
+  const extra = async name => process.env.FD_SHOTS && (await page.waitForTimeout(600), page.screenshot({ path: require('node:path').join(process.env.FD_SHOTS, `fd-33-${name}-${width}.png`) }));
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  const id = 't_ntmanag01', calls = [];
+  const LABEL = { ask: 'Default', edits: 'Accept edits', auto: 'Auto', full: 'Bypass permissions' };
+  const ws = { top: 'full', warned: false, remembered: 'auto', running: null };
+  const rank = m => ['ask', 'edits', 'auto', 'full'].indexOf(m);
+  const modes = () => Object.fromEntries(['manager', 'empty', 'chat'].map(k => {
+    const cur = k === 'manager' && rank(ws.remembered) <= rank(ws.top) ? ws.remembered : ws.top;
+    const run = k === 'manager' ? ws.running : null;
+    return [k, { current: cur, label: LABEL[cur], full_warned: ws.warned, running: run, running_label: run ? LABEL[run] : null,
+      choices: Object.keys(LABEL).map(m => ({ mode: m, label: LABEL[m], allowed: rank(m) <= rank(ws.top) })) }];
+  }));
+  let last = null;
+  const dress = st => {
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true };
+    st.sessions = ws.running ? [{ id, kind: 'manager', title: 'Manager', open: true }] : [];
+    st.runs = { ...(st.runs || {}) };
+    if (ws.running) st.runs[id] = { running: true, helper: { state: 'idle' }, claim: { agent: 'agent:claude' } };
+    st.session_modes = modes();
+    st.rev = 'pm-' + calls.length + '-' + ws.top + '-' + ws.warned;
+    last = st;
+    return st;
+  };
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    route.fulfill({ response: res, json: st.unchanged && last ? dress({ ...last }) : dress(st) });
+  });
+  await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { lines: 8, age_ms: 0, sessions: ws.running ? [{
+    id, key: '', title: 'Manager', kind: 'manager', status: 'idle', word: 'Idle', detail: '', waiting_on: [], question: null, lines: [],
+    tool: 'Claude Code', model: null, mode: 'live', opened_at: null, open_seconds: null, idle_seconds: null, closes_in_seconds: null,
+    last_at: null, pinned: true, name: null }] : [] } }));
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (body.op !== 'session.new') return route.continue();
+    calls.push([body.args.kind, body.args.permissions || '']);
+    const m = body.args.permissions;
+    if (m && rank(m) > rank(ws.top)) return route.fulfill({ status: 422, body: 'Bypass permissions is not allowed in this workspace.' });
+    if (m) { ws.remembered = m; if (m === 'full') ws.warned = true; }
+    ws.running = m || ws.remembered;
+    route.fulfill({ json: dress({ ...last }) });
+  });
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.waitForSelector('#live-bar [data-lbar-new]', { timeout: 10000 });
+  const openMenu = async () => {
+    await page.click('#live-bar [data-lbar-new]');
+    await page.waitForSelector('#live-bar [data-key="lbar-perm"]', { timeout: 5000 });
+  };
+  // the New menu has the tool's four modes; nothing picked: the Manager says it starts in its own (Auto)
+  await openMenu();
+  const segs = await page.$$eval('#live-bar [data-lbar-perm]', els => els.map(el => el.innerText.trim()));
+  if (segs.join('|') !== 'Default|Accept edits|Auto|Bypass permissions') throw new Error(`the Permissions row has ${segs.join(', ')}`);
+  const mgr = () => page.textContent('#live-bar [data-lbar-kind="manager"]');
+  if (!/Auto/.test(await mgr())) throw new Error(`the Manager does not say its mode: ${await mgr()}`);
+  // Bypass permissions: one plain warning the first time, the Manager says it starts so
+  await page.click('#live-bar [data-lbar-perm="full"]');
+  await page.waitForSelector('#live-bar [data-key="lbar-perm-warn"]', { timeout: 3000 });
+  await extra('warning');
+  if (!/Bypass permissions/.test(await mgr())) throw new Error(`the Manager does not say Bypass permissions: ${await mgr()}`);
+  await page.click('#live-bar [data-lbar-kind="manager"]');
+  await page.waitForSelector(`#live-dock .live-pane[data-session="${id}"] [data-key="live-perm"]`, { timeout: 10000 });
+  if (JSON.stringify(calls[0]) !== '["manager","full"]') throw new Error(`the start sent ${JSON.stringify(calls[0])}`);
+  const line = () => page.textContent(`#live-dock .live-pane[data-session="${id}"] [data-key="live-perm"]`);
+  if ((await line()).trim() !== 'Permissions: Bypass permissions') throw new Error(`the pane says "${(await line()).trim()}"`);
+  await extra('pane');
+  // the pane goes on in another mode (the same conversation): Auto
+  await page.click(`#live-dock .live-pane[data-session="${id}"] [data-key="live-perm"]`);
+  await page.waitForSelector('#live-dock [data-key="live-perm-menu"]', { timeout: 3000 });
+  const now = await page.textContent('#live-dock [data-live-perm="full"]');
+  if (!/\(now\)/.test(now)) throw new Error(`the menu does not mark the mode in use: ${now}`);
+  await extra('pane-menu');
+  await page.click('#live-dock [data-live-perm="auto"]');
+  await page.waitForFunction(() => /Permissions: Auto$/.test(document.querySelector('#live-dock [data-key="live-perm"]')?.textContent.trim() || ''), null, { timeout: 5000 });
+  if (JSON.stringify(calls[1]) !== '["manager","auto"]') throw new Error(`the restart sent ${JSON.stringify(calls[1])}`);
+  // a workspace that does not allow Bypass permissions: the segment is off and says why
+  ws.top = 'auto'; ws.warned = false;
+  await page.reload();
+  await mainHasText(page);
+  await page.locator('#live-dock [data-key="live-min"]:visible').first().click().catch(() => {});
+  await page.waitForSelector('#live-bar [data-lbar-new]', { timeout: 10000 });
+  await openMenu();
+  const off = await page.$eval('#live-bar [data-lbar-perm="full"]', el => [el.disabled, el.title]);
+  if (!off[0] || !/Not allowed in this workspace/.test(off[1])) throw new Error(`Bypass permissions is not off: ${off}`);
+  await page.click('#live-bar [data-lbar-perm="edits"]');
+  await page.waitForSelector('#live-bar [data-lbar-perm="edits"][aria-pressed="true"]', { timeout: 3000 });
 }
 
 // Step 15. Sessions without a ticket (ORCH-364). The test dashboard has no orch to start helpers, so the step answers
@@ -1106,7 +1220,12 @@ async function focusButton(page, dash, width) {
   await page.waitForSelector(pane, { timeout: 5000 });
   if (!await page.$eval(`${pane} .key`, el => el.textContent.trim() === 'ORCH-189')) throw new Error('the pane does not show the ticket key');
   // from full screen too: Open ticket steps out of it so the ticket page shows
-  await page.click(`${pane} [data-key="live-full"]`);
+  // a compact pane (narrower than 1200 px, a phone) keeps Full screen in More (ORCH-463)
+  if (await page.$(`${pane} [data-key="live-full"]`)) await page.click(`${pane} [data-key="live-full"]`);
+  else {
+    await page.click(`${pane} [data-key="live-pane-more"]`);
+    await page.click('[data-key="live-more-menu"] [data-key="live-more-full"]');
+  }
   await page.waitForSelector('#live-dock[data-mode="full"]', { timeout: 5000 });
   await page.evaluate(() => { location.hash = '#home'; });
   await mainHasText(page);
@@ -1354,19 +1473,23 @@ async function zoom(page, dash, width) {
   if (!(await page.evaluate(p => document.querySelector(p).contains(document.activeElement), pane))) throw new Error('the keyboard did not move into the zoomed session');
   const docked = await page.$eval('#live-dock', el => el.dataset.mode);
   if (phone && docked !== 'bottom') throw new Error('a phone opened the session on the right');
-  await page.click(`${pane} [data-key="live-full"]`);
+  // a compact pane (narrower than 1200 px, a phone) keeps Full screen in More (ORCH-463)
+  if (await page.$(`${pane} [data-key="live-full"]`)) await page.click(`${pane} [data-key="live-full"]`);
+  else { await page.click(`${pane} [data-key="live-pane-more"]`); await page.click('[data-key="live-more-menu"] [data-key="live-more-full"]'); }
   await page.waitForSelector(`#live-dock[data-mode="full"] ${pane}`, { timeout: 5000 });
   if (!(await page.isVisible('#live-dock[data-mode="full"] #live-bar'))) throw new Error('full screen keeps no strip of the other sessions');
   await page.keyboard.press('Escape');
   await page.waitForSelector(`#live-dock[data-mode="${docked}"] ${pane}`, { timeout: 5000 });
-  await page.focus(`${pane} [data-key="live-full"]`);
+  await page.focus(`${pane} :is([data-key="live-full"], [data-key="live-pane-more"])`);
   await page.keyboard.press('Escape');
   await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
   if (!(await page.isVisible(tileOf('t_bar232')))) throw new Error('the wall is not back after Esc');
   // the picture: the zoomed session in full screen, as in draft D
   await page.click(`${tileOf('t_bar232')} [data-wall-open]`);
   await page.waitForSelector('#live-dock ' + pane, { timeout: 5000 });
-  await page.click(`${pane} [data-key="live-full"]`);
+  // a compact pane (narrower than 1200 px, a phone) keeps Full screen in More (ORCH-463)
+  if (await page.$(`${pane} [data-key="live-full"]`)) await page.click(`${pane} [data-key="live-full"]`);
+  else { await page.click(`${pane} [data-key="live-pane-more"]`); await page.click('[data-key="live-more-menu"] [data-key="live-more-full"]'); }
   await page.waitForSelector(`#live-dock[data-mode="full"] ${pane}`, { timeout: 5000 });
   await page.waitForTimeout(300);
   await noSideways(page);
@@ -1932,6 +2055,19 @@ const STEPS = [
       await ended(page, dash);
     },
     draft: { q: '?page=focus&cur=ORCH-235&view=zoom&ask=1' },
+  },
+  {
+    n: 33, pic: 'fd-33-permissions', area: 'sessions', title: 'Start the Manager in a chosen permission mode', feature: [6],
+    do: ['Open the New menu in the bar and pick Bypass permissions in its Permissions row.', 'Start the Manager.',
+      'In its pane press "Permissions: Bypass permissions" and pick Auto.', 'In a workspace that allows at most Auto, open the New menu.'],
+    see: ['The row shows the tool\'s modes: Default, Accept edits, Auto, Bypass permissions.',
+      'Bypass permissions shows one plain warning the first time; the Manager starts in it and its pane says "Permissions: Bypass permissions".',
+      'Auto ends the session and goes on with the same conversation; the pane says "Permissions: Auto".',
+      'Bypass permissions is off when the workspace does not allow it and says why.'],
+    async run({ page, dash, width }) {
+      await permModes(page, dash, width);
+    },
+    draft: { q: '?page=focus&menu=new' },
   },
 ];
 

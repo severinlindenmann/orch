@@ -12,8 +12,8 @@ const REPO = path.resolve(HERE, '../..');
 const TMP = process.env.WALK_TMP;
 const OUT = process.env.WALK_OUT || path.join(process.env.HOME, 'orch-dev/state/fresh-start-2026-11-04/walkthrough');
 const PT = process.env.E2E_PUBLISH_ADMIN_TOKEN, RT = process.env.E2E_RELAY_ADMIN_TOKEN;
-const PUB_ADMIN = process.env.PUB_ADMIN || 'http://100.71.130.135:8411';
-const REL_ADMIN = process.env.REL_ADMIN || 'http://100.71.130.135:8412';
+const PUB_ADMIN = process.env.PUB_ADMIN || 'http://hostinger-vps.nb.severin.io:8411';
+const REL_ADMIN = process.env.REL_ADMIN || 'http://hostinger-vps.nb.severin.io:8412';
 if (!TMP || !PT || !RT) { console.error('need WALK_TMP, E2E_PUBLISH_ADMIN_TOKEN, E2E_RELAY_ADMIN_TOKEN'); process.exit(2); }
 fs.mkdirSync(OUT, { recursive: true });
 for (const f of fs.readdirSync(OUT)) if (/^\d\d-.*\.png$/.test(f)) fs.rmSync(path.join(OUT, f)); // only this script's own screenshots

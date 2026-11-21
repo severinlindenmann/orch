@@ -228,8 +228,10 @@ def test_status_fields(root, monkeypatch, capsys):
     data = json.loads(capsys.readouterr().out)
     assert data["running"] is True and data["next_run"] == "2026-11-12T10:10:00Z"
     assert cli.main(["--dir", str(root), "status"]) == 0
+    from orch.net import when
+
     assert capsys.readouterr().out.startswith(
-        "Sync: local, every 5 minutes, running, next 2026-11-12T10:10:00Z."
+        f"Sync: local, every 5 minutes, running, next {when('2026-11-12T10:10:00Z')}."
     )
 
 
@@ -408,3 +410,26 @@ def test_view_keeps_the_saved_setting_when_the_status_cannot_be_read(root, capsy
         and "Nothing here was changed" in view["notice"]
     )
     assert view["button"] == {"label": "Try again", "action": {"op": "addon.refresh"}}
+
+
+def test_status_line_shows_local_time(monkeypatch):
+    import time
+
+    monkeypatch.setenv("TZ", "Europe/Zurich")
+    time.tzset()
+    try:
+        s = {
+            "mode": "on",
+            "interval": 5,
+            "running": True,
+            "next_run": "2026-11-19T20:32:31Z",
+            "last_ok": "2026-11-19T20:27:30.515811Z",
+            "paused": False,
+            "last_error": None,
+        }
+        line = cli.status_line(s)
+        assert "Z" not in line.replace("Zurich", "")
+        assert "21:32" in line and "21:27" in line
+    finally:
+        monkeypatch.undo()
+        time.tzset()

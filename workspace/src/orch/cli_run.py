@@ -479,7 +479,10 @@ def dispatch(args, root: Path) -> bool:
         )
     if sub == "list":  # read-only: no cleanup, no writes
         rows = runwatch.list_runs(root)
-        _out(args, {"runs": rows}, runwatch.list_text(rows))
+        line = tend.queue(
+            root
+        )  # tickets waiting for a free helper place (ORCH-1026: invisible during the move)
+        _out(args, {"runs": rows, "line": line}, runwatch.list_text(rows, line))
         return True
     if sub == "tend":  # the helper watcher's pass (ORCH-78): end, remind, start fresh, start the line
         # the watcher first, so a session at the idle limit gets its history line (or its fresh start)

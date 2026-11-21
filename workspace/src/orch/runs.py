@@ -29,7 +29,19 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import adapters, addons, brake, config, diag, history, procs, runhooks, services, tickets
+from orch import (
+    adapters,
+    addons,
+    brake,
+    config,
+    diag,
+    history,
+    procs,
+    runhooks,
+    services,
+    sessionmode,
+    tickets,
+)
 from orch.errors import Refused
 from orch.procs import pid_started, same_start
 
@@ -1426,7 +1438,11 @@ def plan(
         ticket = tickets.load(root, tid)
     name = agent or adapters.chosen(root)
     a = adapters.load(name, root)
-    person = adapters.person_for(name, root)  # the person's own tool config, read once for this start
+    # ORCH-818: the Manager, Empty and Chat helper start in the mode chosen for their kind (sessionmode.py);
+    # every other ticket in the workspace setting (None)
+    perm = sessionmode.for_ticket(root, ticket)
+    perm = sessionmode.tool_mode(name, perm, root) if perm else None
+    person = adapters.person_for(name, root, perm)  # the person's own tool config, read once for this start
     adapters.check_start_folder(name, root)
     items = undelivered(root, tid) if items is None else items
     fresh = fresh or prepare
@@ -1463,6 +1479,7 @@ def plan(
         "orch_hooks_file": hooks_file,
         "stream": mode == "oneshot",
         "person": person,
+        "permissions": perm,
         "workdir": str(workdir_for(root, read(root, tid), tid)),
     }
     argv = None
@@ -1517,7 +1534,7 @@ def plan(
         argv and binary and argv[0] == binary and not shutil.which(binary)
     ):  # not on the PATH of a clean start: use where it really is
         argv = [adapters.find_binary(binary) or binary, *argv[1:]]
-    perm_note = adapters.permission_note(name, root, None, person)
+    perm_note = adapters.permission_note(name, root, perm, person)
     return {
         "agent": name,
         "adapter": a["adapter"],
@@ -1533,6 +1550,7 @@ def plan(
         "fresh_why": cold_note,
         "note": " ".join(n for n in (cold_note, perm_note) if n) or None,
         "permission_note": perm_note,
+        "permissions": perm or config.permissions(root),
     }
 
 

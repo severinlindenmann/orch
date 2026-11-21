@@ -134,7 +134,8 @@ def _progress(t: dict) -> str:
 
 
 def _line(t: dict) -> str:
-    bits = [tickets.STATUS_WORDS[t["status"]]] + ([_progress(t)] if _progress(t) else [])
+    kind = ["Release"] if t.get("release") else ["Epic"] if t.get("epic") else []  # ORCH-906
+    bits = kind + [tickets.STATUS_WORDS[t["status"]]] + ([_progress(t)] if _progress(t) else [])
     if due := tickets.due_label(t.get("due"), t["status"]):
         bits.append(due)  # only a due with a time shows in the list; a day-only due stays as it was
     if quiet := tickets.quiet_label(t.get("quiet_since")):
@@ -251,7 +252,10 @@ def _show(t: dict, root: Path) -> str:
             if tickets.checks_split(t)[1] == 0
             else f"✓ All resolved · {_progress(t)}"
         )
-    out.append(f"Evidence: {tickets.proof_state(t, root)['line']}")
+    proof = tickets.proof_state(t, root)
+    failed = [c for c in t.get("checklist") or [] if proof["per_item"].get(c.get("id")) == "failed"]
+    named = "".join(f" ({c['id']}: {c.get('text', '')})" for c in failed[:3])
+    out.append(f"Evidence: {proof['line']}{named}")
     extra = [f"Owner: {t['owner']}"] if t.get("owner") else []
     if t.get("due"):
         extra.append(tickets.due_label(t["due"], t["status"]) or f"Due: {t['due']}")
@@ -276,6 +280,8 @@ def _show(t: dict, root: Path) -> str:
                 out.append(f"{label}: {t['outcome'][k]}")
     if t.get("release"):
         out.append("Release: the epics and tickets under it ship together")
+    elif t.get("epic"):  # ORCH-906: an epic says so too, as a release does
+        out.append("Epic: its sub-tickets are the work; a run goes through them in order")
     if t.get("parent"):
         p = _lookup(root, t["parent"])
         out.append(
@@ -440,6 +446,9 @@ class _Parser(argparse.ArgumentParser):
 
         m = re.search(r"invalid choice: '([^']*)'", message)
         if m:
+            if self.prog == "orch ticket status":  # a status is a value, not a command
+                names = ", ".join(tickets.STATUSES)
+                self.exit(2, f'"{m.group(1)}" is not a ticket status. Choose one of: {names}.\n')
             what = self.prog + " command" if self.prog != "orch" else "orch command"
             self.exit(2, f'"{m.group(1)}" is not an {what}. Run {self.prog} --help.\n')
         if self.prog in _EXAMPLES:
@@ -1190,7 +1199,7 @@ def run(args: argparse.Namespace) -> None:
             release=args.release,
             human_review=None if args.human_review is None else args.human_review == "yes",
         )
-        part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
+        part = f" (sub-ticket of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
             args,
             t,
@@ -1482,13 +1491,14 @@ def run(args: argparse.Namespace) -> None:
                 )
                 shorthand.append(json.dumps(attached))
         t, c = tickets.check_done(root, args.id, args.check, args.evidence + shorthand, by(), args.proves)
-        ev = c["evidence"][-1]
-        copied = args.file and tickets.proof_present(root, ev)
+        kept = c["evidence"][-len(args.file) :] if args.file else []  # the files of this call, in order
+        shown = kept or c["evidence"][-1:]
+        copied = [e for e in kept if tickets.proof_present(root, e)]
         _out(
             args,
             history.shown_item(root, t, "checklist", c),
-            f"Done: {c['text']} (evidence: {ev['ref']})"
-            + (f"\nEvidence copied: {ev['ref']} ({ev['text']})" if copied else ""),
+            f"Done: {c['text']} (evidence: {', '.join(e['ref'] for e in shown)})"
+            + "".join(f"\nEvidence copied: {e['ref']} ({e['text']})" for e in copied),
         )
     elif cmd == "log":
         t = tickets.log(root, args.id, args.text, by())
@@ -1999,6 +2009,8 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
         ):
             if argv[0] in addons.active(root) or argv[0] in addons.discover():
                 return addons.dispatch(root, argv[0], argv[1:])
+            if argv[0] in addons.SHIPPED_ADDONS:  # a shipped add-on that is off here: say how to turn it on
+                raise Refused(addons.not_on_message(root, argv[0]))
         args = parser.parse_args(argv)
         _resolve_keys(args, root)
         with diag.span(
