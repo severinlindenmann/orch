@@ -308,3 +308,24 @@ def test_a_stopped_service_shows_its_address_without_a_link_and_a_bad_port_shows
     by = {i["id"]: i for i in build(ws, (rows, 0, None))["blocks"][0]["groups"][0]["items"]}
     assert _facts(by["off"])["Address"] == {"label": "Address", "value": "http://127.0.0.1:5173"}
     assert "Address" not in _facts(by["odd"]) and "Address" not in _facts(by["big"])
+
+
+def test_a_plain_program_in_found_has_no_manage_button(ws):
+    # ORCH-934: adopt refuses a bare process, so the page must not draw a button that can only fail
+    from orch_services.view import build
+
+    found = [
+        {
+            "id": "process:4242",
+            "name": "Python http.server",
+            "running": True,
+            "what": "A program started by hand",
+        },
+        {"id": "old-test-page", "name": "Old test page", "running": True},
+    ]
+    view = build(ws, ([], 0, None), found=found)
+    assert not [e.message for e in validator(VIEW_SCHEMA).iter_errors(view)]
+    (group,) = view["blocks"][0]["groups"]
+    plain, entry = group["items"]
+    assert "buttons" not in plain["panel"] and plain["panel"]["facts"]
+    assert entry["panel"]["buttons"][0]["label"] == "Manage with orch"
