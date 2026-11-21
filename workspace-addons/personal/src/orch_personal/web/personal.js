@@ -467,7 +467,7 @@
     if (acts.childNodes.length) card.append(acts);
     return card;
   }
-  async function inboxPanel(part, id) {
+  async function inboxPanel(part, id, calm) {
     const panel = el('article', 'split-panel stack');
     panel.tabIndex = -1;
     let m;
@@ -490,7 +490,7 @@
     }
     m.drafts.forEach(d => panel.append(draftCard(part, d, m)));
     const acts = el('div', 'row');
-    acts.append(button('Use in a ticket', m.drafts.some(d => d.state === 'local') ? 'btn outline' : 'btn primary', () => openUse({id: m.id, title: m.title, part})));
+    acts.append(button('Use in a ticket', calm || m.drafts.some(d => d.state === 'local') ? 'btn outline' : 'btn primary', () => openUse({id: m.id, title: m.title, part})));
     if (m.link) acts.append(link(m.link, 'btn ghost', 'Open in ' + m.source));
     panel.append(acts);
     const side = el('div', 'card');
@@ -575,7 +575,9 @@
       rest.forEach(r => list.append(inboxRow(part, r, id, ready.has(r.id))));
     }
     list.append(el('div', 'pad', check));
-    split.append(list, id ? await inboxPanel(part, id) : el('div', 'split-panel muted', 'Pick a ' + I.noun + ' to read it.'));
+    // one filled button per screen: a Try again above keeps Use in a ticket outlined
+    const calm = d.sources.some(s => s.on && (s.status === 'stopped' || s.status === 'permission'));
+    split.append(list, id ? await inboxPanel(part, id, calm) : el('div', 'split-panel muted', 'Pick a ' + I.noun + ' to read it.'));
     out.push(split, sourcesCard(part, d), inboxRulesCard(part, d), foot);
     return out;
   }
