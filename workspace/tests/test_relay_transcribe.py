@@ -69,3 +69,13 @@ def test_refused_before_anything_is_sent(proj, run, rel, audio, mime, status):
 def test_not_connected_is_refused(proj):
     with pytest.raises(Refused, match="not connected to a relay"):
         relay.transcribe(proj, WEBM, "audio/webm")
+
+
+def test_a_recording_holding_a_secret_is_refused_and_not_sent(proj, run, rel):
+    """R5.2: the recording is scanned before it leaves; a secret in it stops the upload and is not echoed."""
+    connect(run, rel)
+    token = "ghp_" + "A1b2C3d4E5" * 3  # built at run time, so the repo holds no token-shaped literal
+    before = len(rel.calls)
+    with pytest.raises(Refused) as e:
+        relay.transcribe(proj, WEBM + token.encode(), "audio/webm")
+    assert len(rel.calls) == before and token not in str(e.value)
