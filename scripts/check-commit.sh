@@ -6,6 +6,8 @@
 #     does not have it yet, then checked out detached. The shared clone is only read.
 #   - Home: env -i with HOME and ORCH_HOME in the temp folder under ~/.orch-test, ORCH_HOME_STRICT=1, so nothing reaches
 #     the real ~/.orch-tool; the real uv and npm caches are shared (a fresh cache re-downloads gigabytes per run).
+#     ORCH_TEST_GUARD_ONLY points the test suites' real-home guard at the throwaway home: the production orch on this
+#     Mac writes the real ~/.orch-tool during every run, which failed every green group (ORCH-1180).
 #   - Command: the words after `--`, else $CHECK_CMD, else the copy's scripts/ci_light.py (run through uv) against $BASE (default origin/develop).
 #     It runs in the copy.
 #   Exit: the command's exit code; 2 when the commit cannot be found or the copy cannot be made.
@@ -55,7 +57,7 @@ if [ $# -gt 0 ]; then cmd=("$@"); elif [ -n "${CHECK_CMD:-}" ]; then cmd=(sh -c 
   cmd=(uv run -q --no-project --python '>=3.11' --with pytest python scripts/ci_light.py --base "${BASE:-origin/develop}")
 fi
 echo "check-commit: $sha in $COPY"
-(cd "$COPY" && env -i HOME="$THOME" PATH="$PATH" ORCH_HOME="$THOME/.orch-tool" ORCH_HOME_STRICT=1 \
+(cd "$COPY" && env -i HOME="$THOME" PATH="$PATH" ORCH_HOME="$THOME/.orch-tool" ORCH_HOME_STRICT=1 ORCH_TEST_GUARD_ONLY="$THOME" \
   UV_CACHE_DIR="$REAL_HOME/.cache/uv" npm_config_cache="$REAL_HOME/.npm" XDG_CACHE_HOME="$THOME/.cache" \
   LANG="${LANG:-en_US.UTF-8}" REAL_HOME="$REAL_HOME" \
   RUSTUP_HOME="${RUSTUP_HOME:-$REAL_HOME/.rustup}" CARGO_HOME="${CARGO_HOME:-$REAL_HOME/.cargo}" \
