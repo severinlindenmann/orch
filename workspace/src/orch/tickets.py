@@ -3956,6 +3956,8 @@ def answer(
         ownerpick.refuse_card(q, person and str(by).startswith("human:"))
         if decision is None and isinstance(q.get("action"), dict) and "merge" in q["action"]:
             raise Refused(f"{qid} merges a pull request: answer it on the card (Merge or Not now).")
+        if isinstance(q.get("action"), dict) and "add_workspace" in q["action"] and not person_click:
+            raise Refused(f"{qid} adds a workspace to the chat: only the person answers it (Add or Not now).")
         if expected_question_digest is not None and (
             expected_question_digest == QUESTION_UNENCODABLE or question_digest(q) != expected_question_digest
         ):
@@ -3980,7 +3982,13 @@ def answer(
                 _mark_wont_do(ticket, q["check"], by, f"Answered yes to {qid}")
         return q
 
-    return apply_op(root, tid, op, by=by, person_click=person_click)
+    res = apply_op(root, tid, op, by=by, person_click=person_click)
+    q = res[1] if isinstance(res, tuple) else res
+    if isinstance(q, dict) and isinstance(q.get("action"), dict) and "add_workspace" in q["action"]:
+        from orch import chat_groups  # the person's Add on an ask-to-add card adds the workspace
+
+        chat_groups.add_from_answer(root, tid, q, by)
+    return res
 
 
 def mark_question_sent(root: Path, tid: str, qid: str, by: str = "orch") -> None:

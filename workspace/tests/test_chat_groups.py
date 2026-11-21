@@ -2522,7 +2522,7 @@ def test_an_agent_cannot_add_back_a_member_a_person_removed(proj, run, rel, host
         assert run("relay", "group", "remove", host, "Home")[0] == 0
     monkeypatch.setenv("CLAUDECODE", "1")  # an agent session, no terminal
     code, _, err = run("relay", "group", "add", host, "Home")
-    assert code != 0 and "Only a human" in err
+    assert code != 0 and "ask-add" in err  # a helper never adds (Team chat 2.3), a removed member neither
     code, _, err = run("relay", "delegate", "Home", "Sneaky", "--text", "x", "--ticket", host, "--group")
     assert not [m for m in sent(rel, type="delegate") if "group" in m["body"]]
 
