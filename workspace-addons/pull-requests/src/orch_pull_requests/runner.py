@@ -21,15 +21,21 @@ branch, in line order:
   its pull requests go back to the front without a try used, to run again from the base branch. Nothing that runs
   alone, is proved for a person or comes from a fork goes on top of another group, and nothing does while the
   base branch is red.
-- a red group is closed and split by what failed (blame.py, ORCH-558): the members whose files share the most
-  words with the failed checks' names are the suspects; the others run again together first (they merge on
-  green), the suspects after. When that tells nobody apart it is split in halves. So one bad pull request in a
+- its own checks first (ORCH-1377): an entry whose own checks still run waits in line in its place and holds up
+  nobody; a red own check is run again ONCE per head by the queue; red again, it leaves the queue with the failed
+  check and its first failing test.
+- a red group is closed and split by what failed (blame.py, ORCH-558, ORCH-1377): the members that change a
+  failing test file or a module the failing suites import are the suspects, else those whose files share the most
+  words with the failed tests and checks; the suspects are checked first (one alone), the others after. When
+  that tells nobody apart it is split in halves. A member waiting for its part may leave with `queue remove`. So one bad pull request in a
   group of 10 that touches the failing area costs two more runs, not about four. A red group of one leaves the
   queue. A member left alone by the split is never merged on its own light checks, whatever `merge_alone` says
   (ORCH-909): it runs in a group of its own on top of the base, so the check that failed runs on it.
 - a change to CI or to the queue itself (settings.alone_paths) runs alone in its own group: its green run is the
   proof before it counts. One a person merges (a Merge card, or a CI workflow change GitHub holds for the
-  code owner) is only checked: on green its head gets the mark and the person merges it with the Merge card.
+  code owner) is only checked: on green its head gets the mark and the person merges it with the Merge card,
+  made on its ticket also when the ticket is Done (it opens again as Waiting). A lone one takes a scheduled turn,
+  at most one round in three (LONE_EVERY), so the groups behind it go on meanwhile (ORCH-1377).
 - a pull request from a fork is never put on a branch of the repository: it leaves the queue, a person merges it.
 - fixes go first (`--first`, or a red-run ticket of the release keeper, ORCH-1023), on a green base branch too:
   a red release waits for its fix, so the fix must not wait behind the whole line.
@@ -77,6 +83,8 @@ RED_PAUSE_SECS = 300  # an entry that waits for the fix of a red base branch is 
 RED_LOOK_SECS = 60  # how long one look at the base branch's last push run is used
 SILENT_SECS = 1800  # a login lookup without an answer this long: the runner stops (the next add starts one)
 TIDY_TRIES = 5  # failed deletes of one group branch before it is left to a person
+LONE_EVERY = 3  # a pull request that runs alone takes at most one round in this many while groups wait
+LONE_TURN = "runs alone: waits for its turn (at most one round in three), the groups behind it go on"
 BY = "agent:merge-queue"
 NO_ROOM = "this computer's GitHub write limit had no room for the group"
 # what a look at one pull request found
@@ -138,9 +146,11 @@ class Runner:
         self.me: str | None = None
         self.red_checks: frozenset[str] = frozenset()  # failed check names of the last red group
         self.red_tests: list[str] = []  # the test files its failed jobs' logs name (blame.py)
+        self.red_sha = ""  # the commit of the last red group (its failed tests' imports, ORCH-1377)
         self._red: dict[tuple[str, str], tuple[float, frozenset[str]]] = {}
         self._ahead: Lead | None = None  # set while a group is built and checked on top of a running one
         self._live: set[str] = set()  # group branches whose checks run now: tidy leaves them alone
+        self._since_lone = LONE_EVERY - 1  # rounds since a lone pull request had its turn (due at the start)
 
     def take(self, kind: str, what: str = "") -> bool:
         """A slot of this computer's GitHub write limit. While it waits for room, the running entries say so
@@ -207,6 +217,7 @@ class Runner:
                     self.sleep(min(min(later) - self.clock(), PAUSE_SECS) + 1)
                 continue
             rounds += 1
+            self._since_lone = 0 if batch[0].get("lone") else self._since_lone + 1
             try:
                 self.process(batch)
             except Exception as e:  # noqa: BLE001 - never leave entries 'running' behind a crash
@@ -329,6 +340,7 @@ class Runner:
             return []
         bases = settings.bases(self.root)
         repo, base, batch, unseen, answered = rows[0]["repo"], None, [], [], False
+        held = None  # a lone pull request whose turn has not come (ORCH-1377)
         guess = str(rows[0].get("base") or "")  # the base seen at add time; checked again below
         red = self.red_base(repo, guess)
         if red and follow is not None:  # a red base branch: one at a time, nothing on top of another group
@@ -356,16 +368,18 @@ class Runner:
             b = v.get("baseRefName") or ""
             if base and b != base:
                 continue
-            failed = self.failed_checks(r["url"])
-            if failed:
-                if self.base_to_blame(repo, b, r["url"], [r], failed):
-                    continue
-                line = f"Checks of {r['url']} failed: fix them, push, then add it to the merge queue again."
-                self.finish(r, OUT, line, "checks failed")
+            if not self.own_checks_ready(r, v, repo, b):
                 continue
             proof = carded or owner_change(v)
             lone = self.lone_reason(v, proof)
             if lone and batch:  # it runs in a group of its own, in a later round
+                continue
+            if lone and not (self.is_fix(r) or self._since_lone >= LONE_EVERY - 1):
+                # not its turn (ORCH-1377): the groups behind it go on; it is taken when nothing else can run
+                if follow is None and held is None:
+                    held = (r, v, b, proof, lone)
+                if r.get("why") != LONE_TURN:
+                    store.set_state(self.root, r["url"], WAITING, LONE_TURN)
                 continue
             if follow is not None and (lone or v.get("isCrossRepository") or b != follow.base):
                 if not batch:  # first in line: stack no group past it, or it waits as long as one runs
@@ -377,16 +391,93 @@ class Runner:
             if not base and b != guess:  # moved to another base branch since it was added: that one counts
                 most = 1 if self.red_base(repo, b) else size
             base = base or b
-            r.update(
-                base=b, head=v["headRefOid"], fork=bool(v.get("isCrossRepository")),
-                title=str(v.get("title") or "")[:200], closes=_closes(r["repo"], v), proof=proof, lone=lone,
-            )  # fmt: skip
-            batch.append(r)
+            batch.append(_taken(r, v, b, proof, lone))
+        if not batch and held is not None:  # only lone ones could run: no round is left empty for a turn
+            batch.append(_taken(*held))
         if unseen and not answered:  # GitHub showed none of them: does it answer at all?
             answered = self.gh.login() is not None
         for r, line in unseen:  # no answer from GitHub at all: an outage, which uses up no tries
             self.retry([r], line, count=answered)
         return store.claim(self.root, batch)
+
+    # -- its own checks (ORCH-1377) -------------------------------------------------------------------------
+    def own_checks_ready(self, r: dict, v: dict, repo: str, base: str) -> bool:
+        """May the entry be taken now, by its own checks? Still running: it waits in line, keeps its place and
+        holds up nobody. Red once they all ended: the queue runs the failed jobs again ONCE per head; red again
+        (or the rerun was refused): it leaves the queue with the failed check and its first failing test.
+        Red only in what the base branch is red in: not blamed (base_to_blame). False: not taken this round."""
+        u, head = r["url"], str(v.get("headRefOid") or "")
+        look = getattr(self.gh, "own_checks", None)
+        got = look(u) if look is not None else None
+        if got is None:  # GitHub did not answer that read (or an older GitHub part): the failed names only
+            rows, pending = [{"name": n, "link": ""} for n in sorted(self.failed_checks(u))], []
+        else:
+            rows, pending = list(got.get("failed") or []), list(got.get("pending") or [])
+        failed = frozenset(str(x.get("name") or "") for x in rows)
+        again = bool(head) and r.get("rerun_head") == head  # its failed jobs ran once more already
+        if failed and self.base_to_blame(repo, base, u, [r], failed):
+            return False
+        if pending and not (failed and again):
+            why = "its own checks are still running"
+            if failed:
+                why += f" ({_names(failed)} failed: run again once the others end)"
+            self._hold(r, why + "; it keeps its place and the others go on")
+            return False
+        if not failed:
+            return True
+        if not again:
+            reran = self.rerun_own(repo, u, rows)
+            if reran is None:
+                self._hold(
+                    r, f"{_names(failed)} failed; waits for room in the write limit to run it again once"
+                )
+                return False
+            if reran:
+                why = f"its own check {_names(failed)} failed; the merge queue runs it again once"
+                store.set_state(
+                    self.root, u, WAITING, why, rerun_head=head, not_before=self.clock() + PAUSE_SECS
+                )
+                self.log(f"{u}: {why}.")
+                return False
+        first = next((x for x in rows if x.get("link")), rows[0])
+        find = getattr(self.gh, "first_failure", None)
+        test = ""
+        if find is not None and first.get("link"):
+            try:
+                test = str(find(first["link"]) or "")
+            except Exception:  # noqa: BLE001 - a log GitHub would not give: the check name alone
+                test = ""
+        line = f"Checks of {u} failed{' again after one rerun' if again else ''}: {_names(failed)}"
+        if test:
+            line += f"; first failing test: {test}"
+        self.finish(dict(r, head=head or None), OUT, line + ". Fix it, push, then add it to the merge queue again.",
+                    "checks failed")  # fmt: skip
+        return False
+
+    def _hold(self, r: dict, why: str) -> None:
+        """Waiting, in its place, looked at again after a pause; no try used."""
+        store.set_state(self.root, r["url"], WAITING, why, not_before=self.clock() + PAUSE_SECS)
+
+    def rerun_own(self, repo: str, url: str, rows: list[dict]) -> bool | None:
+        """Run the failed jobs of a pull request's own checks again, once per workflow run (a GitHub write: a
+        slot first). True: at least one rerun started; False: none could (no job link, GitHub refused, or no
+        rerun here); None: no room in the write limit now."""
+        from .checks import JOB_URL
+
+        rerun = getattr(self.gh, "rerun_failed", None)
+        if rerun is None:
+            return False
+        runs = []
+        for x in rows:
+            m = JOB_URL.match(str(x.get("link") or ""))
+            if m and m[1].lower() == repo.lower() and m[2] not in runs:
+                runs.append(m[2])
+        ok = False
+        for run in runs:
+            if not self.take("other", f"{repo} rerun {run} of {url}"):
+                return None if not ok else True
+            ok = bool(rerun(repo, int(run))) or ok
+        return ok
 
     def lone_reason(self, v: dict, proof: bool) -> str:
         """Why the pull request runs alone in a group of its own ('' when it may join others): a person merges
@@ -523,16 +614,17 @@ class Runner:
         if len(batch) == 1:
             self.alone(batch[0])
             return
-        self.red_checks, self.red_tests = frozenset(), []
+        self.red_checks, self.red_tests, self.red_sha = frozenset(), [], ""
         red = self.group(batch)
         if len(red) > 1:
             for part in self.split(red, self.red_checks, self.red_tests):
-                left = [e for e in part if _state(self.root, e["url"]) == RUNNING]
+                now = store.start_part(self.root, [e["url"] for e in part])  # taken out meanwhile: left out
+                left = [e for e in part if e["url"] in now]
                 if len(left) == 1:  # group() looks at members again; one alone is looked at here
                     left = self.check_members(left, left[0]["base"])
                 if left:
                     self.process([dict(e, red=True) for e in left])
-        elif red:
+        elif red and store.start_part(self.root, [red[0]["url"]]):
             self.alone(dict(red[0], red=True))
 
     def split(
@@ -545,19 +637,34 @@ class Runner:
             v = self.gh.pr(e["url"]) or {}
             files = v.get("files") if isinstance(v.get("files"), list) else []
             members.append((e["url"], [str(f.get("path") or "") for f in files if isinstance(f, dict)]))
-        bad = set(blame.suspects(failed, members, tests or ()))
+        bad = set(blame.suspects(failed, members, tests or (), self.test_sources(red, tests or [])))
         if bad:
             rest = [e for e in red if e["url"] not in bad]
             sus = [e for e in red if e["url"] in bad]
             what = _names(failed) + (f" ({', '.join(tests[:3])})" if tests else "")
             self.log(
                 f"The group was red in {what}: " + ", ".join(f"#{e['number']}" for e in sus)
-                + f" touch that; the other {len(rest)} run again first."
+                + f" touch that and run {'alone ' if len(sus) == 1 else ''}first; the other {len(rest)} after."
             )  # fmt: skip
-            return [rest, sus]
+            return [
+                sus,
+                rest,
+            ]  # the suspect first (ORCH-1377): red alone it leaves, and the others run together
         half = (len(red) + 1) // 2
         self.log(f"The group was red: splitting it into {half} and {len(red) - half}.")
         return [red[:half], red[half:]]
+
+    def test_sources(self, red: list[dict], tests: list[str]) -> dict[str, str]:
+        """{path: text} of the failed test files in the red group's commit (for their imports); {} when unknown."""
+        sha = self.red_sha
+        if not (tests and sha and red):
+            return {}
+        try:
+            git = self.make_git(red[0]["repo"])
+            read = getattr(git, "sources", None)
+            return dict(read(sha, list(tests))) if read is not None else {}
+        except Exception:  # noqa: BLE001 - not readable: the words decide, as before
+            return {}
 
     # -- one pull request --------------------------------------------------------------------------------
     def alone(self, e: dict, why: str = "") -> None:
@@ -857,9 +964,10 @@ class Runner:
                 self.red_tests = list(tests(url)) if tests and len(inside) > 1 else []
             except Exception:  # noqa: BLE001 - a log GitHub would not give: blame by the check names alone
                 self.red_tests = []
+            self.red_sha = sha
             for e in inside:
                 why = f"its group {url} was red; checked in a smaller group"
-                store.set_state(self.root, e["url"], RUNNING, why, group=None)
+                store.set_state(self.root, e["url"], RUNNING, why, group=None, split=True)
             return inside
         self.retry(inside, f"the group {url} was not merged: {o.line}")
         return []
@@ -915,7 +1023,12 @@ class Runner:
             return []
         for e in inside:
             store.set_state(
-                self.root, e["url"], RUNNING, f"{what} was red; checked in a smaller group", group=None
+                self.root,
+                e["url"],
+                RUNNING,
+                f"{what} was red; checked in a smaller group",
+                group=None,
+                split=True,
             )
         return inside
 
@@ -973,6 +1086,7 @@ class Runner:
         if not batch:
             return
         self.log(f"Next group on top of {lead.url}: " + ", ".join(f"#{e['number']}" for e in batch))
+        self._since_lone += 1  # a round of its own for the lone ones' turn
         self._ahead = lead
         try:
             self.group(batch)
@@ -1019,19 +1133,23 @@ class Runner:
         if o.status == "checks failed" and not unknown:
             if self.base_to_blame(repo, base, url, [e]):
                 return []
-            store.set_state(self.root, e["url"], RUNNING, f"its group {url} was red", group=None)
+            store.set_state(self.root, e["url"], RUNNING, f"its group {url} was red", group=None, split=True)
             return [e]
         self.retry([e], f"the group {url} gave no verdict: {o.line}")
         return []
 
     def owner_card(self, e: dict) -> str:
         """Who merges a proved pull request, making the Merge card on its ticket when there is none yet."""
-        card = (merge_cards(self.root) or {}).get(pr_key(e["url"]))
+        card, why = (merge_cards(self.root) or {}).get(pr_key(e["url"])), ""
         if not card and e.get("ticket"):
-            card = self.ask(self.root, e["ticket"], e["url"])
-        return (
-            f"a person merges it with the Merge card on {card}." if card else "a person merges it on GitHub."
-        )
+            try:  # a Done ticket is opened again for it (ORCH-1377): the card is the only way it gets merged
+                card = self.ask(self.root, e["ticket"], e["url"])
+            except Exception as x:  # noqa: BLE001 - said in the line, never silently
+                why = " ".join(str(x).split())[:160] or x.__class__.__name__
+                self.log(f"The Merge card for {e['url']} was not made: {why}")
+        if card:
+            return f"a person merges it with the Merge card on {card}."
+        return "a person merges it on GitHub" + (f" (no Merge card: {why})." if why else ".")
 
     def _merged(self, url: str) -> dict | None:
         """The pull request once GitHub marked it merged, else as seen last (None: never seen)."""
@@ -1180,6 +1298,15 @@ class _Trouble:
         return f"the wait for {self.url} broke ({self.error.__class__.__name__}: {str(self.error)[:120]})"
 
 
+def _taken(r: dict, v: dict, b: str, proof: bool, lone: str) -> dict:
+    """The entry as the batch takes it: what GitHub showed now."""
+    r.update(
+        base=b, head=v["headRefOid"], fork=bool(v.get("isCrossRepository")),
+        title=str(v.get("title") or "")[:200], closes=_closes(r["repo"], v), proof=proof, lone=lone,
+    )  # fmt: skip
+    return r
+
+
 def _names(jobs) -> str:
     names = sorted(str(j) for j in jobs)
     return ", ".join(names[:4]) + (f" and {len(names) - 4} more" if len(names) > 4 else "")
@@ -1224,21 +1351,46 @@ def owner_change(v: dict) -> bool:
 
 
 def _ask_merge(root: Path, tid: str, url: str) -> str | None:
-    """Make the owner's Merge card for a proved pull request on its ticket; the ticket key, or None."""
-    try:
-        from orch import cli as core
-        from orch import cli_review, tickets
+    """Make the owner's Merge card for a proved pull request on its ticket; the ticket key. A Done ticket is
+    opened again (Waiting) first: an agent may not change a closed ticket, and without the card nobody merges
+    the pull request (#1491, #1941 on 21 Nov). Raises with the reason when the card could not be made."""
+    from orch import tickets
 
-        t = tickets.load(root, tid)
-        key = str(t.get("key") or t["id"])
-        ns = core.build_parser().parse_args(
-            ["ask", t["id"], f"Merge the CI change of {key}? It was checked green in its own queue group.",
-             "--link", "CI change", "--open", url, "--merge", "--then", "It is merged on GitHub with your own login."]
-        )  # fmt: skip
-        cli_review.ask_card(ns, root, t["id"], BY)
-        return key
-    except Exception:  # noqa: BLE001 - no card: the line says a person merges it on GitHub
-        return None
+    t = tickets.load(root, tid)
+    if t.get("status") == "done":
+        _reopen_for_card(root, t["id"], url)
+    key = str(t.get("key") or t["id"])
+    _make_card(root, t["id"], key, url)
+    return key
+
+
+def _make_card(root: Path, tid: str, key: str, url: str) -> None:
+    from orch import cli as core
+    from orch import cli_review
+
+    ns = core.build_parser().parse_args(
+        ["ask", tid, f"Merge the CI change of {key}? It was checked green in its own queue group.",
+         "--link", "CI change", "--open", url, "--merge", "--then", "It is merged on GitHub with your own login."]
+    )  # fmt: skip
+    cli_review.ask_card(ns, root, tid, BY)
+
+
+def _reopen_for_card(root: Path, tid: str, url: str) -> None:
+    """Done -> Waiting, only for the queue's own Merge card (the closed-ticket guard lets exactly this through)."""
+    from orch import tickets
+
+    def op(t):
+        if t.get("status") != "done":
+            return tickets.NO_WRITE
+        t["status"] = "waiting"
+        t["waiting_on"] = None
+        tickets.add_history(
+            t,
+            BY,
+            f"Status done -> waiting: {url} was checked green alone; a person merges it with the Merge card",
+        )
+
+    tickets.apply_op(root, tid, op, by=BY, closed_ok=lambda t: t.get("status") == "done")
 
 
 def wake_text(e: dict, line: str) -> str:

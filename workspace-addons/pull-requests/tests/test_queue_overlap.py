@@ -151,3 +151,25 @@ def test_the_list_line_says_why_the_lone_one_waits(ws, world, monkeypatch):
     rows = {x["number"]: x for x in store.read(ws)}
     assert rows[3]["state"] == "waiting" and rows[3]["why"].startswith("first in line: waits until")
     assert rows[4]["state"] == "waiting"  # not stacked past it
+
+
+def test_a_lone_pull_request_not_due_lets_the_next_group_go_on_top(ws, world, monkeypatch):
+    """ORCH-1377: a lone one whose turn has not come (it ran within the last two rounds) no longer stops every
+    group on top; once due (test above) it stops the stacking and runs next, alone on top of develop."""
+    real = runner.Runner.lone_reason
+    monkeypatch.setattr(
+        runner.Runner,
+        "lone_reason",
+        lambda self, v, proof: "it changes CI" if v.get("number") == 3 else real(self, v, proof),
+    )
+    add(ws, 3, 4)
+    r = make(ws, world)
+    r.sign_in()
+    r._since_lone = 0
+    repo = store.read(ws)[0]["repo"]
+    lead = runner.Lead(
+        repo=repo, base="develop", url="https://github.com/o/r/pull/99", sha="0" * 40, done=threading.Event()
+    )
+    assert [e["number"] for e in r.next_batch(follow=lead)] == [4]
+    rows = {x["number"]: x for x in store.read(ws)}
+    assert rows[3]["state"] == "waiting" and rows[3]["why"] == runner.LONE_TURN
