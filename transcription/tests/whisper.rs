@@ -149,7 +149,8 @@ async fn an_encrypted_job_gives_an_encrypted_transcript_with_times() {
         .to_string();
     tokio::spawn(orch_transcription::jobs::worker(h.app.clone()));
     let mut out = vec![];
-    for _ in 0..600 {
+    // GitHub's 2-core machines need far longer than a laptop (one run took over 30 s): wait up to 3 minutes
+    for _ in 0..1800 {
         let (s, b) = h
             .call(
                 "GET",
@@ -163,7 +164,22 @@ async fn an_encrypted_job_gives_an_encrypted_transcript_with_times() {
             out = b;
             break;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    if out.is_empty() {
+        let (_, b) = h
+            .call(
+                "GET",
+                &format!("/v1/jobs/{id}"),
+                Some(&h.token),
+                &[],
+                vec![],
+            )
+            .await;
+        panic!(
+            "no result after 3 minutes; job: {}",
+            String::from_utf8_lossy(&b)
+        );
     }
     let (_, body) =
         opf1::open(&opf1::result_key(&key), &out).expect("result opens with the result key");
