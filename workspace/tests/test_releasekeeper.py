@@ -1918,3 +1918,112 @@ def test_a_refused_red_ticket_is_tried_again_next_pass(tmp_path, capsys):
     assert tickets_of(out) and "ci.yml" not in out["state"]["after_merge"]
     again = go(tmp_path, capsys, state=out["state"], runs=red_runs(attempt=2), jobs=jobs)
     assert tickets_of(again) and again["state"]["after_merge"]["ci.yml"]["ticket"] == "t_sim"
+
+
+# ---- a job that only hit its time limit runs once more (ORCH-1050)
+
+WIN12 = "workspace / test (macos-latest, 3/5)"  # windows parts are known red in KNOWN
+
+
+def _timeout_jobs(conclusion="cancelled"):
+    return {
+        "77": [
+            {**job(WIN12, conclusion), "databaseId": 501},
+            {**job("workspace / test (ubuntu-latest, 1/2)"), "databaseId": 502},
+        ]
+    }
+
+
+def _red_ci_runs():
+    return {
+        "ci.yml": [run(DEV, "workflow_dispatch", "cancelled", rid=77)],
+        "e2e.yml": [run(DEV, "workflow_dispatch")],
+    }
+
+
+def test_a_run_red_only_by_a_time_limit_runs_again_once(tmp_path, capsys):
+    out = go(
+        tmp_path,
+        capsys,
+        state={"release": in_testing()},
+        runs=_red_ci_runs(),
+        jobs=_timeout_jobs(),
+        time_limit=[501],
+        passed_log=[501],
+    )
+    assert out["did"] == ["rerun:77"]
+    assert out["state"]["release"]["phase"] == "testing" and out["state"]["release"]["retried"] == ["77"]
+    assert "time limit" in out["lines"][-1]
+    again = go(
+        tmp_path,
+        capsys,
+        state=out["state"],
+        runs=_red_ci_runs(),
+        jobs=_timeout_jobs(),
+        time_limit=[501],
+        passed_log=[501],
+    )
+    assert again["did"] == ["ticket:ci run is red on develop (release 31 blocked)"]  # the second time is real
+
+
+def test_a_time_limit_with_a_failed_test_is_not_run_again(tmp_path, capsys):
+    out = go(
+        tmp_path,
+        capsys,
+        state={"release": in_testing()},
+        runs=_red_ci_runs(),
+        jobs=_timeout_jobs(),
+        time_limit=[501],
+        passed_log=[],
+    )
+    assert out["did"] == ["ticket:ci run is red on develop (release 31 blocked)"]
+
+
+def test_a_time_limit_next_to_a_real_red_is_not_run_again(tmp_path, capsys):
+    jobs = {
+        "77": [
+            {**job(WIN12, "cancelled"), "databaseId": 501},
+            {**job("mobile / test", "failure"), "databaseId": 503},
+        ]
+    }
+    out = go(
+        tmp_path,
+        capsys,
+        state={"release": in_testing()},
+        runs=_red_ci_runs(),
+        jobs=jobs,
+        time_limit=[501],
+        passed_log=[501],
+    )
+    assert not any(d.startswith("rerun:") for d in out["did"])
+
+
+@pytest.mark.parametrize(
+    "log,passed",
+    [
+        ("2026-11-20T08:50:00Z 438 passed, 62 skipped in 876.38s (0:14:36)\n", True),
+        (
+            "2026-11-20T08:50:00Z FAILED tests/test_x.py::test_y - assert 1\n1 failed, 3 passed in 9.1s\n",
+            False,
+        ),
+        ("2026-11-20T08:50:00Z 3 passed, 2 errors in 3.0s\n", False),
+        (
+            "2026-11-20T08:50:00Z ....F....\n",
+            False,
+        ),  # stopped before the closing line: -q shows a failure as F
+        ("", False),
+    ],
+)
+def test_all_passed_needs_the_closing_line_without_a_failure(tmp_path, monkeypatch, log, passed):
+    w = rk.World(None, cfg(tmp_path))
+    monkeypatch.setattr(w, "_run", lambda argv, **k: subprocess.CompletedProcess(argv, 0, log, ""))
+    assert w.all_passed(601) is passed
+
+
+def test_hit_time_limit_reads_github_s_annotation(tmp_path, monkeypatch):
+    w = rk.World(None, cfg(tmp_path))
+    msg = "The job running on runner GitHub Actions 12 has exceeded the maximum execution time of 15 minutes."
+    monkeypatch.setattr(w, "_gh_json", lambda args: [{"message": msg}])
+    assert w.hit_time_limit(601) is True
+    monkeypatch.setattr(w, "_gh_json", lambda args: [{"message": "Process completed with exit code 1."}])
+    assert w.hit_time_limit(601) is False
