@@ -95,19 +95,22 @@ def _fhash(filters: dict) -> str:
     return hashlib.sha256(json.dumps(filters, sort_keys=True).encode()).hexdigest()[:12]
 
 
-def _encode(offset: int, fh: str) -> str:
-    return base64.urlsafe_b64encode(json.dumps({"o": offset, "f": fh}).encode()).decode().rstrip("=")
+def _encode(offset: int, fh: str, lo: float, hi: float) -> str:
+    """The next page: where it starts, which question it belongs to and the window the first page read (a
+    window that ends "now" would move with every second; the next page reads the same events)."""
+    raw = {"o": offset, "f": fh, "lo": int(lo), "hi": int(hi)}
+    return base64.urlsafe_b64encode(json.dumps(raw).encode()).decode().rstrip("=")
 
 
-def _decode(token: str, fh: str) -> int:
+def _decode(token: str, fh: str) -> tuple[int, float, float]:
     try:
         raw = json.loads(base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)))
-        o, f = int(raw["o"]), raw["f"]
+        o, f, lo, hi = int(raw["o"]), raw["f"], int(raw["lo"]), int(raw["hi"])
     except (ValueError, KeyError, TypeError):
         raise Refused("That page token is not valid. Start again without --page.") from None
-    if f != fh or o < 0:
+    if f != fh or o < 0 or lo > hi:
         raise Refused("That page token belongs to another question. Start again without --page.")
-    return o
+    return o, lo, hi
 
 
 def query(
@@ -131,9 +134,11 @@ def query(
     if lvl is not None and lvl not in diag.LEVELS:
         raise Refused("--lvl must be one of: " + ", ".join(diag.LEVELS) + ".")
     floor = diag.LEVELS.index(lvl) if lvl else 0
-    filters = {"t": ticket, "r": run, "e": ev, "l": lvl, "lo": int(lo), "hi": int(hi)}
+    filters = {"t": ticket, "r": run, "e": ev, "l": lvl, "s": since, "a": around, "w": span}
     fh = _fhash(filters)
-    offset = _decode(page, fh) if page else 0
+    offset = 0
+    if page:
+        offset, lo, hi = _decode(page, fh)
     items: list[dict] = []
     scanned = 0
     capped = False
@@ -170,7 +175,7 @@ def query(
         },
         "total": len(items),
         "items": out,
-        "next": _encode(offset + n, fh) if more else None,
+        "next": _encode(offset + n, fh, lo, hi) if more else None,
         "unavailable": unavailable
         + (["too many events in the window, narrow it with --since, --ev or --around"] if capped else []),
     }
