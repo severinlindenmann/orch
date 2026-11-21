@@ -5,7 +5,6 @@ rewritten. Fields this version does not know are kept when a record is rewritten
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -41,38 +40,57 @@ def logs_dir(root: Path) -> Path:
     return base_dir(root) / "logs"
 
 
-def on_external_volume(root: Path) -> bool:
-    """macOS: the workspace sits on an external disk (/Volumes/<disk>). launchd jobs may not open files or a working
-    folder there (job exits 78, or hangs in getcwd), so their log and folder live in the home folder."""
-    if sys.platform != "darwin":
-        return False
-    try:
-        return Path(root).resolve().parts[:2] == ("/", "Volumes")
-    except OSError:
-        return False
+def _platform() -> str:
+    return sys.platform  # a function, so tests on Linux can pretend to be a Mac
 
 
-def home_logs_dir(root: Path) -> Path:
-    r = Path(root).resolve()
-    tag = hashlib.sha1(str(r).encode()).hexdigest()[:8]
-    return Path.home() / "Library" / "Logs" / "orch" / f"{re.sub(r'[^A-Za-z0-9._-]', '-', r.name)}-{tag}"
-
-
-def log_path(root: Path, sid: str) -> Path:
-    if on_external_volume(root):
-        return home_logs_dir(root) / f"{sid}.log"
+def log_path(root: Path, sid: str, wid: str | None = None) -> Path:
+    """Where a job writes its log. macOS (with the workspace id): ~/Library/Logs/orch/<workspace id>/, because
+    launchd cannot open a log in a folder macOS protects, such as an external disk (it ends the job with 78 before it
+    starts; report r-1120-0610-services). Elsewhere: in the workspace."""
+    if wid and _platform() == "darwin":
+        return Path.home() / "Library" / "Logs" / "orch" / wid / f"{sid}.log"
     return logs_dir(root) / f"{sid}.log"
 
 
-def retire_log(root: Path, sid: str) -> Path | None:
-    """Move a removed service's log to logs/removed/<id>-<UTC time>.log, so a new service with the same id starts
-    with an empty log instead of showing the old one's last lines. Returns where it went; None when there was no
-    log or it could not be moved (then it stays where it was)."""
-    src = log_path(root, sid)
-    if not src.is_file():
-        return None
+def read_log_path(root: Path, sid: str, wid: str | None = None) -> Path:
+    """The log to read: the newer of the home log and the workspace log (a job loaded before the logs moved keeps
+    writing the old one until it is started again)."""
+    new, old = log_path(root, sid, wid), logs_dir(root) / f"{sid}.log"
+
+    def mtime(p: Path) -> float:
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return -1.0
+
+    return old if new != old and mtime(old) > mtime(new) else new
+
+
+def home_dir(wid: str) -> Path:
+    """macOS: the folder a job of a workspace on an external disk runs from (launchd cannot start it there)."""
+    return Path.home() / "Library" / "Application Support" / "orch" / wid
+
+
+def retire_log(root: Path, sid: str, wid: str | None = None) -> Path | None:
+    """Move a removed service's log aside to removed/<id>-<UTC time>.log next to it, so a new service with the same
+    id starts with an empty log instead of showing the old one's last lines (ORCH-847). Both places are moved (macOS:
+    the home log and a workspace log from before the move). Returns where the log to read went; None when there was
+    no log or it could not be moved (then it stays where it was)."""
+    shown = read_log_path(root, sid, wid)
+    moved: Path | None = None
+    for src in dict.fromkeys((log_path(root, sid, wid), logs_dir(root) / f"{sid}.log")):
+        if not src.is_file():
+            continue
+        dest = _retire_one(src, sid)
+        if dest and src == shown:
+            moved = dest
+    return moved
+
+
+def _retire_one(src: Path, sid: str) -> Path | None:
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    dest = logs_dir(root) / "removed" / f"{sid}-{stamp}.log"
+    dest = src.parent / "removed" / f"{sid}-{stamp}.log"
     n = 1
     while dest.exists():
         n += 1

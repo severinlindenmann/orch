@@ -2,10 +2,16 @@
 
 A launchd job (orch services) gets no permission for Documents, Desktop, Downloads, iCloud Drive or cloud
 storage folders: it dies at once with "getcwd: Operation not permitted". orch services refuses such a folder
-up front and orch doctor names it (report r-1119-1255-ws-6)."""
+up front and orch doctor names it (report r-1119-1255-ws-6).
+
+An external disk (/Volumes/<disk>) is blocked the same way: launchd cannot open a log there (the job ends
+with 78 before it starts) and a program started in such a folder hangs in getcwd. A workspace on an external
+disk is the person's choice and must keep working, so it is not refused: orch services runs its jobs from a
+folder in the home folder and orch doctor says so (report r-1120-0610-services)."""
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -28,6 +34,31 @@ def _resolved(p: Path) -> Path:
         return Path(p).expanduser().resolve()
     except (OSError, RuntimeError):
         return Path(p).expanduser().absolute()
+
+
+VOLUMES = Path("/Volumes")
+
+
+def _device(p: Path) -> int | None:
+    try:
+        return os.stat(p).st_dev
+    except OSError:
+        return None
+
+
+def external_disk(path: Path, home: Path | None = None, platform: str | None = None) -> bool:
+    """True when `path` lies on an external disk (/Volumes/<disk>) on macOS. The disk this Mac starts from is
+    not external: /Volumes/Macintosh HD is a link to /, and a path on the home folder's own disk does not
+    count."""
+    if (platform or _platform()) != "darwin":
+        return False
+    p = _resolved(path)
+    vol = _resolved(VOLUMES)
+    if vol not in p.parents:
+        return False
+    own = _device(home or Path.home())
+    there = _device(p)
+    return there is None or own is None or there != own  # an unmounted disk cannot be read: still external
 
 
 def protected(path: Path, home: Path | None = None, platform: str | None = None) -> str | None:
@@ -65,11 +96,21 @@ def shown(path: Path, home: Path | None = None) -> str:
 
 
 def doctor_row(root: Path, services_on: bool) -> dict | None:
-    """orch doctor: a problem row when services is on and the workspace is in a protected folder."""
+    """orch doctor: a problem row when services is on and the workspace is in a protected folder; a plain note
+    (not a problem) when it is on an external disk, where services still run, from the home folder."""
     if not services_on:
         return None
     word = protected(root)
     if not word:
+        if external_disk(root):
+            return {
+                "name": "services folder",
+                "ok": True,
+                "fact": "This workspace is on an external disk, so its background services run from your "
+                "home folder; macOS may keep them off this computer's local network (use the private "
+                "network address).",
+                "next": "",
+            }
         return None
     return {
         "name": "services folder",
