@@ -73,6 +73,16 @@
         "path": { "type": ["string", "null"], "pattern": "^/", "description": "The plist or unit file, absolute." }
       }
     },
+    "share": {
+      "description": "Only on a service made by `orch services share`: the shared folder and the random mark its server puts in the X-Orch-Share header of every answer, so the link check can tell it from any other server. Not a secret.",
+      "type": "object",
+      "required": ["dir", "mark"],
+      "additionalProperties": false,
+      "properties": {
+        "dir": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[^\\u0000\\n\\r]+$", "description": "The shared folder, absolute and resolved." },
+        "mark": { "type": "string", "pattern": "^[0-9a-f]{32}$" }
+      }
+    },
     "created_at": { "type": "string", "format": "date-time", "pattern": "Z$" }
   },
   "additionalProperties": true

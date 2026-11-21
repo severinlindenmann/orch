@@ -171,7 +171,9 @@ def test_windows_add_start_restart_auto_stop_remove(wcli, st, ws):
     settings = ws / ".orch/addons/services/keeper/sleeper.json"
     assert f'"{settings}"' in task.find(".//t:Exec/t:Arguments", NS).text  # path with a space is quoted
     cfg = json.loads(settings.read_text(encoding="utf-8"))
-    assert Path(cfg["argv"][0]) == Path(sys.executable).resolve() and cfg["log"].endswith("sleeper.log")
+    assert Path(cfg["argv"][0]) == Path(os.path.abspath(sys.executable)) and cfg["log"].endswith(
+        "sleeper.log"
+    )
 
     code, out = jrun(wcli, "start", "sleeper")
     assert code == 0, out

@@ -54,6 +54,7 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 | `list` | `{"services": [row], "unreadable": n, "note"?}`; row = `id, name, state ("running" \| "stopped" \| "failing"), since (RFC 3339 UTC), auto, important, made_by, port, command, cwd, pid?, health, failing, question`; `health` = `{"ok", "how": "process alive" \| "answers on its address", "text"}`, `question` = `{ticket, id, title, text}` while one is open, else `null`. Reads only |
 | `check` | `{"checked": [{id, name, health, failing, unhealthy, did?, error?}], "unreadable": n}`: one pass, no loop (see Health check); a service whose health is not ok is named in the text even before it is failing |
 | `add <name> --id <slug> [--port N] [--ticket ID \| --addon NAME] [--cwd DIR] [--auto] [--start] -- <command...>` | `{"service": row, "next"}`; installed stopped unless `--start`. macOS: refused when the working folder or the program lies in Documents, Desktop, Downloads, iCloud Drive or `~/Library/CloudStorage` (launchd jobs may not use them); `start`/`restart` refuse the same. A start that does not stay running within 10 s names the last log line |
+| `share <folder> --ticket ID [--port N] [--id SLUG]` | `{"url", "port", "folder", "checked", "checked_outside", "again", "service": row, "next"}`: shares a folder by link (see Share a folder) |
 | `start \| stop \| restart <id>` | `{"service": row, "next"}` |
 | `start \| stop \| status` (no id) | the regular check (see Health check): `{"running": true, "pid"}` \| `{"stopped": bool}` \| `{"running": bool, "pid"?}` (status exits 1 when it does not run); `orch start` / `orch stop` call these |
 | `auto <id> on \| off` | `{"service": row, "next"}` |
@@ -64,6 +65,30 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 | `adopt <found-id> [--name X] [--id SLUG] [--ticket ID]` | `{"service": row, "next"}`: Manage with orch (see below) |
 | `act <verb> [--by X] -- <id>` | verbs `start, stop, restart, auto-on, auto-off, important-on, important-off, remove, adopt` (adopt takes a found id); same answers as the commands |
 | `view` | `orch.addon-view/1`: one `split` block (list and panel: every service with its state, starts by itself, made by, last 20 log lines masked, Remove with what happens; "Found on this computer" when there are found items) and a footnote to Automation |
+
+## Share a folder (`share`, ORCH-684)
+Settings in the `[services]` table of `.orch/config.toml`: `share_ports = "A-B"` (required, 1024-65535, low to
+high, at most 1000 ports), `share_name` (required: the name other computers use for this one, put in the link),
+`share_skip = [ports]` (kept for something else, never used even when free right now; the workspace's own
+`[dashboard] listen_port` is skipped by itself), `share_check` (the address the link check goes through, default
+127.0.0.1). Not set up: refused with the line to set it.
+The folder must exist; refused: the home folder or above it, a filesystem root, a folder holding a `.orch` folder, and
+any folder that lies in a dot folder (any case; the server refuses such a folder at start too). The port is the first of the range that is not kept, not the port of
+another service of this workspace, and free for 127.0.0.1: a test bind without address sharing (no SO_REUSEADDR;
+SO_EXCLUSIVEADDRUSE on Windows) works. So a listener on 127.0.0.1 or on every address (0.0.0.0, dual-stack `[::]`)
+holds the port, and one on another single address (a forwarder) does not. `--port N` must be in the range, not
+kept and free. The service runs `<this python> -I -m orch_services.share_server --dir <folder> --port N --mark M`
+on the ticket (record `port` and `share: {dir, mark}`, schema): it binds 127.0.0.1 only with the same exclusive
+bind, answers GET and HEAD with the folder's files (405 for anything else; 404 for a path, or the index page of a
+folder, whose real location is outside the folder or private at any depth: every dot name (`.orch`, `.ssh`, `.git`,
+`.env*`, `.npmrc`, ...) and key-like files (`*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.kdbx`, `id_rsa*`, `id_ed25519*`, ...),
+any case; those are also left out of the folder list; files are opened by the real path that was checked) and adds `X-Orch-Share: M` to every answer. The link check asks `http://<share_check>:N/`
+without proxies or redirects for up to 10 s and passes only on 200 with that mark; another server's answer or a
+server that stopped fails it. A failed check removes only the service this call made and tries the next port (3
+ports at most; one with `--port`), then refuses with what answered ("Nothing was left running"). When the service tool refuses to stop or remove it, the
+record stays and the refusal gives the `remove` line. Printed:
+`http://<share_name>:N/`. The same folder again: the existing share's link when it still answers, else refused
+with the start / remove lines. `remove <id>` ends a share.
 
 ## Found on this computer and Manage with orch
 `found` lists background jobs of the person's own account that orch did not make; it only reads, nothing about a

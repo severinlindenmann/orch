@@ -1,4 +1,4 @@
-"""orch services list|check|found|add|adopt|start|stop|restart|auto|remove|log|act|view|status (contract: contracts/addons/services/README.md)."""
+"""orch services list|check|found|add|share|adopt|start|stop|restart|auto|remove|log|act|view|status (contract: contracts/addons/services/README.md)."""
 
 from __future__ import annotations
 
@@ -91,7 +91,9 @@ def _program(root: Path, rec: dict, strict: bool = True) -> str:
     cwd = root / rec.get("cwd", ".")
     if os.sep in prog or "/" in prog:
         p = Path(prog) if Path(prog).is_absolute() else (cwd / prog)
-        found = str(p.resolve()) if p.is_file() and os.access(p, os.X_OK) else None
+        # absolute, but links kept: a virtual environment's python is a link, and the link is what keeps
+        # the environment (its resolved target is the bare python without the add-ons)
+        found = os.path.abspath(p) if p.is_file() and os.access(p, os.X_OK) else None
     else:
         found = shutil.which(prog)
     if not found and not strict:
@@ -800,6 +802,10 @@ def run(args) -> int:
         return _emit(args, data, _list_text(rows, bad, note))
     if cmd == "add":
         return cmd_add(args, root)
+    if cmd == "share":
+        from .share import cmd_share
+
+        return cmd_share(args, root)
     if cmd == "check":
         return cmd_check(args, root)
     if cmd == "found":
@@ -877,6 +883,11 @@ def main(argv=None) -> int:
     s.add_argument("--cwd")
     s.add_argument("--auto", action="store_true")
     s.add_argument("--start", action="store_true")
+    s = p("share")
+    s.add_argument("folder")
+    s.add_argument("--ticket", required=True)
+    s.add_argument("--port", type=int)
+    s.add_argument("--id")
     for verb in ("start", "stop"):  # without an id: the regular check (orch start runs these)
         p(verb).add_argument("id", nargs="?")
     for verb in ("restart", "remove"):
