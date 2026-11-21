@@ -7,8 +7,15 @@
 // the ticket id; no second store. Built on chat.js the same way the workspace chats are (wrapping its functions).
 const tcId = id => typeof id === 'string' && /^t_[a-z0-9]{6,16}$/.test(id);
 const tcRows = () => chatObjects(state?.ticket_chats).filter(r => tcId(r.id));
-const tcReadNow = new Set();  // opened on this page: no unread count until the next full build has the read mark
-const tcUnread = r => tcReadNow.has(r.id) || chatUi.open === r.id ? 0 : chatCount(r.unread);
+// Opened on this page: {ticket id: its newest line then}. Its unread count stays hidden until the next full build has
+// the read mark, and only while nothing newer came in (a newer line counts again).
+const tcReadNow = new Map();
+function tcUnread(r) {
+  if (chatUi.open === r.id) return 0;
+  const seen = tcReadNow.get(r.id);
+  if (seen !== undefined && (!chatCount(r.unread) || r.last_at !== seen)) tcReadNow.delete(r.id);
+  return tcReadNow.has(r.id) ? 0 : chatCount(r.unread);
+}
 const tcOpen = () => tcId(chatUi.open) ? ticketOf(chatUi.open) : null;
 // The address of a ticket's chat (the ticket page's Open chat links here).
 const tcHash = id => '#chat/' + encodeURIComponent(String(id || ''));
@@ -141,7 +148,8 @@ chatPage = function () {
   if (!t) return tcPageWithoutTickets();
   const page = h('section', {className:'chat-page' + (chatUi.listOpen ? ' chat-list-open' : ' chat-thread-open'), 'data-key':'chat-page'}, chatList(), tcThread(t));
   page.addEventListener('click', chatClick); page.addEventListener('input', chatInput); page.addEventListener('keydown', chatKeydown);
-  page.addEventListener('submit', e => { e.preventDefault(); chatSend(); });
+  // only the chat box: a question card's own answer form submits by itself
+  page.addEventListener('submit', e => { if (e.target.matches('.chat-compose')) { e.preventDefault(); chatSend(); } });
   page.addEventListener('scroll', event => {
     if (event.target.matches('.chat-log')) chatScroll.set(event.target, {near:event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80, stamp:chatLogStamp(event.target)});
   }, true);
@@ -152,8 +160,8 @@ chatPage = function () {
 async function tcMarkRead(id) {
   if (snapshot || !tcId(id)) return;
   const row = tcRows().find(r => r.id === id);
-  tcReadNow.add(id);
   if (row && !chatCount(row.unread)) return;  // nothing new: no write
+  if (row) tcReadNow.set(id, row.last_at);
   try { await act('chat.read', {ticket:id}, {quiet:true}); } catch { /* the count comes back on the next build */ }
 }
 function tcSelect(id) {

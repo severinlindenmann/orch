@@ -41,11 +41,7 @@ module.exports = {
 
     // answer the question in the chat: it shows under Decided
     const q = page.locator('.chat-log [data-question]').first();
-    await q.getByText('Glacier blue').first().click();
-    await act('answer', async () => {
-      const send = q.getByRole('button', { name: /^(Send|Answer|Confirm|Use)/ });
-      if (await send.count()) await send.first().click();
-    });
+    await act('answer', () => q.getByRole('button', { name: /Glacier blue/ }).first().click());  // one tap answers
     await reload();
     must(!(await page.locator('.chat-log [data-question]').count()), 'the question is still open after a reload');
     const decided = await page.locator('[data-key="ticket-chat-decided"]').innerText();
