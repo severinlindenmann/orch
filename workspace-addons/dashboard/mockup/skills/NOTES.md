@@ -1,4 +1,4 @@
-# Skills (Preview add-on, ORCH-834)
+# Skills (Preview add-on, ORCH-834, ORCH-842)
 
 - skills.html: the dashboard shell around the Skills add-on's own page. It runs the add-on's real script
   (`workspace-addons/skills/src/orch_skills/web/skills.js`) on `demo/api/page`, so the mockup and the product can not
@@ -11,3 +11,6 @@
   New skill follow in ORCH-841.
 - Looks come from the master: `.switch-table`, `.list-tools`, `.facts`, `.sheet-actions` in widgets.css (gallery:
   Content, Switch list).
+- ORCH-842: Logins are key profiles with a switch (per workspace; the panel says what off means); connected services
+  show their sign-in state with Check sign-in; a shared skill has Remove from here, a removed one Get it back and
+  "Your admin has a newer version"; the Codex limits are said in the panel. Demo: 13 skills, 3 logins.

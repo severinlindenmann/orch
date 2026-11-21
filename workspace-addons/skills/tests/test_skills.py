@@ -1,10 +1,13 @@
 """Skills add-on: what helpers get here, and Turn off / Turn on for this workspace only."""
 
 import json
+from pathlib import Path
 
 import pytest
 
-from orch_skills import cli, model, switches
+from orch_skills import cli, jsonswitch, model, switches, tools
+
+SETTINGS = Path(".claude/settings.local.json")
 
 
 def _item(data, kind, name):
@@ -141,9 +144,10 @@ def test_codex_still_sees_a_workspace_skill(ws, monkeypatch):
     assert hello["tools"] == {"Claude": "off", "Codex": "off"} and "note" not in hello  # orch's link reaches both
 
 
-def test_mcp_rule_names():
-    assert switches.mcp_rule("claude.ai Gmail") == "mcp__claude_ai_Gmail__*"
-    assert switches.mcp_rule("my-server") == "mcp__my-server__*"
+def test_service_entry_names_from_the_tool_data():
+    spec = tools.all_tools()["claude"]["switches"]["service"]
+    assert jsonswitch.render(spec, "claude.ai Gmail") == "mcp__claude_ai_Gmail__*"
+    assert jsonswitch.render(spec, "my-server") == "mcp__my-server__*"
 
 
 def test_cli_act_list_and_history(ws, capsys):
@@ -239,7 +243,7 @@ def test_a_change_by_someone_else_wins(ws):
     path = ws / ".claude/settings.local.json"
     path.write_text("{}")
     with pytest.raises(switches.Refused, match="changed by someone else"):
-        switches._write(ws, switches.SETTINGS, {"a": 1}, expect=b"{ }")
+        switches._write(ws, SETTINGS, {"a": 1}, expect=b"{ }")
     assert path.read_text() == "{}"
 
 
@@ -247,14 +251,14 @@ def test_a_refused_save_takes_the_record_back(ws, monkeypatch):
     real = switches._write
 
     def refuse_settings(root, rel, doc, expect=True):
-        if rel == switches.SETTINGS:
+        if rel == SETTINGS:
             raise switches.Refused("changed by someone else just now. Try again.")
         return real(root, rel, doc, expect)
 
     monkeypatch.setattr(switches, "_write", refuse_settings)
     with pytest.raises(switches.Refused):
         model.turn(ws, "skill:workspace:release-walk", on=False)
-    assert switches._owned(ws)["skillOverrides"] == []
+    assert switches.owned(ws, "claude", "skill") == []
 
 
 def test_a_relay_copy_with_its_file_cannot_be_turned_off(ws, tmp_path):

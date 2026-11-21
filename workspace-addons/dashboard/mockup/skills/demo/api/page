@@ -26,7 +26,8 @@
    "problems": [],
    "locked": "orch needs it to work tickets; always on",
    "can_off": false,
-   "edit_why": "Comes with orch; orch keeps it up to date"
+   "edit_why": "Comes with orch; orch keeps it up to date",
+   "actions": []
   },
   {
    "id": "skill:orch:orch-dashboard",
@@ -47,7 +48,8 @@
    },
    "problems": [],
    "can_off": true,
-   "edit_why": "Comes with orch; orch keeps it up to date"
+   "edit_why": "Comes with orch; orch keeps it up to date",
+   "actions": []
   },
   {
    "id": "skill:orch:orch-focus",
@@ -68,7 +70,8 @@
    },
    "problems": [],
    "can_off": true,
-   "edit_why": "Comes with orch; orch keeps it up to date"
+   "edit_why": "Comes with orch; orch keeps it up to date",
+   "actions": []
   },
   {
    "id": "skill:orch:orch-hello",
@@ -88,7 +91,8 @@
     "Has no real description"
    ],
    "can_off": true,
-   "edit_why": "Comes with orch; orch keeps it up to date"
+   "edit_why": "Comes with orch; orch keeps it up to date",
+   "actions": []
   },
   {
    "id": "skill:workspace:invoice-export",
@@ -114,7 +118,9 @@
    "edit": {
     "id": "e_9360a9362a10a557f4b78869",
     "mode": "skill"
-   }
+   },
+   "actions": [],
+   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it"
   },
   {
    "id": "skill:workspace:weekly-report",
@@ -138,7 +144,9 @@
    "edit": {
     "id": "e_b5033d5cd4582ffe370f86eb",
     "mode": "skill"
-   }
+   },
+   "actions": [],
+   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it"
   },
   {
    "id": "skill:workspace:release-check",
@@ -165,7 +173,9 @@
    "edit": {
     "id": "e_adda6e4ea790101a37812185",
     "mode": "skill"
-   }
+   },
+   "actions": [],
+   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it"
   },
   {
    "id": "skill:admin:github",
@@ -190,7 +200,10 @@
    },
    "problems": [],
    "can_off": true,
-   "edit_why": "Shared by your admin; ask them to change it"
+   "edit_why": "Shared by your admin; ask them to change it",
+   "actions": [
+    "remove"
+   ]
   },
   {
    "id": "skill:admin:crm-notes",
@@ -209,7 +222,10 @@
    "problems": [],
    "can_off": true,
    "note": "Codex still sees it",
-   "edit_why": "Shared by your admin; ask them to change it"
+   "edit_why": "Shared by your admin; ask them to change it",
+   "actions": [
+    "remove"
+   ]
   },
   {
    "id": "skill:mine:status-page",
@@ -232,7 +248,8 @@
     "Retired, but helpers still see it"
    ],
    "can_off": true,
-   "edit_why": "Editing your computer's own files comes in a later version"
+   "edit_why": "Editing your computer's own files comes in a later version",
+   "actions": []
   },
   {
    "id": "skill:mine:spreadsheets",
@@ -253,7 +270,8 @@
    },
    "problems": [],
    "can_off": true,
-   "edit_why": "Editing your computer's own files comes in a later version"
+   "edit_why": "Editing your computer's own files comes in a later version",
+   "actions": []
   },
   {
    "id": "skill:mine:translate",
@@ -272,7 +290,26 @@
    "problems": [],
    "can_off": true,
    "note": "Codex still sees it",
-   "edit_why": "Editing your computer's own files comes in a later version"
+   "edit_why": "Editing your computer's own files comes in a later version",
+   "actions": []
+  },
+  {
+   "id": "skill:admin:sql-style",
+   "kind": "skill",
+   "name": "sql-style",
+   "where": "admin",
+   "on": false,
+   "removed": true,
+   "locked": "Removed from this workspace; relay updates do not bring it back",
+   "description": "Removed here. Your admin still has it.",
+   "fields": {},
+   "tools": {},
+   "problems": [],
+   "actions": [
+    "restore"
+   ],
+   "can_off": false,
+   "newer": "Your admin has a newer version than the one you removed"
   }
  ],
  "instructions": [
@@ -370,7 +407,12 @@
     "Claude": "on",
     "Codex": "on"
    },
-   "problems": []
+   "problems": [],
+   "actions": [
+    "check"
+   ],
+   "signin_state": "connected",
+   "signin": "Signed in and working (checked 2026-11-19 09:12)"
   },
   {
    "id": "service:mine:context7",
@@ -387,7 +429,13 @@
     "Codex": "on"
    },
    "note": "Codex still sees it",
-   "problems": []
+   "problems": [],
+   "actions": [
+    "check"
+   ],
+   "signin_state": "needs-sign-in",
+   "signin": "Needs a sign-in. Open Claude Code, type /mcp and sign in to context7 again (checked 2026-11-19 09:12)",
+   "tool_limit": "Codex ignores this folder's own settings until you trust this folder in Codex"
   },
   {
    "id": "service:admin:crm",
@@ -405,33 +453,59 @@
    },
    "problems": [
     "Its login is not stored here"
-   ]
+   ],
+   "actions": [
+    "check"
+   ],
+   "signin": "Its login is stored here",
+   "signin_state": "connected"
   }
  ],
  "logins": [
   {
-   "id": "login:workspace:github-login",
+   "id": "login:workspace:github",
    "kind": "login",
-   "name": "github-login",
+   "name": "github",
    "where": "workspace",
-   "on": true,
-   "locked": "Turning a login off for helpers comes in a later version",
-   "can_off": false,
-   "description": "Key. Helpers see only its name, never the secret.",
+   "on": false,
+   "switch": "profile",
+   "can_off": true,
+   "description": "Uses github-login. Helpers never see the secret.",
+   "off_means": "Off: helpers can use it only through its own command (gh)",
+   "on_means": "On: helpers may use it with any command",
+   "scope": "This switch counts for this workspace only; your other workspaces keep their own",
    "tools": {},
-   "problems": []
+   "problems": [],
+   "actions": []
   },
   {
-   "id": "login:admin:crm-key",
+   "id": "login:workspace:crm",
    "kind": "login",
-   "name": "crm-key",
-   "where": "admin",
+   "name": "crm",
+   "where": "workspace",
    "on": true,
-   "locked": "Turning a login off for helpers comes in a later version",
-   "can_off": false,
-   "description": "Key. Helpers see only its name, never the secret.",
+   "switch": "profile",
+   "can_off": true,
+   "description": "Uses crm-key. Helpers never see the secret.",
+   "off_means": "Off: helpers cannot use it; you still can",
+   "on_means": "On: helpers may use it with any command",
+   "scope": "This switch counts for this workspace only; your other workspaces keep their own",
    "tools": {},
-   "problems": []
+   "problems": [],
+   "actions": []
+  },
+  {
+   "id": "login:admin:key-deploy-token",
+   "kind": "login",
+   "name": "deploy-token",
+   "where": "admin",
+   "on": false,
+   "can_off": false,
+   "locked": "No key profile uses this key, so helpers cannot use it. A profile makes it usable",
+   "description": "Key. Not given to helpers.",
+   "tools": {},
+   "problems": [],
+   "actions": []
   }
  ]
 }
