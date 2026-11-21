@@ -381,6 +381,8 @@ final class Outbox {
     nonisolated static func checkVerdict(_ verdict: PendingVerdict, for question: Question) throws {
         guard let digest = question.message.body.digest, verdict.digest == digest, verdict.isValid else { throw VerdictProblem.invalid }
         if let picked = verdict.picked, case .options(let o)? = question.message.body.card?.preview, !o.contains(where: { $0.id == picked }) { throw VerdictProblem.invalid }
+        // ORCH-860: Run it now only where the computer allowed it on the phone (orch's own commands); the computer checks again
+        if verdict.verdict == .ok, let card = question.message.body.card, card.kind == .run, card.run?.runsHere != true { throw VerdictProblem.invalid }
     }
 
     // MARK: Manage
