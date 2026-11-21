@@ -1205,12 +1205,13 @@ class World:
         out: list[dict] = []
         for line in lg.splitlines():
             sha, _, subject = line.partition("\x1f")
+            group = MERGE_LINE.match(subject) and "/orch-queue/" in subject  # only the queue's own merges
             members = [
                 (m[1], x.split("\x1f", 1)[0])
                 for x in self._git(
                     "log", "--first-parent", "--format=%H\x1f%s", f"{sha}^1..{sha}^2"
                 ).stdout.splitlines()
-                if (m := TAKE_IN.match(x.partition("\x1f")[2]))
+                if group and (m := TAKE_IN.match(x.partition("\x1f")[2]))
             ]
             if not members and (m := MERGE_LINE.match(subject)):
                 members = [(m[1], sha)]

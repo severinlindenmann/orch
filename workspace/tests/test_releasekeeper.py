@@ -1674,12 +1674,19 @@ def test_merged_between_names_queue_group_members_and_plain_merges(tmp_path):
         "Merge pull request #10 from x/orch-queue/develop-1",
     )
     branch("pr3", "c/three.py")
+    (repo / "c/four.py").write_text("x\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "Merge queue: take in #1")  # a look-alike line in a plain pull request
     _git(repo, "checkout", "-q", "develop")
     _git(repo, "merge", "-q", "--no-ff", "pr3", "-m", "Merge pull request #3 from x/pr3")
     bad = _git(repo, "rev-parse", "HEAD")
     w = rk.World(None, cfg(tmp_path))
     got = w.merged_between(good, bad)
-    assert [(m["pr"], m["files"]) for m in got] == [(3, ["c/three.py"]), (2, ["b/two.py"]), (1, ["a/one.py"])]
+    assert [(m["pr"], m["files"]) for m in got] == [
+        (3, ["c/four.py", "c/three.py"]),
+        (2, ["b/two.py"]),
+        (1, ["a/one.py"]),
+    ]
     two = next(m for m in got if m["pr"] == 2)
     _git(repo, "revert", "--no-edit", "-m", "1", two["sha"])  # the sha reverts exactly that member
     assert not (repo / "b/two.py").exists() and (repo / "a/one.py").exists()
