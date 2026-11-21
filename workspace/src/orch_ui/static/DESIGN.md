@@ -200,7 +200,7 @@ For the eventual restyle, load system.css after today's kit and page CSS, then r
 | Done | `--done / --success #98cda3` | Green, `✓ Done`. |
 | Paused | `--paused / --text-muted` | Neutral, `Ⅱ Paused`. |
 | Failed | `--failed / --danger #f3a3a5` | Rose, `× Failed`; include a plain next action. |
-| Type | 12/16, 14/18, 14/20, 20/28, 28/36 px | Metadata, compact body, body, section, page title. Four font sizes. |
+| Type | 12/16, 13/18, 14/20, 16/24, 20/28, 28/36 px | Labels, metadata, body (buttons too), row title, section, page title: the SX-2 scale, nothing under 12 px. |
 | Weight | 400 / 500 / 600 | Normal, emphasis, heading. No bold wall of text. |
 | Spacing | 2, 4, 8, 12, 16, 24, 32, 40, 48, 64 px | Use scale for padding and gaps; 1 px borders are not spacing. |
 | Shape | 8 px controls, 10 px cards, 12 px dialogs, round status pills | No nested rounded boxes for ordinary rows. |
