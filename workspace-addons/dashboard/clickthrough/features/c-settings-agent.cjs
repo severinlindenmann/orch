@@ -1,10 +1,11 @@
 // Settings > Helper: add your own helper with a harmless command (echo), it becomes the default, Test it (answers),
-// change what a helper may do and how many work at once. Each is reloaded; the two choices are put back after.
+// change what a helper may do and how many work at once. Each is reloaded; the two choices are put back after, and
+// the demo's stand-in helper is the default again at the end (later click-throughs start helpers that must keep running).
 // Never tests a built-in agent tool (the page would run the real program). Full ("never asks") is not chosen.
 module.exports = {
   name: 'Settings Helper: add, test, permissions, helpers at once',
   covers: ['page:settings/agent', 'config.agent.add', 'config.agent', 'config.agent.test', 'config.permissions', 'live.set'],
-  async run({ page, open, reload, act, must }) {
+  async run({ page, open, reload, act, must, orchAsPerson }) {
     await open('#settings/agent');
     const k = key => page.locator(`[data-key="${key}"]`);
 
@@ -47,5 +48,8 @@ module.exports = {
     await act('live.set', () => sel.selectOption('none'));
     await reload();
     must((await sel.inputValue()) === 'none', 'Helpers at once did not go back to No limit');
+
+    // the stand-in helper is the default again: echo ends at once, so a later Empty helper would be gone before its pane
+    orchAsPerson('config', 'agent', 'standin');
   },
 };
