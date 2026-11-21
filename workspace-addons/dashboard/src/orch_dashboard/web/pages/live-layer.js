@@ -246,12 +246,13 @@ function liveRenStart(key) {
   input?.focus({preventScroll:true});
   input?.select();
 }
-function liveRenEnd(key, saved) {
+// `before`: the own name the session had (null = none); Undo on the toast puts it back (ORCH-1359).
+function liveRenEnd(key, saved, before = null) {
   liveRen = ''; liveRenText = '';
   liveLayerPainted = '';
   liveLayerPaint();
   document.querySelector('#live-dock ' + liveSel(key, 'live-rename'))?.focus({preventScroll:true});
-  if (saved) window.orch?.toast?.('Name saved.');
+  if (saved) window.orch?.toast?.('Name saved.', 'ok', () => window.LiveSessions?.rename(key, before || ''));
 }
 function liveDockHost() {
   // Inside the mount that survives a page change (#keep of the soft page changes: render() never touches it and a
@@ -410,25 +411,35 @@ document.addEventListener('click', async e => {
 // The waiting question of a ticket's pane: its words, one button per option and a field for an own answer, so it is
 // answered where it is shown (ORCH-675). Written only when the question changes, so a typed answer stays.
 const liveAskDrafts = new Map();
+// An answer waits LIVE_ASK_UNDO_MS with Undo on its toast before it is sent (as on Home, ORCH-1359); meanwhile the
+// question is hidden in every pane. Leaving the page sends it at once, so it is not lost.
+const LIVE_ASK_UNDO_MS = 5200, liveAskPending = new Map();  // ticket/question → send now
+addEventListener('pagehide', () => { for (const now of [...liveAskPending.values()]) now(); });
 function liveAskFill(box, id) {
-  const q = snapshot ? null : liveAskModel(ticketOf(id)), sig = q ? [q.id, q.digest, q.text, q.options.join('|')].join('\u0001') : '';
+  const found = snapshot ? null : liveAskModel(ticketOf(id)), q = found && !liveAskPending.has(id + '/' + found.id) ? found : null;
+  const sig = q ? [q.id, q.digest, q.text, q.options.join('|')].join('\u0001') : '';
   if (box.dataset.sig === sig) return;
   box.dataset.sig = sig; box.textContent = ''; box.hidden = !q;
   if (!q) return;
   const send = async answer => {
-    const text = String(answer || '').trim(); if (!text || box.dataset.busy) return;
+    const text = String(answer || '').trim(), slot = id + '/' + q.id; if (!text || box.dataset.busy || liveAskPending.has(slot)) return;
     // a disabled or removed button drops the keyboard to the page, where Esc no longer reaches the layer (ORCH-709):
-    // it waits on the box and goes back into the pane when the answer is in
+    // it goes back into the pane (the next question or Open ticket)
     const had = box.contains(document.activeElement);
-    if (had) { box.tabIndex = -1; box.focus({preventScroll:true}); }
-    box.dataset.busy = '1'; box.querySelectorAll('button,input').forEach(c => { c.disabled = true; });
+    const undone = await new Promise(done => {
+      const timer = setTimeout(() => finish(false), LIVE_ASK_UNDO_MS);
+      const finish = back => { clearTimeout(timer); if (!liveAskPending.has(slot)) return; if (back) liveAskPending.delete(slot); done(back); };
+      liveAskPending.set(slot, () => finish(false));
+      liveLayerFill();
+      if (had) { liveLayerWant = {id, until:Date.now() + 5000, ask:true}; liveLayerTake(); requestAnimationFrame(liveLayerTake); }
+      window.orch?.toast?.('Answered: ' + text, 'ok', () => { finish(true); liveLayerFill(); });
+    });
+    if (undone) return;
     const r = await act('answer', {ticket:id, question:q.id, digest:q.digest, answer:text});
-    delete box.dataset.busy;
-    window.orch?.toast?.(r.ok ? 'Answered: ' + text : r.text || 'Could not send your answer.', r.ok ? 'ok' : 'error');
-    if (r.ok) { liveAskDrafts.delete(id + '/' + q.id); box.dataset.sig = ''; liveAskFill(box, id); }
-    else box.querySelectorAll('button,input').forEach(c => { c.disabled = false; });  // the typed words stay
-    const now = document.activeElement;  // still waiting on the box (or dropped by a repaint): not moved by the person meanwhile
-    if (had && (!now || now === document.body || now === box)) { liveLayerWant = {id, until:Date.now() + 5000, ask:true}; liveLayerTake(); requestAnimationFrame(liveLayerTake); }
+    liveAskPending.delete(slot);
+    if (r.ok) liveAskDrafts.delete(slot);
+    else window.orch?.toast?.(r.text || 'Could not send your answer.', 'error');  // the question and the typed words come back
+    liveLayerFill();
   };
   box.append(h('p', {className:'live-ask-q'}, q.text));
   if (!q.plain) { box.append(h('a', {className:'btn primary sm', href:'#ticket/' + encodeURIComponent(id), 'data-key':'live-ask-open'}, 'Answer on the ticket')); return; }
@@ -486,7 +497,7 @@ function liveBarShared() {
 }
 function liveBar(where, s) {
   const name = liveLayerName();
-  return h('div', {className:'live-bar', role:'group', 'aria-label':name + ' bar', 'data-key':'live-bar'},
+  return h('div', {className:'live-bar', role:'group', 'aria-label':name + ' bar', 'data-key':'live-bar', 'data-toast-clear':''},
     h('a', {className:'live-home', href:'#addon/' + encodeURIComponent(liveLayerPage()?.name || ''), title:name + ' start page'}, name),
     h('div', {className:'live-bar-sessions', 'data-key':'live-bar-sessions'}),
     liveBarEnd(where, s));
@@ -494,12 +505,12 @@ function liveBar(where, s) {
 function liveLayerTree(s, where) {
   if (where === 'side') {
     const name = liveLayerName();
-    return h('button', {type:'button', className:'live-edge', 'data-live':s.panes.length ? 'reopen' : 'place', 'data-mode':'bar', 'data-key':'live-edge', 'aria-label':'Open ' + name + ' again'}, liveIc('dock-side'), h('span', {}, name));
+    return h('button', {type:'button', className:'live-edge', 'data-live':s.panes.length ? 'reopen' : 'place', 'data-mode':'bar', 'data-key':'live-edge', 'data-toast-clear':'', 'aria-label':'Open ' + name + ' again'}, liveIc('dock-side'), h('span', {}, name));
   }
   const bar = liveBarShared() ? null : liveBar(where, s);
   if (where === 'bar' || !s.panes.length) return bar;
   const dim = where === 'right' ? 'width' : 'height', px = s[dim], v = liveLayerView(s, where);
-  const panel = h('div', {className:'live-panel', 'data-mode':where, 'data-n':String(v.shown.length), 'data-key':'live-panel'},
+  const panel = h('div', {className:'live-panel', 'data-mode':where, 'data-n':String(v.shown.length), 'data-key':'live-panel', 'data-toast-clear':''},
     where === 'full' ? null : h('div', {className:'live-grip', role:'separator', tabindex:'0', 'data-live-grip':dim,
       'aria-orientation':dim === 'width' ? 'vertical' : 'horizontal', 'aria-label':dim === 'width' ? 'Width of the panel' : 'Height of the panel',
       'aria-valuenow':px ? String(px) : null, title:'Drag or use the arrow keys to resize'}),
@@ -596,6 +607,7 @@ function liveLayerPad() {
   const pad = where === 'side' || where === 'full' ? 0 : host.offsetHeight;
   document.body.style.setProperty('--live-pad', pad + 'px');
   document.body.style.setProperty('--live-padr', where === 'right' && panel ? panel.offsetWidth + 'px' : '0px');
+  window.UI?.toastPlace?.();  // a toast already shown moves with the bar and the message box (ORCH-1359)
 }
 function liveLayerOff() {
   liveLayerInert(false);
@@ -701,8 +713,10 @@ document.addEventListener('submit', e => {
   e.preventDefault();
   const key = form.dataset.liveRen, text = form.querySelector('input')?.value || '';
   const sess = liveLayerSession(key), own = text.trim() && text.trim() !== clean(sess?.live?.title || '') ? text.trim() : '';
+  const before = typeof sess?.live?.name === 'string' && sess.live.name.trim() ? sess.live.name.trim() : null;
+  if (own === (before || '')) { liveRenEnd(key, false); return; }  // nothing changed: no toast
   const saved = window.LiveSessions?.rename(key, own);  // an empty name, or the title itself, goes back to the title
-  liveRenEnd(key, true);
+  liveRenEnd(key, true, before);
   Promise.resolve(saved).then(() => requestAnimationFrame(() => {  // the page is drawn again when orch answers
     const a = document.activeElement;
     if (!a || a === document.body || !a.isConnected) document.querySelector('#live-dock ' + liveSel(key, 'live-rename'))?.focus({preventScroll:true});

@@ -113,6 +113,22 @@ async function serve(project, script, tag) {
   return { base: `http://127.0.0.1:${port}`, stop };
 }
 
+/** ORCH-1359: a toast never covers the Focus bar or a layer's message box (draft D). Returns a problem or ''. */
+async function toastCovers(page) {
+  return page.evaluate(() => {
+    const seen = el => { const r = el.getBoundingClientRect(); return r.width && r.height && getComputedStyle(el).visibility !== 'hidden' ? r : null; };
+    const meet = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    for (const t of document.querySelectorAll('#ui-toasts .ui-toast')) {
+      const tr = seen(t); if (!tr) continue;
+      for (const el of document.querySelectorAll('#live-bar, .live-bar, .live-msg')) {
+        const r = seen(el);
+        if (r && meet(tr, r)) return `a toast ("${t.textContent.slice(0, 60)}") covers ${el.matches('.live-msg') ? 'the message box' : 'the Focus bar'}`;
+      }
+    }
+    return '';
+  });
+}
+
 /** One step at one width. Returns a list of problems (empty = passed). */
 async function runOne(ctx, step, [w, h], o, urls) {
   const page = await ctx.newPage();
@@ -137,6 +153,7 @@ async function runOne(ctx, step, [w, h], o, urls) {
       await step.run({ page, dash: urls.dash, width: w });
     }
     await page.waitForTimeout(400); // let any move end before the picture
+    if (o.target !== 'draft') { const hit = await toastCovers(page); if (hit) problems.push(hit); }
     await page.screenshot({ path: path.join(o.out, shot(step, w, o.target === 'draft')), fullPage: false });
   } catch (e) {
     problems.push(String(e.message).split('\n')[0]);

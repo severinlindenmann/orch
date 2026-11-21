@@ -229,7 +229,7 @@ if (typeof module === 'object' && module.exports) {
         bar.menu ? newMenu() : null);
     }
     function build(a, all, fold) {
-      return h('div', {id:'live-bar', className:bar.docked ? 'lbar lbar-docked' : 'lbar', role:'group', 'aria-label':addonLabel(a) + ' bar', 'data-fold':String(fold)},
+      return h('div', {id:'live-bar', className:bar.docked ? 'lbar lbar-docked' : 'lbar', role:'group', 'aria-label':addonLabel(a) + ' bar', 'data-fold':String(fold), 'data-toast-clear':''},
         h('a', {className:'lbar-home', href:'#addon/' + encodeURIComponent(a.name), 'data-key':'lbar-home', title:addonLabel(a) + ' start page'}, addonLabel(a)),
         h('nav', {className:'lbar-sw', 'aria-label':'Sessions'}, sessionsRow(a, all, fold)),
         h('span', {className:'lbar-end'}, newButton(fold), typeof bar.end === 'function' ? bar.end() : null),

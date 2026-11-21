@@ -51,3 +51,13 @@ test('the page loads it before the layer and the server serves it', () => {
   assert.ok(at > 0 && at < index.indexOf('pages/live-layer.js'));
   assert.match(fs.readFileSync(path.join(web, '../server.py'), 'utf8'), /\|live-model\|/);
 });
+
+test('Undo of a model choice goes back to the model a person chose, else orch picks again (ORCH-1359)', () => {
+  assert.equal(M.liveModelUndo({model:{name:'sonnet', by:'human:ana'}}), 'sonnet');
+  assert.equal(M.liveModelUndo({model:{name:'opus', by:'orch'}}), 'auto');
+  assert.equal(M.liveModelUndo({model:null}), 'auto');
+  assert.equal(M.liveModelUndo(null), 'auto');
+  assert.equal(M.liveModelUndo({model:{name:'gpt'}}), 'auto');
+  const src = require('node:fs').readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/live-model.js'), 'utf8');
+  assert.match(src, /'Model ' \+ liveModelLabel\(v\) \+ ' chosen for ' \+ key \+ '\.', 'ok', async \(\) =>/, 'the toast offers Undo');
+});
