@@ -60,6 +60,7 @@ def test_http_state_and_static(server):
         "/kit/tokens.css",
         "/logo.svg",
         "/favicon.svg",
+        "/favicon.ico",
         "/apple-touch-icon.png",
     ):
         assert get(server + p)[0] == 200, p

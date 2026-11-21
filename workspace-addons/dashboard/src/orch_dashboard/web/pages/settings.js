@@ -29,7 +29,8 @@ const middleShort = (value, max = 48) => {
 // The add-on's name, the same whether it is on or off (never the lower-case package name, never a tab label).
 const rowLabel = a => capitalise(a?.label || a?.dashboard?.label || a?.name || 'add-on');
 // "Turning on…" next to a switch while the change runs (it can take half a minute: the services restart).
-const switchBusy = a => settingsBusy.has('addon-' + a.name) ? h('span', {className:'meta', 'data-key':'addon-busy-' + a.name, role:'status'}, a.active ? 'Turning off…' : 'Turning on…') : null;
+// While the dashboard restarts after the change: "Waiting for orch to restart…" (ORCH-1046).
+const switchBusy = a => settingsBusy.has('addon-' + a.name) ? h('span', {className:'meta', 'data-key':'addon-busy-' + a.name, role:'status'}, addonWaiting.has(a.name) ? ADDON_WAIT_TEXT : a.active ? 'Turning off…' : 'Turning on…') : null;
 // A change of the add-ons restarts this page's server: nothing asks it (or an add-on's page) until it is back.
 const addonChanging = () => [...settingsBusy].some(k => String(k).startsWith('addon-'));
 const asList = value => Array.isArray(value) ? value : [value];
@@ -758,7 +759,7 @@ async function updStart(to) {
   updUi.from = was?.release || was?.label || null; updUi.phase = 'running'; updUi.reason = ''; render();
   try { sessionStorage.setItem('orch-update-from', JSON.stringify(updUi.from)); } catch (e) {}
   let res = null;
-  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:to === 'release' || to === 'development' ? {to} : {}})}); } catch (e) { /* the server may already be restarting */ }
+  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:to === 'release' || to === 'development' || /^[1-9][0-9]{0,5}(\.[1-9][0-9]{0,3})?$/.test(String(to || '')) ? {to:String(to)} : {}})}); } catch (e) { /* the server may already be restarting */ }
   if (res && res.status !== 202) { updUi.phase = 'failed'; updUi.reason = (await res.text()).slice(0, 200) || 'It did not start.'; render(); return; }
   try { sessionStorage.setItem('orch-update-started', String(Date.now())); } catch (e) {}
 }
@@ -974,7 +975,7 @@ function addonCatalog() {
     return h('div', {className:'card-row ad-row', 'data-key':'catalog-card-' + row.name},
       h('div', {className:'grow'}, ...body),
       done ? null : h('button', {type:'button', className:'btn primary sm', 'data-key':'catalog-add-' + row.name, 'aria-label':(off ? 'Turn on ' : 'Add ') + label, disabled:busy.has(row.name)},
-        busy.has(row.name) ? (off ? 'Turning on…' : 'Adding…') : off ? 'Turn on' : 'Add'));
+        busy.has(row.name) ? (addonWaiting.has(row.name) ? ADDON_WAIT_TEXT : off ? 'Turning on…' : 'Adding…') : off ? 'Turn on' : 'Add'));
   };
   const rowsNow = () => {
     const rows = array(state.settings?.available).filter(r => r && typeof r.name === 'string').concat(offRows().map(r => ({...r, turnOn:true})));
@@ -1001,6 +1002,9 @@ function addonCatalog() {
     if (result.ok) render();
   });
   fill();
+  // the wait for the restarted server repaints this dialog too, not only the page under it
+  addonWaitPaint = () => { if (d.isConnected) fill(); render(); };
+  d.addEventListener('close', () => { addonWaitPaint = () => render(); });
   d.append(list, actions);
   window.orch.open(d);
   if (!snapshot) fetch('/api/state?fresh=1', {cache:'no-store'}).then(res => res.ok ? res.json() : null).then(next => { if (next && d.isConnected) { accept(next); fill(); } }).catch(() => {});

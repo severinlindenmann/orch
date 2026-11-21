@@ -22,7 +22,10 @@
                   {id, ticket, key, card:{kind,title,why,need,then,blocked,ok_label,open,preview}, digest, since,
                    text (the question, shown on the card), group (cards that belong together), recommended}
                   card.files: [{name, type:'img'|'page'|'file', ref}] the result's own files (a Check card); api.fileUrl gives their URL
-                  answers: [{label, picked}] the card's own answer buttons (the dashboard sets them for a Factory start)
+                  answers: [{label, picked}] the card's own answer buttons (the dashboard sets them for a Factory start and a stuck card)
+                  href: '#ticket/<id>' a link inside the page: the card's Open button, same tab (a stuck card)
+                  card.kind 'stuck' (ORCH-1108): work that stopped (Home's rows); only its own buttons answer it, no Looks good / Don't do
+                  card.hint: one plain line in the card's foot saying what its own buttons do (a stuck card)
                   preview refs are "reviewed/<sha12>/<name>" files; the page asks api.fileUrl for them
      answered() -> Promise<[entry]>     entry = {id, ticket, ticket_key, ticket_title, text, key, card, shown:{digest,copy,files}, at, by, via,
                   decision:{action:approve|use|use_with_changes|send_back|dont|none_of_these, picked, allows,
@@ -44,7 +47,7 @@
    A rejected stack()/answered() with error.code 'needs_person' (or 401/403) shows the plain sign-in state. */
 (()=>{'use strict';const UI=window.UI=window.UI||{};
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};
-const KIND={draft:['Draft','page'],check:['Check','check'],link:['Publish','link'],choice:['Choose','cards'],plan:['Plan','note']};
+const KIND={draft:['Draft','page'],check:['Check','check'],link:['Publish','link'],choice:['Choose','cards'],plan:['Plan','note'],stuck:['Stuck','pause']};
 
 /* ---------- time: "today 09:12", "yesterday 17:05", "Thu 16:05", "12 Nov" ---------- */
 const pad=n=>String(n).padStart(2,'0');
@@ -65,9 +68,10 @@ const mapPreview=(p,c,api)=>{if(!p||typeof p!=='object')return {type:'doc'};cons
 const mapFiles=(fs,c,api)=>(Array.isArray(fs)?fs:[]).filter(f=>f&&typeof f.ref==='string'&&typeof f.name==='string'&&f.name).slice(0,24)/* the card shows 5 and a "+N more" tile (ORCH-421) */
  .map(f=>({label:f.name.slice(0,80),type:f.type==='img'||f.type==='page'||f.type==='pdf'?f.type:/\.pdf$/i.test(f.name)?'pdf':'file',src:api.fileUrl(c,f.ref)||''})).filter(f=>f.src);/* a PDF tile shows its first page (ORCH-477) */
 const safeOpen=u=>typeof u==='string'&&/^https?:\/\//i.test(u)?u:undefined;
+const safeHere=u=>typeof u==='string'&&/^#[A-Za-z0-9/_%?=&.-]{1,300}$/.test(u)?u:undefined;/* a link inside the same page (#ticket/<id>), opened in the same tab */
 const mapCard=(c,api,now)=>{const k=c.card||{},kd=KIND[k.kind]||[k.kind||'Review','file'];
  return {id:c.id,kind:k.kind,kindLabel:kd[0],icon:kd[1],ticket:c.ticket_key||(/^(q[0-9]+|review)$/.test(c.key||'')?c.ticket:c.key)||c.ticket,ticketId:c.ticket,ticketTitle:c.ticket_title,about:c.about,task:c.task,when:fmtTime(c.since,now),need:k.need,title:k.title||'Review',
-  why:k.why,okLabel:k.ok_label,then:k.then,blocked:typeof k.blocked==='string'?k.blocked:'',open:safeOpen(k.open),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,
+  why:k.why,hint:typeof k.hint==='string'?k.hint.slice(0,300):'',okLabel:k.ok_label,then:k.then,blocked:typeof k.blocked==='string'?k.blocked:'',open:safeOpen(k.open),href:safeHere(c.href),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,
   text:typeof c.text==='string'?c.text:'',links:(Array.isArray(c.links)?c.links:[]).map(l=>l&&{label:String(l.label||'').slice(0,60),url:safeOpen(l.url)}).filter(l=>l&&l.label&&l.url).slice(0,5),group:typeof c.group==='string'?c.group:'',files:mapFiles(k.files,c,api),answers:(Array.isArray(c.answers)?c.answers:[]).filter(x=>x&&typeof x.label==='string'&&typeof x.picked==='string'&&x.label&&x.picked).slice(0,4).map(x=>({label:x.label.slice(0,40),picked:x.picked})),suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined}};
 
 /* ---------- Answers: words, pill, record ---------- */
@@ -257,12 +261,16 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  const load=async force=>{if(loading||!alive)return;loading=true;try{const cards=await api.stack();touchMeta();apply(cards,!!force)}catch(e){if(!deck||isAuth(e))err(e)}finally{loading=false}};
  let forMe=false;/* ORCH-547: "Answered for me" shows only what someone answered for the person, to look through and undo */
  const undo=api.undo?async e=>{const r=await api.undo(e);if(r&&r.ok){dirty=true;drawAnswered();load(true)}return r}:null;
+ const ANS_STEP=50;let ansShown=ANS_STEP;
  const drawAnswered=async()=>{try{const all=await api.answered();if(!alive)return;ansEl.replaceChildren();
    const mine=all.filter(e=>e&&e.for),list=forMe?mine:all;
-   if(mine.length||forMe){const fn=el('nav','segmented'),mk=(label,on)=>{const b=el('button','btn sm',label);b.type='button';b.setAttribute('aria-pressed',String(forMe===on));b.onclick=()=>{forMe=on;drawAnswered()};return b};
+   if(mine.length||forMe){const fn=el('nav','segmented'),mk=(label,on)=>{const b=el('button','btn sm',label);b.type='button';b.setAttribute('aria-pressed',String(forMe===on));b.onclick=()=>{forMe=on;ansShown=ANS_STEP;drawAnswered()};return b};
     fn.setAttribute('aria-label','Which answers');fn.append(mk('All',false),mk('Answered for me',true));ansEl.append(fn)}
    if(!list.length){ansEl.append(forMe?UI.state({kind:'empty',title:'Nothing answered for you',text:'Answers someone gave for you appear here, to undo.'}):UI.state({kind:'empty',title:'No answers yet',text:'Your answers appear here and on each ticket.'}));return}
-   list.forEach(e=>ansEl.append(UI.answerRecord(e,{fileUrl:api.fileUrl,now:o.now,ticketHref:o.ticketHref,undo})))}
+   /* ORCH-523: the first ANS_STEP answers, the next ones when the end scrolls into view (thousands at 10,000 tickets) */
+   list.slice(0,ansShown).forEach(e=>ansEl.append(UI.answerRecord(e,{fileUrl:api.fileUrl,now:o.now,ticketHref:o.ticketHref,undo})));
+   if(list.length>ansShown){const more=el('p','meta');more.textContent='Loading more…';more.setAttribute('role','status');more.dataset.more='answered';ansEl.append(more);
+    if(typeof IntersectionObserver==='function'){const io=new IntersectionObserver(es=>{if(es.some(x=>x.isIntersecting)&&alive){io.disconnect();ansShown+=ANS_STEP;drawAnswered()}},{rootMargin:'400px 0px'});io.observe(more)}}}
   catch(e){ansEl.replaceChildren(isAuth(e)?UI.state({kind:'empty',title:'Sign in',text:'Run orch review in your terminal. It opens this page signed in.'}):UI.state({kind:'error',title:"Can't reach orch",text:'Is the review page still running in your terminal?',action:{label:'Try again',onClick:drawAnswered}}))}};
  bWait.onclick=()=>setView('deck');bAns.onclick=()=>setView('answered');
  deckEl.replaceChildren(UI.state({kind:'loading'}));waitCount(0);setView('deck');

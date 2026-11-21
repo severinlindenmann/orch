@@ -70,10 +70,28 @@ _TRACE_LOG = addons._trace_log_path()  # the true fallback trace file (temp fold
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 
 
+def guard_only_home(real: Path) -> Path:
+    """The home whose orch folder the guard watches: the real account home, or ORCH_TEST_GUARD_ONLY's.
+    The local check of a merge queue group (scripts/check-commit.sh) runs the suites with a throwaway HOME and
+    ORCH_HOME_STRICT=1 on a Mac where the production orch keeps writing the real home (health.json,
+    github-writes.jsonl), so watching the real home there fails every green run (ORCH-1180). It sets
+    ORCH_TEST_GUARD_ONLY to its throwaway home; CI after the merge keeps watching the real home. Honoured
+    only with ORCH_HOME_STRICT=1 and a folder under <real home>/.orch-test; any other value is ignored."""
+    only = os.environ.get("ORCH_TEST_GUARD_ONLY")
+    if not only or os.environ.get("ORCH_HOME_STRICT") != "1":
+        return real
+    try:
+        p, top = Path(only).resolve(strict=True), (real / ".orch-test").resolve(strict=True)
+    except (OSError, RuntimeError):
+        return real
+    return p if p.is_dir() and p != top and p.is_relative_to(top) else real
+
+
 def _guard_bases() -> list[Path]:
-    """The orch homes the guard watches: ALWAYS the real account home (getpwuid), plus ORCH_TEST_GUARD_HOME's
-    when set (only tests/test_session_guard.py sets it). The override adds a location, never replaces."""
-    bases = [_REAL_HOME_FN() / ".orch-tool"]
+    """The orch homes the guard watches: the real account home (getpwuid; inside the local check its
+    throwaway home, guard_only_home), plus ORCH_TEST_GUARD_HOME's when set (only tests/test_session_guard.py
+    sets it). The override adds a location, never replaces."""
+    bases = [guard_only_home(_REAL_HOME_FN()) / ".orch-tool"]
     extra = os.environ.get("ORCH_TEST_GUARD_HOME")
     if extra:
         bases.append(Path(extra) / ".orch-tool")
@@ -284,6 +302,11 @@ def pytest_sessionfinish(session, exitstatus):
         session.exitstatus = 1
     files, trace = _snapshot_real_tool_home()
     bad = False
+    # ORCH_TEST_GUARD=warn: a changed file only warns. For the merge queue's precheck
+    # (ORCH-545, scripts/ci_light.py --rules): it runs on the computer whose own orch
+    # writes ~/.orch-tool all the time, so a change there says nothing about the tests;
+    # their HOME and ORCH_HOME are a throw-away folder anyway. CI never sets it.
+    warn = os.environ.get("ORCH_TEST_GUARD") == "warn"
     for k in sorted(set(files) | set(_REAL_AT_START)):
         before, after = _REAL_AT_START.get(k), files.get(k)
         if before != after:
@@ -292,8 +315,11 @@ def pytest_sessionfinish(session, exitstatus):
                 if (before and after and before[:2] != after[:2])
                 else "only touched or (re)created/removed"
             )
-            print(f"\nREAL ~/.orch-tool CHANGED: {k}: {kind}", file=sys.stderr)
-            bad = True
+            print(
+                f"\nREAL ~/.orch-tool CHANGED: {k}: {kind}" + (" (warning only)" if warn else ""),
+                file=sys.stderr,
+            )
+            bad = bad or not warn
     new = [x for x in trace if x not in _TRACE_AT_START]
     for raw in new:
         try:
@@ -602,6 +628,17 @@ def _no_update_info_network(monkeypatch):
     from orch import updateinfo
 
     monkeypatch.setattr(updateinfo, "_fetch_messages", lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_selfcheck_after_update(request, monkeypatch):
+    """The check after an update runs the installed orch as child processes: tests of the update itself skip
+    it (test_selfcheck tests it on its own)."""
+    if request.module.__name__.rsplit(".", 1)[-1] == "test_selfcheck":
+        return
+    from orch import selfcheck
+
+    monkeypatch.setattr(selfcheck, "after_update", lambda *a, **k: [])
 
 
 @pytest.fixture

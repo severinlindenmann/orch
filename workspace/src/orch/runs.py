@@ -1845,9 +1845,8 @@ def _start_pressed(root: Path, tid: str) -> str | None:
     item written from inside a helper is stored as agent:<tool> whatever it says (_pending_add_locked), so a
     helper can never pass for a person here."""
     for i in undelivered(root, tid):
-        by = str(i.get("by") or "")
-        if i.get("kind") == "event" and i.get("via") is None and history.is_person_line(by):
-            return by
+        if i.get("kind") == "event" and i.get("via") is None and history.is_person_line(i):
+            return i["by"]
     return None
 
 

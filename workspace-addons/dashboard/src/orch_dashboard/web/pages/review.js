@@ -12,7 +12,87 @@ function reviewFileStamp(tid, kind, name) {
   const stamp = window.FileViewer.stampOf(files.find(file => file.name === name));
   return stamp ? '&v=' + encodeURIComponent(stamp) : '';
 }
-function reviewCards() { return array(state?.review?.cards).map(reviewPlainCard); }
+function reviewCards() { return [...reviewStuckCards(), ...array(state?.review?.cards).map(reviewPlainCard)]; }
+// ORCH-1108 (owner's pick on ORCH-1102): work that stopped (Home's rows: a pull request left open, an idle helper, checks
+// that keep failing, a helper waiting for an OK on its screen, a ticket the Reviewer was not sure about) is a card here
+// too, first in line as on Home, so THE number and the Waiting cards are the same count. The same rows as needsToday()
+// stuck; a ticket the Reviewer was not sure about that waits in Check is its Check card (counted once, as on Home).
+// Its buttons are Home's (helperRow): Merge and Nudge, or Nudge and Start fresh, or none; Open goes to the ticket.
+const STUCK_CARD = /^stuck:(.{1,200})$/;
+function reviewStuckRows() {
+  if (!state || typeof needsToday !== 'function') return [];
+  return needsToday().stuck.map(g => g.row).filter(row => !(row.kind === 'reviewer:unsure' && ticketOf(row.ticket)?.status === 'review'));
+}
+function reviewStuckAnswers(row) {
+  if (row.kind === 'helper:permission' || row.kind === 'reviewer:unsure') return [];  // the answer is on the ticket page: Open
+  if (row.kind === 'helper:unmerged') return [{label:'Merge', picked:'merge'}, {label:state.runs?.[row.ticket]?.running === true ? 'Nudge' : 'Start helper', picked:'nudge'}];
+  return [{label:'Nudge', picked:'nudge'}, {label:'Start fresh', picked:'fresh'}];
+}
+// A button pressed on a stuck card does not end the stopped work (Home keeps its row too): the card comes back in
+// Waiting with what was done and when, so the number and the cards stay the same count. Kept per page.
+const reviewStuckDone = new Map();  // card id -> {word, at, stop}: stop = the stop it was pressed on (a later stop starts clean)
+const reviewStuckBusy = new Set();  // card ids whose button is running now: a second press waits for nothing and does nothing
+const STUCK_WORDS = {merge:'Merged', nudge:'Message sent', start:'Helper started', fresh:'Helper started fresh'};
+const reviewStuckStop = row => [row.kind, row.since || '', row.pull?.head || ''].join('@');
+function reviewStuckDoneOf(row) {
+  const done = reviewStuckDone.get('stuck:' + row.id);
+  return done && done.stop === reviewStuckStop(row) ? done : null;
+}
+function reviewStuckDigest(row) {
+  const done = reviewStuckDoneOf(row);
+  return reviewStuckStop(row) + '@' + (done ? done.at : '');
+}
+function reviewStuckCards() {
+  if (snapshot) return [];
+  return reviewStuckRows().map(row => {
+    const t = ticketOf(row.ticket), id = 'stuck:' + row.id, done = reviewStuckDoneOf(row);
+    const title = clean(t?.title || row.title || ''), about = reviewStuckAbout(t), step = reviewStuckStep(t);
+    const why = [done ? done.word + ' ' + time(new Date(done.at).toISOString()) + '.' : '', step].filter(Boolean).join(' ');
+    return {id, ticket:row.ticket, ticket_key:typeof t?.key === 'string' && t.key ? t.key : row.ticket, ticket_title:title,
+      key:'stuck', since:row.since, digest:reviewStuckDigest(row), href:'#ticket/' + encodeURIComponent(row.ticket),
+      text:clean(row.text), ...(about ? {about} : {}),
+      card:{kind:'stuck', title:title || clean(row.text), hint:reviewStuckHint(row), ...(why ? {why} : {})}, answers:reviewStuckAnswers(row)};
+  });
+}
+// The context the owner asked for (ORCH-1108 q1, "not enough context what it is about"): the ticket's name as the card's
+// title, what was asked in one line (About), the step it stopped on, and what each button does.
+function reviewStuckAbout(t) {
+  const first = String(t?.description || '').split(/\n/).map(s => s.trim()).find(Boolean) || '';
+  const line = clean(first);
+  return line.length > 160 ? line.slice(0, 157).replace(/\s+\S*$/, '') + '…' : line;
+}
+function reviewStuckStep(t) {
+  const tasks = array(t?.checklist).filter(task => !task.wont_do);
+  if (!tasks.length) return '';
+  const done = tasks.filter(task => task.done).length, open = tasks.find(task => !task.done);
+  return (open ? 'Stopped at: ' + clean(open.text || open.title || '') + ' · ' : '') + done + ' of ' + tasks.length + ' steps done.';
+}
+function reviewStuckHint(row) {
+  if (row.kind === 'helper:permission') return 'Open the ticket to see what the helper asks and answer it there.';
+  if (row.kind === 'reviewer:unsure') return 'Open the ticket to check the result yourself.';
+  if (row.kind === 'helper:unmerged') return 'Merge puts the pull request in. ' + (state.runs?.[row.ticket]?.running === true ? 'Nudge asks' : 'Start helper starts a helper that asks') + ' it to merge or say why it stays open.';
+  return 'Nudge asks the helper to go on with the next step. Start fresh stops it and starts a new helper on this ticket.';
+}
+async function reviewStuckAnswer(id, digest, picked) {
+  const m = STUCK_CARD.exec(String(id || '')), row = m && reviewStuckRows().find(r => r.id === m[1]);
+  if (!row) return {ok:false, error:{code:'decided', message:'This is not stuck any more.'}};
+  // the card as it was shown: a newer commit or a newer stop is a new card, never merged or nudged unseen
+  if (digest !== reviewStuckDigest(row)) return {ok:false, error:{code:'changed', message:'This card changed.'}};
+  if (reviewStuckBusy.has(id)) return {ok:false, error:{code:'busy', message:'That button is already running.'}};
+  reviewStuckBusy.add(id);
+  try { return await reviewStuckRun(id, row, picked); } finally { reviewStuckBusy.delete(id); }
+}
+async function reviewStuckRun(id, row, picked) {
+  const pull = row.pull || {}, running = state.runs?.[row.ticket]?.running === true;
+  const r = picked === 'merge' && row.kind === 'helper:unmerged' ? await act('pull.merge', {ticket:row.ticket, url:pull.url, head:pull.head})
+    : picked === 'nudge' && reviewStuckAnswers(row).length ? await nudgeHelper(row.ticket, row.kind === 'helper:unmerged' ? MERGE_ASK : NUDGE)
+    : picked === 'fresh' && row.kind !== 'helper:unmerged' && reviewStuckAnswers(row).length ? await restartFresh(row.ticket)
+    : null;
+  if (!r) return {ok:false, error:{code:'refused', message:'That button is not on this card.'}};
+  if (!r.ok) return {ok:false, error:{code:'error', message:String(r.text || 'It did not work. Try again.').slice(0, 300)}};
+  reviewStuckDone.set(id, {word:STUCK_WORDS[picked === 'nudge' && !running ? 'start' : picked], at:Date.now(), stop:reviewStuckStop(row)});
+  return {ok:true};
+}
 // A Factory proposal reads like Home's card (ORCH-183): its title as the question, the goal and the time in two short
 // lines, not the whole frozen proposal (that stays on the ticket). Any other card is left as it is.
 function reviewPlainCard(c) {
@@ -25,7 +105,7 @@ function reviewPlainCard(c) {
   return {...c, text:p.goal + (p.meta ? '\n' + p.meta : ''), card, ...(answers.length ? {answers} : {})};
 }
 function reviewAnswered() { return array(state?.review?.answered); }
-// The cards of the stack: every open question (an add-on's own too, e.g. Factory's Start?) and every result to check.
+// The cards of the stack: work that stopped, every open question (an add-on's own too, e.g. Factory's Start?) and every result to check.
 function reviewCount() { return reviewCards().length; }
 // The subtitle shows THE needs-you number (needsYouTotal: open questions, results to check and work that stopped; the
 // Review menu entry, the top bar, Home and the live bar show the same one, ORCH-63, ORCH-705).
@@ -126,6 +206,7 @@ function reviewApi() {
       return r.ok ? {ok:true} : {ok:false, error:{code:r.status === 403 ? 'needs_person' : 'error', message:String(r.text || 'Could not undo it.').slice(0, 300)}};
     },
     answer: async ({id, digest, verdict, picked, note}) => {
+      if (STUCK_CARD.test(String(id || ''))) return snapshot ? {ok:false, error:{code:'refused', message:'Nothing can be changed here.'}} : reviewStuckAnswer(id, digest, picked);
       const m = REVIEW_ID.exec(String(id || ''));
       if (!m) return {ok:false, error:{code:'not_found', message:'That card is not here any more.'}};
       const args = {ticket:m[1] || m[3], key:m[2] || 'review', verdict, digest};

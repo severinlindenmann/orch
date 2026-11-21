@@ -15,6 +15,9 @@ from pathlib import Path
 from . import drivers, service, store, watch
 from .store import Refused
 
+START_WAIT_TRIES = 12  # after start / restart: look up to 12 x 0.25 s before saying it did not stay running
+START_WAIT_STEP = 0.25
+
 MASK = "••••••"
 ACT_VERBS = ("start", "stop", "restart", "auto-on", "auto-off", "remove", "adopt")
 
@@ -408,6 +411,14 @@ def _launching(drv, spec) -> bool:
     return bool(drv.status(spec).starting)
 
 
+def _shown(root: Path, p: Path) -> str:
+    """A path as the person reads it: relative to the workspace when it lies inside it."""
+    try:
+        return p.resolve().relative_to(Path(root).resolve()).as_posix()
+    except ValueError:
+        return str(p)
+
+
 def cmd_add(args, root: Path) -> int:
     sid = store.check_id(args.id)
     if store.exists(root, sid):
@@ -434,6 +445,7 @@ def cmd_add(args, root: Path) -> int:
     drv = _driver()
     wid = _workspace_id(root)
     spec = _spec(root, rec, wid)
+    old_log = store.set_aside_old_log(root, sid)  # a re-used id starts with an empty log (ORCH-1131)
     store.save(root, rec)
     store.log_path(root, sid).parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -456,6 +468,8 @@ def cmd_add(args, root: Path) -> int:
         nxt = f"Added {rec['name']} and started it, but it did not stay running. Read its log: orch services log {sid}"
     else:
         nxt = f"Added {rec['name']}. Start it: orch services start {sid}"
+    if old_log is not None:
+        nxt += f"\nIt starts with an empty log; the log of the earlier service {sid} was moved to {_shown(root, old_log)}."
     if store.on_external_volume(root):
         nxt += (
             "\nThis workspace is on an external disk: its log is kept in your Library/Logs/orch folder and the "
@@ -514,6 +528,11 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
     if verb != "stop":
         _settle(drv, spec)
     row = _state(root, drv, rec, wid)
+    for _ in range(START_WAIT_TRIES if verb != "stop" else 0):  # a job can take a moment to show as alive
+        if row["state"] == "running":
+            break
+        time.sleep(START_WAIT_STEP)
+        row = _state(root, drv, rec, wid)
     words = {"start": "Started", "stop": "Stopped", "restart": "Restarted"}[verb]
     nxt = f"{words} {rec['name']}."
     if verb != "stop" and row["state"] != "running" and _launching(drv, spec):

@@ -504,7 +504,7 @@
       return {state: 'working', agent, status: 'working' + by + since, primary: live || stop, items: live ? [stop] : []};
     }
     const sf = startFailure(t, r, settings);
-    if (sf) return {state: 'failed', agent, status: sf.text, startFailed: true, primary: start('Retry'), items: []};
+    if (sf) return {state: 'failed', agent, status: sf.text, startFailed: true, primary: start('Try again'), items: []};
     if (r && r.state === 'dead') return {state: 'failed', agent, status: 'the last run ended without finishing',
       primary: start('Try again'), items: [fresh]};
     if (asks) return {state: 'needs', agent, status: 'needs your answer', primary: {label: 'Answer', op: 'answer'}, items: [fresh]};

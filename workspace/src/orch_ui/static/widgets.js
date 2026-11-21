@@ -138,6 +138,9 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
    item.files: [{label, type:'img'|'page'|'file', src}] the result's own files (a Check card), as tiles that open them
    item.answers: [{label, picked}] the card's own answer buttons in place of the three (a Factory start: Not now, Change it,
        Start); all outlined, so the costly one is never the easiest click; each answers ok with that pick
+   item.kind 'stuck' (ORCH-1108): work that stopped; never Looks good / Don't do / Comment, only its own buttons (Nudge,
+       Start fresh, Merge) or none; item.href (a link in this page, '#ticket/<id>') is its Open button, same tab
+   item.hint: one plain line in the foot saying what the card's own buttons do
    Answers are buttons and keys only, no swipe (owner 16 Nov: "we already have the arrows or buttons to click"):
    → approve (the button names the action: it.okLabel, "Use C"), ← Don't do / Send back / None of these,
    ↓ comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
@@ -207,6 +210,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  /* words */
  const isOpt=it=>!!(it&&it.preview&&it.preview.type==='options');
  const ownAnswers=it=>{const a=it&&Array.isArray(it.answers)?it.answers.filter(x=>x&&x.label&&x.picked):[];return a.length?a:null};
+ const ownOnly=it=>!!ownAnswers(it)||!!it&&it.kind==='stuck';/* a stuck card (ORCH-1108) has no Looks good / Don't do: its own buttons, or Open alone */
  const answerOwn=a=>{if(!cur||overlay||busy)return;const c=cur;busy=true;c.classList.add('leaving');setTimeout(()=>{busy=false;commit('ok',{picked:a.picked})},120)};
  const sendsBack=it=>!!it&&it.kind==='check';/* its "no" is Send back, which needs words: the comment sheet, and no second Comment button */
  const noWord=it=>it.noLabel||(isOpt(it)?'None of these':it.kind==='check'?'Send back':"Don't do");
@@ -262,7 +266,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const sugOf=it=>it&&it.suggest&&!isOpt(it)?it.suggest:null;
  const syncWords=()=>{const it=items[idx];if(!it)return;[[okBtn,'ok'],[noBtn,'no']].forEach(([b,v])=>{b.classList.toggle('suggested',sugOf(it)===v);b.querySelector('.act-sug')?.remove();if(sugOf(it)===v)b.append(el('span','opt-sug act-sug','Suggested'))});okBtn.querySelector('.act-word').textContent=okWord(it);noBtn.querySelector('.act-word').textContent=noWord(it);
   okBtn.classList.toggle('wait',okWord(it)==='Pick one'||!!it.blocked);okBtn.setAttribute('aria-disabled',String(!!it.blocked));talkBtn.hidden=sendsBack(it);thenLine(thenEl,it);
-  const own=ownAnswers(it);[noBtn,okBtn].forEach(b=>{b.hidden=!!own});if(own)talkBtn.hidden=true;ownRow.hidden=!own;
+  const own=ownAnswers(it),only=ownOnly(it);[noBtn,okBtn].forEach(b=>{b.hidden=only});if(only)talkBtn.hidden=true;ownRow.hidden=!own;
   ownRow.replaceChildren(...(own||[]).map(a=>{const b=mk('own',null,a.label,null,()=>answerOwn(a));b.dataset.picked=a.picked;return b}));
   const st=cur&&cur.querySelector('.swipe-stamp.right');if(st)st.textContent=okWord(it)==='Pick one'?'Pick one first':okWord(it)};
  /* card */
@@ -287,10 +291,12 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   const fl=filesRow(it);
   const ft=el('footer','swipe-foot');/* "If you approve" is in the pinned answers bar (ORCH-477); why Looks good is off stays on the card (ORCH-548) */
   if(it.blocked){const t=el('span','swipe-then');t.append(el('b','','Looks good is off: '),it.blocked);ft.append(t)}
+  else if(it.hint)ft.append(el('span','swipe-then',it.hint));/* what the card's own buttons do (a stuck card) */
   const row=el('div','swipe-foot-row');
   row.append(el('span','grow'));const pc=(pins[it.id]||[]).length;if(pc){const s=el('span','swipe-pins');s.append(ic('pin',14),pc+(pc===1?' spot marked':' spots marked'));row.append(s)}
   (it.links||[]).forEach(l=>{const a=el('a','btn ghost sm swipe-link');a.href=l.url;a.target='_blank';a.rel='noopener';a.append(ic('link',14),l.label);a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)});/* the helper's links: a mockup, a reference */
   if(it.open){const a=el('a','btn ghost sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
+  if(it.href&&!it.open){const a=el('a','btn outline sm swipe-here');a.href=it.href;a.append(ic('ticket',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}/* a page of this site (the ticket): same tab */
   ft.append(row);if(row.children.length<2&&!it.blocked)ft.classList.add('empty');/* nothing in it: no empty strip under a short card */
   c.append(...[h,pv,fl,ft].filter(Boolean));return c};
  /* The result's own files (a picture, a page, a PDF): tiles that open the file large inside the page, ← → to the card's
@@ -402,7 +408,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const shortName=it=>{const t=String(it.title||'').trim();if(t.length<=48)return t;if(it.ticket)return it.ticket;const c=t.slice(0,48),sp=c.lastIndexOf(' ');return (sp>20?c.slice(0,sp):c).replace(/[\s,;:.-]+$/,'')+'…'};
  const nudge=(c,msg)=>{reset(c);c.classList.remove('nudge');void c.offsetWidth;c.classList.add('nudge');live.textContent=msg;if(!o.quiet)say(msg)};
  const fly=(verdict,dx,dy)=>{if(!cur||overlay||busy)return;const c=cur,it=items[idx],w=stage.clientWidth,h=stage.clientHeight;
-  if(ownAnswers(it)&&verdict!=='later')return;/* its own buttons answer it */
+  if(ownOnly(it)&&verdict!=='later')return;/* its own buttons answer it */
   if(verdict==='talk'||(verdict==='no'&&sendsBack(it)))return openComment();/* a Check sent back always says what should change */
   if(verdict==='ok'&&isOpt(it)&&!picked[it.id])return nudge(c,'Tap the option you want first.');
   if(verdict==='ok'&&it.blocked)return nudge(c,it.blocked);/* ORCH-548: Looks good is off; the card says why and what to press */

@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import share, spread, store, switching, when
+from . import computer, share, spread, store, switching, when
 from .store import PERIOD_WORDS
 
 HISTORY_DAYS = 30
@@ -28,6 +28,7 @@ def who_words(who: str) -> str:
 def history_rows(root: Path, at: datetime | None = None) -> list[dict]:
     """The last 30 days, newest first, at most 50 lines, each one plain sentence."""
     since = (at or datetime.now(UTC)) - timedelta(days=HISTORY_DAYS)
+    here = computer.label(root)
     out = []
     for r in store.history(root, limit=500):
         when = r.get("at")
@@ -41,10 +42,16 @@ def history_rows(root: Path, at: datetime | None = None) -> list[dict]:
             continue
         label = str(r.get("label") or "Usage")
         text = what[:1].upper() + what[1:] if label == "Usage" else f"{label}: {what}"
+        ws = r.get("workspace")
+        if isinstance(ws, str) and ws and ws != here and what.startswith("switched to"):
+            text = f"{computer.words(ws)['switched']}: {r.get('before') or '?'} → {r.get('after') or label}"
         why = r.get("why")
         if isinstance(why, str) and why.strip():
             text += f" ({why.strip()})"
-        out.append({"at": when, "who": who_words(str(r.get("who") or "")), "text": text[:300]})
+        who = who_words(str(r.get("who") or ""))
+        if isinstance(ws, str) and ws and ws != here and who != "Usage":
+            who = f"{who} in {ws}"  # a change made in another workspace on this computer says where
+        out.append({"at": when, "who": who, "text": text[:300]})
         if len(out) >= HISTORY_MAX:
             break
     return out
@@ -154,6 +161,8 @@ def build(data: dict, root: Path) -> dict:
         "at": store.now(),
         "switcher": bool(data["switcher"]),
         "switching": switching.switching_on(root),
+        # ORCH-943: the one workspace on this computer that switches (None: the workspace keeps Usage alone)
+        "switcher_owner": computer.view(root, computer.shared_dir(root)),
         # the loop's last look said no account is good: helpers wait soon
         "all_at_limit": all_at_limit,
         "one_account": len(subs) <= 1,

@@ -65,6 +65,38 @@ def test_add_is_stopped_until_started_and_the_whole_cycle_works(cli, ws, fake):
     assert [c[0] for c in fake.calls] == ["install", "start", "stop", "restart", "auto", "auto", "uninstall"]
 
 
+def test_a_re_added_id_starts_with_an_empty_log(cli, ws):
+    """ORCH-1131: a new service must not show the removed one's lines (maybe secrets) as its own."""
+    assert _add(cli)[0] == 0
+    log = ws / ".orch/addons/services/logs/web.log"
+    log.write_text("old line\n", encoding="utf-8")
+    assert jrun(cli, "remove", "web")[0] == 0
+    assert log.read_text(encoding="utf-8") == "old line\n"  # remove keeps it
+    code, out = _add(cli)
+    assert code == 0, out
+    assert not log.exists() or log.read_text(encoding="utf-8") == ""
+    code, out = jrun(cli, "log", "web")
+    assert code == 0 and "old line" not in json.dumps(out)
+    kept = list((ws / ".orch/addons/services/logs/removed").glob("web-*.log"))
+    assert len(kept) == 1 and kept[0].read_text(encoding="utf-8") == "old line\n"
+    # a second round keeps both old logs apart
+    log.write_text("second\n", encoding="utf-8")
+    assert jrun(cli, "remove", "web")[0] == 0
+    code, out = _add(cli)
+    assert (
+        code == 0 and "empty log" in out["next"] and ".orch/addons/services/logs/removed/web-" in out["next"]
+    )
+    texts = sorted(
+        p.read_text(encoding="utf-8") for p in (ws / ".orch/addons/services/logs/removed").glob("web-*.log")
+    )
+    assert texts == ["old line\n", "second\n"]
+
+
+def test_a_new_id_says_nothing_about_an_old_log(cli):
+    code, out = _add(cli)
+    assert code == 0 and "empty log" not in out["next"]
+
+
 def test_add_with_start_runs_at_once(cli, fake):
     code, out = _add(cli, "web", "--start")
     assert code == 0 and out["service"]["state"] == "running" and "running" in out["next"]
