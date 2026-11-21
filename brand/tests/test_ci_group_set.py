@@ -185,4 +185,64 @@ def test_group_plan_prints_json_and_runs_nothing(capsys, monkeypatch):
     monkeypatch.setattr(light.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("ran")))
     assert light.main(["--base", "b", "--group", "--plan"]) == 0
     out = capsys.readouterr().out
-    assert '"add-on sync: tests"' in out and '"workspace: tests (not slow)"' in out
+    assert '"add-on sync: tests"' in out and '"workspace: rule tests over the whole tree"' in out
+
+
+# -- the picked workspace tests (texts given, ORCH-1123): before the merge only what the group can break -----------
+TEXTS = {
+    "test_adapters.py": "import orch.adapters\n",
+    "test_cli_seams.py": "",
+    "test_addons.py": "from orch import addons\n",
+    "test_worktrees.py": "from orch import worktrees\n" + "x" * 50,
+    "test_ticket.py": "import orch.ticket\n" + "x" * 5000,
+    "test_other.py": "x" * 5000,
+}
+
+
+def _ws(files):
+    steps = light.group_plan(files, ADDONS, "b", texts=TEXTS)
+    return [s for s in steps if s["name"].startswith("workspace:") and "ruff" not in s["name"]]
+
+
+def test_with_texts_the_full_suite_is_replaced_by_rule_tests_and_picked_files():
+    steps = _ws(["workspace/src/orch/worktrees.py"])
+    assert [s["name"] for s in steps] == [
+        "workspace: rule tests over the whole tree",
+        "workspace: 1 test file(s) that read the changed code",
+    ]
+    assert steps[1]["cmd"] == 'uv run pytest -q -n 8 -m "not slow" tests/test_worktrees.py'
+    assert "workspace: tests (not slow)" not in names(light.group_plan(["workspace/x"], ADDONS, "b", texts=TEXTS))
+
+
+def test_the_rule_tests_always_run_and_name_the_core_text_rule_of_test_addons():
+    steps = _ws(["docs/x.md"])
+    assert [s["name"] for s in steps] == ["workspace: rule tests over the whole tree"]
+    assert steps[0]["cmd"].startswith("uv run pytest -q -n 8 tests/test_adapters.py tests/test_cli_seams.py")
+    assert "tests/test_addons.py::test_core_text_names_no_addon" in steps[0]["cmd"]
+
+
+def test_a_broad_change_or_a_contracts_change_runs_the_quarter_sample():
+    for f in ("workspace/tests/conftest.py", "contracts/x.json", "workspace/src/orch/nobody_imports.py"):
+        steps = _ws([f])
+        assert steps[-1]["cmd"] == 'uv run pytest -q -n 8 -m "not slow" --part 1/4', f
+
+
+def test_a_changed_rule_test_file_does_not_run_twice():
+    steps = _ws(["workspace/tests/test_cli_seams.py"])
+    assert [s["name"] for s in steps] == ["workspace: rule tests over the whole tree"]
+
+
+def test_every_rule_node_names_a_real_test():
+    for node in light.RULE_NODES:
+        file, func = node.split("::")
+        text = (ROOT / "workspace" / "tests" / file).read_text(encoding="utf-8")
+        assert f"def {func}(" in text, node
+
+
+def test_all_tests_flag_keeps_the_full_not_slow_suite(capsys, monkeypatch):
+    monkeypatch.setattr(light, "changed", lambda base: ["workspace/src/orch/worktrees.py"])
+    assert light.main(["--group", "--plan", "--all-tests"]) == 0
+    assert "workspace: tests (not slow)" in capsys.readouterr().out
+    assert light.main(["--group", "--plan"]) == 0
+    out = capsys.readouterr().out
+    assert "workspace: tests (not slow)" not in out and "rule tests over the whole tree" in out
