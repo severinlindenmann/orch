@@ -1513,6 +1513,8 @@ def test_list_keeps_a_gap_after_a_long_name(proj, run, tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     make_addon(repo / "workspace-addons", name="dashboard-tester")
     monkeypatch.setenv("ORCH_REPO", str(repo))
+    # only shipped add-ons are listed as available: count the test one among them
+    monkeypatch.setattr(addons, "SHIPPED_ADDONS", (*addons.SHIPPED_ADDONS, "dashboard-tester"))
     monkeypatch.setattr(addons, "_entry_points", lambda: {})
     monkeypatch.setattr(addons, "preview_builtin", lambda n: pytest.fail("no network in list"))
     text = run("addon", "list")[1]
