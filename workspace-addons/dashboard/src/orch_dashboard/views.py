@@ -21,7 +21,7 @@ TONES = ("neutral", "good", "warn", "needs-you", "bad")
 BLOCKS = ("stat", "list", "calendar", "timeline", "chips", "table", "footnote", "settings", "radio", "split")
 # Same pattern as `link` in contracts/addon-view.schema.json (tests/test_views.py compares them).
 _LINK = re.compile(
-    r"""^(t_[a-z0-9]{6,16}|https://[^\s<>"'`]+|addon:(?![/\\])(?!.*\.\.)[A-Za-z0-9_./?=&%-]{0,300}|app:(home|tickets|notes|chat|settings|addon)(/[a-z][a-z0-9-]{0,31}){0,2})$"""
+    r"""^(t_[a-z0-9]{6,16}|https://[^\s<>"'`]+|http://(127\.0\.0\.1|localhost):[0-9]{1,5}/?|addon:(?![/\\])(?!.*\.\.)[A-Za-z0-9_./?=&%-]{0,300}|app:(home|tickets|notes|chat|settings|addon)(/[a-z][a-z0-9-]{0,31}){0,2})$"""
 )
 _TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -222,7 +222,7 @@ def _panel_ok(p):
             log is None
             or (
                 _keys_only(log, ("title", "lines", "empty"))
-                and _lines_ok(log.get("lines"), 0, 20)
+                and _lines_ok(log.get("lines"), 0, 100)
                 and _opt(log, "title", lambda v: _text(v, 40))
                 and _opt(log, "empty", _text)
             )

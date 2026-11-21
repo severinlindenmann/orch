@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-32 steps: 25 ready (the script clicks them), 7 pending (not built yet).
+33 steps: 30 ready (the script clicks them), 3 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -315,7 +315,7 @@ Must be seen:
 
 - Plain messages with time; done steps and other events as lines between them; the pull request inside the message.
 - The waiting question is an orange card above the chat, not a message; once answered it moves into the chat as yours.
-- A sent message shows at once; Terminal shows the last lines and the choice stays after a reload.
+- A sent message shows at once; Terminal shows the helper’s screen and the choice stays after a reload.
 
 ## 18. Files and screenshots in the message box, with a preview before sending
 
@@ -339,7 +339,7 @@ Must be seen:
 ## 19. Voice into the message box
 
 - Part: voice (draft D feature 13)
-- State: pending, waits for: Chat (crew tasks of the Chat stage)
+- State: ready, clicked by the script
 - Pictures: `fd-19-voice-1280.png`, `fd-19-voice-1920.png`, `fd-19-voice-390.png`
 
 Do:
@@ -353,11 +353,12 @@ Must be seen:
 - While listening the button says so and Esc cancels.
 - The words land in the box and are never sent by themselves.
 - With the relay off there is no microphone.
+- A blocked microphone or nothing heard is one plain sentence.
 
 ## 20. All 16 result widgets, small and big
 
 - Part: 16 widgets (draft D feature 10)
-- State: pending, waits for: Result widgets and big overlay in the style guide (ORCH-263)
+- State: ready, clicked by the script
 - Pictures: `fd-20-widgets-1280.png`, `fd-20-widgets-1920.png`, `fd-20-widgets-390.png`
 
 Do:
@@ -371,38 +372,47 @@ Must be seen:
 - Each opens big in an overlay; arrows step through, Esc closes and gives the focus back.
 - Empty, loading and error look like the style guide states.
 
-## 21. The same widgets on a ticket page
+## 21. The same widgets on a tile, in the chat and on a ticket page
 
 - Part: 16 widgets (draft D feature 10)
-- State: pending, waits for: Result widgets and big overlay in the style guide (ORCH-263)
+- State: ready, clicked by the script
 - Pictures: `fd-21-widgets-ticket-1280.png`, `fd-21-widgets-ticket-1920.png`, `fd-21-widgets-ticket-390.png`
 
 Do:
 
-1. Open a ticket with results.
-2. Open one result big.
+1. Open Focus and look at the tile of a ticket with results; open its result big.
+2. Open the session: each finished step carries its results inside its message; open one big.
+3. Open the ticket page and open one result big.
 
 Must be seen:
 
-- The ticket shows the same widgets as Focus.
-- The big overlay is the same one.
+- The tile shows the newest result small and how many more there are.
+- The chat shows the files, check runs and pull request of a step inside that step's message.
+- The ticket page shows every result of the ticket as the same widgets as Focus, all 16 kinds from its real files, evidence and links.
+- The big overlay is the same one everywhere: arrows step through, Esc closes and gives the focus back.
 
 ## 22. A real terminal: type, select, copy and paste
 
 - Part: terminal (draft D feature 5)
-- State: pending, waits for: Terminal in the browser, after the security review and the owner's choice (Terminal stage)
+- State: ready, clicked by the script
 - Pictures: `fd-22-terminal-1280.png`, `fd-22-terminal-1920.png`, `fd-22-terminal-390.png`
 
 Do:
 
 1. Switch a session to Terminal.
-2. Click in it and type a command, select text, copy it, paste it back.
+2. Press a key: nothing is sent (watching only).
+3. Turn on Let me type, type a command and press Enter.
+4. Paste two lines, then Cancel.
+5. Select text and copy it.
 
 Must be seen:
 
-- It behaves like the Terminal app: typing, selection, copy and paste.
-- Copy all copies the screen text.
-- It can only be reached from this computer.
+- The helper's real screen with its colours; it starts watching only.
+- Keys go to the helper only after Let me type.
+- A paste with a line end asks first.
+- Selecting and copying works like on any page; Copy copies the selection or the screen.
+- While typing the screen follows the size of its pane.
+- It can only be reached from this computer (the bridge, ORCH-743).
 
 ## 23. Opening, zooming, pinning and splitting animate
 
@@ -564,4 +574,24 @@ Must be seen:
 
 - Its tile leaves Working and says No session.
 - Its pane offers the Start choice.
+
+## 33. Start the Manager in a chosen permission mode
+
+- Part: sessions (draft D feature 6)
+- State: ready, clicked by the script
+- Pictures: `fd-33-permissions-1280.png`, `fd-33-permissions-1920.png`, `fd-33-permissions-390.png`
+
+Do:
+
+1. Open the New menu in the bar and pick Bypass permissions in its Permissions row.
+2. Start the Manager.
+3. In its pane press "Permissions: Bypass permissions" and pick Auto.
+4. In a workspace that allows at most Auto, open the New menu.
+
+Must be seen:
+
+- The row shows the tool's modes: Default, Accept edits, Auto, Bypass permissions.
+- Bypass permissions shows one plain warning the first time; the Manager starts in it and its pane says "Permissions: Bypass permissions".
+- Auto ends the session and goes on with the same conversation; the pane says "Permissions: Auto".
+- Bypass permissions is off when the workspace does not allow it and says why.
 

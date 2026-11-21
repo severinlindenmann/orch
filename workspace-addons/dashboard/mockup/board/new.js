@@ -11,7 +11,7 @@ calendar.setAttribute('popover','manual');
 calendar.setAttribute('role','group');
 calendar.dataset.overlayReady='true';
 dateToggle.removeAttribute('aria-haspopup');
-$('#new-dialog').append(calendar);
+($('#new-dialog')||document.body).append(calendar);
 const dateOpen=dateToggle.onclick,closeOtherPopover=UI.closePopover;
 const dateIsOpen=()=>calendar.matches(':popover-open');
 calendar.showModal=()=>{
@@ -36,7 +36,7 @@ document.addEventListener('click',e=>{
     e.preventDefault();e.stopImmediatePropagation();
   }
 },true);
-$('#new-dialog').addEventListener('close',()=>calendar.close());
+$('#new-dialog')?.addEventListener('close',()=>calendar.close());
 window.addEventListener('resize',()=>calendar.close());
 // Epic (ORCH-14): each ticket box becomes its own ticket inside this one, with its own text and files.
 const epicList=$('#epic-tickets'),epicAdd=$('#epic-add');

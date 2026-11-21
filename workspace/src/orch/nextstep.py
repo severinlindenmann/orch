@@ -105,6 +105,9 @@ def _start_task(data, args) -> str:
 
 def _record(data, args) -> str:
     c = getattr(args, "check", "<task>")
+    if getattr(args, "exit_code", None):  # a failed run is not evidence to close on
+        again = f'orch check record {_tid(args)} {c} --cmd "<command>" --exit 0'
+        return f"that run failed: fix it, then run it again: {again}"
     return f'if that is the evidence, close the task: orch check done {_tid(args)} {c} --note "<evidence>"'
 
 
@@ -235,6 +238,9 @@ HINTS = {
     "session new": "open it from the bar in Focus, or: orch session list",
     "session list": "orch session new <empty|chat|terminal|manager>",
     "session close": "start it again any time: orch session new <kind>",
+    "session end": "start it again any time: orch session new <kind>",
+    "session stop": "send it a message to go on, or end it: orch session end <kind>",
+    "run interrupt": 'send it a message to go on: orch run send <ticket> "<text>"',
     "diag inspect": "orch diag query",
     "diag query": "orch diag report",
     "diag report": "share the report with whoever is helping you, then keep working: orch ticket list",
@@ -323,7 +329,11 @@ HINTS = {
     "review link": "orch needs",
     "review tend": "orch review accepted  (what was accepted for you today)",
     "review tend-releases": "orch review list  (what still waits for the owner)",
-    "review verdict": "orch ticket show <next ticket in the history>  (the next one to look at)",
+    "review verdict": lambda d, a: (
+        f"orch ticket show {d['next']['key']}  (the next one waiting for a second look)"
+        if isinstance(d, dict) and isinstance(d.get("next"), dict)
+        else "nothing else waits for a second look; finish your ticket."
+    ),
     "review security": "orch github release --dry-run  (what the release still waits for)",
     "review accepted": "orch needs",
     "review undo": "orch review accepted  (what is still accepted for you today)",

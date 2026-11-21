@@ -1,17 +1,20 @@
 pub mod admin;
 pub mod api;
 pub mod auth;
+pub mod cli;
 pub mod crypto;
 pub mod error;
 pub mod groups;
 pub mod look;
 pub mod mobile;
+pub mod msgsig;
 pub mod onboarding;
 pub mod phone;
 pub mod problems;
 pub mod push;
 pub mod rules;
 pub mod shared;
+pub mod signkeys;
 pub mod speech;
 pub mod state;
 pub mod store;
@@ -20,6 +23,7 @@ pub mod subs_push;
 pub mod transcribe;
 pub mod util;
 pub mod webhooks;
+pub mod wipe;
 
 use std::time::Duration;
 

@@ -95,6 +95,7 @@ actor MockRelay: RelayAPI {
         }
         #endif
         if UserDefaults.standard.bool(forKey: "mockReviewStack") { all.append(contentsOf: MockReviewStack.questions) }
+        if UserDefaults.standard.bool(forKey: "mockRunCards") { all.append(contentsOf: MockReviewStack.runQuestions) }
         if UserDefaults.standard.bool(forKey: "mockAllow") { all.append(Self.allowQuestion) }
         if UserDefaults.standard.bool(forKey: "mockGroups") {
             for (id, name) in GroupMock.names where names[id] == nil { names[id] = name }
@@ -386,6 +387,11 @@ actor MockRelay: RelayAPI {
             // Same checks as the relay: a verdict needs the question's digest.
             guard let q = all.first(where: { $0.id == r.questionMessageId }), q.message.body.digest == v.digest, v.isValid else {
                 throw Self.invalid("This answer does not fit the question.")
+            }
+            // ...and every added file is an upload of this phone with that size (ORCH-444).
+            for f in v.note?.files ?? [] {
+                guard let d = uploads[f.blobId] else { throw RelayError.api(status: 404, code: "not_found", message: "Upload the file first (POST /v1/phone/blobs).") }
+                guard d.count == f.size else { throw Self.invalid("An attachment's size does not match the uploaded file.") }
             }
             verdicts.append((r.questionMessageId, v, r.answer))
         }

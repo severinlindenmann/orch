@@ -48,6 +48,10 @@ ALLOW = {
         "workspace-addons/dashboard/src/orch_dashboard/mobile.py",
         "mark_chat_history",
     ): "shown ticket (data.shown)",
+    (
+        "workspace-addons/dashboard/src/orch_dashboard/ticketpages.py",
+        "slim",
+    ): "shown ticket (_shown -> data.shown); cuts the history, reads the done time",
 }
 # (file, function) -> why it may read a step/ref/plan `by` or another person field (answered_by, wont_by,
 # person, description_by) raw. History reads stay under ALLOW.
@@ -91,6 +95,7 @@ SHOWN = {
     ): "history.shown_json(root, tickets.list_all(root)) first",
     ("workspace/src/orch/cli_review.py", "_wait"): "history.shown_ticket(root, tickets.load(...)) each poll",
     ("workspace/src/orch/runs.py", "fresh_prompt"): "ticket = history.shown_ticket(...) first",
+    ("workspace/src/orch/tickets.py", "worked_since_prepare"): "history.shown_ticket(...) for the steps",
     ("workspace/src/orch/cli.py", "_show"): "t = history.shown_ticket(...) first",
     (
         "workspace/src/orch/review.py",

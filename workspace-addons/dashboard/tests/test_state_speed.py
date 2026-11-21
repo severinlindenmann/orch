@@ -60,7 +60,9 @@ def _helpers(ws, n, stop):
     return threads
 
 
-def _measure(ws, helpers, seconds=3.0, tabs=3):
+def _measure(ws, helpers, seconds=3.0, tabs=3, window=None):
+    """The answer times, sorted. window (a list): gets (start, end) of the time the helpers worked, from the
+    end of the first build to the server's stop, on the clock the builds are stamped with."""
     from orch_dashboard.server import make_server
 
     srv = make_server(ws, 0)
@@ -71,6 +73,7 @@ def _measure(ws, helpers, seconds=3.0, tabs=3):
     try:
         _get(base)  # the first build: the only one a request may wait for
         assert srv.revisions.join()  # an open page's event stream: the watcher runs
+        start = time.monotonic()
         threads = _helpers(ws, helpers, stop)
 
         def tab():
@@ -95,21 +98,27 @@ def _measure(ws, helpers, seconds=3.0, tabs=3):
         srv.revisions.leave()
         srv.shutdown()
         srv.server_close()
+        if window is not None and "start" in locals():
+            window.append((start, time.monotonic()))
     assert not errors, errors
     return sorted(times)
 
 
 @pytest.mark.parametrize("helpers", [1, 6])
 def test_state_answers_stay_fast_while_helpers_work(ws, slow_builds, helpers):
-    times = _measure(ws, helpers)
-    builds_during = len(slow_builds) - 1
+    span: list = []
+    times = _measure(ws, helpers, window=span)
+    start, end = span[0]
+    builds_during = sum(1 for b in slow_builds if b >= start)
     assert len(times) >= 30, "the tabs asked often"
     assert times[-1] < ANSWER_LIMIT, (
         f"{helpers} helpers: slowest answer {times[-1]:.2f}s (builds take {SLOW_BUILD}s)"
     )
-    # builds are bounded by time (one at a time, a rest between them), never by the number of requests
-    most = int(3.0 / (SLOW_BUILD + state_cache.MIN_GAP)) + 2
-    assert builds_during <= most, f"{builds_during} builds for {len(times)} requests in 3 s"
+    # builds are bounded by time (one at a time, a rest between them), never by the number of requests. The
+    # bound is the time the helpers really worked, not the 3 s the tabs asked: on a busy CI machine the threads
+    # start and stop late, and a fixed 3 s once read 5 builds as too many (ORCH-1118, group #2199).
+    most = int((end - start) / (SLOW_BUILD + state_cache.MIN_GAP)) + 2
+    assert builds_during <= most, f"{builds_during} builds for {len(times)} requests in {end - start:.1f} s"
     assert builds_during >= 1, "the changes reached the copy"
 
 

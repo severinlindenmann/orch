@@ -33,6 +33,7 @@ pub fn router(st: State) -> Router {
             patch(ws_patch).delete(ws_delete),
         )
         .route("/admin/api/workspaces/:id/token", post(ws_token))
+        .route("/admin/api/workspaces/:id/removal", get(ws_removal))
         .route(
             "/admin/api/workspaces/:id/profile/approve",
             post(profile_approve),
@@ -331,6 +332,25 @@ async fn ws_token(
     ))
 }
 
+/// What deleting a workspace would remove. A separate GET route, so an older server answers 404 instead of deleting.
+async fn ws_removal(
+    St(st): St<State>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    check(&st, &h)?;
+    let w = get_ws(&st, &id)?;
+    let c = st.db.lock().unwrap();
+    let files = db::file_ids_of(&c, &id)?.len();
+    let apps = db::all_apps(&c)?
+        .into_iter()
+        .filter(|a| a.workspace == id)
+        .count();
+    Ok(Json(json!({"id": id, "name": w.name, "dry_run": true,
+        "removes": {"files": files, "apps": apps}})))
+}
+
+/// Delete a workspace with its files and apps.
 async fn ws_delete(
     St(st): St<State>,
     h: HeaderMap,

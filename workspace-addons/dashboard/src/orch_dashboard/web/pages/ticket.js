@@ -420,7 +420,7 @@ function agentBar(t) {
     helper && window.UI?.helperPill ? window.UI.helperPill(helper.state, helper.word) : null, line.startFailed ? null : ticketWarmth(t, run, session),
     snapshot ? null : h('div', {className:'ab-actions'}, liveLink && alive ? h('a', {className:'btn primary sm', href:liveLink.url, 'data-key':'watch-live'}, 'Watch live') : null,
       alive ? ticketButton(idle ? 'Stop idle helper' : 'Stop', 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'})
-        // a plain start (Start, Continue, Retry, Try again) is the header's one Start button (ORCH-475), never a second one
+        // a plain start (Start, Continue, Try again) is the header's one Start button (ORCH-475), never a second one
         // here; Start anyway takes over a stuck run
         : line.primary?.op === 'run.start' && !line.primary.args?.take_over ? null
         : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
@@ -710,7 +710,7 @@ function ticketFileActions(t, kind, file) {
   return h('div', {className:'file-actions'},
     ticketButton('Open', 'ghost sm', () => previewFile(t.id, kind, file.name), {'data-key':'file-open-' + k}),
     h('a', {className:'btn ghost sm', href:fileUrl(t.id, kind, file.name, true), download:file.name.split('/').pop()}, 'Download'),
-    ticketButton('Copy link for this computer', 'ghost sm', () => copyFileLink(fileUrl(t.id, kind, file.name)), {'data-key':'file-copy-' + k}),
+    ticketButton('Copy link', 'ghost sm', () => copyFileLink(fileUrl(t.id, kind, file.name)), {'data-key':'file-copy-' + k}),
     kind === 'artifacts' ? ticketShareButton(t, file) : null);
 }
 // ORCH-185: a picture shows itself in its row (the badge stays under it until it has loaded).
@@ -898,7 +898,7 @@ function taskRows(t) {
         array(task.evidence).filter(ev => (ev.type || ev.kind) === 'note' && (ev.text || ev.title)).map(ev => h('p', {className:'preserve-lines task-evidence-note'}, clean(ev.text || ev.title))),
         meta ? h('p', {className:'meta'}, meta) : null,
         task.wont_do ? null : h('p', {className:'meta task-proof'}, doing && window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'Not started yet.' : ticketTaskOutcome(task)),
-        taskProofChips(t, task)), h('span', {className:'meta task-word'}, taskWord(task)), menu);
+        taskProofChips(t, task)), h('span', {className:'meta task-word' + (taskCheckFailed(t, task) ? ' bad' : '')}, taskCheckFailed(t, task) ? 'Check failed' : taskWord(task)), menu);
   });
 }
 // ORCH-236: a task can be renamed, moved up or down and removed from its "..." menu (orch check edit / move / remove;
@@ -961,8 +961,20 @@ function addTaskRow(t, scope) {
   });
   return form;
 }
+// The selected tab lives on the address (#ticket/<id>?tab=tasks) so a reload or a shared link keeps it.
+function writeTicketTab(id, tab) {
+  if (typeof history !== 'object' || typeof location !== 'object' || String(location.hash || '').split('?')[0] !== href(id)) return;
+  const next = href(id) + (tab && tab !== 'overview' ? '?tab=' + encodeURIComponent(tab) : '');
+  if (location.hash !== next) history.replaceState(null, '', next);
+}
+function tabFromAddress(id) {
+  if (typeof location !== 'object') return '';
+  const full = String(location.hash || ''), at = full.indexOf('?');
+  return full.slice(0, at < 0 ? full.length : at) === href(id) && at >= 0 ? new URLSearchParams(full.slice(at + 1)).get('tab') || '' : '';
+}
 function selectTicketTab(id, tab, focusQuestion = false) {
   ticketTabs.set(id, tab);
+  writeTicketTab(id, tab);
   render();
   if (focusQuestion) {
     const host = main.querySelector('[data-question]');
@@ -1621,6 +1633,8 @@ function ticketStripModel(t, run, fresh) {
   return m(at ? 'Updated ' + at + '.' : '');
 }
 const taskTitle = task => clean(changeTask(task.text, task.origin)?.title || task.text);
+// ORCH-904: the newest recorded run of this task failed: say so on the task, not only on the Overview.
+const taskCheckFailed = (t, task) => !task.wont_do && t.proof?.per_item?.[task.id] === 'failed';
 const taskWord = task => task.wont_do ? 'Skipped' : task.done ? 'Done' : task.state === 'doing' ? 'Working' : 'To do';
 function ticketProgressCounts(t) {
   const list = array(t.checklist), n = f => list.filter(f).length;
@@ -1685,6 +1699,18 @@ function ticketResultsCard(t) {
     notes.map(n => ticketCompletionNote(n, t)),
     all.length ? (t.status === 'done' ? ticketResultFrame(t, all[0].kind, all[0].file) : ticketFileRow(t, all[0].kind, all[0].file)) : null, all.slice(1, 4).map(x => ticketFileRow(t, x.kind, x.file)), files.length ? headerProof(t) : null);
 }
+// The ticket's results as the same widgets as on the live wall (ORCH-697, draft D), the notes of its finished steps above
+// them; a click opens the big overlay. A read-only copy keeps the Result card above, and so does a ticket that hosts an
+// open group: its file rows carry Share with group, which the widgets do not have yet (bundle ORCH-1185, issue 2280).
+function ticketWidgets(t) {
+  return !snapshot && typeof resultsHost === 'function' && !!window.UI?.result && !ticketHostsOpenGroup(t);
+}
+function ticketWidgetsCard(t) {
+  const notes = t.status === 'review' ? [] : completionNotes(t);
+  return h('section', {className:'card results', 'data-key':'results-widgets'}, h('div', {className:'section-head'}, h('h2', {}, 'Results')),
+    notes.map(n => ticketCompletionNote(n, t)),
+    resultsHost(t.id, {key:'ticket-results-' + t.id, empty:'Nothing yet. Pictures, pages and tables show up here.'}));
+}
 // A change you asked for: what you asked, and that new changes wait for your approval.
 function ticketRequestCard(t) {
   const open = openChanges(t);
@@ -1695,7 +1721,7 @@ function ticketRequestCard(t) {
 }
 const TAB_ALIAS = {questions:'overview', history:'activity', artifacts:'files'};
 function ticketSelectedTab(t) {
-  const raw = ticketTabs.get(t.id), tab = TAB_ALIAS[raw] || raw;
+  const raw = tabFromAddress(t.id) || ticketTabs.get(t.id), tab = TAB_ALIAS[raw] || raw;
   return ['overview', 'tasks', 'files', 'activity'].includes(tab) ? tab : 'overview';
 }
 // The answers given through the Review stack (a question answered there carries a `decision`), newest first, in the
@@ -1890,7 +1916,7 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   return h('section', {className:'strip ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
       m.helper && window.UI?.helperPill ? stripHelperPill(m.helper) : h('span', {className:'pill status-change ' + m.pill, 'data-key':'status-' + t.status + '-' + m.pill}, icon, m.word),
-      h('div', {className:'grow ticket-strip-text'}, h('h1', {className:'t-row'}, window.DashHelpers.keyTag(t, h), inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, m.sentence), railFacts(t)),
+      h('div', {className:'grow ticket-strip-text'}, h('h1', {className:'t-row'}, window.DashHelpers.keyTag(t, h), window.DashHelpers.kindTag(t, h), inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, m.sentence), railFacts(t)),
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);
 }
@@ -1904,7 +1930,8 @@ function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
   const minutes = Number.isFinite(run?.age_seconds) ? Math.max(1, Math.floor(run.age_seconds / 60)) + ' min' : '';
   const key = window.DashHelpers.ticketKey(t), dot = () => h('span', {'aria-hidden':'true'}, '·');
   const pill = window.UI?.helperPill ? stripHelperPill(helper) : h('span', {className:'pill working', 'data-key':'status-helper-' + helper.state}, helper.word);
-  const parts = [key ? h('span', {className:'key'}, key) : null, pill, agent ? name(agent) : null, minutes].filter(Boolean);
+  const kind = window.DashHelpers.kindTag(t, h)?.[1] || null;  // ORCH-906: 'ORCH-7 · Epic · Working'
+  const parts = [key ? h('span', {className:'key'}, key) : null, kind, pill, agent ? name(agent) : null, minutes].filter(Boolean);
   const kicker = h('p', {className:'t-meta strip-kicker', 'data-key':'ticket-kicker'}, parts.flatMap((x, i) => i ? [dot(), typeof x === 'string' ? h('span', {}, x) : x] : [x]));
   // a helper that is not plain working (idle, stuck, waits) still says why in one quiet line; so does "No news since"
   const why = helper.state !== 'working' && helper.detail ? clean(helper.detail) + '.' : '';
@@ -1981,7 +2008,7 @@ function detail(t) {
     // also without a note: the screenshots, files and voice notes a person sent with Send back or Add note (ORCH-422)
     note || inputFiles(t).length ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note, inputFiles(t).map(f => ticketFileRow(t, 'artifacts', f))) : null,
     working && helperLive ? sharedFolderLine(t) : null,
-    t.status !== 'review' ? ticketResultsCard(t) : null,
+    ticketWidgets(t) ? ticketWidgetsCard(t) : t.status !== 'review' ? ticketResultsCard(t) : null,
     ticketHelperDid(t),
     ticketOutcomeCard(t),
     planQ || ['review', 'done'].includes(t.status) ? null : ticketProgress(t, run),
@@ -2101,7 +2128,18 @@ function inlineField(t, field) {
 async function saveField(t, field, value) {
   const same = o => String(o?.[field] ?? '') === String(t[field] ?? '');
   const result = await actRetry('ticket.edit', () => ({ticket:t.id, [field]:value, if_revision:(ticketOf(t.id) || t).revision}), () => same(ticketOf(t.id)));
-  if (!result.ok) window.orch.toast(changeError(result), 'error');
+  if (result.ok) return;
+  const now = ticketOf(t.id), theirs = now ? String(now[field] ?? '') : '';
+  if (result.status === 409 && now && !same(now) && theirs !== String(value)) {
+    // ORCH-903: someone changed this field while it was being edited: keep what was typed, one click applies it.
+    const shown = v => (field === 'owner' ? name(v) : clean(v)) || 'empty';
+    const mine = () => actRetry('ticket.edit', () => ({ticket:t.id, [field]:value, if_revision:(ticketOf(t.id) || t).revision}), () => true)
+      .then(r => { if (!r.ok) window.orch.toast(changeError(r), 'error'); });
+    mine.label = 'Use mine';
+    window.orch.toast('Someone just changed ' + FIELD_LABEL[field] + ' to "' + shown(theirs) + '". You typed "' + shown(value) + '".', 'error', mine);
+    return;
+  }
+  window.orch.toast(changeError(result), 'error');
 }
 function startInline(control) {
   const t = ticketOf(control.dataset.ticket), field = control.dataset.field, host = control.parentElement;

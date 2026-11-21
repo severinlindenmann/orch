@@ -23,9 +23,14 @@ ALLOW = {
         "pull-requests": "ORCH-450: `orch ref wait --merge` refuses merges past the merge queue only while "
         "the queue add-on is on; follow-up like #837 (a manifest key instead of the name)",
     },
+    "orch/selfcheck.py": {"dashboard": _MANIFEST},
     "orch/tend.py": {
         "pull-requests": "ORCH-568: the helper watcher reads the merge queue file, so a helper waiting on "
         "a queued pull request is not nudged; follow-up like #837 (a manifest key instead of the name)",
+    },
+    "orch/releasekeeper.py": {
+        "pull-requests": "ORCH-1128: a red develop reads the merge queue file for a fix and puts the revert "
+        "pull request first in it; follow-up like #837 (a manifest key instead of the name)",
     },
     "orch/cli_chat.py": {"sync": "core `orch chat sync` command; not the add-on"},
     "orch/config.py": {"focus": _FOLLOW_UP, "insights": _FOLLOW_UP},
@@ -52,6 +57,11 @@ ALLOW = {
         "usage": "the account switcher's JSON key for an account's use, not the Usage add-on",
     },
     "orch/look.py": {"services": _KEY},
+    "orch/limitstop.py": {
+        "usage": "ORCH-943: every workspace reads the computer's switch log <tool home>/usage/switched.jsonl "
+        "(a folder in the tool home, not the add-on package) so its helpers are carried on; "
+        "follow-up like #837"
+    },
     "orch/winfinish.py": {"services": _KEY},
 }
 

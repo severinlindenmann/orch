@@ -660,6 +660,15 @@ def _at(iso) -> float | None:
         return None
 
 
+_ANSWERED_RAW = re.compile(r"q\d+ = (?P<ans>.*?)(?: \(routine: [^()]*\))?\s*", re.S)
+
+
+def _answered_words(raw: str) -> str:
+    """The history line 'q3 = Morning (routine: ...)' as plain words: 'answered "Morning"'."""
+    m = _ANSWERED_RAW.fullmatch(raw.strip())
+    return f'answered "{m.group("ans")}"' if m and m.group("ans") else "answered " + raw
+
+
 def accepted(root: Path, since: str) -> list[dict]:
     """What the Reviewer, the Auto Reviewer and Away mode did for the owner since `since` (ISO), newest first:
     {ticket, key, title, at, why, sent_back, auto, undo, undone} plus `answer` + `question` for an answer and
@@ -706,7 +715,7 @@ def accepted(root: Path, since: str) -> list[dict]:
                 qid = txt[len(prefix) :].split(" ", 1)[0]
                 shown = history.shown_ticket(root, t)  # person fields only as shown here (history.md)
                 q = next((x for x in shown.get("questions") or [] if x.get("id") == qid), None)
-                row.update(answer=True, question=qid, why="answered " + txt[len(prefix) :])
+                row.update(answer=True, question=qid, why=_answered_words(txt[len(prefix) :]))
                 row["undone"] = any(f" on {qid} (" in u for u in undone) and not (
                     q and q.get("answered_by") == BY
                 )
