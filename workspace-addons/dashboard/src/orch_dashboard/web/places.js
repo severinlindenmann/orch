@@ -82,17 +82,15 @@
       if (!old || p.changed > old.changed || (p.changed === old.changed && p.removed && !old.removed)) byId.set(p.id, p);
     }
     const out = [...byId.values()];
-    const keepers = new Map();
-    const better = (a, b) => {  // the row to keep when a and b are the same place
-      if (isSecure(a.url) !== isSecure(b.url)) return isSecure(a.url) ? a : b;
-      return (a.opened || 0) !== (b.opened || 0) ? ((a.opened || 0) > (b.opened || 0) ? a : b) : (a.changed >= b.changed ? a : b);
-    };
-    for (const p of live(out)) {
-      for (const k of [p.wsid && 'w:' + p.wsid, 'u:' + p.url].filter(Boolean)) {
-        const other = keepers.get(k);
-        if (other && other !== p) { const win = better(other, p); const lose = win === p ? other : p; lose.dupe = true; keepers.set(k, win); }
-        else keepers.set(k, p);
-      }
+    // Same place = same workspace id or same address. The best row is taken first (https, then the one that last
+    // worked, then the newest change) and claims its keys; a later row with a claimed key is dropped. A dropped row
+    // never claims anything, so it cannot push out a third, different place.
+    const rank = (a, b) => (Number(isSecure(b.url)) - Number(isSecure(a.url))) || ((b.opened || 0) - (a.opened || 0)) || (b.changed - a.changed) || a.id.localeCompare(b.id);
+    const claimed = new Set();
+    for (const p of live(out).sort(rank)) {
+      const keys = [p.wsid && 'w:' + p.wsid, 'u:' + p.url].filter(Boolean);
+      if (keys.some(k => claimed.has(k))) { p.dupe = true; continue; }
+      keys.forEach(k => claimed.add(k));
     }
     const result = out.filter(p => !p.dupe);
     let count = 0;
@@ -147,7 +145,11 @@
     const out = tidy(list, now).filter(p => !isLocal(p.url)).map(p => (p.removed
       ? {id: p.id, url: p.url, changed: p.changed, removed: p.removed}
       : {id: p.id, url: p.url, kind: p.kind, name: p.name, color: p.color, icon: p.icon, wsid: p.wsid, changed: p.changed}));
-    return out.length ? b64(JSON.stringify(out)) : '';
+    // It must fit a link the other side reads (LINK_MAX): removed marks go first, then the places changed longest ago.
+    out.sort((a, b) => (Number(!!a.removed) - Number(!!b.removed)) || (b.changed - a.changed));
+    let text = out.length ? b64(JSON.stringify(out)) : '';
+    while (text.length > LINK_MAX && out.length) { out.pop(); text = out.length ? b64(JSON.stringify(out)) : ''; }
+    return text;
   }
   // Read a list from a link: checked places only, never more than 50, nothing local. [] when it does not fit.
   function unpack(text, now) {
@@ -180,17 +182,27 @@
     }
     return {list: tidy(next, now), fresh: fresh.slice(0, MAX)};
   }
-  const keep = (list, places, now) => tidy(tidy(list, now).concat(places.map(p => Object.assign({}, p, {changed: Math.max(p.changed, now)}))), now);
+  // Keep places from a link: never more than 50 in all, so a kept place never pushes out one already saved.
+  // Returns the list; places beyond the limit are left out (count them with live()).
+  function keep(list, places, now) {
+    const cur = tidy(list, now), room = Math.max(0, MAX - live(cur).length);
+    return tidy(cur.concat(places.slice(0, room).map(p => Object.assign({}, p, {changed: Math.max(p.changed, now)}))), now);
+  }
 
   // Take the list out of the address bar (#…&places=… or #places=…) so it does not stay in history or copied links.
   // Returns { hash, packed }: the hash without it and the packed list ('' when none).
   function takeFromHash(hash) {
     const h = String(hash || '');
-    const m = /([#&?])places=([A-Za-z0-9_-]*)/.exec(h);
-    if (!m) return {hash: h, packed: ''};
-    let rest = h.slice(0, m.index) + (m[1] === '#' ? '#' : '') + h.slice(m.index + m[0].length);
-    rest = rest.replace(/^#&/, '#').replace(/[?&]$/, '').replace(/\?&/, '?');
-    return {hash: rest === '#' ? '' : rest, packed: m[2]};
+    const re = /([#&?])places=([^&]*)/g;
+    let packed = '', found = false;
+    const rest = h.replace(re, (all, lead, value) => {
+      found = true;
+      if (!packed && /^[A-Za-z0-9_-]+$/.test(value)) packed = value;
+      return lead === '#' ? '#' : lead === '?' ? '?' : '';
+    });
+    if (!found) return {hash: h, packed: ''};
+    const clean = rest.replace(/^#&/, '#').replace(/\?&/, '?').replace(/[?&]+$/, '');
+    return {hash: clean === '#' ? '' : clean, packed};
   }
   // The address to open a place with: a dashboard place gets the kept list after #; relay and publish never do.
   // An http address that is not local never gets it either: anyone on that network could change the page and read it.
@@ -199,7 +211,12 @@
     const packed = pack(list, now);
     return packed ? place.url + '/#home&places=' + packed : place.url;
   }
-  const shareUrl = (here, list, now) => { const packed = pack(list, now); return packed ? here.replace(/\/+$/, '') + '/#home&places=' + packed : ''; };
+  // Share my places: '' from an http address that is not local (the page there could be changed to read the list).
+  const shareUrl = (here, list, now) => {
+    if (!isSecure(here)) return '';
+    const packed = pack(list, now);
+    return packed ? here.replace(/\/+$/, '') + '/#home&places=' + packed : '';
+  };
 
   // ---- this browser's storage (it can be missing or refuse: then the list is just empty)
   function load(store, now) {
@@ -214,13 +231,14 @@
   const INCOMING = 'orch.places.incoming';
   function stash(win, now) {
     const loc = win.location, got = takeFromHash(loc.hash);
-    if (!got.packed) return false;
+    if (got.hash === String(loc.hash || '')) return false;
     try { win.history.replaceState(null, '', loc.pathname + loc.search + got.hash); } catch (_) { /* the list just stays */ }
     try {
       const store = win.sessionStorage, before = unpack(store.getItem(INCOMING) || '', now);
       const byId = new Map();
       for (const p of before.concat(unpack(got.packed, now))) byId.set(p.id, p);  // the same link twice is one list
       const all = [...byId.values()];
+      if (!got.packed) return false;
       store.setItem(INCOMING, all.length ? b64(JSON.stringify(all.slice(-MAX))) : '');
     } catch (_) { return false; }
     return true;

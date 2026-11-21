@@ -187,3 +187,45 @@ test('a non-local http dashboard never gets the list; a time from the future is 
   const packed = Buffer.from(JSON.stringify(future)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   assert.ok(P.unpack(packed, NOW)[0].changed <= NOW + 5 * 60 * 1000);
 });
+
+test('outside review: a dropped duplicate never pushes out a third, different place', () => {
+  const p = (id, url, changed, wsid) => ({id, url, name: id, kind: 'workspace', changed, wsid});
+  const out = P.tidy([p('aaaaaaaa', 'https://a.example', NOW, 'ws_aaaa'), p('bbbbbbbb', 'https://b.example', NOW - 1, 'ws_aaaa'), p('cccccccc', 'https://b.example', NOW - 2, 'ws_cccc')], NOW);
+  assert.deepEqual(P.live(out).map(x => x.id).sort(), ['aaaaaaaa', 'cccccccc']);
+});
+
+test('outside review: a full list still makes a link the other side reads', () => {
+  const many = Array.from({length: 50}, (_, i) => ({id: 'id' + String(i).padStart(8, '0'), url: `https://place-with-a-long-name-${i}.office.example.ch/admin`, name: 'P'.repeat(40), kind: 'workspace', changed: NOW - i}));
+  const packed = P.pack(many, NOW);
+  assert.ok(packed.length <= 8000);
+  const back = P.unpack(packed, NOW);
+  assert.ok(back.length > 0 && back.length < 50);
+  assert.equal(back[0].id, 'id00000000');  // the newest stay
+});
+
+test('outside review: keeping places never pushes out a saved one at 50', () => {
+  const many = Array.from({length: 50}, (_, i) => ({id: 'id' + String(i).padStart(8, '0'), url: `https://p${i}.example`, name: 'P', kind: 'workspace', changed: NOW}));
+  const after = P.keep(many, [{id: 'newplace01', url: 'https://new.example', name: 'New', kind: 'workspace', changed: NOW}], NOW + 1);
+  assert.equal(P.live(after).length, 50);
+  assert.ok(!P.live(after).some(x => x.id === 'newplace01'));
+});
+
+test('outside review: every places= leaves the address bar, also a broken one', () => {
+  assert.deepEqual(P.takeFromHash('#home&places=abc&places=def'), {hash: '#home', packed: 'abc'});
+  assert.deepEqual(P.takeFromHash('#home&places=&places=xyz'), {hash: '#home', packed: 'xyz'});
+  assert.deepEqual(P.takeFromHash('#home&places=%%%'), {hash: '#home', packed: ''});
+});
+
+test('outside review: no share link from an http address that is not local', () => {
+  const list = addOk([], {url: 'https://fs.office.example.ch', name: 'Fernscout'}).list;
+  assert.equal(P.shareUrl('http://10.20.0.14:8790', list, NOW), '');
+  assert.match(P.shareUrl('https://ws.example.ch', list, NOW), /#home&places=/);
+});
+
+test('outside review: a removal that arrives at the removed place itself still applies', () => {
+  const r = addOk([], {url: 'https://a.example', name: 'A'});
+  const elsewhere = P.remove(r.list, r.place.id, NOW + 1);
+  const got = P.arrive(r.list, P.unpack(P.pack(elsewhere, NOW + 1), NOW + 1), NOW + 2);  // first what arrived ...
+  const after = P.describe(got.list, 'https://a.example', {name: 'A'}, NOW + 2);          // ... then the page describes itself
+  assert.equal(P.live(after).length, 0);
+});

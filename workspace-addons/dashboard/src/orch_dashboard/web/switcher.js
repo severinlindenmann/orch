@@ -51,7 +51,9 @@
 
   // ---- the saved list in this browser
   const load = () => (P ? P.load(null, now()) : []);
-  const save = list => { if (P) P.save(null, list, now()); return list; };
+  // save() is false when this browser refuses to keep anything (storage off, private window): say so, never "Saved".
+  const save = list => !!(P && P.save(null, list, now()));
+  const refused = () => toast('This browser does not keep saved places. Allow this site to store data and try again.');
   // This dashboard itself, as a place: passed on in a link so the next dashboard can come back here.
   function self() {
     if (!P || !look || P.isLocal(here())) return null;
@@ -146,7 +148,8 @@
     link.onclick = e => {
       if (e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;  // a new tab keeps the plain address
       e.preventDefault();
-      const list = save(P.tidy(load().map(q => (q.id === p.id && !q.removed ? Object.assign({}, q, {opened: now(), changed: now()}) : q)), now()));
+      const list = P.tidy(load().map(q => (q.id === p.id && !q.removed ? Object.assign({}, q, {opened: now(), changed: now()}) : q)), now());
+      save(list);
       location.href = P.openUrl(p, withSelf(list), now());
     };
     const more = n('button', {className: 'btn ghost icon sm sw-more', type: 'button', 'aria-label': 'More for ' + p.name, 'aria-haspopup': 'menu',
@@ -177,7 +180,7 @@
   }
 
   function removePlace(p) {
-    save(P.remove(load(), p.id, now()));
+    if (!save(P.remove(load(), p.id, now()))) { refused(); return; }
     S.rowMenu = null;
     draw();
     const box2 = toast('Removed ' + p.name, () => { save(P.restore(load(), p, now())); draw(); });
@@ -192,7 +195,7 @@
     const form = n('form', {className: 'sw-row sw-rename'}, placeBadge(p), input, n('button', {className: 'btn primary sm', type: 'submit'}, 'Save'), cancel);
     form.onsubmit = e => {
       e.preventDefault();
-      if (input.value.trim()) save(P.rename(load(), p.id, input.value, now()));
+      if (input.value.trim() && !save(P.rename(load(), p.id, input.value, now()))) { refused(); return; }
       S.renaming = null; S.renameText = null; draw();
     };
     setTimeout(() => input.focus(), 0);
@@ -232,7 +235,7 @@
       e.preventDefault();
       const r = P.add(load(), {url: f.address, kind: f.kind, name: f.name}, now());
       if (!r.ok) { f.error = r.why; draw(); return; }
-      save(r.list);
+      if (!save(r.list)) { refused(); return; }
       S.form = null; S.step = null;
       draw();
       toast('Saved ' + r.place.name);
@@ -247,10 +250,18 @@
     try { sessionStorage.setItem(P.INCOMING, P.pack(S.arrived, now())); } catch (_) { /* only this view */ }
   }
   function keepStep() {
-    const keep = list => { save(P.keep(load(), list, now())); S.arrived = S.arrived.filter(p => !list.includes(p)); keepPending(); };
+    // false when nothing could be kept (storage off, or 50 places already): the places stay in the question
+    const keep = list => {
+      const before = P.live(load()).length, next = P.keep(load(), list, now()), added = P.live(next).length - before;
+      if (added < list.length) { toast('You can keep up to ' + P.MAX + ' places. Remove one first.'); if (!added) return false; }
+      if (!save(next)) { refused(); return false; }
+      const kept = list.slice(0, added);
+      S.arrived = S.arrived.filter(p => !kept.includes(p)); keepPending();
+      return true;
+    };
     const rows = S.arrived.map(p => {
       const yes = n('button', {className: 'btn outline sm', type: 'button', 'aria-label': 'Keep ' + p.name}, 'Keep');
-      yes.onclick = () => { keep([p]); draw(); toast('Kept ' + p.name); };
+      yes.onclick = () => { if (keep([p])) { draw(); toast('Kept ' + p.name); } };
       const no = n('button', {className: 'btn ghost sm', type: 'button', 'aria-label': 'Not now for ' + p.name}, 'Not now');
       no.onclick = () => { S.arrived = S.arrived.filter(q => q !== p); keepPending(); draw(); };
       return n('div', {className: 'sw-keep-row'}, placeBadge(p),
@@ -260,7 +271,7 @@
     let all = null;
     if (S.arrived.length > 1) {
       const yes = n('button', {className: 'btn primary sm', type: 'button'}, 'Keep all');
-      yes.onclick = () => { const count = S.arrived.length; keep([...S.arrived]); draw(); toast('Kept ' + count + ' places'); };
+      yes.onclick = () => { const count = S.arrived.length; if (keep([...S.arrived])) { draw(); if (!S.arrived.length) toast('Kept ' + count + ' places'); } };
       const no = n('button', {className: 'btn ghost sm', type: 'button'}, 'Not now');
       no.onclick = () => { S.arrived = []; keepPending(); draw(); };
       all = n('div', {className: 'row sw-keep-all'}, yes, no);
@@ -271,6 +282,9 @@
   // Share my places: a link (and its QR code) that opens this dashboard with the kept places; local ones stay here.
   function shareStep() {
     const list = load(), url = P.shareUrl(here(), withSelf(list), now());
+    if (!url) return n('div', {className: 'sw-share'}, n('p', {className: 'muted'}, P.isSecure(here())
+      ? 'There is nothing to share yet: places that only work on this computer stay here.'
+      : 'Share my places works from a secure address (https). Open this dashboard with https and try again.'));
     const locals = P.live(list).filter(p => P.isLocal(p.url)).map(p => p.name);
     const field = n('input', {className: 'input', readonly: true, value: url, 'aria-label': 'Link to your places'});
     field.onfocus = () => field.select();
@@ -334,17 +348,21 @@
     if (!look) return;
     if (menu) { close(); return; }
     menu = n('div', {className: 'sw-menu sw-places', role: 'menu', 'aria-label': 'Workspaces and saved places', 'data-testid': 'ws-menu'});
+    menu.addEventListener('focusout', e => {
+      const to = e.relatedTarget;
+      if (to && menu && !menu.contains(to) && !box.contains(to) && !(to.closest && to.closest('.sw-row-menu, .ui-toasts'))) close();
+    });
     box.insertAdjacentElement('afterend', menu);
     box.setAttribute('aria-expanded', 'true');
     draw();
     if (!S.step && !S.renaming) menu.querySelector('[role=menuitem]')?.focus();
     menu.onkeydown = e => {
       if (e.target.matches('input')) return;
-      const rows = [...menu.querySelectorAll('[role=menuitem]')];
+      // arrows move over every row and button (Review, "…", Add place, Share my places); Tab leaving the menu closes it
+      const rows = [...menu.querySelectorAll('[role=menuitem], button')];
       const index = rows.indexOf(document.activeElement);
       const next = {ArrowDown: (index + 1) % rows.length, ArrowUp: (index - 1 + rows.length) % rows.length, Home: 0, End: rows.length - 1};
       if (e.key in next && rows.length) { e.preventDefault(); rows[next[e.key]]?.focus(); }
-      if (e.key === 'Tab' && !S.step && !S.renaming) close();
     };
   }
 
@@ -361,9 +379,8 @@
   // becomes the keep question (removals and name changes of kept places apply at once).
   function arrive() {
     if (!P || !look) return;
-    const list = P.describe(load(), here(), {wsid: look.place_id, name: window.OrchLook && window.OrchLook.name(), color: look.color, icon: look.icon}, now());
-    const got = P.arrive(list, P.incoming(null, now()), now());
-    save(got.list);
+    const got = P.arrive(load(), P.incoming(null, now()), now());
+    save(P.describe(got.list, here(), {wsid: look.place_id, name: window.OrchLook && window.OrchLook.name(), color: look.color, icon: look.icon}, now()));
     const me = self();
     S.arrived = got.fresh.filter(p => !isHere(p) && !(me && p.wsid === me.wsid));
     keepPending();
