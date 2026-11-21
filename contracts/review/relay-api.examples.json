@@ -24,7 +24,8 @@
         "color": "blue",
         "look_by": "workspace",
         "phones": 1,
-        "pending": null
+        "pending": null,
+        "signing_key": {"alg": "ed25519", "public_key": "O2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik", "key_id": "874ba89490b22e47", "registered_at": "2026-11-21T14:00:00Z"}
       }
     }
   },
