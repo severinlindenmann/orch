@@ -143,7 +143,7 @@ def test_stop_checks_targets_before_stopping_any(workspace, effects, monkeypatch
 
 def test_restart_stops_then_starts(workspace, effects):
     assert cli.main(["restart", "--no-open"]) == 0
-    assert effects == ["stop", "sweep", "start"]
+    assert effects == ["stop", "hidden", "sweep", "start"]  # orch restart (#1619) also ends hidden sessions
 
 
 def test_dashboard_checks_explicit_target(workspace, monkeypatch, capsys):
