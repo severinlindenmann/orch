@@ -738,10 +738,20 @@ async fn send(
         let (pid, _, ws) = auth::phone(&c, &h)?;
         if let Some(cid) = v["client_id"].as_str() {
             if let Some(old) = client_dup(&c, &pid, cid)? {
-                return Ok((
-                    StatusCode::OK,
-                    Json(json!({"id": old, "client_id": cid, "duplicate": true})),
-                ));
+                let mut out = json!({"id": old, "client_id": cid, "duplicate": true});
+                // A retry after a lost reply still says whether the stored text kept the team choice.
+                let stored = c
+                    .query_row(
+                        &format!("SELECT {MSG_COLS} FROM messages WHERE id=?1"),
+                        [&old],
+                        msg_from_row,
+                    )
+                    .optional()?;
+                if stored.is_some_and(|m| store::open_payload(&app.key, &m).0.get("team").is_some())
+                {
+                    out["team"] = true.into();
+                }
+                return Ok((StatusCode::OK, Json(out)));
             }
         }
         check("send_request", &v)?;

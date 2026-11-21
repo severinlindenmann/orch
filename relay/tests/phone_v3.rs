@@ -1378,6 +1378,16 @@ async fn send_team_choice_reaches_the_workspace() {
         .find(|m| m["id"] == id)
         .expect("stored");
     assert_eq!(m["body"]["team"], team, "{m}");
+    // The same client_id again (the reply was lost): still says the choice was kept.
+    let again = json!({"to": a.id, "client_id": "a0000000-0000-4000-8000-000000001175", "text": "Add Sales",
+        "ticket": "t_7k3f9q", "team": team});
+    let (s, v) = send(&t, &p, again).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(
+        (v["duplicate"].clone(), v["team"].clone()),
+        (json!(true), json!(true)),
+        "{v}"
+    );
     // A text without the field: no team in the reply or the body.
     let body = json!({"to": a.id, "client_id": "b0000000-0000-4000-8000-000000001175", "text": "hi", "ticket": "t_7k3f9q"});
     let (s, v) = send(&t, &p, body).await;
@@ -1391,6 +1401,9 @@ async fn send_team_choice_reaches_the_workspace() {
         .find(|m| m["id"] == id)
         .expect("stored");
     assert!(m["body"].get("team").is_none(), "{m}");
+    let (s, v) = send(&t, &p, json!({"to": a.id, "client_id": "b0000000-0000-4000-8000-000000001175", "text": "hi", "ticket": "t_7k3f9q"})).await;
+    assert_eq!(s, 200, "{v}");
+    assert!(v.get("team").is_none(), "{v}");
 }
 
 #[tokio::test]
