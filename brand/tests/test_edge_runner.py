@@ -223,6 +223,38 @@ def test_installed_hook_reads_the_repository_from_its_root_owned_file_only():
     assert 'if [ -f "$HERE/repo" ]; then REPO=$(cat "$HERE/repo"); else REPO=${ORCH_RUNNER_REPO:-}; fi' in text
     assert "PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; unset BASH_ENV ENV CDPATH" in text
     assert 'kill -9 "$worker"' in text  # a refused job is stopped, not only failed
+    # only the root-owned installed copy stops the job (no job can make a root-owned file)
+    assert "-user 0" in text[text.index("refuse() {") : text.index('kill -9 "$worker"')]
+
+
+@pytest.mark.skipif(not Path("/usr/bin/python3").exists(), reason="the hook uses the system python3")
+def test_a_refused_job_run_from_the_repository_never_stops_its_runner_worker(tmp_path):
+    """On GitHub's machines these tests run inside a real Runner.Worker: a refused hook killed the CI job itself."""
+    ev = tmp_path / "event.json"
+    ev.write_text("{}")
+    env = {"PATH": os.environ.get("PATH", ""), "ORCH_RUNNER_REPO": REPO, "GITHUB_REPOSITORY": REPO,
+           "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/feat/x", "GITHUB_EVENT_PATH": str(ev)}
+    hook = str(RUNNER / "job-started.sh")
+    # a parent process whose command line names Runner.Worker, like the runner's own worker
+    r = subprocess.run(["bash", "-c", 'exec -a Runner.Worker bash -c "bash \\"$0\\"; echo worker-alive"', hook],
+                       env=env, capture_output=True, text=True, timeout=30, check=False)
+    assert "refused" in r.stderr and "worker-alive" in r.stdout, (r.stdout, r.stderr)
+
+
+@pytest.mark.parametrize("name", ["job-started.sh", "job-completed.sh"])
+def test_functions_from_the_job_s_environment_never_replace_a_command_in_the_hooks(tmp_path, name):
+    """A job sets its own environment; bash loads exported functions from it (Codex review of the Mac hooks)."""
+    flag = tmp_path / "hijacked"
+    ev = tmp_path / "event.json"
+    ev.write_text("{}")
+    env = {"PATH": os.environ.get("PATH", ""), "ORCH_RUNNER_REPO": REPO, "GITHUB_REPOSITORY": REPO,
+           "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/feat/x", "GITHUB_EVENT_PATH": str(ev)}
+    for cmd in ("find", "ps", "kill", "id", "cat", "dirname", "tr", "getent"):
+        env[f"BASH_FUNC_{cmd}%%"] = f"() {{ echo x >> {flag}; }}"
+    env["SHELLOPTS"] = "privileged"  # would make the first start look like the clean one if the hook trusted $-
+    r = subprocess.run(["bash", str(RUNNER / name)], env=env, capture_output=True, text=True, timeout=30, check=False)
+    assert not flag.exists(), (r.stdout, r.stderr)
+    assert ("refused" if name == "job-started.sh" else "did nothing") in r.stderr
 
 
 def test_the_clean_up_hook_never_acts_as_a_person(tmp_path):
@@ -258,7 +290,7 @@ def test_a_runner_that_did_not_come_clean_refuses_the_next_job():
     done = (RUNNER / "job-completed.sh").read_text()
     first_restart = done.index('sudo -n /usr/bin/systemctl restart')
     assert done.index("rm_user_dirs   # before EVERY restart") < first_restart
-    assert done.rstrip().endswith("exit 0") and done.count("rm_user_dirs\n") >= 2
+    assert done.rstrip().endswith("exit 0\nfi") and done.count("rm_user_dirs\n") >= 2
 
 
 def test_scripts_parse():

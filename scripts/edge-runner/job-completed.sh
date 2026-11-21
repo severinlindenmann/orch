@@ -4,6 +4,18 @@
 # (the Services add-on's real Linux run), stops every process of the runner user except the runner itself and its
 # user service manager, and empties this user's files in /tmp and /dev/shm. The job's throwaway home lives in the
 # job's temp folder, which the runner wipes itself. Never fails the job.
+# A job sets its own environment, and bash loads shell functions from it: a function (find, ps, kill) would replace
+# that command here, whatever PATH says. So the hook first starts itself again as privileged bash (-p never loads
+# functions from the environment) with only the values it needs. Only paths with a slash run before that line.
+# Limit: bash reads BASH_ENV before any line of this file, so a job whose settings reach the hook can still run code
+# first. The hook is the second lock; the first is the route job and GitHub holding outside contributors' runs (docs/ci-checks.md).
+if [[ ${1-} != --orch-clean ]]; then   # the runner starts hooks without arguments; a job cannot add one
+  pass=(PATH=/usr/bin:/bin:/usr/sbin:/sbin)
+  for v in GITHUB_RUN_ID; do
+    if [[ -n ${!v+x} ]]; then pass+=("$v=${!v}"); fi
+  done
+  /usr/bin/env -i "${pass[@]}" /bin/bash -p "$0" --orch-clean
+else
 set -u
 set +e   # the runner runs hooks with bash -e; nothing here may stop the clean-up half way
 # it stops every other process of its user: only ever as the runner's own user, never as a person
@@ -84,3 +96,4 @@ rm_user_dirs
 # until a person looks, rather than run the next job next to it.
 for d in $USER_DIRS; do { [ -e "$d" ] || [ -L "$d" ]; } && echo "edge runner: $d came back after the clean-up; the next job will be refused" >&2; done
 exit 0
+fi

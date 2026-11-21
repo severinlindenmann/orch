@@ -5,11 +5,23 @@
 # sends nothing else here; this is the second lock on the door (the repository is public: never a fork's pull request).
 # A refused job is STOPPED, not only failed: the runner treats a failed hook as a failed step and would still run
 # later steps marked `if: always()`, so the hook ends the job's Runner.Worker before any step of the job runs.
+# A job sets its own environment, and bash loads shell functions from it: a function (find, ps, kill) would replace
+# that command here, whatever PATH says. So the hook first starts itself again as privileged bash (-p never loads
+# functions from the environment) with only the values it needs. Only paths with a slash run before that line.
+# Limit: bash reads BASH_ENV before any line of this file, so a job whose settings reach the hook can still run code
+# first. The hook is the second lock; the first is the route job and GitHub holding outside contributors' runs (docs/ci-checks.md).
+if [[ ${1-} != --orch-clean ]]; then   # the runner starts hooks without arguments; a job cannot add one
+  pass=(PATH=/usr/bin:/bin:/usr/sbin:/sbin)
+  for v in GITHUB_REPOSITORY GITHUB_EVENT_NAME GITHUB_REF GITHUB_EVENT_PATH GITHUB_JOB GITHUB_RUN_ID ORCH_RUNNER_REPO; do
+    if [[ -n ${!v+x} ]]; then pass+=("$v=${!v}"); fi
+  done
+  /usr/bin/env -i "${pass[@]}" /bin/bash -p "$0" --orch-clean
+else
 set -u
 # a job can set its own environment variables: the hook uses a fixed PATH and nothing a job could have set
 PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; unset BASH_ENV ENV CDPATH
 HERE=$(cd "$(dirname "$0")" && pwd)
-# the job's lifetime = the Runner.Worker that runs it (this hook's ancestor)
+# the job's lifetime = the Runner.Worker that runs it (an ancestor; the parent is this hook's first start)
 worker=""; p=$PPID
 for _ in 1 2 3 4 5 6 7 8; do
   c=$(ps -p "$p" -o args= 2>/dev/null) || break
@@ -18,7 +30,9 @@ for _ in 1 2 3 4 5 6 7 8; do
 done
 refuse() {
   echo "edge runner: refused this job ($1).${2- Only pushes to develop, the nightly run, manual runs and release pull requests run on orch edge.}" >&2
-  [ -n "$worker" ] && kill -9 "$worker" 2>/dev/null
+  # Only the copy setup.sh installed stops the job: its repo file is owned by root, which no job can fake. Run from
+  # the repository (the tests on GitHub's machines run inside a real Runner.Worker) it only fails.
+  if [ -n "$worker" ] && [ -n "$(find "$HERE/repo" -maxdepth 0 -user 0 2>/dev/null)" ]; then kill -9 "$worker" 2>/dev/null; fi
   exit 1
 }
 # The repository comes from the root-owned file setup.sh writes next to the hooks. A job can set its own environment
@@ -67,3 +81,4 @@ if [ "$(id -un)" = orch-ci ]; then
   [ -z "${left// /}" ] || refuse "user services left from an earlier job: $left" " A person must look at orch edge first."
 fi
 echo "edge runner: job ${GITHUB_JOB:-?} of run ${GITHUB_RUN_ID:-?} (${GITHUB_EVENT_NAME:-?}) starts with a throwaway home"
+fi
