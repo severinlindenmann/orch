@@ -23,15 +23,17 @@ struct TeamChatStrip: View {
         if Self.shows(members: members, candidates: TeamChatRules.candidates(model.workspaces, members: members)) {
             HStack(spacing: 10) {
                 Button { infoShown = true } label: {
-                    HStack(spacing: -6) {
-                        ForEach(members.prefix(3), id: \.ws) { m in
-                            WorkspaceBadge(name: m.name, icon: m.look?.icon, color: m.look?.color, size: 22)
-                                .overlay(Circle().stroke(Theme.bg, lineWidth: 2))
-                        }
-                    }.accessibilityHidden(true)
-                    Text(TeamChatRules.stripText(members)).themeFont(13).foregroundStyle(Theme.muted)
-                        .lineLimit(1).truncationMode(.tail).padding(.leading, 6)
-                    Spacer(minLength: 8)
+                    HStack(spacing: 0) {
+                        HStack(spacing: -6) {
+                            ForEach(members.prefix(3), id: \.ws) { m in
+                                WorkspaceBadge(name: m.name, icon: m.look?.icon, color: m.look?.color, size: 22)
+                                    .overlay(Circle().stroke(Theme.bg, lineWidth: 2))
+                            }
+                        }.accessibilityHidden(true)
+                        Text(TeamChatRules.stripText(members)).themeFont(13).foregroundStyle(Theme.muted)
+                            .lineLimit(1).truncationMode(.tail).padding(.leading, 8)
+                        Spacer(minLength: 8)
+                    }.contentShape(Rectangle())
                 }.buttonStyle(PressStyle()).frame(minHeight: 44)
                     .accessibilityLabel("In this chat: " + TeamChatRules.stripText(members) + ". Chat info")
                     .accessibilityIdentifier("team-chat-members")
@@ -43,6 +45,7 @@ struct TeamChatStrip: View {
                     .accessibilityLabel("Add to this chat").accessibilityIdentifier("team-chat-add")
             }
             .padding(.horizontal, 18)
+            .fixedSize(horizontal: false, vertical: true)
             .background(Theme.bg)
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
             .sheet(isPresented: $addShown) {
@@ -192,7 +195,7 @@ struct TeamChatInfoView: View {
             WorkspaceBadge(name: m.name, icon: m.look?.icon, color: m.look?.color, size: 34).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(m.name).themeFont(15).lineLimit(1).truncationMode(.tail)
-                Text(added).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1)
+                Text(added).themeFont(12).foregroundStyle(Theme.muted).lineLimit(2)
             }
             Spacer(minLength: 8)
             if older {
