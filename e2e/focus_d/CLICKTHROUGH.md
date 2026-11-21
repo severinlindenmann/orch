@@ -316,6 +316,7 @@ Must be seen:
 - Plain messages with time; done steps and other events as lines between them; the pull request inside the message.
 - The waiting question is an orange card above the chat, not a message; once answered it moves into the chat as yours.
 - A sent message shows at once; Terminal shows the helper’s screen and the choice stays after a reload.
+- Tab never stops on the page under the layer, and a long chat scrolls with the keyboard.
 
 ## 18. Files and screenshots in the message box, with a preview before sending
 
