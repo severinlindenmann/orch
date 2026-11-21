@@ -1862,3 +1862,5 @@ body.mk-focus-v4d .mw-st[data-s=stop]{color:var(--failed)}
 .gd-links{display:flex;gap:var(--s1);align-items:center}
 @media(max-width:900px){.gd-cols{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:720px){body.mk-focus-v4d .gd-tile{grid-column:auto}.gd-cols>.gd-tree[data-mode=strip]{border:0;padding:0}}
+/* Chat mockup at phone width: the list above the chat (the 1000px rule above came later and won, ORCH-1174). */
+@media (max-width:700px){:where(body.mk-chat-chat) .relay-page #loaded-content,:where(body.mk-chat-chat).relay-page #loaded-content{grid-template-columns:1fr}}

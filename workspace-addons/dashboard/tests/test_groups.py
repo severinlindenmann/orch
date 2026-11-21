@@ -29,6 +29,9 @@ LIST = {
                     "seen": 6,
                     "token": "SECRET",
                     "joined_at": "2026-11-08T10:00:00Z",
+                    "added_by": "you",
+                    "orch_version": "0.9.1",
+                    "chat_groups": True,  # not a number: dropped
                 },
             ],
             "tasks": [{"delegate": "m_x", "ws": "ws_hom0000001", "status": "working", "secret": "no"}],
@@ -87,6 +90,11 @@ def test_groups_are_read_trimmed_and_only_on_the_live_page(ws, tmp_path):
         "look": None,
         "host": False,
         "left_at": None,
+        "reason": None,
+        "added_by": "you",
+        "removed_by": None,
+        "orch_version": "0.9.1",
+        "chat_groups": None,
         "seen": 6,
         "joined_at": "2026-11-08T10:00:00Z",
     }

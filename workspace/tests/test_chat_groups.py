@@ -2996,3 +2996,19 @@ def test_refused_answer_history_note_only_for_a_member_and_only_once(proj, run, 
         "ansn3" in h["text"] or "not applied" in h["text"]
         for h in tickets.load(proj, host)["history"][before:]
     )
+
+
+def test_chat_info_says_who_added_and_removed_a_member(proj, run, rel, host, monkeypatch):
+    """Chat info on the dashboard (ORCH-1174): a person's add and remove read "you", a helper's add the host."""
+    from orch import chat_groups as cg
+
+    assert run("relay", "group", "add", host, HOME)[0] == 0  # the test runs as a person (human:test)
+    with monkeypatch.context() as mp:
+        mp.setattr(tickets, "require_human", lambda *a, **k: None)
+        assert run("relay", "group", "remove", host, "Home")[0] == 0
+    monkeypatch.setenv("CLAUDECODE", "1")  # an agent session: its add is the host workspace's helper
+    assert run("relay", "group", "add", host, BANK)[0] == 0
+    members = {m["ws"]: m for m in cg.view(proj)["hosted"][0]["members"]}
+    assert members[HOME]["added_by"] == "you" and members[HOME]["removed_by"] == "you"
+    assert members[BANK]["added_by"] == WS and members[BANK]["removed_by"] is None
+    assert members[WS]["added_by"] is None  # the host's own entry

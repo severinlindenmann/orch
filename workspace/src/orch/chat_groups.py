@@ -1456,6 +1456,7 @@ def add_member(
             "look": _look(entry),
             "joined_at": tickets.now(),
             "from_seq": g["seq"] + 1,
+            "added_by": _changed_by(g, by),
         }
         _event(
             root,
@@ -1474,6 +1475,12 @@ def add_member(
     return out
 
 
+def _changed_by(g: dict, by: str) -> str:
+    """Who changed the member list, as chat info shows it (contract v2 `added_by` / `removed_by`): "you" for the
+    person, else the host workspace (its helper)."""
+    return "you" if str(by).startswith("human:") else g["host"]
+
+
 def remove_member(root: Path, tid: str, ws: str, by: str = "human:owner", reason: str = "removed") -> dict:
     with _state(root) as st:
         g = st["hosted"].get("grp_" + tid)
@@ -1483,6 +1490,8 @@ def remove_member(root: Path, tid: str, ws: str, by: str = "human:owner", reason
         # the leaver still hears that it was removed (the event goes to it too)
         g["members"][ws]["left_at"] = tickets.now()
         g["members"][ws]["reason"] = reason
+        if reason == "removed":
+            g["members"][ws]["removed_by"] = _changed_by(g, by)
         notify = _active(g) + ([ws] if reason == "removed" else [])
         _event(
             root,
@@ -3329,6 +3338,10 @@ def view(root: Path) -> dict:
                         "joined_at": m.get("joined_at"),
                         "left_at": m.get("left_at"),
                         "reason": m.get("reason"),
+                        "added_by": m.get("added_by"),
+                        "removed_by": m.get("removed_by"),
+                        "orch_version": m.get("orch_version"),
+                        "chat_groups": m.get("chat_groups"),
                         "seen": g["seen"].get(ws),
                         "host": ws == g["host"],
                     }
