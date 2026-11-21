@@ -82,7 +82,7 @@ relay/
   web/{portal.html, style.css}
   onboarding/{onboarding.sh, onboarding.ps1}   (the orch-relay skill lives in workspace/skills/;
   its SKILL.md says: read inbox at session start; before handing work over, read workspaces.json next to it)
-  deploy/{Caddyfile, orch-relay.service, install.sh}
+  deploy/{relay.caddy, orch-relay.service, install.sh, MOVE.md}
   tests/
 ```
 
@@ -144,8 +144,9 @@ sudo -u orch-relay orch-relay admin cleanup --dry-run                  # back up
 ```
 
 ## Deploy
-`relay-deploy.yml` on push to `main`: build, copy over SSH, `systemctl restart orch-relay`, check `/health`.
-First install: `deploy/install.sh` (user, folders, master key, admin token, Caddy route). Same VPS as publish.
+Built by the `relay` CI job (artifact `orch-relay-linux-x86_64`), copied to the server and `systemctl restart orch-relay`, check `/health`.
+First install: `deploy/install.sh` (user, folders, master key, admin token, service; Caddy site in `deploy/relay.caddy`). Same server as publish.
+Moving to a new server: `deploy/MOVE.md`.
 
 ## Groups
 Each workspace is in one group (Private, Work, ...). A group's defaults say which kinds of shared tools its members get

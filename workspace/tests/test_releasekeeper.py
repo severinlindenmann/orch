@@ -730,6 +730,26 @@ def test_a_build_not_for_linux_is_not_prepared(tmp_path, capsys):
     assert "not prepared" in rk.prep_line("relay", p)
 
 
+def test_deploy_card_says_when_production_could_not_be_read(tmp_path, capsys):
+    """ORCH-1026: after the server move the deploy host was silently wrong (production read as unknown)."""
+    out = go(
+        tmp_path,
+        capsys,
+        state={"release": gate(phase="card")},
+        open_release=None,
+        prs=pr("MERGED"),
+        changed=["relay/src/main.rs"],
+        built=BUILT,
+        fetched=FETCHED,
+        prod_sha={},
+    )
+    p = out["state"]["deploy"]["prep"]["relay"]
+    assert p["ready"] and p["prod"] is None
+    line = rk.prep_line("relay", p)
+    assert line.startswith("The relay server is fetched and checked (")
+    assert "Production's relay program could not be read over ssh" in line and "release_deploy_host" in line
+
+
 def test_deploy_go_hands_the_helper_the_prepared_program(tmp_path, capsys, monkeypatch):
     seen = {}
     monkeypatch.setattr(
@@ -1388,3 +1408,17 @@ def test_refused_ticket_is_listed_as_failed(tmp_path, monkeypatch):
     w.root, w.sim, w.dry, w.did = tmp_path, None, False, []
     assert w.new_ticket("ORCH-1", "Develop is red", "n", "d").startswith("not opened")
     assert w.did == ["ticket:Develop is red failed"]
+
+
+def test_a_done_role_ticket_is_opened_again_so_its_cards_are_not_refused(proj, on):
+    tickets.set_status(proj, tickets.resolve(proj, on), "done", tickets.SYSTEM)
+    res = rk.run(proj, world=sim_world(proj))
+    assert "opened it again" in res["lines"][0]
+    assert tickets.load(proj, tickets.resolve(proj, on))["status"] == "open"
+    assert rk.run(proj, world=sim_world(proj))["lines"][0] != res["lines"][0]  # only once
+
+
+def test_a_dry_run_leaves_a_done_role_ticket_alone(proj, on):
+    tickets.set_status(proj, tickets.resolve(proj, on), "done", tickets.SYSTEM)
+    rk.run(proj, dry_run=True, world=sim_world(proj))
+    assert tickets.load(proj, tickets.resolve(proj, on))["status"] == "done"

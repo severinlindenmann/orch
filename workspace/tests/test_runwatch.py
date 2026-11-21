@@ -161,6 +161,20 @@ def test_list_with_no_runs(proj, run):
     assert code == 0 and "No runs right now." in out
 
 
+def test_list_shows_the_tickets_waiting_for_a_helper_place(proj, new_ticket, run):
+    """ORCH-1026: during the server move the owner could not see which tickets waited for a slot."""
+    from orch import runs_live
+
+    a, b = new_ticket("A"), new_ticket("B")
+    runs_live._queue_for_slot(proj, a, "human:tester", "Start when a slot is free.", "normal")
+    runs_live._queue_for_slot(proj, b, "human:tester", "Start when a slot is free.", "high")
+    code, out, _ = run("run", "list")
+    assert code == 0 and "No runs right now." in out
+    assert f"Waiting for a free helper place, in this order: {_key(proj, b)} (high), {_key(proj, a)}." in out
+    line = json.loads(run("run", "list", "--json")[1])["line"]
+    assert [(q["ticket"], q["priority"]) for q in line] == [(b, "high"), (a, "normal")]
+
+
 def test_screen_refuses_without_a_live_session(proj, new_ticket, run):
     tid = new_ticket()
     code, _, err = run("run", "screen", _key(proj, tid))
