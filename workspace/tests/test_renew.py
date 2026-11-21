@@ -703,17 +703,22 @@ def test_a_terminal_is_no_proof(proj, run, monkeypatch):
         assert code == 2 and "Only a person" in out + err and "own login command" in out + err, argv
 
 
-# ------------------------------------------------------------------------------ never a real sign-in in a test
+# ----------------------------------------------------------------------------- never a real sign-in in a test
 
 
 @pytest.fixture
 def real_tool(proj, monkeypatch):
-    """renew.spec points at a tool outside the temp folder, as the real claude is (here: the Python program)."""
+    """renew.spec points at a tool outside the temp folder, as the real claude is (here: Python itself)."""
     monkeypatch.setenv("ORCH_HOME_STRICT", "1")
     real = os.path.realpath(sys.executable)
-    monkeypatch.setattr(renew, "spec", lambda root, name: {"binary": real, "argv": [real, "auth", "login"],
-                                                          "links": ["https://claude.com/"], "helper": "claude",
-                                                          "label": "Main helper"})  # fmt: skip
+    doc = {
+        "binary": real,
+        "argv": [real, "auth", "login"],
+        "links": ["https://claude.com/"],
+        "helper": "claude",
+        "label": "Main helper",
+    }
+    monkeypatch.setattr(renew, "spec", lambda root, name: doc)
     return real
 
 

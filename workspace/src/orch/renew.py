@@ -243,9 +243,9 @@ TEST_INSTALL = (
 
 
 def _real_tool_in_test(binary: str) -> bool:
-    """A test install (ORCH_HOME_STRICT) never runs the real tool's sign-in (ORCH-1101): `claude auth login` opens
-    the sign-in page in the browser of the person at the computer. Only a stand-in in the system temp folder (a
-    test's own fake) may run there; the real tool, also when linked into the test home, may not."""
+    """A test install (ORCH_HOME_STRICT) never runs the real tool's sign-in (ORCH-1101): `claude auth login`
+    opens the sign-in page in the browser of the person at the computer. Only a stand-in in the system temp
+    folder (a test's own fake) may run there; the real tool, also when linked into the test home, may not."""
     from orch import launchenv
 
     if not launchenv.strict():
@@ -253,7 +253,6 @@ def _real_tool_in_test(binary: str) -> bool:
     tmp = os.path.realpath(tempfile.gettempdir())
     real = os.path.realpath(binary)
     return not (real == tmp or real.startswith(tmp.rstrip(os.sep) + os.sep))
-
 
 
 def spec(root: Path, name: str) -> dict | None:
