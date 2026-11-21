@@ -228,7 +228,7 @@ function peoplePanel(settings) {
       p.owner ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-remove', 'data-id':p.id, 'data-key':'settings-people-remove-' + p.id, 'aria-label':'Remove ' + p.name, disabled:busy}, 'Remove'));
     return h('div', {className:'card-row', 'data-key':key},
       h('span', {className:'avatar', 'aria-hidden':'true'}, (String(p.name).trim()[0] || '?').toUpperCase()),
-      h('div', {className:'grow stack'}, h('div', {}, h('h3', {}, String(p.name), p.owner ? ' ' : null, p.owner ? h('span', {className:'badge'}, 'Owner') : null), settingsText('p', {className:'meta'}, peopleCan(p))), rights, actions));
+      h('div', {className:'grow'}, h('div', {}, h('h3', {}, String(p.name), p.owner ? ' ' : null, p.owner ? h('span', {className:'badge'}, 'Owner') : null), settingsText('p', {className:'meta'}, peopleCan(p))), rights, actions));
   };
   const add = snapshot ? null : h('div', {className:'card'}, h('div', {className:'card-row', 'data-key':'settings-people-add'},
     h('input', {type:'text', className:'input grow', maxLength:40, placeholder:'Name, for example Lea', 'aria-label':'Name of the new person', autocomplete:'off', 'data-key':'settings-people-name', 'data-people-enter':'people-add', disabled:busy}),
