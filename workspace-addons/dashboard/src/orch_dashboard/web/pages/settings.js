@@ -1406,7 +1406,7 @@ async function addonRadio(input) {
   window.orch.toast(result.ok ? 'Saved.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
   await loadAddon(id);
 }
-// Contacts (signed messages, ORCH-1203): Accept sends the fingerprint the person saw (the core refuses it when the
+// Contacts (message keys, ORCH-1203): Accept sends the fingerprint the person saw (the core refuses it when the
 // key changed meanwhile) and their own name for the contact; Stop trusting asks once, with the action's own word.
 const CONTACT_ID = /^(ws|ph)_[a-z0-9]{10}$/;
 async function contactAccept(control) {

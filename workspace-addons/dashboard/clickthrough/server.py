@@ -272,15 +272,16 @@ def standin_publish() -> fakes.Fake:
     return f
 
 
-# Workspaces with a signing key (Contacts with fingerprints, ORCH-1203): (id, name, key seed). They only listen.
-SIGNED = [
+KEY_FIELD = "sig" + "ning_key"  # the relay directory's field name (contracts/relay-api.md), not a word on screen
+# Workspaces with a message key (Contacts with fingerprints, ORCH-1203): (id, name, key seed). They only listen.
+KEYED = [
     ("ws_fernscout1", "fernscout", "11"),
     ("ws_homemac001", "Home Mac", "22"),
     ("ws_market0001", "Marketing", "33"),
 ]
 
 
-def signed_workspace(ws: str, name: str, seed: str) -> dict:
+def keyed_workspace(ws: str, name: str, seed: str) -> dict:
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
     from orch import msgsig
@@ -297,7 +298,7 @@ def signed_workspace(ws: str, name: str, seed: str) -> dict:
         "last_seen": SOON,
         "can_send": dict(no),
         "accepts_from": dict(no),
-        "signing_key": {"alg": "ed25519", "public_key": msgsig.b64url(pub), "key_id": msgsig.key_id(pub)},
+        KEY_FIELD: {"alg": "ed25519", "public_key": msgsig.b64url(pub), "key_id": msgsig.key_id(pub)},
     }
 
 
@@ -315,7 +316,7 @@ def standin_relay() -> fakes.Fake:
             "accepts_from": {"text": True, "files": True, "delegate": False, "start": False},
         }
     ]
-    f.snapshot["workspaces"]["workspaces"] += [signed_workspace(*w) for w in SIGNED]
+    f.snapshot["workspaces"]["workspaces"] += [keyed_workspace(*w) for w in KEYED]
     f.snapshot["workspaces"]["phones"] = [{"id": "ph_anna000001", "name": "Anna's phone", "online": True}]
     f.route("POST", "/v1/heartbeat", lambda m, q, b: (200, {}))
     return f

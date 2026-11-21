@@ -566,7 +566,7 @@ p.ev-missing{padding:var(--s5);border:1px dashed var(--border-strong);border-rad
   :where([data-density=desktop]) .input{min-height:36px;font-size:14px}
 }
 
-/* ---- Fingerprint and contact trust (signed messages, ORCH-1203; look B "Split" picked by the owner 21 Nov) ----
+/* ---- Fingerprint and contact trust (message keys, ORCH-1203; look B "Split" picked by the owner 21 Nov) ----
    .fingerprint: 8 groups of 4 in two rows of four, the same pattern the other side's Settings page shows.
    .trust-layout: contacts that need an Accept, this workspace's own fingerprint beside them, the rest below. */
 .fingerprint{display:inline-grid;grid-template-columns:repeat(4,auto);justify-content:start;gap:var(--space-0) var(--s2);font-family:var(--font-mono);font-size:var(--fs-2);line-height:1.4;font-variant-numeric:tabular-nums;letter-spacing:.04em;color:var(--text);user-select:all}

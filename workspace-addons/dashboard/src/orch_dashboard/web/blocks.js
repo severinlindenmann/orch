@@ -377,7 +377,7 @@ const OrchBlocks = (() => {
     l.scrollIntoView({block: 'nearest'}); l.focus({preventScroll: true});
   }
 
-  // ---- Contacts with fingerprint and state (signed messages, ORCH-1203, owner picked look B "Split"): the contacts
+  // ---- Contacts with fingerprint and state (message keys, ORCH-1203, owner picked look B "Split"): the contacts
   // that need an Accept on top, each with its fingerprint, the check line, a name field and one Accept; this
   // workspace's own fingerprint beside them; every other contact in a table below. The words are orch's (TRUST),
   // never the add-on's; only checked ids and fingerprints go into the DOM (data attributes, textContent).
@@ -385,9 +385,9 @@ const OrchBlocks = (() => {
   const FPRINT = /^[0-9A-Z]{4}( [0-9A-Z]{4}){7}$/;
   const TRUST = {
     new_key: {word: 'New key without the old one', tone: 'bad', icon: '!', ask: true,
-      text: 'The old key did not sign this new one. That happens with a lost or new computer, or with an attack. Treat it as a new contact.'},
+      text: 'The old key did not vouch for this new one. That happens with a lost or new computer, or with an attack. Treat it as a new contact.'},
     changed: {word: 'Changed', tone: 'warn', icon: '↻', ask: true,
-      text: 'New key, signed by the old one. This happens when it is installed again. Messages wait until you accept again.'},
+      text: 'New key, vouched for by the old one. This happens when it is installed again. Messages wait until you accept again.'},
     not_accepted: {word: 'Not accepted yet', tone: 'neutral', icon: '○', ask: true,
       text: 'New contact. Its messages wait and nothing runs until you accept it.'},
     not_valid: {word: 'Not valid', tone: 'bad', icon: '×', ask: false},

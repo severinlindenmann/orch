@@ -220,7 +220,7 @@
     },
     "contacts": {
       "type": "object", "required": ["type", "items"], "additionalProperties": false,
-      "description": "Contacts with fingerprint and state (added 21 Nov, ORCH-1203; signed messages, contracts/crypto.md): the contacts that need an Accept on top, each with its fingerprint, the check line, a name field and one Accept; this workspace's own fingerprint beside them; every other contact in a table. The dashboard says every word itself (the state names, the check line, the buttons); the add-on gives only ids, names, fingerprints, states, counts and times. Accept and Stop trusting are the dashboard's own ops `contact.accept` / `contact.withdraw`, a signed-in person's click only. Only the core relay view sends it; older dashboards skip it.",
+      "description": "Contacts with fingerprint and state (added 21 Nov, ORCH-1203; message keys, contracts/crypto.md): the contacts that need an Accept on top, each with its fingerprint, the check line, a name field and one Accept; this workspace's own fingerprint beside them; every other contact in a table. The dashboard says every word itself (the state names, the check line, the buttons); the add-on gives only ids, names, fingerprints, states, counts and times. Accept and Stop trusting are the dashboard's own ops `contact.accept` / `contact.withdraw`, a person's own click in a dashboard they are logged in to. Only the core relay view sends it; older dashboards skip it.",
       "properties": {
         "type": { "const": "contacts" },
         "title": { "$ref": "#/$defs/text", "maxLength": 60 },

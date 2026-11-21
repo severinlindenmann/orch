@@ -1,5 +1,5 @@
-// Contacts with fingerprint and state (signed messages, ORCH-1203; owner picked look B). The stand-in relay lists three
-// workspaces with a signing key (server.py SIGNED). Seeded here as earlier days would leave them: Home Mac was accepted
+// Contacts with fingerprint and state (message keys, ORCH-1203; owner picked look B). The stand-in relay lists three
+// workspaces with a message key (server.py KEYED). Seeded here as earlier days would leave them: Home Mac was accepted
 // with an older key (so now: New key without the old one), Marketing is accepted but sent a forged message (Not valid).
 // fernscout is new (Not accepted yet). The person:
 // - sees every contact with its fingerprint and state, this workspace's own fingerprint, and the careful Accept for
@@ -26,10 +26,10 @@ with msgtrust._state(root) as st:
 module.exports = {
   name: 'Contacts: every contact with its fingerprint and state; accept one under your own name, then stop trusting it',
   covers: ['contact.accept', 'contact.withdraw'],
-  async run({ page, open, reload, act, text, orchAsPerson, python, workspace, standins, until, addonOff, shot }) {
+  async run({ page, open, reload, act, text, orchAsPerson, python, workspace, standins, until, shot }) {
     const r = standins.relay;
+    orchAsPerson('addon', 'add', 'relay', '--yes');   // always: an earlier click-through may have turned it off
     if (!fs.existsSync(path.join(workspace, '.orch', 'secrets', 'relay.json'))) {
-      orchAsPerson('addon', 'add', 'relay', '--yes');
       orchAsPerson('relay', 'connect', r.url, '--workspace', r.workspace, '--token', r.token);
     }
     orchAsPerson('relay', 'refresh');
@@ -78,6 +78,6 @@ module.exports = {
     await row('ws_fernscout1').locator('.trust-pill', { hasText: 'Withdrawn' }).waitFor({ timeout: 20000 })
       .catch(async () => { throw new Error('fernscout is not Withdrawn after a reload:\n' + (await text()).slice(0, 800)); });
     await shot('contacts-withdrawn', row('ws_fernscout1'));
-    await addonOff('relay');
+    // the relay stays on (as in l-phone): turned off and on again, its contact list is empty until the next refresh
   },
 };

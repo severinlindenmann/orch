@@ -196,9 +196,9 @@ TRUST_STATES = ("new_key", "changed", "not_accepted", "not_valid", "withdrawn", 
 
 
 def _trust_block(root: Path) -> dict | None:
-    """Signed messages (ORCH-1203): this workspace's own fingerprint and every contact's fingerprint and
+    """Message keys (ORCH-1203): this workspace's own fingerprint and every contact's fingerprint and
     state, for the Contacts page's `contacts` block. The page says the words; this gives only checked
-    values. None while signing is not on this computer (the page then looks as before)."""
+    values. None while message keys are not on this computer (the page then looks as before)."""
     try:
         from orch import msgtrust, signkey
     except ImportError:
@@ -225,13 +225,17 @@ def _trust_block(root: Path) -> dict | None:
             continue
         row = {
             "id": c["id"],
-            "name": plain(c.get("name") or c["id"], 60),
+            "name": plain(c.get("name") or "", 60),
             "kind": "phone" if c.get("kind") == "phone" else "workspace",
             "state": state,
             "fingerprint": str(c["fingerprint"]),
             "held": int(c.get("held") or 0),
         }
+        if not row["name"] or row["name"] == c["id"]:  # no longer listed on the relay: never a raw id
+            row["name"] = "Unlisted phone" if row["kind"] == "phone" else "Unlisted workspace"
         relay_name = plain(c.get("relay_name") or "", 60)
+        if relay_name == c["id"]:
+            relay_name = ""
         if relay_name and relay_name != row["name"]:
             row["relay_name"] = relay_name
         old = c.get("accepted_fingerprint")

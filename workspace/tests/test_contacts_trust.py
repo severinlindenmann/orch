@@ -164,3 +164,13 @@ def test_a_broken_key_file_hides_only_the_own_fingerprint(ws, run, monkeypatch):
     assert not any(x["type"] == "contacts" for x in v["blocks"]) and any(
         x["type"] == "list" for x in v["blocks"]
     )
+
+
+def test_a_contact_the_relay_no_longer_lists_gets_a_plain_name(ws, rel, person):
+    from orch import relay
+
+    msgtrust.accept(ws, PEER, "human:tester", "cli", FP)
+    rel.snapshot["workspaces"]["workspaces"] = rel.snapshot["workspaces"]["workspaces"][1:]
+    relay.refresh(ws)
+    r = next(r for r in trust(ws)["items"] if r["id"] == PEER)
+    assert r["name"] == "Unlisted workspace" and "relay_name" not in r and r["fingerprint"] == FP
