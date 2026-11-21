@@ -1321,7 +1321,12 @@ async function addonAct(control) {
     locks.add('addon-act'); control.disabled = true;
     const result = await act('addon.act', {addon:id, verb:control.dataset.verb, target:control.dataset.target});
     locks.delete('addon-act'); if (control.isConnected) control.disabled = false;
-    if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
+    if (!result.ok && /^No helper is set yet/.test(result.text || '')) {   // one click to the place that fixes it
+      const {d, actions} = dialog('No helper is set yet', 'dialog');
+      d.append(el('p', '', 'Choose a helper first, then start again.'));
+      actions.append(button('Open Helper settings', 'primary', async () => { await window.orch.close(d); location.hash = '#settings/helper'; }));
+      d.append(actions); window.orch.open(d);
+    } else if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
     else if (control.closest('.blk-split')) {   // list and panel: say what happened, in the add-on's own words
       const said = result.state?.act_answer?.addon === id ? result.state.act_answer.answer?.next : null;
       if (typeof said === 'string' && said) window.orch.toast(clean(said.split(/(?<=\.)\s/)[0]).slice(0, 160), 'ok');   // the first sentence: no path, no command

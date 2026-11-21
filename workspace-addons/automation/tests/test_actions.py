@@ -243,6 +243,13 @@ def test_copy_creates_an_open_ticket_through_core_cli(ws, tmp_path, monkeypatch)
     assert all(row["by"] == "human:tester" for row in copied["history"])
 
 
+def test_run_now_without_a_helper_says_so_in_plain_words(ws):
+    sched(ws)
+    (ws / "noagent").write_text("x")
+    with pytest.raises(Bad, match="^No helper is set yet. Choose one in Settings, Helper.$"):
+        act(ws, "run", "t_rec00001")
+
+
 def test_start_now_on_a_wake_up_uses_the_wake_up(ws):
     from orch_automation.orchcli import tickets
     from orch_automation.runner import load_state
