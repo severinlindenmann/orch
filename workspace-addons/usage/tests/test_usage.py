@@ -339,3 +339,26 @@ def test_usage_shows_how_many_tickets_were_prepared_of_the_daily_limit(cli, fake
     )
     assert prepare_use(ws, now) == {"on": False, "used": 2, "limit": PREPARE_DEFAULT_LIMIT}
     assert "Preparing tickets on Save: off" in cli("list")[1]
+
+
+def test_a_full_prepare_limit_says_when_the_next_ticket_can_be_prepared(ws):
+    """ORCH-811: when the daily Prepare limit is used up, Usage gives the time the oldest counted start is a day old."""
+    import time
+    from datetime import UTC, datetime
+
+    from orch_usage.cli import prepare_use
+
+    now = time.time()
+    run = ws / ".orch" / "run"
+    run.mkdir(parents=True, exist_ok=True)
+    (ws / ".orch" / "config.toml").write_text("[workflow]\nprepare_daily_limit = 2\n")
+    (run / "prepare-starts.json").write_text(json.dumps({"starts": [now - 600]}))
+    assert "free_at" not in prepare_use(ws, now)
+    (run / "prepare-starts.json").write_text(
+        json.dumps({"starts": [now - 30 * 3600, now - 3600, now - 7200, now - 60]})
+    )
+    got = prepare_use(ws, now)
+    assert got["used"] == 3
+    assert datetime.fromisoformat(got["free_at"]) == datetime.fromtimestamp(int(now - 3600 + 24 * 3600), UTC)
+    (ws / ".orch" / "config.toml").write_text("[workflow]\nprepare_daily_limit = 0\n")
+    assert "free_at" not in prepare_use(ws, now)
