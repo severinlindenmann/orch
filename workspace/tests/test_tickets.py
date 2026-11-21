@@ -895,6 +895,7 @@ def test_no_agent_callable_op_writes_as_system():
         "wait_for_start",
         "resume_after_start_wait",
         "ask_for_changes",
+        "set_prepare",  # where a prepare run stands: written by orch's run code only (ORCH-738), no CLI
     }
     tree = ast.parse(Path(tickets.__file__).read_text(encoding="utf-8"))
     bad = []

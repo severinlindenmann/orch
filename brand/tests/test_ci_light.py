@@ -215,6 +215,7 @@ GREEN = {
     "head_branch": "orch-queue/develop-1-abc",
     "status": "completed",
     "conclusion": "success",
+    "rollup": "success",
 }
 
 
@@ -231,6 +232,21 @@ def test_not_proven_without_a_merge_commit_same_files_or_a_green_group_run():
     assert not proven.decide(["p1", "p2"], "T", "T", [dict(GREEN, name="rules")])[0]
     assert not proven.decide(["p1", "p2"], "T", "T", [dict(GREEN, event="workflow_dispatch")])[0]
     assert not proven.decide(["p1", "p2"], "T", "T", [])[0]
+
+
+def test_a_queue_group_the_local_check_checked_proves_nothing():
+    """ORCH-1124: ci.yml skips every job of such a group, the run still ends 'success'; the push runs the suite."""
+    assert not proven.decide(["p1", "p2"], "T", "T", [dict(GREEN, rollup="skipped")])[0]
+    assert not proven.decide(["p1", "p2"], "T", "T", [dict(GREEN, rollup="")])[0]  # GitHub did not say
+
+
+def test_ci_and_rules_skip_only_a_local_check_queue_group():
+    rules = (ROOT / ".github" / "workflows" / "rules.yml").read_text(encoding="utf-8")
+    skip = (
+        "startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == "
+        "github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')"
+    )
+    assert CI.count(skip) == 2 and rules.count(skip) == 1
 
 
 # -- ci.yml wiring ---------------------------------------------------------------------------------------------
@@ -256,8 +272,11 @@ def test_a_proven_develop_push_runs_no_suite():
         assert "outputs.proven != 'true'" in _job_if(job), job
     # for now (ORCH-1106) a proven push still calls these two for the click-throughs and the Windows parts only,
     # which queue groups skip; their other suites stay off (brand/tests/test_ci_queue_skip.py)
-    for job in ("workspace", "addons"):
-        assert _job_if(job).startswith("needs.changes.outputs.proven == 'true' ||"), job
+    assert _job_if("addons").startswith("needs.changes.outputs.proven == 'true' ||")
+    # workspace: not when the Windows parts run on our own Windows VM (ORCH-1127, test_winvm_windows.py)
+    assert _job_if("workspace").startswith(
+        "(needs.changes.outputs.proven != 'true' || vars.WINDOWS_RUNNER != 'winvm') && (needs.changes.outputs.proven == 'true' ||"
+    )
 
 
 def test_the_phone_build_is_not_in_queue_groups_and_runs_on_develop_even_when_proven():

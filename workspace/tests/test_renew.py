@@ -742,3 +742,35 @@ def test_a_real_install_still_starts_the_real_sign_in(proj, real_tool, monkeypat
     calls = []
     monkeypatch.setattr(renew.subprocess, "Popen", lambda argv, **kw: calls.append(argv))
     assert renew.start(proj, "claude")["state"] == "starting" and len(calls) == 1
+
+
+@pytest.fixture
+def account_test_root(tmp_path, monkeypatch):
+    """The account's ~/.orch-test (where the dashboard click-throughs keep their stand-ins), with the system
+    temp folder moved elsewhere so only that root can let a stand-in through."""
+    from orch import launchenv
+
+    acct = tmp_path / "account"
+    (acct / ".orch-test").mkdir(parents=True)
+    other_tmp = tmp_path / "other-tmp"
+    other_tmp.mkdir()
+    monkeypatch.setattr(launchenv, "user_home", lambda: acct)
+    monkeypatch.setattr(renew.tempfile, "gettempdir", lambda: str(other_tmp))
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    return acct / ".orch-test"
+
+
+def test_a_test_install_may_run_a_stand_in_from_the_account_test_folder(account_test_root):
+    """The click-through j-renew.cjs: its stand-in lives under ~/.orch-test/<run>/bin, not in temp."""
+    stand_in = account_test_root / "run1" / "bin" / "claude"
+    stand_in.parent.mkdir(parents=True)
+    stand_in.write_text("#!/bin/sh\n")
+    assert not renew._real_tool_in_test(str(stand_in))
+
+
+def test_a_link_in_the_account_test_folder_to_the_real_tool_is_refused(account_test_root):
+    real = os.path.realpath(sys.executable)
+    link = account_test_root / "run1" / "bin" / "claude"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(real)
+    assert renew._real_tool_in_test(str(link))
