@@ -19,8 +19,8 @@ _RX = [
         re.S,
     ),  # PEM and PGP (PRIVATE KEY BLOCK)
     re.compile(
-        r"\b(?:orn|orp|ora|whk|opk|apv|odt)_[A-Za-z0-9_-]{16,}"
-    ),  # odt_: dashboard login token (ORCH-1035)
+        r"\b(?:orn|orp|ora|ors|whk|opk|apv|odt)_[A-Za-z0-9_-]{16,}"
+    ),  # ors_: a signing key (signkey.py); odt_: dashboard login token (ORCH-1035)
     re.compile(r"\b(?:sk|pk|rk)[-_](?:live|test|proj|ant)?[-_]?[A-Za-z0-9_-]{16,}"),
     re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}"),
     re.compile(r"\bglpat-[A-Za-z0-9_-]{16,}|\bxox[abprs]-[A-Za-z0-9-]{10,}"),
