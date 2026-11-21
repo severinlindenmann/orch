@@ -1,4 +1,4 @@
-"""Write contracts/vectors/msgsig-v1.json (signed messages v1, contracts/relay-api.md "Signed messages").
+"""Write contracts/vectors/msgsig-v1.json (signed messages v1, contracts/msgsig.md).
 
 Run from the repo root:
   uv run --with cryptography python scripts/gen_msgsig_vectors.py [wycheproof ed25519_test.json]

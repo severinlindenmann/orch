@@ -1,4 +1,4 @@
-"""Signed messages v1 (contracts/relay-api.md "Signed messages", vectors/msgsig-v1.json).
+"""Signed messages v1 (contracts/msgsig.md, vectors/msgsig-v1.json).
 
 Pure functions, no I/O: the format, strict reading, key ids, fingerprints, signing and the checks a receiver
 runs. Where the trust store, seen ids and held messages live is the job of the code that calls this (later
@@ -487,7 +487,7 @@ def read_envelope(env: Any) -> Envelope:
     except ValueError as e:
         raise SigError("bad_envelope", str(e)) from None
     if not 2 <= len(signed) <= MAX_SIGNED_BYTES:
-        raise SigError("bad_envelope", "signed size")
+        raise SigError("bad_envelope", "size of the message bytes")
     if len(sig) != 64:
         raise SigError("bad_envelope", "sig size")
     return Envelope(kid, signed, sig)
