@@ -811,7 +811,7 @@ const calDueRow = t => calRow(t, [name(t.owner), calWord(t), CAL().time(t.due) ?
   calTone(t) === 'today' ? chip('Today', 'warning') : null);
 const calMore = (day, n) => h('button', {type:'button', className:'btn ghost xs cal-more', 'data-action':'cal-day', 'data-day':day, 'data-key':'cal-more-' + day}, '+' + n + ' more');
 const calNumText = day => CAL().num(day) === 1 ? '1 ' + CAL().dayShort(day).split(' ')[2] : String(CAL().num(day));
-const calDayHead = (text, isToday) => h('header', {className:'cal-day-h'}, h('span', {className:'cal-num'}, text), isToday ? h('span', {className:'cal-tag'}, 'Today') : null);
+const calDayHead = (text, isToday) => h('header', {className:'cal-dhead'}, h('span', {className:'cal-num'}, text), isToday ? h('span', {className:'cal-tag'}, 'Today') : null);
 // The date beside a day's list (week rows and phone): Fri / 20 / Today.
 function calDate(day, plan) {
   const rel = day === plan.today ? 'Today' : day === CAL().add(plan.today, 1) ? 'Tomorrow' : '';
@@ -837,7 +837,7 @@ function calMonthGrid(plan) {
 }
 function calWeekRows(plan) {
   const w = plan.weeks[0];
-  return h('div', {className:'card cal-days wide-only', 'data-key':'cal-days'}, h('p', {className:'cal-days-h'}, h('strong', {}, w.name + ': '), w.counts),
+  return h('div', {className:'card cal-drows wide-only', 'data-key':'cal-drows'}, h('p', {className:'cal-drows-h'}, h('strong', {}, w.name + ': '), w.counts),
     w.days.map(d => h('section', {className:'cal-drow', 'data-today':d.today ? '' : null, 'data-none':d.items.length ? null : '', 'aria-label':CAL().dayLong(d.day), 'data-key':'cal-drow-' + d.day},
       calDate(d.day, plan), h('div', {className:'cal-items'}, d.items.length ? d.items.map(calCard) : h('p', {className:'meta cal-none'}, d.all ? 'Nothing else due' : 'Nothing due')))));
 }

@@ -112,7 +112,7 @@ const full = t => h('a', {class:'cal-card', href:href(t), 'data-tone':tone(t)},
   h('span', {class:'cal-card-s'}, pill(t)), h('span', {class:'cal-card-t'}, keyOf(t), ' ', t.title),
   h('span', {class:'cal-card-who'}, h('span', {class:'avatar sm', 'aria-hidden':'true', text:t.person[0]}), t.person),
   h('span', {class:'cal-card-due'}, dueTag(t)));
-const dayHead = (day, ln) => h('header', {class:'cal-day-h'},
+const dayHead = (day, ln) => h('header', {class:'cal-dhead'},
   h('span', {class:'cal-num', text:num(day) === 1 ? num(day) + ' ' + MON[D(day).getMonth()] : String(num(day))}),
   day === TODAY && h('span', {class:'cal-tag', text:'Today'}), ln ? h('span', {class:'cal-late', text:ln + ' late'}) : null);
 const dateBlock = day => h('header', {class:'cal-date'}, h('span', {class:'cal-dow', text:DOW[dow(day)]}), h('span', {class:'cal-dnum', text:String(num(day))}),
@@ -148,7 +148,7 @@ const draw = () => { const solo = S.view === 'week', thisMon = monday(TODAY), mo
   const cell = (day, w) => { const c = h('div', {class:'cal-cell', 'data-today':day === TODAY, 'aria-label':dayLong(day)}, dayHead(day, 0)); dayBody(c, day, w); return c; };
   // Saturday and Sunday share one cell
   const weekend = (a, b, w) => { const c = h('div', {class:'cal-cell cal-we', 'data-today':a === TODAY || b === TODAY, 'aria-label':dayLong(a) + ' and ' + dayLong(b)},
-      h('header', {class:'cal-day-h'}, h('span', {class:'cal-num', text:'Sat ' + num(a) + ' · Sun ' + num(b)}), (a === TODAY || b === TODAY) && h('span', {class:'cal-tag', text:'Today'})));
+      h('header', {class:'cal-dhead'}, h('span', {class:'cal-num', text:'Sat ' + num(a) + ' · Sun ' + num(b)}), (a === TODAY || b === TODAY) && h('span', {class:'cal-tag', text:'Today'})));
     dayBody(c, a, w); dayBody(c, b, w); return c; };
   const counts = mon => { const ts = week(mon).flatMap(dueOn), l = ts.filter(late).length, d = ts.filter(t => t.status === 'done').length, o = ts.length - l - d;
     return [l && l + ' late', o && o + ' open', d && d + ' done'].filter(Boolean).join(', ') || 'Nothing due'; };
@@ -156,7 +156,7 @@ const draw = () => { const solo = S.view === 'week', thisMon = monday(TODAY), mo
     lates.length ? lates.map(t => h('a', {class:'cal-late', href:href(t)}, h('span', {class:'cal-late-t'}, keyOf(t), ' ', t.title), h('span', {class:'cal-late-m'}, h('b', {text:'Was due ' + dayShort(t.due)}), ' · ' + t.person + ' · ' + WORD[t.status])))
       : h('p', {class:'meta cal-lane-none', text:'Nothing is late.'}));
   // week: one full-width row per day with readable cards; month: the weeks as rows
-  const grid = solo ? h('div', {class:'card cal-days wide-only'}, h('p', {class:'cal-days-h'}, h('strong', {text:name(mons[0]) + ': '}), counts(mons[0])),
+  const grid = solo ? h('div', {class:'card cal-drows wide-only'}, h('p', {class:'cal-drows-h'}, h('strong', {text:name(mons[0]) + ': '}), counts(mons[0])),
       week(mons[0]).map(day => { const ts = onDay(day), ln = dueOn(day).length - ts.length;
         return h('section', {class:'cal-drow', 'data-today':day === TODAY, 'data-none':!ts.length, 'aria-label':dayLong(day)}, dateBlock(day),
           h('div', {class:'cal-items'}, ts.length ? ts.map(full) : none(ln ? 'Nothing else due' : 'Nothing due'))); }))

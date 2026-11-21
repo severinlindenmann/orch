@@ -1532,7 +1532,7 @@ button.gtree-row:hover{background:var(--surface-2)}
 /* Tickets calendar (ORCH-1081, owner picked draft C, 20 Nov). Bar: previous / next / Today, the title, Month / Week.
    Month (.cal-grid): the weeks as rows, first column the week (.cal-wk: name, days, plain counts), Mon-Fri and one
    Weekend cell; this week tallest, next week medium, later small, past weeks only "1 done". Today's cell has the brand
-   ring. Late tickets sit in one list on the left (.cal-lane), never on their day. Week (.cal-days): one full-width row
+   ring. Late tickets sit in one list on the left (.cal-lane), never on their day. Week (.cal-drows): one full-width row
    per day with readable cards (.cal-card), an empty day is one thin "Nothing due" line. Phone (.cal-phone, up to
    720 px): Late and past weeks as short groups, then each week with a list per day (.cal-prow). */
 .cal-page{display:grid;gap:var(--s4);min-width:0}
@@ -1568,9 +1568,9 @@ button.gtree-row:hover{background:var(--surface-2)}
 .cal-more,.cal-done{justify-self:start;align-self:flex-start}
 .cal-done{gap:var(--s1);color:var(--text-muted)}
 .cal-time{flex:none;font:500 12px/16px var(--font-mono);color:var(--text-muted)}
-.cal-day-h{display:flex;align-items:center;gap:var(--s2);min-height:24px;padding:0 var(--s1)}
+.cal-dhead{display:flex;align-items:center;gap:var(--s2);min-height:24px;padding:0 var(--s1)}
 .cal-num{white-space:nowrap;font-size:13px;line-height:18px;font-weight:500;color:var(--text-muted)}
-[data-today]>.cal-day-h .cal-num{color:var(--text);font-weight:700}
+[data-today]>.cal-dhead .cal-num{color:var(--text);font-weight:700}
 .cal-tag{font-size:12px;line-height:16px;font-weight:500;color:var(--brand)}
 /* Month: the weeks as rows */
 .cal-head,.cal-row{display:grid;grid-template-columns:96px repeat(5,minmax(0,1fr)) minmax(112px,.8fr)}
@@ -1595,8 +1595,8 @@ button.gtree-row:hover{background:var(--surface-2)}
 .cal-row[data-when=later] .cal-wk strong{font-weight:500}
 .cal-grid .cal-chip-t{-webkit-line-clamp:3;line-clamp:3}
 /* Week: one row per day with readable cards */
-.cal-days-h{margin:0;padding:var(--s3) var(--s4);font-size:14px;line-height:20px;color:var(--text-muted)}
-.cal-days-h strong{font-weight:600;color:var(--text)}
+.cal-drows-h{margin:0;padding:var(--s3) var(--s4);font-size:14px;line-height:20px;color:var(--text-muted)}
+.cal-drows-h strong{font-weight:600;color:var(--text)}
 .cal-drow{display:grid;grid-template-columns:72px minmax(0,1fr);gap:var(--s4);padding:var(--s3) var(--s4);border-top:1px solid var(--border)}
 .cal-drow[data-today]{box-shadow:inset 2px 0 0 var(--brand)}
 .cal-drow[data-none]{padding-top:var(--s2);padding-bottom:var(--s2)}
