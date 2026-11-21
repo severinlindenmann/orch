@@ -113,11 +113,16 @@ def test_unwritable_index_still_answers(proj, run, monkeypatch):
     run("init")
     a = _new(run, "Invoice export")
 
-    def refuse(*_a, **_k):
-        raise OSError("read-only")
+    tries = []
 
-    monkeypatch.setattr(ticketindex.procs, "replace", refuse)
+    def refuse(*_a, **_k):
+        tries.append(1)
+        raise PermissionError("held open by a reader (Windows)")
+
+    ticketindex.index_path(proj).unlink(missing_ok=True)  # so the next call has to write it
+    monkeypatch.setattr(ticketindex.os, "replace", refuse)
     assert [r["id"] for r in ticketindex.rows(proj)] == [a]
+    assert tries == [1]  # one try, no waiting for the file to come free: the index is only a cache
     assert not list(ticketindex.index_path(proj).parent.glob("ticket-index.json.*.tmp"))
 
 

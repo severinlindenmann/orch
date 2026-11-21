@@ -22,8 +22,6 @@ import secrets
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import procs
-
 VERSION = 4  # a row or entry changed shape: an index of another version is rebuilt
 NOTE_HEAD = 200
 _FILE_RE = re.compile(r"^(t_.*)\.json$", re.S)  # as tickets.list_all globs: t_*.json
@@ -172,9 +170,9 @@ def _write_index(root: Path, files: dict) -> None:
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_text(json.dumps({"version": VERSION, "files": files}, ensure_ascii=False), encoding="utf-8")
-        procs.replace(tmp, p)
+        os.replace(tmp, p)  # never procs.replace: a reader holding the index on Windows must not stall a list
     except OSError:
-        pass  # best effort: the next call reads the changed files again
+        pass  # best effort (a busy or read-only file): the next call reads the changed files again
     finally:
         try:
             tmp.unlink(missing_ok=True)
