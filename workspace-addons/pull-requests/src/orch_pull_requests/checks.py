@@ -7,6 +7,9 @@ every minute, `orch pull-requests failed-checks tend` once):
 - a GitHub Actions job that was cancelled or timed out is run again ONCE per commit and job name. The rerun is a
   GitHub write: it takes a slot of this computer's write limit (orch.ghlimit, kind "other") first; no room now
   means the next pass tries again, nothing is written. A rerun GitHub refused is not tried again.
+- no burst (ORCH-454): one pass starts at most RERUNS_PER_PASS reruns and wakes at most WAKES_PER_PASS helpers;
+  while 20 or more jobs wait for a machine on GitHub (orch.cibusy) it starts no rerun at all. The rest waits
+  for the next pass.
 - when every check of the commit has finished and one failed for real (failed, cancelled or timed out again after
   its rerun, or its rerun was refused), the ticket's helper is woken ONCE per commit with the names of the failed
   jobs and the last lines of their logs: a live helper gets it as input, otherwise the helper is started with it
@@ -35,6 +38,8 @@ AGAIN = ("CANCELLED", "TIMED_OUT")  # run once more
 FAILED = ("FAILURE", "CANCELLED", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED", "ERROR")
 WORDS = {"CANCELLED": "cancelled", "TIMED_OUT": "timed out", "STARTUP_FAILURE": "did not start"}
 ACTIVE = ("ready", "active", "waiting", "review")  # not Backlog: nobody planned work there yet
+RERUNS_PER_PASS = 2  # reruns one pass starts at most; the rest wait for the next pass (no burst, ORCH-454)
+WAKES_PER_PASS = 2  # helpers one pass wakes at most (a woken helper usually pushes, which starts a run)
 SETTLE_SECS = 600  # after a rerun, GitHub may still show the old job this long: it counts as running
 LOG_LINES = 30
 LINE_CHARS = 300
@@ -238,8 +243,25 @@ def wake(root: Path, tid: str, text: str) -> str:
 
 
 # -- one pass --------------------------------------------------------------------------------------------------
-def tend(root: Path, gh, take=None, wake_fn=None, clock=time.time, log=print) -> dict:
-    """One pass. Returns {"on": bool, "reran": [(url, job name)], "woke": [url], "skipped": [(url, why)]}."""
+def _room(repo: str) -> tuple[bool, int | None]:
+    try:
+        from orch import cibusy
+    except ImportError:  # an older orch without the count: no hold
+        return True, None
+    return cibusy.room(repo)
+
+
+def _busy_line(n) -> str:
+    try:
+        from orch import cibusy
+    except ImportError:
+        return f"{n} jobs wait for a machine on GitHub"
+    return cibusy.busy_line(n)
+
+
+def tend(root: Path, gh, take=None, wake_fn=None, clock=time.time, log=print, room=None) -> dict:
+    """One pass. Returns {"on": bool, "reran": [(url, job name)], "woke": [url], "skipped": [(url, why)]}.
+    room(repo) -> (ok, waiting jobs) says whether a rerun may start now (default: orch.cibusy.room)."""
     out: dict = {"on": is_on(root), "reran": [], "woke": [], "skipped": []}
     if not out["on"]:
         return out
@@ -249,6 +271,8 @@ def tend(root: Path, gh, take=None, wake_fn=None, clock=time.time, log=print) ->
 
     take = take or ghlimit.take
     wake_fn = wake_fn or wake
+    room = room or _room
+    rooms: dict[str, tuple[bool, int | None]] = {}  # one count per repository and pass
     try:
         all_tickets = tickets.list_all(root)
     except Exception as e:  # noqa: BLE001 - unreadable tickets: do nothing this pass
@@ -294,6 +318,16 @@ def tend(root: Path, gh, take=None, wake_fn=None, clock=time.time, log=print) ->
                     continue
                 if not (r["done"] and r["conclusion"] in AGAIN and r["job"]):
                     continue
+                if len(out["reran"]) >= RERUNS_PER_PASS:
+                    waiting = True
+                    out["skipped"].append((url, f"{RERUNS_PER_PASS} reruns this pass already; next pass"))
+                    continue
+                if repo not in rooms:
+                    rooms[repo] = room(repo)
+                if not rooms[repo][0]:
+                    waiting = True
+                    out["skipped"].append((url, _busy_line(rooms[repo][1]) + "; the rerun waits"))
+                    continue
                 if not take("other", f"rerun {r['name']} of {url}", wait=0):
                     waiting = True
                     out["skipped"].append((url, "this computer's GitHub write limit had no room for a rerun"))
@@ -313,6 +347,9 @@ def tend(root: Path, gh, take=None, wake_fn=None, clock=time.time, log=print) ->
                 continue
             failed = [r for r in rows if r["conclusion"] in FAILED]
             if not failed:
+                continue
+            if len(out["woke"]) >= WAKES_PER_PASS:
+                out["skipped"].append((url, f"{WAKES_PER_PASS} helpers woken this pass already; next pass"))
                 continue
             fork = v.get("isCrossRepository") is not False
             text = wake_text(gh, url, head, failed, list(mem["reran"]), root, logs=not fork)
