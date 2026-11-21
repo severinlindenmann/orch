@@ -538,7 +538,9 @@ async function afterRestart(boot, tries = 24, pause = 1500, head = 2500) {
 // Turning an add-on on or off: when the answer is lost on the way (the server restarted), the state read once the
 // server is back says if it worked (the add-on's switch). `settle` false: an answered change returns at once, the
 // caller sends its next step before the restart and waits once after it (Remove: off, then uninstall).
-async function addonSet(name, on, tries = 24, pause = 1500, settle = true) {
+// Back but not changed: the click never reached the server (it was still restarting, e.g. from a Remove just before:
+// ORCH-1045), so it is sent once more; turning on or off twice does no harm.
+async function addonSet(name, on, tries = 24, pause = 1500, settle = true, again = true) {
   const boot = serverBoot;
   const result = await act('addon.set', {name, on}, {check:false});  // the server restarts: its click ids are gone
   if (snapshot || (!result.ok && result.status !== 0)) return result;
@@ -546,13 +548,14 @@ async function addonSet(name, on, tries = 24, pause = 1500, settle = true) {
   const next = await afterRestart(boot, tries, pause);
   if (result.ok || !next) return result;
   const row = array(next.settings?.addons).find(a => a && a.name === name);
-  return row && !!row.active === on ? {ok:true, status:200, state:next, recovered:true} : result;
+  if (row && !!row.active === on) return {ok:true, status:200, state:next, recovered:true};
+  return again ? addonSet(name, on, tries, pause, settle, false) : result;
 }
 // Uninstall an add-on (`orch addon uninstall`, refused while it is on: turn it off first). The services restart
 // like for the switch; the row leaves the list at once and the state read after the restart confirms it. The
 // uninstall goes right after an answered turn-off, before that restart: a wait in between left a page that was
 // reloaded meanwhile with the add-on only turned off (seen in the walk of this change).
-async function addonUninstall(name, tries = 24, pause = 1500) {
+async function addonUninstall(name, tries = 24, pause = 1500, again = true) {
   const still = rows => array(rows).some(a => a && a.name === name);
   if (array(state.settings?.addons).find(a => a && a.name === name)?.active) {
     const off = await addonSet(name, false, tries, pause, false);
@@ -564,7 +567,8 @@ async function addonUninstall(name, tries = 24, pause = 1500) {
   if (result.ok && state?.settings) { state.settings.addons = array(state.settings.addons).filter(a => !(a && a.name === name)); render(); }
   const next = await afterRestart(boot, tries, pause);
   if (result.ok || !next) return result;
-  return still(next.settings?.addons) ? result : {ok:true, status:200, state:next, recovered:true};
+  if (!still(next.settings?.addons)) return {ok:true, status:200, state:next, recovered:true};
+  return again ? addonUninstall(name, tries, pause, false) : result;  // never arrived: once more, like the switch
 }
 // The button a person just pressed shows the kit's busy state at once (aria-busy + aria-disabled), before the
 // answer comes, and until it came (ORCH-102: a click showed nothing for seconds while helpers ran).

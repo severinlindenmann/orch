@@ -136,6 +136,43 @@ test('two changes at once: the first one ending does not end the quiet time of t
   assert.equal(c.win.orchQuiet(), false);
 });
 
+// The click sent again when the server is back unchanged (ported from PR 2237, ORCH-1045 / ORCH-1046).
+const lost = {ok: false, status: 0, text: 'Failed to fetch'};
+function counted(answers, states, opts) {
+  const c = page(lost, states, opts), sent = [];
+  c.act = async (op, args) => { sent.push({op, args}); return Array.isArray(answers) ? answers.shift() : answers; };
+  c.sent = sent;
+  return c;
+}
+
+test('Add right after a Remove: the click never arrived, so it is sent once more and the add-on is added (ORCH-1045)', async () => {
+  const gone = {settings: {addons: []}};
+  const c = counted([lost, {ok: true, status: 200}], ['down', 'down', gone, [gone, 'b9'], [gone, 'b9']]);
+  const r = await c.addonSet('factory', true);
+  assert.equal(r.ok, true);
+  assert.equal(c.sent.length, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(c.sent[1])), {op: 'addon.set', args: {name: 'factory', on: true}});
+});
+
+test('the second click is lost too and the server is back unchanged: one error, no third click', async () => {
+  const off = {settings: {addons: [{name: 'factory', active: false}]}};
+  const c = counted(lost, [off, off]);
+  const r = await c.addonSet('factory', true);
+  assert.equal(r.ok, false);
+  assert.equal(c.sent.length, 2);
+});
+
+test('Remove during a restart: a click that never arrived is sent once more; a lost answer is not', async () => {
+  const there = () => ({settings: {addons: [{name: 'factory', active: false}]}}), gone = {settings: {addons: []}};
+  const again = counted([lost, {ok: true, status: 200}], [there(), gone, gone], {state: there()});
+  assert.equal((await again.addonUninstall('factory')).ok, true);
+  assert.deepEqual(again.sent.map(x => x.op), ['addon.uninstall', 'addon.uninstall']);
+  const answered = counted(lost, ['down', gone], {state: there()});
+  const r = await answered.addonUninstall('factory');
+  assert.equal(r.recovered, true);
+  assert.equal(answered.sent.length, 1);
+});
+
 test('the poll, the live sessions and the debug log skip their requests while the page is quiet', () => {
   const live = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livesessions.js'), 'utf8');
   const trail = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/diagtrail.js'), 'utf8');
