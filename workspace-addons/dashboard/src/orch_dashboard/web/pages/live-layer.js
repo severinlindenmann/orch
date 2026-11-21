@@ -162,6 +162,8 @@ let liveLayer = null;
 let liveLayerPainted = '';
 let liveLayerWas = '';
 let liveLayerWasPanes = [];  // the panes painted last: a new one slides in
+let liveLayerActed = 0;  // when a person last changed the layer: only then it moves, never on a live-data repaint
+let liveLayerFrom = null;  // {id, rect}: the wall tile a session was opened from; its pane grows out of it (draft D zoom)
 function liveLayerStore() { try { return window.localStorage; } catch { return null; } }
 function liveLayerPhone() { return !!window.matchMedia?.('(max-width: 720px)').matches; }
 let liveLayerWs = null;
@@ -217,6 +219,7 @@ function liveLayerPins() {
 }
 function liveLayerPin(key) {
   const on = !liveLayerPins().includes(key);
+  if (typeof liveWallBeforePin === 'function') liveWallBeforePin();  // the wall's tile slides to its band (pages/livewall.js)
   window.LiveSessions?.pin(key, on);  // shows at once ('orch:live-pins'), saved in the workspace
   return on;
 }
@@ -274,6 +277,7 @@ function liveDockHost() {
 function liveLayerDo(act, after) {
   const before = liveLayerModel(), stepped = liveLayerStep(before, act, liveLayerPhone());
   if (stepped === before) return;
+  liveLayerActed = Date.now();
   const next = liveLayerSort(stepped, liveLayerLive());
   liveLayer = next;
   liveLayerWrite(liveLayerStore(), next, liveLayerWs);
@@ -544,6 +548,8 @@ function liveLayerPaint() {
     const shared = liveBarShared(), keepBar = shared ? document.getElementById('live-bar') : null;
     const typing = document.activeElement?.closest?.('#live-dock [data-live-msg-text]')?.dataset.liveMsgText;  // the message box keeps the keyboard
     const renaming = !!document.activeElement?.closest?.('#live-dock [data-live-ren]');
+    // motion (draft D): where each pane and the panel were, so they can move from there (pages/live-layer.js liveLayerMove)
+    const was = liveLayerMotionBefore(host, where);
     host.replaceChildren(...[liveLayerTree(s, where)].filter(Boolean), ...(keepBar ? [keepBar] : []));
     if (renaming) host.querySelector('[data-live-ren] input')?.focus({preventScroll:true});
     if (shared) {
@@ -555,6 +561,7 @@ function liveLayerPaint() {
       const box = host.querySelector(`[data-live-msg-text="${typing.replace(/["\\]/g, '')}"]`);
       if (box) { box.focus({preventScroll:true}); box.setSelectionRange(box.value.length, box.value.length); }
     }
+    liveLayerMove(host, where, was);
     liveLayerPainted = key;
     liveLayerWas = where;
     liveLayerWasPanes = where === 'bar' || where === 'side' ? [] : [...s.panes];
@@ -570,6 +577,43 @@ function liveLayerPaint() {
 // data or Start choice arrives and that drops the keyboard to the page, so every paint puts it back until the person
 // presses a key or clicks somewhere (or 5 seconds pass). After an answer in the pane (`ask`) it goes to the next
 // question's first choice when there is one, else to Open ticket (ORCH-709).
+// Motion of the layer (draft D, ORCH-1329), on the master motion helpers (kit/motion.js: orch.flip, orch.leave), so
+// reduced motion keeps all of it still. The panel's own entry (up from the bottom, in from the right, full screen) is
+// CSS (widgets.css .live-panel); here: a pane grows out of the wall tile it was opened from, panes that stay slide and
+// resize to their new place when one is added or closed, and the panel leaves for --dur-exit when it closes to the bar.
+function liveLayerMotionBefore(host, where) {
+  const m = window.orch;
+  if (!m?.flip || Date.now() - liveLayerActed > 1000) { liveLayerFrom = null; return null; }
+  const panel = host.querySelector(':scope > .live-panel');
+  const from = liveLayerFrom && Date.now() - liveLayerFrom.at < 1000 ? liveLayerFrom : null;
+  liveLayerFrom = null;
+  return {panel, rect:panel?.getBoundingClientRect() || null, panes:m.rects(host, ':scope > .live-panel > .live-pane', 'data-session'), from, where:liveLayerWas};
+}
+function liveLayerMove(host, where, was) {
+  const m = window.orch;
+  if (!was || !m?.flip) return;
+  const open = where !== 'bar' && where !== 'side';
+  if (!open) {
+    // closed to the bar or the side: the old panel fades out where it was instead of vanishing
+    if (was.panel && was.rect && was.where !== 'bar' && was.where !== 'side') m.leave(was.panel, was.rect, host);
+    return;
+  }
+  const panes = [...host.querySelectorAll(':scope > .live-panel > .live-pane')];
+  const grown = was.from && panes.find(p => p.dataset.session === was.from.id && !was.panes.has(p.dataset.session));
+  if (grown) {
+    // zoom: the pane grows out of its tile; the panel does not slide in at the same time (one move at a time)
+    delete grown.dataset.new;
+    host.dataset.still = '';
+    m.flip(grown, was.from.rect);
+  }
+  if (was.where !== where) return;  // the panel moved place: its own entry is the one move
+  for (const p of panes) if (p !== grown && was.panes.has(p.dataset.session)) m.flip(p, was.panes.get(p.dataset.session));
+}
+function liveLayerFromTile(id) {
+  const tile = document.querySelector('main [data-tile="' + String(id).replace(/["\\]/g, '') + '"]');
+  const r = tile?.getBoundingClientRect();
+  liveLayerFrom = r && r.width && r.height ? {id, rect:r, at:Date.now()} : null;
+}
 let liveLayerWant = null;
 function liveLayerTake() {
   if (!liveLayerWant) return;
@@ -641,11 +685,12 @@ window.addEventListener('orch:live-sessions', () => { if (document.getElementByI
 window.LiveLayer = {
   open(key, into = false) {  // the bar marks chips by ticket id; a ticket's session button moves the keyboard into the pane
     const id = liveLayerSession(key)?.id || key;
+    liveLayerFromTile(id);
     liveLayerDo({type:'open', key:id});
     if (into) { liveLayerWant = {id, until:Date.now() + 5000}; liveLayerTake(); }
   },
   place(mode) { liveLayerDo({type:'place', mode}); },
-  beside(key) { liveLayerDo({type:liveLayerPhone() ? 'open' : 'beside', key:liveLayerSession(key)?.id || key}); },  // a wall tile's Add beside
+  beside(key) { const id = liveLayerSession(key)?.id || key; liveLayerFromTile(id); liveLayerDo({type:liveLayerPhone() ? 'open' : 'beside', key:id}); },  // a wall tile's Add beside
   pin(key) { return liveLayerPin(liveLayerSession(key)?.id || key); },
   get mode() { return liveLayerWhere(liveLayerModel(), liveLayerPhone()); },
   get panes() { return [...liveLayerModel().panes]; },
