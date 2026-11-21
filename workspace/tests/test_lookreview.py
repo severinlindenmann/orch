@@ -261,18 +261,38 @@ def test_one_helper_at_a_time_and_a_daily_limit_of_tickets(proj, run, new_ticket
     assert _lines(proj, b).count(full) == 1  # once a day, not every pass
 
 
-def test_tickets_one_per_pass_all_get_a_look_the_same_day(proj, run, new_ticket, facts, on, starts):
-    """18 Nov: tickets came one per pass, each helper got one, and 4 helpers a day ran out by 06:00."""
+def _held(t: datetime):
+    """A datetime whose now() stands still at `t` (ORCH-1183)."""
+
+    class _Held(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return t if tz is None else t.astimezone(tz)
+
+    return _Held
+
+
+@pytest.mark.parametrize("at", ["23:59:40", "23:59:59", "00:00:05"])
+def test_tickets_one_per_pass_all_get_a_look_the_same_day(
+    proj, run, new_ticket, facts, on, starts, monkeypatch, at
+):
+    """18 Nov: tickets came one per pass, each helper got one, and 4 helpers a day ran out by 06:00.
+    One clock for the whole test (ORCH-1183): the daily cap counts per day on purpose, so six looks that
+    straddle midnight rightly count on two days."""
+    held = datetime.fromisoformat(f"2026-11-21T{at}").astimezone()
+    monkeypatch.setattr(lookreview, "datetime", _held(held))
     for i in range(6):
         tid = _finished(proj, run, new_ticket, title=f"Look change {i}")
         reviewer.run(proj)
         assert lookreview.read_state(proj)["open"]["items"] == [tid]
         lookreview.verdict(proj, tid, "leave", "x")
     assert len(starts) == 6
-    assert lookreview.read_state(proj)["looked"] == {lookreview._day(): 6}
+    assert lookreview.read_state(proj)["looked"] == {"2026-11-21": 6}
 
 
-def test_a_batch_never_goes_past_the_daily_limit(proj, run, new_ticket, facts, on, starts):
+def test_a_batch_never_goes_past_the_daily_limit(proj, run, new_ticket, facts, on, starts, monkeypatch):
+    held = datetime.fromisoformat("2026-11-21T23:59:59").astimezone()
+    monkeypatch.setattr(lookreview, "datetime", _held(held))  # one day for the whole test (ORCH-1183)
     ids = [_finished(proj, run, new_ticket, title=f"Look change {i}") for i in range(3)]
     for tid in ids:
         lookreview.queue(proj, tid, "changes how a page looks")

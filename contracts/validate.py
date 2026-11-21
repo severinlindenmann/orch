@@ -1691,6 +1691,12 @@ def rc_relay_answer(req, phone, paired, questions, answered, blobs, vreq):
             st = blobs.get(vo["blob_id"])
             if st is None or st["uploader"] != phone:
                 return 404, "not_found"
+        for f in (v.get("note") or {}).get("files") or []:
+            st = blobs.get(f["blob_id"])
+            if st is None or st["uploader"] != phone:
+                return 404, "not_found"
+            if st["size"] != f["size"]:
+                return 422, "invalid"
     return 201, None
 
 

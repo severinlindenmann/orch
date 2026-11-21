@@ -9,9 +9,10 @@ module.exports = {
     const title = 'Check the poster colours';
     await open('#home');
     await page.getByRole('button', { name: 'New ticket' }).first().click();
-    const dlg = page.locator('dialog[open]');
+    const dlg = page.locator('.new-ticket-page');  // the New ticket page (ORCH-1037)
     await dlg.getByPlaceholder(/What should the helper do/).fill(title);
     await act('ticket.new', () => dlg.getByRole('button', { name: 'Save without starting' }).click());
+    await page.waitForFunction(() => location.hash.startsWith('#ticket/'), null, { timeout: 15000 });  // the saving moment, then the new ticket
     await open('#tickets');
     await page.getByText(title).first().click();
     await page.getByRole('button', { name: 'Change title' }).waitFor();
