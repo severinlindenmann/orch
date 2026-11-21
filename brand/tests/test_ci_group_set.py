@@ -45,6 +45,13 @@ def test_a_group_that_changes_only_docs_runs_every_check_but_no_add_on_suite():
     ]
 
 
+def test_a_group_that_touches_the_workspace_or_an_add_on_checks_the_generated_files():
+    for f in ("workspace/src/orch/x.py", "workspace-addons/sync/x.py"):
+        steps = names(light.group_plan([f], ADDONS, "b"))
+        assert steps.index(light.GENERATED["name"]) == steps.index("contracts") + 1
+    assert light.GENERATED["name"] not in names(light.group_plan(["docs/x.md"], ADDONS, "b"))
+
+
 def test_ruff_checks_and_format_checks_the_workspace_and_every_add_on():
     steps = by_name(light.group_plan([], ADDONS, "origin/develop"))
     want = [("workspace: ruff", "workspace")] + [(f"add-on {a}: ruff", f"workspace-addons/{a}") for a in ADDONS]
@@ -157,6 +164,13 @@ def test_it_stops_at_the_first_red_with_one_fail_line(tmp_path):
     assert lines[-1].startswith("local check: FAIL at s1 (step 2 of 3, exit 3,")
     assert sum(x.startswith("local check:") for x in lines) == 1
     assert failed.read_text(encoding="utf-8") == "s1\n"
+
+
+def test_a_marker_that_cannot_be_written_still_ends_with_the_fail_line(tmp_path):
+    lines: list[str] = []
+    env = {"PATH": "/usr/bin:/bin", "ORCH_CHECK_FAILED": str(tmp_path / "missing" / "failed.txt")}
+    assert light.run_group(_steps(4), env, out=lines.append) == 1
+    assert lines[-1].startswith("local check: FAIL at s0 (step 1 of 1, exit 4,")
 
 
 def test_all_green_ends_with_one_pass_line():

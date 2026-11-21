@@ -120,6 +120,14 @@ def pick_tests(files: list[str], texts: dict[str, str]) -> tuple[list[str], bool
     return sorted(picked), False
 
 
+GENERATED = {
+    "name": "generated files are current (shipped_addons.json)",
+    "cwd": "workspace",
+    "cmd": "uv run python ../scripts/gen_shipped_addons.py --check"
+    " || { echo 'run: python3 scripts/gen_shipped_addons.py and commit the result'; exit 1; }",
+}
+
+
 def plan(files: list[str], texts: dict[str, str], addons: set[str]) -> list[dict]:
     """The steps in order: {name, cwd, cmd}. Pure: reads nothing but its arguments."""
     steps: list[dict] = [
@@ -128,14 +136,7 @@ def plan(files: list[str], texts: dict[str, str], addons: set[str]) -> list[dict
     ]
     if any(f.startswith(("workspace/", "workspace-addons/")) for f in files):
         # generated files (ORCH-699): two pull requests that are each fine can leave one out of date together
-        steps.append(
-            {
-                "name": "generated files are current (shipped_addons.json)",
-                "cwd": "workspace",
-                "cmd": "uv run python ../scripts/gen_shipped_addons.py --check"
-                " || { echo 'run: python3 scripts/gen_shipped_addons.py and commit the result'; exit 1; }",
-            }
-        )
+        steps.append(dict(GENERATED))
     if any(f.startswith("workspace/") for f in files):
         steps += [
             {
@@ -238,12 +239,17 @@ def group_plan(files: list[str], addons: dict[str, int], base: str, labels: str 
             "cmd": "uv run -q --no-project --python '>=3.11' --with jsonschema --with rfc3339-validator"
             " --with cryptography python contracts/validate.py",
         },
+    ]
+    if any(f.startswith(("workspace/", "workspace-addons/")) for f in files):
+        # generated files (ORCH-699): a group is exactly where two fine pull requests leave one out of date
+        steps.append(dict(GENERATED))
+    steps.append(
         {
             "name": "workspace: ruff",
             "cwd": "workspace",
             "cmd": "uv sync -q && uv run ruff check . && uv run ruff format --check .",
-        },
-    ]
+        }
+    )
     for name in sorted(addons):
         steps.append(
             {
@@ -285,7 +291,10 @@ def run_group(steps: list[dict], env: dict[str, str], out=lambda line: print(lin
         if got.returncode != 0:
             took = time.monotonic() - start
             if env.get("ORCH_CHECK_FAILED"):
-                Path(env["ORCH_CHECK_FAILED"]).write_text(s["name"] + "\n", encoding="utf-8")
+                try:
+                    Path(env["ORCH_CHECK_FAILED"]).write_text(s["name"] + "\n", encoding="utf-8")
+                except OSError as e:  # the marker is extra; the FAIL line must still come
+                    out(f"(could not write ORCH_CHECK_FAILED: {e})")
             out(f"local check: FAIL at {s['name']} (step {i} of {len(steps)}, exit {got.returncode}, {took:.0f} s)")
             return 1
     out(f"local check: PASS ({len(steps)} steps, {time.monotonic() - start:.0f} s)")
