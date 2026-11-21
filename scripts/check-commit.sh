@@ -10,7 +10,7 @@
 #     It runs in the copy.
 #   Exit: the command's exit code; 2 when the commit cannot be found or the copy cannot be made.
 #   Last line: "check-commit: PASS <sha> in <n>s" or "check-commit: FAIL (exit <rc>) <sha> in <n>s".
-# Env: CHECK_SRC (git folder to copy from, default the shared clone of this script's repo), CHECK_CMD, BASE, LANE.
+# Env: CHECK_CMD is a shell command line. CHECK_SRC (git folder to copy from, default the shared clone of this script's repo), BASE, LANE.
 set -u
 usage() { echo "usage: scripts/check-commit.sh <commit> [-- command...]" >&2; exit 2; }
 [ $# -ge 1 ] && [ -n "$1" ] && [ "$1" != "--" ] || usage
@@ -42,14 +42,15 @@ G() { git -C "$COPY" "$@"; }
 # remote so a commit the shared clone lacks comes from there (into the copy, never into the shared clone)
 G fetch -q "$SRC" '+refs/remotes/origin/*:refs/remotes/origin/*' 2>/dev/null
 url=$(git -C "$SRC" config --get remote.origin.url 2>/dev/null) && G remote set-url origin "$url"
-sha=$(G rev-parse -q --verify "$REV^{commit}" 2>/dev/null)
+# resolve in the shared clone first (its local branches and tags; read only), its objects reach the copy via --shared
+sha=$(git -C "$SRC" rev-parse -q --verify "$REV^{commit}" 2>/dev/null)
 if [ -z "$sha" ] && [ -n "${url:-}" ]; then
   G fetch -q origin "$REV" 2>/dev/null && sha=$(G rev-parse -q --verify "FETCH_HEAD^{commit}" 2>/dev/null)
 fi
 [ -n "$sha" ] || { echo "check-commit: commit not found: $REV" >&2; exit 2; }
 G -c advice.detachedHead=false checkout -q --detach "$sha" || { echo "check-commit: could not check out $sha" >&2; exit 2; }
 
-if [ $# -gt 0 ]; then cmd=("$@"); elif [ -n "${CHECK_CMD:-}" ]; then cmd=("$CHECK_CMD"); else
+if [ $# -gt 0 ]; then cmd=("$@"); elif [ -n "${CHECK_CMD:-}" ]; then cmd=(sh -c "$CHECK_CMD"); else
   # ci_light.py's steps call `python` with pytest (as on CI); this Mac has neither on PATH, uv provides both
   cmd=(uv run -q --no-project --python '>=3.11' --with pytest python scripts/ci_light.py --base "${BASE:-origin/develop}")
 fi

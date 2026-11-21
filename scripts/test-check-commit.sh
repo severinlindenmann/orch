@@ -58,7 +58,12 @@ tail -1 "$S/log" | grep -q "^check-commit: FAIL (exit 3) $B in " || fail "no FAI
 run "$X" -- "$S/probe.sh" "$S/out" 0 > "$S/log" 2>&1 || { cat "$S/log"; fail "remote-only commit not checked"; }
 [ "$(v head)" = "$X" ] || fail "remote-only commit: copy is at $(v head)"
 
-# 4. unknown commit: exit 2, nothing left behind
+# 4. a local branch of the shared clone (not on the remote) and a CHECK_CMD with arguments
+g -C "$S/shared" branch -q local-only "$A"; snap "$S/before"
+CHECK_CMD="'$S/probe.sh' '$S/out' 0" run local-only > "$S/log" 2>&1 || { cat "$S/log"; fail "local branch or CHECK_CMD run failed"; }
+[ "$(v head)" = "$A" ] || fail "local branch: copy is at $(v head), not $A"
+
+# 5. unknown commit: exit 2, nothing left behind
 run 0123456789abcdef0123456789abcdef01234567 -- "$S/probe.sh" "$S/out" 0 > "$S/log" 2>&1; rc=$?
 [ $rc = 2 ] || fail "unknown commit gave exit $rc, not 2"
 
