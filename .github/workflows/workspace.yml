@@ -14,6 +14,12 @@ on:
         description: "the Linux parts (off only on a push to develop that a green queue group proved, ORCH-1106)"
         type: boolean
         default: true
+env:
+  # Tests a person set aside on a "Broken test" ticket (ORCH-455, the pull-requests add-on writes the variable):
+  # every pytest run still runs them and shows them, as an expected failure (.github/pytest/orch_aside.py).
+  ORCH_ASIDE: ${{ vars.ORCH_ASIDE }}
+  PYTEST_PLUGINS: orch_aside
+  PYTHONPATH: ${{ github.workspace }}/.github/pytest
 jobs:
   # Which systems and how many parts each (ORCH-315). Every part has a 15-minute limit (Windows 20); the full
   # suite takes about 12 min on Ubuntu, 22-40 min on macOS and ~140 min on Windows (ORCH-32), so the slow systems
