@@ -17,23 +17,62 @@ from pathlib import Path
 from . import page, picker, spread
 from . import share as share_mod
 
-CODEX_PROVIDERS = ("openai",)
-# The picker only knows helper tools by their registry name; a share without a helper tool account falls back to this.
-CODEX = "codex"
-TOOL_LABELS = {"claude": "Claude Code", CODEX: "Codex"}
+
+def _tools() -> list[tuple[str, str, tuple[str, ...]]]:
+    """The built-in helper tools from orch's agent registry (agents.json), in its order: (registry name, label,
+    the API key variables it takes or drops). No tool name is written in this add-on (the adapter rule)."""
+    try:
+        from orch import agentsdata
+
+        reg = agentsdata.load()["adapters"]
+    except Exception:  # noqa: BLE001 - outside an orch install: no tools known
+        return []
+    out = []
+    for name, doc in reg.items():
+        detect = doc.get("detect") if isinstance(doc, dict) else None
+        if not detect:  # the generic entry: not a tool of its own
+            continue
+        key = doc.get("api_key") or {}
+        names = [key.get("env"), *(key.get("drop") or [])]
+        out.append((name, str(doc.get("label") or name), tuple(str(v) for v in names if v)))
+    return out
 
 
-def tool_of(row: dict) -> str:
-    """claude or codex: an account's own `tool`, else its provider (OpenAI = Codex), else its label."""
+def lead_tool() -> str | None:
+    """The tool orch starts by default: the registry's first."""
+    t = _tools()
+    return t[0][0] if t else None
+
+
+def helper_tool() -> str | None:
+    """The helper tool a share means when Usage has no helper tool account: the registry's second, else its first."""
+    t = _tools()
+    return t[1][0] if len(t) > 1 else (t[0][0] if t else None)
+
+
+def tool_of(row: dict) -> str | None:
+    """An account's tool by its registry name: its own `tool`, else the tool that takes its provider's API key
+    (provider openai -> the tool with an OPENAI_ key variable), else a tool label in its label, else the lead tool."""
+    tools = _tools()
     tool = str(row.get("tool") or "").lower()
-    if tool in TOOL_LABELS:
+    if any(tool == name for name, _, _ in tools):
         return tool
-    if (
-        str(row.get("provider") or "").lower() in CODEX_PROVIDERS
-        or CODEX in str(row.get("label", "")).lower()
-    ):
-        return CODEX
-    return "claude"
+    provider = str(row.get("provider") or "").lower().split("-")[0]
+    if provider:
+        prefix = provider.upper() + "_"
+        for name, _, keys in tools:
+            if any(k.startswith(prefix) for k in keys):
+                return name
+    label = str(row.get("label", "")).lower()
+    for name, tool_label, _ in tools:
+        if tool_label.lower() in label:
+            return name
+    return lead_tool()
+
+
+def tool_label(name: str | None) -> str:
+    """A tool's name for people, from the registry."""
+    return next((label for n, label, _ in _tools() if n == name), name or "")
 
 
 def _time(text) -> datetime | None:
@@ -58,11 +97,12 @@ def source(row: dict) -> dict:
     on = bool(row.get("on")) and not missing
     acc = {"on": on, "state": "missing" if missing else "", "bars": bars}
     why = spread.skipped(acc) if on else None
+    tool = tool_of(row)
     out = {
         "id": row["id"],
         "label": row.get("label") or row["id"],
-        "tool": tool_of(row),
-        "tool_label": TOOL_LABELS[tool_of(row)],
+        "tool": tool,
+        "tool_label": tool_label(tool),
         "type": row.get("type"),
         "on": on,
         "at_limit": why is not None,
@@ -116,7 +156,7 @@ def _share_tool(rows: list[dict]) -> str:
     for r in sorted(rows, key=lambda r: r.get("order", 0)):
         if r.get("type") == "helper-tool" and r.get("on", True):
             return tool_of(r)
-    return CODEX
+    return helper_tool()
 
 
 def picker_share(s: dict | None, rows: list[dict]) -> dict:

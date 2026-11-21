@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from conftest import jrun
 
 from orch_usage import cli as usage_cli
-from orch_usage import page, picker, sources
+from orch_usage import page, picker, sources, store
 
 # 20 helper starts as orch would ask for them: kind of work and orch's model pick
 STARTS = [
@@ -59,7 +59,7 @@ def _seed(cli, ws, fake_switcher, tmp_path):
     jrun(cli, "list")  # the readers find the two subscriptions
     log = tmp_path / "spend.jsonl"
     log.write_text("")
-    p = ws / ".orch/addons/usage/accounts.json"
+    p = store.usage_dir(ws) / "accounts.json"
     data = json.loads(p.read_text())
     for id_, label, type_, provider, order, limit in (
         ("a_key001", "Claude API credit", "api-key", "anthropic-api", 3, 50),
