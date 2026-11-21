@@ -184,13 +184,24 @@ def _lines_ok(v, lo, hi):
     return isinstance(v, list) and lo <= len(v) <= hi and all(_text(x) for x in v)
 
 
+def _confirm_ok(c):
+    """Ask once before a split button is sent (a job marked important, ORCH-641): title, lines, Keep label."""
+    return (
+        _keys_only(c, ("title", "lines", "keep"))
+        and _text(c.get("title"), 80)
+        and _lines_ok(c.get("lines"), 1, 5)
+        and _opt(c, "keep", lambda v: _text(v, 30))
+    )
+
+
 def _split_button_ok(b):
     return (
-        _keys_only(b, ("label", "action", "link", "primary"))
+        _keys_only(b, ("label", "action", "link", "primary", "confirm"))
         and _text(b.get("label"), 30)
         and _opt(b, "action", _action)
         and _opt(b, "link", _link)
         and _opt(b, "primary", lambda v: isinstance(v, bool))
+        and _opt(b, "confirm", _confirm_ok)
     )
 
 
