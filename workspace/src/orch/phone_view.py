@@ -1370,6 +1370,43 @@ def _status(ticket: dict) -> str:
     return s if s in STATUSES else "open"
 
 
+CHAT_KEEP = 20  # chat lines kept in the phone's history window even when newer plain lines would push them out
+
+
+def _tail(lines: list[dict]) -> list[dict]:
+    """The phone's history window (at most HISTORY lines, oldest first): the newest CHAT_KEEP chat lines are kept
+    first, so a ticket chat on the phone does not lose its messages while a helper writes many plain lines;
+    the rest of the window is the newest plain lines."""
+    if len(lines) <= HISTORY:
+        return lines
+    idx = [i for i, e in enumerate(lines) if e.get("chat_message") is True][-CHAT_KEEP:]
+    keep = set(idx)
+    for i in range(len(lines) - 1, -1, -1):
+        if len(keep) >= HISTORY:
+            break
+        keep.add(i)
+    return [lines[i] for i in sorted(keep)]
+
+
+def _chat_fields(entry: dict, line: dict, h) -> dict:
+    """A chat line (`chat_message: true`) is a real message: the phone's ticket chat shows it as a bubble with its
+    stable id (so a relay copy of the same message is shown once) and the typed name, if any. The name is shown
+    as typed and marked "not signed in" on the phone; it proves nothing (contracts/history.md "Chat lines")."""
+    if entry.get("chat_message") is not True:
+        return line
+    line["chat"] = True
+    mid = entry.get("id")
+    if isinstance(mid, str) and tickets.CHAT_LINE_ID_RE.fullmatch(mid):
+        line["id"] = mid
+    try:
+        name = tickets.clean_by_name(entry.get("by_name")) if isinstance(entry.get("by_name"), str) else None
+    except Refused:  # a hand-edited line with a name too long: shown without it
+        name = None
+    if name and (name := _clip(name, 60, h)):
+        line["name"] = name
+    return line
+
+
 def _closed_view(ticket: dict, running: bool, done: int, total: int) -> dict:
     """The full view when stored key values can not be hidden (no value hider) or a text still holds one
     after hiding: no text from the ticket at all (fail closed), only counts and the status."""
@@ -1397,7 +1434,7 @@ def build(root: Path, ticket: dict, atts: list[dict], h=None) -> dict:
     if h is None:
         return _closed_view(ticket, running, done, total)
     hist = []
-    for entry in history.lines(root, ticket)[-HISTORY:]:  # an unproven synced author is the sync role here
+    for entry in _tail(history.lines(root, ticket)):  # an unproven synced author is the sync role here
         if internal_wakeup(entry) or _ADMIN_NOTE.match(str(entry.get("text", ""))):
             continue
         # Ticket history has no verified relay sender; raw labels cannot name a phone.
@@ -1409,7 +1446,7 @@ def build(root: Path, ticket: dict, atts: list[dict], h=None) -> dict:
         if not _TIME.fullmatch(at):
             continue
         who, role = _who(entry.get("by", ""), h)
-        hist.append({"at": at, "who": who, "role": role, "text": text})
+        hist.append(_chat_fields(entry, {"at": at, "who": who, "role": role, "text": text}, h))
     view: dict = {
         "title": _clip(ticket.get("title", ""), 200, h) or "Ticket",
         "status": _status(ticket),

@@ -40,7 +40,12 @@ def test_newest_first_and_a_ticket_without_chat_is_not_listed(three):
     assert quiet not in {r["id"] for r in rows}
     top = rows[0]
     assert top["title"] == "Newer chat" and top["lines"] == 2 and top["open_questions"] == 0
-    assert top["last"] == {"kind": "line", "by": YOU, "text": "Looks good"}
+    assert {k: top["last"][k] for k in ("kind", "by", "text")} == {
+        "kind": "line",
+        "by": YOU,
+        "text": "Looks good",
+    }
+    assert top["last"]["id"].startswith("m_")  # the chat line's stable id
     assert top["last_at"] == "2026-11-10T09:10:00Z"
 
 
@@ -78,6 +83,7 @@ def test_a_ticket_with_only_an_open_question_is_listed_and_unread(proj):
     (row,) = ticketchats.chats(proj)
     assert row["id"] == tid and row["lines"] == 0 and row["open_questions"] == 1
     assert row["last"]["kind"] == "question" and row["last"]["text"] == "Which colour?"
+    assert row["last"]["id"] == "q1" and row["last"]["by"] is None
     assert row["unread"] == 1
     tickets.answer(proj, tid, "q1", "Blue", YOU, "cli")
     assert ticketchats.chats(proj) == []  # answered and no chat lines: no longer a ticket chat
@@ -121,3 +127,53 @@ def test_orch_chat_list_and_read_commands(three, run):
 def test_no_ticket_chats_yet(proj, run):
     code, out, _ = run("chat", "list")
     assert code == 0 and "No ticket chats yet." in out
+
+
+def test_the_last_line_keeps_the_typed_name(proj):
+    tid = _ticket(proj, "Named")
+    tickets.apply_op(
+        proj,
+        tid,
+        lambda t: tickets.add_history(
+            t, YOU, "Hi all", chat=True, at="2026-11-10T09:00:00+00:00", by_name="Anna"
+        ),
+        by=YOU,
+    )
+    (row,) = ticketchats.chats(proj)
+    assert row["last"]["by_name"] == "Anna" and row["last"]["by"] == YOU
+
+
+def test_a_line_in_the_same_second_as_the_read_mark_is_still_unread(proj):
+    tid = _ticket(proj, "Same second")
+    _say(proj, tid, AGENT, "First", "2026-11-10T09:00:00+00:00")
+    ticketchats.mark_read(proj, tid)  # read now: one line seen
+    t = tickets.load(proj, tid)
+    _say(proj, tid, AGENT, "Arrived right after", t["history"][-1]["at"])  # stamped in an already-read second
+    (row,) = ticketchats.chats(proj)
+    assert row["unread"] == 1
+
+
+def test_an_old_question_without_asked_at_stays_read_after_an_edit(proj):
+    tid = _ticket(proj, "Old question")
+    tickets.ask(proj, tid, "Which colour?", ["Blue", "Green"], "Blue", AGENT)
+
+    def drop_asked_at(t):
+        t["questions"][0].pop("asked_at", None)
+
+    tickets.apply_op(proj, tid, drop_asked_at, by=AGENT)
+    ticketchats.mark_read(proj, tid)
+    tickets.apply_op(proj, tid, lambda t: t.update(title="Old question, renamed"), by=AGENT)
+    (row,) = ticketchats.chats(proj)
+    assert row["unread"] == 0
+
+
+def test_a_bad_typed_name_in_the_file_is_dropped(proj):
+    tid = _ticket(proj, "Edited by hand")
+    _say(proj, tid, YOU, "Hi", "2026-11-10T09:00:00+00:00")
+
+    def bad_name(t):
+        t["history"][-1]["by_name"] = "x" * 500
+
+    tickets.apply_op(proj, tid, bad_name, by=YOU)
+    (row,) = ticketchats.chats(proj)
+    assert "by_name" not in row["last"]
