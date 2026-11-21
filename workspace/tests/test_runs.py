@@ -339,6 +339,18 @@ def test_bad_input_is_refused(proj, new_ticket):
         runs.pending_add(proj, tid, "x", "text", "")
 
 
+def test_start_prompt_may_pass_what_a_person_may_send(proj, new_ticket):
+    """ORCH-1122: the start text orch builds can pass 8000 characters; a person's own text still cannot."""
+    tid = new_ticket()
+    long = "x" * 9022
+    item = runs._pending_add_locked(proj, tid, "orch", "text", long, "start", None)
+    assert len(item["text"]) == 9022
+    with pytest.raises(Refused, match="1 to 8000"):
+        runs.pending_add(proj, tid, "phone", "message", long)
+    with pytest.raises(Refused, match="1 to 40000"):
+        runs._pending_add_locked(proj, tid, "orch", "text", "y" * 40001, "start", None)
+
+
 def test_release_needs_the_run_when_a_process_holds_the_claim(proj, new_ticket, run, monkeypatch):
     tid = new_ticket()
     rec = runs.claim(proj, tid, "a", "claude", pid=os.getpid())
