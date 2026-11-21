@@ -6,7 +6,7 @@
   "type": "object",
   "required": ["schema", "orch_api", "name", "version", "description", "run", "skill"],
   "additionalProperties": false,
-  "dependentSchemas": { "page": { "required": ["background"], "properties": { "background": { "const": true } } } },
+  "dependentSchemas": { "page": { "anyOf": [ { "required": ["background"], "properties": { "background": { "const": true } } }, { "properties": { "page": { "required": ["live_session"], "properties": { "live_session": { "const": true } } } } } ] } },
   "properties": {
     "schema": { "const": "orch.addon/1" },
     "orch_api": { "const": 1, "description": "Version of the add-on contract (CLI, view, ext rules) this add-on was written for." },
