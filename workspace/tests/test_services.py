@@ -209,7 +209,7 @@ def test_dead_pids_are_pruned(proj):
 
 
 def test_start_stop_status_are_reserved_names():
-    assert {"start", "stop", "status"} <= addons.RESERVED
+    assert {"start", "stop", "restart", "status"} <= addons.RESERVED
 
 
 @pytest.mark.parametrize(
@@ -386,3 +386,41 @@ def test_status_lists_known_workspaces_that_run_nothing(svc, proj, run, tmp_path
     assert "NoOrch" not in by and "Gone" not in by
     assert rows == sorted(rows, key=lambda r: (r["name"].lower(), r["workspace"]))
     assert "Known" in run("status")[1] and "nothing running" in run("status")[1]
+
+
+def test_restart_starts_the_services_again_and_keeps_helpers(svc, proj, run, monkeypatch):
+    """orch restart (ORCH-435): every background add-on stops and starts on the code installed now; unlike
+    orch stop it never ends a helper's session."""
+    from orch import runs_live
+
+    ended = []
+    monkeypatch.setattr(runs_live, "stop_hidden", lambda root: ended.append(root) or [])
+    run("start")
+    calls = []
+    real = services._call
+    monkeypatch.setattr(
+        services, "_call", lambda root, name, m, sub, *a: calls.append(sub) or real(root, name, m, sub, *a)
+    )
+    code, out, err = run("restart")
+    assert code == 0, err
+    assert calls == ["stop", "start"] and ended == []
+    assert f"Restarted in {proj.name}:" in out and "hello" in out
+    assert (proj / "svc.txt").exists()
+    assert [e["addon"] for e in services.running()] == ["hello"]
+    code, out, _ = run("restart", "--json")
+    data = json.loads(out)
+    assert code == 0 and data["stopped"] == [{"addon": "hello", "stopped": True}]
+    assert data["addons"][0]["running"] is True
+
+
+def test_restart_with_nothing_in_the_background(proj, run):
+    run("init")
+    code, out, _ = run("restart")
+    assert code == 0 and "Nothing to restart" in out
+
+
+def test_restart_reports_a_service_that_did_not_come_back(svc, proj, run):
+    run("start")
+    (proj / "fail.txt").write_text("x", encoding="utf-8")
+    code, _, err = run("restart")
+    assert code == 2 and "hello did not start again" in err
