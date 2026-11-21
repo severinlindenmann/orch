@@ -317,6 +317,8 @@ def test_a_switcher_that_fails_is_not_called_missing(cli, fake_switcher, ws):
     code, d = jrun(cli, "list")
     assert code == 0 and d["switcher"] is True
     assert d["warnings"] and "not installed" not in d["warnings"][0]
+
+
 def test_usage_shows_how_many_tickets_were_prepared_of_the_daily_limit(cli, fake_switcher, ws):
     """ORCH-741: the daily Prepare limit per workspace is shown in Usage (orch core counts and enforces it)."""
     import time

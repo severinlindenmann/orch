@@ -312,6 +312,8 @@ def test_a_5_hour_window_without_its_own_limit_shows_the_default_early_switch(cl
     _seed(cli)  # first now has its own 5-hour limit (95 %)
     bars = {b["period"]: b for b in page.build(usage_cli.gather(ws), ws)["accounts"][0]["bars"]}
     assert bars["5h"]["limit"] == 95 and "early" not in bars["5h"] and "early" not in bars["week"]
+
+
 def test_the_page_draws_the_daily_prepare_limit_under_today(cli, fake_switcher, ws):
     """ORCH-811 (owner picked draft C): the page model carries the Prepare use, and the page draws it as one line
     under Today with a way to Settings; a full limit says until when."""

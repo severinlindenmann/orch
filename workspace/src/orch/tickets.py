@@ -2677,7 +2677,14 @@ def tidy(
             ticket[k] = more[k]
             add_history(ticket, by, PREPARE_FIELDS[k] + ": " + _field_words(root, k, more[k]))
         kinded = bool(kind_name and not kind(ticket) and _put_kind(ticket, kind_name, by))
-        if (title == old or edited) and not filled and not wrote and not estimated and not added and not kinded:
+        if (
+            (title == old or edited)
+            and not filled
+            and not wrote
+            and not estimated
+            and not added
+            and not kinded
+        ):
             add_history(ticket, by, "Ticket tidied: nothing to change")
 
     return apply_op(root, tid, op, by=by)[0]

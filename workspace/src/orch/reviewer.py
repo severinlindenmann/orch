@@ -270,6 +270,8 @@ def review_result(root: Path | None, ticket: dict) -> dict | None:
         if got is not None:
             got["line"] = " ".join(str(got.get("line") or "").split())[:300] or "no details given"
             return got
+
+
 def kind_block(root: Path, ticket: dict) -> str | None:
     """ORCH-645: why no automation may accept this ticket by its kind (a draft, an empty list, a kind the
     workspace does not list; no kind counts as a small bug), or None. One check for the Reviewer and its
@@ -708,7 +710,6 @@ def picks_text(picks: list[dict]) -> list[str]:
     return out
 
 
-
 def _answered_for(root: Path, ticket: dict, start) -> list[dict]:
     """The answers someone gave FOR the person (Away mode, the manager, a script; ORCH-547) since `start`,
     as SHOWN here: each says who gave it, so the morning list never shows a stand-in as the person."""
@@ -726,7 +727,7 @@ def _answered_for(root: Path, ticket: dict, start) -> list[dict]:
                 "title": shown.get("title") or "",
                 "at": q.get("answered_at") or q.get("at"),
                 "why": (
-                    f'{q["id"]} = {q["answer"]} ({history.answered_words(q.get("answered_by"), who)})'
+                    f"{q['id']} = {q['answer']} ({history.answered_words(q.get('answered_by'), who)})"
                     if q.get("answered_by") != BY
                     else f'answered "{q["answer"]}" ({history.answered_words(q.get("answered_by"), who)})'
                 )

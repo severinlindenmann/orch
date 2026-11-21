@@ -179,7 +179,7 @@ def test_drafts_and_designs_wait_for_the_person(proj, run, new_ticket, no_agent)
     )
     code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", "agent:manager", "--for",
                          "Severin", "--json")  # fmt: skip
-    # refused by the draft rule (ORCH-582, said first) or the stand-in rule (ORCH-547): both keep it for the person
+    # refused by the draft rule (ORCH-582, said first) or the stand-in rule (ORCH-547)
     assert code != 0 and ("own answer" in out + err or "Only a person picks a draft" in out + err)
     assert read(proj, tid)["questions"][0]["answer"] is None
 

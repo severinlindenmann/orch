@@ -1390,7 +1390,7 @@ FOUND_SOURCES = 10  # the phone shows at most this many sources of What I found 
 
 
 def _prepare_view(ticket: dict) -> dict | None:
-    """Where Prepare stands on a saved ticket in Backlog (ORCH-738 / ORCH-742): only while the ticket is open."""
+    """Where Prepare stands on a saved ticket in Backlog (ORCH-738, ORCH-742): only while it is open."""
     p = ticket.get("prepare")
     if ticket.get("status") != "open" or not isinstance(p, dict) or p.get("state") not in _PREPARE_STATES:
         return None
@@ -1401,7 +1401,7 @@ def _prepare_view(ticket: dict) -> dict | None:
 
 
 def _found_view(ticket: dict, h) -> dict | None:
-    """What I found (ORCH-740), for the phone's What I found row (ORCH-742): written by a helper, so every text
+    """What I found (ORCH-740) for the phone's What I found row (ORCH-742): written by a helper, so every text
     goes through the scrub and the value hider, and links only as safe http(s) addresses."""
     f = ticket.get("found")
     if not isinstance(f, dict):
@@ -1552,10 +1552,18 @@ def _tasks_sig(ticket: dict, root: Path | None = None) -> str:
     data = [items, ticket.get("status"), running]
     if ticket.get("started") is True:
         data.append(True)
-    prep, found = ticket.get("prepare"), ticket.get("found")  # ORCH-742: Preparing / Prepared and What I found
+    prep, found = (
+        ticket.get("prepare"),
+        ticket.get("found"),
+    )  # ORCH-742: Preparing / Prepared and What I found
     if isinstance(prep, dict) or isinstance(found, dict):
-        # the whole What I found (a change without a new time re-sends too); default=str keeps odd values hashable
-        data.append([prep.get("state") if isinstance(prep, dict) else None, found if isinstance(found, dict) else None])
+        # the whole What I found (a change without a new time re-sends too); default=str keeps odd values
+        data.append(
+            [
+                prep.get("state") if isinstance(prep, dict) else None,
+                found if isinstance(found, dict) else None,
+            ]
+        )
     return hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 

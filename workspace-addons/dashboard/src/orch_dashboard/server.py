@@ -406,7 +406,9 @@ class Handler(BaseHTTPRequestHandler):
         if local and path == "/ready" and self.nonce:
             return True  # orch's start/stop check: answered only with a proof of the start secret, no data
         if local and path == "/api/session-state":
-            return True  # the sign-in chip's own state (signed in, view only, helper): no data, so it can say so
+            return (
+                True  # the sign-in chip's own state (signed in, view only, helper): no data, so it can say so
+            )
         # a sandboxed ticket page's own files: its origin is opaque, so the browser sends no cookie with them
         # (a cross-site load an attacker's page can show but never read); the page document itself needs one
         px = PROXY.fullmatch(path)
