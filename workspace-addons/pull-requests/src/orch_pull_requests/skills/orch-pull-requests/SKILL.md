@@ -1,6 +1,10 @@
 ---
 name: orch-pull-requests
 description: See each pull request's checks and merge state (on the Pull requests page and live on its ticket) and merge a finished pull request through the merge queue, which merges several together after one run of the checks. Use when a ticket links a pull request, should be merged once its checks pass ("merge on green") and the pull-requests add-on is on. Not for opening pull requests or for pull requests a person merges with a Merge card.
+metadata:
+  owner: "orch"
+  status: "active"
+  requires: "gh"
 ---
 # orch merge queue
 
