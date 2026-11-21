@@ -319,7 +319,7 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
     w["runs"] = runs
     w["events"] = (events + [now] * new)[-MAX_EVENTS:]
 
-    if not new:  # healthy = alive, answering and not started again since the last pass
+    if not new and h["ok"]:  # healthy = alive, answering and not started again; Starting… is not healthy yet
         w["healthy_since"] = w.get("healthy_since") or now
     else:
         w["healthy_since"] = None

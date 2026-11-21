@@ -15,6 +15,7 @@ const OrchBlocks = (() => {
   const FILE = /^f_[a-z0-9]+$/;
   const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/;
   let opts = {};   // {addonUrl(name) -> local page address or null}, set per render()
+  const openLogs = new Set();   // ids whose whole log is open: kept when the page refreshes (ORCH-1130)
   const VERB = /^[a-z][a-z-]{0,20}$/;
   const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
   const ITEM = /^[a-z]_[a-z0-9]{6,16}$/;   // the id of one thing an add-on keeps (a ticket t_…, a lesson l_…)
@@ -293,7 +294,8 @@ const OrchBlocks = (() => {
     box.append(el('div', 'log-lines-h', log.title || 'Last log lines'));
     if (arr(log.lines).length) {
       const ol = el('ol'); arr(log.lines).forEach(l => ol.append(el('li', '', l))); box.append(ol);
-      if (arr(log.lines).length > 6) { box.classList.add('log-short'); box.dataset.long = '1'; } // Open log shows every line
+      if (arr(log.lines).length > 6) { box.classList.add(openLogs.has(it.id) ? 'log-full' : 'log-short'); box.dataset.long = '1'; } // Open log shows every line
+      else if (openLogs.has(it.id)) box.classList.add('log-full');
     }
     else box.append(el('p', 'meta', log.empty || 'Nothing written yet.'));
     return box;
@@ -309,7 +311,7 @@ const OrchBlocks = (() => {
     const row = el('div', 'row');
     if (it.question) row.append(el('span', 'muted', 'The question above is about this one.'));
     else arr(p.buttons).forEach((x, i) => { const b = splitButton(x, it, 'btn sm ' + (x.primary ? 'primary' : 'outline')); if (b) row.append(b); });
-    if (p.log) { const o = el('button', 'btn ghost sm', 'Open log'); o.type = 'button'; o.dataset.splitLog = it.id; o.setAttribute('aria-label', 'Open log of ' + it.title); row.append(o); }
+    if (p.log) { const w = openLogs.has(it.id) ? 'Close log' : 'Open log', o = el('button', 'btn ghost sm', w); o.type = 'button'; o.dataset.splitLog = it.id; o.setAttribute('aria-label', w + ' of ' + it.title); row.append(o); }
     if (row.childNodes.length) s.append(row);
     if (arr(p.facts).length) s.append(splitFacts(p.facts, it));
     if (p.note) s.append(el('p', 'muted', p.note));
@@ -378,6 +380,7 @@ const OrchBlocks = (() => {
     const l = section && [...section.querySelectorAll('[data-log]')].find(n => n.dataset.log === id);
     if (!l) return;
     const open = !l.classList.contains('log-full');
+    if (open) openLogs.add(id); else openLogs.delete(id);
     l.classList.toggle('log-full', open); l.classList.toggle('log-short', !open && l.dataset.long === '1');
     for (const b of section.querySelectorAll('[data-split-log]')) if (b.dataset.splitLog === id) { b.textContent = open ? 'Close log' : 'Open log'; b.setAttribute('aria-label', (open ? 'Close log of ' : 'Open log of ') + (b.getAttribute('aria-label') || '').replace(/^(Open|Close) log of /, '')); }
     l.scrollIntoView({block: 'nearest'}); l.focus({preventScroll: true});

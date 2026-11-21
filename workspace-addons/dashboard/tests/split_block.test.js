@@ -114,6 +114,9 @@ test('Open log shows every line of a long log and Close log goes back to the las
   B.splitLogShow(s, item.id);
   assert.ok(box.classList.contains('log-full') && !box.classList.contains('log-short'));
   assert.equal(btn.textContent, 'Close log');
+  const again = B.render(view.blocks, {self: 'services'}).kids[0];   // the page refreshes: the log stays open
+  assert.ok(again.querySelector('.log-lines').classList.contains('log-full'));
+  assert.equal(again.querySelector('[data-split-log]').textContent, 'Close log');
   B.splitLogShow(s, item.id);
   assert.ok(box.classList.contains('log-short') && !box.classList.contains('log-full'));
   assert.equal(btn.textContent, 'Open log');
