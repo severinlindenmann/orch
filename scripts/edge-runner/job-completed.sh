@@ -39,14 +39,25 @@ while [ -n "$p" ] && [ "$p" -gt 1 ]; do keep="$keep$p "; p=$(ps -p "$p" -o ppid=
 # The runner is recognised by the program it runs (its own bin folder), never by words in a command line a job
 # could copy.
 RBIN=$(cd "$REAL_HOME/actions-runner/bin" 2>/dev/null && pwd -P)
-mgr=$(systemctl show "user@$ME.service" -p MainPID --value 2>/dev/null)
-bus=$(systemctl --user show dbus.service -p MainPID --value 2>/dev/null)
+# The manager's PID comes from the system manager (a job cannot change it). (sd-pam) is the one child the manager
+# starts in its first second (a job's own units are its children too, but start later). The bus counts only when its
+# program is the system's dbus binary (a job could replace dbus.service with a runtime override).
+start() { awk '{print $22}' "/proc/$1/stat" 2>/dev/null; }
 SYSTEM_PIDS=""
-for x in $mgr $bus; do [ "$x" -gt 0 ] 2>/dev/null && SYSTEM_PIDS="$SYSTEM_PIDS $x"; done
-if [ "${mgr:-0}" -gt 0 ] 2>/dev/null; then   # (sd-pam): the manager's child in the manager's own scope
+mgr=$(systemctl show "user@$ME.service" -p MainPID --value 2>/dev/null)
+if [ "${mgr:-0}" -gt 0 ] 2>/dev/null; then
+  SYSTEM_PIDS=" $mgr"
+  m0=$(start "$mgr"); hz=$(getconf CLK_TCK)
   for c in $(ps -o pid= --ppid "$mgr" 2>/dev/null); do
-    [ "$(cat "/proc/$c/cgroup" 2>/dev/null)" = "0::/user.slice/user-$ME.slice/user@$ME.service/init.scope" ] && SYSTEM_PIDS="$SYSTEM_PIDS $c"
+    c0=$(start "$c")
+    [ -n "$c0" ] && [ -n "$m0" ] && [ $((c0 - m0)) -le "$hz" ] && { SYSTEM_PIDS="$SYSTEM_PIDS $c"; break; }
   done
+fi
+bus=$(systemctl --user show dbus.service -p MainPID --value 2>/dev/null)
+if [ "${bus:-0}" -gt 0 ] 2>/dev/null; then
+  case $(readlink "/proc/$bus/exe" 2>/dev/null) in
+    (/usr/bin/dbus-daemon|/usr/bin/dbus-broker|/usr/bin/dbus-broker-launch) SYSTEM_PIDS="$SYSTEM_PIDS $bus";;
+  esac
 fi
 leftovers() {
   local pid exe
