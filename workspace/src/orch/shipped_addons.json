@@ -480,6 +480,16 @@
  },
  "skills": {
   "acts": {
+   "delete": {
+    "summary": "Move one skill of this workspace or your computer to the Bin",
+    "who": "people",
+    "writes": []
+   },
+   "new": {
+    "summary": "Make a new draft skill in this workspace",
+    "who": "people",
+    "writes": []
+   },
    "off": {
     "summary": "Turn one skill, rules file or connected service off in this workspace",
     "who": "people",
@@ -487,6 +497,11 @@
    },
    "on": {
     "summary": "Turn one skill, rules file or connected service on again in this workspace",
+    "who": "people",
+    "writes": []
+   },
+   "restore": {
+    "summary": "Put one skill from the Bin back where it was, never over another",
     "who": "people",
     "writes": []
    }
@@ -515,6 +530,7 @@
   "run": "orch_skills",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-skills",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,

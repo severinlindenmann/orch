@@ -19,8 +19,6 @@ from . import switches
 from .switches import Refused
 
 SCHEMA = "orch.skills-page/1"
-TOOLS = {"claude": "Claude", "codex": "Codex"}
-INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md", "CLAUDE.local.md", "AGENTS.local.md")
 DESC_MIN = 20
 _DESC = re.compile(r"^description:[ \t]*(.*)$", re.MULTILINE)
 _ID_PART = re.compile(r"[^A-Za-z0-9_.@-]")
@@ -73,14 +71,23 @@ def _home(account_home: Path | None) -> Path:
         return Path(os.path.expanduser("~"))
 
 
-def _tools(root: Path) -> list[str]:
+def _tools(root: Path) -> dict[str, str]:
+    """{tool name: label} of the built-in helper tools here; none found: the one this page can switch."""
     try:
-        from orch import skills
+        from orch import adapters, skills
 
-        found = [n for n in skills.detected_agents(root) if n in TOOLS]
-    except Exception:  # noqa: BLE001  no core: Claude is the one tool this page can switch
-        found = []
-    return found or ["claude"]
+        found = {n: adapters.load(n)["label"] for n in skills.detected_agents(root) if n != "generic"}
+    except Exception:  # noqa: BLE001
+        found = {}
+    if not found:
+        t = switches.tool()
+        found = {t["name"]: t["label"]} if t else {}
+    return found
+
+
+def _off_by_hand() -> str:
+    t = switches.tool()
+    return "Turned off by hand in " + (t["settings"].as_posix() if t else "the tool's own settings")
 
 
 # ---- skills -------------------------------------------------------------------------------------------------
@@ -106,7 +113,7 @@ def _skill_sources(root: Path, account_home: Path | None) -> list[tuple[str, str
     for name, folder in _skill_folders(harness).items():
         found.append(("orch", name, folder))
     seen = set(orch_names)
-    for base in (root / ".agents" / "skills", root / ".claude" / "skills"):
+    for base in [root / p for p in switches.skill_places()]:
         for name, folder in _skill_folders(base).items():
             if name in seen:
                 continue
@@ -152,7 +159,7 @@ def _kept_copy(root: Path, name: str) -> bool:
         from orch import harness
     except ImportError:
         return False
-    for where in (".agents/skills", ".claude/skills"):
+    for where in switches.skill_places():
         p = root / where / name
         if not _is_link(p) and p.is_dir() and harness._keep_files(p):
             return True
@@ -163,7 +170,9 @@ def skills(root: Path, account_home: Path | None = None, keys: set[str] | None =
     from orch import skills as core
 
     off = core.off_names(root)
-    claude = switches.claude_state(root)["skillOverrides"]
+    own = switches.tool_state(root)["skills"]
+    t = switches.tool()
+    switchable = t["name"] if t else None
     tools = _tools(root)
     items = []
     for where, name, folder in _skill_sources(root, account_home):
@@ -182,7 +191,7 @@ def skills(root: Path, account_home: Path | None = None, keys: set[str] | None =
             item["link"] = True  # a link to somewhere else: orch does not delete through it
         if where in ("orch", "admin"):
             linked_off = name in off
-            item["on"] = not linked_off and name not in claude
+            item["on"] = not linked_off and name not in own
             item["switch"] = "linked"
             if name in core.ALWAYS_ON:
                 item.update(on=True, locked="orch needs it to work tickets; always on")
@@ -190,18 +199,21 @@ def skills(root: Path, account_home: Path | None = None, keys: set[str] | None =
                 item["locked"] = (
                     "On this computer it is a copy that holds its add-on's file; turn the add-on off instead"
                 )
-            elif name in claude and claude[name] == "hand":
-                item["locked"] = "Turned off by hand in .claude/settings.local.json"
-            # orch's links reach every tool; a shared folder itself stays in .agents/skills, which Codex reads
+            elif own.get(name) == "hand":
+                item["locked"] = _off_by_hand()
+            # orch's links reach every tool; a shared folder itself stays in .agents/skills, which some tools read
             item["tools"] = {
-                TOOLS[t]: "off" if not item["on"] and not (where == "admin" and t == "codex") else "on" for t in tools
+                label: "off" if not item["on"] and not (where == "admin" and switches.reads_shared(n)) else "on"
+                for n, label in tools.items()
             }
         else:
-            item["on"] = name not in claude
-            item["switch"] = "claude"
-            if claude.get(name) == "hand":
-                item["locked"] = "Turned off by hand in .claude/settings.local.json"
-            item["tools"] = {TOOLS[t]: ("off" if (t == "claude" and not item["on"]) else "on") for t in tools}
+            item["on"] = name not in own
+            item["switch"] = "tool" if switchable else None
+            if own.get(name) == "hand":
+                item["locked"] = _off_by_hand()
+            item["tools"] = {
+                label: ("off" if (n == switchable and not item["on"]) else "on") for n, label in tools.items()
+            }
         item["problems"] = _skill_problems(root, head, meta, keys or set()) if item["on"] else []
         items.append(item)
     return items
@@ -211,29 +223,30 @@ def skills(root: Path, account_home: Path | None = None, keys: set[str] | None =
 
 
 def instructions(root: Path, account_home: Path | None = None) -> list[dict]:
-    excl = switches.claude_state(root)["claudeMdExcludes"]
+    excl = switches.tool_state(root)["rules"]
     tools = _tools(root)
     items = []
-    mine = _home(account_home) / ".claude" / "CLAUDE.md"
-    if mine.is_file():
+    t = switches.tool()
+    mine = _home(account_home) / t["home_rules"] if t else None
+    if mine is not None and mine.is_file():
         on = str(mine) not in excl
         it = {
-            "id": item_id("instructions", "mine", "CLAUDE.md"),
+            "id": item_id("instructions", "mine", mine.name),
             "kind": "instructions",
             "name": "Your rules for every project",
-            "file": "~/.claude/CLAUDE.md",
+            "file": "~/" + t["home_rules"],
             "where": "mine",
             "on": on,
-            "switch": "claude",
+            "switch": "tool",
             "words": len(_text(mine).split()),
-            "description": "Your own rules for Claude, read in every folder on this computer.",
-            "tools": {"Claude": "on" if on else "off"},
+            "description": f"Your own rules for {t['label']}, read in every folder on this computer.",
+            "tools": {t["label"]: "on" if on else "off"},
             "problems": [],
         }
         if excl.get(str(mine)) == "hand":
-            it["locked"] = "Turned off by hand in .claude/settings.local.json"
+            it["locked"] = _off_by_hand()
         items.append(it)
-    for fn in INSTRUCTION_FILES:
+    for fn in switches.instruction_files():
         p = root / fn
         if not p.is_file():
             continue
@@ -249,7 +262,7 @@ def instructions(root: Path, account_home: Path | None = None) -> list[dict]:
                 "locked": "Helpers in this workspace always read it",
                 "words": len(text.split()),
                 "description": _first_line(text),
-                "tools": {TOOLS[t]: "on" for t in tools},
+                "tools": {label: "on" for label in tools.values()},
                 "problems": [],
             }
         )
@@ -267,7 +280,7 @@ def instructions(root: Path, account_home: Path | None = None) -> list[dict]:
                 "locked": "Written by orch: one block for each add-on that is on. Turn the add-on off to remove its block",
                 "words": len(text.split()),
                 "description": f"{text.count(chr(10) + '## ') + text.startswith('## ')} blocks, one per add-on.",
-                "tools": {TOOLS[t]: "on" for t in tools},
+                "tools": {label: "on" for label in tools.values()},
                 "problems": [],
             }
         )
@@ -294,7 +307,9 @@ def services(root: Path, account_home: Path | None = None) -> list[dict]:
         conns, _ = inventory.connections(root, account_home=account_home)
     except Exception:  # noqa: BLE001  no inventory: nothing listed (the page says so)
         conns = []
-    deny = switches.claude_state(root)["deny"]
+    deny = switches.tool_state(root)["deny"]
+    t = switches.tool()
+    switchable = t["name"] if t else None
     tools = _tools(root)
     items = []
     for c in conns:
@@ -309,15 +324,15 @@ def services(root: Path, account_home: Path | None = None) -> list[dict]:
             "server": c["name"],
             "where": WHERE_OF_SOURCE.get(c["source"], "workspace"),
             "on": on,
-            "switch": "claude",
+            "switch": "tool" if switchable else None,
             "description": "Program on this computer: " + c["command"]
             if c.get("command")
             else ("Web service at " + c["host"] if c.get("host") else "Connected service"),
-            "tools": {TOOLS[t]: ("off" if t == "claude" and not on else "on") for t in tools},
+            "tools": {label: ("off" if n == switchable and not on else "on") for n, label in tools.items()},
             "problems": ["Its login is not stored here"] if c.get("state") == "missing-key" and on else [],
         }
         if deny.get(rule) == "hand":
-            it["locked"] = "Turned off by hand in .claude/settings.local.json"
+            it["locked"] = _off_by_hand()
         items.append(it)
     return items
 
@@ -356,7 +371,7 @@ def build(root: Path, account_home: Path | None = None) -> dict:
     data = {
         "schema": SCHEMA,
         "generated_at": now(),
-        "tools": [TOOLS[t] for t in _tools(root)],
+        "tools": list(_tools(root).values()),
         "skills": skills(root, account_home, {x["name"] for x in lg}),
         "instructions": instructions(root, account_home),
         "services": services(root, account_home),
@@ -392,11 +407,12 @@ def turn(root: Path, target: str, on: bool, account_home: Path | None = None) ->
     if it["kind"] == "skill" and it["switch"] == "linked":
         changed = switches.set_linked(root, it["name"], on)
     elif it["kind"] == "skill":
-        changed = switches.set_claude(root, "skillOverrides", it["name"], on)
+        changed = switches.set_tool(root, "skills", it["name"], on)
     elif it["kind"] == "service":
-        changed = switches.set_claude(root, "deny", switches.mcp_rule(it["server"]), on)
-    elif it["kind"] == "instructions" and it["where"] == "mine":
-        changed = switches.set_claude(root, "claudeMdExcludes", str(_home(account_home) / ".claude" / "CLAUDE.md"), on)
+        changed = switches.set_tool(root, "deny", switches.mcp_rule(it["server"]), on)
+    elif it["kind"] == "instructions" and it["where"] == "mine" and switches.tool():
+        rules = _home(account_home) / switches.tool()["home_rules"]
+        changed = switches.set_tool(root, "rules", str(rules), on)
     else:
         raise Refused(f"{it['name']} cannot be turned off here.")
     return {"item": find(root, target, account_home), "changed": changed}

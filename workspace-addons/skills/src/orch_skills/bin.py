@@ -37,6 +37,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from . import switches
 from .switches import Refused, _is_link, safe_path
 
 SCHEMA = "orch.skills-bin/1"
@@ -44,7 +45,6 @@ WS_BIN = Path(".orch") / "addons" / "skills" / "bin"
 RECORD = "record.json"
 ITEM = "item"
 LOCK = ".lock"
-WS_PLACES = (Path(".agents") / "skills", Path(".claude") / "skills")
 ENTRY = re.compile(r"[0-9]{8}T[0-9]{6}Z-[A-Za-z0-9_.@-]{1,120}-[0-9a-f]{6}")
 BIN_TARGET = re.compile(r"bin:(workspace|mine):(" + ENTRY.pattern + ")")
 NAME = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
@@ -88,11 +88,11 @@ def _no_links(base: Path, path: Path) -> None:
 
 
 def _place_of(root: Path, where: str, origin: str, account_home: Path | None) -> Path:
-    """The folder an entry came from, checked again: a workspace entry only in .agents/skills or .claude/skills, a
+    """The folder an entry came from, checked again: a workspace entry only in a skills folder helpers read (switches.skill_places), a
     computer entry only in one of the helper tools' skill folders. A record that names anything else is refused."""
     if where == "workspace":
         rel = Path(origin)
-        if rel.is_absolute() or len(rel.parts) != 3 or rel.parent not in WS_PLACES:
+        if rel.is_absolute() or len(rel.parts) != 3 or rel.parent not in switches.skill_places():
             raise Refused("This bin entry does not say where it came from. Nothing was changed.")
         return safe_path(root, rel)
     p = Path(origin)
@@ -356,7 +356,7 @@ def _recover_one(root: Path, where: str, entry: Path, rec: dict, account_home: P
 def source_folder(root: Path, where: str, name: str, account_home: Path | None = None) -> Path:
     """The real folder of a workspace or computer skill, checked: no link anywhere on the way."""
     if where == "workspace":
-        for place in WS_PLACES:
+        for place in switches.skill_places():
             p = root / place / name
             if (p / "SKILL.md").is_file() or _is_link(p):
                 return safe_path(root, place / name)
@@ -567,10 +567,10 @@ def new_skill(root: Path, name: str, owner: str, taken: set[str]) -> Path:
         raise Refused("A skill name uses small letters, digits and single dashes, like weekly-report (at most 64).")
     if name in taken or name.startswith("orch"):
         raise Refused(f"A skill named {name} is already here. Pick another name.")
-    for place in WS_PLACES:
+    for place in switches.skill_places():
         if os.path.lexists(root / place / name):
             raise Refused(f"A skill named {name} is already here. Pick another name.")
-    rel = WS_PLACES[0] / name
+    rel = switches.skill_places()[0] / name
     folder = safe_path(root, rel)
     folder.parent.mkdir(parents=True, exist_ok=True)
     safe_path(root, rel)

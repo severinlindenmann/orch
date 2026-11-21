@@ -239,7 +239,7 @@ def test_a_change_by_someone_else_wins(ws):
     path = ws / ".claude/settings.local.json"
     path.write_text("{}")
     with pytest.raises(switches.Refused, match="changed by someone else"):
-        switches._write(ws, switches.SETTINGS, {"a": 1}, expect=b"{ }")
+        switches._write(ws, switches.tool()["settings"], {"a": 1}, expect=b"{ }")
     assert path.read_text() == "{}"
 
 
@@ -247,14 +247,14 @@ def test_a_refused_save_takes_the_record_back(ws, monkeypatch):
     real = switches._write
 
     def refuse_settings(root, rel, doc, expect=True):
-        if rel == switches.SETTINGS:
+        if rel == switches.tool()["settings"]:
             raise switches.Refused("changed by someone else just now. Try again.")
         return real(root, rel, doc, expect)
 
     monkeypatch.setattr(switches, "_write", refuse_settings)
     with pytest.raises(switches.Refused):
         model.turn(ws, "skill:workspace:release-walk", on=False)
-    assert switches._owned(ws)["skillOverrides"] == []
+    assert switches._owned(ws)["skills"] == []
 
 
 def test_a_relay_copy_with_its_file_cannot_be_turned_off(ws, tmp_path):

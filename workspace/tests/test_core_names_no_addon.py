@@ -64,6 +64,11 @@ ALLOW = {
     },
     "orch/winfinish.py": {"services": _KEY},
 }
+# literals that are a plain word everywhere in core, not the add-on of the same name
+EVERYWHERE = {
+    "skills": "the skills folders and data key (.agents/skills, harness skills, inventory 'skills'); "
+    "the Skills add-on (ORCH-834) only took the plain word as its name",
+}
 
 
 def test_addon_folder_listing_is_found():
@@ -88,7 +93,7 @@ def test_core_has_no_addon_name_literals():
         rel = f.relative_to(ROOT / "workspace/src").as_posix()
         for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in names:
-                if node.value not in ALLOW.get(rel, {}):
+                if node.value not in ALLOW.get(rel, {}) and node.value not in EVERYWHERE:
                     bad.append(f"{rel}:{node.lineno} {node.value!r}")
     assert not bad, (
         "core names an add-on (R1.2); move it into the add-on or allowlist it with a reason:\n"

@@ -320,7 +320,17 @@
               "properties": {
                 "instructions": { "$ref": "#/$defs/path", "description": "File the tool reads by itself (AGENTS.md)." },
                 "instructions_link": { "type": "object", "propertyNames": { "$ref": "#/$defs/path" }, "additionalProperties": { "type": "string", "pattern": "^@[A-Za-z0-9_./-]{1,200}$" }, "description": "File -> line it must contain, e.g. TOOL.md -> @AGENTS.md (the file this tool reads at start)." },
-                "skills_link": { "$ref": "#/$defs/path", "description": "Folder linked to .agents/skills." }
+                "skills_link": { "$ref": "#/$defs/path", "description": "Folder linked to .agents/skills." },
+                "folder_switches": {
+                  "type": "object", "additionalProperties": false, "required": ["settings", "skills", "rules_exclude", "home_rules"],
+                  "properties": {
+                    "settings": { "$ref": "#/$defs/path", "description": "The tool's own per-folder settings file (JSON object) where it turns things off." },
+                    "skills": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$", "description": "Key of an object there: skill name -> \"off\"." },
+                    "rules_exclude": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$", "description": "Key of a list there: full paths of rules files the tool does not read." },
+                    "home_rules": { "$ref": "#/$defs/path", "description": "The person's own rules file, relative to their home." }
+                  },
+                  "description": "The tool's per-folder switches the Skills page may write (skills add-on); connected services go off through permissions.deny there."
+                }
               }
             }
           ],
