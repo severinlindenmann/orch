@@ -81,3 +81,8 @@ def max_group(root: Path) -> int:
     if isinstance(got, bool) or not isinstance(got, int) or not 1 <= got <= MOST_GROUP:
         return DEFAULT_MAX_GROUP
     return got
+
+
+def precheck(root: Path) -> str | None:
+    got = _table(root).get("precheck")
+    return got.strip() if isinstance(got, str) and got.strip() else None
