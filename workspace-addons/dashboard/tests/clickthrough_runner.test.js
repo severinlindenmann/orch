@@ -132,3 +132,34 @@ test('any other failure, or a feature nobody did, still makes the run red', () =
   assert.deepEqual(v.failed.map(r => r.c.file), ['a.cjs']);
   assert.equal(verdict([{ c: { file: 'a.cjs', covers: [] }, problems: [] }], ['op:z'], {}).code, 1);
 });
+
+// ORCH-1402: the first round runs on several servers at once; each lane takes the next click-through when it is free,
+// the results keep the list's order, and the second try still runs after every lane's server stopped.
+test('lanes run the first round at once and keep the order', async () => {
+  const seen = [], live = { now: 0, max: 0 };
+  let between = 0;
+  const { results, secondTry } = await runAll(['a', 'b', 'c', 'd', 'e'].map(f => ct(f + '.cjs')), {
+    lanes: 2,
+    first: async (c, k) => {
+      live.now++; live.max = Math.max(live.max, live.now);
+      await new Promise(r => setTimeout(r, c.file === 'a.cjs' ? 30 : 5));
+      live.now--; seen.push([c.file, k]);
+      return c.file === 'd.cjs' ? fail(c) : pass(c);
+    },
+    fresh: async c => { assert.equal(between, 1, 'the second try runs after the lanes stopped'); return pass(c); },
+    between: async () => { between++; },
+    log: () => {},
+  });
+  assert.equal(live.max, 2, 'two at once');
+  assert.deepEqual(new Set(seen.map(x => x[1])), new Set([0, 1]), 'both lanes worked');
+  assert.equal(seen.find(x => x[0] === 'a.cjs')[1], 0);
+  assert.ok(seen.filter(x => x[1] === 1).length >= 3, 'the free lane took the next ones while a.cjs was slow');
+  assert.deepEqual(results.map(r => r.c.file), ['a.cjs', 'b.cjs', 'c.cjs', 'd.cjs', 'e.cjs'], 'the order stays');
+  assert.deepEqual(secondTry, ['d.cjs']);
+});
+
+test('more lanes than click-throughs start only as many as needed', async () => {
+  const lanesUsed = new Set();
+  await runAll([ct('a.cjs')], { lanes: 4, first: async (c, k) => { lanesUsed.add(k); return pass(c); }, fresh: async c => pass(c), log: () => {} });
+  assert.deepEqual([...lanesUsed], [0]);
+});

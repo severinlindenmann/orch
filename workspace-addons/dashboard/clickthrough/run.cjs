@@ -338,6 +338,10 @@ const UNSTEADY = {
 };
 /** No second try starts after this long (the CI job stops at 15 minutes). */
 const RETRY_DEADLINE_MS = 12 * 60000;
+/** The first round runs on this many seeded servers at once, each with its own throw-away home and browser context
+ *  (ORCH-1402: one after the other the suite took 14m45s of the job's 15). Each click-through already passes alone on
+ *  a fresh server (the second try), so none needs another one's leftovers. CLICKTHROUGH_LANES=1 runs them in a row. */
+const LANES = Math.max(1, Number(process.env.CLICKTHROUGH_LANES) || 2);
 
 /** promise, or a plain error after ms; the timer is always cleared when it settles (an unref timer let Node 20 end a pending test as cancelled) */
 function withTimeout(promise, ms, what) {
@@ -350,11 +354,15 @@ function withTimeout(promise, ms, what) {
 
 /** Every click-through once, then each failed one once more from a clean state (fresh(c) runs it on a fresh server and
  *  browser context). A pass on the second try counts as a pass and is named, so flakes stay visible; failed twice =
- *  failed. first(c) and fresh(c) resolve {c, problems, ...}; between() runs after the first round. */
+ *  failed. first(c, lane) and fresh(c) resolve {c, problems, ...}; between() runs after the first round. With lanes > 1
+ *  the first round runs that many at once, each lane taking the next click-through in the list when it is free;
+ *  results keep the list's order. */
 async function runAll(todo, { first, fresh, between = async () => {}, maxRetries = MAX_RETRIES, deadline = Infinity,
-  now = Date.now, log = console.log }) {
-  const results = [];
-  for (const c of todo) results.push(await first(c));
+  now = Date.now, log = console.log, lanes = 1 }) {
+  const results = new Array(todo.length);
+  let next = 0;
+  const lane = async k => { while (next < todo.length) { const i = next++; results[i] = await first(todo[i], k); } };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(lanes, todo.length)) }, (_, k) => lane(k)));
   await between();
   const failed = results.filter(r => r.problems.length);
   const secondTry = [];
@@ -411,16 +419,27 @@ async function main() {
   const todo = all.filter(c => !o.only || o.only.has(c.file.replace(/\.cjs$/, '')));
   if (o.only && todo.length !== o.only.size) throw new Error(`no such click-through: ${[...o.only].filter(n => !all.some(c => c.file === n + '.cjs')).join(', ')}`);
   if (o.out) fs.mkdirSync(o.out, { recursive: true });
-  let srv = await serve();
+  const nLanes = Math.max(1, Math.min(LANES, todo.length));
+  // every lane's server starts at once; a server that does not start stops the ones that did
+  const booted = await Promise.allSettled(Array.from({ length: nLanes }, () => serve()));
+  let servers = booted.filter(x => x.status === 'fulfilled').map(x => x.value);
+  const broken = booted.find(x => x.status === 'rejected');
+  if (broken) { for (const one of servers) one.stop(); throw broken.reason; }
   const { chromium } = playwright();
   // a fake microphone that is always allowed (ORCH-422: the voice note click-through records with it)
   const browser = await chromium.launch({ args: ['--use-mock-keychain', '--password-store=basic', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
   let run;
   try {
-    const ctx = await signIn(browser, srv);
+    const ctxs = await Promise.all(servers.map(one => signIn(browser, one)));
+    if (nLanes > 1) console.log(`${todo.length} click-throughs on ${nLanes} servers at once`);
     run = await runAll(todo, {
-      first: c => runOne(ctx, srv, c, o),
-      between: async () => { await ctx.close().catch(() => {}); srv.stop(); srv = null; },
+      lanes: nLanes,
+      first: (c, k) => runOne(ctxs[k], servers[k], c, o),
+      between: async () => {
+        await Promise.all(ctxs.map(x => x.close().catch(() => {})));
+        for (const one of servers) one.stop();
+        servers = [];
+      },
       // the second try: a new throw-away home and server and a new browser context, as for the first round
       fresh: async c => {
         let one = null;
@@ -436,7 +455,7 @@ async function main() {
     });
   } finally {
     await browser.close();
-    if (srv) srv.stop();
+    for (const one of servers) one.stop();
   }
   const { results, secondTry } = run;
   const v = verdict(results, o.only ? null : catalogue.features());
