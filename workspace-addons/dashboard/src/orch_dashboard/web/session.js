@@ -58,24 +58,35 @@
       (document.body || document.documentElement).insertBefore(b, (document.body || document.documentElement).firstChild);
     }
   }
-  var m = /[#&]launch=([A-Za-z0-9_-]{20,64})/.exec(location.hash || "");
-  if (!m) return;
-  // The app must NOT start (and fetch, and read a one-time notice) while the page is only a bootstrap: stop loading the
-  // rest of the page, hand the token over, and reload; everything starts after the reload with the session.
-  if (window.stop) window.stop();
-  history.replaceState(null, "", location.pathname + location.search);
-  realFetch("/session", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token: m[1] }),
-  }).then(function (r) {
-    if (!r.ok) {  // a used or ended link: say so (the stopped page would stay on empty boxes with no word why)
-      return r.text().then(function (t) { showSignIn(t || "This sign-in link did not work. Open the dashboard again from orch."); });
-    }
-    return r.json().then(function (j) {
-      try { localStorage.setItem(KEY, j.secret || ""); } catch (e) { /* no storage: the page stays watch-only */ }
-      try { sessionStorage.removeItem(KEY); } catch (e) { /* none */ }
-      location.reload();
-    });
+  // A sign-in link pasted into a tab that is already open only changes the hash: no load happens, so the router would
+  // show "Page not found" for it. Treat it like a fresh load: this listener is added before the app's (session.js
+  // loads first), takes the token out of the address and stops the event, so the app never routes to it (#1918).
+  window.addEventListener("hashchange", function (e) {
+    if (!spend(false)) return;
+    if (e && e.stopImmediatePropagation) e.stopImmediatePropagation();
   });
+  spend(true);
+  function spend(loading) {
+    var m = /[#&]launch=([A-Za-z0-9_-]{20,64})/.exec(location.hash || "");
+    if (!m) return false;
+    // The app must NOT start (and fetch, and read a one-time notice) while the page is only a bootstrap: stop loading
+    // the rest of the page, hand the token over, and reload; everything starts after the reload with the session.
+    if (loading && window.stop) window.stop();
+    history.replaceState(null, "", location.pathname + location.search);
+    realFetch("/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: m[1] }),
+    }).then(function (r) {
+      if (!r.ok) {  // a used or ended link: say so (the stopped page would stay on empty boxes with no word why)
+        return r.text().then(function (t) { showSignIn(t || "This sign-in link did not work. Open the dashboard again from orch."); });
+      }
+      return r.json().then(function (j) {
+        try { localStorage.setItem(KEY, j.secret || ""); } catch (e) { /* no storage: the page stays watch-only */ }
+        try { sessionStorage.removeItem(KEY); } catch (e) { /* none */ }
+        location.reload();
+      });
+    });
+    return true;
+  }
 })();

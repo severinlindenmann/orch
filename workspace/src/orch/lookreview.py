@@ -318,7 +318,20 @@ def verdict(root: Path, tid: str, word: str, line: str, points: list[str] | None
     st = read_state(root)
     st["line"].pop(tid, None)
     _write_state(root, st)
-    return {"ticket": tid, "key": after.get("key") or tid, "verdict": word, "why": why}
+    nxt = next_in_line(root, st)
+    return {"ticket": tid, "key": after.get("key") or tid, "verdict": word, "why": why, "next": nxt}
+
+
+def next_in_line(root: Path, st: dict | None = None) -> dict | None:
+    """The next ticket waiting for a second look (issue 1920): first the open look's own tickets, then the
+    oldest in line. {ticket, key} or None when nothing is left."""
+    st = st or read_state(root)
+    items = [t for t in (st["open"] or {}).get("items") or [] if t in st["line"]]
+    rest = sorted((t for t in st["line"] if t not in items), key=lambda t: str(st["line"][t].get("at") or ""))
+    for t in [*items, *rest]:
+        with contextlib.suppress(Refused, OSError, ValueError):
+            return {"ticket": t, "key": tickets.load(root, t).get("key") or t}
+    return None
 
 
 VERDICT_TEXT = {"accept": "accepted for you", "back": "sent back", "leave": "left for you"}
