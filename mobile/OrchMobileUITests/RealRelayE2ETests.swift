@@ -273,7 +273,7 @@ final class RealRelayE2ETests: XCTestCase {
         e.pids.append(S['ask'][0].pid)
         out = t
         """)
-        let app = launch(extra: ["-open", "workspace:\(ws)"])
+        let app = launch()   // ticket chats sit on Chats (owner 21 Nov, ORCH-1169)
         let row = app.buttons["ticket-\(ws)|\(t)"]
         _ = row.waitForExistence(timeout: 30); scrollTo(app, row)
         must(app, row, "ticket row of the question", timeout: 10); row.tap()
@@ -583,8 +583,8 @@ final class RealRelayE2ETests: XCTestCase {
     func test16ArchiveUndoArchivedListUnarchiveAndDelete() {
         let t1 = host("out = mk_done_topic('Archive me')")
         let t2 = host("out = mk_done_topic('Delete me')")
-        let app = launch(extra: ["-open", "workspace:\(ws)"])
-        // The workspace's Done tickets sit behind "Done (n)" on its screen (W7-BUGS 4: strict again)
+        let app = launch()
+        // Finished ticket chats sit behind "Done (n)" in Ticket chats on Chats (owner 21 Nov, ORCH-1169)
         openDone(app)
         let row = el(app, "ticket-\(ws)|\(t1)")
         scrollTo(app, row)
@@ -597,7 +597,7 @@ final class RealRelayE2ETests: XCTestCase {
         row.swipeLeft()
         must(app, app.buttons["Archive"], "Archive again", timeout: 5); app.buttons["Archive"].tap()
         XCTAssertTrue(row.waitForNonExistence(timeout: 10))
-        let archived = el(app, "archived-row")
+        let archived = el(app, "archived-row-all")
         scrollTo(app, archived)
         must(app, archived, "Archived in Chats", timeout: 10)
         scrollTo(app, archived)
@@ -610,7 +610,7 @@ final class RealRelayE2ETests: XCTestCase {
         expandDone(app)
 
         must(app, row, "agent message unarchives ticket", timeout: 40)
-        _ = launch(extra: ["-open", "workspace:\(ws)"])
+        _ = launch()
         openDone(app)
         let deleted = el(app, "ticket-\(ws)|\(t2)")
         scrollTo(app, deleted)
@@ -636,7 +636,7 @@ final class RealRelayE2ETests: XCTestCase {
         let toggle = app.buttons["done-toggle"]
         let end = Date().addingTimeInterval(40)
         while !toggle.exists && Date() < end { app.swipeUp(); sleep(1) }
-        must(app, toggle, "Done (n) section on the workspace screen", timeout: 5)
+        must(app, toggle, "Done (n) in Ticket chats on Chats", timeout: 5)
         expandDone(app)
     }
 

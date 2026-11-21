@@ -36,6 +36,15 @@ function liveEndWords(name, kind) {
     : {ask:'End ' + who + '?', why:'It stops now. Its conversation is kept: continue it later, or reopen it from History.',
       done:who.charAt(0).toUpperCase() + who.slice(1) + ' ended. Its conversation is in History.'};
 }
+// ORCH-1362 (UX checklist D5): Stop is never greyed. Pressed while nothing runs, it says so and what to do instead.
+const LIVE_END_IDLE_STOP = 'Nothing is running right now, so there is nothing to stop. Type a message below to give it work.';
+// ORCH-1362 (UX checklist E3, L4): an error says what went wrong and what to do, and its toast carries the one button
+// that does it. text: orch's own reason ('' = fallback); label: the button. Returns the words of the toast.
+function liveFailText(text, fallback, label = 'Try again') {
+  const said = String(text || '').trim() || String(fallback || 'That did not work.');
+  const t = /[.!?]$/.test(said) ? said : said + '.';
+  return /try again/i.test(t) ? t : t + ' Press ' + label + ' to do it again.';
+}
 // The note an idle helper's pane shows instead of an empty box: what is going on, what to type, a way out.
 function liveEndIdleText(m, now) {
   if (m.login) return {head:'The helper stopped: its login changed.', tail:'Start it again to use the new login. The conversation is kept.'};
@@ -44,7 +53,7 @@ function liveEndIdleText(m, now) {
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {LIVE_END_KINDS, liveEndLogin, liveEndModel, liveEndWords, liveEndIdleText};
+  module.exports = {LIVE_END_KINDS, LIVE_END_IDLE_STOP, liveEndLogin, liveEndModel, liveEndWords, liveEndIdleText, liveFailText};
 } else {
   // --- the page ---
   // One menu at a time, wherever it is: 'pane:<id>', 'tile:<id>' or 'bar:<id>'; ask = the End question shows.
@@ -68,7 +77,7 @@ if (typeof module === 'object' && module.exports) {
     const where = 'pane:' + id;
     return [
       m.stop ? h('button', {type:'button', className:'btn sm ghost live-pbtn', 'data-live-end':'stop', 'data-id':id, 'data-key':'live-stop',
-        disabled:!m.busy || liveEnd.busy === id, 'aria-label':'Stop the current step of ' + label,
+        disabled:liveEnd.busy === id, 'aria-busy':liveEnd.busy === id ? 'true' : null, 'aria-label':'Stop the current step of ' + label,
         title:m.busy ? 'Stop: ends the current step, the session stays' : 'Nothing is running right now'}, ic('stop'), h('span', {className:'live-word'}, 'Stop')) : null,
       h('button', {type:'button', className:'btn sm ghost live-pbtn', 'data-live-end':'ask', 'data-where':where, 'data-id':id, 'data-key':'live-end',
         'aria-expanded':String(liveEnd.open === where), 'aria-label':'End session of ' + label, title:'End session'}, ic('power'), h('span', {className:'live-word'}, 'End session')),
@@ -106,7 +115,7 @@ if (typeof module === 'object' && module.exports) {
       ic(glyph), h('span', {className:'live-opt-t'}, h('span', {}, words2), h('span', {className:'meta'}, sub)));
     return h('div', {className:'live-pop live-end-menu', role:'group', 'aria-label':'Stop or end ' + (name || 'this session'), 'data-key':'live-end-menu'},
       name ? h('p', {className:'live-pop-h'}, name) : null,
-      m.stop ? item('stop', 'stop', 'Stop', m.busy ? 'Ends the current step. The session stays.' : 'Nothing is running right now.', {disabled:!m.busy || busy, 'data-key':'live-end-stop'}) : null,
+      m.stop ? item('stop', 'stop', 'Stop', m.busy ? 'Ends the current step. The session stays.' : 'Nothing is running right now.', {disabled:busy, 'aria-busy':busy ? 'true' : null, 'data-key':'live-end-stop'}) : null,
       item('ask', 'power', 'End session', m.kind === 'terminal' ? 'Closes the terminal.' : 'Ends the helper. It moves to History.', {'data-key':'live-end-end'}));
   }
   window.liveEndMenu = liveEndMenu;
@@ -131,6 +140,13 @@ if (typeof module === 'object' && module.exports) {
     return r;
   }
   const toast = (text, kind) => window.orch?.toast?.(text, kind);
+  // An error toast with its one button (Try again by default) that does the failed thing once more (ORCH-1362).
+  window.liveFail = function liveFail(text, fallback, again, label = 'Try again') {
+    if (typeof again !== 'function') return window.orch?.toast?.(String(text || '').trim() || fallback, 'error');
+    const go = () => { again(); };
+    go.label = label;
+    return window.orch?.toast?.(liveFailText(text, fallback, label), 'error', go);
+  };
   document.addEventListener('click', async e => {
     const b = e.target.closest?.('[data-live-end]');
     if (!b) {
@@ -154,19 +170,28 @@ if (typeof module === 'object' && module.exports) {
     }
     if (what === 'no') { liveEnd.open = ''; liveEnd.ask = false; liveEndRepaint(); toast('The session stays.', 'ok'); return; }
     liveEnd.open = ''; liveEnd.ask = false;
-    if (what === 'stop') {
-      const r = await liveEndRun(id, m.stopOp);
-      toast(r.ok ? 'Stopped the current step. The session stays; type to go on.' : r.text || 'Could not stop the step.', r.ok ? 'ok' : 'error');
-    } else if (what === 'yes') {
-      const r = await liveEndRun(id, m.endOp), words = liveEndWords(liveEndName(id), m.kind);
-      toast(r.ok ? words.done : r.text || 'Could not end the session.', r.ok ? 'ok' : 'error');
-      if (r.ok && m.kind === 'terminal' && typeof liveLayerDo === 'function') liveLayerDo({type:'close', key:id});
-    } else if (what === 'restart') {
-      const r = await liveEndRun(id, m.endOp), r2 = r.ok ? await liveEndRun(id, m.startOp) : r;
-      toast(r2.ok ? 'Started again. It goes on with the same conversation.' : r2.text || 'Could not start it again.', r2.ok ? 'ok' : 'error');
-    }
+    if (what === 'stop' && !m.busy) toast(LIVE_END_IDLE_STOP, 'ok');
+    else await liveEndDo(id, what, m);
     liveEndRepaint();
   }, true);
+  // Stop, End session and Start again; a failure says what to do and offers Try again, which runs the same once more.
+  async function liveEndDo(id, what, m) {
+    // the ops come from the id and the kind, so the same m does it again even when the session list has changed
+    const again = (next = what) => () => liveEndDo(id, next, m).then(() => liveEndRepaint());
+    if (what === 'stop') {
+      const r = await liveEndRun(id, m.stopOp);
+      if (r.ok) toast('Stopped the current step. The session stays; type to go on.', 'ok'); else window.liveFail(r.text, 'Could not stop the step.', again());
+    } else if (what === 'yes') {
+      const r = await liveEndRun(id, m.endOp), words = liveEndWords(liveEndName(id), m.kind);
+      if (r.ok) toast(words.done, 'ok'); else window.liveFail(r.text, 'Could not end the session.', again());
+      if (r.ok && m.kind === 'terminal' && typeof liveLayerDo === 'function') liveLayerDo({type:'close', key:id});
+    } else if (what === 'restart' || what === 'start') {
+      // Start again ends first; when the end worked and only the start failed, Try again only starts
+      const r = what === 'start' ? {ok:true} : await liveEndRun(id, m.endOp), r2 = r.ok ? await liveEndRun(id, m.startOp) : r;
+      if (r2.ok) toast('Started again. It goes on with the same conversation.', 'ok');
+      else window.liveFail(r2.text, r.ok ? 'Could not start it again.' : 'Could not end it to start it again.', again(r.ok ? 'start' : 'restart'));
+    }
+  }
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape' || !liveEnd.open) return;
     const where = liveEnd.open.replace(/["\\]/g, '');
