@@ -54,6 +54,7 @@ jobs:
       mobile: ${{ steps.f.outputs.mobile }}
       brand: ${{ steps.f.outputs.brand }}
       dashshots: ${{ steps.f.outputs.dashshots }}
+      pagesmoke: ${{ steps.f.outputs.pagesmoke }}
       clock: ${{ steps.f.outputs.clock }}
       oscode: ${{ steps.os.outputs.oscode }}
       # ORCH-545: light = a pull request into develop on its own (one light job, ~5 min); queue = a merge queue
@@ -94,6 +95,9 @@ jobs:
             relay: ['relay/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', '.github/workflows/relay.yml']
             # only the contracts the phone tests read (blocks, crypto, look, relay-api, message, chat-groups, vectors, examples, review)
             mobile: ['mobile/**', 'contracts/blocks*', 'contracts/crypto.md', 'contracts/look*/**', 'contracts/look*', 'contracts/relay-api*', 'contracts/message.schema.json', 'contracts/chat-groups*', 'contracts/vectors/**', 'contracts/examples/**', 'contracts/review/**', '.github/workflows/mobile.yml']
+            # the Focus and Insights pages: a light pull request loads them in its own page-smoke job (ORCH-1333);
+            # the same paths as PAGE_SMOKE in scripts/ci_light.py
+            pagesmoke: ['workspace-addons/focus/**', 'workspace-addons/insights/**', 'e2e/focus_insights*', 'e2e/focus_insights*/**']
             # the dashboard's pages and what takes their pictures (ORCH-312)
             dashshots: ['workspace-addons/dashboard/src/**', 'workspace/src/orch_ui/static/**', 'workspace/src/orch/cli_shot.py', 'workspace/src/orch/dashshots.py', 'e2e/dash_ci_shots.py', '.github/workflows/dash-shots.yml']
             # the suites at a fake hour (ORCH-390): anything that can change what a page or a test does with the time
@@ -153,6 +157,28 @@ jobs:
           node-version: 20
       - run: pip install pytest
       - run: python3 scripts/ci_light.py --base "origin/${{ github.base_ref }}"
+  # A light pull request that changes the Focus or Insights pages loads them here, in a job of its own: the page smoke
+  # (e2e/focus_insights_smoke.cjs) runs the whole Focus click-through, about 6 minutes, which did not fit in the light
+  # job next to the core and dashboard steps (ORCH-1333, owner 21 Nov). Same steps as addons.yml page-smoke, which
+  # merge queue groups and other places still run.
+  page-smoke:
+    needs: changes
+    if: needs.changes.outputs.light == 'true' && needs.changes.outputs.pagesmoke == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.64.1-${{ runner.os }}
+      - run: npm install -g playwright@1.64.1
+      - run: playwright install --with-deps chromium
+      - run: node e2e/focus_insights_smoke.cjs
   contracts:
     needs: changes
     if: needs.changes.outputs.proven != 'true' && (needs.changes.outputs.contracts == 'true' || needs.changes.outputs.queue == 'true')
@@ -245,7 +271,7 @@ jobs:
     uses: ./.github/workflows/dash-shots.yml
   gate:
     if: "${{ always() && !(startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')) }}"
-    needs: [changes, light, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, mobile, clock, brand, dash-shots]
+    needs: [changes, light, page-smoke, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, mobile, clock, brand, dash-shots]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
