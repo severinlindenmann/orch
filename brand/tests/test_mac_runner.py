@@ -332,3 +332,14 @@ def test_the_clean_up_hook_never_acts_as_a_person():
     assert guard < hook.index("kill ") and guard < hook.index("trap ")
     r = subprocess.run(["bash", str(RUNNER / "job-completed.sh")], capture_output=True, text=True, timeout=30)
     assert r.returncode == 0 and "did nothing" in r.stderr
+
+
+def test_lock_numbers_from_the_environment_are_never_run_as_code(tmp_path):
+    flag = tmp_path / "ran"
+    r = _lock(tmp_path, "status", ORCH_LOCK_TTL_MIN=f"a[$(touch {flag})]", ORCH_LOCK_WAIT_SECS=f"x[$(touch {flag})]")
+    assert r.returncode == 0 and not flag.exists()
+
+
+def test_installed_hooks_use_a_fixed_path():
+    for name in ("job-started.sh", "job-completed.sh"):
+        assert "PATH=/usr/bin:/bin:/usr/sbin:/sbin" in (RUNNER / name).read_text(), name

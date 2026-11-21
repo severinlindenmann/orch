@@ -7,6 +7,8 @@
 # A refused job is STOPPED, not only failed: the runner treats a failed hook as a failed step and would still run
 # later steps marked `if: always()`, so the hook ends the job's Runner.Worker before any step of the job runs.
 set -u
+# a job can set its own environment variables: the hook uses a fixed PATH and nothing a job could have set
+PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; unset BASH_ENV ENV CDPATH
 HERE=$(cd "$(dirname "$0")" && pwd)
 # the job's lifetime = the Runner.Worker that runs it (this hook's ancestor)
 worker=""; p=$PPID
@@ -22,7 +24,8 @@ refuse() {
 }
 # The repository comes from the root-owned file setup.sh writes next to the hooks. A job can set its own environment
 # variables, so the environment is read only where that file does not exist (the tests run the hook from the repo).
-if [ -f "$HERE/repo" ]; then REPO=$(cat "$HERE/repo"); unset ORCH_LOCK_DIR; else REPO=${ORCH_RUNNER_REPO:-}; fi
+if [ -f "$HERE/repo" ]; then REPO=$(cat "$HERE/repo"); unset ORCH_LOCK_DIR ORCH_LOCK_TTL_MIN ORCH_LOCK_WAIT_SECS ORCH_LOCK_POLL_SECS
+else REPO=${ORCH_RUNNER_REPO:-}; fi
 [ -n "$REPO" ] || refuse "no repository is set for the runner"
 verdict=$(/usr/bin/python3 -I - "$REPO" <<'PY'
 import json, os, sys

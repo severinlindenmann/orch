@@ -9,7 +9,8 @@ set +e   # the runner runs hooks with bash -e; nothing here may stop the clean-u
 # it stops every other process of its user: only ever as the runner's own user, never as a person
 [ "$(id -un)" = orch-ci ] || { echo "job-completed.sh: runs only as the user orch-ci; did nothing" >&2; exit 0; }
 HERE=$(cd "$(dirname "$0")" && pwd)
-[ -f "$HERE/repo" ] && unset ORCH_LOCK_DIR   # installed: the fixed lock folder, whatever the job set
+# installed: fixed PATH and lock settings, whatever the job set
+[ -f "$HERE/repo" ] && { PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; unset BASH_ENV ENV CDPATH ORCH_LOCK_DIR ORCH_LOCK_TTL_MIN ORCH_LOCK_WAIT_SECS ORCH_LOCK_POLL_SECS; }
 trap 'bash "$HERE/lock.sh" release xcode "ci-${GITHUB_RUN_ID:-}"; bash "$HERE/lock.sh" release heavy mac-runner; exit 0' EXIT
 ME=$(id -u)
 xcrun simctl shutdown all >/dev/null 2>&1

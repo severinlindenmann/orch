@@ -12,7 +12,9 @@
 # serialized by a second lock (<name>.reap), so two waiters never both remove it.
 set -u
 D=${ORCH_LOCK_DIR:-/Users/Shared/orch-locks}
-TTL=$(( ${ORCH_LOCK_TTL_MIN:-150} * 60 )); WAIT=${ORCH_LOCK_WAIT_SECS:-7200}; POLL=${ORCH_LOCK_POLL_SECS:-5}
+num() { case $1 in (''|*[!0-9.]*) echo "$2";; (*) echo "$1";; esac; }   # plain numbers only: never bash arithmetic on text
+TTL=$(( $(num "${ORCH_LOCK_TTL_MIN:-}" 150 | cut -d. -f1) * 60 )); WAIT=$(num "${ORCH_LOCK_WAIT_SECS:-}" 7200 | cut -d. -f1)
+POLL=$(num "${ORCH_LOCK_POLL_SECS:-}" 5)
 CALLER_UMASK=$(umask); umask 007   # lock dirs and holder files: owner and group only
 set -C                             # `>` never overwrites or follows an existing file (or a planted symlink)
 valid() { case $1 in heavy|xcode) ;; *) echo "lock.sh: unknown lock $1 (heavy, xcode)" >&2; exit 2;; esac; }
