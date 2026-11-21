@@ -6,8 +6,19 @@ on:
         description: "where py311, page-smoke and dashboard-clickthroughs run, as JSON: \"ubuntu-latest\" or this Mac's runner labels (ci.yml job route, ORCH-1125)"
         type: string
         default: '"ubuntu-latest"'
+      # FOR NOW (ORCH-1106, owner 20 Nov): merge queue groups pass clickthroughs=false, a push to develop that a green
+      # group proved passes suites=false (only the click-throughs run). Switch back: see the note at the top of ci.yml.
+      suites:
+        description: "the add-on suites and page checks (every job but the click-throughs)"
+        type: boolean
+        default: true
+      clickthroughs:
+        description: "the dashboard click-throughs"
+        type: boolean
+        default: true
 jobs:
   dashboard:
+    if: inputs.suites
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:
@@ -25,6 +36,7 @@ jobs:
       - run: node --test tests/*.test.js ../../workspace/src/orch_ui/tests/*.test.mjs
       - run: uv run pytest -q -n auto
   automation:
+    if: inputs.suites
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:
@@ -40,6 +52,7 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n auto
   factory:
+    if: inputs.suites
     runs-on: ubuntu-latest
     timeout-minutes: 8
     defaults:
@@ -55,6 +68,7 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n 2
   sync:
+    if: inputs.suites
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -70,6 +84,7 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n auto
   focus:
+    if: inputs.suites
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:
@@ -85,6 +100,7 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n auto
   insights:
+    if: inputs.suites
     # The Insights suite includes the check that the bundled counts schema equals the contract: without this job
     # a contract change drifts silently (#590 came back after the per_run/changed/removed additions).
     runs-on: ubuntu-latest
@@ -102,6 +118,7 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n auto
   lessons:
+    if: inputs.suites
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:
@@ -117,6 +134,7 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n 2
   services:
+    if: inputs.suites
     # Pinned: Playwright has no Chromium for ubuntu-latest (26.04) yet; the SVC-1 click-through needs it
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -162,6 +180,7 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
   pull-requests:
+    if: inputs.suites
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:
@@ -177,6 +196,7 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n 2
   dashboard-tester:
+    if: inputs.suites
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:
@@ -192,6 +212,7 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n 2
   usage:
+    if: inputs.suites
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:
@@ -207,6 +228,7 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n 2
   tool-name-scan:
+    if: inputs.suites
     # The cross-tree scan lives in the workspace tests but also reads workspace-addons/,
     # so it must run on add-on-only changes, where the workspace job is skipped.
     runs-on: ubuntu-latest
@@ -222,6 +244,7 @@ jobs:
       - run: uv sync
       - run: uv run pytest -q tests/test_adapters.py::test_no_tool_names_outside_the_adapter
   py311:
+    if: inputs.suites
     # The installer's tool Python is 3.11: argparse there is stricter (fb14, `-- <text>` after an optional positional).
     runs-on: ${{ fromJSON(inputs.mac_jobs_runs_on) }}
     timeout-minutes: 10
@@ -234,6 +257,7 @@ jobs:
       - run: cd workspace-addons/focus && uv run --python 3.11 pytest -q tests/test_server.py -k "argv or send or control_char"
       - run: cd workspace && uv run --python 3.11 pytest -q tests/test_chat.py -k "say"
   page-smoke:
+    if: inputs.suites
     # Loads every Focus (and Insights) screen in headless Chromium and fails on a console error, an uncaught exception,
     # a failed request or a missing window global: a page that throws at load must never reach develop.
     runs-on: ${{ fromJSON(inputs.mac_jobs_runs_on) }}
@@ -249,6 +273,7 @@ jobs:
       - run: playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
       - run: node e2e/focus_insights_smoke.cjs
   dashboard-clickthroughs:
+    if: inputs.clickthroughs
     # Every dashboard feature done like a person on a seeded workspace with the real dashboard server and local
     # stand-ins for relay, publish, GitHub and add-ons (workspace-addons/dashboard/clickthrough, ORCH-308/384); a
     # feature nobody clicked fails by name. Its own job: next to the page checks it no longer fit in 10 minutes.

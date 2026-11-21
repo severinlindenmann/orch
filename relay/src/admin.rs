@@ -1000,6 +1000,10 @@ async fn add_phone(
     }
     let c = app.db.lock().unwrap();
     let ws = check_ws_list(&c, &v["workspaces"])?;
+    // A phone with no workspace pairs fine and then reaches nothing.
+    if ws.is_empty() {
+        return Err(invalid("Pick at least one workspace the phone can reach."));
+    }
     let pid = rand_id("ph_", 10);
     let code = rand_token("pc_", 16);
     c.execute(
