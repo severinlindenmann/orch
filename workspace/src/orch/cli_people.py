@@ -66,6 +66,10 @@ def _list_text(v: dict) -> str:
             "owner" if p["owner"] else (", ".join(people.RIGHT_WORDS[r] for r in p["rights"]) or "no rights")
         )
         rows.append(f"  {p['name']}{' (removed)' if p['removed'] else ''}  [{p['id']}]  {rights}")
+    names = {p["id"]: p["name"] for p in v["people"]}
+    for ph in v.get("phones") or []:
+        whose = "cut off" if ph["cut"] else names.get(ph["person"]) or "not tied yet"
+        rows.append(f"  phone {ph['name']}  [{ph['id']}]  {whose}{'' if ph['paired'] else ', not paired'}")
     return "People:\n" + "\n".join(rows)
 
 

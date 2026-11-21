@@ -733,6 +733,27 @@ def _people_rights(a):
     return ["people", "rights", _person_id(a), ",".join(_person_rights(a)) or "none"], _expect(a), []
 
 
+_PHONE_ID = re.compile(r"ph_[A-Za-z0-9_-]{1,64}")
+
+
+def _phone_id(a) -> str:
+    v = a.get("phone")
+    if not isinstance(v, str) or not _PHONE_ID.fullmatch(v):
+        raise BadRequest("That phone is not in the list.")
+    return v
+
+
+def _people_tie(a):
+    """Settings > People > Phones: whose phone this is (a paired phone; pairing itself happens elsewhere)."""
+    _only(a, ("phone", "id", "revision"))
+    return ["people", "tie", _phone_id(a), _person_id(a)], _expect(a), []
+
+
+def _people_cut(a):
+    _only(a, ("phone", "revision"))
+    return ["people", "cut", _phone_id(a)], _expect(a), []
+
+
 def _people_remove(a):
     _only(a, ("id", "revision"))
     return ["people", "remove", _person_id(a)], _expect(a), []
@@ -1294,6 +1315,8 @@ OPS = {
     "people.rename": _people_rename,
     "people.rights": _people_rights,
     "people.remove": _people_remove,
+    "people.tie": _people_tie,
+    "people.cut": _people_cut,
     "live.set": _live_set,
     "diag.set": _diag_set,
     "typing.set": _typing_set,

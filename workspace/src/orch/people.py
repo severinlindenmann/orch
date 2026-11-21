@@ -225,7 +225,36 @@ def view(root: Path) -> dict:
             }
             for p in doc["people"]
         ],
+        "phones": phones_view(root, doc),
     }
+
+
+def phones_view(root: Path, doc: dict) -> list[dict]:
+    """The phones Settings shows: every phone paired on the relay now (its last snapshot) plus every phone
+    the list knows, with whose it is: [{id, name, paired, person, cut}]. Names come from the relay (display
+    text only). Nothing when the relay is not set up."""
+    snap = Path(root) / ".agents" / "skills" / "orch-relay" / "workspaces.json"
+    try:
+        paired = json.loads(snap.read_text(encoding="utf-8")).get("phones") or []
+    except (OSError, ValueError, AttributeError):
+        paired = []
+    out, seen = [], set()
+    for ph in paired:
+        if isinstance(ph, dict) and isinstance(ph.get("id"), str) and PHONE_RE.fullmatch(ph["id"]):
+            seen.add(ph["id"])
+            out.append({"id": ph["id"], "name": _phone_name(ph.get("name"), ph["id"]), "paired": True})
+    for d in doc.get("devices") or []:
+        if isinstance(d, dict) and d.get("id") not in seen and PHONE_RE.fullmatch(str(d.get("id"))):
+            out.append({"id": d["id"], "name": d["id"], "paired": False})
+    for ph in out:
+        d = _device(doc, ph["id"]) or {}
+        ph["person"], ph["cut"] = d.get("person"), bool(d.get("cut_at"))
+    return out
+
+
+def _phone_name(value, fallback: str) -> str:
+    name = " ".join("".join(c for c in str(value or "") if c.isprintable()).split())[:40]
+    return name or fallback
 
 
 # ------------------------------------------------------------------ stamping new history lines
@@ -576,6 +605,8 @@ def phone_may_start(root: Path, phone: str, queued_at: str | None = None) -> boo
         if who_sent(root, phone, "start") is None:
             return True  # list off
         d = _device(load(root), phone) or {}
+        if d.get("tied_at") and not queued_at:
+            return False  # no time on the queued item: it can't be shown to come after the tie (fail closed)
         # same second as the tie counts as before it (times have 1 s steps): fail closed
         return not (queued_at and d.get("tied_at") and str(queued_at) <= str(d["tied_at"]))
     except PhoneRefused:

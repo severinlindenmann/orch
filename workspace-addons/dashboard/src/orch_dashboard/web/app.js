@@ -841,6 +841,8 @@ main.addEventListener('drop', event => {
 main.addEventListener('change', async event => {
   const right = event.target.closest('[data-people-right]');
   if (right) { await peopleRight(right); return; }
+  const whose = event.target.closest('[data-people-phone]');
+  if (whose) { await peopleTie(whose); return; }
   const cap = event.target.closest('[data-key="settings-copies-max"]');
   if (cap) { if (!snapshot && !settingsBusy.has('copies')) settingsSend('copies.set', {max:Number(cap.value)}, 'copies'); return; }
   const most = event.target.closest('[data-key="settings-live-max"]');

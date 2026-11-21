@@ -191,7 +191,7 @@ async function reviewerSwitch() {
 // means, and who was removed (their names stay in the history). A new person starts with Write.
 // The words People / Write / Decide / Start work wait for the owner's pick (R4.2, ORCH-1159).
 const PEOPLE_RIGHTS = [['write', 'Write', 'Chat, add steps and files.'], ['decide', 'Decide', 'Answer questions and accept drafts.'], ['start', 'Start work', 'Start a helper, which spends your budget, and merge finished work.']];
-let peopleRenaming = null, peopleRemoving = null;
+let peopleRenaming = null, peopleRemoving = null, peopleCutting = null;
 function peopleCan(p) {
   if (p.owner) return 'Owner: may do everything and manages the people.';
   const words = {write:'write', decide:'decide', start:'start work'};
@@ -240,8 +240,42 @@ function peoplePanel(settings) {
       h('h2', {className:'set-sub'}, 'Add a person'), h('p', {className:'meta'}, 'A new person starts with Write. Tick more below.'), add,
       h('h2', {className:'set-sub'}, 'What the rights mean'), RIGHTS_CARD(),
       h('h2', {className:'set-sub'}, count), h('div', {className:'card', 'data-key':'settings-people-list'}, active.map(row))),
+    peoplePhones(list, active, busy),
     removed.length ? h('div', {className:'stack', 'data-key':'settings-people-removed'}, h('h2', {className:'set-sub'}, 'Removed'),
       h('div', {className:'card'}, h('div', {className:'card-row'}, settingsText('p', {className:'grow'}, removed.map(p => p.name).join(', ')), settingsText('p', {className:'meta'}, 'Their names stay in the history.')))) : null];
+}
+// Phones (step 4): every phone paired on the relay, and whose it is. A phone does nothing until it is tied to a
+// person; Cut stops one lost phone at once (the relay admin page still lists it until it is removed there).
+function peoplePhones(list, active, busy) {
+  const phones = array(list.phones);
+  if (!phones.length) return null;
+  const nameOf = id => (array(list.people).find(p => p.id === id) || {}).name;
+  const row = ph => {
+    const key = 'settings-people-phone-' + ph.id, owner = nameOf(ph.person);
+    if (peopleCutting === ph.id) return h('div', {className:'card-row', 'data-key':key, role:'alert'},
+      h('div', {className:'grow'}, settingsText('h3', {}, 'Cut off ' + ph.name + '?'), settingsText('p', {className:'meta'}, 'It can’t write, decide or start work here any more. What it already shows can’t be taken back. Also remove it on the relay admin page.')),
+      h('button', {type:'button', className:'btn danger sm', 'data-action':'people-cut-yes', 'data-phone':ph.id, 'data-key':'settings-people-cut-yes', disabled:busy}, 'Cut off'),
+      h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-cut-cancel', 'data-key':'settings-people-cut-cancel'}, 'Cancel'));
+    const status = ph.cut ? 'Cut off. Also remove it on the relay admin page.'
+      : !ph.paired ? 'Not paired with this workspace any more.'
+      : owner ? owner + '’s phone.' : 'Not tied to anyone yet, so it can’t do anything here.';
+    const pick = snapshot ? null : h('select', {'aria-label':'Whose phone is ' + ph.name, 'data-people-phone':ph.id, 'data-key':key + '-who', disabled:busy || !ph.paired},
+      h('option', {value:'', ...(owner && !ph.cut ? {} : {selected:''})}, 'Whose phone?'),
+      active.map(p => h('option', {value:p.id, ...(p.id === ph.person && !ph.cut ? {selected:''} : {})}, String(p.name))));
+    return h('div', {className:'card-row', 'data-key':key},
+      h('div', {className:'grow'}, h('h3', {}, String(ph.name), !ph.person && ph.paired ? ' ' : null, !ph.person && ph.paired ? h('span', {className:'badge'}, 'New') : null), settingsText('p', {className:'meta'}, status)),
+      pick,
+      snapshot || !ph.person || ph.cut ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-cut', 'data-phone':ph.id, 'data-key':key + '-cut', 'aria-label':'Cut off ' + ph.name, disabled:busy}, 'Cut off'));
+  };
+  return h('div', {className:'stack', 'data-key':'settings-people-phones'}, h('h2', {className:'set-sub'}, 'Phones'),
+    h('p', {className:'meta'}, 'Phones are paired on the relay admin page. Choose whose each one is: only then can it write, decide or start work, as that person may.'),
+    h('div', {className:'card'}, phones.map(row)));
+}
+async function peopleTie(select) {
+  const list = state.settings?.people_list || {};
+  if (snapshot || !select.value) return;
+  const r = await settingsSend('people.tie', {phone:select.dataset.peoplePhone, id:select.value, revision:list.revision}, 'people');
+  if (r.ok) window.orch.toast('Saved. That phone now acts as ' + (array(list.people).find(p => p.id === select.value) || {}).name + '.', 'ok');
 }
 async function peopleAction(action, control) {
   const list = state.settings?.people_list || {}, revision = list.revision;
@@ -264,6 +298,11 @@ async function peopleAction(action, control) {
     const r = await settingsSend('people.rename', {id:person.id, name, revision}, 'people');
     if (r.ok) { peopleRenaming = null; render(); }
   } else if (action === 'people-remove' && person) { peopleRemoving = person.id; peopleRenaming = null; render(); document.querySelector('[data-key="settings-people-remove-cancel"]')?.focus();
+  } else if (action === 'people-cut') { peopleCutting = control.dataset.phone; render(); document.querySelector('[data-key="settings-people-cut-cancel"]')?.focus();
+  } else if (action === 'people-cut-cancel') { peopleCutting = null; render();
+  } else if (action === 'people-cut-yes') {
+    const r = await settingsSend('people.cut', {phone:control.dataset.phone, revision}, 'people');
+    if (r.ok) { peopleCutting = null; window.orch.toast('Cut off. Also remove it on the relay admin page.', 'ok'); render(); }
   } else if (action === 'people-remove-cancel') { peopleRemoving = null; render();
   } else if (action === 'people-remove-yes' && person) {
     const r = await settingsSend('people.remove', {id:person.id, revision}, 'people');
