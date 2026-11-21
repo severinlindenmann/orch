@@ -169,7 +169,7 @@ STAND_IN_SCRIPT = "agent:script"  # a program answering with no helper around an
 def refuse_stand_in_on(card) -> None:
     """Drafts, mockups and designs are accepted only by the person: never by the manager, Away mode or a
     script standing in for them (AGENTS.md, owner 18 Nov)."""
-    # the one draft rule (ORCH-582, ownerpick.is_draft_card): a draft card, or a choice whose options show files
+    # the one draft rule (ORCH-582, ownerpick.is_draft_card): a draft, or a choice whose options show files
     if _STAND_IN.get() and isinstance(card, dict) and ownerpick.is_draft_card({"card": card}):
         who = _STAND_IN.get() or ""
         raise Refused(f"Drafts and designs wait for {who.removeprefix('human:')}'s own answer.")
