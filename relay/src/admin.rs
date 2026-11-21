@@ -379,7 +379,7 @@ async fn new_token(
     guard(&app, &h)?;
     let token = rand_token("orn_", 32);
     let n = app.db.lock().unwrap().execute(
-        "UPDATE workspaces SET token_hash=?2, pending_description=NULL, pending_tags=NULL, pending_at=NULL, pending_rev=NULL WHERE id=?1",
+        "UPDATE workspaces SET token_hash=?2, pending_description=NULL, pending_tags=NULL, pending_at=NULL, pending_rev=NULL, sign_key=NULL, sign_key_at=NULL WHERE id=?1",
         params![id, token_hash(&token)],
     )?;
     if n == 0 {
