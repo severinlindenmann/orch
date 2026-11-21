@@ -1049,11 +1049,13 @@ button.live-pt:hover{color:var(--brand)}
 .live-ctl{position:relative;display:flex;flex:none;gap:var(--s1);align-items:center}
 .live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0;max-height:calc(var(--live-h) - var(--touch) - var(--s3));overflow-y:auto;overscroll-behavior:contain}
 .live-dock[data-mode=full] .live-ctl .live-pop{max-height:calc(100dvh - var(--live-bottom,0px) - var(--touch) * 2)}  /* More stays above the phone tab bar and scrolls (ORCH-817) */
-/* Pane buttons carry their word (ORCH-463). A compact pane (split, narrow, small): the title keeps a full row, the
-   buttons go on a second row and wrap when even that is short */
+/* Pane buttons carry their word (ORCH-463). A compact pane (split, narrow, small) shows them as icon buttons in one row
+   beside the title, the word as tooltip and name (draft D, ORCH-1328); the row goes under the title only when the
+   title would get less than about 12 characters (a phone) */
 .live-pbtn{gap:var(--s1);padding-inline:var(--s1)}
-.live-ph[data-compact]{flex-wrap:wrap;row-gap:0;padding-top:var(--s2)}
-.live-ph[data-compact]>.live-ctl{flex:1 0 100%;flex-wrap:wrap;justify-content:flex-end}
+.live-ph[data-compact]{flex-wrap:wrap;row-gap:0}
+.live-ph[data-compact]>.live-pt{min-width:min(12ch,100%)}
+.live-ph[data-compact]>.live-ctl{flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end;margin-left:auto}
 .live-opt .key{color:var(--text-muted);font-variant-numeric:tabular-nums}
 .live-pop-scroll{max-height:min(320px,45vh);overflow-y:auto;overscroll-behavior:contain}  /* a long list of sessions to pick from (Add beside) */
 .live-pb{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:var(--s2);min-height:0;padding:var(--s5);overflow:auto;color:var(--text-muted);text-align:center}
@@ -1069,7 +1071,9 @@ button.live-pt:hover{color:var(--brand)}
 .live-view{flex:none}
 .live-view .btn{min-height:28px;padding:0 var(--s2);font-size:var(--fs-meta)}
 .live-pb[data-live-body] .live-ask{margin:0;padding:var(--s3);border:1px solid var(--needs-you);border-radius:var(--r1);background:var(--warning-soft)}
-.live-chat{display:flex;flex:1 1 auto;flex-direction:column;gap:var(--s3);min-height:min(calc(var(--s8) * 4),45vh);overflow:auto;overscroll-behavior:contain}
+/* the chat takes the room the question card and the message box leave and scrolls in it, so the message box (sticky at
+   the bottom) never covers its last line in a short pane (ORCH-1328) */
+.live-chat{display:flex;flex:1 1 0;flex-direction:column;gap:var(--s3);min-height:var(--s8);overflow:auto;overscroll-behavior:contain}
 .live-chat-msg{display:grid;gap:var(--s1);max-width:min(100%,var(--reading-width))}
 .live-chat-msg p{margin:0;padding:var(--s2) var(--s3);border-radius:var(--radius);background:var(--surface-2);overflow-wrap:anywhere;white-space:pre-line}
 .live-chat-msg[data-w=y]{align-self:flex-end;justify-items:end}
@@ -1139,10 +1143,11 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 @keyframes live-up{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
 @keyframes live-in{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
 @media(max-width:720px){
-  .live-dock{left:0}
+  .live-dock{left:0;--live-h:72dvh}
   .live-dock:not([data-mode=full]):not([data-mode=side]){bottom:var(--live-bottom,0)}
   .live-dock[data-mode=side]{top:auto;bottom:calc(var(--live-bottom,0px) + var(--s4));transform:none}
-  .live-panel[data-mode=bottom]{height:min(var(--live-h),60vh)}
+  /* the layer is a sheet over the page (draft D at 390, ORCH-1328): most of the screen, rounded top, a shadow */
+  .live-panel[data-mode=bottom]{height:var(--live-h);max-height:calc(100dvh - var(--topbar-height) - var(--live-bottom,0px) - var(--s8) * 2);border-radius:var(--r2) var(--r2) 0 0;box-shadow:var(--lift-shadow)}
   .live-bar{padding-inline:var(--s2)}
   :not(.live-pbtn)>.live-word{display:none}  /* the bar folds its words; a pane keeps them (ORCH-463) */
 }
@@ -1430,6 +1435,10 @@ button.gtree-row:hover{background:var(--surface-2)}
 /* the message box stays at the bottom of the pane while the chat above it scrolls (draft D, ORCH-695) */
 .live-pb[data-live-body]>.live-msg{position:sticky;bottom:calc(-1 * var(--s3));z-index:1;padding-bottom:var(--s3);margin-bottom:calc(-1 * var(--s3));background:var(--surface)}
 .live-to{font-size:var(--fs-meta);line-height:16px;color:var(--text-muted)}
+/* side by side the message box keeps one short line: who gets it on one line (its full words are the field's name), the
+   limits of files stay in the single pane and on the phone (ORCH-1328: the split had no room left for the chat) */
+.live-panel:not([data-n="1"]) .live-to{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.live-panel:not([data-n="1"]) .live-msg form>p.meta:not([data-delivery]){display:none}
 /* a pane takes dropped files into its message box (ORCH-695): the pane says so while files are over it */
 .live-pane[data-drop]{outline:2px dashed var(--brand);outline-offset:-2px}
 /* voice into the message box (ORCH-696, draft D feature 13): the strip while listening (a moving level, the time, Stop,
