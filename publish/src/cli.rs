@@ -267,10 +267,9 @@ pub fn admin_target(a: &Admin) -> Result<(String, String), String> {
         Some(u) => u.trim_end_matches('/').to_string(),
         None => {
             let listen = get("ADMIN_LISTEN").unwrap_or("127.0.0.1:8411".into());
-            let listen = listen
-                .replace("0.0.0.0:", "127.0.0.1:")
-                .replace("[::]:", "[::1]:");
-            format!("http://{listen}")
+            // the interface form (wt0:port) becomes that interface's address, never a host name lookup
+            let addr = crate::listen::client_addr("ORCH_PUBLISH_ADMIN_LISTEN", &listen)?;
+            format!("http://{addr}")
         }
     };
     Ok((url, token))

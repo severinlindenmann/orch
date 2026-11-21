@@ -95,7 +95,16 @@ def connect(root: Path, url: str, workspace: str, token: str) -> tuple[dict, str
         Refused, OSError, ValueError
     ):  # blobs of another relay or workspace are useless here
         phone_view.forget_blobs(root, keep_scope=phone_view.blob_scope(root))
-    return who, refresh(root)
+    line = refresh(root)
+    from orch import signkey  # the key pair is made here and its public half registered (ORCH-1200)
+
+    try:
+        key = signkey.register(root)
+        who["signing_key"] = {k: key[k] for k in ("alg", "public_key", "key_id", "fingerprint", "state")}
+        line += "\n" + signkey.line(key)
+    except (Refused, OSError, ValueError, TimeoutError) as e:
+        line += f"\nThe signing key could not be registered yet ({e}). orch tries again later."
+    return who, line
 
 
 def whoami(root: Path) -> dict:
@@ -963,6 +972,12 @@ def _retry_with_fresh_blobs(root, to, body, tv, ticket, reply_to, mid) -> dict |
         return None
 
 
+def _line_mid(msg: dict) -> str | None:
+    """The relay message id as the chat line's id (one id for the message everywhere), if it has that form."""
+    mid = msg.get("id")
+    return mid if isinstance(mid, str) and tickets.CHAT_LINE_ID_RE.fullmatch(mid) else None
+
+
 def _record_general(root: Path, msg: dict, text: str, body: dict, reply_to, refs) -> None:
     from orch import chat
 
@@ -970,7 +985,7 @@ def _record_general(root: Path, msg: dict, text: str, body: dict, reply_to, refs
     tickets.apply_op(
         root,
         gid,
-        lambda t: tickets.add_history(t, tickets.current_actor(), text, chat=True),
+        lambda t: tickets.add_history(t, tickets.current_actor(), text, chat=True, mid=_line_mid(msg)),
         by=tickets.current_actor(),
     )
     chat.record(root, msg["id"], body["by"], body["via"], text, msg["created_at"], reply_to, refs=refs)
@@ -2632,7 +2647,8 @@ def _continue(
         r["phone"] = (
             True  # the owner wrote to it from a phone: its questions go there too (mobile_mode.from_phone)
         )
-        tickets.add_history(t, by, plain, "phone", chat=general)
+        # a phone text is a message in the ticket's chat (General or a ticket chat); its id is the relay id
+        tickets.add_history(t, by, plain, "phone", chat=True, mid=_line_mid({"id": mid}))
         t["waiting_on"] = None
         if general:
             return
@@ -2693,7 +2709,12 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
     if mid not in _v3_state(root)["described"]:
         # also the retry of a message whose files could not be fetched the first time (Transient)
         text = _describe(root, tid, mid, who, body, final)
-        tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"), by=by)
+        tickets.apply_op(
+            root,
+            tid,
+            lambda t: tickets.add_history(t, by, text, "phone", chat=True, mid=_line_mid({"id": mid})),
+            by=by,
+        )
         _mark_described(root, mid)
         _working_add(root, mid, frm, tid, False, "run")
     _ack_once(root, mid, frm, tid, False, f"Got it: {tickets.load(root, tid)['title']}"[:300])

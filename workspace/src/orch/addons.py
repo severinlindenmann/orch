@@ -706,14 +706,65 @@ def _missing_source(e: dict) -> str | None:
     return None if Path(e["source"]).is_dir() else f"its folder {e['source']} is gone"
 
 
+_CATALOG_PATH = "workspace/src/orch/shipped_addons.json"
+_source_catalog_cache: dict[tuple[str, str], frozenset[str] | None] = {}
+
+
+def _catalog_names(text: str) -> frozenset[str] | None:
+    """The add-on names in a shipped_addons.json text; None when it is not one (never an empty set: a
+    broken file must not drop every built-in add-on)."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    names = frozenset(n for n in data if isinstance(n, str) and NAME_RE.match(n))
+    return names or None
+
+
+def _fetch_source_catalog(r: str, at: str) -> frozenset[str] | None:
+    """The built-in add-ons the source orch installs from ships at `at` (its shipped_addons.json), or None
+    when that can not be read (offline, another host). Tests replace this."""
+    folder = file_repo(r)
+    if folder is not None:
+        from orch import safegit
+
+        rc, out, _ = safegit.run(["show", f"{at}:{_CATALOG_PATH}"], folder, 10, read_only=True, root=folder)
+        return _catalog_names(out) if rc == 0 else None
+    m = re.fullmatch(r"https://github\.com/([^/]+)/([^/]+)", r.removesuffix(".git"))
+    if not m:
+        return None
+    from urllib.request import urlopen
+
+    url = f"https://raw.githubusercontent.com/{m[1]}/{m[2]}/{at}/{_CATALOG_PATH}"
+    try:
+        with urlopen(url, timeout=6) as resp:  # noqa: S310 (fixed https host)
+            return _catalog_names(resp.read(512 * 1024).decode("utf-8", "replace"))
+    except Exception:
+        return None
+
+
+def _source_catalog() -> frozenset[str] | None:
+    """What the NEW orch ships, asked of the source once per command. The running orch's SHIPPED_ADDONS is the
+    OLD catalog: after an add-on was removed from the repository (dashboard-tester, #1772) it still listed it,
+    and uv failed on the folder the new source no longer has (ORCH-1369)."""
+    at = (repo(), ref())
+    if at not in _source_catalog_cache:
+        _source_catalog_cache[at] = _fetch_source_catalog(*at)
+    return _source_catalog_cache[at]
+
+
 def _no_longer_ships(e: dict) -> bool:
-    """A built-in add-on this orch version does not ship (an older install registered it, e.g. 'scheduler').
-    orch update drops it from the registry instead of failing on a folder the repository no longer has."""
+    """A built-in add-on the orch being installed does not ship (an older install registered it, e.g.
+    'scheduler', or 'dashboard-tester' after it left the repository). orch update drops it from the registry
+    instead of failing on a folder the repository no longer has."""
     if e["source"] != "built-in":
         return False
-    if _is_local(repo()):
-        return not (Path(repo()) / "workspace-addons" / e["name"]).is_dir()
-    return e["name"] not in SHIPPED_ADDONS
+    if _is_local(repo()):  # a placeholder folder (pyproject.toml only, no src/) is no add-on
+        return not (Path(repo()) / "workspace-addons" / e["name"] / "src").is_dir()
+    names = _source_catalog()
+    return e["name"] not in (SHIPPED_ADDONS if names is None else names)
 
 
 def _current_registry() -> list[dict]:
@@ -898,7 +949,7 @@ def _record_text(plan: dict) -> str:
     return orch_home.install_record_text(plan["kind"], plan["env"])
 
 
-def _install_tool(entries: list[dict]) -> None:
+def _install_tool(entries: list[dict]) -> list[dict]:
     from orch import home as orch_home
 
     plan = _reinstall_plan()
@@ -917,7 +968,16 @@ def _install_tool(entries: list[dict]) -> None:
                     "Try again later."
                 ) from e
         try:
-            run_uv(_tool_args(entries))
+            try:
+                run_uv(_tool_args(entries))
+            except Exception as e:
+                gone = _gone_in_uv_error(str(e), entries)
+                if not gone:
+                    raise
+                rest = [x for x in entries if x["name"] not in gone]
+                run_uv(_tool_args(rest))  # once more without them; a second failure is a real one
+                _drop_gone(gone)
+                entries = rest
         except Exception as e:
             restored = winfinish.restore_tool(kept) if kept else plan is None
             detail = str(e)
@@ -927,6 +987,24 @@ def _install_tool(entries: list[dict]) -> None:
         winfinish.discard_backup(kept)
     if plan and ((plan["env"] / "bin").exists() or (plan["env"] / "Scripts").exists()):
         orch_home.write_install_record(plan["env"], plan["kind"])
+    return entries
+
+
+def _gone_in_uv_error(detail: str, entries: list[dict]) -> set[str]:
+    """Built-in add-ons uv could not find in the source ("has no subdirectory workspace-addons/<name>"): the
+    source no longer ships them although the catalog check could not tell (offline catalog, ORCH-1369)."""
+    named = set(re.findall(r"no subdirectory\W+workspace-addons[/\\]([A-Za-z0-9._-]+)", detail))
+    return {e["name"] for e in entries if e["source"] == "built-in" and e["name"] in named}
+
+
+def _drop_gone(gone: set[str]) -> None:
+    """Take add-ons the source no longer ships off the registry (after the install without them worked), one
+    plain line each."""
+    for n in sorted(gone):
+        print(f"Add-on {n} removed: it no longer ships with orch.")
+    reg = registry(ships_check=False)
+    if any(e["name"] in gone for e in reg):
+        _save_registry([e for e in reg if e["name"] not in gone])
 
 
 def _running_workspaces(root: Path) -> list[str]:
@@ -1015,7 +1093,7 @@ def _reinstall(
 
     tool_env_change_ok()
     if not winfinish.needed():
-        _install_tool(entries)
+        entries = _install_tool(entries)  # without add-ons the source turned out not to ship any more
         path = registry_path()
         before = path.read_bytes() if save and path.exists() else None
         try:
@@ -2428,11 +2506,16 @@ def uninstall(root: Path, name: str) -> None:
         raise Refused(f"{name} is part of orch. Turn it off here with: orch addon remove {name}")
     if name in active(root):
         raise Refused(f"The {name} add-on is turned on here. Turn it off first: orch addon remove {name}")
-    reg = registry()
-    if name not in [e["name"] for e in reg]:
+    if not installed_here(name):
         raise Refused(f"The add-on '{name}' is not installed.")
-    rest = [e for e in reg if e["name"] != name]
+    # every entry, also one this orch does not ship (any more): those must be removable too (ORCH-1369)
+    rest = [e for e in _current_registry() if e["name"] != name]
     _reinstall(rest, save=True, then=[], root=root, done=f"{name} uninstalled")
+
+
+def installed_here(name: str) -> bool:
+    """On this computer's add-on list, also when this orch no longer ships it."""
+    return name in [e["name"] for e in registry(ships_check=False)]
 
 
 # ---------------------------------------------------------------- update
@@ -2969,6 +3052,10 @@ def update(
             before_path.unlink(missing_ok=True)  # a failed install leaves no stale snapshot
             raise
         return []
+    # The NEW code runs from here on. An older orch did the install step with its own catalog and still kept
+    # add-ons this version no longer ships (dashboard-tester, installed then from its placeholder package):
+    # take them off the list now, one plain line each (ORCH-1369).
+    _current_registry()
     before = _load_snapshot(root, nonce)
     done = []
     if (root / ".orch" / "harness" / "skills" / "orch").is_dir():

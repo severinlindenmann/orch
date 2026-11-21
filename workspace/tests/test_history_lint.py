@@ -77,16 +77,25 @@ PERSON_OK = {
         "workspace/src/orch/tickets.py",
         "_wont_view",
     ): "writer guard: the stored Won't do state before/after an op",
+    (
+        "workspace/src/orch/tickets.py",
+        "_reviewer_answer_stored",
+    ): "writer guard: does the stored question still hold the Reviewer's answer (ORCH-425 undo)",
 }
 # (file, function) -> readers that take the shown ticket at their entry (history.shown_ticket / shown_json /
 # shown_item, checked below) and read person fields of THAT: the reason says which.
 SHOWN = {
+    (
+        "workspace/src/orch/reviewer.py",
+        "accepted",
+    ): "shown = history.shown_ticket(root, t) before a question's answered_by is read",
     (
         "workspace/src/orch/cli_review.py",
         "_answered",
     ): "history.shown_json(root, tickets.list_all(root)) first",
     ("workspace/src/orch/cli_review.py", "_wait"): "history.shown_ticket(root, tickets.load(...)) each poll",
     ("workspace/src/orch/runs.py", "fresh_prompt"): "ticket = history.shown_ticket(...) first",
+    ("workspace/src/orch/tickets.py", "worked_since_prepare"): "history.shown_ticket(...) for the steps",
     ("workspace/src/orch/cli.py", "_show"): "t = history.shown_ticket(...) first",
     (
         "workspace/src/orch/review.py",
