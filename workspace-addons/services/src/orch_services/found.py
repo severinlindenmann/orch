@@ -42,6 +42,31 @@ WINDOWS_NOTE = (
 )
 
 
+def _real_account_home() -> Path:
+    try:
+        import pwd
+
+        return Path(pwd.getpwuid(os.getuid()).pw_dir)
+    except (ImportError, KeyError):
+        return Path.home()
+
+
+def _test_home_on_real_account() -> bool:
+    """A test install (ORCH_HOME aimed at a folder that is not the real ~/.orch-tool) whose process still has the real
+    HOME: the real LaunchAgents / systemd units are not its own, so Found must not list them (nobody may adopt the
+    real forwarder into a test workspace)."""
+    env = os.environ.get("ORCH_HOME")
+    if not env:
+        return False
+    try:
+        real = _real_account_home().resolve()
+        if Path(env).resolve() == (real / ".orch-tool").resolve():
+            return False
+        return Path.home().resolve() == real
+    except OSError:
+        return False
+
+
 def _tool(argv: list[str], timeout: int = 20) -> subprocess.CompletedProcess | None:
     """Run a read-only platform tool; None when it is missing or does not answer."""
     env = {**os.environ, "LC_ALL": "C"}  # C locale: ps dates in one form
@@ -396,7 +421,9 @@ def scan(root: Path, processes: bool = False) -> list[dict]:
     """Every found job orch can take over (launchd / systemd), sorted by name. Reads only; an item already managed
     by orch is left out. Plain programs (tail, hand-run scripts) cannot be taken over and are no items: they are
     only counted by `others`, unless `processes` is set (adopt looks one up to explain why it cannot)."""
-    if sys.platform == "darwin":
+    if _test_home_on_real_account():
+        units, pids = [], set()
+    elif sys.platform == "darwin":
         units, pids = _launchd(root)
     elif sys.platform.startswith("linux"):
         units, pids = _systemd(root)

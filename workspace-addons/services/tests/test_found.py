@@ -547,3 +547,23 @@ def test_orchs_own_background_pages_are_never_found(cli, mac, tools, ws):
     out = jrun(cli, "found")[1]
     assert out["found"] == [] or all(not i["id"].startswith("process:") for i in out["found"])
     assert out["others"] == 1  # only watcher.py; orch's own pages are not counted
+
+
+def test_a_test_home_with_the_real_account_home_finds_no_real_jobs(cli, mac, tools, monkeypatch):
+    """ORCH-637: a test install (own ORCH_HOME) whose process still has the real HOME must not list the account's jobs."""
+    from orch_services import found
+
+    # the mac fixture's HOME stands for the real account home here
+    monkeypatch.setattr(found, "_real_account_home", lambda: Path.home())
+    code, out = jrun(cli, "found")
+    assert code == 0, out
+    assert out["found"] == []
+    # a person's real install (ORCH_HOME is the real ~/.orch-tool) still sees its jobs
+    monkeypatch.setenv("ORCH_HOME", str(Path.home() / ".orch-tool"))
+    code, out = jrun(cli, "found")
+    assert {i["id"] for i in out["found"]} >= {"launchd:com.example.web-preview"}
+    # a test home with its own HOME (not the account's) still sees what is under that HOME
+    monkeypatch.setenv("ORCH_HOME", str(Path.home() / "elsewhere"))
+    monkeypatch.setattr(found, "_real_account_home", lambda: Path("/nonexistent-real-home"))
+    code, out = jrun(cli, "found")
+    assert {i["id"] for i in out["found"]} >= {"launchd:com.example.web-preview"}
