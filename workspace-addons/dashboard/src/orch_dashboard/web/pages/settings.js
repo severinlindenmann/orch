@@ -203,7 +203,7 @@ function peopleCard(settings) {
   const active = array(list.people).filter(p => !p.removed), removed = array(list.people).filter(p => p.removed);
   const row = p => {
     const rights = h('div', {className:'row', role:'group', 'aria-label':'Rights of ' + p.name}, PEOPLE_RIGHTS.map(([id, label]) =>
-      h('label', {className:'row'}, h('input', {type:'checkbox', 'data-people-right':id, 'data-id':p.id, 'data-key':'settings-people-' + p.id + '-' + id, ...(p.owner || p.rights.includes(id) ? {checked:''} : {}), disabled:snapshot || busy || p.owner}), label)));
+      h('label', {className:'check-label'}, h('input', {type:'checkbox', 'data-people-right':id, 'data-id':p.id, 'data-key':'settings-people-' + p.id + '-' + id, ...(p.owner || p.rights.includes(id) ? {checked:''} : {}), disabled:snapshot || busy || p.owner}), label)));
     if (peopleRenaming === p.id) return h('div', {className:'card-row', 'data-key':'settings-people-row-' + p.id},
       h('input', {type:'text', className:'input grow', maxLength:40, value:p.name, 'aria-label':'New name for ' + p.name, 'data-key':'settings-people-rename-name', 'data-people-enter':'people-rename-save', 'data-id':p.id, disabled:busy}),
       h('button', {type:'button', className:'btn primary sm', 'data-action':'people-rename-save', 'data-id':p.id, 'data-key':'settings-people-rename-save', disabled:busy}, 'Save'),
