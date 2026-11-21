@@ -1,19 +1,14 @@
 //! Signing keys of phones (ORCH-1204, design note ORCH-1027 sections 2 and 5): the phone makes its own Ed25519 key
 //! in its keychain and sends the public half when it redeems the pairing code the relay admin made ("Add phone").
 //! The admin's pairing is the anchor: a new pairing replaces the key (the workspaces then see a new key without
-//! the old one and must accept the phone again). A phone paired before keys existed may register one key once with
-//! `PUT /v1/phone/signing-key`; replacing it needs a new pairing, so a stolen phone token alone cannot swap it.
+//! the old one and must accept the phone again). There is no other way to set it: a phone paired before keys gets
+//! one by a new pairing, so a stolen phone token alone can never bind a key.
 //!
 //! The relay shows the key to the phone's workspaces (directory `phones[].signing_key`) as a HINT only: a
 //! workspace trusts it only after a person accepted its fingerprint. The private key never comes here.
 use crate::error::*;
 use crate::signkeys::{key_id, parse_public, ALG};
-use crate::state::AppState;
 use crate::util::*;
-use axum::body::Bytes;
-use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
-use axum::Json;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
@@ -72,11 +67,6 @@ pub fn add_to_card(c: &Connection, card: &mut Value) {
     card["signing_key"] = info(c, &id);
 }
 
-/// `PUT /v1/phone/signing-key` (merged into the phone routes).
-pub fn routes() -> axum::Router<AppState> {
-    axum::Router::new().route("/v1/phone/signing-key", axum::routing::put(put))
-}
-
 /// The phone's registered raw key, for the signature check of what it sends.
 pub fn raw_key(c: &Connection, pid: &str) -> Option<[u8; 32]> {
     let k: Option<String> = c
@@ -86,59 +76,4 @@ pub fn raw_key(c: &Connection, pid: &str) -> Option<[u8; 32]> {
         .flatten()
         .flatten();
     k.and_then(|k| parse_public(&k).ok())
-}
-
-/// `PUT /v1/phone/signing-key` `{"alg": "ed25519", "public_key": "<43 chars>"}` (phone auth): once, for a phone
-/// paired before keys existed. 201 stored, 200 the same key again, 409 `key_exists` for another key.
-pub async fn put(
-    State(app): State<AppState>,
-    h: HeaderMap,
-    body: Bytes,
-) -> Res<(StatusCode, Json<Value>)> {
-    let v = crate::api::parse_body(&body)?;
-    let o = v
-        .as_object()
-        .ok_or_else(|| invalid("Send {\"alg\": \"ed25519\", \"public_key\": \"…\"}."))?;
-    if let Some(k) = o.keys().find(|k| *k != "alg" && *k != "public_key") {
-        return Err(invalid(format!("Unknown field `{k}`.")));
-    }
-    if o.get("alg").and_then(Value::as_str) != Some(ALG) {
-        return Err(invalid("`alg` must be \"ed25519\"."));
-    }
-    let pk = o
-        .get("public_key")
-        .and_then(Value::as_str)
-        .ok_or_else(|| invalid("`public_key` is missing."))?;
-    parse_public(pk).map_err(invalid)?;
-    let c = app.db.lock().unwrap();
-    let (pid, _, ws) = crate::auth::phone(&c, &h)?;
-    let cur: Option<String> =
-        c.query_row("SELECT sign_key FROM phones WHERE id=?1", [&pid], |r| r.get(0))?;
-    let out = |status: &str| {
-        let mut i = info(&c, &pid);
-        i["status"] = status.into();
-        i
-    };
-    match cur {
-        Some(k) if k == pk => Ok((StatusCode::OK, Json(out("unchanged")))),
-        Some(_) => Err(ApiError {
-            status: StatusCode::CONFLICT,
-            code: "key_exists",
-            message: "This phone already has a signing key. A new key needs a new pairing on the relay admin page."
-                .into(),
-        }),
-        None => {
-            let tok = crate::auth::bearer(&h).map(token_hash).unwrap_or_default();
-            let n = c.execute(
-                "UPDATE phones SET sign_key=?3, sign_key_at=?4 WHERE id=?1 AND token_hash=?2 AND sign_key IS NULL",
-                params![pid, tok, pk, now()],
-            )?;
-            if n == 0 {
-                return Err(unauthorized());
-            }
-            // Its workspaces see the new key on their next directory read.
-            crate::store::bump_and_hint(&c, &app.key, &ws)?;
-            Ok((StatusCode::CREATED, Json(out("stored"))))
-        }
-    }
 }

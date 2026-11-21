@@ -16,7 +16,6 @@ use std::collections::HashMap;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .merge(crate::phonekeys::routes())
         .route("/v1/phone/pair", post(pair))
         .route("/v1/phone/push", post(register_push))
         .route("/v1/phone/workspaces", get(workspaces))

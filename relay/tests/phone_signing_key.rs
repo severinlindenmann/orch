@@ -1,6 +1,6 @@
 //! Phone signing keys (ORCH-1204, relay-api.md "Signing key of a phone"): the phone sends its public key when it
-//! redeems the pairing code; a bad key refuses the pairing and leaves the code unused; a new pairing replaces the
-//! key; a phone paired before keys may register one key once; its workspaces see the key in the directory.
+//! redeems the pairing code; a bad key refuses the pairing and leaves the code unused; there is no route that sets
+//! a key with the phone token alone; its workspaces see the key in the directory.
 mod common;
 use common::*;
 use serde_json::{json, Value};
@@ -73,50 +73,22 @@ async fn pairing_stores_the_key_and_the_workspace_sees_it() {
     assert_eq!(sk["key_id"].as_str().unwrap().len(), 16);
     assert!(sk.get("fingerprint").is_none(), "the relay never sends a fingerprint");
 
-    // The token alone cannot swap it.
-    let (s, v) = t
+    // The token alone cannot set or swap it: no such route.
+    let (s, _) = t
         .phone(&p, "PUT", "/v1/phone/signing-key", Some(json!({"alg": "ed25519", "public_key": k2})))
         .await;
-    assert_eq!(s, 409, "{v}");
-    assert_eq!(v["error"], "key_exists");
-    let (s, _) = t
-        .phone(&p, "PUT", "/v1/phone/signing-key", Some(json!({"alg": "ed25519", "public_key": k1})))
-        .await;
-    assert_eq!(s, 200);
+    assert!(s == 404 || s == 405, "{s}");
     assert_eq!(phone_key_in_directory(&t, &a).await["public_key"], k1.as_str());
 }
 
 #[tokio::test]
-async fn a_phone_paired_before_keys_registers_once() {
+async fn a_pairing_without_a_key_has_none() {
     let t = start().await;
     let a = t.add_ws("A").await;
-    let (k1, k2, bad) = keys();
     let code = new_code(&t, &a).await;
     let (s, v) = redeem(&t, &code, None).await;
     assert_eq!(s, 201, "{v}");
-    let p = (
-        v["phone_id"].as_str().unwrap().to_string(),
-        v["token"].as_str().unwrap().to_string(),
-    );
     assert!(phone_key_in_directory(&t, &a).await.is_null());
-    let put = |pk: &str| Some(json!({"alg": "ed25519", "public_key": pk}));
-    assert_eq!(t.phone(&p, "PUT", "/v1/phone/signing-key", put(&bad)).await.0, 422);
-    let (s, v) = t
-        .phone(&p, "PUT", "/v1/phone/signing-key", Some(json!({"alg": "ed25519", "public_key": k1, "x": 1})))
-        .await;
-    assert_eq!(s, 422, "{v}");
-    let (s, v) = t.phone(&p, "PUT", "/v1/phone/signing-key", put(&k1)).await;
-    assert_eq!(s, 201, "{v}");
-    assert_eq!(v["status"], "stored");
-    assert_eq!(t.phone(&p, "PUT", "/v1/phone/signing-key", put(&k2)).await.0, 409);
-    assert_eq!(phone_key_in_directory(&t, &a).await["public_key"], k1.as_str());
-    // A workspace token is not a phone token.
-    assert_eq!(
-        t.phone(&(a.id.clone(), a.token.clone()), "PUT", "/v1/phone/signing-key", put(&k2))
-            .await
-            .0,
-        401
-    );
 }
 
 #[tokio::test]
