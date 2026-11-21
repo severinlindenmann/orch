@@ -132,7 +132,7 @@ def test_chat_lines_stay_in_the_window_after_many_plain_lines(proj):
     assert [t["at"] for t in tail] == sorted(t["at"] for t in tail)
 
 
-def test_a_new_chat_line_changes_the_phone_signature():
+def test_a_new_chat_line_changes_what_the_phone_follows():
     """A message in the ticket chat reaches a phone that follows the ticket right away."""
     ticket = {
         "status": "active",

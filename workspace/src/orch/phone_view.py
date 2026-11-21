@@ -1542,9 +1542,7 @@ def _tasks_sig(ticket: dict, root: Path | None = None) -> str:
     if ticket.get("started") is True:
         data.append(True)
     # the newest chat line: a message in the ticket's chat (helper or person) reaches the phone right away
-    last_chat = next(
-        (e.get("id") for e in reversed(ticket.get("history") or []) if e.get("chat_message") is True), None
-    )
+    last_chat = history.last_chat_id(ticket)
     if last_chat:
         data.append(last_chat)
     return hashlib.sha256(json.dumps(data).encode()).hexdigest()[:16]
