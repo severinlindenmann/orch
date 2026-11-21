@@ -21,6 +21,8 @@ pub const MAX_OPEN_PER_CALLER: usize = 4;
 /// All stored recordings together.
 pub const MAX_STORED: u64 = 2 * 1024 * 1024 * 1024;
 pub const KEEP_SECS: i64 = 7 * 24 * 3600;
+/// Job uploads read at the same time (each holds up to 200 MB, and opening it once more).
+pub const MAX_UPLOADS: usize = 2;
 /// A job runs in pieces of about this length, so short calls get a turn in between.
 pub const PIECE_SECS: usize = 300;
 
@@ -190,6 +192,19 @@ impl Jobs {
             let _ = std::fs::remove_file(self.path(id, ext));
         }
         self.keys.lock().unwrap().remove(id);
+    }
+
+    /// Before reading an upload: Busy when the caller has its 4 open jobs or the store is full.
+    pub fn room_for(&self, owner: &str) -> Result<(), JobError> {
+        let all = self.all();
+        if all.iter().filter(|m| m.owner == owner && m.open()).count() >= MAX_OPEN_PER_CALLER {
+            return Err(JobError::Busy);
+        }
+        let stored: u64 = all.iter().filter(|m| m.open()).map(|m| m.size).sum();
+        if stored + MAX_BLOB as u64 > MAX_STORED {
+            return Err(JobError::Busy);
+        }
+        Ok(())
     }
 
     /// Check the blob with its key, store it encrypted as sent, keep the key in memory.

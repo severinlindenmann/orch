@@ -2,7 +2,7 @@
 
 Speech to text with a self-hosted Whisper model (whisper.cpp). Runs on our own machine, reached over the private
 network; the relay uses it in place of Deepgram when it is set up (relay-api.md `/v1/phone/transcribe`).
-Base: `http://<private-network name>:8103`, or behind a TLS reverse proxy. JSON in, JSON out; errors as `common.md`:
+Base: `http://<private-network name>:8104`, or behind a TLS reverse proxy. JSON in, JSON out; errors as `common.md`:
 `{"error": "<code>", "message"}`, and every message says what to do next.
 
 **Auth** (every route except `/v1/health`): `Authorization: Bearer ort_<43 chars>`. Wrong or missing → `401

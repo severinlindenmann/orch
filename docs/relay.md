@@ -100,6 +100,13 @@ The admin stores one Deepgram API key (portal: Shared config > Voice; `PUT /admi
 take audio bytes (m4a, wav, webm; 10 MB / 2 min), call Deepgram (`nova-3`, smart format, language detected unless `?language=`) and return `{text, language, duration}`.
 No key = `503 transcription_off`. 30 calls a minute per phone or workspace (in memory). The Deepgram call sits behind the `Transcriber` trait; tests use a fake.
 
+**Our own transcription service** (`docs/transcription.md`): when the admin sets its address and token
+(`PUT /admin/api/voice/service`, sealed with the master key like the Deepgram key, the token never returned), both
+transcribe endpoints send the audio there instead, and Deepgram is never called for transcription. When the service
+is down or busy the caller gets `502 transcription_failed` "The transcription service is not available right now. Try
+again in a few minutes." (no fallback to Deepgram: voice stays in our network). `DELETE /admin/api/voice/service`
+goes back to Deepgram. Reading aloud stays on Deepgram. The call sits behind the `OwnService` trait; tests use a fake.
+
 ## How a message flows
 Sender `POST /v1/messages` → relay checks the schema and the pair rule → stores (body encrypted with the master key)
 → receiver gets it on the next `GET /v1/inbox` and acks → receiver stores the id as seen. Offline = it waits on the relay.

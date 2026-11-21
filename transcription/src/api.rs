@@ -30,6 +30,8 @@ pub struct App {
     pub jobs: crate::jobs::Jobs,
     /// One transcription at a time: the engine uses all its threads for one clip.
     pub run: Arc<Semaphore>,
+    /// Job uploads being read; more get `busy` before their body is read.
+    pub uploads: Semaphore,
     waiting: AtomicUsize,
 }
 
@@ -42,6 +44,7 @@ impl App {
             tokens: crate::tokens::Tokens::open(data_dir),
             jobs: crate::jobs::Jobs::open(data_dir),
             run: Arc::new(Semaphore::new(1)),
+            uploads: Semaphore::new(crate::jobs::MAX_UPLOADS),
             waiting: AtomicUsize::new(0),
         })
     }
@@ -203,6 +206,9 @@ pub async fn job_create(
     body: Body,
 ) -> Res<Response> {
     let lang = language_code(q.get("language").map(String::as_str), app.engine.as_ref())?;
+    // Room first, then read: a full store or too many uploads never get a body into memory.
+    let _upload = app.uploads.try_acquire().map_err(|_| busy())?;
+    app.jobs.room_for(&who.0).map_err(job_err)?;
     let blob = axum::body::to_bytes(body, crate::jobs::MAX_BLOB + 1)
         .await
         .map_err(|_| too_large("The recording is larger than 200 MB."))?;

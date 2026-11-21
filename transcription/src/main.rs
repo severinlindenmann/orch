@@ -11,7 +11,7 @@ Usage:
   orch-transcription --help
 
 Settings (all optional):
-  ORCH_TRANSCRIPTION_LISTEN      address to listen on (default 127.0.0.1:8103)
+  ORCH_TRANSCRIPTION_LISTEN      address to listen on (default 127.0.0.1:8104)
   ORCH_TRANSCRIPTION_DATA_DIR    data folder (default /var/lib/orch-transcription)
   ORCH_TRANSCRIPTION_MODEL       speech model file (default <data>/models/model.bin)
   ORCH_TRANSCRIPTION_VAD_MODEL   voice detection model file (default <data>/models/vad.bin)

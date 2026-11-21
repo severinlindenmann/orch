@@ -30,7 +30,7 @@ impl Config {
                     .unwrap_or(4)
             });
         Config {
-            listen: var("LISTEN").unwrap_or_else(|| "127.0.0.1:8103".into()),
+            listen: var("LISTEN").unwrap_or_else(|| "127.0.0.1:8104".into()),
             model: var("MODEL")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| data_dir.join("models/model.bin")),

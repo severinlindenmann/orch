@@ -59,7 +59,8 @@ pub fn open(key: &[u8; 32], blob: &[u8]) -> Option<(Header, Vec<u8>)> {
         return None;
     }
     let header: Header = serde_json::from_slice(&plain[4..4 + n]).ok()?;
-    let body = plain[4 + n..].to_vec();
+    let mut body = plain;
+    body.drain(..4 + n); // no second copy of a large recording
     if header.size != body.len() as u64 {
         return None;
     }

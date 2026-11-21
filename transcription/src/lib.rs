@@ -21,7 +21,7 @@ pub use api::{App, AppState};
 #[derive(Clone, Debug)]
 pub struct Caller(pub String);
 
-async fn signed_in(
+async fn require_token(
     State(app): State<AppState>,
     mut req: Request,
     next: Next,
@@ -39,16 +39,16 @@ async fn signed_in(
 }
 
 pub fn router(app: AppState) -> Router {
-    let signed = Router::new()
+    let with_token = Router::new()
         .route("/v1/transcribe", post(api::transcribe))
         .route("/v1/jobs", post(api::job_create))
         .route("/v1/jobs/:id", get(api::job_get).delete(api::job_delete))
         .route("/v1/jobs/:id/key", post(api::job_key))
         .route("/v1/jobs/:id/result", get(api::job_result))
-        .route_layer(middleware::from_fn_with_state(app.clone(), signed_in));
+        .route_layer(middleware::from_fn_with_state(app.clone(), require_token));
     Router::new()
         .route("/v1/health", get(api::health))
-        .merge(signed)
+        .merge(with_token)
         .fallback(api::fallback)
         .with_state(app)
 }
