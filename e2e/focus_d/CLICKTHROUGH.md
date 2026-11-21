@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-33 steps: 29 ready (the script clicks them), 4 pending (not built yet).
+33 steps: 30 ready (the script clicks them), 3 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -315,7 +315,7 @@ Must be seen:
 
 - Plain messages with time; done steps and other events as lines between them; the pull request inside the message.
 - The waiting question is an orange card above the chat, not a message; once answered it moves into the chat as yours.
-- A sent message shows at once; Terminal shows the last lines and the choice stays after a reload.
+- A sent message shows at once; Terminal shows the helper’s screen and the choice stays after a reload.
 
 ## 18. Files and screenshots in the message box, with a preview before sending
 
@@ -394,19 +394,25 @@ Must be seen:
 ## 22. A real terminal: type, select, copy and paste
 
 - Part: terminal (draft D feature 5)
-- State: pending, waits for: Terminal in the browser, after the security review and the owner's choice (Terminal stage)
+- State: ready, clicked by the script
 - Pictures: `fd-22-terminal-1280.png`, `fd-22-terminal-1920.png`, `fd-22-terminal-390.png`
 
 Do:
 
 1. Switch a session to Terminal.
-2. Click in it and type a command, select text, copy it, paste it back.
+2. Press a key: nothing is sent (watching only).
+3. Turn on Let me type, type a command and press Enter.
+4. Paste two lines, then Cancel.
+5. Select text and copy it.
 
 Must be seen:
 
-- It behaves like the Terminal app: typing, selection, copy and paste.
-- Copy all copies the screen text.
-- It can only be reached from this computer.
+- The helper's real screen with its colours; it starts watching only.
+- Keys go to the helper only after Let me type.
+- A paste with a line end asks first.
+- Selecting and copying works like on any page; Copy copies the selection or the screen.
+- While typing the screen follows the size of its pane.
+- It can only be reached from this computer (the bridge, ORCH-743).
 
 ## 23. Opening, zooming, pinning and splitting animate
 
