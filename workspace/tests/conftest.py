@@ -70,10 +70,28 @@ _TRACE_LOG = addons._trace_log_path()  # the true fallback trace file (temp fold
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 
 
+def guard_only_home(real: Path) -> Path:
+    """The home whose orch folder the guard watches: the real account home, or ORCH_TEST_GUARD_ONLY's.
+    The local check of a merge queue group (scripts/check-commit.sh) runs the suites with a throwaway HOME and
+    ORCH_HOME_STRICT=1 on a Mac where the production orch keeps writing the real home (health.json,
+    github-writes.jsonl), so watching the real home there fails every green run (ORCH-1180). It sets
+    ORCH_TEST_GUARD_ONLY to its throwaway home; CI after the merge keeps watching the real home. Honoured
+    only with ORCH_HOME_STRICT=1 and a folder under <real home>/.orch-test; any other value is ignored."""
+    only = os.environ.get("ORCH_TEST_GUARD_ONLY")
+    if not only or os.environ.get("ORCH_HOME_STRICT") != "1":
+        return real
+    try:
+        p, top = Path(only).resolve(strict=True), (real / ".orch-test").resolve(strict=True)
+    except (OSError, RuntimeError):
+        return real
+    return p if p.is_dir() and p != top and p.is_relative_to(top) else real
+
+
 def _guard_bases() -> list[Path]:
-    """The orch homes the guard watches: ALWAYS the real account home (getpwuid), plus ORCH_TEST_GUARD_HOME's
-    when set (only tests/test_session_guard.py sets it). The override adds a location, never replaces."""
-    bases = [_REAL_HOME_FN() / ".orch-tool"]
+    """The orch homes the guard watches: the real account home (getpwuid; inside the local check its
+    throwaway home, guard_only_home), plus ORCH_TEST_GUARD_HOME's when set (only tests/test_session_guard.py
+    sets it). The override adds a location, never replaces."""
+    bases = [guard_only_home(_REAL_HOME_FN()) / ".orch-tool"]
     extra = os.environ.get("ORCH_TEST_GUARD_HOME")
     if extra:
         bases.append(Path(extra) / ".orch-tool")
