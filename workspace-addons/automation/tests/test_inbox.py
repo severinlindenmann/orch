@@ -282,3 +282,61 @@ def test_only_a_phone_answer_may_open_a_live_session(ws):
     starts = {c["args"][2]: c["args"] for c in calls(ws) if c["args"][:2] == ["run", "start"]}
     assert "--mode" not in starts["t_ans00000"]
     assert "oneshot" in starts["t_ans00001"] and "oneshot" in starts["t_ans00002"]
+
+
+def _pickups(ws, rows):
+    (ws / "pickups.json").write_text(json.dumps(rows))
+
+
+def _picked(ws):
+    return {r["id"]: r for r in json.loads((ws / "pickups.json").read_text())}
+
+
+def test_workspace_text_core_passed_on_starts_one_helper_and_records_its_run(ws):
+    """#2051: core passed two texts from another workspace to one idle ticket and one to the General ticket:
+    one run per ticket, each message records the run that took it, and a second pass starts nothing."""
+    relay_on(ws, [])
+    add_ticket(ws, "t_move0001", title="Move the server")
+    (ws / "ended-t_move0001").write_text("")
+    (ws / "ended-t_genr0001").write_text("")
+    _pickups(
+        ws,
+        [
+            {"id": "m_1", "from": "ws_a", "ticket": "t_move0001", "general": False},
+            {"id": "m_2", "from": "ws_a", "ticket": "t_move0001", "general": False},
+            {"id": "m_3", "from": "ws_a", "ticket": "t_genr0001", "general": True},
+        ],
+    )
+    assert sorted(Scheduler(ws).tick(T(8))) == ["t_genr0001", "t_move0001"]
+    assert sorted(runs_started(ws)) == ["t_genr0001", "t_move0001"]
+    assert {k: v.get("run") for k, v in _picked(ws).items()} == {"m_1": "r_1", "m_2": "r_1", "m_3": "r_1"}
+    assert Scheduler(ws).tick(T(9)) == [] and len(runs_started(ws)) == 2
+
+
+def test_workspace_text_on_a_running_ticket_starts_nothing_and_a_paused_one_says_why(ws):
+    relay_on(ws, [])
+    add_ticket(ws, "t_busy0001", title="Busy")  # no ended- file: the fake says a run holds it
+    add_ticket(ws, "t_off00001", title="Off", ext={"automation": {"paused": True}})
+    _pickups(
+        ws,
+        [
+            {"id": "m_4", "from": "ws_a", "ticket": "t_busy0001", "general": False},
+            {"id": "m_5", "from": "ws_a", "ticket": "t_off00001", "general": False},
+        ],
+    )
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
+    got = _picked(ws)
+    assert got["m_4"]["run"] and "switched off" in got["m_5"]["not_started"]
+
+
+def test_workspace_text_whose_helper_cannot_start_is_recorded_once(ws):
+    relay_on(ws, [])
+    add_ticket(ws, "t_move0002", title="Move")
+    (ws / "ended-t_move0002").write_text("")
+    (ws / "noagent").write_text("")
+    _pickups(ws, [{"id": "m_6", "from": "ws_a", "ticket": "t_move0002", "general": False}])
+    Scheduler(ws).tick(T(8))
+    assert _picked(ws)["m_6"].get("not_started")
+    n = len(runs_started(ws))
+    Scheduler(ws).tick(T(9))
+    assert len(runs_started(ws)) == n, "never tried again and again"
