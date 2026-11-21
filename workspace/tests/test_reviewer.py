@@ -381,6 +381,22 @@ def test_a_part_with_no_task_is_decided_once(proj, run, new_ticket, facts, on, n
     assert len(_lines(proj, tid)) == before and no_starts == []
 
 
+def test_an_open_pull_request_in_the_queue_starts_no_helper(proj, run, new_ticket, facts, on, no_starts):
+    """ORCH-815: the queue merges it or wakes the helper with its reason; sending it back only woke a helper
+    that could do nothing but wait."""
+    facts["facts"]["state"] = "OPEN"
+    tid = _finished(proj, run, new_ticket)
+    url = PR
+    qfile = proj / ".orch" / "addons" / "pull-requests" / "queue.json"
+    qfile.parent.mkdir(parents=True, exist_ok=True)
+    qfile.write_text(json.dumps({"entries": [{"url": url, "state": "running", "ticket": tid}]}))
+    reviewer.run(proj)
+    assert tickets.load(proj, tid)["status"] == "review" and no_starts == []
+    qfile.write_text(json.dumps({"entries": [{"url": url, "state": "out", "ticket": tid}]}))
+    reviewer.run(proj)  # out of the queue and still open: back to the helper as before
+    assert tickets.load(proj, tid)["status"] == "ready" and no_starts == [tid]
+
+
 def test_missing_work_goes_back_even_with_a_part_with_no_task(proj, run, new_ticket, facts, on, no_starts):
     facts["facts"]["state"] = "OPEN"
     tid = _real(proj, run, new_ticket, "unbuilt")
