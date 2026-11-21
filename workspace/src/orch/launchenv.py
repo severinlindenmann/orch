@@ -5,7 +5,8 @@ so replaying it would let such a process choose what the restarted service runs 
 service with the CALLER's environment plus exactly three overrides that come from the system, not a record:
 
   HOME      the current user's home from the password database (a test or sandbox HOME must not decide
-            where the agent login is looked for)
+            where the agent login is looked for); except in a test install (ORCH_HOME_STRICT), where the
+            caller's test HOME stays, so a restarted test dashboard never sees or writes the real home's files
   ORCH_HOME the orch folder in use now
   ORCH_ROOT the verified workspace folder (set by services._call)
 
@@ -63,10 +64,17 @@ def user_home() -> Path | None:
     return home if home.is_absolute() and home.is_dir() else None
 
 
+def strict() -> bool:
+    """A test install: ORCH_HOME_STRICT (anything but empty or 0), the same test as orch.addons.home()."""
+    return os.environ.get("ORCH_HOME_STRICT", "") not in ("", "0")
+
+
 def overrides(orch_home: Path) -> tuple[dict[str, str], list[str]]:
-    """(variables to set over the caller's environment, notes). HOME is left as the caller's when the system
-    cannot tell the user's home (and a note says so)."""
+    """(variables to set over the caller's environment, notes). HOME is left as the caller's in a test install
+    (ORCH_HOME_STRICT) and when the system cannot tell the user's home (then a note says so)."""
     out, notes = {"ORCH_HOME": str(orch_home)}, []
+    if strict():
+        return out, notes
     home = user_home()
     if home is not None:
         out["HOME"] = str(home)
@@ -78,6 +86,12 @@ def overrides(orch_home: Path) -> tuple[dict[str, str], list[str]]:
 def apply(base: dict[str, str], over: dict[str, str]) -> dict[str, str]:
     """The caller's environment with the overrides on top (nothing else changes)."""
     return {**base, **over}
+
+
+def home_said(over: dict[str, str], used: dict[str, str]) -> str:
+    """Which HOME a restart used, for the line a person reads: the path and where it came from."""
+    where = "this user's home folder" if "HOME" in over else "this terminal's"
+    return f"HOME {used.get('HOME', '(not set)')} ({where})"
 
 
 def differs(recorded: object, used: dict[str, str]) -> list[str]:
