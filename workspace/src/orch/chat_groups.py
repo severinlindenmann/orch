@@ -33,7 +33,7 @@ import time
 import zlib
 from pathlib import Path
 
-from orch import net, phone_view, tickets
+from orch import history, net, phone_view, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -2039,11 +2039,11 @@ def chat_of_ticket(root: Path, tid: str, g: dict | None = None) -> dict:
     names = {_by_name(g, ws): m.get("name") for ws, m in (g or {}).get("members", {}).items()}
     host = (g or {}).get("host")
     lines = []
-    for h in t.get("history", []):
+    for h in history.lines(root, t):
         if not (isinstance(h, dict) and h.get("chat_message") is True and isinstance(h.get("text"), str)):
             continue
         by = str(h.get("by") or "")
-        if by.startswith("human:"):
+        if history.is_person_line(h):
             who, name = "person", ""
         elif by in names and by != _by_name(g or {}, host or ""):
             who, name = "member", _line(names[by] or "", 60)
