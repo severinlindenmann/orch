@@ -156,6 +156,23 @@ def created(kind: str, obj) -> None:
         _CREATED[id(obj)] = (kind, obj)
 
 
+def created_lines(ticket: dict) -> list[dict]:
+    """The history lines core made for `ticket` in this process and not yet recorded (by identity). Read only:
+    tickets._write lets the people list stamp them (people.stamp) before their digest is taken."""
+    lines = ticket.get("history") if isinstance(ticket, dict) else None
+    if not isinstance(lines, list):
+        return []
+    with _CREATED_LOCK:
+        if not _CREATED:
+            return []
+        out = []
+        for h in lines:
+            hit = _CREATED.get(id(h))
+            if hit is not None and hit[1] is h and hit[0] == "lines":
+                out.append(h)
+        return out
+
+
 def _take_created(ticket: dict) -> dict[str, list]:
     """The marked objects that are in `ticket` (by identity, never by content), removed from the marks."""
     found: dict[str, list] = {k: [] for k in KINDS}
