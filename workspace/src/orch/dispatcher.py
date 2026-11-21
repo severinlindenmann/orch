@@ -95,9 +95,10 @@ def budget_accounts(root: Path, now: float | None = None) -> list[dict]:
 
 def pace(accounts: list[dict], now: float) -> dict | None:
     """{"ratio": budget left / budget the time left would use on pace, "used": combined week %, "short_full":
-    every account reports its 5-hour window used up}, or None when nothing is known. ratio 1.0 = on pace."""
+    every account reports its 5-hour window used up, "none_free": every account is at its week or 5-hour
+    limit}, or None when nothing is known. ratio 1.0 = on pace."""
     left = want = cap_sum = used_sum = 0.0
-    short_full = 0
+    short_full = blocked = 0
     for a in accounts:
         used = max(0.0, _num(a.get("week_used")) or 0.0)
         cap = _num(a.get("week_cap"))
@@ -109,9 +110,12 @@ def pace(accounts: list[dict], now: float) -> dict | None:
         cap_sum += cap
         used_sum += min(used, cap)
         s_used, s_cap = _num(a.get("short_used")), _num(a.get("short_cap"))
+        s_full = False
         if s_used is not None:
             s_cap = 100.0 if s_cap is None or s_cap <= 0 else s_cap
-            short_full += s_used >= s_cap
+            s_full = s_used >= s_cap
+            short_full += s_full
+        blocked += s_full or used >= cap  # this account cannot take a helper now
     if not cap_sum:
         return None
     if left <= 0:
@@ -124,6 +128,8 @@ def pace(accounts: list[dict], now: float) -> dict | None:
         "ratio": ratio,
         "used": round(100.0 * used_sum / cap_sum, 1),
         "short_full": short_full == len(accounts),  # an account with no 5-hour number may still have room
+        # every account at one of its limits (one at its week, another at its 5 hours): none can run a helper
+        "none_free": blocked == len(accounts),
     }
 
 
@@ -148,6 +154,8 @@ def target(root: Path, now: float | None = None, load=None) -> dict:
         n, why = h, f"budget unknown: {h} helpers"
     elif p["short_full"]:
         n, why = 0, "every 5-hour window is used up"
+    elif p["none_free"]:
+        n, why = 0, "every account is at its weekly or 5-hour limit"
     elif p["ratio"] <= 0:
         n, why = 0, f"the weekly budget is used up ({p['used']:g} %)"
     else:

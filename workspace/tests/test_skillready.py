@@ -31,6 +31,14 @@ def test_header_metadata_is_read(tmp_path):
     assert skillready.metadata(tmp_path / "broken") == {}
 
 
+def test_a_quoted_value_with_a_comment_after_it(tmp_path):
+    folder = tmp_path / "gh"
+    folder.mkdir()
+    head = "---\nname: gh\nmetadata:\n  requires: \"gh\" # GitHub CLI\n  owner: 'Severin'\n---\nBody\n"
+    (folder / "SKILL.md").write_text(head)
+    assert skillready._fallback_header(head)["metadata"] == {"requires": "gh", "owner": "Severin"}
+
+
 def test_missing_programs_logins_and_addons(proj, monkeypatch):
     monkeypatch.setattr(skillready.shutil, "which", lambda p: "/usr/bin/git" if p == "git" else None)
     monkeypatch.setattr(skillready, "_login_names", lambda root: {"have-login"})

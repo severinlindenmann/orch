@@ -43,8 +43,8 @@ def _fallback_header(text: str) -> dict:
         value = value.strip()
         if value[:1] not in ('"', "'"):
             value = value.split(" #", 1)[0].rstrip()  # an inline YAML comment
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
+        elif (end := value.find(value[0], 1)) > 0:  # a quoted value, maybe with a comment after it
+            value = value[1:end]
         if indented and in_meta:
             meta[key.strip()] = value
         elif not indented:

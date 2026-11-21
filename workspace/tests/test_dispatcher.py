@@ -127,6 +127,13 @@ def test_one_full_5_hour_window_is_not_all_and_a_past_reset_aims_high(proj, calm
     assert dispatcher.target(proj, NOW)["target"] == 4
 
 
+def test_one_account_at_its_week_and_the_other_at_its_5_hours_starts_nothing(proj, calm):
+    _on(proj, 2)
+    _budget(proj, [_week(100, 84, short=10), _week(20, 84, short=100)])  # neither can take a helper now
+    got = dispatcher.target(proj, NOW)
+    assert got["target"] == 0 and "weekly or 5-hour limit" in got["why"]
+
+
 @pytest.mark.parametrize(
     "doc",
     [

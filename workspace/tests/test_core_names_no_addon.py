@@ -33,8 +33,9 @@ ALLOW = {
     "orch/chat.py": {"automation": _FOLLOW_UP},
     "orch/tickets.py": {
         "dashboard": "PERSON_VIA: the one named compat constant (wire value of contracts/chat-groups.md)",
-        "pull-requests": "ORCH-568/ORCH-815: in_merge_queue reads the merge queue file and a pull request wait "
-        "needs the add-on on (moved here from tend.py); follow-up like #837 (a manifest key instead of the name)",
+        "pull-requests": "ORCH-568/ORCH-815: in_merge_queue reads the merge queue file and a pull request "
+        "wait needs the add-on on (moved here from tend.py); follow-up like #837 (a manifest key instead "
+        "of the name)",
     },
     "orch/pagesession.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
     "orch/pagelaunch.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
