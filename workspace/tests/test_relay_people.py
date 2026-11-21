@@ -261,3 +261,51 @@ def test_a_refused_answer_sends_the_question_to_the_phones_again(proj, run, rel,
     new_qmid = next(m["id"] for m in reversed(rel.sent) if m.get("type") == "question")
     _answer(rel, run, "m_ans0000000000010", MAX, tid, new_qmid)
     assert tickets.load(proj, tid)["questions"][0]["answered_by"] == "human:" + team["max"]
+
+
+# ---- second outside look (Codex) at the fixes
+
+
+def test_a_slot_start_after_a_phone_answer_keeps_that_phone(proj, team, new_ticket, monkeypatch):
+    from orch import runs_live
+
+    people.set_rights(proj, "Max", ["write", "decide", "start"])
+    tid = new_ticket()
+    monkeypatch.setattr(tickets, "now", lambda: "2099-01-01T00:00:00Z")
+    with people.acting((team["max"], MAX)):
+        runs_live._queue_for_slot(proj, tid, "human:" + team["max"], "start please")
+    slot = next(i for i in runs.undelivered(proj, tid) if i.get("via") == "slots")
+    assert slot["phone"] == MAX
+    assert people.phone_may_start(proj, MAX, slot["at"])
+    people.cut(proj, MAX)
+    assert not people.phone_may_start(proj, MAX, slot["at"])  # start_waiting skips it
+
+
+def test_answer_records_are_never_dropped_and_an_unknown_phone_answer_is_refused(proj, team):
+    people.set_rights(proj, "Max", ["write", "decide", "start"])
+    by = "human:" + team["max"]
+    people.remember_answer(proj, "t_first", "q1", MAX)
+    people.cut(proj, MAX)
+    for i in range(210):
+        people.remember_answer(proj, f"t_{i}", "q1", LEA)
+    assert not people.answer_still_ok(proj, "t_first", "q1", by, "decide", "start", via="phone")
+    assert not people.answer_still_ok(proj, "t_none", "q1", by, "decide", "start", via="phone")
+    assert people.answer_still_ok(proj, "t_none", "q1", by, "decide", "start", via="dashboard")
+
+
+def test_with_the_list_off_person_ids_are_not_checked(proj, team, new_ticket):
+    tid = new_ticket()
+    runs.pending_add(proj, tid, "human:" + team["max"], "answer", "Tue", "phone")
+    people.path(proj).rename(people.path(proj).with_name("people.json.away"))
+    assert len(runs.human_waiting(proj, tid)) == 1  # as before the list existed
+
+
+def test_a_phone_answer_queued_for_a_helper_keeps_its_phone(proj, team, new_ticket, monkeypatch):
+    people.set_rights(proj, "Max", ["write", "decide", "start"])
+    tid = new_ticket()
+    monkeypatch.setattr(tickets, "now", lambda: "2099-01-01T00:00:00Z")
+    with people.acting((team["max"], MAX)):
+        runs.pending_add(proj, tid, "human:" + team["max"], "answer", "Tue", "phone")
+    assert [i["phone"] for i in runs.human_waiting(proj, tid)] == [MAX]
+    people.cut(proj, MAX)
+    assert runs.human_waiting(proj, tid) == []  # the cut phone's answer starts nothing

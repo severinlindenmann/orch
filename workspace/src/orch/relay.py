@@ -2947,7 +2947,7 @@ def apply_allow_answers(root: Path) -> list[str]:
                 q.get("via") or "cli",
                 q.get("answered_by") or "unknown",
             )
-            still = people.answer_still_ok(root, t["id"], q["id"], by, "decide", "start")
+            still = people.answer_still_ok(root, t["id"], q["id"], by, "decide", "start", via=via)
             if choice != "ignore" and not still:
                 # ORCH-1161: an allow answered by a person of the list is checked again when it takes effect
                 # (removed, or a right taken away since): not applied, said once

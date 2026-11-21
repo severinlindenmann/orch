@@ -489,6 +489,8 @@ def _pending_add_locked(
         "kind": kind,
         "text": text,
     }
+    if phone is None:
+        phone = people.acting_phone()  # queued while a phone's message is handled: checked when it starts
     if phone is not None and not tool and PHONE_ID_RE.fullmatch(str(phone)):
         item["phone"] = phone  # the relay's phone-text path: the sender's phone id
     item["human"] = not tool and _human_author(by, via, kind, item.get("phone"))

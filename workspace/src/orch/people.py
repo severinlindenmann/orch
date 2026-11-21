@@ -566,6 +566,12 @@ def acting(who: tuple[str, str] | None):
         _ACTING.reset(token)
 
 
+def acting_phone() -> str | None:
+    """The phone whose message is being handled (inside acting), else None."""
+    who = _ACTING.get()
+    return who[1] if who is not None else None
+
+
 def phone_actor(phone: str) -> str | None:
     """`human:pr_...` while the people check let this phone in (inside acting), else None."""
     who = _ACTING.get()
@@ -719,7 +725,7 @@ def person_may(root: Path, by: str, *rights: str) -> bool:
         doc = load(root)
     except Broken:
         return False
-    return doc is not None and may(doc, pid, *rights)
+    return doc is None or may(doc, pid, *rights)  # list off: nothing is checked, as before
 
 
 def _answers_path(root: Path) -> Path:
@@ -736,13 +742,13 @@ def remember_answer(root: Path, tid: str, qid: str, phone: str) -> None:
         d[f"{tid}/{qid}"] = phone
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_name(p.name + f".{os.getpid()}.tmp")
-        tmp.write_text(json.dumps(dict(list(d.items())[-200:])), encoding="utf-8")
+        tmp.write_text(json.dumps(d), encoding="utf-8")  # never trimmed: a lost record would allow
         os.replace(tmp, p)
 
 
-def answer_still_ok(root: Path, tid: str, qid: str, by: str, *rights: str) -> bool:
+def answer_still_ok(root: Path, tid: str, qid: str, by: str, *rights: str, via: str | None = None) -> bool:
     """person_may, plus: when a phone of the list answered it, that phone is still paired, tied to the same
-    person and not cut."""
+    person and not cut. A phone answer whose phone is not known (record missing) is refused (fail closed)."""
     if not person_may(root, by, *rights):
         return False
     pid = by[6:] if isinstance(by, str) and by.startswith("human:") else None
@@ -753,7 +759,7 @@ def answer_still_ok(root: Path, tid: str, qid: str, by: str, *rights: str) -> bo
     except (OSError, ValueError, AttributeError):
         phone = None
     if not phone:
-        return True  # answered at this computer (or before this was kept): person_may decided
+        return via != "phone"  # answered at this computer: person_may decided; a phone we can't name: no
     try:
         doc = load(root)
     except Broken:
