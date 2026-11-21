@@ -3,6 +3,13 @@
    shows why it waits on you (need). Order: most urgent first. */
 window.SWIPE_KIT='../../../../workspace/src/orch_ui/static/';
 window.SWIPE_ITEMS=[
+ /* Stuck work (ORCH-1108): Home's rows of work that stopped, as cards first in line, with Home's own buttons and Open
+    (the ticket, same tab). No Looks good / Don't do: there is nothing to approve. A row with no button (a helper waiting
+    for an OK on its screen) shows Open alone. */
+ {id:'s1',kind:'stuck',kindLabel:'Stuck',icon:'pause',ticket:'DT-53',ticketId:'DT-53',ticketTitle:'Booking form',when:'today 11:12',title:'The checks of the step "Send the booking mail" failed 3 times in a row.',
+  href:'../ticket/ticket.html',preview:{type:'doc'},answers:[{label:'Nudge',picked:'nudge'},{label:'Start fresh',picked:'fresh'}]},
+ {id:'s2',kind:'stuck',kindLabel:'Stuck',icon:'pause',ticket:'DT-54',ticketId:'DT-54',ticketTitle:'Menu page',when:'today 10:55',title:'The helper has waited 6 min for your OK on its screen.',
+  href:'../ticket/ticket.html',preview:{type:'doc'}},
  /* A CI workflow change the owner merges (ORCH-305, ORCH-429): the changed lines with the risky ones red, the check's words
     first, and "Safe to merge" only when a script check found nothing. The click approves and merges this exact version. */
  {id:'m1',kind:'link',kindLabel:'Merge',icon:'link',ticket:'ORCH-512',ticketId:'ORCH-512',ticketTitle:'Release builds upload the app',when:'today 11:40',title:'Merge the CI workflow change of ORCH-512?',
