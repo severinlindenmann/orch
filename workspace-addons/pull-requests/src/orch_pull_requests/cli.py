@@ -412,13 +412,15 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             print(f"{args.url} does not wait in the merge queue.")
             return 1
-        from .runner import admit
+        from .runner import _release_fix, admit
 
         url = store.canonical(args.url)
         ticket = _ticket(root, args.ticket, url)
         old = store.find(store.read(root), url)
         seen = {} if old and old.get("state") not in FINISHED else admit(root, _github(), url)
-        row, new = store.add(root, url, ticket, _actor(), first=args.first, **seen)
+        # a release keeper's red-run fix goes first by itself (ORCH-1023)
+        first = args.first or _release_fix(root, ticket)
+        row, new = store.add(root, url, ticket, _actor(), first=first, **seen)
         start_runner(root)
         if not args.wait:
             ahead = [x for x in store.read(root) if x.get("state") not in FINISHED and x["url"] != url]

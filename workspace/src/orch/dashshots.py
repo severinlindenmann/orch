@@ -42,6 +42,7 @@ PAGES = {
     "home": "Home",
     "tickets": "Tickets",
     "ticket": "A ticket",
+    "new": "New ticket",
     "review": "Review",
     "chat": "Chat",
     "settings": "Settings",
@@ -49,8 +50,8 @@ PAGES = {
 WEB = "workspace-addons/dashboard/src/orch_dashboard/web/"
 SERVER = "workspace-addons/dashboard/src/orch_dashboard/"
 KIT = "workspace/src/orch_ui/static/"
-# A page's own files (web/pages/<name>.js|css) change only that page; newticket is the form opened from Home.
-OWN = {"newticket": "home"}
+# A page's own files (web/pages/<name>.js|css) change only that page; newticket is the New ticket page (#new).
+OWN = {"newticket": "new"}
 MAX_PNG = 4 * 1024 * 1024
 MAX_SHEET = 9 * 1024 * 1024  # under the card's 10 MB for one file (review.MAX_FILE)
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"

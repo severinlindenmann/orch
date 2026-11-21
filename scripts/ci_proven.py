@@ -4,7 +4,8 @@
 The merge queue checks a group of pull requests on top of develop (branch `orch-queue/...`, the full suite) and
 merges the group with a merge commit. When that merge commit has exactly the files of the group commit (same git
 tree), the push to develop would run the very same tests on the very same files again. This answers `true` then,
-and ci.yml skips every suite of that push; macOS and Windows still run nightly and in the release check.
+and ci.yml skips every suite of that push; macOS still runs nightly and in the release check. For now (ORCH-1106)
+the click-throughs and the Windows parts still run on that push, because queue groups skip them.
 
 Proven = the commit has two parents, its tree equals the tree of its second parent, and a `ci` pull request run of
 that second parent on an `orch-queue/` branch finished green with its `gate` job run and green (not skipped: a group the

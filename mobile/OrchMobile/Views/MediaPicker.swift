@@ -25,6 +25,8 @@ enum MediaSelection: Equatable {
 
 @MainActor
 struct MediaPicker: View {
+    /// Adding to a review answer (ORCH-444): no location, no caption; the files go back to the comment sheet, nothing is sent yet.
+    var forAnswer = false
     var onPick: (MediaSelection) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var libraryOpen = false
@@ -114,8 +116,13 @@ struct MediaPicker: View {
         }
     }
 
+    private var sendLabel: String {
+        if forAnswer { return drafts.count > 1 ? "Add \(drafts.count) to the answer" : "Add to the answer" }
+        return drafts.count > 1 ? "Send \(drafts.count) photos" : "Send photo"
+    }
+
     private var title: String {
-        switch step { case .choices: "Add to chat"; case .preview: "Preview"; case .location: "Current location" }
+        switch step { case .choices: forAnswer ? "Add to your answer" : "Add to chat"; case .preview: "Preview"; case .location: "Current location" }
     }
 
     private var choices: some View {
@@ -140,10 +147,12 @@ struct MediaPicker: View {
                 MediaTile(label: "Files", icon: "doc", color: Theme.warn)
             }
             .accessibilityLabel("Files").accessibilityIdentifier(fileChoiceID)
-            Button {
-                errorText = nil; step = .location; locationRequest = UUID()
-            } label: { MediaTile(label: "Location", icon: "mappin.and.ellipse", color: Theme.brand) }
-            .accessibilityLabel("Location").accessibilityIdentifier("media-location")
+            if !forAnswer {
+                Button {
+                    errorText = nil; step = .location; locationRequest = UUID()
+                } label: { MediaTile(label: "Location", icon: "mappin.and.ellipse", color: Theme.brand) }
+                .accessibilityLabel("Location").accessibilityIdentifier("media-location")
+            }
         }
         .buttonStyle(.plain)
         .disabled(busy)
@@ -227,18 +236,20 @@ struct MediaPicker: View {
                     }
                 }
             }
-            TextField("Add a caption...", text: $caption, axis: .vertical)
-                .themeFont(17).padding(12).frame(minHeight: 44)
-                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(Theme.border))
-                .accessibilityLabel("Add a caption")
-                .accessibilityIdentifier("media-caption")
+            if !forAnswer {
+                TextField("Add a caption...", text: $caption, axis: .vertical)
+                    .themeFont(17).padding(12).frame(minHeight: 44)
+                    .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(Theme.border))
+                    .accessibilityLabel("Add a caption")
+                    .accessibilityIdentifier("media-caption")
+            }
             Button {
                 let text = caption.trimmingCharacters(in: .whitespacesAndNewlines)
                 pick(.files(drafts, caption: text.isEmpty ? nil : text))
-            } label: { Text(drafts.count > 1 ? "Send \(drafts.count) photos" : "Send photo") }
+            } label: { Text(sendLabel) }
             .buttonStyle(MediaActionStyle(primary: true)).disabled(drafts.isEmpty)
-            .accessibilityLabel(drafts.count > 1 ? "Send \(drafts.count) photos" : "Send photo")
+            .accessibilityLabel(sendLabel)
             .accessibilityIdentifier("media-send")
             Button {
                 removePrepared(drafts)

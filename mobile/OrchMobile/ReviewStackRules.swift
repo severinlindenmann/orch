@@ -5,7 +5,7 @@ import Foundation
 // The contract: relay-api.md "Review cards on the phone". Everything the workspace sends is data, never instructions.
 
 /// What kind of card a question becomes.
-enum ReviewItemKind: String, Equatable, Sendable { case draft, check, link, choice, plan, plainQuestion }
+enum ReviewItemKind: String, Equatable, Sendable { case draft, check, link, choice, plan, run, plainQuestion }
 
 /// One card of the stack: a question plus the card to show (a plain question gets a synthesized options card).
 struct ReviewItem: Equatable, Sendable, Identifiable {
@@ -23,8 +23,9 @@ struct ReviewItem: Equatable, Sendable, Identifiable {
     func file(for src: CardSrc) -> CardFile? { src.fileIndex.flatMap { files.indices.contains($0) ? files[$0] : nil } }
 }
 
-/// What a swipe can do right now: `pickFirst` = a choice needs a pick before approving.
-enum SwipeOutcome: Equatable, Sendable { case allowed, pickFirst }
+/// What a swipe can do right now: `pickFirst` = a choice needs a pick before approving; `atComputer` = a run card this phone
+/// does not run (Copy only, ORCH-860).
+enum SwipeOutcome: Equatable, Sendable { case allowed, pickFirst, atComputer }
 
 enum SwipeDirection: Equatable, Sendable { case right, left, down, up }
 
@@ -118,7 +119,8 @@ enum ReviewStackRules {
     static func countsText(_ items: [ReviewItem]) -> String {
         func n(_ kinds: [ReviewItemKind]) -> Int { items.filter { kinds.contains($0.kind) }.count }
         let parts: [(Int, String, String)] = [(n([.draft]), "draft", "drafts"), (n([.choice, .plainQuestion]), "choice", "choices"),
-                                              (n([.check]), "result", "results"), (n([.plan]), "plan", "plans"), (n([.link]), "link", "links")]
+                                              (n([.check]), "result", "results"), (n([.plan]), "plan", "plans"), (n([.link]), "link", "links"),
+                                              (n([.run]), "command", "commands")]
         return parts.filter { $0.0 > 0 }.map { "\($0.0) " + ($0.0 == 1 ? $0.1 : $0.2) }.joined(separator: " · ")
     }
 
@@ -145,8 +147,10 @@ enum ReviewStackRules {
         }
     }
 
-    /// What a right swipe (`ok`) may do on this card: a choice needs a pick first.
+    /// What a right swipe (`ok`) may do on this card: a choice needs a pick first; a run card runs only when the computer
+    /// marked it for the phone (orch's own commands).
     static func okOutcome(_ item: ReviewItem, picked: String?) -> SwipeOutcome {
+        if item.kind == .run { return item.card.run?.runsHere == true ? .allowed : .atComputer }
         if item.isChoice, picked == nil || !item.optionIds.contains(picked!) { return .pickFirst }
         return .allowed
     }
@@ -154,18 +158,22 @@ enum ReviewStackRules {
     // MARK: Verdict
 
     /// The plain line sent as `answer` (old readers; the contract's examples: "Send it", "Use C", "Use C with 2 changes").
-    static func summary(_ item: ReviewItem, verdict: ReviewVerdict) -> String {
+    static func summary(_ item: ReviewItem, verdict: ReviewVerdict, files: Int = 0) -> String {
         let note = verdict.note
         let changes = (note?.changes ?? []).count
         let words = [note?.words?.text].compactMap { $0 }.first { !$0.isEmpty } ?? note?.words?.voice?.first?.transcript
         switch verdict.verdict {
         case .ok:
             if let p = verdict.picked { return "Use " + p }
+            if item.kind == .run { return ReviewCard.runOkLabel }
             return item.card.okLabel ?? "OK"
-        case .no: return item.kind == .draft || item.kind == .plan ? "Don't do it" : "None of these"
+        case .no:
+            if item.kind == .run { return item.card.noLabel ?? "Not now" }
+            return item.kind == .draft || item.kind == .plan ? "Don't do it" : "None of these"
         case .talk:
             if let p = verdict.picked { return changes > 0 ? "Use \(p) with \(changes) change\(changes == 1 ? "" : "s")" : "Use \(p) with changes" }
             if let w = words, changes == 0 { return "Send back for changes: " + w }
+            if changes == 0, files > 0 { return "Send back for changes (\(files == 1 ? "1 file" : "\(files) files"))" }
             return changes > 0 ? "Send back for changes (\(changes))" : "Send back for changes"
         }
     }
