@@ -80,8 +80,8 @@ def test_example_denominators_inventory_and_privacy(answer):
     assert view["tabs"]["connections"]["known"] is True
     row = build_list(answer, "skills")["rows"][0]
     assert row["name"] == "Invoice export"
-    assert row["numbers"] == "5 of the 23 times helpers worked"
-    assert row["unseen"] == "Can't tell for 4 of the times helpers worked"
+    assert row["numbers"] == "5 of 23 runs"
+    assert row["unseen"] == "4 runs can't tell"
     assert row["label"] == "Working well"
     connections = build_list(answer, "connections")["rows"]
     assert any(row["name"] == "Google Drive" for row in connections)
@@ -122,11 +122,9 @@ def test_contract_vectors(case, nothing):
             assert row["uses"] is None and row["numbers"] == "Can't tell yet"
             assert row["label"] == "Can't tell yet"
         else:
-            assert (
-                row["numbers"] == f"{entry['runs']['used']} of the {entry['runs']['of']} times helpers worked"
-            )
+            assert row["numbers"] == f"{entry['runs']['used']} of {entry['runs']['of']} runs"
         if entry["runs"]["unseen"] == 1:
-            assert row["unseen"] == "Can't tell for 1 of the times helpers worked"
+            assert row["unseen"] == "1 run can't tell"
 
 
 def test_all_health_labels_and_sorting(answer):
@@ -400,7 +398,7 @@ def test_frontend_text_only_and_refresh():
     assert "textContent" in js and "createElement" in js
     assert "setInterval(refresh, 30000)" in js and "document.hidden" in js
     assert "row.uses === null" in js
-    assert "Fills after a helper’s first work" in js
+    assert "Fills after the first helper run" in js
     assert "dataset.prefix" in js
     for word in ("MCP", "NetBird", "VPN"):
         assert word not in js

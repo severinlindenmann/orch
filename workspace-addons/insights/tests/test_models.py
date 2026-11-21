@@ -38,7 +38,7 @@ def test_projection():
     assert view["empty"] is False
     assert [m["label"] for m in view["models"]] == ["Sonnet", "Opus"]  # zero rows dropped, fixed order
     assert [m["tokens"] for m in view["models"]] == [5000, 1000]
-    assert view["moved_text"] == "1 of 4 tickets needed the stronger helper"
+    assert view["moved_text"] == "1 of 4 tickets moved up to Opus"
     assert [t["key"] for t in view["tickets"]] == ["ORCH-2", "ORCH-1"]
     assert view["tickets"][0]["parts"] == [
         {"name": "sonnet", "label": "Sonnet", "tokens": 5000},
@@ -49,7 +49,7 @@ def test_projection():
 
 def test_empty_and_errors():
     assert build_models(usage(totals={}, tickets=[])) == {"empty": True, "text": EMPTY, "team": None}
-    assert EMPTY == "No helper work in the last 30 days."
+    assert EMPTY == "No model use in the last 30 days."
     for bad in (None, [], {"schema": "other/1"}):
         assert build_models(bad) == {"error": ERROR}
 
@@ -66,7 +66,7 @@ def test_route(server, fake_orch):
     (fake_orch.parent / "usage.json").write_text(json.dumps(usage()))
     code, _headers, body = request(server, "/api/models")
     assert code == 200
-    assert json.loads(body)["moved_text"] == "1 of 4 tickets needed the stronger helper"
+    assert json.loads(body)["moved_text"] == "1 of 4 tickets moved up to Opus"
     assert json.loads((fake_orch.parent / "call.json").read_text())["args"] == [
         "tokens",
         "--days",

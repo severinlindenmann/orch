@@ -62,7 +62,7 @@ module.exports = {
     // the page polls: the epic's tickets may be drawn a moment after the epic itself
     const listed = await page.waitForFunction(() => {
       const t = document.querySelector('main')?.innerText || '';
-      return t.includes('Parts') && t.includes('Book the stand') && t.includes('Order the banner');
+      return t.includes('Tickets in this epic') && t.includes('Book the stand') && t.includes('Order the banner');
     }, null, { timeout: 30000 }).then(() => true, () => false);
     const shown = await text();
     must(listed, 'the epic page does not list its tickets: ' + shown.replace(/\s+/g, ' ').slice(0, 300));

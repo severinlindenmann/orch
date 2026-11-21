@@ -35,7 +35,7 @@ test('helpers: time and money words, totals, stuck lines, this week', () => {
   const now = Date.parse('2026-11-18T12:00:00Z');
   assert.equal(helpers.stuckWords({stuck:'question', questions:[{sent_at:'2026-11-15T12:00:00Z'}]}, now), 'Question waits 3 days');
   assert.equal(helpers.stuckWords({stuck:'question', questions:[{asked_at:'2026-11-16T12:00:00Z'}]}, now), 'Question waits 2 days');
-  assert.equal(helpers.stuckWords({stuck:'quiet', quiet_since:'2026-11-17T10:00:00Z'}, now), 'Quiet for 26 h');
+  assert.equal(helpers.stuckWords({stuck:'quiet', quiet_since:'2026-11-17T10:00:00Z'}, now), 'No news for 26 h');
   assert.equal(helpers.stuckWords({stuck:'overdue'}, now), 'Past its due date');
   assert.equal(helpers.stuckWords({}, now), '');
   const wed = new Date(2026, 10, 18, 12).getTime(), monday = new Date(2026, 10, 16).getTime();

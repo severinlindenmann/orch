@@ -57,7 +57,7 @@ def test_optional_done_when_in_new_and_edit_dialog():
     assert "t ? ['owner', 'due', 'note', 'done_when'] : []" in js
     assert "input.name = field" in js
     assert "input.rows = 4; input.maxLength = 2000" in js
-    assert "Optional. Say it in your own words, the helper turns it into tasks." in js
+    assert "Optional. Say it in your own words, the helper turns it into steps." in js
     assert "'More options'" not in js  # the optional fields are shown plainly
     assert "key === 'done_when' ? input.value : input.value.trim()" in js
 

@@ -292,8 +292,8 @@ def test_inventory_only_rows_and_panel(answer):
     assert panel["first_seen"] == "2 Nov 2026" and panel["last_seen"] == "16 Nov 2026"
     assert panel["numbers"] == [
         "7 uses: 6 ok, 1 failed, 0 refused",
-        "Used 5 of the 23 times helpers worked",
-        "Can't tell for 4 of the times helpers worked",
+        "Used in 5 of 23 runs",
+        "4 runs can't tell",
     ]
     assert build_detail(answer, "skills", skill["key"]) == panel
     assert build_detail(answer, "skills", "not-there") is None

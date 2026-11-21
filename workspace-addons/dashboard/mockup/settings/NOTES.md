@@ -114,7 +114,7 @@ Shared-system fix requested: `input.switch` needs explicit 36 × 24 px dimension
 
 ### settings-phone.html
 - Pairing stays in Settings and uses the relay connection; it does not open the relay server.
-- Relay status, address, Set up relay and Reconnect now come before the phone controls, with “Your phone talks to this workspace through your phone link.”
+- Relay status, address, Set up relay and Reconnect now come before the phone controls, with “Your phone talks to this workspace through your relay.”
 - Empty shows no relay, a disabled Pair a phone button and “Connect to your relay first”; `?relay=disconnected` shows the reconnect case.
 - Setup and reconnect demonstrate enabling pairing locally; no real connection is made.
 
@@ -244,7 +244,7 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 ### settings-about.html (owner feedback 14 Nov, fb1)
 - New tab "About & updates": installed release, newest release, "What changed" (max 5 plain lines), one Update button, steps (Downloading / Installing / Restarting / Done) and "Updated 16 → 17". Click the button to see the steps.
 - 16 Nov (ORCH-89): the About card (Style guide row) moved here from General, below Automatic.
-- 17 Nov (ORCH-5, issue 957): the Installed line says plainly where this orch came from: a quiet "Release" badge, or an amber "Test version" badge with the branch. Under a development build's name: "The newest changes, not yet tested as a release." One outline button switches ("Switch to test version" / "Switch to release") with the what-happens line beside it (manager, 17 Nov: no branch names, button words by the button); it runs the same `orch update` as the Update button. A development build also shows the amber "Test version" badge in the top bar (a link to this tab). Click the switch button to see both states.
+- 17 Nov (ORCH-5, issue 957): the Installed line says plainly where this orch came from: a quiet "Release" badge, or an amber "Development build" badge with the branch. Under a development build's name: "The newest changes, not yet tested as a release." One outline button switches ("Switch to development build" / "Switch to release") with the what-happens line beside it (manager, 17 Nov: no branch names, button words by the button); it runs the same `orch update` as the Update button. A development build also shows the amber "Development build" badge in the top bar (a link to this tab). Click the switch button to see both states.
 
 - Owner 14 Nov (fb11/fb24): Set up relay is no longer a button/dialog; when no relay is connected the card lists the 3 plain steps (admin page, paste the orch relay connect line, Check again); Pair a phone shows only once connected.
 
@@ -253,7 +253,7 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 - Settings › General: Name and Description are edited in place (Edit, then Save / Cancel); each Save is one signed click.
 
 ## Report a problem (diagnostics D3, 15 Nov)
-`settings.html` (General): card "Report a problem": the row "Notes for problem reports" (one switch, on by default, one click, no review) and "Saved reports" (number and time, Delete all, one click). Interim wording until the owner answers on the new noun (R4.2).
+`settings.html` (General): card "Report a problem": the row "Debug log" (one switch, on by default, one click, no review) and "Saved reports" (number and time, Delete all, one click). Interim wording until the owner answers on the new noun (R4.2).
 
 ## lessons/lessons.html — Lessons (settings-only add-on page)
 

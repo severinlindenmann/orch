@@ -36,7 +36,7 @@ LABELS = {
     "unknown": "Can't tell yet",
 }
 ERROR = "Insights could not read the workspace record."
-PARTIAL = "Some of the times helpers worked could not be read, numbers may be low."
+PARTIAL = "Some runs could not be read, numbers may be low."
 
 
 def _keep(entries, allowed):
@@ -141,12 +141,10 @@ def _row(item, inventory, generated):
         "health": health,
         "label": LABELS[health],
         "uses": None if health == "unknown" else item["uses"],
-        "numbers": "Can't tell yet"
-        if health == "unknown"
-        else f"{runs['used']} of the {runs['of']} times helpers worked",
+        "numbers": "Can't tell yet" if health == "unknown" else f"{runs['used']} of {runs['of']} runs",
         "runs_used": None if health == "unknown" else runs["used"],
         "runs_of": None if health == "unknown" else runs["of"],
-        "unseen": f"Can't tell for {unseen} of the times helpers worked" if unseen else None,
+        "unseen": f"{unseen} {'run' if unseen == 1 else 'runs'} can't tell" if unseen else None,
         "detail": "Not used in 30 days" if health == "idle" else "",
     }
 

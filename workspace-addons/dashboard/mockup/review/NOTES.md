@@ -21,7 +21,7 @@
 - 16 Nov (ORCH-110): a choice whose options have no pictures (a plain question) shows plain option rows with the whole
   title and its description: no dark frame, no empty picture box, no zoom, and the letter chip only for short ids (A, B).
 - 16 Nov (ORCH-77): "Accepted for you" card under "All cards" (the Reviewer's Done-for-you tickets of today): ticket link, the why line, a Send back button that asks for a short note, or "Sent back". Hidden when nothing was accepted. It stays on a phone width (below the deck) while the All cards aside hides. Settings > General has the switch "Accept small finished work for me".
-- 17 Nov (ORCH-79): Settings > General has the switch "Put new versions live without my click" under "Accept small finished work for me" (off by default; only the owner turns it on). On: a release Merge card with every check green merges by itself and the card shows as answered by the release keeper.
+- 17 Nov (ORCH-79): Settings > General has the switch "Merge releases without my click" under "Accept small finished work for me" (off by default; only the owner turns it on). On: a release Merge card with every check green merges by itself and the card shows as answered by the release keeper.
 - 17 Nov (ORCH-183, persona test): Send back on a Check result opens the "What should change?" box (it never goes
   out without words) and the separate Comment button is left out there; an answer waits 6 s before it is saved, so
   Undo takes it back for real (after that Undo is off and the toast says it is already saved); the "What was done"
@@ -52,9 +52,3 @@
   holds and the page scrolls: the whole title and the whole summary are always readable (no "…", no words box that
   cuts a line); the answers and Later stay pinned at the bottom above the tab bar; files wrap into rows so "+N more"
   is in sight; the summary line is 16 px and clear of the "Make bigger" button.
-- 19 Nov (ORCH-848, owner picked draft A): a "Run it now" card (kind run, `UI.runCard` in the master): the question stays the
-  title; the command sits in the copy box with Copy and Run it now on its line (filled on Review, outlined on Home and the
-  ticket page); what it printed unfolds under it with "I ran it · You ran it at 14:32"; a command that is not orch's own
-  asks once more in a strip with one way out (Cancel, the other answer is hidden meanwhile); a sign-in or copy-only
-  command has Copy only; the phone runs only orch's own commands. The review mockup shows one run card first (Run it
-  now answers after 1.2 s). The draft folder `draft-848/` stays as it was.

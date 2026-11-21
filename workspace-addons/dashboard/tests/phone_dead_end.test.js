@@ -20,7 +20,7 @@ test('not connected: the next step is written inline; pairing is not offered in 
   assert.ok(!/disabled:true/.test(panel), 'no disabled pair button');
   assert.ok(!/Pair a phone/.test(src + app), 'no pairing entry point in the workspace');
   assert.ok(!/phonePairDialog|'phone-pair'/.test(src + app));
-  assert.match(panel, /Phones are paired on your phone link/);
+  assert.match(panel, /Phones are paired on your relay/);
   assert.match(panel, /phone-relay-admin/);
 });
 
