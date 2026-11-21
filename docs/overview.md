@@ -42,7 +42,9 @@
 
 - One VPS. Caddy does TLS and proxies the public paths only. `/admin` is never routed by Caddy.
 - Admin portals: open `http://<private-network IP>:8411/admin` (publish) or `:8412/admin` (relay) from the owner's devices on the private network.
-  Admin token required. Never public; no SSH tunnel.
+  Admin token required. Never public; no SSH tunnel. The admin address is set as the private-network interface
+  (`ORCH_RELAY_ADMIN_LISTEN=wt0:8412`, `ORCH_PUBLISH_ADMIN_LISTEN=wt0:8411`), so a new private address needs no
+  change; see docs/live-check.md.
 
 ## Monorepo `orch`
 
