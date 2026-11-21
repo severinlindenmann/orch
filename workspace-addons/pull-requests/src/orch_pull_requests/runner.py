@@ -777,6 +777,13 @@ class Runner:
             if res.verdict == localcheck.RED:
                 return self._local_red(repo, base, sha, inside, res, built)
             if res.verdict == localcheck.GREEN:
+                if (
+                    label and self.owner_label(repo, inside) != label
+                ):  # it went while the check ran: not posted
+                    self.retry(
+                        inside, f"an {LABEL} label of the group changed while it was checked", count=False
+                    )
+                    return []
                 if not self._post_local(repo, sha, res.line):
                     # some statuses may stand on the commit: it never gets a pull request (tidy deletes the
                     # branch); the group is built and checked again after a pause, no try used
@@ -796,6 +803,9 @@ class Runner:
         good = self.check_members(inside, base)  # just before the group pull request is opened
         if len(good) < len(inside):  # someone changed: this branch is not used (tidy deletes it)
             return self.group(good, alone)
+        if label and self.owner_label(repo, inside) != label:  # a label went while the group was checked
+            self.retry(inside, f"an {LABEL} label of the group changed while it was checked", count=False)
+            return []
         title, body = _group_text(inside)
         if label:
             body += f"\n{LABEL_LINE}\n"
@@ -898,7 +908,7 @@ class Runner:
         for e, has in views:
             if has:
                 continue
-            got = look(repo, e["head"], required_checks.WORDS) if look else None
+            got = look(repo, e["head"], required_checks.WORDS, e["number"]) if look else None
             if got != "success":
                 self.log(
                     f"#{e['number']} has no green banned-words check of its own at {e['head'][:12]} ({got}): "

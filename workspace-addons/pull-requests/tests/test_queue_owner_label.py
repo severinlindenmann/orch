@@ -39,7 +39,8 @@ class LabelHub(FakeGitHub):
                 v["headRefOid"] = self.prs[n]["now"]
         return v
 
-    def check_state(self, repo, sha, name):
+    def check_state(self, repo, sha, name, number):
+        assert number == int(sha)  # the member's own pull request
         self.looked.append((sha, name))
         return self.words.get(int(sha))
 
@@ -64,7 +65,8 @@ def test_a_group_with_a_labelled_member_gets_the_label_when_the_others_passed_on
     r.run()
     assert gh.opened_with == [(LABEL,)]
     assert runner.LABEL_LINE in gh.bodies[0]
-    assert gh.looked == [(_head(2), required_checks.WORDS)]  # only the unlabelled member, at its group head
+    # only the unlabelled member, at its group head: at the build and again right before the group opens
+    assert gh.looked == [(_head(2), required_checks.WORDS)] * 2
     assert states(ws) == {1: "merged", 2: "merged"} and len(calls) == 1
 
 
@@ -185,3 +187,45 @@ def test_the_check_command_sees_the_labels_in_its_environment(ws, words_repo, tm
         == localcheck.GREEN
     )
     assert json.loads(out.read_text()) == ""
+
+
+@pytest.mark.parametrize("mode", ["github", "local"])
+def test_a_label_taken_off_while_the_group_was_checked_opens_no_labelled_group(ws, mode):
+    """Both members labelled at the build, so nobody's own check was read; #2 loses its label meanwhile."""
+    (ws / ".orch" / "config.toml").write_text(f'[pull_requests]\ngroup_check = "{mode}"\n', encoding="utf-8")
+    _add(ws, 1, 2)
+    gh = LabelHub({1: {"labels": [LABEL]}, 2: {"labels": [LABEL]}}, words={2: "failure"})
+    posted: list[str] = []
+    gh.post_status = lambda repo, sha, context, state, description: posted.append(context) or True
+    r, _ = make(ws, gh, FakeGit())
+    built = r.owner_label
+
+    def owner_label(repo, inside):
+        got = built(repo, inside)
+        gh.prs[2]["labels"] = []  # taken off right after this look
+        return got
+
+    r.owner_label = owner_label
+    r.local_check = lambda repo, sha, on, labels="": localcheck.Result(localcheck.GREEN, 1.0, "passed")
+    r.process(r.next_batch())
+    assert gh.opened_with == [] and posted == []
+    assert all(x["state"] == "waiting" and "changed while it was checked" in x["why"] for x in store.read(ws))
+
+
+def test_check_state_counts_only_the_member_s_own_newest_run():
+    """Another pull request with the same head (and its own label) never stands in for the member."""
+    from orch_pull_requests.github import GitHub
+
+    gh = object.__new__(GitHub)
+    rows = [
+        {"id": 5, "status": "completed", "conclusion": "failure", "pull_requests": [{"number": 2}]},
+        {"id": 9, "status": "completed", "conclusion": "success", "pull_requests": [{"number": 7}]},
+    ]
+    gh._json = lambda *a: {"check_runs": rows}
+    assert gh.check_state(REPO, "a" * 40, "banned-words", 2) == "failure"
+    assert gh.check_state(REPO, "a" * 40, "banned-words", 7) == "success"
+    assert gh.check_state(REPO, "a" * 40, "banned-words", 3) is None
+    rows.append({"id": 11, "status": "in_progress", "conclusion": None, "pull_requests": [{"number": 2}]})
+    assert gh.check_state(REPO, "a" * 40, "banned-words", 2) == "pending"
+    gh._json = lambda *a: None  # GitHub did not answer
+    assert gh.check_state(REPO, "a" * 40, "banned-words", 2) is None

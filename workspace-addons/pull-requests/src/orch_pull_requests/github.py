@@ -174,12 +174,18 @@ class GitHub:
         ]
         return lines[-1] if got.returncode == 0 and lines else None
 
-    def check_state(self, repo: str, sha: str, name: str) -> str | None:
-        """The newest check run called name on one commit: its conclusion (success, failure, skipped ...) once it
-        ended, "pending" while it runs, None when there is none or GitHub did not answer. A rerun or a label
-        change runs it again; the newest one is the one that counts."""
+    def check_state(self, repo: str, sha: str, name: str, number: int) -> str | None:
+        """The newest check run called name on one commit that GitHub ties to pull request number (another pull
+        request with the same head never counts): its conclusion (success, failure, skipped ...) once it ended,
+        "pending" while it runs, None when there is none or GitHub did not answer. A rerun or a label change runs
+        it again; the newest one is the one that counts."""
         v = self._json("api", f"repos/{repo}/commits/{sha}/check-runs?check_name={quote(name)}&per_page=100")
         runs = [r for r in (v.get("check_runs") or []) if isinstance(r, dict)] if isinstance(v, dict) else []
+        runs = [
+            r
+            for r in runs
+            if number in {p.get("number") for p in r.get("pull_requests") or [] if isinstance(p, dict)}
+        ]
         if not runs:
             return None
         newest = max(runs, key=lambda r: r.get("id") or 0)
