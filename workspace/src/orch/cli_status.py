@@ -213,8 +213,11 @@ def _services_cmd(args, root: Path) -> None:
             targets = [root.resolve()]
         else:
             targets = _pick(services.status())
-        from orch import runs_live
+        from orch import runs_live, service_guard
 
+        # Check every target before stopping any, including --all and explicit paths.
+        for target in targets:
+            service_guard.require_change(target, getattr(args, "by", None))
         done = [
             {"workspace": str(t), "addons": services.stop(t), "sessions": runs_live.stop_hidden(t)}
             for t in targets
