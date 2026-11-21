@@ -276,6 +276,7 @@ class Scheduler:
         self.last_doctor: datetime | None = None
         self.wake = threading.Event()  # the listener sets it when something arrived
         self.watch: dict[str, dict] = {}  # tid -> {t0, at, log, hist} for runs started in the last moments
+        self.last_start: dict = {}  # the last orchcli.run_start answer (its run id)
         sdir(root)
 
     # -- starting -----------------------------------------------------------
@@ -298,6 +299,7 @@ class Scheduler:
             self.agent_of(t),
             mode=None if phone else "oneshot",
         )
+        self.last_start = res
         if res["result"] == "started":
             if n:
                 roles.begin(self.root, tid, fmt(now), time_limit(t))
@@ -692,6 +694,7 @@ class Scheduler:
             started += self.inbox(now)
             # a new phone text made its ticket in this inbox pass: start it now, not one interval later (fb6)
             started += [t for t in self.phone_tickets(now) if t not in started]
+            started += self.peer_pickups(now, skip=started)
         started += self.report_tickets(now, skip=started)
         return started
 
@@ -769,6 +772,53 @@ class Scheduler:
             if tid:
                 started.append(tid)
         return started
+
+    def peer_pickups(self, now: datetime, skip: list[str] | None = None) -> list[str]:
+        """#2051: a text from another workspace that core passed on to a ticket (or the General ticket) starts a
+        helper there, with no repeat, script or allow step. Core keeps the list (`orch relay pickups --waiting`,
+        also for texts an agent's `orch relay inbox` passed on); each one is recorded with the run that took it,
+        or why none could, so it is never started twice. A running helper reads the queued text itself."""
+        rows = orchcli.call(self.root, "relay", "pickups", "--waiting", by=False)
+        started: list[str] = []
+        runs_by_ticket: dict[str, str] = {}
+        for r in rows if isinstance(rows, list) else []:
+            if not isinstance(r, dict):
+                continue
+            mid, tid = r.get("id"), r.get("ticket")
+            if not (isinstance(mid, str) and isinstance(tid, str) and orchcli.ID_RE.match(tid)):
+                continue
+            if tid in runs_by_ticket:  # one run takes every message of this pass on its ticket
+                self._picked(mid, run=runs_by_ticket[tid])
+                continue
+            t = orchcli.ticket(self.root, tid) or {"id": tid}
+            if not self.may_start(t):
+                self._picked(mid, why="the ticket's automation is switched off here")
+                continue
+            st = orchcli.run_status(self.root, tid)
+            if not isinstance(st, dict):
+                continue  # could not find out: next pass
+            if st.get("running"):
+                run = str(((st.get("claim") or {}).get("run")) or "already running")
+                runs_by_ticket[tid] = run
+                self._picked(mid, run=run)
+                continue
+            if tid in (skip or []):
+                continue  # started a moment ago in this pass: its claim shows next pass
+            res = self.start_run(tid, f"a message from another workspace, {mid}", now)
+            if res in ("started", "pending"):
+                run = str(self.last_start.get("run") or "already running")
+                runs_by_ticket[tid] = run
+                self._picked(mid, run=run)
+                if res == "started":
+                    started.append(tid)
+            else:
+                self._picked(mid, why=str(self.last_start.get("reason") or "the helper could not be started"))
+        return started
+
+    def _picked(self, mid: str, run: str | None = None, why: str | None = None) -> None:
+        args = ["relay", "pickups", "--started", mid]
+        args += ["--run", run] if run else ["--not-started", (why or "")[:200] or "not started"]
+        orchcli.call(self.root, *args, by=False)
 
     def _handle(self, m: dict, now: datetime) -> str | None:
         kind, mid, body = m.get("type"), m["id"], m.get("body") or {}

@@ -969,7 +969,7 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .split-list .list-row>a:hover{text-decoration:underline}
 .split-list .list-row>a:focus-visible{outline:none;box-shadow:var(--focus-ring);border-radius:var(--r1)}
 .split-view .subline{display:block;font-size:var(--fs-meta);line-height:16px;font-weight:400;color:var(--text-faint)}
-.split-panel{min-width:0;padding:var(--s4)}
+.split-panel{min-width:0;padding:var(--s4);align-content:start}
 .split-panel[hidden]{display:none}
 .split-panel:focus{outline:none}
 .split-panel:focus-visible{box-shadow:inset var(--focus-ring)}
@@ -984,6 +984,8 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .log-lines ol{list-style:none;margin:0;padding:var(--s3);display:grid;gap:2px;overflow-x:auto}
 .log-lines li{white-space:pre-wrap;overflow-wrap:anywhere}
 .log-lines>p{padding:var(--s3);margin:0}
+.log-lines.log-short li:nth-last-child(n+7){display:none}
+.log-lines.log-full ol{max-height:60vh;overflow:auto}
 @media(max-width:720px){
   .split-view{grid-template-columns:minmax(0,1fr)}
   .split-view>*+*{border-left:0}
@@ -1047,7 +1049,8 @@ button.live-pt:hover{color:var(--brand)}
 .live-ren{display:flex;flex:1 1 0;gap:var(--s2);align-items:center;min-width:0}
 .live-ren .input{flex:1 1 0;min-width:0}
 .live-ctl{position:relative;display:flex;flex:none;gap:var(--s1);align-items:center}
-.live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0}
+.live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0;max-height:calc(var(--live-h) - var(--touch) - var(--s3));overflow-y:auto;overscroll-behavior:contain}
+.live-dock[data-mode=full] .live-ctl .live-pop{max-height:calc(100dvh - var(--live-bottom,0px) - var(--touch) * 2)}  /* More stays above the phone tab bar and scrolls (ORCH-817) */
 /* Pane buttons carry their word (ORCH-463). A compact pane (split, narrow, small): the title keeps a full row, the
    buttons go on a second row and wrap when even that is short */
 .live-pbtn{gap:var(--s1);padding-inline:var(--s1)}
@@ -1362,6 +1365,43 @@ body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:
 .rule-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--s4);align-items:center;padding:var(--s3) var(--s4);border-top:1px solid var(--border)}
 .rule-row:first-child{border-top:0}
 @media(max-width:600px){.rule-row{grid-template-columns:minmax(0,1fr);gap:var(--s2)}}
+/* Calendar week (Personal Calendar, ORCH-651 from draft A): every calendar in one grid, a quarter hour per row. The
+   page sets --rows (quarter hours shown) on .cal-week and grid-row on each event; .cal-0 … .cal-5 give one colour per
+   calendar; [data-cal][hidden] hides a calendar ticked off. Phone: .cal-days, one list per day. Gallery: #cal-week. */
+.cal-0{--cal:var(--info);--cal-soft:var(--info-soft)}
+.cal-1{--cal:var(--chart-4);--cal-soft:var(--surface-3)}
+.cal-2{--cal:var(--success);--cal-soft:var(--success-soft)}
+.cal-3{--cal:var(--warning);--cal-soft:var(--warning-soft)}
+.cal-4{--cal:var(--brand);--cal-soft:var(--brand-soft)}
+.cal-5{--cal:var(--text-muted);--cal-soft:var(--surface-2)}
+.cal-dot{display:inline-block;flex:none;width:var(--s2);height:var(--s2);border-radius:var(--space-0);background:var(--cal);align-self:center}
+.cal-legend{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);align-items:center}
+.cal-legend label{display:inline-flex;align-items:center;gap:var(--s2);min-height:var(--s6);cursor:pointer}
+.cal-week{--cal-time:var(--s8);--rows:44;overflow-x:auto}
+.cal-week-head,.cal-week-all,.cal-week-body{display:grid;grid-template-columns:var(--cal-time) repeat(7,minmax(var(--s9),1fr))}
+.cal-week-head{border-bottom:1px solid var(--border)}
+.cal-day-h{padding:var(--s2);border-left:1px solid var(--border)}
+.cal-day-h.today strong{color:var(--brand)}
+.cal-week-all{border-bottom:1px solid var(--border);min-height:var(--s7)}
+.cal-week-all>.meta{padding:var(--s2) var(--s1);align-self:center}
+.cal-day-all{display:grid;align-content:start;gap:var(--s1);padding:var(--s1);border-left:1px solid var(--border)}
+.cal-hours{display:grid;grid-template-rows:repeat(var(--rows),var(--s4))}
+.cal-hours .meta{grid-row:span 4;padding:0 var(--s1);font-variant-numeric:tabular-nums}
+.cal-day{display:grid;grid-template-rows:repeat(var(--rows),var(--s4));grid-auto-columns:minmax(0,1fr);border-left:1px solid var(--border);background:repeating-linear-gradient(to bottom,var(--border) 0 1px,transparent 1px calc(var(--s4)*4))}
+.cal-day.today,.cal-day-all.today{background-color:var(--surface-2)}
+.cal-ev{display:block;min-width:0;overflow:hidden;margin:0 var(--space-0) var(--space-0);padding:var(--space-0) var(--s1) var(--space-0) var(--s2);border-left:var(--s1) solid var(--cal);border-radius:var(--s1);background:var(--cal-soft);color:var(--text);font-size:var(--fs-meta);line-height:var(--s4)}
+.cal-ev-t{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;font-weight:500;overflow:hidden;overflow-wrap:anywhere}
+.cal-ev .meta{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cal-ev.declined .cal-ev-t{text-decoration:line-through;color:var(--text-muted)}
+.cal-ev.free{background:transparent;border-left-style:dashed}
+[data-cal][hidden]{display:none}
+.cal-days{display:none}
+.cal-days .list-row{align-items:flex-start}
+.cal-days .when{flex:none;min-width:calc(var(--s9) + var(--s2));font-variant-numeric:tabular-nums}
+@media(max-width:720px){.cal-week{display:none}.cal-days{display:grid;gap:var(--s4)}}
+/* a row's buttons as one group (.row-acts): on a phone they move under the words instead of squeezing them */
+.row-acts{display:flex;flex:none;align-items:center;gap:var(--s2)}
+@media(max-width:600px){.list-row:has(>.row-acts){flex-wrap:wrap}.list-row>.row-acts{width:100%;justify-content:flex-end}}
 /* A choice card that fills its grid cell: a two-line .live-opt, pressed when in use (Usage "How work is spread", ORCH-657) */
 .live-opt.tall{align-items:flex-start;height:100%;padding:var(--s4)}
 .live-opt.tall .live-opt-t{gap:var(--s1)}
@@ -1432,6 +1472,20 @@ button.gtree-row:hover{background:var(--surface-2)}
 .live-to{font-size:var(--fs-meta);line-height:16px;color:var(--text-muted)}
 /* a pane takes dropped files into its message box (ORCH-695): the pane says so while files are over it */
 .live-pane[data-drop]{outline:2px dashed var(--brand);outline-offset:-2px}
+/* voice into the message box (ORCH-696, draft D feature 13): the strip while listening (a moving level, the time, Stop,
+   Cancel) sits above the row; the line after the words, or one plain refusal, sits under it. Still with reduced motion. */
+.live-voice{display:flex;gap:var(--s2);align-items:center;min-width:0;padding:var(--s1) var(--s2);border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2)}
+.live-voice>span:not(.live-voice-wave){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.live-voice-wave{display:flex;flex:none;align-items:center;gap:2px;height:24px}
+.live-voice-wave i{display:block;width:3px;height:20%;border-radius:2px;background:var(--brand)}
+.live-voice[data-rec] .live-voice-wave i{animation:live-voice-bar .7s ease-in-out infinite alternate}
+.live-voice[data-rec] .live-voice-wave i:nth-child(3n+2){animation-delay:-.25s}
+.live-voice[data-rec] .live-voice-wave i:nth-child(3n){animation-delay:-.5s}
+.live-voice-t{font-variant-numeric:tabular-nums}
+.live-vhint{margin:0}
+.live-vhint[role=alert]{color:var(--text)}
+@keyframes live-voice-bar{from{height:20%}to{height:100%}}
+@media(prefers-reduced-motion:reduce){.live-voice[data-rec] .live-voice-wave i{animation:none;height:60%}}
 .lbar-n{min-width:16px;padding:0 var(--s1);border-radius:var(--r1);background:var(--surface-3);color:var(--text-muted);font-variant-numeric:tabular-nums;text-align:center}
 @media(prefers-reduced-motion:reduce){.gtree-row{transition:none}}
 
@@ -1468,6 +1522,25 @@ button.gtree-row:hover{background:var(--surface-2)}
  .run-card .cmd-copy-text{flex-basis:100%}
  .run-card .btn{min-height:44px}
 }
+/* ORCH-817: Stop and End session in the pane header, a wall tile's More and the bar; the idle note of a helper pane */
+.live-end-menu,.live-end-ask{width:min(300px,calc(100vw - var(--s5)))}
+.live-end-ask p{margin:0}
+.live-end-opt{align-items:flex-start;min-height:var(--touch)}
+.live-end-opt .ic-wrap{margin-top:2px}
+.live-end-row{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.live-end-idle{display:grid;flex:none;gap:var(--s2);padding:var(--s3);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2)}
+.live-end-idle p{margin:0}
+.live-end-idle[hidden]{display:none}
+.live-ended{display:grid;gap:var(--s3)}
+.live-ended h3,.live-ended>p{margin:0}
+.wall-foot,.wall-line{position:relative}
+.wall-tile:has(.live-end-menu,.live-end-ask),.wall-line:has(.live-end-menu,.live-end-ask){z-index:7}
+.lbar-rw{display:flex;gap:var(--s1);align-items:center}
+.lbar-rw .lbar-row{flex:1;min-width:0}
+.lbar-endwrap{position:absolute;left:var(--s3);bottom:100%;z-index:6}
+.lbar-endwrap .live-pop{right:auto;left:0}
+.lbar-newrow{display:flex;gap:var(--s1);align-items:stretch}
+.lbar-newrow .live-opt{flex:1;min-width:0}
 /* Side rail that is a sheet on smaller screens (ORCH-581, ticket page draft E). The same element serves both widths, so
    every control exists once: from 1100 px it sits in the page; below, it shows only while [data-open=true], as a sheet
    from the right over a scrim, and a closed rail is out of the tab order. .narrow-only marks what only small screens

@@ -74,6 +74,14 @@ test('mapCard carries the round and the task so the card can say About', () => {
   assert.equal(it.ticketId, 't_abc');
   assert.equal(UI.review.mapCard(card('y'), fakeApi([[]]), NOW).about, undefined);
 });
+test('ORCH-1108: mapCard names a stuck card Stuck and keeps only a link inside the page as its Open', () => {
+  const {UI} = load();
+  const c = card('s', {href: '#ticket/t_abc123', answers: [{label: 'Nudge', picked: 'nudge'}]}); c.card = {kind: 'stuck', title: 'The helper is idle.'};
+  const it = UI.review.mapCard(c, fakeApi([[]]), NOW);
+  assert.equal(it.kindLabel, 'Stuck'); assert.equal(it.icon, 'pause'); assert.equal(it.href, '#ticket/t_abc123');
+  assert.deepEqual(JSON.parse(JSON.stringify(it.answers)), [{label: 'Nudge', picked: 'nudge'}]);
+  for (const bad of ['javascript:alert(1)', 'https://x.example/t', '//evil', '#ticket/<b>']) assert.equal(UI.review.mapCard(card('b', {href: bad}), fakeApi([[]]), NOW).href, undefined, bad);
+});
 test('mapCard keeps option previews and picks a kind label', () => {
   const {UI} = load();
   const c = card('o'); c.card = {kind: 'choice', title: 'Which?', preview: {type: 'options', options: [{id: 'A', title: 'As today', preview: {type: 'page', src: 'reviewed/aa/a.html'}}, {id: 'B', title: 'New', suggested: true}]}};

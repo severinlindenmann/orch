@@ -44,3 +44,8 @@ writes = ["ext.factory"]
 summary = "Ask again to start an order saved for later (you press Start)"
 who = "people"
 writes = ["ext.factory"]
+
+[[selfcheck]]                              # after every update: the Factory list still opens
+label = "Factory list"
+fails = "the Factory list does not open"
+args = ["list", "--json"]

@@ -36,6 +36,9 @@ lines, instead of after a 16 minute group run. The full set runs **once per merg
 files the group touches. A push to develop whose files equal a green queue group (`scripts/ci_proven.py`: a merge
 commit with the tree of its second parent, and a green `ci` run of that parent on an `orch-queue/` branch) runs no
 suite again. Contracts, publish, relay, mobile and the dashboard pictures still follow their paths on a pull request.
+With the queue setting `group_check = local` (ORCH-1124) the queue checks a group with the local check on this Mac
+instead: its group pull request carries `orch-group-check: local`, ci.yml and rules.yml skip it, and the push to
+develop runs the full set because a skipped group run proves nothing.
 
 Why: 18 Nov, nearly every pull request ran the full set: 365 `ci` runs for 62 merges (5.9 per merge), GitHub ran
 about two full runs at once, pull requests waited up to two hours and the queue merged about one an hour.
@@ -50,15 +53,15 @@ about two full runs at once, pull requests waited up to two hours and the queue 
 | headless-launch (rules): every browser start goes through `e2e/headless.cjs` / `.py` (ORCH-615) | runs (the queue stops on it) | required | | | runs |
 | workspace, Linux (2 parts) | only with Windows ² | required, always | runs unless proven | runs | required |
 | workspace, macOS (5 parts) | | | runs | runs | required |
-| workspace, Windows (16 parts) | not while known red ¹ | not run ³ | shown (known red), also when proven ³ | shown (known red) | shown (known red), in the release check |
+| workspace, Windows (20 parts, split by measured time, 20-minute limit) | not while known red ¹ | not run ³ | shown (known red), also when proven ³ | shown (known red) | shown (known red), in the release check |
 | Windows install as a standard user | not while Windows is known red ¹ | | runs | runs | required, in the release check |
 | CLI smoke, Windows + macOS | | required, always | | | required |
 | e2e smoke (5 minutes) | | required, always | | | required |
 | add-on suites, page smoke | in light (changed add-ons only) | required, always | runs unless proven | | required |
 | dashboard click-throughs | in light (changed add-ons only) | not run, for now ³ | runs, also when proven ³ | | required |
-| clock (suites at 22:30 and 23:59:40 UTC) | | required, always | runs unless proven | runs | required |
+| clock (suites at 22:30 and 23:59:40 UTC, 4 parts each: ORCH-1118) | | required, always | runs unless proven | runs | required |
 | contracts, publish, relay | required | required (contracts always) | runs unless proven | | required |
-| mobile | required | required | runs unless proven | runs, with phone UI tests | required |
+| mobile | required (smoke set) | not run (owner, 20 Nov: ORCH-1118) | runs, full suite, also when proven | runs, with phone UI tests | required |
 | brand (words, tokens, CI time limits, Windows-safe paths: ORCH-872) | in light | required, always | runs unless proven | runs | required |
 | full e2e (`e2e` workflow, 03:17 UTC) | | | | runs | |
 
@@ -83,7 +86,29 @@ pull request; a red one on develop opens the red-develop ticket as before. Switc
 are done and 20 groups in a row were green with them: the note at the top of `ci.yml`,
 `brand/tests/test_ci_queue_skip.py`.
 
+## Windows on our own Windows VM (ORCH-1127)
+
+The repository variable `WINDOWS_RUNNER=winvm` moves the Windows parts of develop pushes and of the nightly run
+off GitHub's machines. On this Mac, `e2e/winvm/dispatch.py` (an orch service) then runs the Windows test parts,
+the Windows CLI smoke (with the junction check) and the standard-user install in a fresh winvm clone of the golden image (4 CPUs, 8 GB) and removes the clone
+afterwards, even after a failed or stopped run. It runs one clone at a time, in this order: the head of every open
+release pull request, the develop head once a night after 01:00 UTC, then the newest develop commit. Commits
+pushed while the clone was busy are skipped. A failed run is run once more before it counts. The result goes on
+the commit as the status `windows (winvm)`, and a failed one on develop opens the red-develop ticket
+(`releasekeeper.winvm_red`).
+The VM is ARM64, so release checks and pull requests keep GitHub's x86-64 Windows run.
+**Switch back:** delete the variable or set it to `github`. GitHub runs the Windows parts again on the next push,
+and the dispatcher stays idle. Logs: `~/.orch-test/winvm-runs/` on the Mac.
+
 A draft pull request gets no CI run; marking it ready starts one.
+
+Time limits (ORCH-1050): every workspace part has a limit (15 minutes, Windows 20) and a "Time used" step that writes
+a warning once a part passes 70 percent of it. Windows parts are split by measured time
+(`workspace/tests/ci_times_windows.json`, `--part-times`); every Windows part uploads its test times as the
+`ci-times-windows-<K>` artifact. When a part nears its limit, refresh the file from one run's artifacts:
+`python tests/ci_parts.py merge tests/ci_times_windows.json <downloaded ci-times.json files>`. The release keeper runs
+a develop job that hit its time limit with no failed test once more before it blocks a release; a red release check
+already gets one more try (ORCH-1023).
 
 ## Known red
 

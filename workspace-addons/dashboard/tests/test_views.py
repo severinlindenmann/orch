@@ -493,6 +493,23 @@ def test_a_done_ticket_with_an_open_live_session_gets_its_run_status(tmp_path, m
     assert sorted(asked) == ["t_done0001", "t_open0001"] and set(got) == {"t_done0001", "t_open0001"}
 
 
+def test_one_open_ticket_keeps_its_live_run(tmp_path, monkeypatch):
+    """ORCH-884: with one id, `orch run status <id> --json` answers that run itself, not {runs: {...}}."""
+    from orch_dashboard import data
+
+    def one(b, args, root, **kw):
+        ids = args[2:-1]
+        if len(ids) == 1:
+            return {"ticket": ids[0], "running": True, "mode": "live"}
+        return {"runs": {i: {"running": True} for i in ids}}
+
+    monkeypatch.setattr(data, "run_orch", one)
+    got = data.load_runs(tmp_path, "orch", [{"id": "t_only0001", "status": "open"}], fresh=True)
+    assert got == {"t_only0001": {"ticket": "t_only0001", "running": True, "mode": "live"}}
+    monkeypatch.setattr(data, "run_orch", lambda b, args, root, **kw: {})  # orch did not answer
+    assert data.load_runs(tmp_path, "orch", [{"id": "t_only0002", "status": "open"}], fresh=True) == {}
+
+
 def test_the_shared_folder_line_passes_as_short_plain_text_only(tmp_path, monkeypatch):
     from orch_dashboard import data
 
