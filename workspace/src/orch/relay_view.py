@@ -270,7 +270,7 @@ def view(root: Path) -> dict:
     try:
         net.load_service(root, "relay")
     except Refused:
-        out["notice"] = "Relay not connected. Connect it in Settings."
+        out["notice"] = "Contacts is not connected. Connect it in Settings."
         out["notice_tone"] = "warn"
         out["header"] = {"status": {"label": "Not connected", "tone": "warn"}}
         out["blocks"] += [
@@ -281,8 +281,8 @@ def view(root: Path) -> dict:
                 "items": [],
                 "empty": {
                     "title": "Not connected",
-                    "text": "Connect the relay in Settings to send and receive messages.",
-                    "button": {"label": "Open phone settings", "to": "app:settings/phone"},
+                    "text": "Connect Contacts in Settings to send and receive messages.",
+                    "button": {"label": "Open Contacts settings", "to": "app:settings/phone"},
                 },
             },
             {
@@ -293,7 +293,7 @@ def view(root: Path) -> dict:
                 "items": [],
                 "empty": {
                     "title": "No workspaces yet",
-                    "text": "The workspaces you allow show here once the relay is connected.",
+                    "text": "The workspaces you allow show here once Contacts is connected.",
                 },
             },
         ]
@@ -424,7 +424,7 @@ def view(root: Path) -> dict:
                     if peers
                     else "Pair a phone or allow a workspace in Settings to start a conversation."
                 ),
-                "button": {"label": "Open phone settings", "to": "app:settings/phone"},
+                "button": {"label": "Open Contacts settings", "to": "app:settings/phone"},
             },
         },
         {

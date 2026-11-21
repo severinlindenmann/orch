@@ -589,6 +589,11 @@ def _problem(args, root: Path, out) -> None:
         r = rp.fetch(root, args.id)
         if r.get("mine") and not (Path(r["path"]) / rp.FROM).exists():  # the original folder, no copy
             text = f"Report {r['ref']} was shared from here, so nothing new was fetched.\n{r['path']}"
+            if not args.look:  # taken on purpose (ORCH-86), but say so: other workspaces cannot take it now
+                text += (
+                    "\nIt is now taken by this workspace, so no other workspace can take it."
+                    f" To let another take it: orch relay problem back {args.id}"
+                )
         else:
             text = (
                 f"Report {r['ref']}\n{r['path']}\n"
@@ -794,12 +799,12 @@ def _build_send(root: Path, args, sub: str, t: str | None) -> dict:
         )
     if sub == "start":
         return relay.send_start(root, args.workspace, args.key, args.text, t)
-    if args.file and (args.update or args.reply_to or args.speak):
-        raise Refused("--update, --reply-to and --speak go with a text, not a file.")
+    if args.file and (args.update or args.speak):
+        raise Refused("--update and --speak go with a text, not a file.")
     if args.summary and not args.speak:
         raise Refused("--summary goes with --speak.")
     if args.file:
-        return relay.send_file(root, args.workspace, Path(args.file), args.text or None, t)
+        return relay.send_file(root, args.workspace, Path(args.file), args.text or None, t, args.reply_to)
     if not args.text:
         raise Refused("Nothing to send. Give a text or --file.")
     speak = relay.speak_hint(root, t, args.text, args.summary) if args.speak else None
