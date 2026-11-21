@@ -1,12 +1,12 @@
 pub mod admin;
 pub mod api;
 pub mod auth;
+pub mod cli;
 pub mod crypto;
 pub mod error;
 pub mod groups;
 pub mod look;
 pub mod mobile;
-pub mod notebook;
 pub mod onboarding;
 pub mod phone;
 pub mod problems;
@@ -21,6 +21,7 @@ pub mod subs_push;
 pub mod transcribe;
 pub mod util;
 pub mod webhooks;
+pub mod wipe;
 
 use std::time::Duration;
 

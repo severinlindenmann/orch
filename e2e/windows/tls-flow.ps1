@@ -1,7 +1,7 @@
 # How orch checks web certificates on Windows (#226, #232), as a standard user with orch's own installed Python:
 # a server whose trusted certificate names the host is accepted; a server with a trusted certificate for another
 # name is refused by the name check; a local server with a self-signed certificate is refused and never gets
-# the token; the Windows check (truststore) is strict. E2E_TLS_HOST (default relay.dev.severin.io) and
+# the token; the Windows check (truststore) is strict. E2E_TLS_HOST (default relay.severin.io) and
 # E2E_TLS_MISMATCH_SERVER (default www.google.com) pick the servers.
 # Installs orch if a flow before did not. Last log line "RESULT ok" or "RESULT fail: <what>".
 $ErrorActionPreference = "Continue"
@@ -17,7 +17,7 @@ if (-not (Get-Command orch -ErrorAction SilentlyContinue)) {
 }
 $py = Join-Path (uv tool dir) "orch-workspace\Scripts\python.exe"
 Check (Test-Path $py) "orch's own Python found"
-$tlsHost = if ($env:E2E_TLS_HOST) { $env:E2E_TLS_HOST } else { "relay.dev.severin.io" }
+$tlsHost = if ($env:E2E_TLS_HOST) { $env:E2E_TLS_HOST } else { "relay.severin.io" }
 # a big public server that answers an unknown name with its default (valid) certificate: the name-check target
 $mismatchServer = if ($env:E2E_TLS_MISMATCH_SERVER) { $env:E2E_TLS_MISMATCH_SERVER } else { "www.google.com" }
 # One Python script: each check prints "ok: ..." or "FAIL: ..." (the same names as the unit tests in test_net_tls.py).

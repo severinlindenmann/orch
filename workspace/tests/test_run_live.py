@@ -155,6 +155,8 @@ def test_live_start_pastes_the_prompt_and_input_only_when_idle(proj, run, lab):
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(rec)
     pane = runs_live.tmux(proj, "display-message", "-p", "-t", runs_live.target(tid), "#{pane_pid}")
     assert rec["mode"] == "live" and rec["pid"] == int(pane.stdout.strip())  # the claim's pid is the pane pid
+    # ORCH-707: orch's own server passes focus events on, so the tool shows no tmux tip about them
+    assert runs_live.tmux(proj, "show-options", "-gv", "focus-events").stdout.strip() == "on"
     # the agent says it is ready by itself (`orch run done`): the prompt goes in once
     _until(lambda: _lines(lab, "input"), what="first prompt")
     assert "Do the thing" in _lines(lab, "input")[0]
@@ -167,7 +169,10 @@ def test_live_start_pastes_the_prompt_and_input_only_when_idle(proj, run, lab):
     assert code == 0 and json.loads(out)["delivered"] == 0
     assert [i["text"] for i in runs.undelivered(proj, tid)] == ["Use CHF"]
     code, out, _ = run("run", "done", tid)
-    assert "1 message from you waiting: sent." in out
+    # the fake agent's own late idle signal can reach the wrapper's watcher first: it types the waiting input
+    # itself and this `run done` finds nothing left ("Noted." alone; failed by chance in six queue groups on
+    # 20 Nov, ORCH-1132). Wait for the text, whoever sent it; it still goes in exactly once (below).
+    assert code == 0 and out.startswith("Noted."), out
     _until(lambda: len(_lines(lab, "input")) == 2, what="the sent text")
     assert _lines(lab, "input")[1] == "New input: | - human:anna: |     Use CHF"
     assert runs.undelivered(proj, tid) == []

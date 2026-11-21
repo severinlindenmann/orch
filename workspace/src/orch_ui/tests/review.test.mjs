@@ -168,6 +168,17 @@ test('needs_person: plain sign-in message, error toast, the card returns', async
   assert.equal(decks.length, 2); assert.equal(decks[1].items.length, 1);
 });
 
+test('needs_person with the server sign-in words (dashboard): shows them, never the terminal (#1918)', async () => {
+  const words = 'Sign in to do this: open the dashboard with a sign-in link from orch.';
+  const api = fakeApi([[card('a')]], async () => ({ok: false, error: {code: 'needs_person', message: words}}));
+  const {decks, toasts} = await mount(api);
+  decks[0].o.onDecide(decks[0].items[0], 'ok', null);
+  await flush(); await flush();
+  assert.equal(toasts[0].m, words); assert.equal(toasts[0].k, 'error');
+  assert.doesNotMatch(toasts[0].m, /terminal/);
+  assert.equal(decks.length, 2); assert.equal(decks[1].items.length, 1);
+});
+
 test('other errors show the message and bring the card back', async () => {
   const api = fakeApi([[card('a')]], async () => ({ok: false, error: {code: 'refused', message: 'Not allowed.'}}));
   const {decks, toasts} = await mount(api);

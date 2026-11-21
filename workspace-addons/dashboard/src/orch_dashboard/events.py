@@ -91,6 +91,9 @@ class Revisions:
             from orch import addons
 
             files.append(addons.home() / "agent-approvals.json")
+            # the add-on list (`orch addon uninstall` rewrites it): without it a removed add-on stayed in the
+            # cached Settings list until the 120 s safety rebuild (ORCH-1034)
+            files.append(addons.registry_path())
         return files
 
     def join(self):

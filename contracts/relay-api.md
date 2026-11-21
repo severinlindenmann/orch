@@ -47,7 +47,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | GET | `/v1/inbox?wait=0..30` | – | `{items: [message…], next: null}` not yet acked, oldest first, max 100. `wait` = long-poll seconds |
 | POST | `/v1/inbox/ack` | `{ids: [m_…]}` | `204`. Acked messages are no longer delivered (the admin can still read them). The relay keeps the ack time; for a phone's text it is that text's `delivered_at` (Phone API) |
 | POST | `/v1/blobs` | raw bytes, max 100 MB | `201 {blob_id, size, sha256}` |
-| GET | `/v1/blobs/<blob_id>` | – | raw bytes; only for the uploader, receivers of a `file` message with this blob, and the workspace a stored phone text names it in (`body.attachments[].blob_id`, `body.voice.blob_id`, `body.feedback.pins[].voice_blob_id` of a phone text whose `to` is exactly the calling workspace; never via `to: phones`), the workspace a phone answer names it in (`body.verdict.note.words.voice[].blob_id` of a stored phone `answer` whose `to` is exactly the calling workspace), else `404`. That access lasts as long as the phone text is stored: removing the workspace from the phone or signing the phone out does not take it back. Always served as `application/octet-stream` |
+| GET | `/v1/blobs/<blob_id>` | – | raw bytes; only for the uploader, receivers of a `file` message with this blob, and the workspace a stored phone text names it in (`body.attachments[].blob_id`, `body.voice.blob_id`, `body.feedback.pins[].voice_blob_id` of a phone text whose `to` is exactly the calling workspace; never via `to: phones`), the workspace a phone answer names it in (`body.verdict.note.words.voice[].blob_id` or `body.verdict.note.files[].blob_id` of a stored phone `answer` whose `to` is exactly the calling workspace), else `404`. That access lasts as long as the phone text is stored: removing the workspace from the phone or signing the phone out does not take it back. Always served as `application/octet-stream` |
 | POST | `/v1/webhooks` | `{mode: "once"\|"permanent", ticket?}` | `201 {id, url}`; `url` = `https://relay.severin.io/webhook/<id>?token=whk_…` (shown once) |
 | GET | `/v1/webhooks` | – | list of `{id, mode, ticket, created_at, last_call_at}` (own only) |
 | DELETE | `/v1/webhooks/<id>` | – | `204` |
@@ -265,17 +265,32 @@ has one cell per column (the two rules the schema cannot say); every `{"file": i
 `card_files` blob was uploaded by the sender (`404 not_found` otherwise, unknown ids included) with exactly that `size` and
 `sha256`; the sizes add up to at most 20 MB.
 
+*Run cards on the phone* (ORCH-848/860; `$defs/card_run`, the `card-run-*` and `run-*` shapes of vectors/review-card-v1.json).
+A card of kind `run` asks the person to run one command. It carries `run` = `{command, class, changes?, undo?, phone}` and
+`no_label` (one of orch's own fixed words for the other answer); every other kind carries neither. `run` is what the phone
+shows, never what runs: no folder, program path or argv goes on the wire; the computer runs only the command it stored and
+checks it again at run time (`runcard.check_spec`, the digest). `command` is one line of at most 300 characters with no
+control, zero-width or bidi character and no shell operator. `phone: true` (Run it now on this phone) is allowed only with
+`class: orch` (orch's own operations); any other class shows the command with Copy and one line why. The phone's Run it now
+is a plain `verdict: ok` with the digest it was shown; `no` is the `no_label` answer. The relay checks only the shape; the
+workspace decides (`relay._apply_run`: a paired phone, orch's own operations only, the digest, one run at a time) and answers
+with the review result (`applied` = it ran and the setting is in place; `refused` = it did not run or did not work).
+
 *Answer (phone → relay → workspace).* `POST /v1/phone/answer` takes an optional `verdict` = `{verdict: ok|no|talk, picked?,
 digest, note?}` (`$defs/verdict`: changes ≤ 20 × 500, words.text ≤ 2000, words.voice ≤ 3 `{blob_id, transcript ≤ 2000, lang,
-duration ≤ 120}`, pins ≤ 30 `{n, on?, x 0..1, y 0..1, text?}`; `picked` null with `no`; no other keys, so it cannot name a
+duration ≤ 120}`, files ≤ 5 `{blob_id, kind: image|file|voice, name ≤ 120, size, mime, duration?}` (what the person recorded or
+added to the answer), pins ≤ 30 `{n, on?, x 0..1, y 0..1, text?}`; `picked` null with `no`; no other keys, so it cannot name a
 ticket or question). `answer` stays required: the phone's own plain line for the swipe, for old readers only. The relay
 refuses the verdict (`422 invalid`) on a question without `body.digest`, when `verdict.digest` is not exactly that
-`body.digest`, or when it is over **8192 bytes** as compact UTF-8 JSON (`review.MAX_NOTE_BYTES`); every voice `blob_id` must be
-an upload of **this** phone (`404 not_found` for another phone's, a workspace's or an unknown blob; the same rule as `send`).
+`body.digest`, or when it is over **8192 bytes** as compact UTF-8 JSON (`review.MAX_NOTE_BYTES`); every voice and files `blob_id`
+must be an upload of **this** phone (`404 not_found` for another phone's, a workspace's or an unknown blob; the same rule as
+`send`), and a file's `size` must be the uploaded size (`422 invalid`).
 It then copies `verdict` unchanged into the answer body (`ticket`, `key`, `question_id` from the question, as for every
 answer). First answer wins (`409 already_answered`), as for every question: a phone cannot change its verdict once the relay
 stored it; until then it sits in the phone's Outbox and may be changed there (M4). A blob named in an answer counts as used
-(not deleted after 24 h).
+(not deleted after 24 h). Before it decides, the workspace saves every voice and `files` blob of a verdict it can still use in the
+ticket's files and adds one line naming them to the person's words, so the helper reads them (a file it cannot fetch is named as
+not downloaded).
 
 *Workspace rules* (vectors/review-card-v1.json `workspace`, review-question-v1.json `verdict_cases`). It acts on a verdict only
 as for every phone answer (human-proof.md "Phone actions"): fetched itself, `from` a phone of its `phones` list, not
@@ -401,36 +416,6 @@ the token is stored nowhere else) and `.orch/secrets/relay.json` with url and wo
 
 Phone onboarding link (from the admin portal, also as QR code, valid 24 h, one use):
 `orch://pair?relay=https%3A%2F%2Frelay.severin.io&code=pc_<22 chars>`
-
-## Notebook (the small orch app on the person's notebook)
-
-One notebook belongs to exactly one workspace; a workspace has at most one. The admin adds it on the relay admin page
-(Notebooks: name + workspace) and runs the shown line on the notebook (`orch notebook connect <relay url> <code>`, code
-`nc_<22 chars>`, one use, 24 h). Nothing else pairs a notebook. Messages are type `notebook` (message.schema.json
-`$defs.notebook`), text only (no blob on any notebook route), stored encrypted at rest like every message. Every
-notebook route takes the notebook and its workspace from the token, never from the body.
-
-**Notebook auth:** `X-Orch-Notebook: nb_…` + `Authorization: Bearer orn_<43 chars>`. A workspace or phone token never
-works here, and a notebook token never works on workspace or phone routes.
-
-| Method | Path | Body | Answer |
-|---|---|---|---|
-| POST | `/v1/notebook/pair` | `{code, name?}` | `201 {notebook_id, token, workspace: {id, name}}`. Unknown code `401`; used or expired `410` (only one of two calls at the same time wins) |
-| GET | `/v1/notebook/requests?wait=0..30` | – | `{items: [message…]}`: unacked asks from its workspace, oldest first, at most 20; long-poll up to `wait` s. Not acked = handed out again (at least once). An ask past its `expires_at` is dropped, never handed out. At most 2 open calls per notebook (`429`). Each call marks the notebook seen |
-| POST | `/v1/notebook/ack` | `{ids: [m_…] ≤ 100}` | `204`; only its own asks |
-| POST | `/v1/notebook/send` | `{id, reply_to?, notebook: {kind: reply\|status, …}}` | `201 {id}`. The relay builds the message (`from` the notebook, `to` its workspace). `reply`: `reply_to` must be an ask from its workspace to this notebook (`403`), one reply per ask (`409 already_answered`); the same id and content again → `200 {id, duplicate: true}`. `status`: only the newest unfetched status waits (an older unfetched one is replaced). 60 per minute (`429`) |
-| GET | `/v1/notebooks` (workspace auth) | – | `{items: [{id, name, paired, last_seen, online, waiting}]}` (0 or 1 item). `online` = seen in the last 120 s (a waiting notebook calls at least every 30 s); `waiting` = asks not acked yet |
-
-**Asks from the workspace** go through `POST /v1/messages` (`to: nb_…`, type `notebook`, `body.notebook.kind: ask`,
-no `ticket`, no `reply_to`): only to the sender's own connected notebook (another workspace's notebook answers `404`
-like an unknown one; not connected yet `403`), `expires_at` in the future and at most 7 days away (`422`), at most 100
-waiting and 60 per minute (`429`). No other type goes to `nb_…`, and a workspace never sends `reply` or `status`.
-Every workspace check of the content (what a helper may see) happens again in the workspace; the notebook's own list of
-actions is the boundary of what runs there.
-
-Admin: `GET/POST /admin/api/notebooks` (POST `{name, workspace}` → `201 {notebook_id, code, line}`; a second notebook
-for one workspace `409`), `DELETE /admin/api/notebooks/<id>` (`204`: its token stops at once, an open long-poll is
-refused, its codes and waiting asks are deleted). Removing a workspace removes its notebook.
 
 ## Subscribers (other systems that listen)
 

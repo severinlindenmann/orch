@@ -280,7 +280,8 @@ def test_the_reviewers_probe_a_member_closed_during_a_red_group_never_lands(ws, 
     assert world.landed(2) and world.landed(4)
     assert states(ws) == {1: "out", 2: "merged", 3: "out", 4: "merged"}
     assert "closed" in why(ws, 1)
-    assert len(world.groups) == 2  # [1,2,3,4] and [3,4]: #1 is looked at again before [1,2] is built
+    # [1,2,3,4], then every member left over by the split in a group of its own (ORCH-909)
+    assert len(world.groups) == 5
     nothing_left_behind(ws, world)
 
 

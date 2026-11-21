@@ -1083,6 +1083,18 @@ def _unused(inv: dict, runs: list[dict], kinds) -> list[dict]:
     return out
 
 
+def _runs_started(root: Path, day_from: str, day_to: str) -> int:
+    """Helper runs orch itself started in the window (ORCH-966), whether or not the helper wrote record lines:
+    a custom helper may write none, and Insights then says "not measured" instead of "no runs"."""
+    from orch import runs_live
+
+    try:
+        recs = runs_live.records(root)
+    except Exception:  # noqa: BLE001 - an unreadable run folder is "unknown", never a false count
+        return 0
+    return sum(day_from <= str(r.get("started_at") or "")[:10] <= day_to for r in recs)
+
+
 def counts(root: Path, args) -> dict:
     from orch import config
 
@@ -1113,6 +1125,7 @@ def counts(root: Path, args) -> dict:
     inv = inventory.document(root, stamp)
     return {
         "schema": "orch.counts/1",
+        "started": _runs_started(root, day_from, day_to),
         "generated_at": stamp,
         "since": since,
         "from": day_from,

@@ -1,5 +1,5 @@
 'use strict';
-// The wall of the new live page (draft D, ORCH-360), behind the Preview switch (pages/live.js). Every session of the
+// The wall of the live page (draft D, ORCH-360; pages/live.js). Every session of the
 // workspace in bands: Pinned, Needs you and working (orange needs-you tiles first), In line, Idle and no session. A
 // working tile shows what its helper does in one sentence and a peek of its last lines, kept current by the live
 // sessions API (pages/livesessions.js, ORCH-359). A filter keeps the matching tiles; a band folds away and stays
@@ -26,11 +26,13 @@ function liveWallBands(sessions, pins, filter, groups) {
   const shown = f ? all.filter(s => s.group ? liveWallGroups.match(s.group, f)
     : [s.key, s.name, s.title, s.word, LIVE_WALL_WORD[s.status]].filter(x => typeof x === 'string' && x).join(' ').toLowerCase().includes(f)) : all;
   const rank = {'needs-you':0, working:1, idle:2, 'in-line':3, closed:4};
-  const sorted = shown.map((s, i) => [s, i]).sort((a, b) => rank[a[0].status] - rank[b[0].status] || a[1] - b[1]).map(x => x[0]);
+  // ORCH-790: an idle or closed session whose ticket waits for the person (`needs`) sorts and lands with needs you
+  const asks = s => s.status === 'needs-you' || ((s.status === 'idle' || s.status === 'closed') && s.needs === true);
+  const sorted = shown.map((s, i) => [s, i]).sort((a, b) => (asks(a[0]) ? 0 : rank[a[0].status]) - (asks(b[0]) ? 0 : rank[b[0].status]) || a[1] - b[1]).map(x => x[0]);
   const pin = sorted.filter(s => pinned.has(s.id)), rest = sorted.filter(s => !pinned.has(s.id));
   return {
-    pin, need:rest.filter(s => s.status === 'needs-you' || s.status === 'working'),
-    queue:rest.filter(s => s.status === 'in-line'), idle:rest.filter(s => s.status === 'idle' || s.status === 'closed'),
+    pin, need:rest.filter(s => asks(s) || s.status === 'working'),
+    queue:rest.filter(s => s.status === 'in-line'), idle:rest.filter(s => !asks(s) && (s.status === 'idle' || s.status === 'closed')),
     total:all.length, shown:shown.length,
   };
 }
@@ -124,6 +126,11 @@ function liveWallPin(s, pinned) {
   return h('button', {type:'button', className:'btn icon sm ghost', 'data-wall-pin':s.id, 'data-key':'wall-pin-' + s.id,
     'aria-pressed':String(pinned), 'aria-label':(pinned ? 'Unpin ' : 'Pin ') + liveWallLabel(s), title:pinned ? 'Unpin' : 'Pin'}, iconEl('pinned'));
 }
+// Stop and End session from the wall (ORCH-817, pages/live-end.js): a More button with its menu on tiles and lines.
+function liveWallEnd(s) {
+  if (typeof window.liveEndMore !== 'function' || s.group) return [];
+  return [window.liveEndMore(s.id, 'tile', liveWallLabel(s)), window.liveEndOpenAt('tile') === s.id ? window.liveEndMenu(s.id, 'tile:' + s.id) : null];
+}
 // A group's tile (ORCH-345): the group's title, its helper counts, the small tree; orange when one helper needs you.
 function liveWallGroupTile(s, pinned) {
   const g = s.group;
@@ -145,7 +152,13 @@ function liveWallTile(s, pinned) {
       h('span', {className:'wall-now', 'data-wall-now':s.id}, liveNow(s)),
       peek ? h('span', {className:'wall-peek', 'data-wall-peek':s.id, 'aria-hidden':'true'}, peek) : null),
     meta.length ? h('span', {className:'wall-meta meta'}, meta.map(x => h('span', {}, x))) : null,
-    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), liveWallTicketLink(s), liveWallPin(s, pinned), liveWallBeside(s)));
+    liveWallResults(s),
+    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), liveWallTicketLink(s), liveWallPin(s, pinned), liveWallBeside(s), ...liveWallEnd(s)));
+}
+// The ticket's newest result, small, and "+N more" (ORCH-697); a click opens it big. None without a ticket.
+function liveWallResults(s) {
+  const t = typeof ticketOf === 'function' ? ticketOf(s.id) : null;
+  return t && typeof resultsHost === 'function' ? resultsHost(t.id, {key:'wall-results-' + s.id, max:typeof RESULTS_TILE === 'number' ? RESULTS_TILE : 1, cls:'wall-results', label:'Results of ' + liveWallLabel(s)}) : null;
 }
 function liveWallLine(s, pinned) {
   const meta = [liveTool(s), liveWarm(s)].filter(Boolean), now = liveNow(s);
@@ -154,7 +167,7 @@ function liveWallLine(s, pinned) {
     liveWallOpen(s, 'wall-lopen', liveWallStat(s), h('span', {className:'wall-key'}, s.key || ''), h('span', {className:'wall-tt'}, liveName(s)),
       h('span', {className:'wall-lnow', 'data-wall-now':s.id, 'aria-hidden':said ? null : 'true'}, said || '\u00a0')),
     meta.length ? h('span', {className:'wall-lmeta meta'}, meta.map(x => h('span', {}, x))) : null,
-    liveWallTicketLink(s), liveWallPin(s, pinned));
+    liveWallTicketLink(s), liveWallPin(s, pinned), ...liveWallEnd(s));
 }
 const LIVE_WALL_BANDS = [
   ['pin', 'Pinned', 'Nothing is pinned. Pin a session to keep it here.'],
@@ -202,6 +215,7 @@ function liveWallRepaint() {
   if (!host || typeof reconcile !== 'function') return;
   const next = h('div', {}, ...liveWallBody());
   reconcile(host, next);
+  if (typeof resultsFillAll === 'function') resultsFillAll(host);
 }
 if (typeof window === 'object' && typeof document === 'object' && !(typeof module === 'object' && module.exports)) {
   window.addEventListener('orch:live-sessions', liveWallRepaint);

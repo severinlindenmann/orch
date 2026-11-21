@@ -300,6 +300,9 @@ def test_every_account_at_its_limit_reaches_the_person_once_as_one_row(cli, swit
         assert _warn_ids(ws, 30 * n) == first
     (row,) = [r for r in switching.needs_rows(ws, at(150)) if r["id"] == first[0]]
     assert row["source"] == "usage" and row["ticket"] is None and row["tone"] == "bad"
+    # the title is not said again in the text, and the hint has no brackets inside brackets
+    assert not row["text"].lower().startswith("every account is at or near")
+    assert "(" not in row["cli"]
     assert (
         row["actions"][0]["verb"] == "seen" and row["actions"][0]["target"] == f"all-at-limit:{row['since']}"
     )
@@ -634,3 +637,11 @@ def test_a_5_hour_limit_of_the_account_wins_over_the_default():
         key="k_main", label="main", slot=1, windows={"5h": Window(93.0), "week": Window(1.0)}
     )
     assert switching.judge(a, use, {}, 10).good
+
+
+def test_a_look_with_a_failing_switcher_says_it_did_not_answer(cli, fake_switcher, ws):
+    fake_switcher.answer("not json")
+    code, d = jrun(cli, "run", "--once")
+    assert code == 0 and d["switcher"] is True and d["did"] == "nothing"
+    code, out, _ = cli("run", "--once")
+    assert "not installed" not in out and "looks again" in out

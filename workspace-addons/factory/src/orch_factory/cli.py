@@ -93,6 +93,32 @@ def background(args, root):
     return 0
 
 
+def _value(v):
+    return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+
+
+def plain(cmd, result):
+    """Plain lines for a person (list, show, next); --json prints the same data as JSON."""
+    if cmd == "list":
+        if not result:
+            return "No orders yet."
+        lines = []
+        for o in result:
+            line = f"{o['order']}  {o.get('stage') or '-'}  {o.get('title') or ''}"
+            if o.get("broken"):
+                line += f"  (problem: {o['broken']})"
+            elif o.get("questions"):
+                line += f"  ({len(o['questions'])} open question(s))"
+            lines.append(line)
+        return "\n".join(lines)
+    if cmd == "show":
+        lines = [f"{k}: {_value(v)}" for k, v in result.items() if k != "questions"]
+        for q in result.get("questions") or []:
+            lines.append(f"question: {_value(q)}")
+        return "\n".join(lines)
+    return "\n".join(f"{k}: {_value(v)}" for k, v in result.items())
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     try:
@@ -246,6 +272,9 @@ def main(argv=None):
             from . import pageapi
 
             result = pageapi.needs(root)
+        if args.cmd in ("list", "show", "next") and not args.json:
+            print(plain(args.cmd, result))
+            return 0
         print(json.dumps(result))
         return 0
     except (Refused, OSError) as error:
