@@ -1,9 +1,9 @@
-"""Write contracts/vectors/signing-v1.json (signed messages v1, contracts/relay-api.md "Signed messages").
+"""Write contracts/vectors/msgsig-v1.json (signed messages v1, contracts/relay-api.md "Signed messages").
 
 Run from the repo root:
-  uv run --with cryptography python scripts/gen_signing_vectors.py [wycheproof ed25519_test.json]
+  uv run --with cryptography python scripts/gen_msgsig_vectors.py [wycheproof ed25519_test.json]
 Without the Wycheproof file the "wycheproof" section of the existing vector file is kept as it is.
-It also writes the copy the phone tests read (mobile/OrchMobileTests/Fixtures/signing-v1.json).
+It also writes the copy the phone tests read (mobile/OrchMobileTests/Fixtures/msgsig-v1.json).
 
 Independent of workspace/src/orch/msgsig.py on purpose: the expected results here are written by hand per
 case, so the three implementations are tested against the contract, not against each other.
@@ -22,8 +22,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "contracts" / "vectors" / "signing-v1.json"
-PHONE_COPY = ROOT / "mobile" / "OrchMobileTests" / "Fixtures" / "signing-v1.json"
+OUT = ROOT / "contracts" / "vectors" / "msgsig-v1.json"
+PHONE_COPY = ROOT / "mobile" / "OrchMobileTests" / "Fixtures" / "msgsig-v1.json"
 
 T0 = 1795000000000  # created_ms of most cases (Nov 2026)
 MIN = 60_000
@@ -35,7 +35,7 @@ def b64u(b: bytes) -> str:
 
 
 def seed(label: str) -> bytes:
-    return hashlib.sha256(b"orch signing-v1 test key " + label.encode()).digest()
+    return hashlib.sha256(b"orch msgsig-v1 test key " + label.encode()).digest()
 
 
 def pub_of(sd: bytes) -> bytes:
@@ -802,9 +802,9 @@ else:
     wycheproof = json.loads(OUT.read_text())["wycheproof"]
 
 doc = {
-    "name": "signing-v1",
+    "name": "msgsig-v1",
     "about": "Signed messages v1, contracts/relay-api.md 'Signed messages'. "
-    "Made by scripts/gen_signing_vectors.py; "
+    "Made by scripts/gen_msgsig_vectors.py; "
     "do not edit by hand. Seeds are public TEST keys. Python (workspace), Rust (relay) and Swift (phone) "
     "run every section; Swift skips 'sign' (CryptoKit signatures are randomized).",
     "constants": {

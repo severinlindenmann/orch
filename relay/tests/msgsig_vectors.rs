@@ -1,4 +1,4 @@
-//! Signed messages v1: the shared vectors (contracts/vectors/signing-v1.json) against the relay's gate.
+//! Signed messages v1: the shared vectors (contracts/vectors/msgsig-v1.json) against the relay's gate.
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -7,7 +7,7 @@ use orch_relay::msgsig::{self, RelayOutcome};
 use serde_json::Value;
 
 fn vectors() -> Value {
-    serde_json::from_str(include_str!("../../contracts/vectors/signing-v1.json")).unwrap()
+    serde_json::from_str(include_str!("../../contracts/vectors/msgsig-v1.json")).unwrap()
 }
 
 fn h(s: &Value) -> Vec<u8> {

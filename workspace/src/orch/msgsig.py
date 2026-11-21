@@ -1,4 +1,4 @@
-"""Signed messages v1 (contracts/relay-api.md "Signed messages", vectors/signing-v1.json).
+"""Signed messages v1 (contracts/relay-api.md "Signed messages", vectors/msgsig-v1.json).
 
 Pure functions, no I/O: the format, strict reading, key ids, fingerprints, signing and the checks a receiver
 runs. Where the trust store, seen ids and held messages live is the job of the code that calls this (later

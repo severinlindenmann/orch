@@ -2765,21 +2765,21 @@ for prefix in ("valid-", "invalid-"):
     if not any(f.name.startswith(prefix) for f in cg_files):
         fails.append(f"vectors/chat-groups: needs at least one {prefix}* vector")
 
-# Signed messages v1 (relay-api.md "Signed messages"): the phone tests read a copy that must be the same file,
+# Message envelope v1 (msgsig.md): the phone tests read a copy that must be the same file,
 # and every case family the contract names is there. The behaviour itself runs in the three languages' tests.
-_sig_path = HERE / "vectors" / "signing-v1.json"
-_sig_copy = HERE.parent / "mobile" / "OrchMobileTests" / "Fixtures" / "signing-v1.json"
+_sig_path = HERE / "vectors" / "msgsig-v1.json"
+_sig_copy = HERE.parent / "mobile" / "OrchMobileTests" / "Fixtures" / "msgsig-v1.json"
 if not _sig_copy.exists() or _sig_copy.read_bytes() != _sig_path.read_bytes():
-    fails.append("vectors/signing-v1.json: the phone copy in mobile/OrchMobileTests/Fixtures differs (run scripts/gen_signing_vectors.py)")
+    fails.append("vectors/msgsig-v1.json: the phone copy in mobile/OrchMobileTests/Fixtures differs (run scripts/gen_msgsig_vectors.py)")
 _sig = json.loads(_sig_path.read_text(encoding="utf-8"))
 _sig_names = [c["name"] for c in _sig["messages"]]
 for _fam in ("good_", "wrong_", "missing_", "changed_", "replayed", "redirected", "strict_", "field_", "envelope_"):
     if not any(n.startswith(_fam) for n in _sig_names):
-        fails.append(f"vectors/signing-v1.json: no {_fam}* case")
+        fails.append(f"vectors/msgsig-v1.json: no {_fam}* case")
 if len(set(_sig_names)) != len(_sig_names):
-    fails.append("vectors/signing-v1.json: duplicate case names")
+    fails.append("vectors/msgsig-v1.json: duplicate case names")
 if _sig["wycheproof"]["count"] != len(_sig["wycheproof"]["cases"]) or _sig["wycheproof"]["count"] < 200:
-    fails.append("vectors/signing-v1.json: Wycheproof cases missing")
+    fails.append("vectors/msgsig-v1.json: Wycheproof cases missing")
 
 for _fn in KINDS.values():
     _fn()

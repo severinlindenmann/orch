@@ -1,4 +1,4 @@
-//! Signed messages v1 (contracts/relay-api.md "Signed messages", vectors/signing-v1.json).
+//! Signed messages v1 (contracts/relay-api.md "Signed messages", vectors/msgsig-v1.json).
 //!
 //! The relay is the first gate: it checks the envelope, the sender's registered key, the signature, the strict
 //! reading of the signed bytes, the field rules and that the signed `from` is the caller. Freshness and `to` are

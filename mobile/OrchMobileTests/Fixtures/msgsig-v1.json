@@ -1,6 +1,6 @@
 {
- "name": "signing-v1",
- "about": "Signed messages v1, contracts/relay-api.md 'Signed messages'. Made by scripts/gen_signing_vectors.py; do not edit by hand. Seeds are public TEST keys. Python (workspace), Rust (relay) and Swift (phone) run every section; Swift skips 'sign' (CryptoKit signatures are randomized).",
+ "name": "msgsig-v1",
+ "about": "Signed messages v1, contracts/relay-api.md 'Signed messages'. Made by scripts/gen_msgsig_vectors.py; do not edit by hand. Seeds are public TEST keys. Python (workspace), Rust (relay) and Swift (phone) run every section; Swift skips 'sign' (CryptoKit signatures are randomized).",
  "constants": {
   "tag": "orch-sig-v1",
   "purposes": [
@@ -18,49 +18,49 @@
  "parties": {
   "ws_a": {
    "address": "ws_aaaaaaaaaa",
-   "seed": "47936414759301fe909a9f58d40274691c60454e95287472907b9fa44b1c3a57",
-   "pub": "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7",
-   "key_id": "887e2aef1f298505",
-   "fingerprint": "H1Z2 NVRZ 562G ANC2 C7SG CZBD CCGC R7VC"
+   "seed": "2ac631bebeee8add85f901d1039c7a74a9a285b70e314f884cd52bc03637d44a",
+   "pub": "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7",
+   "key_id": "82cb649ca45a17af",
+   "fingerprint": "GB5P 9754 B8BT ZRJS P1HY 1HZ7 XCX0 JPM1"
   },
   "ws_b": {
    "address": "ws_bbbbbbbbbb",
-   "seed": "59b3cdf13f0ccb05d1b6b017a28aff9e741a0c5f0e01e05a71def9b9773210ab",
-   "pub": "d57cc9d43b6054329b575f0b84a842938e6c78fc53bb519d2dc4563768bd6d17",
-   "key_id": "2683d1f46a96092a",
-   "fingerprint": "4T1X 3X3A JR4J NG2M 46MT Y9QY 3420 WFHX"
+   "seed": "4cab84bc4a564fd9c1dc4d1c0daf09e06e69f41b3dc81bc17ead10b4f669ec07",
+   "pub": "4b9c28014349dcea8ba5d6a24b0095d1832931b29b1b94a16530e1ee4f241674",
+   "key_id": "540aeea97f5fb2b6",
+   "fingerprint": "AG5E XABZ BYSB C5H6 YG26 9AZY 72NV F2DY"
   },
   "ws_c": {
    "address": "ws_cccccccccc",
-   "seed": "d747aa6af732307a23a287630e4c0f8bdd8fae290244b80a5b041fa4300e7413",
-   "pub": "550a178f7ac3f49f1a4ea6f284f2702208a2431a691f96e9ed4641e5ae46fd2a",
-   "key_id": "19f9fd724ac4fe04",
-   "fingerprint": "37WZ TWJA RKZ0 9HYW SAWR K8B4 SERB PR8F"
+   "seed": "7c510b66e603c054653a97d00dad3e39986fc4b66dafe8b95a79ae1a6085d09f",
+   "pub": "3c31b58f9454b5456f349fea25b52701fa9fb1632a8fb8188662392b3cb0df6b",
+   "key_id": "17771d7fdd3f28bf",
+   "fingerprint": "2XVH TZYX 7WMB ZXS6 7KJ6 ETKB Z7T4 M3JT"
   },
   "ph_p": {
    "address": "ph_pppppppppp",
-   "seed": "9e49a17f0e03a66b54b10e99beeae2596aefdb632c29d6020da2b237bcadae16",
-   "pub": "675a236f8c1f98d196b6882dd8212b5a0a85f2f46bc0ad4d4ed15acdef42e64d",
-   "key_id": "85ef3da9354a5671",
-   "fingerprint": "GQQK VA9N 99B7 3G7T 1B36 48HS CE7Z JNQ2"
+   "seed": "2c7bd7d869dabec19bd17d43637110ca0ebc5f7ce0fc5277125faa274f7cf177",
+   "pub": "afd9817ca3db077ce7d20e79ef8157e5bf44d0af8af5b866d2798d934c4b0696",
+   "key_id": "1a55d274cfb3c2fe",
+   "fingerprint": "39AX 4X6F PF1F WM85 MN9P CQHV 0X2G 0QQ9"
   },
   "mallory": {
    "address": null,
-   "seed": "394742ce51e6b94f2d4acb93519c2722829acb59ac78e95d944cd8e5ac21ced9",
-   "pub": "f5aaa9de903d0b7d9dfa7881de72e79292dac58276530204641f315aae694313",
-   "key_id": "64cddcf385826592",
-   "fingerprint": "CK6X SWW5 G9JS 5J1C SJMV 5HDP DJ0B 9K14"
+   "seed": "8560355a15d2bb186c37bcc3b72d477b53bf1ee24ffe3d19df1850e28351ccff",
+   "pub": "88a88015215865c2c8ed47c3ab950f7a9ee40888e765546d9418c4baca1faea2",
+   "key_id": "dee998abbbdc5408",
+   "fingerprint": "VVMS HAXV VHA0 H0ZN 0G9D FJP1 W3K0 JFSY"
   }
  },
  "keys": [
   {
    "name": "good_ws_a",
-   "pub": "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7",
+   "pub": "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7",
    "ok": true
   },
   {
    "name": "good_ph_p",
-   "pub": "675a236f8c1f98d196b6882dd8212b5a0a85f2f46bc0ad4d4ed15acdef42e64d",
+   "pub": "afd9817ca3db077ce7d20e79ef8157e5bf44d0af8af5b866d2798d934c4b0696",
    "ok": true
   },
   {
@@ -125,36 +125,36 @@
   },
   {
    "name": "31_bytes",
-   "pub": "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1",
+   "pub": "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9",
    "ok": false
   },
   {
    "name": "33_bytes",
-   "pub": "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c700",
+   "pub": "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b700",
    "ok": false
   }
  ],
  "sign": [
   {
    "name": "ws_a_msg",
-   "seed": "47936414759301fe909a9f58d40274691c60454e95287472907b9fa44b1c3a57",
+   "seed": "2ac631bebeee8add85f901d1039c7a74a9a285b70e314f884cd52bc03637d44a",
    "purpose": "msg",
    "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-   "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQ"
+   "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dg"
   },
   {
    "name": "ph_p_msg",
-   "seed": "9e49a17f0e03a66b54b10e99beeae2596aefdb632c29d6020da2b237bcadae16",
+   "seed": "2c7bd7d869dabec19bd17d43637110ca0ebc5f7ce0fc5277125faa274f7cf177",
    "purpose": "msg",
    "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwNiIsImZyb20iOiJwaF9wcHBwcHBwcHBwIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJib2R5Ijp7InRleHQiOiJPaywgZ28ifX0",
-   "sig": "Yw0LCAcr4rPOqF4xly2Mo7J9X9eEpzRx-5wETRAFyL-sYYl46Zm8gaZicO0j0cls_vYzbUEQKdifbibquYryAA"
+   "sig": "uK2JXE1oohmDW8bPkRcVQZr7sqDT9na9QI1dycI0XrN_9t7lPdLFJ4iDcmHLvfclCDN_w4dYFR64tJNLKehnAg"
   },
   {
    "name": "ws_a_report",
-   "seed": "47936414759301fe909a9f58d40274691c60454e95287472907b9fa44b1c3a57",
+   "seed": "2ac631bebeee8add85f901d1039c7a74a9a285b70e314f884cd52bc03637d44a",
    "purpose": "report",
    "signed": "eyJhcmNoaXZlX3NoYTI1NiI6IjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAifQ",
-   "sig": "p4omMtYP9pu7FmzFPqztWDKUNtSgYEE7fmR4yulBeHGwdQaUz8jbcsXFVNyQK31Y9uEev8Nxj76mcNgYgHmmBQ"
+   "sig": "R6bO9ttPinTwO0s-d5spd1A6x4LC4-BCpc6-OqMOhtj5mI9bSST2MnG9z5iZzRrAwRCcW0C9Da5TiwXSP3qlDA"
   }
  ],
  "strict_json": [
@@ -355,15 +355,15 @@
    "note": "A signed text from ws_a to ws_b.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQ"
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -374,7 +374,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -385,9 +385,9 @@
    "note": "relay_meta is outside the signature and never read by decisions.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQ",
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dg",
     "relay_meta": {
      "from_name": "Somebody else",
      "type": "allow"
@@ -397,7 +397,7 @@
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -408,7 +408,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -419,15 +419,15 @@
    "note": "A file listed by blob id, size and hash.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMiIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6ImZpbGUiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsibmFtZSI6InJlcG9ydC5wZGYifSwiZmlsZXMiOlt7ImJsb2JfaWQiOiJiXzAwMDAwMDAwMDAwMDAwMDEiLCJzaXplIjoxMjM0NSwic2hhMjU2IjoiODQ1ZTkxODMxMzE5ZTg5YzRkNjU2YmRiODBjMjc4YWMwOWE3MjMwZDYxZTVkZmQyZTFiMWZiYjQzNmFjODkxNyJ9XX0",
-    "sig": "N1rlkmW39NV4K5_hQSqFSnBIUskamdK01zZeSG65vmHSjdQ-9Q4ZntnyZ-22bhjZftjl6qQbYOMKZ1HRnF0dAQ"
+    "sig": "ugFHhHrxxP2Cl9XqdXMfCoY3W4fvj2RbLkSNajCjlxEZLPvc4vZyqtOHj27O0xMAjkl7soaNiGC8Ftuao8hICQ"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -438,7 +438,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -449,15 +449,15 @@
    "note": "An answer names the question's hash.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMyIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6ImFuc3dlciIsImNyZWF0ZWRfbXMiOjE3OTUwMDAwMDAwMDAsIm9yaWdpbiI6InBlcnNvbiIsInRpY2tldCI6InRfYWJjMTIzIiwiYm9keSI6eyJvcHRpb24iOiJZZXMifSwicmVwbHlfdG8iOiJtXzAwMDAwMDAwMDAwMDAwcTEiLCJxdWVzdGlvbl9pZCI6InExIiwicXVlc3Rpb25fc2hhMjU2IjoiOTFiNGJkMmQ1NThmNTk0ZjQwYmFkNGNlNDQ1YmZkN2JjMGYwZGU5MWQxNzc5MzhhYWEyNDNkNTU3ZGU1N2Q2NiJ9",
-    "sig": "gHApq6t9P-WeMWYrnZ2rSegJrXI6y-oDKxixTwNP2U4i_hZhaFZxsSmVP1mDmLsIparWFpLTxdkrVGj0u_vcCw"
+    "sig": "Nw99KTEIfHLTsNSsXMqjhjfdh9EtimLhhwj_usgLLXy4LiiSpgZBBGlg4q1zWOvevYNsZ7kvLvn_jrqMhtLUAw"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -468,7 +468,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -479,15 +479,15 @@
    "note": "An allow carries expires_ms, at most 60 minutes after created_ms.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwNCIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6ImFsbG93IiwiY3JlYXRlZF9tcyI6MTc5NTAwMDAwMDAwMCwib3JpZ2luIjoicGVyc29uIiwidGlja2V0IjoidF9hYmMxMjMiLCJib2R5Ijp7ImFsbG93IjoiZGVsZWdhdGUifSwicmVwbHlfdG8iOiJtXzAwMDAwMDAwMDAwMDAwZDEiLCJleHBpcmVzX21zIjoxNzk1MDAzNjAwMDAwfQ",
-    "sig": "B9QCvl4x6qZzTSoO-ATEQSu4Iqi5RFdY4dmloW1vFV5uAIuYPLEAjWRC7lUGVVll5yQbPsORbjn8XYm0g5ehAA"
+    "sig": "2K8Wim-jPxla7z6QbSSdBOMVvZEYAAA7RLul5yMl9btn3-9-d8rASb20FAHPx5b6moLTFOBdxhxhWkPXdG9uDA"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -498,7 +498,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -509,15 +509,15 @@
    "note": "A workspace text to every phone; the phone checks it.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwNSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJwaG9uZXMiLCJ0eXBlIjoidGV4dCIsImNyZWF0ZWRfbXMiOjE3OTUwMDAwMDAwMDAsIm9yaWdpbiI6InBlcnNvbiIsInRpY2tldCI6InRfYWJjMTIzIiwiYm9keSI6eyJ0ZXh0IjoiSGVsbG8gZnJvbSBQaWxhdHVzIn19",
-    "sig": "3-ktFmY4LBkJNRyJktepECK280u0aua3z6k_vJ0OSafAQgsea4HbDUq3cOJ1S6VjYfkhFAFjz1Kr5bKUDTu6AA"
+    "sig": "XATLS9mp7SFTSNV1W8wbvHU4gYCHo3JjrWsfIL-srPgT7AiqWBdkIPfKbyKcXO4hoozerFumzJS_8iu9S_RvDg"
    },
    "receiver": {
     "me": "ph_pppppppppp",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -528,7 +528,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -539,15 +539,15 @@
    "note": "The phone signs the same format, always as a person.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "85ef3da9354a5671",
+    "key_id": "1a55d274cfb3c2fe",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwNiIsImZyb20iOiJwaF9wcHBwcHBwcHBwIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJib2R5Ijp7InRleHQiOiJPaywgZ28ifX0",
-    "sig": "Yw0LCAcr4rPOqF4xly2Mo7J9X9eEpzRx-5wETRAFyL-sYYl46Zm8gaZicO0j0cls_vYzbUEQKdifbibquYryAA"
+    "sig": "uK2JXE1oohmDW8bPkRcVQZr7sqDT9na9QI1dycI0XrN_9t7lPdLFJ4iDcmHLvfclCDN_w4dYFR64tJNLKehnAg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ph_pppppppppp": [
-      "675a236f8c1f98d196b6882dd8212b5a0a85f2f46bc0ad4d4ed15acdef42e64d"
+      "afd9817ca3db077ce7d20e79ef8157e5bf44d0af8af5b866d2798d934c4b0696"
      ]
     },
     "now_ms": 1795000001000,
@@ -558,7 +558,7 @@
    "relay": {
     "caller": "ph_pppppppppp",
     "registered": [
-     "675a236f8c1f98d196b6882dd8212b5a0a85f2f46bc0ad4d4ed15acdef42e64d"
+     "afd9817ca3db077ce7d20e79ef8157e5bf44d0af8af5b866d2798d934c4b0696"
     ],
     "seen": {}
    },
@@ -569,15 +569,15 @@
    "note": "To a group: host, group id and member-list version are signed.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwNyIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOnsiZ3JvdXAiOiJncnBfdF9hYmMxMjMiLCJob3N0Ijoid3NfYWFhYWFhYWFhYSIsIm1lbWJlcnNfdiI6M30sInR5cGUiOiJ0ZXh0IiwiY3JlYXRlZF9tcyI6MTc5NTAwMDAwMDAwMCwib3JpZ2luIjoicGVyc29uIiwidGlja2V0IjoidF9hYmMxMjMiLCJib2R5Ijp7InRleHQiOiJIZWxsbyBmcm9tIFBpbGF0dXMifX0",
-    "sig": "Sz43qHSk6PTrKr6okI7Z0jS9YADCR5GrlGjy4yXP94Dzu6um05bYM_ggLGlLgd9hH-Hg7WRPlMJAYouPOe99CQ"
+    "sig": "E6NMIPZnXv4nRLSrpVdG5Wscr9b12b-1j3FcolhkJqFgnFaKnpePiBICr4WExl7O1pL06QrazSsrZTAXI7IWCw"
    },
    "receiver": {
     "me": "ws_cccccccccc",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -593,7 +593,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -604,15 +604,15 @@
    "note": "Escapes and non-ASCII text are fine when well formed.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwOCIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJoZWxwZXIiLCJib2R5Ijp7InRleHQiOiJHclx1MDBmY1x1MDBkZmUgXHVkODNkXHVkZTAwIEdyw7zDn2Ug8J-YgCIsIm4iOi00MiwibGlzdCI6W3RydWUsZmFsc2UsbnVsbCx7fV19fQ",
-    "sig": "eafPRZq2O1loS91W-ICsfm2x5Yhh536Aek99sMBDus6SMZe_T23ejcMHBatlSP4wBTWXLxGgP4Y-7V07KAj_AQ"
+    "sig": "p9_1Oi8m48u_mJNVYNa3NkVeSb_AnG1q1qs3llg3IEAYE783sWrjIDKRmjeeO622FJuaYGz_mOpavS9DctM0BA"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -623,7 +623,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -634,15 +634,15 @@
    "note": "Whitespace between tokens is allowed (only outside the object it is not).",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyAidiIgOiAxICwKICJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwOSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJib2R5Ijp7fQl9",
-    "sig": "VdyKz0gLDico4vLJiNpzZWeCmkV1ruv0JwsZBKlFHIeH0CMawZzgA-lbW0Ai6UiUT2xXbaRFK5dKZnsTW7OzCw"
+    "sig": "JYfKJIV4brBMKkCFQ3gPlwCuAbpyJdmXbhx60mirb2E2owuAvaI9vNTl1ttIn7ss6eVH_Oa8TFRgjBrZbhjuBQ"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -653,7 +653,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -664,15 +664,15 @@
    "note": "Created 4 minutes ahead of the receiver's clock: allowed.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAxMCIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMjQwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "39Q5nGCrVzEPYzaRaKaXnUMsT_66wnQTZnHqL5eJxgLQKCVceMTql1hnvef1m6Rui5lKY35-yrWXQY7Xjkl_Bw"
+    "sig": "F7K0N0Ps_zGW0b2HKCLFNJWhCU5iHdC_Zg95gaH321mRMOexRXj93lOkMUpKDBroQ63-wg8gsybfSuXPBV43Dw"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000000000,
@@ -683,7 +683,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -694,15 +694,15 @@
    "note": "Text up to 30 days old is still taken.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQ"
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1797505600000,
@@ -713,7 +713,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -724,15 +724,15 @@
    "note": "Signed by another key but naming ws_a's key id.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "mZ4k7oaa3LhDFLz8fJ1nIN4glMlJy54MM7NdEN1Td_W-hLMYqZpMblQxAPKF10rywuOb6EoUs_sLykFWl2UdAQ"
+    "sig": "Ol_sygoutC6Eon6FEW4buwaR9d8DyT92IibWjCZ7EPszFKh2sW4BKudDf3BE7WYYOiP-I5cLX7VmZMREBia3DA"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -743,7 +743,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -754,15 +754,15 @@
    "note": "Signed by a key nobody accepted or registered.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "64cddcf385826592",
+    "key_id": "dee998abbbdc5408",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "mZ4k7oaa3LhDFLz8fJ1nIN4glMlJy54MM7NdEN1Td_W-hLMYqZpMblQxAPKF10rywuOb6EoUs_sLykFWl2UdAQ"
+    "sig": "Ol_sygoutC6Eon6FEW4buwaR9d8DyT92IibWjCZ7EPszFKh2sW4BKudDf3BE7WYYOiP-I5cLX7VmZMREBia3DA"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -773,7 +773,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -784,15 +784,15 @@
    "note": "Signed as a problem report, presented as a message.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "u-2ATz8HnDvZTSgtVRkIMm89nTVr6hl0I887oJCXaPIYfajOaVIpB7HYH0-YuqnSlm-0ToCpkc_knmCPEBo3DA"
+    "sig": "67zhtaEtZ22kUR66HmcEKYlq38Rt1hqPSDCTmXyjVT-MdCY5OrohjabtMVrDjZS8H2EbKLe9RTH-g6gX2WIzBQ"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -803,7 +803,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -814,15 +814,15 @@
    "note": "Signed over the bare bytes without the orch-sig-v1 tag.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "n8J0GUXlC8Pp7nuQZcSb8UpHE0K80w-V2G-DUif_tQTiqalDxLiqmJPYMIj6UFtKvgDn8_3RpiF4qvSWkJAgBQ"
+    "sig": "doW9FqY3khDFIZkrNrIbqOAzjN1eRtBXk323pisWO0XyFC39ofFDFN2_mdb_dIyP4mzHdotE9-hRTLABYPHgDg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -833,7 +833,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -844,15 +844,15 @@
    "note": "Valid signature by ws_a, but the signed from says ws_c.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAxMSIsImZyb20iOiJ3c19jY2NjY2NjY2NjIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "SU356NDMlZjaa6HEPqAjWgi4PjYuTdf8x9HOXl5ZhikudhLb3g6mtZ2JZx9DznZaM_lwSqiuB8xUkHFdPn10BQ"
+    "sig": "aSC1ZA1wQQQqoypclWH2q5nhCDRQ-0Fw7ZYp08Eqzo5dTrruH9hv277Mb2RM0CWZAyeMgkD-MlhjHVF4HkfcAg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -863,7 +863,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -904,14 +904,14 @@
    "note": "Envelope without a signature.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -922,7 +922,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -933,7 +933,7 @@
    "note": "Empty signature.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
     "sig": ""
    },
@@ -941,7 +941,7 @@
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -952,7 +952,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -966,7 +966,7 @@
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -977,7 +977,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -988,15 +988,15 @@
    "note": "One word of the signed bytes changed after signing.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhhbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQ"
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1007,7 +1007,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1018,15 +1018,15 @@
    "note": "One bit of the signature flipped.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcSMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQ"
+    "sig": "FiL8PvKZh1y4QSQeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1037,7 +1037,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1048,15 +1048,15 @@
    "note": "S + L (same math, second spelling): refused.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wUyvET_grgb91C1jogIyuzZ_dscP18NYQLgseDfaH5hGQ"
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmLGUwm3PxWgr7ZqXBeJttnQytf3Qs2CVSE4NuQZHv4Hg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1067,7 +1067,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1078,15 +1078,15 @@
    "note": "The same message again: the receiver refuses a seen id; the relay answers duplicate.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQ"
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1102,7 +1102,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {
      "m_0000000000000001": "68b631b4f9185278300ec4db8a4d78b7c22cfc4d63f308b3e26633b6a9b15f81"
@@ -1115,15 +1115,15 @@
    "note": "A seen id with other signed bytes: refused by both (relay 409 conflict).",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkRpZmZlcmVudCJ9fQ",
-    "sig": "7mtrnjkiYYPREGIIw49fvaj_D_DdWVrJL448dPT6kLQx2L-CJUST_mhAScy46xzN9DmG-d4EYwn2Ja3t8V0bAg"
+    "sig": "aEa198oxp9XcX2PFH1GnTxB9sviZPA_LiMDjBUtsNNUT8arCLsLcEnwl-ib4EqTWariyqZxR2Qz7M0yFg9ObDQ"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1139,7 +1139,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {
      "m_0000000000000001": "68b631b4f9185278300ec4db8a4d78b7c22cfc4d63f308b3e26633b6a9b15f81"
@@ -1152,15 +1152,15 @@
    "note": "An allow released after it expired.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwNCIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6ImFsbG93IiwiY3JlYXRlZF9tcyI6MTc5NTAwMDAwMDAwMCwib3JpZ2luIjoicGVyc29uIiwidGlja2V0IjoidF9hYmMxMjMiLCJib2R5Ijp7ImFsbG93IjoiZGVsZWdhdGUifSwicmVwbHlfdG8iOiJtXzAwMDAwMDAwMDAwMDAwZDEiLCJleHBpcmVzX21zIjoxNzk1MDAzNjAwMDAwfQ",
-    "sig": "B9QCvl4x6qZzTSoO-ATEQSu4Iqi5RFdY4dmloW1vFV5uAIuYPLEAjWRC7lUGVVll5yQbPsORbjn8XYm0g5ehAA"
+    "sig": "2K8Wim-jPxla7z6QbSSdBOMVvZEYAAA7RLul5yMl9btn3-9-d8rASb20FAHPx5b6moLTFOBdxhxhWkPXdG9uDA"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795003600000,
@@ -1171,7 +1171,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1182,15 +1182,15 @@
    "note": "A text held back 31 days.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQ"
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1797678400000,
@@ -1201,7 +1201,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1212,15 +1212,15 @@
    "note": "Created 6 minutes ahead of the receiver's clock.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAxMiIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMzYwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "trLUVSLbWJem7tbLxzM-JeUJvYRRntzUK8ZShToUWjx34pfFU20bN_M2Hs2_2SWppP5h9staQc9CTWt2tvXSBw"
+    "sig": "1eqreCA70PhXXaTvirORHjlzm8y4fFyCXMsfaOjo_okpvZ5B7iMz39OAltE6ZxIs8Tt4KzjUxjTFSTosXXNQDg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000000000,
@@ -1231,7 +1231,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1242,15 +1242,15 @@
    "note": "Signed for ws_c, delivered to ws_b.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAxMyIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19jY2NjY2NjY2NjIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "RxO-o-QryjMMEuNY6U74b0zM7r7PcvGtKe6Xx-3Mtnu_MmJWcHna_hTEv1OeE3P-umjD9fMnvTl-vw-hSQUHCQ"
+    "sig": "SLxGJE3H5fKiGaALPt9oGMEz0QrTvb7m71Z9g8b9GVTrNk4gRR0azgFYByuYoxx4UO6Yt-Y2d_6YXlBJphJTBA"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1261,7 +1261,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1272,15 +1272,15 @@
    "note": "Signed for one phone, delivered to another.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAxNCIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJwaF9xcXFxcXFxcXFxIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "HR257U_uJ29aFnVS6jiQIIhPH8TCXAfJLNBGUwFmbUfv5Eo7QAAHbWXpnXyctstqmTKgTr7xs0dqNyiQo0XIBA"
+    "sig": "aPTO0CNCetvLXGVz7Td-_o-J3fEHEXfIjYdXB9CDhSuhOI2YaELa2Xl8l9ysN0iTJ2JI5O7N6cXdUTZvJB1WAg"
    },
    "receiver": {
     "me": "ph_pppppppppp",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1291,7 +1291,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1302,15 +1302,15 @@
    "note": "A group message to a workspace not in that group.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAxNSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOnsiZ3JvdXAiOiJncnBfdF9hYmMxMjMiLCJob3N0Ijoid3NfYWFhYWFhYWFhYSIsIm1lbWJlcnNfdiI6M30sInR5cGUiOiJ0ZXh0IiwiY3JlYXRlZF9tcyI6MTc5NTAwMDAwMDAwMCwib3JpZ2luIjoicGVyc29uIiwidGlja2V0IjoidF9hYmMxMjMiLCJib2R5Ijp7InRleHQiOiJIZWxsbyBmcm9tIFBpbGF0dXMifX0",
-    "sig": "lkAQfgSmDzfWpg9KZIxku3vSMKJw_v3-0SN5nZvN7q1mB0c571IXYZxKNgfoPUPk4Vu0eC7-Is9k_hxf-8B0Cg"
+    "sig": "FfuFMtEjuWOROQWUczEq6MMyL2gDcTXq8NM2w20Cy7SNF1JtHn6LtIDSLPgqIsriDrm-8qiWvdMLOnHrOlmfDw"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1321,7 +1321,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1332,15 +1332,15 @@
    "note": "Our own message handed back to us.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAxNiIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOnsiZ3JvdXAiOiJncnBfdF9hYmMxMjMiLCJob3N0Ijoid3NfYmJiYmJiYmJiYiIsIm1lbWJlcnNfdiI6MX0sInR5cGUiOiJ0ZXh0IiwiY3JlYXRlZF9tcyI6MTc5NTAwMDAwMDAwMCwib3JpZ2luIjoicGVyc29uIiwidGlja2V0IjoidF9hYmMxMjMiLCJib2R5Ijp7InRleHQiOiJIZWxsbyBmcm9tIFBpbGF0dXMifX0",
-    "sig": "eaIpbrG1KWIGiddTtFWWMaSfBIpBupHZWwxb_L6yD0TtQhZTkIpdoYdAWK-lygeB9YTUxL-9RyJp_aQULm4bDQ"
+    "sig": "leVXW2bvDHGtFSfhG50-veORc4Wqt8BfSKRiMb0N76p-58SX-v6wSceaq3CfEc8cQbp_P6nEw3873g7pgG0yAw"
    },
    "receiver": {
     "me": "ws_aaaaaaaaaa",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1356,7 +1356,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1367,15 +1367,15 @@
    "note": "Correctly signed, but the bytes break a strict reading rule.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsIlx1MDA2OWQiOiJtXzAwMDAwMDAwMDAwMDAwMDIifQ",
-    "sig": "akX-4j77UKe_Ps5Er6UOP0wdbn2E42VDdzSR_ge8K8Ye5L--m6GsSd7CBD_F9SOFm1BVTFVg1fLQMjEz8mxpDQ"
+    "sig": "EV7fZTSqk0Cf3lFIbylElpbM6iETl_VAssO78CFmzMAcxTX9mJ_HOOMOshYOegwJDebtEiRasFAhqe8Wwg1nAQ"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1386,7 +1386,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1397,15 +1397,15 @@
    "note": "Correctly signed, but the bytes break a strict reading rule.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "77u_e30",
-    "sig": "GD5NxVwmfrxe5nHPKwXPPVm2_cJB1gcrKeGBm7RbTKHjUzDndIluoJVpoFqrAW6IMuCFZZ4R6Gcknt74--i_DA"
+    "sig": "qUjnFxN_QHeP-F0KWBGKorWHIG54hRb1MzG2R4h71wLeNdBSEhRER0fa1rbBfN5MZVQqlJ5agIlSxBweiYNNAA"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1416,7 +1416,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1427,15 +1427,15 @@
    "note": "Correctly signed, but the bytes break a strict reading rule.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "e30K",
-    "sig": "my6_WH11RbrripmLoyame_tgtHaIkgbL89KkoutqeKGfbies-UGznTdrlXGBbP5oqUJBFU_YI3dZWOrL54amDQ"
+    "sig": "VaE6N52GkBlNehxrPSYLvnbBqKs4RJaFG_O_o7rB76bO_5BPOMaRksOJXFQwU3kgY9RsCGq6C3KIuc-QzmxQCQ"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1446,7 +1446,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1457,15 +1457,15 @@
    "note": "Correctly signed, but the bytes break a strict reading rule.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJuIjoxLjV9",
-    "sig": "eaK27-ivK7yGf1Yy0zX6SG3WbCINzqyoTVwO1JjRwpns5DUjAK6RgR37ZaF0EiwS2qy9mdHsCZDgWTqQO5QDAA"
+    "sig": "NgRdLMOtakjFRFnqXs5TZuh2bw9HmOPMIOJ9JDvLuAlaM2WfHUzMFxog8oj0bOeVZxRVA0mDGPcRnpWoE7z5Aw"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1476,7 +1476,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1487,15 +1487,15 @@
    "note": "Correctly signed, but the bytes break a strict reading rule.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJuIjo5MDA3MTk5MjU0NzQwOTkyfQ",
-    "sig": "dtajmbN_-pqGfdsHSPpsj-LK4PwI32E4tIlEDBQAWMc5Ba5DbdGvjeMLmj6CwVPQaTPwklD6Arqm_bZqevZ1DA"
+    "sig": "ogkhHCIWUq5MBVrXaqVx-WX0o6gOB4jUPWU9amodk56MRqANJC69Zy0627S0eupQ-4603mu0_nz45bXfkiszDA"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1506,7 +1506,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1517,15 +1517,15 @@
    "note": "Correctly signed, but the bytes break a strict reading rule.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJzIjoiXHVkODAwIn0",
-    "sig": "ZgnOE6pPpzD0oPIrIbqFbhNHNllpiY6aufKukyLmxNcQvAp4PIMN8lfDc1ZUumCgf1tauWcRh4R3ZM0y7hXPBg"
+    "sig": "wSi0levBrwMlE9LHNr9-2kYFUhvifXyAiYIaP-kIWSnCNmOQAY6HrYsg_ppcaMwG3ws7XfZTul3-An456ntLAA"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1536,7 +1536,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1547,15 +1547,15 @@
    "note": "Correctly signed, but the bytes break a strict reading rule.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJzIjoi_yJ9",
-    "sig": "jYvASG6v7-OQDhPzKKnyNDKfFD1In5v_j2GOole5qC6JtNCce5-qLM9whnXb7bwxUvNgX35aYyK_g__xRlXNAQ"
+    "sig": "__Fw8oVCJ4AfPWDT0vctgsp3lc2y856Drzj3P4xZ3tBBSEsh0mg0tpAx5NaAhk74sfor5V-Ptx3xzXiG_lIEDw"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1566,7 +1566,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1577,15 +1577,15 @@
    "note": "Correctly signed, but the bytes break a strict reading rule.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJhIjpbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW11dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dfQ",
-    "sig": "5Z7nf77YFRU5oh411B2GM98-1uiKDs-OLfz45b0iqR7ZlcjGSJfdyR1wlcjXAgJ-VWd-w-5QPmKzn1GnkgPCAQ"
+    "sig": "6tdorz8gaO3Fx3Snn5VLrT8Fjmpnq_FEcZiMTrKkGIS9S5zMBmjJQYqbMaUl4uNcmlqCHs4HEe2mx_BrfI83BQ"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1596,7 +1596,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1607,15 +1607,15 @@
    "note": "An unknown field is refused, never ignored.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9LCJleHRyYSI6IngifQ",
-    "sig": "L5UQvhztPKXWYYyK5Vam_JPb3OWw8cPxf4Mf1-9SpZpntmg0nqXvYWneTD3oVgpm4uMwui91tcgXd3x2i8NPAA"
+    "sig": "JDrtqYsx1nTYljMPsgLzEUnJJ8o7SLMubxtO19xSmxP46z3NHxgu_g7z3sVpjI8tx181msMSEaWv7ET2ZAtjCg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1626,7 +1626,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1637,15 +1637,15 @@
    "note": "origin is required.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "4MN5oFIaxhtStb2PwYXKH6T60Uudx8LPSAa80IHymikfSQEatJDtILyzUIC8lxwRAMG8mGEAx1QUgaMVoe3UBQ"
+    "sig": "o2ThDAZh-iAUbJhcscGAcSZ5i4J9q3gRl44IeM8DJI_QbVIzJFyt1U4jaWjyH2yUXYOrL3IS9M-_SHWorxKcBw"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1656,7 +1656,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1667,15 +1667,15 @@
    "note": "true is not the integer 1.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2Ijp0cnVlLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "ruKSEyQJdRUW9V7VZPHQZPE_jYSR98dyLAyZ5Ry43aqxrb9b-2ZfegTyT_vnnPYPTti-0lOtKsnhAMw1Kuf5Cw"
+    "sig": "5xLc9LBUbXPr4urAVEWc43rBCqd1jouT_h8tmjYPTTARGCdGJvZPQkOErUNGzhrZ4_blOwVdQ-xAK9OsjDiUBw"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1686,7 +1686,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1697,15 +1697,15 @@
    "note": "Times are integer milliseconds.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoiMjAyNi0xMS0yMVQxMDowMDowMFoiLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "e0JSMz74J9etJ2_7yGH5dsyv9UYYO1tuFm1kfqxYU11pB9tfUHTJro-j-pjnqCHaHpJqkLAWkxAh1r6563bfCw"
+    "sig": "GZRoMw24Qmgomtv0xQFj-pC8N5wOxnh9lOYe6LSq6eWSIVfmPrr8nvJDDQiTt6uJtzp-p_fkrmHEWy-A7yxmBg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1716,7 +1716,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1727,15 +1727,15 @@
    "note": "allow, delegate and start need expires_ms.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6ImFsbG93IiwiY3JlYXRlZF9tcyI6MTc5NTAwMDAwMDAwMCwib3JpZ2luIjoicGVyc29uIiwidGlja2V0IjoidF9hYmMxMjMiLCJib2R5Ijp7InRleHQiOiJIZWxsbyBmcm9tIFBpbGF0dXMifSwicmVwbHlfdG8iOiJtXzAwMDAwMDAwMDAwMDAwZDEifQ",
-    "sig": "Wdo8W_W4QTlB9VrgtwrtcWhva-kBnB5BfF9y_SDCYid4ZYWer9B4PU5RXVyJDi0mm6Ly2IrqiG6PUauV3b3CBg"
+    "sig": "shsDIzE-9sV18HZszyGqx-DVF8L6xzafqOQ0kRw8SpF84zBCQ8DvxWrWpeKhS5EpL9_7GnzNgACNbAQ0Oa3mBw"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1746,7 +1746,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1757,15 +1757,15 @@
    "note": "expires_ms at most 60 minutes after created_ms.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InN0YXJ0IiwiY3JlYXRlZF9tcyI6MTc5NTAwMDAwMDAwMCwib3JpZ2luIjoicGVyc29uIiwidGlja2V0IjoidF9hYmMxMjMiLCJib2R5Ijp7InRleHQiOiJIZWxsbyBmcm9tIFBpbGF0dXMifSwiZXhwaXJlc19tcyI6MTc5NTAwMzY2MDAwMH0",
-    "sig": "InnCxxTgu77ZXPVli2xUhdkwW517nuL6xsOEXjHUUMAsi6lDObLE05NeMn-d4OK8ieQr6GdmC-Q7EUkr0cS7Cw"
+    "sig": "gADUllq4Kp4nRhSMEfVNp4r9v70xILhIlzcmdEClTEc3WnpMTvd-7onm8JXit4TMJLlcqWEnnnKt8X_pXIs_Bg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1776,7 +1776,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1787,15 +1787,15 @@
    "note": "expires_ms only on allow, delegate and start.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9LCJleHBpcmVzX21zIjoxNzk1MDAwMDYwMDAwfQ",
-    "sig": "ZV92nCpQPY7U3qjU8S5ZuI33xTc1338ED2E0wyGlwu85Yj-Z1Wue44Jla-X8ztb3EnqvWO_wVx1ertjH7b8eDA"
+    "sig": "OA3TrLBRhcVe8iABi1OX8o9VOEGgp-5-t0DCyYre2zPzMEfQp7nFse1DHezcaVdhURHkuxcfPyv9UrQPEM4XDA"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1806,7 +1806,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1817,15 +1817,15 @@
    "note": "An answer must sign the question's hash.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6ImFuc3dlciIsImNyZWF0ZWRfbXMiOjE3OTUwMDAwMDAwMDAsIm9yaWdpbiI6InBlcnNvbiIsInRpY2tldCI6InRfYWJjMTIzIiwiYm9keSI6eyJ0ZXh0IjoiSGVsbG8gZnJvbSBQaWxhdHVzIn0sInJlcGx5X3RvIjoibV8wMDAwMDAwMDAwMDAwMHExIiwicXVlc3Rpb25faWQiOiJxMSJ9",
-    "sig": "dt-8Ae7m3ZGU2J66mI7k9d-2VgiXbWUcyXVwOasnafprtBvZT8xpDIX48NaNTYlybMN_2IkKiX0NsFEJ2_PBBg"
+    "sig": "lYdD_FRFc36jzaHYG824Xu_XeX5y6Hx1kLaQHBy8EGrnbx_Cp8Gt6O-FGn_r2YqWrsyU_coQPtTIaYmcGsIsAA"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1836,7 +1836,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1847,15 +1847,15 @@
    "note": "A message to itself.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19hYWFhYWFhYWFhIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "_UMBYYSBObVhrzHfIHi5K7WyPA7vSoxAzUwyc61bxtuInJb0MYphQs15XR1oKuOnXYgvQBk309DPFzmpSF6tDA"
+    "sig": "f-YRkNpbeezrB-4-hprQlMbllh7g7bqj5sLCNIkLDet1AhyJhUyzluOxzt-iy2_bQsmA60_LW7PS6vIkNpGgDw"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1866,7 +1866,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1877,15 +1877,15 @@
    "note": "A file message lists its files.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6ImZpbGUiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "5UI6imej6H9ObJJhY2Y9FXuSuZYJERrlprx53027tmgWfShuDZBeJut2BXOaHuWqlvVW4WZ8sEvw3IDyJBptAg"
+    "sig": "hIdg4-1qLiycq8IVoNBhqWyr_-fUuGSt-iOzAjbFsxpOjflx4pXe4DK7SYpgtVV452yVL1id6GSkLgDR3lgnDw"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1896,7 +1896,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1907,15 +1907,15 @@
    "note": "A file hash is 64 lowercase hex characters.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6ImZpbGUiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9LCJmaWxlcyI6W3siYmxvYl9pZCI6ImJfMDAwMDAwMDAwMDAwMDAwMSIsInNpemUiOjEsInNoYTI1NiI6IkFCQyJ9XX0",
-    "sig": "puUrM9HFb-nwCjJdn4PqrA67UFObOxhJp5poSw62VTuv7WM8t77uNFhKc7KiE1E5AOwsXs-4vYKq5m3X-zU3CQ"
+    "sig": "-JEOLYP8pzPFnU1PrepWKmrjJozwVWRiJHfBEFEoQK-mYGLCPJTGNceIZpDeoVXgmZF4ROc9xZPWAcGFKbpsCA"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1926,7 +1926,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1937,15 +1937,15 @@
    "note": "File entries have exactly blob_id, size, sha256.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6ImZpbGUiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9LCJmaWxlcyI6W3siYmxvYl9pZCI6ImJfMDAwMDAwMDAwMDAwMDAwMSIsInNpemUiOjEsInNoYTI1NiI6IjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCJuYW1lIjoieCJ9XX0",
-    "sig": "5BrzjJcYODLVDGyVM-AvNkQ2gDIVu-IBcTuhpNV_e3v30xsjFIohq1vliIVY6C3KvvD1gw62fc5Fbc-KM8K3Bw"
+    "sig": "ZVhd2HydKTIDZeZqEWnuKie3CFJJmdFa07rMGe5wTkbk-Nu8ANNVY8wFw6bQwMF1x6BLfGngGVw_QOKxucc4DQ"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1956,7 +1956,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1967,15 +1967,15 @@
    "note": "Types the relay makes itself are never signed messages.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InJlZnJlc2gtaGludCIsImNyZWF0ZWRfbXMiOjE3OTUwMDAwMDAwMDAsIm9yaWdpbiI6InBlcnNvbiIsInRpY2tldCI6InRfYWJjMTIzIiwiYm9keSI6eyJ0ZXh0IjoiSGVsbG8gZnJvbSBQaWxhdHVzIn19",
-    "sig": "IU4LGmgOneEictPzOjgFL88s2AYN4dUEpdhlKwR5eRodFB4HZCfWCxrlWYTVelU9nUFaAaoVvR8wD4Uk2_pPDw"
+    "sig": "1B34Otx_KTZivbQXPqEzHn_wW2scj6IT3R_e6s-c8BPYi7Q0MAjJjsnQaOv7EsegDIHJwBlloMtnlvvDc_cDDg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -1986,7 +1986,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -1997,15 +1997,15 @@
    "note": "A phone signs only as a person.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "85ef3da9354a5671",
+    "key_id": "1a55d274cfb3c2fe",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMiIsImZyb20iOiJwaF9wcHBwcHBwcHBwIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJoZWxwZXIiLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "31wpoEYXrB9xAPGL0A5mN1K7EoOEyO-SaR3_qbCPXGql8WN8jROMMt9v25uEsv-l2dAGVlIajjhrw6g8ONMXCA"
+    "sig": "AXe4M1pzxA8-uguo4d7RgWATts2oQ-4rmV0qQXv0d2NVnd_M2NdYb_psgFpDDvEgOihNXVnFMiU4enAyHYDcAA"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ph_pppppppppp": [
-      "675a236f8c1f98d196b6882dd8212b5a0a85f2f46bc0ad4d4ed15acdef42e64d"
+      "afd9817ca3db077ce7d20e79ef8157e5bf44d0af8af5b866d2798d934c4b0696"
      ]
     },
     "now_ms": 1795000001000,
@@ -2016,7 +2016,7 @@
    "relay": {
     "caller": "ph_pppppppppp",
     "registered": [
-     "675a236f8c1f98d196b6882dd8212b5a0a85f2f46bc0ad4d4ed15acdef42e64d"
+     "afd9817ca3db077ce7d20e79ef8157e5bf44d0af8af5b866d2798d934c4b0696"
     ],
     "seen": {}
    },
@@ -2027,15 +2027,15 @@
    "note": "A phone sends only to a workspace.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "85ef3da9354a5671",
+    "key_id": "1a55d274cfb3c2fe",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMyIsImZyb20iOiJwaF9wcHBwcHBwcHBwIiwidG8iOiJwaG9uZXMiLCJ0eXBlIjoidGV4dCIsImNyZWF0ZWRfbXMiOjE3OTUwMDAwMDAwMDAsIm9yaWdpbiI6InBlcnNvbiIsInRpY2tldCI6InRfYWJjMTIzIiwiYm9keSI6eyJ0ZXh0IjoiSGVsbG8gZnJvbSBQaWxhdHVzIn19",
-    "sig": "k5kDFmtumxMlVZ860rKtCE58Ji-H8iWyfLx7tUpAvgLOWO9X-hIg0H4rJyYLArpj5pv0iuUWM4jesWpqxLeEBg"
+    "sig": "stRJ9xoIGTo3WnrzLyFBunnZWdJAQkvqvJmEK3eIuwfYevShLvDOY7Z-47OfXq5Z4wOble4ViPjPd_zWkrN_BA"
    },
    "receiver": {
     "me": "ph_pppppppppp",
     "accepted": {
      "ph_pppppppppp": [
-      "675a236f8c1f98d196b6882dd8212b5a0a85f2f46bc0ad4d4ed15acdef42e64d"
+      "afd9817ca3db077ce7d20e79ef8157e5bf44d0af8af5b866d2798d934c4b0696"
      ]
     },
     "now_ms": 1795000001000,
@@ -2046,7 +2046,7 @@
    "relay": {
     "caller": "ph_pppppppppp",
     "registered": [
-     "675a236f8c1f98d196b6882dd8212b5a0a85f2f46bc0ad4d4ed15acdef42e64d"
+     "afd9817ca3db077ce7d20e79ef8157e5bf44d0af8af5b866d2798d934c4b0696"
     ],
     "seen": {}
    },
@@ -2057,15 +2057,15 @@
    "note": "A trailing newline is not part of an id pattern.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyM1xuIiwiYm9keSI6eyJ0ZXh0IjoiSGVsbG8gZnJvbSBQaWxhdHVzIn19",
-    "sig": "CQ8Z_eNj_YBZxV2po-fRk1AbpmrdrRjCkOuKMyIRgfbMp68WVA1hH9URAZsDgnALIJh1YiGu0wI1xA30_XUHDA"
+    "sig": "UUCaL2_8qQfpvyPWhaUFyegEeiw0HiM9p_EKjHnfBQaVgNWkyvPdghQa4_ftKJFVzmhMVNKuFv7rkudmm0taDA"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2076,7 +2076,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2087,15 +2087,15 @@
    "note": "A trailing newline is not part of an id pattern.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMVxuIiwiZnJvbSI6IndzX2FhYWFhYWFhYWEiLCJ0byI6IndzX2JiYmJiYmJiYmIiLCJ0eXBlIjoidGV4dCIsImNyZWF0ZWRfbXMiOjE3OTUwMDAwMDAwMDAsIm9yaWdpbiI6InBlcnNvbiIsInRpY2tldCI6InRfYWJjMTIzIiwiYm9keSI6eyJ0ZXh0IjoiSGVsbG8gZnJvbSBQaWxhdHVzIn19",
-    "sig": "-KvoY-tAVrmpll0eHZM0iezWcFZl0Dt8qICwBLY3UbsrKi8owA1Gg_XEWCDBE2jY7y7puRkuuKjoweoa6WbXDA"
+    "sig": "iHhulWbUfqqR2QTV-5TaSwjFbEyyX0u6wAL563sWrp3s1xGEgvYZ3HemXwJmP_b8uIkG1J_Vol18r3wRtD1aBw"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2106,7 +2106,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2117,15 +2117,15 @@
    "note": "question_id only on an answer.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9LCJxdWVzdGlvbl9pZCI6InExIn0",
-    "sig": "QlcEme-P0cRgVmpwJm3O9rnFv6JIUnPkJpydMuEP5IXV-6D8BCwVTwW2kq3MBQIeNDZRrMOiN1IS1CwKzCjSDg"
+    "sig": "7rAkx0th80Z5w5K9AhWNz_PptyguvBIIQ83lfShUt20oU53NE9DDp8doNBqHTL8_yfj9o6sjt9VDLOGS4nflAg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2136,7 +2136,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2147,15 +2147,15 @@
    "note": "A group message is never an allow.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOnsiZ3JvdXAiOiJncnBfdF9hYmMxMjMiLCJob3N0Ijoid3NfYWFhYWFhYWFhYSIsIm1lbWJlcnNfdiI6MX0sInR5cGUiOiJhbGxvdyIsImNyZWF0ZWRfbXMiOjE3OTUwMDAwMDAwMDAsIm9yaWdpbiI6InBlcnNvbiIsInRpY2tldCI6InRfYWJjMTIzIiwiYm9keSI6eyJ0ZXh0IjoiSGVsbG8gZnJvbSBQaWxhdHVzIn0sInJlcGx5X3RvIjoibV8wMDAwMDAwMDAwMDAwMGQxIiwiZXhwaXJlc19tcyI6MTc5NTAwMDA2MDAwMH0",
-    "sig": "mAdafgWS0EToweZ5q_oZsRkeOCcifTS2d3KoonInzkkyVeojGduqZP9htWfR_UYTy_d4Q--gWJtytjb_qiEXAg"
+    "sig": "3vgLJFHUs_ZdYicGGp7sqVts3EdShYoudAhbns5aXF5lwleAKmdaMNgOKud0XIJmqUI6Ipd-QaSrjlg2arHqBg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2166,7 +2166,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2177,15 +2177,15 @@
    "note": "A group message is never a start.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOnsiZ3JvdXAiOiJncnBfdF9hYmMxMjMiLCJob3N0Ijoid3NfYWFhYWFhYWFhYSIsIm1lbWJlcnNfdiI6MX0sInR5cGUiOiJzdGFydCIsImNyZWF0ZWRfbXMiOjE3OTUwMDAwMDAwMDAsIm9yaWdpbiI6InBlcnNvbiIsInRpY2tldCI6InRfYWJjMTIzIiwiYm9keSI6eyJ0ZXh0IjoiSGVsbG8gZnJvbSBQaWxhdHVzIn0sImV4cGlyZXNfbXMiOjE3OTUwMDAwNjAwMDB9",
-    "sig": "-sy9ZFaBIRpG9WXef3T2jGJ9iYyKy5qGrzsuSlKC2uXjMWRrxOQ1kW04_qIHRDCCw37kCmwYYIcuqDOnpaHBDQ"
+    "sig": "Mqgn7CUtLtt9G_rOO5DwTR4S4sI_nQ3M6CkkZcCiBhU4k32Cd-_6G0tT6We4JLX0mW9gbGX-1chHCK51Ylx1Bw"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2196,7 +2196,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2207,15 +2207,15 @@
    "note": "A group message is never an answer.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOnsiZ3JvdXAiOiJncnBfdF9hYmMxMjMiLCJob3N0Ijoid3NfYWFhYWFhYWFhYSIsIm1lbWJlcnNfdiI6MX0sInR5cGUiOiJhbnN3ZXIiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9LCJyZXBseV90byI6Im1fMDAwMDAwMDAwMDAwMDBxMSIsInF1ZXN0aW9uX2lkIjoicTEiLCJxdWVzdGlvbl9zaGEyNTYiOiI5MWI0YmQyZDU1OGY1OTRmNDBiYWQ0Y2U0NDViZmQ3YmMwZjBkZTkxZDE3NzkzOGFhYTI0M2Q1NTdkZTU3ZDY2In0",
-    "sig": "_cwvaYwo_2g-vSDxtqK160HpdnSMhLL2iKfYMQ6Kco7it6hZ3_LDi2xL11zT0R2ZzAfIgU0m44qUBHdk5jW3Cg"
+    "sig": "JwhpaooSPDWRIU8Hi7inTFMd91B95XLcgDZSMgh2EqdFtGpNEtfnlzY1GtonIAlsS4tS4PHM6HYB_tamit7iDQ"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2226,7 +2226,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2237,15 +2237,15 @@
    "note": "Two keys that are the same text in another Unicode spelling (NFC) count as a duplicate.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmNCIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsiw6kiOjEsImXMgSI6Mn19",
-    "sig": "zb7zGqrkBvlt8jL-Wjf55adplG9khPuGRN5EHZpzDiLHoNlVie6iKJ4hBAk9VkODQn4OU77foc6kmeTtN9RjDA"
+    "sig": "5NnkmHNNuRLxIIZOz7ZTIuDUcCzAZUKTNyyQcp9bORgZPdDaW50H6FkNf1lhqD4z1xrw6X-lgZjaVKz8nAIEBg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2256,7 +2256,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2267,18 +2267,18 @@
    "note": "One key listed under two contacts: the signed from decides, never the order of the list.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmNSIsImZyb20iOiJ3c19jY2NjY2NjY2NjIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "3h-8hCe-89G21d1FmInFH8RTGWP5YIPEPxaOOXiR3bnscOCjez276sQrjgrcsrXNHz3j6ue_LPUqv4BoJgC8CQ"
+    "sig": "ezh_whyBElZPzGtLTAbJa0qIW5HepNQJfHApqLVruwYQkzH_3CCJo5ig4fwvtbxKEQSOSVkBEfKzfP6dQsDtDg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ],
      "ws_cccccccccc": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2289,7 +2289,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2300,15 +2300,15 @@
    "note": "Exactly 5 minutes ahead is still allowed.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmNiIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMzAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "ThoAkQlBqEWlrPS-Hkm80_TqoaqNzc3HjYeXu6x26J8WLwslYlt1R68-zyq2T5HQ23CM0VMCkRU-M3zHg5osDw"
+    "sig": "rdoGgpOFmEv1JhUITis08Ejpwx68NtzL3SuH7FtRzPrncuecZzKZdWU2L5PJM9qyQuMc_c6AiLKbU1ywzXltBw"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000000000,
@@ -2319,7 +2319,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2330,15 +2330,15 @@
    "note": "At expires_ms the allow is expired.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDBmNyIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6ImFsbG93IiwiY3JlYXRlZF9tcyI6MTc5NTAwMDAwMDAwMCwib3JpZ2luIjoicGVyc29uIiwidGlja2V0IjoidF9hYmMxMjMiLCJib2R5Ijp7fSwicmVwbHlfdG8iOiJtXzAwMDAwMDAwMDAwMDAwZDEiLCJleHBpcmVzX21zIjoxNzk1MDAwNjAwMDAwfQ",
-    "sig": "cUWLBSjpjsXcROl2Wap-n2ItWwfsB10bHWdiGPzVUkJiWSiSeyhqZyHeXYWoM2-sNyx5r9ohb0TFCNpD4r5BBQ"
+    "sig": "HJ6b4HL4HBM9Qwg7zuo8ndDMG9K4k-T-bRJPPEvOj3BTr7bOVWi9_Sn_0mWOQ2A7au1Ajzp67xbSVxdlOsMRDQ"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000600000,
@@ -2349,7 +2349,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2360,15 +2360,15 @@
    "note": "Exactly 30 days old is still taken (older is refused).",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQ"
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1797592000000,
@@ -2379,7 +2379,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2390,15 +2390,15 @@
    "note": "base64url without padding only.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQ=="
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dg=="
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2409,7 +2409,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2420,15 +2420,15 @@
    "note": "+ and / are not base64url.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ+",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQ"
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2439,7 +2439,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2450,15 +2450,15 @@
    "note": "Unused trailing bits must be zero (one spelling only).",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCR"
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dh"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2469,7 +2469,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2480,15 +2480,15 @@
    "note": "key_id is 16 lowercase hex characters.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887E2AEF1F298505",
+    "key_id": "82CB649CA45A17AF",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQ"
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2499,7 +2499,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2510,15 +2510,15 @@
    "note": "A signature is exactly 64 bytes.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5h"
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2529,7 +2529,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2540,15 +2540,15 @@
    "note": "A signature is exactly 64 bytes.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQA"
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4DgA"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2559,7 +2559,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2570,16 +2570,16 @@
    "note": "Unknown envelope fields are refused.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQ",
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dg",
     "purpose": "msg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2590,7 +2590,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2601,15 +2601,15 @@
    "note": "Only sig_v 1 exists.",
    "envelope": {
     "sig_v": 2,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQ"
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2620,7 +2620,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2631,16 +2631,16 @@
    "note": "relay_meta is an object when present.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQ",
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dg",
     "relay_meta": "x"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2651,7 +2651,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2662,15 +2662,15 @@
    "note": "The signed bytes are not empty.",
    "envelope": {
     "sig_v": 1,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQ"
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2681,7 +2681,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
@@ -2692,15 +2692,15 @@
    "note": "sig_v is the integer 1, not 1.0.",
    "envelope": {
     "sig_v": 1.0,
-    "key_id": "887e2aef1f298505",
+    "key_id": "82cb649ca45a17af",
     "signed": "eyJ2IjoxLCJpZCI6Im1fMDAwMDAwMDAwMDAwMDAwMSIsImZyb20iOiJ3c19hYWFhYWFhYWFhIiwidG8iOiJ3c19iYmJiYmJiYmJiIiwidHlwZSI6InRleHQiLCJjcmVhdGVkX21zIjoxNzk1MDAwMDAwMDAwLCJvcmlnaW4iOiJwZXJzb24iLCJ0aWNrZXQiOiJ0X2FiYzEyMyIsImJvZHkiOnsidGV4dCI6IkhlbGxvIGZyb20gUGlsYXR1cyJ9fQ",
-    "sig": "eCQwAe2pzPiRwcWMdSoO-ga8fwty1FN5D29JAEUm7wVF6E6iaFUJn3oYl-Up0A3F_dscP18NYQLgseDfaH5hCQ"
+    "sig": "FiL8PvKZh1y4QSUeAOqve2xG1NRaeglS5INhbooQKMmeRVbJwZlEKug8ss1_LPxSQytf3Qs2CVSE4NuQZHv4Dg"
    },
    "receiver": {
     "me": "ws_bbbbbbbbbb",
     "accepted": {
      "ws_aaaaaaaaaa": [
-      "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+      "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
      ]
     },
     "now_ms": 1795000001000,
@@ -2711,7 +2711,7 @@
    "relay": {
     "caller": "ws_aaaaaaaaaa",
     "registered": [
-     "3923542cf2bc4d21eff7022e330f287c6cb7c2f6b080aba5239b692bf91db1c7"
+     "0201f154d2aa00510e43c9c41f17272dbcfc862fbebbd8edccfad295ccebf9b7"
     ],
     "seen": {}
    },
