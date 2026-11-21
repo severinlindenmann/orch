@@ -128,7 +128,7 @@ def test_init_nothing_found(proj, run, fake_path):
 def test_init_asks_found_agents_and_other(proj, run, fake_path, monkeypatch):
     _stub(fake_path, "claude", "2.1.318")
     monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
-    answers = iter(["2", "", "my-agent --prompt {prompt}"])
+    answers = iter(["2", "", "my-agent --prompt {prompt}", ""])  # the last: your name, skipped
     monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
     code, out, _ = run("init")
     assert code == 0

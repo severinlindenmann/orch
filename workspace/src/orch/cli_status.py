@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from orch import addons, cardtext, history, look, pagelaunch, services, term
+from orch import addons, cardtext, config, history, look, pagelaunch, services, term
 from orch.errors import Refused
 
 
@@ -179,8 +179,10 @@ def _services_cmd(args, root: Path) -> None:
                     ws = sorted([*ws, w], key=lambda x: (x["name"].lower(), x["workspace"]))
                 w["addons"] = here
         ws = _with_known(ws)
-        for w in ws:  # the workspace switcher draws each one with its badge
+        for w in ws:  # the workspace switcher draws each one with its badge and its own name
             w.update({k: look.read(Path(w["workspace"]))[k] for k in ("icon", "color")})
+            w["name"] = config.workspace_name(Path(w["workspace"])) or w["name"]  # else the folder name
+        ws.sort(key=lambda x: (x["name"].lower(), x["workspace"]))
         lines = []
         for w in ws:
             lines.append(f"{w['name']}  ({_home_path(w['workspace'])})")
