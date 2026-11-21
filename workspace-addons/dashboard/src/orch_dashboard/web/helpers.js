@@ -794,8 +794,10 @@
   function costLine(t) {
     const est = t && t.estimate, parts = [];
     if (est && typeof est === 'object') {
-      const m = Number.isInteger(est.minutes) && est.minutes > 0 ? durationWords(est.minutes * 60) : '';
-      const c = typeof est.cost === 'number' && est.cost >= 0 ? moneyWords(est.cost) : '';
+      // ORCH-740/742: a range keeps the high end in minutes / cost and the low end in minutes_low / cost_low
+      const okM = v => Number.isInteger(v) && v > 0, okC = v => typeof v === 'number' && v >= 0;
+      const m = okM(est.minutes) ? (okM(est.minutes_low) && est.minutes_low < est.minutes ? durationWords(est.minutes_low * 60) + '–' : '') + durationWords(est.minutes * 60) : '';
+      const c = okC(est.cost) ? (okC(est.cost_low) && est.cost_low < est.cost ? moneyWords(est.cost_low) + '–' : '') + moneyWords(est.cost) : '';
       if (m || c) parts.push('Estimate: about ' + [m, c].filter(Boolean).join(' · '));
     }
     if (!parts.length && t && !t.spend && typeof t.range === 'string' && t.range) parts.push('Before Start: ' + t.range);  // ORCH-297

@@ -1708,3 +1708,35 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
 @media (min-width:721px){.review-layout>.review-rail{align-self:stretch;align-content:start}.review-side{z-index:2}}
 @media (max-width:720px){.swipe-acts-row>.swipe-later kbd{display:none}}/* a phone has no keys: Later keeps the answers' row */
 @media (max-width:720px){.swipe-pair-answers{flex:1 1 auto;margin-left:0}.swipe-pair-acts{flex-wrap:wrap-reverse}}/* a phone side: Later beside the answers, under them only when there is no room */
+
+/* Prepare on a saved ticket (ORCH-742, look B picked by the owner 19 Nov; draft ORCH-730 section 6).
+   The sentence under the title while Prepare runs, the Prepared word (described, not checked), What I found folded
+   into one line under What was asked, the sources it could not open in sight below it, and the quiet word in the list. */
+.prepare-line{display:inline-flex;align-items:center;gap:var(--s2)}
+.prepare-line .spinner{width:12px;height:12px;flex:none}
+.prepared-word{color:var(--text);font-weight:600}
+.prepare-word{margin-left:var(--s2);white-space:nowrap;flex:none;font-size:var(--fs-meta);color:var(--text-muted)}
+details.found-fold>summary{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2);cursor:pointer;list-style:none}
+details.found-fold>summary::-webkit-details-marker{display:none}
+details.found-fold>summary h2{margin:0}
+details.found-fold>summary .found-chev{margin-left:auto;color:var(--text-faint);transition:transform var(--dur-fast) var(--ease-out)}
+details.found-fold[open]>summary .found-chev{transform:rotate(90deg)}
+details.found-fold[open]>summary{margin-bottom:var(--s3)}
+.found-body{display:grid;gap:var(--s3)}
+.found-body>.meta{margin:0}
+.found-facts{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s5);margin:0;padding:0;list-style:none;color:var(--text)}
+.found-sources{list-style:none;margin:0;padding:0;display:grid;border-top:1px solid var(--border)}
+.found-src{display:grid;grid-template-columns:1fr auto;gap:var(--s1) var(--s3);align-items:start;padding:var(--s3) 0;border-bottom:1px solid var(--border)}
+.found-src b{font-weight:500;color:var(--text);overflow-wrap:anywhere}
+.found-src p{grid-column:1;margin:0;color:var(--text-muted);font-size:var(--fs-meta);overflow-wrap:anywhere}
+.found-src .btn{grid-column:2;grid-row:1 / span 2;align-self:center}
+.found-src.found-closed b{color:var(--warning)}
+.found-card{display:grid;gap:var(--s3)}
+.found-closed-list{border-top:0}
+details.found-fold[open]+.found-closed-list{border-top:1px solid var(--border)}
+@media (max-width:720px){
+  .found-src{grid-template-columns:1fr}
+  .found-src p{grid-row:2}
+  .found-src .btn{grid-column:1;grid-row:3;justify-self:start}
+}
+@media (prefers-reduced-motion:reduce){details.found-fold>summary .found-chev{transition:none}}

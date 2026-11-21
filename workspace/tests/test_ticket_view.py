@@ -241,6 +241,56 @@ def test_due_is_in_the_full_snapshot_only(proj, new_ticket):
     assert "due" not in phone_view.build(proj, t, [])
 
 
+
+def test_prepare_and_found_in_the_full_snapshot_only(proj, new_ticket):
+    """ORCH-742: Preparing / Prepared under the title and the What I found row on the phone."""
+    tid = new_ticket("Spring newsletter")
+    t = tickets.load(proj, tid)
+    assert "prepare" not in phone_view.build(proj, t, []) and "found" not in phone_view.build(proj, t, [])
+    t["prepare"] = {"state": "prepared", "at": "2026-11-19T09:41:00Z", "run": "r_x", "why": "inside"}
+    t["found"] = {
+        "sources": [
+            {"name": "MKT-214 Spring newsletter", "link": "https://acme.example/browse/MKT-214", "opened": True, "lines": "One mail, four photos."},
+            {"name": "Old notes", "link": "javascript:alert(1)", "opened": True, "lines": "token: abc.def-123"},
+            *[{"name": f"Page {i}", "opened": True} for i in range(15)],
+            {"name": "Email from Anna", "opened": False, "why": "No mail connection is set up."},
+        ],
+        "facts": ["For 1,400 shop customers", 7],
+        "at": "2026-11-19T09:41:00Z",
+        "by": "agent:claude",
+    }
+    tv = phone_view.build(proj, t, [])
+    assert_valid(tv)
+    assert tv["prepare"] == {"state": "prepared", "at": "2026-11-19T09:41:00Z"}
+    found = tv["found"]
+    assert len(found["sources"]) == phone_view.FOUND_SOURCES
+    assert found["sources"][0] == {"name": "Email from Anna", "opened": False, "why": "No mail connection is set up."}
+    assert found["sources"][1]["link"] == "https://acme.example/browse/MKT-214"
+    assert "link" not in found["sources"][2] and found["sources"][2]["lines"] == "token: [hidden]"
+    assert found["facts"] == ["For 1,400 shop customers"] and "by" not in found
+    light = phone_view.light_view(proj, t)
+    assert "prepare" not in light and "found" not in light
+    t["status"] = "active"  # Prepare's word is only for a saved ticket in Backlog; What I found stays
+    tv = phone_view.build(proj, t, [])
+    assert "prepare" not in tv and "found" in tv
+    t["status"], t["prepare"] = "open", {"state": "odd"}
+    assert "prepare" not in phone_view.build(proj, t, [])
+
+
+def test_prepare_and_found_change_the_snapshot_signature(proj, new_ticket):
+    t = tickets.load(proj, new_ticket("Sig"))
+    before = phone_view._tasks_sig(t)
+    t["prepare"] = {"state": "preparing", "at": "2026-11-19T09:40:00Z"}
+    preparing = phone_view._tasks_sig(t)
+    t["prepare"]["state"] = "prepared"
+    assert len({before, preparing, phone_view._tasks_sig(t)}) == 3
+    prepared = phone_view._tasks_sig(t)
+    t["found"] = {"sources": [{"name": "Mail", "opened": False}], "facts": []}
+    with_found = phone_view._tasks_sig(t)
+    t["found"]["facts"] = ["For 1,400 customers"]  # changed, still without a time
+    assert len({prepared, with_found, phone_view._tasks_sig(t)}) == 3
+
+
 def test_redact_and_safe_url_units():
     assert phone_view.redact("token: abc.def-123") == "token: [hidden]"
     assert (
