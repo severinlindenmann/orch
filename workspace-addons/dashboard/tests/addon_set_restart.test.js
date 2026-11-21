@@ -4,20 +4,21 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
-const start = src.indexOf('async function addonSet('), end = src.indexOf('\n}\n', start) + 3;
-const ustart = src.indexOf('async function addonUninstall('), uend = src.indexOf('\n}\n', ustart) + 3;
+const start = src.indexOf('async function addonSet('), end = src.indexOf('// The button a person just pressed', start);
 
 // actResult: one answer for every click, or a list (one per click, in order); c.sent counts the clicks sent
 function page(actResult, states, current = {settings: {addons: []}}) {
-  const accepted = [], sent = [], answers = Array.isArray(actResult) ? actResult : null;
+  const accepted = [], sent = [], painted = [], answers = Array.isArray(actResult) ? actResult : null;
   const c = vm.createContext({
-    snapshot: false, accepted, sent, setTimeout: f => f(), state: current,
+    snapshot: false, accepted, sent, painted, setTimeout: f => f(), state: current,
     array: v => Array.isArray(v) ? v : [],
     act: async (op, args) => { sent.push({op, args}); return answers ? answers.shift() : actResult; },
     accept: s => { accepted.push(s); c.state = s; },
     fetch: async () => { const s = states.shift(); if (s === 'down') throw new Error('Failed to fetch'); return {ok: true, json: async () => s}; },
   });
-  vm.runInContext(src.slice(start, end) + src.slice(ustart, uend) + '\nthis.addonSet = addonSet; this.addonUninstall = addonUninstall;', c);
+  // render() notes whether the page showed the wait for the restart at that moment
+  c.render = () => painted.push([...c.addonWaiting].join(','));
+  vm.runInContext(src.slice(start, end) + '\nthis.addonSet = addonSet; this.addonUninstall = addonUninstall; this.addonWaiting = addonWaiting; this.SLOW = ADDON_SLOW; this.WAIT = ADDON_WAIT_TEXT;', c);
   return c;
 }
 const lost = {ok: false, status: 0, text: 'Failed to fetch'};
@@ -40,13 +41,33 @@ test('Add right after a Remove: the click never arrived, so it is sent once more
   assert.deepEqual(JSON.parse(JSON.stringify(c.sent[1])), {op: 'addon.set', args: {name: 'factory', on: true}});
 });
 
-test('the second click is lost too and the server is back unchanged: one error, no third click', async () => {
+test('the second click is lost too and the server is back unchanged: one plain error, no third click', async () => {
   const off = {settings: {addons: [{name: 'factory', active: false}]}};
   const c = page(lost, [off, off]);
   const r = await c.addonSet('factory', true);
   assert.equal(r.ok, false);
-  assert.equal(r.text, 'Failed to fetch');
+  assert.equal(r.text, c.SLOW);
+  assert.doesNotMatch(r.text, /fetch/i);
   assert.equal(c.sent.length, 2);
+});
+
+test('while the server restarts the page says it waits, and the wait ends with the answer (ORCH-1046)', async () => {
+  const on = {settings: {addons: [{name: 'factory', active: true}]}};
+  const c = page(lost, ['down', 'down', on]);
+  const r = await c.addonSet('factory', true);
+  assert.equal(r.ok, true);
+  assert.deepEqual([...c.painted], ['factory', '']);  // shown once while waiting, cleared once at the end
+  assert.equal(c.addonWaiting.size, 0);
+  assert.equal(c.WAIT, 'Waiting for orch to restart…');
+});
+
+test('the server never comes back within the wait: a plain sentence, never "Failed to fetch"', async () => {
+  const c = page(lost, ['down', 'down']);
+  const r = await c.addonSet('factory', true, 2);
+  assert.equal(r.ok, false);
+  assert.equal(r.text, c.SLOW);
+  assert.equal(c.sent.length, 1);
+  assert.equal(c.addonWaiting.size, 0);
 });
 
 test('the second click lands during the restart and the state then shows it on: recovered', async () => {

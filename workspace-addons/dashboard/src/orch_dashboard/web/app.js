@@ -515,6 +515,13 @@ window.orchActId = () => newActId();  // one id a form keeps for its retries (OR
 async function addonSet(name, on, tries = 20, pause = 1500, again = true) {
   const result = await act('addon.set', {name, on}, {check:false});  // the server restarts: its click ids are gone
   if (result.ok || result.status !== 0 || snapshot) return result;
+  return addonWait(name, async () => {
+    const back = await addonBack(name, on, tries, pause);
+    return back === null && again ? addonSet(name, on, tries, pause, false) : back;
+  }, result);
+}
+// Read the state until the server answers: the add-on in the wanted state = it worked; back but unchanged = null.
+async function addonBack(name, on, tries, pause) {
   for (let i = 0; i < tries; i++) {
     await new Promise(done => setTimeout(done, pause));
     let next = null;
@@ -525,10 +532,9 @@ async function addonSet(name, on, tries = 20, pause = 1500, again = true) {
     if (!next) continue;
     accept(next);
     const row = array(next.settings?.addons).find(a => a && a.name === name);
-    if (row && !!row.active === on) return {ok:true, status:200, state:next, recovered:true};
-    return again ? addonSet(name, on, tries, pause, false) : result;
+    return row && !!row.active === on ? {ok:true, status:200, state:next, recovered:true} : null;
   }
-  return result;
+  return false;
 }
 // Uninstall an add-on (`orch addon uninstall`, refused while it is on: turn it off first). The
 // services restart like for the switch, so a lost answer is checked by reading the state again, and a click that
@@ -541,19 +547,35 @@ async function addonUninstall(name, tries = 20, pause = 1500, again = true) {
   }
   const result = await act('addon.uninstall', {name}, {check:false});
   if (result.ok || result.status !== 0 || snapshot) return result;
-  for (let i = 0; i < tries; i++) {
-    await new Promise(done => setTimeout(done, pause));
-    let next = null;
-    try {
-      const res = await fetch('/api/state', {cache:'no-store'});
-      if (res.ok) next = await res.json();
-    } catch (_) { /* still restarting */ }
-    if (!next) continue;
-    accept(next);
-    if (!still(next.settings?.addons)) return {ok:true, status:200, state:next, recovered:true};
-    return again ? addonUninstall(name, tries, pause, false) : result;
-  }
-  return result;
+  return addonWait(name, async () => {
+    for (let i = 0; i < tries; i++) {
+      await new Promise(done => setTimeout(done, pause));
+      let next = null;
+      try {
+        const res = await fetch('/api/state', {cache:'no-store'});
+        if (res.ok) next = await res.json();
+      } catch (_) { /* still restarting */ }
+      if (!next) continue;
+      accept(next);
+      if (!still(next.settings?.addons)) return {ok:true, status:200, state:next, recovered:true};
+      return again ? addonUninstall(name, tries, pause, false) : null;
+    }
+    return null;
+  }, result);
+}
+// While the page waits for its server to come back after an add-on change, the add-on's button and switch say so
+// (ORCH-1046) instead of a bare "Failed to fetch"; when it is still not back, one plain sentence says what to do.
+const addonWaiting = new Set();
+let addonWaitPaint = () => render();  // the catalogue dialog paints itself too while it is open
+const ADDON_WAIT_TEXT = 'Waiting for orch to restart…';
+const ADDON_SLOW = 'orch is still restarting. Wait a moment, then try again.';
+async function addonWait(name, wait, lost) {
+  const outer = !addonWaiting.has(name);
+  if (outer) { addonWaiting.add(name); addonWaitPaint(); }
+  try {
+    const r = await wait();
+    return r && (r.ok || r.status !== 0) ? r : {...(r || lost), ok:false, status:0, text:ADDON_SLOW};
+  } finally { if (outer) { addonWaiting.delete(name); addonWaitPaint(); } }
 }
 // The button a person just pressed shows the kit's busy state at once (aria-busy + aria-disabled), before the
 // answer comes, and until it came (ORCH-102: a click showed nothing for seconds while helpers ran).
