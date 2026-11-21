@@ -29,3 +29,8 @@ body .shared-preview.preview-controls{position:fixed!important;inset:auto 12px 8
 .preview-options button{border:0;border-radius:4px;padding:6px;background:var(--surface-2);color:var(--text)}
 body:has(.shared-preview) main{padding-bottom:72px}
 @media(prefers-reduced-motion:reduce){.shared-preview *{animation:none!important;transition:none!important}}
+/* Calendar week sample (#cal-week): four hours, events placed as the Personal page places them */
+#cal-week .cal-week{--rows:16}
+#cal-week .cal-g-a{grid-row:1/span 4}
+#cal-week .cal-g-b{grid-row:5/span 3}
+#cal-week .cal-g-c{grid-row:13/span 4}
