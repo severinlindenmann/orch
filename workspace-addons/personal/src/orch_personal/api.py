@@ -135,9 +135,10 @@ def helper_uses(name: str, p: dict) -> str:
         n = len(p.get("helpers") or {})
         if not n:
             return "nothing yet (no source is open to helpers)"
-        read = {"attached": f"only {what} you attach to a ticket", "all": f"{what} from the sources you opened"}[
-            p["read"]
-        ]
+        read = {
+            "attached": f"only {what} you attach to a ticket",
+            "all": f"{what} from the sources you opened",
+        }[p["read"]]
         return f"{read} · {'drafts only, never send' if p['write'] == 'add' else 'no drafts'}"
     return "nothing"
 
@@ -523,9 +524,7 @@ def _inbox_src(root: Path, who: Who, part: str, p: dict, iid: str) -> tuple[dict
             raise Refused(f"The person does not let helpers read {_what(part)}. Ask them on your ticket.")
         attached = iid in store.used_on(root, who.ticket, part)
         if p["read"] == "attached" and not attached:
-            raise Refused(
-                "That is not attached to your ticket. The person attaches it with Use in a ticket."
-            )
+            raise Refused("That is not attached to your ticket. The person attaches it with Use in a ticket.")
         srcs = {s["way"]: s for s in inbox_mod.sources(root, part)}
         src = srcs.get(way)
         if not src or not (src["helpers"] or attached):
@@ -533,20 +532,30 @@ def _inbox_src(root: Path, who: Who, part: str, p: dict, iid: str) -> tuple[dict
         return src, ref
     src = {s["way"]: s for s in inbox_mod.sources(root, part)}.get(way)
     if not src:
-        raise Refused(f"There is no source {way} for {store.PARTS[part]['label']}. See them: orch personal ways")
+        raise Refused(
+            f"There is no source {way} for {store.PARTS[part]['label']}. See them: orch personal ways"
+        )
     return src, ref
 
 
 def _helper_rows(root: Path, rows: list[dict]) -> list[dict]:
     """A row whose preview looks like it holds a secret never reaches a helper, not even as a hit."""
-    return [r for r in rows if not _secret(root, f"{r['from']} {r.get('subject') or r.get('chat')} {r['preview']}")]
+    return [
+        r
+        for r in rows
+        if not _secret(root, f"{r['from']} {r.get('subject') or r.get('chat')} {r['preview']}")
+    ]
 
 
 def _inbox_tile(root: Path, part: str, p: dict, needs: list, who: Who) -> dict:
     srcs = _inbox_srcs(root, who, part, p)
     if who.helper and p["read"] != "all":
         n = len(store.used_on(root, who.ticket, part))
-        return {"state": "ok", "status": f"{n} attached to your ticket", "line": f"orch personal {part} attached"}
+        return {
+            "state": "ok",
+            "status": f"{n} attached to your ticket",
+            "line": f"orch personal {part} attached",
+        }
     if not srcs:
         return {
             "state": "empty",
@@ -566,7 +575,9 @@ def _inbox_tile(root: Path, part: str, p: dict, needs: list, who: Who) -> dict:
                 {
                     "part": part,
                     "item": d["item"],
-                    "title": f"{d['title']} waits for your answer" if d.get("title") else "A reply is ready for you to send",
+                    "title": f"{d['title']} waits for your answer"
+                    if d.get("title")
+                    else "A reply is ready for you to send",
                     "text": f"{store.PARTS[part]['label']} · {d['source']} · a reply is drafted, not sent",
                     "at": d["at"],
                     "action": "Read the draft",
@@ -575,7 +586,11 @@ def _inbox_tile(root: Path, part: str, p: dict, needs: list, who: Who) -> dict:
     noun = "mail" if part == "mail" else "chat"
     n = len(rows)
     if not ok:
-        state, status, line = "stopped", "Not checked", f"{bad[0]['name']}: {bad[0]['problem']}" if bad else "No source works."
+        state, status, line = (
+            "stopped",
+            "Not checked",
+            f"{bad[0]['name']}: {bad[0]['problem']}" if bad else "No source works.",
+        )
     elif n:
         state, status = "attn", f"{n}{'+' if got['cut'] else ''} need you"
         line = f"{n} {noun}{'' if n == 1 else 's'} need you"
@@ -589,7 +604,9 @@ def _inbox_tile(root: Path, part: str, p: dict, needs: list, who: Who) -> dict:
         "line": line,
         "changed": looked["checked"],
         "changed_word": "as of",
-        "source": " · ".join(f"{s['name']} {'works' if s['ok'] else 'not checked'}" for s in looked["sources"]),
+        "source": " · ".join(
+            f"{s['name']} {'works' if s['ok'] else 'not checked'}" for s in looked["sources"]
+        ),
         "rows": [
             {
                 "id": r["id"],
@@ -648,7 +665,12 @@ def inbox_find(root: Path, who: Who, part: str, words: str) -> dict:
     if who.helper:
         rows = _helper_rows(root, rows)
         store.log(root, part, f"looked for “{' '.join(words.split())[:60]}”", who.by, who.ticket)
-    return {"schema": f"orch.personal.{part}/1", "items": rows, "sources": report, "data_note": INBOX_NOTE[part]}
+    return {
+        "schema": f"orch.personal.{part}/1",
+        "items": rows,
+        "sources": report,
+        "data_note": INBOX_NOTE[part],
+    }
 
 
 def inbox_attached(root: Path, who: Who, part: str) -> dict:
@@ -681,9 +703,7 @@ def inbox_show(root: Path, who: Who, part: str, iid: str) -> dict:
     }
 
 
-def inbox_draft(
-    root: Path, who: Who, part: str, iid: str, text: str, request: str | None = None
-) -> dict:
+def inbox_draft(root: Path, who: Who, part: str, iid: str, text: str, request: str | None = None) -> dict:
     """A reply draft: into the person's own Drafts, or kept on Personal. Never sent."""
     p = _inbox_part(root, part)
     src, ref = _inbox_src(root, who, part, p, iid)
@@ -693,16 +713,20 @@ def inbox_draft(
     if request is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", request):
         raise Refused("--request is letters, digits, - and _ (at most 64).")
     title = inbox_mod.title_of(part, inbox_mod.item_id(src["way"], ref))
-    if not title:  # a helper's own process has no list in memory: the subject or chat name, for the person's line
+    if (
+        not title
+    ):  # a helper's own process has no list in memory: the subject or chat name, for the person's line
         try:
             title = inbox_mod.show(root, part, src, ref)["title"]
         except Refused:
             title = ""
     d = inbox_mod.draft(root, part, src, ref, text, who.by, who.ticket, request, title[:120])
     if not d.get("again"):
-        where = {"saved": "in your Drafts", "local": "kept on Personal", "unsure": "maybe in your Drafts"}.get(
-            d["state"], "not saved"
-        )
+        where = {
+            "saved": "in your Drafts",
+            "local": "kept on Personal",
+            "unsure": "maybe in your Drafts",
+        }.get(d["state"], "not saved")
         store.log(root, part, f"drafted a reply in {src['name']}, {where} (not sent)", who.by, who.ticket)
     inbox_mod.forget_cache()
     words = {
@@ -711,7 +735,25 @@ def inbox_draft(
         "unsure": inbox_mod.UNSURE,
         "failed": d.get("problem") or "The draft could not be saved.",
     }
-    return {**d, "words": words.get(d["state"], ""), "no_send": NO_SEND}
+    out = {**d, "words": words.get(d["state"], ""), "no_send": NO_SEND}
+    if who.helper:  # the subject and the source's own message stay with the person
+        keep = (
+            "id",
+            "part",
+            "item",
+            "way",
+            "source",
+            "text",
+            "ticket",
+            "at",
+            "state",
+            "draft",
+            "again",
+            "words",
+            "no_send",
+        )
+        out = {k: v for k, v in out.items() if k in keep}
+    return out
 
 
 def inbox_throw_away(root: Path, who: Who, part: str, did: str) -> dict:
@@ -728,10 +770,17 @@ def inbox_source(
     need_person(who, "choose what helpers may use")
     _inbox_part(root, part)
     if way not in {s["way"] for s in inbox_mod.sources(root, part)}:
-        raise Refused(f"There is no source {way} for {store.PARTS[part]['label']}. See them: orch personal ways")
+        raise Refused(
+            f"There is no source {way} for {store.PARTS[part]['label']}. See them: orch personal ways"
+        )
     p = store.set_source(root, part, way, helpers, accounts)
     inbox_mod.forget_cache()
-    return {"part": part, "way": way, "helpers": bool(p["helpers"].get(way)), "accounts": p["accounts"].get(way, [])}
+    return {
+        "part": part,
+        "way": way,
+        "helpers": bool(p["helpers"].get(way)),
+        "accounts": p["accounts"].get(way, []),
+    }
 
 
 def inbox_accounts(root: Path, who: Who, part: str, way: str) -> dict:
@@ -777,11 +826,30 @@ def inbox_page(root: Path, who: Who, part: str, fresh: bool = False) -> dict:
         "checked": looked["checked"],
         "report": looked["sources"],
         "sources": [
-            {k: s[k] for k in ("way", "name", "on", "status", "words", "problem", "last_worked", "checked",
-                               "helpers", "accounts", "needs_accounts", "drafts_on_source", "fix_ticket", "changed")}
+            {
+                k: s[k]
+                for k in (
+                    "way",
+                    "name",
+                    "on",
+                    "status",
+                    "words",
+                    "problem",
+                    "last_worked",
+                    "checked",
+                    "helpers",
+                    "accounts",
+                    "needs_accounts",
+                    "drafts_on_source",
+                    "fix_ticket",
+                    "changed",
+                )
+            }
             for s in srcs
         ],
-        "ready": [{"way": k, "text": v, "added": k in {s["way"] for s in srcs}} for k, v in READY_WAYS[part].items()],
+        "ready": [
+            {"way": k, "text": v, "added": k in {s["way"] for s in srcs}} for k, v in READY_WAYS[part].items()
+        ],
         "drafts": ds,
         "read": p["read"],
         "write": p["write"],
@@ -801,7 +869,14 @@ def _use_inbox(root: Path, who: Who, ticket: str, part: str, iid: str) -> dict:
     _no_secret(root, body)
     attached = _attach(root, ticket, f"{m['title'][:80]}.md", body, who.by)
     store.mark_used(root, ticket, part, m["id"], who.by, attached)
-    return {"schema": "orch.personal.used/1", "ticket": ticket, "part": part, "id": m["id"], "title": m["title"], "file": attached}
+    return {
+        "schema": "orch.personal.used/1",
+        "ticket": ticket,
+        "part": part,
+        "id": m["id"],
+        "title": m["title"],
+        "file": attached,
+    }
 
 
 # --- Notes --------------------------------------------------------------------------------------------------
@@ -983,7 +1058,9 @@ def way_ask(root: Path, who: Who, slug: str, action: str, values: dict | None) -
     ):  # a recorder is read only through Meetings: consent and read rules first
         raise Refused("A recorder is read through Meetings, after your OK: orch personal meetings list")
     if w and w["part"] in store.INBOX_PARTS:  # mail and chats only through their part: its rules first
-        raise Refused(f"This way in is read through {store.PARTS[w['part']]['label']}: orch personal {w['part']} need-me")
+        raise Refused(
+            f"This way in is read through {store.PARTS[w['part']]['label']}: orch personal {w['part']} need-me"
+        )
     r = ways_mod.ask(root, slug, action, values)
     store.log(root, "ways", f"asked {r['name']}: {action}", who.by, who.ticket)
     return {**r, "note": WAY_NOTE}

@@ -28,6 +28,7 @@ import json
 import re
 import threading
 import time
+from datetime import UTC
 from pathlib import Path
 
 from . import store
@@ -45,7 +46,9 @@ MAX_MESSAGES = 30
 CACHE_SECONDS = 300
 REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@=+/-]{0,255}")
 ITEM_ID = re.compile(r"([a-z0-9][a-z0-9-]{0,31})~([A-Za-z0-9][A-Za-z0-9._:@=+/-]{0,255})")
-LINK = re.compile(r"(https://(outlook\.office\.com|outlook\.office365\.com|outlook\.live\.com|teams\.microsoft\.com)/|msteams:)\S{0,1500}")
+LINK = re.compile(
+    r"(https://(outlook\.office\.com|outlook\.office365\.com|outlook\.live\.com|teams\.microsoft\.com)/|msteams:)\S{0,1500}"
+)
 UNSURE = "Not sure the draft was saved; look in Drafts before you write it again."
 _CACHE: dict[str, tuple[float, dict]] = {}
 _CACHE_LOCK = threading.Lock()
@@ -178,15 +181,15 @@ def needs_person(part: str, row: dict, vip: list[str]) -> int:
 
 def _iso(when: str) -> str:
     """Times from a source with an offset (2026-11-20T09:12:00+01:00) compare as UTC."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     try:
-        d = datetime.fromisoformat(when.replace("Z", "+00:00"))
+        d = datetime.fromisoformat(when)
     except ValueError:
         return when
     if d.tzinfo is None:
         d = d.astimezone()
-    return d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return d.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def look(root: Path, part: str, srcs: list[dict], fresh: bool = False) -> dict:
@@ -207,7 +210,9 @@ def look(root: Path, part: str, srcs: list[dict], fresh: bool = False) -> dict:
                 if src["needs_accounts"]
                 else (src["problem"] or src["words"])
             )
-            report.append({"way": src["way"], "name": src["name"], "ok": False, "problem": why, "more": False})
+            report.append(
+                {"way": src["way"], "name": src["name"], "ok": False, "problem": why, "more": False}
+            )
             continue
         try:
             data = _ask(root, src, "list", {"days": DAYS, "limit": LIST_LIMIT})
@@ -215,7 +220,9 @@ def look(root: Path, part: str, srcs: list[dict], fresh: bool = False) -> dict:
             # a way in that stopped keeps its first reason (the self-check's line), not "ended with code 1"
             st = ways_mod.saved(root).get(src["way"], {})
             why = st.get("problem") if st.get("status") == "stopped" and st.get("problem") else str(e)
-            report.append({"way": src["way"], "name": src["name"], "ok": False, "problem": why, "more": False})
+            report.append(
+                {"way": src["way"], "name": src["name"], "ok": False, "problem": why, "more": False}
+            )
             continue
         got, more = _items(part, src, data, LIST_LIMIT)
         rows += got
@@ -247,7 +254,9 @@ def find(root: Path, part: str, srcs: list[dict], words: str) -> tuple[list[dict
         try:
             data = _ask(root, src, "find", {"words": words, "limit": NEED_LIMIT})
         except Refused as e:
-            report.append({"way": src["way"], "name": src["name"], "ok": False, "problem": str(e), "more": False})
+            report.append(
+                {"way": src["way"], "name": src["name"], "ok": False, "problem": str(e), "more": False}
+            )
             continue
         got, more = _items(part, src, data, NEED_LIMIT)
         rows += got
@@ -260,7 +269,12 @@ def show(root: Path, part: str, src: dict, ref: str) -> dict:
     if not _usable(src):
         raise Refused(f"{src['name']} is not working right now: {src['problem'] or src['words']}")
     data = _ask(root, src, "show", {"ref": ref})
-    out = {"id": item_id(src["way"], ref), "way": src["way"], "source": src["name"], "link": _link(data.get("link"))}
+    out = {
+        "id": item_id(src["way"], ref),
+        "way": src["way"],
+        "source": src["name"],
+        "link": _link(data.get("link")),
+    }
     if part == "mail":
         out.update(
             {
@@ -361,7 +375,8 @@ def draft(
         raise Refused(f"A draft can be at most {MAX_DRAFT} characters.")
     iid = item_id(src["way"], ref)
     req = request or hashlib.sha256(f"{iid}\0{text}\0{ticket}".encode()).hexdigest()[:24]
-    did = "d_" + hashlib.sha256(f"{iid}\0{req}".encode()).hexdigest()[:16]
+    # who asks is part of the key: a request id never returns another ticket's or helper's draft
+    did = "d_" + hashlib.sha256(f"{iid}\0{ticket}\0{by}\0{req}".encode()).hexdigest()[:16]
     with _locked(root):
         cur = drafts(root).get(did)
         if cur:
@@ -392,7 +407,11 @@ def draft(
                 fields = {"state": "unsure", "problem": f"{UNSURE} ({e})"}
             else:
                 if got.get("saved") is True:
-                    fields = {"state": "saved", "draft": _line(got.get("draft"), 256), "link": _link(got.get("link"))}
+                    fields = {
+                        "state": "saved",
+                        "draft": _line(got.get("draft"), 256),
+                        "link": _link(got.get("link")),
+                    }
                 else:
                     fields = {"state": "unsure", "problem": UNSURE}
     else:

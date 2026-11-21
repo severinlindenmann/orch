@@ -59,8 +59,24 @@ DEFAULTS = {
     "meetings": {"on": True, "folder": "", "read": "attached", "write": "add"},
     # Mail and Messages: write "add" = helpers make drafts; there is no send rule at all. Each source (a way in)
     # starts closed to helpers ("helpers"); for the Mail app the person picks which accounts count ("accounts").
-    "mail": {"on": True, "folder": "", "read": "attached", "write": "add", "helpers": {}, "accounts": {}, "vip": []},
-    "messages": {"on": True, "folder": "", "read": "attached", "write": "add", "helpers": {}, "accounts": {}, "vip": []},
+    "mail": {
+        "on": True,
+        "folder": "",
+        "read": "attached",
+        "write": "add",
+        "helpers": {},
+        "accounts": {},
+        "vip": [],
+    },
+    "messages": {
+        "on": True,
+        "folder": "",
+        "read": "attached",
+        "write": "add",
+        "helpers": {},
+        "accounts": {},
+        "vip": [],
+    },
 }
 INBOX_PARTS = ("mail", "messages")
 INBOX_WRITE = ("never", "add")

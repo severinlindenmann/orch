@@ -424,7 +424,9 @@ def ask(root: Path, slug: str, action: str, values: dict | None = None, secrets:
         # A failed or timed-out script means the way in stopped; a rule refusal (too big, not text, a secret)
         # means the source answered and the way in itself still works.
         if code not in (0, -2):
-            before = saved(root).get(slug, {})  # a stopped way in keeps its first reason (the self-check's line)
+            before = saved(root).get(
+                slug, {}
+            )  # a stopped way in keeps its first reason (the self-check's line)
             keep = before.get("status") == "stopped" and before.get("problem")
             _update(root, slug, status="stopped", problem=keep or str(e), checked=store.now())
         raise
@@ -488,11 +490,22 @@ def _fix_ticket(root: Path, slug: str, name: str, before: dict, now: dict) -> No
             )
             tid = api._new_ticket(root, f"Fix the {name} way in", note.strip(), "", "agent:personal")
             _update(root, slug, fix_ticket=tid)
-        elif now["status"] == "works" and int(before.get("fails") or 0) >= FIX_AFTER and _ticket_open(root, tid):
+        elif (
+            now["status"] == "works"
+            and int(before.get("fails") or 0) >= FIX_AFTER
+            and _ticket_open(root, tid)
+        ):
             api._run_orch(
                 root,
-                [*api._orch_cmd(), "ticket", "summary", tid, f"The way in {name} works again ({now['checked']}).",
-                 "--by", "agent:personal"],
+                [
+                    *api._orch_cmd(),
+                    "ticket",
+                    "summary",
+                    tid,
+                    f"The way in {name} works again ({now['checked']}).",
+                    "--by",
+                    "agent:personal",
+                ],
                 "",
             )
     except Refused:
@@ -509,7 +522,9 @@ def add_template(root: Path, name: str) -> dict:
     dest = folder(root) / name
     if dest.exists():
         return next(r for r in status(root) if r["way"] == name) if name in found(root) else {"way": name}
-    files = [f for f in src.iterdir() if f.is_file() and not f.name.startswith(".") and f.name != "__pycache__"]
+    files = [
+        f for f in src.iterdir() if f.is_file() and not f.name.startswith(".") and f.name != "__pycache__"
+    ]
     tmp = folder(root) / f".{name}.part"
     if tmp.is_dir() and not tmp.is_symlink():
         shutil.rmtree(tmp)  # left by a copy that was cut off

@@ -451,7 +451,11 @@ def _inbox(root: Path, who: api.Who, args) -> int:
     noun = "mail" if part == "mail" else "chats"
     if sub in ("need-me", "list"):
         fresh = bool(getattr(args, "fresh", False))
-        d = api.inbox_need_me(root, who, part, fresh) if sub == "need-me" else api.inbox_list(root, who, part, fresh)
+        d = (
+            api.inbox_need_me(root, who, part, fresh)
+            if sub == "need-me"
+            else api.inbox_list(root, who, part, fresh)
+        )
         lines = [f"({d['data_note']})"] + [_inbox_line(r) for r in d["items"]]
         if len(lines) == 1:
             ok = all(s["ok"] for s in d["sources"]) and d["sources"] and not d.get("cut")
@@ -471,7 +475,10 @@ def _inbox(root: Path, who: api.Who, args) -> int:
         return _emit(args, d, "\n".join(lines + ([rep] if rep else [])), f"orch personal {part} show <id>")
     if sub == "attached":
         d = api.inbox_attached(root, who, part)
-        text = "\n".join(f"- {r['id']} ({r.get('file') or ''})" for r in d["items"]) or "Nothing is attached to this ticket."
+        text = (
+            "\n".join(f"- {r['id']} ({r.get('file') or ''})" for r in d["items"])
+            or "Nothing is attached to this ticket."
+        )
         return _emit(args, d, text, f"orch personal {part} show <id>")
     if sub == "show":
         d = api.inbox_show(root, who, part, args.id)
@@ -481,26 +488,57 @@ def _inbox(root: Path, who: api.Who, args) -> int:
             body = d["text"]
         else:
             head = [f"# {d['chat']}", d["source"]]
-            body = "\n".join(f"{'You' if m['me'] else m['who'] or '?'} {_when(m['when'])}: {m['text']}" for m in d["messages"])
-        return _emit(args, d, f"({d['data_note']})\n" + "\n".join(head) + "\n\n" + body, f"orch personal {part} draft {args.id} --text \"...\"")
+            body = "\n".join(
+                f"{'You' if m['me'] else m['who'] or '?'} {_when(m['when'])}: {m['text']}"
+                for m in d["messages"]
+            )
+        return _emit(
+            args,
+            d,
+            f"({d['data_note']})\n" + "\n".join(head) + "\n\n" + body,
+            f'orch personal {part} draft {args.id} --text "..."',
+        )
     if sub == "draft":
         text = args.text if args.text is not None else sys.stdin.read()
         d = api.inbox_draft(root, who, part, args.id, text, args.request)
         return _emit(args, d, d["words"], "Tell the person on your ticket that a draft waits for them.")
     if sub == "rules":
         d = api.set_rules(root, who, part, args.read, args.write)
-        return _emit(args, d, f"Read: {d['read']} · Drafts: {'yes' if d['write'] == 'add' else 'no'} · Send: never", f"orch personal {part} need-me")
+        return _emit(
+            args,
+            d,
+            f"Read: {d['read']} · Drafts: {'yes' if d['write'] == 'add' else 'no'} · Send: never",
+            f"orch personal {part} need-me",
+        )
     if sub == "source":
         helpers = None if args.helpers is None else args.helpers == "on"
-        accounts = None if args.accounts is None else [a.strip() for a in args.accounts.split(",") if a.strip()]
+        accounts = (
+            None if args.accounts is None else [a.strip() for a in args.accounts.split(",") if a.strip()]
+        )
         d = api.inbox_source(root, who, part, args.way, helpers, accounts)
-        return _emit(args, d, f"{args.way}: helpers {'may use it' if d['helpers'] else 'cannot use it'}" + (f" · accounts: {', '.join(d['accounts'])}" if d["accounts"] else ""), f"orch personal {part} need-me")
+        return _emit(
+            args,
+            d,
+            f"{args.way}: helpers {'may use it' if d['helpers'] else 'cannot use it'}"
+            + (f" · accounts: {', '.join(d['accounts'])}" if d["accounts"] else ""),
+            f"orch personal {part} need-me",
+        )
     if sub == "accounts":
         d = api.inbox_accounts(root, who, part, args.way)
-        return _emit(args, d, "\n".join(d["accounts"]) or "No accounts found.", f'orch personal {part} source {args.way} --accounts "<name>,<name>"')
+        return _emit(
+            args,
+            d,
+            "\n".join(d["accounts"]) or "No accounts found.",
+            f'orch personal {part} source {args.way} --accounts "<name>,<name>"',
+        )
     if sub == "add-source":
         d = api.inbox_add_source(root, who, part, args.template)
-        return _emit(args, d, f"Added {d.get('name', args.template)}; it is off until you turn it on.", f"orch personal ways on {args.template}")
+        return _emit(
+            args,
+            d,
+            f"Added {d.get('name', args.template)}; it is off until you turn it on.",
+            f"orch personal ways on {args.template}",
+        )
     raise Refused(f"Unknown command {part} {sub}.")
 
 
@@ -566,10 +604,12 @@ def main(argv=None) -> int:
     s.add_argument("--read", choices=store.READ)
     s.add_argument("--write", choices=store.WRITE)
     for part, noun in (("mail", "mail"), ("messages", "chats")):
-        x = sub.add_parser(part, help=f"{noun} that need you; helpers draft replies, never send").add_subparsers(
-            dest="sub", required=True
+        x = sub.add_parser(
+            part, help=f"{noun} that need you; helpers draft replies, never send"
+        ).add_subparsers(dest="sub", required=True)
+        p(x, "need-me", help=f"{noun} that need you, from every source").add_argument(
+            "--fresh", action="store_true"
         )
-        p(x, "need-me", help=f"{noun} that need you, from every source").add_argument("--fresh", action="store_true")
         p(x, "list", help=f"recent {noun}").add_argument("--fresh", action="store_true")
         p(x, "find").add_argument("words", nargs="+")
         p(x, "show").add_argument("id")
@@ -586,7 +626,9 @@ def main(argv=None) -> int:
         s.add_argument("--helpers", choices=("on", "off"))
         s.add_argument("--accounts", help="comma separated account names (Mail app)")
         p(x, "accounts", help="the accounts a source knows (person)").add_argument("way")
-        p(x, "add-source", help="add a ready source, off until you turn it on (person)").add_argument("template")
+        p(x, "add-source", help="add a ready source, off until you turn it on (person)").add_argument(
+            "template"
+        )
     w = p(sub, "ways", help="ways in: your own scripts that reach a source on this computer")
     ws = w.add_subparsers(dest="sub")
     p(ws, "list", help="each way in: off, needs your permission, stopped or works")

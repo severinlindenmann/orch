@@ -21,26 +21,75 @@ def iso(hours_ago: float) -> str:
 
 
 MAILS = [
-    {"ref": "m1", "from": "Petra Zingg", "subject": "Rückfrage zur Offerte", "when": iso(1),
-     "preview": "Ist die Schnittstelle im Fixpreis enthalten?", "unread": True, "to_me": True},
-    {"ref": "m2", "from": "Newsletter", "subject": "Angebote", "when": iso(2), "preview": "Jetzt kaufen",
-     "unread": True, "to_me": False},
-    {"ref": "m3", "from": "Steueramt", "subject": "Frist 30 Nov", "when": iso(30), "preview": "Bitte einreichen.",
-     "unread": False, "flagged": True},
-    {"ref": "m4", "from": "Marco Keller", "subject": "Erledigt", "when": iso(3), "preview": "Danke.",
-     "unread": False, "to_me": True},
-    {"ref": "m5", "from": "Alte Mail", "subject": "Vor einer Woche", "when": iso(24 * 7), "preview": "?",
-     "unread": True, "to_me": True},
+    {
+        "ref": "m1",
+        "from": "Petra Zingg",
+        "subject": "Rückfrage zur Offerte",
+        "when": iso(1),
+        "preview": "Ist die Schnittstelle im Fixpreis enthalten?",
+        "unread": True,
+        "to_me": True,
+    },
+    {
+        "ref": "m2",
+        "from": "Newsletter",
+        "subject": "Angebote",
+        "when": iso(2),
+        "preview": "Jetzt kaufen",
+        "unread": True,
+        "to_me": False,
+    },
+    {
+        "ref": "m3",
+        "from": "Steueramt",
+        "subject": "Frist 30 Nov",
+        "when": iso(30),
+        "preview": "Bitte einreichen.",
+        "unread": False,
+        "flagged": True,
+    },
+    {
+        "ref": "m4",
+        "from": "Marco Keller",
+        "subject": "Erledigt",
+        "when": iso(3),
+        "preview": "Danke.",
+        "unread": False,
+        "to_me": True,
+    },
+    {
+        "ref": "m5",
+        "from": "Alte Mail",
+        "subject": "Vor einer Woche",
+        "when": iso(24 * 7),
+        "preview": "?",
+        "unread": True,
+        "to_me": True,
+    },
 ]
 CHATS = [
-    {"ref": "c1", "chat": "Lea Brunner", "from": "Lea Brunner", "when": iso(1),
-     "preview": "Kannst du die Offerte v2 heute noch anschauen?", "unread": True, "direct": True,
-     "link": "msteams:/l/chat/0/0?users=lea"},
-    {"ref": "c2", "chat": "Projekt Helvetia", "from": "Anna Meier", "when": iso(2), "preview": "Preismodell im Wiki",
-     "unread": True, "direct": False},
+    {
+        "ref": "c1",
+        "chat": "Lea Brunner",
+        "from": "Lea Brunner",
+        "when": iso(1),
+        "preview": "Kannst du die Offerte v2 heute noch anschauen?",
+        "unread": True,
+        "direct": True,
+        "link": "msteams:/l/chat/0/0?users=lea",
+    },
+    {
+        "ref": "c2",
+        "chat": "Projekt Helvetia",
+        "from": "Anna Meier",
+        "when": iso(2),
+        "preview": "Preismodell im Wiki",
+        "unread": True,
+        "direct": False,
+    },
 ]
 
-WAY = r'''
+WAY = r"""
 import json, os, sys, pathlib
 req = json.load(sys.stdin)
 a, v = req["action"], req["values"]
@@ -68,7 +117,7 @@ elif a == "draft":
         print(json.dumps({"saved": "maybe"}))
     else:
         print(json.dumps({"saved": True, "draft": "dr-" + v["ref"]}))
-'''
+"""
 
 
 def make_source(ws, slug, part, items, name, draft=True, extra_actions=None, files=None):
@@ -145,7 +194,7 @@ def test_no_send_in_any_shipped_way_in_nor_in_the_commands():
     for f in (SRC / "way_templates").rglob("*"):
         if f.is_file():
             text = f.read_text(encoding="utf-8")
-            assert not re.search(r"\bsend\b", text, re.I), f"{f.name} names send"
+            assert not re.search(r"\bsend\b", text, re.IGNORECASE), f"{f.name} names send"
     with pytest.raises(SystemExit):
         main(["mail", "send", "x"])
     with pytest.raises(SystemExit):
@@ -181,13 +230,13 @@ def test_nothing_needs_you_only_when_every_source_answered(cli, ws):
     make_source(ws, "mailapp", "mail", [], "Mail app", files={"x.txt": "x"})
     jrun(cli, "add", "mail")
     jrun(cli, "ways", "on", "outlook")
-    code, out, _ = cli("mail", "need-me")
+    _, out, _ = cli("mail", "need-me")
     assert "Nothing needs you" not in out and "Mail app not checked: off" in out
     jrun(cli, "ways", "on", "mailapp")
     from orch_personal import inbox
 
     inbox.forget_cache()
-    code, out, _ = cli("mail", "need-me")
+    _code, out, _ = cli("mail", "need-me")
     assert "Nothing needs you." in out
 
 
@@ -207,8 +256,18 @@ def test_find_and_word_limit(cli, outlook):
 
 
 def test_source_answers_are_cleaned_and_capped(cli, ws):
-    bad = [{"ref": "../x y", "subject": "bad id"}, {"ref": "ok1", "subject": "S" * 900, "preview": "a\x00b" * 300,
-           "when": iso(1), "unread": True, "to_me": True, "link": "https://evil.example/x"}]
+    bad = [
+        {"ref": "../x y", "subject": "bad id"},
+        {
+            "ref": "ok1",
+            "subject": "S" * 900,
+            "preview": "a\x00b" * 300,
+            "when": iso(1),
+            "unread": True,
+            "to_me": True,
+            "link": "https://evil.example/x",
+        },
+    ]
     make_source(ws, "outlook", "mail", bad, "Outlook")
     jrun(cli, "add", "mail")
     jrun(cli, "ways", "on", "outlook")
@@ -289,6 +348,10 @@ def test_helper_draft_lands_in_drafts_once(cli, outlook, monkeypatch, fake_orch)
     again = jrun(cli, "mail", "draft", "outlook~m1", "--text", "Ja, inklusive.", "--request", "r1")[1]
     assert again["again"] is True and again["id"] == d["id"]
     assert [c["action"] for c in calls(outlook, "outlook")].count("draft") == 1
+    assert "title" not in d and "problem" not in d  # the subject stays with the person
+    as_helper(monkeypatch, ticket="t_other1")  # another ticket with the same request id gets its own draft
+    other = jrun(cli, "mail", "draft", "outlook~m1", "--text", "Anders", "--request", "r1")
+    assert other[0] == 2  # and here it may not even read that mail
     from orch_personal import store
 
     assert any("(not sent)" in a["what"] for a in store.activity(outlook))
@@ -314,7 +377,7 @@ def test_helper_cannot_draft_when_the_rule_says_never(cli, outlook, monkeypatch,
 
 
 def test_draft_with_a_secret_is_refused(cli, outlook, stored_keys):
-    code, d = jrun(cli, "mail", "draft", "outlook~m1", "--text", "token ghp_" + "a1B2c3D4e5" * 4)
+    code, _d = jrun(cli, "mail", "draft", "outlook~m1", "--text", "token ghp_" + "a1B2c3D4e5" * 4)
     assert code == 2
 
 
@@ -391,7 +454,11 @@ def orch_tickets(tmp_path, monkeypatch, ws):
 
 def test_a_fix_ticket_after_two_failed_checks_and_only_one(cli, ws, orch_tickets):
     d = make_source(ws, "outlook", "mail", MAILS, "Outlook", files={"check.py": "print('ok')\n"})
-    toml = (d / "way.toml").read_text().replace('[actions]', f'selfcheck = {json.dumps([PY, "check.py"])}\n[actions]')
+    toml = (
+        (d / "way.toml")
+        .read_text()
+        .replace("[actions]", f"selfcheck = {json.dumps([PY, 'check.py'])}\n[actions]")
+    )
     (d / "way.toml").write_text(toml)
     jrun(cli, "add", "mail")
     assert jrun(cli, "ways", "on", "outlook")[1]["status"] == "works"
@@ -419,9 +486,19 @@ def test_a_fix_ticket_after_two_failed_checks_and_only_one(cli, ws, orch_tickets
 
 
 def test_permission_never_makes_a_fix_ticket(cli, ws, orch_tickets):
-    d = make_source(ws, "outlook", "mail", MAILS, "Outlook",
-                    files={"check.py": "import sys\nprint('Allow it.')\nsys.exit(3)\n"})
-    toml = (d / "way.toml").read_text().replace('[actions]', f'selfcheck = {json.dumps([PY, "check.py"])}\n[actions]')
+    d = make_source(
+        ws,
+        "outlook",
+        "mail",
+        MAILS,
+        "Outlook",
+        files={"check.py": "import sys\nprint('Allow it.')\nsys.exit(3)\n"},
+    )
+    toml = (
+        (d / "way.toml")
+        .read_text()
+        .replace("[actions]", f"selfcheck = {json.dumps([PY, 'check.py'])}\n[actions]")
+    )
     (d / "way.toml").write_text(toml)
     jrun(cli, "add", "mail")
     for _ in range(3):
@@ -430,7 +507,7 @@ def test_permission_never_makes_a_fix_ticket(cli, ws, orch_tickets):
 
 
 # --- the Mail app way in -------------------------------------------------------------------------------------
-FAKE_OSA = r'''#!{py}
+FAKE_OSA = r"""#!{py}
 import json, os, sys, pathlib
 script = sys.stdin.read()
 log = pathlib.Path(os.environ["HOME"]) / "osa.jsonl"
@@ -452,7 +529,7 @@ elif "enabled of a" in script:
     print("iCloud" + RS + "Work" + RS)
 else:
     print("2")
-'''
+"""
 
 
 @pytest.fixture
@@ -482,7 +559,9 @@ def test_mail_app_source_needs_accounts_then_reads_and_drafts(cli, ws, mac_mail)
 
     inbox.forget_cache()
     d = jrun(cli, "mail", "need-me")[1]
-    assert [(i["id"], i["from"], i["to_me"]) for i in d["items"]] == [("mac-mail~ACC-1:41", "Petra Zingg", True)]
+    assert [(i["id"], i["from"], i["to_me"]) for i in d["items"]] == [
+        ("mac-mail~ACC-1:41", "Petra Zingg", True)
+    ]
     d = jrun(cli, "mail", "show", "mac-mail~ACC-1:41")[1]
     assert d["to"] == ["me@example.ch"] and d["text"].startswith("Guten Tag")
     d = jrun(cli, "mail", "draft", "mac-mail~ACC-1:41", "--text", 'Ja " & do shell script "x')[1]
