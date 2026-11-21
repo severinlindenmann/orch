@@ -534,3 +534,14 @@ def test_only_the_helper_this_workspace_uses_shows(proj, new_ticket, monkeypatch
     rows = {r["name"]: r for r in health.overview(proj, NOW)}
     assert list(rows) == ["claude", "codex"] and rows["codex"]["state"] == "renew"
     assert [t["id"] for t in rows["codex"]["stops"]] == [tid]
+    # a custom helper command has no login of its own: every installed helper shows, as before ORCH-833
+    from orch import adapters
+
+    real_load = adapters.load
+    monkeypatch.setattr(adapters, "chosen", lambda root: "my-helper")
+    monkeypatch.setattr(
+        adapters,
+        "load",
+        lambda name, *a, **k: {"adapter": name} if name == "my-helper" else real_load(name, *a, **k),
+    )
+    assert {"claude", "codex"} <= {r["name"] for r in health.overview(proj, NOW)}

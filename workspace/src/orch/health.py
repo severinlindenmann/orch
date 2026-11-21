@@ -464,8 +464,12 @@ def overview(
     before = last(root) if (due_only or only) else None
     old = {x.get("name"): x for x in (before or {}).get("items") or [] if isinstance(x, dict)}
     rows = []
-    for r in recipes(root):
-        if not _used_here(root, r, chosen):
+    found = recipes(root)
+    # a chosen helper without a login of its own (a custom helper command) says nothing about which logins
+    # it needs: every installed helper shows, as without a chosen one
+    known = chosen if chosen in {r.get("helper") for r in found if r.get("helper")} else None
+    for r in found:
+        if not _used_here(root, r, known):
             continue
         prev = old.get(r["name"])
         if (only and r["name"] != only) or (due_only and prev and _fresh(prev, r, now)):
