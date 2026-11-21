@@ -27,7 +27,23 @@ def _real_home() -> Path:
         return Path.home()
 
 
-_REAL_TOOL_HOME = _real_home() / ".orch-tool"
+def _watched_home(real: Path) -> Path:
+    """The real home, or ORCH_TEST_GUARD_ONLY's inside the local check of a merge queue group (a throwaway
+    HOME with ORCH_HOME_STRICT=1, while the production orch on the same Mac keeps writing the real home;
+    ORCH-1180).
+    Honoured only with ORCH_HOME_STRICT=1 and a folder under <real home>/.orch-test (same rule as
+    workspace/tests/conftest.py guard_only_home)."""
+    only = os.environ.get("ORCH_TEST_GUARD_ONLY")
+    if not only or os.environ.get("ORCH_HOME_STRICT") != "1":
+        return real
+    try:
+        p, top = Path(only).resolve(strict=True), (real / ".orch-test").resolve(strict=True)
+    except (OSError, RuntimeError):
+        return real
+    return p if p.is_dir() and p != top and p.is_relative_to(top) else real
+
+
+_REAL_TOOL_HOME = _watched_home(_real_home()) / ".orch-tool"
 
 
 def snapshot(base: Path = _REAL_TOOL_HOME) -> dict:

@@ -22,6 +22,7 @@ function settingsCtx(extra = {}) {
   const ctx = {
     h: el, fragment: (...k) => ({tag: 'frag', props: {}, kids: k.flat(Infinity).filter(k2 => k2 != null)}),
     array: v => Array.isArray(v) ? v : [], capitalise, snapshot: false, settingsBusy: new Set(),
+    addonWaiting: new Set(), ADDON_WAIT_TEXT: 'Waiting for orch to restart…',
     state: {settings: {addons: [], available: []}, addons: []}, addons: () => [],
     asList: v => Array.isArray(v) ? v : [v],
     heading: (t, s, o) => el('h1', {}, t, s, o && o.actions),
@@ -57,6 +58,8 @@ test('the switch shows Turning on… / Turning off… while the change runs', ()
   assert.equal(text(c.switchBusy({name: 'factory', active: false})), 'Turning on…');
   assert.equal(text(c.switchBusy({name: 'factory', active: true})), 'Turning off…');
   assert.equal(c.addonChanging(), true);
+  ctx.addonWaiting.add('factory');  // the dashboard restarts after the change (ORCH-1046)
+  assert.equal(text(c.switchBusy({name: 'factory', active: false})), 'Waiting for orch to restart…');
 });
 
 // 23: no call to an add-on that is off/removed, none while the services restart

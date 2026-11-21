@@ -79,16 +79,18 @@
         "attachments": { "$ref": "message.schema.json#/$defs/text/properties/attachments" },
         "voice": { "$ref": "message.schema.json#/$defs/text/properties/voice" },
         "location": { "$ref": "message.schema.json#/$defs/text/properties/location" },
-        "feedback": { "$ref": "message.schema.json#/$defs/feedback" }
+        "feedback": { "$ref": "message.schema.json#/$defs/feedback" },
+        "team": { "$ref": "message.schema.json#/$defs/team", "description": "Optional (team chat step 2, ORCH-1175): the person's Add / @ choice in a ticket chat. Needs text and a ticket. Copied into the body unchanged; the ticket's workspace decides (it adds only workspaces it may add, names only current members). An older relay drops it: the reply then has no team field." }
       },
       "allOf": [
         { "if": { "required": ["general"], "properties": { "general": { "const": true } } }, "then": { "not": { "required": ["ticket"], "properties": { "ticket": { "type": "string" } } } } },
+        { "if": { "required": ["team"] }, "then": { "required": ["ticket", "text"], "properties": { "ticket": { "type": "string" } } } },
         { "if": { "required": ["feedback"] }, "then": { "required": ["ticket"], "properties": { "ticket": { "type": "string" } } } }
       ]
     },
     "send_response": {
       "type": "object", "required": ["id"], "additionalProperties": false,
-      "properties": { "id": { "$ref": "#/$defs/msg_id" }, "client_id": { "oneOf": [{ "$ref": "#/$defs/client_id" }, { "type": "null" }] }, "duplicate": { "const": true } }
+      "properties": { "id": { "$ref": "#/$defs/msg_id" }, "client_id": { "oneOf": [{ "$ref": "#/$defs/client_id" }, { "type": "null" }] }, "duplicate": { "const": true }, "team": { "const": true, "description": "The relay kept the request's team field (ORCH-1175). Absent from an older relay: the app then says Add and @ work on the computer for now." } }
     },
 
     "answer_request": {

@@ -75,6 +75,13 @@ class StateCache:
             if note != state["auto_update_note"]:
                 out["auto_update_note"] = note
                 out["rev"] = f"{state.get('rev', '')}-u{note['at'] if note else 0}"
+        if "update_check" in state:  # the card after a failed self-check: in the orch home too
+            from . import update
+
+            card = update.check_card()
+            if card != state["update_check"]:
+                out["update_check"] = card
+                out["rev"] = f"{out.get('rev', state.get('rev', ''))}-c{card['at'] if card else 0}"
         if state.get("start_line"):  # why the line does not move changes with the load, not with a file
             line = start_line(self.root)
             if line != state["start_line"]:
