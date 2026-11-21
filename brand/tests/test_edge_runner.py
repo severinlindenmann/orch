@@ -127,7 +127,7 @@ def test_the_route_job_also_decides_for_orch_edge_and_never_fails():
     assert "head.repo.full_name == github.repository" in cond and cond.endswith("|| ''")
 
 
-@pytest.mark.parametrize("job,inp", [("relay", "runs_on"), ("publish", "runs_on"),
+@pytest.mark.parametrize("job,inp", [("clock", "runs_on"), ("relay", "runs_on"), ("publish", "runs_on"),
                                      ("e2e-smoke", "runs_on"), ("addons", "linux_runs_on")])
 def test_ci_passes_the_route_to_every_linux_job_and_runs_all_of_them_on_orch_edge(job, inp):
     body = _job(CI, job)
@@ -135,11 +135,6 @@ def test_ci_passes_the_route_to_every_linux_job_and_runs_all_of_them_on_orch_edg
     assert re.search(r"^    needs: \[changes, route\]$", body, re.MULTILINE)
     # a failed route job never skips them (they go to GitHub's machines), and on orch edge they run after each merge
     assert "if: ${{ !cancelled() && needs.changes.result == 'success' && (" in body and ON_EDGE in body
-
-
-def test_the_clock_tests_stay_on_github_until_file_times_are_faked_on_orch_edge():
-    body = _job(CI, "clock")
-    assert "runs_on: '[\"ubuntu-latest\"]'" in body and "needs.route" not in body.split("# NOT on orch edge")[0]
 
 
 @pytest.mark.parametrize("file,job", [("clock.yml", "suites"), ("relay.yml", "test"), ("publish.yml", "test"),
@@ -175,7 +170,7 @@ def test_the_job_home_keeps_temp_files_off_the_memory_disk_and_caps_workers():
     home = (ROOT / ".github" / "actions" / "edge-job-home" / "action.yml").read_text()
     assert "if: runner.environment == 'self-hosted'" in home
     for line in ("TMPDIR=$RUNNER_TEMP/tmp", "ORCH_HOME_STRICT=1", "PYTEST_XDIST_AUTO_NUM_WORKERS=4", "CARGO_BUILD_JOBS=4",
-                 "CARGO_HOME=$cache/cargo", "RUSTUP_HOME=$cache/rustup"):
+                 "CARGO_HOME=$cache/cargo", "RUSTUP_HOME=$cache/rustup", "UV_PYTHON_PREFERENCE=only-managed", "NO_FAKE_STAT=1"):
         assert line in home, line
 
 

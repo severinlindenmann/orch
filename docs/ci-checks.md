@@ -128,10 +128,11 @@ Runners.
 
 ## Linux jobs on the orch edge test server (ORCH-1126)
 
-Relay, publish, the short e2e set and the Services add-on with its real Linux run
+The clock tests (fake wall clock), relay, publish, the short e2e set and the Services add-on with its real Linux run
 can run on a GitHub runner on the orch edge test server (Debian, ARM64, 8 cores, 8 GB) instead of GitHub's machines.
-Never on a production server. The clock tests (fake wall clock) stay on GitHub's machines for now: Debian 13's
-libfaketime on ARM64 does not fake file times, so tests that compare a file's time with the clock go red there.
+Never on a production server. There the jobs use uv's own Python builds (`UV_PYTHON_PREFERENCE=only-managed`), and
+the clock tests keep real file times as on GitHub (`NO_FAKE_STAT=1`: libfaketime would shift the file times a
+program reads but not the ones it sets).
 The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
 
 - **Only trusted runs**: a push to develop, the nightly run, a manual run and a release pull request. Pull requests

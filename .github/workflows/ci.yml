@@ -275,14 +275,11 @@ jobs:
   # The add-on suites, the page tests and the workspace tests that name a day at 22:30 and 23:59:40 UTC: a test that
   # only passes by day goes red here, on its pull request, not on develop at night (ORCH-390, #1371, #1421).
   clock:
-    needs: changes
-    if: needs.changes.outputs.light != 'true' && needs.changes.outputs.proven != 'true' && (needs.changes.outputs.clock == 'true' || needs.changes.outputs.queue == 'true' || github.event_name == 'schedule')
+    needs: [changes, route]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && ((needs.changes.outputs.light != 'true' && needs.changes.outputs.proven != 'true' && (needs.changes.outputs.clock == 'true' || needs.changes.outputs.queue == 'true' || github.event_name == 'schedule')) || needs.route.outputs.edge_where == 'edge' || needs.route.outputs.edge_where == 'both') }}
     uses: ./.github/workflows/clock.yml
-    # NOT on orch edge yet (ORCH-1126): Debian 13's libfaketime on ARM64 does not fake file times, so tests that
-    # compare a file's time with the clock go red there. To move it: needs [changes, route], the route condition
-    # and runs_on from needs.route.outputs.edge, like relay below.
     with:
-      runs_on: '["ubuntu-latest"]'
+      runs_on: ${{ needs.route.outputs.edge || '["ubuntu-latest"]' }}
   brand:
     # words from docs/wording.md (R7.5), design tokens and a time limit on every CI job; pure text checks, a few seconds
     needs: changes

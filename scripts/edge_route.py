@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Where do this run's Linux jobs go: the orch edge test server's own runner or GitHub's machines? (ORCH-1126)
 
-The Linux jobs are relay, publish, the short e2e set and the Services add-on with its real Linux run (the clock
-tests stay on GitHub's machines for now: libfaketime on Debian 13 ARM64 does not fake file times). They run on the orch edge runner (label `orch-edge`, ARM64) only when ALL of these hold,
+The Linux jobs are the clock tests (fake wall clock), relay, publish, the short e2e set and the Services add-on
+with its real Linux run. They run on the orch edge runner (label `orch-edge`, ARM64) only when ALL of these hold,
 else on GitHub's machines as before. The rules are the Mac's (scripts/mac_route.py, ORCH-1125):
 
 1. The repository variable EDGE_RUNNER is `orch-edge`. Any other value or none: GitHub's machines. This is the one
