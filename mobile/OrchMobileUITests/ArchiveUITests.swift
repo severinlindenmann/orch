@@ -16,11 +16,13 @@ final class ArchiveUITests: XCTestCase {
         return app
     }
     private func launch() -> XCUIApplication {
-        let app = start(["-openChat", "ws_pilatus001"])
+        // Ticket chats sit on Chats (owner 21 Nov, ORCH-1169); Q3 is under the collapsed Done group.
+        let app = start([])
         let done = app.buttons["done-toggle"]
-        XCTAssertTrue(done.waitForExistence(timeout: 20), "workspace screen")
+        XCTAssertTrue(done.waitForExistence(timeout: 20), "Ticket chats on Chats")
+        app.reveal(done)
         done.tap()
-        // The workspace look and banners push the Done rows below the fold: scroll like a person would.
+        // The banners and other rows push the Done rows below the fold: scroll like a person would.
         let chat = app.descendants(matching: .any)[row].firstMatch
         XCTAssertTrue(chat.waitForExistence(timeout: 20))
         app.reveal(chat)
@@ -78,7 +80,8 @@ final class ArchiveUITests: XCTestCase {
         let back = rowBack(app, "Undo brings the chat back")
         swipeAction(app, back, "Archive")
         XCTAssertTrue(el(app, row).waitForNonExistence(timeout: 10), "the row is gone")
-        let archived = el(app, "archived-row")
+        let archived = el(app, "archived-row-all")
+        app.reveal(archived)
         ready(archived, "Archived row"); archived.tap()
         XCTAssertTrue(el(app, "archived-t:ws_pilatus001|t_q3sum1").waitForExistence(timeout: 10))
         shot(app, "3-archived-list")
@@ -109,7 +112,7 @@ final class ArchiveUITests: XCTestCase {
         shot(app, "4-delete-confirm")
         ready(el(app, "delete-confirm"), "confirm button"); el(app, "delete-confirm").tap()
         XCTAssertTrue(chat.waitForNonExistence(timeout: 10), "the chat leaves the list")
-        XCTAssertFalse(el(app, "archived-row").exists, "a deleted chat is not archived")
+        XCTAssertFalse(el(app, "archived-row-all").exists, "a deleted chat is not archived")
     }
 
     func testAutoArchiveSwitchInSettings() {

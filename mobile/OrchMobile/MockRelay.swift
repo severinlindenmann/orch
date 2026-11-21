@@ -74,6 +74,12 @@ actor MockRelay: RelayAPI {
         }
         #endif
         if UserDefaults.standard.bool(forKey: "mockMakeTicket") { all.append(Self.makeTicketQuestion) }
+        // Team chat step 1 (ORCH-1169): PIL-13 gets chat lines with names before its open question. Opt-in keeps other counts unchanged.
+        if UserDefaults.standard.bool(forKey: "mockTicketChat") {
+            updateLog.append(TicketUpdate(id: "m_ticketchatupd001", workspace: Self.pilatus, workspaceName: "Pilatus Workspace",
+                ticket: "t_7k3f9q", kind: "question", title: "Rename field X in ingestion job", text: "DATE or TIMESTAMP?", replyTo: nil,
+                at: "2026-11-04T10:41:00Z", key: "PIL-13", ticketView: Self.ticketChatView))
+        }
         if UserDefaults.standard.bool(forKey: "mockReview") {
             all.append(Self.reviewQuestion)
             updateLog.append(TicketUpdate(id: "m_reviewupdate001", workspace: Self.pilatus, workspaceName: "Pilatus Workspace",
@@ -218,6 +224,18 @@ actor MockRelay: RelayAPI {
                             linkType: "GitHub · Pull request", icon: "github", mono: "GH", status: "review")],
         historyTail: [.init(at: "2026-11-05T15:05:00Z", by: "You", role: "person", text: "Please add an export for the invoices."),
                       .init(at: "2026-11-05T15:08:00Z", by: "Claude", role: "agent", text: "Reading the invoice table first.")])
+
+    /// Chat lines of PIL-13 (-mockTicketChat YES): a name typed on the computer, the helper, and you.
+    static let ticketChatView = TicketSnapshot(
+        title: "Rename field X in ingestion job", status: "waiting", agent: "Claude", summary: "Renaming field X; one choice is open.",
+        checklist: [.init(text: "Find every use of field X", done: true), .init(text: "Rename it", done: false)], running: false,
+        historyTail: [.init(at: "2026-11-04T10:30:00Z", by: "Claude", role: "agent", text: "Started on the rename."),
+                      .init(at: "2026-11-04T10:32:00Z", by: "you", role: "person", text: "Field X also feeds the monthly report.",
+                            chat: true, messageId: "m_tcnina0000000001", name: "Nina Weber"),
+                      .init(at: "2026-11-04T10:35:00Z", by: "Claude", role: "agent", text: "I checked the report: both types work there.",
+                            chat: true, messageId: "m_tcclaude00000002"),
+                      .init(at: "2026-11-04T10:38:00Z", by: "you", role: "person", text: "Fine, pick what is safer.",
+                            chat: true, messageId: "m_tcyou00000000003")])
 
     /// Work updates per (workspace, ticket), newest per ticket is what the feed returns.
     private var updateLog: [TicketUpdate] = [

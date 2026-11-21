@@ -1,3 +1,8 @@
+# 21 Nov team chat step 1: Ticket chats (ORCH-1169)
+- New page `ticket-chats.html`: Chats lists every ticket's chat under "Ticket chats" (newest first, unread count, key and workspace, "Needs your OK"), above "Workspaces".
+- Owner 21 Nov: Ticket chats replace the topic list of the workspace screen (no second chat layer). Finished tickets sit under a collapsed Done in Ticket chats; rows keep Archive / Delete swipes and their status chip; the workspace screen keeps Your helper, Archived and New topic. The workspace topic list in the main mockup screens is superseded by this page.
+- A ticket chat names who wrote each incoming message ("Claude · Marketing", a name typed on the computer "· not signed in") above the first bubble of a run; question cards and the composer as before.
+
 # 12 Nov phone UX, batch 4
 - Info: one "Shared" list; filters (Photos, Files, Links, Previews) only when they have content and only when there are two or more, zero counts hidden, "Progress · 3 of 4 done" row; no "N tasks · N references"; phone-local workspace name.
 - Result viewer: subtitle "PDF · 3 pages · 12:38" (time as the app prints it), version behind "Details", no status chip; PDF edge to edge on dark with page shadows and page count; share icon next to close; action bar on the composer band.
