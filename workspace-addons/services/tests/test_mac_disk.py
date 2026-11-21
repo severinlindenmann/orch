@@ -104,8 +104,8 @@ def test_no_route_to_host_names_the_local_network(cli, fake, ws, mac, clock):
     assert _add(cli)[0] == 0
     log = store.log_path(ws, "web", WID)
     log.write_text(
-        "dial tcp 192.168.64.3:443: connect: no route to host\nNo route to host\n", encoding="utf-8"
-    )
+        "dial tcp 192.168.64.3:443: connect: no route to host\n", encoding="utf-8"
+    )  # lowercase, as Go and curl write it
     fake.start_dies = True
     code, out = jrun(cli, "start", "web")
     assert code == 0 and "local network" in out["next"] and "private network address" in out["next"]
@@ -117,6 +117,36 @@ def test_exit_78_without_a_log_says_macos_blocked_it(cli, fake, ws, mac, clock):
     fake.last_exit = lambda spec: 78
     code, out = jrun(cli, "start", "web")
     assert code == 0 and "did not let it open its log or its folder" in out["next"]
+
+
+def test_exit_78_with_an_empty_new_log_still_says_macos_blocked_it(cli, fake, ws, mac, clock):
+    from orch_services import store
+
+    assert _add(cli)[0] == 0
+    store.log_path(ws, "web", WID).write_text(
+        "", encoding="utf-8"
+    )  # launchd opened the log, then failed the folder
+    fake.start_dies = True
+    fake.last_exit = lambda spec: 78
+    code, out = jrun(cli, "start", "web")
+    assert code == 0 and "did not let it open its log or its folder" in out["next"]
+
+
+def test_the_home_log_of_an_earlier_build_is_still_read_and_moved_aside(cli, fake, ws, mac):
+    import hashlib
+    import re
+
+    assert _add(cli)[0] == 0
+    r = ws.resolve()
+    tag = hashlib.sha1(str(r).encode()).hexdigest()[:8]
+    name = re.sub(r"[^A-Za-z0-9._-]", "-", r.name)
+    earlier = mac / "Library" / "Logs" / "orch" / f"{name}-{tag}" / "web.log"
+    earlier.parent.mkdir(parents=True, exist_ok=True)
+    earlier.write_text("from the earlier home log\n", encoding="utf-8")
+    code, out = jrun(cli, "log", "web")
+    assert code == 0 and out["lines"] == ["from the earlier home log"]
+    assert jrun(cli, "remove", "web")[0] == 0 and _add(cli)[0] == 0
+    assert not earlier.exists() and list((earlier.parent / "removed").glob("web-*.log"))
 
 
 @pytest.fixture

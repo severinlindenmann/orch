@@ -5,6 +5,7 @@ rewritten. Fields this version does not know are kept when a record is rewritten
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -52,10 +53,24 @@ def log_path(root: Path, sid: str, wid: str | None = None) -> Path:
     return logs_dir(root) / f"{sid}.log"
 
 
+def _earlier_log_paths(root: Path, sid: str, wid: str | None) -> tuple[Path, ...]:
+    """Every place a job may still write its log: the current one, the workspace (before the logs moved) and, on
+    macOS, the per-folder home log an earlier build gave a workspace on /Volumes (<folder name>-<sha1 8>/)."""
+    places = [log_path(root, sid, wid), logs_dir(root) / f"{sid}.log"]
+    if wid and _platform() == "darwin":
+        try:
+            r = Path(root).resolve()
+        except OSError:
+            r = Path(root).absolute()
+        tag = hashlib.sha1(str(r).encode()).hexdigest()[:8]
+        name = re.sub(r"[^A-Za-z0-9._-]", "-", r.name)
+        places.append(Path.home() / "Library" / "Logs" / "orch" / f"{name}-{tag}" / f"{sid}.log")
+    return tuple(dict.fromkeys(places))
+
+
 def read_log_path(root: Path, sid: str, wid: str | None = None) -> Path:
-    """The log to read: the newer of the home log and the workspace log (a job loaded before the logs moved keeps
+    """The log to read: the newest of the places a job may write it (a job loaded before the logs moved keeps
     writing the old one until it is started again)."""
-    new, old = log_path(root, sid, wid), logs_dir(root) / f"{sid}.log"
 
     def mtime(p: Path) -> float:
         try:
@@ -63,7 +78,9 @@ def read_log_path(root: Path, sid: str, wid: str | None = None) -> Path:
         except OSError:
             return -1.0
 
-    return old if new != old and mtime(old) > mtime(new) else new
+    places = _earlier_log_paths(root, sid, wid)
+    best = max(places, key=mtime)
+    return best if mtime(best) > mtime(places[0]) else places[0]
 
 
 def home_dir(wid: str) -> Path:
@@ -77,7 +94,7 @@ def set_aside_old_log(root: Path, sid: str, wid: str | None = None) -> Path | No
     where the log to read went; refused when one could not be moved."""
     shown = read_log_path(root, sid, wid)
     moved: Path | None = None
-    for log in dict.fromkeys((log_path(root, sid, wid), logs_dir(root) / f"{sid}.log")):
+    for log in _earlier_log_paths(root, sid, wid):
         if not log.is_file():
             continue
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")

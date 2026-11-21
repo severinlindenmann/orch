@@ -496,7 +496,7 @@ def _why_stopped(root: Path, drv, spec, since: float) -> str:
             " macOS did not let it use its folder: move the workspace or the program out of Documents, Desktop, "
             "Downloads and iCloud Drive (for example to ~/code), and keep the program off an external disk."
         )
-    if drv.name == "launchd" and any("No route to host" in ln for ln in lines):
+    if drv.name == "launchd" and any("no route to host" in ln.lower() for ln in lines):
         out += (
             " macOS keeps background services off this computer's local network: use the private network address, "
             "or allow it in System Settings, Privacy & Security, Local Network."
@@ -507,7 +507,10 @@ def _why_stopped(root: Path, drv, spec, since: float) -> str:
 def _no_log_why(root: Path, drv, spec, since: float) -> str:
     """launchd ended the job with 78 before it ran and wrote no log: it could not open the log or the folder."""
     try:
-        written = store.read_log_path(root, spec.sid, spec.workspace_id).stat().st_mtime >= since - 1
+        st = store.read_log_path(root, spec.sid, spec.workspace_id).stat()
+        written = (
+            st.st_mtime >= since - 1 and st.st_size > 0
+        )  # launchd may create the log and still fail (78)
     except OSError:
         written = False
     last = getattr(drv, "last_exit", None)
