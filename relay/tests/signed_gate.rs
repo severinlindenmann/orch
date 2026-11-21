@@ -137,13 +137,23 @@ async fn wrong_missing_or_changed_signature_is_refused() {
 
 #[tokio::test]
 async fn a_signed_sender_must_be_the_caller() {
-    let (t, a, b, _) = setup().await;
+    let (t, a, b, _k) = setup().await;
     let kb = sk(12);
     register(&t, &b, &kb).await;
     // B signs a message claiming to be from A and A's token posts it
     let (m, _) = signed_msg(&kb, &a, &b.id, "x");
     let (s, v) = post(&t, &a, m).await;
-    assert_eq!(s, 422, "{v}");
+    assert_eq!((s, code(&v)), (422, "unknown_key"), "{v}");
+    // A's own key signs bytes that name B as the sender: refused as wrong_sender (403, like rule 1)
+    let (mut m, _) = signed_msg(&a_key(), &b, &a.id, "x");
+    m["from"] = a.id.clone().into();
+    m["to"] = b.id.clone().into();
+    let (s, v) = post(&t, &a, m).await;
+    assert_eq!((s, code(&v)), (403, "wrong_sender"), "{v}");
+}
+
+fn a_key() -> SigningKey {
+    sk(11)
 }
 
 #[tokio::test]
@@ -326,13 +336,32 @@ async fn key_change_is_held_until_the_relay_admin_approves() {
         200
     );
     assert_eq!(
-        t.admin_json("POST", &path, Some(json!({"key_id": key_id(&k)})))
-            .await
-            .0,
+        t.admin_json(
+            "POST",
+            &path,
+            Some(json!({"key_id": key_id(&k), "kind": "signed"}))
+        )
+        .await
+        .0,
+        409
+    );
+    // approval is bound to the kind the admin saw: a "without the old key" approval does not fit
+    assert_eq!(
+        t.admin_json(
+            "POST",
+            &path,
+            Some(json!({"key_id": key_id(&k2), "kind": "no_old_key"}))
+        )
+        .await
+        .0,
         409
     );
     let (s, v) = t
-        .admin_json("POST", &path, Some(json!({"key_id": key_id(&k2)})))
+        .admin_json(
+            "POST",
+            &path,
+            Some(json!({"key_id": key_id(&k2), "kind": "signed"})),
+        )
         .await;
     assert_eq!(s, 200, "{v}");
     // now the new key works and the old one is refused
@@ -407,6 +436,7 @@ fn withdraw_body(k: &SigningKey, ws: &Ws) -> Value {
 #[tokio::test]
 async fn withdrawn_key_is_refused_and_vouches_for_nothing() {
     let (t, a, b, k) = setup().await;
+    let (_, before) = t.call(&b, "GET", "/v1/refresh", None).await;
     // only a statement signed by the key itself withdraws it
     let (s, _) = t
         .call(
@@ -432,6 +462,18 @@ async fn withdrawn_key_is_refused_and_vouches_for_nothing() {
     // whoami and the directory say so (a hint for receivers)
     let (_, me) = t.call(&a, "GET", "/v1/whoami", None).await;
     assert_eq!(me["signing_key_state"]["state"], "withdrawn");
+    let (_, dir) = t.call(&b, "GET", "/v1/refresh", None).await;
+    let seen_by_b = dir["workspaces"]["workspaces"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|w| w["id"] == a.id.as_str())
+        .map(|w| w["signing_key_state"]["state"].clone());
+    assert_eq!(seen_by_b, Some(json!("withdrawn")), "{dir}");
+    assert_ne!(
+        dir["version"], before["version"],
+        "the withdrawal raises the version"
+    );
     // the withdrawn key cannot vouch for a new one; a change without it waits for the admin
     let k2 = sk(24);
     let (s, v) = t
@@ -454,9 +496,13 @@ async fn withdrawn_key_is_refused_and_vouches_for_nothing() {
     assert_eq!(s, 202);
     let path = format!("/admin/api/signing-keys/{}/approve", a.id);
     assert_eq!(
-        t.admin_json("POST", &path, Some(json!({"key_id": key_id(&k2)})))
-            .await
-            .0,
+        t.admin_json(
+            "POST",
+            &path,
+            Some(json!({"key_id": key_id(&k2), "kind": "no_old_key"}))
+        )
+        .await
+        .0,
         200
     );
     let (m, _) = signed_msg(&k2, &a, &b.id, "new key");

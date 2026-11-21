@@ -46,14 +46,15 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
 
 // ------------------------------------------------------------------ the switch
 
-pub fn require_signed(c: &Connection) -> bool {
-    c.query_row("SELECT 1 FROM settings WHERE k=?1", [REQUIRE_KEY], |_| {
-        Ok(())
-    })
-    .optional()
-    .ok()
-    .flatten()
-    .is_some()
+/// A read error is an error, never "off" (fail closed).
+pub fn require_signed(c: &Connection) -> rusqlite::Result<bool> {
+    Ok(
+        c.query_row("SELECT 1 FROM settings WHERE k=?1", [REQUIRE_KEY], |_| {
+            Ok(())
+        })
+        .optional()?
+        .is_some(),
+    )
 }
 
 pub fn set_require_signed(c: &Connection, on: bool) -> rusqlite::Result<()> {
@@ -97,7 +98,7 @@ fn refused(e: SigError) -> ApiError {
             "The signature does not match the message.",
         ),
         SigError::WrongSender => (
-            StatusCode::UNPROCESSABLE_ENTITY,
+            StatusCode::FORBIDDEN,
             "The signed sender is not this workspace.",
         ),
         _ => (
@@ -119,15 +120,14 @@ fn current_key(c: &Connection, ws: &str) -> rusqlite::Result<Option<String>> {
 }
 
 /// `withdrawn` / `blocked` / `replaced` when the key no longer counts, else None.
-fn ended(c: &Connection, ws: &str, key: &str) -> Option<String> {
+/// A read error is an error, never "still usable" (fail closed).
+fn ended(c: &Connection, ws: &str, key: &str) -> rusqlite::Result<Option<String>> {
     c.query_row(
         "SELECT state FROM sign_key_ended WHERE ws=?1 AND public_key=?2",
         params![ws, key],
         |r| r.get(0),
     )
     .optional()
-    .ok()
-    .flatten()
 }
 
 fn end_key(c: &Connection, ws: &str, key: &str, state: &str) -> rusqlite::Result<()> {
@@ -156,7 +156,7 @@ fn usable_key(c: &Connection, ws: &str) -> Res<[u8; 32]> {
             "This workspace has no signing key at the relay yet.",
         ));
     };
-    match ended(c, ws, &k).as_deref() {
+    match ended(c, ws, &k)?.as_deref() {
         Some("withdrawn") => {
             return Err(sig_err(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -187,7 +187,10 @@ pub fn state_info(c: &Connection, ws: &str) -> Value {
     let Ok(Some(k)) = current_key(c, ws) else {
         return Value::Null;
     };
-    let state = ended(c, ws, &k).unwrap_or_else(|| "active".into());
+    let state = ended(c, ws, &k)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "active".into());
     let pending: Option<String> = c
         .query_row(
             "SELECT new_key FROM sign_key_change WHERE ws=?1",
@@ -223,7 +226,7 @@ fn same(outer: &Value, signed: &Map<String, Value>, k: &str) -> bool {
 pub fn check(c: &Connection, me: &str, msg: &mut Value) -> Res<Gate> {
     let env = msg.as_object_mut().and_then(|o| o.remove("envelope"));
     let Some(env) = env else {
-        if require_signed(c) {
+        if require_signed(c)? {
             return Err(refused(SigError::MissingSignature));
         }
         return Ok(Gate::Unsigned);
@@ -391,7 +394,7 @@ pub async fn change(
             "This workspace has no signing key yet: register it with PUT /v1/me/signing-key.",
         ));
     };
-    if cur == new_pk || ended(&c, &me, &new_pk).is_some() {
+    if cur == new_pk || ended(&c, &me, &new_pk)?.is_some() {
         return Err(invalid(
             "The new key must be a key this workspace never used before.",
         ));
@@ -404,7 +407,7 @@ pub async fn change(
                 if *old_id != signkeys::key_id(&cur_raw) || e.key_id != *old_id {
                     return Err(refused(SigError::UnknownKey));
                 }
-                if let Some(st) = ended(&c, &me, &cur) {
+                if let Some(st) = ended(&c, &me, &cur)? {
                     // a withdrawn or blocked key never vouches for a replacement
                     return Err(sig_err(
                     StatusCode::UNPROCESSABLE_ENTITY,
@@ -485,9 +488,14 @@ pub async fn withdraw(State(app): State<AppState>, h: HeaderMap, body: Bytes) ->
             "`key_id` must be the id of the key that signs the statement.",
         ));
     }
-    if ended(&c, &me, &cur).is_none() {
+    if ended(&c, &me, &cur)?.is_none() {
         end_key(&c, &me, &cur, "withdrawn")?;
     }
+    // directory readers learn the new state like after approve and block
+    let rel = crate::store::related(&c, &me);
+    crate::store::bump_and_hint(&c, &app.key, &rel)?;
+    drop(c);
+    app.notify.notify_waiters();
     Ok(Json(
         json!({"status": "withdrawn", "key_id": signkeys::key_id(&raw)}),
     ))
@@ -516,12 +524,15 @@ pub async fn admin_list(State(app): State<AppState>, h: HeaderMap) -> Res<Json<V
         .collect::<Result<_, _>>()?;
     let mut out = vec![];
     for (id, name, key, at) in rows {
-        let current = key.as_deref().map(|k| {
-            let mut card = key_card(k);
-            card["state"] = ended(&c, &id, k).unwrap_or_else(|| "active".into()).into();
-            card["registered_at"] = at.map(fmt_time).into();
-            card
-        });
+        let current = match key.as_deref() {
+            Some(k) => {
+                let mut card = key_card(k);
+                card["state"] = ended(&c, &id, k)?.unwrap_or_else(|| "active".into()).into();
+                card["registered_at"] = at.map(fmt_time).into();
+                Some(card)
+            }
+            None => None,
+        };
         let pending: Option<Value> = c
             .query_row(
                 "SELECT new_key, kind, requested_at FROM sign_key_change WHERE ws=?1",
@@ -552,8 +563,14 @@ pub async fn admin_list(State(app): State<AppState>, h: HeaderMap) -> Res<Json<V
         );
     }
     Ok(Json(
-        json!({"require_signed": require_signed(&c), "workspaces": out}),
+        json!({"require_signed": require_signed(&c)?, "workspaces": out}),
     ))
+}
+
+/// `{"key_id": …, "kind": …}` of what the admin saw (kind only for a pending change).
+fn kind_in(body: &Bytes) -> Res<Option<String>> {
+    let v = crate::api::parse_body(body)?;
+    Ok(v["kind"].as_str().map(str::to_string))
 }
 
 fn key_id_in(body: &Bytes) -> Res<String> {
@@ -597,17 +614,21 @@ pub async fn admin_approve(
 ) -> Res<Json<Value>> {
     crate::auth::admin(&app, &h)?;
     let kid = key_id_in(&body)?;
+    let kind = kind_in(&body)?
+        .ok_or_else(|| invalid("Send the `kind` of the change shown on the page."))?;
     let c = app.db.lock().unwrap();
-    let Some((new_key, _)) = pending_of(&c, &ws)?.filter(|(k, _)| kid_of(k) == kid) else {
+    // bound to what the admin saw: the same new key AND the same kind (signed by the old key or not)
+    let Some((new_key, _)) = pending_of(&c, &ws)?.filter(|(k, kd)| kid_of(k) == kid && *kd == kind)
+    else {
         return Err(stale());
     };
-    if ended(&c, &ws, &new_key).is_some() {
+    if ended(&c, &ws, &new_key)?.is_some() {
         return Err(stale());
     }
     c.execute_batch("SAVEPOINT sign_approve")?;
     let done = (|| -> rusqlite::Result<()> {
         if let Some(old) = current_key(&c, &ws)? {
-            if ended(&c, &ws, &old).is_none() {
+            if ended(&c, &ws, &old)?.is_none() {
                 end_key(&c, &ws, &old, "replaced")?;
             }
         }
@@ -663,7 +684,7 @@ pub async fn admin_block(
     let Some(cur) = current_key(&c, &ws)?.filter(|k| kid_of(k) == kid) else {
         return Err(stale());
     };
-    if ended(&c, &ws, &cur).is_none() {
+    if ended(&c, &ws, &cur)?.is_none() {
         end_key(&c, &ws, &cur, "blocked")?;
     }
     let rel = crate::store::related(&c, &ws);

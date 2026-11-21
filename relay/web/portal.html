@@ -310,7 +310,7 @@ function sigChip(st){const [t,c]=SIG_STATE[st]||[st,'outline'];return el('span',
 function fp(k){return el('span',{class:'mono'},k&&k.fingerprint?k.fingerprint:'—')}
 async function signaturesPage(v){
  const data=await api('/signing-keys');if(v!==epoch)return;const rows=data.workspaces||[];const on=!!data.require_signed;
- const sigAct=(w,path,label,busyLabel,done,cls,key)=>button(label,async()=>{await api('/signing-keys/'+enc(w.workspace)+'/'+path,'POST',{key_id:key.key_id});toast(done);await route();focusMain()},cls,busyLabel);
+ const sigAct=(w,path,label,busyLabel,done,cls,key)=>button(label,async()=>{await api('/signing-keys/'+enc(w.workspace)+'/'+path,'POST',{key_id:key.key_id,kind:key.kind});toast(done);await route();focusMain()},cls,busyLabel);
  let filled=false;const pend=rows.filter(w=>w.pending).map(w=>{const p=w.pending,lost=p.kind==='no_old_key';const main=!lost&&!filled;if(main)filled=true;
   return el('div',{class:'card-row'},el('div',{class:'grow'},el('h3',{},w.name),sub('New signature '),fp(p),sub(lost?'Not confirmed with its old signature: a lost computer, or someone else. Check with the workspace owner before you approve.':'Confirmed with its old signature. Requested '+ago(p.requested_at)+'.')),
    lost?el('span',{class:'chip danger'},'Without the old signature'):el('span',{class:'chip warning'},'Changed'),
