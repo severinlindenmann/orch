@@ -2958,8 +2958,6 @@ def note_answer_refused(root: Path, asked: dict, m: dict, why: str) -> None:
         who = "agent:relay"
         line = f"Answer from {_line(frm, 60)} to {_line(str(asked['question_id']), 20)} not applied: {short}"
 
-        from orch import history
-
         def add(t):
             q2 = next((x for x in t["questions"] if x["id"] == asked["question_id"]), None)
             if q2 is None or q2.get("answer") is not None:  # answered meanwhile: nothing to say
