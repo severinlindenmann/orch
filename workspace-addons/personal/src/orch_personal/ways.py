@@ -28,6 +28,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import threading
@@ -52,6 +53,13 @@ STATUS_WORDS = {
     "works": "Works",
 }
 SECRET_REFUSED = "The answer looks like it holds a password or key, so helpers do not get it."
+# Mail and Messages ways in may only read and make drafts (owner: no send in any script). A way in for them that
+# lists any other action cannot be turned on, and Personal never runs another action on it.
+PART_ACTIONS = {
+    "mail": frozenset({"accounts", "list", "find", "show", "draft"}),
+    "messages": frozenset({"accounts", "list", "find", "show", "draft"}),
+}
+FIX_AFTER = 2  # failed self-checks in a row before Personal makes a ticket to fix the way in
 _LOCK = threading.Lock()
 
 
@@ -215,9 +223,15 @@ def status(root: Path) -> list[dict]:
                 else None,
                 "changed": changed,
                 "actions": sorted(w["actions"]),
+                "fix_ticket": s.get("fix_ticket") if on and state == "stopped" else None,
             }
         )
     return rows
+
+
+def _not_allowed(w: dict) -> list[str]:
+    allowed = PART_ACTIONS.get(w["part"])
+    return [] if allowed is None else sorted(a for a in w["actions"] if a not in allowed)
 
 
 def _get(root: Path, slug: str) -> dict:
@@ -248,6 +262,12 @@ def turn(root: Path, slug: str, on: bool) -> dict:
             },
         )
     w = _get(root, slug)
+    extra = _not_allowed(w)
+    if extra:
+        raise Refused(
+            f"{w['name']} cannot be turned on: a way in for {store.PARTS[w['part']]['label']} may only read and "
+            f"make drafts, and it lists {', '.join(extra)}. Remove that from its way.toml."
+        )
     fp = fingerprint(w["dir"])
     if fp is None:
         raise Refused(
@@ -357,7 +377,7 @@ def _secret(root: Path, text: str) -> bool:
     return bool(secretscan.find(text, root))
 
 
-def _text(root: Path, code: int, raw: bytes, name: str) -> str:
+def _text(root: Path, code: int, raw: bytes, name: str, secrets: bool = True) -> str:
     """Text only, size, secrets: a refusal is one plain sentence."""
     if code == -1:
         raise Refused(f"{name} took longer than {TIMEOUT} seconds and was stopped.")
@@ -371,18 +391,22 @@ def _text(root: Path, code: int, raw: bytes, name: str) -> str:
         text = "\x00"
     if "\x00" in text:
         raise Refused(f"{name} gave something that is not text; helpers get text only.")
-    if _secret(root, text):
+    if secrets and _secret(root, text):
         raise Refused(SECRET_REFUSED)
     return text
 
 
-def ask(root: Path, slug: str, action: str, values: dict | None = None) -> dict:
-    """A helper asks a way in that is on: one listed action, text back."""
+def ask(root: Path, slug: str, action: str, values: dict | None = None, secrets: bool = True) -> dict:
+    """A helper asks a way in that is on: one listed action, text back. secrets=False only for a part that checks
+    each item itself before a helper sees it (Mail and Messages: one mail with a key must not hide the mailbox)."""
     w = _get(root, slug)
     if not saved(root).get(slug, {}).get("on"):
         raise Refused(f"{w['name']} is off. Only the person turns it on: orch personal ways on {slug}")
     if _changed(saved(root).get(slug, {}), w["dir"]):
         raise Refused(f"{w['name']}: {CHANGED} Only the person does that: orch personal ways on {slug}")
+    allowed = PART_ACTIONS.get(w["part"])
+    if _not_allowed(w) or (allowed is not None and action not in allowed):
+        raise Refused(f"{w['name']} may only read and make drafts; Personal runs nothing else on it.")
     argv = w["actions"].get(action)
     if not argv:
         listed = ", ".join(sorted(w["actions"])) or "none"
@@ -395,12 +419,14 @@ def ask(root: Path, slug: str, action: str, values: dict | None = None) -> dict:
     except OSError:
         code, raw = 127, b""
     try:
-        text = _text(root, code, raw, w["name"])
+        text = _text(root, code, raw, w["name"], secrets)
     except Refused as e:
         # A failed or timed-out script means the way in stopped; a rule refusal (too big, not text, a secret)
         # means the source answered and the way in itself still works.
         if code not in (0, -2):
-            _update(root, slug, status="stopped", problem=str(e), checked=store.now())
+            before = saved(root).get(slug, {})  # a stopped way in keeps its first reason (the self-check's line)
+            keep = before.get("status") == "stopped" and before.get("problem")
+            _update(root, slug, status="stopped", problem=keep or str(e), checked=store.now())
         raise
     _update(root, slug, status="works", problem=None, last_worked=store.now())
     return {"way": slug, "name": w["name"], "action": action, "text": text}
@@ -430,8 +456,70 @@ def check(root: Path, slug: str) -> dict:
             else:
                 why = "took too long" if code == -1 else "its self-check failed"
                 fields.update(status="stopped", problem=first or f"The way in stopped working: {why}.")
+    fields["fails"] = int(s.get("fails") or 0) + 1 if fields["status"] == "stopped" else 0
     _update(root, slug, **fields)
+    _fix_ticket(root, slug, w["name"], s, fields)
     return next(r for r in status(root) if r["way"] == slug)
+
+
+def _ticket_open(root: Path, tid) -> bool:
+    if not isinstance(tid, str) or not re.fullmatch(r"t_[a-z0-9]{6,16}", tid):
+        return False
+    try:
+        t = json.loads((root / ".orch" / "tickets" / f"{tid}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(t, dict) and t.get("status") not in ("done", "dropped", "review")
+
+
+def _fix_ticket(root: Path, slug: str, name: str, before: dict, now: dict) -> None:
+    """The way in stopped: after FIX_AFTER failed self-checks in a row, one ticket to fix it (never a second one
+    while it is open); when it works again, a line on that ticket. Only the problem line, never mail or chat text.
+    A ticket that cannot be made now is tried at the next failed check."""
+    from . import api  # api imports this module
+
+    tid = before.get("fix_ticket")
+    try:
+        if now["status"] == "stopped" and now["fails"] >= FIX_AFTER and not _ticket_open(root, tid):
+            note = (
+                f"Personal: the self-check of the way in {name} ({slug}) failed {now['fails']} times in a row, "
+                f"last at {now['checked']}. {now.get('problem') or ''} "
+                f"After the fix: orch personal ways check {slug}"
+            )
+            tid = api._new_ticket(root, f"Fix the {name} way in", note.strip(), "", "agent:personal")
+            _update(root, slug, fix_ticket=tid)
+        elif now["status"] == "works" and int(before.get("fails") or 0) >= FIX_AFTER and _ticket_open(root, tid):
+            api._run_orch(
+                root,
+                [*api._orch_cmd(), "ticket", "summary", tid, f"The way in {name} works again ({now['checked']}).",
+                 "--by", "agent:personal"],
+                "",
+            )
+    except Refused:
+        pass
+
+
+def add_template(root: Path, name: str) -> dict:
+    """Copy a ready way in shipped with Personal into ways/<name>; it stays off until the person turns it on."""
+    from importlib import resources
+
+    src = resources.files("orch_personal").joinpath("way_templates", name)
+    if not SLUG.fullmatch(name or "") or not src.is_dir():
+        raise Refused(f"Personal has no ready way in called {name}.")
+    dest = folder(root) / name
+    if dest.exists():
+        return next(r for r in status(root) if r["way"] == name) if name in found(root) else {"way": name}
+    files = [f for f in src.iterdir() if f.is_file() and not f.name.startswith(".") and f.name != "__pycache__"]
+    tmp = folder(root) / f".{name}.part"
+    if tmp.is_dir() and not tmp.is_symlink():
+        shutil.rmtree(tmp)  # left by a copy that was cut off
+    tmp.mkdir(parents=True)
+    for f in files:
+        (tmp / f.name).write_bytes(f.read_bytes())
+        if f.name.endswith((".py", ".sh")):
+            (tmp / f.name).chmod(0o755)
+    tmp.rename(dest)
+    return next(r for r in status(root) if r["way"] == name)
 
 
 def check_due(root: Path, every: float = CHECK_EVERY) -> list[str]:

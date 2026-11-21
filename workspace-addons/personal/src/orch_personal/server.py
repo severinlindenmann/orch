@@ -57,7 +57,11 @@ OPS = (
     "meet_agree",
     "meet_tickets",
     "meet_delete",
+    "inbox_source",
+    "inbox_add_source",
+    "inbox_throw_away",
 )
+INBOX = ("mail", "messages")
 
 
 def _web(name: str) -> bytes:
@@ -159,6 +163,8 @@ class Handler(BaseHTTPRequestHandler):
             "/notes",
             "/parts",
             "/meetings",
+            "/mail",
+            "/messages",
         ):  # the screens: one page, the path picks the first screen
             prefix = self.headers.get("X-Forwarded-Prefix") or ""
             prefix = prefix if PREFIX.fullmatch(prefix) else ""
@@ -190,12 +196,22 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(api.meetings_list(self.root, who))
             if path == "/api/meeting":
                 return self._json(api.meetings_show(self.root, who, one("id")))
+            if path in ("/api/mail", "/api/messages"):
+                return self._json(api.inbox_page(self.root, who, path[5:], one("fresh") == "1"))
+            if path in ("/api/mail/one", "/api/messages/one"):
+                return self._json(api.inbox_show(self.root, who, path[5:].split("/")[0], one("id")))
+            if path in ("/api/mail/find", "/api/messages/find"):
+                return self._json(api.inbox_find(self.root, who, path[5:].split("/")[0], one("q")))
+            if path in ("/api/mail/accounts", "/api/messages/accounts"):
+                return self._json(api.inbox_accounts(self.root, who, path[5:].split("/")[0], one("way")))
             if path == "/api/rules":
                 parts = store.settings(self.root)["parts"]
                 return self._json(
                     {
                         "notes": parts.get("notes"),
                         "meetings": parts.get("meetings"),
+                        "mail": parts.get("mail"),
+                        "messages": parts.get("messages"),
                         "read": store.READ_WORDS,
                         "write": store.WRITE_WORDS,
                     }
@@ -254,7 +270,7 @@ def _act(root: Path, op: str, args: dict):
         return api.set_folder(root, who, _s(args, "path"))
     if op == "rules":
         read, write = args.get("read"), args.get("write")
-        part = args.get("part") if args.get("part") in ("notes", "meetings") else "notes"
+        part = args.get("part") if args.get("part") in ("notes", "meetings", *INBOX) else "notes"
         return api.set_rules(
             root,
             who,
@@ -273,8 +289,23 @@ def _act(root: Path, op: str, args: dict):
             or not (root / ".orch" / "tickets" / f"{ticket}.json").is_file()
         ):
             raise Refused("That ticket is not there any more. Reload the page and pick another.")
-        part = "meetings" if args.get("part") == "meetings" else "notes"
+        part = args.get("part") if args.get("part") in ("meetings", *INBOX) else "notes"
         return api.use(root, who, ticket, part, _s(args, "id"))
+    if op in ("inbox_source", "inbox_add_source", "inbox_throw_away"):
+        part = args.get("part")
+        if part not in INBOX:
+            raise Refused("Something is missing in that click. Reload the page and try again.")
+        if op == "inbox_add_source":
+            return api.inbox_add_source(root, who, part, _s(args, "template"))
+        if op == "inbox_throw_away":
+            return api.inbox_throw_away(root, who, part, _s(args, "id"))
+        helpers = args.get("helpers") if isinstance(args.get("helpers"), bool) else None
+        accounts = args.get("accounts")
+        if accounts is not None and (
+            not isinstance(accounts, list) or not all(isinstance(a, str) and len(a) <= 120 for a in accounts)
+        ):
+            raise Refused("Something is missing in that click. Reload the page and try again.")
+        return api.inbox_source(root, who, part, _s(args, "way"), helpers, accounts)
     if op == "meet_pickup":
         return api.meetings_pickup(root, who)
     if op == "meet_agree":
