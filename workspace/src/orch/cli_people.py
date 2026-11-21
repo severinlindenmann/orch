@@ -60,6 +60,10 @@ def _list_text(v: dict) -> str:
     return "People:\n" + "\n".join(rows)
 
 
+def _rights(text: str) -> list[str]:
+    return [] if text.strip().lower() == "none" else text.split(",")
+
+
 def _default_name() -> str:
     who = tickets.current_actor()
     return who.split(":", 1)[1]
@@ -80,7 +84,7 @@ def dispatch(args, root: Path) -> bool:
         _out(args, {"ok": True, **people.view(root)}, f"People list on. Owner: {o['name']} [{o['id']}]")
         return True
     if cmd == "add":
-        p = people.add(root, args.name, args.rights.split(",") if args.rights else None, expect=expect)
+        p = people.add(root, args.name, _rights(args.rights) if args.rights else None, expect=expect)
         _out(args, {"ok": True, "person": p}, f"Added {p['name']} [{p['id']}]")
         return True
     if cmd == "rename":
@@ -88,8 +92,7 @@ def dispatch(args, root: Path) -> bool:
         _out(args, {"ok": True, "person": p}, f"Renamed to {p['name']} [{p['id']}]")
         return True
     if cmd == "rights":
-        rights = [] if args.rights.strip().lower() == "none" else args.rights.split(",")
-        p = people.set_rights(root, args.who, rights, expect=expect)
+        p = people.set_rights(root, args.who, _rights(args.rights), expect=expect)
         words = ", ".join(people.RIGHT_WORDS[r] for r in p["rights"]) or "no rights"
         _out(args, {"ok": True, "person": p}, f"{p['name']}: {words}")
         return True

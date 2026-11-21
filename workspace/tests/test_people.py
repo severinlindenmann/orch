@@ -154,6 +154,17 @@ def test_helpers_and_phones_are_not_stamped(proj, run, new_ticket, monkeypatch):
     phone = {"by": "human:Pixel", "via": "phone", "text": "x"}
     people.stamp(proj, phone)
     assert "person" not in phone
+    for other in (
+        {"by": "human:Lea (Product)", "via": "relay", "text": "x"},  # a line from another workspace
+        {"by": "human:ph_8d2k1m0q7z", "via": "cli", "text": "x"},
+        {"by": "human:tester", "text": "x"},  # no via: not known to be local
+    ):
+        people.stamp(proj, other)
+        assert "person" not in other
+    lea = people.add(proj, "Lea")
+    typed = {"by": "human:" + lea["id"], "via": "cli", "text": "x"}  # --by human:pr_... at the machine
+    people.stamp(proj, typed)
+    assert typed["person"] == people.owner(people.load(proj))["id"]  # the machine is the owner
     monkeypatch.setenv("ORCH_AGENT", "claude")
     claimed = {"by": "human:tester", "via": "cli", "text": "x"}
     people.stamp(proj, claimed)  # a helper claiming human: is not a person

@@ -184,6 +184,82 @@ function reviewerCard(settings) {
 async function reviewerSwitch() {
   await settingsSend('reviewer.set', {on:state.settings?.reviewer_on !== true}, 'reviewer');
 }
+// People (ORCH-1161): the workspace's person list. Only here, only at this computer (core refuses helpers).
+// Off: one plain row and Turn on. On: one row per person with the three rights as checkboxes (saved on click),
+// Rename and Remove (Remove asks once in the row); a name box and Add person at the end. A new person starts with
+// Write. The owner keeps every right and has no Remove. Removed people stay listed quietly (history keeps them).
+// The words People / Write / Decide / Start work wait for the owner's pick (R4.2, ORCH-1159).
+const PEOPLE_RIGHTS = [['write', 'Write'], ['decide', 'Decide'], ['start', 'Start work']];
+let peopleRenaming = null, peopleRemoving = null;
+function peopleCard(settings) {
+  const list = settings.people_list || {state:'off', people:[]};
+  const busy = settingsBusy.has('people');
+  const head = h('h2', {className:'set-sub'}, 'People');
+  if (list.state === 'broken') return h('div', {className:'stack', 'data-key':'settings-people'}, head, h('div', {className:'card'}, h('div', {className:'card-row'},
+    h('div', {className:'grow'}, settingsText('h3', {}, 'The people list can’t be read'), settingsText('p', {className:'meta'}, 'Nobody but you can do anything until it is set up again. Move the file .orch/local/people.json away, then turn People on here.')))));
+  if (list.state !== 'on') return h('div', {className:'stack', 'data-key':'settings-people'}, head, h('div', {className:'card'}, h('div', {className:'card-row'},
+    h('div', {className:'grow'}, settingsText('h3', {}, 'Only you work here'), settingsText('p', {className:'meta'}, 'Add the people who work with you. Each one gets rights: Write, Decide and Start work. You stay the owner.')),
+    snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'people-on', 'data-key':'settings-people-on', disabled:busy}, 'Turn on'))));
+  const active = array(list.people).filter(p => !p.removed), removed = array(list.people).filter(p => p.removed);
+  const row = p => {
+    const rights = h('div', {className:'row', role:'group', 'aria-label':'Rights of ' + p.name}, PEOPLE_RIGHTS.map(([id, label]) =>
+      h('label', {className:'row'}, h('input', {type:'checkbox', 'data-people-right':id, 'data-id':p.id, 'data-key':'settings-people-' + p.id + '-' + id, ...(p.owner || p.rights.includes(id) ? {checked:''} : {}), disabled:snapshot || busy || p.owner}), label)));
+    if (peopleRenaming === p.id) return h('div', {className:'card-row', 'data-key':'settings-people-row-' + p.id},
+      h('input', {type:'text', className:'input grow', maxLength:40, value:p.name, 'aria-label':'New name for ' + p.name, 'data-key':'settings-people-rename-name', 'data-people-enter':'people-rename-save', 'data-id':p.id, disabled:busy}),
+      h('button', {type:'button', className:'btn primary sm', 'data-action':'people-rename-save', 'data-id':p.id, 'data-key':'settings-people-rename-save', disabled:busy}, 'Save'),
+      h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-rename-cancel', 'data-key':'settings-people-rename-cancel'}, 'Cancel'));
+    if (peopleRemoving === p.id) return h('div', {className:'card-row', 'data-key':'settings-people-row-' + p.id, role:'alert'},
+      h('div', {className:'grow'}, settingsText('h3', {}, 'Remove ' + p.name + '?'), settingsText('p', {className:'meta'}, 'They can’t write, decide or start work here any more. What they did stays in the history with their name.')),
+      h('button', {type:'button', className:'btn danger sm', 'data-action':'people-remove-yes', 'data-id':p.id, 'data-key':'settings-people-remove-yes', disabled:busy}, 'Remove'),
+      h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-remove-cancel', 'data-key':'settings-people-remove-cancel'}, 'Cancel'));
+    return h('div', {className:'card-row', 'data-key':'settings-people-row-' + p.id},
+      h('span', {className:'avatar sm', 'aria-hidden':'true'}, (String(p.name).trim()[0] || '?').toUpperCase()),
+      h('div', {className:'grow'}, h('h3', {}, String(p.name), p.owner ? ' ' : null, p.owner ? h('span', {className:'badge'}, 'Owner') : null), rights),
+      snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-rename', 'data-id':p.id, 'data-key':'settings-people-rename-' + p.id, 'aria-label':'Rename ' + p.name, disabled:busy}, 'Rename'),
+      snapshot || p.owner ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-remove', 'data-id':p.id, 'data-key':'settings-people-remove-' + p.id, 'aria-label':'Remove ' + p.name, disabled:busy}, 'Remove'));
+  };
+  const add = snapshot ? null : h('div', {className:'card-row', 'data-key':'settings-people-add'},
+    h('input', {type:'text', className:'input grow', maxLength:40, placeholder:'Name', 'aria-label':'Name of the new person', autocomplete:'off', 'data-key':'settings-people-name', 'data-people-enter':'people-add', disabled:busy}),
+    h('button', {type:'button', className:'btn outline sm', 'data-action':'people-add', 'data-key':'settings-people-add-btn', disabled:busy}, 'Add person'));
+  return h('div', {className:'stack', 'data-key':'settings-people'}, head,
+    h('p', {className:'meta'}, 'Write: chat, add steps and files. Decide: answer questions and accept drafts. Start work: start a helper and merge. A new person starts with Write.'),
+    h('div', {className:'card'}, active.map(row), add),
+    removed.length ? settingsText('p', {className:'meta', 'data-key':'settings-people-removed'}, 'Removed: ' + removed.map(p => p.name).join(', ') + '. Their names stay in the history.') : null);
+}
+async function peopleAction(action, control) {
+  const list = state.settings?.people_list || {}, revision = list.revision;
+  const person = array(list.people).find(p => p.id === control?.dataset.id);
+  const value = key => (document.querySelector('[data-key="' + key + '"]')?.value || '').trim();
+  if (action === 'people-on') {
+    const me = state.people?.me;
+    const r = await settingsSend('people.on', me ? {name:me} : {}, 'people');
+    if (r.ok) window.orch.toast('People is on. You are the owner.', 'ok');
+  } else if (action === 'people-add') {
+    const name = value('settings-people-name');
+    if (!name) { document.querySelector('[data-key="settings-people-name"]')?.focus(); return; }
+    const r = await settingsSend('people.add', {name, rights:['write'], revision}, 'people');
+    if (r.ok) { window.orch.toast('Added ' + name + '.', 'ok'); document.querySelector('[data-key="settings-people-name"]')?.focus(); }
+  } else if (action === 'people-rename' && person) { peopleRenaming = person.id; peopleRemoving = null; render(); document.querySelector('[data-key="settings-people-rename-name"]')?.select();
+  } else if (action === 'people-rename-cancel') { peopleRenaming = null; render();
+  } else if (action === 'people-rename-save' && person) {
+    const name = value('settings-people-rename-name');
+    if (!name || name === person.name) { peopleRenaming = null; render(); return; }
+    const r = await settingsSend('people.rename', {id:person.id, name, revision}, 'people');
+    if (r.ok) { peopleRenaming = null; render(); }
+  } else if (action === 'people-remove' && person) { peopleRemoving = person.id; peopleRenaming = null; render(); document.querySelector('[data-key="settings-people-remove-cancel"]')?.focus();
+  } else if (action === 'people-remove-cancel') { peopleRemoving = null; render();
+  } else if (action === 'people-remove-yes' && person) {
+    const r = await settingsSend('people.remove', {id:person.id, revision}, 'people');
+    if (r.ok) { peopleRemoving = null; window.orch.toast('Removed ' + person.name + '.', 'ok'); render(); }
+  }
+}
+async function peopleRight(box) {
+  const list = state.settings?.people_list || {};
+  const person = array(list.people).find(p => p.id === box.dataset.id);
+  if (!person || person.owner || snapshot) return;
+  const rights = PEOPLE_RIGHTS.map(([id]) => id).filter(id => id === box.dataset.peopleRight ? box.checked : person.rights.includes(id));
+  await settingsSend('people.rights', {id:person.id, rights, revision:list.revision}, 'people');
+}
 // Merge releases without my click (ORCH-79): off = the owner clicks Merge on the release card; on = a release
 // with every check green merges by itself (orch review tend-releases). Only a person can turn it on.
 function releaseMergeCard(settings) {
@@ -684,7 +760,7 @@ function settingsPage() {
   if (detailAddon) return addonDetailPage(detailAddon);
   return fragment(h('div', {className:'settings stack form-width', 'data-key':'settings-root'}, heading('Settings', 'Make ' + clean(state.workspace || 'this workspace') + ' work your way.'),
     h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons'], ['about', 'About & updates']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
-    panel('general', [snapshot ? null : window.OrchLook?.profileCard(), privateCard(settings), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
+    panel('general', [snapshot ? null : window.OrchLook?.profileCard(), privateCard(settings), peopleCard(settings), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
       // Folder: its name plainly, Copy path, and the full path as quiet text beside it (no Details toggle).
       h('div', {className:'card-row name-row folder-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'},
         settingsText('strong', {'data-key':'settings-folder-name'}, folderName(settings.folder) || state.workspace),

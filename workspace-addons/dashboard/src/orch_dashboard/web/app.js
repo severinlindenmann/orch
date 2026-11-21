@@ -309,6 +309,7 @@ function accept(next) {
   const arrived = new Set(array(next.needs).filter(n => !seenNeeds.has(n.id)).map(n => n.id));
   array(next.needs).forEach(n => seenNeeds.add(n.id));
   state = next;
+  if ('person_names' in next) window.DashHelpers.setPersonNames(next.person_names);  // human:pr_... reads as the name
   wsNames = new Map([...['hosted', 'joined'].flatMap(k => array(state?.groups?.[k])).flatMap(g => [...array(g.members), ...array(g.connectable)]),
     ...array(typeof chatDm === 'object' ? chatDm.contacts : [])].filter(m => m && m.ws && m.name).map(m => [m.ws, String(m.name)]));
   window.dispatchEvent(new CustomEvent('orch:state', {detail: next}));
@@ -838,6 +839,8 @@ main.addEventListener('drop', event => {
   moveToLane(id, lane, col);
 });
 main.addEventListener('change', async event => {
+  const right = event.target.closest('[data-people-right]');
+  if (right) { await peopleRight(right); return; }
   const cap = event.target.closest('[data-key="settings-copies-max"]');
   if (cap) { if (!snapshot && !settingsBusy.has('copies')) settingsSend('copies.set', {max:Number(cap.value)}, 'copies'); return; }
   const most = event.target.closest('[data-key="settings-live-max"]');
@@ -869,6 +872,8 @@ main.addEventListener('change', async event => {
   if (result.ok) window.orch.toast(agent.label + ' is now the default helper.', 'ok');
 });
 main.addEventListener('keydown', event => {
+  const enter = event.key === 'Enter' && event.target.closest('[data-people-enter]');
+  if (enter && !snapshot) { event.preventDefault(); peopleAction(enter.dataset.peopleEnter, enter); return; }
   if (event.key === 'Escape' && event.target.closest('.settings-review')) { event.preventDefault(); settingsReviewClose(); return; }
   const settingsTabControl = event.target.closest('[data-action="settings-tab"]');
   if (settingsTabControl && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
@@ -939,6 +944,7 @@ main.addEventListener('click', async event => {
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
   if (action === 'reviewer-set') { await reviewerSwitch(); return; }
   if (action === 'release-merge-set') { await releaseMergeSwitch(); return; }
+  if (action.startsWith('people-')) { await peopleAction(action, control); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
   if (action === 'auto-update-note-ok') { const r = await act('update.note.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }

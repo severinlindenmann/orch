@@ -228,27 +228,33 @@ def view(root: Path) -> dict:
 # ------------------------------------------------------------------ stamping new history lines
 
 
+LOCAL_VIA = ("cli", "dashboard")  # where a line made at this computer comes from (tickets._env_via)
+
+
 def stamp(root: Path, line: dict) -> None:
     """A NEW history line core made in this process (tickets._write calls it before the digest is recorded):
-    once the list is on, a person's action at this machine records the owner's person id and the device
-    `machine`. Phones get their own person and device with step 4. Helpers (agent:*) and system lines are not
-    people and get nothing. A line that already names a person is left alone. Never raises."""
+    once the list is on, a person's action at this machine records the owner's person id and device `machine`.
+    Allowlist only: a human line from this computer's CLI or dashboard (via cli / dashboard), not from a
+    helper's environment and not a phone (`human:ph_...`). A person id typed in `--by` still stamps the owner
+    (whoever sits at the machine is the owner). Everything else stays unstamped: phones (step 4), relay and
+    chat lines from other workspaces, helpers, system lines. A line that names a person is left alone.
+    Never raises."""
     try:
         if not isinstance(line, dict) or "person" in line:
             return
         by, via = line.get("by"), line.get("via")
-        if not isinstance(by, str) or not by.startswith("human:") or via == "phone":
+        if not isinstance(by, str) or not by.startswith("human:") or via not in LOCAL_VIA:
+            return
+        if by.startswith(("human:ph_", "human:br_")):
             return
         from orch import tickets
 
         if tickets.agent_tool():
             return
-        doc = load(root)
-        o = owner(doc)
+        o = owner(load(root))
         if o is None:
             return
-        pid = by[6:] if _ID_RE.fullmatch(by[6:]) else o["id"]
-        line["person"], line["device"] = pid, MACHINE
+        line["person"], line["device"] = o["id"], MACHINE
     except Exception:  # noqa: BLE001 - a broken or missing list stamps nothing
         return
 
