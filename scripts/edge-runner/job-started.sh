@@ -59,9 +59,11 @@ esac
 ME=$(id -u); REAL_HOME=$(getent passwd "$ME" | cut -d: -f6)
 if [ "$(id -un)" = orch-ci ]; then
   for d in "$REAL_HOME/.config/systemd" "$REAL_HOME/.config/environment.d" "$REAL_HOME/.local/share/systemd"; do
-    [ -e "$d" ] && refuse "$d is left from an earlier job (the clean-up did not hold)" " A person must look at orch edge first."
+    { [ -e "$d" ] || [ -L "$d" ]; } && refuse "$d is left from an earlier job (the clean-up did not hold)" " A person must look at orch edge first."
   done
-  left=$(XDG_RUNTIME_DIR=/run/user/$ME systemctl --user list-units --type=service,timer,path --state=active,activating --plain --no-legend 2>/dev/null | awk '{print $1}' | tr '\n' ' ')
+  units=$(XDG_RUNTIME_DIR=/run/user/$ME systemctl --user list-units --type=service,timer,path --state=active,activating --plain --no-legend 2>/dev/null) \
+    || refuse "the user service manager does not answer, so nobody can see what an earlier job left" " A person must look at orch edge first."
+  left=$(printf '%s\n' "$units" | awk '{print $1}' | tr '\n' ' ')
   [ -z "${left// /}" ] || refuse "user services left from an earlier job: $left" " A person must look at orch edge first."
 fi
 echo "edge runner: job ${GITHUB_JOB:-?} of run ${GITHUB_RUN_ID:-?} (${GITHUB_EVENT_NAME:-?}) starts with a throwaway home"

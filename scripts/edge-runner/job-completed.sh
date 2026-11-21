@@ -82,5 +82,5 @@ rm_user_dirs
 rm_user_dirs
 # Anything still there now is refused by the next job's start hook (job-started.sh): the runner then stays red
 # until a person looks, rather than run the next job next to it.
-for d in $USER_DIRS; do [ -e "$d" ] && echo "edge runner: $d came back after the clean-up; the next job will be refused" >&2; done
+for d in $USER_DIRS; do { [ -e "$d" ] || [ -L "$d" ]; } && echo "edge runner: $d came back after the clean-up; the next job will be refused" >&2; done
 exit 0
