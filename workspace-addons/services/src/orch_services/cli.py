@@ -147,6 +147,27 @@ def _same_kind(drv: drivers.Driver, rec: dict) -> None:
         )
 
 
+def _refuse_protected(drv: drivers.Driver, spec: drivers.Spec) -> None:
+    """macOS: a launchd job cannot use Documents, Desktop, Downloads or iCloud Drive (it stops at once with
+    "getcwd: Operation not permitted"); refuse before anything is written or started. An adopted job runs from its own
+    entry and is left alone."""
+    if drv.name != "launchd" or spec.external:
+        return
+    try:
+        from orch import macfolders
+    except ImportError:  # an older core: the start check still names the reason from the log
+        return
+    hit = macfolders.first_protected([spec.cwd, Path(spec.argv[0])])
+    if not hit:
+        return
+    path, word = hit
+    what = "This workspace is" if path == spec.cwd else f"The program {macfolders.shown(path)} is"
+    raise Refused(
+        f"{what} in {word}, and macOS does not let background jobs use that folder, so {spec.name} would stop at "
+        "once. Move it to a folder such as ~/code (not Documents, Desktop, Downloads or iCloud Drive), then try again."
+    )
+
+
 def _driver() -> drivers.Driver:
     d = drivers.get()
     d.check()
@@ -361,7 +382,9 @@ def _state(root: Path, drv: drivers.Driver, rec: dict, wid: str) -> dict:
     return _row(root, rec, drv.status(spec), _switched_off(drv, rec, spec))
 
 
-SETTLE_QUIET = 3.0  # seconds a job that is not even launching gets before it counts as stopped
+SETTLE_QUIET = (
+    10.0  # seconds a job that is not even launching gets before it counts as stopped (uv run builds first)
+)
 SETTLE_LAUNCH = 90.0  # seconds a job the platform is still launching gets (slow start under load)
 
 
@@ -380,6 +403,27 @@ def _settle(drv, spec) -> drivers.Status | None:
 
 def _launching(drv, spec) -> bool:
     return bool(drv.status(spec).starting)
+
+
+def _why_stopped(root: Path, drv, spec, since: float) -> str:
+    """After a start that did not stay running: the last line the job wrote since then (secrets hidden), and the
+    folder hint when macOS refused it ("getcwd: Operation not permitted"). Empty when the log says nothing new."""
+    try:
+        if spec.log.stat().st_mtime < since - 1:
+            return ""
+        lines = [ln for ln in tail_masked(root, spec.log, 20) if ln.strip()]
+    except (OSError, Refused):
+        return ""
+    if not lines:
+        return ""
+    last = lines[-1].strip()[:200]
+    out = f" Its log ends with: {last}"
+    if drv.name == "launchd" and any("Operation not permitted" in ln for ln in lines):
+        out += (
+            " macOS did not let it use its folder: move the workspace or the program out of Documents, Desktop, "
+            "Downloads and iCloud Drive (for example to ~/code)."
+        )
+    return out
 
 
 def cmd_add(args, root: Path) -> int:
@@ -408,6 +452,7 @@ def cmd_add(args, root: Path) -> int:
     drv = _driver()
     wid = _workspace_id(root)
     spec = _spec(root, rec, wid)
+    _refuse_protected(drv, spec)
     store.save(root, rec)
     store.log_path(root, sid).parent.mkdir(parents=True, exist_ok=True)
     store.log_path(root, sid).unlink(missing_ok=True)  # a new service starts with an empty log (ORCH-847)
@@ -417,6 +462,7 @@ def cmd_add(args, root: Path) -> int:
         store.delete(root, sid)
         raise
     store.mark(root, sid, False)
+    started = time.time()
     if args.start:
         drv.start(spec)
         store.mark(root, sid, True)
@@ -428,7 +474,10 @@ def cmd_add(args, root: Path) -> int:
     elif args.start and _launching(drv, spec):
         nxt = f"Added {rec['name']}; it was started and is still starting. Check later: orch services list"
     elif args.start:
-        nxt = f"Added {rec['name']} and started it, but it did not stay running. Read its log: orch services log {sid}"
+        nxt = (
+            f"Added {rec['name']} and started it, but it did not stay running."
+            f"{_why_stopped(root, drv, spec, started)} Read its log: orch services log {sid}"
+        )
     else:
         nxt = f"Added {rec['name']}. Start it: orch services start {sid}"
     if store.on_external_volume(root):
@@ -496,6 +545,9 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
         return _emit(args, {"removed": sid, "next": nxt}, nxt)
     spec = _spec(root, rec, wid, strict=verb != "stop")
     was_stopped = verb == "stop" and _state(root, drv, rec, wid)["state"] == "stopped"
+    if verb != "stop":
+        _refuse_protected(drv, spec)
+    started = time.time()
     getattr(drv, verb)(spec)
     store.mark(root, sid, verb != "stop")
     if verb != "stop":
@@ -508,7 +560,10 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
     if verb != "stop" and row["state"] != "running" and _launching(drv, spec):
         nxt = f"{rec['name']} is still starting. Check later: orch services list"
     elif verb != "stop" and row["state"] != "running":
-        nxt = f"{rec['name']} did not stay running. Read its log: orch services log {sid}"
+        nxt = (
+            f"{rec['name']} did not stay running.{_why_stopped(root, drv, spec, started)}"
+            f" Read its log: orch services log {sid}"
+        )
     return _emit(args, {"service": row, "next": nxt}, nxt)
 
 
@@ -668,6 +723,8 @@ def check_pass(root: Path) -> tuple[list[dict], list[str], int]:
                 said.append(res["did"])
             elif res["failing"]:
                 said.append(f"{rec['name']} keeps stopping; the question is open.")
+            elif res.get("unhealthy"):
+                said.append(f"{rec['name']}: {res['health']['text']}.")
         out.append(res)
     if not recs:
         said.append("No services yet.")

@@ -52,8 +52,8 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 | Command | Answer (`--json`) |
 |---|---|
 | `list` | `{"services": [row], "unreadable": n, "note"?}`; row = `id, name, state ("running" \| "stopped" \| "failing"), since (RFC 3339 UTC), auto, important, made_by, port, command, cwd, pid?, health, failing, question`; `health` = `{"ok", "how": "process alive" \| "answers on its address", "text"}`, `question` = `{ticket, id, title, text}` while one is open, else `null`. Reads only |
-| `check` | `{"checked": [{id, name, health, failing, did?, error?}], "unreadable": n}`: one pass, no loop (see Health check) |
-| `add <name> --id <slug> [--port N] [--ticket ID \| --addon NAME] [--cwd DIR] [--auto] [--start] -- <command...>` | `{"service": row, "next"}`; installed stopped unless `--start` |
+| `check` | `{"checked": [{id, name, health, failing, unhealthy, did?, error?}], "unreadable": n}`: one pass, no loop (see Health check); a service whose health is not ok is named in the text even before it is failing |
+| `add <name> --id <slug> [--port N] [--ticket ID \| --addon NAME] [--cwd DIR] [--auto] [--start] -- <command...>` | `{"service": row, "next"}`; installed stopped unless `--start`. macOS: refused when the working folder or the program lies in Documents, Desktop, Downloads, iCloud Drive or `~/Library/CloudStorage` (launchd jobs may not use them); `start`/`restart` refuse the same. A start that does not stay running within 10 s names the last log line |
 | `start \| stop \| restart <id>` | `{"service": row, "next"}` |
 | `start \| stop \| status` (no id) | the regular check (see Health check): `{"running": true, "pid"}` \| `{"stopped": bool}` \| `{"running": bool, "pid"?}` (status exits 1 when it does not run); `orch start` / `orch stop` call these |
 | `auto <id> on \| off` | `{"service": row, "next"}` |
@@ -93,7 +93,10 @@ every minute until Services is turned off, so nobody sets up a repeat. Every pas
 check.lock`: the regular check and a person's `orch services check` never run at the same time (a person's waits up
 to 30 s, then is refused with "Another check runs right now"); the regular check skips a round a person holds. Its
 log: `.orch/addons/services/checker.log` (service names and counts only).
-- Health: the process is alive (driver state); with a `port`, a TCP connect to `127.0.0.1:<port>` within 0.5 s.
+- Health: the process is alive (driver state); with a `port`, a TCP connect to `127.0.0.1:<port>` within 0.5 s, and
+  the listener on that port (`lsof -iTCP:<port> -sTCP:LISTEN`) is the driver's pid or one of its child processes;
+  otherwise `"Alive, but another program answers on its address"`. Where the listener cannot be read (Windows, no
+  `lsof`) the connect alone counts.
   A service the person stopped is not checked (`"Stopped, so not checked"`) and never failing.
 - A failure = a failed health check, or a start the platform did by itself since the last pass (driver `runs()`:
   launchd `runs` from `launchctl print`, systemd `NRestarts`; starts through orch move the baseline and do not
