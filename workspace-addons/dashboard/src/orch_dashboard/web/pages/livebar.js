@@ -196,6 +196,8 @@ if (typeof module === 'object' && module.exports) {
         h('span', {className:'segmented', role:'group', 'aria-label':'Permissions'}, r.choices.map(c => h('button', {type:'button', className:'btn sm',
           'data-lbar-perm':c.mode, 'data-key':'lbar-perm-' + c.mode, 'aria-pressed':String(bar.perm === c.mode), disabled:!c.allowed || !!bar.busy,
           title:c.allowed ? null : LIVE_PERM_OFF}, c.label)))),
+      // a greyed mode says why under the row, not only on hover (ORCH-1362, UX checklist D5)
+      r.choices.some(c => !c.allowed) ? h('p', {className:'meta', 'data-key':'lbar-perm-off'}, r.choices.filter(c => !c.allowed).map(c => c.label).join(', ') + ': ' + LIVE_PERM_OFF.charAt(0).toLowerCase() + LIVE_PERM_OFF.slice(1)) : null,
       r.warn ? h('p', {className:'meta', 'data-key':'lbar-perm-warn'}, r.warn) : null];
     }
     // ORCH-710 (draft D feature 12): the model the Empty helper runs on, the usual one preselected so it stays one click.
@@ -269,7 +271,7 @@ if (typeof module === 'object' && module.exports) {
       }
       paint(true);
       if (made) openSession(a, made.id);
-      else window.orch?.toast?.(r.ok ? 'It did not start. Try again.' : (r.text || 'It did not start.'), 'error');
+      else (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(r.ok ? '' : r.text, 'It did not start.', () => startNew(kind, true));
     }
     window.LiveNew = {start: startNew, kinds: LIVEBAR_NEW};
     function place() {

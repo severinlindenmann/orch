@@ -5,9 +5,8 @@ final class DoneReviewUITests: XCTestCase {
 
     private func launch(ticket: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES",
-                                "-mockDoneReview", "YES", "-openChat", "ws_pilatus001"]
-        if let ticket { app.launchArguments += ["-openTicket", ticket] }
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-mockDoneReview", "YES"]
+        if let ticket { app.launchArguments += ["-openChat", "ws_pilatus001", "-openTicket", ticket] }
         app.launch()
         return app
     }
@@ -54,11 +53,12 @@ final class DoneReviewUITests: XCTestCase {
     }
 
     func testDoneResultsShowReviewInTopicList() {
-        let app = launch()
-        XCTAssertTrue(app.buttons["general-ws_pilatus001"].waitForExistence(timeout: 20))
+        let app = launch()   // Chats: the ticket chats list (owner 21 Nov, ORCH-1169)
+        XCTAssertTrue(app.descendants(matching: .any)["ticket-chats"].firstMatch.waitForExistence(timeout: 20))
         for (id, title) in [("t_donerev1", "Done, verdict asked"), ("t_donerev2", "Done, no question")] {
             let row = app.buttons["ticket-ws_pilatus001|" + id]
             XCTAssertTrue(row.waitForExistence(timeout: 10))
+            app.reveal(row)
             let review = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Ready for review"), object: row)
             XCTAssertEqual(XCTWaiter.wait(for: [review], timeout: 10), .completed)
             XCTAssertTrue(row.isHittable)

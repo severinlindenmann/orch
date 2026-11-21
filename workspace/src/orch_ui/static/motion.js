@@ -74,6 +74,48 @@
       dialog.dataset.state='closing';await wait(reduce()?0:200);dialog.close();delete dialog.dataset.state;
       const state=overlayState.get(dialog);state?.trigger?.focus();
     },
+    reduce,
+    /* A thing grows or moves from where it was (`from`, a DOMRect) to where it is now: transform and opacity only,
+       --dur-slow with --ease-move (draft D's zoom, pin and split). `scale:false` only slides. Still with reduced
+       motion, on a refresh and when nothing moved; never blocks input (the element is already in its new place). */
+    flip(el, from, o={}) {
+      if (!el || !from || !el.animate || reduce() || document.documentElement.dataset.refresh !== undefined) return null;
+      el.getAnimations?.().forEach(a => { if (a.id === 'orch-flip') a.cancel(); });
+      const to = el.getBoundingClientRect();
+      if (!to.width || !to.height || !from.width || !from.height) return null;
+      // a move still running (a second pin, a quick close): the caller measured `from` with it, so it stops here first
+      const dx = from.left - to.left, dy = from.top - to.top, sx = from.width / to.width, sy = from.height / to.height;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < .01 && Math.abs(sy - 1) < .01) return null;
+      const cs = getComputedStyle(document.documentElement);
+      const move = `translate(${dx}px,${dy}px)` + (o.scale === false ? '' : ` scale(${sx},${sy})`);
+      const a = el.animate([{transformOrigin:'0 0', transform:move, opacity:o.fade ?? (o.scale === false ? 1 : .6)}, {transformOrigin:'0 0', transform:'none', opacity:1}],
+        {duration:parseFloat(cs.getPropertyValue('--dur-slow')) || 240, easing:cs.getPropertyValue('--ease-move').trim() || 'ease-out'});
+      a.id = 'orch-flip';
+      return a;
+    },
+    /* Rects of the elements under `root` matching `sel`, by the value of `attr`: what flip() needs from before a repaint. */
+    rects(root, sel, attr) {
+      const out = new Map();
+      root?.querySelectorAll(sel).forEach(el => { const k = el.getAttribute(attr), r = el.getBoundingClientRect(); if (k && r.width && r.height && !out.has(k)) out.set(k, r); });
+      return out;
+    },
+    /* A thing that was just taken out of the page leaves: it stays where it was for --dur-exit, fades and drops 8 px
+       with --ease-exit, then goes (ids and data-key removed; kept in `host`, the body by default, so its styles stay). Inert and hidden from screen readers meanwhile; gone at once with reduced motion. */
+    leave(el, rect, host=document.body) {
+      if (!el || !rect || !rect.width || !el.animate || reduce() || document.documentElement.dataset.refresh !== undefined) return null;
+      const cs = getComputedStyle(document.documentElement);
+      // only a picture of what was there: no ids or data-key left, so nothing finds it as the real thing
+      for (const x of [el, ...el.querySelectorAll('[id], [data-key]')]) { x.removeAttribute('id'); x.removeAttribute('data-key'); }
+      el.inert = true; el.setAttribute('aria-hidden', 'true'); el.dataset.leaving = '';
+      Object.assign(el.style, {position:'fixed', left:rect.left + 'px', top:rect.top + 'px', width:rect.width + 'px', height:rect.height + 'px',
+        margin:'0', zIndex:'90', pointerEvents:'none', animation:'none'});
+      host.append(el);
+      const a = el.animate([{opacity:1, transform:'none'}, {opacity:0, transform:'translateY(8px)'}],
+        {duration:parseFloat(cs.getPropertyValue('--dur-exit')) || 120, easing:cs.getPropertyValue('--ease-exit').trim() || 'ease-in', fill:'forwards'});
+      const done = () => el.remove();
+      a.onfinish = done; a.oncancel = done;
+      return a;
+    },
     async resolve(row, focusTarget) {
       row.style.setProperty('--row-height',`${row.getBoundingClientRect().height}px`);row.classList.add('row-out');focusTarget?.focus();await wait(reduce()?0:160);row.remove();
     }
