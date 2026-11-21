@@ -39,11 +39,14 @@
 
   // ---- data ----
   const D = { ws: [], tickets: [], questions: [], messages: [], thread: [], loaded: false };
-  const V = { id: null, filter: 'all', answered: {}, answeredQ: {}, staged: null, sending: false };
+  const V = { id: null, shown: null, filter: 'all', answered: {}, answeredQ: {}, answerIds: {}, staged: null, sending: false, sendId: null, gen: 0 };
 
   function reachable(w) { return !!(w && w.last_seen && Date.now() - Date.parse(w.last_seen) <= FRESH_MS); }
   function wsById(id) { return D.ws.find((w) => w.id === id); }
   function tById(id) { return D.tickets.find((t) => t.id === id); }
+  // Questions with no ticket in the list (a ticket proposal, or a ticket older than the newest 100) go to the
+  // workspace's own conversation, so every open question can be answered.
+  function looseQs(wsId) { return D.questions.filter((q) => q.message.from === wsId && !D.tickets.some((t) => t.ws === wsId && t.ticket === q.message.ticket)); }
   function qOpen(t) { return D.questions.filter((q) => q.message.from === t.ws && q.message.ticket === t.ticket && !V.answered[q.message.id]); }
   function status(t) {
     if (qOpen(t).length) return 'needs';
@@ -80,10 +83,11 @@
     D.loaded = true;
   }
   async function loadThread() {
-    const t = tById(V.id);
+    const t = tById(V.id), gen = V.gen;
     if (!t) { D.thread = []; return; }
     const r = await api('GET', '/v1/phone/updates?workspace=' + encodeURIComponent(t.ws) + '&ticket=' + encodeURIComponent(t.ticket) + '&limit=100');
-    D.thread = r.items || [];
+    // Another conversation was opened while this one loaded: drop the answer, never show it under the wrong title.
+    if (gen === V.gen) D.thread = r.items || [];
   }
 
   // ---- render ----
@@ -139,6 +143,11 @@
       else h += `<div class="msg"><p class="meta">${m.kind === 'result' ? '<span class="badge done">Result</span> ' : ''}Your helper · ${esc(when(m.at))}</p><p>${esc(m.text)}</p></div>`;
     }
     const t = tById(V.id);
+    if (!t && wsById(V.id)) {
+      const qs = looseQs(V.id);
+      for (const q of Object.values(V.answeredQ)) if (q.message.from === V.id && !D.tickets.some((x) => x.ws === V.id && x.ticket === q.message.ticket) && !qs.some((x) => x.message.id === q.message.id)) qs.push(q);
+      for (const q of qs) h += questionCard(q, 'thread');
+    }
     if (t) {
       // An answered question leaves the open list at once; its card stays here with the answer for this visit.
       const qs = D.questions.filter((q) => q.message.from === t.ws && q.message.ticket === t.ticket);
@@ -161,15 +170,16 @@
 
   function render() {
     if (!V.id || (!tById(V.id) && !wsById(V.id))) V.id = (D.tickets[0] && D.tickets[0].id) || (D.ws[0] && D.ws[0].id) || null;
-    const needs = D.tickets.filter((t) => status(t) === 'needs').length;
+    const needs = D.tickets.filter((t) => status(t) === 'needs').length + D.ws.filter((w) => looseQs(w.id).some((q) => !V.answered[q.message.id])).length;
     let h = `<div class="segmented" role="group" aria-label="Show"><button type="button" class="btn" data-filter="all" aria-pressed="${V.filter === 'all'}">All</button><button type="button" class="btn" data-filter="needs" aria-pressed="${V.filter === 'needs'}">Needs you${needs ? ' <span class="count">' + needs + '</span>' : ''}</button></div>`;
     let any = false;
     for (const w of D.ws) {
       const ts = D.tickets.filter((t) => t.ws === w.id && (V.filter === 'all' || status(t) === 'needs'));
-      if (V.filter === 'needs' && !ts.length) continue;
+      const loose = looseQs(w.id).filter((q) => !V.answered[q.message.id]).length;
+      if (V.filter === 'needs' && !ts.length && !loose) continue;
       any = true;
       h += `<section class="b-group" aria-label="${esc(w.name)}"><div class="b-group-h">${wsb(w, 's26')}<strong class="grow truncate">${esc(w.name)}</strong><span class="meta">${reachDot(w)} ${reachable(w) ? 'Online' : 'Not reachable'}</span></div>
-        ${V.filter === 'all' ? `<button type="button" class="b-row" data-open="${esc(w.id)}" aria-current="${V.id === w.id}"><span class="b-ic muted">${ic('pencil', 16)}</span><span class="grow"><strong>New message</strong><span class="meta">Starts a new ticket</span></span></button>` : ''}
+        ${V.filter === 'all' || loose ? `<button type="button" class="b-row" data-open="${esc(w.id)}" aria-current="${V.id === w.id}"><span class="${loose ? 'dot needs' : 'b-ic muted'}" aria-hidden="true">${loose ? '' : ic('pencil', 16)}</span><span class="grow"><strong>New message</strong><span class="meta">${loose ? 'Waiting for your answer' : 'Starts a new ticket'}</span></span></button>` : ''}
         ${ts.map((t) => { const st = status(t); return `<button type="button" class="b-row" data-open="${esc(t.id)}" aria-current="${V.id === t.id}"><span class="dot ${st === 'needs' ? 'needs' : st === 'done' ? 'ok' : 'working'}" aria-hidden="true"></span><span class="grow"><strong class="truncate">${esc(t.title)}</strong><span class="meta truncate">${t.key ? '<span class="key">' + esc(t.key) + '</span> · ' : ''}${esc(st === 'needs' ? 'Waiting for your answer' : t.last)}</span></span><span class="meta a-side">${esc(when(t.at))}</span></button>`; }).join('')}</section>`;
     }
     if (!D.ws.length) h += `<div class="empty"><p>No workspace is shared with this browser yet.</p></div>`;
@@ -179,7 +189,8 @@
     $('#b-reach').innerHTML = off.length === 1 ? `<span class="badge">${reachDot(off[0])} ${esc(off[0].name)} is not reachable</span>` : off.length > 1 ? `<span class="badge"><span class="dot idle" aria-hidden="true"></span> ${off.length} workspaces are not reachable</span>` : '';
     const t = tById(V.id), w = wsById(V.id) || wsById(t && t.ws);
     const scroll = $('.b-scroll'), keep = scroll ? scroll.scrollTop : null;
-    const draft = $('[data-composer] [name=text]'), draftText = draft ? draft.value : '', hadFocus = draft && document.activeElement === draft;
+    const draft = V.shown === V.id ? $('[data-composer] [name=text]') : null, draftText = draft ? draft.value : '', hadFocus = draft && document.activeElement === draft;
+    V.shown = V.id;
     if (!w) { $('#b-thread').innerHTML = ''; return; }
     const v = t && t.view, done = v && typeof v.done === 'number' ? v.done : null, total = v && typeof v.total === 'number' ? v.total : null;
     $('#b-thread').innerHTML = `<header class="b-thread-h"><button type="button" class="btn icon ghost b-back" data-back aria-label="Back to the list">${ic('chevron-right', 18)}</button>
@@ -223,10 +234,11 @@
   }
   async function startApp(welcome) {
     setState('app');
+    clearInterval(timer);
     try { await loadAll(); render(); await loadThread(); render(); } catch (e) { if (e instanceof Cut) return cut(); toast('The relay could not be reached. Trying again.', true); }
     if (welcome) toast('You are signed in. This browser is called ' + (DEV.name || 'This browser') + '.');
     timer = setInterval(() => { if (!document.hidden) refresh(); }, POLL_MS);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+    if (!startApp.seen) { startApp.seen = true; document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); }); }
   }
 
   // ---- sign in: the code is read from the part after # and sent only when the person presses Sign in ----
@@ -234,19 +246,41 @@
     const m = /(?:^#|&)code=(pc_[A-Za-z0-9_-]+)/.exec(location.hash || ''); // base64url code (util::rand_token)
     return m ? m[1] : null;
   }
+  // The code leaves the address bar and the history at once; until it is used it waits in this tab only, so a
+  // reload before Sign in does not lose it.
+  const PENDING = 'orch.relay.code';
+  const keepCode = (c) => { try { if (c) sessionStorage.setItem(PENDING, c); else sessionStorage.removeItem(PENDING); } catch (_) { /* tab only */ } };
   let CODE = codeFromHash();
-  if (CODE) history.replaceState(null, '', location.pathname); // the code leaves the address bar and the history
+  if (CODE) { history.replaceState(null, '', location.pathname); keepCode(CODE); } else { try { CODE = sessionStorage.getItem(PENDING); } catch (_) { CODE = null; } }
+  const useCode = () => { CODE = null; keepCode(null); };
 
+  // Already signed in and a new invitation link was opened: its workspaces are added to this browser.
+  async function redeem() {
+    setState('signing');
+    try {
+      const r = await api('POST', '/v1/phone/invitations/redeem', { code: CODE });
+      useCode();
+      await startApp(false);
+      const names = (r.workspaces || []).map((w) => w.name).join(', ');
+      toast(names ? 'You can now reach ' + names + '.' : 'The invitation was added.');
+    } catch (x) {
+      if (x instanceof Cut) return cut();
+      if (x.status === 404 || x.status === 410) { useCode(); await startApp(false); return toast('This invitation no longer works. Ask for a new link.', true); }
+      setState('invite');
+      const err = $('[data-signin-error]'); err.textContent = 'Signing in did not work. Check the connection and press Sign in again.'; err.hidden = false;
+    }
+  }
   async function signIn() {
     if (!CODE) return setState('nocode');
+    if (DEV) return redeem();
     setState('signing');
     const err = $('[data-signin-error]'); err.hidden = true;
     try {
       const r = await fetch('/v1/phone/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: CODE, name: 'Browser' }), credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' });
-      if (r.status === 401 || r.status === 404 || r.status === 410) { CODE = null; return setState('used'); }
+      if (r.status === 401 || r.status === 404 || r.status === 410) { useCode(); return setState('used'); }
       if (!r.ok) throw new Error('pair ' + r.status);
       const j = await r.json();
-      CODE = null;
+      useCode();
       DEV = { id: j.phone_id, token: j.token, name: j.name || '' };
       saveDev(DEV);
       startApp(true);
@@ -261,14 +295,15 @@
     const el = e.target.closest('[data-signin],[data-answer],[data-signout],[data-signout-yes],[data-close-dialog],[data-open],[data-back],[data-filter]');
     if (!el) return;
     if (el.matches('[data-signin]')) return signIn();
-    if (el.matches('[data-open]')) { V.id = el.dataset.open; V.staged = null; document.body.dataset.pane = 'thread'; D.thread = []; render(); try { await loadThread(); render(); } catch (x) { if (x instanceof Cut) cut(); } return; }
+    if (el.matches('[data-open]')) { if (V.sending) return; V.id = el.dataset.open; V.gen += 1; V.staged = null; V.sendId = null; document.body.dataset.pane = 'thread'; D.thread = []; render(); try { await loadThread(); render(); } catch (x) { if (x instanceof Cut) cut(); } return; }
     if (el.matches('[data-back]')) { document.body.dataset.pane = 'list'; return render(); }
     if (el.matches('[data-filter]')) { V.filter = el.dataset.filter; return render(); }
     if (el.matches('[data-answer]')) {
       const qid = el.dataset.q, ans = el.dataset.answer;
       $$(`[data-q="${CSS.escape(qid)}"]`).forEach((b) => { b.disabled = true; });
       try {
-        await api('POST', '/v1/phone/answer', { question_message_id: qid, answer: ans, client_id: cid() });
+        const id = (V.answerIds[qid] = V.answerIds[qid] || cid()); // a retry of the same answer is not a second one
+        await api('POST', '/v1/phone/answer', { question_message_id: qid, answer: ans, client_id: id });
         V.answered[qid] = ans;
         const q = D.questions.find((x) => x.message.id === qid); if (q) V.answeredQ[qid] = q;
         render(); refresh();
@@ -284,12 +319,18 @@
     if (el.matches('[data-close-dialog]')) return el.closest('dialog').close();
     if (el.matches('[data-signout-yes]')) {
       $$('dialog[open]').forEach((d) => d.close());
-      try { await api('POST', '/v1/phone/signout'); } catch (_) { /* the token is dropped here either way */ }
+      try { await api('POST', '/v1/phone/signout'); } catch (x) {
+        // 401 = the relay already signed it out. Anything else: the token still works, so stay and say it.
+        if (!(x instanceof Cut)) { toast('Signing out did not work. Check the connection and try again.', true); return; }
+      }
       dropDev(); DEV = null; clearInterval(timer); setState('left');
     }
   });
+  document.addEventListener('input', (e) => { if (e.target.matches('[data-composer] [name=text]') && !V.sending) V.sendId = null; });
   document.addEventListener('change', (e) => {
     if (!e.target.matches('[data-attach]')) return;
+    if (V.sending) { e.target.value = ''; return; }
+    V.sendId = null;
     const f = e.target.files[0]; if (!f) return;
     if (f.size > 25 * 1024 * 1024) { toast('This file is bigger than 25 MB.', true); e.target.value = ''; return; }
     V.staged = { file: f, name: f.name, size: f.size };
@@ -300,19 +341,24 @@
     e.preventDefault();
     const text = f.elements.text.value.trim();
     if ((!text && !V.staged) || V.sending) return;
-    const t = tById(V.id), to = t ? t.ws : V.id;
+    // Everything is read once here: switching the conversation or picking another file while it sends changes nothing.
+    const t = tById(V.id), to = t ? t.ws : V.id, staged = V.staged, convo = V.id;
+    V.sendId = V.sendId || cid(); // kept for a retry of this same message, so a lost answer never makes a second one
+    const sendId = V.sendId;
     V.sending = true; f.querySelector('[type=submit]').disabled = true;
     try {
-      const body = { to, client_id: cid() };
+      const body = { to, client_id: sendId };
       if (text) body.text = text;
       if (t) body.ticket = t.ticket;
-      if (V.staged) {
-        const up = await api('POST', '/v1/phone/blobs', undefined, V.staged.file);
-        const mime = /^[a-z]+\/[a-z0-9.+-]+$/i.test(V.staged.file.type) ? V.staged.file.type : 'application/octet-stream';
-        body.attachments = [{ blob_id: up.blob_id, kind: mime.startsWith('image/') ? 'image' : 'file', name: V.staged.name.slice(0, 255) || 'file', size: up.size, mime }];
+      if (staged) {
+        if (!staged.blob) staged.blob = await api('POST', '/v1/phone/blobs', undefined, staged.file);
+        const mime = /^[a-z]+\/[a-z0-9.+-]+$/i.test(staged.file.type) ? staged.file.type : 'application/octet-stream';
+        body.attachments = [{ blob_id: staged.blob.blob_id, kind: mime.startsWith('image/') ? 'image' : 'file', name: staged.name.slice(0, 255) || 'file', size: staged.blob.size, mime }];
       }
       await api('POST', '/v1/phone/send', body);
-      V.staged = null; f.elements.text.value = '';
+      V.sendId = null;
+      if (V.staged === staged) V.staged = null;
+      const box = V.id === convo ? $('[data-composer] [name=text]') : null; if (box) box.value = '';
       V.sending = false;
       await refresh();
       const inp = $('[data-composer] [name=text]'); if (inp) inp.focus();
@@ -325,6 +371,12 @@
   });
 
   // ---- start ----
-  if (DEV) startApp(false);
+  // A new invitation link opened in this same tab only changes the part after # (no reload).
+  window.addEventListener('hashchange', () => {
+    const c = codeFromHash(); if (!c) return;
+    history.replaceState(null, '', location.pathname); CODE = c; keepCode(c);
+    clearInterval(timer); $$('dialog[open]').forEach((d) => d.close()); setState('invite');
+  });
+  if (DEV && !CODE) startApp(false);
   else setState(CODE ? 'invite' : 'nocode');
 })();
