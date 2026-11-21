@@ -211,6 +211,24 @@ async fn a_browser_invitation_cannot_be_merged_into_a_phone_and_back() {
         )
         .await;
     assert_eq!(s, 410, "a phone does not take a browser's invitation: {e}");
+    let (_, w) = t.phone(&phone, "GET", "/v1/phone/workspaces", None).await;
+    assert_eq!(
+        w["items"].as_array().unwrap().len(),
+        1,
+        "the phone gained nothing"
+    );
+    // The refused invitation still works for a browser that is already signed in (browser to browser).
+    let br0 = sign_in_browser(&t, &a).await;
+    let (s, r) = t
+        .phone(
+            &br0,
+            "POST",
+            "/v1/phone/invitations/redeem",
+            Some(json!({"code": code})),
+        )
+        .await;
+    assert_eq!(s, 200, "{r}");
+    assert_eq!(r["workspaces"], json!([{"id": b.id, "name": "B"}]));
     // A browser does not take a phone's invitation either.
     let br = sign_in_browser(&t, &a).await;
     let (_, p) = add_device(&t, &b, json!({"name": "P2"})).await;
@@ -239,4 +257,36 @@ async fn cut_browser_is_refused_from_its_next_request() {
     assert_eq!(s, 401);
     let (_, snap) = t.call(&a, "GET", "/v1/refresh", None).await;
     assert_eq!(snap["workspaces"]["phones"], json!([]));
+}
+
+#[test]
+fn a_database_from_before_browsers_gets_kind_phone_and_keeps_working() {
+    let dir = tempfile::tempdir().unwrap();
+    let c = rusqlite::Connection::open(dir.path().join("relay.db")).unwrap();
+    // The phones table exactly as it was before this change, with a paired phone and an open invitation.
+    c.execute_batch(
+        "CREATE TABLE phones(id TEXT PRIMARY KEY, name TEXT NOT NULL, workspaces TEXT NOT NULL,
+            token_hash TEXT, apns_token TEXT, sandbox INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
+            last_seen INTEGER, paired_at INTEGER);
+         INSERT INTO phones(id,name,workspaces,token_hash,created_at) VALUES('ph_aaaaaaaaaa','Old','[]','h',1);
+         INSERT INTO phones(id,name,workspaces,created_at) VALUES('ph_bbbbbbbbbb','Invited','[]',2);",
+    )
+    .unwrap();
+    for _ in 0..2 {
+        orch_relay::store::init(&c).unwrap();
+    }
+    let kinds: Vec<(String, String, Option<String>)> = c
+        .prepare("SELECT id,kind,token_hash FROM phones ORDER BY id")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        kinds,
+        vec![
+            ("ph_aaaaaaaaaa".into(), "phone".into(), Some("h".into())),
+            ("ph_bbbbbbbbbb".into(), "phone".into(), None),
+        ]
+    );
 }

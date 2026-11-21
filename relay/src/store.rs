@@ -81,10 +81,18 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
     // When the phone paired (L3): broadcasts to `phones` from before are not shown to it.
     let _ = c.execute("ALTER TABLE phones ADD COLUMN paired_at INTEGER", []);
     // Browser sign-in (ORCH-1197): a device is a phone (the app) or a browser (the relay's own page).
-    let _ = c.execute(
-        "ALTER TABLE phones ADD COLUMN kind TEXT NOT NULL DEFAULT 'phone'",
+    // Fails loudly on anything but "already there": every device query reads `kind`.
+    let has_kind: bool = c.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('phones') WHERE name='kind'",
         [],
-    );
+        |r| r.get::<_, i64>(0).map(|n| n > 0),
+    )?;
+    if !has_kind {
+        c.execute(
+            "ALTER TABLE phones ADD COLUMN kind TEXT NOT NULL DEFAULT 'phone'",
+            [],
+        )?;
+    }
     crate::groups::init(c)?;
     crate::subs::init(c)?;
     Ok(())
