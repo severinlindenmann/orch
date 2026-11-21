@@ -30,7 +30,7 @@
 .tc-day{text-align:center;font-size:11px;color:var(--text-muted);margin:4px 0}
 </style></head><body><div class="page"><div class="top"><a href="index.html">&larr; Phone app v3</a></div>
 <h1>Ticket chats</h1>
-<p class="muted">Team chat step 1 (ORCH-1114, draft picked in ORCH-1098). Every ticket's chat in one list on Chats, newest first, next to the workspace chats. A ticket chat shows who wrote each message, the helper's questions as cards and the box to write. The same messages show in the Chats page on the computer. Only you and your helpers in this step; adding workspaces or people comes later.</p>
+<p class="muted">Team chat step 1 (ORCH-1114, draft picked in ORCH-1098). Every ticket's chat in one list on Chats, newest first, next to the workspace chats. Ticket chats replace the topic list of the workspace screen (owner 21 Nov): the workspace screen keeps only its own chat (Your helper) and New topic. A ticket chat shows who wrote each message, the helper's questions as cards and the box to write. The same messages show in the Chats page on the computer. Only you and your helpers in this step; adding workspaces or people comes later.</p>
 <div class="tc-grid">
 
 <div><p class="cap"><b>1</b> Chats: Ticket chats above Workspaces</p><div class="phone"><div class="p-nav"><h4 style="font-size:22px">Chats</h4></div><div class="p-body">
@@ -39,13 +39,20 @@
 <div class="tc-h">Ticket chats</div>
 <div class="tc-list">
 <div class="row"><div class="av s g">M</div><div class="m"><b>Launch the Trail Runner X shoe</b><small>Claude: Draft is in the part "Spring…</small><small>MKT-7 · Marketing</small><small class="warn">Needs your OK</small></div><div class="end"><time>09:41</time><span class="badge-n">3</span></div></div>
-<div class="row"><div class="av s">P</div><div class="m"><b>Final box art</b><small>Box art by Tuesday evening.</small><small>PRD-12 · Product</small></div><div class="end"><time>09:12</time><span class="badge-n">1</span></div></div>
-<div class="row"><div class="av s g">M</div><div class="m"><b>March newsletter</b><small>Before I put it in the tool, check…</small><small>MKT-46 · Marketing</small></div><div class="end"><time>Yesterday</time></div></div>
+<div class="row"><div class="av s">P</div><div class="m"><b>Final box art</b><small>Box art by Tuesday evening.</small><small>PRD-12 · Product</small><small>Ready for review</small></div><div class="end"><time>09:12</time><span class="badge-n">1</span></div></div>
+<div class="row"><div class="av s g">M</div><div class="m"><b>March newsletter</b><small>Before I put it in the tool, check…</small><small>MKT-46 · Marketing</small><small>Helper is working</small></div><div class="end"><time>Yesterday</time></div></div>
+<div class="row"><div class="m"><b style="font-weight:400">Done</b></div><div class="end" style="flex-direction:row;gap:8px"><span>4</span><span>›</span></div></div>
 </div>
 <div class="tc-h">Workspaces</div>
 <div class="tc-list"><div class="row"><div class="av g">M</div><div class="m"><b>Marketing</b><small>Your helper · write here to start</small></div><div class="end"><time>08:30</time></div></div></div>
 </div></div>
-<p class="muted" style="margin-top:8px;font-size:12px">Five rows, then "See all (n)". The filters (All, Unread, Needs your OK) apply to both lists. A finished ticket leaves the list once read; a topic that is still starting is not listed yet.</p></div>
+<p class="muted" style="margin-top:8px;font-size:12px">Every open ticket of every workspace, newest first, with its status; finished ones under Done (collapsed). A topic that is still starting shows "Getting started…". Swipe a row for Archive (and Delete when finished). The filters (All, Unread, Needs your OK) apply to both lists.</p></div>
+
+<div><p class="cap"><b>1b</b> The workspace screen: no topic list any more</p><div class="phone"><div class="p-nav"><span>&lsaquo;</span><div class="av s g">M</div><h4>Marketing</h4></div><div class="p-body">
+<div class="tc-list" style="margin-top:12px"><div class="row"><div class="av g">M</div><div class="m"><b>Your helper</b><small>Talk to Marketing</small></div><div class="end"><span>›</span></div></div></div>
+<div class="tc-list"><div class="row"><div class="m"><b>Archived</b><small>2 chats</small></div><div class="end"><span>›</span></div></div></div>
+</div><div class="tc-comp"><span class="tc-in" style="text-align:center;color:var(--brand)">New topic</span></div></div>
+<p class="muted" style="margin-top:8px;font-size:12px">The workspace's own chat, its archived chats and New topic. The new topic shows under Ticket chats on Chats.</p></div>
 
 <div><p class="cap"><b>2</b> A ticket chat: names, question card, composer</p><div class="phone"><div class="p-nav"><span>&lsaquo;</span><div style="flex:1;min-width:0"><h4 style="font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Launch the Trail Runner X shoe</h4><div class="tc-sub"><span class="warn">● Needs your OK</span> · Marketing</div></div></div>
 <div class="tc-chat"><div class="tc-day">Today</div>

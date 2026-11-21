@@ -29,13 +29,13 @@ final class TicketChatsUITests: XCTestCase {
         XCTAssertTrue(list.waitForExistence(timeout: 20), "the Ticket chats list shows on Chats")
         XCTAssertTrue(app.staticTexts["Ticket chats"].exists)
         XCTAssertTrue(app.staticTexts["Workspaces"].exists, "the workspace chats sit under their own heading")
-        let row = el(app, "ticket-chat-ws_pilatus001|t_7k3f9q")
+        let row = el(app, "ticket-ws_pilatus001|t_7k3f9q")
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         XCTAssertTrue(el(app, "room-ws_pilatus001").exists, "the workspace chat is still there")
         try shot(app, "ticket-chats-list")
 
         // The ticket chat: names above the incoming messages, the question card and the box to write.
-        row.tap()
+        app.reveal(row); row.tap()
         let nina = el(app, "chat-sender-m_tcnina0000000001")
         XCTAssertTrue(nina.waitForExistence(timeout: 15), "a name typed on the computer shows above its message")
         XCTAssertTrue(nina.label.contains("Nina Weber · not signed in"), nina.label)
