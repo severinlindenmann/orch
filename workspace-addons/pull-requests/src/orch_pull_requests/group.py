@@ -137,3 +137,20 @@ class Git:
 
     def push(self, sha: str, branch: str) -> None:
         self.run("push", "-q", "origin", f"{sha}:refs/heads/{branch}", timeout=600)
+
+    def changes(self, base_sha: str, sha: str, paths: list[str]) -> bool:
+        """True when sha changes any of these files compared with base_sha."""
+        got = self.run("diff", "--quiet", base_sha, sha, "--", *paths, ok=(0, 1))
+        return got.returncode == 1
+
+    def worktree_add(self, folder: Path, sha: str) -> None:
+        """A clean copy of one commit for the local check (localcheck.py); the files it lacks are fetched."""
+        self.run("worktree", "add", "-q", "--detach", str(folder), sha, timeout=900)
+
+    def worktree_remove(self, folder: Path) -> None:
+        """Remove the copy again; a copy git cannot remove is pruned once its folder is gone."""
+        try:
+            self.run("worktree", "remove", "--force", str(folder))
+        except Refused:
+            shutil.rmtree(folder, ignore_errors=True)
+            self.run("worktree", "prune", ok=(0, 1, 128))
