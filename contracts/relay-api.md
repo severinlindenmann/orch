@@ -35,6 +35,11 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 3. **Same id twice:** identical message → `200 {id, duplicate: true}`, nothing new is stored. Same id, different content (or another sender) → `409 conflict`.
 4. **Only the receiver** can fetch and ack its inbox messages.
 
+## Message envelope (v1)
+
+Messages from workspaces and phones carry an Ed25519 envelope in the top-level field `envelope`: format, reading
+rules, who checks what and the error codes are in `msgsig.md` (vectors: `vectors/msgsig-v1.json`).
+
 ## Workspace API
 
 | Method | Path | Request | Response |
