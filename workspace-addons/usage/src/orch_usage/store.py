@@ -486,8 +486,10 @@ def set_on(a: dict, rows: list[dict], who: str, on: bool) -> None:
 def set_order(accounts: list[dict], a: dict, rows: list[dict], who: str, place: int) -> None:
     _renumber(accounts)
     if not 1 <= place <= len(accounts):
-        raise Refused(f"There {'is' if len(accounts) == 1 else 'are'} {len(accounts)} account"
-                      f"{'' if len(accounts) == 1 else 's'}. Pick a place from 1 to {len(accounts)}.")
+        raise Refused(
+            f"There {'is' if len(accounts) == 1 else 'are'} {len(accounts)} account"
+            f"{'' if len(accounts) == 1 else 's'}. Pick a place from 1 to {len(accounts)}."
+        )
     old = a["order"]
     if place == old:
         return

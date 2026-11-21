@@ -623,7 +623,9 @@ def test_orchs_add_on_servers_are_never_found_by_their_recorded_pid(
     p.write_text(
         json.dumps([{"workspace": str(ws), "addon": "focus", "pid": 967, "url": None}]), encoding="utf-8"
     )
-    assert jrun(cli, "found")[1]["others"] == 3  # 967 does not name orch: still counted (965 and its child too now)
+    assert (
+        jrun(cli, "found")[1]["others"] == 3
+    )  # 967 does not name orch: still counted (965 and its child too now)
 
 
 def test_what_a_managed_service_started_is_not_found_again(cli, mac, tools, ws, monkeypatch):

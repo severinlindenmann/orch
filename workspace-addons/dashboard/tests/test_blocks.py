@@ -711,7 +711,10 @@ def test_split_action_for_another_item_or_op_is_not_drawn(tmp_path):
     items[1]["panel"]["danger"]["action"]["args"]["target"] = "dashboard-front"
     tree = run(tmp_path, page)
     web = _by_data(tree, "splitPanel", "web-preview")[0]
-    assert [x["data"]["verb"] for x in walk(web) if x["data"].get("addonAct")] == ["auto-off", "important-off"]
+    assert [x["data"]["verb"] for x in walk(web) if x["data"].get("addonAct")] == [
+        "auto-off",
+        "important-off",
+    ]
 
 
 @node

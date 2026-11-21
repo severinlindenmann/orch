@@ -674,7 +674,9 @@ class _Parser(argparse.ArgumentParser):
 def main(argv=None) -> int:
     ap = _Parser(prog="orch usage")
     ap.add_argument(
-        "--dir", default=os.environ.get("ORCH_ROOT", "."), help="the workspace folder (default: where you are)"
+        "--dir",
+        default=os.environ.get("ORCH_ROOT", "."),
+        help="the workspace folder (default: where you are)",
     )
     sub = ap.add_subparsers(dest="cmd", required=True, parser_class=_Parser, metavar="command")
 

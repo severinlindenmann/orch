@@ -487,14 +487,17 @@ def test_a_new_service_with_an_old_id_starts_with_an_empty_log(cli, ws, fake):
 def test_stop_on_a_stopped_service_says_it_is_already_stopped(cli, fake):
     _add(cli)
     code, out = jrun(cli, "stop", "web")
-    assert code == 0 and out["next"] == "Web preview is already stopped." and out["service"]["state"] == "stopped"
+    assert (
+        code == 0
+        and out["next"] == "Web preview is already stopped."
+        and out["service"]["state"] == "stopped"
+    )
     jrun(cli, "start", "web")
     code, out = jrun(cli, "stop", "web")
     assert out["next"] == "Stopped Web preview."
 
 
 def test_the_log_of_an_adopted_job_without_a_log_file_says_orch_keeps_none(ws):
-    from orch_services import store
     from orch_services.cli import no_log_text
 
     rec = {"id": "j", "name": "Job", "adopted": {"kind": "launchd", "entry": "com.x.job", "path": None}}
@@ -509,6 +512,8 @@ def test_a_new_service_with_a_removed_ones_id_starts_with_an_empty_log(cli, ws, 
     assert jrun(cli, "remove", "web")[0] == 0
     _add(cli)
     assert jrun(cli, "log", "web")[1]["lines"] == []
+
+
 def test_stopping_the_regular_check_says_the_running_services_keep_running(cli, fake, monkeypatch):
     # ORCH-935 point 2: turning Services off said only "The regular check stopped." while the jobs kept running
     from orch_services import service
