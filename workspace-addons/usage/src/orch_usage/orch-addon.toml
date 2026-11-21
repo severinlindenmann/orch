@@ -49,6 +49,10 @@ who = "people"
 summary = "Switch accounts by itself, or only show and warn"
 who = "people"
 
+[acts.switcher]
+summary = "Follow the workspace that switches the accounts, or switch from here"
+who = "people"
+
 [acts.seen]
 summary = "Got it: hide a Usage warning until it clears and comes back"
 who = "people"
