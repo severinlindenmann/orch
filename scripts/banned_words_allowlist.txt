@@ -27,4 +27,10 @@ relay/tests/msgsig_vectors.rs
 scripts/gen_msgsig_vectors.py
 workspace/src/orch/msgsig.py
 workspace/tests/test_msgsig_vectors.py
+# The phone's own key (ORCH-1204):
+mobile/OrchMobile/PhoneKey.swift
+mobile/OrchMobile/MessageSigner.swift
+mobile/OrchMobileTests/PhoneSigningTests.swift
+relay/src/phonekeys.rs
+relay/tests/phone_signing_key.rs
 relay/Cargo.lock                     # crate names of the Ed25519 library (ed25519, signature)
