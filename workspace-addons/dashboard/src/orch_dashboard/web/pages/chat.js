@@ -125,10 +125,12 @@ function chatList() {
 // The grouped list shows only when there is something besides the helper chat (a live group or a workspace chat); an open
 // group or workspace chat (a deep link) always keeps it, so nothing becomes unreachable.
 const chatRich = () => !!(chatGroup() || chatDmId(chatUi.open)) || chatGroups().some(g => !chatFinished(g)) || chatDm.contacts.length > 0;
+// The Contacts link leads to the add-on that declares the `phone` panel (the relay). state.addons lists only active
+// add-ons, so while it is off there is no link at all (R1.1: the relay stays invisible until turned on).
 function chatPhoneLink() {
   if (snapshot) return null;
-  const phone = chatObjects(state?.addons).find(a => /phone/i.test(String(a.label || a.title || '')));
-  return h('a', {className:'chat-phone-link', href:phone?.name ? '#addon/' + phone.name : '#settings', 'data-key':'phone-link'}, 'Contacts');
+  const phone = chatObjects(state?.addons).find(a => a?.dashboard?.panel === 'phone' && a.name);
+  return phone ? h('a', {className:'chat-phone-link', href:'#addon/' + phone.name, 'data-key':'phone-link'}, 'Contacts') : null;
 }
 function chatOpenAgent() {
   if (snapshot) return;
