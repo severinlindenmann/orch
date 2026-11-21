@@ -501,8 +501,9 @@ function needsToday() {
   const hiddenResults = review.filter(t => unsure.has(t.id)).length, questions = window.DashHelpers.needsYouCount(needs);
   // ORCH-1358: a helper that needs you on its screen (an OK in the terminal, no written question) is in Home's Helpers
   // list as Needs you and an orange chip in the live bar, so it counts here too; a ticket already counted is not again
-  const counted = new Set([...needs.map(r => r.ticket), ...review.map(t => t.id)]);
-  const screen = window.DashHelpers.helperRows(all, state.runs).filter(r => r.state === 'you' && !counted.has(r.ticket.id)).length;
+  // (never a finished ticket, nor one already in the needs list: a Home row, or one snoozed for later or just answered)
+  const counted = new Set([...needsList().map(r => r.ticket), ...review.map(t => t.id)]);
+  const screen = window.DashHelpers.helperRows(all, state.runs).filter(r => r.state === 'you' && !r.finished && !counted.has(r.ticket.id)).length;
   return {needs, notices, failed, groups, review, changes, asked, logins, stuck, unsure, hiddenResults, questions, screen,
     count:questions + review.length + stuck.length - hiddenResults + screen};
 }

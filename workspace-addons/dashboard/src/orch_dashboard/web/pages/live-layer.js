@@ -161,12 +161,15 @@ function liveAskModel(t) {
 // disagree (the page's own state is polled at another time): a session that ended has no helper (never Working), one
 // that needs you says Needs you. Without an answer of the API yet, the page's own helper state (`own`) stays.
 const LIVE_LAYER_HELPER = {'needs-you':'you', working:'working', idle:'idle'};
+const LIVE_LAYER_FINE = {Starting:'starting', 'On hold':'waiting', Stuck:'stuck', 'Stopped: usage limit':'limit'};
 function liveLayerHelper(live, own) {
   if (!live || typeof live.status !== 'string') return own || null;
   const st = LIVE_LAYER_HELPER[live.status];
   if (!st) return null;  // in line or closed: no helper runs
   if (own && (own.state === st || (st === 'working' && ['working', 'starting', 'waiting', 'stuck', 'limit'].includes(own.state)))) return own;
-  return {state:st, word:{you:'Needs you', working:'Working', idle:'Idle'}[st], detail:typeof live.detail === 'string' ? live.detail : ''};
+  // a working session keeps the API's finer word (Starting, On hold, Stuck, Stopped: usage limit)
+  const fine = st === 'working' ? LIVE_LAYER_FINE[live.word] : null;
+  return {state:fine || st, word:fine ? live.word : {you:'Needs you', working:'Working', idle:'Idle'}[st], detail:typeof live.detail === 'string' ? live.detail : ''};
 }
 // --- the page ---
 let liveLayer = null;

@@ -9,7 +9,7 @@
 // The words below are shared by every place that shows a session, so the wall says it the same way (draft D).
 const LIVE_SESSIONS_EVERY = 3000;  // ms between two reads (the state poll's pace)
 const LIVE_SESSIONS_LINES = 8;
-const LIVE_STATUS_BAR = {'needs-you':'wait', working:'run', 'in-line':'queue', idle:'idle'};  // the bar's codes; closed is not in the bar
+const LIVE_STATUS_BAR = {'needs-you':'wait', working:'run', 'in-line':'queue', idle:'idle'};  // the bar's codes; closed is in the bar only when it asks (`needs`, liveBarRows)
 
 // "25 min", "1 h 5 min", "2 h"
 function liveDur(seconds) {
