@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>Switcher drafts · orch</title><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/tokens.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/components.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/widgets.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/interaction.css"><link rel="stylesheet" href="draft.css"></head>
+<body class="mk-draft-1273-index">
+<main class="d-chooser">
+<header><p class="eyebrow">ORCH-1273 · three drafts to pick from</p><h1>The workspace switcher with Saved places</h1>
+<p class="muted">Each draft is a whole dashboard page with the switcher open. Everything is clickable; nothing is saved and no place really opens. The "Preview" pill at the bottom right jumps between the states. Make the window narrow (390) to see the phone.</p></header>
+<div class="d-cards">
+
+<section class="card pad d-card"><h2>Draft A: everything in the one menu</h2>
+<p>The menu you know, with two parts: On this computer and Saved places. It shows one thing at a time: Add place, Share my places and the keep question each replace the list and have a back arrow. New places from a link show as one line with Review, the list stays under it. "…" opens beside its row.</p>
+<p>Trade-off: the fewest steps and nothing new to learn, and no window over the page. But the menu gets long with many places and it holds both switching and managing.</p>
+<a class="btn primary" href="draft-a.html">Open draft A</a>
+<div class="d-states"><a class="btn ghost xs" href="draft-a.html?state=add">Add place</a><a class="btn ghost xs" href="draft-a.html?state=refused">Bad address</a><a class="btn ghost xs" href="draft-a.html?state=keep">From a link</a><a class="btn ghost xs" href="draft-a.html?state=review">Keep question</a><a class="btn ghost xs" href="draft-a.html?state=share">Share my places</a><a class="btn ghost xs" href="draft-a.html?state=empty">Empty</a><a class="btn ghost xs" href="draft-a.html?state=rowmenu">Row menu</a><a class="btn ghost xs" href="draft-a.html?state=removed">Removed</a></div></section>
+
+<section class="card pad d-card"><h2>Draft B: short menu, managing in a sheet</h2>
+<p>The menu only switches: this computer and the four places you opened last, in small rows. "All saved places" opens a sheet on the right with every place and its full address, Add place, rename, remove, sharing and the keep question.</p>
+<p>Trade-off: the menu stays short and calm however many places you save, but adding or changing a place is one step further away, and a place you rarely open is in the sheet, not in the menu.</p>
+<a class="btn primary" href="draft-b.html">Open draft B</a>
+<div class="d-states"><a class="btn ghost xs" href="draft-b.html?state=sheet">Saved places</a><a class="btn ghost xs" href="draft-b.html?state=add">Add place</a><a class="btn ghost xs" href="draft-b.html?state=refused">Bad address</a><a class="btn ghost xs" href="draft-b.html?state=keep">From a link</a><a class="btn ghost xs" href="draft-b.html?state=share">Share my places</a><a class="btn ghost xs" href="draft-b.html?state=empty">Empty</a><a class="btn ghost xs" href="draft-b.html?state=rowmenu">Row menu</a><a class="btn ghost xs" href="draft-b.html?state=removed">Removed</a></div></section>
+
+<section class="card pad d-card"><h2>Draft C: one panel, find first</h2>
+<p>The switcher opens a panel in the middle of the page (from the bottom on a phone). On top one field: type to find a place, or paste an address to add it. Relay and publish sit as two tiles of their own, the workspaces are a list with their address beside the name.</p>
+<p>Trade-off: the most room, and quick with many places, because you type two letters and click. But it covers the page and looks least like the menu of today.</p>
+<a class="btn primary" href="draft-c.html">Open draft C</a>
+<div class="d-states"><a class="btn ghost xs" href="draft-c.html?state=add">Add place</a><a class="btn ghost xs" href="draft-c.html?state=refused">Bad address</a><a class="btn ghost xs" href="draft-c.html?state=keep">From a link</a><a class="btn ghost xs" href="draft-c.html?state=share">Share my places</a><a class="btn ghost xs" href="draft-c.html?state=empty">Empty</a><a class="btn ghost xs" href="draft-c.html?state=rowmenu">Row menu</a><a class="btn ghost xs" href="draft-c.html?state=removed">Removed</a></div></section>
+
+</div>
+<section class="card pad d-card"><h2>The same in all three</h2>
+<p>One click on a row switches. A row shows its badge, name, kind and one grey line: "last opened 3 days ago", "Sign in once" for a place this browser never signed in to, "Only in this browser" for an address on this computer, and a small "not secure" mark for an http address. Relay and publish have their own small picture. Remove has no question: it shows Undo. A place from a link is saved only after Keep, with its full address shown. Pairing a phone is not part of this.</p></section>
+</main>
+</body></html>

@@ -109,7 +109,7 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .person-switch .menu-pop{grid-template-columns:minmax(0,1fr)}
 .person-switch .menu-item>.truncate{min-width:0}
 .person-switch .menu-item .ck{margin-left:auto;color:var(--brand)}
-.qr{width:168px;height:168px;border-radius:8px;background:var(--paper);padding:8px;flex:none}
+.qr{width:168px;height:168px;border-radius:8px;background:var(--paper);color:var(--ink);padding:8px;flex:none}
 .stepper .done-s{color:var(--success)}
 .stepper .now{color:var(--text)}
 .step-n{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;border:1px solid var(--border-strong);font-size:12px}
