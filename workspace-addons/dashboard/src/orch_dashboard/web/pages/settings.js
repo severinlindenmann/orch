@@ -199,10 +199,11 @@ function peopleCan(p) {
   if (!can.length) return 'May only read.';
   return 'May ' + (can.length > 1 ? can.slice(0, -1).join(', ') + ' and ' + can[can.length - 1] : can[0]) + '.';
 }
+const RIGHTS_CARD = () => h('div', {className:'card', 'data-key':'settings-people-rights'}, PEOPLE_RIGHTS.map(([id, label, what]) => h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, label), settingsText('p', {className:'grow meta'}, what))));
 function peoplePanel(settings) {
   const list = settings.people_list || {state:'off', people:[]};
   const busy = settingsBusy.has('people');
-  const intro = h('p', {className:'meta'}, 'Who works in ' + clean(state.workspace || 'this workspace') + ' and what each one may do. Only you change this, on this computer.');
+  const intro = h('p', {className:'meta'}, 'Who works in ' + clean(state.workspace || 'this workspace') + ' and what each one may do. Only you can change this, at this computer.');
   if (list.state === 'broken') return [intro, h('div', {className:'card'}, h('div', {className:'card-row', 'data-key':'settings-people'},
     h('div', {className:'grow'}, settingsText('h3', {}, 'The people list can’t be read'), settingsText('p', {className:'meta'}, 'Nobody but you can do anything until it is set up again. Move the file .orch/local/people.json away, then turn People on here.'))))];
   if (list.state !== 'on') return [intro, h('div', {className:'empty', 'data-key':'settings-people'},
@@ -231,15 +232,14 @@ function peoplePanel(settings) {
       h('div', {className:'grow'}, h('div', {}, h('h3', {}, String(p.name), p.owner ? ' ' : null, p.owner ? h('span', {className:'badge'}, 'Owner') : null), settingsText('p', {className:'meta'}, peopleCan(p))), rights, actions));
   };
   const add = snapshot ? null : h('div', {className:'card'}, h('div', {className:'card-row', 'data-key':'settings-people-add'},
-    h('input', {type:'text', className:'input grow', maxLength:40, placeholder:'Name, for example Lea', 'aria-label':'Name of the new person', autocomplete:'off', 'data-key':'settings-people-name', 'data-people-enter':'people-add', disabled:busy}),
+    h('input', {type:'text', className:'input grow', maxLength:40, placeholder:'Name', 'aria-label':'Name of the new person', autocomplete:'off', 'data-key':'settings-people-name', 'data-people-enter':'people-add', disabled:busy}),
     h('button', {type:'button', className:'btn primary sm', 'data-action':'people-add', 'data-key':'settings-people-add-btn', disabled:busy}, 'Add person')));
   const count = active.length === 1 ? '1 person' : active.length + ' people';
   return [intro,
     h('div', {className:'stack', 'data-key':'settings-people'},
       h('h2', {className:'set-sub'}, 'Add a person'), h('p', {className:'meta'}, 'A new person starts with Write. Tick more below.'), add,
+      h('h2', {className:'set-sub'}, 'What the rights mean'), RIGHTS_CARD(),
       h('h2', {className:'set-sub'}, count), h('div', {className:'card', 'data-key':'settings-people-list'}, active.map(row))),
-    h('div', {className:'stack', 'data-key':'settings-people-rights'}, h('h2', {className:'set-sub'}, 'What the rights mean'),
-      h('div', {className:'card'}, PEOPLE_RIGHTS.map(([id, label, what]) => h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, label), settingsText('p', {className:'grow meta'}, what))))),
     removed.length ? h('div', {className:'stack', 'data-key':'settings-people-removed'}, h('h2', {className:'set-sub'}, 'Removed'),
       h('div', {className:'card'}, h('div', {className:'card-row'}, settingsText('p', {className:'grow'}, removed.map(p => p.name).join(', ')), settingsText('p', {className:'meta'}, 'Their names stay in the history.')))) : null];
 }
