@@ -3240,7 +3240,7 @@ def say_member(root: Path, host: str, gid: str, text: str, via: str = "helper") 
         from orch import msgtrust
 
         # callers pass PERSON_VIA only after their own person check: marked as the person's words (ORCH-1202)
-        with msgtrust.as_person(via == tickets.PERSON_VIA):
+        with msgtrust.as_person(via == tickets.PERSON_VIA and tickets.agent_tool() is None):
             msg = _send(root, host, "text", body, j.get("ticket"))
         _own_sent(j, msg)
     return msg or {"sent": False}

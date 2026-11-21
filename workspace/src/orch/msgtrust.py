@@ -2,7 +2,7 @@
 
 The receiver is the decisive gate. It never trusts the relay's own check:
 
-- `sign_outgoing` adds the `envelope` (relay-api.md "Signed messages (v1)") to every message this workspace
+- `seal_outgoing` adds the `envelope` (relay-api.md "Signed messages (v1)") to every message this workspace
   sends, when it has a signing key. `origin` is set here by orch itself: `person` only inside `as_person()`
   (a person's own action) or from the CLI at a terminal outside a helper; everything else is `helper`.
 - `gate` runs on every message the relay hands over, before it is saved to .orch/inbox, so nothing downstream
@@ -18,7 +18,7 @@ The receiver is the decisive gate. It never trusts the relay's own check:
 
 `signed_only` is this computer's own switch (off until the cut-over, ORCH-1205). Off: an unsigned message
 still goes through as today; a signed one is checked all the same. On: an unsigned one is refused too. No
-relay flag or message can change it; only a person (`set_signed_only`).
+relay flag or message can change it; only a person (`set_refuse_unsigned`).
 """
 
 from __future__ import annotations
@@ -170,19 +170,19 @@ def _contact(st: dict, peer: str) -> dict:
     return st["contacts"].setdefault(peer, {"keys": [], "not_valid": 0})
 
 
-def signed_only(root: Path) -> bool:
+def refuse_unsigned(root: Path) -> bool:
     try:
         return bool(_load(root).get("signed_only"))
     except Refused:
         return True  # a damaged list never opens the door
 
 
-def set_signed_only(root: Path, on: bool, by: str) -> dict:
+def set_refuse_unsigned(root: Path, on: bool, by: str) -> dict:
     """This computer's own switch. Only a person changes it (the CLI checks that)."""
     with _state(root) as st:
         st["signed_only"] = bool(on)
         st["signed_only_by"] = {"by": by, "at": _iso(_now_ms())}
-    return {"signed_only": bool(on)}
+    return {"refuse_unsigned": bool(on)}
 
 
 # ---------------------------------------------------------------- keys: accepted and hinted
@@ -300,7 +300,7 @@ def _encode(o: dict) -> bytes | None:
     return b if len(b) <= msgsig.MAX_SIGNED_BYTES else None
 
 
-def sign_outgoing(root: Path, msg: dict, origin: str | None = None) -> dict:
+def seal_outgoing(root: Path, msg: dict, origin: str | None = None) -> dict:
     """`msg` with its `envelope`, or unchanged when this workspace has no signing key yet or the message
     cannot be signed. The private key is only touched inside signkey.sign_bytes."""
     from orch import signkey

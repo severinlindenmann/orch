@@ -594,7 +594,7 @@ def _message(
         return {**msg, "dry_run": True}
     from orch import msgtrust
 
-    sealed = msgtrust.sign_outgoing(root, msg)  # every message carries its envelope (ORCH-1202)
+    sealed = msgtrust.seal_outgoing(root, msg)  # every message carries its envelope (ORCH-1202)
     raw = json.dumps(sealed).encode("utf-8")
     path = _write_outbox(root, msg["id"], raw)
     from orch import relay_view

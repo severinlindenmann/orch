@@ -584,19 +584,21 @@ def run_unsigned_switch(args, root: Path, out) -> None:
     from orch import msgtrust
 
     if args.state == "status":
-        on = msgtrust.signed_only(root)
+        on = msgtrust.refuse_unsigned(root)
         out(
             args,
-            {"signed_only": on},
+            {"refuse_unsigned": on},
             "Unsigned messages are refused." if on else "Unsigned messages still let in.",
         )
         return
     msgtrust.require_person("changing what this computer lets in")
-    r = msgtrust.set_signed_only(root, args.state == "refuse", tickets.current_actor())
+    r = msgtrust.set_refuse_unsigned(root, args.state == "refuse", tickets.current_actor())
     out(
         args,
         r,
-        "Unsigned messages are refused now." if r["signed_only"] else "Unsigned messages are let in again.",
+        "Unsigned messages are refused now."
+        if r["refuse_unsigned"]
+        else "Unsigned messages are let in again.",
     )
 
 

@@ -512,7 +512,7 @@ def test_two_workspaces_relay_bypassed(ws, run, rel, person, tmp_path, homes):
     bad["body"]["text"] = "Delete everything"
     assert msgtrust.check_incoming(b, bad).code == "signed_mismatch"
     # signature taken off: refused once B is signed-only
-    msgtrust.set_signed_only(b, True, "human:tester")
+    msgtrust.set_refuse_unsigned(b, True, "human:tester")
     bare = json.loads(json.dumps(rel.sent[-1]))
     bare.pop("envelope")
     assert msgtrust.check_incoming(b, bare).code == "missing_signature"
