@@ -769,14 +769,14 @@ class World:
         owner, name = self.cfg.repo.split("/", 1)
         q = (
             'query($o:String!,$n:String!){repository(owner:$o,name:$n){ref(qualifiedName:"refs/heads/develop")'
-            "{target{... on Commit{history(first:60){nodes{oid status{context(name:"
+            "{target{... on Commit{commits:history(first:60){nodes{oid status{context(name:"
             + json.dumps(WINVM_CONTEXT)
             + "){state}}}}}}}}}"
         )
         d = self._gh_json(["api", "graphql", "-f", f"query={q}", "-F", f"o={owner}", "-F", f"n={name}"])
         nodes = ((((d or {}).get("data") or {}).get("repository") or {}).get("ref") or {}).get("target") or {}
         out = []
-        for n in (nodes.get("history") or {}).get("nodes") or []:
+        for n in (nodes.get("commits") or {}).get("nodes") or []:  # alias: GitHub's commit list
             c = (n.get("status") or {}).get("context") if n.get("status") else None
             if c and c.get("state"):
                 out.append((n["oid"], str(c["state"]).lower()))
