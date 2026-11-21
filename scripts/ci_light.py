@@ -231,7 +231,7 @@ def plan(
             )
         steps.append({"name": f"add-on {name}", "cwd": f"workspace-addons/{name}", "cmd": cmd})
     clicks = sorted({m.group(1) for f in files if (m := CLICK.match(f))})
-    smoke = any(PAGE_SMOKE.match(f) for f in files)
+    smoke = any(PAGE_SMOKE.match(f) and not ADDON_SKILL.match(f) for f in files)  # skill text loads no page
     if clicks or smoke:  # the browser only when a page test of this pull request needs it (about a minute)
         steps.append(
             {

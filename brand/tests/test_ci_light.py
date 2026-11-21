@@ -124,6 +124,14 @@ def test_a_page_library_change_with_a_dashboard_skill_change_runs_the_whole_dash
     assert "add-on dashboard" in names(steps)
 
 
+def test_a_focus_or_insights_skill_change_starts_no_browser():
+    for name in ("focus", "insights"):
+        f = f"workspace-addons/{name}/src/orch_{name}/skills/orch-{name}/SKILL.md"
+        assert not any("browser" in n or "Chromium" in n for n in names(light.plan([f], TEXTS, ADDONS, ADDON_TEXTS)))
+    page = "workspace-addons/focus/src/orch_focus/web/app.js"
+    assert "Focus and Insights pages load in a browser" in names(light.plan([page], TEXTS, ADDONS, ADDON_TEXTS))
+
+
 def test_without_addon_texts_a_skill_change_runs_the_whole_suite():
     assert names(light.plan([SKILL], TEXTS, ADDONS))[-1] == "add-on sync"
 
