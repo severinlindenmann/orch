@@ -109,6 +109,9 @@ ci.yml's `route` job (`scripts/mac_route.py`) decides once per run:
   emptied after every job (`scripts/mac-runner/job-completed.sh`). No owner secrets on the Mac.
 - **A refused job never runs a step**: the job-started hook stops the job's worker process at once (a failed hook
   alone would still run later `if: always()` steps).
+- **The hooks are the second lock, not the first**: they start themselves again in a clean environment, so functions
+  a job exports cannot replace their commands; but bash reads `BASH_ENV` before any hook line runs. The first lock
+  is GitHub holding every outside contributor's run until you click (step 1 below) and the route job.
 - **Shares the Mac with helpers**: each job holds the shared `heavy` lock, xcodebuild the `xcode` lock
   (`scripts/mac-runner/lock.sh`, folder `/Users/Shared/orch-locks`, group `orch-locks`); the macOS workspace suite
   is one part at `-n 6` there.

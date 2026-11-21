@@ -309,6 +309,22 @@ def test_a_refused_job_is_stopped_not_only_failed_and_the_job_cannot_switch_the_
     assert 'kill -9 "$worker"' in hook and "Runner.Worker" in hook
     assert "ORCH_HOOK_TEST" not in hook  # no switch a job's own environment could set
     assert 'if [ -f "$HERE/repo" ]; then REPO=$(cat "$HERE/repo"); unset ORCH_LOCK_DIR' in hook
+    # only the root-owned installed copy stops the job (no job can make a root-owned file)
+    assert '-user 0' in hook[hook.index("refuse() {") : hook.index('kill -9 "$worker"')]
+
+
+def test_a_refused_job_run_from_the_repository_never_stops_its_runner_worker(tmp_path):
+    """On GitHub's machines these tests run inside a real Runner.Worker: a refused hook killed the CI job itself."""
+    ev = tmp_path / "event.json"
+    ev.write_text("{}")
+    env = {"PATH": os.environ.get("PATH", ""), "ORCH_RUNNER_REPO": REPO, "GITHUB_REPOSITORY": REPO,
+           "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/feat/x", "GITHUB_EVENT_PATH": str(ev),
+           "ORCH_LOCK_DIR": str(tmp_path / "locks")}
+    hook = str(RUNNER / "job-started.sh")
+    # a parent process whose command line names Runner.Worker, like the runner's own worker
+    r = subprocess.run(["bash", "-c", 'exec -a Runner.Worker bash -c "bash \\"$0\\"; echo worker-alive"', hook],
+                       env=env, capture_output=True, text=True, timeout=30)
+    assert "refused" in r.stderr and "worker-alive" in r.stdout, (r.stdout, r.stderr)
 
 
 def test_installed_hook_ignores_a_repository_named_by_the_job(tmp_path):
@@ -338,6 +354,23 @@ def test_lock_numbers_from_the_environment_are_never_run_as_code(tmp_path):
     flag = tmp_path / "ran"
     r = _lock(tmp_path, "status", ORCH_LOCK_TTL_MIN=f"a[$(touch {flag})]", ORCH_LOCK_WAIT_SECS=f"x[$(touch {flag})]")
     assert r.returncode == 0 and not flag.exists()
+
+
+@pytest.mark.parametrize("name", ["job-started.sh", "job-completed.sh"])
+def test_functions_from_the_job_s_environment_never_replace_a_command_in_the_hooks(tmp_path, name):
+    """A job sets its own environment; bash loads exported functions from it (Codex review, ORCH-1125)."""
+    flag = tmp_path / "hijacked"
+    ev = tmp_path / "event.json"
+    ev.write_text("{}")
+    env = {"PATH": os.environ.get("PATH", ""), "ORCH_RUNNER_REPO": REPO, "GITHUB_REPOSITORY": REPO,
+           "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/feat/x", "GITHUB_EVENT_PATH": str(ev),
+           "ORCH_LOCK_DIR": str(tmp_path / "locks")}
+    for cmd in ("find", "ps", "kill", "id", "cat", "dirname", "tr"):
+        env[f"BASH_FUNC_{cmd}%%"] = f"() {{ echo x >> {flag}; }}"
+    env["SHELLOPTS"] = "privileged"  # would make the first start look like the clean one if the hook trusted $-
+    r = subprocess.run(["bash", str(RUNNER / name)], env=env, capture_output=True, text=True, timeout=30)
+    assert not flag.exists(), (r.stdout, r.stderr)
+    assert ("refused" if name == "job-started.sh" else "did nothing") in r.stderr
 
 
 def test_installed_hooks_use_a_fixed_path():
