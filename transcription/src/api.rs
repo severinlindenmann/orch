@@ -26,18 +26,20 @@ const SILENCE_RMS: f32 = 1e-4;
 
 pub struct App {
     pub engine: Arc<dyn Engine>,
+    pub tokens: crate::tokens::Tokens,
     /// One transcription at a time: the engine uses all its threads for one clip.
-    run: Semaphore,
+    pub run: Arc<Semaphore>,
     waiting: AtomicUsize,
 }
 
 pub type AppState = Arc<App>;
 
 impl App {
-    pub fn new(engine: Arc<dyn Engine>) -> AppState {
+    pub fn new(engine: Arc<dyn Engine>, data_dir: &std::path::Path) -> AppState {
         Arc::new(App {
             engine,
-            run: Semaphore::new(1),
+            tokens: crate::tokens::Tokens::open(data_dir),
+            run: Arc::new(Semaphore::new(1)),
             waiting: AtomicUsize::new(0),
         })
     }
@@ -140,11 +142,13 @@ pub async fn transcribe(
         return Err(busy());
     }
     let line = InLine(&app.waiting);
-    let _permit = app.run.acquire().await.map_err(|_| busy())?;
+    let permit = app.run.clone().acquire_owned().await.map_err(|_| busy())?;
     drop(line);
     let engine = app.engine.clone();
     let data = data.to_vec();
+    // The slot goes with the work: a caller who hangs up does not free it while the engine still runs.
     let (t, duration) = tokio::task::spawn_blocking(move || {
+        let _slot = permit;
         transcribe_blocking(engine.as_ref(), data, ext, lang.as_deref())
     })
     .await

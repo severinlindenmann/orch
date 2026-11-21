@@ -4,6 +4,9 @@ const HELP: &str = "orch-transcription: speech to text with a self-hosted Whispe
 
 Usage:
   orch-transcription [serve]   start the service (settings: ORCH_TRANSCRIPTION_* variables)
+  orch-transcription token add <name> [--per-minute N]   make a token (shown once; default 30 a minute)
+  orch-transcription token list                         names, limits, dates (never the tokens)
+  orch-transcription token remove <name>                refuse it from the next request on, delete its jobs
   orch-transcription --version
   orch-transcription --help
 
@@ -23,6 +26,16 @@ fn main() {
         None | Some("serve") => {}
         Some("--help") | Some("-h") | Some("help") => {
             print!("{HELP}");
+            return;
+        }
+        Some("token") => {
+            match token_cmd(&args[1..]) {
+                Ok(out) => print!("{out}"),
+                Err(e) => {
+                    eprintln!("orch-transcription: {e}");
+                    std::process::exit(2);
+                }
+            }
             return;
         }
         Some("--version") | Some("-V") => {
@@ -52,6 +65,63 @@ fn main() {
     if let Err(e) = rt.block_on(serve()) {
         eprintln!("orch-transcription: {e}");
         std::process::exit(1);
+    }
+}
+
+fn token_cmd(args: &[String]) -> Result<String, String> {
+    let cfg = Config::from_env();
+    let t = orch_transcription::tokens::Tokens::open(&cfg.data_dir);
+    let a: Vec<&str> = args.iter().map(String::as_str).collect();
+    match a.as_slice() {
+        ["add", name, rest @ ..] => {
+            let per = match rest {
+                [] => orch_transcription::tokens::DEFAULT_PER_MINUTE,
+                ["--per-minute", n] => n
+                    .parse()
+                    .map_err(|_| "--per-minute takes a number, for example 60".to_string())?,
+                _ => {
+                    return Err(
+                        "usage: orch-transcription token add <name> [--per-minute N]".into(),
+                    )
+                }
+            };
+            let tok = t.add(name, per)?;
+            Ok(format!(
+                "{tok}\nToken {name} made ({per} a minute). It is shown only now: put it where the caller keeps secrets.\n"
+            ))
+        }
+        ["list"] => {
+            let all = t.list();
+            if all.is_empty() {
+                return Ok("No tokens yet. Make one: orch-transcription token add <name>\n".into());
+            }
+            Ok(all
+                .iter()
+                .map(|e| {
+                    format!(
+                        "{}  {} a minute  made {}\n",
+                        e.name,
+                        e.per_minute,
+                        orch_transcription::tokens::day(e.created_at)
+                    )
+                })
+                .collect())
+        }
+        ["remove", name] => {
+            if t.remove(name)? {
+                Ok(format!(
+                    "Token {name} removed; its jobs are deleted within a minute.\n"
+                ))
+            } else {
+                Err(format!(
+                    "no token named {name}; see orch-transcription token list"
+                ))
+            }
+        }
+        _ => Err(
+            "usage: orch-transcription token add <name> [--per-minute N] | list | remove <name>"
+                .into(),
+        ),
     }
 }
 
@@ -92,7 +162,7 @@ async fn serve() -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())??;
-    let app = orch_transcription::App::new(engine);
+    let app = orch_transcription::App::new(engine, &cfg.data_dir);
     tracing::info!("listening on {}", cfg.listen);
     axum::serve(listener, orch_transcription::router(app))
         .with_graceful_shutdown(async {

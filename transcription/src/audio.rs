@@ -13,6 +13,8 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 
 pub const RATE: u32 = 16_000;
+const MIN_RATE: u32 = 8_000;
+const MAX_RATE: u32 = 96_000;
 
 #[derive(Debug, PartialEq)]
 pub enum AudioError {
@@ -96,9 +98,12 @@ pub fn decode(data: Vec<u8>, ext: &str, max_seconds: f64) -> Result<Vec<f32>, Au
         let ch = spec.channels().count().max(1);
         if rate == 0 {
             rate = spec.rate();
-            if rate == 0 {
+            // A made-up rate would get past the length cap (it counts samples): only real audio rates.
+            if !(MIN_RATE..=MAX_RATE).contains(&rate) {
                 return Err(AudioError::Unreadable);
             }
+        } else if spec.rate() != rate {
+            return Err(AudioError::Unreadable);
         }
         buf.resize(ab.samples_interleaved(), 0.0);
         ab.copy_to_slice_interleaved(&mut buf);
@@ -190,6 +195,27 @@ mod tests {
         let y = resample(&x, 48_000, 16_000);
         let rms = (y[1000..15000].iter().map(|v| v * v).sum::<f32>() / 14000.0).sqrt();
         assert!((rms - 0.707).abs() < 0.05, "rms {rms}");
+    }
+
+    #[test]
+    fn a_made_up_sample_rate_is_refused() {
+        // a WAV header claiming 1 MHz: 120 s of "audio" would be 120 million samples
+        let mut v = Vec::new();
+        let n: u32 = 1000;
+        v.extend_from_slice(b"RIFF");
+        v.extend_from_slice(&(36 + n * 2).to_le_bytes());
+        v.extend_from_slice(b"WAVEfmt ");
+        v.extend_from_slice(&16u32.to_le_bytes());
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.extend_from_slice(&1_000_000u32.to_le_bytes());
+        v.extend_from_slice(&2_000_000u32.to_le_bytes());
+        v.extend_from_slice(&2u16.to_le_bytes());
+        v.extend_from_slice(&16u16.to_le_bytes());
+        v.extend_from_slice(b"data");
+        v.extend_from_slice(&(n * 2).to_le_bytes());
+        v.resize(v.len() + n as usize * 2, 1);
+        assert_eq!(decode(v, "wav", 120.0), Err(AudioError::Unreadable));
     }
 
     #[test]

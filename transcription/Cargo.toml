@@ -29,7 +29,13 @@ tracing-subscriber = "0.3"
 symphonia = { version = "0.6", default-features = false, features = ["aac", "isomp4", "wav", "pcm", "mkv", "ogg", "vorbis", "flac", "mp3"] }
 symphonia-adapter-libopus = "0.3"
 whisper-rs = { version = "0.16", optional = true }
+sha2 = "0.10"
+rand = "0.8"
+base64 = "0.22"
+aes-gcm = "0.10"
+hkdf = "0.12"
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }
 http-body-util = "0.1"
+tempfile = "3"

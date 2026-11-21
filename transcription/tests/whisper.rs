@@ -6,13 +6,12 @@
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
-use http_body_util::BodyExt;
+use axum::http::StatusCode;
 use orch_transcription::engine::{Engine, WhisperEngine};
-use orch_transcription::{router, App};
 use serde_json::Value;
-use tower::ServiceExt;
+
+mod common;
+use common::fixture;
 
 fn engine() -> Option<Arc<dyn Engine>> {
     static E: OnceLock<Option<Arc<dyn Engine>>> = OnceLock::new();
@@ -41,26 +40,7 @@ macro_rules! need_model {
 }
 
 async fn post(e: Arc<dyn Engine>, uri: &str, ct: &str, body: Vec<u8>) -> (StatusCode, Value) {
-    let r = router(App::new(e))
-        .oneshot(
-            Request::post(uri)
-                .header("content-type", ct)
-                .body(Body::from(body))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let s = r.status();
-    let b = r.into_body().collect().await.unwrap().to_bytes();
-    (s, serde_json::from_slice(&b).unwrap())
-}
-
-fn fixture(name: &str) -> Vec<u8> {
-    std::fs::read(format!(
-        "{}/tests/fixtures/{name}",
-        env!("CARGO_MANIFEST_DIR")
-    ))
-    .unwrap()
+    common::harness(e).post(uri, ct, body).await
 }
 
 fn words(v: &Value) -> String {

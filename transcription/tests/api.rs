@@ -5,9 +5,10 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use orch_transcription::engine::{Engine, FakeEngine, Transcript};
-use orch_transcription::{router, App};
 use serde_json::Value;
 use tower::ServiceExt;
+
+mod common;
 
 fn fixture(name: &str) -> Vec<u8> {
     std::fs::read(format!(
@@ -41,15 +42,7 @@ fn wav(secs: f64, amp: f32) -> Vec<u8> {
 }
 
 async fn post(engine: Arc<dyn Engine>, uri: &str, ct: &str, body: Vec<u8>) -> (StatusCode, Value) {
-    let app = router(App::new(engine));
-    let req = Request::post(uri)
-        .header("content-type", ct)
-        .body(Body::from(body))
-        .unwrap();
-    let r = app.oneshot(req).await.unwrap();
-    let status = r.status();
-    let b = r.into_body().collect().await.unwrap().to_bytes();
-    (status, serde_json::from_slice(&b).unwrap_or(Value::Null))
+    common::harness(engine).post(uri, ct, body).await
 }
 
 #[tokio::test]
@@ -226,15 +219,19 @@ impl Engine for Slow {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_full_line_answers_busy_at_once() {
-    let app = router(App::new(Arc::new(Slow)));
+    let h = common::harness(Arc::new(Slow));
+    let app = h.router.clone();
+    let auth = format!("Bearer {}", h.token);
     let body = fixture("jfk.wav");
     let mut tasks = vec![];
     for _ in 0..8 {
         let app = app.clone();
         let body = body.clone();
+        let auth = auth.clone();
         tasks.push(tokio::spawn(async move {
             let req = Request::post("/v1/transcribe")
                 .header("content-type", "audio/wav")
+                .header("authorization", auth)
                 .body(Body::from(body))
                 .unwrap();
             app.oneshot(req).await.unwrap().status()
@@ -256,7 +253,8 @@ async fn a_full_line_answers_busy_at_once() {
 
 #[tokio::test]
 async fn health_and_unknown_paths() {
-    let app = router(App::new(Arc::new(FakeEngine::default())));
+    let h = common::harness(Arc::new(FakeEngine::default()));
+    let app = h.router.clone();
     let r = app
         .clone()
         .oneshot(Request::get("/v1/health").body(Body::empty()).unwrap())
