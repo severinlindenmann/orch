@@ -28,6 +28,10 @@ ALLOW = {
         "pull-requests": "ORCH-568: the helper watcher reads the merge queue file, so a helper waiting on "
         "a queued pull request is not nudged; follow-up like #837 (a manifest key instead of the name)",
     },
+    "orch/releasekeeper.py": {
+        "pull-requests": "ORCH-1128: a red develop reads the merge queue file for a fix and puts the revert "
+        "pull request first in it; follow-up like #837 (a manifest key instead of the name)",
+    },
     "orch/cli_chat.py": {"sync": "core `orch chat sync` command; not the add-on"},
     "orch/config.py": {"focus": _FOLLOW_UP, "insights": _FOLLOW_UP},
     "orch/history.py": {"sync": _FOLLOW_UP},

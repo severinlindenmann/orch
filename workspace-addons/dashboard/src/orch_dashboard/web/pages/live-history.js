@@ -76,7 +76,7 @@ function liveHistBody(sess) {
   return h('div', {className:'live-hist'}, head,
     working ? h('p', {className:'meta'}, 'Stop the helper to reopen an earlier session.') : null,
     liveHistRows(sess, v, working, busy, 'live-hist-h-' + sess.id),
-    h('p', {className:'meta'}, 'orch keeps the last ' + LIVE_HIST_MAX + ' sessions of this ticket on this computer.'));
+    h('p', {className:'meta'}, 'orch keeps the last ' + LIVE_HIST_MAX + ' sessions of this ' + (sess.kind ? 'helper' : 'ticket') + ' on this computer.'));
 }
 function liveHistRows(sess, v, working, busy, labelledby) {
   return h('ul', {className:'live-hist-list', 'aria-labelledby':labelledby}, v.rows.map(r => h('li', {className:'live-hist-row', 'data-current':r.current ? '' : null},

@@ -137,6 +137,7 @@ if (typeof module === 'object' && module.exports) {
     const on = () => typeof liveFocusOn === 'function' && liveFocusOn();
     async function read() {
       if (store.busy || !on() || document.visibilityState === 'hidden') return;
+      if (window.orchQuiet?.()) return;  // an add-on change restarts the server: the next tick asks it (ORCH-1034)
       store.busy = true;
       try {
         const r = await fetch('api/sessions?lines=' + LIVE_SESSIONS_LINES, {cache:'no-cache', credentials:'same-origin'});

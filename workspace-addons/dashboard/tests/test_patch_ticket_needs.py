@@ -1,0 +1,42 @@
+"""ORCH-1047: a click's quick answer (data.patch_ticket) reads the clicked ticket again; its question rows that are no
+longer open leave the needs list too. Before, the needs list stayed the cached one, so Home showed an answered
+question again until the background build ran, and a click on it was refused ("q1 is already answered.")."""
+
+import json
+
+from orch_dashboard import data
+
+from .conftest import _ticket
+
+
+def _q(qid, text, answer=None):
+    return {"id": qid, "text": text, "options": ["Yes", "No"], "recommended": "Yes", "answer": answer}
+
+
+def _row(tid, qid):
+    return {"id": f"core:q:{tid}:{qid}", "source": "core", "kind": "question", "ticket": tid,
+            "answer": {"question": qid, "options": ["Yes", "No"]}}  # fmt: skip
+
+
+def test_an_answered_question_leaves_the_needs_list_of_the_click_answer(ws):
+    tid = "t_order0001"
+    before = _ticket(tid, "Weekly newsletter template", "waiting", checklist=[], ext={},
+                     questions=[_q("q1", "Story?"), _q("q2", "Colour?"), _q("q3", "Language?")])  # fmt: skip
+    after = {**before, "questions": [_q("q1", "Story?", "Yes"), _q("q2", "Colour?"), _q("q3", "Language?")]}
+    (ws / ".orch" / "tickets" / f"{tid}.json").write_text(json.dumps(after))
+    other = _row("t_other000x", "q1")  # another ticket's question stays, whatever its id
+    notice = {"id": "sync:note", "source": "sync", "ticket": None, "text": "A note"}
+    state = {
+        "tickets": [before],
+        "needs": [_row(tid, "q1"), _row(tid, "q2"), _row(tid, "q3"), other, notice],
+        "runs": {},
+    }
+    out = data.patch_ticket(ws, None, state, tid)
+    assert out is not None
+    assert [n["id"] for n in out["needs"]] == [
+        f"core:q:{tid}:q2",
+        f"core:q:{tid}:q3",
+        "core:q:t_other000x:q1",
+        "sync:note",
+    ]
+    assert state["needs"][0]["id"] == f"core:q:{tid}:q1", "the cached state itself is not changed"

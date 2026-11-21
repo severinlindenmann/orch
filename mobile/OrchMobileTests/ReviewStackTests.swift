@@ -282,6 +282,69 @@ final class ReviewVerdictOutboxTests: XCTestCase {
         XCTAssertFalse(big.isValid)           // over 8 KB
         XCTAssertTrue(box.items.isEmpty)
     }
+    // ORCH-444: voice notes, pictures and files with a Send back
+    private func draftFile(_ name: String, _ data: Data, kind: MessageAttachment.Kind, mime: String, duration: Double? = nil) throws -> DraftFile {
+        let d = tmpDir(); dirs.append(d)
+        let url = d.appendingPathComponent(name); try data.write(to: url)
+        return DraftFile(url: url, kind: kind, name: name, mime: mime, duration: duration)
+    }
+    func testAnswerFilesAreUploadedFirstAndNamedInTheVerdict() async throws {
+        let (box, dir) = outbox(); let q = MockReviewStack.questions[0]; let relay = MockRelay(latency: .zero)
+        let jpg = Data([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]), voice = Data(repeating: 7, count: 40)
+        let photo = try draftFile("screen.jpg", jpg, kind: .image, mime: "image/jpeg")
+        let rec = try draftFile("voice-1.m4a", voice, kind: .voice, mime: "audio/mp4", duration: 2.4)
+        let v = ReviewVerdict(verdict: .talk, digest: q.message.body.digest!, note: .init(words: .init(text: "Bigger logo")))
+        try box.enqueueAnswer(question: q, answer: "Send back for changes: Bigger logo", verdict: v, files: [photo, rec])
+        try FileManager.default.removeItem(at: photo.url)                              // the Outbox keeps its own copy
+        XCTAssertEqual(box.items[0].files.map(\.name), ["screen.jpg", "voice-1.m4a"])
+        XCTAssertNil(box.items[0].verdict?.note?.files, "blob ids are only known after the upload")
+        box.flushWrites()
+        let again = Outbox(directory: dir, phone: "ph_iphone0001")                    // a restart keeps the files
+        XCTAssertEqual(again.items[0].files.count, 2)
+        _ = await again.flush(using: relay)
+        let verdicts = await relay.verdicts, uploads = await relay.uploads
+        let files = try XCTUnwrap(verdicts.first?.verdict.note?.files)
+        XCTAssertEqual(files.map(\.kind), [.image, .voice]); XCTAssertEqual(files.map(\.size), [jpg.count, voice.count])
+        XCTAssertEqual(uploads[files[0].blobId], jpg); XCTAssertEqual(uploads[files[1].blobId], voice)
+        XCTAssertEqual(files[1].duration, 2.4); XCTAssertEqual(verdicts[0].verdict.note?.words?.text, "Bigger logo")
+    }
+    func testFilesAloneAreEnoughAndAtMostFive() throws {
+        let (box, _) = outbox(); let q = MockReviewStack.questions[0]; let digest = q.message.body.digest!
+        let one = try draftFile("offer.pdf", Data("%PDF".utf8), kind: .file, mime: "application/pdf")
+        let talk = ReviewVerdict(verdict: .talk, digest: digest)
+        XCTAssertEqual(ReviewStackRules.summary(ReviewStackRules.item(for: q)!, verdict: talk, files: 1), "Send back for changes (1 file)")
+        XCTAssertThrowsError(try box.enqueueAnswer(question: q, answer: "x", verdict: talk, files: Array(repeating: one, count: 6))) {
+            XCTAssertEqual($0 as? Outbox.VerdictProblem, .invalid)
+        }
+        XCTAssertTrue(box.items.isEmpty)
+        try box.enqueueAnswer(question: q, answer: "Send back for changes (1 file)", verdict: talk, files: [one])
+        XCTAssertEqual(Outbox.answerRequest(for: box.items[0]).verdict?.note?.files?.count, 1)
+    }
+    func testChangingTheVerdictReplacesItsFiles() throws {
+        let (box, _) = outbox(); let q = MockReviewStack.questions[0]; let digest = q.message.body.digest!
+        let one = try draftFile("offer.pdf", Data("%PDF".utf8), kind: .file, mime: "application/pdf")
+        try box.enqueueAnswer(question: q, answer: "x", verdict: ReviewVerdict(verdict: .talk, digest: digest), files: [one])
+        try box.changeVerdict(question: q, answer: "Send it", verdict: ok(q))
+        XCTAssertTrue(box.items[0].files.isEmpty)
+        XCTAssertNil(Outbox.answerRequest(for: box.items[0]).verdict?.note, "a right swipe carries no files")
+    }
+    /// Codex review: a replacement that cannot be copied left the old answer pointing at deleted copies.
+    func testAFailedReplacementKeepsTheOldFiles() throws {
+        let (box, _) = outbox(); let q = MockReviewStack.questions[0]; let digest = q.message.body.digest!
+        let one = try draftFile("offer.pdf", Data("%PDF".utf8), kind: .file, mime: "application/pdf")
+        let talk = ReviewVerdict(verdict: .talk, digest: digest)
+        try box.enqueueAnswer(question: q, answer: "x", verdict: talk, files: [one])
+        let empty = try draftFile("empty.jpg", Data(), kind: .image, mime: "image/jpeg")
+        XCTAssertThrowsError(try box.changeVerdict(question: q, answer: "y", verdict: talk, files: [empty]))
+        let kept = try XCTUnwrap(box.items[0].files.first)
+        XCTAssertEqual(kept.name, "offer.pdf")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: box.fileURL(box.items[0], kept).path))
+        let two = try draftFile("screen.jpg", Data([0xff, 0xd8, 1]), kind: .image, mime: "image/jpeg")
+        try box.changeVerdict(question: q, answer: "z", verdict: talk, files: [two])
+        XCTAssertEqual(box.items[0].files.map(\.name), ["screen.jpg"])
+        XCTAssertNotEqual(box.items[0].files[0].file, kept.file, "a replacement never reuses an old copy's name")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: box.fileURL(box.items[0], kept).path), "the old copy goes")
+    }
     func testChoiceNeedsPickFirst() throws {
         let item = ReviewStackRules.item(for: try question("card-choice"))!
         XCTAssertEqual(ReviewStackRules.okOutcome(item, picked: nil), .pickFirst)
@@ -327,5 +390,77 @@ final class CardFileCacheTests: XCTestCase {
         XCTAssertNotNil(ok)
         let again = await model.cardFile(forged)                  // a verified cache hit for another hash does not leak either
         XCTAssertNil(again)
+    }
+}
+
+/// ORCH-860: Run it now on the phone. A run card shows the command with Copy; Run it now only for orch's own commands the
+/// computer marked for the phone; every other command shows one line why and a right swipe never sends ok.
+final class RunCardTests: XCTestCase {
+    func testRunShapesDecodeOnlyWhenTheSchemaTakesThem() throws {
+        var n = 0
+        for s in try shapes() where (s["name"] as! String).hasPrefix("card-run-") || (s["name"] as! String).hasPrefix("run-") {
+            let name = s["name"] as! String
+            // an extra key (folder, argv) is refused by the relay; the app ignores unknown keys like on every card and never shows them
+            if ["run-cwd-on-wire", "run-argv-on-wire"].contains(name) { continue }
+            let card = try question(name).message.body.card
+            if s["schema"] as? Bool == true { XCTAssertEqual(card?.kind, .run, name) } else { XCTAssertNil(card, name) }
+            n += 1
+        }
+        XCTAssertGreaterThanOrEqual(n, 28)
+    }
+    func testOrchCommandRunsHereOthersShowWhy() throws {
+        let orch = ReviewStackRules.item(for: try question("card-run-orch"))!
+        XCTAssertEqual(orch.kind, .run)
+        XCTAssertEqual(orch.card.run?.runsHere, true)
+        XCTAssertNil(orch.card.run?.whyNotHere)
+        XCTAssertEqual(ReviewStackRules.okOutcome(orch, picked: nil), .allowed)
+        for name in ["card-run-other", "card-run-copy", "card-run-login"] {
+            let item = ReviewStackRules.item(for: try question(name))!
+            XCTAssertEqual(item.card.run?.runsHere, false, name)
+            XCTAssertEqual(ReviewStackRules.okOutcome(item, picked: nil), .atComputer, name)
+            let why = try XCTUnwrap(item.card.run?.whyNotHere, name)
+            XCTAssertFalse(why.contains("\n"), name)
+        }
+    }
+    func testAnswersAreOrchsOwnWords() throws {
+        let item = ReviewStackRules.item(for: try question("card-run-orch"))!
+        let ok = try XCTUnwrap(ReviewStackRules.verdict(item, .ok)), no = try XCTUnwrap(ReviewStackRules.verdict(item, .no))
+        XCTAssertEqual(ReviewStackRules.summary(item, verdict: ok), "I ran it")
+        XCTAssertEqual(ReviewStackRules.summary(item, verdict: no), "Leave it off for now")
+        XCTAssertEqual(ReviewStackRules.countsText([item]), "1 command")
+    }
+    @MainActor func testOkOnARunCardThePhoneMayNotRunIsNeverQueued() throws {
+        let dir = tmpDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let box = Outbox(directory: dir, phone: "ph_iphone0001")
+        let other = try question("card-run-other"), digest = other.message.body.digest!
+        XCTAssertThrowsError(try box.enqueueAnswer(question: other, answer: "I ran it", verdict: ReviewVerdict(verdict: .ok, digest: digest))) {
+            XCTAssertEqual($0 as? Outbox.VerdictProblem, .invalid)
+        }
+        XCTAssertNoThrow(try box.enqueueAnswer(question: other, answer: "Not now", verdict: ReviewVerdict(verdict: .no, digest: digest)))
+        let orch = try question("card-run-orch")
+        XCTAssertNoThrow(try box.enqueueAnswer(question: orch, answer: "I ran it", verdict: ReviewVerdict(verdict: .ok, digest: orch.message.body.digest!)))
+    }
+    func testAnOrchCommandThePhoneMayNotRunShowsWhy() throws {
+        let run = CardRun(command: "orch config set workflow.reviewer_look on", cls: .orch, phone: false)
+        XCTAssertFalse(run.runsHere)
+        XCTAssertEqual(run.whyNotHere, "Run this one at your computer.")
+        let item = ReviewStackRules.item(for: cardQ("m_rx", ReviewCard(kind: .run, title: "T", then: "x", run: run, noLabel: "Not now")))!
+        XCTAssertEqual(ReviewStackRules.okOutcome(item, picked: nil), .atComputer)
+    }
+    @MainActor func testOutboxRefusesOkWithoutTheDecoderOnAPhoneFlagOnAnotherClass() throws {
+        // built in code (the decoder would refuse it): phone true on a command that is not orch's own never runs here
+        let run = CardRun(command: "brew install gh", cls: .other, phone: true)
+        XCTAssertFalse(run.runsHere); XCTAssertFalse(run.isValid)
+        let q = cardQ("m_ry", ReviewCard(kind: .run, title: "T", then: "x", run: run, noLabel: "Not now"))
+        let dir = tmpDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let box = Outbox(directory: dir, phone: "ph_iphone0001")
+        XCTAssertThrowsError(try box.enqueueAnswer(question: q, answer: "I ran it", verdict: ReviewVerdict(verdict: .ok, digest: q.message.body.digest!)))
+    }
+    func testABrokenRunCardIsNotAnsweredAsAPlainQuestion() throws {
+        // the card is dropped on decode; a question without options is not a stack card, so no ok can be sent from the stack
+        let json = #"{"schema":"orch.msg/1","id":"m_z","from":"ws_p","to":"phones","type":"question","created_at":"2026-11-15T09:00:00Z","body":{"question_id":"q1","text":"T","options":[],"digest":"\#(String(repeating: "b", count: 64))","card":{"kind":"run","title":"t","then":"x","run":{"command":"rm x; id","class":"orch","phone":true},"no_label":"Not now"}}}"#
+        let m = try JSONCoding.decoder.decode(QuestionMessage.self, from: Data(json.utf8))
+        XCTAssertNil(m.body.card)
+        XCTAssertNil(ReviewStackRules.kind(of: Question(message: m, workspaceName: "P")))
     }
 }

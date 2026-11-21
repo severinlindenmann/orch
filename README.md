@@ -172,4 +172,4 @@ Every PR runs only the folders it touches (`ci.yml`); one check, `gate`, must be
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE). Free for noncommercial use.
+[Apache License 2.0](LICENSE). Copyright notice in [NOTICE](NOTICE).

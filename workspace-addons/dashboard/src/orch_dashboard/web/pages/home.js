@@ -9,7 +9,11 @@ function changeError(result) {
   if (result.status === 0) return "Can't reach orch. Your change was not sent.";
   const text = window.DashHelpers.scrubText(result.text);
   // the page was older than the ticket (a new round started, the work changed): nothing was approved
-  return /changed while you worked|Read it again/i.test(text) ? 'This ticket changed since you opened it. Look at it again, then accept.' : text;
+  if (/changed while you worked|Read it again/i.test(text)) return 'This ticket changed since you opened it. Look at it again, then accept.';
+  // an answer to a question that is settled or changed meanwhile (ORCH-1047): plain words, no question id
+  if (/^q[0-9]+ is already answered/.test(text)) return 'This question was already answered.';
+  if (/^q[0-9]+ changed after it was shown/.test(text)) return 'This question changed since you saw it. Look at it again, then answer.';
+  return text;
 }
 // Home rows sit under a heading that already says their status, so a row shows no status chip; the ticket number
 // (ORCH-58) goes before the title. `tail` is what a row adds instead, e.g. when it finished.
@@ -61,7 +65,10 @@ function needRow(row, newest, questionCount = 1, same = []) {
             const result = await act('answer', {ticket:r.ticket, question:r.answer.question, digest:r.answer.digest, answer:option});
             if (result.ok) answered++; else failed = failed || result;
           }
-          if (failed) window.orch.toast((answered ? 'Answered on ' + answered + ' of ' + total + ' tickets. ' : '') + changeError(failed), 'error');
+          if (failed) {
+            window.orch.toast((answered ? 'Answered on ' + answered + ' of ' + total + ' tickets. ' : '') + changeError(failed), 'error');
+            if (typeof refresh === 'function') refresh();  // a refused answer: Home reads what is open now
+          }
         } finally {
           rows.forEach(r => pendingAnswers.delete(r.id));
           locks.delete(key);

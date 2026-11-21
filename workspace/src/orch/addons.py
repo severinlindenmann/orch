@@ -2863,8 +2863,9 @@ def _restart_locked(
     for n in sorted(names - stopped):
         why = services._printable(stops.get(n, {}).get("error") or "did not stop")
         lines.append(f"Restart {label(n)} to use the new version (stop failed: {why})")
-    # The environment: this terminal's, plus HOME from the system and ORCH_HOME (see launchenv). Nothing the
-    # service recorded is replayed (that file is writable by any process of this user); it is only compared.
+    # The environment: this terminal's, plus ORCH_HOME and (not in a test install) HOME from the system (see
+    # launchenv). Nothing the service recorded is replayed (that file is writable by any process of this
+    # user); it is only compared.
     from orch import launchenv
 
     over, env_notes = launchenv.overrides(home())
@@ -2876,7 +2877,8 @@ def _restart_locked(
         diff = launchenv.differs((recorded or {}).get(n), used)
         if diff:
             lines.append(
-                f"{label(n)} started with a different {'/'.join(diff)}; restarted with this terminal's "
+                f"{label(n)} started with a different {'/'.join(diff)}; restarted with "
+                f"{launchenv.home_said(over, used)} and this terminal's PATH "
                 f"(run orch stop, then orch start, in {root} if that is wrong)"
             )
     errors: dict[str, str] = {}
