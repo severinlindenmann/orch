@@ -65,6 +65,38 @@ def test_add_is_stopped_until_started_and_the_whole_cycle_works(cli, ws, fake):
     assert [c[0] for c in fake.calls] == ["install", "start", "stop", "restart", "auto", "auto", "uninstall"]
 
 
+def test_a_re_added_id_starts_with_an_empty_log(cli, ws):
+    """ORCH-1131: a new service must not show the removed one's lines (maybe secrets) as its own."""
+    assert _add(cli)[0] == 0
+    log = ws / ".orch/addons/services/logs/web.log"
+    log.write_text("old line\n", encoding="utf-8")
+    assert jrun(cli, "remove", "web")[0] == 0
+    assert log.read_text(encoding="utf-8") == "old line\n"  # remove keeps it
+    code, out = _add(cli)
+    assert code == 0, out
+    assert not log.exists() or log.read_text(encoding="utf-8") == ""
+    code, out = jrun(cli, "log", "web")
+    assert code == 0 and "old line" not in json.dumps(out)
+    kept = list((ws / ".orch/addons/services/logs/removed").glob("web-*.log"))
+    assert len(kept) == 1 and kept[0].read_text(encoding="utf-8") == "old line\n"
+    # a second round keeps both old logs apart
+    log.write_text("second\n", encoding="utf-8")
+    assert jrun(cli, "remove", "web")[0] == 0
+    code, out = _add(cli)
+    assert (
+        code == 0 and "empty log" in out["next"] and ".orch/addons/services/logs/removed/web-" in out["next"]
+    )
+    texts = sorted(
+        p.read_text(encoding="utf-8") for p in (ws / ".orch/addons/services/logs/removed").glob("web-*.log")
+    )
+    assert texts == ["old line\n", "second\n"]
+
+
+def test_a_new_id_says_nothing_about_an_old_log(cli):
+    code, out = _add(cli)
+    assert code == 0 and "empty log" not in out["next"]
+
+
 def test_add_with_start_runs_at_once(cli, fake):
     code, out = _add(cli, "web", "--start")
     assert code == 0 and out["service"]["state"] == "running" and "running" in out["next"]
@@ -222,6 +254,59 @@ def test_log_masks_secrets_and_keeps_plain_lines(cli, ws, stored_keys):
     assert len(out["lines"]) == 2 and out["lines"][-1] == "listening on 8000"
     code, out, _ = cli("log", "web", "--lines", "1")
     assert out.strip() == "listening on 8000"
+
+
+def test_log_masks_only_the_secret_part_of_a_line(cli, ws, stored_keys):
+    """ORCH-933: a key=value secret hides the value, not the whole line (the rest of the log stays useful)."""
+    _add(cli)
+    stored_keys["MY_TOKEN"] = "zq-stored-value-81723"
+    log = ws / ".orch/addons/services/logs/web.log"
+    written = [
+        "tick 5 password=hunter2isverylong123 TOKEN=abcDEF123456ghiJKL789",
+        "tick 6 API_KEY=hunter2hunter2hunter2 done",
+        "tick 7 all good [hidden]",
+    ]
+    log.write_text("\n".join(written) + "\n", encoding="utf-8")
+    code, out = jrun(cli, "log", "web")
+    assert code == 0
+    assert out["lines"] == [
+        "tick 5 password=•••••• TOKEN=••••••",
+        "tick 6 API_KEY=•••••• done",
+        "tick 7 all good [hidden]",
+    ], out["lines"]
+
+
+def test_log_mask_never_shows_part_of_a_value(cli, ws, stored_keys):
+    """ORCH-933 review: a quoted value with spaces is hidden whole; dots put in for display never make a stored
+    key value appear (a literal [hidden] in the log next to its parts)."""
+    _add(cli)
+    stored_keys["ODD_KEY"] = "abc••••••def-81723"
+    log = ws / ".orch/addons/services/logs/web.log"
+    written = [
+        'tick 8 password="correct horse battery staple" done',
+        "tick 9 password=x1y2z3w4v5 abc[hidden]def-81723",
+    ]
+    log.write_text("\n".join(written) + "\n", encoding="utf-8")
+    code, out = jrun(cli, "log", "web")
+    assert code == 0
+    text = "\n".join(out["lines"])
+    for part in ("horse", "battery", "staple", "abc••••••def"):
+        assert part not in text, out["lines"]
+    assert out["lines"][0] == "tick 8 password=•••••• done", out["lines"]
+
+
+def test_log_line_with_a_stored_key_is_hidden_whole(cli, ws, stored_keys):
+    """ORCH-933 review: a stored value that itself holds key=value is never cut into shown pieces."""
+    _add(cli)
+    stored_keys["COMBO"] = "leftpart-81723 password=hunter2isverylong123 rightpart-81723"
+    log = ws / ".orch/addons/services/logs/web.log"
+    log.write_text(
+        "tick 10 leftpart-81723 password=hunter2isverylong123 rightpart-81723\ntick 11 fine\n",
+        encoding="utf-8",
+    )
+    code, out = jrun(cli, "log", "web")
+    assert code == 0
+    assert out["lines"] == ["••••••", "tick 11 fine"], out["lines"]
 
 
 def test_view_is_a_valid_page(cli, ws):

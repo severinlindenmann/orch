@@ -113,6 +113,12 @@ a.result-link:hover{background:var(--surface-2)}
 a.result-link .result-name{text-decoration:underline}
 .result-link .meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .result-link[data-state=error] .meta{color:var(--danger)}
+/* a ticket's results in a page (ORCH-697): the widgets, then the plain links as rows; "+N more" opens the overlay */
+.results-host{display:grid;gap:var(--s2);min-width:0}
+.results-host[hidden]{display:none}
+.result-links{display:grid;gap:var(--space-0)}
+.result-more{align-self:center;justify-self:start}
+.wall-results .result-grid,.live-results .result-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,200px),1fr))}
 /* the big overlay */
 dialog.dialog.result-overlay{width:min(1100px,calc(100% - var(--s6)));height:min(800px,calc(100dvh - var(--s6)));max-height:none;padding:0;display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden;border-radius:var(--radius-card)}
 dialog.result-overlay:not([open]){display:none}
