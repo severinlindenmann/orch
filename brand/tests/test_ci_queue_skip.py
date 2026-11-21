@@ -74,6 +74,12 @@ def test_both_still_count_for_the_final_check():
     last = list(CI_JOBS.values())[
         -1
     ]  # the roll-up job GitHub requires: green when every called job passed or was skipped
-    assert line(last, "if") == "always()"
+    cond = line(last, "if")
+    # always(), except a queue group the local check already decided (group_check = local, ORCH-1124): the queue
+    # posts the roll-up status itself there
+    assert cond == "always()" or (
+        cond.startswith('"${{ always() && !(')
+        and "contains(github.event.pull_request.body, 'orch-group-check: local')" in cond
+    ), cond
     needs = line(last, "needs")
     assert "addons" in needs and "workspace" in needs
