@@ -49,6 +49,10 @@ ALLOW = {
         "workspace-addons/dashboard/src/orch_dashboard/mobile.py",
         "mark_chat_history",
     ): "shown ticket (data.shown)",
+    (
+        "workspace-addons/dashboard/src/orch_dashboard/ticketpages.py",
+        "slim",
+    ): "shown ticket (_shown -> data.shown); cuts the history, reads the done time",
 }
 # (file, function) -> why it may read a step/ref/plan `by` or another person field (answered_by, wont_by,
 # person, description_by) raw. History reads stay under ALLOW.

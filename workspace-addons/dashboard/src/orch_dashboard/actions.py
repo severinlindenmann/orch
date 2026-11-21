@@ -1705,6 +1705,13 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
 
         update.dismiss_auto_note()
         return 200, "", None
+    if op == "update.check.dismiss":  # Home: "Not now" on the card after a failed self-check; nothing runs
+        if not session:
+            raise NeedsPerson(SIGNIN)
+        from . import update
+
+        update.dismiss_check_card()
+        return 200, "", None
     if orch_bin == SELF and turns_review_off(op, args) and not session:  # ORCH-424: only the signed-in person
         raise NeedsPerson(SIGNIN)
     if op == "ticket.new" and isinstance(args, dict) and "steps" in args:

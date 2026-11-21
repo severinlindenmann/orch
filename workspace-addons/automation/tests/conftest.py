@@ -48,6 +48,17 @@ elif args[:2] == ["diag", "tickets"]:
 elif args[:2] == ["relay", "inbox"] and "--since" in args:
     p = root / "since.json"
     print(p.read_text() if p.exists() else json.dumps({{"next": int(args[args.index("--since") + 1]), "items": []}}))
+elif args[:2] == ["relay", "pickups"] and "--started" in args:
+    p = root / "pickups.json"; rows = json.loads(p.read_text())
+    mid = args[args.index("--started") + 1]
+    for r in rows:
+        if r["id"] == mid and "--run" in args: r["run"] = args[args.index("--run") + 1]
+        if r["id"] == mid and "--not-started" in args: r["not_started"] = args[args.index("--not-started") + 1]
+    p.write_text(json.dumps(rows)); print("{{}}")
+elif args[:2] == ["relay", "pickups"]:
+    p = root / "pickups.json"
+    rows = json.loads(p.read_text()) if p.exists() else []
+    print(json.dumps([r for r in rows if "--waiting" not in args or not (r.get("run") or r.get("not_started"))]))
 elif args[:2] == ["relay", "inbox"]:
     p = root / "inbox.json"
     print(p.read_text() if p.exists() else "[]")

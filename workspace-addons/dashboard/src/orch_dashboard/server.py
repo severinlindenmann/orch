@@ -39,6 +39,14 @@ try:  # the core's debug log; a dashboard that cannot import it simply writes no
 except ImportError:  # pragma: no cover
     diag = None
 
+try:  # reads a refused request's unread body before the close (Windows resets the connection otherwise)
+    from orch.httpbody import ReadsWholeBody
+except ImportError:  # pragma: no cover
+
+    class ReadsWholeBody:  # an older core: no draining
+        pass
+
+
 DEFAULT_PORT = 8420
 MAX_BODY = 16384  # every action but the ones below
 MAX_BIG_BODY = (
@@ -270,7 +278,7 @@ def _client_gone(sock) -> bool:
         return True
 
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
     timeout = 10  # a short body must not hold a thread
 
     def __init__(self, *a, root: Path, orch_bin: str | None, puller: ViewPuller, session=None, **kw):
@@ -334,14 +342,7 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def _refuse_type(self):
-        """415 for a body that is not JSON. Reads a small body first: Windows resets a connection closed with
-        unread data, and the client then sees an abort instead of the answer."""
-        try:
-            n = int(self.headers.get("Content-Length") or "0")
-            if 0 < n <= 65536:
-                self.rfile.read(n)
-        except (ValueError, OSError):
-            pass
+        """415 for a body that is not JSON (its unread body is read after the answer: ReadsWholeBody)."""
         return self._send(415, b"send JSON", "text/plain")
 
     def _send(self, code, body: bytes, ctype: str, extra: dict | None = None, csp: str | None = None):
@@ -915,6 +916,18 @@ class Handler(BaseHTTPRequestHandler):
                 hdr["Content-Encoding"] = "gzip"
                 hdr["Vary"] = "Accept-Encoding"
             return self._send(200, body, "application/json", hdr)
+        if path == "/api/tickets":  # one page of tickets, searched and filtered here (ORCH-523)
+            from . import ticketpages
+            from .data import _me
+
+            body = ticketpages.answer(self.root, parse_qs(query), _me(self.root).removeprefix("human:"))
+            hdr = {}
+            if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+                import gzip
+
+                body = gzip.compress(body, 3)
+                hdr = {"Content-Encoding": "gzip", "Vary": "Accept-Encoding"}
+            return self._send(200, body, "application/json", hdr)
         if path == "/api/chat/contacts" or re.fullmatch(r"/api/chat/thread/ws_[a-z0-9]{10}", path):
             from .data import load_chat_contacts, load_chat_thread
 
@@ -1082,6 +1095,9 @@ class Handler(BaseHTTPRequestHandler):
             "apple-touch-icon.png",
         ):
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
+        # Browsers still ask for favicon.ico on some pages; a 404 there is a page error in the console.
+        if name == "favicon.ico":
+            return self._send(200, web_file("favicon.svg"), TYPES[".svg"])
         self._send(404, b"not found", "text/plain")
 
     def _events(self):
@@ -1532,8 +1548,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise actions.NeedsPerson(actions.SIGNIN)
                 args = body.get("args") or {}
                 to = args.get("to") if isinstance(args, dict) else None
-                if to is not None and to not in update.BUILDS:
-                    raise actions.BadRequest("Choose release or development build.")
+                if not update.target_ok(to):
+                    raise actions.BadRequest("Choose release, development build or a release number.")
                 code, text = update.start_update(
                     self.root,
                     self.orch_bin,
@@ -1775,6 +1791,11 @@ def make_server(
     srv.revisions = Revisions(root)
     srv.state_cache = StateCache(root, orch_bin, srv.revisions)
     srv.act_ids = actids.ActIds()
+    from . import ticketpages
+
+    ticketpages.warm(
+        root
+    )  # the first /api/tickets page answers at once, not after reading every ticket (ORCH-523)
     srv.remote_server, srv.remote_error = None, None
     if remote is not None:
         try:
