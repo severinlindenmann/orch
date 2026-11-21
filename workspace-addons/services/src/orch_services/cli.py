@@ -374,7 +374,7 @@ def _launching(drv, spec) -> bool:
 def _shown(root: Path, p: Path) -> str:
     """A path as the person reads it: relative to the workspace when it lies inside it."""
     try:
-        return str(p.resolve().relative_to(Path(root).resolve()))
+        return p.resolve().relative_to(Path(root).resolve()).as_posix()
     except ValueError:
         return str(p)
 
