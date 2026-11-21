@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -p
 # Runner hook before every job on the orch edge test server's CI runner (ACTIONS_RUNNER_HOOK_JOB_STARTED, set by
 # setup.sh; ORCH-1126). Refuses a job that must never run here: anything but a push to develop, the nightly run, a
 # manual run or a release pull request (into main, from a branch of this repository). ci.yml's route job already

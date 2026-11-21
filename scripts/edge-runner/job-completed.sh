@@ -1,9 +1,10 @@
-#!/bin/bash
+#!/bin/bash -p
 # Runner hook after every job on the orch edge test server's CI runner (ACTIONS_RUNNER_HOOK_JOB_COMPLETED, set by
 # setup.sh; ORCH-1126). Leaves nothing for the next job: stops and removes the throwaway user services a job made
 # (the Services add-on's real Linux run), stops every process of the runner user except the runner itself and its
 # user service manager, and empties this user's files in /tmp and /dev/shm. The job's throwaway home lives in the
-# job's temp folder, which the runner wipes itself. Never fails the job.
+# job's temp folder, which the runner wipes itself. Before the next job runner-loop.sh (root) stops everything of
+# orch-ci again and makes a fresh runner folder and home. Never fails the job.
 # A job sets its own environment, and bash loads shell functions from it: a function (find, ps, kill) would replace
 # that command here, whatever PATH says. So the hook first starts itself again as privileged bash (-p never loads
 # functions from the environment) with only the values it needs. Only paths with a slash run before that line.
@@ -53,7 +54,7 @@ keep=" $$ "; p=$PPID
 while [ -n "$p" ] && [ "$p" -gt 1 ]; do keep="$keep$p "; p=$(ps -p "$p" -o ppid= 2>/dev/null | tr -d ' '); done
 # The runner is recognised by the program it runs (its own bin folder), never by words in a command line a job
 # could copy.
-RBIN=$(cd "$REAL_HOME/actions-runner/bin" 2>/dev/null && pwd -P)
+RBIN=$(cd "$HERE/job/bin" 2>/dev/null && pwd -P)   # the fresh runner folder runner-loop.sh makes per job
 # The manager's PID comes from the system manager (a job cannot change it). (sd-pam) is the one child the manager
 # starts in its first second (a job's own units are its children too, but start later). The session bus is NOT kept:
 # a job could start it with its own settings; it is stopped like the rest and starts again when it is next needed.

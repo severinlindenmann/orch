@@ -7,18 +7,23 @@
 # or `gh api -X POST repos/<repo>/actions/runners/registration-token --jq .token` with an admin login; valid one hour).
 # It is used once and never stored; the runner keeps only its own credentials, which can take jobs and nothing else.
 #
-# What it sets up:
+# What it sets up (the same safety as the Mac's runner after its security review ORCH-1233):
 # - packages the Linux jobs need that a job cannot install itself without sudo: faketime (clock tests), a C
-#   toolchain for cargo, tmux, Node (only to install Chromium's system libraries for Playwright)
+#   toolchain for cargo, tmux, Chromium's system libraries (Playwright), nftables for the network rule
 # - a user `orch-ci` with its own group and a closed home; lingering on, so the Services add-on's real Linux run
 #   has a user service manager
-# - Rust (rustup, stable, rustfmt, clippy) in orch-ci's download cache, which every job reuses
-#   (.github/actions/edge-job-home)
-# - the GitHub runner 2.338.2 (checksum checked) in /home/orch-ci/actions-runner, label orch-edge, started at boot
-#   by systemd under that user at lower priority than the test services, memory capped at 5 GB (its user services at 1.5 GB)
-# - job hooks in /usr/local/orch-edge-runner (owned by root, the runner cannot change them): before each job they
-#   refuse anything but develop pushes, the nightly run, manual runs and release pull requests; after each job they
-#   stop leftovers, remove throwaway user services and clean up. Each job gets a throwaway home in its temp folder.
+# - everything of the runner in /usr/local/orch-edge-runner, owned by root (orch-ci can change none of it): the GitHub
+#   runner 2.338.2 (checksum checked) as a read-only copy, its sign-up (label orch-edge), the job hooks, a `bash`
+#   that starts the hooks without the job's settings (bash), the network rule (nft-orch-ci.nft) and the loop
+# - the loop (runner-loop.sh, root, started at boot): before EVERY job it closes the private and the local network to
+#   orch-ci, stops everything of orch-ci, makes a fresh runner folder from the copy and empties orch-ci's home and
+#   temp files, then starts the runner for one job, under orch-ci, at lower priority than the test services, memory
+#   capped at 5 GB (its user services at 1.5 GB)
+# - job hooks: before each job they refuse anything but develop pushes, the nightly run, manual runs and release pull
+#   requests; after each job they stop leftovers. Each job gets a throwaway home with its own download caches (Rust,
+#   uv, Python, browsers, npm): no job leaves a program for the next one.
+# Run it again to take a new runner version (VER below): the sign-up stays. The runner never updates itself (each job
+# starts from the copy), so bump VER when GitHub asks for a newer runner.
 # Undo everything: sudo bash uninstall.sh
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "Run it as root: sudo bash $0" >&2; exit 1; }
@@ -26,36 +31,47 @@ set -euo pipefail
 
 REPO_URL=${ORCH_RUNNER_REPO_URL:-https://github.com/severinlindenmann/orch}
 REPO=${REPO_URL#https://github.com/}
-U=orch-ci; H=/home/$U; WORK=/srv/orch-ci/work; NAME=${ORCH_RUNNER_NAME:-orch-edge-$(hostname -s)}
+U=orch-ci; H=/home/$U; NAME=${ORCH_RUNNER_NAME:-orch-edge-$(hostname -s)}
 VER=2.338.2; SHA=670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945
 TAR=actions-runner-linux-arm64-$VER.tar.gz
 PW_VER=1.55.0   # e2e/walkthrough/package-lock.json
-HOOKS=/usr/local/orch-edge-runner
-UNIT=/etc/systemd/system/orch-edge-runner.service
+B=/usr/local/orch-edge-runner; HOOKS=$B
+UNIT=/etc/systemd/system/orch-edge-runner.service; LOOP=/etc/systemd/system/orch-edge-runner-loop.service
 SRC=$(cd "$(dirname "$0")" && pwd)
-R=$H/actions-runner
 
 if [ "${1:-}" = register ]; then
-  [ -x "$R/config.sh" ] || { echo "Run 'sudo bash $0' (the install) first." >&2; exit 1; }
-  if [ ! -f "$R/.runner" ]; then
+  [ -f "$B/template/config.sh" ] || { echo "Run 'sudo bash $0' (the install) first." >&2; exit 1; }
+  if [ ! -f "$B/creds/.runner" ]; then
     if [ -t 0 ]; then printf 'Runner registration token (from GitHub, not stored): '; IFS= read -rs TOKEN; echo
     else IFS= read -r TOKEN || true; fi
     [ -n "${TOKEN:-}" ] || { echo "No token; stopped. Run it again with the token on stdin." >&2; exit 1; }
-    ( cd "$R" && sudo -u "$U" -H ./config.sh --unattended --replace --url "$REPO_URL" \
-        --token "$TOKEN" --name "$NAME" --labels orch-edge --work "$WORK" )
+    systemctl stop orch-edge-runner-loop.service orch-edge-runner.service 2>/dev/null || true
+    rm -rf /usr/local/orch-edge-runner/job; cp -a "$B/template" "$B/job"; chown -R "$U:$U" "$B/job"
+    ( cd "$B/job" && sudo -u "$U" -H ./config.sh --unattended --replace --disableupdate --url "$REPO_URL" \
+        --token "$TOKEN" --name "$NAME" --labels orch-edge --work "$B/job/_work" )
     unset TOKEN
+    rm -rf /usr/local/orch-edge-runner/creds.new; install -d -o root -g root -m 0700 "$B/creds.new"
+    for f in .runner .credentials .credentials_rsaparams; do
+      if [ -f "$B/job/$f" ] && [ ! -L "$B/job/$f" ]; then install -o root -g root -m 0600 "$B/job/$f" "$B/creds.new/$f"; fi
+    done
+    [ -f "$B/creds.new/.runner" ] || { echo "The runner did not sign up; stopped." >&2; exit 1; }
+    rm -rf /usr/local/orch-edge-runner/creds; mv "$B/creds.new" "$B/creds"; rm -rf /usr/local/orch-edge-runner/job
   fi
-  systemctl enable --now orch-edge-runner.service
+  "$B/runner-loop.sh" --check
+  systemctl enable --now orch-edge-runner-loop.service
   echo "Done. '$NAME' runs; GitHub shows it under Settings > Actions > Runners as Idle within a minute."
   echo "It takes the Linux jobs once the repository variable EDGE_RUNNER is orch-edge (docs/ci-checks.md)."
   exit 0
 fi
 [ -z "${1:-}" ] || { echo "usage: sudo bash $0 [register]" >&2; exit 2; }
 
+# nothing of the runner runs while setup changes it (the loop also holds a lock, runner-loop.sh)
+systemctl stop orch-edge-runner-loop.service orch-edge-runner.service 2>/dev/null || true
+
 echo "== 1/6 packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq faketime build-essential pkg-config git curl tmux nodejs npm jq >/dev/null
+apt-get install -y -qq faketime build-essential pkg-config git curl tmux nodejs npm jq nftables >/dev/null
 
 # orch edge gets an IPv6 default route from its network but no public IPv6 address: a download from a host with
 # IPv6 addresses (pypi, raw.githubusercontent.com) then fails with "No route to host". Prefer IPv4 (RFC 6724 table).
@@ -64,9 +80,6 @@ grep -q '^precedence ::ffff:0:0/96' /etc/gai.conf 2>/dev/null || echo 'precedenc
 echo "== 2/6 user $U"
 id "$U" >/dev/null 2>&1 || useradd --create-home --home-dir "$H" --shell /bin/bash --user-group "$U"
 chmod 700 "$H"
-# the jobs' work folder (with each job's throwaway home and temp files) lies OUTSIDE the runner user's home: orch's
-# tests check that a test home is never inside the real one
-install -d -o root -g root -m 0755 /srv/orch-ci; install -d -o "$U" -g "$U" -m 0750 "$WORK"
 loginctl enable-linger "$U"
 # no cron or at jobs for it: a job must not leave work that starts after it
 for f in /etc/cron.deny /etc/at.deny; do touch "$f"; grep -qx "$U" "$f" || echo "$U" >> "$f"; done
@@ -74,7 +87,7 @@ crontab -r -u "$U" 2>/dev/null || true
 # after every job the clean-up hook restarts this user's own service manager: that one command, nothing else
 SUDO=/etc/sudoers.d/orch-ci-runner
 printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl restart user@%s.service\n' "$U" "$(id -u "$U")" > "$SUDO.new"
-chmod 0440 "$SUDO.new"; visudo -cqf "$SUDO.new" && mv -f "$SUDO.new" "$SUDO" || { rm -f "$SUDO.new"; echo "sudoers rule invalid; stopped." >&2; exit 1; }
+chmod 0440 "$SUDO.new"; visudo -cqf "$SUDO.new" && mv -f "$SUDO.new" "$SUDO" || { rm -f /etc/sudoers.d/orch-ci-runner.new; echo "sudoers rule invalid; stopped." >&2; exit 1; }
 # user services a job starts (systemd --user) live outside the runner's own cap: give them one of their own, so the
 # runner (5 GB) and its user services (1.5 GB) together leave room for the test copies of relay, publish and hub
 mkdir -p "/etc/systemd/system/user-$(id -u "$U").slice.d"
@@ -83,70 +96,90 @@ for d in /home/* /root; do   # the runner should not read other people's files; 
   [ "$d" = "$H" ] || [ ! -d "$d" ] && continue
   sudo -u "$U" ls "$d" >/dev/null 2>&1 && echo "  note: $U can read $d (chmod o-rwx $d closes it)"
 done
+# an earlier install kept the runner and a shared download cache in the runner's home and its work folder in /srv:
+# both were writable by every job (security review ORCH-1233 M2). The loop empties the home before each job.
+systemctl disable --now orch-edge-runner.service 2>/dev/null || true
+rm -rf /srv/orch-ci
 
-echo "== 3/6 Rust for the jobs (in $H/ci-cache)"
-sudo -u "$U" -H mkdir -p "$H/ci-cache/cargo" "$H/ci-cache/rustup"
-if [ ! -x "$H/ci-cache/cargo/bin/rustup" ]; then
-  tmp=$(mktemp -d); chmod 755 "$tmp"
-  curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp/rustup-init.sh" https://sh.rustup.rs; chmod 644 "$tmp/rustup-init.sh"
-  sudo -u "$U" -H env CARGO_HOME="$H/ci-cache/cargo" RUSTUP_HOME="$H/ci-cache/rustup" \
-    sh "$tmp/rustup-init.sh" -y -q --no-modify-path --profile minimal --default-toolchain stable -c rustfmt -c clippy
-  rm -f "$tmp/rustup-init.sh"; rmdir "$tmp"
-fi
-sudo -u "$U" -H env CARGO_HOME="$H/ci-cache/cargo" RUSTUP_HOME="$H/ci-cache/rustup" "$H/ci-cache/cargo/bin/cargo" --version
-
-echo "== 4/6 Chromium's system libraries (Playwright $PW_VER)"
+echo "== 3/6 Chromium's system libraries (Playwright $PW_VER)"
 npx -y "playwright@$PW_VER" install-deps chromium >/dev/null 2>&1 || echo "  note: Playwright could not install Chromium's libraries; the Services click-through may fail here"
 
-echo "== 5/6 GitHub runner $VER and job hooks"
-if [ ! -x "$R/config.sh" ]; then
-  sudo -u "$U" -H mkdir -p "$R"
-  tmp=$(mktemp -d); curl -fsSL -o "$tmp/$TAR" "https://github.com/actions/runner/releases/download/v$VER/$TAR"
-  echo "$SHA  $tmp/$TAR" | sha256sum -c - >/dev/null || { echo "Checksum of the runner download is wrong; stopped." >&2; exit 1; }
-  sudo -u "$U" tar xzf - -C "$R" < "$tmp/$TAR"; rm -f "$tmp/$TAR"; rmdir "$tmp"
-  "$R/bin/installdependencies.sh" >/dev/null
-fi
-mkdir -p "$HOOKS"
-install -m 0755 -o root -g root "$SRC/job-started.sh" "$SRC/job-completed.sh" "$HOOKS/"
+echo "== 4/6 hooks, bash, network rule and loop in $B (owned by root)"
+[ -L "$B" ] && { echo "$B is a symlink; stopped." >&2; exit 1; }
+install -d -o root -g root -m 0755 "$B" "$B/bin"
+install -m 0755 -o root -g root "$SRC/job-started.sh" "$SRC/job-completed.sh" "$SRC/runner-loop.sh" "$B/"
+install -m 0644 -o root -g root "$SRC/nft-orch-ci.nft" "$B/"
+install -m 0755 -o root -g root "$SRC/bash" "$B/bin/bash"
+printf '%s\n' "$REPO" > "$B/repo.new"; chmod 0644 "$B/repo.new"
+mv -f "$B/repo.new" "$B/repo"   # the hooks trust this file, never the job's environment
 # a copy of these scripts for registering and the undo (docs/ci-checks.md names this folder)
 KEEP=/opt/orch-edge-runner-src; mkdir -p "$KEEP"
-[ "$SRC" = "$KEEP" ] || install -m 0644 -o root -g root "$SRC/setup.sh" "$SRC/uninstall.sh" "$SRC/job-started.sh" "$SRC/job-completed.sh" "$KEEP/"
-printf '%s\n' "$REPO" > "$HOOKS/repo.new"; chmod 0644 "$HOOKS/repo.new"
-mv -f "$HOOKS/repo.new" "$HOOKS/repo"   # the hooks trust this file, never the job's environment
+[ "$SRC" = "$KEEP" ] || install -m 0644 -o root -g root "$SRC/setup.sh" "$SRC/uninstall.sh" "$SRC/job-started.sh" \
+  "$SRC/job-completed.sh" "$SRC/runner-loop.sh" "$SRC/nft-orch-ci.nft" "$SRC/bash" "$KEEP/"
 
-echo "== 6/6 start at boot under $U"
+echo "== 5/6 GitHub runner $VER (read-only copy)"
+if [ "$(cat "$B/template/.orch-version" 2>/dev/null)" != "$VER" ]; then
+  DL=/usr/local/orch-edge-runner/runner-download.tar.gz
+  curl -fsSL -o "$DL" "https://github.com/actions/runner/releases/download/v$VER/$TAR"
+  echo "$SHA  $DL" | sha256sum -c - >/dev/null || { echo "Checksum of the runner download is wrong; stopped." >&2; exit 1; }
+  rm -rf /usr/local/orch-edge-runner/template.new; mkdir "$B/template.new"
+  tar xzf "$DL" -C "$B/template.new" --no-same-owner
+  rm -f /usr/local/orch-edge-runner/runner-download.tar.gz
+  echo "$VER" > "$B/template.new/.orch-version"
+  "$B/template.new/bin/installdependencies.sh" >/dev/null
+  chown -R root:root "$B/template.new"; chmod -R go-w "$B/template.new"
+  rm -rf /usr/local/orch-edge-runner/template.old; [ -d "$B/template" ] && mv "$B/template" "$B/template.old"
+  mv "$B/template.new" "$B/template"; rm -rf /usr/local/orch-edge-runner/template.old
+fi
+
+echo "== 6/6 start at boot: the loop as root, the runner under $U (one job per start)"
 # The hooks and settings live in this root-owned unit, never in a file in the runner's own folder.
 cat > "$UNIT.new" <<EOF
 [Unit]
-Description=orch CI runner for the Linux jobs (ORCH-1126, label orch-edge); never production
+Description=orch CI runner for the Linux jobs, one job per start (ORCH-1126, label orch-edge); never production
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 User=$U
 Group=$U
-WorkingDirectory=$R
-ExecStart=$R/run.sh
+WorkingDirectory=$B/job
+ExecStart=$B/job/run.sh --once
 Environment=HOME=$H
 Environment=ACTIONS_RUNNER_HOOK_JOB_STARTED=$HOOKS/job-started.sh
 Environment=ACTIONS_RUNNER_HOOK_JOB_COMPLETED=$HOOKS/job-completed.sh
-Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# the clean bash first: the runner starts the hooks with the first bash on this PATH (security review ORCH-1233 M1)
+Environment=PATH=$B/bin:/usr/local/bin:/usr/bin:/bin
 Environment=LANG=C.UTF-8
-Restart=always
-RestartSec=10
+Restart=no
 Nice=5
 # GitHub's machines use 022; the user's own default (002) makes folders group-writable and orch's tests refuse that
 UMask=0022
 CPUWeight=50
 MemoryMax=5G
-KillMode=process
-KillSignal=SIGTERM
-TimeoutStopSec=5min
+KillMode=control-group
+TimeoutStopSec=30
+EOF
+cat > "$LOOP.new" <<EOF
+[Unit]
+Description=orch CI runner loop: a fresh runner, home and closed private network before every job (ORCH-1126)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=$B/runner-loop.sh
+Restart=always
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
 EOF
-chmod 0644 "$UNIT.new"; mv -f "$UNIT.new" "$UNIT"
+for f in "$UNIT" "$LOOP"; do chmod 0644 "$f.new"; mv -f "$f.new" "$f"; done
 systemctl daemon-reload
-if [ -f "$R/.runner" ]; then systemctl enable --now orch-edge-runner.service; systemctl restart orch-edge-runner.service
-else echo "Installed. Register the runner once: <token> | sudo bash $0 register"; fi
+if [ -f "$B/creds/.runner" ]; then
+  "$B/runner-loop.sh" --check
+  systemctl enable orch-edge-runner-loop.service; systemctl restart orch-edge-runner-loop.service
+else
+  echo "Installed. Before registering: Settings > Actions > General > 'Fork pull request workflows from outside"
+  echo "collaborators' must be the strictest choice (docs/ci-checks.md). Then: <token> | sudo bash $0 register"
+fi

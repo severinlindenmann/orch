@@ -172,6 +172,8 @@ def test_the_job_home_keeps_temp_files_off_the_memory_disk_and_caps_workers():
     for line in ("TMPDIR=$RUNNER_TEMP/tmp", "ORCH_HOME_STRICT=1", "PYTEST_XDIST_AUTO_NUM_WORKERS=4", "CARGO_BUILD_JOBS=4",
                  "CARGO_HOME=$cache/cargo", "RUSTUP_HOME=$cache/rustup", "UV_PYTHON_PREFERENCE=only-managed", "NO_FAKE_STAT=1"):
         assert line in home, line
+    # every download cache inside the throwaway home: no job leaves a program for the next one (ORCH-1233 L2)
+    assert 'cache="$h/.cache"' in home and "ci-cache" not in home and "real_home" not in home
 
 
 def test_no_workflow_names_the_edge_runner_itself():
@@ -266,13 +268,84 @@ def test_the_clean_up_hook_never_acts_as_a_person(tmp_path):
 def test_setup_refuses_anything_but_root_on_the_arm64_debian_test_server():
     text = (RUNNER / "setup.sh").read_text()
     assert '[ "$(id -u)" = 0 ]' in text and "aarch64" in text and "/etc/debian_version" in text
-    assert "sha256sum -c" in text and "--labels orch-edge" in text
-    unit = text[text.index("[Service]"):]
-    assert '--work "$WORK"' in text and "WORK=/srv/orch-ci/work" in text  # never inside the runner's home
+    assert "sha256sum -c" in text and "--labels orch-edge" in text and "--disableupdate" in text
+    unit = text[text.index("[Service]"):text.index('cat > "$LOOP.new"')]
+    assert '--work "$B/job/_work"' in text  # inside the fresh runner folder, never inside the runner's home
     for line in ("User=$U", "UMask=0022", "MemoryMax=5G", "ACTIONS_RUNNER_HOOK_JOB_STARTED=$HOOKS/job-started.sh",
-                 "ACTIONS_RUNNER_HOOK_JOB_COMPLETED=$HOOKS/job-completed.sh"):
+                 "ACTIONS_RUNNER_HOOK_JOB_COMPLETED=$HOOKS/job-completed.sh", "ExecStart=$B/job/run.sh --once",
+                 "Restart=no", "KillMode=control-group", "Environment=PATH=$B/bin:"):
         assert line in unit, line
+    assert "[Install]" not in unit  # only the loop starts the runner
     assert "TOKEN" not in text.split("unset TOKEN")[1]  # the token is never kept or printed after registering
+
+
+# --- the Mac's security review ORCH-1233, the same fixes here ------------------------------------------------------
+
+
+def test_the_runner_finds_a_clean_bash_first_so_no_job_setting_runs_before_the_hook():
+    """M1: plain bash reads BASH_ENV, SHELLOPTS and exported functions of the job before the hook's first line."""
+    wrapper = (RUNNER / "bash").read_text()
+    assert wrapper.startswith("#!/bin/bash -p\n")
+    assert 'exec /usr/bin/env -i "${pass[@]}" /bin/bash -p "$last"' in wrapper
+    assert '"$here/job-started.sh"|"$here/job-completed.sh")' in wrapper and 'exec /bin/bash "$@"' in wrapper
+    setup = (RUNNER / "setup.sh").read_text()
+    assert 'install -m 0755 -o root -g root "$SRC/bash" "$B/bin/bash"' in setup
+    for hook in ("job-started.sh", "job-completed.sh"):
+        assert (RUNNER / hook).read_text().startswith("#!/bin/bash"), hook
+
+
+def test_a_job_s_bash_env_never_runs_through_the_wrapper(tmp_path):
+    b = tmp_path / "bin"
+    b.mkdir()
+    (b / "bash").write_text((RUNNER / "bash").read_text())
+    (b / "bash").chmod(0o755)
+    (tmp_path / "job-started.sh").write_text('echo "hook ran with BASH_ENV=${BASH_ENV-unset}"\n')
+    flag = tmp_path / "hijacked"
+    (tmp_path / "evil.sh").write_text(f"echo x >> {flag}\n")
+    env = {"PATH": os.environ.get("PATH", ""), "BASH_ENV": str(tmp_path / "evil.sh"), "GITHUB_EVENT_NAME": "push"}
+    r = subprocess.run([str(b / "bash"), "--noprofile", "--norc", "-e", "-o", "pipefail", str(tmp_path / "job-started.sh")],
+                       env=env, capture_output=True, text=True, timeout=30, check=False)
+    assert "hook ran with BASH_ENV=unset" in r.stdout and not flag.exists(), (r.stdout, r.stderr)
+
+
+def test_a_fresh_runner_folder_and_home_before_every_job_from_a_root_owned_copy():
+    """M2: a persistent runner folder the job can write would carry a job's changes into the next job."""
+    loop = (RUNNER / "runner-loop.sh").read_text()
+    assert '[ "$(id -u)" = 0 ]' in loop and "B=/usr/local/orch-edge-runner" in loop
+    order = [loop.index(x) for x in ('pkill -KILL -u "$U"', 'gone "$J"', 'cp -a "$B/template" "$J"', '"$B/creds/$f"',
+                                       'mv "$H" "$old"', 'install -d -o "$U" -g "$U" -m 0700 "$H"', "orch_ci_files | while",
+                                       'systemctl start "user@$uid.service"')]
+    assert order == sorted(order)
+    rounds = loop[loop.index('log "started"'):]
+    assert rounds.index("network_closed") < rounds.index("fresh") < rounds.index('systemctl start "$SVC"')
+    assert "MAX=$((4 * 3600))" in loop and "round longer than" in loop
+    assert "JOB_MAX=$((60 * 60))" in loop and "job longer than" in loop  # counted from the job's worker
+    # every file of orch-ci on every writable filesystem, no depth limit; a file left fails the round (outside review)
+    assert "findmnt -rn -t ext4,xfs,btrfs,tmpfs" in loop and "-maxdepth" not in loop and "files of $U are still there" in loop
+    assert "flock -n 9" in loop  # one root clean-up at a time
+    setup = (RUNNER / "setup.sh").read_text()
+    assert 'chown -R root:root "$B/template.new"; chmod -R go-w "$B/template.new"' in setup
+    assert 'install -d -o root -g root -m 0700 "$B/creds.new"' in setup
+    assert "rm -rf /srv/orch-ci" in setup  # the old job-writable work folder of an earlier install
+    assert "ci-cache" not in setup
+    assert setup.index("systemctl stop orch-edge-runner-loop.service orch-edge-runner.service") < setup.index("== 1/6 packages")
+
+
+def test_the_runner_user_never_reaches_the_private_or_the_local_network():
+    rule = (RUNNER / "nft-orch-ci.nft").read_text()
+    for net in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16", "fc00::/7", "fe80::/10"):
+        assert net in rule, net
+    assert rule.count('meta skuid "orch-ci"') == 2 and "127." not in rule.split("table inet orch_ci_runner {")[1]
+    loop = (RUNNER / "runner-loop.sh").read_text()
+    assert 'nft -f "$B/nft-orch-ci.nft"' in loop and "the runner stays off" in loop
+    assert "nftables" in (RUNNER / "setup.sh").read_text()
+
+
+def test_uninstall_is_the_off_switch():
+    text = (RUNNER / "uninstall.sh").read_text()
+    for line in ("disable --now orch-edge-runner-loop.service", "nft delete table inet orch_ci_runner",
+                 "rm -rf /usr/local/orch-edge-runner"):
+        assert line in text, line
 
 
 def test_after_each_job_the_user_manager_restarts_and_only_that_command_is_allowed():

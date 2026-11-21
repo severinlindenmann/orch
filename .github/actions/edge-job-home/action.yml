@@ -1,9 +1,9 @@
 name: edge-job-home
 description: >-
   On the orch edge test server's own runner (ORCH-1126): give the job a throwaway home under the job's temp folder
-  (the runner wipes it after the job), an orch home inside it with ORCH_HOME_STRICT=1, download caches that survive
-  between jobs (uv, Python, Rust, browsers, npm) and a cap on test workers so 8 GB of memory holds. On GitHub's
-  machines it does nothing.
+  (the runner wipes it after the job), an orch home inside it with ORCH_HOME_STRICT=1, the download caches inside it
+  too (uv, Python, Rust, browsers, npm: no job leaves a program for the next one, security review ORCH-1233 L2) and
+  a cap on test workers so 8 GB of memory holds. On GitHub's machines it does nothing.
 runs:
   using: composite
   steps:
@@ -12,10 +12,9 @@ runs:
       shell: bash
       run: |
         set -eu
-        real_home=$HOME
         h="$RUNNER_TEMP/home"
         mkdir -p "$h/orch" "$h/.config" "$h/.cache" "$RUNNER_TEMP/tmp"
-        cache="$real_home/ci-cache"   # downloads and toolchains only: content-addressed, safe to share
+        cache="$h/.cache"   # downloads and toolchains of this job only (Rust comes from dtolnay/rust-toolchain)
         mkdir -p "$cache/uv" "$cache/uv-python" "$cache/ms-playwright" "$cache/npm" "$cache/cargo" "$cache/rustup"
         {
           echo "HOME=$h"
