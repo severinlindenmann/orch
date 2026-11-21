@@ -40,7 +40,12 @@ def test_newest_first_and_a_ticket_without_chat_is_not_listed(three):
     assert quiet not in {r["id"] for r in rows}
     top = rows[0]
     assert top["title"] == "Newer chat" and top["lines"] == 2 and top["open_questions"] == 0
-    assert top["last"] == {"kind": "line", "by": YOU, "text": "Looks good"}
+    assert {k: top["last"][k] for k in ("kind", "by", "text")} == {
+        "kind": "line",
+        "by": YOU,
+        "text": "Looks good",
+    }
+    assert top["last"]["id"].startswith("m_")  # the chat line's stable id
     assert top["last_at"] == "2026-11-10T09:10:00Z"
 
 
@@ -78,6 +83,7 @@ def test_a_ticket_with_only_an_open_question_is_listed_and_unread(proj):
     (row,) = ticketchats.chats(proj)
     assert row["id"] == tid and row["lines"] == 0 and row["open_questions"] == 1
     assert row["last"]["kind"] == "question" and row["last"]["text"] == "Which colour?"
+    assert row["last"]["id"] == "q1" and row["last"]["by"] is None
     assert row["unread"] == 1
     tickets.answer(proj, tid, "q1", "Blue", YOU, "cli")
     assert ticketchats.chats(proj) == []  # answered and no chat lines: no longer a ticket chat
@@ -121,3 +127,17 @@ def test_orch_chat_list_and_read_commands(three, run):
 def test_no_ticket_chats_yet(proj, run):
     code, out, _ = run("chat", "list")
     assert code == 0 and "No ticket chats yet." in out
+
+
+def test_the_last_line_keeps_the_typed_name(proj):
+    tid = _ticket(proj, "Named")
+    tickets.apply_op(
+        proj,
+        tid,
+        lambda t: tickets.add_history(
+            t, YOU, "Hi all", chat=True, at="2026-11-10T09:00:00+00:00", by_name="Anna"
+        ),
+        by=YOU,
+    )
+    (row,) = ticketchats.chats(proj)
+    assert row["last"]["by_name"] == "Anna" and row["last"]["by"] == YOU

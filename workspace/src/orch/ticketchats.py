@@ -103,7 +103,14 @@ def _row(root: Path, t: dict, read_at: datetime | None) -> dict | None:
         "last_at": at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "last": {
             "kind": kind,
+            "id": last.get("id"),  # a chat line's stable id, a question's q-id
             "by": last.get("by") if kind == "line" else None,
+            # the typed name, shown as typed and "not signed in" (contracts/history.md, chat lines)
+            **(
+                {"by_name": last["by_name"]}
+                if kind == "line" and isinstance(last.get("by_name"), str)
+                else {}
+            ),
             "text": _clip(last["text"]),
         },
         "lines": len(lines),
