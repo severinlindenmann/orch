@@ -1257,8 +1257,23 @@ def test_chat_new_and_make_ticket_validation():
         [],
         [],
     )
+    # a ticket's chat on the Chats page (ORCH-1168): the ticket id and the text; opening it marks it read
+    assert actions.OPS["chat.say"]({"text": "hi", "ticket": "t_abcdef"}) == (
+        ["chat", "say"],
+        ["--ticket", "t_abcdef"],
+        ["hi"],
+    )
+    assert actions.OPS["chat.read"]({"ticket": "t_abcdef"}) == (
+        ["chat", "read", "t_abcdef"],
+        ["--reader", "dashboard"],
+        [],
+    )
     for op, args in [
         ("chat.say", {"text": "hi", "new": "yes"}),
+        ("chat.say", {"text": "hi", "ticket": "--help"}),
+        ("chat.say", {"text": "hi", "ticket": "t_abcdef", "new": True}),
+        ("chat.read", {"ticket": "t_abcdef", "reader": "you"}),
+        ("chat.read", {}),
         ("chat.make_ticket", {"id": "--help"}),
         ("chat.make_ticket", {"id": "m_abcdefghij", "by": "agent:x"}),
     ]:

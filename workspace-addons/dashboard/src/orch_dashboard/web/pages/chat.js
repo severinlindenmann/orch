@@ -124,7 +124,8 @@ function chatList() {
 }
 // The grouped list shows only when there is something besides the helper chat (a live group or a workspace chat); an open
 // group or workspace chat (a deep link) always keeps it, so nothing becomes unreachable.
-const chatRich = () => !!(chatGroup() || chatDmId(chatUi.open)) || chatGroups().some(g => !chatFinished(g)) || chatDm.contacts.length > 0;
+// let: pages/ticketchat.js adds the ticket chats
+let chatRich = () => !!(chatGroup() || chatDmId(chatUi.open)) || chatGroups().some(g => !chatFinished(g)) || chatDm.contacts.length > 0;
 // The Contacts link leads to the add-on that declares the `phone` panel (the relay). state.addons lists only active
 // add-ons, so while it is off there is no link at all (R1.1: the relay stays invisible until turned on).
 function chatPhoneLink() {
