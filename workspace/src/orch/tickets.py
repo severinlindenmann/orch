@@ -952,13 +952,53 @@ def _env_via() -> str:
     return v if re.fullmatch(r"[a-z][a-z0-9-]{1,23}", v) else "cli"
 
 
+CHAT_LINE_ID_RE = re.compile(r"m_[a-z0-9]{16}")
+BY_NAME_MAX = 60
+
+
+def chat_line_id() -> str:
+    """A new stable id for a chat line (contracts/history.md "Chat lines"), in the form of a message id."""
+    return "m_" + "".join(secrets.choice(_ALPHABET) for _ in range(16))
+
+
+def clean_by_name(name: str | None) -> str | None:
+    """The name a person typed for a chat line: one line, 1 to 60 characters, or None. Never an identity."""
+    if name is None:
+        return None
+    name = " ".join(clean_untrusted(str(name)).split())
+    if not name:
+        return None
+    if len(name) > BY_NAME_MAX:
+        raise Refused(f"A name has 1 to {BY_NAME_MAX} characters.")
+    return name
+
+
 def add_history(
-    ticket: dict, by: str, text: str, via: str | None = None, chat: bool = False, *, at: str | None = None
+    ticket: dict,
+    by: str,
+    text: str,
+    via: str | None = None,
+    chat: bool = False,
+    *,
+    at: str | None = None,
+    mid: str | None = None,
+    by_name: str | None = None,
 ) -> None:
     """THE one point where core appends a history line (contracts/history.md). chat=True marks a real Chat or
-    group message (`chat_message: true`): the only lines the Chat shows. The exact line object made here is
+    group message (`chat_message: true`): the only lines the Chat shows. A chat line also gets a stable `id`
+    (`mid` when the message already has one, else a new one) and, when given, the name the person typed
+    (`by_name`, shown as typed and never trusted; `by` stays the actor). The exact line object made here is
     marked as core's own (history.created); _write records it when the ticket is written."""
     entry = {"at": at or now(), "by": by, "via": via or _env_via(), "text": text, "chat_message": chat}
+    if chat:
+        if mid is not None and not CHAT_LINE_ID_RE.fullmatch(mid):
+            raise Refused("A chat line id is m_ and 16 lowercase letters or digits.")
+        entry["id"] = mid or chat_line_id()
+        name = clean_by_name(by_name)
+        if name:
+            entry["by_name"] = name
+    elif mid is not None or by_name is not None:
+        raise Refused("Only a chat line carries an id and a typed name.")
     ticket["history"].append(entry)
     history.created("lines", entry)
 
@@ -2237,6 +2277,8 @@ def set_prepare(
             rec["run"] = run
         if why:
             rec["why"] = " ".join(str(why).split())[:200]
+        if state == "prepared":  # what Prepare left, so Start can tell what changed since (ORCH-739)
+            rec["seen"] = _prepare_seen(root, ticket)
         ticket["prepare"] = rec
         if state == "prepared":
             add_history(ticket, by, PREPARED_LINE)
@@ -2250,6 +2292,146 @@ def set_prepare(
         if ticket_path(root, tid).exists():
             raise
         return False
+
+
+_PREPARE_FIELDS = (
+    ("title", "Title"),
+    ("note", "The person's note"),
+    ("description", "Description"),
+    ("done_when", "Done when"),
+    ("due", "Due date"),
+    ("owner", "Owner"),
+)
+_SEEN_FILES_MAX = 200
+# lines that only say the work started (the Start itself), not something the helper must react to
+_START_NOISE = re.compile(r"^(Status \S+ -> \S+|\S+( \S+)? started|" + re.escape(PREPARED_LINE) + r")$")
+
+
+def _artifact_names(root: Path, tid: str) -> list[str]:
+    """The files in the ticket's artifacts folder (relative names, sorted, capped); [] when there is none.
+    Read only: never creates the folder, never follows a link."""
+    d = artifacts_path(root, tid)
+    try:
+        if d.is_symlink() or not d.is_dir():
+            return []
+        names = sorted(
+            p.relative_to(d).as_posix() for p in d.rglob("*") if p.is_file() and not p.is_symlink()
+        )
+    except OSError:
+        return []
+    return names[:_SEEN_FILES_MAX]
+
+
+def _prepare_seen(root: Path, ticket: dict) -> dict:
+    """The ticket as Prepare left it: its fields, its steps and its files (ORCH-739)."""
+    seen: dict = {k: ticket.get(k) for k, _ in _PREPARE_FIELDS if ticket.get(k) not in (None, "")}
+    seen["checks"] = {
+        str(c.get("id")): str(c.get("text") or "")
+        for c in ticket.get("checklist") or []
+        if isinstance(c, dict) and c.get("id")
+    }
+    seen["files"] = _artifact_names(root, ticket["id"])
+    seen["lines"] = history.length(ticket)  # lines from here on came after Prepare
+    return seen
+
+
+def _short(v: object, n: int = 300) -> str:
+    s = " ".join(str(v).split())
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def changed_since_prepare(root: Path, ticket: dict, agent: str | None = None) -> list[str] | None:
+    """What changed on a prepared ticket since Prepare ended, one plain line each: a field a person edited,
+    steps added, removed or reworded, new files, and what others wrote on the ticket since (answers,
+    messages). [] = nothing changed; None = the ticket was never marked Prepared (no record to compare).
+    agent: the helper's own label (agent:<name>), whose own lines are left out."""
+    p = ticket.get("prepare") if isinstance(ticket.get("prepare"), dict) else {}
+    seen = p.get("seen") if p.get("state") == "prepared" else None
+    if not isinstance(seen, dict):
+        return None
+    out: list[str] = []
+    for key, label in _PREPARE_FIELDS:
+        old, new = seen.get(key), ticket.get(key)
+        if old in (None, "") and new in (None, ""):
+            continue
+        if old == new:
+            continue
+        if old in (None, ""):
+            out.append(f"{label} added: {_short(new)}")
+        elif new in (None, ""):
+            out.append(f"{label} removed (was: {_short(old)})")
+        else:
+            out.append(f"{label} changed from: {_short(old)} | to: {_short(new)}")
+    old_checks = seen.get("checks") if isinstance(seen.get("checks"), dict) else {}
+    now_checks = {
+        str(c.get("id")): c for c in ticket.get("checklist") or [] if isinstance(c, dict) and c.get("id")
+    }
+    for cid, c in now_checks.items():
+        text = str(c.get("text") or "")
+        if cid not in old_checks:
+            out.append(f"Step added: {cid} {_short(text, 200)}")
+        elif old_checks[cid] != text:
+            out.append(f"Step {cid} reworded from: {_short(old_checks[cid], 200)} | to: {_short(text, 200)}")
+    for cid, text in old_checks.items():
+        if cid not in now_checks:
+            out.append(f"Step removed: {cid} {_short(text, 200)}")
+    old_files = set(seen.get("files") or [])
+    new_files = [f for f in _artifact_names(root, ticket["id"]) if f not in old_files]
+    if new_files:
+        shown = ", ".join(_short(f, 200) for f in new_files[:20])  # a name is one plain line, never more
+        out.append("New files: " + shown + (" …" if len(new_files) > 20 else ""))
+    lines = history.lines(root, ticket)
+    start = seen.get("lines")
+    if not isinstance(start, int) or isinstance(start, bool) or not 0 <= start <= len(lines):
+        since = str(p.get("at") or "")  # no position kept (or the history was cut): by time, strictly after
+        lines = [h for h in lines if isinstance(h, dict) and str(h.get("at") or "") > since]
+    else:
+        lines = lines[start:]
+    said = []
+    for h in lines:
+        if not isinstance(h, dict):
+            continue
+        by, text = str(h.get("by") or "?"), str(h.get("text") or "")
+        if (agent and by == agent) or by in (SYSTEM, "orch") or _START_NOISE.match(text):
+            continue
+        said.append(f"{by}: {_short(text)}")
+    if said:
+        out.append("Written on the ticket since:\n" + "\n".join(f"  - {s}" for s in said[-10:]))
+    return out
+
+
+def worked_since_prepare(root: Path, ticket: dict, agent: str | None) -> bool:
+    """True once the helper (agent:<name>) wrote on the ticket after Prepare ended: the first Start after
+    Prepare is over, so later runs are not told again that preparing ended or what changed (ORCH-739)."""
+    p = ticket.get("prepare") if isinstance(ticket.get("prepare"), dict) else {}
+    if not agent or not p.get("state"):
+        return False
+    lines = history.lines(root, ticket)
+    seen = p.get("seen") if isinstance(p.get("seen"), dict) else {}
+    start = seen.get("lines")
+    if isinstance(start, int) and not isinstance(start, bool) and 0 <= start <= len(lines):
+        after = lines[start:]
+    else:  # Not prepared yet (no position kept): by time, strictly after
+        since = str(p.get("at") or "")
+        after = [h for h in lines if isinstance(h, dict) and str(h.get("at") or "") > since]
+    since = str(p.get("at") or "")
+    checklist = history.shown_ticket(root, ticket).get("checklist") or []  # who marked a step, as proven
+    if any(  # a helper started or finished a step since Prepare ended (starting one writes no history line;
+        # Prepare itself starts and finishes none, so the same second counts); a person's tick is a change
+        isinstance(c, dict)
+        and (c.get("state") == "doing" or c.get("done"))
+        and not str(c.get("by") or "").startswith("human:")
+        and str(c.get("at") or "") >= since
+        for c in checklist
+    ):
+        return True
+    return any(
+        isinstance(h, dict)
+        and h.get("by") == agent
+        and not _START_NOISE.match(str(h.get("text") or ""))
+        and not str(h.get("text") or "").startswith(NOT_PREPARED)
+        for h in after
+    )
 
 
 def prepare_state(root: Path, ticket: dict) -> dict | None:
