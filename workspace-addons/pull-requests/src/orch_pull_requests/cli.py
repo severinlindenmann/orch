@@ -322,7 +322,7 @@ def main(argv: list[str] | None = None) -> int:
     ls.add_argument("--json", action="store_true")
     au = q.add_parser(
         "audit",
-        help="merges past the queue, times it stood still, check runs per merge and minutes to merged, for the last hours",
+        help="merges past the queue, times it stood still, check runs per merge, minutes to merged, the busiest hour and group start to merged, for the last hours",
     )
     au.add_argument("--hours", type=float, default=14, help="how far back (default 14: one night)")
     au.add_argument("--json", action="store_true")
@@ -355,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     hs.add_argument("state", nargs="?", choices=("on", "off", "status"), default="status")
     hs.add_argument("--json", action="store_true")
-    w = sub.add_parser("watch", help=argparse.SUPPRESS)
+    w = sub.add_parser("watch")  # hidden: no help= keeps it out of the --help list
     w.add_argument("--root", help=argparse.SUPPRESS)
     args = p.parse_args(argv)
     try:
