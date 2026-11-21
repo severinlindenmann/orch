@@ -4,8 +4,9 @@ Nothing the service recorded is replayed: the record sits in a file that any pro
 so replaying it would let such a process choose what the restarted service runs with. The restart starts the
 service with the CALLER's environment plus exactly three overrides that come from the system, not a record:
 
-  HOME      the current user's home from the password database (a test or sandbox HOME must not decide
-            where the agent login is looked for)
+  HOME      the current user's home from the password database (a sandbox HOME must not decide where the
+            agent login is looked for). A test install keeps the caller's HOME: ORCH_HOME_STRICT is on or
+            the installer marked it `test`, so its add-ons never reach the real home (ORCH-632).
   ORCH_HOME the orch folder in use now
   ORCH_ROOT the verified workspace folder (set by services._call)
 
@@ -63,10 +64,25 @@ def user_home() -> Path | None:
     return home if home.is_absolute() and home.is_dir() else None
 
 
+def test_install() -> bool:
+    """A test install: ORCH_HOME_STRICT is on (the isolation switch of every test and e2e run) or the
+    installer marked this orch `test`. Its services keep the HOME they are started with."""
+    if os.environ.get("ORCH_HOME_STRICT", "") not in ("", "0"):
+        return True
+    try:
+        from orch import home as orch_home
+
+        return orch_home.read_install_record() == "test"
+    except Exception:  # noqa: BLE001 - no record readable: a normal install
+        return False
+
+
 def overrides(orch_home: Path) -> tuple[dict[str, str], list[str]]:
-    """(variables to set over the caller's environment, notes). HOME is left as the caller's when the system
-    cannot tell the user's home (and a note says so)."""
+    """(variables to set over the caller's environment, notes). HOME is left as the caller's in a test
+    install, and when the system cannot tell the user's home (and a note says so)."""
     out, notes = {"ORCH_HOME": str(orch_home)}, []
+    if test_install():
+        return out, notes
     home = user_home()
     if home is not None:
         out["HOME"] = str(home)
@@ -78,6 +94,11 @@ def overrides(orch_home: Path) -> tuple[dict[str, str], list[str]]:
 def apply(base: dict[str, str], over: dict[str, str]) -> dict[str, str]:
     """The caller's environment with the overrides on top (nothing else changes)."""
     return {**base, **over}
+
+
+def source(name: str, over: dict[str, str]) -> str:
+    """Where the restart took one of HOME/PATH from, in plain words."""
+    return "this user's home folder" if name in over else "this terminal"
 
 
 def differs(recorded: object, used: dict[str, str]) -> list[str]:

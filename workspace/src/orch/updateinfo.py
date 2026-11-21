@@ -135,15 +135,35 @@ def label(release: int | None, sha: str | None, ref: str) -> str:
     if release:
         return f"orch {release}"
     if sha:
+        if sha.startswith(ref.lower()):  # installed from a commit: name it once
+            return f"orch {sha[:8]}"
         return f"orch {_printable(ref)} {sha[:8]}"
     return f"orch {addons._orch_version()}"
 
 
+def origin_sha() -> str | None:
+    """The commit this orch was installed from when the install itself tells it (no network): the commit uv
+    recorded for a git install, or a ref that is a commit (ORCH_REF=9c4ba8a2). None for a branch zip."""
+    try:
+        sha = addons._origin_commit()
+        if sha:
+            return sha
+        r = addons.ref()
+    except Exception:  # noqa: BLE001
+        return None
+    return r.lower() if _COMMIT_REF.fullmatch(r) else None
+
+
+_COMMIT_REF = re.compile(r"[0-9a-fA-F]{7,40}")
+
+
 def current_label() -> str:
-    """What `orch --version` and `orch status` print."""
+    """What `orch --version` and `orch status` print. A fresh install whose commit was not recorded (the
+    install could not ask the source) still names its commit when the install tells it (ORCH-632)."""
     try:
         got = installed()
-        text = label(got["release"], got["sha"], addons.ref())
+        sha = got["sha"] or (None if got["release"] else origin_sha())
+        text = label(got["release"], sha, addons.ref())
     except Exception:  # noqa: BLE001
         text = f"orch {addons._orch_version()}"
     return text + build_words()
