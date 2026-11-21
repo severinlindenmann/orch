@@ -154,6 +154,20 @@ def test_group_ops_run_orch_with_exact_argv(act_server, act_orch):
     json.dumps(say)
 
 
+def test_group_say_passes_the_helpers_picked_with_at(act_server, act_orch):
+    for to in ("ws_bank000001", ["--file"], ["a b"], ["ws_1"] * 8):  # a list of ids, at most 7
+        args = {"ticket": "t_abcdef", "text": "hi", "to": to}
+        assert post(act_server, {"op": "group.say", "args": args})[0] == 400, to
+    assert acts(act_orch) == []
+    args = {"ticket": "t_abcdef", "text": "Bank?", "to": ["ws_bank000001", "Home"]}
+    assert post(act_server, {"op": "group.say", "args": args})[0] == 200
+    args = {"group": "grp_t_abcdef", "host": "ws_fin0000001", "text": "Finance?", "to": ["ws_fin0000001"]}
+    assert post(act_server, {"op": "group.say", "args": args})[0] == 200
+    say, reply = acts(act_orch)[-2:]
+    assert say[4:9] == ["--dashboard", "--to", "ws_bank000001", "--to", "Home"]
+    assert reply[5:8] == ["--dashboard", "--to", "ws_fin0000001"]
+
+
 def test_groups_pass_only_cleaned_fields(ws, tmp_path):
     listing = {
         "hosted": [],

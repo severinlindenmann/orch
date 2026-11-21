@@ -3692,9 +3692,12 @@ def ask(
     shown: dict | None = None,
     group: str | None = None,
     links: list[dict] | None = None,
+    add_workspace: str | None = None,
 ) -> tuple[dict, dict]:
     """card/shown: a Review stack card (orch/review.py validates and copies it before it gets here).
-    group: a short name for cards that belong together (one set on Review); only with a card."""
+    group: a short name for cards that belong together (one set on Review); only with a card.
+    add_workspace: only from chat_groups.ask_to_add (the Add / Not now card it words itself); a caller's own
+    --action can never carry it, so a person's Add never adds a workspace under other words."""
     if not text.strip():
         raise Refused("A question needs text.")
     if group is not None:
@@ -3715,11 +3718,15 @@ def ask(
             act = None
         if not isinstance(act, dict):
             raise Refused("--action must be a JSON object.")
+        if "add_workspace" in act:
+            raise Refused("Asking to add a workspace: orch relay group ask-add <ticket> <workspace>.")
         if "merge" in act and card is None:  # a merge is only ever the --merge link card's
             raise Refused(
                 "A merge goes with a link card: orch ask --link TITLE --open <pull request> --merge."
             )
 
+    if add_workspace is not None:
+        act = {**(act or {}), "add_workspace": add_workspace}
     _guard_question(root, text, options, recommended, check)
     for part in (text, *options, *([recommended] if recommended else []), *_labels(act)):
         if _asks_for_secret(part):
