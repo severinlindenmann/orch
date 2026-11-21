@@ -11,7 +11,7 @@
 .attachment-composer.composer-row{padding:0;border:0;background:transparent}
 .composer-row form{display:grid;gap:var(--s2)}
 .composer-row .composer-line{display:flex;gap:var(--s2);align-items:flex-end;min-width:0}
-.composer-row .composer-line textarea{flex:1;min-width:0;min-height:var(--touch);max-height:calc(var(--s8) * 3);padding:var(--s2) var(--s3);border:1px solid var(--input);border-radius:var(--r1);background:var(--bg);resize:vertical}
+.composer-row .composer-line textarea{flex:1;min-width:0;min-height:var(--touch);max-height:calc(var(--s8) * 3);padding:var(--s2) var(--s3);border:1px solid var(--input);border-radius:var(--r1);background:var(--bg);resize:vertical;height:auto;field-sizing:content}
 .composer-row .composer-line>.btn{flex:none;min-height:var(--touch)}
 .composer-row .staged-files{flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain}
 .composer-row .attachment-tile{flex:none;grid-template-columns:auto minmax(0,1fr);align-items:center;column-gap:var(--s2);min-width:160px;max-width:min(100%,240px);border-radius:var(--r1);background:var(--surface-2)}

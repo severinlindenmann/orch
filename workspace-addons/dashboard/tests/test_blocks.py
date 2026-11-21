@@ -866,3 +866,19 @@ def test_a_chart_series_needs_one_number_per_label():
     assert check_view(v) is not None
     v["blocks"][1]["series"][0]["values"] = [7]  # 7 labels, 1 number: refused, not drawn as zeros
     assert check_view(v) is None
+
+
+def test_split_log_takes_as_many_lines_as_the_contract_and_no_more():
+    """ORCH-639: the contract allowed 100 log lines, the dashboard still refused more than 20 ('Can't show Services')."""
+    from orch_dashboard.views import check_view
+
+    schema = json.loads(
+        (Path(__file__).resolve().parents[3] / "contracts/addon-view.schema.json").read_text()
+    )
+    panel = schema["$defs"]["splitItem"]["properties"]["panel"]["properties"]
+    most = panel["log"]["properties"]["lines"]["maxItems"]
+    page = _services()
+    page["blocks"][0]["groups"][0]["items"][0]["panel"]["log"]["lines"] = [f"line {i}" for i in range(most)]
+    assert check_view(page) is not None
+    page["blocks"][0]["groups"][0]["items"][0]["panel"]["log"]["lines"].append("one more")
+    assert check_view(page) is None

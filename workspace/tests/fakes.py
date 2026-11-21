@@ -211,6 +211,32 @@ def make_relay() -> Fake:
         },
     }
     add_profile(f, {"phones": 1})
+    f.sign_key = None  # the public key a PUT /v1/me/signing-key stored (relay-api.md, Signing key)
+
+    def put_sign_key(m, q, body):
+        req = json.loads(body)
+        pk = req.get("public_key")
+        if (
+            set(req) != {"alg", "public_key"}
+            or req.get("alg") != "ed25519"
+            or not isinstance(pk, str)
+            or len(pk) != 43
+        ):
+            return 422, {"error": "invalid", "message": "Bad signing key."}
+        info = {
+            "alg": "ed25519",
+            "public_key": pk,
+            "key_id": "0" * 16,
+            "registered_at": "2026-11-21T14:00:00Z",
+        }
+        if f.sign_key is None:
+            f.sign_key = pk
+            return 201, {**info, "status": "stored"}
+        if f.sign_key == pk:
+            return 200, {**info, "status": "unchanged"}
+        return 409, {"error": "key_exists", "message": "This workspace already has a signing key."}
+
+    f.route("PUT", "/v1/me/signing-key", put_sign_key)
 
     def post_msg(m, q, body):
         msg = json.loads(body)
@@ -275,4 +301,20 @@ def make_relay() -> Fake:
         "DELETE", r"/v1/webhooks/(wh_[a-z0-9]+)", lambda m, q, b: (f.webhooks.pop(m.group(1)) and 204, None)
     )
     f.route("GET", "/v1/refresh", lambda m, q, b: (200, f.snapshot))
+
+    # POST /v1/transcribe (relay-api.md): audio in, {text, language, duration} out. `transcript` is what it
+    # "hears" ("" = nothing heard); `transcribe_off` answers as a relay without a Deepgram key.
+    f.transcript, f.transcribe_off = "Please keep the old file name.", False
+
+    def transcribe(m, q, body):
+        kind = (f.calls[-1][2].get("Content-Type") or "").split(";")[0].strip()
+        if f.transcribe_off:
+            return 503, {"error": "transcription_off", "message": "Voice transcription is not set up."}
+        if kind not in ("audio/m4a", "audio/wav", "audio/webm"):
+            return 422, {"error": "invalid", "message": "Content-Type must be audio/m4a, audio/wav or webm."}
+        if not body:
+            return 422, {"error": "invalid", "message": "The audio is empty."}
+        return 200, {"text": f.transcript, "language": "en", "duration": 2.0}
+
+    f.route("POST", "/v1/transcribe", transcribe)
     return f.start()

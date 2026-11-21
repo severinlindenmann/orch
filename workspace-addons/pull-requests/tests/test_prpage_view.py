@@ -248,8 +248,9 @@ def test_a_queued_pull_request_with_failed_checks_is_in_the_queue_not_failed(prw
     _queue(prws, 1, ticket="t_aaaaa1")
     v = valid(view.build(prws, running=True, queue_alive=True))
     (table,) = [b for b in v["blocks"] if b["type"] == "table"]
-    assert table["rows"][0]["cells"]["state"] == "1st in line"
-    assert "failed" not in table["rows"][0].get("subtitle", "").lower()
+    cells = table["rows"][0]["cells"]
+    assert cells["state"] == "In line" and "1st in line" in cells["why"]
+    assert "failed" not in cells["why"].lower()
 
 
 def test_an_empty_queue_still_says_where_it_is(prws):

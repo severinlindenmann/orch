@@ -28,7 +28,7 @@ if(row)root.innerHTML=`<form><label class="sr-only" for="${esc(root.id)}-message
 else root.innerHTML=`<form><label class="sr-only" for="${esc(root.id)}-message">${esc(options.label||'Instruction for Helper')}</label><textarea id="${esc(root.id)}-message" rows="2"${maxLength?` maxlength="${maxLength}"`:''} placeholder="${esc(options.placeholder||'Write an instruction, paste a screenshot, or drop files…')}"></textarea><div class="staged-files"></div><p class="attachment-error" role="alert"></p><div class="composer-actions"><button class="btn sm" type="button" data-attach>${esc(options.attachLabel||'Attach')}</button><input type="file" multiple hidden accept="${ext.map(e=>'.'+e).join(',')}"><span data-voice-slot hidden></span>${options.send===false?'':`<span class="meta">${maxFiles} files · ${mb(maxBytes)} MB each</span><button class="btn ${options.sendStyle==='outline'?'outline':'primary'} sm" type="submit">${esc(options.sendLabel||'Queue instruction')}</button>`}${interrupt?'<button class="btn sm" type="button" data-interrupt>Interrupt now</button>':''}</div>${hint}<p class="meta" data-delivery role="status"></p></form>`;
 const field=root.querySelector('textarea'),input=root.querySelector('input'),list=root.querySelector('.staged-files'),error=root.querySelector('[role=alert]'),delivery=root.querySelector('[data-delivery]'),submit=root.querySelector('[type=submit]');let files=[],busy=false;
 field.value=options.draft||'';field.oninput=()=>options.onDraft?.(field.value);
-function draw(){list.replaceChildren();files.forEach(f=>{const tile=document.createElement('div');tile.className='attachment-tile';if(f.url&&String(f.type).startsWith('image/')){const img=new Image();img.src=f.url;img.alt=f.name;tile.append(img)}else if(row){const kind=document.createElement('span');kind.className='attachment-kind';kind.setAttribute('aria-hidden','true');kind.innerHTML=window.icon?window.icon('file',16):'';tile.append(kind)}const label=document.createElement('span');label.className='attachment-name';label.textContent=f.name;tile.append(label);const progress=document.createElement('progress');progress.max=100;progress.value=f.progress;progress.setAttribute('aria-label','Upload '+f.name);tile.append(progress);const text=document.createElement('small');text.textContent=size(f.size)+' · '+(f.failed?'Could not read file.':f.progress===100?'Ready to attach':`Uploading ${f.progress}%`);tile.append(text);if(f.failed){const retry=document.createElement('button');retry.type='button';retry.textContent='Retry';retry.onclick=()=>read(f);tile.append(retry)}const remove=document.createElement('button');remove.type='button';remove.className='btn ghost icon attachment-remove';remove.innerHTML=window.icon?window.icon('x',16):'×';remove.title='Remove';remove.setAttribute('aria-label','Remove '+f.name);remove.onclick=()=>{f.reader?.abort();files=files.filter(x=>x!==f);draw()};tile.append(remove);list.append(tile)});if(submit)submit.disabled=busy||files.some(f=>f.progress<100||f.failed);options.onFiles?.(files)}
+function draw(){list.replaceChildren();files.forEach(f=>{const tile=document.createElement('div');tile.className='attachment-tile';if(f.url&&String(f.type).startsWith('image/')){const img=new Image();img.src=f.url;img.alt=f.name;tile.append(img)}else if(row){const kind=document.createElement('span');kind.className='attachment-kind';kind.setAttribute('aria-hidden','true');kind.innerHTML=window.icon?window.icon('file',16):'';tile.append(kind)}const label=document.createElement('span');label.className='attachment-name';label.textContent=f.name;tile.append(label);const progress=document.createElement('progress');progress.max=100;progress.value=f.progress;progress.setAttribute('aria-label','Upload '+f.name);tile.append(progress);const text=document.createElement('small');text.textContent=size(f.size)+' · '+(f.failed?'Could not read file.':f.progress===100?'Ready to attach':`Uploading ${f.progress}%`);tile.append(text);if(f.failed){const retry=document.createElement('button');retry.type='button';retry.textContent='Try again';retry.onclick=()=>read(f);tile.append(retry)}const remove=document.createElement('button');remove.type='button';remove.className='btn ghost icon attachment-remove';remove.innerHTML=window.icon?window.icon('x',16):'×';remove.title='Remove';remove.setAttribute('aria-label','Remove '+f.name);remove.onclick=()=>{f.reader?.abort();files=files.filter(x=>x!==f);draw()};tile.append(remove);list.append(tile)});if(submit)submit.disabled=busy||files.some(f=>f.progress<100||f.failed);options.onFiles?.(files)}
 function read(f){f.failed=false;f.progress=0;const r=f.reader=new FileReader();r.onprogress=e=>{if(e.lengthComputable){f.progress=Math.round(e.loaded/e.total*99);draw()}};r.onload=()=>{f.url=r.result;f.progress=100;draw()};r.onerror=()=>{f.failed=true;draw()};r.readAsDataURL(f.file);draw()}
 function add(incoming){error.textContent='';for(const file of incoming){const dot=file.name.lastIndexOf('.'),kind=dot>0?file.name.slice(dot+1).toLowerCase():'';if(file.size>maxBytes){error.textContent+=`This file is larger than ${mb(maxBytes)} MB. `;continue}if(!ext.includes(kind)){error.textContent+=options.acceptError?options.acceptError+' ':"This kind of file can't be attached. ";continue}if(files.length>=maxFiles){error.textContent+=`Attach up to ${maxFiles} files at a time. `;continue}const f={file,name:file.name,size:file.size,type:file.type,progress:0};files.push(f);read(f)}}
 root.querySelector('[data-attach]').onclick=()=>input.click();input.onchange=()=>{add(input.files);input.value=''};root.addEventListener('paste',e=>{const pasted=UI.pastedFiles(e);if(pasted.length){e.preventDefault();add(pasted)}});
@@ -50,9 +50,12 @@ field.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.metaKey||e.ctrlKey||
 return {field,add,clear,files:()=>files.slice(),restore:message=>{field.value=message.text;files=message.files.map(f=>({...f,progress:100}));draw();options.onDraft?.(field.value);field.focus()},
 recorder:voice,destroy(){voice?.destroy();target.removeEventListener('dragenter',onEnter);target.removeEventListener('dragover',onOver);target.removeEventListener('dragleave',onLeave);target.removeEventListener('drop',onDrop);overlay.remove();files.forEach(f=>f.reader?.abort())}};
 };
-/* UI.voiceRecorder({onDone(file, words), onError(message), lang, maxSecs}) -> {button, stop(), destroy()} or null where the
-   browser cannot record (no microphone access, or an http address that is not this computer). One click starts, one stops;
-   it stops by itself after maxSecs (5 minutes). Words only from speech recognition that runs on this computer. */
+/* UI.voiceRecorder({onDone(file, words), onError(message, code), onState(recording, {cancelled, empty}), lang, maxSecs,
+   words}) -> {button, start(), stop(), cancel(), secs(), destroy()} or null where the browser cannot record (no microphone
+   access, or an http address that is not this computer). One click starts, one stops; it stops by itself after maxSecs
+   (5 minutes). Words only from speech recognition that runs on this computer; words:false skips it (a page that gets
+   the words elsewhere, the new Focus message box through the relay: ORCH-696). A page may draw its own controls and
+   call start()/stop()/cancel(): cancel() drops the recording (no onDone). onError's code: 'blocked' or 'none'. */
 const VOICE_TYPES=[['audio/webm;codecs=opus','webm'],['audio/webm','webm'],['audio/ogg;codecs=opus','ogg'],['audio/mp4','m4a']];
 UI.voiceRecorder=(o={})=>{
  const MR=window.MediaRecorder,md=navigator.mediaDevices;if(!MR||!md||!md.getUserMedia)return null;
@@ -60,11 +63,12 @@ UI.voiceRecorder=(o={})=>{
  const icon=n=>(window.icon?window.icon(n,16):'');
  const button=document.createElement('button');button.type='button';button.className='btn sm voice-record';
  const idle=()=>{button.innerHTML=icon('mic')+'<span>Record</span>';button.classList.remove('rec');button.setAttribute('aria-pressed','false');button.title='Record a voice note';button.setAttribute('aria-label','Record a voice note');button.disabled=false};idle();
- let rec=null,stream=null,chunks=[],t0=0,timer=null,speech=null,words=[],gone=false;
+ let rec=null,stream=null,chunks=[],t0=0,timer=null,speech=null,words=[],gone=false,dropped=false,asking=0;
  const secs=()=>Math.max(1,Math.round((Date.now()-t0)/1000)),clock=n=>Math.floor(n/60)+':'+String(n%60).padStart(2,'0');
  const tick=()=>{const n=secs();button.lastChild.textContent='Stop · '+clock(n);if(n>=maxSecs)stop()};
  const release=()=>{clearInterval(timer);timer=null;stream?.getTracks().forEach(t=>t.stop());stream=null;try{speech?.stop()}catch(_){/* already ended */}speech=null};
  async function listen(){  /* speech to words, only on this computer (Chrome's on-device recognition); else none */
+  if(o.words===false)return;
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR||!('processLocally' in SR.prototype)||typeof SR.available!=='function')return;
   if(navigator.webdriver)return;/* a test browser has no on-device speech, and asking it crashed the headless one */
   const lang=o.lang||navigator.language||'en-US';
@@ -73,18 +77,21 @@ UI.voiceRecorder=(o={})=>{
   const r=new SR();r.lang=lang;r.processLocally=true;r.continuous=true;r.interimResults=false;
   r.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++)if(e.results[i].isFinal)words.push(e.results[i][0].transcript.trim())};
   r.onerror=()=>{};try{r.start();speech=r}catch(_){/* no words, the sound file is kept */}}
- async function start(){if(rec||gone)return;button.disabled=true;
-  try{stream=await md.getUserMedia({audio:true})}catch(e){idle();o.onError?.(e&&e.name==='NotAllowedError'?'The microphone is blocked. Allow it for this page in the browser, then record again.':'No microphone was found.');return}
-  if(gone){release();return}
+ async function start(){if(rec||gone||button.disabled)return;button.disabled=true;dropped=false;const ask=++asking;let got;
+  try{got=await md.getUserMedia({audio:true})}catch(e){if(ask!==asking||gone)return;asking=0;idle();const blocked=!!e&&(e.name==='NotAllowedError'||e.name==='SecurityError');o.onError?.(blocked?'The microphone is blocked. Allow it for this page in the browser, then record again.':'No microphone was found.',blocked?'blocked':'none');return}
+  if(ask!==asking||gone){got.getTracks().forEach(t=>t.stop());return}  /* cancelled while the browser asked: cancel() told the page */
+  asking=0;stream=got;
   chunks=[];words=[];try{rec=new MR(stream,{mimeType:kind[0]})}catch(_){rec=new MR(stream)}
   rec.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
-  rec.onstop=()=>{const n=secs(),type=rec.mimeType||kind[0];rec=null;release();idle();if(gone||!chunks.length)return;
+  rec.onstop=()=>{const n=secs(),type=rec.mimeType||kind[0];rec=null;release();idle();if(!gone)o.onState?.(false,{cancelled:dropped,empty:!chunks.length});if(gone||dropped||!chunks.length)return;
    const ext=/mp4/.test(type)?'m4a':/ogg/.test(type)?'ogg':'webm',d=new Date(),name='voice-note-'+String(d.getHours()).padStart(2,'0')+String(d.getMinutes()).padStart(2,'0')+'.'+ext;
    const file=new File(chunks,name,{type:type.split(';')[0]});o.onDone?.(file,words.join(' ').trim(),n)};
   rec.start(1000);t0=Date.now();button.disabled=false;button.classList.add('rec');button.setAttribute('aria-pressed','true');button.title='Stop recording';button.setAttribute('aria-label','Stop recording');
-  button.innerHTML=icon('stop')+'<span></span>';tick();timer=setInterval(tick,500);listen()}
+  button.innerHTML=icon('stop')+'<span></span>';tick();timer=setInterval(tick,500);o.onState?.(true,{});listen()}
  function stop(){if(rec&&rec.state!=='inactive'){try{speech?.stop()}catch(_){/* ended */}setTimeout(()=>{if(rec&&rec.state!=='inactive')rec.stop()},speech?400:0)}}
+ function cancel(){dropped=true;if(rec&&rec.state!=='inactive'){rec.stop();return}
+  if(asking){asking=0;idle();if(!gone)o.onState?.(false,{cancelled:true,empty:true})}}  /* still asking: at once; a microphone granted later is released */
  button.onclick=()=>rec?stop():start();
- return {button,stop,get recording(){return !!rec},destroy(){gone=true;if(rec&&rec.state!=='inactive')rec.stop();release()}};
+ return {button,start,stop,cancel,secs:()=>rec?secs():0,get recording(){return !!rec},destroy(){gone=true;asking=0;if(rec&&rec.state!=='inactive')rec.stop();release()}};
 };
 document.addEventListener('DOMContentLoaded',()=>document.querySelectorAll('[data-composer-demo]').forEach(root=>UI.composer(root,root.dataset.composerDemo==='voice'?{voice:true,accept:[...DEMO_EXT,'webm','ogg','m4a'],attachLabel:'Add file'}:root.dataset.composerDemo==='row'?{layout:'row',interrupt:false,attachLabel:'Add files',sendLabel:'Send',placeholder:'Message the helper',hint:'Paste a screenshot or drop files here · up to 10 files, 25 MB each'}:{})));})();

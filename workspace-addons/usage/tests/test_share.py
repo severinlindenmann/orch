@@ -58,7 +58,7 @@ def test_preset_then_parts_by_command(cli, no_switcher, ws):
         "when_ahead": "api",
         "day_dollars": 20,
     }
-    saved = json.loads((ws / ".orch/addons/usage/share.json").read_text())
+    saved = json.loads((store.usage_dir(ws) / "share.json").read_text())
     assert saved["schema"] == share.SCHEMA and saved["share"] == d["share"]
 
 
@@ -201,7 +201,7 @@ def test_page_click_refusal_and_page_model(cli, no_switcher, ws):
 
 
 def test_a_broken_share_file_is_reported_not_used(cli, no_switcher, ws):
-    d = ws / ".orch/addons/usage"
+    d = store.usage_dir(ws)
     d.mkdir(parents=True)
     (d / "share.json").write_text('{"schema": "orch.usage-share/1", "share": {"week_pct": 7}}')
     code, v = jrun(cli, "share")
@@ -216,7 +216,7 @@ def test_a_refused_order_saves_nothing_else(cli, fake_switcher, ws):
 
 
 def test_odd_kinds_in_the_file_do_not_crash(cli, no_switcher, ws):
-    d = ws / ".orch/addons/usage"
+    d = store.usage_dir(ws)
     d.mkdir(parents=True)
     bad = dict(share.PRESETS["even"]["share"], api_for=[{}])
     (d / "share.json").write_text(json.dumps({"schema": share.SCHEMA, "share": bad}))
@@ -225,7 +225,7 @@ def test_odd_kinds_in_the_file_do_not_crash(cli, no_switcher, ws):
 
 
 def test_a_newer_share_format_is_never_overwritten(cli, no_switcher, ws):
-    d = ws / ".orch/addons/usage"
+    d = store.usage_dir(ws)
     d.mkdir(parents=True)
     (d / "share.json").write_text('{"schema": "orch.usage-share/2", "share": {"new": 1}}')
     code, v = jrun(cli, "share", "--preset", "even", "--by", ME)
