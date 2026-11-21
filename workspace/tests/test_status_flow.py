@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 
 import pytest
 
@@ -317,7 +318,9 @@ def test_changes_asked_shows_after_send_back_and_clears_when_worked(proj, new_ti
     assert tickets.status_word(dict(t, status="review")) == "Review"  # only while it waits to be worked
 
 
-@pytest.mark.skipif(not hasattr(__import__("time"), "tzset"), reason="time.tzset is not on Windows")
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="time.tzset exists only on Unix; the zone cannot be set here"
+)
 def test_wait_until_history_line_is_local_time(proj, new_ticket, monkeypatch):
     import time
 

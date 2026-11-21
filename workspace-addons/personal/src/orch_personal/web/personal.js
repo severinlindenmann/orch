@@ -37,6 +37,7 @@
     return host;
   }
 
+  const SIGN_IN = 'Personal is private. Open the dashboard with a sign-in link from orch (run orch start on the computer).';
   const NO_REACH = 'Personal does not answer. Reload the page; if it stays, run orch start.';
   async function read(path) {
     let r;
@@ -44,7 +45,9 @@
     catch (e) { throw new Error(NO_REACH); }
     const body = await r.json().catch(() => null);
     if (r.status === 409 && body && body.error) throw new Error(body.error);
-    if (!r.ok || !body) throw new Error(r.status === 403 ? 'Open Personal from the dashboard.' : 'Personal could not be read. Reload the page.');
+    // 401: the dashboard knows no sign-in in this browser; 403: Personal refused it. Neither is fixed by a reload.
+    if (r.status === 401 || r.status === 403) { const e = new Error(SIGN_IN); e.signIn = true; throw e; }
+    if (!r.ok || !body) throw new Error('Personal could not be read. Reload the page.');
     return body;
   }
   async function act(op, args) {
@@ -467,7 +470,9 @@
     const h = decodeURIComponent(location.hash.slice(1)) || (['notes', 'meetings', 'parts'].includes(start) ? start : '');
     view.setAttribute('aria-busy', 'true');
     try { if (!today) today = await read('/api/today'); }
-    catch (e) { view.replaceChildren(state('error', 'Personal can’t be shown right now', e.message)); view.setAttribute('aria-busy', 'false'); return; }
+    catch (e) {
+      view.replaceChildren(e.signIn ? state('empty', 'Sign in to see Personal', e.message) : state('error', 'Personal can’t be shown right now', e.message));
+      view.setAttribute('aria-busy', 'false'); return; }
     let out;
     const [screen, ...rest] = h.split('/');
     const head = (title, sub) => { $('page-title').firstChild.textContent = title + ' '; $('page-sub').textContent = sub; };

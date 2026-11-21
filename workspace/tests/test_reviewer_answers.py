@@ -139,7 +139,8 @@ def test_tend_answers_without_the_review_switch_and_dry_run_only_says(proj, run,
     assert code == 0 and "q1: answered for you: Fix it now" in out
     assert _q(proj, tid)["answer"] == "Fix it now"
     code, out, _ = run("review", "accepted")
-    assert code == 0 and "Answered for you today: 1 question" in out and "q1 = Fix it now" in out
+    assert code == 0 and "Answered for you today: 1 question" in out and 'answered "Fix it now"' in out
+    assert "routine:" not in out and "q1 = " not in out  # plain words, not the history line (issue 1919)
 
 
 def test_a_changed_question_is_refused(proj, run, new_ticket, on):
@@ -174,3 +175,9 @@ def test_a_question_from_an_older_version_stays_for_the_owner(proj, run, new_tic
     t["questions"][0].pop("asked_at")
     tickets.save(proj, t)
     assert reviewer.answer_routine(proj, now=LATER)[0]["routine"] is False
+
+
+def test_a_routine_answer_reads_as_plain_words():
+    raw = "q3 = Morning (routine: a plain question with the helper's recommendation, no concept)"
+    assert reviewer._answered_words(raw) == 'answered "Morning"'
+    assert reviewer._answered_words("something else") == "answered something else"
