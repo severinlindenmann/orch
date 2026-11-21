@@ -1220,10 +1220,11 @@ function addonNotice(view) {
   if (snapshot || (op !== 'addon.start' && op !== 'addon.refresh')) return h('p', {className:tone}, clean(view.notice));
   return h('div', {className:tone}, h('p', {className:'grow'}, clean(view.notice)), h('button', {type:'button', className:'btn outline sm', 'data-action':op === 'addon.start' ? 'start' : 'retry-addon'}, clean(b.label)));
 }
-let pendingRepeat = null;  // {tid, title, plan, removing}: the repeat being saved or removed, shown as a row
+let pendingRepeat = null;  // {addon, tid, title, plan, removing, savedAt}: the repeat being saved or removed, shown as a row
 // The cells of that row: "DEM-9 · Weekly report · Saving…" first, the new plan in the second cell (one line when one cell).
+// ORCH-1006: once stored (savedAt) the row drops the Saving word at once, with the toast, and stays until the list has it.
 function pendingCells(n, p) {
-  const head = p.title + (p.removing ? ' · Removing…' : ' · Saving…');
+  const head = p.title + (p.savedAt ? '' : p.removing ? ' · Removing…' : ' · Saving…');
   if (n < 2) return [head + (p.plan && !p.removing ? ' · ' + p.plan : '')];
   return Array.from({length:n}, (_, i) => i === 0 ? head : i === 1 && !p.removing ? p.plan || '' : '');
 }
@@ -1246,13 +1247,23 @@ function paintAddon(id) {
   }
   // A repeat that is being saved or removed shows at once, with its number and plan, until the list has the change:
   // in place of the ticket's own row when it has one, else as a new row on top.
-  if (pendingRepeat && blocks) {
+  // A removed repeat simply leaves. With no table yet (the first repeat) the line takes the place of the empty card,
+  // never above a "No schedules yet" (ORCH-1006).
+  if (pendingRepeat && pendingRepeat.addon === id && blocks) {
     const body = blocks.querySelector('table tbody'), first = body?.querySelector('tr');
     const own = body ? [...body.querySelectorAll('[data-addon-edit]')].find(n => n.dataset.addonEdit === pendingRepeat.tid)?.closest('tr') : null;
-    if (body && first) {
+    if (pendingRepeat.removing && pendingRepeat.savedAt) own?.remove();
+    else if (body && first) {
       const row = h('tr', {'data-key':'repeat-saving', role:'status'}, pendingCells((own || first).children.length, pendingRepeat).map(text => h('td', {}, text)));
       if (own) own.replaceWith(row); else body.prepend(row);
-    } else blocks.prepend(h('p', {className:'status-line', role:'status'}, pendingCells(1, pendingRepeat)[0]));
+    } else if (!pendingRepeat.removing) {
+      const empty = blocks.querySelector('.blk-empty');
+      if (empty) {   // drawn as the list's own row: the name, the plan below it
+        const [head, plan] = pendingCells(2, pendingRepeat);
+        empty.replaceWith(h('ul', {className:'blk-list'}, h('li', {'data-key':'repeat-saving', role:'status'},
+          h('span', {className:'li-row'}, h('span', {className:'li-main'}, h('span', {className:'li-title'}, head), plan ? h('small', {className:'li-sub'}, plan) : null)))));
+      } else blocks.prepend(h('p', {className:'status-line', 'data-key':'repeat-saving', role:'status'}, pendingCells(1, pendingRepeat)[0]));
+    }
   }
   reconcile(host, template);
   const slot = document.getElementById('addon-header');
@@ -1267,6 +1278,7 @@ async function loadAddon(id, manual = false) {
   if (addonChanging()) return;
   if (!snapshot && state && !addons().some(a => a.name === id)) return;  // turned off or removed: nothing to ask
   addonBusy.add(id);
+  const asked = Date.now();  // a load asked after a repeat was stored has it: the waiting row can go (ORCH-1006)
   const retry = main.querySelector('[data-action="retry-addon"]');
   if (manual && retry) { retry.disabled = true; retry.textContent = 'Trying…'; }
   try {
@@ -1279,6 +1291,7 @@ async function loadAddon(id, manual = false) {
   } catch (_) {
     addonViews[id] = addonViews[id]?.view ? {...addonViews[id], state:'stale'} : {state:'error', message:'No answer.'};
   } finally { addonBusy.delete(id); }
+  if (pendingRepeat?.savedAt && pendingRepeat.addon === id && asked >= pendingRepeat.savedAt) pendingRepeat = null;
   if (isPublish(id) && !snapshot) await loadSharedLinks();
   if (shownAddon() === id) paintAddon(id);
   if (addonAgain.delete(id)) await loadAddon(id);
@@ -1585,16 +1598,21 @@ function repeatsDialog(only = null, addonName = null) {
 // Save or Delete in the repeat window: it closes at once and the list shows the change ("Saving…" / "Removing…",
 // with the ticket's number) until it is stored. It always ends: the answer, or after 30 s a plain "taking too long"
 // (the change may still have been made).
+// Stored: the row loses its Saving word together with the toast and stays (plain) until a reload asked after the
+// save has painted the list (ORCH-1006: the reload takes seconds, so clearing it later read "Saving…" after "Repeat saved").
 async function repeatSend(d, args, pending, okText) {
   await window.orch.close(d);
-  pendingRepeat = pending;
+  const mine = {...pending, addon:args.addon};
+  pendingRepeat = mine;
   if (route().kind === 'addon') paintAddon(route().id);
   let timer;
   const late = new Promise(done => { timer = setTimeout(() => done({ok:false, text:'This is taking too long. Check the list, then try again.'}), 30000); });
   let result;
   try { result = await Promise.race([act('addon.act', args), late]); }
   catch (err) { result = {ok:false, text:'That did not work. Try again.'}; }
-  finally { clearTimeout(timer); pendingRepeat = null; }
+  finally { clearTimeout(timer); }
+  if (pendingRepeat === mine) pendingRepeat = result.ok ? {...mine, savedAt:Date.now()} : null;
+  if (route().kind === 'addon') paintAddon(route().id);
   window.orch.toast(result.ok ? okText : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
   if (route().kind === 'addon') await loadAddon(route().id);
 }
