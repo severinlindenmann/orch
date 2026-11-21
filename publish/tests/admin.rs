@@ -358,3 +358,144 @@ async fn admin_root_goes_to_the_portal() {
     assert!(r.status.is_redirection());
     assert_eq!(r.headers["location"], "/admin");
 }
+
+/// Every text cell of every table that contains `needle`.
+fn rows_naming(c: &rusqlite::Connection, needle: &str) -> Vec<String> {
+    let tables: Vec<String> = c
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    let mut hits = vec![];
+    for t in tables {
+        let cols: Vec<String> = c
+            .prepare(&format!("SELECT name FROM pragma_table_info('{t}')"))
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        for col in cols {
+            let n: i64 = c
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM \"{t}\" WHERE typeof(\"{col}\")='text' AND instr(\"{col}\", ?1)>0"),
+                    [needle],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            if n > 0 {
+                hits.push(format!("{t}.{col}"));
+            }
+        }
+    }
+    hits
+}
+
+/// Every path under `dir` whose name contains one of `needles`.
+fn paths_naming(dir: &std::path::Path, needles: &[&str]) -> Vec<String> {
+    let mut out = vec![];
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&d) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().to_string();
+            if needles.iter().any(|n| name.contains(n)) {
+                out.push(p.display().to_string());
+            }
+            if p.is_dir() {
+                stack.push(p);
+            }
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn delete_workspace_leaves_no_row_or_file_of_it() {
+    let t = setup();
+    let gone = t.workspace("Gone", basic_rights()).await;
+    let stays = t.workspace("Stays", basic_rights()).await;
+    let mut fids = vec![];
+    for _ in 0..2 {
+        fids.push(
+            t.api(&gone, "POST", "/v1/files", vector_blob())
+                .await
+                .json()["id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+    let keep = t
+        .api(&stays, "POST", "/v1/files", vector_blob())
+        .await
+        .json()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for (w, name) in [(&gone, "gone-site"), (&stays, "kept-site")] {
+        let r = t
+            .api(
+                w,
+                "PUT",
+                &format!("/v1/apps/{name}"),
+                bundle(&[
+                    (
+                        "app.toml",
+                        &format!("name = \"{name}\"\nstack = \"static\"\n"),
+                    ),
+                    ("index.html", "<p>hi</p>"),
+                ]),
+            )
+            .await;
+        assert!(r.status.is_success(), "{}", r.text());
+    }
+    std::fs::create_dir_all(t.st.cfg.data_dir.join("logs")).unwrap();
+    std::fs::write(t.st.cfg.log_path("gone-site"), b"log").unwrap();
+    let dir = t.st.cfg.data_dir.clone();
+    assert!(!paths_naming(&dir, &["gone-site"]).is_empty());
+
+    let pre = t
+        .adm(
+            "GET",
+            &format!("/admin/api/workspaces/{}/removal", gone.0),
+            Value::Null,
+        )
+        .await;
+    assert_eq!(pre.status, 200, "{}", pre.text());
+    assert_eq!(pre.json()["removes"], json!({"files": 2, "apps": 1}));
+    assert_eq!(pre.json()["name"], "Gone");
+    assert!(
+        !rows_naming(&t.st.db.lock().unwrap(), &gone.0).is_empty(),
+        "dry run changed nothing"
+    );
+
+    let r = t
+        .adm(
+            "DELETE",
+            &format!("/admin/api/workspaces/{}", gone.0),
+            Value::Null,
+        )
+        .await;
+    assert_eq!(r.status, 204);
+    {
+        let c = t.st.db.lock().unwrap();
+        assert_eq!(rows_naming(&c, &gone.0), Vec::<String>::new());
+        assert_eq!(rows_naming(&c, "gone-site"), Vec::<String>::new());
+        for f in &fids {
+            assert_eq!(rows_naming(&c, f), Vec::<String>::new());
+        }
+        assert!(!rows_naming(&c, &stays.0).is_empty());
+        assert!(!rows_naming(&c, &keep).is_empty());
+    }
+    let mut needles: Vec<&str> = fids.iter().map(String::as_str).collect();
+    needles.push("gone-site");
+    assert_eq!(paths_naming(&dir, &needles), Vec::<String>::new());
+    assert!(!paths_naming(&dir, &[&keep]).is_empty());
+    assert!(!paths_naming(&dir, &["kept-site"]).is_empty());
+}

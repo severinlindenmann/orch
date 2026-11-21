@@ -186,6 +186,14 @@ test('changing the choice, address or interval shows a review line; Undo drops i
   card = c.syncCard(ON);
   assert.equal(text(byKey(card, 'sync-review-text')), 'Enter a sync address first.');
   assert.equal(byKey(card, 'sync-review-save').disabled, true);
+  ui.draft = {where:'remote', addr:'not a real address', every:'15'};
+  card = c.syncCard(ON);
+  assert.match(text(byKey(card, 'sync-review-text')), /^This is not a valid sync address\./);
+  assert.equal(byKey(card, 'sync-review-save').disabled, true);
+  for (const good of ['https://github.com/me/copy', 'git@github.com:me/copy.git', 'ssh://box.example.net/orch']) {
+    ui.draft = {where:'remote', addr:good, every:'15'};
+    assert.equal(byKey(c.syncCard(ON), 'sync-review-save').disabled, false, good);
+  }
   ui.draft = {where:'local', addr:'', every:'15'};
   await click(byKey(c.syncCard(ON), 'sync-review-save'));
   assert.deepEqual(calls.at(-2), ['addon.act', {addon:'sync', verb:'set', target:'local'}]);
