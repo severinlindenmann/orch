@@ -58,12 +58,13 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import re
 import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import blame, settings, store
+from . import blame, localcheck, required_checks, settings, store
 from . import precheck as prechecks
 from .store import FINISHED, MERGED, OUT, RUNNING, WAITING, Refused
 
@@ -670,7 +671,7 @@ class Runner:
                 left = [e for e in inside if e not in out]
                 red = self.group(left, alone) if left else []
             else:
-                red = self._check_group(repo, base, sha, inside, alone)
+                red = self._check_group(repo, base, sha, inside, alone, on=start)
         for e in apart:
             if ahead is not None:  # it conflicts with the group before it: a round of its own, no try used
                 why = f"it conflicted with the group {ahead.url} before it; waits again"
@@ -732,7 +733,7 @@ class Runner:
         return [e for e, _ in bad]
 
     def _check_group(
-        self, repo: str, base: str, sha: str, inside: list[dict], alone: bool = False
+        self, repo: str, base: str, sha: str, inside: list[dict], alone: bool = False, on: str = ""
     ) -> list[dict]:
         # the workspace's own mark: two workspaces on one repository never share a group branch
         mark = hashlib.sha256(str(self.root.resolve()).encode("utf-8")).hexdigest()[:6]
@@ -750,13 +751,36 @@ class Runner:
         except Refused as e:
             self.retry(inside, f"the group branch was not pushed: {e}")
             return []
-        if not self.mark(repo, sha, "Built by the orch merge queue"):  # the develop rule can require it
+        built = self.clock()
+        mode = self.group_check(inside)
+        local = shadow = None
+        if mode == "local":  # the local check decides before the group pull request exists (localcheck.py)
+            res = self.local_check(repo, sha, on)
+            if res.verdict == localcheck.RED:
+                return self._local_red(repo, base, sha, inside, res, built)
+            if res.verdict == localcheck.GREEN:
+                if not self._post_local(repo, sha, res.line):
+                    # some statuses may stand on the commit: it never gets a pull request (tidy deletes the
+                    # branch); the group is built and checked again after a pause, no try used
+                    self.retry(inside, "the local check's result could not be posted on GitHub", count=False)
+                    return []
+                local = res
+            else:  # broken: this group is checked on GitHub as before
+                self.log(f"Local check of {sha[:12]}: {res.line}; this group is checked on GitHub.")
+                localcheck.record(self.root, mode="local", sha=sha, local=localcheck.BROKEN, secs=res.secs,
+                                 line=res.line, built_at=built)  # fmt: skip
+        elif mode == "shadow":  # next to GitHub's run; GitHub's verdict decides
+            shadow = _Shadow(self, repo, sha, on)
+        # the develop rule requires the mark (a green local check has set it already)
+        if local is None and not self.mark(repo, sha, "Built by the orch merge queue"):
             self.retry(inside, "the queue's mark was not set on the group commit")
             return []
         good = self.check_members(inside, base)  # just before the group pull request is opened
         if len(good) < len(inside):  # someone changed: this branch is not used (tidy deletes it)
             return self.group(good, alone)
         title, body = _group_text(inside)
+        if local is not None:
+            body += f"\n{localcheck.LOCAL_LINE} ({local.line})\n"
         if not self.take("pr", f"{repo} group {branch}"):
             self.retry(inside, NO_ROOM, count=False)
             return []
@@ -775,6 +799,13 @@ class Runner:
                 why = f"in the group {url}, checked on top of the group {self._ahead.url}"
                 store.set_state(self.root, e["url"], RUNNING, why, group=url)
         o = self.wait_group(repo, base, url, branch, sha, inside)
+        merged = bool(o.ok and o.status == "merged")
+        if local is not None:
+            localcheck.record(self.root, mode="local", url=url, sha=sha, local=localcheck.GREEN, secs=local.secs,
+                             line=local.line, built_at=built, merged_at=self.clock() if merged else None,
+                             github=o.status)  # fmt: skip
+        if shadow is not None:
+            shadow.done(url, o)
         if self._ahead is not None and not (o.ok and o.status == "merged"):
             return self._not_followed(url, base, inside, o)
         if o.ok and o.status == "merged":
@@ -815,6 +846,61 @@ class Runner:
             return inside
         self.retry(inside, f"the group {url} was not merged: {o.line}")
         return []
+
+    # -- the local check (ORCH-1124, localcheck.py) ----------------------------------------------------------
+    def group_check(self, inside: list[dict]) -> str:
+        """github, shadow or local for this group. A change that must prove itself on GitHub (CI, the queue's own
+        code: alone_paths) or one a person merges is always checked on GitHub."""
+        if any(e.get("lone") or e.get("proof") for e in inside):
+            return "github"
+        return settings.group_check(self.root)
+
+    def local_check(self, repo: str, sha: str, on: str) -> localcheck.Result:
+        try:
+            git = self.make_git(repo)
+        except Refused as e:
+            return localcheck.Result(localcheck.BROKEN, 0.0, f"no copy of {repo} for the check: {e}")
+        self.log(f"Local check on {sha[:12]} ...")
+        res = localcheck.run(git, sha, on or sha, settings.check_command(self.root))
+        self.log(f"Local check on {sha[:12]}: {res.line}")
+        return res
+
+    def _post_local(self, repo: str, sha: str, line: str) -> bool:
+        """A green local check: the develop rule's required checks as commit statuses, the queue's mark last (it
+        is the one nobody can merge without)."""
+        post = getattr(self.gh, "post_status", None)
+        if post is None:
+            return False
+        for ctx in required_checks.REQUIRED:
+            if not (self.take("other", f"{repo} {ctx} {sha[:12]}") and post(repo, sha, ctx, "success", line)):
+                return False
+        return self.mark(repo, sha, "Built and checked by the orch merge queue (local check)")
+
+    def _local_red(
+        self, repo: str, base: str, sha: str, inside: list[dict], res: localcheck.Result, built: float
+    ) -> list[dict]:
+        """A red local check: no group pull request (tidy deletes the branch); split like a red group."""
+        localcheck.record(self.root, mode="local", sha=sha, local=localcheck.RED, secs=res.secs, line=res.line,
+                         failed=res.failed, built_at=built)  # fmt: skip
+        post = getattr(self.gh, "post_status", None)
+        if post is not None and self.take("other", f"{repo} status {sha[:12]}"):
+            post(
+                repo, sha, required_checks.ROLLUP, "failure", res.line
+            )  # for whoever looks at the commit; never required
+        what = f"the local check of the group commit {sha[:12]}"
+        self.log(f"Red: {what}: {res.line} (" + ", ".join(f"#{e['number']}" for e in inside) + ")")
+        if self._ahead is not None:  # on top of a running group: again from the base branch, no try used
+            why = f"{what} built on top of the group {self._ahead.url} was red; waits again"
+            store.back_to_front(self.root, [e["url"] for e in inside], why)
+            return []
+        self.red_checks = frozenset(res.failed)
+        if self.base_to_blame(repo, base, what, inside, self.red_checks):
+            return []
+        for e in inside:
+            store.set_state(
+                self.root, e["url"], RUNNING, f"{what} was red; checked in a smaller group", group=None
+            )
+        return inside
 
     # -- the next group while one runs (ORCH-432) --------------------------------------------------------
     def wait_group(self, repo: str, base: str, url: str, branch: str, sha: str, inside: list[dict]):
@@ -1036,6 +1122,33 @@ class Runner:
             tickets.note_history(self.root, tid, BY, f"{e['url']} left the merge queue: {how}.")
 
 
+class _Shadow:
+    """The local check next to GitHub's run of one group (group_check = shadow): its verdict is only written down
+    (localcheck.record) next to GitHub's, for `orch pull-requests queue local-checks`."""
+
+    def __init__(self, r: Runner, repo: str, sha: str, on: str):
+        self.root, self.sha, self.got = r.root, sha, []
+        self.t = threading.Thread(
+            target=lambda: self.got.append(r.local_check(repo, sha, on)),
+            name=f"local check {sha[:12]}",
+            daemon=True,
+        )
+        self.t.start()
+
+    def done(self, url: str, o) -> None:
+        self.t.join(localcheck.CHECK_SECS + 60)
+        res = self.got[0] if self.got else localcheck.Result(localcheck.BROKEN, 0.0, "the check did not end")
+        unknown = bool(getattr(getattr(o, "verdict", None), "unknown", False))
+        if o.ok and o.status in ("merged", "checks passed"):
+            gh = localcheck.GREEN
+        elif o.status == "checks failed" and not unknown:
+            gh = localcheck.RED
+        else:
+            gh = "unknown"
+        localcheck.record(self.root, mode="shadow", url=url, sha=self.sha, local=res.verdict, secs=res.secs,
+                         line=res.line, failed=res.failed, github=gh, github_line=str(o.line)[:200])  # fmt: skip
+
+
 @dataclass
 class _Trouble:
     """What the waiter thread says when the waiter itself broke: neither green nor red."""
@@ -1222,7 +1335,9 @@ def _closes(repo: str, v: dict) -> list[str]:
 
 
 def _safe_title(title: str) -> str:
-    """A title as inert code text: words like 'closes #5' in it must not close anything."""
+    """A title as inert code text: words like 'closes #5' in it must not close anything, and it never carries the
+    line that makes ci.yml skip a local-check group (localcheck.LOCAL_LINE)."""
+    title = re.sub(r"orch-group-check", "orch group check", title, flags=re.IGNORECASE)
     return "`" + " ".join(title.replace("`", "'").split())[:200] + "`" if title.strip() else ""
 
 
