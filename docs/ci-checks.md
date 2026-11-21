@@ -20,7 +20,7 @@ steps are marked `continue-on-error`, so its check stays green and only a warnin
 
 ## Light on a pull request, full once per queue group (ORCH-545)
 
-A pull request into develop on its own runs one **light** job (`scripts/ci_light.py`, about 5 minutes): words and
+A pull request into develop on its own runs one **light** job (`scripts/ci_light.py`, 5 to 11 minutes, limit 15): words and
 style, ruff, the workspace tests that import the modules it changed (or a quarter of the suite as a sample when it
 changes what all tests share, a module no test imports, or more than a quarter of the suite), the rule tests that
 read the whole tree (`RULE_TESTS` plus every file named `test_no_*`, `test_*_lint`, `test_*_seams`, `test_*_scan_doors`,
