@@ -543,7 +543,17 @@ def _helper_rows(root: Path, rows: list[dict]) -> list[dict]:
     return [
         r
         for r in rows
-        if not _secret(root, f"{r['from']} {r.get('subject') or r.get('chat')} {r['preview']}")
+        if not _secret(
+            root,
+            f"{r['id']} {r['from']} {r.get('subject') or r.get('chat')} {r['preview']} {r['link'] or ''}",
+        )
+    ]
+
+
+def _helper_report(root: Path, rows: list[dict]) -> list[dict]:
+    """A source's problem line reaches a helper only when it holds nothing that looks like a secret."""
+    return [
+        {**r, "problem": "not checked"} if r["problem"] and _secret(root, r["problem"]) else r for r in rows
     ]
 
 
@@ -635,7 +645,7 @@ def inbox_need_me(root: Path, who: Who, part: str, fresh: bool = False) -> dict:
         "total": got["total"],
         "cut": got["cut"],
         "checked": looked["checked"],
-        "sources": looked["sources"],
+        "sources": _helper_report(root, looked["sources"]) if who.helper else looked["sources"],
         "data_note": INBOX_NOTE[part],
         "no_send": NO_SEND,
     }
@@ -652,7 +662,7 @@ def inbox_list(root: Path, who: Who, part: str, fresh: bool = False) -> dict:
         "schema": f"orch.personal.{part}/1",
         "items": rows,
         "checked": looked["checked"],
-        "sources": looked["sources"],
+        "sources": _helper_report(root, looked["sources"]) if who.helper else looked["sources"],
         "data_note": INBOX_NOTE[part],
         "no_send": NO_SEND,
     }
@@ -664,6 +674,7 @@ def inbox_find(root: Path, who: Who, part: str, words: str) -> dict:
     rows, report = inbox_mod.find(root, part, _inbox_srcs(root, who, part, p), words)
     if who.helper:
         rows = _helper_rows(root, rows)
+        report = _helper_report(root, report)
         store.log(root, part, f"looked for “{' '.join(words.split())[:60]}”", who.by, who.ticket)
     return {
         "schema": f"orch.personal.{part}/1",
@@ -689,7 +700,7 @@ def inbox_show(root: Path, who: Who, part: str, iid: str) -> dict:
     src, ref = _inbox_src(root, who, part, p, iid)
     m = inbox_mod.show(root, part, src, ref)
     if who.helper:
-        if _secret(root, inbox_mod.as_markdown(part, m, INBOX_NOTE[part])):
+        if _secret(root, inbox_mod.as_markdown(part, m, INBOX_NOTE[part]) + f"\n{m['link'] or ''}"):
             raise Refused("This holds something that looks like a password or key, so helpers do not get it.")
         store.log(root, part, f"read “{m['title'][:80]}”", who.by, who.ticket)
     return {
@@ -733,6 +744,7 @@ def inbox_draft(root: Path, who: Who, part: str, iid: str, text: str, request: s
         "saved": f"The draft is in your Drafts in {src['name']}. It is not sent.",
         "local": "The reply is kept on Personal for you to copy and send yourself. It is not sent.",
         "unsure": inbox_mod.UNSURE,
+        "saving": "The draft is still being saved; look in Drafts in a moment.",
         "failed": d.get("problem") or "The draft could not be saved.",
     }
     out = {**d, "words": words.get(d["state"], ""), "no_send": NO_SEND}

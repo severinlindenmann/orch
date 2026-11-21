@@ -31,7 +31,14 @@ on pad(n)
 end pad
 on txt(v)
 	if v is missing value then return ""
-	return v as text
+	set t to v as text
+	-- mail text must never carry the field marks this script uses between fields
+	set AppleScript's text item delimiters to {character id 30, character id 31}
+	set parts to text items of t
+	set AppleScript's text item delimiters to " "
+	set t to parts as text
+	set AppleScript's text item delimiters to ""
+	return t
 end txt
 on inboxOf(acc)
 	tell application "Mail"
@@ -106,11 +113,11 @@ on run argv
 		set m to first message of (my inboxOf(acc)) whose id is ((item 2 of argv) as integer)
 		set toList to ""
 		repeat with r in (to recipients of m)
-			set toList to toList & (address of r) & US
+			set toList to toList & my txt(address of r) & US
 		end repeat
 		set ccList to ""
 		repeat with r in (cc recipients of m)
-			set ccList to ccList & (address of r) & US
+			set ccList to ccList & my txt(address of r) & US
 		end repeat
 		return my txt(sender of m) & RS & toList & RS & ccList & RS & my txt(subject of m) & RS & my iso(date received of m) & RS & my txt(content of m)
 	end tell
@@ -141,20 +148,24 @@ on rows(accs, lim, cutoff, needle)
 	set US to character id 31
 	set RS to character id 30
 	set out to ""
-	set n to 0
+	set more to false
 	tell application "Mail"
 		repeat with acc in accounts
-			if (name of acc as text) is in accs and n < lim then
+			set n to 0
+			if (name of acc as text) is in accs then
 				set mine to email addresses of acc
 				set box to my inboxOf(acc)
 				if box is not missing value then
 					if needle is "" then
-						set hits to (messages of box whose date received > cutoff)
+						set hits to (messages of box whose date received > cutoff or flagged status is true)
 					else
 						set hits to (messages of box whose subject contains needle or sender contains needle)
 					end if
 					repeat with m in hits
-						if n is greater than or equal to lim then exit repeat
+						if n is greater than or equal to lim then
+							set more to true
+							exit repeat
+						end if
 						set n to n + 1
 						set toMe to false
 						repeat with r in (to recipients of m)
@@ -162,7 +173,7 @@ on rows(accs, lim, cutoff, needle)
 						end repeat
 						set preview to ""
 						try
-							set preview to content of m
+							set preview to my txt(content of m)
 							if (length of preview) > 300 then set preview to text 1 thru 300 of preview
 						end try
 						set out to out & (id of acc as text) & ":" & (id of m as text) & US & my txt(sender of m) & US & my txt(subject of m) & US & my iso(date received of m) & US & (read status of m as text) & US & (flagged status of m as text) & US & (toMe as text) & US & preview & RS
@@ -171,7 +182,7 @@ on rows(accs, lim, cutoff, needle)
 			end if
 		end repeat
 	end tell
-	if n is greater than or equal to lim then set out to out & "MORE"
+	if more then set out to out & "MORE"
 	return out
 end rows
 """

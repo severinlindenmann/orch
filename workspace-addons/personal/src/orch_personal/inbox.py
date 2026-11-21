@@ -250,6 +250,16 @@ def find(root: Path, part: str, srcs: list[dict], words: str) -> tuple[list[dict
     rows, report = [], []
     for src in srcs:
         if not _usable(src):
+            why = (
+                "off"
+                if not src["on"]
+                else "choose which accounts count"
+                if src["needs_accounts"]
+                else src["words"]
+            )
+            report.append(
+                {"way": src["way"], "name": src["name"], "ok": False, "problem": why, "more": False}
+            )
             continue
         try:
             data = _ask(root, src, "find", {"words": words, "limit": NEED_LIMIT})
@@ -380,6 +390,12 @@ def draft(
     with _locked(root):
         cur = drafts(root).get(did)
         if cur:
+            if cur.get("state") == "saving" and _age(cur.get("at")) > SAVING_SECONDS:
+                # cut off while it was being saved: maybe it is in Drafts; never tried again by itself
+                cur = {**cur, "state": "unsure", "problem": UNSURE}
+                data = drafts(root)
+                data[did] = cur
+                _save_drafts(root, data)
             return {**cur, "id": did, "again": True}
         row = {
             "part": part,
@@ -433,13 +449,26 @@ def drafts_for(root: Path, part: str, iid: str | None = None) -> list[dict]:
     return rows
 
 
+def _age(at) -> float:
+    try:
+        return time.time() - time.mktime(time.strptime(str(at), "%Y-%m-%dT%H:%M:%SZ")) + time.timezone
+    except ValueError:
+        return float("inf")
+
+
+SAVING_SECONDS = 600
+
+
 def throw_away(root: Path, did: str) -> dict:
-    """The person throws a kept reply away (on Personal only; a draft in their Drafts they delete there)."""
+    """The person throws a reply kept on Personal away. A draft in their own Drafts they delete there; its record
+    stays, so the same request never makes a second draft."""
     with _locked(root):
         data = drafts(root)
         row = data.get(did)
         if not row:
             raise Refused("That draft is not there any more. Reload the page.")
+        if row.get("state") != "local":
+            raise Refused("This draft is in your Drafts; delete it there.")
         data.pop(did)
         _save_drafts(root, data)
         return {**row, "id": did}

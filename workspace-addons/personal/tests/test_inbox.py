@@ -514,17 +514,19 @@ log = pathlib.Path(os.environ["HOME"]) / "osa.jsonl"
 with log.open("a") as f:
     f.write(json.dumps({{"argv": sys.argv[1:], "script": script}}) + "\n")
 mode = (pathlib.Path(os.environ["HOME"]) / "osa-mode").read_text().strip()
+import time
+NOW = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - 3600))
 US, RS = "\x1f", "\x1e"
 if mode == "closed":
     print("NOTRUNNING"); sys.exit(0)
 if mode == "denied":
     sys.stderr.write("execution error: Not authorized to send Apple events to Mail. (-1743)\n"); sys.exit(1)
 if "on rows(" in script and "whose date received" in script and "set accs to my picked(argv, 3)" in script and "item 2 of argv) as integer) * days" in script:
-    print("ACC-1:41" + US + "Petra Zingg <petra@example.ch>" + US + "Rückfrage" + US + "2026-11-20T09:12:00" + US + "false" + US + "false" + US + "true" + US + "Ist das im Fixpreis?" + RS)
+    print("ACC-1:41" + US + "Petra Zingg <petra@example.ch>" + US + "Rückfrage" + US + NOW + US + "false" + US + "false" + US + "true" + US + "Ist das im Fixpreis?" + RS)
 elif "first message of" in script and "reply m" in script:
     print("SAVED")
 elif "first message of" in script:
-    print("Petra Zingg <petra@example.ch>" + RS + "me@example.ch" + US + RS + RS + "Rückfrage" + RS + "2026-11-20T09:12:00" + RS + "Guten Tag\nIst das im Fixpreis?")
+    print("Petra Zingg <petra@example.ch>" + RS + "me@example.ch" + US + RS + RS + "Rückfrage" + RS + NOW + RS + "Guten Tag\nIst das im Fixpreis?")
 elif "enabled of a" in script:
     print("iCloud" + RS + "Work" + RS)
 else:
@@ -593,3 +595,42 @@ def test_mail_app_template_is_plain_python_39_and_never_writes_its_folder():
     ast.parse(src, feature_version=(3, 9))
     toml = (SRC / "way_templates" / "mac-mail" / "way.toml").read_text(encoding="utf-8")
     assert '"-B"' in toml and 'part = "mail"' in toml
+
+
+def test_a_draft_in_drafts_cannot_be_thrown_away_here(cli, outlook):
+    from orch_personal import api
+
+    d = jrun(cli, "mail", "draft", "outlook~m1", "--text", "Hallo", "--request", "r5")[1]
+    with pytest.raises(api.Refused, match="delete it there"):
+        api.inbox_throw_away(outlook, api.Who(helper=False, by="human:me"), "mail", d["id"])
+    again = jrun(cli, "mail", "draft", "outlook~m1", "--text", "Hallo", "--request", "r5")[1]
+    assert again["again"] is True
+
+
+def test_a_draft_cut_off_while_saving_turns_unsure(cli, outlook):
+    from orch_personal import inbox
+
+    d = jrun(cli, "mail", "draft", "outlook~m1", "--text", "Hallo", "--request", "r6")[1]
+    data = inbox.drafts(outlook)
+    data[d["id"]].update(state="saving", at="2026-01-01T00:00:00Z")
+    inbox._save_drafts(outlook, data)
+    again = jrun(cli, "mail", "draft", "outlook~m1", "--text", "Hallo", "--request", "r6")[1]
+    assert again["state"] == "unsure" and "look in Drafts" in again["words"]
+    assert [c["action"] for c in calls(outlook, "outlook")].count("draft") == 1
+
+
+def test_find_says_which_sources_were_not_searched(cli, outlook, ws):
+    make_source(ws, "other", "mail", [], "Other mail")
+    d = jrun(cli, "mail", "find", "Steueramt")[1]
+    assert {"way": "other", "name": "Other mail", "ok": False, "problem": "off", "more": False} in d[
+        "sources"
+    ]
+    _, out, _ = cli("mail", "find", "nothing-like-this")
+    assert "Other mail not checked: off" in out
+
+
+def test_mail_app_reads_each_account_and_flagged_older_mail():
+    src = (SRC / "way_templates" / "mac-mail" / "mail.py").read_text(encoding="utf-8")
+    assert "or flagged status is true" in src  # flagged mail older than the window still comes
+    assert "set n to 0\n\t\t\tif (name of acc as text) is in accs" in src  # the limit counts per account
+    assert "text item delimiters to {character id 30, character id 31}" in src  # mail text cannot fake fields
