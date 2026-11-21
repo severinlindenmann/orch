@@ -22,7 +22,10 @@
                   {id, ticket, key, card:{kind,title,why,need,then,blocked,ok_label,open,preview}, digest, since,
                    text (the question, shown on the card), group (cards that belong together), recommended}
                   card.files: [{name, type:'img'|'page'|'file', ref}] the result's own files (a Check card); api.fileUrl gives their URL
-                  answers: [{label, picked}] the card's own answer buttons (the dashboard sets them for a Factory start)
+                  answers: [{label, picked}] the card's own answer buttons (the dashboard sets them for a Factory start and a stuck card)
+                  href: '#ticket/<id>' a link inside the page: the card's Open button, same tab (a stuck card)
+                  card.kind 'stuck' (ORCH-1108): work that stopped (Home's rows); only its own buttons answer it, no Looks good / Don't do
+                  card.hint: one plain line in the card's foot saying what its own buttons do (a stuck card)
                   preview refs are "reviewed/<sha12>/<name>" files; the page asks api.fileUrl for them
      answered() -> Promise<[entry]>     entry = {id, ticket, ticket_key, ticket_title, text, key, card, shown:{digest,copy,files}, at, by, via,
                   decision:{action:approve|use|use_with_changes|send_back|dont|none_of_these, picked, allows,
@@ -40,7 +43,7 @@
    A rejected stack()/answered() with error.code 'needs_person' (or 401/403) shows the plain sign-in state. */
 (()=>{'use strict';const UI=window.UI=window.UI||{};
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};
-const KIND={draft:['Draft','page'],check:['Check','check'],link:['Publish','link'],choice:['Choose','cards'],plan:['Plan','note']};
+const KIND={draft:['Draft','page'],check:['Check','check'],link:['Publish','link'],choice:['Choose','cards'],plan:['Plan','note'],stuck:['Stuck','pause']};
 
 /* ---------- time: "today 09:12", "yesterday 17:05", "Thu 16:05", "12 Nov" ---------- */
 const pad=n=>String(n).padStart(2,'0');
@@ -61,9 +64,10 @@ const mapPreview=(p,c,api)=>{if(!p||typeof p!=='object')return {type:'doc'};cons
 const mapFiles=(fs,c,api)=>(Array.isArray(fs)?fs:[]).filter(f=>f&&typeof f.ref==='string'&&typeof f.name==='string'&&f.name).slice(0,24)/* the card shows 5 and a "+N more" tile (ORCH-421) */
  .map(f=>({label:f.name.slice(0,80),type:f.type==='img'||f.type==='page'?f.type:'file',src:api.fileUrl(c,f.ref)||''})).filter(f=>f.src);
 const safeOpen=u=>typeof u==='string'&&/^https?:\/\//i.test(u)?u:undefined;
+const safeHere=u=>typeof u==='string'&&/^#[A-Za-z0-9/_%?=&.-]{1,300}$/.test(u)?u:undefined;/* a link inside the same page (#ticket/<id>), opened in the same tab */
 const mapCard=(c,api,now)=>{const k=c.card||{},kd=KIND[k.kind]||[k.kind||'Review','file'];
  return {id:c.id,kind:k.kind,kindLabel:kd[0],icon:kd[1],ticket:c.ticket_key||(/^(q[0-9]+|review)$/.test(c.key||'')?c.ticket:c.key)||c.ticket,ticketId:c.ticket,ticketTitle:c.ticket_title,about:c.about,task:c.task,when:fmtTime(c.since,now),need:k.need,title:k.title||'Review',
-  why:k.why,okLabel:k.ok_label,then:k.then,blocked:typeof k.blocked==='string'?k.blocked:'',open:safeOpen(k.open),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,
+  why:k.why,hint:typeof k.hint==='string'?k.hint.slice(0,300):'',okLabel:k.ok_label,then:k.then,blocked:typeof k.blocked==='string'?k.blocked:'',open:safeOpen(k.open),href:safeHere(c.href),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,
   text:typeof c.text==='string'?c.text:'',links:(Array.isArray(c.links)?c.links:[]).map(l=>l&&{label:String(l.label||'').slice(0,60),url:safeOpen(l.url)}).filter(l=>l&&l.label&&l.url).slice(0,5),group:typeof c.group==='string'?c.group:'',files:mapFiles(k.files,c,api),answers:(Array.isArray(c.answers)?c.answers:[]).filter(x=>x&&typeof x.label==='string'&&typeof x.picked==='string'&&x.label&&x.picked).slice(0,4).map(x=>({label:x.label.slice(0,40),picked:x.picked})),suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined}};
 
 /* ---------- Answers: words, pill, record ---------- */
