@@ -69,6 +69,8 @@ form). It is never sent: only the public key is registered here.
 - Fingerprint (what people compare): the same hash in Crockford base32, the first 32 characters as 8 groups of 4. A
   workspace shows its own (`orch relay key`, `orch relay status`, `orch relay whoami`), always computed from its own
   key, never read from the relay. The relay never sends a fingerprint.
+- A new workspace token from the admin (`POST /admin/api/workspaces/<id>/token`) drops the stored key: the next
+  registration is a new key, which receivers treat as a new contact, never as the old one.
 - The relay keeps the key and shows it in whoami and in each directory item (`workspaces.schema.json` `signing_key`)
   as a HINT only: a receiver trusts a key once a person accepted its fingerprint, never because the relay lists it.
 

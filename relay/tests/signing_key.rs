@@ -122,3 +122,37 @@ async fn refuses_bad_keys_and_bodies() {
         .await;
     assert_eq!(s, 401);
 }
+
+/// A new token from the admin (reinstall, a stolen token) drops the key the old token registered: the next
+/// registration is a new key, which receivers treat as a new contact (design A2), never a silent carry-over.
+#[tokio::test]
+async fn new_token_drops_the_registered_key() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let pk = vectors()["good"][0]["public_key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (s, _) = t.call(&a, "PUT", "/v1/me/signing-key", put(&pk)).await;
+    assert_eq!(s, 201);
+    let (s, v) = t
+        .admin_json(
+            "POST",
+            &format!("/admin/api/workspaces/{}/token", a.id),
+            None,
+        )
+        .await;
+    assert_eq!(s, 200, "{v}");
+    let a2 = Ws {
+        id: a.id.clone(),
+        token: v["token"].as_str().unwrap().into(),
+    };
+    let (_, w) = t.call(&a2, "GET", "/v1/whoami", None).await;
+    assert_eq!(w["signing_key"], Value::Null);
+    let other = vectors()["good"][1]["public_key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (s, _) = t.call(&a2, "PUT", "/v1/me/signing-key", put(&other)).await;
+    assert_eq!(s, 201);
+}

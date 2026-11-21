@@ -95,7 +95,16 @@ def connect(root: Path, url: str, workspace: str, token: str) -> tuple[dict, str
         Refused, OSError, ValueError
     ):  # blobs of another relay or workspace are useless here
         phone_view.forget_blobs(root, keep_scope=phone_view.blob_scope(root))
-    return who, refresh(root)
+    line = refresh(root)
+    from orch import signkey  # the key pair is made here and its public half registered (ORCH-1200)
+
+    try:
+        key = signkey.register(root)
+        who["signing_key"] = {k: key[k] for k in ("alg", "public_key", "key_id", "fingerprint", "state")}
+        line += "\n" + signkey.line(key)
+    except (Refused, OSError, ValueError, TimeoutError) as e:
+        line += f"\nThe signing key could not be registered yet ({e}). orch tries again later."
+    return who, line
 
 
 def whoami(root: Path) -> dict:
