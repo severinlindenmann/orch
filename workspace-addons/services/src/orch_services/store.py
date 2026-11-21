@@ -63,6 +63,29 @@ def log_path(root: Path, sid: str) -> Path:
     return logs_dir(root) / f"{sid}.log"
 
 
+def set_aside_old_log(root: Path, sid: str) -> Path | None:
+    """A new service must not show the lines of a removed one with the same id (ORCH-1131): move the old log into
+    removed/<sid>-<time>.log next to it, so the new service starts with an empty log. Returns where it went."""
+    log = log_path(root, sid)
+    if not log.is_file():
+        return None
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    dest = log.parent / "removed" / f"{sid}-{stamp}.log"
+    n = 1
+    while dest.exists():
+        n += 1
+        dest = log.parent / "removed" / f"{sid}-{stamp}-{n}.log"
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(log, dest)
+    except OSError as e:
+        raise Refused(
+            f"The old log of an earlier service {sid} could not be moved aside ({e.strerror or e}). "
+            "Close what has it open and try again, or pick another id."
+        ) from e
+    return dest
+
+
 def state_path(root: Path, sid: str) -> Path:
     return base_dir(root) / "state" / f"{sid}.json"
 

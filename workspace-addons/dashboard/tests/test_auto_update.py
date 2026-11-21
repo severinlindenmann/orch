@@ -109,3 +109,55 @@ def test_a_note_written_while_the_page_is_open_shows_without_a_workspace_change(
     assert served["auto_update_note"]["to"] == "orch 17" and served["rev"] != "r1"  # the page renders again
     cache._store({"rev": "r2"}, None)  # a snapshot: no note key, none added
     assert "auto_update_note" not in cache._served()[0]
+
+
+def test_check_card_reaches_the_page_and_not_now_needs_a_session(ws, act_orch):
+    import json
+    import time
+
+    from orch import selfcheck
+
+    from orch_dashboard.data import load_state
+
+    selfcheck.card_path().parent.mkdir(parents=True, exist_ok=True)
+    selfcheck.card_path().write_text(
+        json.dumps(
+            {"at": int(time.time()), "release": 33, "back_to": 32, "failed": [{"name": "a", "why": "b"}]}
+        )
+    )
+    s = load_state(ws, orch_bin=str(act_orch), with_settings=True)
+    assert s["update_check"]["back_to"] == 32 and s["update_check"]["failed"] == [{"name": "a", "why": "b"}]
+    with pytest.raises(actions.NeedsPerson):
+        actions.run_op(ws, actions.SELF, "update.check.dismiss", {}, session=False)
+    assert actions.run_op(ws, actions.SELF, "update.check.dismiss", {}, session=True)[0] == 200
+    assert selfcheck.card() is None
+
+
+@pytest.mark.parametrize(
+    ("to", "ok"),
+    [
+        (None, True),
+        ("release", True),
+        ("32", True),
+        ("33.1", True),
+        ("0", False),
+        ("3x", False),
+        ("33.", False),
+    ],
+)
+def test_update_start_takes_a_release_number(to, ok):
+    assert update.target_ok(to) is ok
+    if not ok:
+        assert (
+            update.start_update(__import__("pathlib").Path("."), "orch", {}, start=lambda *a, **k: 1, to=to)[
+                0
+            ]
+            == 400
+        )
+
+
+def test_go_back_starts_orch_update_to_that_number(ws, monkeypatch):
+    started = []
+    monkeypatch.setattr(update, "_record_update", lambda root, pid: None)
+    code, _ = update.start_update(ws, "orch", {}, start=lambda argv, **k: started.append(argv) or 1, to="32")
+    assert code == 202 and started == [["update", "--to", "32"]]

@@ -51,8 +51,12 @@ PROBE_JS = """({never, leak}) => {
       if (!scrolls) out.cut.push((el.innerText || el.getAttribute('aria-label') || el.tagName).trim().slice(0, 40));
     }
   }
+  // A helper's own lines (a terminal excerpt on a Focus card, code in a result) are its words, not orch's: left out.
+  const own = e => { let t = e.innerText || '';
+    for (const q of e.querySelectorAll('pre, code, samp, kbd, textarea')) { const x = q.innerText; if (x) t = t.split(x).join(' '); }
+    return t; };
   const chrome = [...document.querySelectorAll('button, [role=tab], nav a, h1, h2, h3, label, th, .btn')]
-    .filter(vis).map(e => (e.innerText || '').trim()).filter(Boolean);
+    .filter(vis).map(e => own(e).trim()).filter(Boolean);
   for (const w of never) {
     const re = new RegExp('(^|[^A-Za-z])' + w.replace(/[.*+?^${}()|[\\]\\\\-]/g, '\\\\$&') + '([^A-Za-z]|$)');
     const hit = chrome.find(t => re.test(t.replace(/\\bSign in\\b/g, '')));
@@ -151,7 +155,15 @@ def browser_ready() -> bool:
 
 def _text_len(page) -> int:
     best = 0
+    with contextlib.suppress(Exception):
+        best = int(page.main_frame.evaluate(TEXT_LEN_JS) or 0)
+    if best > 20:
+        # Shown. A frame is asked only when main is empty: an evaluate in a frame that never gets a page has no
+        # time limit (phone #home "took 164.8 s", report r-1121-1222-ws-2).
+        return best
     for f in page.frames:  # add-on pages live in a frame inside main
+        if f == page.main_frame:
+            continue
         with contextlib.suppress(Exception):  # a frame that went away
             best = max(best, int(f.evaluate(TEXT_LEN_JS) or 0))
     return best
