@@ -1,3 +1,7 @@
+# 21 Nov team chat step 1: Ticket chats (ORCH-1169)
+- New page `ticket-chats.html`: Chats lists every ticket's chat under "Ticket chats" (newest first, unread count, key and workspace, "Needs your OK"), above "Workspaces"; five rows, then "See all (n)".
+- A ticket chat names who wrote each incoming message ("Claude · Marketing", a name typed on the computer "· not signed in") above the first bubble of a run; question cards and the composer as before.
+
 # 12 Nov phone UX, batch 4
 - Info: one "Shared" list; filters (Photos, Files, Links, Previews) only when they have content and only when there are two or more, zero counts hidden, "Progress · 3 of 4 done" row; no "N tasks · N references"; phone-local workspace name.
 - Result viewer: subtitle "PDF · 3 pages · 12:38" (time as the app prints it), version behind "Details", no status chip; PDF edge to edge on dark with page shadows and page count; share icon next to close; action bar on the composer band.
@@ -66,3 +70,7 @@ Topic header: plain icons of one size; the subtitle shows the status (Working gr
 ## 12 Nov phone UX, batch 7: wording and Dynamic Type
 
 One word, "topic", for a work thread: "Make topic", "Making topic…", "Topic made", "Couldn't make the topic", "Topic started: …", "Updates and results show up in this topic.", archive delete text "The topic and its history…", topic header info button "Topic info" (General keeps "Chat info"). No "Mobile mode" / "Send questions to my phone" on screen: the banner reads "You're away from <computer> · questions come to your phone" (muted: "You're away from <computer> · questions muted"); it wraps to 2 lines (more at accessibility sizes) instead of shrinking. At accessibility text sizes chat and workspace headers show the title on up to 2 lines and drop the subtitle; the chat header stops growing at AX2 so it is not clipped (not mocked: the mockup has no large-text mode). VoiceOver: unread badge "3 unread", amber count "1 question needs your OK" / "3 questions need your OK", workspace badge "Workspace icon, online" / "last seen 14:02" / "not reachable" (computer never seen) / "offline" (no connection), updated with the dot every minute.
+
+## 21 Nov team chat step 2 in the app (ORCH-1175)
+
+New page `team-chat.html`: in a ticket chat a strip under the title names who is in it (“Pilatus, Sales and Bank”) with + Add. Add opens a sheet with the Workspaces list (your workspaces on this phone that are not in the chat yet) and the line “They see this ticket and the whole chat. If you remove them later, what they already got stays with them.” Messages from another workspace carry “Helper · Sales” and its mark. The helper’s ask is a plain Add / Not now card. Chat info lists each workspace with “Added by you · 4 Nov” / “Added by Pilatus · 4 Nov”, “older orch” for a workspace on an older version, and “Adding…” until a workspace you asked for joined. An older relay: “Adding from the phone is not ready yet. Add it on the computer.”

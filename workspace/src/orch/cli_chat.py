@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from orch import chat, history, nextstep, tickets
+from orch import chat, history, nextstep, ticketchats, tickets
 from orch.errors import Refused
 
 
@@ -27,6 +27,11 @@ def add_parsers(sub, common) -> None:
     x = s.add_parser("make-ticket", parents=[common], help="make a ticket from a Chat proposal")
     x.add_argument("message_id")
     x.add_argument("--title")
+    x = s.add_parser("list", parents=[common], help="ticket chats: chat lines or an open question")
+    x.add_argument("--reader", help="whose unread count (default: you)")
+    x = s.add_parser("read", parents=[common], help="mark a ticket chat as read up to now")
+    x.add_argument("id")
+    x.add_argument("--reader", help="who read it (default: you)")
     _add_dm_parsers(s, common)
 
 
@@ -53,6 +58,13 @@ def dispatch(args, root: Path) -> bool:
     elif args.sub == "day":
         d = chat.read_day(root, args.day)
         _out(args, d, "\n".join(f"{m['by']}: {m['text']}" for m in d["messages"]) or "Nothing on that day.")
+    elif args.sub == "list":
+        d = ticketchats.chats(root, args.reader)
+        _out(args, d, "\n".join(_chat_row(r) for r in d) or "No ticket chats yet.")
+    elif args.sub == "read":
+        tid = tickets.resolve_cli(root, args.id, json_output=args.json)
+        d = ticketchats.mark_read(root, tid, args.reader)
+        _out(args, d, f"{d['key']}: read.")
     elif args.sub == "make-ticket":
         # the phone path calls chat.make_ticket in this process with the relay-authenticated sender instead
         # (relay._apply_proposal_answer).
@@ -81,6 +93,12 @@ def dispatch(args, root: Path) -> bool:
     else:
         return _dispatch_dm(args, root)
     return True
+
+
+def _chat_row(r: dict) -> str:
+    new = f"  {r['unread']} new" if r["unread"] else ""
+    ask = "  question" if r["open_questions"] else ""
+    return f"{r['key']}  {r['title']}{new}{ask}\n    {r['last']['text']}"
 
 
 # Workspace DMs stay outside HELPER_COMMANDS: the helper is default-denied.

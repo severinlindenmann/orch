@@ -1,0 +1,69 @@
+{
+  "why": "v2: removed_by only on a removal (reason removed), never when the member left by itself (G14).",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_v2event000000010",
+    "from": "ws_fin0000001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-08T10:03:00Z",
+    "ticket": "t_fin14a",
+    "key": "FIN-14",
+    "body": {
+      "text": "Bank left",
+      "group": {
+        "id": "grp_t_fin14a",
+        "host": "ws_fin0000001",
+        "title": "Pay car tax 2027",
+        "members": [
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            },
+            "joined_at": "2026-11-08T10:00:00Z",
+            "orch_version": "0.9.4",
+            "chat_groups": 2
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            },
+            "added_by": "you",
+            "joined_at": "2026-11-08T10:01:00Z",
+            "orch_version": "0.9.4",
+            "chat_groups": 2
+          },
+          {
+            "ws": "ws_ban0000001",
+            "name": "Bank",
+            "look": {
+              "icon": "wallet",
+              "color": "blue"
+            },
+            "added_by": "ws_fin0000001",
+            "joined_at": "2026-11-08T10:05:00Z"
+          }
+        ],
+        "seq": 10
+      },
+      "by": "ws_fin0000001",
+      "via": "helper",
+      "update": {
+        "kind": "note"
+      },
+      "group_event": {
+        "kind": "member_left",
+        "ws": "ws_ban0000001",
+        "reason": "left",
+        "at": "2026-11-21T09:10:00Z",
+        "removed_by": "you"
+      }
+    }
+  }
+}

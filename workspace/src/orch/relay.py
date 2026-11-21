@@ -457,7 +457,16 @@ def _write_outbox(root: Path, mid: str, raw: bytes) -> Path:
     fd = os.open(p, flags, 0o600)
     with os.fdopen(fd, "wb") as f:
         f.write(raw)
+    # the write time is the send order (outbox_list): a precise, strictly rising time, because a file system
+    # may keep coarse times and two messages saved in a row must never share one
+    global _LAST_SAVED_NS
+    _LAST_SAVED_NS = max(time.time_ns(), _LAST_SAVED_NS + 1)
+    with contextlib.suppress(OSError):
+        os.utime(p, ns=(_LAST_SAVED_NS, _LAST_SAVED_NS))
     return p
+
+
+_LAST_SAVED_NS = 0
 
 
 def _own_key(root: Path, tid: str) -> str | None:
@@ -613,18 +622,38 @@ def log_send_failure(root: Path, what: str, why: object) -> None:
 
 
 def outbox_list(root: Path) -> list[dict]:
-    """Messages saved but not taken by the relay yet, oldest first: [{id, to, type, created_at}]."""
-    out = []
+    """Messages saved but not taken by the relay yet, in the order they were saved (each file is written once,
+    so its write time is the send order; created_at alone is whole seconds and a group copy keeps its
+    origin's time): [{id, to, type, created_at}]."""
+    rows: list[tuple[int, dict]] = []
     d = _outbox(root)
     if d.is_symlink() or not d.is_dir():
-        return out
+        return []
     for f in sorted(d.glob("m_*.json")):
         if f.is_symlink() or not re.fullmatch(r"m_[a-z0-9]{16}", f.stem):
             continue
         m = net.read_json(f, None)
+        try:
+            written = f.stat().st_mtime_ns
+        except OSError:
+            continue
         if isinstance(m, dict) and m.get("id") == f.stem:
-            out.append({k: m.get(k) for k in ("id", "to", "type", "created_at")})
-    return sorted(out, key=lambda m: (str(m["created_at"]), m["id"]))
+            rows.append((written, {k: m.get(k) for k in ("id", "to", "type", "created_at")}))
+    rows.sort(key=lambda x: (x[0], str(x[1]["created_at"]), x[1]["id"]))
+    return [x[1] for x in rows]
+
+
+def drop_from_outbox(root: Path, drop) -> list[str]:
+    """Delete the messages still waiting in .orch/outbox/ for which `drop(message)` is true (e.g. copies for
+    a workspace that was removed from a group). Returns the ids deleted. Unreadable entries are left alone."""
+    gone = []
+    for item in outbox_list(root):
+        p = _outbox(root) / f"{item['id']}.json"
+        m = net.read_json(p, None)
+        if isinstance(m, dict) and drop(m):
+            p.unlink(missing_ok=True)
+            gone.append(item["id"])
+    return gone
 
 
 def resend_outbox(root: Path) -> dict:
@@ -648,6 +677,12 @@ def resend_outbox(root: Path) -> dict:
             except ValueError:
                 msg = None
             if isinstance(msg, dict):
+                from orch import chat_groups
+
+                if why := chat_groups.stale_copy(root, msg):  # removed from the group while it waited
+                    res["dropped"].append({"id": m["id"], "reason": why})
+                    p.unlink(missing_ok=True)
+                    continue
                 scan_outgoing(root, msg)  # the whole message, every field, as decoded (escapes resolved)
             else:
                 secretscan.refuse_if_secret(raw, "message", root)  # not a message we know: scan the bytes
@@ -917,6 +952,12 @@ def _retry_with_fresh_blobs(root, to, body, tv, ticket, reply_to, mid) -> dict |
         return None
 
 
+def _line_mid(msg: dict) -> str | None:
+    """The relay message id as the chat line's id (one id for the message everywhere), if it has that form."""
+    mid = msg.get("id")
+    return mid if isinstance(mid, str) and tickets.CHAT_LINE_ID_RE.fullmatch(mid) else None
+
+
 def _record_general(root: Path, msg: dict, text: str, body: dict, reply_to, refs) -> None:
     from orch import chat
 
@@ -924,7 +965,7 @@ def _record_general(root: Path, msg: dict, text: str, body: dict, reply_to, refs
     tickets.apply_op(
         root,
         gid,
-        lambda t: tickets.add_history(t, tickets.current_actor(), text, chat=True),
+        lambda t: tickets.add_history(t, tickets.current_actor(), text, chat=True, mid=_line_mid(msg)),
         by=tickets.current_actor(),
     )
     chat.record(root, msg["id"], body["by"], body["via"], text, msg["created_at"], reply_to, refs=refs)
@@ -2586,7 +2627,9 @@ def _continue(
         r["phone"] = (
             True  # the owner wrote to it from a phone: its questions go there too (mobile_mode.from_phone)
         )
-        tickets.add_history(t, by, plain, "phone", chat=general)
+        tickets.add_history(
+            t, by, plain, "phone", chat=general, mid=_line_mid({"id": mid}) if general else None
+        )
         t["waiting_on"] = None
         if general:
             return
@@ -2628,10 +2671,16 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
         _ack_once(root, mid, frm, tid, False, "Got it")
         from orch import chat_groups
 
+        # ORCH-1175: the person's Add from the ticket chat on the phone (body.team, set only on phone texts)
+        added = False
+        with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
+            added = bool(
+                (chat_groups.phone_team(root, tid, msg, "human:" + (who or "phone")) or {}).get("added")
+            )
         with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
             if chat_groups.phone_text(root, tid, msg):  # G8: only a reply to a group copy joins the group
                 return f"added to {tid} and the group", tid
-        return f"added to {tid}", tid
+        return (f"added to {tid}; added a workspace to its chat" if added else f"added to {tid}"), tid
     if tid is None:
         spoken = body.get("voice", {}).get("transcript", "") if isinstance(body.get("voice"), dict) else ""
         said = str(body.get("text") or spoken or "")

@@ -22,6 +22,7 @@ HUMAN_ONLY = {
     "tools update",  # a person updates a tool (Settings > About & updates; agents are refused)
     "look shared-pages",  # a person's switch in the dashboard (agents are refused)
     "review answer",  # a person decides a card (agents are refused: needs_person)
+    "relay group add",  # a person adds a workspace to a chat (helpers are refused: they use ask-add)
     "ticket changes",  # a person sends a Review ticket back (agents are refused)
     "run history",  # a person reads or continues an earlier chat (Focus; agents are refused to continue)
     "run take-back",  # a person takes back a waiting message (agents are refused)
