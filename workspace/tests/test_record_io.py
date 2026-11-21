@@ -98,6 +98,7 @@ def plant(ws, kind):
 
 # Exact call expressions keep arbitrary Path receivers out of the allowlist.
 SAFE_ATTRIBUTE_CALLS = {
+    "lazyschema.checker",  # a JSON Schema check built on first use (ORCH-609); it touches no file
     "raw.rfind",
     "b''.join",
     "r.get",
@@ -312,6 +313,7 @@ from pathlib import Path
 from typing import Any, Generic, Literal, TypeVar
 from jsonschema import Draft202012Validator, FormatChecker
 from orch import hider as hiding
+from orch import lazyschema
 from orch.collect_execjson import _hash, detail_name
 from orch.errors import Refused
 from orch.hider import Hider, NoHiderError
