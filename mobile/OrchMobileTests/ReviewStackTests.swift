@@ -282,6 +282,69 @@ final class ReviewVerdictOutboxTests: XCTestCase {
         XCTAssertFalse(big.isValid)           // over 8 KB
         XCTAssertTrue(box.items.isEmpty)
     }
+    // ORCH-444: voice notes, pictures and files with a Send back
+    private func draftFile(_ name: String, _ data: Data, kind: MessageAttachment.Kind, mime: String, duration: Double? = nil) throws -> DraftFile {
+        let d = tmpDir(); dirs.append(d)
+        let url = d.appendingPathComponent(name); try data.write(to: url)
+        return DraftFile(url: url, kind: kind, name: name, mime: mime, duration: duration)
+    }
+    func testAnswerFilesAreUploadedFirstAndNamedInTheVerdict() async throws {
+        let (box, dir) = outbox(); let q = MockReviewStack.questions[0]; let relay = MockRelay(latency: .zero)
+        let jpg = Data([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]), voice = Data(repeating: 7, count: 40)
+        let photo = try draftFile("screen.jpg", jpg, kind: .image, mime: "image/jpeg")
+        let rec = try draftFile("voice-1.m4a", voice, kind: .voice, mime: "audio/mp4", duration: 2.4)
+        let v = ReviewVerdict(verdict: .talk, digest: q.message.body.digest!, note: .init(words: .init(text: "Bigger logo")))
+        try box.enqueueAnswer(question: q, answer: "Send back for changes: Bigger logo", verdict: v, files: [photo, rec])
+        try FileManager.default.removeItem(at: photo.url)                              // the Outbox keeps its own copy
+        XCTAssertEqual(box.items[0].files.map(\.name), ["screen.jpg", "voice-1.m4a"])
+        XCTAssertNil(box.items[0].verdict?.note?.files, "blob ids are only known after the upload")
+        box.flushWrites()
+        let again = Outbox(directory: dir, phone: "ph_iphone0001")                    // a restart keeps the files
+        XCTAssertEqual(again.items[0].files.count, 2)
+        _ = await again.flush(using: relay)
+        let verdicts = await relay.verdicts, uploads = await relay.uploads
+        let files = try XCTUnwrap(verdicts.first?.verdict.note?.files)
+        XCTAssertEqual(files.map(\.kind), [.image, .voice]); XCTAssertEqual(files.map(\.size), [jpg.count, voice.count])
+        XCTAssertEqual(uploads[files[0].blobId], jpg); XCTAssertEqual(uploads[files[1].blobId], voice)
+        XCTAssertEqual(files[1].duration, 2.4); XCTAssertEqual(verdicts[0].verdict.note?.words?.text, "Bigger logo")
+    }
+    func testFilesAloneAreEnoughAndAtMostFive() throws {
+        let (box, _) = outbox(); let q = MockReviewStack.questions[0]; let digest = q.message.body.digest!
+        let one = try draftFile("offer.pdf", Data("%PDF".utf8), kind: .file, mime: "application/pdf")
+        let talk = ReviewVerdict(verdict: .talk, digest: digest)
+        XCTAssertEqual(ReviewStackRules.summary(ReviewStackRules.item(for: q)!, verdict: talk, files: 1), "Send back for changes (1 file)")
+        XCTAssertThrowsError(try box.enqueueAnswer(question: q, answer: "x", verdict: talk, files: Array(repeating: one, count: 6))) {
+            XCTAssertEqual($0 as? Outbox.VerdictProblem, .invalid)
+        }
+        XCTAssertTrue(box.items.isEmpty)
+        try box.enqueueAnswer(question: q, answer: "Send back for changes (1 file)", verdict: talk, files: [one])
+        XCTAssertEqual(Outbox.answerRequest(for: box.items[0]).verdict?.note?.files?.count, 1)
+    }
+    func testChangingTheVerdictReplacesItsFiles() throws {
+        let (box, _) = outbox(); let q = MockReviewStack.questions[0]; let digest = q.message.body.digest!
+        let one = try draftFile("offer.pdf", Data("%PDF".utf8), kind: .file, mime: "application/pdf")
+        try box.enqueueAnswer(question: q, answer: "x", verdict: ReviewVerdict(verdict: .talk, digest: digest), files: [one])
+        try box.changeVerdict(question: q, answer: "Send it", verdict: ok(q))
+        XCTAssertTrue(box.items[0].files.isEmpty)
+        XCTAssertNil(Outbox.answerRequest(for: box.items[0]).verdict?.note, "a right swipe carries no files")
+    }
+    /// Codex review: a replacement that cannot be copied left the old answer pointing at deleted copies.
+    func testAFailedReplacementKeepsTheOldFiles() throws {
+        let (box, _) = outbox(); let q = MockReviewStack.questions[0]; let digest = q.message.body.digest!
+        let one = try draftFile("offer.pdf", Data("%PDF".utf8), kind: .file, mime: "application/pdf")
+        let talk = ReviewVerdict(verdict: .talk, digest: digest)
+        try box.enqueueAnswer(question: q, answer: "x", verdict: talk, files: [one])
+        let empty = try draftFile("empty.jpg", Data(), kind: .image, mime: "image/jpeg")
+        XCTAssertThrowsError(try box.changeVerdict(question: q, answer: "y", verdict: talk, files: [empty]))
+        let kept = try XCTUnwrap(box.items[0].files.first)
+        XCTAssertEqual(kept.name, "offer.pdf")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: box.fileURL(box.items[0], kept).path))
+        let two = try draftFile("screen.jpg", Data([0xff, 0xd8, 1]), kind: .image, mime: "image/jpeg")
+        try box.changeVerdict(question: q, answer: "z", verdict: talk, files: [two])
+        XCTAssertEqual(box.items[0].files.map(\.name), ["screen.jpg"])
+        XCTAssertNotEqual(box.items[0].files[0].file, kept.file, "a replacement never reuses an old copy's name")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: box.fileURL(box.items[0], kept).path), "the old copy goes")
+    }
     func testChoiceNeedsPickFirst() throws {
         let item = ReviewStackRules.item(for: try question("card-choice"))!
         XCTAssertEqual(ReviewStackRules.okOutcome(item, picked: nil), .pickFirst)
