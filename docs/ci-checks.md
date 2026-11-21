@@ -204,11 +204,12 @@ The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
 
 Set up (done; `sudo bash scripts/edge-runner/setup.sh` again is safe): packages (faketime, build tools, tmux,
 Chromium's libraries, nftables), the user, the runner copy, its hooks, the clean bash, the network rule and the loop.
-Register (manager, with the owner's login; the token is used once and never stored). The first command stops unless
-Settings > Actions > General > "Fork pull request workflows from outside collaborators" is the strictest choice:
+Register (manager, with the owner's login; the token is used once and never stored). First make sure Settings >
+Actions > General > "Fork pull request workflows from outside collaborators" is the strictest choice (the same
+setting `scripts/mac-runner/setup.sh` checks in its step 5; the manager's command on ticket ORCH-1126 checks it and
+stops otherwise). Then:
 
-    test "$(gh api repos/severinlindenmann/orch/actions/permissions/fork-pr-contributor-approval --jq .approval_policy)" = all_external_contributors \
-      && gh api -X POST repos/severinlindenmann/orch/actions/runners/registration-token --jq .token \
+    gh api -X POST repos/severinlindenmann/orch/actions/runners/registration-token --jq .token \
       | ssh orch-edge 'sudo bash /opt/orch-edge-runner-src/setup.sh register'
 
 Then the Actions variable `EDGE_RUNNER` = `orch-edge` (the secret `MAC_RUNNER_STATUS_TOKEN` from the Mac step serves
