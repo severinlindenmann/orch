@@ -16,6 +16,7 @@ pub fn aad(kind: &str, name: &str) -> String {
     match kind {
         "skills" => format!("skill:{name}"),
         "mcp" => format!("mcp:{name}"),
+        "skillhead" => format!("skillhead:{name}"),
         _ => name.to_string(),
     }
 }
@@ -23,6 +24,11 @@ pub fn aad(kind: &str, name: &str) -> String {
 pub fn valid_name(kind: &str, n: &str) -> bool {
     let ok = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.';
     !n.is_empty() && n.len() <= 64 && n.chars().all(ok) && (kind != "skills" || !n.starts_with('.'))
+}
+
+/// Open one sealed item (null when it cannot be opened).
+pub fn open_item(key: &Key, kind: &str, name: &str, blob: &[u8]) -> Value {
+    dec(key, kind, name, blob)
 }
 
 fn dec(key: &Key, kind: &str, name: &str, blob: &[u8]) -> Value {
@@ -35,11 +41,17 @@ fn dec(key: &Key, kind: &str, name: &str, blob: &[u8]) -> Value {
 pub fn snapshot(c: &Connection, key: &Key, me: &str) -> rusqlite::Result<Value> {
     let mut skills = vec![];
     for r in c
-        .prepare("SELECT s.name,s.version,s.files FROM skills s JOIN assign a ON a.kind='skills' AND a.name=s.name WHERE a.ws=?1 ORDER BY s.name")?
-        .query_map([me], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, Vec<u8>>(2)?)))?
+        .prepare("SELECT s.name,s.version,s.files,s.head FROM skills s JOIN assign a ON a.kind='skills' AND a.name=s.name WHERE a.ws=?1 ORDER BY s.name")?
+        .query_map([me], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, Vec<u8>>(2)?, r.get::<_, Option<Vec<u8>>>(3)?)))?
     {
-        let (n, v, f) = r?;
-        skills.push(json!({"name": n, "version": v, "files": dec(key, "skills", &n, &f)}));
+        let (n, v, f, h) = r?;
+        let files = dec(key, "skills", &n, &f);
+        let header = match h {
+            Some(h) => dec(key, "skillhead", &n, &h),
+            None => skill_header(&files),
+        };
+        skills.push(json!({"name": n, "version": v, "shown_version": shown_version(&header, v),
+            "header": header, "files": files}));
     }
     let mut mcp = Map::new();
     for r in c
@@ -141,6 +153,11 @@ pub fn put_item(
     let mut ver = 0;
     match kind {
         "skills" => {
+            let head = crypto::seal(
+                key,
+                &aad("skillhead", name),
+                &serde_json::to_vec(&skill_header(value)).unwrap(),
+            );
             ver = c
                 .query_row("SELECT version FROM skills WHERE name=?1", [name], |r| {
                     r.get::<_, i64>(0)
@@ -148,8 +165,8 @@ pub fn put_item(
                 .unwrap_or(0)
                 + 1;
             c.execute(
-                "INSERT INTO skills(name,version,files) VALUES(?1,?2,?3) ON CONFLICT(name) DO UPDATE SET version=?2, files=?3",
-                params![name, ver, blob],
+                "INSERT INTO skills(name,version,files,head) VALUES(?1,?2,?3,?4) ON CONFLICT(name) DO UPDATE SET version=?2, files=?3, head=?4",
+                params![name, ver, blob, head],
             )?;
         }
         "mcp" => {
@@ -180,4 +197,190 @@ pub fn assigned_ws(c: &Connection, kind: &str, name: &str) -> Vec<String> {
     c.prepare("SELECT ws FROM assign WHERE kind=?1 AND name=?2")
         .and_then(|mut s| s.query_map(params![kind, name], |r| r.get(0))?.collect())
         .unwrap_or_default()
+}
+
+// ---------- skill header (the frontmatter of SKILL.md) ----------
+//
+// A restricted reader for the flat skill header (skill format, ORCH-531): top-level `key: value` lines and one
+// `metadata:` map of text values. Anything fancier (nested maps, lists, anchors) is skipped, never an error:
+// the header only feeds labels and the platform check, the files stay as the admin uploaded them.
+
+const HEAD_MAX: usize = 16 * 1024;
+const VALUE_MAX: usize = 1024;
+const META_MAX: usize = 64;
+
+/// The version people see: `metadata.version` when the skill sets one, else the relay's own counter.
+pub fn shown_version(header: &Value, counter: i64) -> String {
+    match header["metadata"]["version"].as_str() {
+        Some(v) if !v.is_empty() => v.to_string(),
+        _ => counter.to_string(),
+    }
+}
+
+fn head_key_ok(k: &str) -> bool {
+    !k.is_empty()
+        && k.len() <= 64
+        && k.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// True when the text after a key's colon holds no value (empty or only a comment): a map follows.
+fn head_empty(raw: &str) -> bool {
+    let v = raw.trim();
+    v.is_empty() || v.starts_with('#')
+}
+
+/// One quoted value: the text inside the quotes, when what follows the closing quote is empty or a comment.
+fn head_quoted(v: &str, q: char) -> Option<String> {
+    let mut out = String::new();
+    let mut it = v[1..].char_indices().peekable();
+    while let Some((i, c)) = it.next() {
+        if q == '"' && c == '\\' {
+            match it.next() {
+                Some((_, '"')) => out.push('"'),
+                Some((_, '\\')) => out.push('\\'),
+                Some((_, o)) => {
+                    out.push('\\');
+                    out.push(o);
+                }
+                None => return None,
+            }
+        } else if c == q {
+            if q == '\'' && it.peek().map(|p| p.1) == Some('\'') {
+                it.next();
+                out.push('\'');
+                continue;
+            }
+            return head_empty(&v[1 + i + 1..]).then_some(out);
+        } else {
+            out.push(c);
+        }
+    }
+    None
+}
+
+fn head_value(raw: &str) -> Option<String> {
+    let v = raw.trim();
+    let out = if v.starts_with(['"', '\'']) {
+        head_quoted(v, v.chars().next()?)?
+    } else {
+        if v.starts_with(['[', '{', '&', '*', '!', '|', '>']) {
+            return None;
+        }
+        match v.find(" #").or_else(|| v.find("\t#")) {
+            Some(i) => v[..i].trim_end().to_string(),
+            None => v.to_string(),
+        }
+    };
+    let out: String = out.chars().filter(|c| !c.is_control()).collect();
+    (out.chars().count() <= VALUE_MAX).then_some(out)
+}
+
+/// The parsed header of a skill's `SKILL.md` (files as `{path: base64}`): `{"name", "description",
+/// "metadata": {key: text}}`, only what was readable. `{}` when there is no header.
+pub fn skill_header(files: &Value) -> Value {
+    let text = files["SKILL.md"]
+        .as_str()
+        .and_then(|b| B64.decode(b).ok())
+        .and_then(|b| String::from_utf8(b).ok())
+        .unwrap_or_default();
+    let mut lines = text.lines();
+    if lines.next().map(str::trim_end) != Some("---") {
+        return json!({});
+    }
+    let mut out = Map::new();
+    let mut meta = Map::new();
+    let mut in_meta = false;
+    let mut meta_indent = 0;
+    let mut size = 0;
+    for line in lines {
+        size += line.len() + 1;
+        if size > HEAD_MAX || line.trim_end() == "---" {
+            break;
+        }
+        if line.trim().is_empty() || line.trim_start().starts_with('#') {
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        let Some((k, v)) = line.trim().split_once(':') else {
+            continue;
+        };
+        let k = k.trim();
+        if indent == 0 {
+            in_meta = k == "metadata" && head_empty(v);
+            meta_indent = 0;
+            if !in_meta && matches!(k, "name" | "description") {
+                if let Some(v) = head_value(v) {
+                    out.insert(k.to_string(), v.into());
+                }
+            }
+        } else if in_meta {
+            // only the first level of metadata (its indent is set by the first line, readable key or not):
+            // a deeper line belongs to a nested map, which is skipped
+            if meta_indent == 0 {
+                meta_indent = indent;
+            }
+            if indent != meta_indent || head_empty(v) || !head_key_ok(k) || meta.len() >= META_MAX {
+                continue;
+            }
+            if let Some(v) = head_value(v) {
+                meta.insert(k.to_string(), v.into());
+            }
+        }
+    }
+    if !meta.is_empty() {
+        out.insert("metadata".into(), Value::Object(meta));
+    }
+    Value::Object(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn head(text: &str) -> Value {
+        skill_header(&json!({"SKILL.md": B64.encode(text)}))
+    }
+
+    #[test]
+    fn reads_the_flat_header() {
+        let h = head(
+            "---\nname: github\ndescription: \"GitHub work. Use when a PR: \\\"x\\\"\"\nlicense: MIT\n\
+             metadata:\n  version: \"1.2.0\"\n  owner: Severin # who\n  status: 'draft'\n  platforms: \"macos, windows\"\n\
+             ---\nbody: not header\n",
+        );
+        assert_eq!(h["name"], "github");
+        assert_eq!(h["description"], "GitHub work. Use when a PR: \"x\"");
+        assert_eq!(
+            h["metadata"],
+            json!({"version": "1.2.0", "owner": "Severin", "status": "draft", "platforms": "macos, windows"})
+        );
+        assert!(h.get("license").is_none() && h.get("body").is_none());
+        assert_eq!(shown_version(&h, 7), "1.2.0");
+    }
+
+    #[test]
+    fn skips_what_it_cannot_read() {
+        assert_eq!(head("no header\nname: x\n"), json!({}));
+        assert_eq!(skill_header(&json!({})), json!({}));
+        assert_eq!(skill_header(&Value::Null), json!({}));
+        let h = head(
+            "---\nname: x\nmetadata:\n  nested:\n    deep: a\n  list: [a, b]\n  bad key!: v\n  ok: \"v\"\n\
+             status: draft\n---\n",
+        );
+        // nested and list values, bad keys and top-level extras are left out; metadata ends at the next top-level key
+        assert_eq!(h, json!({"name": "x", "metadata": {"ok": "v"}}));
+        assert_eq!(shown_version(&h, 3), "3");
+        let h = head(
+            "---\nname: \"x\" # the name\nmetadata: # what it needs\n  bad key!:\n    platforms: windows\n  platforms: 'linux' \
+             # only here\n  owner: \"A \\\"B\\\"\" # quoted\n  note: it's a#tag\n  odd: \"open\n---\n",
+        );
+        // comments after a value or a map key are dropped; a nested line under a skipped key stays out
+        assert_eq!(
+            h,
+            json!({"name": "x", "metadata": {"platforms": "linux", "owner": "A \"B\"", "note": "it's a#tag"}})
+        );
+        let long = format!("---\nmetadata:\n  owner: {}\n---\n", "a".repeat(2000));
+        assert_eq!(head(&long), json!({}));
+    }
 }

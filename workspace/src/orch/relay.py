@@ -13,6 +13,7 @@ import os
 import re
 import secrets
 import shutil
+import sys
 import time
 import unicodedata
 import urllib.parse
@@ -3506,8 +3507,35 @@ def _keep_policy(root: Path, policy) -> None:
         net.write_json(net.secrets_dir(root) / "policy.json", {"usage_counts": policy["usage_counts"]}, True)
 
 
+PLATFORM_WORDS = {"macos": "macOS", "windows": "Windows", "linux": "Linux"}
+
+
+def _this_platform() -> str:
+    if sys.platform.startswith("win"):
+        return "windows"
+    return "macos" if sys.platform == "darwin" else "linux"
+
+
+def _platform_refusal(sk: dict) -> str | None:
+    """Why a shared skill cannot run on this computer, from `metadata.platforms` in the header the relay sends
+    (skill format, ORCH-531); None when it can, when no platform is named, or when no listed word is known."""
+    header = sk.get("header")
+    meta = header.get("metadata") if isinstance(header, dict) else None
+    raw = meta.get("platforms") if isinstance(meta, dict) else None
+    if not isinstance(raw, str):
+        return None
+    known = [w for w in (p.strip().lower() for p in raw.split(",")) if w in PLATFORM_WORDS]
+    here = _this_platform()
+    if not known or here in known:
+        return None
+    return (
+        f"made for {', '.join(PLATFORM_WORDS[w] for w in dict.fromkeys(known))}, not {PLATFORM_WORDS[here]}"
+    )
+
+
 def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:
     names = []
+    versions: dict[str, str] = {}
     for sk in snap.get("skills", []):
         name = sk.get("name") if isinstance(sk, dict) else None
         try:
@@ -3518,6 +3546,9 @@ def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:
                 or name.startswith("orch-")
             ):
                 raise Refused(f"bad skill name {name!r}")
+            why = _platform_refusal(sk)
+            if why:
+                raise Refused(why)
             files = sk.get("files")
             if not isinstance(files, dict) or not files:
                 raise Refused("no files")
@@ -3531,6 +3562,9 @@ def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:
                 net.write_atomic(base / rp, data)
             net.write_atomic(base / SHARED_MARK, b"")
             names.append(name)
+            shown = sk.get("shown_version")
+            if isinstance(shown, str) and shown:
+                versions[name] = shown[:64]
         except Refused as e:
             if isinstance(name, str):
                 shutil.rmtree(stage / "skills" / name, ignore_errors=True)
@@ -3539,7 +3573,9 @@ def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:
     if not isinstance(mcp, dict) or not isinstance(cred, dict):
         raise Refused("The snapshot has bad MCP or credentials. Nothing changed.")
     net.write_json(stage / "mcp.json", {"mcpServers": mcp}, True)
-    net.write_json(stage / "shared.json", {"version": snap["version"], "skills": names})
+    net.write_json(
+        stage / "shared.json", {"version": snap["version"], "skills": names, "skill_versions": versions}
+    )
     ws = snap.get("workspaces")
     if not isinstance(ws, dict) or not isinstance(ws.get("workspaces"), list):
         raise Refused("The snapshot has no workspace directory. Nothing changed.")
