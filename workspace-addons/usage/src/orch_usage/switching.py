@@ -705,6 +705,7 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
             did = "waiting to try again"  # the accounts to go to just failed; tried again after RETRY_MINUTES
         if on and ch.active:
             memory["mine"] = {"to": ch.active.account["id"], "at": _iso(at)}  # staying is a choice too
+            memory.pop("outside", None)  # an outside change Usage is happy with ends that fight
     if outside_row:
         hist.insert(0, outside_row)
 

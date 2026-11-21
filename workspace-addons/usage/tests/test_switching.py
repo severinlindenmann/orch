@@ -644,3 +644,15 @@ def test_a_look_with_a_failing_switcher_says_it_did_not_answer(cli, fake_switche
     assert code == 0 and d["switcher"] is True and d["did"] == "nothing"
     code, out, _ = cli("run", "--once")
     assert "not installed" not in out and "looks again" in out
+
+
+def test_an_outside_change_usage_stays_on_ends_that_fight(cli, switcher, ws):
+    """ORCH-612 review: a fight count left behind made the next, new fight stop without the one more try."""
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    assert switching.look(ws, at(0))["did"] == "switched"
+    mem = switching._read(switching.memory_path(ws))
+    mem["outside"] = {"to": mem["mine"]["to"], "at": switching._iso(at(0)), "count": 1}
+    switching._write(switching.memory_path(ws), mem)
+    assert switching.look(ws, at(60))["did"] == "stay"  # Usage is happy on this account
+    assert "outside" not in switching._read(switching.memory_path(ws))
