@@ -710,6 +710,10 @@ def _look_text(r: dict) -> str:
         "would switch": f"Would switch from {r.get('active')} to {r.get('target')} (switching is off).",
         "switch failed": f"Could not switch to {r.get('target')}. It is tried again in 10 minutes.",
         "waiting to try again": f"Waiting to try {r.get('target')} again.",
+        "held": (
+            f"Staying on {r.get('active')}: another program keeps switching back to it. "
+            "Which rule should win? See orch usage needs."
+        ),
     }.get(r["did"], r["did"])
     if r.get("all_at_limit"):
         text += " Warning: every account is at or near its limit."
