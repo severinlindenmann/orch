@@ -260,7 +260,7 @@ function peoplePhones(list, active, busy) {
       : !ph.paired ? 'Not paired with this workspace any more.'
       : owner ? owner + '’s phone.' : 'Not tied to anyone yet, so it can’t do anything here.';
     const pick = snapshot ? null : h('select', {'aria-label':'Whose phone is ' + ph.name, 'data-people-phone':ph.id, 'data-key':key + '-who', disabled:busy || !ph.paired},
-      h('option', {value:'', ...(owner && !ph.cut ? {} : {selected:''})}, 'Whose phone?'),
+      h('option', {value:'', ...(owner && !ph.cut ? {} : {selected:''})}, 'Whose?'),
       active.map(p => h('option', {value:p.id, ...(p.id === ph.person && !ph.cut ? {selected:''} : {})}, String(p.name))));
     return h('div', {className:'card-row', 'data-key':key},
       h('div', {className:'grow'}, h('h3', {}, String(ph.name), !ph.person && ph.paired ? ' ' : null, !ph.person && ph.paired ? h('span', {className:'badge'}, 'New') : null), settingsText('p', {className:'meta'}, status)),
