@@ -165,7 +165,11 @@
     let next = cur;
     for (const p of incoming) {
       const old = byId.get(p.id);
-      if (!old) { if (!p.removed && !live(cur).some(q => q.url === p.url || (p.wsid && q.wsid === p.wsid))) fresh.push(p); continue; }
+      if (!old) {
+        const known = q => q.id === p.id || q.url === p.url || (p.wsid && q.wsid === p.wsid);
+        if (!p.removed && !live(cur).some(known) && !fresh.some(known)) fresh.push(p);
+        continue;
+      }
       if (p.changed <= old.changed) continue;
       if (p.removed) next = next.map(q => (q.id === p.id ? {id: q.id, url: q.url, changed: p.changed, removed: p.removed} : q));
       else if (!old.removed && p.url === old.url) next = next.map(q => (q.id === p.id ? Object.assign({}, q, {name: p.name, color: p.color, icon: p.icon, changed: p.changed}) : q));
@@ -209,7 +213,9 @@
     try { win.history.replaceState(null, '', loc.pathname + loc.search + got.hash); } catch (_) { /* the list just stays */ }
     try {
       const store = win.sessionStorage, before = unpack(store.getItem(INCOMING) || '', now);
-      const all = before.concat(unpack(got.packed, now));
+      const byId = new Map();
+      for (const p of before.concat(unpack(got.packed, now))) byId.set(p.id, p);  // the same link twice is one list
+      const all = [...byId.values()];
       store.setItem(INCOMING, all.length ? b64(JSON.stringify(all.slice(-MAX))) : '');
     } catch (_) { return false; }
     return true;

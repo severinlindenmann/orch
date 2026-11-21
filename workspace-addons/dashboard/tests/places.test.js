@@ -163,3 +163,15 @@ test('arrival: the list leaves the address bar and is kept for this tab through 
   P.clearIncoming(session);
   assert.deepEqual(P.incoming(session, NOW), []);
 });
+
+test('the same link twice gives one keep question per place', () => {
+  const list = addOk([], {url: 'https://pilatus.example.ch', name: 'Pilatus'}).list;
+  const packed = P.pack(list, NOW);
+  const session = memory();
+  const win = () => ({location: {hash: '#home&places=' + packed, pathname: '/', search: ''}, history: {replaceState() {}}, sessionStorage: session});
+  P.stash(win(), NOW);
+  P.stash(win(), NOW);
+  assert.equal(P.incoming(session, NOW).length, 1);
+  const twice = P.unpack(packed, NOW).concat(P.unpack(packed, NOW));
+  assert.equal(P.arrive([], twice, NOW).fresh.length, 1);
+});

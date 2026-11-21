@@ -122,6 +122,11 @@ the first rows without any extra work.
   "Got it", pill buttons, underlined text actions, full-width outline buttons are deleted.
 - SX-6 Selects and chevrons: one Select (36 px, border like inputs, SVG chevron), the same chevron on nav groups, ticket
   groups and the workspace switcher (fb26).
+- Workspace switcher (ORCH-1273, owner picked draft A on 21 Nov): one menu with "On this computer" and "Saved places"
+  (the person's own dashboards, relay and publish pages, kept in this browser by `places.js` of the dashboard). It
+  lists other networks only because the person added them; the 8 Nov rule "a workspace in another network is never
+  listed" is lifted. Add place, the keep question for places from a link and Share my places are steps inside the
+  menu (`.sw-head` with a back arrow), never a dialog over it; the "…" menu of a row never covers another row.
 - SX-7 Segmented and radio: one segmented control (raised surface = selected, ring = focus only) for List/Board,
   7/30/90 days, Every day…Custom, 4/8/12/24 h, All/People/Helper; one radio style (Sync rows, helper tools, "What a
   helper may do"); green fill is reserved for primary and toggles-on; a "Suggested" tag never fills.
