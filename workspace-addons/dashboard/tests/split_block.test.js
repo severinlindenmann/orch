@@ -110,3 +110,17 @@ test("a service's address opens the app in a new tab (ORCH-846)", () => {
   assert.equal(a.getAttribute('target') ?? a.target, '_blank');
   assert.match(a.getAttribute('rel') ?? a.rel, /noopener/);
 });
+
+test('Stop on a job marked important asks once, on the list row and in the panel (ORCH-641)', () => {
+  address = '#addon/services';
+  const s = draw();
+  const stops = s.querySelectorAll('[data-addon-act]').filter(b => b.dataset.verb === 'stop');
+  const web = stops.filter(b => b.dataset.target === 'web-preview'), other = stops.filter(b => b.dataset.target !== 'web-preview');
+  assert.equal(web.length, 2);   // the row button and the panel button
+  for (const b of web) {
+    assert.equal(b.dataset.confirm, 'Stop Web preview?');
+    assert.match(b.dataset.confirmLines, /marked important/);
+    assert.equal(b.dataset.keep, 'Keep it running');
+  }
+  assert.ok(other.length > 0 && other.every(b => b.dataset.confirm === undefined));   // other jobs stop at once
+});

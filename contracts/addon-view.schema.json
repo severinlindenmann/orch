@@ -242,8 +242,8 @@
     "splitId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.:-]{0,63}$" },
     "splitButton": {
       "type": "object", "required": ["label"], "additionalProperties": false,
-      "description": "A button: `action` (sent as is; for `addon.act` the target must be the item's id) or `link` (a ticket, an https page or a dashboard page).",
-      "properties": { "label": { "$ref": "#/$defs/text", "maxLength": 30 }, "action": { "$ref": "#/$defs/action" }, "link": { "$ref": "#/$defs/link" }, "primary": { "type": "boolean" } }
+      "description": "A button: `action` (sent as is; for `addon.act` the target must be the item's id) or `link` (a ticket, an https page or a dashboard page). `confirm` = ask once before sending (the shared dialog: what will happen, a Keep button and this button; no typed word).",
+      "properties": { "label": { "$ref": "#/$defs/text", "maxLength": 30 }, "action": { "$ref": "#/$defs/action" }, "link": { "$ref": "#/$defs/link" }, "primary": { "type": "boolean" }, "confirm": { "type": "object", "required": ["title", "lines"], "additionalProperties": false, "properties": { "title": { "$ref": "#/$defs/text", "maxLength": 80 }, "lines": { "type": "array", "minItems": 1, "maxItems": 5, "items": { "$ref": "#/$defs/text" } }, "keep": { "$ref": "#/$defs/text", "maxLength": 30, "default": "Keep it" } } } }
     },
     "splitItem": {
       "type": "object", "required": ["id", "title", "state", "panel"], "additionalProperties": false,

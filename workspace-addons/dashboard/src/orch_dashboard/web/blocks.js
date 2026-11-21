@@ -253,6 +253,10 @@ const OrchBlocks = (() => {
       const b = el('button', cls, x.label); b.type = 'button';
       b.dataset.addonAct = 'true'; b.dataset.verb = String(args.verb); b.dataset.target = it.id; b.dataset.label = x.label;
       b.setAttribute('aria-label', x.label + ' ' + it.title);
+      const c = x.confirm;   // ask once before it is sent (a job marked important): the shared dialog, no typed word
+      if (c && typeof c.title === 'string' && arr(c.lines).length) {
+        b.dataset.confirm = c.title; b.dataset.confirmLines = arr(c.lines).join('\n'); b.dataset.keep = c.keep || 'Keep it';
+      }
       return b;
     }
     if (shownLink(x.link)) { const l = linked(cls, x.link, [x.label]); l.className = cls; return l; }
@@ -306,7 +310,7 @@ const OrchBlocks = (() => {
     const row = el('div', 'row');
     if (it.question) row.append(el('span', 'muted', 'The question above is about this one.'));
     else arr(p.buttons).forEach((x, i) => { const b = splitButton(x, it, 'btn sm ' + (x.primary ? 'primary' : 'outline')); if (b) row.append(b); });
-    if (p.log) { const o = el('button', 'btn ghost sm', 'Open log'); o.type = 'button'; o.dataset.splitLog = it.id; o.setAttribute('aria-label', 'Open log of ' + it.title); row.append(o); }
+    if (p.log) { const o = el('button', 'btn ghost sm phone-only', 'Open log'); o.type = 'button'; o.dataset.splitLog = it.id; o.setAttribute('aria-label', 'Open log of ' + it.title); row.append(o); }
     if (row.childNodes.length) s.append(row);
     if (arr(p.facts).length) s.append(splitFacts(p.facts, it));
     if (p.note) s.append(el('p', 'muted', p.note));
