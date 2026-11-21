@@ -587,7 +587,7 @@ def _accepted(args, root: Path) -> None:
 
     rows = reviewer.accepted(root, reviewer.since_time(args.since))
     picks = ownerpick.waiting_rows(root)  # ORCH-582: drafts waiting for the owner, shown on their own
-    word = args.since if args.since in ("today", "yesterday") else "since " + args.since
+    word = "today" if args.since == "today" else "since " + args.since  # issue 1920: yesterday AND today
     text = reviewer.accepted_text(rows, word, picks)
     data: dict = {"since": args.since, "accepted": rows, "waiting_pick": picks}
     if args.phone:

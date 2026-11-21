@@ -21,7 +21,7 @@ from orch_dashboard.server import make_server
 
 pytestmark = [
     pytest.mark.skipif(shutil.which("tmux") is None, reason="needs tmux"),
-    # the CI clock job runs the add-on suites under libfaketime, where a real tmux server hangs; runs in addons.yml
+    # the clock CI job runs every add-on suite under libfaketime, where a real tmux server hangs (as test_term.py)
     pytest.mark.skipif(
         "faketime" in os.environ.get("LD_PRELOAD", ""),
         reason="a real tmux hangs under libfaketime; runs in addons.yml",

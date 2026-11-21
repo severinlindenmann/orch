@@ -865,10 +865,15 @@ SESSION_KINDS = ("empty", "chat", "terminal", "manager")  # core sessions.KINDS 
 def _session_new(a):
     """The New menu of the live bar: a session without a ticket (empty helper, chat helper, plain terminal,
     Manager), through the core's one start path. A second New of the same kind goes to the one that is open."""
-    _only(a, ("kind",))
+    _only(a, ("kind", "model"))
     if a.get("kind") not in SESSION_KINDS:
         raise BadRequest("Choose an empty helper, a chat helper, a plain terminal or the Manager.")
-    return ["session", "new", a["kind"]], [], []
+    model = a.get("model")
+    if model is None:
+        return ["session", "new", a["kind"]], [], []
+    if a["kind"] != "empty" or model not in MODELS or model == "auto":  # ORCH-710: the Empty helper's pick
+        raise BadRequest("Pick Sonnet, Opus, Haiku or Fable for the Empty helper.")
+    return ["session", "new", "empty"], ["--model", model], []
 
 
 def _run_send(a):

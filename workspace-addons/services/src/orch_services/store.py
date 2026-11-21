@@ -5,10 +5,12 @@ rewritten. Fields this version does not know are kept when a record is rewritten
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import secrets
+import sys
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
@@ -38,7 +40,26 @@ def logs_dir(root: Path) -> Path:
     return base_dir(root) / "logs"
 
 
+def on_external_volume(root: Path) -> bool:
+    """macOS: the workspace sits on an external disk (/Volumes/<disk>). launchd jobs may not open files or a working
+    folder there (job exits 78, or hangs in getcwd), so their log and folder live in the home folder."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        return Path(root).resolve().parts[:2] == ("/", "Volumes")
+    except OSError:
+        return False
+
+
+def home_logs_dir(root: Path) -> Path:
+    r = Path(root).resolve()
+    tag = hashlib.sha1(str(r).encode()).hexdigest()[:8]
+    return Path.home() / "Library" / "Logs" / "orch" / f"{re.sub(r'[^A-Za-z0-9._-]', '-', r.name)}-{tag}"
+
+
 def log_path(root: Path, sid: str) -> Path:
+    if on_external_volume(root):
+        return home_logs_dir(root) / f"{sid}.log"
     return logs_dir(root) / f"{sid}.log"
 
 
