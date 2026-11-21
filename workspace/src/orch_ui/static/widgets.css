@@ -1509,3 +1509,14 @@ button.gtree-row:hover{background:var(--surface-2)}
 @keyframes launch-breathe{50%{transform:scale(.7);opacity:.7}}
 @keyframes launch-out{to{opacity:0;transform:translateY(-4px) scale(.98)}}
 @media(prefers-reduced-motion:reduce){.launch,.launch-ring,.launch-core,.launch-out{animation:none}}
+/* Draft E tabs (ORCH-778): a tab's head line (stepped bar or segmented filter, then one action on the right), the
+   stepped progress bar (one step per task: done = brand, the one the helper is on = working, skipped = muted) and a
+   count inside a segmented button. */
+.tab-head{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap;min-height:40px}
+.tab-head>.btn:last-child:not(:first-child){margin-left:auto}
+.progress-steps{display:flex;gap:3px;flex:1 1 0;max-width:216px;min-width:48px}
+.progress-steps>span{flex:1;min-width:3px;height:4px;border-radius:2px;background:var(--surface-3)}
+.progress-steps>.done{background:var(--brand)}
+.progress-steps>.doing{background:var(--working)}
+.progress-steps>.skipped{background:var(--border-strong)}
+.segmented .seg-count{font:12px var(--font-mono);color:var(--text-muted)}
