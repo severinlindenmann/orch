@@ -24,6 +24,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `icons.js` | One icon set, `icon('check', 16)`. |
 | `preview.css`, `fileviewer.*`, `evidence.js`, `blocks.*` | File and result previews, viewer, proof, blocks. |
 | `results.css`, `results.js` (17 Nov, ORCH-263) | Result widgets, look from Focus draft D: `UI.result(item, {size: 'sm' \| 'lg', state})` for the 16 kinds (Markdown, text and logs, code, JSON and YAML, table, web page, PDF, picture, video, audio, chart, change, pull request link, archive, plain link, unknown file), each loaded, empty, loading, error and too big; `UI.resultOverlay(list, i)` the big overlay (← → between results, × Close, Esc, a click outside). `UI.result.kindOf(name)` picks the kind. No fetching: the page hands in the content. Gallery: Result widgets. The dashboard feeds them from a ticket's real files, evidence, check runs and links in one place (`pages/results-feed.js`, ORCH-697: `resultsHost(ticket)` on wall tiles, in a session's chat and on the ticket page); `.results-host`, `.result-links` and `.result-more` lay them out. |
+| `qr.js` | QR code picture for a link (`OrchQR.svg(text)`, byte mode, ECC M, null when too long), used by Share my places (ORCH-1273). |
 | `term.css`, `term.js`, `xterm*.js`, `LICENSE-xterm.txt` (19 Nov, ORCH-744) | The helper's real screen, `UI.term({label, onInput, onSize})` on the terminal bridge: xterm.js 5.5.0 with its WebGL renderer and fit addon, vendored unchanged (licence and checksums in `LICENSE-xterm.txt`; the xterm.css rules it needs are in `term.css` on tokens). Watching only by default, **Let me type** switch, Copy, a paste with a line end asks once, the screen follows its box while typing. Gallery: Terminal. |
 | `question-card*.js`, `composer.*` | Question card, chat composer (`UI.composer`: words, pasted screenshots, picked or dropped files; `voice:true` adds Record, `UI.voiceRecorder`, words only from on-device speech to text; `send:false` inside the Review comment sheet, ORCH-422; `layout:'row'` is draft D's message box in a Focus pane: previews above one line of clip, words and Send, ORCH-695). |
 | `gallery.html`, `gallery.js`, `gallery.css`, `state-controls.js`, `samples/` | The living style guide, its fixtures, and the Loaded / Loading / Empty / Error switcher the mockup pages use. |
@@ -122,6 +123,11 @@ the first rows without any extra work.
   "Got it", pill buttons, underlined text actions, full-width outline buttons are deleted.
 - SX-6 Selects and chevrons: one Select (36 px, border like inputs, SVG chevron), the same chevron on nav groups, ticket
   groups and the workspace switcher (fb26).
+- Workspace switcher (ORCH-1273, owner picked draft A on 21 Nov): one menu with "On this computer" and "Saved places"
+  (the person's own dashboards, relay and publish pages, kept in this browser by `places.js` of the dashboard). It
+  lists other networks only because the person added them; the 8 Nov rule "a workspace in another network is never
+  listed" is lifted. Add place, the keep question for places from a link and Share my places are steps inside the
+  menu (`.sw-head` with a back arrow), never a dialog over it; the "…" menu of a row never covers another row.
 - SX-7 Segmented and radio: one segmented control (raised surface = selected, ring = focus only) for List/Board,
   7/30/90 days, Every day…Custom, 4/8/12/24 h, All/People/Helper; one radio style (Sync rows, helper tools, "What a
   helper may do"); green fill is reserved for primary and toggles-on; a "Suggested" tag never fills.
