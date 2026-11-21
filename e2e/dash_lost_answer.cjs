@@ -68,7 +68,7 @@ async function run(width, arrives) {
     await page.locator('#content').waitFor();
     await page.waitForTimeout(300);
     await page.keyboard.press('n');  // New ticket on every width (the top-bar button is hidden on a phone)
-    const dialog = page.locator('dialog.new-ticket');
+    const dialog = page.locator('.new-ticket');  // ORCH-1037: the New ticket page (#new), no longer a window
     await dialog.waitFor();
     await dialog.locator('textarea.new-ticket-text').fill('Check the invoice export');
     await dialog.getByRole('button', {name: 'Save without starting'}).click();
@@ -84,7 +84,7 @@ for (const width of [1280, 390]) {
       assert.equal(await page.evaluate(() => decodeURIComponent(location.hash)), '#ticket/t_lost001');
       assert.equal(made.size, 1);
       assert.equal(posts.filter(p => p.op === 'ticket.new').length, 1, 'not sent again by itself');
-      await page.locator('dialog.new-ticket').waitFor({state: 'detached'});
+      await page.locator('.new-ticket').waitFor({state: 'detached'});
       await page.screenshot({path: path.join(OUT, `made-${width}.png`)});
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }

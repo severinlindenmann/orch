@@ -41,6 +41,7 @@ SUBCOMMANDS = (
     "take-back",
     "attach",
     "stop",
+    "interrupt",
     "event",
     "done",
     "input",
@@ -469,11 +470,15 @@ def dispatch(args, root: Path) -> bool:
         return True
     if sub is None:
         raise Refused(
-            "Say what to do: orch run list, or orch run start|status|screen|send|attach|stop <ticket>"
+            "Say what to do: orch run list, or "
+            "orch run start|status|screen|send|attach|interrupt|stop <ticket>"
         )
     if sub == "list":  # read-only: no cleanup, no writes
         rows = runwatch.list_runs(root)
-        _out(args, {"runs": rows}, runwatch.list_text(rows))
+        line = tend.queue(
+            root
+        )  # tickets waiting for a free helper place (ORCH-1026: invisible during the move)
+        _out(args, {"runs": rows, "line": line}, runwatch.list_text(rows, line))
         return True
     if sub == "tend":  # the helper watcher's pass (ORCH-78): end, remind, start fresh, start the line
         # the watcher first, so a session at the idle limit gets its history line (or its fresh start)
@@ -543,6 +548,14 @@ def dispatch(args, root: Path) -> bool:
             f"Stopped {_name(root, tid)}. The work done so far is kept."
             if ok
             else f"Nothing is running on {_name(root, tid)}.",
+        )
+    elif sub == "interrupt":
+        if not runs_live.interrupt(root, tid):
+            raise Refused(f"No live session on {_name(root, tid)}, so there is no step to stop.")
+        _out(
+            args,
+            {"interrupted": True},
+            f"Stopped the current step of {_name(root, tid)}. The session stays; send it a message to go on.",
         )
     elif sub == "claim":
         name = args.agent or adapters.detect_env(os.environ) or _chosen_or_generic(root)
