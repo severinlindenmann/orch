@@ -16,10 +16,11 @@ one hash part of the suite (--part 1/BROAD_PARTS) instead: a sample in about 4 m
 
 The group set (--group, ORCH-1177): the before-merge checks of a merge queue group, run on this computer in a clean
 copy of the group commit (the queue's local check, ORCH-1123/1124). Every text check, brand wording, contracts,
-ruff check and format check of the workspace and of every add-on CI checks, the workspace tests that are not slow,
-then the suites of the add-ons the group touched; at most WORKERS test workers. It stops at the first red and ends
-with one line: "local check: PASS (...)" or "local check: FAIL at <step> (...)"; exit 0 green, 1 red. The failed
-step's name goes to the file named by ORCH_CHECK_FAILED when that is set.
+ruff check and format check of the workspace and of every add-on CI checks, the whole-tree rule tests and the
+workspace tests that read the changed code (or a 1/4 sample; --all-tests: every not-slow one), then the suites of the
+add-ons the group touched; at most WORKERS test workers. The rest runs after the merge (ORCH-1120). It stops at the
+first red and ends with one line: "local check: PASS (...)" or "local check: FAIL at <step> (...)"; exit 0 green,
+1 red. The failed step's name goes to the file named by ORCH_CHECK_FAILED when that is set.
 
 Usage: python3 scripts/ci_light.py --base origin/develop --plan   prints the steps as JSON, runs nothing
        python3 scripts/ci_light.py --base origin/develop          runs the steps in order, stops at the first red
@@ -77,7 +78,11 @@ RULE_TESTS = (
 # or test_spawn_argv.py (not test_relay_secret_scan.py: it tests the scanner itself, 10 s). A rule test that sits in a
 # bigger file is named here by its node id.
 RULE_NAME = re.compile(r"^test_(no_.+|.+_lint|.+_seams|.+_scan_doors|.*names.*|spawn_argv)\.py$")
-RULE_NODES = ("test_cli_status_start.py::test_no_function_reimports_a_module_level_orch_name",)
+RULE_NODES = (
+    "test_cli_status_start.py::test_no_function_reimports_a_module_level_orch_name",
+    # core text names no add-on: both red queue groups of 21 Nov that ORCH-1180 measured (61ada1974, c4bc60751)
+    "test_addons.py::test_core_text_names_no_addon",
+)
 CLICK = re.compile(r"^workspace-addons/dashboard/clickthrough/features/([^/]+)\.cjs$")
 PAGE_SMOKE = re.compile(r"^(workspace-addons/(focus|insights)/|e2e/focus_insights)")
 PLAYWRIGHT = "1.64.1"  # the version of the page-smoke and dashboard-clickthroughs jobs (addons.yml)
@@ -277,10 +282,14 @@ def _workers(n: int) -> int:
     return max(1, min(n, WORKERS))
 
 
-def group_plan(files: list[str], addons: dict[str, int], base: str, labels: str = "") -> list[dict]:
+def group_plan(
+    files: list[str], addons: dict[str, int], base: str, labels: str = "", texts: dict[str, str] | None = None
+) -> list[dict]:
     """The group set in order, cheap first: {name, cwd, cmd}. Pure: reads nothing but its arguments.
     addons: {add-on folder: test workers} of the add-ons CI checks (ci_addons). labels: the group's pull request
-    labels, comma separated, as rules.yml passes them (owner-approved lifts the banned words)."""
+    labels, comma separated, as rules.yml passes them (owner-approved lifts the banned words).
+    texts: {workspace test file: its text} picks the workspace tests (workspace_steps); None runs every not-slow
+    workspace test (--all-tests: 12-21 min on this Mac, measured by ORCH-1180)."""
     q = shlex.quote
     words = f"python3 scripts/check_banned_words.py --base {q(base)}" + (f" --labels {q(labels)}" if labels else "")
     steps: list[dict] = [
@@ -319,13 +328,16 @@ def group_plan(files: list[str], addons: dict[str, int], base: str, labels: str 
                 "cmd": "uv sync -q && uv run ruff check . && uv run ruff format --check .",
             }
         )
-    steps.append(
-        {
-            "name": "workspace: tests (not slow)",
-            "cwd": "workspace",
-            "cmd": f'uv run pytest -q -n {WORKERS} -m "not slow"',
-        }
-    )
+    if texts is None:
+        steps.append(
+            {
+                "name": "workspace: tests (not slow)",
+                "cwd": "workspace",
+                "cmd": f'uv run pytest -q -n {WORKERS} -m "not slow"',
+            }
+        )
+    else:
+        steps += workspace_steps(files, texts)
     every = SHARED_ADDON_TEST in files
     touched = {m.group(1) for f in files if (m := ADDON.match(f))}
     if any(UI.match(f) for f in files):
@@ -340,6 +352,48 @@ def group_plan(files: list[str], addons: dict[str, int], base: str, labels: str 
                 " && node --test tests/*.test.js ../../workspace/src/orch_ui/tests/*.test.mjs && " + cmd
             )
         steps.append({"name": f"add-on {name}: tests", "cwd": f"workspace-addons/{name}", "cmd": cmd})
+    return steps
+
+
+def workspace_steps(files: list[str], texts: dict[str, str]) -> list[dict]:
+    """The workspace tests of the group set (ORCH-1123): every not-slow workspace test took 12-21 min here, no faster
+    than GitHub (ORCH-1180), so before the merge only what the group can break runs, the rest after it:
+    the rule tests over the whole tree (always, about 15 s), then the test files that read the changed code, or the
+    1/BROAD_PARTS hash sample when the change is broad (what all tests share, an unknown module, contracts, or more
+    than one part). A group that changes nothing under workspace/ or contracts/ runs the rule tests only."""
+    rules = rule_tests(texts)
+    steps = [
+        {
+            "name": "workspace: rule tests over the whole tree",
+            "cwd": "workspace",
+            "cmd": f"uv run pytest -q -n {WORKERS} " + " ".join(shlex.quote(f"tests/{t}") for t in rules),
+        }
+    ]
+    core = [f for f in files if f.startswith("workspace/")]
+    broad = any(f.startswith("contracts/") for f in files)
+    tests: list[str] = []
+    if core and not broad:
+        tests, broad = pick_tests(core, texts)
+    if broad:
+        steps.append(
+            {
+                "name": f"workspace: test sample (part 1/{BROAD_PARTS}; the rest runs after the merge)",
+                "cwd": "workspace",
+                "cmd": f'uv run pytest -q -n {WORKERS} -m "not slow" --part 1/{BROAD_PARTS}',
+            }
+        )
+        return steps
+    whole = {r.split("::")[0] for r in rules if "::" not in r}
+    tests = [t for t in tests if t not in whole]
+    if tests:
+        steps.append(
+            {
+                "name": f"workspace: {len(tests)} test file(s) that read the changed code",
+                "cwd": "workspace",
+                "cmd": f'uv run pytest -q -n {WORKERS} -m "not slow" '
+                + " ".join(shlex.quote(f"tests/{t}") for t in tests),
+            }
+        )
     return steps
 
 
@@ -377,10 +431,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--rules", action="store_true", help="only the whole-tree rule checks (the merge queue's precheck)")
     ap.add_argument("--group", action="store_true", help="the before-merge set of a merge queue group")
     ap.add_argument("--labels", default="", help="--group: the pull request labels, comma separated")
+    ap.add_argument(
+        "--all-tests", action="store_true", help="--group: every not-slow workspace test, not the picked ones"
+    )
     a = ap.parse_args(argv)
     if a.group:
         addons = ci_addons((ROOT / ".github/workflows/addons.yml").read_text(encoding="utf-8"))
-        steps = group_plan(changed(a.base), addons, a.base, a.labels)
+        steps = group_plan(changed(a.base), addons, a.base, a.labels, None if a.all_tests else test_texts())
         if a.plan:
             print(json.dumps(steps, indent=1))
             return 0
