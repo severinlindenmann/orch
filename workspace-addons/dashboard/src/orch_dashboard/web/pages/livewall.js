@@ -210,12 +210,23 @@ function liveWall() {
       h('label', {className:'sr-only', for:'wall-filter'}, 'Filter sessions'),
       h('input', {className:'input', id:'wall-filter', type:'search', placeholder:'Filter by name, ticket or status', autocomplete:'off', value:ui.f, 'data-wall-filter':'1'})));
 }
+// Motion (draft D, ORCH-1329): a pin or unpin (on the wall or in a pane) notes where every tile is; the next repaint
+// slides the tiles from there to their new band (kit/motion.js orch.flip; still with reduced motion). A routine data
+// refresh moves nothing.
+let liveWallMoving = null;
+function liveWallBeforePin() {
+  const host = document.querySelector('main [data-key="wall-body"]');
+  liveWallMoving = host && window.orch?.flip ? {rects:window.orch.rects(host, '[data-tile]', 'data-tile'), at:Date.now()} : null;
+}
 function liveWallRepaint() {
   const host = document.querySelector('main [data-key="wall-body"]');
   if (!host || typeof reconcile !== 'function') return;
+  const moving = liveWallMoving && Date.now() - liveWallMoving.at < 1000 ? liveWallMoving.rects : null;
+  liveWallMoving = null;
   const next = h('div', {}, ...liveWallBody());
   reconcile(host, next);
   if (typeof resultsFillAll === 'function') resultsFillAll(host);
+  if (moving) for (const el of host.querySelectorAll('[data-tile]')) { const r = moving.get(el.dataset.tile); if (r) window.orch.flip(el, r, {scale:false}); }
 }
 if (typeof window === 'object' && typeof document === 'object' && !(typeof module === 'object' && module.exports)) {
   window.addEventListener('orch:live-sessions', liveWallRepaint);
@@ -243,6 +254,7 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
         const a = document.activeElement;
         if (!a || a === document.body || !a.isConnected || a.dataset?.wallPin === id) document.querySelector('main [data-wall-pin="' + id + '"]')?.focus({preventScroll:true});
       };
+      liveWallBeforePin();
       const saved = window.LiveSessions.pin(id, pin.getAttribute('aria-pressed') !== 'true');
       keep();
       Promise.resolve(saved).then(() => requestAnimationFrame(keep));
