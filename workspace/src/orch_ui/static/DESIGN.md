@@ -399,6 +399,8 @@ Production targets: local feedback <100 ms; warm route <300 ms; cold data route 
 | Progress | 150 ms | Move; label changes immediately. |
 | Status | 200 ms once | Subtle border pulse; no persistent movement. |
 | Skeleton | 1600 ms | Low-contrast shimmer only under `[aria-busy=true]`. Instant content swap. |
+| Grow / move into place (Focus zoom, pin, split) | 240 ms | `orch.flip(el, fromRect)`: from where it was to where it is, transform + opacity, `--ease-move`; `{scale:false}` only slides. Only after a person's action, never on a data refresh. |
+| Focus layer closes | 120 ms | `orch.leave(el, rect, host)`: the old panel fades and drops 8 px where it was, `--ease-exit`, inert, then goes. |
 
 **Conflict resolved:** the system brief explicitly requests a 150 ms page transition; BP-71 prohibits fading every route. The class and Replay example exist but are opt-in for first entry only. Routine navigation has no page fade. Skeleton-to-content and numbers never animate. A reorder in the real app should use FLIP on the moved item only (120 ms), not animate the entire list.
 
