@@ -226,6 +226,24 @@ def test_concurrency(store):
     assert list_runs(ws).unwrap() == ["r_8k2m01"]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="the pre-open lstat runs only where os.open has no dir_fd")
+def test_a_lock_file_being_deleted_is_waited_for(store, monkeypatch):
+    """Windows: the lock file another writer is deleting shows no links to the pre-open lstat; the writer
+    waits for it instead of saying there are no records (test_concurrency, CI 21 Nov)."""
+    ws, writer = store
+    real, calls = record._open, []
+
+    def deleting(ws_, rel, mode, **kw):
+        if mode == "create_excl" and rel[-1].endswith(".lock") and not calls:
+            calls.append(rel)
+            raise record.RecordUnavailable("missing")
+        return real(ws_, rel, mode, **kw)
+
+    monkeypatch.setattr(record, "_open", deleting)
+    assert writer.append(event(id="after-delete"))["seq"] == 1
+    assert calls
+
+
 @pytest.mark.parametrize("case", VECTORS["retention"])
 def test_retention_plan(case):
     assert plan_retention(case["runs"], case["now"], case["keep_days"], case["max_mb"]) == case["expect"]
