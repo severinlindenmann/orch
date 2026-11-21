@@ -22,6 +22,7 @@ function settingsCtx(extra = {}) {
   const ctx = {
     h: el, fragment: (...k) => ({tag: 'frag', props: {}, kids: k.flat(Infinity).filter(k2 => k2 != null)}),
     array: v => Array.isArray(v) ? v : [], capitalise, snapshot: false, settingsBusy: new Set(),
+    addonWaiting: new Set(), ADDON_WAIT_TEXT: 'Waiting for orch to restart…',
     state: {settings: {addons: [], available: []}, addons: []}, addons: () => [],
     asList: v => Array.isArray(v) ? v : [v],
     heading: (t, s, o) => el('h1', {}, t, s, o && o.actions),
@@ -57,13 +58,15 @@ test('the switch shows Turning on… / Turning off… while the change runs', ()
   assert.equal(text(c.switchBusy({name: 'factory', active: false})), 'Turning on…');
   assert.equal(text(c.switchBusy({name: 'factory', active: true})), 'Turning off…');
   assert.equal(c.addonChanging(), true);
+  ctx.addonWaiting.add('factory');  // the dashboard restarts after the change (ORCH-1046)
+  assert.equal(text(c.switchBusy({name: 'factory', active: false})), 'Waiting for orch to restart…');
 });
 
 // 23: no call to an add-on that is off/removed, none while the services restart
 test('loadAddon asks nothing for a removed add-on or while an add-on change runs', async () => {
   const calls = [];
   const ctx = settingsCtx({
-    addonBusy: new Set(), addonAgain: new Set(), addonViews: {}, fetch: async u => { calls.push(u); return {ok: true, json: async () => ({})}; },
+    addonBusy: new Set(), addonAgain: new Set(), pendingRepeat: null, addonViews: {}, fetch: async u => { calls.push(u); return {ok: true, json: async () => ({})}; },
     addons: () => [{name: 'sync'}], state: {}, isPublish: () => false, shownAddon: () => null, main: {querySelector: () => null},
     paintAddon: () => {}, loadSharedLinks: async () => {},
   });
@@ -145,23 +148,14 @@ test('the add-on page offers Remove, and says plainly when the add-on is part of
   assert.match(text(find(core, byKey('addon-detail-core'))), /Relay is part of orch\. You can turn it off, but not remove it\./);
 });
 
-// ORCH-264: the Preview switch for the new Focus sits on the Focus add-on page, only when Focus is on
-test('the live-session add-on page shows the Preview switch, off by default, only there', () => {
-  const mk = (settings) => {
-    const ctx = settingsCtx({addons: () => [], state: {look: null, settings}, heading: t => el('h1', {}, t)});
-    vm.runInContext(head + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
-    return ctx;
-  };
-  const focus = {name: 'focus', label: 'Focus', page: {live_session: true}, active: true, description: 'd', removable: true};
-  const off = find(mk({focus_preview_on: false}).page(focus), byKey('addon-detail-live-preview'));
-  assert.equal(off.props['data-action'], 'live-preview');
-  assert.equal(off.props['aria-checked'], false);
-  assert.equal(text(off), 'Off');
-  assert.equal(text(find(mk({focus_preview_on: true}).page(focus), byKey('addon-detail-live-preview'))), 'On');
-  assert.match(text(find(mk({focus_preview_on: false}).page(focus), byKey('addon-detail-live-preview-row'))), /Preview.*Try the new Focus.*today’s Focus/);
-  assert.equal(find(mk({focus_preview_on: false}).page({...focus, active: false}), byKey('addon-detail-live-preview')), null);
-  assert.equal(find(mk({focus_preview_on: false}).page({name: 'sync', active: true, description: 'd'}), byKey('addon-detail-live-preview')), null);
-  assert.equal(find(mk({}).page(focus), byKey('addon-detail-live-preview')), null, 'no setting in the state (an old server): no switch');
+// ORCH-816: the new Focus is the only Focus; its add-on page has no Preview switch, in any state
+test('the live-session add-on page has no Preview switch', () => {
+  const ctx = settingsCtx({addons: () => [], state: {look: null, settings: {focus_preview_on: false, typing_on: false}}, heading: t => el('h1', {}, t)});
+  vm.runInContext(head + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+  const page = ctx.page({name: 'focus', label: 'Focus', page: {live_session: true}, active: true, description: 'd', removable: true});
+  assert.equal(find(page, byKey('addon-detail-live-preview')), null);
+  assert.doesNotMatch(text(page), /Preview|today’s Focus/);
+  assert.ok(find(page, byKey('addon-detail-typing')), 'the Typing switch stays');
 });
 
 // 19: the Update button keeps the version before, so the end says "Updated orch 23 → 24."
@@ -184,4 +178,22 @@ test('the Focus add-on page shows the typing switch with one plain line, only wh
   assert.match(text(find(on, byKey('addon-detail-typing-row'))), /Let me type into the helper’s screen.*click the helper’s live screen and type into it/);
   assert.equal(find(mk({typing_on: false}).page({name: 'focus', page: {live_session: true}, active: false, description: 'd'}), byKey('addon-detail-typing')), null);
   assert.equal(find(mk({typing_on: true}).page({name: 'sync', active: true, description: 'd'}), byKey('addon-detail-typing')), null);
+});
+
+// ORCH-261 (owner): the plain terminal is a shell, so typing into it has its own switch, off by default
+test('the Focus add-on page shows a separate plain terminal switch that says it is a shell', () => {
+  const mk = (settings) => {
+    const ctx = settingsCtx({addons: () => [], state: {look: null, settings}, heading: t => el('h1', {}, t)});
+    vm.runInContext(head + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+    return ctx;
+  };
+  const focus = {name: 'focus', page: {live_session: true}, active: true, description: 'd'};
+  const on = mk({typing_on: true, terminal_typing_on: false}).page(focus);
+  const sw = find(on, byKey('addon-detail-terminal-typing'));
+  assert.equal(sw.props['data-action'], 'terminal-typing');
+  assert.equal(sw.props['aria-checked'], false, 'helper typing on leaves the plain terminal off');
+  assert.match(text(find(on, byKey('addon-detail-terminal-typing-row'))), /Let me type into the plain terminal.*shell on this computer/);
+  assert.ok(find(on, byKey('addon-detail-typing')), 'the helper switch stays as it was');
+  assert.equal(find(mk({typing_on: true}).page(focus), byKey('addon-detail-terminal-typing')), null, 'an older core without the setting: no row');
+  assert.equal(find(mk({terminal_typing_on: true}).page({...focus, active: false}), byKey('addon-detail-terminal-typing')), null);
 });

@@ -94,6 +94,7 @@
   "run": "orch_automation",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-automation",
   "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": false,
@@ -192,100 +193,13 @@
   "run": "orch_dashboard",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-dashboard",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
   "ticket_links": [],
   "ticket_view": [],
   "version": "0.2.0"
- },
- "dashboard-tester": {
-  "acts": {},
-  "agents_block": "skills/orch-dashboard-tester/AGENTS-block.md",
-  "background": false,
-  "description": "Looks at every dashboard page once a day and reports what is broken, without clicking anything.",
-  "docs": "docs.json",
-  "docs_pages": [
-   {
-    "good": [
-     "A helper cannot start it; only your daily repeat can."
-    ],
-    "icon": "eye",
-    "id": "dashboard-tester",
-    "one": "Once a day it opens every page, without clicking, and reports what is broken.",
-    "related": [
-     "automation"
-    ],
-    "steps": [
-     {
-      "text": "You set it up and press Allow this script",
-      "who": "you"
-     },
-     {
-      "detail": "At three widths: laptop, big screen, phone.",
-      "text": "Every morning at 06:30 it opens every page",
-      "who": "orch"
-     },
-     {
-      "text": "Looks for errors, slow pages, cut-off layouts, wrong words",
-      "who": "orch"
-     },
-     {
-      "branch": [
-       {
-        "if": "Yes",
-        "then": "Skipped"
-       },
-       {
-        "if": "No",
-        "then": "A problem report, at most 3 a day"
-       }
-      ],
-      "end": true,
-      "text": "Already known on an open ticket?",
-      "who": "orch"
-     }
-    ],
-    "tech": {
-     "cmds": [
-      [
-       "orch shot <page>",
-       "pictures of a page, no keychain window"
-      ]
-     ],
-     "files": [
-      [
-       ".orch/dash-tester/",
-       "its runs and pictures"
-      ]
-     ],
-     "live": [
-      "self"
-     ]
-    },
-    "title": "Dashboard tester"
-   }
-  ],
-  "gitignore": [
-   ".orch/addons/dashboard-tester/"
-  ],
-  "name": "dashboard-tester",
-  "needs": false,
-  "orch_api": 1,
-  "recommended": false,
-  "requires": [
-   "dashboard",
-   "automation"
-  ],
-  "run": "orch_dashboard_tester",
-  "runs_agents": true,
-  "schema": "orch.addon/1",
-  "skill": "skills/orch-dashboard-tester",
-  "ticket_ext_inert": false,
-  "ticket_fields_section": null,
-  "ticket_links": [],
-  "ticket_view": [],
-  "version": "0.1.0"
  },
  "factory": {
   "acts": {
@@ -400,6 +314,16 @@
   "run": "orch_factory",
   "runs_agents": true,
   "schema": "orch.addon/1",
+  "selfcheck": [
+   {
+    "args": [
+     "list",
+     "--json"
+    ],
+    "fails": "the Factory list does not open",
+    "label": "Factory list"
+   }
+  ],
   "skill": "skills/orch-factory",
   "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": false,
@@ -506,6 +430,7 @@
   "run": "orch_focus",
   "runs_agents": true,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-focus",
   "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": false,
@@ -602,6 +527,7 @@
   "run": "orch_insights",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-insights",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
@@ -689,7 +615,115 @@
   "run": "orch_lessons",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-lessons",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
+ },
+ "personal": {
+  "acts": {},
+  "agents_block": "skills/orch-personal/AGENTS-block.md",
+  "background": true,
+  "dashboard": {
+   "icon": "user",
+   "label": "Personal",
+   "order": 15,
+   "subtitle": "What needs you, then each part at a glance. Helpers use only what you turned on."
+  },
+  "description": "Your notes (and next your meetings, calendar, messages and mail) in one place; helpers use only what you allow.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [
+     "A recording is read only after you said everyone on the call agreed. Ways in are your own scripts on this computer: they run only their listed actions and stop when their folder changes."
+    ],
+    "icon": "lock",
+    "id": "personal",
+    "one": "Your own notes, meetings and calendar; helpers see only what you allow.",
+    "related": [],
+    "steps": [
+     {
+      "detail": "Per part: what helpers may read (nothing, only what you attach to a ticket, all) and whether they may add notes.",
+      "text": "You turn on a part (Notes, Meetings, Calendar) and set its rules",
+      "who": "you"
+     },
+     {
+      "text": "A helper asks Personal for a note, a meeting or free times",
+      "who": "helper"
+     },
+     {
+      "decision": true,
+      "detail": "Not allowed: the helper asks you on its ticket. A calendar at Nothing is left out; Busy times show without a title.",
+      "text": "Checks the rules before it hands anything over",
+      "who": "orch"
+     },
+     {
+      "text": "Gets text only, as information, never as orders",
+      "who": "helper"
+     },
+     {
+      "detail": "It never changes or deletes your notes and never adds an event; a suggestion waits for you.",
+      "text": "Writes a new note into From helpers or suggests a meeting time",
+      "who": "helper"
+     },
+     {
+      "end": true,
+      "text": "You add the suggestion to your calendar or make tickets from next steps",
+      "who": "you"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch personal today",
+       "parts that are on and what helpers can use"
+      ],
+      [
+       "orch personal notes find \"<words>\"",
+       "notes a helper may read"
+      ],
+      [
+       "orch personal calendar free --days 5 --minutes 60",
+       "free times in the calendars a helper may see"
+      ],
+      [
+       "orch personal ways",
+       "each way in that is on"
+      ]
+     ],
+     "files": [
+      [
+       ".orch/addons/personal/",
+       "its rules and data, kept out of git"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Personal"
+   }
+  ],
+  "gitignore": [
+   ".orch/addons/personal/"
+  ],
+  "name": "personal",
+  "needs": false,
+  "orch_api": 1,
+  "page": {
+   "label": "Open Personal",
+   "path": "/"
+  },
+  "recommended": false,
+  "requires": [],
+  "run": "orch_personal",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "selfcheck": [],
+  "skill": "skills/orch-personal",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
   "ticket_links": [],
@@ -807,6 +841,16 @@
   "run": "orch_pull_requests",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [
+   {
+    "args": [
+     "queue",
+     "check"
+    ],
+    "fails": "the merge queue runner is not running while pull requests wait",
+    "label": "Merge queue runner"
+   }
+  ],
   "skill": "skills/orch-pull-requests",
   "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": false,
@@ -943,7 +987,7 @@
  "services": {
   "acts": {},
   "agents_block": "skills/orch-services/AGENTS-block.md",
-  "background": false,
+  "background": true,
   "dashboard": {
    "icon": "box",
    "label": "Services",
@@ -1023,6 +1067,7 @@
   "run": "orch_services",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-services",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
@@ -1109,6 +1154,7 @@
   "run": "orch_sync",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-sync",
   "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": true,
@@ -1156,6 +1202,11 @@
    },
    "share": {
     "summary": "Change how helper work is spread over subscriptions, API credit and helper tools",
+    "who": "people",
+    "writes": []
+   },
+   "switcher": {
+    "summary": "Follow the workspace that switches the accounts, or switch from here",
     "who": "people",
     "writes": []
    },
@@ -1255,6 +1306,7 @@
   "run": "orch_usage",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-usage",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,

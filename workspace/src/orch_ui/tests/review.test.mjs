@@ -74,6 +74,14 @@ test('mapCard carries the round and the task so the card can say About', () => {
   assert.equal(it.ticketId, 't_abc');
   assert.equal(UI.review.mapCard(card('y'), fakeApi([[]]), NOW).about, undefined);
 });
+test('ORCH-1108: mapCard names a stuck card Stuck and keeps only a link inside the page as its Open', () => {
+  const {UI} = load();
+  const c = card('s', {href: '#ticket/t_abc123', answers: [{label: 'Nudge', picked: 'nudge'}]}); c.card = {kind: 'stuck', title: 'The helper is idle.'};
+  const it = UI.review.mapCard(c, fakeApi([[]]), NOW);
+  assert.equal(it.kindLabel, 'Stuck'); assert.equal(it.icon, 'pause'); assert.equal(it.href, '#ticket/t_abc123');
+  assert.deepEqual(JSON.parse(JSON.stringify(it.answers)), [{label: 'Nudge', picked: 'nudge'}]);
+  for (const bad of ['javascript:alert(1)', 'https://x.example/t', '//evil', '#ticket/<b>']) assert.equal(UI.review.mapCard(card('b', {href: bad}), fakeApi([[]]), NOW).href, undefined, bad);
+});
 test('mapCard keeps option previews and picks a kind label', () => {
   const {UI} = load();
   const c = card('o'); c.card = {kind: 'choice', title: 'Which?', preview: {type: 'options', options: [{id: 'A', title: 'As today', preview: {type: 'page', src: 'reviewed/aa/a.html'}}, {id: 'B', title: 'New', suggested: true}]}};
@@ -165,6 +173,17 @@ test('needs_person: plain sign-in message, error toast, the card returns', async
   decks[0].o.onDecide(decks[0].items[0], 'ok', null);
   await flush(); await flush();
   assert.match(toasts[0].m, /Sign in to answer: run orch review in your terminal/); assert.equal(toasts[0].k, 'error');
+  assert.equal(decks.length, 2); assert.equal(decks[1].items.length, 1);
+});
+
+test('needs_person with the server sign-in words (dashboard): shows them, never the terminal (#1918)', async () => {
+  const words = 'Sign in to do this: open the dashboard with a sign-in link from orch.';
+  const api = fakeApi([[card('a')]], async () => ({ok: false, error: {code: 'needs_person', message: words}}));
+  const {decks, toasts} = await mount(api);
+  decks[0].o.onDecide(decks[0].items[0], 'ok', null);
+  await flush(); await flush();
+  assert.equal(toasts[0].m, words); assert.equal(toasts[0].k, 'error');
+  assert.doesNotMatch(toasts[0].m, /terminal/);
   assert.equal(decks.length, 2); assert.equal(decks[1].items.length, 1);
 });
 

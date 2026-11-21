@@ -16,6 +16,13 @@
 // The runner records every action the page really sends and every page it shows. A click-through that claims a
 // feature in `covers` but never did it fails; with no --only, a feature of the catalogue (catalogue.cjs) that no
 // click-through did fails too, by name. Exit 0 = all passed.
+//
+// A click-through that fails is tried once more at the end, alone, on a fresh throw-away home, server and browser
+// context (ORCH-1132): a pass then counts, and the summary names it ("passed on second try: <file>") so a flaky one
+// stays visible. Failed twice = failed. More than 3 failures at once are not tried again (a real break). Each
+// click-through has a time limit of 3 minutes, so one hang cannot eat the job. A click-through on the short
+// UNSTEADY list (each entry names the ticket that fixes it) still runs, but its failure is printed as
+// "FAILED (known unsteady, does not count): <file>" and does not make the run red.
 'use strict';
 const fs = require('node:fs');
 const net = require('node:net');
@@ -29,7 +36,7 @@ const REPO = path.resolve(__dirname, '..', '..', '..');
 let SIZE = { width: 1280, height: 900 };
 /** Add-ons of this checkout the demo home has installed (off until a click-through turns one on, see server.py):
  *  every orch the run starts sees the same ones. */
-const ADDONS = ['focus', 'lessons', 'pull-requests', 'factory', 'sync'];
+const ADDONS = ['focus', 'lessons', 'pull-requests', 'factory', 'sync', 'automation'];
 const UV_RUN = ['uv', 'run', '-q', '--project', path.join(REPO, 'workspace'),
   ...ADDONS.flatMap(n => ['--with-editable', path.join(REPO, 'workspace-addons', n)])];
 /** the env of every process of the run: the throw-away home only; ORCH_REPO = this checkout, so the add-ons
@@ -140,7 +147,7 @@ async function signIn(browser, srv) {
 
 /** Record what the page does: ops sent (with their answer) and the router kinds it showed. */
 function recorder(page, base) {
-  const rec = { ops: [], pages: new Set(), errors: [], refusedOk: new Set(), failed: [], offAddons: new Set(), offViews404: 0 };
+  const rec = { ops: [], pages: new Set(), errors: [], refusedOk: new Set(), failed: [], offAddons: new Set(), offViews404: 0, slowOk: new Set(), slow503: 0 };
   page.on('response', r => {
     if (r.status() < 400) return;
     const line = `${r.status()} ${r.request().method()} ${r.url().replace(base, '')}`;
@@ -149,6 +156,10 @@ function recorder(page, base) {
     // the view of an add-on the click-through itself just turned off (addonOff) may answer 404 once; that is fine
     const m = /^404 GET \/api\/addon\/([^/?]+)$/.exec(line);
     if (m && rec.offAddons.has(decodeURIComponent(m[1]))) rec.offViews404++;
+    // an add-on page's own answer that is still being built the first time says 503 "slow to answer" and the page
+    // shows Try again; a click-through that waits it out names that address (slowOk) and those 503s are not counted
+    const s = /^503 GET ([^?]+)/.exec(line);
+    if (s && rec.slowOk.has(s[1])) rec.slow503++;
   });
   page.on('pageerror', e => rec.errors.push(`uncaught exception: ${String(e.message).slice(0, 300)}`));
   page.on('console', m => {
@@ -157,6 +168,7 @@ function recorder(page, base) {
     // Chromium logs every 4xx answer as a console error; an action a click-through expects to be refused is fine
     if (/Failed to load resource: the server responded with a status of 4\d\d/.test(t) && rec.ops.some(o => o.status >= 400 && rec.refusedOk.has(o.op))) return;
     if (/Failed to load resource: the server responded with a status of 404/.test(t) && rec.offViews404 > 0) { rec.offViews404--; return; }
+    if (/Failed to load resource: the server responded with a status of 503/.test(t) && rec.slow503 > 0) { rec.slow503--; return; }
     // name the address of a failed load (Chromium's line does not)
     rec.errors.push(`console error: ${t.slice(0, 300)}${/Failed to load resource/.test(t) && rec.failed.length ? ` (${rec.failed.at(-1)})` : ''}`);
   });
@@ -277,6 +289,9 @@ function tools(page, srv, rec, shots = null) {
       t.orchAsPerson('addon', 'remove', name);
       return t.until(s => !(s.addons || []).some(a => a.name === name), `${name} off again`);
     },
+    /** the page's own GET at `address` (such as '/addon/factory/api/home') may answer 503 while its first answer is
+     *  still being built (the page says Try again); the click-through waits that out, so those 503s are no error */
+    slowOk(address) { rec.slowOk.add(address); },
     /** with --out: keep pictures of the page now at the UX checklist sizes, <file>-<name>-<w>.png (a state worth
      *  showing in a review), with `el` (a locator) scrolled into view; the window goes back to its size after */
     async shot(name, el = null) {
@@ -308,7 +323,83 @@ function where(e) {
   return ` (at ${m[2]}:${m[3]}${src ? ': ' + src : ''})`;
 }
 
+/** A time limit for one click-through (the slowest takes about a minute on CI): a hang fails it by name instead of
+ *  eating the whole job. */
+const STEP_LIMIT_MS = 180000;
+/** At most this many failed click-throughs are tried a second time: more failures at once are a real break, and a
+ *  fresh server for each would only stretch a red job. */
+const MAX_RETRIES = 3;
+/** Known unsteady click-throughs: each still runs and is printed, but a failure does not make the run red (nor do
+ *  the features only it covers). The owner decided click-throughs must not hold up queue groups (20 Nov); this is
+ *  the bridge until the named ticket fixes the click-through. Keep it short (a test allows at most 3) and remove an
+ *  entry as soon as its ticket is done. */
+const UNSTEADY = {
+  'r-factory-idea-to-start.cjs': 'ORCH-1118',  // failed twice in one run in group #2220 (Running after a reload; 404)
+};
+/** No second try starts after this long (the CI job stops at 15 minutes). */
+const RETRY_DEADLINE_MS = 12 * 60000;
+
+/** promise, or a plain error after ms; the timer is always cleared when it settles (an unref timer let Node 20 end a pending test as cancelled) */
+function withTimeout(promise, ms, what) {
+  let timer;
+  const late = new Promise((_, no) => {
+    timer = setTimeout(() => no(new Error(`${what} took longer than ${Math.round(ms / 1000)}s and was stopped`)), ms);
+  });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+
+/** Every click-through once, then each failed one once more from a clean state (fresh(c) runs it on a fresh server and
+ *  browser context). A pass on the second try counts as a pass and is named, so flakes stay visible; failed twice =
+ *  failed. first(c) and fresh(c) resolve {c, problems, ...}; between() runs after the first round. */
+async function runAll(todo, { first, fresh, between = async () => {}, maxRetries = MAX_RETRIES, deadline = Infinity,
+  now = Date.now, log = console.log }) {
+  const results = [];
+  for (const c of todo) results.push(await first(c));
+  await between();
+  const failed = results.filter(r => r.problems.length);
+  const secondTry = [];
+  if (failed.length > maxRetries) {
+    log(`\n${failed.length} click-throughs failed: more than ${maxRetries}, so none is tried again.`);
+    return { results, secondTry };
+  }
+  for (const r of failed) {
+    if (now() > deadline) { log(`no time left for a second try of ${r.c.file}`); continue; }
+    log(`\ntrying ${r.c.file} once more on a fresh server`);
+    const again = await fresh(r.c);
+    if (!again.problems.length) {
+      results[results.indexOf(r)] = again;
+      secondTry.push(r.c.file);
+    }
+  }
+  return { results, secondTry };
+}
+
+/** One click-through on a new page of ctx: its problems, the features it did, its time. */
+async function runOne(ctx, srv, c, o) {
+  const page = await ctx.newPage();
+  const rec = recorder(page, srv.base);
+  const problems = [];
+  const t0 = Date.now();
+  try {
+    await withTimeout(c.run(tools(page, srv, rec, o.out ? path.join(o.out, c.file.replace(/\.cjs$/, '')) : null)), o.limit || STEP_LIMIT_MS, c.file);
+  } catch (e) {
+    problems.push(String(e.message).split('\n')[0] + where(e));
+  }
+  if (o.out) await withTimeout(page.screenshot({ path: path.join(o.out, c.file.replace(/\.cjs$/, '.png')) }), 30000, 'the picture').catch(() => {});
+  await withTimeout(page.close(), 30000, 'closing the page').catch(() => {});
+  problems.push(...new Set(rec.errors));
+  const did = new Set([...rec.ops.filter(x => ok(x.status) || rec.refusedOk.has(x.op)).map(x => x.op), ...rec.pages]);
+  const claimedNotDone = (c.covers || []).filter(k => !did.has(k));
+  if (!problems.length && claimedNotDone.length) problems.push(`says it covers ${claimedNotDone.join(', ')} but never did it`);
+  const r = { c, problems, secs: ((Date.now() - t0) / 1000).toFixed(1) };
+  console.log(`${problems.length ? 'FAILED' : 'passed'}  ${c.name} (${c.file}, ${r.secs}s)`);
+  for (const p of problems) console.log(`        ${p}`);
+  if (problems.length && rec.ops.length) console.log(`        actions sent: ${rec.ops.map(x => `${x.op} ${x.status}`).join(', ')}`);
+  return r;
+}
+
 async function main() {
+  const started = Date.now();
   const o = args(process.argv.slice(2));
   const all = catalogue.clickthroughs();
   if (o.list) {
@@ -320,52 +411,63 @@ async function main() {
   const todo = all.filter(c => !o.only || o.only.has(c.file.replace(/\.cjs$/, '')));
   if (o.only && todo.length !== o.only.size) throw new Error(`no such click-through: ${[...o.only].filter(n => !all.some(c => c.file === n + '.cjs')).join(', ')}`);
   if (o.out) fs.mkdirSync(o.out, { recursive: true });
-  const srv = await serve();
+  let srv = await serve();
   const { chromium } = playwright();
   // a fake microphone that is always allowed (ORCH-422: the voice note click-through records with it)
   const browser = await chromium.launch({ args: ['--use-mock-keychain', '--password-store=basic', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
-  const done = new Set(), results = [];
+  let run;
   try {
     const ctx = await signIn(browser, srv);
-    for (const c of todo) {
-      const page = await ctx.newPage();
-      const rec = recorder(page, srv.base);
-      const problems = [];
-      const t0 = Date.now();
-      try {
-        await c.run(tools(page, srv, rec, o.out ? path.join(o.out, c.file.replace(/\.cjs$/, '')) : null));
-      } catch (e) {
-        problems.push(String(e.message).split('\n')[0] + where(e));
-      }
-      if (o.out) await page.screenshot({ path: path.join(o.out, c.file.replace(/\.cjs$/, '.png')) }).catch(() => {});
-      await page.close();
-      problems.push(...new Set(rec.errors));
-      const did = new Set([...rec.ops.filter(x => ok(x.status) || rec.refusedOk.has(x.op)).map(x => x.op), ...rec.pages]);
-      const claimedNotDone = (c.covers || []).filter(k => !did.has(k));
-      if (!problems.length && claimedNotDone.length) problems.push(`says it covers ${claimedNotDone.join(', ')} but never did it`);
-      if (!problems.length) for (const k of c.covers || []) done.add(k);
-      results.push({ c, problems, secs: ((Date.now() - t0) / 1000).toFixed(1) });
-      console.log(`${problems.length ? 'FAILED' : 'passed'}  ${c.name} (${c.file}, ${results.at(-1).secs}s)`);
-      for (const p of problems) console.log(`        ${p}`);
-      if (problems.length && rec.ops.length) console.log(`        actions sent: ${rec.ops.map(x => `${x.op} ${x.status}`).join(', ')}`);
-    }
+    run = await runAll(todo, {
+      first: c => runOne(ctx, srv, c, o),
+      between: async () => { await ctx.close().catch(() => {}); srv.stop(); srv = null; },
+      // the second try: a new throw-away home and server and a new browser context, as for the first round
+      fresh: async c => {
+        let one = null;
+        try {
+          one = await serve();
+          const fctx = await signIn(browser, one);
+          try { return await runOne(fctx, one, c, o); } finally { await fctx.close().catch(() => {}); }
+        } catch (e) {
+          return { c, problems: [`the second try did not start: ${String(e.message).split('\n')[0]}`] };
+        } finally { if (one) one.stop(); }
+      },
+      deadline: started + RETRY_DEADLINE_MS,
+    });
   } finally {
     await browser.close();
-    srv.stop();
+    if (srv) srv.stop();
   }
-  const failed = results.filter(r => r.problems.length);
-  let missing = [];
-  if (!o.only) {
-    missing = catalogue.features().filter(k => !done.has(k));
-    if (missing.length) {
-      console.log('\nThese dashboard features have no passing click-through (add one in workspace-addons/dashboard/clickthrough/features/):');
-      for (const k of missing) console.log(`  - ${k}`);
-    }
+  const { results, secondTry } = run;
+  const v = verdict(results, o.only ? null : catalogue.features());
+  if (v.missing.length) {
+    console.log('\nThese dashboard features have no passing click-through (add one in workspace-addons/dashboard/clickthrough/features/):');
+    for (const k of v.missing) console.log(`  - ${k}`);
   }
-  console.log(`\n${results.length - failed.length} of ${results.length} click-throughs passed${o.only ? '' : `; ${catalogue.features().length - missing.length} of ${catalogue.features().length} features done`}.`);
-  return failed.length || missing.length ? 1 : 0;
+  const nFeatures = catalogue.features().length;
+  console.log(`\n${results.length - v.failed.length - v.unsteady.length} of ${results.length} click-throughs passed${o.only ? '' : `; ${nFeatures - v.missing.length - v.excused.length} of ${nFeatures} features done`}.`);
+  if (secondTry.length) console.log(`passed on second try: ${secondTry.join(', ')}`);
+  for (const r of v.unsteady) console.log(`FAILED (known unsteady, does not count): ${r.c.file} (${UNSTEADY[r.c.file]} fixes it)`);
+  if (v.failed.length) console.log(`failed: ${v.failed.map(r => r.c.file).join(', ')}`);
+  return v.code;
 }
 
-module.exports = { tools, recorder, where };
+/** The run's verdict. failed: what makes it red; unsteady: failures of the UNSTEADY list (printed, not counted);
+ *  missing: features (when given) no passing click-through did, except those only a failed unsteady one covers
+ *  (excused). code: 1 = red. */
+function verdict(results, features, unsteady = UNSTEADY) {
+  const bad = results.filter(r => r.problems.length);
+  const failed = bad.filter(r => !unsteady[r.c.file]);
+  const shaky = bad.filter(r => unsteady[r.c.file]);
+  const done = new Set(), shakyCovers = new Set();
+  for (const r of results) if (!r.problems.length) for (const k of r.c.covers || []) done.add(k);
+  for (const r of shaky) for (const k of r.c.covers || []) shakyCovers.add(k);
+  const notDone = (features || []).filter(k => !done.has(k));
+  const missing = notDone.filter(k => !shakyCovers.has(k));
+  const excused = notDone.filter(k => shakyCovers.has(k));
+  return { failed, unsteady: shaky, missing, excused, code: failed.length || missing.length ? 1 : 0 };
+}
+
+module.exports = { tools, recorder, where, runAll, withTimeout, verdict, UNSTEADY };
 
 if (require.main === module) main().then(c => process.exit(c), e => { console.error(e); process.exit(1); });

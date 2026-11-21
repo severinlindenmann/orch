@@ -54,19 +54,21 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 | `check` | `{"checked": [{id, name, health, failing, did?, error?}], "unreadable": n}`: one pass, no loop (see Health check) |
 | `add <name> --id <slug> [--port N] [--ticket ID \| --addon NAME] [--cwd DIR] [--auto] [--start] -- <command...>` | `{"service": row, "next"}`; installed stopped unless `--start` |
 | `start \| stop \| restart <id>` | `{"service": row, "next"}` |
+| `start \| stop \| status` (no id) | the regular check (see Health check): `{"running": true, "pid"}` \| `{"stopped": bool}` \| `{"running": bool, "pid"?}` (status exits 1 when it does not run); `orch start` / `orch stop` call these |
 | `auto <id> on \| off` | `{"service": row, "next"}` |
 | `remove <id>` | `{"removed": id, "next"}`: stops it, removes the platform entry and the record, keeps the log |
 | `log <id> [--lines N]` (default 20, max 1000) | `{"id", "lines": [...]}`; every line goes through the core secret scan, a hit shows `••••••` in place of the value (the whole line when the value cannot be told apart) |
-| `found` | `{"found": [item]}`; item = `id` (`launchd:<label>` \| `systemd:<unit>` \| `process:<pid>`), `name`, `running`, `since`, `what` (one plain line), `how` (`kind`, `label`/`unit`, `path`, `pid`?), `command` (secret scan hits as `••••••`), `auto`. Nothing found = `[]` and one plain sentence; Windows: `[]` and `"note"`. Reads only |
+| `found` | `{"found": [item]}`; item = `id` (`launchd:<label>` \| `systemd:<unit>`; plain programs are no items), `name`, `running`, `since`, `what` (one plain line), `how` (`kind`, `label`/`unit`, `path`, `pid`?), `command` (secret scan hits as `••••••`), `auto`. Nothing found = `[]` and one plain sentence; `others`? = number of plain programs running in the workspace folder (shown as one line "N other programs run here", only when > 0); Windows: `[]` and `"note"`. Reads only |
 | `adopt <found-id> [--name X] [--id SLUG] [--ticket ID]` | `{"service": row, "next"}`: Manage with orch (see below) |
 | `act <verb> [--by X] -- <id>` | verbs `start, stop, restart, auto-on, auto-off, remove, adopt` (adopt takes a found id); same answers as the commands |
-| `view` | `orch.addon-view/1`: one `split` block (list and panel: every service with its state, starts by itself, made by, last 20 log lines masked, Remove with what happens; "Found on this computer" when there are found items) and a footnote to Automation |
+| `view` | `orch.addon-view/1`: one `split` block (list and panel: every service with its state, starts by itself, made by, last 100 log lines masked (the page shows 6 until Open log), Remove with what happens; "Found on this computer" when there are found items) and a footnote to Automation |
 
 ## Found on this computer and Manage with orch
 `found` lists background jobs of the person's own account that orch did not make; it only reads, nothing about a
 found job changes until the person chooses Manage with orch (`adopt`).
 - macOS: plists in `~/Library/LaunchAgents` (Label, `ProgramArguments`/`Program`, `RunAtLoad`) plus
-  `launchctl print gui/<uid>/<label>`; labels `ch.orch.svc.*` (orch's own) and `com.apple.`, `com.google.`,
+  `launchctl print gui/<uid>/<label>`; starts by itself = `RunAtLoad` and the label not switched off in
+  `launchctl print-disabled gui/<uid>` (also asked for an adopted job in list and on the page); labels `ch.orch.svc.*` (orch's own) and `com.apple.`, `com.google.`,
   `com.microsoft.` are left out (one list in `found.py`).
 - Linux: `systemctl --user list-units --type=service --all` and `~/.config/systemd/user/*.service`, then one
   `systemctl --user show`; only units whose file is in `~/.config/systemd/user` or `~/.local/share/systemd/user`, never
@@ -83,9 +85,12 @@ has `"forgotten": true` and says so). A bare process cannot be adopted: refused 
 use instead; it is never stopped by orch.
 
 ## Health check and failing (`check`)
-One pass over every service, no loop and no sleep (R2.6); a person repeats it with the automation add-on
-(`orch automation script add services-check -- orch services check`, then `orch automation repeat <ticket>
-"every 5 minutes" --script services-check`).
+One pass over every service, no loop and no sleep. The add-on's background process (`background = true`, started by
+`orch start` and when Services is turned on: `orch services start|stop|status` without a service id) runs this pass
+every minute until Services is turned off, so nobody sets up a repeat. Every pass holds `.orch/addons/services/
+check.lock`: the regular check and a person's `orch services check` never run at the same time (a person's waits up
+to 30 s, then is refused with "Another check runs right now"); the regular check skips a round a person holds. Its
+log: `.orch/addons/services/checker.log` (service names and counts only).
 - Health: the process is alive (driver state); with a `port`, a TCP connect to `127.0.0.1:<port>` within 0.5 s.
   A service the person stopped is not checked (`"Stopped, so not checked"`) and never failing.
 - A failure = a failed health check, or a start the platform did by itself since the last pass (driver `runs()`:

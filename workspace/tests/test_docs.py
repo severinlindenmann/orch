@@ -1,5 +1,5 @@
-"""The Documentation page's content (contracts/docs-pages.md, orch/docs.py): every shipped docs file is valid, the
-pages come together in the right groups, and a bad docs file refuses its add-on."""
+"""The Documentation page's content (contracts/docs-pages.md, orch/docs.py): every shipped docs file is valid,
+the pages come together in the right groups, and a bad docs file refuses its add-on."""
 
 import json
 from pathlib import Path
@@ -20,7 +20,14 @@ def _rows(off=("sync",)):
     rows = []
     for f in MANIFESTS:
         m = addons.parse_manifest(f, core="builtin" in f.parts)
-        rows.append({"name": m["name"], "active": m["name"] not in off, "running": False, "docs_pages": m["docs_pages"]})
+        rows.append(
+            {
+                "name": m["name"],
+                "active": m["name"] not in off,
+                "running": False,
+                "docs_pages": m["docs_pages"],
+            }
+        )
     return rows
 
 
@@ -46,7 +53,9 @@ def test_collect_orders_groups_marks_off_and_keeps_links_inside():
     pages = out["pages"]
     assert [g["id"] for g in out["groups"]] == ["orch", "builtin", "addon"]
     groups = [p["group"] for p in pages]
-    assert groups == sorted(groups, key=["orch", "builtin", "addon"].index), "orch first, then relay and publish, then add-ons"
+    assert groups == sorted(groups, key=["orch", "builtin", "addon"].index), (
+        "orch first, then relay and publish, then add-ons"
+    )
     assert [p["addon"] for p in pages if p["group"] == "builtin"][0] == "relay"
     ids = [p["id"] for p in pages]
     assert len(ids) == len(set(ids)) == 28
@@ -56,8 +65,22 @@ def test_collect_orders_groups_marks_off_and_keeps_links_inside():
 
 
 def test_an_addon_never_replaces_a_page_that_is_already_there():
-    rows = _rows() + [{"name": "zz-copy", "active": True, "running": False,
-                       "docs_pages": [{"id": "new-ticket", "icon": "plus", "title": "Mine", "one": "Mine.", "steps": [{"who": "you", "text": "x"}]}]}]
+    rows = _rows() + [
+        {
+            "name": "zz-copy",
+            "active": True,
+            "running": False,
+            "docs_pages": [
+                {
+                    "id": "new-ticket",
+                    "icon": "plus",
+                    "title": "Mine",
+                    "one": "Mine.",
+                    "steps": [{"who": "you", "text": "x"}],
+                }
+            ],
+        }
+    ]
     pages = docs.collect(rows)["pages"]
     assert [p["title"] for p in pages if p["id"] == "new-ticket"] == ["After you make a ticket"]
 
@@ -65,14 +88,56 @@ def test_an_addon_never_replaces_a_page_that_is_already_there():
 @pytest.mark.parametrize(
     "page, why",
     [
-        ({"id": "x1", "icon": "plus", "title": "T", "one": "O", "steps": [{"who": "robot", "text": "x"}]}, "who is"),
-        ({"id": "x1", "icon": "nope", "title": "T", "one": "O", "steps": [{"who": "you", "text": "x"}]}, "icon"),
-        ({"id": "x1", "icon": "plus", "title": "<b>", "one": "O", "steps": [{"who": "you", "text": "x"}]}, "title"),
-        ({"id": "x1", "icon": "plus", "title": "T", "one": "O", "steps": [{"who": "you", "text": "x"}], "tech": {"live": ["weather"]}}, "live"),
-        ({"id": "x1", "icon": "plus", "title": "T", "one": "O", "kind": "states", "states": [{"id": "a1", "label": "A"}, {"id": "b1", "label": "B"}],
-          "moves": [{"from": "a1", "to": "zz", "by": "you", "text": "go"}]}, "between two"),
-        ({"id": "x1", "icon": [], "title": "T", "one": "O", "steps": [{"who": "you", "text": "x"}]}, "wrong kind"),
-        ({"id": "x1", "icon": "plus", "title": "T", "one": "O", "steps": [{"who": "you", "text": "x"}], "tech": {"live": [{}]}}, "wrong kind"),
+        (
+            {"id": "x1", "icon": "plus", "title": "T", "one": "O", "steps": [{"who": "robot", "text": "x"}]},
+            "who is",
+        ),
+        (
+            {"id": "x1", "icon": "nope", "title": "T", "one": "O", "steps": [{"who": "you", "text": "x"}]},
+            "icon",
+        ),
+        (
+            {"id": "x1", "icon": "plus", "title": "<b>", "one": "O", "steps": [{"who": "you", "text": "x"}]},
+            "title",
+        ),
+        (
+            {
+                "id": "x1",
+                "icon": "plus",
+                "title": "T",
+                "one": "O",
+                "steps": [{"who": "you", "text": "x"}],
+                "tech": {"live": ["weather"]},
+            },
+            "live",
+        ),
+        (
+            {
+                "id": "x1",
+                "icon": "plus",
+                "title": "T",
+                "one": "O",
+                "kind": "states",
+                "states": [{"id": "a1", "label": "A"}, {"id": "b1", "label": "B"}],
+                "moves": [{"from": "a1", "to": "zz", "by": "you", "text": "go"}],
+            },
+            "between two",
+        ),
+        (
+            {"id": "x1", "icon": [], "title": "T", "one": "O", "steps": [{"who": "you", "text": "x"}]},
+            "wrong kind",
+        ),
+        (
+            {
+                "id": "x1",
+                "icon": "plus",
+                "title": "T",
+                "one": "O",
+                "steps": [{"who": "you", "text": "x"}],
+                "tech": {"live": [{}]},
+            },
+            "wrong kind",
+        ),
     ],
 )
 def test_a_bad_page_is_refused_with_what_is_off(page, why):
@@ -94,14 +159,28 @@ def test_a_manifest_with_a_bad_docs_file_refuses_the_addon(tmp_path):
     with pytest.raises(addons.Refused, match="docs file is not valid"):
         addons.parse_manifest(pkg / "orch-addon.toml")
     (pkg / "docs.json").write_text(
-        json.dumps({"schema": "orch.docs/1", "pages": [{"id": "demo", "icon": "box", "title": "Demo", "one": "It shows.", "steps": [{"who": "orch", "text": "Shows it"}]}]}),
+        json.dumps(
+            {
+                "schema": "orch.docs/1",
+                "pages": [
+                    {
+                        "id": "demo",
+                        "icon": "box",
+                        "title": "Demo",
+                        "one": "It shows.",
+                        "steps": [{"who": "orch", "text": "Shows it"}],
+                    }
+                ],
+            }
+        ),
         encoding="utf-8",
     )
     assert addons.parse_manifest(pkg / "orch-addon.toml")["docs_pages"][0]["id"] == "demo"
 
 
 def test_the_gallery_and_mockup_sample_is_current():
-    """samples/docs-sample.js (gallery + mockup) is generated from the docs files: run scripts/gen_docs_sample.py."""
+    """samples/docs-sample.js (gallery + mockup) is generated from the docs files: run
+    scripts/gen_docs_sample.py."""
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("gen_docs_sample", REPO / "scripts" / "gen_docs_sample.py")

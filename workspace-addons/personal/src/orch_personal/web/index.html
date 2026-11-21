@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en" data-prefix="__P__">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Personal · orch</title>
+<script src="__P__/kit/frame.js"></script>
+<link rel="stylesheet" href="__P__/kit/tokens.css">
+<link rel="stylesheet" href="__P__/kit/components.css">
+<link rel="stylesheet" href="__P__/kit/motion.css">
+<link rel="stylesheet" href="__P__/kit/interaction.css">
+<link rel="stylesheet" href="__P__/kit/widgets.css">
+<script src="__P__/kit/overlay.js" defer></script>
+<script src="__P__/kit/select.js" defer></script>
+<script src="__P__/kit/components.js" defer></script>
+<script src="__P__/kit/widgets.js" defer></script>
+<script src="__P__/web/personal.js" defer></script>
+</head>
+<body>
+<main id="content" class="page wide page-enter" tabindex="-1" aria-label="Personal">
+<header class="page-header">
+<div><h1 id="page-title">Personal <span class="badge">Preview</span></h1>
+<p id="page-sub">What needs you, then each part at a glance. You see everything; helpers use only what you turned on.</p></div>
+<div class="actions"><a id="add-link" class="btn outline" href="#parts">Add a part</a></div>
+</header>
+<nav id="parts-nav" class="tabs" aria-label="Personal" hidden></nav>
+<div id="view" class="stack-lg" aria-live="polite" aria-busy="true">
+<div class="tile-grid loading-mask" inert aria-hidden="true"><article class="card part-tile"><div class="card-h"><h2>Loading</h2></div><div class="part-tile-body"><p class="glance"><strong>Loading Personal</strong></p></div><div class="part-tile-foot meta">Loading</div></article></div>
+</div>
+<p id="announcement" class="sr-only" role="status"></p>
+<dialog id="use-dialog" class="dialog" aria-labelledby="use-title">
+<h2 id="use-title">Use in a ticket</h2>
+<p class="meta" id="use-what"></p>
+<p class="muted" id="use-allow">Helpers on that ticket can read this note. Nothing in your notes folder changes.</p>
+<fieldset class="stack-sm" id="use-tickets"><legend class="sr-only">Pick a ticket</legend></fieldset>
+<div class="actions"><button class="btn ghost" type="button" id="use-cancel">Cancel</button><button class="btn primary" type="button" id="use-ok">Attach to ticket</button></div>
+</dialog>
+<dialog id="folder-dialog" class="dialog" aria-labelledby="folder-title">
+<h2 id="folder-title">Choose the folder with your notes</h2>
+<p class="muted">The folder on this computer, for example your Obsidian vault. Nothing in it is changed; helpers write only into “From helpers”.</p>
+<label class="stack-sm"><span>Folder</span><input class="input" id="folder-path" autocomplete="off" placeholder="/Users/you/Documents/Notes"></label>
+<p class="note" id="folder-error" role="alert" hidden></p>
+<div class="actions"><button class="btn ghost" type="button" id="folder-cancel">Cancel</button><button class="btn primary" type="button" id="folder-ok">Use this folder</button></div>
+</dialog>
+<dialog id="delete-dialog" class="dialog" aria-labelledby="delete-title">
+<h2 id="delete-title">Delete this meeting from Personal?</h2>
+<p class="meta" id="delete-what"></p>
+<p class="muted">Its transcript, summary and next steps leave Personal. Tickets already made stay. Your recorder on this computer still has it; delete it there too if you want it gone.</p>
+<div class="actions"><button class="btn ghost" type="button" id="delete-cancel">Cancel</button><button class="btn danger" type="button" id="delete-ok">Delete</button></div>
+</dialog>
+</main>
+</body>
+</html>

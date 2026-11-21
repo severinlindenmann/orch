@@ -60,3 +60,16 @@ def test_plain_patch_cannot_set_the_mark(proj, new_ticket):
         tickets.clean_field("release", True)
     with pytest.raises(Refused):
         tickets.patch(proj, tid, read(proj, tid)["revision"], json.dumps({"release": True}), "human:test")
+
+
+def test_list_and_show_name_the_kind(run, new_ticket):
+    """ORCH-906: `ticket list` names an epic and a release; `ticket show` has an epic line too."""
+    rel = json.loads(run("ticket", "new", "Release 30", "--release", "--json")[1])["id"]
+    epic = json.loads(run("ticket", "new", "Ticket flow", "--epic", "--json")[1])["id"]
+    plain = new_ticket("Board lanes")
+    out = run("ticket", "list")[1]
+    line = {tid: next(x for x in out.splitlines() if f"[{tid}]" in x) for tid in (rel, epic, plain)}
+    assert "(Release, " in line[rel] and "(Epic, " in line[epic]
+    assert "(Release" not in line[plain] and "(Epic" not in line[plain]
+    assert "Epic: its sub-tickets are the work" in run("ticket", "show", epic)[1]
+    assert "Epic:" not in run("ticket", "show", plain)[1]

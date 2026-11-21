@@ -1,6 +1,6 @@
-"""The Documentation page's content (contracts/docs-pages.md): orch's own pages (docs.json next to this file) and
-the pages each add-on brings (`docs = "<file>"` in its orch-addon.toml). Only checks and reads JSON; never runs
-add-on code. The dashboard draws the pages (orch_ui docs.js) and fills the live facts itself."""
+"""The Documentation page's content (contracts/docs-pages.md): orch's own pages (docs.json next to this file)
+and the pages each add-on brings (`docs = "<file>"` in its orch-addon.toml). Only checks and reads JSON; never
+runs add-on code. The dashboard draws the pages (orch_ui docs.js) and fills the live facts itself."""
 
 from __future__ import annotations
 
@@ -16,13 +16,18 @@ TONES = frozenset({"muted", "info", "working", "warn", "needs", "ok"})
 KINDS = frozenset({"flow", "states", "compare"})
 # the icons docs.js draws (the master icon set plus a few of its own)
 ICONS = frozenset(
-    "ticket plus helper question check chip queue chat clock puzzle lock copy link phone bolt share upload home "
-    "eye hammer target chart note merge box cloud".split()
+    "ticket plus helper question check chip queue chat clock puzzle lock copy link phone bolt share upload "
+    "home eye hammer target chart note merge box cloud".split()
 )
-# live facts the dashboard knows how to read (no network, no AI); "self" = the add-on's own state (on, running)
+# live facts the dashboard knows how to read (no network, no AI); "self" = the add-on's own state
+# (on, running)
 LIVE = frozenset({"relay", "phone", "publish", "helper-limit", "reviewer", "addons", "self"})
 # groups: orch's own pages; the built-in add-ons you turn on when needed (relay, publish); every other add-on
-GROUPS = ({"id": "orch", "label": "orch"}, {"id": "builtin", "label": "Turn on when needed"}, {"id": "addon", "label": "Add-ons"})
+GROUPS = (
+    {"id": "orch", "label": "orch"},
+    {"id": "builtin", "label": "Turn on when needed"},
+    {"id": "addon", "label": "Add-ons"},
+)
 
 
 class DocsError(ValueError):
@@ -62,13 +67,39 @@ def _steps(steps, where: str, n: int = 16) -> None:
         _need(isinstance(br, list) and len(br) <= 4, w, "branch is a list of at most 4")
         for b in br:
             _keys(b, {"if", "then", "stop"}, w + " branch")
-            _need(_text(b.get("if"), 90) and _text(b.get("then"), 90), w + " branch", "if and then are plain words")
+            _need(
+                _text(b.get("if"), 90) and _text(b.get("then"), 90),
+                w + " branch",
+                "if and then are plain words",
+            )
             _bool(b, "stop", w + " branch")
 
 
 def check_page(p, where: str = "page") -> dict:
-    _keys(p, {"id", "icon", "title", "one", "kind", "steps", "states", "moves", "compare", "good", "related", "tech", "group"}, where)
-    _need(isinstance(p.get("id"), str) and bool(ID_RE.match(p["id"])), where, "id is 2 to 41 lowercase letters, digits or dashes")
+    _keys(
+        p,
+        {
+            "id",
+            "icon",
+            "title",
+            "one",
+            "kind",
+            "steps",
+            "states",
+            "moves",
+            "compare",
+            "good",
+            "related",
+            "tech",
+            "group",
+        },
+        where,
+    )
+    _need(
+        isinstance(p.get("id"), str) and bool(ID_RE.match(p["id"])),
+        where,
+        "id is 2 to 41 lowercase letters, digits or dashes",
+    )
     where = f"page {p['id']}"
     _need(p.get("icon") in ICONS, where, "icon is not in the docs icon set")
     _need(_text(p.get("title"), 60), where, "title is at most 60 plain characters")
@@ -83,8 +114,14 @@ def check_page(p, where: str = "page") -> dict:
         ids = set()
         for s in st:
             _keys(s, {"id", "label", "tone"}, where + " state")
-            _need(isinstance(s.get("id"), str) and bool(ID_RE.match(s["id"])), where, "a state id is lowercase")
-            _need(_text(s.get("label"), 30) and s.get("tone", "muted") in TONES, where, "a state has a label and a tone")
+            _need(
+                isinstance(s.get("id"), str) and bool(ID_RE.match(s["id"])), where, "a state id is lowercase"
+            )
+            _need(
+                _text(s.get("label"), 30) and s.get("tone", "muted") in TONES,
+                where,
+                "a state has a label and a tone",
+            )
             ids.add(s["id"])
         mv = p.get("moves")
         _need(isinstance(mv, list) and 0 < len(mv) <= 24, where, "moves is a list of 1 to 24")
@@ -97,12 +134,24 @@ def check_page(p, where: str = "page") -> dict:
         _need(isinstance(cmp, list) and 2 <= len(cmp) <= 4, where, "compare is a list of 2 to 4 flows")
         for i, f in enumerate(cmp):
             _keys(f, {"title", "tone", "steps"}, f"{where} flow {i + 1}")
-            _need(_text(f.get("title"), 40) and f.get("tone", "muted") in TONES, where, "a flow has a title and a tone")
+            _need(
+                _text(f.get("title"), 40) and f.get("tone", "muted") in TONES,
+                where,
+                "a flow has a title and a tone",
+            )
             _steps(f.get("steps"), f"{where} flow {i + 1}", 8)
     good = p.get("good", [])
-    _need(isinstance(good, list) and len(good) <= 5 and all(_text(g, 220) for g in good), where, "good is at most 5 plain lines")
+    _need(
+        isinstance(good, list) and len(good) <= 5 and all(_text(g, 220) for g in good),
+        where,
+        "good is at most 5 plain lines",
+    )
     rel = p.get("related", [])
-    _need(isinstance(rel, list) and len(rel) <= 8 and all(isinstance(r, str) and ID_RE.match(r) for r in rel), where, "related is at most 8 page ids")
+    _need(
+        isinstance(rel, list) and len(rel) <= 8 and all(isinstance(r, str) and ID_RE.match(r) for r in rel),
+        where,
+        "related is at most 8 page ids",
+    )
     tech = p.get("tech")
     if tech is not None:
         _keys(tech, {"cmds", "files", "live"}, where + " tech")
@@ -112,10 +161,15 @@ def check_page(p, where: str = "page") -> dict:
             for r in rows:
                 _need(
                     isinstance(r, list) and len(r) == 2 and _text(r[0], 110, angle=True) and _text(r[1], 90),
-                    where, f"a tech {k} row is [text, what it does]",
+                    where,
+                    f"a tech {k} row is [text, what it does]",
                 )
         live = tech.get("live", [])
-        _need(isinstance(live, list) and len(live) <= 4 and all(x in LIVE for x in live), where, "tech live names known live facts")
+        _need(
+            isinstance(live, list) and len(live) <= 4 and all(x in LIVE for x in live),
+            where,
+            "tech live names known live facts",
+        )
     return p
 
 
@@ -129,7 +183,11 @@ def check(data, where: str = "docs") -> list[dict]:
     for p in pages:
         try:
             check_page(p, where)
-        except (TypeError, AttributeError, KeyError):  # a list where a word belongs, and the like: refused, not a crash
+        except (
+            TypeError,
+            AttributeError,
+            KeyError,
+        ):  # a list where a word belongs, and the like: refused, not a crash
             raise DocsError(f"{where}: a page has a value of the wrong kind") from None
         _need(p["id"] not in seen, where, f"page id {p['id']} is used twice")
         seen.add(p["id"])
@@ -157,7 +215,8 @@ def core_file() -> Path:
 def collect(addon_rows: list[dict], core_names=("relay", "publish")) -> dict:
     """Everything the Documentation page shows: orch's pages, then the pages of each add-on (built-in ones in
     "builtin", the others in "addon"), each marked with its add-on and whether it is on here. addon_rows are
-    {name, active, running, background, docs_pages} (addons.docs_rows). A related id that names no shown page is dropped."""
+    {name, active, running, background, docs_pages} (addons.docs_rows). A related id that names no shown page
+    is dropped."""
     core = json.loads(core_file().read_text(encoding="utf-8"))
     pages = [{**p, "group": "orch"} for p in check(core, "orch docs.json")]
     seen = {p["id"] for p in pages}
@@ -167,9 +226,16 @@ def collect(addon_rows: list[dict], core_names=("relay", "publish")) -> dict:
             if p["id"] in seen:
                 continue  # an add-on never replaces a page orch or another add-on already has
             seen.add(p["id"])
-            pages.append({**p, "group": "builtin" if row["name"] in core_names else "addon", "addon": row["name"],
-                          "on": bool(row.get("active")), "running": bool(row.get("running")),
-                          "background": bool(row.get("background"))})
+            pages.append(
+                {
+                    **p,
+                    "group": "builtin" if row["name"] in core_names else "addon",
+                    "addon": row["name"],
+                    "on": bool(row.get("active")),
+                    "running": bool(row.get("running")),
+                    "background": bool(row.get("background")),
+                }
+            )
     for p in pages:
         p["related"] = [r for r in p.get("related", []) if r in seen and r != p["id"]]
     return {"schema": SCHEMA, "actors": core.get("actors", {}), "groups": list(GROUPS), "pages": pages}

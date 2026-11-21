@@ -271,3 +271,29 @@ def test_start_prefers_the_last_port_then_falls_back(ws, monkeypatch):
             assert cur2["port"] != pref
         finally:
             assert service.stop(ws) == "stopped"
+
+
+def _no_agent(monkeypatch):
+    from orch import adapters
+
+    for k, v in list(os.environ.items()):
+        if adapters.detect_env({k: v}):
+            monkeypatch.delenv(k, raising=False)
+
+
+def test_a_persons_start_restarts_a_dashboard_a_helper_started_on_its_port(ws, monkeypatch):
+    """A dashboard started from a helper session is watch-only for its whole life (no sign-in). A helper's next
+    start leaves it; the person's start replaces it (its old port when free), so their link works (report r-1119-1255)."""
+    _no_agent(monkeypatch)
+    monkeypatch.setenv("ORCH_AGENT", "claude")
+    cur = service.start(ws, port=_free_port())
+    try:
+        assert json.loads((_rundir(ws) / "server.json").read_text())["watch_only"] is True
+        assert service.start(ws) == cur  # a helper's start: unchanged (it would stay watch-only)
+        monkeypatch.delenv("ORCH_AGENT")
+        new = service.start(ws)
+        assert new["pid"] != cur["pid"]  # its old port when free, else another (parallel tests share ports)
+        assert json.loads((_rundir(ws) / "server.json").read_text())["watch_only"] is False
+        assert service.start(ws) == new  # a person's dashboard is never restarted by a start
+    finally:
+        assert service.stop(ws) in ("stopped", "not running")

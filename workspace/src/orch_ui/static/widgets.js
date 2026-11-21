@@ -20,13 +20,13 @@ UI.commandCopy=(command,o)=>{o=o||{};command=String(command||'');const box=el('d
   else{const r=document.createRange&&document.createRange();const sel=window.getSelection&&window.getSelection();if(r&&sel){r.selectNodeContents(code);sel.removeAllRanges();sel.addRange(r)}if(UI.toast)UI.toast('Could not copy. The command is selected: press Ctrl+C (Cmd+C on a Mac).',null,'error')}};
  row.append(code,b);box.append(row);return box};
 /* Helpers list (ORCH-61): one row per live helper, the same on dashboard Home and in Focus. The state comes from the core
-   (orch run status "helper": working | starting | you | waiting | idle | stuck); the page never words it itself.
+   (orch run status "helper": working | starting | you | waiting | idle | stuck | limit); the page never words it itself.
    UI.helperPill(state, word) -> the worded pill; UI.helperSummary(rows) -> "4 working · 1 waits for you · 1 idle";
    UI.helperList(rows, o) -> <section class="card helper-list"> with rows {key, title, href, state, word, meta, actions:[{label, run, key}]},
    o.title (default "Helpers"), o.empty (shown when there are no rows), o.dataKey. */
-const HELPER_LOOK={working:['working','working'],starting:['working','working'],you:['needs','needs'],waiting:['','check'],idle:['','todo'],stuck:['failed','needs']};
+const HELPER_LOOK={working:['working','working'],starting:['working','working'],you:['needs','needs'],waiting:['','check'],idle:['','todo'],stuck:['failed','needs'],limit:['','check']};
 UI.helperPill=(state,word)=>{const [cls,icon]=HELPER_LOOK[state]||['','todo'];const p=el('span','pill helper-pill'+(cls?' '+cls:''));p.dataset.state=state||'';p.append(UI.statusIcon(icon),document.createTextNode(word||''));return p};
-const HELPER_COUNT=[['working','working'],['starting','starting'],['you','waits for you','wait for you'],['waiting','on hold'],['idle','idle'],['stuck','stuck']];
+const HELPER_COUNT=[['working','working'],['starting','starting'],['you','waits for you','wait for you'],['waiting','on hold'],['idle','idle'],['stuck','stuck'],['limit','stopped on the usage limit']];
 UI.helperSummary=rows=>{const n={};(rows||[]).forEach(r=>{n[r.state]=(n[r.state]||0)+1});return HELPER_COUNT.filter(([k])=>n[k]).map(([k,one,many])=>n[k]+' '+(n[k]>1&&many?many:one)).join(' · ')};
 /* The meta line under a helper's title, the same words everywhere: "Step 3 of 4 · 52 min", "Since 3 h · your answer",
    "Nothing running for 18 min". row: {state, detail, step:{n,of}, minutes, idle, finished} (minutes: since start, idle: quiet). */
@@ -34,15 +34,15 @@ const helperSpan=m=>m==null?'':m<1?'just now':m<60?m+' min':m<1440?Math.round(m/
 UI.helperMeta=r=>{r=r||{};const d=r.detail||'';
  if(r.finished&&(r.state==='idle'||r.state==='stuck'))return 'Finished · '+(d||'session still open');
  if(r.state==='you')return [r.idle!=null?'Since '+helperSpan(r.idle):'',d.toLowerCase()].filter(Boolean).join(' · ');
- if(r.state==='waiting'||r.state==='idle'||r.state==='stuck')return d;
+ if(r.state==='waiting'||r.state==='idle'||r.state==='stuck'||r.state==='limit')return d;
  return [r.step?'Step '+r.step.n+' of '+r.step.of:'',helperSpan(r.minutes),d].filter(Boolean).join(' · ')};
 /* The ticket's one state (ORCH-71): the ticket page strip and Focus show the same pill and word for the same ticket.
    t: {status, questions, bring_back, waiting_on}; helper: the core's helper state {state, word, detail} while a helper runs, else null.
    UI.ticketState(t, helper) -> {pill, word, helper}; pill is a status icon name (todo, working, needs, check, done).
    UI.ticketPill(s) -> the pill for that state: the helper pill while a helper runs, else the status pill. */
 const TICKET_WORD={open:'Backlog',ready:'To do',active:'Working',waiting:'Needs you',review:'Check',done:'Done',dropped:"Won't do"};
-const HELPER_WORD={working:'Working',starting:'Starting',you:'Waits for you',waiting:'On hold',idle:'Idle',stuck:'Stuck'};
-const HELPER_PILL={working:'working',starting:'working',you:'needs',waiting:'check',idle:'todo',stuck:'needs'};
+const HELPER_WORD={working:'Working',starting:'Starting',you:'Waits for you',waiting:'On hold',idle:'Idle',stuck:'Stuck',limit:'Stopped: usage limit'};
+const HELPER_PILL={working:'working',starting:'working',you:'needs',waiting:'check',idle:'todo',stuck:'needs',limit:'check'};
 UI.ticketState=(t,helper)=>{t=t||{};
  if(t.status==='done')return {pill:'done',word:'Done',helper:null};
  if((t.questions||[]).some(q=>q&&q.answer==null))return {pill:'needs',word:'Needs you',helper:null};
@@ -101,6 +101,21 @@ UI.state=o=>{o=o||{};const kind=o.kind||'empty';
  if(o.title)b.append(el('strong','',o.title));if(o.text)b.append(el('p','',o.text));
  if(o.action){const a=el('button','btn '+(kind==='error'?'primary':'outline')+' sm',o.action.label);a.type='button';if(o.action.onClick)a.onclick=o.action.onClick;b.append(a)}
  return b};
+/* Launch (ORCH-1037): the short "starting" moment between pressing Start in a form and landing on what it made.
+   UI.launch({title, sub, steps:['Creating the ticket','Starting your helper','Opening it']}) -> {el, step(i), warn(i, text), finish(title), fail()}.
+   step(i) marks the steps before i done and step i working; warn(i, text) marks step i as needing you, with new words; finish() marks all done and fades the box out. role=status, so a
+   screen reader hears each step. Text only (textContent). Reduced motion: no spin, no fade (motion.css). */
+UI.launch=o=>{o=o||{};const box=el('div','launch');box.setAttribute('role','status');box.setAttribute('aria-live','polite');
+ const mark=el('div','launch-mark');mark.setAttribute('aria-hidden','true');mark.append(el('span','launch-ring'),el('span','launch-core'));
+ const title=el('h2','launch-title',o.title||'Starting');box.append(mark,title);if(o.sub)box.append(el('p','launch-sub meta',o.sub));
+ const list=el('ol','launch-steps'),rows=(o.steps||[]).map(t=>{const li=el('li');li.dataset.state='todo';li.append(UI.statusIcon('todo'),el('span','',t));list.append(li);return li});
+ if(rows.length)box.append(list);
+ const mark_=(li,st)=>{if(li.dataset.state===st||li.dataset.state==='needs')return;li.dataset.state=st;li.firstChild.replaceWith(UI.statusIcon(st==='active'?'working':st))};
+ const api={el:box,step(i){rows.forEach((li,n)=>mark_(li,n<i?'done':n===i?'active':'todo'))},
+  warn(i,t){const li=rows[i];if(!li)return;mark_(li,'needs');if(t)li.lastChild.textContent=t},
+  finish(t){rows.forEach(li=>mark_(li,'done'));box.dataset.done='true';if(t)title.textContent=t;box.classList.add('launch-out')},
+  fail(){box.remove()}};
+ api.step(0);return api};
 /* Stat tile: UI.stat('Done this week', '12', {delta:'+3 vs last week', dir:'up'}) */
 UI.stat=(label,value,o)=>{o=o||{};const t=el('div','stat-tile');t.append(el('span','stat-label',label),el('span','stat-value',String(value)));if(o.delta)t.append(el('span','stat-delta'+(o.dir?' '+o.dir:''),o.delta));return t};
 /* 7-day line: UI.spark([3,5,4,0,2,6,4], {label:'Last 7 days: …', tone:1..7}); an svg with one line, highest value at the top */
@@ -123,6 +138,9 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
    item.files: [{label, type:'img'|'page'|'file', src}] the result's own files (a Check card), as tiles that open them
    item.answers: [{label, picked}] the card's own answer buttons in place of the three (a Factory start: Not now, Change it,
        Start); all outlined, so the costly one is never the easiest click; each answers ok with that pick
+   item.kind 'stuck' (ORCH-1108): work that stopped; never Looks good / Don't do / Comment, only its own buttons (Nudge,
+       Start fresh, Merge) or none; item.href (a link in this page, '#ticket/<id>') is its Open button, same tab
+   item.hint: one plain line in the foot saying what the card's own buttons do
    Answers are buttons and keys only, no swipe (owner 16 Nov: "we already have the arrows or buttons to click"):
    → approve (the button names the action: it.okLabel, "Use C"), ← Don't do / Send back / None of these,
    ↓ comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
@@ -141,7 +159,9 @@ UI.docBox=(p,hTag)=>{p=p||{};const d=el('div','doc');const st=p.status;
  if(Array.isArray(p.flow)&&p.flow.length){const r=el('div','doc-flow');p.flow.forEach((t,i)=>{if(i)r.append(el('span','doc-arrow','→'));r.append(el('span','doc-box',t))});d.append(r)}
  if(p.chart&&Array.isArray(p.chart.bars)){const max=Math.max(...p.chart.bars.map(b=>Math.abs(b.value)),1),r=el('div','doc-chart');r.setAttribute('role','img');r.setAttribute('aria-label',p.chart.bars.map(b=>b.label+' '+b.value+(p.chart.unit||'')).join(', '));
    p.chart.bars.forEach(b=>{const row=el('div','doc-bar'),t=el('div','progress'),f=el('span');f.style.width=Math.round(Math.abs(b.value)/max*100)+'%';t.append(f);row.append(el('span','',b.label),t,el('b','',b.value+(p.chart.unit||'')));r.append(row)});d.append(r)}
- if(Array.isArray(p.diff)&&p.diff.length){const r=el('div','doc-diff');p.diff.forEach(l=>r.append(el('div','doc-line '+(l.op==='+'?'add':'del'),l.op+' '+l.text)));d.append(r)}
+/* diff lines (ORCH-429): a file's name above its lines, a risky line marked red with why (l.risk) */
+ if(Array.isArray(p.diff)&&p.diff.length){const r=el('div','doc-diff');let last=null;p.diff.forEach(l=>{if(l.file&&l.file!==last)r.append(el('div','doc-diff-file',l.file));last=l.file||last;
+   const row=el('div','doc-line '+(l.op==='+'?'add':'del')+(l.risk?' risk':''),l.op+' '+l.text);if(l.risk)row.append(el('span','doc-risk',l.risk));r.append(row)});d.append(r)}
  if(p.heading)d.append(el(hTag||'h4','',p.heading));(p.paras||[]).forEach(x=>d.append(el('p','',x)));
  if(Array.isArray(p.rows)&&p.rows.length){const ul=el('ul','doc-rows');p.rows.forEach(r=>{if(!r||!r.title)return;const li=el('li','doc-row');li.append(el('span','doc-row-title',r.title));
    if(r.key)li.append(el('span','chip doc-row-key',r.key));if(r.n)li.append(el('span','doc-row-n','#'+r.n));ul.append(li)});d.append(ul)}
@@ -177,6 +197,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  /* words */
  const isOpt=it=>!!(it&&it.preview&&it.preview.type==='options');
  const ownAnswers=it=>{const a=it&&Array.isArray(it.answers)?it.answers.filter(x=>x&&x.label&&x.picked):[];return a.length?a:null};
+ const ownOnly=it=>!!ownAnswers(it)||!!it&&it.kind==='stuck';/* a stuck card (ORCH-1108) has no Looks good / Don't do: its own buttons, or Open alone */
  const answerOwn=a=>{if(!cur||overlay||busy)return;const c=cur;busy=true;c.classList.add('leaving');setTimeout(()=>{busy=false;commit('ok',{picked:a.picked})},120)};
  const sendsBack=it=>!!it&&it.kind==='check';/* its "no" is Send back, which needs words: the comment sheet, and no second Comment button */
  const noWord=it=>it.noLabel||(isOpt(it)?'None of these':it.kind==='check'?'Send back':"Don't do");
@@ -231,7 +252,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const sugOf=it=>it&&it.suggest&&!isOpt(it)?it.suggest:null;
  const syncWords=()=>{const it=items[idx];if(!it)return;[[okBtn,'ok'],[noBtn,'no']].forEach(([b,v])=>{b.classList.toggle('suggested',sugOf(it)===v);b.querySelector('.act-sug')?.remove();if(sugOf(it)===v)b.append(el('span','opt-sug act-sug','Suggested'))});okBtn.querySelector('.act-word').textContent=okWord(it);noBtn.querySelector('.act-word').textContent=noWord(it);
   okBtn.classList.toggle('wait',okWord(it)==='Pick one'||!!it.blocked);okBtn.setAttribute('aria-disabled',String(!!it.blocked));talkBtn.hidden=sendsBack(it);
-  const own=ownAnswers(it);[noBtn,okBtn].forEach(b=>{b.hidden=!!own});if(own)talkBtn.hidden=true;ownRow.hidden=!own;
+  const own=ownAnswers(it),only=ownOnly(it);[noBtn,okBtn].forEach(b=>{b.hidden=only});if(only)talkBtn.hidden=true;ownRow.hidden=!own;
   ownRow.replaceChildren(...(own||[]).map(a=>{const b=mk('own',null,a.label,null,()=>answerOwn(a));b.dataset.picked=a.picked;return b}));
   const st=cur&&cur.querySelector('.swipe-stamp.right');if(st)st.textContent=okWord(it)==='Pick one'?'Pick one first':okWord(it)};
  /* card */
@@ -251,10 +272,12 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   const ft=el('footer','swipe-foot');
   if(it.blocked){const t=el('span','swipe-then');t.append(el('b','','Looks good is off: '),it.blocked);ft.append(t)}
   else if(it.then){const t=el('span','swipe-then');t.append(el('b','',(isOpt(it)?'If you pick one: ':'If you approve: ')),it.then);ft.append(t)}
+  else if(it.hint)ft.append(el('span','swipe-then',it.hint));/* what the card's own buttons do (a stuck card) */
   const row=el('div','swipe-foot-row');
   row.append(el('span','grow'));const pc=(pins[it.id]||[]).length;if(pc){const s=el('span','swipe-pins');s.append(ic('pin',14),pc+(pc===1?' spot marked':' spots marked'));row.append(s)}
   (it.links||[]).forEach(l=>{const a=el('a','btn ghost sm swipe-link');a.href=l.url;a.target='_blank';a.rel='noopener';a.append(ic('link',14),l.label);a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)});/* the helper's links: a mockup, a reference */
   if(it.open){const a=el('a','btn ghost sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
+  if(it.href&&!it.open){const a=el('a','btn outline sm swipe-here');a.href=it.href;a.append(ic('ticket',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}/* a page of this site (the ticket): same tab */
   ft.append(row);
   c.append(...[h,pv,fl,ft].filter(Boolean));return c};
  /* The result's own files (a picture, a page, a PDF): tiles that open the file in a new tab */
@@ -303,7 +326,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const shortName=it=>{const t=String(it.title||'').trim();if(t.length<=48)return t;if(it.ticket)return it.ticket;const c=t.slice(0,48),sp=c.lastIndexOf(' ');return (sp>20?c.slice(0,sp):c).replace(/[\s,;:.-]+$/,'')+'…'};
  const nudge=(c,msg)=>{reset(c);c.classList.remove('nudge');void c.offsetWidth;c.classList.add('nudge');live.textContent=msg;if(!o.quiet)say(msg)};
  const fly=(verdict,dx,dy)=>{if(!cur||overlay||busy)return;const c=cur,it=items[idx],w=stage.clientWidth,h=stage.clientHeight;
-  if(ownAnswers(it)&&verdict!=='later')return;/* its own buttons answer it */
+  if(ownOnly(it)&&verdict!=='later')return;/* its own buttons answer it */
   if(verdict==='talk'||(verdict==='no'&&sendsBack(it)))return openComment();/* a Check sent back always says what should change */
   if(verdict==='ok'&&isOpt(it)&&!picked[it.id])return nudge(c,'Tap the option you want first.');
   if(verdict==='ok'&&it.blocked)return nudge(c,it.blocked);/* ORCH-548: Looks good is off; the card says why and what to press */

@@ -1531,70 +1531,6 @@ window.DOCS_SAMPLE = {
    "background": true
   },
   {
-   "id": "dashboard-tester",
-   "icon": "eye",
-   "title": "Dashboard tester",
-   "one": "Once a day it opens every page, without clicking, and reports what is broken.",
-   "steps": [
-    {
-     "who": "you",
-     "text": "You set it up and press Allow this script"
-    },
-    {
-     "who": "orch",
-     "text": "Every morning at 06:30 it opens every page",
-     "detail": "At three widths: laptop, big screen, phone."
-    },
-    {
-     "who": "orch",
-     "text": "Looks for errors, slow pages, cut-off layouts, wrong words"
-    },
-    {
-     "who": "orch",
-     "text": "Already known on an open ticket?",
-     "branch": [
-      {
-       "if": "Yes",
-       "then": "Skipped"
-      },
-      {
-       "if": "No",
-       "then": "A problem report, at most 3 a day"
-      }
-     ],
-     "end": true
-    }
-   ],
-   "good": [
-    "A helper cannot start it; only your daily repeat can."
-   ],
-   "related": [
-    "automation"
-   ],
-   "tech": {
-    "cmds": [
-     [
-      "orch shot <page>",
-      "pictures of a page, no keychain window"
-     ]
-    ],
-    "files": [
-     [
-      ".orch/dash-tester/",
-      "its runs and pictures"
-     ]
-    ],
-    "live": [
-     "self"
-    ]
-   },
-   "group": "addon",
-   "addon": "dashboard-tester",
-   "on": true,
-   "running": false,
-   "background": false
-  },
-  {
    "id": "factory",
    "icon": "hammer",
    "title": "Factory",
@@ -1851,6 +1787,81 @@ window.DOCS_SAMPLE = {
    "background": false
   },
   {
+   "id": "personal",
+   "icon": "lock",
+   "title": "Personal",
+   "one": "Your own notes, meetings and calendar; helpers see only what you allow.",
+   "steps": [
+    {
+     "who": "you",
+     "text": "You turn on a part (Notes, Meetings, Calendar) and set its rules",
+     "detail": "Per part: what helpers may read (nothing, only what you attach to a ticket, all) and whether they may add notes."
+    },
+    {
+     "who": "helper",
+     "text": "A helper asks Personal for a note, a meeting or free times"
+    },
+    {
+     "who": "orch",
+     "text": "Checks the rules before it hands anything over",
+     "decision": true,
+     "detail": "Not allowed: the helper asks you on its ticket. A calendar at Nothing is left out; Busy times show without a title."
+    },
+    {
+     "who": "helper",
+     "text": "Gets text only, as information, never as orders"
+    },
+    {
+     "who": "helper",
+     "text": "Writes a new note into From helpers or suggests a meeting time",
+     "detail": "It never changes or deletes your notes and never adds an event; a suggestion waits for you."
+    },
+    {
+     "who": "you",
+     "text": "You add the suggestion to your calendar or make tickets from next steps",
+     "end": true
+    }
+   ],
+   "good": [
+    "A recording is read only after you said everyone on the call agreed. Ways in are your own scripts on this computer: they run only their listed actions and stop when their folder changes."
+   ],
+   "related": [],
+   "tech": {
+    "cmds": [
+     [
+      "orch personal today",
+      "parts that are on and what helpers can use"
+     ],
+     [
+      "orch personal notes find \"<words>\"",
+      "notes a helper may read"
+     ],
+     [
+      "orch personal calendar free --days 5 --minutes 60",
+      "free times in the calendars a helper may see"
+     ],
+     [
+      "orch personal ways",
+      "each way in that is on"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/addons/personal/",
+      "its rules and data, kept out of git"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   },
+   "group": "addon",
+   "addon": "personal",
+   "on": true,
+   "running": true,
+   "background": true
+  },
+  {
    "id": "pull-requests",
    "icon": "merge",
    "title": "Pull requests and the merge queue",
@@ -1992,8 +2003,8 @@ window.DOCS_SAMPLE = {
    "group": "addon",
    "addon": "services",
    "on": true,
-   "running": false,
-   "background": false
+   "running": true,
+   "background": true
   },
   {
    "id": "sync",

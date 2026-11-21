@@ -1,6 +1,7 @@
 # Services: background jobs of this workspace, kept running by launchd (macOS), systemd user units (Linux)
 # or a Task Scheduler task of the person's own (Windows).
-# No background process of its own: the computer's service tool does the keeping.
+# The computer's service tool does the keeping; the add-on's own background process (orch start) is only the regular
+# check: `orch services check` every minute, so a service that keeps stopping raises its one question by itself.
 schema = "orch.addon/1"
 orch_api = 1
 name = "services"
@@ -11,6 +12,7 @@ run = "orch_services"
 skill = "skills/orch-services"
 agents_block = "skills/orch-services/AGENTS-block.md"
 gitignore = [".orch/addons/services/"]
+background = true                          # orch services start|stop|status (no id): the regular check
 
 [dashboard]
 label = "Services"
