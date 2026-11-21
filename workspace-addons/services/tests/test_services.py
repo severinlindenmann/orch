@@ -398,3 +398,21 @@ def test_a_new_service_with_an_old_id_starts_with_an_empty_log(cli, ws, fake):
     code, _out = _add(cli, "web")
     assert code == 0
     assert not log.exists() or log.read_text(encoding="utf-8") == ""
+
+
+def test_stop_on_a_stopped_service_says_it_is_already_stopped(cli, fake):
+    _add(cli)
+    code, out = jrun(cli, "stop", "web")
+    assert code == 0 and out["next"] == "Web preview is already stopped." and out["service"]["state"] == "stopped"
+    jrun(cli, "start", "web")
+    code, out = jrun(cli, "stop", "web")
+    assert out["next"] == "Stopped Web preview."
+
+
+def test_the_log_of_an_adopted_job_without_a_log_file_says_orch_keeps_none(ws):
+    from orch_services import store
+    from orch_services.cli import no_log_text
+
+    rec = {"id": "j", "name": "Job", "adopted": {"kind": "launchd", "entry": "com.x.job", "path": None}}
+    assert no_log_text(rec) == "orch keeps no log for this job."
+    assert no_log_text({"id": "w", "name": "Web", "adopted": None}) == "Web has not written anything yet."

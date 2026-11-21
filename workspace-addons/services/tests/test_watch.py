@@ -368,3 +368,16 @@ def test_one_bad_pass_counts_once_even_when_it_was_also_started_again(
     _crash(fake)
     assert _check(cli)["failing"] is True and len(orch.asks()) == 1
     assert "3 times" in orch.ticket()["questions"][0]["text"]
+
+
+def test_many_failures_recommend_look_into_it_not_restart(cli, fake, ws, clock, orch):
+    # ORCH-623: a job that failed 8 times in 10 minutes is not helped by one more restart
+    fake.run_counts["budget"] = 1
+    _add(cli)
+    clock["t"] = T0 + 60
+    for _ in range(8):
+        _crash(fake)
+    res = _check(cli)
+    assert res["failing"] is True
+    q = orch.ticket()["questions"][0]
+    assert "failed 8 times" in q["text"] and q["recommended"] == "Look into it"

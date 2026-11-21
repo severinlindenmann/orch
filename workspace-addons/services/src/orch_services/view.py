@@ -99,6 +99,15 @@ def _log(root: Path, r: dict) -> list[str]:
     return [_plain(ln) for ln in lines if ln.strip()][-LOG_LINES:]
 
 
+def _empty_log(root: Path, r: dict) -> str:
+    from .cli import no_log_text
+
+    try:
+        return no_log_text(store.get(root, r["id"]))
+    except store.Refused:
+        return f"{r['name']} has not written anything yet."
+
+
 def _remove_lines(r: dict, depends: list[str]) -> list[str]:
     if _adopted(r):  # remove only forgets an adopted job (cli.cmd_simple): say that, not "it stops now"
         return [
@@ -178,7 +187,7 @@ def _service_item(root: Path, r: dict) -> dict:
         "panel": {
             "buttons": [main] if stopped else [main, _btn("Restart", "restart", sid)],
             "facts": facts,
-            "log": {"lines": _log(root, r), "empty": _plain(f"{name} has not written anything yet.")},
+            "log": {"lines": _log(root, r), "empty": _plain(_empty_log(root, r))},
             "danger": {
                 "label": "Remove",
                 "note": "Remove takes it off this list for good.",
