@@ -29,7 +29,11 @@ ALLOW = {
     },
     "orch/cli_leave.py": {
         "services": "ORCH-843: orch doctor names a macOS-protected workspace folder only while the services "
-        "add-on is on (launchd jobs die there); follow-up like #837 (a manifest key instead of the name)"
+        "add-on is on (launchd jobs die there); follow-up like #837 (a manifest key instead of the name)",
+    },
+    "orch/releasekeeper.py": {
+        "pull-requests": "ORCH-1128: a red develop reads the merge queue file for a fix and puts the revert "
+        "pull request first in it; follow-up like #837 (a manifest key instead of the name)",
     },
     "orch/cli_chat.py": {"sync": "core `orch chat sync` command; not the add-on"},
     "orch/config.py": {"focus": _FOLLOW_UP, "insights": _FOLLOW_UP},
