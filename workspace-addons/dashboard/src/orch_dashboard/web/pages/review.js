@@ -40,10 +40,32 @@ function reviewStuckCards() {
   if (snapshot) return [];
   return reviewStuckRows().map(row => {
     const t = ticketOf(row.ticket), id = 'stuck:' + row.id, done = reviewStuckDone.get(id);
-    return {id, ticket:row.ticket, ticket_key:typeof t?.key === 'string' && t.key ? t.key : row.ticket, ticket_title:clean(t?.title || row.title || ''),
+    const title = clean(t?.title || row.title || ''), about = reviewStuckAbout(t), step = reviewStuckStep(t);
+    const why = [done ? done.word + ' ' + time(new Date(done.at).toISOString()) + '.' : '', step].filter(Boolean).join(' ');
+    return {id, ticket:row.ticket, ticket_key:typeof t?.key === 'string' && t.key ? t.key : row.ticket, ticket_title:title,
       key:'stuck', since:row.since, digest:reviewStuckDigest(row), href:'#ticket/' + encodeURIComponent(row.ticket),
-      card:{kind:'stuck', title:clean(row.text), ...(done ? {why:done.word + ' ' + time(new Date(done.at).toISOString()) + '.'} : {})}, answers:reviewStuckAnswers(row)};
+      text:clean(row.text), ...(about ? {about} : {}),
+      card:{kind:'stuck', title:title || clean(row.text), hint:reviewStuckHint(row), ...(why ? {why} : {})}, answers:reviewStuckAnswers(row)};
   });
+}
+// The context the owner asked for (ORCH-1108 q1, "not enough context what it is about"): the ticket's name as the card's
+// title, what was asked in one line (About), the step it stopped on, and what each button does.
+function reviewStuckAbout(t) {
+  const first = String(t?.description || '').split(/\n/).map(s => s.trim()).find(Boolean) || '';
+  const line = clean(first);
+  return line.length > 160 ? line.slice(0, 157).replace(/\s+\S*$/, '') + '…' : line;
+}
+function reviewStuckStep(t) {
+  const tasks = array(t?.checklist).filter(task => !task.wont_do);
+  if (!tasks.length) return '';
+  const done = tasks.filter(task => task.done).length, open = tasks.find(task => !task.done);
+  return (open ? 'Stopped at: ' + clean(open.text || open.title || '') + ' · ' : '') + done + ' of ' + tasks.length + ' steps done.';
+}
+function reviewStuckHint(row) {
+  if (row.kind === 'helper:permission') return 'Open the ticket to see what the helper asks and answer it there.';
+  if (row.kind === 'reviewer:unsure') return 'Open the ticket to check the result yourself.';
+  if (row.kind === 'helper:unmerged') return 'Merge puts the pull request in. ' + (state.runs?.[row.ticket]?.running === true ? 'Nudge asks' : 'Start helper starts a helper that asks') + ' it to merge or say why it stays open.';
+  return 'Nudge asks the helper to go on with the next step. Start fresh stops it and starts a new helper on this ticket.';
 }
 async function reviewStuckAnswer(id, digest, picked) {
   const m = STUCK_CARD.exec(String(id || '')), row = m && reviewStuckRows().find(r => r.id === m[1]);

@@ -268,7 +268,8 @@ function stuckHome(runs = {}) {
   const tickets = [
     {id:'t_abcdef', key:'DT-41', title:'Newsletter', status:'waiting', questions:[{id:'q3', text:'Home block'}]},
     {id:'t_aaaa01', key:'DT-1', title:'Invoice export', status:'review', questions:[]},
-    {id:'t_aaaa02', key:'DT-2', title:'Docs', status:'active', questions:[]},
+    {id:'t_aaaa02', key:'DT-2', title:'Docs', status:'active', questions:[], description:'Write the setup guide for new staff.\nMore lines.',
+      checklist:[{id:'c1', text:'Collect the steps', done:true}, {id:'c2', text:'Write the guide'}, {id:'c3', text:'Skip', wont_do:true}]},
     {id:'t_aaaa03', key:'DT-3', title:'Booking', status:'active', questions:[]},
     {id:'t_aaaa04', key:'DT-4', title:'Menu', status:'active', questions:[]},
     {id:'t_aaaa05', key:'DT-5', title:'Report', status:'review', questions:[]},
@@ -299,12 +300,20 @@ test('ORCH-1108: Review\'s number and its Waiting cards are the same count, stuc
   assert.equal(JSON.stringify(by('t_aaaa02').answers), JSON.stringify([{label:'Nudge', picked:'nudge'}, {label:'Start fresh', picked:'fresh'}]));
   assert.equal(by('t_aaaa04').answers.length, 0, 'a helper waiting for an OK on its screen: Open only');
   assert.equal(by('t_aaaa02').href, '#ticket/t_aaaa02'); assert.equal(by('t_aaaa02').ticket_key, 'DT-2');
-  assert.equal(by('t_aaaa02').card.title, 'Stopped: helper:idle');
+  // the context the owner asked for (q1 sent back: "not enough context what it is about"): the ticket's name, what was
+  // asked, where it stopped, what the buttons do
+  assert.equal(by('t_aaaa02').card.title, 'Docs'); assert.equal(by('t_aaaa02').text, 'Stopped: helper:idle');
+  assert.equal(by('t_aaaa02').about, 'Write the setup guide for new staff.');
+  assert.equal(by('t_aaaa02').card.why, 'Stopped at: Write the guide · 1 of 2 steps done.');
+  assert.match(by('t_aaaa02').card.hint, /^Nudge asks the helper .* Start fresh stops it/);
+  assert.match(by('t_aaaa04').card.hint, /^Open the ticket/);
+  assert.equal(by('t_aaaa03').about, undefined, 'no description: no About line');
   assert.equal(stuckHome({t_aaaa01:{running:true}}).reviewStuckCards()[0].answers[1].label, 'Nudge', 'a helper running: Nudge');
   // the shared kit draws it as a Stuck card with those buttons and the Open link
   const reviewKit = {}; vm.runInContext(fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/review.js'), 'utf8'), vm.createContext({window:reviewKit}));
   const item = reviewKit.UI.review.mapCard(by('t_aaaa01'), {fileUrl:() => ''}, new Date('2026-11-15T12:00:00Z'));
   assert.equal(item.kindLabel, 'Stuck'); assert.equal(item.ticket, 'DT-1'); assert.equal(item.href, '#ticket/t_aaaa01');
+  assert.equal(item.title, 'Invoice export'); assert.equal(item.text, 'Stopped: helper:unmerged'); assert.match(item.hint, /^Merge puts the pull request in\. Start helper/);
 });
 test('ORCH-1108: a stuck card\'s buttons do what Home\'s do; a row that is gone, changed or without that button does nothing', async () => {
   const c = stuckHome(), api = c.reviewApi(), stuck = (await api.stack()).filter(x => x.card.kind === 'stuck');
