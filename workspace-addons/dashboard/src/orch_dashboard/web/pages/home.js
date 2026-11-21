@@ -271,7 +271,7 @@ function helperRow(row, key) {
 function startFailedRow(t, sf) {
   return h('div', {className:'card-row home-need', 'data-key':'start-failed-' + t.id}, ticketTitle(t),
     h('p', {}, clean(sf.text)),
-    snapshot ? null : h('div', {className:'row'}, startHost(t, 'start-failed-' + t.id + '-retry', {label:'Retry', continueLabel:'Retry'}) || button('Retry', 'outline sm', async () => {
+    snapshot ? null : h('div', {className:'row'}, startHost(t, 'start-failed-' + t.id + '-retry', {label:'Try again', continueLabel:'Try again'}) || button('Try again', 'outline sm', async () => {
       if (changeUnavailable()) return;
       const result = await act('run.start', {ticket:t.id});
       window.orch.toast(result.ok ? 'Starting again' : changeError(result), result.ok ? 'ok' : 'error');
