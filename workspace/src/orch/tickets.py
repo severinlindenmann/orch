@@ -102,7 +102,7 @@ def now() -> str:
 
 
 def parse_time(text: str) -> str:
-    """Any ISO 8601 time -> UTC RFC 3339 ending in Z. Without offset = UTC."""
+    """Any ISO 8601 time -> UTC RFC 3339 ending in Z. Without offset = local time (ORCH-619)."""
     t = text.strip()
     if t.endswith(("Z", "z")):
         t = t[:-1] + "+00:00"
@@ -110,9 +110,7 @@ def parse_time(text: str) -> str:
         dt = datetime.fromisoformat(t)
     except ValueError:
         raise Refused(f"'{text}' is not a time. Use e.g. 2026-11-05T08:00:00+01:00") from None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")  # a naive time is read as local by astimezone
 
 
 def agent_tool() -> str | None:
@@ -546,11 +544,14 @@ def apply_op(
     if_revision: int | None = None,
     by: str,
     person_click: bool = False,
+    closed_ok=None,
 ):
     """person_click: a person's click on the dashboard or a phone, whatever tool started that server.
+    closed_ok(ticket) -> bool: a write the closed-ticket guard lets through on a done/dropped ticket (only
+    switching an add-on's repeat off, #2051); checked under the lock on the stored ticket.
     Every attempt leaves one decision event in the debug log (diag.md): ticket.op_applied or
     ticket.op_refused (actor, op, status and revision before/after, the refusing guard; no ticket text)."""
-    info: dict = {"person_click": person_click}
+    info: dict = {"person_click": person_click, "closed_ok": closed_ok}
     try:
         out = _apply_op(root, tid, fn, expect, if_revision, by, info)
     except BaseException as e:
@@ -594,7 +595,12 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
         ticket = _load_raw(root, tid)
         eff_status = ticket.get("status")
         info.update(status=eff_status, revision=revision(ticket))
-        if eff_status in CLOSED and _agent_actor(by) and not _addon_keeps_its_ticket(root, ticket, by):
+        if (
+            eff_status in CLOSED
+            and _agent_actor(by)
+            and not _addon_keeps_its_ticket(root, ticket, by)
+            and not (info.get("closed_ok") and info["closed_ok"](ticket))
+        ):
             raise ClosedRefused(CLOSED_AGENT)
         if if_revision is not None and revision(ticket) != if_revision:
             raise _conflict(root, ticket, f"Ticket {tid}", {k: ticket.get(k) for k in PATCH_FIELDS})
@@ -2416,36 +2422,82 @@ def prepare_state(root: Path, ticket: dict) -> dict | None:
     return {"state": state, "words": words, **({"why": why} if why else {})}
 
 
+def _minutes_words(m: int) -> str:
+    return (f"{m // 60} h" + (f" {m % 60} min" if m % 60 else "")) if m >= 60 else f"{m} min"
+
+
+def _ok_minutes(m: object) -> bool:
+    return isinstance(m, int) and not isinstance(m, bool) and m > 0
+
+
+def _ok_cost(c: object) -> bool:
+    return isinstance(c, int | float) and not isinstance(c, bool) and c >= 0
+
+
 def estimate_words(est: object) -> str:
-    """ "about 45 min · $2.00" for a stored estimate; "" for none."""
+    """ "about 45 min · $2.00" for a stored estimate, "about 30-60 min · $2.00-$5.00" for a range (ORCH-740);
+    "" for none."""
     if not isinstance(est, dict):
         return ""
     m, cost = est.get("minutes"), est.get("cost")
+    lo_m, lo_c = est.get("minutes_low"), est.get("cost_low")
     parts = []
-    if isinstance(m, int) and not isinstance(m, bool) and m > 0:
-        parts.append((f"{m // 60} h" + (f" {m % 60} min" if m % 60 else "")) if m >= 60 else f"{m} min")
-    if isinstance(cost, int | float) and not isinstance(cost, bool) and cost >= 0:
-        parts.append(f"${cost:,.2f}")
+    if _ok_minutes(m):
+        if _ok_minutes(lo_m) and lo_m < m:
+            parts.append(f"{lo_m}-{m} min" if m < 120 else f"{_minutes_words(lo_m)} - {_minutes_words(m)}")
+        else:
+            parts.append(_minutes_words(m))
+    if _ok_cost(cost):
+        parts.append(f"${lo_c:,.2f}-${cost:,.2f}" if _ok_cost(lo_c) and lo_c < cost else f"${cost:,.2f}")
     return "about " + " · ".join(parts) if parts else ""
 
 
+def parse_range(text: object, kind: str):
+    """ "45" -> 45, "30-60" -> (30, 60) for --estimate-minutes / --estimate-cost (ORCH-740: an estimate is a
+    range). Minutes are whole numbers, dollars may have cents. None stays None."""
+    if text is None or isinstance(text, int | float | tuple):
+        return text
+    s = str(text).strip().replace("$", "").replace(" ", "").replace("–", "-")
+    num = r"\d+" if kind == "minutes" else r"\d*\.?\d+"
+    m = re.fullmatch(rf"({num})(?:-({num}))?", s)
+    if not m:
+        what = "whole minutes" if kind == "minutes" else "dollars"
+        raise Refused(f"Give the estimate in {what}, one number (45) or a range (30-60).")
+    conv = int if kind == "minutes" else float
+    lo = conv(m.group(1))
+    if m.group(2) is None:
+        return lo
+    hi = conv(m.group(2))
+    if hi < lo:
+        raise Refused("A range starts with the smaller number: 30-60, not 60-30.")
+    return lo if hi == lo else (lo, hi)
+
+
 def _estimate(minutes: object, cost: object) -> dict | None:
-    """ORCH-189: the helper's own estimate from its first run (helper minutes, dollars at list price)."""
+    """ORCH-189: the helper's own estimate from its first run (helper minutes, dollars at list price).
+    Either may be a (low, high) range (ORCH-740): stored as minutes/cost = the high end, so every older
+    reader keeps a number, and minutes_low/cost_low = the low end."""
     if minutes is None and cost is None:
         return None
-    if minutes is not None and (
-        not isinstance(minutes, int) or isinstance(minutes, bool) or not 0 < minutes <= 100_000
-    ):
-        raise Refused("An estimate needs whole minutes between 1 and 100000.")
-    if cost is not None and (
-        not isinstance(cost, int | float) or isinstance(cost, bool) or not 0 <= cost <= 100_000
-    ):
-        raise Refused("An estimated cost needs dollars between 0 and 100000.")
     out: dict = {}
-    if minutes is not None:
-        out["minutes"] = minutes
-    if cost is not None:
-        out["cost"] = round(float(cost), 2)
+    for name, value in (("minutes", minutes), ("cost", cost)):
+        if value is None:
+            continue
+        lo, hi = value if isinstance(value, tuple) else (None, value)
+        for v in (lo, hi):
+            if v is None:
+                continue
+            if name == "minutes" and (not isinstance(v, int) or isinstance(v, bool) or not 0 < v <= 100_000):
+                raise Refused("An estimate needs whole minutes between 1 and 100000.")
+            if name == "cost" and (
+                not isinstance(v, int | float) or isinstance(v, bool) or not 0 <= v <= 100_000
+            ):
+                raise Refused("An estimated cost needs dollars between 0 and 100000.")
+        if lo is not None and lo > hi:
+            raise Refused("A range starts with the smaller number: 30-60, not 60-30.")
+        out[name] = hi if name == "minutes" else round(float(hi), 2)
+        if lo is not None and lo != hi:
+            out[f"{name}_low"] = lo if name == "minutes" else round(float(lo), 2)
     return out
 
 
@@ -2457,12 +2509,16 @@ def tidy(
     fields: dict | None = None,
     description: str | None = None,
     estimate: dict | None = None,
+    extra: dict | None = None,
 ) -> dict:
     """Tidy a new ticket when work starts, without asking: a short clear title (the person's own words stay in
     the history: "Title tidied from: ...") and owner / due / done_when,
     filled only where still empty, and the agent's description (what and why, its own field, never the
     person's note) when there is none yet, and the helper's time and cost estimate (ORCH-189: made in the same
-    first run, shown on the ticket) when there is none yet. Once."""
+    first run, shown on the ticket) when there is none yet. Once.
+    extra (Prepare, ORCH-740), each filled only while empty: asked_by (who asked for the work, e.g. the sender
+    of the email), maybe_same (a ticket that looks like the same work: shown, never merged) and needs_ok (what
+    the plan will need the person's OK for)."""
     title = title.strip()
     est = _estimate((estimate or {}).get("minutes"), (estimate or {}).get("cost"))
     if not title or len(title) > 200:
@@ -2473,11 +2529,13 @@ def tidy(
     fields = {k: v for k, v in (fields or {}).items() if k in ("owner", "due", "done_when") and v}
     for k, v in fields.items():
         clean_field(k, v)
+    more = _prepare_fields(root, tid, extra or {})
 
     def op(ticket):
         if tidied(root, ticket):
             raise Refused("This ticket was already tidied.")
         old = str(ticket.get("title") or "")
+        was_auto = bool(ticket.get("title_auto"))
         edited = any(  # someone renamed it after it was created: that title is theirs, tidy leaves it
             re.fullmatch(
                 r"Title changed(?: \(was: .* \| now: .*\))?",
@@ -2490,6 +2548,8 @@ def tidy(
             ticket["title"] = title
             ticket.pop("title_auto", None)
             add_history(ticket, by, TIDY_LINE + old[:200])
+        elif was_auto and not edited:  # the helper kept the placeholder's words: now they are its title
+            ticket.pop("title_auto", None)
         filled = [k for k in sorted(fields) if not ticket.get(k)]
         for k in filled:
             _set_field(ticket, k, fields[k])
@@ -2499,13 +2559,239 @@ def tidy(
         if wrote:
             ticket["description"] = description
             ticket["description_by"] = by[:100]
+            if was_auto and ticket.get("note") == LONG_NOTE:  # only the placeholder note goes (as `title`)
+                ticket.pop("note", None)
             add_history(ticket, by, f"Description written by {by[:100]}")
         estimated = bool(est and not ticket.get("estimate"))
         if estimated:
             ticket["estimate"] = {**est, "by": by[:100], "at": now()}
             add_history(ticket, by, "Estimate: " + estimate_words(est))
-        if (title == old or edited) and not filled and not wrote and not estimated:
+        added = [k for k in PREPARE_FIELDS if k in more and not ticket.get(k)]
+        for k in added:
+            ticket[k] = more[k]
+            add_history(ticket, by, PREPARE_FIELDS[k] + ": " + _field_words(root, k, more[k]))
+        if (title == old or edited) and not filled and not wrote and not estimated and not added:
             add_history(ticket, by, "Ticket tidied: nothing to change")
+
+    return apply_op(root, tid, op, by=by)[0]
+
+
+# Prepare (ORCH-740, accepted draft ORCH-730 2a/2b): what the helper fills besides tidy's fields.
+PREPARE_FIELDS = {"asked_by": "Asked by", "maybe_same": "Maybe the same as", "needs_ok": "Needs your OK for"}
+PREPARED_PREFIX = "Prepared:"
+FOUND_MAX_SOURCES = 20
+FOUND_MAX_FACTS = 10
+
+
+def _plain(value: object, what: str, limit: int) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise Refused(f"{what} must be text.")
+    v = " ".join(value.split())
+    if len(v) > limit:
+        raise Refused(f"{what} is at most {limit} characters; this one has {len(v)}. Shorten it.")
+    return v
+
+
+def _prepare_fields(root: Path, tid: str, extra: dict) -> dict:
+    """Check tidy's Prepare fields before anything is written: plain text with limits, maybe_same a real
+    ticket other than this one (open or closed), no secret in any of them (R5.2)."""
+    out: dict = {}
+    if extra.get("asked_by"):
+        out["asked_by"] = _plain(extra["asked_by"], "Asked by", 100)
+    if extra.get("needs_ok"):
+        out["needs_ok"] = _plain(extra["needs_ok"], "Needs your OK for", 300)
+    if extra.get("maybe_same"):
+        ref = str(extra["maybe_same"]).strip()
+        try:
+            other = load(root, resolve(root, ref))["id"]
+        except (Refused, OSError, ValueError, KeyError):
+            raise Refused(
+                f"No ticket {ref} here: name an existing ticket for --maybe-same (orch ticket list)."
+            ) from None
+        if other == resolve(root, tid):
+            raise Refused("A ticket cannot be the same as itself: leave --maybe-same out.")
+        out["maybe_same"] = other
+    if out:
+        from orch import secretscan
+
+        secretscan.refuse_if_secret_in(root, {k: v for k, v in out.items()}, "ticket", verb="saved")
+    return out
+
+
+def _field_words(root: Path, key: str, value: str) -> str:
+    if key == "maybe_same":
+        with contextlib.suppress(Exception):
+            o = load(root, value)
+            return f"{o.get('key') or value} {o.get('title', '')}".strip()
+    return value
+
+
+def _found_text(value: object, what: str, limit: int, *, optional: bool = False) -> str | None:
+    if optional and (value is None or (isinstance(value, str) and not value.strip())):
+        return None
+    return _plain(value, what, limit)
+
+
+def clean_found(data: object) -> dict:
+    """The "What I found" part (ORCH-740) as a helper gives it, checked whole before anything is written:
+    {"sources": [{"name", "link"?, "lines"} or {"name", "link"?, "could_not_open": "<why>"}], "facts": [...]}.
+    Returns the stored shape (sources with opened true/false)."""
+    if not isinstance(data, dict):
+        raise Refused('What I found must be a JSON object: {"sources": [...], "facts": [...]}.')
+    unknown = sorted(set(data) - {"sources", "facts"})
+    if unknown:
+        raise Refused(f"What I found takes only sources and facts, not {', '.join(unknown)}.")
+    sources, facts = data.get("sources") or [], data.get("facts") or []
+    if not isinstance(sources, list) or not isinstance(facts, list):
+        raise Refused("sources and facts must be lists.")
+    if not sources:
+        raise Refused(
+            "What I found needs at least one source: every link, file or message the ticket points to, "
+            "read or not."
+        )
+    if len(sources) > FOUND_MAX_SOURCES:
+        raise Refused(f"What I found keeps at most {FOUND_MAX_SOURCES} sources; this has {len(sources)}.")
+    if len(facts) > FOUND_MAX_FACTS:
+        raise Refused(f"What I found keeps at most {FOUND_MAX_FACTS} key facts; this has {len(facts)}.")
+    out_sources = []
+    for i, src in enumerate(sources, 1):
+        if not isinstance(src, dict):
+            raise Refused(f"Source {i} must be an object with name and lines (or could_not_open).")
+        bad = sorted(set(src) - {"name", "link", "lines", "could_not_open"})
+        if bad:
+            raise Refused(f"Source {i} takes name, link, lines or could_not_open, not {', '.join(bad)}.")
+        rec: dict = {"name": _plain(src.get("name"), f"Source {i} name", 120)}
+        link = _found_text(src.get("link"), f"Source {i} link", 500, optional=True)
+        if link:
+            rec["link"] = link
+        why = _found_text(src.get("could_not_open"), f"Source {i} could_not_open", 200, optional=True)
+        lines = _found_text(src.get("lines"), f"Source {i} lines", 300, optional=True)
+        if why and lines:
+            raise Refused(f"Source {i}: give lines (it was read) or could_not_open (it was not), not both.")
+        if why:
+            rec.update(opened=False, why=why)
+        elif lines:
+            rec.update(opened=True, lines=lines)
+        else:
+            raise Refused(
+                f"Source {i} needs lines (one or two lines of what it says) or could_not_open (why not)."
+            )
+        out_sources.append(rec)
+    out_facts = [_plain(f, f"Fact {i}", 300) for i, f in enumerate(facts, 1)]
+    return {"sources": out_sources, "facts": out_facts}
+
+
+def found_counts(found: object) -> tuple[int, int]:
+    """(read, could not open) of a stored What I found part."""
+    src = found.get("sources") if isinstance(found, dict) else None
+    src = [s for s in src or [] if isinstance(s, dict)]
+    read = sum(1 for s in src if s.get("opened") is True)
+    return read, len(src) - read
+
+
+def sources_words(found: object) -> str:
+    """ "2 sources read, 1 could not be opened" (ORCH-740)."""
+    read, missed = found_counts(found)
+    words = f"{read} source{'s' if read != 1 else ''} read"
+    return words + (f", {missed} could not be opened" if missed else "")
+
+
+def prepare_lines(ticket: dict, root: Path | None = None) -> list[str]:
+    """What Prepare added, as plain lines for `orch ticket show` and a later helper's start text (ORCH-740):
+    Asked by, Maybe the same as, Needs your OK for, and the What I found part with Could not open."""
+    out = []
+    for k, label in PREPARE_FIELDS.items():
+        v = ticket.get(k)
+        if isinstance(v, str) and v:
+            out.append(f"{label}: " + (_field_words(root, k, v) if root is not None else v))
+    found = ticket.get("found")
+    if isinstance(found, dict):
+        src = [x for x in found.get("sources") or [] if isinstance(x, dict)]
+        read = [x for x in src if x.get("opened") is True]
+        missed = [x for x in src if x.get("opened") is not True]
+        lines = ["What I found:"]
+        lines += [
+            f"  - {x.get('name', '?')}"
+            + (f" ({x['link']})" if x.get("link") else "")
+            + f": {x.get('lines', '')}"
+            for x in read
+        ]
+        lines += [f"  * {f}" for f in found.get("facts") or [] if isinstance(f, str)]
+        if missed:
+            lines.append("Could not open:")
+            lines += [
+                f"  - {x.get('name', '?')}"
+                + (f" ({x['link']})" if x.get("link") else "")
+                + f": {x.get('why', '')}"
+                for x in missed
+            ]
+        out.append("\n".join(lines))
+    return out
+
+
+def set_found(root: Path, tid: str, data: object, by: str) -> dict:
+    """Write the ticket's What I found part (ORCH-740): what Prepare read from the sources the ticket points
+    to,
+    one or two lines each with its link, the key facts, and the sources it could not open with the reason.
+    A later call replaces it whole (the helper gathered again). Information, never instructions: later helpers
+    get it labelled as such. Nothing with a secret in it is written (R5.2)."""
+    found = clean_found(data)
+    from orch import secretscan
+
+    secretscan.refuse_if_secret_in(root, found, "What I found part", verb="saved")
+
+    def op(ticket):
+        again = isinstance(ticket.get("found"), dict)
+        ticket["found"] = {**found, "by": by[:100], "at": now()}
+        add_history(
+            ticket,
+            by,
+            ("What I found, gathered again: " if again else "What I found: ") + sources_words(found),
+        )
+
+    return apply_op(root, tid, op, by=by)[0]
+
+
+def is_prepared(root: Path, ticket: dict) -> bool:
+    """The ticket has its Prepared line (ORCH-740)."""
+    texts = (
+        str(h.get("text", "")).removeprefix(history.SYNCED_UNVERIFIED) for h in history.lines(root, ticket)
+    )
+    return any(t.startswith(PREPARED_PREFIX) for t in texts)
+
+
+def prepared(root: Path, tid: str, by: str) -> dict:
+    """End of Prepare (ORCH-740): one history line that says what it read and filled, e.g. "Prepared: 2
+    sources
+    read, 1 could not be opened; title, description, done-when, estimate, asked by, suggested plan (4 steps)".
+    Once per ticket. It names only what is there; refused while the ticket has no suggested plan (no task)."""
+
+    def op(ticket):
+        if is_prepared(root, ticket):
+            raise Refused("This ticket is already prepared; go on with the work.")
+        steps = [c for c in ticket.get("checklist") or [] if not c.get("wont_do")]
+        if not steps:
+            raise Refused(f'Add the suggested plan first, one task per step: orch check add {tid} "<step>"')
+        filled = [] if ticket.get("title_auto") else ["title"]
+        for k, w in (
+            ("description", "description"),
+            ("done_when", "done-when"),
+            ("estimate", "estimate"),
+            ("owner", "owner"),
+            ("asked_by", "asked by"),
+            ("due", "due date"),
+        ):
+            if ticket.get(k):
+                filled.append(w)
+        refs = [r for r in ticket.get("refs") or [] if isinstance(r, dict)]
+        if refs:
+            filled.append(f"links ({len(refs)})")
+        for k, w in (("maybe_same", "maybe the same as"), ("needs_ok", "needs your OK for")):
+            if ticket.get(k):
+                filled.append(w)
+        filled.append(f"suggested plan ({len(steps)} step{'s' if len(steps) != 1 else ''})")
+        head = sources_words(ticket["found"]) + "; " if isinstance(ticket.get("found"), dict) else ""
+        add_history(ticket, by, f"{PREPARED_PREFIX} {head}{', '.join(filled)}")
 
     return apply_op(root, tid, op, by=by)[0]
 
@@ -2535,6 +2821,29 @@ def set_model(root: Path, tid: str, name: str, by: str) -> dict:
     return apply_op(root, tid, op, by=by)[0]
 
 
+def _kept_model(ticket: dict) -> str | None:
+    """The model that stays as it is: a person's choice, or Opus once a helper ran on it (never down by
+    itself: a ticket picked or moved up to Opus does not drop to Sonnet in the middle of its work)."""
+    from orch import modelpick
+
+    cur = modelpick.chosen(ticket)
+    if not cur:
+        return None
+    if modelpick.by_person(ticket) or cur["name"] == modelpick.pick(ticket)[0]:
+        return cur["name"]
+    if cur["name"] == "opus" and (cur.get("up") or ticket.get("sessions")):
+        return "opus"
+    return None
+
+
+def next_model(ticket: dict) -> str:
+    """The model the next start runs on, read only (pick_model without writing): what a page shows before
+    the person starts a helper (the Empty helper's New menu, ORCH-710)."""
+    from orch import modelpick
+
+    return _kept_model(ticket) or modelpick.pick(ticket)[0]
+
+
 def pick_model(root: Path, tid: str, by: str) -> str:
     """Before a start: keep a person's choice, else let orch pick from the ticket as it is now (a history line
     only when the pick changes). Returns the model name."""
@@ -2542,20 +2851,8 @@ def pick_model(root: Path, tid: str, by: str) -> str:
 
     out: dict = {}
 
-    def keep(ticket) -> str | None:
-        """The model that stays as it is: a person's choice, or Opus once a helper ran on it (never down by
-        itself: a ticket picked or moved up to Opus does not drop to Sonnet in the middle of its work)."""
-        cur = modelpick.chosen(ticket)
-        if not cur:
-            return None
-        if modelpick.by_person(ticket) or cur["name"] == modelpick.pick(ticket)[0]:
-            return cur["name"]
-        if cur["name"] == "opus" and (cur.get("up") or ticket.get("sessions")):
-            return "opus"
-        return None
-
     def op(ticket):
-        kept = keep(ticket)
+        kept = _kept_model(ticket)
         if kept:
             out["name"] = kept
             return
@@ -2564,7 +2861,7 @@ def pick_model(root: Path, tid: str, by: str) -> str:
         ticket["model"] = {"name": name, "by": modelpick.BY_ORCH, "why": why[:200]}
         add_history(ticket, by, f"Model picked: {modelpick.LABELS[name]} ({why[:200]})")
 
-    kept = keep(load(root, tid))
+    kept = _kept_model(load(root, tid))
     if kept:
         return kept  # nothing to write
     apply_op(root, tid, op, by=by)
@@ -2675,11 +2972,17 @@ def _next_id(items: list[dict], prefix: str) -> str:
 
 
 def _item(ticket: dict, cid: str) -> dict:
+    """The task named `cid`. A plain number N is the task c<N> (checks are named c1, c2, ...)."""
+    cid = str(cid)
+    ids = [c["id"] for c in ticket["checklist"]]
+    if cid not in ids and cid.isdigit() and f"c{int(cid)}" in ids:
+        cid = f"c{int(cid)}"
     item = next((c for c in ticket["checklist"] if c["id"] == cid), None)
     if item is None:
+        have = f" This ticket has {ids[0]}..{ids[-1]}." if ids else " This ticket has no checks yet."
         raise Refused(
-            f"Ticket {ticket['id']} has no check {cid}. "
-            f"Run `orch ticket show {ticket['id']}` to see its checks."
+            f"Ticket {ticket['id']} has no check {cid}. Checks are named c1, c2, ...{have} "
+            f"Run `orch ticket show {ticket['id']}` to see them."
         )
     return item
 
@@ -2882,7 +3185,7 @@ def check_done(
         if proved:
             item["proves"] = list(dict.fromkeys([*item.get("proves", []), *proved]))
         _clear_doing(item)
-        add_history(t, by, f"Check {cid} done")
+        add_history(t, by, f"Check {item['id']} done")
         return item
 
     return apply_op(root, tid, op, by=by)
@@ -3468,6 +3771,41 @@ def validate_ext(schema: dict, obj: dict, addon: str) -> None:
         raise Refused(f"ext.{addon}{'.' + where if where else ''}: {e.message}")
 
 
+# an add-on marks a boolean field of its ticket_ext schema with the value that switches it off
+OFF_MARK = "x-orch-off"
+
+
+def _off_values(schema: dict | None) -> dict:
+    """The fields an add-on's ticket_ext schema marks with x-orch-off, and the value that switches its repeat
+    off: {field: True|False}. Declared by the add-on, never inferred from stored data; core names no field."""
+    props = (schema or {}).get("properties") if isinstance(schema, dict) else None
+    if not isinstance(props, dict):
+        return {}
+    return {
+        k: v[OFF_MARK]
+        for k, v in props.items()
+        if isinstance(v, dict) and v.get("type") == "boolean" and isinstance(v.get(OFF_MARK), bool)
+    }
+
+
+def _repeat_block(ticket: dict, addon: str, schema: dict | None) -> tuple[dict, dict] | None:
+    """(ext block, off values) of an ACTIVE add-on whose own ticket_ext schema marks fields that switch a
+    repeat off, else None (R1.2: core names no add-on)."""
+    off = _off_values(schema)
+    if not off:
+        return None
+    cur = (ticket.get("ext") or {}).get(addon)
+    return (cur, off) if isinstance(cur, dict) else None
+
+
+def repeat_off_only(cur: dict, new: dict, off: dict) -> bool:
+    """#2051: the change from cur to new only sets fields to their switch-off values (`off`), nothing else.
+    An agent may do that on a done or dropped ticket (a helper turns off a repeat on a ticket in Review); it
+    never switches one on there or changes anything else."""
+    changed = {k for k in set(cur) | set(new) if cur.get(k) != new.get(k)}
+    return all(k in off and new.get(k) is off[k] for k in changed)
+
+
 def ext_set(
     root: Path,
     tid: str,
@@ -3496,7 +3834,11 @@ def ext_set(
         ext[addon] = merged
         add_history(ticket, by, f"Set ext.{addon}")
 
-    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+    def only_off(ticket) -> bool:
+        block = _repeat_block(ticket, addon, schema)
+        return block is not None and repeat_off_only(block[0], {**block[0], **obj}, block[1])
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by, closed_ok=only_off)[0]
 
 
 def ext_unset(
@@ -3538,7 +3880,19 @@ def ext_unset(
         if not ext:
             del ticket["ext"]
 
-    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+    def only_off(ticket) -> bool:
+        """Removing a repeat (or its next planned start) only switches work off, so it is allowed on a closed
+        ticket too; but not the whole block of a paused one: that would also undo its switch-off."""
+        block = _repeat_block(ticket, addon, schema)
+        if block is None:
+            return False
+        cur, off = block
+        # a field whose switch-off value is true (absent = on) must not be removed while it is set
+        return key in ("next_run", "each_run") or (
+            not key and not any(v is True and cur.get(k) is True for k, v in off.items())
+        )
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by, closed_ok=only_off)[0]
 
 
 _SECRET_FOLDER_RE = re.compile(r"\.orch[/\\]+secrets|\borch secrets\b|\bsecrets folder\b", re.I)
@@ -3993,7 +4347,9 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
         raise Refused("Use exactly one of --until <time> or --on <kind>:<ref>.")
     if until:
         w = waiting_value("time", until=until)
-        note = f"Waiting until {w['until']}"
+        from .net import when as _local_when
+
+        note = f"Waiting until {_local_when(w['until'])}"
     else:
         kind, sep, ref = on.partition(":")
         if not sep or kind not in WAIT_KINDS or kind == "time":

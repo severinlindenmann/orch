@@ -56,7 +56,7 @@ def test_rows_with_ticket_checks_and_merge_state(prws):
     # what needs someone first, then ready to merge, then drafts
     assert [r["cells"]["pr"] for r in rows] == ["Change 3", "Change 1", "Change 2"]
     assert rows[0]["cells"] == {"pr": "Change 3", "ticket": "DM-2", "state": "Checks failed", "in_line": None}
-    assert rows[0]["subtitle"] == "Checks failed: lint. Open the ticket to fix it."
+    assert rows[0]["subtitle"] == "Checks failed: lint. Waits for a helper place."
     assert rows[0]["link"] == "t_aaaaa2"  # a linked pull request opens its ticket
     assert rows[1]["cells"]["state"] == "Ready to merge" and rows[1]["subtitle"] == "Not in the merge queue."
     assert rows[2]["cells"]["ticket"] is None and rows[2]["link"] == PR.format(2)  # no ticket: GitHub
@@ -65,6 +65,14 @@ def test_rows_with_ticket_checks_and_merge_state(prws):
         "type": "footnote",
         "text": "The merge queue checks up to 5 pull requests together and merges them when the checks pass.",
     }
+
+
+def test_repair_note_says_who_fixes_a_red_pull_request():
+    tk = {"id": "t_a", "key": "DM-2"}
+    assert view.repair_note(tk, {"t_a": "claude"}, {"t_a": "active"}) == "Being repaired by claude."
+    assert view.repair_note(tk, {}, {"t_a": "ready"}) == "Waits for a helper place."
+    assert "No helper is on it" in view.repair_note(tk, {}, {"t_a": "review"})
+    assert "No ticket" in view.repair_note(None, {}, {})
 
 
 def test_github_trouble_is_the_notice(prws):
@@ -133,6 +141,16 @@ def test_the_queue_shows_its_groups_per_project_and_each_row_its_place(prws):
     paused = table["rows"][2]
     assert paused["subtitle"] == "GitHub did not answer; tries again by itself in 6 min."
     assert table["meta"] == "5 open · 2 repositories"
+
+
+def test_a_queued_pull_request_with_failed_checks_is_in_the_queue_not_failed(prws):
+    add_ticket(prws, "t_aaaaa1", [{"url": PR.format(1)}])
+    poll.once(prws, fetch=FakeGitHub({"acme/app": [gql_pr(1, merge="BLOCKED", checks=fail_run("lint"))]}))
+    _queue(prws, 1, ticket="t_aaaaa1")
+    v = valid(view.build(prws, running=True, queue_alive=True))
+    (table,) = [b for b in v["blocks"] if b["type"] == "table"]
+    assert table["rows"][0]["cells"]["state"] == "1st in line"
+    assert "failed" not in table["rows"][0].get("subtitle", "").lower()
 
 
 def test_an_empty_queue_still_says_where_it_is(prws):

@@ -109,6 +109,7 @@ def _remove_lines(r: dict, depends: list[str]) -> list[str]:
     lines = [
         "It stays stopped and leaves this list." if stopped else "It stops now and leaves this list.",
         "It will not start by itself again.",
+        "Its log stays on this computer.",
     ]
     if depends:
         lines.append(_plain("These stop working: " + ", ".join(depends) + "."))
@@ -118,6 +119,14 @@ def _remove_lines(r: dict, depends: list[str]) -> list[str]:
     else:
         lines.append("Its files on this computer stay as they are.")
     return lines
+
+
+def _address(r: dict) -> str | None:
+    """http://127.0.0.1:<port> for a service with a port (the address its health check asks), else None."""
+    port = r.get("port")
+    if isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= 65535:
+        return f"http://127.0.0.1:{port}"
+    return None
 
 
 def _service_item(root: Path, r: dict) -> dict:
@@ -144,6 +153,12 @@ def _service_item(root: Path, r: dict) -> dict:
         },
         _made_by(root, r.get("made_by")),
     ]
+    address = _address(r)
+    if address:
+        # the app's own address on this computer; a link only while it runs (a stopped one has nothing to open)
+        facts.append(
+            {"label": "Address", "value": address, **({"link": address} if state == "running" else {})}
+        )
     health = r.get("health")
     if isinstance(health, dict) and isinstance(health.get("text"), str) and health["text"].strip():
         facts.append(
@@ -216,15 +231,16 @@ def _found_item(f: dict) -> dict | None:
     facts = [{"label": "Found", "value": (f"{word} since {since}" if since else word) + ", not made by orch"}]
     if isinstance(f.get("what"), str) and f["what"].strip():
         facts.append({"label": "What it is", "value": _plain(f["what"])})
+    # A plain program (no launchd/systemd entry) cannot be taken over: adopt refuses it, so the page draws no
+    # button for it, only what was found (ORCH-934).
+    panel: dict = {"facts": facts, "note": "orch leaves it alone until you say so."}
+    if not sid.startswith("process:"):
+        panel["buttons"] = [_btn("Manage with orch", "adopt", vid)]
     return {
         "id": vid,
         "title": _plain(name, 80),
         "state": {"label": f"{word}, not managed", "tone": "neutral"},
-        "panel": {
-            "facts": facts,
-            "note": "orch leaves it alone until you say so.",
-            "buttons": [_btn("Manage with orch", "adopt", vid)],
-        },
+        "panel": panel,
     }
 
 

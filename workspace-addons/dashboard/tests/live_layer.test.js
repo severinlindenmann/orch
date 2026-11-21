@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerSort, liveAskModel, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerCompact, liveLayerSort, liveAskModel, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -190,11 +190,14 @@ test('the split and the selected pane are kept per browser, at most three', () =
 
 test('panes fold pin and place into More when narrow, on the right with more than one, and on a phone', () => {
   assert.equal(L.liveLayerNarrow('bottom', 1, 1040, false), false);
-  assert.equal(L.liveLayerNarrow('bottom', 2, 1040, false), false);
+  assert.equal(L.liveLayerNarrow('bottom', 2, 1040, false), true);   // two at 1280 wide: the header with Chat | Terminal does not fit
+  assert.equal(L.liveLayerNarrow('bottom', 2, 1680, false), false);
   assert.equal(L.liveLayerNarrow('bottom', 3, 1040, false), true);
-  assert.equal(L.liveLayerNarrow('bottom', 3, 1680, false), false);
+  assert.equal(L.liveLayerNarrow('bottom', 3, 1680, false), true);   // three at 1920 wide: 560 px each
+  assert.equal(L.liveLayerNarrow('bottom', 3, 2400, false), false);
   assert.equal(L.liveLayerNarrow('right', 2, 760, false), true);
   assert.equal(L.liveLayerNarrow('right', 1, 760, false), false);
+  assert.equal(L.liveLayerNarrow('right', 1, 537, false), true);    // on the right at 1280 wide
   assert.equal(L.liveLayerNarrow('bottom', 1, 390, true), true);
 });
 
@@ -262,11 +265,55 @@ test('a window resize draws the layer again only across the phone width', () => 
   assert.match(page, /if \(now !== phone\)/);
 });
 
-test('ORCH-679: a running helper has Stop in its pane (run.stop, "Stop idle helper" when idle); no helper, no Stop', () => {
-  assert.match(source, /sess\.kind \|\| !sess\.running \? null : h\('button'[^\n]*'data-live-stop':sess\.id\}, liveStopLabel\(sess\)\)/);
-  assert.match(source, /\['idle', 'stuck'\]\.includes\(h2\.state\) \? 'Stop idle helper' : 'Stop'/);
-  assert.match(source, /#live-dock \[data-live-stop\][\s\S]{0,200}act\('run\.stop', \{ticket:b\.dataset\.liveStop\}\)/);
-  assert.match(source, /x\.running && !x\.kind \? liveStopLabel\(x\) : ''/);  // the dock repaints when idle turns into working
+// ORCH-463: words on the pane buttons, full titles in the split, Add beside asks which session.
+test('a split, narrow or small pane is compact: its title gets a row of its own', () => {
+  assert.equal(L.liveLayerCompact('bottom', 1, 1680, false), false, 'one roomy pane: one row');
+  assert.equal(L.liveLayerCompact('bottom', 1, 1040, false), true, 'one pane at 1280 wide: the title gets its row');
+  assert.equal(L.liveLayerCompact('bottom', 2, 1280, false), true, 'every split');
+  assert.equal(L.liveLayerCompact('bottom', 1, 800, false), true, 'a small single pane');
+  assert.equal(L.liveLayerCompact('bottom', 1, 390, true), true, 'a phone');
+});
+
+test('every pane button carries its word, and Add beside opens a choice instead of taking the first session', () => {
+  const pane = source.slice(source.indexOf('function livePane('), source.indexOf('// The live part of a pane'));
+  for (const w of ['Pin', 'Add beside', 'Place', 'Full screen', 'Leave full screen', 'Minimise', 'Close', 'More']) assert.match(pane, new RegExp(`'${w}'`), w);
+  assert.doesNotMatch(pane, /liveBtn\('btn icon/, 'no icon-only button left in a pane');
+  assert.match(pane, /livePaneBtn\('menu', besideWhy, 'plus', 'Add beside', \{'data-menu':besideMenu/);
+  assert.match(source, /act === 'beside-pick'\) liveLayerDo\(\{type:'beside', key:b\.dataset\.session\}/);
+  assert.doesNotMatch(source, /act === 'beside'\)/, 'no click adds a session unasked');
+  const menu = source.slice(source.indexOf('function liveBesideMenu('), source.indexOf('// The More menu'));
+  assert.match(menu, /'data-live':'beside-pick'/);
+  assert.match(menu, /others\.map\(/);
+});
+
+test('a button with a word is named by the word unless its label starts with it', () => {
+  const body = source.slice(source.indexOf('function liveBtn('), source.indexOf('// A pane\'s button'));
+  const ctx = {h:(tag, attrs) => attrs, liveIc:() => null};
+  vm.createContext(ctx); vm.runInContext(body + '\nthis.f = liveBtn;', ctx);
+  assert.equal(ctx.f('b', 'pin', 'Pin ORCH-1', 'g', {}, 'Pin')['aria-label'], 'Pin ORCH-1');
+  assert.equal(ctx.f('b', 'x', 'Where it sits', 'g', {}, 'Bottom')['aria-label'], null);
+  assert.equal(ctx.f('b', 'x', 'Where it sits', 'g')['aria-label'], 'Where it sits');
+});
+
+test('ORCH-817: every pane has Stop and End session in its header (More when narrow); the old body Stop is gone', () => {
+  assert.doesNotMatch(source, /data-live-stop/);
+  assert.match(source, /\.\.\.\(sess \? liveEndHere\(key, label, o\.narrow\) : \[\]\)/);
+  assert.match(source, /narrow \? \[window\.liveEndOpenAt\?\.\('pane'\) === key \? window\.liveEndMenu\(key, 'pane:' \+ key\) : null\] : window\.liveEndButtons\(key, label\)/);
+  assert.match(source, /narrow && sess && typeof window\.liveEndMenu === 'function' \? liveMoreEnd\(key\) : null/);
+  assert.match(source, /typeof window\.liveEndKey === 'function' \? window\.liveEndKey\(\) : null\]\);/, 'the dock repaints when a Stop or End menu opens');
+});
+
+test('ORCH-817: an ended helper without a ticket keeps its pane with Start again and History; an ended terminal does not', () => {
+  assert.match(source, /o\.open === true \|\| o\.kind !== 'terminal'/);
+  assert.match(source, /ended:!running && x\.kind !== 'terminal' && \(x\.open !== true \|\| \(!!window\.LiveSessions\?\.ready && !live\)\)/);
+  assert.match(source, /sess\?\.ended \? h\('div', \{className:'live-pb live-pb-start'\}, liveEndedBody\(sess, label\)\)/);
+  assert.match(source, /act\('session\.new', \{kind:b\.dataset\.liveAgain\}/);
+  assert.match(source, /liveHistBody\(sess\)/);
+});
+
+test('ORCH-817: an idle helper pane gets the idle note instead of one status line', () => {
+  assert.match(source, /sess\.kind === 'terminal' \? null : h\('div', \{className:'live-end-idle', 'data-live-idle':''/);
+  assert.match(source, /window\.liveEndIdleFill\(idle, body\.dataset\.liveBody, text\)/);
 });
 
 test('the pane shows the waiting question with its options and answers it there (ORCH-675)', () => {
@@ -277,6 +324,20 @@ test('the pane shows the waiting question with its options and answers it there 
   assert.equal(liveAskModel({}), null);
   assert.equal(liveAskModel({questions:[{id:'q3', kind:'plan', text:'Plan?'}]}).plain, false);
   assert.match(source, /liveAskFill[^]*?act\('answer', \{ticket:id, question:q\.id, digest:q\.digest/, 'the answer is the same op a question card sends');
+});
+
+test('the waiting question shows once: the now line steps back while the question box shows it (ORCH-708)', () => {
+  // ORCH-817 adds the idle note between the fill and the hide; the now line still steps back for the question box
+  assert.match(source, /liveAskFill\(askBox, body\.dataset\.liveBody\);[^]{0,300}?now\.hidden = \(?!!askBox && !askBox\.hidden\)?/,
+    'the fill hides the now line after the question box is written');
+});
+
+test('after an answer in the pane the keyboard stays in the pane, so Esc still steps the layer back (ORCH-709)', () => {
+  const fill = source.slice(source.indexOf('function liveAskFill'), source.indexOf('// The live part of a pane'));
+  assert.match(fill, /const had = box\.contains\(document\.activeElement\);[^]*?box\.focus\([^]*?c\.disabled = true/, 'the keyboard waits on the box before its buttons are disabled');
+  assert.match(fill, /liveLayerWant = \{id, until:[^}]*ask:true\}; liveLayerTake\(\)/, 'and goes back into the pane when the answer is in');
+  const take = source.slice(source.indexOf('function liveLayerTake'), source.indexOf('// Full screen covers the page'));
+  assert.match(take, /\[data-live-ask\]:not\(\[hidden\]\) :is\(button, input\):not\(:disabled\)/, 'the next question\'s first choice first');
 });
 
 // ORCH-706: a helper that waits for an OK on its screen shows its choice in the last lines; in a short pane (the panel

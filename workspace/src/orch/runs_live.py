@@ -453,6 +453,8 @@ def start_live(
         r = tmux(
             root, "new-session", "-d", "-P", "-F", "#{pane_pid}", "-x", "200", "-y", "50",
             "-s", tid, "-c", str(work), "-e", f"ORCH_ROOT={root}", "--", *cmd,
+            # ORCH-707: orch's own server passes focus events on, so the tool shows no tmux tip about it
+            ";", "set-option", "-g", "focus-events", "on",
         )  # fmt: skip
         if r.returncode != 0:
             raise Refused(f"tmux could not start the session: {r.stderr.strip() or 'unknown error'}")
@@ -461,6 +463,7 @@ def start_live(
             tmux={"socket": socket_name(root), "session": tid},
             live={"state": "starting", "since": tickets.now()},
         )  # fmt: skip
+        runs.set_process_fields(root, tid, run, permissions=p.get("permissions"))  # ORCH-818: the pane header
     except BaseException:
         runs.release(root, tid, run)
         hooks_path.unlink(missing_ok=True)
@@ -1565,6 +1568,23 @@ def stop(root: Path, tid: str, hold: bool = False) -> bool:
         return False
     _close(root, rec, interrupt=True)
     start_waiting(root)
+    return True
+
+
+def interrupt(root: Path, tid: str) -> bool:
+    """Stop only the current step of a live session (`orch run interrupt`, Stop in Focus, ORCH-817): the
+    tool's own interrupt keys go in once; the session, its claim and its conversation stay, and the helper
+    waits for the next message. False when no live session is on. A tool with no interrupt keys is refused."""
+    rec = runs.read(root, tid)
+    if not rec or rec.get("mode") != "live" or not session_exists(root, tid):
+        return False
+    keys = adapters.load(rec["agent"], root).get("live", {}).get("interrupt_keys") or []
+    if not keys:
+        raise Refused(
+            "This helper's tool has no key that stops one step. End the session instead: orch run stop."
+        )
+    for k in keys:
+        tmux(root, "send-keys", "-t", target(tid), k)
     return True
 
 

@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-32 steps: 23 ready (the script clicks them), 9 pending (not built yet).
+33 steps: 29 ready (the script clicks them), 4 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -24,38 +24,35 @@ Must be seen:
 - Home shows its content, no loading shape stays.
 - At 390 wide nothing scrolls sideways.
 
-## 2. Today's Focus still works with Preview off
+## 2. Focus opens as the new Focus
 
 - Part: start
 - State: ready, clicked by the script
-- Pictures: `fd-02-focus-today-1280.png`, `fd-02-focus-today-1920.png`, `fd-02-focus-today-390.png`
+- Pictures: `fd-02-focus-new-1280.png`, `fd-02-focus-new-1920.png`, `fd-02-focus-new-390.png`
 
 Do:
 
-1. Leave the Preview switch off.
-2. Open Focus from the side bar.
+1. Open Focus from the side bar (at phone width from its address).
 
 Must be seen:
 
-- Today's Focus opens with its list of live helpers.
-- Nothing of the new Focus shows.
+- Focus opens as the new Focus (the wall of step 4 fills it), with no Preview mark.
+- No old Focus page shows.
+- At 390 wide nothing scrolls sideways.
 
-## 3. Turn the new Focus on with the Preview switch
+## 3. Focus has no Preview switch
 
 - Part: start
 - State: ready, clicked by the script
-- Pictures: `fd-03-preview-on-1280.png`, `fd-03-preview-on-1920.png`, `fd-03-preview-on-390.png`
+- Pictures: `fd-03-no-switch-1280.png`, `fd-03-no-switch-1920.png`, `fd-03-no-switch-390.png`
 
 Do:
 
-1. Open Settings and turn on the Preview switch for the new Focus.
-2. Open Focus from the side bar.
+1. Open Settings, Add-ons, Focus.
 
 Must be seen:
 
-- Focus opens as the new Focus, marked Preview (the wall of step 4 fills it).
-- The switch is marked Preview.
-- Turning it off again brings back today's Focus.
+- The Typing switch is there; there is no Preview switch and no word Preview.
 
 ## 4. The live wall in bands
 
@@ -102,13 +99,15 @@ Must be seen:
 Do:
 
 1. Open Tickets and press the Focus button of a row.
-2. Open a ticket page and press its Focus button.
-3. In the session press Open ticket, also from full screen.
+2. Press Answer on a waiting row and answer with the keyboard, then Esc.
+3. Open a ticket page and press its Focus button.
+4. In the session press Open ticket, also from full screen.
 
 Must be seen:
 
 - Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.
 - The session opens in the layer and the page stays.
+- After the answer the keyboard stays in the session; Esc steps back to the bar.
 - Open ticket goes back to the same ticket page; the session stays open.
 
 ## 7. Pin a session and give it your own name
@@ -300,42 +299,47 @@ Must be seen:
 - Stop in the pane stops its helper; an idle helper's button says Stop idle helper.
 - A new model applies when the helper finishes its current step (or at its next start) and says so.
 
-## 17. Chat: messages with the results inside
+## 17. Chat: messages and ticket events, questions answered inside
 
 - Part: chat (draft D feature 5)
-- State: pending, waits for: Chat (crew tasks of the Chat stage)
+- State: ready, clicked by the script
 - Pictures: `fd-17-chat-1280.png`, `fd-17-chat-1920.png`, `fd-17-chat-390.png`
 
 Do:
 
-1. Open a session in Chat view.
-2. Read the messages and press a result inside one.
+1. Open a session: it opens in Chat.
+2. Answer its waiting question in the orange card and send a message.
+3. Switch to Terminal, reload, switch back to Chat.
 
 Must be seen:
 
-- Plain messages with time; step events between them.
-- Results show as small widgets and open big.
+- Plain messages with time; done steps and other events as lines between them; the pull request inside the message.
+- The waiting question is an orange card above the chat, not a message; once answered it moves into the chat as yours.
+- A sent message shows at once; Terminal shows the last lines and the choice stays after a reload.
 
 ## 18. Files and screenshots in the message box, with a preview before sending
 
 - Part: message box (draft D feature 13)
-- State: pending, waits for: Chat (crew tasks of the Chat stage)
+- State: ready, clicked by the script
 - Pictures: `fd-18-message-box-1280.png`, `fd-18-message-box-1920.png`, `fd-18-message-box-390.png`
 
 Do:
 
 1. Attach a file, paste a screenshot, drop a second file.
 2. Remove one, then send.
+3. Reload the page.
 
 Must be seen:
 
 - Each one shows as a small preview before sending.
 - Removing one takes it out; the sent message carries the rest.
+- The box says its limits in plain words; a file over 25 MB is refused.
+- The sent message and its files stay after a reload.
 
 ## 19. Voice into the message box
 
 - Part: voice (draft D feature 13)
-- State: pending, waits for: Chat (crew tasks of the Chat stage)
+- State: ready, clicked by the script
 - Pictures: `fd-19-voice-1280.png`, `fd-19-voice-1920.png`, `fd-19-voice-390.png`
 
 Do:
@@ -349,11 +353,12 @@ Must be seen:
 - While listening the button says so and Esc cancels.
 - The words land in the box and are never sent by themselves.
 - With the relay off there is no microphone.
+- A blocked microphone or nothing heard is one plain sentence.
 
 ## 20. All 16 result widgets, small and big
 
 - Part: 16 widgets (draft D feature 10)
-- State: pending, waits for: Result widgets and big overlay in the style guide (ORCH-263)
+- State: ready, clicked by the script
 - Pictures: `fd-20-widgets-1280.png`, `fd-20-widgets-1920.png`, `fd-20-widgets-390.png`
 
 Do:
@@ -367,21 +372,24 @@ Must be seen:
 - Each opens big in an overlay; arrows step through, Esc closes and gives the focus back.
 - Empty, loading and error look like the style guide states.
 
-## 21. The same widgets on a ticket page
+## 21. The same widgets on a tile, in the chat and on a ticket page
 
 - Part: 16 widgets (draft D feature 10)
-- State: pending, waits for: Result widgets and big overlay in the style guide (ORCH-263)
+- State: ready, clicked by the script
 - Pictures: `fd-21-widgets-ticket-1280.png`, `fd-21-widgets-ticket-1920.png`, `fd-21-widgets-ticket-390.png`
 
 Do:
 
-1. Open a ticket with results.
-2. Open one result big.
+1. Open Focus and look at the tile of a ticket with results; open its result big.
+2. Open the session: each finished step carries its results inside its message; open one big.
+3. Open the ticket page and open one result big.
 
 Must be seen:
 
-- The ticket shows the same widgets as Focus.
-- The big overlay is the same one.
+- The tile shows the newest result small and how many more there are.
+- The chat shows the files, check runs and pull request of a step inside that step's message.
+- The ticket page shows every result of the ticket as the same widgets as Focus, all 16 kinds from its real files, evidence and links.
+- The big overlay is the same one everywhere: arrows step through, Esc closes and gives the focus back.
 
 ## 22. A real terminal: type, select, copy and paste
 
@@ -560,4 +568,24 @@ Must be seen:
 
 - Its tile leaves Working and says No session.
 - Its pane offers the Start choice.
+
+## 33. Start the Manager in a chosen permission mode
+
+- Part: sessions (draft D feature 6)
+- State: ready, clicked by the script
+- Pictures: `fd-33-permissions-1280.png`, `fd-33-permissions-1920.png`, `fd-33-permissions-390.png`
+
+Do:
+
+1. Open the New menu in the bar and pick Bypass permissions in its Permissions row.
+2. Start the Manager.
+3. In its pane press "Permissions: Bypass permissions" and pick Auto.
+4. In a workspace that allows at most Auto, open the New menu.
+
+Must be seen:
+
+- The row shows the tool's modes: Default, Accept edits, Auto, Bypass permissions.
+- Bypass permissions shows one plain warning the first time; the Manager starts in it and its pane says "Permissions: Bypass permissions".
+- Auto ends the session and goes on with the same conversation; the pane says "Permissions: Auto".
+- Bypass permissions is off when the workspace does not allow it and says why.
 

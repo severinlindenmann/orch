@@ -8,7 +8,7 @@ Pace: how fast the work uses a subscription (percent per minute per window), mea
 the last minutes and applied to every candidate (the same work moves with the switch). It is remembered across a
 switch, so an account left early is not taken back until its use drops (a reset) or the work slows down.
 
-Files in .orch/addons/usage/: `settings.json` {"switching": bool} (written by the command; off until the person turns
+Files in the Usage folder of this computer (computer.py): `settings.json` {"switching": bool} (written by the command; off until the person turns
 it on) and `switching.json` (the loop's own memory: samples, pace, the last choice). Only labels, numbers and times.
 """
 
@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import store
+from . import computer, store, when
 from .readers import SubscriptionUse, cswap
 
 EVERY_SECONDS = 30
@@ -76,11 +76,11 @@ def _write(p: Path, data: dict) -> None:
 
 
 def settings_path(root: Path) -> Path:
-    return store.usage_dir(root) / "settings.json"
+    return store.ensure(root) / "settings.json"
 
 
 def memory_path(root: Path) -> Path:
-    return store.usage_dir(root) / "switching.json"
+    return store.ensure(root) / "switching.json"
 
 
 def switching_on(root: Path) -> bool:
@@ -366,6 +366,13 @@ def choose(
 # ---------------------------------------------------------------- one look
 
 
+def _nowhere_to_go(ch: Choice) -> bool:
+    """Every account is at or near a limit and Usage has no other account to go to. A choice that leaves the active
+    account for one that has room is not stuck: the warning would say "no account to switch to" while it switches."""
+    leaving = ch.target is not None and (ch.active is None or ch.target.use.key != ch.active.use.key)
+    return ch.all_at_limit and not leaving
+
+
 def _switch(slot: int) -> bool:
     cmd = cswap.command()
     if not cmd:
@@ -406,11 +413,14 @@ def _recent_failures(memory: dict, at: datetime) -> dict[str, str]:
     return out
 
 
+ALL_AT_LIMIT_ALERT = "Every account is at or near its limit."
+
+
 def alerts(accounts: list[dict], ch: Choice, failed: dict[str, str]) -> list[str]:
     """What the person should see now (list, status, the page), in plain words; empty when all is well."""
     out = []
-    if ch.all_at_limit:
-        out.append("Every account is at or near its limit.")
+    if _nowhere_to_go(ch):
+        out.append(ALL_AT_LIMIT_ALERT)
     names = {a["id"]: a["label"] for a in accounts}
     for k in failed:
         out.append(f"Could not switch to {names.get(k, k)}; Usage tries the next account in order.")
@@ -435,9 +445,45 @@ def _use_words(c: Candidate) -> str:
     return f"{c.account['label']}: " + ", ".join(bits) if bits else c.account["label"]
 
 
+def following(root: Path, shared: Path) -> str | None:
+    """The name of the workspace whose Usage loop switches the accounts now, when it is not this one."""
+    o = computer.owner(shared)
+    if o.get("workspace") in (None, computer.key(root)):
+        return None
+    if o.get("running") or computer.just_taken(o, shared):  # a person just moved it there: never in between
+        return o.get("name") or "another workspace"
+    return None
+
+
+def _switch_once(root: Path, shared: Path | None, switch, t: Candidate, before: str | None) -> str:
+    """One switch under the computer's switch lock, with the switcher checked again inside it (a take-over waits
+    for it). Returns "switched", "failed" or "follow" (another workspace switches now: nothing was done)."""
+    if shared is None:
+        return "switched" if switch(t.use.slot) and _stuck(t.use.key) else "failed"
+    with computer.held(shared / "switch.lock", wait=90, busy="Another switch is running."):
+        if following(root, shared):
+            return "follow"
+        if not (switch(t.use.slot) and _stuck(t.use.key)):
+            return "failed"
+        computer.note_switch(shared, root, before, t.account["label"])
+    return "switched"
+
+
 def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     """One pass: read, choose, switch (or say what it would do), write the history. Returns what happened."""
     at = at or datetime.now(UTC)
+    shared = computer.shared_dir(root)
+    if shared is not None:
+        computer.note_workspace(root, shared)
+        other = following(root, shared)
+        if other:
+            return {
+                "at": _iso(at),
+                "switcher": True,
+                "switching": switching_on(root),
+                "did": "follow",
+                "owner": other,
+            }
     cfg = config(root)
     ahead = float(cfg["ahead_minutes"])
     try:
@@ -446,10 +492,16 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     except cswap.ReaderError as e:
         found, error = None, str(e)
     if found is None:
-        return {"at": _iso(at), "switcher": False, "did": "nothing", "note": error or "no account switcher"}
+        return {
+            "at": _iso(at),
+            "switcher": cswap.command() is not None,  # installed but not answering is not "missing"
+            "did": "nothing",
+            "note": error or "no account switcher",
+        }
 
+    tz = when.zone(root)
     with store.change(root) as (accounts, rows):
-        store.expire(accounts, rows, at)
+        store.expire(accounts, rows, at, say=lambda ends: when.words(ends, tz))
         store.sync_found(accounts, rows, found, provider="anthropic", reader="cswap")
     accounts = store.load(root)["accounts"]
 
@@ -463,7 +515,9 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     did = "stay"
 
     # all at a limit: one warning when it starts, none while it lasts
-    if ch.all_at_limit and not memory.get("all_at_limit"):
+    # a look that switches to an account with room warns about nothing
+    stuck = _nowhere_to_go(ch)
+    if stuck and not memory.get("all_at_limit"):
         where = ch.target or ch.active
         state = "; ".join(_use_words(c) for c in ch.candidates) or "no account to read"
         hist.append(
@@ -476,7 +530,7 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
                 at,
             )
         )
-    memory["all_at_limit"] = ch.all_at_limit
+    memory["all_at_limit"] = stuck
 
     t = ch.target
     why = ch.why
@@ -504,7 +558,11 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
             break
         else:
             memory.pop("would", None)
-            if switch(t.use.slot) and _stuck(t.use.key):
+            done = _switch_once(root, shared, switch, t, before)
+            if done == "follow":
+                did = "follow"
+                break
+            if done == "switched":
                 did = "switched"
                 memory.pop("failed", None)
                 failed = {}
@@ -569,7 +627,7 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     # at a limit = by the limits alone: an account left out only because a switch to it failed still has room
     limits = choose(accounts, found, pace, ahead) if failed else ch
     warn_now: dict = {}
-    if limits.all_at_limit:
+    if _nowhere_to_go(limits):
         warn_now["all-at-limit"] = {}
     if failed:
         first = min(failed, key=lambda k: failed[k])  # the account that failed first names the warning
@@ -631,7 +689,7 @@ def warning_rows(root: Path, at: datetime | None = None) -> list[dict]:
         if k == "all-at-limit":
             title, tone = "Usage: every account is at or near its limit", "bad"
             text = (
-                "Every account is at or near its limit, so Usage has no account to switch to. Helpers may stop "
+                "Usage has no account to switch to, so helpers may stop "
                 "until a limit resets. Raise a limit or turn on another account in Usage."
             )
         else:
@@ -652,7 +710,7 @@ def warning_rows(root: Path, at: datetime | None = None) -> list[dict]:
                 "text": text[:500],
                 "tone": tone,
                 "since": w["since"],
-                "cli": f"orch usage list   (Got it: orch usage seen {k})",
+                "cli": f"orch usage list; hide it with: orch usage seen {k}",
                 "actions": [
                     {
                         "label": "Got it",
@@ -680,23 +738,49 @@ def addon_on(root: Path) -> bool | None:
 
 
 def run_forever(root: Path, once: bool = False, clock=None, sleep=None, log=print, active=addon_on) -> None:
-    """Look every `every_seconds` until Usage is turned off here (or once). clock/sleep: tests pass fakes."""
+    """Look every `every_seconds` until Usage is turned off here (or once). clock/sleep: tests pass fakes.
+    One loop per computer looks and switches (computer.Switcher); the others follow it."""
     import time
 
     clock = clock or (lambda: datetime.now(UTC))
     sleep = sleep or time.sleep
-    while True:
-        if active(root) is False:
-            log("Usage is turned off in this workspace; stopping.")
-            return
-        try:
-            r = look(root, clock())
-            if r["did"] not in ("stay", "nothing"):
-                log(f"{r['at']} {r['did']}: {r.get('active')} -> {r.get('target')}")
-        except store.Refused as e:
-            log(f"skipped: {e}")
-        except Exception as e:  # noqa: BLE001 - one bad look must not end the loop
-            log(f"skipped: {type(e).__name__}: {e}")
-        if once:
-            return
-        sleep(config(root)["every_seconds"])
+    shared = computer.shared_dir(root)
+    lease = computer.Switcher(root, shared) if shared is not None else None
+    was: bool | None = None
+    try:
+        while True:
+            if active(root) is False:
+                log("Usage is turned off in this workspace; stopping.")
+                return
+            try:
+                if lease is not None:
+                    mine = lease.hold()
+                    if mine != was:
+                        who = following(root, shared)
+                        log(
+                            "This workspace switches the accounts."
+                            if mine
+                            else f"{who or 'Another workspace'} switches the accounts; following."
+                        )
+                    was = mine
+                    if (
+                        not mine
+                    ):  # only the switcher's loop looks and switches; a follower only says it is here
+                        computer.note_workspace(root, shared)
+                        if once:
+                            return
+                        sleep(config(root)["every_seconds"])
+                        continue
+                r = look(root, clock())
+                if r["did"] not in ("stay", "nothing", "follow"):
+                    log(f"{r['at']} {r['did']}: {r.get('active')} -> {r.get('target')}")
+            except store.Refused as e:
+                log(f"skipped: {e}")
+            except Exception as e:  # noqa: BLE001 - one bad look must not end the loop
+                log(f"skipped: {type(e).__name__}: {e}")
+            if once:
+                return
+            sleep(config(root)["every_seconds"])
+    finally:
+        if lease is not None:
+            lease.release()

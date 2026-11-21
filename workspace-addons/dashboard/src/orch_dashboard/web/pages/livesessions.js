@@ -1,7 +1,7 @@
 'use strict';
 // Live sessions (ORCH-359): the one list of sessions the live page reads (the bar, the panes, later the wall), from
 // GET /api/sessions (sessions.py: built from the state the page already polls, plus one read of the live screens).
-// Polled every few seconds while the Preview switch is on and the page is shown; nothing else asks for it.
+// Polled every few seconds while the page is shown; nothing else asks for it.
 // window.LiveSessions: list (in the API's order), get(id or key), ready (true after the first answer), refresh(),
 // pins, name(id), pin(id, on), rename(id, name): pins and own names kept by orch for the workspace (ORCH-361).
 // Every answer fires 'orch:live-sessions' on window; the bar and the layer repaint on it.
@@ -17,7 +17,8 @@ function liveDur(seconds) {
   if (m < 60) return m + ' min';
   return Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '');
 }
-// What the session does now, in one plain sentence: the open question, else the core's detail, else what it waits on.
+// What the session does now, in one plain sentence: the open question, else the core's detail, else what it waits on,
+// else the step it works on (ORCH-463: a helper that said nothing showed only 'Working').
 function liveNow(s) {
   if (!s) return '';
   if (s.status === 'needs-you') return s.question || s.detail || 'Waits for you.';
@@ -26,6 +27,7 @@ function liveNow(s) {
   const w = Array.isArray(s.waiting_on) ? s.waiting_on.filter(x => x && x.what && x.kind !== 'person') : [];
   if (s.detail) return s.detail;
   if (w.length) return 'Waiting for ' + w.map(x => x.what).join(', ');
+  if (typeof s.step === 'string' && s.step) return 'Working on: ' + s.step;
   return s.word || '';
 }
 // "Tool · Model", or one of them, or ''
@@ -132,9 +134,10 @@ if (typeof module === 'object' && module.exports) {
         if (done.every(Boolean)) try { localStorage.removeItem('orch.live.pins'); } catch { /* private window */ }
       });
     }
-    const on = () => typeof livePreviewOn === 'function' && livePreviewOn();
+    const on = () => typeof liveFocusOn === 'function' && liveFocusOn();
     async function read() {
       if (store.busy || !on() || document.visibilityState === 'hidden') return;
+      if (window.orchQuiet?.()) return;  // an add-on change restarts the server: the next tick asks it (ORCH-1034)
       store.busy = true;
       try {
         const r = await fetch('api/sessions?lines=' + LIVE_SESSIONS_LINES, {cache:'no-cache', credentials:'same-origin'});
@@ -167,7 +170,7 @@ if (typeof module === 'object' && module.exports) {
       name(ref) { const x = this.get(ref); return x ? liveName(x) : ''; },
       pin(id, on) { const x = this.get(id); return x ? save('session.pin', x.id, {pinned:typeof on === 'boolean' ? on : !livePinIds([x], store.pending).length}) : Promise.resolve(false); },
       rename(id, name) { const x = this.get(id); return x ? save('session.name', x.id, {name:String(name || '').trim() || null}) : Promise.resolve(false); },
-      // app.js calls it after every render: starts the poll the first time the Preview switch is seen on
+      // app.js calls it after every render: starts the poll the first time the live page is on
       sync() { if (on() && !store.timer) tick(); },
     };
   })();

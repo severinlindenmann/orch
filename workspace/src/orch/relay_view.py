@@ -230,6 +230,26 @@ def fold(rows: list[tuple[str, dict, tuple]]) -> list[tuple[str, dict]]:
     return out
 
 
+def _pickup_state(root: Path, item: dict, m: dict, rec: dict | None, handled: bool) -> None:
+    """#2051: a text from another workspace says where it went and which helper run took it."""
+    if rec is None:
+        if m["type"] == "text" and not handled and relay.is_peer_text(root, m):
+            item["chips"] = [{"label": "Not picked up yet", "tone": "warn"}]
+        return
+    where = "Chat" if rec.get("general") else _about(root, rec.get("ticket"), None) or "a ticket"
+    if rec.get("run"):
+        run = f"Run {plain(rec['run'], 40)}, started {_stamp(rec.get('started_at')) or '-'}"
+    elif rec.get("not_started"):
+        run = f"No helper started: {plain(rec['not_started'], 120)}"
+    else:
+        run = "Waits for a helper"
+    item["chips"] = [{"label": plain(f"Picked up · {where}", 40), "tone": "good"}]
+    item["detail"] = [
+        {"label": "Passed to", "value": plain(where, 120)},
+        {"label": "Helper", "value": run},
+    ]
+
+
 def _question_state(root: Path, entry: dict) -> str:
     """Answered or Taken back once the ticket has moved on from the question, else empty (stays Question)."""
     rec = net.read_json(relay._asked_path(root), {}).get(entry.get("id"))
@@ -250,7 +270,7 @@ def view(root: Path) -> dict:
     try:
         net.load_service(root, "relay")
     except Refused:
-        out["notice"] = "Relay not connected. Connect it in Settings."
+        out["notice"] = "Contacts is not connected. Connect it in Settings."
         out["notice_tone"] = "warn"
         out["header"] = {"status": {"label": "Not connected", "tone": "warn"}}
         out["blocks"] += [
@@ -261,8 +281,8 @@ def view(root: Path) -> dict:
                 "items": [],
                 "empty": {
                     "title": "Not connected",
-                    "text": "Connect the relay in Settings to send and receive messages.",
-                    "button": {"label": "Open phone settings", "to": "app:settings/phone"},
+                    "text": "Connect Contacts in Settings to send and receive messages.",
+                    "button": {"label": "Open Contacts settings", "to": "app:settings/phone"},
                 },
             },
             {
@@ -273,7 +293,7 @@ def view(root: Path) -> dict:
                 "items": [],
                 "empty": {
                     "title": "No workspaces yet",
-                    "text": "The workspaces you allow show here once the relay is connected.",
+                    "text": "The workspaces you allow show here once Contacts is connected.",
                 },
             },
         ]
@@ -334,21 +354,24 @@ def view(root: Path) -> dict:
                 item["chips"] = [{"label": state or KINDS[type_]}]
         return at, item, (title, arrow, type_, line, extra)
 
+    picked = {r["id"]: r for r in relay.pickups(root)}
+    handled = relay.seen(root)
     for m in _received(root):
         line, extra = preview(m["type"], m.get("body"))
         upd = (m.get("body") or {}).get("update") if isinstance(m.get("body"), dict) else None
         auto = is_update(m["type"], line, upd)
-        (updates if auto else rows).append(
-            row(
-                str(m.get("created_at") or ""),
-                relay.name_of(root, m["from"]),
-                "in",
-                m["type"],
-                line,
-                extra,
-                auto=auto,
-            )
+        r = row(
+            str(m.get("created_at") or ""),
+            relay.name_of(root, m["from"]),
+            "in",
+            m["type"],
+            line,
+            extra,
+            auto=auto,
         )
+        if not auto:
+            _pickup_state(root, r[1], m, picked.get(m["id"]), m["id"] in handled)
+        (updates if auto else rows).append(r)
     for e in _sent(root):
         line = plain(e.get("preview") or "-")
         auto = is_update(e["type"], line, e.get("update"))
@@ -401,7 +424,7 @@ def view(root: Path) -> dict:
                     if peers
                     else "Pair a phone or allow a workspace in Settings to start a conversation."
                 ),
-                "button": {"label": "Open phone settings", "to": "app:settings/phone"},
+                "button": {"label": "Open Contacts settings", "to": "app:settings/phone"},
             },
         },
         {

@@ -33,8 +33,11 @@ QUIET_SEC = 0.7  # no new network event for this long = the page has settled
 _CANDIDATES = (
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    # Playwright 1.57+ downloads Chrome for Testing; older builds were Chromium
+    "~/Library/Caches/ms-playwright/chromium-*/chrome-mac*/Google Chrome for Testing.app/Contents/MacOS/"
+    "Google Chrome for Testing",
     "~/Library/Caches/ms-playwright/chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium",
-    "~/.cache/ms-playwright/chromium-*/chrome-linux/chrome",
+    "~/.cache/ms-playwright/chromium-*/chrome-linux*/chrome",
 )
 
 
@@ -114,7 +117,7 @@ class _Pipe:
         while b"\0" not in self.buf:
             left = deadline - time.monotonic()
             if left <= 0 or not select.select([self.r], [], [], left)[0]:
-                raise TimeoutError
+                raise TimeoutError("the browser did not answer in time")
             chunk = os.read(self.r, 1 << 20)
             if not chunk:
                 raise EOFError
@@ -196,6 +199,7 @@ def page_url(url: str, part: str) -> str:
     return url.split("#", 1)[0] + "#" + part
 
 
+STILL_LOADING = "the page was still loading"
 BUSY_JS = "!!document.querySelector('[aria-busy=\"true\"]')"
 
 
@@ -228,7 +232,7 @@ def capture(pipe: _Pipe, url: str, width: int, height: int, wait: int) -> bytes:
         # no picture, never one of a loading shape (CI pictures on a slow runner, ORCH-312).
         while _busy(pipe, s):
             if time.monotonic() >= deadline:
-                raise TimeoutError("the page was still loading")
+                raise TimeoutError(STILL_LOADING)
             time.sleep(0.2)
             pipe.settle(s, QUIET_SEC, min(deadline, time.monotonic() + QUIET_SEC))
         shot = pipe.call("Page.captureScreenshot", {"format": "png"}, session=s, timeout=60)
@@ -307,7 +311,14 @@ def shoot(
                     page = url if not done else shown
                 where = page_url(shown, part) if pname else shown
                 try:
-                    data = capture(pipe, page, w, _height(w, height), wait)
+                    try:
+                        data = capture(pipe, page, w, _height(w, height), wait)
+                    except TimeoutError as e:
+                        # A slow machine can leave one browser call unanswered (CI, ORCH-796): try that
+                        # picture once more. Never for a page still loading, never with a sign-in link.
+                        if str(e) == STILL_LOADING or "#launch=" in page:
+                            raise
+                        data = capture(pipe, page, w, _height(w, height), wait)
                 except (TimeoutError, EOFError, RuntimeError, KeyError, ValueError) as e:
                     raise Refused(f"No picture was made for {where} at {w} wide ({e}).") from None
                 if not data:
