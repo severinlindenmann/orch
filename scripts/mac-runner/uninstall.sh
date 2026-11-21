@@ -8,7 +8,7 @@ set -euo pipefail
 PLIST=/Library/LaunchDaemons/io.orch.mac-runner.plist
 launchctl bootout system "$PLIST" 2>/dev/null || true
 rm -f "$PLIST"
-rm -f /usr/local/orch-mac-runner/lock.sh /usr/local/orch-mac-runner/job-started.sh /usr/local/orch-mac-runner/job-completed.sh
+rm -f /usr/local/orch-mac-runner/lock.sh /usr/local/orch-mac-runner/job-started.sh /usr/local/orch-mac-runner/job-completed.sh /usr/local/orch-mac-runner/repo
 rmdir /usr/local/orch-mac-runner 2>/dev/null || true
 rm -f /Users/Shared/orch-locks/heavy/holder; rmdir /Users/Shared/orch-locks/heavy 2>/dev/null || true
 if [ "${1:-}" = "--remove-user" ]; then

@@ -65,6 +65,8 @@ mkdir -p "$LOCKS"; chown root:"$LG" "$LOCKS"; chmod 2770 "$LOCKS"
 echo "== 3/6 job hooks in $HOOKS"
 mkdir -p "$HOOKS"
 install -m 0755 -o root -g wheel "$SRC/lock.sh" "$SRC/job-started.sh" "$SRC/job-completed.sh" "$HOOKS/"
+printf '%s\n' "$REPO" > "$HOOKS/repo.new"; chown root:wheel "$HOOKS/repo.new"; chmod 0644 "$HOOKS/repo.new"
+mv -f "$HOOKS/repo.new" "$HOOKS/repo"   # the hooks trust this file, never the job's environment
 
 echo "== 4/6 GitHub runner $VER"
 R=$H/actions-runner
@@ -104,8 +106,6 @@ cat > "$PLIST" <<EOF
     <key>HOME</key><string>$H</string>
     <key>ACTIONS_RUNNER_HOOK_JOB_STARTED</key><string>$HOOKS/job-started.sh</string>
     <key>ACTIONS_RUNNER_HOOK_JOB_COMPLETED</key><string>$HOOKS/job-completed.sh</string>
-    <key>ORCH_RUNNER_REPO</key><string>$REPO</string>
-    <key>ORCH_LOCK_DIR</key><string>$LOCKS</string>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>LANG</key><string>en_US.UTF-8</string>
   </dict>

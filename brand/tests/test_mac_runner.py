@@ -238,7 +238,7 @@ def test_lock_refuses_an_unknown_name(tmp_path):
 def _hook(tmp_path, event, ref="refs/heads/develop", pr=None, repo=REPO):
     ev = tmp_path / "event.json"
     ev.write_text(json.dumps({"pull_request": pr} if pr else {}))
-    env = {"PATH": os.environ.get("PATH", ""), "ORCH_RUNNER_REPO": REPO, "GITHUB_REPOSITORY": repo, "ORCH_HOOK_TEST": "1",
+    env = {"PATH": os.environ.get("PATH", ""), "ORCH_RUNNER_REPO": REPO, "GITHUB_REPOSITORY": repo,
            "GITHUB_EVENT_NAME": event, "GITHUB_REF": ref, "GITHUB_EVENT_PATH": str(ev),
            "ORCH_LOCK_DIR": str(tmp_path / "locks"), "ORCH_LOCK_POLL_SECS": "0.2", "ORCH_LOCK_WAIT_SECS": "5"}
     return subprocess.run(["bash", str(RUNNER / "job-started.sh")], env=env, capture_output=True, text=True, timeout=30)
@@ -304,6 +304,22 @@ def test_the_runner_settings_live_in_the_root_owned_start_entry_not_in_the_runne
     assert '> "$R/.env"' not in setup and "ACTIONS_RUNNER_HOOK_JOB_STARTED</key>" in setup
 
 
-def test_a_refused_job_is_stopped_not_only_failed():
+def test_a_refused_job_is_stopped_not_only_failed_and_the_job_cannot_switch_the_hook():
     hook = (RUNNER / "job-started.sh").read_text()
     assert 'kill -9 "$worker"' in hook and "Runner.Worker" in hook
+    assert "ORCH_HOOK_TEST" not in hook  # no switch a job's own environment could set
+    assert 'if [ -f "$HERE/repo" ]; then REPO=$(cat "$HERE/repo"); unset ORCH_LOCK_DIR' in hook
+
+
+def test_installed_hook_ignores_a_repository_named_by_the_job(tmp_path):
+    inst = tmp_path / "hooks"
+    inst.mkdir()
+    for f in ("job-started.sh", "lock.sh"):
+        (inst / f).write_text((RUNNER / f).read_text())
+    (inst / "repo").write_text(REPO + "\n")
+    ev = tmp_path / "event.json"
+    ev.write_text(json.dumps({"pull_request": _pr("main", "someone/orch")}))
+    env = {"PATH": os.environ.get("PATH", ""), "ORCH_RUNNER_REPO": "someone/orch", "GITHUB_REPOSITORY": REPO,
+           "GITHUB_EVENT_NAME": "pull_request", "GITHUB_REF": "refs/pull/1/merge", "GITHUB_EVENT_PATH": str(ev)}
+    r = subprocess.run(["bash", str(inst / "job-started.sh")], env=env, capture_output=True, text=True, timeout=30)
+    assert r.returncode == 1 and "fork" in r.stderr

@@ -17,11 +17,13 @@ for _ in 1 2 3 4 5 6 7 8; do
 done
 refuse() {
   echo "mac runner: refused this job ($1). Only pushes to develop, the nightly run, manual runs and release pull requests run on this Mac." >&2
-  [ -n "$worker" ] && [ -z "${ORCH_HOOK_TEST:-}" ] && kill -9 "$worker" 2>/dev/null
+  [ -n "$worker" ] && kill -9 "$worker" 2>/dev/null
   exit 1
 }
-REPO=${ORCH_RUNNER_REPO:-}
-[ -n "$REPO" ] || refuse "ORCH_RUNNER_REPO is not set for the runner"
+# The repository comes from the root-owned file setup.sh writes next to the hooks. A job can set its own environment
+# variables, so the environment is read only where that file does not exist (the tests run the hook from the repo).
+if [ -f "$HERE/repo" ]; then REPO=$(cat "$HERE/repo"); unset ORCH_LOCK_DIR; else REPO=${ORCH_RUNNER_REPO:-}; fi
+[ -n "$REPO" ] || refuse "no repository is set for the runner"
 verdict=$(/usr/bin/python3 -I - "$REPO" <<'PY'
 import json, os, sys
 repo = sys.argv[1]

@@ -7,6 +7,7 @@
 set -u
 set +e   # the runner runs hooks with bash -e; nothing here may stop the clean-up half way
 HERE=$(cd "$(dirname "$0")" && pwd)
+[ -f "$HERE/repo" ] && unset ORCH_LOCK_DIR   # installed: the fixed lock folder, whatever the job set
 trap 'bash "$HERE/lock.sh" release xcode "ci-${GITHUB_RUN_ID:-}"; bash "$HERE/lock.sh" release heavy mac-runner; exit 0' EXIT
 ME=$(id -u)
 xcrun simctl shutdown all >/dev/null 2>&1
