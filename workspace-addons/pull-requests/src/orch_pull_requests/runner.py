@@ -271,6 +271,11 @@ class Runner:
         the release keeper."""
         return bool(e.get("first")) or _release_fix(self.root, e.get("ticket"))
 
+    def is_release_fix(self, e: dict) -> bool:
+        """A fix for a release (label "fix for release N"): it goes first and is checked alone, so it ships as
+        N.1 at once and no other change rides along (ORCH-552)."""
+        return isinstance(e.get("fix_release"), int)
+
     def base_to_blame(
         self, repo: str, base: str, url: str, entries: list[dict], failed: frozenset[str] | None = None
     ) -> bool:
@@ -332,6 +337,9 @@ class Runner:
         # fixes first (--first, or a red-run ticket of the release keeper): also while the base branch is green, so a
         # fix for a red release does not wait behind the whole line while develop moves on (ORCH-1023)
         rows = sorted(rows, key=lambda r: not self.is_fix(r))
+        if any(self.is_release_fix(r) for r in rows):  # a fix for a release: first, and alone
+            rows = sorted(rows, key=lambda r: not self.is_release_fix(r))
+            most = 1
         for r in rows:
             if r["repo"] != repo or len(batch) >= most or (batch and batch[0].get("lone")):
                 continue
@@ -1170,7 +1178,20 @@ def admit(root: Path, gh, url: str) -> dict:
         raise Refused("GitHub did not say which login gh uses; try again in a minute.")
     if want and not settings.same_login(me, want):
         raise Refused(f"gh uses the login {me} here, but this merge queue merges only as {want}; not queued.")
-    return {"base": b, "login": me}
+    out = {"base": b, "login": me}
+    fix = _fix_target(v.get("labels"))
+    if fix is not None:
+        out["fix_release"] = fix  # checked alone and ahead of the line (ORCH-552)
+    return out
+
+
+def _fix_target(labels) -> int | None:
+    try:
+        from orch import releasekeeper
+
+        return releasekeeper.fix_target(labels)
+    except Exception:  # noqa: BLE001 - an older orch: no fix lane, it waits its turn
+        return None
 
 
 def review_problem(v: dict) -> str | None:
