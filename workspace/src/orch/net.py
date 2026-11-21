@@ -279,6 +279,13 @@ def profile(root: Path, name: str, description: str | None, tags: list[str] | No
     return call_json("PATCH", cfg["url"] + "/v1/me", auth_headers(cfg), body, timeout=30)[1]
 
 
+def _now():
+    """The local time `when` compares with: one place a test can hold still (ORCH-1183, midnight)."""
+    import datetime as dt
+
+    return dt.datetime.now().astimezone()
+
+
 def when(iso: str | None) -> str:
     """A time in plain words and local time: 'today 21:48', 'tomorrow 21:48', 'Sat 7 Nov 21:48'."""
     import datetime as dt
@@ -287,7 +294,7 @@ def when(iso: str | None) -> str:
         t = dt.datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone()
     except (ValueError, AttributeError):
         return str(iso)
-    d = (t.date() - dt.datetime.now().astimezone().date()).days
+    d = (t.date() - _now().date()).days
     day = {0: "today", 1: "tomorrow", -1: "yesterday"}.get(d) or t.strftime(
         "%a %-d %b" if sys.platform != "win32" else "%a %d %b"
     )
