@@ -23,8 +23,9 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `motion.css`, `motion.js` | Motion tokens in use (see Motion contract). |
 | `icons.js` | One icon set, `icon('check', 16)`. |
 | `preview.css`, `fileviewer.*`, `evidence.js`, `blocks.*` | File and result previews, viewer, proof, blocks. |
-| `results.css`, `results.js` (17 Nov, ORCH-263) | Result widgets, look from Focus draft D: `UI.result(item, {size: 'sm' \| 'lg', state})` for the 16 kinds (Markdown, text and logs, code, JSON and YAML, table, web page, PDF, picture, video, audio, chart, change, pull request link, archive, plain link, unknown file), each loaded, empty, loading, error and too big; `UI.resultOverlay(list, i)` the big overlay (← → between results, × Close, Esc, a click outside). `UI.result.kindOf(name)` picks the kind. No fetching: the page hands in the content. Gallery: Result widgets. |
-| `question-card*.js`, `composer.*` | Question card, chat composer (`UI.composer`: words, pasted screenshots, picked or dropped files; `voice:true` adds Record, `UI.voiceRecorder`, words only from on-device speech to text; `send:false` inside the Review comment sheet, ORCH-422). |
+| `results.css`, `results.js` (17 Nov, ORCH-263) | Result widgets, look from Focus draft D: `UI.result(item, {size: 'sm' \| 'lg', state})` for the 16 kinds (Markdown, text and logs, code, JSON and YAML, table, web page, PDF, picture, video, audio, chart, change, pull request link, archive, plain link, unknown file), each loaded, empty, loading, error and too big; `UI.resultOverlay(list, i)` the big overlay (← → between results, × Close, Esc, a click outside). `UI.result.kindOf(name)` picks the kind. No fetching: the page hands in the content. Gallery: Result widgets. The dashboard feeds them from a ticket's real files, evidence, check runs and links in one place (`pages/results-feed.js`, ORCH-697: `resultsHost(ticket)` on wall tiles, in a session's chat and on the ticket page); `.results-host`, `.result-links` and `.result-more` lay them out. |
+| `term.css`, `term.js`, `xterm*.js`, `LICENSE-xterm.txt` (19 Nov, ORCH-744) | The helper's real screen, `UI.term({label, onInput, onSize})` on the terminal bridge: xterm.js 5.5.0 with its WebGL renderer and fit addon, vendored unchanged (licence and checksums in `LICENSE-xterm.txt`; the xterm.css rules it needs are in `term.css` on tokens). Watching only by default, **Let me type** switch, Copy, a paste with a line end asks once, the screen follows its box while typing. Gallery: Terminal. |
+| `question-card*.js`, `composer.*` | Question card, chat composer (`UI.composer`: words, pasted screenshots, picked or dropped files; `voice:true` adds Record, `UI.voiceRecorder`, words only from on-device speech to text; `send:false` inside the Review comment sheet, ORCH-422; `layout:'row'` is draft D's message box in a Focus pane: previews above one line of clip, words and Send, ORCH-695). |
 | `gallery.html`, `gallery.js`, `gallery.css`, `state-controls.js`, `samples/` | The living style guide, its fixtures, and the Loaded / Loading / Empty / Error switcher the mockup pages use. |
 | `mockup.css` | Mockup-only layout, linked only by the dashboard mockup pages (merged from the former per-draft sheets, #795 D1). Every rule is scoped with `body.mk-<draft>`; not for product pages, no new rules (R6.2). |
 | `COMPONENT-QA.md` | The 13 Nov component audit (QA-01..30). |
@@ -162,6 +163,7 @@ the first rows without any extra work.
 ## Behaviour notes (owner feedback 14 Nov)
 
 - "You: <name>" (kit menu above Settings): pick a person or Add person (name only). The chosen person is the actor of tickets and history lines made from the dashboard.
+- Sign-in state (ORCH-850): a `.chip` under "You: <name>": "Signed in" (filled), or an outline "View only" (with "Started by a helper. Restart with orch start in your terminal." when a helper started the dashboard). Read from `/api/session-state`, per browser.
 - "Send questions to my phone" is shown only when a relay is set up and a phone is paired. The Shared links tab only exists once sharing is set up (the add-on stays in Settings > Add-ons).
 
 ## Reference: the 13 Nov shared visual system
@@ -245,6 +247,7 @@ For ticket lists use `.page.list-page`, a one-line header, one 32 px toolbar, 8 
 - **Status:** one status phrase per unit, never the same status in header, banner and footer. A board column can supply the status label to its cards; do not repeat it just to add colour. A standalone card uses the labelled badge. Owner, one time fact and an optional preview complete the card. No IDs or technical chips.
 - **Rows versus cards:** use rows for a collection, cards for a result preview, a decision or a genuinely separate group. Rows share one outer frame, not a card per line. Cards have no shadow. Compact applies to cards as well as rows. Use `data-density="compact"` on the view or native radios inside `.density-scope`. `<html data-density="desktop">` gives a mouse screen (721 px and wider, hover) 32 px buttons and 36 px inputs; touch screens keep 44 px. The workspace badge (`.wsb.s16/s26/s32/s46` with `data-c`), the look picker (`.lk-*`) and the sidebar switcher (`.ws-switch`, `.sw-menu`) live in `widgets.css` (gallery: "Workspace look").
 - **Avatars / helper chips:** initial or helper symbol plus visible name. A lone initial does not identify responsibility. No decorative stacks of avatars.
+- **Changed lines on a card (diff):** `UI.docBox` shows `diff` lines as added (green) and removed (red tint), a file's name above its lines, and a risky added line marked red with a short reason pill (`risk`, ORCH-429: the CI workflow Merge card). Red means "look at this", never decoration; at most 30 lines, the rest behind the card's link.
 - **Progress:** known steps use a labelled count and 4 px bar, or the four-stage stepper. Do not invent percentages for open-ended work. Announce meaningful stage changes, not every tick. Long jobs show elapsed time, current action and Leave running / Cancel (BP-63).
 - **Side panel:** editable owner, due and definition of done. Keep extra properties under one Details disclosure. Production edits save immediately, with rollback on failure and Undo where appropriate (BP-28).
 - **Menus / tooltips:** native details for simple menu disclosures; normal links/buttons retain natural keyboard navigation. These are not ARIA application menus. Close on Escape as shown; application click-away handling may be added. Tooltips only reinforce shortcuts, never explain a primary label.
@@ -335,6 +338,38 @@ carry a tag. The selected row is `aria-current` (brand edge), a helper that need
 A helper that needs you turns the whole tile orange. The pane's message box (`.live-msg`) starts with `.live-to`:
 "Message to: Write the texts (ORCH-301). Only this helper gets it." In the bar the group is one chip with the helper
 count (`.lbar-n`), the same number as its tile.
+
+### Chat view of a session (ORCH-687)
+A ticket's pane has Chat | Terminal in its header (`.segmented.live-view`, `aria-pressed`; in a narrow pane "Show
+terminal" / "Show chat" in More). Chat is the default and the choice is kept per browser. `.live-chat` (`role=log`) is
+the ticket read as a conversation, oldest first: a done step and other events are one muted line (`.live-ev`, "✓ Step 2
+done: … · 14:21"); the helper's words are `.live-chat-msg` on the left (`surface-2`), your words on the right
+(`data-w=y`, `brand-soft`), each with "Helper · 14:38" or "You · 14:55" above, and its links (`.live-links`) inside.
+The waiting question is never a message: it is the orange card (`.live-ask`, `needs-you` edge, `warning-soft`) above
+the chat, answered there with its options or own words.
+
+### Terminal (ORCH-744)
+`.term` is the helper's real screen wherever a page shows it (the new Focus pane in Terminal view, dashboard
+`pages/liveterm.js`, fed by the terminal bridge's stream). One line on top says what you can do now ("Watching ·
+select text to copy it", "Typing: your keys go to the helper · Shift+Tab stops", "Watching only · typing is off in
+Settings"), then **Let me type** (a `.switch`, shown only when the workspace allows typing) and Copy (the selection,
+else all of the terminal's text). Typing on gives the box a brand edge and a blinking cursor (still with reduced
+motion). Nothing goes out while watching; a paste with a line end shows `.term-ask` ("Paste 3 lines into the helper's
+screen?" Paste / Cancel) first; Ctrl+C or Cmd+C with a selection copies. The screen is xterm.js on a canvas (WebGL,
+loaded before the terminal opens so no inline style is added); its colours are read from the tokens. A program's
+clipboard writes and title changes are ignored; links open only for http and https, with noopener. While watching the
+screen keeps the helper's size and scrolls; while typing it follows its box. States: loading (skeleton), live,
+reconnecting (the last screen stays, typing off until the person turns it on again), typing off, closed, no screen
+(one sentence why), no WebGL (one sentence, the chat view instead).
+
+### Voice into the message box (ORCH-696)
+Only while the relay is on: a microphone (`btn icon sm ghost`, "Speak") sits in `.live-msg-row` between the words and
+Send. While listening `.live-voice` (`role=status`, `surface-2`, `r1`) above the row shows a moving level
+(`.live-voice-wave`, still with reduced motion), "Listening 0:04", Stop and Cancel; Esc cancels and the microphone is
+hidden. Then "Writing down your words…", then the words land in the box and `.live-vhint` under it says "From your
+voice. Check the words, change what is wrong, then send." (gone on the first key). Nothing is sent by itself. A
+refusal (microphone blocked, nothing heard, the relay said no) is one plain sentence in the same place (`role=alert`).
+The recording itself is `UI.voiceRecorder` (composer.js) with `words:false`, its own controls drawn by the page.
 
 ## Loading, errors and performance
 

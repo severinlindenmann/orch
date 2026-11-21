@@ -359,21 +359,34 @@ def busy_words(n: int, ticket: str) -> str:
 PRIORITIES = ("high", "normal", "low")  # the order tickets waiting in line start in (then oldest first)
 
 
-def _queue_for_slot(root: Path, tid: str, by: str, text: str, priority: str = "normal") -> None:
-    """Put the ticket in line for a free slot. Queued again: the line keeps one place, the higher priority."""
+def _queue_for_slot(
+    root: Path, tid: str, by: str, text: str, priority: str = "normal", prepare: bool = False
+) -> None:
+    """Put the ticket in line for a free slot. Queued again: the line keeps one place, the higher priority.
+    prepare: the place is for a prepare-only run (ORCH-738); a real start queued meanwhile makes it one for
+    the work (a person's Start always wins over Prepare)."""
     with runs.locked(root, tid):
         items = runs._pending_read(root, tid)
         mine = [i for i in items if i.get("via") == "slots" and not i.get("delivered_at")]
         want = PRIORITIES.index(priority)
+        made = False
         if mine:
             want = min([_rank(i) for i in mine] + [want])  # queued again: never lower
         else:
             item = runs._pending_add_locked(root, tid, by, "event", text, "slots", None)
             items = runs._pending_read(root, tid)
             mine = [i for i in items if i["id"] == item["id"]]
-        if any(_rank(i) != want or (want != 1 and "priority" not in i) for i in mine):
-            for i in mine:
-                i["priority"] = PRIORITIES[want]
+            made = True
+        changed = False
+        for i in mine:
+            if made and prepare and not i.get("prepare"):
+                i["prepare"], changed = True, True
+            elif not prepare and i.get("prepare"):
+                i.pop("prepare")
+                changed = True
+            if _rank(i) != want or (want != 1 and "priority" not in i):
+                i["priority"], changed = PRIORITIES[want], True
+        if changed:
             runs._pending_write(root, tid, items)
 
 
@@ -440,6 +453,8 @@ def start_live(
         r = tmux(
             root, "new-session", "-d", "-P", "-F", "#{pane_pid}", "-x", "200", "-y", "50",
             "-s", tid, "-c", str(work), "-e", f"ORCH_ROOT={root}", "--", *cmd,
+            # ORCH-707: orch's own server passes focus events on, so the tool shows no tmux tip about it
+            ";", "set-option", "-g", "focus-events", "on",
         )  # fmt: skip
         if r.returncode != 0:
             raise Refused(f"tmux could not start the session: {r.stderr.strip() or 'unknown error'}")
@@ -448,6 +463,7 @@ def start_live(
             tmux={"socket": socket_name(root), "session": tid},
             live={"state": "starting", "since": tickets.now()},
         )  # fmt: skip
+        runs.set_process_fields(root, tid, run, permissions=p.get("permissions"))  # ORCH-818: the pane header
     except BaseException:
         runs.release(root, tid, run)
         hooks_path.unlink(missing_ok=True)
@@ -1555,6 +1571,23 @@ def stop(root: Path, tid: str, hold: bool = False) -> bool:
     return True
 
 
+def interrupt(root: Path, tid: str) -> bool:
+    """Stop only the current step of a live session (`orch run interrupt`, Stop in Focus, ORCH-817): the
+    tool's own interrupt keys go in once; the session, its claim and its conversation stay, and the helper
+    waits for the next message. False when no live session is on. A tool with no interrupt keys is refused."""
+    rec = runs.read(root, tid)
+    if not rec or rec.get("mode") != "live" or not session_exists(root, tid):
+        return False
+    keys = adapters.load(rec["agent"], root).get("live", {}).get("interrupt_keys") or []
+    if not keys:
+        raise Refused(
+            "This helper's tool has no key that stops one step. End the session instead: orch run stop."
+        )
+    for k in keys:
+        tmux(root, "send-keys", "-t", target(tid), k)
+    return True
+
+
 def stop_hidden(root: Path) -> list[str]:
     """`orch stop`: also end the live sessions a person can not see in the ticket list: the hidden Chat
     (General) ticket's and those of tickets with waiting input (run/pending). Only an exact session name of
@@ -1856,8 +1889,12 @@ def start_waiting(root: Path) -> list[str]:
             continue
         if _status(root, tid) in ("done", "dropped"):
             continue  # a Done ticket never gets a run by itself (ORCH-247); the person starts it by hand
+        prepare = all(i.get("prepare") for i in items)  # Save without starting (ORCH-738)
         with contextlib.suppress(Exception):
-            runs.start(root, tid, items[0]["by"], mode="live")
+            if prepare:
+                runs.start(root, tid, items[0]["by"], prepare=True)
+            else:
+                runs.start(root, tid, items[0]["by"], mode="live")
             started.append(tid)
     return started
 

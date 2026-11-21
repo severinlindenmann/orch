@@ -32,6 +32,28 @@ def _orch_bin() -> str | None:
     return SELF if importlib.util.find_spec("orch") else os.environ.get("ORCH_BIN") or None
 
 
+def _same_orch_bin(orch_bin: str, root: Path | None = None) -> str:
+    """`orch:self` when `orch_bin` is this very orch, so its reads are answered in this process (orch.reads)
+    instead of one new process per read; a test's fake orch or another install stays as it is (ORCH-634)."""
+    import os
+    import shutil
+
+    try:
+        from orch import reads
+    except ImportError:
+        return orch_bin
+    from .actions import SELF
+
+    if os.sep not in orch_bin and (os.altsep is None or os.altsep not in orch_bin):
+        path = shutil.which(orch_bin)  # a bare name: through PATH, as the command starts it
+    else:
+        path = str(Path(root or ".") / orch_bin)  # relative: from the workspace (the command's cwd)
+    try:
+        return SELF if hasattr(reads, "same_orch") and reads.same_orch(path) else orch_bin
+    except Exception:  # noqa: BLE001 - unsure: the command as before
+        return orch_bin
+
+
 def _open(root: Path, page: str) -> None:
     """Open the page; the launch token (URL fragment) goes only to an absolute-path opener (H1)."""
     try:
@@ -132,7 +154,7 @@ def _area(args, root: Path) -> int:
 def _data(args, root: Path) -> int:
     import os
 
-    orch_bin = os.environ.get("ORCH_BIN") or "orch"
+    orch_bin = _same_orch_bin(os.environ.get("ORCH_BIN") or "orch", root)
     if args.cmd == "view":
         from .view import build
 

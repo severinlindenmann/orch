@@ -618,10 +618,10 @@ async fn answer(
         }
         let (qb, qextra) = store::open_payload(&app.key, &q);
         // A verdict (relay-api.md "Review cards on the phone"): only on a question with a digest, naming exactly that
-        // digest, at most 8 KB, every voice file an upload of this phone (another's, a workspace's or an unknown blob
+        // digest, at most 8 KB, every voice file and added file an upload of this phone (another's, a workspace's or an unknown blob
         // answers the same 404).
         let verdict = &v["verdict"];
-        let mut voice: Vec<&str> = vec![];
+        let mut named: Vec<&str> = vec![];
         if !verdict.is_null() {
             if qb["digest"].as_str().is_none() || verdict["digest"] != qb["digest"] {
                 return Err(invalid(
@@ -645,7 +645,27 @@ async fn answer(
                 if !own {
                     return Err(not_found("Upload the file first (POST /v1/phone/blobs)."));
                 }
-                voice.push(b);
+                named.push(b);
+            }
+            // Pictures, files and recordings added to the answer: the same rule, and the size must be the upload's.
+            for fl in verdict["note"]["files"].as_array().into_iter().flatten() {
+                let b = fl["blob_id"].as_str().unwrap_or("");
+                let stored: Option<i64> = c
+                    .query_row(
+                        "SELECT size FROM blobs WHERE id=?1 AND uploader=?2",
+                        [b, &pid],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                match stored {
+                    None => return Err(not_found("Upload the file first (POST /v1/phone/blobs).")),
+                    Some(n) if Some(n) != fl["size"].as_i64() => {
+                        return Err(invalid(
+                            "An attachment's size does not match the uploaded file.",
+                        ))
+                    }
+                    _ => named.push(b),
+                }
             }
         }
         let tx = c.unchecked_transaction()?;
@@ -671,8 +691,8 @@ async fn answer(
         if let Some(cid) = &cid {
             remember_client_id(&c, &pid, cid, &id)?;
         }
-        // The workspace this answer goes to may read its voice files (GET /v1/blobs/<id>); they are used, not purged.
-        for b in &voice {
+        // The workspace this answer goes to may read its voice and added files (GET /v1/blobs/<id>); they are used, not purged.
+        for b in &named {
             c.execute(
                 "INSERT OR IGNORE INTO phone_blobs(blob_id,msg_id) VALUES(?1,?2)",
                 params![b, id],
@@ -713,15 +733,25 @@ async fn send(
     body: Bytes,
 ) -> Res<(StatusCode, Json<Value>)> {
     let v = parse_body(&body)?;
-    let id = {
+    let (id, team) = {
         let c = app.db.lock().unwrap();
         let (pid, _, ws) = auth::phone(&c, &h)?;
         if let Some(cid) = v["client_id"].as_str() {
             if let Some(old) = client_dup(&c, &pid, cid)? {
-                return Ok((
-                    StatusCode::OK,
-                    Json(json!({"id": old, "client_id": cid, "duplicate": true})),
-                ));
+                let mut out = json!({"id": old, "client_id": cid, "duplicate": true});
+                // A retry after a lost reply still says whether the stored text kept the team choice.
+                let stored = c
+                    .query_row(
+                        &format!("SELECT {MSG_COLS} FROM messages WHERE id=?1"),
+                        [&old],
+                        msg_from_row,
+                    )
+                    .optional()?;
+                if stored.is_some_and(|m| store::open_payload(&app.key, &m).0.get("team").is_some())
+                {
+                    out["team"] = true.into();
+                }
+                return Ok((StatusCode::OK, Json(out)));
             }
         }
         check("send_request", &v)?;
@@ -791,6 +821,12 @@ async fn send(
                 b.insert("human_review".into(), on.into());
             }
         }
+        // ORCH-1175: the person's Add / @ choice in a ticket chat, copied unchanged (the schema checked its form
+        // and that it comes with text and a ticket); the ticket's workspace decides what it does.
+        let team = !v["team"].is_null();
+        if team {
+            b.insert("team".into(), v["team"].clone());
+        }
         let body = Value::Object(b);
         // Same schema check as workspace messages.
         let mut cand = json!({"schema": "orch.msg/1", "id": rand_id("m_", 16), "from": pid, "to": to,
@@ -816,14 +852,15 @@ async fn send(
             )?;
         }
         tx.commit()?;
-        id
+        (id, team)
     };
     app.notify.notify_waiters();
     let cid = v["client_id"].clone();
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({"id": id, "client_id": cid})),
-    ))
+    let mut out = json!({"id": id, "client_id": cid});
+    if team {
+        out["team"] = true.into();
+    }
+    Ok((StatusCode::CREATED, Json(out)))
 }
 
 /// Largest phone upload: 25 MB.

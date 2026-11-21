@@ -16,6 +16,11 @@
   base did not change is merged on its own checks, with no second run. false = it is checked in a queue group of
   its own on top of the base first, like every group: for a repository whose pull requests run only a light set of
   checks of their own and the full set runs on queue groups (orch development, ORCH-545).
+- `group_check`: how a queue group is checked (ORCH-1124, localcheck.py). `github` (default) = GitHub's checks of
+  the group pull request; `shadow` = the same, and the local check runs next to it so both verdicts can be compared;
+  `local` = the local check on this computer decides and GitHub's group run is skipped. Anything else = `github`.
+- `check_command`: the local check's command (a list of words, run in a clean copy of the group commit; `{base}` is
+  the base commit). Default: DEFAULT_CHECK.
 """
 
 from __future__ import annotations
@@ -31,6 +36,8 @@ DEFAULT_ALONE = (
     "workspace/src/orch/ghlimit.py",
 )
 DEFAULT_MAX_GROUP, MOST_GROUP = 5, 20
+GROUP_CHECKS = ("github", "shadow", "local")
+DEFAULT_CHECK = ("python3", "scripts/ci_light.py", "--base", "{base}")
 
 
 def _table(root: Path) -> dict:
@@ -81,3 +88,21 @@ def max_group(root: Path) -> int:
     if isinstance(got, bool) or not isinstance(got, int) or not 1 <= got <= MOST_GROUP:
         return DEFAULT_MAX_GROUP
     return got
+
+
+def group_check(root: Path) -> str:
+    got = _table(root).get("group_check")
+    got = got.strip().lower() if isinstance(got, str) else ""
+    return got if got in GROUP_CHECKS else "github"
+
+
+def check_command(root: Path) -> list[str]:
+    got = _table(root).get("check_command")
+    if isinstance(got, list) and got and all(isinstance(x, str) and x.strip() for x in got):
+        return [x.strip() for x in got]
+    return list(DEFAULT_CHECK)
+
+
+def precheck(root: Path) -> str | None:
+    got = _table(root).get("precheck")
+    return got.strip() if isinstance(got, str) and got.strip() else None

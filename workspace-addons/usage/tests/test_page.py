@@ -86,7 +86,7 @@ def test_every_click_is_a_cli_command_with_a_history_line(cli, fake_switcher, ws
 def test_period_change_and_a_credit_limit_until_a_date(cli, fake_switcher, ws):
     _seed(cli)
     ids = _ids(ws)
-    p = ws / ".orch/addons/usage/accounts.json"
+    p = store.usage_dir(ws) / "accounts.json"
     data = json.loads(p.read_text())
     data["accounts"].append(
         {
@@ -133,11 +133,11 @@ def test_period_change_and_a_credit_limit_until_a_date(cli, fake_switcher, ws):
 )
 def test_bad_clicks_are_refused_and_change_nothing(cli, fake_switcher, ws, verb, target):
     _seed(cli)
-    before = (ws / ".orch/addons/usage/accounts.json").read_text()
+    before = (store.usage_dir(ws) / "accounts.json").read_text()
     target = target.replace("ID", _ids(ws)["first"])
     code, d = _act(cli, verb, target)
     assert code == 2 and d["error"]
-    assert (ws / ".orch/addons/usage/accounts.json").read_text() == before
+    assert (store.usage_dir(ws) / "accounts.json").read_text() == before
 
 
 def test_all_at_limit_and_one_account(cli, fake_switcher, ws):
@@ -150,6 +150,16 @@ def test_all_at_limit_and_one_account(cli, fake_switcher, ws):
     m = page.build(usage_cli.gather(ws), ws)
     # the two others stay known (missing), so a second account is still there
     assert m["one_account"] is False and {a["state"] for a in m["accounts"][1:]} == {"missing"}
+
+
+def test_every_account_at_limit_is_one_box_not_two(cli, fake_switcher, ws):
+    _seed(cli)
+    switching._write(
+        switching.memory_path(ws), {"all_at_limit": True, "alerts": [switching.ALL_AT_LIMIT_ALERT]}
+    )
+    m = page.build(usage_cli.gather(ws), ws)
+    assert m["all_at_limit"] is True
+    assert switching.ALL_AT_LIMIT_ALERT not in m["warnings"]
 
 
 def test_one_account_only(cli, fake_switcher, ws):
@@ -277,7 +287,7 @@ def test_many_switches_in_a_short_while_give_one_warning(ws):
 
 def test_until_on_a_week_limit_is_refused_with_a_hint_to_use_end(cli, fake_switcher, ws):
     _seed(cli)
-    f = ws / ".orch/addons/usage/accounts.json"
+    f = store.usage_dir(ws) / "accounts.json"
     before = f.read_text()
     for argv in (
         ("limit", "first", "90%", "--period", "week", "--until", "2099-02-01"),
@@ -287,3 +297,17 @@ def test_until_on_a_week_limit_is_refused_with_a_hint_to_use_end(cli, fake_switc
         code, out, err = cli(*argv)
         assert code == 2 and "--end" in (out + err), argv
     assert f.read_text() == before
+
+
+def test_a_5_hour_window_without_its_own_limit_shows_the_default_early_switch(cli, fake_switcher, ws):
+    """ORCH-643: an account with only a weekly limit still switches early at 90 % of its 5 hours (ORCH-642); the
+    page says so on that bar. A window with its own limit shows that limit, never the default."""
+    assert jrun(cli, "list")[0] == 0
+    assert jrun(cli, "limit", "first", "98%", "--period", "week", "--by", "human:owner")[0] == 0
+    m = page.build(usage_cli.gather(ws), ws)
+    bars = {b["period"]: b for b in m["accounts"][0]["bars"]}
+    assert bars["5h"].get("early") == switching.DEFAULT_EARLY["5h"] == 90.0 and "limit" not in bars["5h"]
+    assert bars["week"]["limit"] == 98 and "early" not in bars["week"]
+    _seed(cli)  # first now has its own 5-hour limit (95 %)
+    bars = {b["period"]: b for b in page.build(usage_cli.gather(ws), ws)["accounts"][0]["bars"]}
+    assert bars["5h"]["limit"] == 95 and "early" not in bars["5h"] and "early" not in bars["week"]

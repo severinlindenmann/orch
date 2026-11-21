@@ -53,7 +53,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import store
+from . import computer, store
 
 STARTS = "starts.json"
 SCHEMA = "orch.usage-starts/1"
@@ -100,7 +100,7 @@ class Pick:
 
 
 def _path(root: Path) -> Path:
-    return store.usage_dir(root) / STARTS
+    return store.ensure(root) / STARTS
 
 
 def _load(root: Path) -> dict:
@@ -125,7 +125,7 @@ def _load(root: Path) -> dict:
 
 
 def _save(root: Path, starts: dict) -> None:
-    d = store.usage_dir(root)
+    d = store.ensure(root)
     d.mkdir(parents=True, exist_ok=True)
     body = (
         json.dumps({"schema": SCHEMA, "starts": starts}, indent=1, ensure_ascii=False, sort_keys=True) + "\n"
@@ -450,6 +450,7 @@ def pick(
                 "ahead": ahead,
                 "why": p.why,
                 "tries": int((old or {}).get("tries", 0)) + 1,
+                "workspace": computer.label(root),  # ORCH-943: the split per workspace on the page
             }
         _save(root, starts)
         return p

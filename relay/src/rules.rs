@@ -93,6 +93,12 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
     // The marker is checked wherever it appears, not only on a text (the schema refuses other types too).
     // The caller holds the one database lock from the duplicate check to the insert, so the one-result
     // rule below cannot race another result.
+    // ORCH-1175: the Add / @ choice is the person's, set only by the relay on a phone text (POST /v1/phone/send).
+    if msg["body"].get("team").is_some() {
+        return Err(invalid(
+            "`team` is set only by the relay on a phone's text. Send the text without it.",
+        ));
+    }
     if msg["body"].get("proposal_result").is_some() {
         if typ != "text" {
             return Err(invalid("Invalid proposal result."));
@@ -110,9 +116,6 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
             return Err(invalid("Invalid taken-back text."));
         }
         check_taken_back(c, key, sender, &msg)?;
-    }
-    if typ == "notebook" {
-        return crate::notebook::authorize_ask(c, key, sender, msg);
     }
     if let Some((idx, label)) = kind_of(&typ) {
         if to == "phones" || valid_id(&to, "ph_", 10) {

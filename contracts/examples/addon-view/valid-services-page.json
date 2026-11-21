@@ -106,6 +106,7 @@
           "lines": [
            "It stops now and leaves this list.",
            "It will not start by itself again.",
+           "Its log stays on this computer.",
            "Its files on this computer stay as they are."
           ],
           "keep": "Keep it"
@@ -210,6 +211,11 @@
           "link": "t_m2x8p0q"
          },
          {
+          "label": "Address",
+          "value": "http://127.0.0.1:5173",
+          "link": "http://127.0.0.1:5173"
+         },
+         {
           "label": "Depends on it",
           "value": "The demo workspace"
          }
@@ -237,6 +243,7 @@
           "lines": [
            "It stops now and leaves this list.",
            "It will not start by itself again.",
+           "Its log stays on this computer.",
            "Its files on this computer stay as they are."
           ],
           "keep": "Keep it"
@@ -319,6 +326,7 @@
           "lines": [
            "It stays stopped and leaves this list.",
            "It will not start by itself again.",
+           "Its log stays on this computer.",
            "Its files on this computer stay as they are."
           ],
           "keep": "Keep it"

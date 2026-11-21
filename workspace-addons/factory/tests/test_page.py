@@ -1264,3 +1264,73 @@ def test_budget_health_is_measured_when_the_page_reads_it(ws, run, srv):
     code, home, _ = get(srv, "/api/home")
     by = {o["id"]: o for o in home["orders"]}
     assert code == 200 and by[order]["budget"]["used"] == 12
+
+
+# Report r-1119-2059 (ORCH-965): the proposal's Time + budget card showed "AI cost about $—", "Ready around —" and
+# repeated your time from the summary line above it.
+
+
+def test_proposal_time_and_budget_show_only_values_and_your_time_once():
+    import shutil
+
+    js = _page_js()
+    body = js[js.index("  function proposal(order) {") : js.index("  // A task handed to another workspace")]
+    assert "Your time" not in body and "'~' + duration(time.active_min)];" not in body
+    # the builder words of the report are gone from the proposal; its top button says Run details (owner, ORCH-965 q1)
+    for word in (
+        "API target",
+        "'ETA '",
+        "Budget preset",
+        "card('The line'",
+        "Crew + what it needs",
+        "Active time cap",
+    ):
+        assert word not in body, word
+    assert "orderLink(order, 'Run details')" in body
+    if not shutil.which("node"):
+        return
+    names = (
+        "const text",
+        "const capital",
+        "function parseWhen",
+        "function dayWord",
+        "function hhmm",
+        "function when(",
+        "function whenRange",
+        "function duration",
+        "function timeBudget",
+    )
+    src = []
+    for name in names:
+        if name not in js:
+            continue
+        start = js.index(name)
+        end = js.index("\n  }\n", start) + 4 if name.startswith("function") else js.index("\n", start)
+        src.append(js[start:end])
+    cases = (
+        "[[{}, {}], [{active_min: 45}, {preset: 'small', active_min_cap: 60}],"
+        " [{active_min: 90, owner_min: 5}, {api_usd_target: 12, preset: 'standard', active_min_cap: 120}]]"
+    )
+    out = subprocess.run(
+        [
+            "node",
+            "-e",
+            "\n".join(src) + f"\nconsole.log(JSON.stringify({cases}.map(([t, b]) => timeBudget(t, b))))",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    empty, no_cost, full = json.loads(out)
+    assert empty == [["meta", "Time and budget are not planned yet."]]
+    assert no_cost == [
+        ["p", "~45 min active"],
+        ["meta", "Budget · Small"],
+        ["meta", "Time limit (active time): 1 h."],
+    ]
+    assert full == [
+        ["p", "~1 h 30 min active · AI cost about $12"],
+        ["meta", "Budget · Standard"],
+        ["meta", "Time limit (active time): 2 h. AI cost is a target, not a limit."],
+    ]
+    assert "—" not in out and "Your time" not in out
