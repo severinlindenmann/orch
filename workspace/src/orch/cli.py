@@ -34,6 +34,7 @@ from orch import (
     cli_secret,
     cli_session,
     cli_shot,
+    cli_skill,
     cli_status,
     cli_tools,
     cli_workspace,
@@ -416,6 +417,7 @@ ADVANCED_TOP = {
     "session",
     "triage",
     "checks",  # ORCH-529: --help-all only
+    "skill",  # ORCH-532: for helpers and scripts
     "tools",  # ORCH-589: --help-all only (updates are a person's choice in Settings)
 }
 ADVANCED_SUB = {"relay": {"allow"}}
@@ -551,6 +553,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_workspace.add_parsers(sub, common)
     cli_health.add_parsers(sub, common)
     cli_checks.add_parsers(sub, common)
+    cli_skill.add_parsers(sub, common)
     cli_tools.add_parsers(sub, common)
 
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
@@ -1163,6 +1166,7 @@ def run(args: argparse.Namespace) -> None:
         or cli_workspace.dispatch(args, root)
         or cli_health.dispatch(args, root)
         or cli_checks.dispatch(args, root)
+        or cli_skill.dispatch(args, root)
         or cli_tools.dispatch(args, root)
     ):
         pass

@@ -1,6 +1,9 @@
 ---
 name: orch-focus
 description: Use when a person wants to watch an agent work on one ticket live, answer its questions as they come, or send it a message while it works. Focus is a live page; your part is to keep the ticket current. Not for a list of all tickets (that is the dashboard).
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch focus
 

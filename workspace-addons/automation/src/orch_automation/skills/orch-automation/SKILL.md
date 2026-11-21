@@ -1,6 +1,9 @@
 ---
 name: orch-automation
 description: "{{description}}"
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch automation
 

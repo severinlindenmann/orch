@@ -352,6 +352,10 @@ HINTS = {
     "relay problem done": "orch relay problem list",
     "relay problem back": "orch relay problem list",
     "relay *": "carry on; a reply comes in on your next run.",
+    "skill check": "after you change a skill, run it again: orch skill check",
+    "skill list": "orch skill show <name>",
+    "skill show": "orch skill check <name>",
+    "skill review-due": "orch ticket list",
 }
 
 
