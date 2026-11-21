@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-34 steps: 31 ready (the script clicks them), 3 pending (not built yet).
+34 steps: 33 ready (the script clicks them), 1 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -220,6 +220,7 @@ Must be seen:
 
 - Two, then three panes sit next to each other; on the right they are stacked.
 - Every pane has pin, add beside, place, minimise and close.
+- With three panes Add beside is not greyed: its menu says three is the most and to close one first.
 - The split stays while the page changes.
 - Closing a pane gives its room to the others.
 - On a phone one session shows at a time and there is no add beside.
@@ -417,22 +418,26 @@ Must be seen:
 ## 23. Opening, zooming, pinning and splitting animate
 
 - Part: motion (draft D feature 7, 8, 9)
-- State: pending, waits for: Look and motion (Look and motion stage)
+- State: ready, clicked by the script
 - Pictures: `fd-23-motion-1280.png`, `fd-23-motion-1920.png`, `fd-23-motion-390.png`
 
 Do:
 
-1. Open the layer, zoom a tile, pin a session, add a pane beside, each once.
+1. Open a result big and close it.
+2. Zoom a tile into the layer, go full screen and back.
+3. Add two panes beside and close one (a phone: open another session from the wall).
+4. Put the layer back in the bar, pin a session, zoom a tile again.
 
 Must be seen:
 
-- Each change moves smoothly and quickly, nothing jumps.
+- Each change moves smoothly and quickly, nothing jumps: the pane grows out of its tile, the panes slide to their new place, the panel fades out when it closes, a pinned tile slides to the Pinned band.
+- Only transform and opacity move, each move at most 240 ms, layout shift at most 0.1.
 - The picture is taken after the move ends.
 
 ## 24. With reduced motion everything stays still
 
 - Part: reduced motion (draft D feature 7, 8, 9)
-- State: pending, waits for: Look and motion (Look and motion stage)
+- State: ready, clicked by the script
 - Reduced motion on for this step.
 - Pictures: `fd-24-reduced-motion-1280.png`, `fd-24-reduced-motion-1920.png`, `fd-24-reduced-motion-390.png`
 
@@ -526,7 +531,7 @@ Do:
 Must be seen:
 
 - The wall shows with that session open in the layer, the keyboard in its pane.
-- An unknown ticket shows the wall, opens nothing and says "There is no ticket with this address."
+- An unknown ticket shows the wall, opens nothing and says "There is no ticket with this address. Find it on the Tickets page." with an Open Tickets button
 
 ## 30. Keyboard only: wall, layer and back to the bar
 

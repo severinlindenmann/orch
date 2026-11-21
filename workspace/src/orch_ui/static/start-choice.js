@@ -41,7 +41,13 @@
       const w = said.get(e.ticket);
       if (!w) return;
       if (e.state === 'queued') w.toast(w.name + ' waits in line for a free helper place.', 'ok');
-      else if (e.state === 'failed' || e.state === 'slow') w.toast(e.text, 'error');
+      else if (e.state === 'failed' && w.again) {
+        /* a failed start says what to do and offers the one button that does it (ORCH-1362, UX checklist E3/L4) */
+        const t = String(e.text || 'Could not start the helper.').trim().replace(/([^.!?])$/, '$1.');
+        const again = () => w.again(e.rest);
+        again.label = 'Try again';
+        w.toast(/try again/i.test(t) ? t : t + ' Press Try again to start it once more.', 'error', again);
+      } else if (e.state === 'failed' || e.state === 'slow') w.toast(e.text, 'error');
       if (!['starting', 'started'].includes(e.state)) said.delete(e.ticket);
     });
     return st;
@@ -59,7 +65,7 @@
     host.replaceChildren(wrap, whyLine);
     let isOpen = false;
     let menuNow = null; /* the drawn caret menu: a redraw reads its open state, as its toggle event comes later */
-    const toast = (text, kind) => (o.toast || (UI.toast ? t => UI.toast(t) : () => {}))(text, kind);
+    const toast = (text, kind, again) => (o.toast || (UI.toast ? (t, k, a) => UI.toast(t, a, k) : () => {}))(text, kind, again);
 
     const view = () => S.sessions(o.sessions, new Date(), UI.stamp ? (at, now) => UI.stamp(at.toISOString(), {now: now.toISOString()}) : null);
     const pickOf = () => {
@@ -203,13 +209,14 @@
       }
       return w;
     }
-    async function go(ops, how) {
+    /* rest: Try again after a failed start sends only the steps that did not go through, without o.before again */
+    async function go(ops, how, rest) {
       if (starter.starting(o.ticket)) return;
-      const first = o.before ? await o.before(ops) : [];
+      const first = rest ? [] : o.before ? await o.before(ops) : [];
       if (first === null) return;
       isOpen = false;
-      said.set(o.ticket, {name: o.name || 'The ticket', toast});
-      starter.start(o.ticket, [...(first || []), ...ops]).then(r => {
+      said.set(o.ticket, {name: o.name || 'The ticket', toast, again: left => go(ops, how, left && left.length ? left : null)});
+      starter.start(o.ticket, rest || [...(first || []), ...ops]).then(r => {
         if (r && r.ok && !r.again) {
           picks.delete(o.ticket);
           toast(how === 'fresh' ? 'Fresh start on ' + (o.name || 'the ticket') + ': the helper reads the ticket again.'
