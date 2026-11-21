@@ -1472,3 +1472,20 @@ button.gtree-row:hover{background:var(--surface-2)}
 @keyframes launch-breathe{50%{transform:scale(.7);opacity:.7}}
 @keyframes launch-out{to{opacity:0;transform:translateY(-4px) scale(.98)}}
 @media(prefers-reduced-motion:reduce){.launch,.launch-ring,.launch-core,.launch-out{animation:none}}
+/* History, newest first (ORCH-777, ticket Overview draft E): days under a ruled label, small event rows for what happened,
+   message cards for answers and files; .history-more holds Show earlier, Show all and the jump to the request. */
+.history-list{display:grid;gap:var(--s4);min-width:0}
+.history-day{display:grid;gap:var(--s2);min-width:0}
+.history-day-h{display:flex;align-items:center;gap:var(--s2);margin:0;font-size:var(--fs-meta);line-height:var(--s4);font-weight:600;color:var(--text-muted)}
+.history-day-h::after{content:'';flex:1;border-top:1px solid var(--border)}
+.history-event{display:grid;gap:var(--s1);padding:var(--s1) var(--s3);min-width:0}
+.history-event-line{display:flex;align-items:center;gap:var(--s2);min-width:0}
+.history-event-line p{margin:0;font-size:var(--fs-meta);overflow-wrap:anywhere}
+.history-event-line time{white-space:nowrap}
+.history-dot{width:6px;height:6px;border-radius:50%;background:var(--text-muted);flex:none}
+.history-msg{display:grid;gap:var(--s2);padding:var(--s3);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);min-width:0}
+.history-msg>p{margin:0;overflow-wrap:anywhere}
+.history-msg-h{display:flex;align-items:center;gap:var(--s2);font-size:var(--fs-meta)}
+.history-reply{margin:0;padding-left:var(--s3);border-left:2px solid var(--brand);overflow-wrap:anywhere}
+.history-more{display:flex;flex-wrap:wrap;justify-content:center;gap:var(--s2);padding-top:var(--s2);border-top:1px dashed var(--border)}
+.ticket-talk.talk-line{display:grid;gap:var(--s2)}
