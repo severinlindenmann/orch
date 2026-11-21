@@ -347,6 +347,15 @@ done: … · 14:21"); the helper's words are `.live-chat-msg` on the left (`surf
 The waiting question is never a message: it is the orange card (`.live-ask`, `needs-you` edge, `warning-soft`) above
 the chat, answered there with its options or own words.
 
+### Voice into the message box (ORCH-696)
+Only while the relay is on: a microphone (`btn icon sm ghost`, "Speak") sits in `.live-msg-row` between the words and
+Send. While listening `.live-voice` (`role=status`, `surface-2`, `r1`) above the row shows a moving level
+(`.live-voice-wave`, still with reduced motion), "Listening 0:04", Stop and Cancel; Esc cancels and the microphone is
+hidden. Then "Writing down your words…", then the words land in the box and `.live-vhint` under it says "From your
+voice. Check the words, change what is wrong, then send." (gone on the first key). Nothing is sent by itself. A
+refusal (microphone blocked, nothing heard, the relay said no) is one plain sentence in the same place (`role=alert`).
+The recording itself is `UI.voiceRecorder` (composer.js) with `words:false`, its own controls drawn by the page.
+
 ## Loading, errors and performance
 
 The brief asks for shell + skeleton within 100 ms while the numeric checklist says not to show indicators for sub-second work. Reconcile by expected latency (BP-05, BP-55–67):
