@@ -547,6 +547,11 @@
     "who": "people",
     "writes": []
    },
+   "switcher": {
+    "summary": "Follow the workspace that switches the accounts, or switch from here",
+    "who": "people",
+    "writes": []
+   },
    "switching": {
     "summary": "Switch accounts by itself, or only show and warn",
     "who": "people",

@@ -32,6 +32,18 @@ def _root(start: str) -> Path:
     raise Refused("No orch workspace here. Run orch init first, or go to your workspace folder.")
 
 
+def _helper_run() -> bool:
+    """Is this command run by a helper (inside an orch run or a helper tool), whatever --by says?"""
+    if os.environ.get("ORCH_RUN") or os.environ.get("ORCH_AGENT"):
+        return True
+    try:
+        from orch import tickets
+
+        return bool(tickets.agent_tool())
+    except Exception:  # noqa: BLE001 - no core to ask: the environment said no
+        return False
+
+
 def _actor(explicit: str | None) -> str:
     if explicit:
         if not store.valid_actor(explicit) or explicit == store.USAGE:
@@ -349,7 +361,7 @@ def gather(root: Path) -> dict:
         out.append(row)
     if d["unreadable"]:
         warnings.append(
-            f"{d['unreadable']} account(s) in .orch/addons/usage could not be read and are skipped."
+            f"{d['unreadable']} account(s) in the Usage folder could not be read and are skipped."
         )
     mem = switching._read(switching.memory_path(root))  # what the loop's last look found (ORCH-620)
     warnings += [w for w in mem.get("alerts") or [] if isinstance(w, str)]
@@ -438,6 +450,8 @@ def run(args) -> int:
         lines.append("Next: orch usage limit <account> <number>  (or period / order / on / off / end)")
         print("\n".join(lines))
         return 0
+    if cmd in ("follow", "take-over"):
+        return _switcher_cmd(args, root)
     if cmd == "history":
         rows = store.history(root)
         if args.account and args.account.strip().lower() in (share_mod.ACCOUNT, share_mod.LABEL.lower()):
@@ -448,10 +462,15 @@ def run(args) -> int:
         if args.json:
             print(json.dumps({"history": rows}, ensure_ascii=False))
             return 0
+        from . import computer
+
+        here = computer.label(root)
         out = [
             f"{_local(r.get('at', ''))}  {r.get('label', r.get('account'))}: {r.get('what')}"
             + (f" ({r['why']})" if r.get("why") else "")
-            + f"  (by {str(r.get('who', '')).split(':', 1)[-1]})"
+            + f"  (by {str(r.get('who', '')).split(':', 1)[-1]}"
+            + (f" in {r['workspace']}" if r.get("workspace") and r["workspace"] != here else "")
+            + ")"
             for r in rows
         ] or ["No changes yet."]
         print("\n".join(out))
@@ -611,6 +630,9 @@ def _loop_cmd(args, root: Path) -> int:
         line += "".join(
             f"\nWarning: {w}" for w in (switching._read(switching.memory_path(root)).get("alerts") or [])
         )
+        owner_line = _owner_line(root)
+        if owner_line:
+            line += "\n" + owner_line
         if last:
             line += f"\nLast look {_local(last.get('at', ''))}: {last.get('did')} ({last.get('why')})."
         print(json.dumps(data, ensure_ascii=False) if args.json else line)
@@ -625,6 +647,10 @@ def _loop_cmd(args, root: Path) -> int:
         nxt = "Usage now switches by itself before an account reaches a limit."
     else:
         nxt = "Usage only shows and warns; it does not switch."
+    nxt += " This setting counts for every workspace on this computer."
+    owner_line = _owner_line(root)
+    if owner_line and on:
+        nxt += " " + owner_line
     return _emit(
         args,
         {"switching": on, "changed": changed, "next": nxt},
@@ -632,9 +658,50 @@ def _loop_cmd(args, root: Path) -> int:
     )
 
 
+def _owner_line(root: Path) -> str | None:
+    """'<workspace> switches the accounts on this computer' when another workspace's loop switches, else None."""
+    from . import computer
+
+    v = computer.view(root, computer.shared_dir(root))
+    if not v or v["mine"] or not v.get("running"):
+        return None
+    w = v["words"]
+    return f"{w['title']}. {w['text']} To switch from here: orch usage take-over."
+
+
+def _switcher_cmd(args, root: Path) -> int:
+    from . import computer
+
+    shared = computer.shared_dir(root)
+    if shared is None:
+        raise Refused(
+            "Usage keeps its settings in this workspace only here; there is no other workspace to follow."
+        )
+    who = _actor(args.by)
+    if args.cmd == "follow":
+        changed = computer.follow(root, shared, who)
+        v = computer.view(root, shared)
+        return _emit(
+            args,
+            {"changed": changed, "switcher": v},
+            (SAVED + " " if changed else "Already like that. ") + (v["words"]["tag"] + "."),
+        )
+    if _helper_run():  # a helper may name a person with --by; the take-over is the person's own click
+        raise Refused("Only a person can move account switching to another workspace.")
+    changed = computer.take_over(root, shared, who)
+    text = (
+        "This workspace switches the accounts now. The other workspace follows from its next look (within a minute)."
+        if changed
+        else "This workspace already switches the accounts."
+    )
+    return _emit(args, {"changed": changed, "switcher": computer.view(root, shared)}, text)
+
+
 def _look_text(r: dict) -> str:
     if not r.get("switcher"):
         return NO_SWITCHER
+    if r.get("did") == "follow":
+        return f"{r.get('owner')} switches the accounts on this computer; this workspace follows."
     if r.get("did") == "nothing":  # installed, but it did not answer: say so, Usage looks again by itself
         return (r.get("note") or "The account switcher did not answer.") + " Usage looks again in a minute."
     text = {
@@ -725,6 +792,12 @@ def main(argv=None) -> int:
     s = p("switching", help="Turn switching accounts by itself on or off")
     s.add_argument("state", choices=("on", "off"))
     s.add_argument("--by")
+    for name in ("follow", "take-over"):
+        s = p(
+            name,
+            help="another workspace switches the accounts: follow it, or switch from here (a person only)",
+        )
+        s.add_argument("--by")
     s = p("act", help="A change from the Usage page (the page uses it)")
     s.add_argument("verb")
     s.add_argument("target")
