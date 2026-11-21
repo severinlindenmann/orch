@@ -130,7 +130,7 @@ test('the request block: note, the helper-written description and the request fi
   const c = context();
   assert.equal(run(c, 'overviewRequest(t, null, [])', {t:{id:'t'}}), null);
   const node = run(c, 'overviewRequest(t, "NOTE", [])', {t:{id:'t', description:'What this is about', description_by:'agent:claude', created_at:T0}});
-  assert.match(text(node), /What you asked.*NOTE.*What this is about.*Written by/);
+  assert.match(text(node), /What was asked.*NOTE.*What this is about.*Written by/);
 });
 
 test('the Overview order in detail(): write box, history, then the request last; the old cards are gone', () => {

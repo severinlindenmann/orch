@@ -1308,12 +1308,12 @@ function overviewHistory(t, entries) {
   return h('section', {className:'history-list', 'aria-label':'History', 'data-key':'history-' + t.id},
     days.map(d => h('section', {className:'history-day'}, h('h3', {className:'history-day-h'}, d.day), d.rows)), tail);
 }
-// What you asked: the person's note (editable in place), the description a helper wrote, and the files that came with it.
+// What was asked (one heading for the ask, ORCH-415): the person's note (editable in place), the description a helper wrote, and the files that came with it.
 // Always the last block of the Overview, right under the history and its Show earlier line, so it never folds away.
 function overviewRequest(t, note, files) {
   if (!note && !t.description && !files.length) return null;
   return h('section', {className:'card asked', 'data-key':'brief'},
-    h('div', {className:'section-head'}, h('h2', {}, 'What you asked'), overviewCreated(t) != null ? h('span', {className:'meta'}, localStamp(new Date(overviewCreated(t)).toISOString())) : null),
+    h('div', {className:'section-head'}, h('h2', {}, 'What was asked'), overviewCreated(t) != null ? h('span', {className:'meta'}, localStamp(new Date(overviewCreated(t)).toISOString())) : null),
     note,
     t.description ? h('div', {className:'stack', 'data-key':'description'}, h('p', {className:'preserve-lines'}, linkRefs(t, t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
     files.map(f => ticketFileRow(t, 'artifacts', f)));
