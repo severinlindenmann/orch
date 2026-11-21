@@ -35,7 +35,7 @@ async function liveTermPost(path, payload) {
 function liveTermSay(r) {
   if (r.status === 403) window.orch?.toast?.(r.text || 'Sign in to type here: open the dashboard with a sign-in link from orch.', 'error');
   else if (r.status === 409 && /Another page/.test(r.text)) window.orch?.toast?.(r.text, 'error');
-  else if (r.status === 409) window.orch?.toast?.('The helper’s screen has closed; that was not sent.', 'error');
+  else if (r.status === 409) window.orch?.toast?.('The helper’s screen has closed; that was not sent. Start the helper again from its pane, then type again.', 'error');
   else window.orch?.toast?.(r.text.slice(0, 120) || 'The screen did not take that. Try again.', 'error');
 }
 const liveTermJSON = s => { try { return JSON.parse(s); } catch (e) { return null; } };

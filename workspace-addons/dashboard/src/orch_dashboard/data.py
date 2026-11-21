@@ -750,6 +750,16 @@ def load_chat(root: Path, orch_bin: str | None) -> dict | None:
     return d if isinstance(d, dict) else None
 
 
+DASHBOARD_READER = "dashboard"  # one read mark for this computer's dashboard until sign-in (team chat step 3)
+
+
+def load_ticket_chats(root: Path, orch_bin: str | None) -> list | None:
+    """`orch chat list --json`: the ticket chats for the Chats page, newest first, with the dashboard's unread
+    counts. None = not readable (an older core without the list)."""
+    d = run_orch(orch_bin, ["chat", "list", "--reader", DASHBOARD_READER, "--json"], root)
+    return d if isinstance(d, list) else None
+
+
 def load_chat_days(root: Path, orch_bin: str | None) -> list | None:
     d = run_orch(orch_bin, ["chat", "days", "--json"], root)
     return d if isinstance(d, list) else None
@@ -1485,6 +1495,7 @@ def load_state(
         f_general = pool.submit(load_general, root) if with_addons else None
         f_sessions = pool.submit(load_sessions, root) if with_settings else None
         f_chat = pool.submit(load_chat, root, orch_bin) if with_addons else None
+        f_ticket_chats = pool.submit(load_ticket_chats, root, orch_bin) if with_addons else None
         f_services = pool.submit(load_services, root, orch_bin) if with_addons else None
         f_groups = pool.submit(mobile.load_groups, root, orch_bin) if with_addons else None
         f_mobile = pool.submit(mobile.load_mobile, root, orch_bin) if with_settings else None
@@ -1506,6 +1517,7 @@ def load_state(
     needs = f_needs.result() if f_needs else None
     general = f_general.result() if f_general else None
     chat = f_chat.result() if f_chat else None
+    ticket_chats = f_ticket_chats.result() if f_ticket_chats else None
     services = f_services.result() if f_services else []
     sessions = f_sessions.result() if f_sessions else []
     runs = load_runs(root, orch_bin, tickets, fresh, extra=[x["id"] for x in sessions]) if with_addons else {}
@@ -1528,6 +1540,8 @@ def load_state(
         "general": general,  # snapshots carry no phone chat
         # Chat (former General): helper name, today's texts with cards, the strip counts, the History list.
         "chat": chat,
+        # Chats page (team chat step 1): tickets with chat lines or an open question, newest first, unread counts
+        "ticket_chats": ticket_chats,
         "needs": needs if isinstance(needs, list) else [],
         "review": f_review.result() if f_review else {"cards": [], "answered": [], "accepted": []},
         "services": services,  # snapshots name no add-on

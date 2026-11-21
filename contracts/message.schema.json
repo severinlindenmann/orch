@@ -433,8 +433,12 @@
               "at": { "type": "string", "format": "date-time", "pattern": "Z$" },
               "who": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Display name: the person's name or the agent's (e.g. Claude)." },
               "role": { "enum": ["agent", "person"] },
-              "text": { "type": "string", "minLength": 1, "maxLength": 1000 }
-            }
+              "text": { "type": "string", "minLength": 1, "maxLength": 1000 },
+              "chat": { "const": true, "description": "Optional. The line is a real chat message (history chat_message): the phone's ticket chat shows it as a bubble. Absent = an ordinary history line." },
+              "id": { "type": "string", "pattern": "^m_[a-z0-9]{16}$", "description": "Optional, chat lines only. The line's stable id (contracts/history.md Chat lines); equal to the relay message id when the message also came as one, so the phone shows it once." },
+              "name": { "type": "string", "minLength": 1, "maxLength": 60, "description": "Optional, chat lines only. The name the person typed (by_name), shown as typed and marked not signed in. Never an identity." }
+            },
+            "dependentRequired": { "id": ["chat"], "name": ["chat"] }
           }
         },
         "refs": {

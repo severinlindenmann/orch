@@ -13,8 +13,8 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from . import picker, store, switching, when
 from . import share as share_mod
-from . import store, switching, when
 from .readers import credit_reader, cswap
 from .store import PERIOD_WORDS, Refused
 
@@ -473,6 +473,45 @@ def _fail(args, msg: str) -> int:
 # ---------------------------------------------------------------- commands
 
 
+def _pick_cmd(args, root: Path) -> int:
+    """One helper start: which tool, account and model, and why; or wait, with the reason and until when."""
+    from . import sources
+
+    kind = (args.kind or "helpers").strip().lower()
+    if kind not in store.KINDS:
+        raise Refused(f"'{args.kind}' is not a kind of work. Use {', '.join(store.KINDS)}.")
+    request = {"start": args.start, "ticket": args.ticket, "kind": kind, "model": args.model}
+    p = sources.pick(root, request)
+    if args.json:
+        print(json.dumps(p.to_dict(), ensure_ascii=False))
+    else:
+        line = p.why[:1].upper() + p.why[1:]
+        if p.wait and p.until:
+            line += f" Tries again at {_local(p.until)}."
+        print(line)
+    return 3 if p.wait else 0
+
+
+def _start_state_cmd(args, root: Path) -> int:
+    """The starter tells Usage what became of a picked start: started, failed (money back) or finished."""
+    spent = None
+    if args.cmd == "finished" and args.spent not in (None, "", "unknown"):
+        try:
+            spent = float(str(args.spent).lstrip("$"))
+        except ValueError:
+            spent = math.nan
+        if not math.isfinite(spent) or spent < 0:
+            raise Refused(f"'{args.spent}' is not an amount of dollars. Use a number like 1.20 or unknown.")
+    fn = {"started": picker.started, "failed": picker.failed}.get(args.cmd)
+    ok = fn(root, args.start) if fn else picker.finished(root, args.start, spent)
+    text = "Saved." if ok else "Nothing changed: Usage has no open start with that id."
+    if args.json:
+        print(json.dumps({"ok": ok, "start": args.start, "state": args.cmd}, ensure_ascii=False))
+    else:
+        print(text)
+    return 0
+
+
 def run(args) -> int:
     root = _root(args.dir)
     cmd = args.cmd
@@ -543,6 +582,10 @@ def run(args) -> int:
         )
     if cmd == "share":
         return _share_cmd(args, root)
+    if cmd == "pick":
+        return _pick_cmd(args, root)
+    if cmd in ("started", "failed", "finished"):
+        return _start_state_cmd(args, root)
 
     who = _actor(args.by)
     tz, at = when.zone(root), _now()
@@ -757,6 +800,10 @@ def _look_text(r: dict) -> str:
         "would switch": f"Would switch from {r.get('active')} to {r.get('target')} (switching is off).",
         "switch failed": f"Could not switch to {r.get('target')}. It is tried again in 10 minutes.",
         "waiting to try again": f"Waiting to try {r.get('target')} again.",
+        "held": (
+            f"Staying on {r.get('active')}: another program keeps switching back to it. "
+            "Which rule should win? See orch usage needs."
+        ),
     }.get(r["did"], r["did"])
     if r.get("all_at_limit"):
         text += " Warning: every account is at or near its limit."
@@ -836,6 +883,16 @@ def main(argv=None) -> int:
     s.add_argument("--order", help="all or the first accounts in order: 'Personal 1, Company'")
     s.add_argument("--clear", action="store_true", help="remove the share")
     s.add_argument("--by")
+    s = p("pick", help="Which tool, account and model one helper start uses, and why")
+    s.add_argument("--start", required=True, help="the start's id, the same on every retry")
+    s.add_argument("--ticket")
+    s.add_argument("--kind", help="lead, code, reviews, builds, scripts or helpers")
+    s.add_argument("--model", help="orch's model pick: opus, sonnet or haiku")
+    for name in ("started", "failed", "finished"):
+        s = p(name, help=f"Tell Usage a picked start {name}")
+        s.add_argument("start")
+        if name == "finished":
+            s.add_argument("--spent", help="what the helper really spent, in dollars, or unknown")
     s = p("switching", help="Turn switching accounts by itself on or off")
     s.add_argument("state", choices=("on", "off"))
     s.add_argument("--by")

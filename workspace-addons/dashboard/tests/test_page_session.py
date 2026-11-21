@@ -440,6 +440,7 @@ ACT_ARGS = {
     "review.undo": {"ticket": TID, "key": "q1"},
     "ticket.changes": {"ticket": TID, "text": "more"},
     "chat.say": {"text": "hi"},
+    "chat.read": {"ticket": TID},
     "chat.make_ticket": {"id": "m_abcdefghijkl"},
     "check.set": {"ticket": TID, "check": "c1", "done": True},
     "check.wont_do": {"ticket": TID, "check": "c1"},

@@ -539,19 +539,33 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         var by: String? = nil      // who (a name)
         var role: String? = nil    // agent | person
         var text: String
-        var id: String { (at ?? "") + "|" + (by ?? "") + "|" + text }
-        init(at: String? = nil, by: String? = nil, role: String? = nil, text: String) { self.at = at; self.by = by; self.role = role; self.text = text }
+        /// A real chat message (history `chat_message`): the ticket chat shows it as a bubble with its name.
+        var chat: Bool = false
+        /// The chat line's stable id (`m_…`); the same as the relay message id when it also came as a message.
+        var messageId: String? = nil
+        /// The name the person typed on the dashboard: shown as typed, marked "not signed in". Never an identity.
+        var name: String? = nil
+        var id: String { messageId ?? ((at ?? "") + "|" + (by ?? "") + "|" + text) }
+        init(at: String? = nil, by: String? = nil, role: String? = nil, text: String, chat: Bool = false, messageId: String? = nil, name: String? = nil) {
+            self.at = at; self.by = by; self.role = role; self.text = text; self.chat = chat; self.messageId = messageId; self.name = name
+        }
         init(from d: Decoder) throws {
             let c = try d.container(keyedBy: CodingKeys.self)
             at = try? c.decodeIfPresent(String.self, forKey: .at)
             let who = try? c.decodeIfPresent(String.self, forKey: .who), b = try? c.decodeIfPresent(String.self, forKey: .by)
             by = who ?? b; role = try? c.decodeIfPresent(String.self, forKey: .role)
             text = try c.decode(String.self, forKey: .text)
+            chat = ((try? c.decodeIfPresent(Bool.self, forKey: .chat)) ?? nil) == true
+            if chat {
+                messageId = (try? c.decodeIfPresent(String.self, forKey: .messageId)) ?? nil
+                name = ((try? c.decodeIfPresent(String.self, forKey: .name)) ?? nil).flatMap { ChatNames.clean($0) }
+            }
         }
-        enum CodingKeys: String, CodingKey { case at, by, who, role, text }
+        enum CodingKeys: String, CodingKey { case at, by, who, role, text, chat, messageId = "id", name }
         func encode(to e: Encoder) throws {
             var c = e.container(keyedBy: CodingKeys.self)
             try c.encodeIfPresent(at, forKey: .at); try c.encodeIfPresent(by, forKey: .who); try c.encodeIfPresent(role, forKey: .role); try c.encode(text, forKey: .text)
+            if chat { try c.encode(true, forKey: .chat); try c.encodeIfPresent(messageId, forKey: .messageId); try c.encodeIfPresent(name, forKey: .name) }
         }
     }
     var title: String? = nil
