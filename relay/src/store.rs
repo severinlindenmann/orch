@@ -625,8 +625,9 @@ pub fn phones_of(c: &Connection, ws: &str) -> rusqlite::Result<Vec<Value>> {
     for row in rows {
         let (id, name, list, last) = row?;
         if parse_list(&list).iter().any(|w| w == ws) {
-            out.push(json!({"id": id, "name": name, "online": online(last), "last_seen": last.map(fmt_time),
-                "signing_key": crate::phonekeys::info(c, &id)}));
+            let mut p = json!({"id": id, "name": name, "online": online(last), "last_seen": last.map(fmt_time)});
+            crate::phonekeys::add_to_card(c, &mut p);
+            out.push(p);
         }
     }
     Ok(out)

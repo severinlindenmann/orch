@@ -16,9 +16,9 @@ use std::collections::HashMap;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .merge(crate::phonekeys::routes())
         .route("/v1/phone/pair", post(pair))
         .route("/v1/phone/push", post(register_push))
-        .route("/v1/phone/signing-key", axum::routing::put(crate::phonekeys::put))
         .route("/v1/phone/workspaces", get(workspaces))
         .route(
             "/v1/phone/workspaces/:id",
@@ -55,7 +55,7 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
     let v = parse_body(&body)?;
     let code = v["code"].as_str().unwrap_or("");
     // The phone's own public key (ORCH-1204); a bad key refuses the pairing before the code is used.
-    let sign_key = crate::phonekeys::from_pair_request(&v)?;
+    let phone_key = crate::phonekeys::from_pair_request(&v)?;
     let mut c = app.db.lock().unwrap();
     let row: Option<(String, i64, bool)> = c
         .query_row(
@@ -83,7 +83,7 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
     if let Some(n) = v["name"].as_str().and_then(store::clean_phone_name) {
         tx.execute("UPDATE phones SET name=?2 WHERE id=?1", params![pid, n])?;
     }
-    crate::phonekeys::set_on_pair(&tx, &pid, sign_key.as_deref())?;
+    crate::phonekeys::set_on_pair(&tx, &pid, phone_key.as_deref())?;
     tx.commit()?;
     let list: String = c.query_row("SELECT workspaces FROM phones WHERE id=?1", [&pid], |r| {
         r.get(0)

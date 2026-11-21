@@ -66,6 +66,17 @@ pub fn info(c: &Connection, pid: &str) -> Value {
     }
 }
 
+/// Adds the phone's key to its directory card (`phones[].signing_key`).
+pub fn add_to_card(c: &Connection, card: &mut Value) {
+    let id = card["id"].as_str().unwrap_or_default().to_string();
+    card["signing_key"] = info(c, &id);
+}
+
+/// `PUT /v1/phone/signing-key` (merged into the phone routes).
+pub fn routes() -> axum::Router<AppState> {
+    axum::Router::new().route("/v1/phone/signing-key", axum::routing::put(put))
+}
+
 /// The phone's registered raw key, for the signature check of what it sends.
 pub fn raw_key(c: &Connection, pid: &str) -> Option<[u8; 32]> {
     let k: Option<String> = c
