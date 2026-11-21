@@ -714,6 +714,19 @@ def test_loop_asks_core_for_the_health_checks_once_a_minute_without_a_ticket(ws)
     assert len([c for c in calls(ws) if c["args"][:2] == ["doctor", "soon"]]) == 2
 
 
+def test_loop_looks_at_skill_review_dates_once_an_hour_without_an_agent(ws):
+    """ORCH-536: a skill whose review-by date passed gets a ticket from core (`orch skill review-due`, no AI). The
+    loop asks once an hour, with no ticket of its own, and starts no run for it."""
+    s = Scheduler(ws)
+    assert s.tick(T(10, 0)) == []
+    s.tick(T(10, 30))
+    asked = [c for c in calls(ws) if c["args"][:2] == ["skill", "review-due"]]
+    assert len(asked) == 1 and asked[0]["by"] is None
+    s.tick(T(11, 0))
+    assert len([c for c in calls(ws) if c["args"][:2] == ["skill", "review-due"]]) == 2
+    assert runs_started(ws) == []
+
+
 def test_failed_wake_start_is_retried_a_few_times_then_left(ws):
     """ORCH-255: a passed wake time must not leave the ticket without a helper after one failed start."""
     (ws / "noagent").write_text("")

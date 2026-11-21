@@ -1,6 +1,9 @@
 ---
 name: orch-dashboard-tester
 description: Use when the person wants the dashboard checked every day for broken pages, errors, slow pages, cut-off layouts or wrong words, or asks what the daily dashboard look found. It only opens pages and reads; it never clicks. Not for testing your own code changes (use orch shot for pictures).
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch dashboard-tester
 
