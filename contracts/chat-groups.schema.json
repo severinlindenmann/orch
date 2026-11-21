@@ -92,6 +92,9 @@
         "shared_ticket": {
           "$ref": "#/$defs/shared_ticket"
         },
+        "shared_chat": {
+          "$ref": "#/$defs/shared_chat"
+        },
         "share": {
           "$ref": "#/$defs/share"
         },
@@ -273,6 +276,11 @@
               {
                 "required": [
                   "shared_ticket"
+                ]
+              },
+              {
+                "required": [
+                  "shared_chat"
                 ]
               },
               {
@@ -632,6 +640,55 @@
           }
         }
       ]
+    },
+    "shared_chat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lines"
+      ],
+      "description": "v2. Host only, on the ticket card (body.shared_ticket) a member gets right after its member_added (targeted: no group.seq): the ticket's chat so far, so the added workspace sees the whole chat. Only lines marked as chat in the host ticket (what the person, the host helper or a member said), never other history, notes, files or refs. Texts redacted; newest lines kept; at most 200 lines and 32768 bytes as compact UTF-8 JSON (validate.py). It rides on the card because older (v1) members accept the card and ignore this field (chat-groups.md §6).",
+      "properties": {
+        "lines": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "who",
+              "text"
+            ],
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/time"
+              },
+              "who": {
+                "enum": [
+                  "person",
+                  "helper",
+                  "member"
+                ],
+                "description": "person = the host's person, helper = the host's helper, member = a member workspace (its name in name)."
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 60
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 2000
+              }
+            }
+          }
+        },
+        "more": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647,
+          "description": "How many older chat lines were left out to stay within the limits."
+        }
+      }
     },
     "shared_ticket": {
       "type": "object",

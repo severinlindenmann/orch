@@ -373,12 +373,14 @@ def run_group(args, root: Path, out) -> None:
         )  # fmt: skip
         out(args, r, _said_line(r))
     elif sub == "add":
-        if _as_person(args) is None:  # a helper only asks; the person's Add adds (ask-add)
+        cg.refuse_task_of_other_chat(root, tid)
+        who = _as_person(args)
+        if who is None:  # a helper only asks; the person's Add adds (ask-add)
             raise Refused(
                 "A helper cannot add a workspace. Ask the person: "
                 f"orch relay group ask-add {args.ticket} {args.workspace}"
             )
-        r = cg.add_member(root, tid, ws, by)
+        r = cg.add_member(root, tid, ws, who)  # the person added it: added_by "you"
         out(args, r, "Added to the group." if r["added"] else "Already in the group.")
     elif sub == "ask-add":
         r = cg.ask_to_add(root, tid, ws, by)
