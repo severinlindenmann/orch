@@ -544,11 +544,14 @@ def apply_op(
     if_revision: int | None = None,
     by: str,
     person_click: bool = False,
+    closed_ok=None,
 ):
     """person_click: a person's click on the dashboard or a phone, whatever tool started that server.
+    closed_ok(ticket) -> bool: a write the closed-ticket guard lets through on a done/dropped ticket (only
+    switching an add-on's repeat off, #2051); checked under the lock on the stored ticket.
     Every attempt leaves one decision event in the debug log (diag.md): ticket.op_applied or
     ticket.op_refused (actor, op, status and revision before/after, the refusing guard; no ticket text)."""
-    info: dict = {"person_click": person_click}
+    info: dict = {"person_click": person_click, "closed_ok": closed_ok}
     try:
         out = _apply_op(root, tid, fn, expect, if_revision, by, info)
     except BaseException as e:
@@ -592,7 +595,12 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
         ticket = _load_raw(root, tid)
         eff_status = ticket.get("status")
         info.update(status=eff_status, revision=revision(ticket))
-        if eff_status in CLOSED and _agent_actor(by) and not _addon_keeps_its_ticket(root, ticket, by):
+        if (
+            eff_status in CLOSED
+            and _agent_actor(by)
+            and not _addon_keeps_its_ticket(root, ticket, by)
+            and not (info.get("closed_ok") and info["closed_ok"](ticket))
+        ):
             raise ClosedRefused(CLOSED_AGENT)
         if if_revision is not None and revision(ticket) != if_revision:
             raise _conflict(root, ticket, f"Ticket {tid}", {k: ticket.get(k) for k in PATCH_FIELDS})
@@ -3551,6 +3559,30 @@ def validate_ext(schema: dict, obj: dict, addon: str) -> None:
         raise Refused(f"ext.{addon}{'.' + where if where else ''}: {e.message}")
 
 
+REPEAT_OFF = {"recurring": False, "paused": True}  # the values that switch an add-on's repeat off
+
+
+def _repeat_block(ticket: dict, addon: str, schema: dict | None) -> dict | None:
+    """The ext block of an ACTIVE add-on whose own ticket_ext schema declares a repeat (boolean recurring and
+    paused fields), else None. Declared by the add-on, never inferred from stored data an agent could write;
+    core names no add-on (R1.2)."""
+    props = (schema or {}).get("properties") if isinstance(schema, dict) else None
+    if not isinstance(props, dict) or not all(
+        isinstance(props.get(k), dict) and props[k].get("type") == "boolean" for k in REPEAT_OFF
+    ):
+        return None
+    cur = (ticket.get("ext") or {}).get(addon)
+    return cur if isinstance(cur, dict) else None
+
+
+def repeat_off_only(cur: dict, new: dict) -> bool:
+    """#2051: the change from cur to new only switches a repeat off (recurring false, paused true), nothing
+    else. An agent may do that on a done or dropped ticket (a helper turns off a repeat on a ticket in
+    Review); it never switches one on there or changes anything else."""
+    changed = {k for k in set(cur) | set(new) if cur.get(k) != new.get(k)}
+    return all(k in REPEAT_OFF and new.get(k) is REPEAT_OFF[k] for k in changed)
+
+
 def ext_set(
     root: Path,
     tid: str,
@@ -3579,7 +3611,11 @@ def ext_set(
         ext[addon] = merged
         add_history(ticket, by, f"Set ext.{addon}")
 
-    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+    def only_off(ticket) -> bool:
+        cur = _repeat_block(ticket, addon, schema)
+        return cur is not None and repeat_off_only(cur, {**cur, **obj})
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by, closed_ok=only_off)[0]
 
 
 def ext_unset(
@@ -3621,7 +3657,15 @@ def ext_unset(
         if not ext:
             del ticket["ext"]
 
-    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+    def only_off(ticket) -> bool:
+        """Removing a repeat (or its next planned start) only switches work off, so it is allowed on a closed
+        ticket too; but not the whole block of a paused one: that would also undo its switch-off."""
+        cur = _repeat_block(ticket, addon, schema)
+        if cur is None:
+            return False
+        return key in ("next_run", "each_run") or (not key and cur.get("paused") is not True)
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by, closed_ok=only_off)[0]
 
 
 _SECRET_FOLDER_RE = re.compile(r"\.orch[/\\]+secrets|\borch secrets\b|\bsecrets folder\b", re.I)
