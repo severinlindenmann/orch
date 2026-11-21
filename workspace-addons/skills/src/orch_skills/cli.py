@@ -248,7 +248,11 @@ def run(args) -> int:
         rows = _history(root)
         text = "\n".join(
             f"{r.get('at')}  {r.get('name')}: "
-            + ({"remove": "removed", "restore": "brought back", "edited": "edited"}.get(r.get("what"), f"turned {r.get('what')}"))
+            + (
+                {"remove": "removed", "restore": "brought back", "edited": "edited"}.get(
+                    r.get("what"), f"turned {r.get('what')}"
+                )
+            )
             + f" (by {str(r.get('who', '')).split(':', 1)[-1]})"
             for r in rows
         )

@@ -1715,7 +1715,11 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             text=True,
             timeout=_op_timeout(op, args),
             # a Save's text goes as UTF-8 bytes whatever this computer's language setting is
-            **({"input": text_in, "encoding": "utf-8"} if text_in is not None else {"stdin": subprocess.DEVNULL}),
+            **(
+                {"input": text_in, "encoding": "utf-8"}
+                if text_in is not None
+                else {"stdin": subprocess.DEVNULL}
+            ),
             env=env,
         )
     except subprocess.TimeoutExpired:

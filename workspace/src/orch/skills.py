@@ -77,7 +77,9 @@ def removed_shared(root: Path) -> dict[str, int]:
 
 
 def _unlink_ours(root: Path, where: str, name: str, target: Path) -> None:
-    """Remove <where>/<name> only when it is orch's link (or orch's copy) to target: a team's own link stays."""
+    """Remove <where>/<name> when it is orch's: a link to `target`, or orch's copy of it where links are not
+    possible (harness.unlink_skill keeps a copy that has files of the person's). A link to somewhere else, a plain
+    folder of the person's and a copy that holds an add-on's own file stay."""
     dest = root / where / name
     if harness.is_link(root / where):
         return
@@ -333,16 +335,6 @@ def apply_copy_files(root: Path, work: Path, linked: set[str] | frozenset = froz
                 refused = refused or Refused(f"{work / fn} is a link; orch will not write through it.")
     if refused:
         raise refused
-
-
-def _unlink_ours(root: Path, where: str, name: str, target: Path) -> None:
-    """Remove <where>/<name> when it is orch's: a link to `target`, or orch's copy of it where links are not
-    possible (harness.unlink_skill keeps a copy that has files of the person's). A link to somewhere else and
-    a plain folder of the person's stay."""
-    dest = root / where / name
-    if harness.is_link(dest) and not harness._same(dest, target):
-        return
-    harness.unlink_skill(root, where, name)
 
 
 def hidden_skills(root: Path) -> dict[str, str]:

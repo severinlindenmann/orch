@@ -72,7 +72,9 @@ SETTINGS_OPS = (
     "mobile.hours",
 )
 WRITE_SLICE = 64 * 1024  # bytes per send of an answer (see _send)
-MID_BODY = 400 * 1024  # an add-on click: a Save carries its text (at most 160 KB as UTF-8, escaped twice as JSON)
+MID_BODY = (
+    400 * 1024
+)  # an add-on click: a Save carries its text (at most 160 KB as UTF-8, escaped twice as JSON)
 MID_OPS = ("addon.act",)
 BIG_OPS = ("ticket.new", "ticket.paste", "ticket.attach", "link.share")
 _BIG_READS = threading.BoundedSemaphore(1)

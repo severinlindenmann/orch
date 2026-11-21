@@ -30,6 +30,8 @@ MAX_FILE = 64 * 1024  # a file bigger than this (UTF-8 bytes) is not offered for
 MAX_INPUT = 160 * 1024  # what a save may send on stdin: the text as JSON (escapes make it longer than the file)
 EDIT_ID = re.compile(r"e_[0-9a-f]{24}")
 REVISION = re.compile(r"[0-9a-f]{64}")
+
+
 def skill_bases() -> list[Path]:
     """Where helpers find this workspace's skills: .agents/skills and each tool's own skills folder (core tool data)."""
     links = [Path(t["skills_link"]) for t in toolsdata.all_tools().values() if t.get("skills_link")]

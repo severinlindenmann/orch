@@ -22,8 +22,6 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import adapters
-
 OFF_SCHEMA = "orch.skills-off/1"
 OWNED_SCHEMA = "orch.skills-owned/2"
 OWNED = Path(".orch") / "addons" / "skills" / "owned.json"
