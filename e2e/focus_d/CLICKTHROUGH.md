@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-32 steps: 25 ready (the script clicks them), 7 pending (not built yet).
+33 steps: 26 ready (the script clicks them), 7 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1440, 1920, 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -564,4 +564,24 @@ Must be seen:
 
 - Its tile leaves Working and says No session.
 - Its pane offers the Start choice.
+
+## 33. Start the Manager in a chosen permission mode
+
+- Part: sessions (draft D feature 6)
+- State: ready, clicked by the script
+- Pictures: `fd-33-permissions-1280.png`, `fd-33-permissions-1920.png`, `fd-33-permissions-390.png`
+
+Do:
+
+1. Open the New menu in the bar and pick Bypass permissions in its Permissions row.
+2. Start the Manager.
+3. In its pane press "Permissions: Bypass permissions" and pick Auto.
+4. In a workspace that allows at most Auto, open the New menu.
+
+Must be seen:
+
+- The row shows the tool's modes: Default, Accept edits, Auto, Bypass permissions.
+- Bypass permissions shows one plain warning the first time; the Manager starts in it and its pane says "Permissions: Bypass permissions".
+- Auto ends the session and goes on with the same conversation; the pane says "Permissions: Auto".
+- Bypass permissions is off when the workspace does not allow it and says why.
 

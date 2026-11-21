@@ -45,6 +45,9 @@ Manager; one of each, a second New goes to the open one. Only when the person as
     orch session list                                # which ones exist and are open
     orch session close <kind>                        # a helper's conversation is kept; the terminal closes
 
+The Manager, empty helper and chat helper start in the permission mode picked in the New menu (remembered per kind,
+at most what workspace.permissions allows). Never raise it yourself: only the signed-in person can, on the dashboard.
+
 Focus adds one row to `orch needs`: a live helper waiting for the person's OK on its screen.
 
 ## Rules

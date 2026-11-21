@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from orch import manager, runs, runs_live, tickets
+from orch import adapters, manager, runs, runs_live, sessionmode, tickets
 from orch.errors import Refused
 
 KINDS = ("empty", "chat", "terminal", "manager")
@@ -67,7 +67,29 @@ def one(root: Path, kind: str) -> dict | None:
     out = {"id": tid, "kind": kind, "title": TITLES[kind], "running": on, "open": is_open}
     if kind == "empty":
         out["model"] = start_model(root, tid)
+    if kind in sessionmode.KINDS:
+        out["permissions"] = _mode_row(root, kind, tid if on else None)
     return out
+
+
+def _running_mode(root: Path, tid: str) -> str | None:
+    rec = runs.read(root, tid) or {}
+    v = rec.get("permissions")
+    return v if v in sessionmode.RANK else None
+
+
+def _mode_row(root: Path, kind: str, running_tid: str | None) -> dict:
+    """ORCH-818: the Start choice's modes for this kind, and the mode the running session has (the pane
+    header shows it in words). Never fails a listing: a tool orch cannot load shows no choices."""
+    try:
+        name = adapters.chosen(root)
+        row = sessionmode.offer(root, kind, name)
+    except Exception:  # noqa: BLE001 - no tool here: nothing to choose
+        return {"current": None, "label": None, "choices": [], "full_warned": False, "running": None}
+    run = _running_mode(root, running_tid) if running_tid else None
+    row["running"] = run
+    row["running_label"] = sessionmode.label(name, run, root) if run else None
+    return row
 
 
 def start_model(root: Path, tid: str) -> str | None:
@@ -84,19 +106,36 @@ def listing(root: Path) -> list[dict]:
     return [s for k in KINDS if (s := one(root, k)) is not None]
 
 
-def new(root: Path, kind: str, by: str, model: str | None = None) -> dict:
+def new(
+    root: Path, kind: str, by: str, model: str | None = None, mode: str | None = None, person: bool = False
+) -> dict:
     """Start (or go to) the session without a ticket of this kind: {id, kind, title, running, open, started,
     notes}. Already on: nothing new starts (started False). model: the person's pick for the Empty helper
-    (haiku, sonnet, opus, fable), set before it starts (ORCH-710); one already running keeps its model."""
+    (haiku, sonnet, opus, fable), set before it starts (ORCH-710); one already running keeps its model.
+    mode (ORCH-818): the permission mode to start in (sessionmode.MODES), remembered for this kind; refused
+    above what the workspace allows, and above the kind's current mode unless person (the signed-in grant).
+    A session that is on in another mode ends and continues the same conversation in the new one."""
     if kind not in KINDS:
         raise Refused(f"No such session without a ticket: {kind}. Choose one of: {', '.join(KINDS)}.")
     if model and kind != "empty":
         raise Refused("Only the Empty helper takes a model here. Pick the others' model in their own place.")
+    if mode is not None and kind not in sessionmode.KINDS:
+        raise Refused(f"The {TITLES[kind]} runs no helper, so it has no permission mode.")
     notes: list[str] = []
     started = False
+    if mode is not None:
+        chosen = sessionmode.resolve(root, kind, mode, person)
+        sessionmode.remember(root, kind, chosen)
+        tid = _id(root, kind)
+        if tid and runs.running(root, tid):
+            name = adapters.chosen(root)
+            want = sessionmode.tool_mode(name, chosen, root)
+            if _running_mode(root, tid) != want:  # restart in the new mode, same conversation
+                runs_live.stop(root, tid)
+                notes.append(f"The {TITLES[kind]} goes on in {sessionmode.label(name, want, root)}.")
     if kind == "manager":
         d = manager.start(root, by)
-        started, notes = bool(d.get("started")), list(d.get("notes") or [])
+        started, notes = bool(d.get("started")), notes + list(d.get("notes") or [])
     elif kind == "terminal":
         made = tickets.session_id(root, "terminal") is None
         tid = tickets.ensure_session(root, "terminal", by)
@@ -113,7 +152,7 @@ def new(root: Path, kind: str, by: str, model: str | None = None) -> dict:
             tickets.set_model(root, tid, model, by)
         if not on:
             r = runs.start(root, tid, by, mode="live")
-            started, notes = True, list(r.get("notes") or [])
+            started, notes = True, notes + list(r.get("notes") or [])
     return {**(one(root, kind) or {}), "started": started, "notes": notes}
 
 

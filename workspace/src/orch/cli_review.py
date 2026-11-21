@@ -313,6 +313,18 @@ def _with_workflow(pv: dict, wf: dict | None) -> dict:
     if not wf:
         return pv
     pv["paras"] = [ghmerge.workflow_words(wf), *(pv.get("paras") or [])]
+    # ORCH-429: the label a script check gives, and the changed lines themselves with the risky ones marked
+    if wf.get("safe"):
+        pv["chips"] = [{"text": "Safe to merge", "tone": "ok"}]
+    elif any(x.get("risk") for x in wf.get("lines") or []):
+        pv["chips"] = [{"text": "Look at the red lines", "tone": "bad"}]
+    if wf.get("lines"):
+        pv["diff"] = wf["lines"]
+        if wf.get("lines_more"):
+            n = wf["lines_more"]
+            pv["paras"].append(
+                f"And {n} more changed line{'' if n == 1 else 's'}: Workflow changes shows all."
+            )
     rows = [{"title": f"{f['name']} (+{f['add']} −{f['del']})"[:200]} for f in wf["files"][:5]]
     if len(wf["files"]) > 5:
         rows.append({"title": f"and {len(wf['files']) - 5} more workflow files"})
