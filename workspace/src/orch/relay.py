@@ -2639,6 +2639,10 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
         with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
             if chat_groups.phone_text(root, tid, msg):  # G8: only a reply to a group copy joins the group
                 return f"added to {tid} and the group", tid
+        # ORCH-1175: the person's Add from the ticket chat on the phone (the relay sets body.team only on phone texts)
+        with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
+            if (chat_groups.phone_team(root, tid, msg, "human:" + (who or "phone")) or {}).get("added"):
+                return f"added to {tid}; added a workspace to its chat", tid
         return f"added to {tid}", tid
     if tid is None:
         spoken = body.get("voice", {}).get("transcript", "") if isinstance(body.get("voice"), dict) else ""
