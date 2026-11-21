@@ -245,6 +245,106 @@ def test_gate_red_and_develop_moved_closes_and_recuts(tmp_path, capsys):
     assert out["did"] == ["close:release 31 PR 9031"] and out["state"]["release"] is None
 
 
+RUN_URL = "https://github.com/o/r/actions/runs/{}/job/7"
+
+
+def test_gate_red_runs_the_failed_jobs_once_more_before_a_ticket(tmp_path, capsys):
+    """ORCH-1023: a flaky test each closed releases 35 and 36 in one night; red checks get one more try."""
+    bad = [
+        {
+            "name": "macos 3/5",
+            "status": "COMPLETED",
+            "conclusion": "FAILURE",
+            "detailsUrl": RUN_URL.format(11),
+        },
+        {
+            "name": "macos 4/5",
+            "status": "COMPLETED",
+            "conclusion": "FAILURE",
+            "detailsUrl": RUN_URL.format(11),
+        },
+        {"name": "linux", "status": "COMPLETED", "conclusion": "SUCCESS", "detailsUrl": RUN_URL.format(12)},
+        ROLLUP_DONE,
+    ]
+    moved = {"develop": "e" * 40, "main": MAIN, "unreleased": UN3}
+    out = go(
+        tmp_path,
+        capsys,
+        state={"release": gate()},
+        open_release={"number": 9031},
+        prs=pr(checks=bad),
+        heads=moved,
+    )
+    assert out["did"] == ["rerun:11"]  # not closed although develop moved: the run gets its one more try
+    assert out["state"]["release"]["reran"]["runs"] == ["11"] and "once more" in out["lines"][-1]
+    st, rel = out["state"], dict(open_release={"number": 9031}, heads=moved)
+    wait = go(tmp_path, capsys, state=st, prs=pr(checks=bad), **rel)  # GitHub still shows the old failure
+    assert wait["did"] == [] and "waits for the failed jobs" in wait["lines"][-1]
+    later = "2999-01-01T00:00:00Z"  # the new try started after the rerun and is red again
+    red_again = [dict(c, startedAt=later) if c.get("conclusion") == "FAILURE" else c for c in bad]
+    again = go(tmp_path, capsys, state=wait["state"], prs=pr(checks=red_again), **rel)
+    assert again["did"] == ["close:release 31 PR 9031"]  # red again: as before, no second rerun
+
+
+def test_gate_rerun_that_never_reports_stops_waiting(tmp_path, capsys):
+    bad = [{"name": "m", "status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": RUN_URL.format(5)}]
+    st = {"release": dict(gate(), reran={"runs": ["5"], "at": "2000-01-01T00:00:00Z"})}
+    heads = {"develop": DEV, "main": MAIN, "unreleased": UN3}
+    out = go(
+        tmp_path,
+        capsys,
+        state=st,
+        open_release={"number": 9031},
+        prs=pr(checks=bad + [ROLLUP_DONE]),
+        heads=heads,
+    )
+    assert out["did"] == ["ticket:Release 31 checks are red: m"]  # waited longer than the test timeout
+
+
+def test_gate_refused_rerun_goes_on_to_the_ticket(tmp_path, capsys, monkeypatch):
+    def refuse(self, run_id):
+        raise Refused("no write")
+
+    monkeypatch.setattr(rk.World, "rerun_failed", refuse)
+    bad = [{"name": "m", "status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": RUN_URL.format(5)}]
+    heads = {"develop": DEV, "main": MAIN, "unreleased": UN3}
+    out = go(
+        tmp_path,
+        capsys,
+        state={"release": gate()},
+        open_release={"number": 9031},
+        prs=pr(checks=bad + [ROLLUP_DONE]),
+        heads=heads,
+    )
+    assert out["did"] == ["ticket:Release 31 checks are red: m"] and out["state"]["release"]["reran"]
+    assert any("could not run 5 again" in line for line in out["lines"])
+
+
+def test_failed_runs_reads_the_newest_try_of_each_check():
+    old = {
+        "name": "a",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "startedAt": "1",
+        "detailsUrl": RUN_URL.format(1),
+    }
+    new = {
+        "name": "a",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "startedAt": "2",
+        "detailsUrl": RUN_URL.format(1),
+    }
+    status = {
+        "context": "ext",
+        "state": "FAILURE",
+        "targetUrl": "https://ci.example/9",
+    }  # no Actions run: none
+    assert rk.failed_runs([old, new, status]) == []
+    assert rk.failed_runs([old]) == ["1"]
+    assert rk.failed_runs([old], ignore=frozenset({"a"})) == []
+
+
 def test_merged_updates_notes_highlights_and_asks_deploy(tmp_path, capsys):
     out = go(
         tmp_path,
