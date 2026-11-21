@@ -392,8 +392,9 @@ def _processes(root: Path, skip: set[int], commands: frozenset[str] = frozenset(
     addons = _addon_pids()
 
     def from_orch(pid: int) -> bool:
-        """orch started it, or a service orch keeps runs it (its main process, the same command started again
-        by launchd after a crash with a new pid, or anything those started): never a found item."""
+        """orch started it, or a job orch keeps or the computer keeps (skip) runs it: its main process, the same
+        command started again by launchd after a crash with a new pid, or anything those started, such as the
+        `sleep` of a ticker (ORCH-847, ORCH-1130): never a found item."""
         seen = set()
         while pid in rows and pid not in seen:
             seen.add(pid)
@@ -411,10 +412,7 @@ def _processes(root: Path, skip: set[int], commands: frozenset[str] = frozenset(
     cand = [
         pid
         for pid, r in rows.items()
-        if pid not in mine
-        and pid not in skip
-        and r["tty"] in ("?", "??", "-")
-        and not from_orch(pid)  # also what a kept service started (ORCH-847): its main pid is in skip
+        if pid not in mine and r["tty"] in ("?", "??", "-") and not from_orch(pid)
     ]
     if sys.platform.startswith("linux"):
         cwds = {pid: c for pid in cand if (c := _cwd_linux(pid))}

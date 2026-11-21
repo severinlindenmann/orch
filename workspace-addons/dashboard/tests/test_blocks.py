@@ -666,8 +666,8 @@ def test_split_buttons_switch_log_and_remove(tmp_path):
     sw = next(x for x in walk(web) if x["cls"] == "switch")
     assert sw["attrs"]["role"] == "switch" and sw["attrs"]["aria-checked"] == "true"
     assert [x["text"] for x in walk(web) if x["data"].get("splitLog")] == ["Open log"]
-    # ORCH-935: on a wide screen the log lines are already in view; Open log is only for the phone width
-    assert [x["cls"] for x in walk(web) if x["data"].get("splitLog")] == ["btn ghost sm phone-only"]
+    # ORCH-639 (newer than ORCH-935's phone-only button): the panel shows 6 lines, Open log the whole log, any width
+    assert [x["cls"] for x in walk(web) if x["data"].get("splitLog")] == ["btn ghost sm"]
     log = next(x for x in walk(web) if x["cls"] == "log-lines")
     assert [x["text"] for x in walk(log) if x["tag"] == "li"][-1] == "12:15:40 key loaded: ••••••"
     rm = next(x for x in walk(web) if x["data"].get("verb") == "remove")
@@ -742,3 +742,19 @@ def test_split_checks_match_the_schema_on_bad_input():
         bad = json.loads(json.dumps(good))
         mutate(bad["blocks"][0])
         assert check_view(bad) is None
+
+
+def test_split_log_takes_as_many_lines_as_the_contract_and_no_more():
+    """ORCH-639: the contract allowed 100 log lines, the dashboard still refused more than 20 ('Can't show Services')."""
+    from orch_dashboard.views import check_view
+
+    schema = json.loads(
+        (Path(__file__).resolve().parents[3] / "contracts/addon-view.schema.json").read_text()
+    )
+    panel = schema["$defs"]["splitItem"]["properties"]["panel"]["properties"]
+    most = panel["log"]["properties"]["lines"]["maxItems"]
+    page = _services()
+    page["blocks"][0]["groups"][0]["items"][0]["panel"]["log"]["lines"] = [f"line {i}" for i in range(most)]
+    assert check_view(page) is not None
+    page["blocks"][0]["groups"][0]["items"][0]["panel"]["log"]["lines"].append("one more")
+    assert check_view(page) is None

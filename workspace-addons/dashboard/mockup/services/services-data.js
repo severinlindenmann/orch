@@ -121,7 +121,7 @@ const btn=(s,what,label,cls)=>h('button',{class:'btn sm '+(cls||'outline'),type:
 /* one order everywhere: Start or Stop first, then Restart (then Open log, added by the page) */
 const mainButton=s=>s.state==='stopped'?btn(s,'start','Start'):btn(s,'stop','Stop');
 const stateButtons=s=>s.state==='stopped'?[mainButton(s)]:[mainButton(s),btn(s,'restart','Restart')];
-const logBtn=(s,show)=>h('button',{class:'btn ghost sm phone-only',type:'button','data-k':s.id+':log','aria-label':'Open log of '+s.name,onclick:()=>show()},'Open log');
+const logBtn=(s,show)=>h('button',{class:'btn ghost sm',type:'button','data-k':s.id+':log','aria-label':'Open log of '+s.name,onclick:()=>show()},'Open log');
 const removeRow=(s,after)=>h('div',{class:'row between quiet-note'},h('span',{class:'meta'},'Remove takes it off this list for good.'),h('button',{class:'btn danger sm',type:'button','data-k':s.id+':remove','aria-label':'Remove '+s.name,onclick:()=>act.remove(s.id,after)},'Remove'));
 /* everything about one service, plainly, top to bottom: state, starts by itself, made by, address, health check, depends on it, last log lines, Remove.
    A found service shows what was found and only Manage with orch. */

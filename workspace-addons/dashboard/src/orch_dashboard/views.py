@@ -233,7 +233,7 @@ def _panel_ok(p):
             log is None
             or (
                 _keys_only(log, ("title", "lines", "empty"))
-                and _lines_ok(log.get("lines"), 0, 20)
+                and _lines_ok(log.get("lines"), 0, 100)
                 and _opt(log, "title", lambda v: _text(v, 40))
                 and _opt(log, "empty", _text)
             )

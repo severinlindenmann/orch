@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import store
 
-LOG_LINES = 20
+LOG_LINES = 100  # the page shows the last 6 and Open log shows all of these (ORCH-639)
 WORD = {"running": "Running", "stopped": "Stopped", "failing": "Failing"}
 TONE = {"running": "good", "stopped": "neutral", "failing": "bad"}
 AUTO_WORDS = {
@@ -158,6 +158,8 @@ def _address(r: dict) -> str | None:
 def _service_item(root: Path, r: dict) -> dict:
     sid, name, state = r["id"], _plain(r["name"], 80), r["state"]
     word, tone = WORD.get(state, "Stopped"), TONE.get(state, "neutral")
+    if state == "running" and isinstance(r.get("health"), dict) and r["health"].get("starting"):
+        word, tone = "Starting…", "neutral"  # just started and not answering yet: not a failure (ORCH-639)
     since = _when(r.get("since"))
     stopped = state == "stopped"
     h = r.get("health")
@@ -201,7 +203,9 @@ def _service_item(root: Path, r: dict) -> dict:
             {
                 "label": "Health check",
                 "value": _plain(health["text"]),
-                "tone": "neutral" if stopped else ("good" if health.get("ok") else "bad"),
+                "tone": "neutral"
+                if stopped or health.get("starting")
+                else ("good" if health.get("ok") else "bad"),
             }
         )
     if depends:

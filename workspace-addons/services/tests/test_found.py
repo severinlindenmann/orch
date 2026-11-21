@@ -681,3 +681,29 @@ def test_a_managed_services_own_processes_are_never_found(cli, mac, tools, ws):
     # 970-972 are the kept services' own processes, a shebang with a flag too
     assert out["others"] == 2
     assert _process_ids(ws) == {"process:973", "process:974"}
+
+
+def test_children_of_a_managed_job_are_no_other_programs(cli, mac, tools, ws):
+    # ORCH-1130: an adopted ticker (launchd pid 4321) runs `sleep 5` as its child; only the job's main pid was
+    # skipped, so the sleep showed up as a program running in this workspace folder.
+    assert jrun(cli, "adopt", "launchd:com.example.web-preview")[0] == 0
+    tools.set(
+        ps=[
+            {
+                "pid": 4321,
+                "ppid": 1,
+                "tty": "??",
+                "argv": ["/bin/sh", "-c", "while true; do date; sleep 5; done"],
+            },
+            {"pid": 4322, "ppid": 4321, "tty": "??", "argv": ["sleep", "5"]},
+            {"pid": 4323, "ppid": 4322, "tty": "??", "argv": ["sleep", "1"]},
+            {"pid": 970, "ppid": 1, "tty": "??", "argv": ["tail", "-f", "log.txt"]},
+        ],
+        lsof={"4321": str(ws), "4322": str(ws), "4323": str(ws), "970": str(ws)},
+    )
+    code, out = jrun(cli, "found")
+    assert code == 0, out
+    assert not [i for i in out["found"] if i["id"].startswith("process:")]
+    assert out["others"] == 1  # only tail; the job's children belong to the job
+    code, text, _ = cli("found")
+    assert "1 other program runs here." in text and "sleep" not in text
