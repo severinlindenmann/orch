@@ -8,6 +8,7 @@ from __future__ import annotations
 from test_queue import REPO, FakeGit, FakeGitHub, Outcome, make, states, url
 
 from orch_pull_requests import settings, store
+from orch_pull_requests.required_checks import ROLLUP
 
 FLAKY = ["addons / dashboard", "clock / *"]
 CLOCK = "clock / at 22:30:00 UTC (factory-dashboard)"
@@ -80,7 +81,7 @@ def _go(ws, runs, n=(1, 2, 3), ended_after=0):
 
 def test_a_group_red_only_in_flaky_checks_runs_them_again_once_and_merges_without_a_split(ws):
     _config(ws)
-    r, gh, calls = _go(ws, [{"failed": ["addons / dashboard", CLOCK, "gate"]}, {}])
+    r, gh, calls = _go(ws, [{"failed": ["addons / dashboard", CLOCK, ROLLUP]}, {}])
     r.run()
     assert gh.reruns == [(REPO, 77)]
     assert len(set(calls)) == 1 and len(calls) == 2  # one group, its checks waited for twice, no split
@@ -90,7 +91,7 @@ def test_a_group_red_only_in_flaky_checks_runs_them_again_once_and_merges_withou
 
 def test_red_again_after_the_rerun_is_split_as_before_and_never_run_again_a_second_time(ws):
     _config(ws)
-    red = {"failed": ["addons / dashboard", "gate"]}
+    red = {"failed": ["addons / dashboard", ROLLUP]}
     r, gh, calls = _go(ws, [red, red])  # the rerun is red too; the parts after the split are green
     r.run()
     assert gh.reruns == [(REPO, 77)]  # once for the first group only
@@ -102,7 +103,7 @@ def test_red_again_after_the_rerun_is_split_as_before_and_never_run_again_a_seco
 def test_a_group_also_red_in_a_check_that_is_not_flaky_is_split_without_a_rerun(ws):
     _config(ws)
     r, gh, calls = _go(
-        ws, [{"failed": ["addons / dashboard", "workspace / test (ubuntu-latest, 1/2)", "gate"]}]
+        ws, [{"failed": ["addons / dashboard", "workspace / test (ubuntu-latest, 1/2)", ROLLUP]}]
     )
     r.process(r.next_batch())
     assert gh.reruns == [] and calls.count(calls[0]) == 1 and len(set(calls)) > 1  # split at once
@@ -110,14 +111,14 @@ def test_a_group_also_red_in_a_check_that_is_not_flaky_is_split_without_a_rerun(
 
 def test_without_the_setting_every_red_group_is_split_as_before(ws):
     _config(ws, flaky=None)
-    r, gh, calls = _go(ws, [{"failed": ["addons / dashboard", "gate"]}])
+    r, gh, calls = _go(ws, [{"failed": ["addons / dashboard", ROLLUP]}])
     r.process(r.next_batch())
     assert gh.reruns == [] and calls.count(calls[0]) == 1 and len(set(calls)) > 1
 
 
 def test_a_group_red_only_in_the_summary_check_is_not_called_flaky(ws):
     _config(ws)
-    r, gh, _ = _go(ws, [{"failed": ["gate"]}])
+    r, gh, _ = _go(ws, [{"failed": [ROLLUP]}])
     r.process(r.next_batch())
     assert gh.reruns == []
 
@@ -154,12 +155,12 @@ def test_a_refused_rerun_splits_the_group(ws):
 
 def test_only_flaky_matches_names_with_a_star_and_ignores_case_and_summary_checks(ws):
     _config(ws, extra="")
-    assert settings.flaky_checks(ws) == FLAKY and settings.summary_checks(ws) == ["gate"]
-    assert settings.only_flaky(ws, {"Addons / Dashboard", "clock / at 23:59:40 UTC (workspace)", "gate"})
+    assert settings.flaky_checks(ws) == FLAKY and settings.summary_checks(ws) == [ROLLUP]
+    assert settings.only_flaky(ws, {"Addons / Dashboard", "clock / at 23:59:40 UTC (workspace)", ROLLUP})
     assert not settings.only_flaky(ws, {"addons / dashboard-clickthroughs"})  # no star: the exact name only
     assert not settings.only_flaky(ws, set())
-    assert not settings.only_flaky(ws, {"gate"})
-    _config(ws, flaky=["e2e-smoke / *"], extra='summary_checks = ["gate", "all green"]\n')
+    assert not settings.only_flaky(ws, {ROLLUP})
+    _config(ws, flaky=["e2e-smoke / *"], extra='summary_checks = ["all green"]\n')
     assert settings.only_flaky(ws, {"e2e-smoke / smoke", "all green"})
 
 

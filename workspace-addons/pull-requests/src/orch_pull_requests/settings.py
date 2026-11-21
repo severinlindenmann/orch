@@ -25,12 +25,14 @@
   A queue group red only in these runs its failed jobs again ONCE before it is split; red again, it is split as
   before. Default: none (every red group is split).
 - `summary_checks`: checks that only sum up the others (they fail whenever another one does), so they never make a
-  group count as red in something other than its flaky checks. Default: `["gate"]`.
+  group count as red in something other than its flaky checks. Default: CI's roll-up job (required_checks.ROLLUP).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+
+from . import required_checks
 
 DEFAULT_BASES = ("develop",)
 NEVER = ("main", "master")
@@ -43,7 +45,7 @@ DEFAULT_ALONE = (
 DEFAULT_MAX_GROUP, MOST_GROUP = 5, 20
 GROUP_CHECKS = ("github", "shadow", "local")
 DEFAULT_CHECK = ("python3", "scripts/ci_light.py", "--base", "{base}")
-DEFAULT_SUMMARY = ("gate",)
+DEFAULT_SUMMARY = (required_checks.ROLLUP,)
 
 
 def _table(root: Path) -> dict:

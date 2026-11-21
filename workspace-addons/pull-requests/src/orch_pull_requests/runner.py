@@ -31,7 +31,7 @@ branch, in line order:
   group of 10 that touches the failing area costs two more runs, not about four. A red group of one leaves the
   queue. A member left alone by the split is never merged on its own light checks, whatever `merge_alone` says
   (ORCH-909): it runs in a group of its own on top of the base, so the check that failed runs on it.
-- a group red only in known flaky checks (settings.flaky_checks, ORCH-1340; summary checks such as `gate` do not
+- a group red only in known flaky checks (settings.flaky_checks, ORCH-1340; summary checks such as CI's roll-up job do not
   count) runs its failed jobs again ONCE before it is split: the queue waits until its other checks ended, reruns
   the failed jobs and waits for the checks again. Red again, it is split as above.
 - a change to CI or to the queue itself (settings.alone_paths) runs alone in its own group: its green run is the
