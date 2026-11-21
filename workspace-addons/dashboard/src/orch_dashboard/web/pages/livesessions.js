@@ -117,7 +117,7 @@ if (typeof module === 'object' && module.exports) {
       if (!r?.ok) {
         store.list = store.list.map(x => x.id === id ? {...x, ...Object.fromEntries(Object.keys(change).map(k => [k, before[k]]))} : x);
         told(id, 'pinned' in change ? {pinned:before.pinned} : null);
-        if (!quiet) window.orch?.toast?.(r?.text || 'That did not work.', 'error');
+        if (!quiet) (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(r?.text, 'pinned' in change ? (change.pinned ? 'Could not pin it.' : 'Could not unpin it.') : 'Could not rename it.', () => save(op, id, change));
         return false;
       }
       read();

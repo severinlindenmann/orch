@@ -57,7 +57,7 @@ test('the layer shows the History button and the list in the pane, and the page 
   assert.match(layer, /liveHistKey\(\)/, 'opening History repaints the dock');
   const index = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
   assert.ok(index.indexOf('pages/live-history.js') > 0 && index.indexOf('pages/live-history.js') < index.indexOf('pages/live-layer.js'));
-  assert.match(source, /act\('session\.reopen', \{ticket:id, session:b\.dataset\.id\}\)/);
+  assert.match(source, /act\('session\.reopen', \{ticket:id, session\}\)/);
   assert.match(source, /fetch\('\/api\/sessions\/' \+ encodeURIComponent\(id\)\)/);
 });
 

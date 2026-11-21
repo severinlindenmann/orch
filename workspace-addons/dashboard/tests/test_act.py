@@ -51,6 +51,7 @@ def acts(act_orch):
             ["review", "list"],
             ["review", "accepted"],
             ["chat", "status"],
+            ["chat", "list"],  # the ticket chats (Chats page) in every state build
         )
         and c[:2] != ["private", "--json"]
         and c[:2] != ["look", "shared-pages"]
@@ -736,7 +737,13 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
                 if c[:2] not in (["addon", "list"], ["run", "status"], ["ticket", "list"], ["ticket", "show"])
                 and c[0] not in ("needs", "status", "agents")
                 and c[:2]
-                not in (["config", "get"], ["chat", "status"], ["review", "list"], ["review", "accepted"])
+                not in (
+                    ["config", "get"],
+                    ["chat", "status"],
+                    ["chat", "list"],
+                    ["review", "list"],
+                    ["review", "accepted"],
+                )
                 and c[:3] not in (["relay", "mobile", "status"], ["relay", "group", "list"])
                 and c[0] != "look"
                 and c[:2] != ["private", "--json"]
@@ -1076,6 +1083,30 @@ def test_release_merge_switch_is_one_config_set_by_a_human():
         build_argv("release_merge.set", {"on": "yes"})
 
 
+def test_auto_reviewer_and_away_switches_and_undo_are_orch_calls_by_a_human():
+    """ORCH-425: the Review page's two switches and its Undo."""
+    from orch_dashboard.actions import build_argv
+
+    for op, key in (("auto_reviewer.set", "workflow.auto_reviewer"), ("away.set", "workflow.away")):
+        for on in (True, False):
+            argv = build_argv(op, {"on": on})
+            assert argv[:4] == ["config", "set", key, "on" if on else "off"]
+            assert argv[argv.index("--by") + 1].startswith("human:")
+        with pytest.raises(actions.BadRequest):
+            build_argv(op, {"on": 1})
+    argv = build_argv("review.undo", {"ticket": "t_abcdef"})
+    assert argv[:3] == ["review", "undo", "t_abcdef"] or argv[-1] == "t_abcdef"
+    argv = build_argv("review.undo", {"ticket": "t_abcdef", "question": "q3"})
+    assert "q3" in argv and argv[argv.index("--by") + 1].startswith("human:")
+    for bad in (
+        {"ticket": "t_abcdef", "question": "q3; rm"},
+        {"ticket": "nope"},
+        {"ticket": "t_abcdef", "x": 1},
+    ):
+        with pytest.raises(actions.BadRequest):
+            build_argv("review.undo", bad)
+
+
 def test_browser_actions_do_not_inherit_the_servers_agent_identity(ws, monkeypatch):
     from orch.adapters import detect_env
 
@@ -1264,8 +1295,23 @@ def test_chat_new_and_make_ticket_validation():
         [],
         [],
     )
+    # a ticket's chat on the Chats page (ORCH-1168): the ticket id and the text; opening it marks it read
+    assert actions.OPS["chat.say"]({"text": "hi", "ticket": "t_abcdef"}) == (
+        ["chat", "say"],
+        ["--ticket", "t_abcdef"],
+        ["hi"],
+    )
+    assert actions.OPS["chat.read"]({"ticket": "t_abcdef"}) == (
+        ["chat", "read", "t_abcdef"],
+        ["--reader", "dashboard"],
+        [],
+    )
     for op, args in [
         ("chat.say", {"text": "hi", "new": "yes"}),
+        ("chat.say", {"text": "hi", "ticket": "--help"}),
+        ("chat.say", {"text": "hi", "ticket": "t_abcdef", "new": True}),
+        ("chat.read", {"ticket": "t_abcdef", "reader": "you"}),
+        ("chat.read", {}),
         ("chat.make_ticket", {"id": "--help"}),
         ("chat.make_ticket", {"id": "m_abcdefghij", "by": "agent:x"}),
     ]:

@@ -30,7 +30,8 @@ def overlapping(w, seen: dict):
         end = time.monotonic() + 10
         if stop is None:  # a group that may get one on top of it: give it a moment to be built
             mine = list(w.groups).index(u) if u in w.groups else -1
-            while len(w.groups) <= mine + 1 and time.monotonic() < end - 9.5:
+            # up to 4 s: a busy shared Mac took longer than 0.5 s to build it (flaky in the local group check)
+            while len(w.groups) <= mine + 1 and time.monotonic() < end - 6:
                 time.sleep(0.01)
         else:  # on top of another: wait until that one ended
             while not stop() and any(g["state"] == "OPEN" for x, g in w.groups.items() if x != u):

@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerCompact, liveLayerSort, liveAskModel, liveLayerHelper, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerCompact, liveLayerSort, liveAskModel, liveLayerHelper, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -307,7 +307,8 @@ test('ORCH-817: an ended helper without a ticket keeps its pane with Start again
   assert.match(source, /o\.open === true \|\| o\.kind !== 'terminal'/);
   assert.match(source, /ended:!running && x\.kind !== 'terminal' && \(x\.open !== true \|\| \(!!window\.LiveSessions\?\.ready && !live\)\)/);
   assert.match(source, /sess\?\.ended \? h\('div', \{className:'live-pb live-pb-start'\}, liveEndedBody\(sess, label\)\)/);
-  assert.match(source, /act\('session\.new', \{kind:b\.dataset\.liveAgain\}/);
+  assert.match(source, /liveStartAgain\(b\.dataset\.liveAgain, b\)/);
+  assert.match(source, /act\('session\.new', \{kind\}, \{quiet:true\}\)/);
   assert.match(source, /liveHistBody\(sess\)/);
 });
 
@@ -369,4 +370,20 @@ test('before the page state arrives a working session keeps the API word (Stuck,
   const x = L.liveLayerHelper({status:'working', word:'Stuck', detail:'No update for a while'}, null);
   assert.equal(x.state, 'stuck'); assert.equal(x.word, 'Stuck');
   assert.equal(L.liveLayerHelper({status:'working', word:'Working'}, null).word, 'Working');
+});
+
+// ORCH-1362 (UX checklist D5): Add beside is never greyed; with nothing to add its menu says why and what to do.
+test('Add beside stays a button; its menu says why nothing can go beside and what to do instead', () => {
+  assert.equal(L.liveBesideNote(1, 2), '', 'sessions to pick: no note');
+  assert.match(L.liveBesideNote(1, 0), /^No other session is live\. Start one/);
+  assert.match(L.liveBesideNote(3, 2), /^Three sessions show at once, the most\. Close one/);
+  const pane = source.slice(source.indexOf('function livePane('), source.indexOf('// The body of a pane'));
+  const beside = pane.slice(pane.indexOf("'Add beside', {"), pane.indexOf('}),', pane.indexOf("'Add beside', {")));
+  assert.doesNotMatch(beside, /disabled/, 'Add beside is never greyed');
+  assert.match(pane, /s\.menu === besideMenu \? liveBesideMenu\(key, label, o\.others, besideNone\)/);
+  const menu = source.slice(source.indexOf('function liveBesideMenu('), source.indexOf('// The More menu'));
+  assert.match(menu, /note \? h\('p', \{className:'meta', role:'status', 'data-key':'live-beside-none'\}, note\)/);
+  const more = source.slice(source.indexOf('function liveMoreEnd('), source.indexOf('// ORCH-817: Stop (the current step)'));
+  assert.doesNotMatch(more, /disabled/, 'Stop in More is never greyed');
+  assert.match(more, /'Nothing is running right now\.'/, 'and says next to it when nothing runs');
 });
