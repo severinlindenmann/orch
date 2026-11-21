@@ -18,8 +18,11 @@ export XDG_RUNTIME_DIR="/run/user/$ME"
 #   1. RESTART the user service manager from the system side (the one command setup.sh allows this user with sudo):
 #      every user unit and its processes end.
 #   2. Stop every other leftover process of the user (below).
-#   3. Remove the unit, environment and settings folders, then restart the manager once more so it starts from them.
+#   3. Remove the unit, environment and settings folders (also before step 1), restart the manager once more, check.
+USER_DIRS="$REAL_HOME/.config/systemd $REAL_HOME/.config/environment.d $REAL_HOME/.local/share/systemd"
+rm_user_dirs() { local d; for d in $USER_DIRS; do { [ -e "$d" ] || [ -L "$d" ]; } && rm -rf "$d"; done; }
 restarted=0
+rm_user_dirs   # before EVERY restart: a restarted manager must not start the job's units again
 if sudo -n /usr/bin/systemctl restart "user@$ME.service" 2>/dev/null; then restarted=1; else
   # not set up for it (an older setup.sh): stop what the user manager runs, as well as it can from inside
   echo "edge runner: could not restart the user service manager; stopping its units one by one" >&2
@@ -74,8 +77,10 @@ if [ -n "$stray" ]; then
   stray=$(leftovers); [ -n "$stray" ] && kill -9 $stray 2>/dev/null
 fi
 find /tmp /var/tmp /dev/shm -mindepth 1 -maxdepth 1 -user "$ME" ! -name 'dotnet-diagnostic-*' ! -name 'clr-debug-pipe-*' -exec rm -rf {} + 2>/dev/null
-for d in "$REAL_HOME/.config/systemd" "$REAL_HOME/.config/environment.d" "$REAL_HOME/.local/share/systemd"; do
-  { [ -e "$d" ] || [ -L "$d" ]; } && rm -rf "$d"
-done
+rm_user_dirs
 [ "$restarted" = 1 ] && sudo -n /usr/bin/systemctl restart "user@$ME.service" 2>/dev/null
+rm_user_dirs
+# Anything still there now is refused by the next job's start hook (job-started.sh): the runner then stays red
+# until a person looks, rather than run the next job next to it.
+for d in $USER_DIRS; do [ -e "$d" ] && echo "edge runner: $d came back after the clean-up; the next job will be refused" >&2; done
 exit 0

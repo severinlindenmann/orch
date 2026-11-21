@@ -17,7 +17,7 @@ for _ in 1 2 3 4 5 6 7 8; do
   p=$(ps -p "$p" -o ppid= 2>/dev/null | tr -d ' '); [ -n "$p" ] && [ "$p" -gt 1 ] || break
 done
 refuse() {
-  echo "edge runner: refused this job ($1). Only pushes to develop, the nightly run, manual runs and release pull requests run on orch edge." >&2
+  echo "edge runner: refused this job ($1).${2- Only pushes to develop, the nightly run, manual runs and release pull requests run on orch edge.}" >&2
   [ -n "$worker" ] && kill -9 "$worker" 2>/dev/null
   exit 1
 }
@@ -53,4 +53,15 @@ case $verdict in
   ok) ;;
   *) refuse "${verdict#no: }" ;;
 esac
+# Fail closed: user services, timers or their folders left from an earlier job mean the clean-up did not hold. The job
+# is refused (red) until a person looks, rather than run next to whatever is still there. Only vendor sockets
+# (gpg-agent, ssh-agent) are active on a clean runner.
+ME=$(id -u); REAL_HOME=$(getent passwd "$ME" | cut -d: -f6)
+if [ "$(id -un)" = orch-ci ]; then
+  for d in "$REAL_HOME/.config/systemd" "$REAL_HOME/.config/environment.d" "$REAL_HOME/.local/share/systemd"; do
+    [ -e "$d" ] && refuse "$d is left from an earlier job (the clean-up did not hold)" " A person must look at orch edge first."
+  done
+  left=$(XDG_RUNTIME_DIR=/run/user/$ME systemctl --user list-units --type=service,timer,path --state=active,activating --plain --no-legend 2>/dev/null | awk '{print $1}' | tr '\n' ' ')
+  [ -z "${left// /}" ] || refuse "user services left from an earlier job: $left" " A person must look at orch edge first."
+fi
 echo "edge runner: job ${GITHUB_JOB:-?} of run ${GITHUB_RUN_ID:-?} (${GITHUB_EVENT_NAME:-?}) starts with a throwaway home"

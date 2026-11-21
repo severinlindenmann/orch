@@ -252,9 +252,18 @@ def test_after_each_job_the_user_manager_restarts_and_only_that_command_is_allow
     hook = (RUNNER / "job-completed.sh").read_text()
     assert 'sudo -n /usr/bin/systemctl restart "user@$ME.service"' in hook
     for d in (".config/systemd", ".config/environment.d", ".local/share/systemd"):
-        assert f'"$REAL_HOME/{d}"' in hook
+        assert f"$REAL_HOME/{d}" in hook
     setup = (RUNNER / "setup.sh").read_text()
     assert "NOPASSWD: /usr/bin/systemctl restart user@%s.service" in setup and "visudo -cqf" in setup
+
+
+def test_a_runner_that_did_not_come_clean_refuses_the_next_job():
+    hook = (RUNNER / "job-started.sh").read_text()
+    assert "is left from an earlier job" in hook and "user services left from an earlier job" in hook
+    done = (RUNNER / "job-completed.sh").read_text()
+    first_restart = done.index('sudo -n /usr/bin/systemctl restart')
+    assert done.index("rm_user_dirs   # before EVERY restart") < first_restart
+    assert done.rstrip().endswith("exit 0") and done.count("rm_user_dirs\n") >= 2
 
 
 def test_scripts_parse():
