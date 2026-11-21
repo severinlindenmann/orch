@@ -1,4 +1,4 @@
-// Starts the page session (H1/H2): a one-time sign-in link (`orch start`, or `orch start --print-launch-url` for
+// Starts the page session (H1/H2): a one-time sign-in link (`orch dashboard open`, or `orch dashboard open --print` for
 // another computer) opens this page with a token in the URL fragment. The fragment is never sent in a request; it is
 // posted once and removed from the address bar. The answer carries the page secret: it is kept in localStorage (per
 // origin, so a page on another port or host never sees it; every tab of this browser shares it, so a second window
@@ -6,7 +6,7 @@
 // send it to every port of the host). Then the page reloads. The sign-in is the ONLY check: where the browser is (this
 // computer, another one, behind a proxy) does not matter.
 (function () {
-  var KEY = "orch_page_secret", HEADER = "X-Orch-Page";
+  var KEY = "orch_page_secret", HEADER = "X-Orch-Page", COMMAND = "orch dashboard open";
   function stored() {
     var v = "";
     try { v = localStorage.getItem(KEY) || ""; } catch (e) { v = ""; }
@@ -52,7 +52,17 @@
       b.id = "orch-signin"; b.className = "banner info orch-notice"; b.setAttribute("role", "alert");
       b.style.cssText = "margin:8px 16px 0";
       var d = document.createElement("div"); d.textContent = t; b.appendChild(d);
-      var x = document.createElement("button"); x.type = "button"; x.textContent = "Got it"; x.style.marginTop = "8px";
+      if (t.indexOf(COMMAND) !== -1) {  // the notice names the sign-in command: one click copies it
+        var c = document.createElement("button"); c.type = "button"; c.className = "btn primary sm"; c.textContent = "Copy command";
+        c.style.marginTop = "8px"; c.style.marginRight = "8px";
+        c.onclick = function () {
+          var done = function () { c.textContent = "Copied"; };
+          try { navigator.clipboard.writeText(COMMAND).then(done, function () { c.textContent = COMMAND; }); }
+          catch (e) { c.textContent = COMMAND; }  // no clipboard here: show the words to type
+        };
+        b.appendChild(c);
+      }
+      var x = document.createElement("button"); x.type = "button"; x.className = "btn sm"; x.textContent = "Got it"; x.style.marginTop = "8px";
       x.onclick = function () { b.remove(); };
       b.appendChild(x);
       (document.body || document.documentElement).insertBefore(b, (document.body || document.documentElement).firstChild);
@@ -79,7 +89,7 @@
       body: JSON.stringify({ token: m[1] }),
     }).then(function (r) {
       if (!r.ok) {  // a used or ended link: say so (the stopped page would stay on empty boxes with no word why)
-        return r.text().then(function (t) { showSignIn(t || "This sign-in link did not work. Open the dashboard again from orch."); });
+        return r.text().then(function (t) { showSignIn(t || "This sign-in link did not work. Sign in again: run orch dashboard open in your terminal."); });
       }
       return r.json().then(function (j) {
         try { localStorage.setItem(KEY, j.secret || ""); } catch (e) { /* no storage: the page stays watch-only */ }
