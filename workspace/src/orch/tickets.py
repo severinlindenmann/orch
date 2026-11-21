@@ -188,12 +188,13 @@ def resolve(root: Path, ref, *, follow_moved: bool = False, notice=None):
     if not isinstance(ref, str) or not _KEY_RE.match(ref.strip()):
         return ref
     want = ref.strip().upper()
-    local = list_all(root)
-    for t in local:
-        if str(t.get("key", "")).upper() == want:
-            return t["id"]
+    from orch import ticketindex
+
+    for r in ticketindex.rows(root):  # the index, not every ticket file (ORCH-521)
+        if str(r.get("key") or "").upper() == want:
+            return r["id"]
     if follow_moved:
-        t = _moved_ticket(root, want, local)
+        t = _moved_ticket(root, want, list_all(root))
         if t is not None:
             if notice is not None:
                 notice(f"{want} moved to {t.get('key') or t['id']}")
@@ -256,8 +257,10 @@ def next_key(root: Path) -> str:
     with _locked(root, "key"):
         p = _counter_path(root)
         last = _counter_last(root)
-        for t in list_all(root):
-            m = _KEY_RE.match(str(t.get("key", "")))
+        from orch import ticketindex
+
+        for t in ticketindex.rows(root):  # the keys from the index, not every ticket file (ORCH-521)
+            m = _KEY_RE.match(str(t.get("key") or ""))
             if m:
                 last = max(last, int(m.group(2)))
         n = last + 1
