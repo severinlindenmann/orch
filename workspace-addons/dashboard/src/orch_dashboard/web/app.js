@@ -504,47 +504,60 @@ async function actRetry(op, args, applies) {
 }
 window.orchAct = (op, args, opts) => act(op, args, opts);
 window.orchActId = () => newActId();  // one id a form keeps for its retries (ORCH-580)
-// Turning an add-on on or off restarts the running services, this page's server too. When the answer is lost on
-// the way (the server restarted), read the state again once it is back: the add-on's switch says if it worked.
-async function addonSet(name, on, tries = 20, pause = 1500) {
-  const result = await act('addon.set', {name, on}, {check:false});  // the server restarts: its click ids are gone
-  if (result.ok || result.status !== 0 || snapshot) return result;
-  for (let i = 0; i < tries; i++) {
-    await new Promise(done => setTimeout(done, pause));
-    let next = null;
-    try {
-      const res = await fetch('/api/state', {cache:'no-store'});
-      if (res.ok) next = await res.json();
-    } catch (_) { /* still restarting */ }
-    if (!next) continue;
-    accept(next);
-    const row = array(next.settings?.addons).find(a => a && a.name === name);
-    return row && !!row.active === on ? {ok:true, status:200, state:next, recovered:true} : result;
-  }
-  return result;
+// An add-on change restarts the running services about a second after its answer (orch.restartlater), this
+// page's server too. Until the new server answers, nothing on the page asks it: the poll, the live sessions and the
+// debug log wait (window.orchQuiet), and this one wait reads the state once it is back (ORCH-1034: every poll hit
+// the closed port, the browser logged refused connections and the page said it could not reach the workspace).
+// The same run answering twice (`boot` unchanged) means nothing restarted: its answer is taken.
+let restartHold = 0;
+window.orchQuiet = () => Date.now() < restartHold;
+async function afterRestart(boot, tries = 24, pause = 1500, head = 2500) {
+  const wait = ms => new Promise(done => setTimeout(done, ms));
+  restartHold = Date.now() + head + (tries + 2) * pause;  // never longer than this wait, even if it is cut short
+  try {
+    await wait(head);
+    let same = 0;
+    for (let i = 0; i < tries; i++) {
+      if (i) await wait(pause);
+      let res = null;
+      try { res = await fetch('/api/state?fresh=1', {cache:'no-store'}); } catch (_) { continue; }  // still restarting
+      if (!res.ok) continue;
+      const now = res.headers?.get?.('X-Orch-Boot') || null;
+      if (boot && now === boot && ++same < 2) continue;  // the old run, not stopped yet
+      serverBoot = now || serverBoot;
+      const next = await res.json();
+      if (next && !next.delta) accept(next);
+      return next && !next.delta ? next : null;
+    }
+    return null;
+  } finally { restartHold = 0; }
 }
-// Uninstall an add-on (`orch addon uninstall`, refused while it is on: turn it off first). The
-// services restart like for the switch, so a lost answer is checked by reading the state again.
-async function addonUninstall(name, tries = 20, pause = 1500) {
+// Turning an add-on on or off: when the answer is lost on the way (the server restarted), the state read once the
+// server is back says if it worked (the add-on's switch).
+async function addonSet(name, on, tries = 24, pause = 1500) {
+  const boot = serverBoot;
+  const result = await act('addon.set', {name, on}, {check:false});  // the server restarts: its click ids are gone
+  if (snapshot || (!result.ok && result.status !== 0)) return result;
+  const next = await afterRestart(boot, tries, pause);
+  if (result.ok || !next) return result;
+  const row = array(next.settings?.addons).find(a => a && a.name === name);
+  return row && !!row.active === on ? {ok:true, status:200, state:next, recovered:true} : result;
+}
+// Uninstall an add-on (`orch addon uninstall`, refused while it is on: turn it off first). The services restart
+// like for the switch; the row leaves the list at once and the state read after the restart confirms it.
+async function addonUninstall(name, tries = 24, pause = 1500) {
   const still = rows => array(rows).some(a => a && a.name === name);
   if (array(state.settings?.addons).find(a => a && a.name === name)?.active) {
     const off = await addonSet(name, false);
     if (!off.ok) return off;
   }
+  const boot = serverBoot;
   const result = await act('addon.uninstall', {name}, {check:false});
-  if (result.ok || result.status !== 0 || snapshot) return result;
-  for (let i = 0; i < tries; i++) {
-    await new Promise(done => setTimeout(done, pause));
-    let next = null;
-    try {
-      const res = await fetch('/api/state', {cache:'no-store'});
-      if (res.ok) next = await res.json();
-    } catch (_) { /* still restarting */ }
-    if (!next) continue;
-    accept(next);
-    return still(next.settings?.addons) ? result : {ok:true, status:200, state:next, recovered:true};
-  }
-  return result;
+  if (snapshot || (!result.ok && result.status !== 0)) return result;
+  if (result.ok && state?.settings) { state.settings.addons = array(state.settings.addons).filter(a => !(a && a.name === name)); render(); }
+  const next = await afterRestart(boot, tries, pause);
+  if (result.ok || !next) return result;
+  return still(next.settings?.addons) ? result : {ok:true, status:200, state:next, recovered:true};
 }
 // The button a person just pressed shows the kit's busy state at once (aria-busy + aria-disabled), before the
 // answer comes, and until it came (ORCH-102: a click showed nothing for seconds while helpers ran).
@@ -675,6 +688,7 @@ let refreshAgain = false;
 let wantFull = false;  // the last delta did not fit the state held: ask for the whole state once
 async function refresh() {
   if (snapshot) return;
+  if (window.orchQuiet()) return;  // an add-on change restarts the server: afterRestart reads the state once it is back
   if (fetching || writing) { refreshAgain = true; return; }
   fetching = true;
   refreshAgain = false;
