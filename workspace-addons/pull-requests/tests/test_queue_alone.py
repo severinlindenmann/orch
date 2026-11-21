@@ -140,6 +140,7 @@ def test_a_proved_pull_request_of_a_done_ticket_still_gets_its_merge_card(ws, mo
         lambda root, tid, key, u: made.append((tickets.load(root, tid)["status"], key, u)),
     )  # fmt: skip
     t = tickets.create(ws, "CI change", by="human:p")
+    tickets.ref_add(ws, t["id"], url(1), "human:p")
     tickets.set_status(ws, t["id"], "done", "human:p")
     add(ws, 1, ticket=t["id"])
     gh = FakeGitHub({1: {"files": [".github/workflows/ci.yml"]}})
@@ -205,3 +206,17 @@ def test_a_lone_fix_goes_first_whatever_the_turn(ws):
     r, _ = make(ws, gh, FakeGit())
     r._since_lone = 0
     assert [e["number"] for e in r.next_batch()] == [1]
+
+
+def test_a_done_ticket_that_does_not_link_the_pull_request_is_not_opened(ws, monkeypatch):
+    """Only the ticket the pull request belongs to opens again; a wrong --ticket never reopens someone's work."""
+    from orch import tickets
+
+    monkeypatch.setattr(runner, "_make_card", lambda *a: None)
+    t = tickets.create(ws, "Other work", by="human:p")
+    tickets.set_status(ws, t["id"], "done", "human:p")
+    add(ws, 1, ticket=t["id"])
+    r, _ = make(ws, FakeGitHub({1: CI}), FakeGit(), ask=runner._ask_merge)
+    r.run()
+    assert tickets.load(ws, t["id"])["status"] == "done"
+    assert "is Done and does not link" in store.find(store.read(ws), url(1))["why"]

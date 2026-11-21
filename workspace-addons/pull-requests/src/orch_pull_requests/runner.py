@@ -414,10 +414,9 @@ class Runner:
         else:
             rows, pending = list(got.get("failed") or []), list(got.get("pending") or [])
         failed = frozenset(str(x.get("name") or "") for x in rows)
-        again = bool(head) and r.get("rerun_head") == head  # its failed jobs ran once more already
         if failed and self.base_to_blame(repo, base, u, [r], failed):
             return False
-        if pending and not (failed and again):
+        if pending:  # never judged while some still run (a rerun's fast failure waits for the rest too)
             why = "its own checks are still running"
             if failed:
                 why += f" ({_names(failed)} failed: run again once the others end)"
@@ -425,20 +424,27 @@ class Runner:
             return False
         if not failed:
             return True
-        if not again:
-            reran = self.rerun_own(repo, u, rows)
-            if reran is None:
+        done = set(r.get("rerun_runs") or []) if head and r.get("rerun_head") == head else set()
+        fresh = [x for x in dict.fromkeys(_run_of(repo, x) for x in rows) if x and x not in done]
+        refused: list[str] = []
+        if fresh:  # each workflow run gets its one rerun per head, also when another's rerun was refused
+            started, refused = self.rerun_own(repo, u, fresh)
+            if started or refused:
+                done |= set(started) | set(refused)
+                store.set_state(
+                    self.root, u, WAITING, r.get("why") or "", rerun_head=head, rerun_runs=sorted(done)
+                )
+            if started:
+                why = f"its own check {_names(failed)} failed; the merge queue runs it again once"
+                store.set_state(self.root, u, WAITING, why, not_before=self.clock() + PAUSE_SECS)
+                self.log(f"{u}: {why}.")
+                return False
+            if len(refused) < len(fresh):  # no room in the write limit for the rest now
                 self._hold(
                     r, f"{_names(failed)} failed; waits for room in the write limit to run it again once"
                 )
                 return False
-            if reran:
-                why = f"its own check {_names(failed)} failed; the merge queue runs it again once"
-                store.set_state(
-                    self.root, u, WAITING, why, rerun_head=head, not_before=self.clock() + PAUSE_SECS
-                )
-                self.log(f"{u}: {why}.")
-                return False
+        again = bool(done - set(refused))  # a refused rerun never ran: not "again"
         first = next((x for x in rows if x.get("link")), rows[0])
         find = getattr(self.gh, "first_failure", None)
         test = ""
@@ -458,26 +464,18 @@ class Runner:
         """Waiting, in its place, looked at again after a pause; no try used."""
         store.set_state(self.root, r["url"], WAITING, why, not_before=self.clock() + PAUSE_SECS)
 
-    def rerun_own(self, repo: str, url: str, rows: list[dict]) -> bool | None:
-        """Run the failed jobs of a pull request's own checks again, once per workflow run (a GitHub write: a
-        slot first). True: at least one rerun started; False: none could (no job link, GitHub refused, or no
-        rerun here); None: no room in the write limit now."""
-        from .checks import JOB_URL
-
+    def rerun_own(self, repo: str, url: str, runs: list[str]) -> tuple[list[str], list[str]]:
+        """Run the failed jobs of these workflow runs again (a GitHub write each: a slot first). Returns (started,
+        refused); a run left out of both got no room in the write limit now. No rerun here: all refused."""
         rerun = getattr(self.gh, "rerun_failed", None)
         if rerun is None:
-            return False
-        runs = []
-        for x in rows:
-            m = JOB_URL.match(str(x.get("link") or ""))
-            if m and m[1].lower() == repo.lower() and m[2] not in runs:
-                runs.append(m[2])
-        ok = False
+            return [], list(runs)
+        started, refused = [], []
         for run in runs:
             if not self.take("other", f"{repo} rerun {run} of {url}"):
-                return None if not ok else True
-            ok = bool(rerun(repo, int(run))) or ok
-        return ok
+                break
+            (started if rerun(repo, int(run)) else refused).append(run)
+        return started, refused
 
     def lone_reason(self, v: dict, proof: bool) -> str:
         """Why the pull request runs alone in a group of its own ('' when it may join others): a person merges
@@ -1307,6 +1305,14 @@ def _taken(r: dict, v: dict, b: str, proof: bool, lone: str) -> dict:
     return r
 
 
+def _run_of(repo: str, row: dict) -> str:
+    """The workflow run id of a failed check's job link in repo ('' when it has none)."""
+    from .checks import JOB_URL
+
+    m = JOB_URL.match(str(row.get("link") or ""))
+    return m[2] if m and m[1].lower() == repo.lower() else ""
+
+
 def _names(jobs) -> str:
     names = sorted(str(j) for j in jobs)
     return ", ".join(names[:4]) + (f" and {len(names) - 4} more" if len(names) > 4 else "")
@@ -1358,6 +1364,9 @@ def _ask_merge(root: Path, tid: str, url: str) -> str | None:
 
     t = tickets.load(root, tid)
     if t.get("status") == "done":
+        linked = {pr_key(str(x.get("url") or "")) for x in t.get("refs") or [] if isinstance(x, dict)}
+        if pr_key(url) not in linked:  # only the ticket the pull request belongs to is opened again
+            raise Refused(f"its ticket {t.get('key') or t['id']} is Done and does not link {url}")
         _reopen_for_card(root, t["id"], url)
     key = str(t.get("key") or t["id"])
     _make_card(root, t["id"], key, url)

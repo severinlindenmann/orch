@@ -131,3 +131,53 @@ def test_first_failure_reads_the_first_failure_line_without_the_gh_prefix():
     )
     assert blame.first_failure(log) == "FAILED tests/test_a.py::test_one - assert 1 == 2"
     assert blame.first_failure("all good") == ""
+
+
+class TwoRuns(OwnChecks):
+    """Failed checks in two workflow runs (77 and 88)."""
+
+    def own_checks(self, u):
+        c = self.checks.get(1, {})
+        rows = [
+            {"name": x, "link": f"https://github.com/acme/app/actions/runs/{run}/job/1"}
+            for x, run in c.get("failed", [])
+        ]
+        return {"failed": rows, "pending": list(c.get("pending", []))}
+
+
+def test_a_rerun_that_fails_fast_while_others_still_run_waits_for_them(ws):
+    """Outside review: red again in one job while the rerun's other jobs run: it waits for all of them."""
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    store.set_state(ws, url(1), store.WAITING, "x", rerun_head=f"{1:040d}", rerun_runs=["77"])
+    gh = OwnChecks({1: {}}, {1: {"failed": ["lint"], "pending": ["workspace / test"]}})
+    r, _ = make(ws, gh, FakeGit())
+    assert r.next_batch() == [] and _row(ws, 1)["state"] == "waiting"
+
+
+def test_each_workflow_run_gets_its_own_rerun_when_another_was_refused(ws):
+    """Outside review: run 77's rerun refused, 88's started; 88 still red later is 'again', 77 never retried."""
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh = TwoRuns({1: {}}, {1: {"failed": [("lint", 77), ("tests", 88)]}})
+    gh.rerun_failed = lambda repo, run: (gh.reruns.append(run), run == 88)[1]
+    r, _ = make(ws, gh, FakeGit())
+    assert r.next_batch() == [] and gh.reruns == [77, 88]
+    assert _row(ws, 1)["rerun_runs"] == ["77", "88"]
+    r.clock = lambda: 10**9
+    r.next_batch()
+    row = _row(ws, 1)
+    assert gh.reruns == [77, 88] and row["state"] == "out" and "again after one rerun" in row["why"]
+
+
+def test_no_room_for_a_second_run_keeps_its_rerun_for_later(ws):
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh = TwoRuns({1: {}}, {1: {"failed": [("lint", 77), ("tests", 88)]}})
+    gh.rerun_failed = lambda repo, run: (gh.reruns.append(run), True)[1]
+    r, _ = make(ws, gh, FakeGit())
+    slots = iter([True, False])
+    r._take = lambda kind, what: next(slots, False)
+    r.next_batch()
+    assert gh.reruns == [77] and _row(ws, 1)["rerun_runs"] == ["77"]
+    r._take = lambda kind, what: True
+    r.clock = lambda: 10**9
+    r.next_batch()
+    assert gh.reruns == [77, 88] and _row(ws, 1)["state"] == "waiting"
