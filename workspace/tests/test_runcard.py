@@ -601,6 +601,10 @@ def test_a_failed_phone_run_answers_the_phone_in_the_message_format(tk, run, mon
     relay._apply_run(Path(root), tid, _q(root, tid, q["id"]), _digest(root, tid, q["id"]), ME, "phone",
                      lambda body, note, applied=None: seen.append(body), lambda _t: None)  # fmt: skip
     assert seen == [{"result": "refused", "reason": "unavailable"}]
-    schema = json.loads((Path(__file__).resolve().parents[2] / "contracts" / "message.schema.json").read_text())
-    jsonschema.Draft202012Validator({"$defs": schema["$defs"], "$ref": "#/$defs/review_result"}).validate(seen[0])
+    schema = json.loads(
+        (Path(__file__).resolve().parents[2] / "contracts" / "message.schema.json").read_text()
+    )
+    jsonschema.Draft202012Validator({"$defs": schema["$defs"], "$ref": "#/$defs/review_result"}).validate(
+        seen[0]
+    )
     assert _q(root, tid, q["id"])["answer"] is None
