@@ -733,15 +733,25 @@ async fn send(
     body: Bytes,
 ) -> Res<(StatusCode, Json<Value>)> {
     let v = parse_body(&body)?;
-    let id = {
+    let (id, team) = {
         let c = app.db.lock().unwrap();
         let (pid, _, ws) = auth::phone(&c, &h)?;
         if let Some(cid) = v["client_id"].as_str() {
             if let Some(old) = client_dup(&c, &pid, cid)? {
-                return Ok((
-                    StatusCode::OK,
-                    Json(json!({"id": old, "client_id": cid, "duplicate": true})),
-                ));
+                let mut out = json!({"id": old, "client_id": cid, "duplicate": true});
+                // A retry after a lost reply still says whether the stored text kept the team choice.
+                let stored = c
+                    .query_row(
+                        &format!("SELECT {MSG_COLS} FROM messages WHERE id=?1"),
+                        [&old],
+                        msg_from_row,
+                    )
+                    .optional()?;
+                if stored.is_some_and(|m| store::open_payload(&app.key, &m).0.get("team").is_some())
+                {
+                    out["team"] = true.into();
+                }
+                return Ok((StatusCode::OK, Json(out)));
             }
         }
         check("send_request", &v)?;
@@ -811,6 +821,12 @@ async fn send(
                 b.insert("human_review".into(), on.into());
             }
         }
+        // ORCH-1175: the person's Add / @ choice in a ticket chat, copied unchanged (the schema checked its form
+        // and that it comes with text and a ticket); the ticket's workspace decides what it does.
+        let team = !v["team"].is_null();
+        if team {
+            b.insert("team".into(), v["team"].clone());
+        }
         let body = Value::Object(b);
         // Same schema check as workspace messages.
         let mut cand = json!({"schema": "orch.msg/1", "id": rand_id("m_", 16), "from": pid, "to": to,
@@ -836,14 +852,15 @@ async fn send(
             )?;
         }
         tx.commit()?;
-        id
+        (id, team)
     };
     app.notify.notify_waiters();
     let cid = v["client_id"].clone();
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({"id": id, "client_id": cid})),
-    ))
+    let mut out = json!({"id": id, "client_id": cid});
+    if team {
+        out["team"] = true.into();
+    }
+    Ok((StatusCode::CREATED, Json(out)))
 }
 
 /// Largest phone upload: 25 MB.
