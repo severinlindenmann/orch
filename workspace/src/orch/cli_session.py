@@ -23,6 +23,9 @@ def add_parsers(sub, common) -> None:
         "permissions), remembered for this kind; a session that is on goes on in it. Raising it needs the "
         "signed-in person on the dashboard",
     )
+    x.add_argument(
+        "--model", choices=("haiku", "sonnet", "opus", "fable"), help="the model the Empty helper starts on"
+    )
     s.add_parser("list", parents=[common], help="the sessions without a ticket and whether they are open")
     x = s.add_parser(
         "close", parents=[common], help="end a session without a ticket (a helper's conversation is kept)"
@@ -50,7 +53,7 @@ def dispatch(args, root: Path) -> bool:
         # ORCH-818: only the dashboard's signed-in page hands this call a person grant. Used up first, needed
         # or not, so it never reaches the helper this call starts.
         person = ownerpick.person_granted(root, by)
-        d = sessions.new(root, args.kind, by, mode=mode, person=person)
+        d = sessions.new(root, args.kind, by, model=getattr(args, "model", None), mode=mode, person=person)
         for note in d.get("notes") or []:
             print(note, file=sys.stderr)
         name = d.get("title", args.kind)

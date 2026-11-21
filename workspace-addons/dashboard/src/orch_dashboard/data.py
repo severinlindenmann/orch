@@ -677,6 +677,8 @@ def load_sessions(root: Path) -> list[dict]:
                 "title": SESSION_TITLES[kind],
                 "closed": bool(t.get("closed_at")),
             }
+            if kind == "empty":
+                found[kind]["model"] = _next_model(t)
     return [found[k] for k in SESSION_TITLES if k in found]
 
 
@@ -710,8 +712,19 @@ def load_session_modes(root: Path, sessions: list[dict]) -> dict | None:
     return out
 
 
+def _next_model(t: dict) -> str | None:
+    """The model the Empty helper starts on (or runs on): the New menu shows and preselects it (ORCH-710)."""
+    try:
+        from orch import tickets as core
+
+        return core.next_model(t)
+    except Exception:  # noqa: BLE001 - an older core: the page shows no model
+        return None
+
+
 def shape_sessions(sessions: list[dict], runs: dict) -> list[dict]:
-    """[{id, kind, title, open}] for the bar and the wall: a helper is open while its session runs."""
+    """[{id, kind, title, open, model?}] for the bar and the wall: a helper is open while its session runs; the
+    Empty helper says the model it starts on."""
     out = []
     for s in sessions:
         on = (runs.get(s["id"]) or {}).get("running") is True
@@ -721,6 +734,7 @@ def shape_sessions(sessions: list[dict], runs: dict) -> list[dict]:
                 "kind": s["kind"],
                 "title": s["title"],
                 "open": not s["closed"] if s["kind"] == "terminal" else on,
+                **({"model": s["model"]} if s.get("model") else {}),
             }
         )
     return out

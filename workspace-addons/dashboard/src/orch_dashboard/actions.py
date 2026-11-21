@@ -855,17 +855,25 @@ SESSION_MODES = ("ask", "edits", "auto", "full")  # core sessionmode.MODES (ORCH
 def _session_new(a):
     """The New menu of the live bar: a session without a ticket (empty helper, chat helper, plain terminal,
     Manager), through the core's one start path. A second New of the same kind goes to the one that is open."""
-    _only(a, ("kind", "permissions"))
+    _only(a, ("kind", "permissions", "model"))
     if a.get("kind") not in SESSION_KINDS:
         raise BadRequest("Choose an empty helper, a chat helper, a plain terminal or the Manager.")
+    flags: list[str] = []
+    model = a.get("model")
+    if model is not None:
+        if (
+            a["kind"] != "empty" or model not in MODELS or model == "auto"
+        ):  # ORCH-710: the Empty helper's pick
+            raise BadRequest("Pick Sonnet, Opus, Haiku or Fable for the Empty helper.")
+        flags += ["--model", model]
     mode = a.get("permissions")
-    if mode is None:
-        return ["session", "new", a["kind"]], [], []
-    # ORCH-818: the Start choice's permission mode; the core refuses one the workspace does not allow, and a
-    # raise without the signed-in person's grant (SESSION_GRANT_OPS)
-    if mode not in SESSION_MODES or a["kind"] == "terminal":
-        raise BadRequest("Choose a permission mode the helper knows.")
-    return ["session", "new", a["kind"]], ["--permission-mode", mode], []
+    if mode is not None:
+        # ORCH-818: the Start choice's permission mode; the core refuses one the workspace does not allow, and a
+        # raise without the signed-in person's grant (SESSION_GRANT_OPS)
+        if mode not in SESSION_MODES or a["kind"] == "terminal":
+            raise BadRequest("Choose a permission mode the helper knows.")
+        flags += ["--permission-mode", mode]
+    return ["session", "new", a["kind"]], flags, []
 
 
 def _run_send(a):
