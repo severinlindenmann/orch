@@ -371,6 +371,14 @@ def _launching(drv, spec) -> bool:
     return bool(drv.status(spec).starting)
 
 
+def _shown(root: Path, p: Path) -> str:
+    """A path as the person reads it: relative to the workspace when it lies inside it."""
+    try:
+        return str(p.resolve().relative_to(Path(root).resolve()))
+    except ValueError:
+        return str(p)
+
+
 def cmd_add(args, root: Path) -> int:
     sid = store.check_id(args.id)
     if store.exists(root, sid):
@@ -397,6 +405,7 @@ def cmd_add(args, root: Path) -> int:
     drv = _driver()
     wid = _workspace_id(root)
     spec = _spec(root, rec, wid)
+    old_log = store.set_aside_old_log(root, sid)  # a re-used id starts with an empty log (ORCH-1131)
     store.save(root, rec)
     store.log_path(root, sid).parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -419,6 +428,8 @@ def cmd_add(args, root: Path) -> int:
         nxt = f"Added {rec['name']} and started it, but it did not stay running. Read its log: orch services log {sid}"
     else:
         nxt = f"Added {rec['name']}. Start it: orch services start {sid}"
+    if old_log is not None:
+        nxt += f"\nIt starts with an empty log; the log of the earlier service {sid} was moved to {_shown(root, old_log)}."
     if store.on_external_volume(root):
         nxt += (
             "\nThis workspace is on an external disk: its log is kept in your Library/Logs/orch folder and the "
