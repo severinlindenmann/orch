@@ -2375,10 +2375,11 @@ def worked_since_prepare(root: Path, ticket: dict, agent: str | None) -> bool:
         since = str(p.get("at") or "")
         after = [h for h in lines if isinstance(h, dict) and str(h.get("at") or "") > since]
     since = str(p.get("at") or "")
-    if any(  # a step started or finished since Prepare ended (starting one writes no history line;
-        # Prepare itself starts and finishes none, so the same second counts)
+    if any(  # a helper started or finished a step since Prepare ended (starting one writes no history line;
+        # Prepare itself starts and finishes none, so the same second counts); a person's tick is a change
         isinstance(c, dict)
         and (c.get("state") == "doing" or c.get("done"))
+        and not str(c.get("by") or "").startswith("human:")
         and str(c.get("at") or "") >= since
         for c in ticket.get("checklist") or []
     ):

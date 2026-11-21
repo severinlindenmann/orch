@@ -7,6 +7,7 @@ import os
 import shlex
 import sys
 import time
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import test_run_wrap
@@ -424,6 +425,16 @@ def test_only_the_first_start_after_prepare_gets_the_changes(proj, new_ticket, t
     assert "preparing is over" not in later["prompt"] and DONE_WHEN_CHANGED not in later["prompt"]
 
 
+def test_a_step_a_person_ticks_before_start_does_not_hide_the_changes(proj, new_ticket, transcript):
+    tid = new_ticket()
+    _prepared(proj, tid)
+    tickets.edit(proj, tid, None, "human:t", {"done_when": "The report is sent to Anna"})
+    tickets.check_start(proj, tid, "c1", "human:t")  # the person marks a step before pressing Start
+    tickets.set_status(proj, tid, "active", "human:t")
+    text = runs.plan(proj, tid, agent="claude")["prompt"]
+    assert "preparing is over" in text and DONE_WHEN_CHANGED in text
+
+
 def test_a_long_change_list_never_crowds_out_new_input(proj, new_ticket, transcript):
     tid = new_ticket()
     _prepared(proj, tid)
@@ -433,6 +444,24 @@ def test_a_long_change_list_never_crowds_out_new_input(proj, new_ticket, transcr
     items = [{"id": "i1", "by": "human:t", "text": "IMPORTANT_NEW_INPUT", "at": tickets.now()}]
     text = runs.plan(proj, tid, agent="claude", items=items)["prompt"]
     assert "IMPORTANT_NEW_INPUT" in text and "more changes: see orch ticket show" in text
+
+
+def test_a_cut_change_list_keeps_the_newest_lines_on_the_ticket(proj, new_ticket, transcript):
+    tid = new_ticket()
+    _prepared(proj, tid)
+    for i in range(40):
+        tickets.check_add(proj, tid, f"Extra step {i} with some longer words to fill the list", "human:t")
+    later = (datetime.now(UTC) + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def op(t):  # a minute later: lines of the same second as the last run are not new
+        tickets.add_history(t, "human:t", "Use the October numbers as the base.", at=later)
+        return True
+
+    tickets.apply_op(proj, tid, op, by="human:t")
+    tickets.set_status(proj, tid, "active", "human:t")
+    text = runs.plan(proj, tid, agent="claude")["prompt"]
+    assert runs.CHANGES_CUT in text and "New on the ticket since last time" in text
+    assert "Use the October numbers as the base." in text
 
 
 def test_a_new_file_name_reaches_the_helper_as_one_plain_line(proj, new_ticket):

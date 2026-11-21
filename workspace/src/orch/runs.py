@@ -1386,13 +1386,14 @@ def prepare_prompt(ticket: dict, items: list[dict], root: Path) -> str:
 
 
 CHANGES_MAX = 3000  # the list of what changed since Prepare never crowds out the new input after it
+CHANGES_CUT = "- … more changes: see orch ticket show"
 
 
 def _changes_text(changes: list[str]) -> str:
     text = "\n".join(c if c.startswith("Written on") else f"- {c}" for c in changes)
     if len(text) <= CHANGES_MAX:
         return text
-    return text[: CHANGES_MAX - 60].rsplit("\n", 1)[0] + "\n- … more changes: see orch ticket show"
+    return text[: CHANGES_MAX - 60].rsplit("\n", 1)[0] + "\n" + CHANGES_CUT
 
 
 def _prepared_start_plan(ticket: dict, root: Path | None = None, agent: str | None = None) -> list[str]:
@@ -1468,7 +1469,8 @@ def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str
     prepared = _prepared_start_plan(ticket, root, agent)
     if any(h.startswith("- ") and "What I found" in h for h in news):  # Prepare wrote it since last time
         parts.extend(found_text(ticket))
-    if news and len(prepared) < 2:  # a list of what changed since Prepare already names these lines
+    cut = bool(prepared) and prepared[-1].endswith(CHANGES_CUT)
+    if news and (len(prepared) < 2 or cut):  # a whole list of what changed since Prepare names these lines
         parts.append("New on the ticket since last time:\n" + "\n".join(news[-10:]))
     if items:
         parts.append("New input:\n" + _items_text(items))
