@@ -135,9 +135,12 @@ struct ChatsListView: View {
             attentionCards
             let shown = model.workspaceSummaries.filter { ChatsRowRules.matches(filter, unread: $0.unread, needsYou: $0.openQuestions > 0) }
             let groupsShown = GroupsSection.shown(model, filter: filter)
-            if shown.isEmpty && groupsShown.isEmpty {
+            let ticketChats = TicketChatsRules.rows(model.workspaceSummaries, filter: filter)
+            if !ticketChats.isEmpty { TicketChatsSection(rows: ticketChats) }
+            if shown.isEmpty && groupsShown.isEmpty && ticketChats.isEmpty {
                 Text("Nothing here yet.").themeFont(15).foregroundStyle(Theme.muted).padding(.vertical, 24)
             } else if !shown.isEmpty {
+                if !ticketChats.isEmpty { ChatsSectionHeader(text: "Workspaces") }
                 VStack(spacing: 0) {
                     ForEach(shown) { summary in
                         workspaceRow(summary)
@@ -362,5 +365,95 @@ enum ChatsRowRules {
         if starting { return "Getting started…" }
         if working && unread == 0 { return "Working…" }
         return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No messages yet" : text
+    }
+}
+
+/// One row of the "Ticket chats" list: a ticket's chat with the workspace it lives in.
+struct TicketChatRow: Identifiable, Equatable {
+    let topic: TopicSummary
+    let workspace: Workspace
+    var id: String { "\(workspace.id)|\(topic.id.ticket ?? "")" }
+}
+
+/// The "Ticket chats" list on Chats (team chat step 1): every ticket's chat from every workspace, newest first.
+enum TicketChatsRules {
+    /// Shown before "See all (n)".
+    static let shownLimit = 5
+    static let finished: Set<TopicStatus> = [.done, .dropped, .stopped, .didntWork]
+
+    /// Tickets of every workspace with their chat, newest activity first. A finished ticket stays only while it has
+    /// unread messages; a topic that is still starting is not a ticket yet. The filter is the one of the whole list.
+    static func rows(_ summaries: [WorkspaceSummary], filter: String = "All") -> [TicketChatRow] {
+        summaries.flatMap { s in
+            s.topics.filter { !$0.isStarting && $0.id.ticket != nil && (!finished.contains($0.status) || $0.unread > 0) }
+                .map { TicketChatRow(topic: $0, workspace: s.workspace) }
+        }
+        .filter { ChatsRowRules.matches(filter, unread: $0.topic.unread, needsYou: $0.topic.status == .waitingOnYou) }
+        .sorted { ($0.topic.lastAt ?? "", $0.id) > ($1.topic.lastAt ?? "", $1.id) }
+    }
+
+    /// "PRD-7 · Marketing": the ticket key and the workspace under the title.
+    static func detail(_ row: TicketChatRow, workspaceName: String) -> String {
+        [row.topic.key, workspaceName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+}
+
+/// "Ticket chats" on Chats: one row per ticket's chat, next to the workspace chats (as in the ORCH-1098 draft).
+struct TicketChatsSection: View {
+    let rows: [TicketChatRow]
+    @State private var showAll = false
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        let shown = showAll ? rows : Array(rows.prefix(TicketChatsRules.shownLimit))
+        VStack(alignment: .leading, spacing: 10) {
+            ChatsSectionHeader(text: "Ticket chats")
+            VStack(spacing: 0) {
+                ForEach(shown) { row in
+                    rowView(row)
+                    if row.id != shown.last?.id || shown.count < rows.count { ShellDivider().padding(.leading, 56) }
+                }
+                if shown.count < rows.count {
+                    Button { showAll = true } label: {
+                        HStack {
+                            Text("See all (\(rows.count))").themeFont(15, .semibold)
+                            Spacer()
+                            ShellChevron()
+                        }.frame(minHeight: 44).padding(.horizontal, 16).padding(.vertical, 4).contentShape(Rectangle())
+                    }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("ticket-chats-see-all")
+                }
+            }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+        }.accessibilityElement(children: .contain).accessibilityIdentifier("ticket-chats")
+    }
+
+    private func rowView(_ row: TicketChatRow) -> some View {
+        let wsName = WorkspaceAlias.name(for: row.workspace)
+        let preview = ChatsRowRules.preview(row.topic.lastLine, working: row.topic.status == .working, unread: row.topic.unread)
+        return NavigationLink(value: ChatRoute.ticket(workspace: row.workspace.id, ticket: row.topic.id.ticket ?? "")) {
+            HStack(alignment: .top, spacing: 12) {
+                WorkspaceBadge(name: wsName, icon: row.workspace.icon, color: row.workspace.color, size: 32).padding(.top, 2)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(row.topic.title).themeFont(16, .semibold).lineLimit(ChatsRowRules.titleLines(typeSize.isAccessibilitySize))
+                    Text(preview).themeFont(14).foregroundStyle(Theme.muted).lineLimit(1)
+                    Text(TicketChatsRules.detail(row, workspaceName: wsName)).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1)
+                    if row.topic.status == .waitingOnYou {
+                        Text(TopicStatus.waitingOnYou.label).themeFont(12).foregroundStyle(Theme.warn)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).multilineTextAlignment(.leading)
+                VStack(alignment: .trailing, spacing: 10) {
+                    Text(ShellTime.short(row.topic.lastAt)).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
+                    ShellBadge(count: row.topic.unread)
+                }
+            }.padding(.horizontal, 12).padding(.vertical, 12).contentShape(Rectangle())
+        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text)
+            .accessibilityIdentifier("ticket-chat-\(row.id)")
+    }
+}
+
+/// A section title on Chats ("Ticket chats", "Workspaces"), in the style of "Groups".
+struct ChatsSectionHeader: View {
+    let text: String
+    var body: some View {
+        Text(text).themeFont(13, .semibold).foregroundStyle(Theme.muted).padding(.top, 4).accessibilityAddTraits(.isHeader)
     }
 }

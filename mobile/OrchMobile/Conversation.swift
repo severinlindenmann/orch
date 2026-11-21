@@ -75,6 +75,11 @@ struct ConvItem: Identifiable, Equatable, Sendable {
     let at: String
     let side: Side
     var by: String? = nil
+    /// Who wrote it (a helper's name, or a name typed on the dashboard); the ticket chat shows it above an incoming bubble
+    /// with the workspace ("Claude · Marketing") or "not signed in". nil = the workspace's helper.
+    var sender: String? = nil
+    /// The sender is a name typed on the dashboard: shown with "not signed in".
+    var typedName: Bool = false
     var day: String? = nil
     var kind: Kind = .message
     var text: String = ""
@@ -332,11 +337,37 @@ enum ConversationBuilder {
             item.question = q; item.answer = d.answers[q.id]
             out.append(item)
         }
+        if case .topic(let ws, let t) = id { out += chatLines(workspace: ws, ticket: t, d, shown: out) }
         out.sort { ($0.at, $0.id) < ($1.at, $1.id) }
         if let cut = d.erased[ReadState.key(id)] { out.removeAll { $0.at <= cut } }
         if case .topic = id {
             let review = d.tickets.first { $0.workspace == id.workspace && $0.ticket == id.ticket }.map { TopicStatus($0) == .review } ?? false
             return mergingResults(out, review: review)
+        }
+        return out
+    }
+
+    /// The ticket's chat lines (history `chat_message`, from the dashboard or a helper's chat answer) as bubbles with
+    /// names, so the ticket chat shows the same messages as the computer. A line the phone already has as a relay
+    /// message (same id; for an old line without an id, the same text from the same side) is shown once.
+    static func chatLines(workspace ws: String, ticket: String, _ d: ConversationInputs, shown: [ConvItem]) -> [ConvItem] {
+        guard let t = d.tickets.first(where: { $0.workspace == ws && $0.ticket == ticket }) else { return [] }
+        let ids = Set(shown.map(\.id))
+        var out: [ConvItem] = []
+        for line in t.view?.historyTail ?? [] where line.chat {
+            guard let at = line.at, !line.text.isEmpty else { continue }
+            if let mid = line.messageId, ids.contains(mid) { continue }
+            let person = (line.role ?? "").lowercased() == "person"
+            let side: ConvItem.Side = person && line.name == nil ? .me : .them
+            // An old line without an id: shown once when the phone already has the same text from the same side.
+            if line.messageId == nil, shown.contains(where: { $0.side == side && $0.text == line.text }) { continue }
+            var item = ConvItem(id: line.messageId ?? ("chat-" + line.id), at: at, side: side, text: line.text)
+            if side == .them {
+                if person { item.sender = line.name; item.typedName = true }
+                else { item.sender = line.by.flatMap { $0.isEmpty ? nil : $0 } }
+            }
+            if side == .me { item.receipt = .delivered }
+            out.append(item)
         }
         return out
     }
