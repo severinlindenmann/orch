@@ -21,6 +21,72 @@ GITIGNORE_LINES = [
     ".orch/run/",
     ".orch/tickets/*/evidence/",
 ]
+OFF_FILE = Path(".orch") / "skills-off.json"  # orch.skills-off/1, written by the Skills page's Turn off
+ALWAYS_ON = frozenset({"orch"})  # the core skill: helpers cannot work tickets without it
+
+
+def off_names(root: Path) -> frozenset[str]:
+    """Skill names orch does not link in this workspace (orch's own and the admin's shared ones). A missing,
+    damaged or linked file means none: a bad file never hides a skill by accident."""
+    import json
+
+    path = Path(root) / OFF_FILE
+    try:
+        if harness.is_link(path) or not path.is_file() or path.stat().st_size > 64 * 1024:
+            return frozenset()
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return frozenset()
+    if (
+        not isinstance(doc, dict)
+        or doc.get("schema") != "orch.skills-off/1"
+        or not isinstance(doc.get("skills"), list)
+    ):
+        return frozenset()
+    return (
+        frozenset(n for n in doc["skills"] if isinstance(n, str) and harness.safe_skill_name(n)) - ALWAYS_ON
+    )
+
+
+# orch.skills-removed/1, written by the Skills page's Remove from here
+REMOVED_FILE = Path(".orch") / "skills-removed.json"
+
+
+def removed_shared(root: Path) -> dict[str, int]:
+    """Shared skills a person removed from this workspace: {name: the admin's version when it was removed}.
+    `orch relay refresh` does not bring them back. A missing, damaged or linked file means none."""
+    import json
+
+    path = Path(root) / REMOVED_FILE
+    try:
+        if harness.is_link(path) or not path.is_file() or path.stat().st_size > 64 * 1024:
+            return {}
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(doc, dict) or doc.get("schema") != "orch.skills-removed/1":
+        return {}
+    got = doc.get("skills")
+    if not isinstance(got, dict):
+        return {}
+    return {
+        n: v if isinstance(v, int) and not isinstance(v, bool) else 0
+        for n, v in got.items()
+        if isinstance(n, str) and harness.safe_skill_name(n)
+    }
+
+
+def _unlink_ours(root: Path, where: str, name: str, target: Path) -> None:
+    """Remove <where>/<name> only when it is orch's link (or orch's copy) to target: a team's own link stays."""
+    dest = root / where / name
+    if harness.is_link(root / where):
+        return
+    if harness.is_link(dest) and not harness._same(dest, target):
+        return
+    if not harness.is_link(dest) and dest.is_dir() and harness._keep_files(dest):
+        harness.skip_note(f"{dest} (an add-on keeps a file in it; turn the add-on off instead)")
+        return  # a copy (no links here) that holds an add-on's own file, e.g. orch-relay's workspaces.json
+    harness.unlink_skill(root, where, name)
 
 
 def packaged_skills_dir() -> Path:
@@ -158,9 +224,12 @@ def apply_agent_files(root: Path) -> list[str]:
     places = _skill_places(root)
     harness.protect_local(root, _exclude_lines(root))  # first, so a refused link cannot leave secrets visible
     sk = harness.harness_dir(root) / "skills"
-    names = _harness_skill_names(root)
+    off = off_names(root)
+    names = [n for n in _harness_skill_names(root) if n not in off]
     refused = None  # one refused link must not stop the others or the local instruction file
     for where in places:
+        for n in sorted(off):  # turned off on the Skills page: orch's own link goes, the skill files stay
+            _unlink_ours(root, where, n, sk / n)
         for n in names:
             harness.check_harness(root, sk / n)
             try:
@@ -169,11 +238,14 @@ def apply_agent_files(root: Path) -> list[str]:
                 refused = refused or e
     for sh in _shared_skills(root):  # skills the relay delivered (not orch*): visible to every detected agent
         for where in places[1:]:
+            if sh.name in off:
+                _unlink_ours(root, where, sh.name, sh)
+                continue
             try:
                 harness.link_skill(root, where, sh.name, sh)
             except Refused as e:
                 refused = refused or e
-    harness.sync_copies(root, places)
+    harness.sync_copies(root, places, skip=off)
     done, local = [], []
     for n in detected_agents(root):
         a = adapters.load(n)

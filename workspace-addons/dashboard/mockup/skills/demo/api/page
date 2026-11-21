@@ -1,0 +1,480 @@
+{
+ "schema": "orch.skills-page/1",
+ "generated_at": "2026-11-19T10:00:00Z",
+ "tools": [
+  "Claude",
+  "Codex"
+ ],
+ "skills": [
+  {
+   "id": "skill:orch:orch",
+   "kind": "skill",
+   "name": "orch",
+   "where": "orch",
+   "description": "Track every piece of work as a ticket with a step list, evidence for each step and questions for a person.",
+   "fields": {
+    "owner": "orch",
+    "status": "active"
+   },
+   "words": 21,
+   "on": true,
+   "switch": "linked",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [],
+   "locked": "orch needs it to work tickets; always on",
+   "can_off": false,
+   "actions": []
+  },
+  {
+   "id": "skill:orch:orch-dashboard",
+   "kind": "skill",
+   "name": "orch-dashboard",
+   "where": "orch",
+   "description": "Show the tickets in a web page on this computer.",
+   "fields": {
+    "owner": "orch",
+    "status": "active"
+   },
+   "words": 10,
+   "on": true,
+   "switch": "linked",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [],
+   "can_off": true,
+   "actions": []
+  },
+  {
+   "id": "skill:orch:orch-focus",
+   "kind": "skill",
+   "name": "orch-focus",
+   "where": "orch",
+   "description": "A live page for one ticket: watch the helper work and answer its questions.",
+   "fields": {
+    "owner": "orch",
+    "status": "active"
+   },
+   "words": 14,
+   "on": true,
+   "switch": "linked",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [],
+   "can_off": true,
+   "actions": []
+  },
+  {
+   "id": "skill:orch:orch-hello",
+   "kind": "skill",
+   "name": "orch-hello",
+   "where": "orch",
+   "description": "d",
+   "fields": {},
+   "words": 1,
+   "on": true,
+   "switch": "linked",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [
+    "Has no real description"
+   ],
+   "can_off": true,
+   "actions": []
+  },
+  {
+   "id": "skill:workspace:invoice-export",
+   "kind": "skill",
+   "name": "invoice-export",
+   "where": "workspace",
+   "description": "Export the monthly invoices to the accounting folder. Use at the end of each month.",
+   "fields": {
+    "owner": "Anna",
+    "status": "active",
+    "version": "1.3.0",
+    "requires": "python3"
+   },
+   "words": 15,
+   "on": true,
+   "switch": "claude",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [],
+   "can_off": true,
+   "actions": [],
+   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it"
+  },
+  {
+   "id": "skill:workspace:weekly-report",
+   "kind": "skill",
+   "name": "weekly-report",
+   "where": "workspace",
+   "description": "Write the weekly team report from finished tickets. Use on Fridays.",
+   "fields": {
+    "owner": "Ben",
+    "status": "draft"
+   },
+   "words": 11,
+   "on": true,
+   "switch": "claude",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [],
+   "can_off": true,
+   "actions": [],
+   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it"
+  },
+  {
+   "id": "skill:workspace:release-check",
+   "kind": "skill",
+   "name": "release-check",
+   "where": "workspace",
+   "description": "Run the release checklist in a test folder before a release.",
+   "fields": {
+    "owner": "Anna",
+    "status": "active",
+    "requires": "node, playwright"
+   },
+   "words": 11,
+   "on": true,
+   "switch": "claude",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [
+    "Not ready here: playwright is missing"
+   ],
+   "can_off": true,
+   "actions": [],
+   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it"
+  },
+  {
+   "id": "skill:admin:github",
+   "kind": "skill",
+   "name": "github",
+   "where": "admin",
+   "description": "GitHub work for the team's repos: pull requests, workflow runs, branch rules. Check the routing table first.",
+   "fields": {
+    "owner": "Anna",
+    "status": "active",
+    "version": "1.2.0",
+    "requires": "gh, git",
+    "platforms": "macos, windows",
+    "routing-table": "references/routing.md"
+   },
+   "words": 17,
+   "on": true,
+   "switch": "linked",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [],
+   "can_off": true,
+   "actions": [
+    "remove"
+   ]
+  },
+  {
+   "id": "skill:admin:crm-notes",
+   "kind": "skill",
+   "name": "crm-notes",
+   "where": "admin",
+   "description": "Add a short note to a customer in the CRM after a call.",
+   "fields": {},
+   "words": 13,
+   "on": false,
+   "switch": "linked",
+   "tools": {
+    "Claude": "off",
+    "Codex": "on"
+   },
+   "problems": [],
+   "can_off": true,
+   "note": "Codex still sees it",
+   "actions": [
+    "remove"
+   ]
+  },
+  {
+   "id": "skill:mine:status-page",
+   "kind": "skill",
+   "name": "status-page",
+   "where": "mine",
+   "description": "A live status page of running work.",
+   "fields": {
+    "status": "retired",
+    "replaced-by": "orch-dashboard"
+   },
+   "words": 7,
+   "on": true,
+   "switch": "claude",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [
+    "Retired, but helpers still see it"
+   ],
+   "can_off": true,
+   "actions": []
+  },
+  {
+   "id": "skill:mine:spreadsheets",
+   "kind": "skill",
+   "name": "spreadsheets",
+   "where": "mine",
+   "description": "Read and write spreadsheets: sum, sort, chart. Use for .xlsx and .csv files.",
+   "fields": {
+    "owner": "Ben",
+    "status": "active"
+   },
+   "words": 13,
+   "on": true,
+   "switch": "claude",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [],
+   "can_off": true,
+   "actions": []
+  },
+  {
+   "id": "skill:mine:translate",
+   "kind": "skill",
+   "name": "translate",
+   "where": "mine",
+   "description": "Translate a text between English and German, keeping the tone.",
+   "fields": {},
+   "words": 10,
+   "on": false,
+   "switch": "claude",
+   "tools": {
+    "Claude": "off",
+    "Codex": "on"
+   },
+   "problems": [],
+   "can_off": true,
+   "note": "Codex still sees it",
+   "actions": []
+  },
+  {
+   "id": "skill:admin:sql-style",
+   "kind": "skill",
+   "name": "sql-style",
+   "where": "admin",
+   "on": false,
+   "removed": true,
+   "locked": "Removed from this workspace; relay updates do not bring it back",
+   "description": "Removed here. Your admin still has it.",
+   "fields": {},
+   "tools": {},
+   "problems": [],
+   "actions": [
+    "restore"
+   ],
+   "can_off": false,
+   "newer": "Your admin has a newer version than the one you removed"
+  }
+ ],
+ "instructions": [
+  {
+   "id": "instructions:mine:CLAUDE.md",
+   "kind": "instructions",
+   "name": "Your rules for every project",
+   "file": "~/.claude/CLAUDE.md",
+   "where": "mine",
+   "on": true,
+   "words": 92,
+   "description": "Your own rules for Claude, read in every folder on this computer.",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [],
+   "switch": "claude",
+   "can_off": true
+  },
+  {
+   "id": "instructions:workspace:AGENTS.md",
+   "kind": "instructions",
+   "name": "AGENTS.md",
+   "file": "AGENTS.md",
+   "where": "workspace",
+   "on": true,
+   "words": 640,
+   "description": "Team rules: every change belongs to a ticket.",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [],
+   "locked": "Helpers in this workspace always read it",
+   "can_off": false
+  },
+  {
+   "id": "instructions:workspace:CLAUDE.md",
+   "kind": "instructions",
+   "name": "CLAUDE.md",
+   "file": "CLAUDE.md",
+   "where": "workspace",
+   "on": true,
+   "words": 1,
+   "description": "@AGENTS.md",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [],
+   "locked": "Helpers in this workspace always read it",
+   "can_off": false
+  },
+  {
+   "id": "instructions:orch:AGENTS.orch.md",
+   "kind": "instructions",
+   "name": "orch blocks",
+   "file": "AGENTS.orch.md",
+   "where": "orch",
+   "on": true,
+   "words": 1210,
+   "description": "9 blocks, one per add-on.",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [],
+   "locked": "Written by orch: one block for each add-on that is on. Turn the add-on off to remove its block",
+   "can_off": false
+  }
+ ],
+ "services": [
+  {
+   "id": "service:workspace:playwright",
+   "kind": "service",
+   "name": "Playwright browser",
+   "server": "playwright",
+   "where": "workspace",
+   "on": true,
+   "switch": "claude",
+   "can_off": true,
+   "description": "Program on this computer: npx",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [],
+   "actions": [
+    "check"
+   ],
+   "signin_state": "connected",
+   "signin": "Signed in and working (checked 2026-11-19 09:12)"
+  },
+  {
+   "id": "service:mine:context7",
+   "kind": "service",
+   "name": "context7",
+   "server": "context7",
+   "where": "mine",
+   "on": false,
+   "switch": "claude",
+   "can_off": true,
+   "description": "Web service at mcp.context7.com",
+   "tools": {
+    "Claude": "off",
+    "Codex": "on"
+   },
+   "note": "Codex still sees it",
+   "problems": [],
+   "actions": [
+    "check"
+   ],
+   "signin_state": "needs-sign-in",
+   "signin": "Needs a sign-in. Open Claude Code, type /mcp and sign in to context7 again (checked 2026-11-19 09:12)",
+   "tool_limit": "Codex ignores this folder's own settings until you trust this folder in Codex"
+  },
+  {
+   "id": "service:admin:crm",
+   "kind": "service",
+   "name": "CRM",
+   "server": "crm",
+   "where": "admin",
+   "on": true,
+   "switch": "claude",
+   "can_off": true,
+   "description": "Web service at crm.example.com",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [
+    "Its login is not stored here"
+   ],
+   "actions": [
+    "check"
+   ],
+   "signin": "Its login is stored here",
+   "signin_state": "connected"
+  }
+ ],
+ "logins": [
+  {
+   "id": "login:workspace:github",
+   "kind": "login",
+   "name": "github",
+   "where": "workspace",
+   "on": false,
+   "switch": "profile",
+   "can_off": true,
+   "description": "Uses github-login. Helpers never see the secret.",
+   "off_means": "Off: helpers can use it only through its own command (gh)",
+   "on_means": "On: helpers may use it with any command",
+   "scope": "This switch counts for this workspace only; your other workspaces keep their own",
+   "tools": {},
+   "problems": [],
+   "actions": []
+  },
+  {
+   "id": "login:workspace:crm",
+   "kind": "login",
+   "name": "crm",
+   "where": "workspace",
+   "on": true,
+   "switch": "profile",
+   "can_off": true,
+   "description": "Uses crm-key. Helpers never see the secret.",
+   "off_means": "Off: helpers cannot use it; you still can",
+   "on_means": "On: helpers may use it with any command",
+   "scope": "This switch counts for this workspace only; your other workspaces keep their own",
+   "tools": {},
+   "problems": [],
+   "actions": []
+  },
+  {
+   "id": "login:admin:key-deploy-token",
+   "kind": "login",
+   "name": "deploy-token",
+   "where": "admin",
+   "on": false,
+   "can_off": false,
+   "locked": "No key profile uses this key, so helpers cannot use it. A profile makes it usable",
+   "description": "Key. Not given to helpers.",
+   "tools": {},
+   "problems": [],
+   "actions": []
+  }
+ ]
+}
