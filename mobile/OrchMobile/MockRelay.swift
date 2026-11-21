@@ -323,8 +323,17 @@ actor MockRelay: RelayAPI {
         for (id, name) in names.sorted(by: { $0.key < $1.key }) where !list.contains(where: { $0.id == id }) {
             list.append(Workspace(id: id, name: name, description: "", tags: [], online: true, lastSeen: Self.now(), openQuestions: open(id)))
         }
+        // Screenshots of Accept (ORCH-1204): `-mockSigningKey YES` lists a key for Pilatus, not accepted yet on the phone.
+        if UserDefaults.standard.bool(forKey: "mockSigningKey"), let i = list.firstIndex(where: { $0.id == Self.pilatus }) {
+            list[i].signingKey = Self.pilatusKey
+        }
         return list.filter { !removed.contains($0.id) }.map { var w = $0; w.mutedUntil = mutes[w.id] ?? nil; return w }
     }
+    static let pilatusKey: WorkspaceKey = {
+        // A fixed demo key for screenshots, never a real workspace's key.
+        let raw = [UInt8]((try? Curve25519.Signing.PrivateKey(rawRepresentation: Data(repeating: 7, count: 32)))?.publicKey.rawRepresentation ?? Data())
+        return WorkspaceKey(alg: "ed25519", publicKey: MessageSignature.b64urlEncode(raw), keyId: MessageSignature.keyId(raw))
+    }()
     func questions() async throws -> [Question] {
         try await check()
         if empty { return [] }
@@ -593,3 +602,4 @@ actor MockRelay: RelayAPI {
         }
     }
 }
+
