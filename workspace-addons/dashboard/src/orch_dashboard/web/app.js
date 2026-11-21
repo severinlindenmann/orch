@@ -316,8 +316,8 @@ function accept(next) {
 }
 function route() {
   const r = pageRoute();
-  // The live-session add-on's addresses show the live page (pages/live.js)
-  return r.kind === 'page' && typeof liveFocusOn === 'function' && liveFocusOn() && livePageOf(r.id) ? {...r, kind:'live'} : r;
+  // The live-session add-on's addresses show the live page (pages/live.js); it has no page of its own to embed
+  return r.kind === 'page' && typeof livePageOf === 'function' && livePageOf(r.id) ? {...r, kind:'live'} : r;
 }
 function pageRoute() {
   const full = location.hash || '#home', query = full.indexOf('?'), hash = query < 0 ? full : full.slice(0, query) || '#home';

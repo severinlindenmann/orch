@@ -1,14 +1,13 @@
 // Same numbers (ORCH-309, takes the test part of ORCH-296): one count, one date, one state for the same thing, on every
 // page that shows it. The test reads the numbers each page shows (Home, the side menu, the top bar, the phone bottom bar,
-// Review, Tickets, one ticket page and Focus), once, from the same fake workspace, and FAILS when two pages differ.
+// Review, Tickets, one ticket page), once, from the same fake workspace, and FAILS when two pages differ.
 // It is a test of agreement, not of one definition: when a page changes how it counts, every page must change with it.
 //   - the needs-you number: top bar line, menu button, side-menu Review badge, phone bottom-bar badge, Home title,
-//     Home "Needs you" card, Home line (questions + results), Review line, Tickets pill, Tickets lanes (Needs you + Check),
-//     Focus start line (inside the dashboard);
-//   - the ticket count: Home "All N tickets", Tickets list header, Tickets lane counts, Focus group counts;
+//     Home "Needs you" card, Home line (questions + results), Review line, Tickets pill, Tickets lanes (Needs you + Check);
+//   - the ticket count: Home "All N tickets", Tickets list header, Tickets lane counts;
 //   - for the same ticket: the status word and the due date on Home, Tickets and the ticket page.
 // The state is the shared fake workspace of the dashboard tests (state-chat-settings.json) with Review cards added.
-// Real dashboard and Focus web files in Chromium (own browser, mock keychain), every request answered in memory.
+// Real dashboard web files in Chromium (own browser, mock keychain), every request answered in memory.
 // usage: [PW_DIR=..] [SHOTS_DIR=..] node --test e2e/dash_same_numbers.cjs
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -22,17 +21,15 @@ const OUT = process.env.SHOTS_DIR || path.join(os.tmpdir(), 'dash-same-numbers')
 const ROOT = path.join(__dirname, '..');
 const DASH = path.join(ROOT, 'workspace-addons', 'dashboard');
 const WEB = path.join(DASH, 'src', 'orch_dashboard', 'web');
-const FOCUS_WEB = path.join(ROOT, 'workspace-addons', 'focus', 'src', 'orch_focus', 'web');
 const FIX = path.join(DASH, 'tests', 'fixtures', 'state-chat-settings.json');
 const KIT = path.join(ROOT, 'workspace', 'src', 'orch_ui', 'static');
 const BASE = 'http://dash.test';
 const TYPES = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json'};
 
-// The shared fake workspace: the dashboard fixture, Review cards for every open question and result, Focus as a shipped add-on.
+// The shared fake workspace: the dashboard fixture, Review cards for every open question and result.
 function makeState() {
   const s = JSON.parse(fs.readFileSync(FIX, 'utf8'));
   delete s._note; delete s.chat_activity; delete s.act_answer;
-  s.addons.push({name: 'focus', shipped: true, page: true, dashboard: {label: 'Focus', icon: 'target'}});
   const byId = new Map(s.tickets.map(t => [t.id, t]));
   const cards = [];
   for (const n of s.needs) {
@@ -56,24 +53,12 @@ async function openContext(browser, state, size) {
     if (p === '/api/state' || p === '/api/act') return json(state);
     if (p === '/api/events') return route.fulfill({status: 204, body: ''});
     if (p === '/api/frame-pass') return json({pass: 'p'.repeat(24), file: 'f'.repeat(24)});
-    if (p === '/addon/focus/api/tickets') return json({workspace: state.workspace, tickets: state.tickets, manager: null});
-    if (p === '/addon/focus/api/live') return json({cards: [], same_file: null});
-    if (p === '/addon/focus/api/areas') return json({areas: [], same_file: null});
-    if (p === '/addon/focus/api/procs') return json({procs: []});
     if (p.startsWith('/api/') || p.includes('/api/')) return route.fulfill({status: 404, body: ''});
-    let rel, root = WEB;
-    const focus = p === '/addon/focus' || p.startsWith('/addon/focus/');
-    if (focus) {                                        // the page orch ships, under the dashboard's own address (__P__)
-      rel = p.slice('/addon/focus'.length).replace(/^\/+/, '');
-      root = FOCUS_WEB;
-      if (rel.startsWith('web/')) rel = rel.slice(4);
-      if (rel === '') rel = 'index.html';
-    } else rel = p === '/' ? 'index.html' : p.replace(/^\/+/, '');
+    let root = WEB, rel = p === '/' ? 'index.html' : p.replace(/^\/+/, '');
     if (rel.startsWith('kit/')) { rel = rel.slice(4); root = KIT; }
     const file = path.normalize(path.join(root, rel));
     if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) return route.fulfill({status: 404, body: ''});
     let body = fs.readFileSync(file);
-    if (focus && rel === 'index.html') body = Buffer.from(String(body).split('__P__').join('/addon/focus'));
     return route.fulfill({status: 200, contentType: TYPES[path.extname(file)] || 'application/octet-stream',
       headers: {'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'", 'Access-Control-Allow-Origin': '*'}, body});
   });
@@ -203,28 +188,6 @@ test('same numbers: every page shows the same count, date and state for the same
       await page.screenshot({path: path.join(OUT, 'ticket-' + key + '.png')});
     }
 
-    // ---- Focus, shown inside the dashboard (it gets the dashboard's own number)
-    await page.goto('about:blank'); await page.goto(BASE + '/#addon/focus');
-    const frame = await (async () => {
-      for (let i = 0; i < 60; i++) {
-        const f = page.frames().find(x => x.url().includes('/addon/focus'));
-        if (f && await f.locator('.fx-pick-group').count().catch(() => 0)) return f;
-        await page.waitForTimeout(250);
-      }
-      return null;
-    })();
-    assert.ok(frame, 'Focus did not show its start page inside the dashboard');
-    await page.waitForTimeout(500);
-    const focus = await frame.evaluate(() => {
-      const groups = {};
-      for (const g of document.querySelectorAll('.fx-pick-group')) {
-        const m = /^(.+?)\s*\((\d+)\)/.exec(g.querySelector('h2')?.innerText.replace(/\s+/g, ' ').trim() || '');
-        if (m) groups[m[1]] = Number(m[2]);
-      }
-      return {line: (/(\d+) things? needs? you|(\d+) things? need you|Nothing needs you/.exec(document.body.innerText) || [])[0] || '', groups};
-    });
-    await page.screenshot({path: path.join(OUT, 'focus.png')});
-    note('needs you', 'Focus start line', /Nothing/.test(focus.line) ? 0 : int(focus.line));
     // tabbar (phone bottom bar) is checked at 390 below
     await context.close();
 
@@ -252,7 +215,7 @@ test('same numbers: every page shows the same count, date and state for the same
     const open = state.review.cards.length;
     if (needs.value !== open) problems.push(`needs you: the pages show ${needs.value}, the workspace has ${open} open questions and results`);
 
-    // the same ticket: Tickets lane = Focus group = ticket page state word; Tickets Due = ticket page Due
+    // the same ticket: Tickets lane = ticket page state word; Tickets Due = ticket page Due
     const LANE_WORD = {'Needs you': 'Needs you', Check: 'Check', Working: 'Working'};
     for (const [key, row] of Object.entries(tickets.rows)) {
       const tp = ticketPage[key];
@@ -262,9 +225,6 @@ test('same numbers: every page shows the same count, date and state for the same
       if (!(NONE.test(row.due) && NONE.test(tp.due)) && row.due !== tp.due) problems.push(`${key}: Tickets shows due "${row.due}", the ticket page shows "${tp.due}"`);
     }
     for (const key of Object.keys(SAMPLE)) if (!tickets.rows[key]) problems.push(`${key}: not in the Tickets list`);
-    for (const [lane, group] of [['Working', 'Working'], ['Backlog', 'To do'], ['Done', 'Done']]) {
-      if (tickets.lanes[lane] !== focus.groups[group]) problems.push(`${lane}: Tickets says ${tickets.lanes[lane]}, Focus "${group}" says ${focus.groups[group]}`);
-    }
     assert.deepEqual(errors, [], 'page errors');
     assert.deepEqual(problems, [], 'screenshots in ' + OUT);
     return;

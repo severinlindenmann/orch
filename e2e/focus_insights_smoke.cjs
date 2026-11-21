@@ -1,10 +1,8 @@
 #!/usr/bin/env node
-// Page smoke test (CI job `page-smoke`): loads EVERY screen of e2e/focus_insights_shots.cjs (SCREENS: start, areas
-// dialog, ticket tabs, helper tree, ... Insights and dashboard screens are appended there) in headless Chromium
-// at 1280 wide against the fake-orch fixture server, and FAILS on:
+// Page smoke test (CI job `page-smoke`): loads EVERY screen of e2e/focus_insights_shots.cjs (SCREENS: the Insights
+// and dashboard screens) in headless Chromium at 1280 wide against its fixture server, and FAILS on:
 //   - any console error or uncaught exception (pageerror),
 //   - any failed request (script, stylesheet, fetch) or HTTP status >= 400,
-//   - a missing window global the pages need (EXPECT_GLOBALS), e.g. window.FocusHelpers when helpers.js throws at load.
 // A page that throws at load must never reach develop (#525 lost holdText; nothing caught it).
 // Then it runs the UX checks of the master gallery (workspace/src/orch_ui/tests/ux_checks.cjs: self-test first, then
 // sideways scroll, target size, focus mark, reduced motion, text contrast), and the click-through of the new Focus
@@ -15,21 +13,19 @@
 //
 //   node e2e/focus_insights_smoke.cjs        (exit 0 = all screens clean)
 'use strict';
-const { SCREENS, start, startExtra, playwright } = require('./focus_insights_shots.cjs');
+const { SCREENS, startExtra, playwright } = require('./focus_insights_shots.cjs');
 const headless = require('./headless.cjs'); // the keychain options (ORCH-615)
 
 process.env.FOCUS_SHOTS_SETTLE_MS = process.env.FOCUS_SHOTS_SETTLE_MS || '2500';
-// Globals every Focus page must have after load (the ticket and start screens both use them).
-const EXPECT_GLOBALS = ['FocusStore', 'FocusHelpers'];
 
 (async () => {
   const { chromium } = playwright();
-  const servers = { focus: await start(), ...(await startExtra(SCREENS)) };
+  const servers = await startExtra(SCREENS);
   const browser = await headless.launch(chromium);
   const problems = [];
   try {
     for (const s of SCREENS) {
-      const srv = servers[s.server || 'focus'];
+      const srv = servers[s.server];
       const page = await browser.newPage({ viewport: { width: s.smokeWidth || 1280, height: 900 } });
       const note = what => problems.push(`${s.name}: ${what}`);
       page.on('console', m => { if (m.type() === 'error') note(`console error: ${m.text().slice(0, 300)}`); });
@@ -40,9 +36,6 @@ const EXPECT_GLOBALS = ['FocusStore', 'FocusHelpers'];
         await page.goto(srv.base + s.url);
         if (s.wait) await page.waitForSelector(s.wait, { timeout: 20000 });
         await s.setup(page, srv.base);
-        for (const g of s.server ? [] : EXPECT_GLOBALS) { // the Focus pages' globals; Insights has its own page
-          if (!(await page.evaluate(name => typeof window[name] !== 'undefined', g))) note(`window.${g} is missing`);
-        }
       } catch (e) {
         note(`screen did not load: ${String(e.message).split('\n')[0]}`);
       } finally { await page.close(); }

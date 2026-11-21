@@ -30,35 +30,21 @@ import time
 
 FRAME_HEADER = "X-Orch-Frame"
 FRAME_PARAM = "orch-frame"
-# The dashboard calls an add-on page makes itself (beyond its own /addon/<name>/): Focus shows and types into the
-# live helper session and acts through the dashboard. Every other add-on page: none.
-FRAME_ROOT = {"focus": ("/api/act", "/api/events", "/api/term", "/api/term/keys")}
+# The dashboard calls an add-on page makes itself (beyond its own /addon/<name>/), per add-on name. No shipped
+# add-on page makes any (the dashboard draws Focus itself); a page that needs some is listed here.
+FRAME_ROOT: dict[str, tuple[str, ...]] = {}
 ALL_ROOT_PATHS = frozenset(p for paths in FRAME_ROOT.values() for p in paths)
 PASS_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
-# the addresses a file pass may read: an add-on's file and picture answers (Focus /api/file, Factory order files and
+# the addresses a file pass may read: an add-on's file and picture answers (Factory order files and
 # the pictures and demo of a built task on its stage review, ORCH-419)
 FILE_PATH = re.compile(
     r"/api/(?:file|order/[A-Za-z0-9_-]{1,64}/file/[A-Za-z0-9_./%-]{1,300}"
     r"|order/t_[a-z0-9]{6,16}/result/t_[a-z0-9]{6,16}/[A-Za-z0-9._-]{1,80})"
 )
 LIFE = 900  # 15 minutes: the frame asks for new passes by itself when a call answers 401
-# What each add-on's pass may run through the dashboard's /api/act (Focus's store.js EMBED_HUMAN, `ticket.done`
-# arriving as `ticket.patch` to done). Everything else is refused (ORCH-186 review M1).
-FRAME_OPS = {
-    "focus": frozenset(
-        {
-            "answer",
-            "ticket.patch",
-            "run.send",
-            "check.wont_do",
-            "check.reopen",
-            "check.edit",
-            "check.remove",
-            "ticket.attach",
-            "run.take_back",
-        }
-    )
-}
+# What each add-on's pass may run through the dashboard's /api/act, per add-on name: the person's actions that
+# page offers, nothing else. Everything else is refused (ORCH-186 review M1).
+FRAME_OPS: dict[str, frozenset[str]] = {}
 REFUSED_OP = "This page may not do that. Do it in the dashboard."
 
 
@@ -67,7 +53,7 @@ def op_refusal(addon: str, body: dict) -> str | None:
     op, args = body.get("op"), body.get("args")
     if op not in FRAME_OPS.get(addon, ()) or not isinstance(args, dict):
         return REFUSED_OP
-    # ticket.patch: only Done (Focus's "Looks good"), nothing else of the ticket
+    # ticket.patch: only Done, nothing else of the ticket
     if op == "ticket.patch" and (
         set(args) - {"ticket", "data", "if_revision"} or args.get("data") != {"status": "done"}
     ):

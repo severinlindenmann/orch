@@ -7,5 +7,4 @@
   the mapper) and the final `result` line. Scrubbed: paths -> `/work/proj`, session and message uuids replaced, thinking
   signatures, tool/slash-command/agent/mcp lists and hook outputs emptied (only a single hook pair kept).
 - `helper-denial.jsonl`: SYNTHETIC, same line shapes: a `Task` helper with a child step (`parent_tool_use_id`), an MCP call, a
-  Skill call, a result with `permission_denials` and `is_error: true`. Built by hand from the Focus adapter fixture
-  (`workspace-addons/focus/tests/fixtures/claude-run.jsonl`) and the real shape above.
+  Skill call, a result with `permission_denials` and `is_error: true`. Built by hand from the real shape above.

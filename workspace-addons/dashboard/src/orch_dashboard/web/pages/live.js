@@ -1,7 +1,7 @@
 'use strict';
 // The live page (draft D, ORCH-261; the only one since ORCH-816): the addresses of the add-on whose page has live sessions
-// show this page: the wall of every session (pages/livewall.js), with the bar and the layer under every page. Never in
-// a shared copy (it has no live sessions). The dashboard names no add-on: the page is found by its live_session capability.
+// show this page: the wall of every session (pages/livewall.js), with the bar and the layer under every page. In
+// a shared copy only its name and one line (it has no live sessions). The dashboard names no add-on: the page is found by its live_session capability.
 function liveFocusOn() {
   return !snapshot;
 }
@@ -24,6 +24,7 @@ function liveNewButtons() {
 }
 function liveNextPage(r) {
   const label = addonLabel(livePageOf(r.id));
+  if (!liveFocusOn()) return fragment(heading(label, ''), h('p', {className:'meta', 'data-key':'live-next-copy'}, 'Live sessions show only on the computer the helpers work on.'));
   window.LiveSessions?.sync();
   return fragment(heading(label, ''),
     liveNewButtons(),

@@ -195,14 +195,6 @@
   "hex": 0,
   "style": 0
  },
- "workspace-addons/focus/src/orch_focus/web/focus.css": {
-  "hex": 12,
-  "style": 0
- },
- "workspace-addons/focus/src/orch_focus/web/helpers.js": {
-  "hex": 6,
-  "style": 0
- },
  "workspace-addons/insights/src/orch_insights/web/insights.css": {
   "hex": 0,
   "style": 0

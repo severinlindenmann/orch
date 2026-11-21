@@ -80,7 +80,6 @@ V = {
     "run-pending": validator("run-pending"),
     "needs": validator("needs"),
     "agent-adapter": validator("agent-adapter"),
-    "run-event": validator("addons/focus/run-event"),
     "automation-ext": validator("addons/automation/ext"),
     "focus-ext": validator("addons/focus/ext"),
     "factory-ext": validator("addons/factory/ext"),
@@ -129,10 +128,6 @@ def argv_errors(doc):
 
 
 def errors(kind, doc):
-    if kind == "run-event":  # an example file is a list of events (one log)
-        if not isinstance(doc, list) or not doc:
-            return [types.SimpleNamespace(message="needs a non-empty list of events")]
-        return [e for ev in doc for e in V[kind].iter_errors(ev)]
     errs = list(V[kind].iter_errors(doc))
     if kind == "agent-adapter" and not errs:
         errs += argv_errors(doc)
