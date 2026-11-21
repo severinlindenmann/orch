@@ -184,7 +184,7 @@ test('the Focus add-on page shows the typing switch with one plain line, only wh
 test('the Focus add-on page shows a separate plain terminal switch that says it is a shell', () => {
   const mk = (settings) => {
     const ctx = settingsCtx({addons: () => [], state: {look: null, settings}, heading: t => el('h1', {}, t)});
-    vm.runInContext(head + '\n' + slice(ssrc, 'const moreOpen', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+    vm.runInContext(head + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
     return ctx;
   };
   const focus = {name: 'focus', page: {live_session: true}, active: true, description: 'd'};

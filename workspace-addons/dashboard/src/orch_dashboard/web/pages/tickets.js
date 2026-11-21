@@ -555,7 +555,7 @@ function board() {
         capped || (BOARD_FOLDED.includes(status) && boardOpen.has(status)) ? h('div', {className:'row status-row-foot'},
           capped ? h('button', {type:'button', className:'btn ghost sm show-done', 'data-action':'board-more', 'data-lane':status, 'data-key':'board-more-' + status}, boardMore.has(status) ? 'Show fewer' : 'Show ' + (Math.max(mine.length, total) - cols * 2) + ' more') : null,
           BOARD_FOLDED.includes(status) && boardOpen.has(status) ? h('button', {type:'button', className:'btn ghost sm', 'data-action':'board-open', 'data-lane':status, 'data-key':'board-fold-' + status}, 'Fold') : null) : null,
-        fetchMore && (!capped || boardMore.has(status)) ? moreMark('row-' + status, 0, fetchMore) : null];
+        fetchMore && (!capped || boardMore.has(status)) ? moreMark('lane-' + status, 0, fetchMore) : null];
     const dot = boardDot(status);
     return h('section', {className:'status-row' + (mine.length ? '' : ' is-empty'), 'data-status':status, 'data-key':'col-' + status, 'aria-label':label + ', ' + total},
       h('div', {className:'status-row-h'}, dot, h('h2', {}, label), h('span', {className:'status-count count-n'}, String(total))),

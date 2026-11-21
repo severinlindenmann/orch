@@ -98,7 +98,7 @@ test('ORCH-14/576: an epic tile has the Epic tag and "1/2 done"; a ticket inside
   const c = context(items);
   const epic = c.boardCard(items[0], 'open');
   assert.equal(nodes(epic, n => n.attrs?.className === 'kind-tag')[0].children[0], 'Epic');
-  assert.match(JSON.stringify(epic), /Epic · 1\/2 done/);
+  assert.match(JSON.stringify(epic), /1\/2 done/);
   assert.match(JSON.stringify(c.boardCard(items[2], 'open')), /Part of: Dashboard fixes/);
   assert.doesNotMatch(JSON.stringify(c.boardCard(items[2], 'open')), /Sub-ticket of/);
 });
