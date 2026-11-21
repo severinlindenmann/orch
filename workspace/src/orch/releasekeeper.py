@@ -14,9 +14,11 @@ One pass moves the release one phase on (state: .orch/run/release-keeper.json):
            into main -> its checks. A red run -> one top ticket (a helper starts at once) and the candidate is
            skipped until develop moves.
   gate     the release pull request's checks: green -> the Merge card on the role ticket (orch ask
-           --merge --release) -> card. Red -> one top ticket; when develop moves past it the old pull
+           --merge --release) -> card. Red -> its failed jobs run once more (a flaky test, ORCH-1023); red
+           again -> one top ticket; when develop moves past it the old pull
            request is closed and the release is cut again from scratch.
-  card     `orch review tend-releases` merges it when the owner allowed it (workflow.release_merge);
+  card     `orch review tend-releases` merges it when the owner allowed it (workflow.release_merge), also
+           when its only red checks have a named exception (ORCH-178);
            otherwise the owner clicks Merge. Merged -> installed.
   merged   `orch update` here; when a server folder (github.release_servers) changed the deploy is prepared
            (the CI-built program fetched and checked, production's program read over ssh, read only, new
@@ -25,8 +27,9 @@ One pass moves the release one phase on (state: .orch/run/release-keeper.json):
            the release worktree removed -> idle.
 Release proof (ORCH-456): a red check holds the release unless a person recorded a named exception for it
 (`orch github release-exception "<check>" --ticket <key> --until <date>`, shown on the Merge card and in the
-note); and the walks named in github.release_walks (install walk, services test, click-through pass) each get
-a helper ticket when the release is cut; the Merge card waits until every walk recorded a pass
+note; the keeper records one itself, for FIX_DAYS, when its "Release N checks are red" ticket links a fix pull
+request, ORCH-178); and the walks named in github.release_walks (install walk, services test, click-through
+pass) each get a helper ticket when the release is cut; the Merge card waits until every walk recorded a pass
 (`orch github release-walk <N> <walk> pass|fail "<line>"`). A release that reached main without that proof
 is written on the role ticket.
 Every pass also runs the security check (secreview.py, ORCH-317): pull requests touching the servers, sign-in,
@@ -55,7 +58,7 @@ import re
 import shutil
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from orch import brake, config, runs, secreview, tickets
@@ -83,7 +86,6 @@ REQUIRED_FALLBACK = ["gate"]
 TIME_LIMIT_RE = re.compile(r"exceeded the maximum execution time", re.I)
 FAILED_TEST_RE = re.compile(r"\bFAILED\s+\S+::|\b\d+ (?:failed|errors?)\b")
 PASSED_RE = re.compile(r"\b\d+ passed\b[^\n]* in [\d.]+s\b")  # pytest's closing line
-JOB_URL_RE = re.compile(r"/actions/runs/(\d+)/job/(\d+)")
 TEST_TIMEOUT_H = 4  # dispatched runs that have not finished after this: say it once, dispatch again next pass
 KEEP_STAGED = 2  # newest prepared programs kept per server (rollback)
 PASSED = ("SUCCESS", "SKIPPED", "NEUTRAL")
@@ -279,14 +281,17 @@ def ts(s) -> datetime | None:
     return d if d is None or d.tzinfo else d.replace(tzinfo=UTC)
 
 
+SHARD = re.compile(r", [0-9]{1,3}/[0-9]{1,3}\)")
+
+
 def known_name(name: str, names) -> str | None:
     """The entry of `names` that covers job `name`: the same name, or the job without its part. A job split
     into parts (ORCH-315, "workspace / test (windows-latest, 3/6)") is covered by "workspace / test
     (windows-latest)", so a known-red entry keeps working when CI splits the job."""
     if name in names:
         return name
-    for n in names:
-        if n.endswith(")") and name.startswith(n[:-1] + ", "):
+    for n in names:  # only a part number ("3/6") is added; another matrix axis is another job
+        if n.endswith(")") and name.startswith(n[:-1] + ", ") and SHARD.fullmatch(name[len(n) - 1 :]):
             return n
     return None
 
@@ -319,6 +324,46 @@ def checks_green(rollup, ignore=frozenset()) -> str:
             return "red"
         good += word == "SUCCESS"
     return state if good or state != "green" else "pending"
+
+
+RUN_URL = re.compile(r"/actions/runs/(\d+)")
+
+
+def _newest_failed(rollup, ignore=frozenset()) -> list[dict]:
+    """The failed checks, the newest try of each (not ignored)."""
+    last: dict = {}
+    for n, c in enumerate(rollup or []):
+        name = c.get("name") or c.get("context") or ""
+        if known_name(name, ignore) is not None:
+            continue
+        key, when = (c.get("workflowName"), name or n), str(c.get("startedAt") or "")
+        if key not in last or when >= last[key][0]:
+            last[key] = (when, c)
+    out = []
+    for _, c in last.values():
+        word = c.get("conclusion") if "status" in c else c.get("state")
+        if c.get("status") in (None, "COMPLETED") and word not in PASSED and word not in (None, "PENDING"):
+            out.append(c)
+    return out
+
+
+def failed_runs(rollup, ignore=frozenset()) -> list[str]:
+    """The Actions run ids of the failed checks (newest try of each check counts), for one more try."""
+    out = []
+    for c in _newest_failed(rollup, ignore):
+        m = RUN_URL.search(str(c.get("detailsUrl") or c.get("targetUrl") or ""))
+        if m and m.group(1) not in out:
+            out.append(m.group(1))
+    return out
+
+
+def failed_before(rollup, since: datetime, ignore=frozenset()) -> bool:
+    """A failed check whose newest try started before `since`: the run again has not reported it yet."""
+    for c in _newest_failed(rollup, ignore):
+        started = ts(c.get("startedAt"))
+        if started is None or started < since:
+            return True
+    return False
 
 
 def not_reported(rollup, names) -> list[str]:
@@ -686,6 +731,19 @@ class World:
         if self.sim is not None:
             return dict(self.sim.get("exceptions") or {})
         return _read_json(self.cfg.exceptions_path)
+
+    def record_exception(self, check: str, entry: dict) -> None:
+        """A named exception the keeper records itself for a fix ticket (ORCH-178, owner 20 Nov)."""
+        self.did.append(f"exception:{check}")
+        if self.sim is not None:
+            self.sim.setdefault("exceptions", {})[check] = entry
+            return
+        if self.dry:
+            return
+        data = _read_json(self.cfg.exceptions_path)
+        data[check] = entry
+        self.cfg.run_dir.mkdir(parents=True, exist_ok=True)
+        runs._atomic(self.cfg.exceptions_path, json.dumps(data, indent=1) + "\n")
 
     def walk_results(self) -> dict[str, dict]:
         """{release number: {walk: {verdict, line, at, by}}} as the walk helpers recorded them."""
@@ -1128,6 +1186,17 @@ class World:
 
         self.act(f"close:release {rel['n']} PR {rel['pr']}", go)
 
+    def rerun_failed(self, run_id: str) -> None:
+        """Run the failed jobs of one Actions run once more (a red release check gets one more try)."""
+
+        def go():
+            self.bot_ok()
+            r = self._run([self.gh, "run", "rerun", str(run_id), "--failed", "--repo", self.cfg.repo])
+            if r.returncode != 0:
+                raise Refused(f"rerun {run_id}: {(r.stderr or r.stdout).strip()[:200]}")
+
+        self.act(f"rerun:{run_id}", go)
+
     def remove_wt(self, wt: str | None) -> None:
         if wt and (self.sim is not None or Path(wt).exists()):
             self.act(f"rmwt:{wt}", lambda: self._git("worktree", "remove", "--force", wt))
@@ -1309,18 +1378,6 @@ def red_jobs(w: World, r: dict | None, known: dict[str, str]) -> list[tuple[str,
     return out
 
 
-def red_checks(rollup, ignore=frozenset()) -> list[tuple[str, str, str]]:
-    """(run id, job id, name) of every red check of a pull request (from the check's link to its job)."""
-    bad = set(failed_checks(rollup, ignore))
-    out = []
-    for c in rollup or []:
-        name = str(c.get("name") or c.get("context") or "?")
-        if name in bad:
-            m = JOB_URL_RE.search(str(c.get("detailsUrl") or c.get("targetUrl") or ""))
-            out.append((m[1], m[2], name) if m else ("", "", name))
-    return out
-
-
 def retry_time_limit(w: World, rel: dict, red: list[tuple[str, str, str]]) -> list[str] | None:
     """A release red ONLY through jobs that hit their time limit with every test passed: run those jobs again,
     once per run and release (ORCH-1050). None when the red is anything else or already had its retry."""
@@ -1351,6 +1408,71 @@ def open_red_ticket(rows: list[dict], words: str) -> dict | None:
     return next(
         (t for t in rows if (t.get("status") or "") not in DONE and words in (t.get("title") or "")), None
     )
+
+
+FIX_DAYS = 2  # how long an exception the keeper records for a fix ticket lasts (owner 20 Nov, ORCH-178)
+
+
+def fix_exceptions(w: World, rel: dict, bad: list[str]) -> list[str]:
+    """Owner 20 Nov (ORCH-178, from ORCH-431): once the keeper's own "Release N checks are red" ticket links a
+    fix pull request (orch ref add), the keeper records the named exception itself for each red check it put
+    on that ticket: that ticket, ending FIX_DAYS later or when the ticket is done. The ticket and its checks
+    come from the keeper's own record (rel["red_checks"], written when it opened or noted the ticket), never
+    from a title or note anyone can edit. It shows on the Merge card and in the release note like one a person
+    recorded; it is never renewed for the same ticket. Returns the lines when it recorded any (the release is
+    judged again next pass)."""
+    mine = rel.get("red_checks") or {}
+    if not bad or not mine.get("ticket"):
+        return []
+    t = next(
+        (
+            x
+            for x in w.tickets()
+            if mine["ticket"] in (x.get("key"), x.get("id")) and (x.get("status") or "") not in DONE
+        ),
+        None,
+    )
+    if t is None:
+        return []
+    fix = next(
+        (
+            u
+            for r in t.get("refs") or []
+            if (
+                m := re.search(
+                    rf"github\.com/{re.escape(w.cfg.repo)}/pull/(\d+)", u := (r or {}).get("url") or ""
+                )
+            )
+            and int(m[1]) != rel.get("pr")
+        ),
+        None,
+    )
+    if fix is None:
+        return []
+    key = str(t.get("key") or t["id"])
+    have = w.exceptions()
+    names = [
+        c
+        for c in bad
+        if c in (mine.get("checks") or [])
+        and not ((have.get(c) or {}).get("by") == BY and (have.get(c) or {}).get("ticket") == key)
+    ]
+    if not names:
+        return []
+    until = (now().date() + timedelta(days=FIX_DAYS)).isoformat()
+    for c in names:
+        w.record_exception(
+            c,
+            {"ticket": key, "until": until, "why": f"fix pull request {fix} linked to {key}"[:300], "by": BY,
+             "at": now().isoformat(timespec="seconds")},
+        )  # fmt: skip
+    w.note(
+        key, f"Release keeper: recorded a named exception until {until} for {', '.join(names)} (fix {fix})."
+    )
+    return [
+        f"release {rel['n']}: {key} links the fix {fix}: recorded named exceptions until {until} for "
+        f"{', '.join(names)}; judged again next pass"
+    ]
 
 
 def recut(w: World, st: dict, rel: dict, h: dict, what: str) -> bool:
@@ -1441,11 +1563,13 @@ def red(w: World, st: dict, role: str, title: str, words: str, note: str, done_w
     """One top ticket per red thing: never a second while one with the same words is open."""
     cur = open_red_ticket(w.tickets(), words)
     if cur:
+        st["red_ticket"] = str(cur.get("key") or cur["id"])
         if st.get("red_logged") != title:
             w.note(cur.get("key") or cur["id"], f"Release keeper: still red. {note[:600]}")
             st["red_logged"] = title
         return [f"red, ticket {cur.get('key') or cur['id']} is open"]
     tid = w.new_ticket(role, title, note, done_when, over_limit=True)  # a red base starts at once (ORCH-699)
+    st["red_ticket"] = tid if tid and not tid.startswith("not opened") else None
     st["red_logged"] = title
     return [f"red: opened top ticket {tid} ({title})"]
 
@@ -1528,16 +1652,40 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
             if g == "pending":
                 return out + [f"release {rel['n']}: release checks still running"]
             if g == "red":
-                again = retry_time_limit(w, rel, red_checks(p.get("statusCheckRollup"), ignore))
-                if again:
-                    return out + again
                 bad = ", ".join(failed_checks(p.get("statusCheckRollup"), ignore)) or "see the pull request"
+                runs = failed_runs(p.get("statusCheckRollup"), ignore)
+                again = rel.get("reran") or {}
+                if runs and not again:  # one more try: a flaky test must not close it (ORCH-1023)
+                    # written before the call: the new try starts after this time at GitHub
+                    rel["reran"] = {"runs": runs, "at": now().isoformat()}
+                    asked = []
+                    for run_id in runs:
+                        try:
+                            w.rerun_failed(run_id)
+                            asked.append(run_id)
+                        except Refused as e:  # refused: no endless retries, the red path below goes on
+                            out.append(f"release {rel['n']}: could not run {run_id} again: {e}")
+                    if asked:
+                        return out + [
+                            f"release {rel['n']}: checks red on {bad}; ran the failed jobs once more"
+                        ]
+                elif again:
+                    since = ts(again.get("at"))
+                    if (
+                        since
+                        and now() - since < timedelta(hours=TEST_TIMEOUT_H)
+                        and failed_before(p.get("statusCheckRollup"), since, ignore)
+                    ):
+                        return out + [f"release {rel['n']}: waits for the failed jobs to finish once more"]
                 if recut(w, st, rel, h, "checks"):
                     return out + [
                         f"release {rel['n']}: checks were red, develop moved and the fix ticket is closed: "
                         "closed the pull request; cut again next pass"
                     ]
-                return out + red(
+                names = failed_checks(p.get("statusCheckRollup"), ignore)
+                if fixed := fix_exceptions(w, rel, names):
+                    return out + fixed
+                lines = red(
                     w,
                     st,
                     role,
@@ -1546,11 +1694,20 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
                     f"The release pull request {p.get('url')} into main is red on: {bad}. Fix it on "
                     "develop (a normal pull request); the release keeper closes this release and cuts it "
                     "again once develop "
-                    "has the fix and this ticket is done. A red check ships only with a named exception a "
-                    'person records: orch github release-exception "<check>" --ticket <key> --until '
-                    "<YYYY-MM-DD>.",
+                    "has the fix and this ticket is done. A red check ships only with a named exception: "
+                    "link the fix pull request to this ticket (orch ref add) and the release keeper records "
+                    f"one for the checks named here until {FIX_DAYS} days later, so the release goes without "
+                    'a new cut; or a person records one: orch github release-exception "<check>" --ticket '
+                    "<key> --until <YYYY-MM-DD>.",
                     f"Release {rel['n']}'s checks are green (after a fix on develop)",
                 )
+                mine = rel.get("red_checks") or {}  # which checks the keeper put on which ticket (ORCH-178)
+                if st.get("red_ticket") and mine.get("ticket") != st["red_ticket"]:
+                    mine = {"ticket": st["red_ticket"], "checks": []}
+                if mine:
+                    mine["checks"] = sorted(set(mine.get("checks") or []) | set(names))
+                    rel["red_checks"] = mine
+                return out + lines
             wv = walk_verdicts(w, rel)
             if wv["failed"]:
                 bad = "; ".join(wv["failed"])
@@ -1719,7 +1876,7 @@ def tend_releases(w: World) -> dict:
     from orch import review
 
     try:
-        return review.tend_releases(w.root)
+        return review.tend_releases(w.root, known_red=w.known_red())
     except Refused as e:  # inside a helper, or GitHub said no: the owner's click still works
         return {"refused": str(e)}
 
@@ -1898,7 +2055,16 @@ def prep_line(part: str, p: dict) -> str:
     if not p.get("ready"):
         return f"The {part} server is not prepared ({p.get('why') or 'unknown'}); the helper fetches it."
     needs = "; ".join(p.get("needs") or []) or "no new settings or data changes"
-    return f"The {part} server is fetched and checked ({needs})."
+    line = f"The {part} server is fetched and checked ({needs})."
+    if not p.get(
+        "prod"
+    ):  # after the 19 Nov server move the deploy host pointed at the stopped server, unnoticed
+        line += (
+            f" Production's {part} program could not be read over ssh: check that the deploy host and key "
+            "settings (github.release_deploy_host, github.release_deploy_key) point at the server that runs "
+            "it now."
+        )
+    return line
 
 
 def helper_steps(prep: dict, script: str | None = None) -> str:
@@ -2091,12 +2257,27 @@ def run(
         root, tickets.resolve(root, cfg.role)
     )  # the role ticket was removed: Refused, plain words
     role = str(t.get("key") or t["id"])
+    reopened = None
+    if t.get("status") == "done" and not dry_run:
+        # A person moved the role ticket to Done but its repeat goes on (a repeat survives Done): every
+        # card of this pass would be refused ("This ticket is closed") and nothing reaches Home.
+        # Open it again.
+        tickets.set_status(root, t["id"], "open", tickets.SYSTEM)
+        tickets.log(
+            root,
+            t["id"],
+            "The role ticket was Done but its repeat still runs: opened it again so the cards reach you.",
+            tickets.SYSTEM,
+        )
+        reopened = f"{role} was Done while its repeat runs: opened it again"
     st = read_state(cfg)
     w = world or World(root, cfg, dry=dry_run, known=known)
     try:
         lines = pass_once(w, st, role, hold_text(cfg))
     except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError) as e:
         lines = [f"pass stopped: {e}"]
+    if reopened:
+        lines.insert(0, reopened)
     if not dry_run:
         _write_state(cfg, st)
     return {"off": False, "paused": False, "role": role, "lines": lines, "did": w.did, "state": st}

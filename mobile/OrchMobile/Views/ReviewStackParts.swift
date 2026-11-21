@@ -11,9 +11,10 @@ struct ReviewCardView: View {
     let state: String?
     var workspaceName: String? = nil
     let onOpen: () -> Void
+    var onRun: () -> Void = {}
 
     private var kindName: String {
-        switch item.kind { case .draft: "Draft"; case .check: "Result"; case .link: "Link"; case .choice, .plainQuestion: "Choice"; case .plan: "Plan" }
+        switch item.kind { case .draft: "Draft"; case .check: "Result"; case .link: "Link"; case .choice, .plainQuestion: "Choice"; case .plan: "Plan"; case .run: "Command" }
     }
 
     var body: some View {
@@ -29,13 +30,15 @@ struct ReviewCardView: View {
             }
             Text(item.card.title).themeFont(21, .semibold).lineLimit(3).accessibilityAddTraits(.isHeader).accessibilityIdentifier("review-title")
             if let why = item.card.why, !why.isEmpty { Text(why).themeFont(14).foregroundStyle(Theme.muted).lineLimit(3) }
-            if let preview = item.card.preview {
+            if let run = item.card.run {
+                RunCommandView(run: run, onRun: onRun)
+            } else if let preview = item.card.preview {
                 CardPreviewView(item: item, preview: preview, picked: $picked, onOpen: onOpen)
             } else {
                 Spacer(minLength: 0)
             }
             if !item.card.then.isEmpty {
-                Text("If you approve: \(item.card.then)").themeFont(14).foregroundStyle(Theme.text).lineLimit(3).accessibilityIdentifier("review-then")
+                Text(item.kind == .run ? "After it runs: \(item.card.then)" : "If you approve: \(item.card.then)").themeFont(14).foregroundStyle(Theme.text).lineLimit(3).accessibilityIdentifier("review-then")
             }
             HStack(spacing: 8) {
                 if let state { Text(state).themeFont(12, .semibold).foregroundStyle(Theme.warn).accessibilityIdentifier("review-state") }
@@ -44,6 +47,54 @@ struct ReviewCardView: View {
         .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous).stroke(Theme.border))
+    }
+}
+
+/// A run card's command (ORCH-848 draft A, ORCH-860): the command line with Copy, Run it now beside it only when the phone may
+/// run it (orch's own commands), else one line why; then what it changes and how to undo it, in orch's words.
+struct RunCommandView: View {
+    let run: CardRun
+    let onRun: () -> Void
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
+                Text(verbatim: run.command).font(.system(.subheadline, design: .monospaced)).foregroundStyle(Theme.text)
+                    .fixedSize(horizontal: false, vertical: true)   // always the whole command: what Copy copies is what you see
+                    .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
+                    .accessibilityIdentifier("review-run-command")
+                Button {
+                    UIPasteboard.general.string = run.command; copied = true
+                    Task { try? await Task.sleep(for: .seconds(1.6)); copied = false }
+                } label: {
+                    Text(copied ? "Copied" : "Copy").themeFont(14, .semibold).frame(minWidth: 64, minHeight: 44)
+                        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous).stroke(Theme.border))
+                }.buttonStyle(PressStyle()).accessibilityIdentifier("review-run-copy").accessibilityLabel("Copy")
+            }
+            if run.runsHere {
+                Button(action: onRun) {
+                    Text("Run it now").themeFont(16, .semibold).foregroundStyle(Theme.onBrand).frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Theme.brand, in: RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
+                }.buttonStyle(PressStyle()).accessibilityIdentifier("review-run-now").accessibilityLabel("Run it now")
+            } else if let why = run.whyNotHere {
+                Text(why).themeFont(13).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("review-run-why")
+            }
+            if let changes = run.changes { row("Changes", changes, mono: false) }
+            if let undo = run.undo { row("Undo", undo, mono: run.cls != .orch || undo.hasPrefix("orch ")) }
+        }
+    }
+
+    private func row(_ label: String, _ value: String, mono: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label).themeFont(13).foregroundStyle(Theme.muted).frame(width: 64, alignment: .leading)
+            Group {
+                if mono { Text(verbatim: value).font(.system(.footnote, design: .monospaced)) } else { Text(verbatim: value).themeFont(14) }
+            }.foregroundStyle(Theme.text).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+        }.accessibilityElement(children: .combine).accessibilityIdentifier("review-run-" + label.lowercased())
     }
 }
 
@@ -187,6 +238,8 @@ struct ReviewCommentSheet: View {
     let item: ReviewItem
     @Binding var about: String?
     @Binding var text: String
+    /// Voice recordings, pictures and files that go with the answer (ORCH-444); temp copies until the Outbox takes them.
+    @Binding var files: [DraftFile]
     let pins: PinStore
     let onSend: (ReviewVerdict.Word, String?) -> Void
     @Environment(AppModel.self) private var model
@@ -198,8 +251,12 @@ struct ReviewCommentSheet: View {
     @State private var pressAt: Date?
     @State private var pressOpened = false   // this press is the one that opened the mic
     @State private var startTask: Task<Void, Never>?
+    @State private var picking = false
 
-    private var hasContent: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || pins.count > 0 }
+    private var hasContent: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || pins.count > 0 || !files.isEmpty }
+    /// An old workspace (no digest) only takes the plain answer: nothing to add files to.
+    private var canAddFiles: Bool { item.digest != nil }
+    private var roomForFiles: Int { canAddFiles ? max(0, ReviewCardLimits.maxAnswerFiles - files.count) : 0 }
 
     var body: some View {
         ScrollView {
@@ -210,7 +267,8 @@ struct ReviewCommentSheet: View {
                         ForEach(item.optionIds + ["All"], id: \.self) { Text($0).tag($0) }
                     }.pickerStyle(.segmented).accessibilityIdentifier("comment-about")
                 }
-                Text("Say it or type it. The helper reads your words and tries again.").themeFont(13).foregroundStyle(Theme.muted)
+                Text(canAddFiles ? "Say it, type it or add a picture or file. The helper gets all of it on the ticket and tries again."
+                                 : "Say it or type it. The helper reads your words and tries again.").themeFont(13).foregroundStyle(Theme.muted)
                 TextField("What should change?", text: $text, axis: .vertical).lineLimit(3...8).themeFont(16).padding(12)
                     .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
                     .accessibilityIdentifier("comment-text")
@@ -231,6 +289,14 @@ struct ReviewCommentSheet: View {
                 }
                 if working { ProgressView().accessibilityLabel("Writing down what you said") }
                 if let error { Text(error).themeFont(14).foregroundStyle(Theme.muted) }
+                if canAddFiles {
+                    ForEach(Array(files.enumerated()), id: \.element.url) { i, f in AnswerFileRow(file: f) { remove(i) } }
+                    Button { error = nil; picking = true } label: {
+                        Label(files.isEmpty ? "Add a picture or file" : "Add another", systemImage: "paperclip")
+                    }
+                    .buttonStyle(ArtifactActionButtonStyle(primary: false)).disabled(roomForFiles == 0 || working || listening)
+                    .accessibilityIdentifier("comment-add-file")
+                }
                 if pins.count > 0 { PinChipRow(store: pins) }
                 Button { onSend(.talk, nil) } label: { Text("Send back for changes") }
                     .buttonStyle(ArtifactActionButtonStyle(primary: !(item.isChoice && about != nil))).disabled(!hasContent || working)
@@ -244,8 +310,34 @@ struct ReviewCommentSheet: View {
         }
         .foregroundStyle(Theme.text).tint(Theme.brand).background(Theme.surface).preferredColorScheme(.dark)
         .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
-        .onDisappear { recorder?.cancel() }   // the text stays in the card's draft
+        .onDisappear { recorder?.cancel() }   // the text and the files stay in the card's draft
+        .sheet(isPresented: $picking) {
+            MediaPicker(forAnswer: true) { selection in
+                guard case .files(let drafts, _) = selection else { return }
+                let room = roomForFiles
+                files.append(contentsOf: drafts.prefix(room))
+                if drafts.count > room {
+                    MediaSelection.files(Array(drafts.dropFirst(room)), caption: nil).cleanUp()
+                    error = "Up to \(ReviewCardLimits.maxAnswerFiles) recordings, pictures or files go with one answer."
+                }
+            }
+        }
         .accessibilityIdentifier("comment-sheet")
+    }
+
+    private func remove(_ i: Int) {
+        guard files.indices.contains(i) else { return }
+        MediaSelection.files([files.remove(at: i)], caption: nil).cleanUp()
+    }
+
+    /// The recording itself goes with the answer (a temp copy: the recorder deletes its own files), while there is room.
+    private func keep(_ segments: [VoiceSegment]) {
+        for seg in segments where roomForFiles > 0 {
+            let n = files.filter { $0.kind == .voice }.count + 1
+            let copy = FileManager.default.temporaryDirectory.appendingPathComponent("answer-\(UUID().uuidString).m4a")
+            guard (try? FileManager.default.copyItem(at: seg.url, to: copy)) != nil else { continue }
+            files.append(DraftFile(url: copy, kind: .voice, name: "voice-\(n).m4a", mime: "audio/mp4", duration: seg.duration))
+        }
     }
 
     /// Press: open the mic. Let go after a hold = stop; a quick tap leaves it on, the next tap stops it.
@@ -277,12 +369,44 @@ struct ReviewCommentSheet: View {
         Task { @MainActor in
             defer { working = false }
             await startTask?.value
-            guard recorder.isRecording, let segment = recorder.stop().first else { return }
+            guard recorder.isRecording else { return }
+            let segments = recorder.stop()
+            guard let segment = segments.first else { return }
+            keep(segments)   // the recording goes along (ORCH-444); its words are written into the box below
             let draft = await model.voiceDraft(for: segment)
             let t = draft.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !t.isEmpty { text = text.isEmpty ? t : text + " " + t }   // v1: the transcript only, no audio is sent
+            if !t.isEmpty { text = text.isEmpty ? t : text + " " + t }
             recorder.cancel()
         }
+    }
+}
+
+/// One recording, picture or file on the comment sheet, with a remove button.
+struct AnswerFileRow: View {
+    let file: DraftFile
+    let onRemove: () -> Void
+    var body: some View {
+        HStack(spacing: 12) {
+            Group {
+                if file.kind == .image, let image = UIImage(contentsOfFile: file.url.path) {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else {
+                    Image(systemName: file.kind == .voice ? "waveform" : "doc").themeFont(18, .semibold).foregroundStyle(Theme.muted)
+                }
+            }
+            .frame(width: 44, height: 44).background(Theme.surface2).clipShape(RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(file.kind == .voice ? "Voice note" : file.name).themeFont(15, .semibold).lineLimit(1)
+                if file.kind == .voice, let d = file.duration { Text("\(max(1, Int(d.rounded())))s").themeFont(13).foregroundStyle(Theme.muted).monospacedDigit() }
+            }
+            Spacer(minLength: 0)
+            Button(action: onRemove) {
+                Image(systemName: "xmark").frame(width: 44, height: 44).background(Theme.surface3, in: Circle())
+            }
+            .buttonStyle(.plain).foregroundStyle(Theme.muted)
+            .accessibilityLabel(file.kind == .voice ? "Remove voice note" : "Remove \(file.name)")
+        }
+        .accessibilityElement(children: .contain).accessibilityIdentifier("comment-file")
     }
 }
 

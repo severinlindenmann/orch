@@ -52,6 +52,10 @@
       "type": "integer",
       "minimum": 0
     },
+    "started": {
+      "type": "integer",
+      "minimum": 0
+    },
     "tickets": {
       "type": "integer",
       "minimum": 0

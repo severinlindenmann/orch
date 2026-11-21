@@ -187,7 +187,8 @@ def read_file(root: Path, tid: str, kind: str, name, download: bool = False) -> 
     media = ext in AUDIO or ext in VIDEO or ext == "pdf"
     if not download and ext not in TEXT and ext not in IMAGES and not media:
         return nope
-    big = phone or media or download
+    # a picture is held to the 25 MB upload limit, not the 2 MB text one
+    big = phone or media or download or ext in IMAGES
     try:
         data = safefile.read_ticket_file(
             root, tid, kind, name, MAX_DOWNLOAD if download else MAX_PHONE if big else MAX_BYTES

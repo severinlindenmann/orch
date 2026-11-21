@@ -255,6 +255,10 @@
         "runs": {
           "$ref": "#/$defs/n"
         },
+        "started": {
+          "$ref": "#/$defs/n",
+          "description": "Helper runs orch started in the window, recorded or not (ORCH-966)."
+        },
         "tickets": {
           "$ref": "#/$defs/n"
         },

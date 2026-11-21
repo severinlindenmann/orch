@@ -29,7 +29,19 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import adapters, addons, brake, config, diag, history, procs, runhooks, services, tickets
+from orch import (
+    adapters,
+    addons,
+    brake,
+    config,
+    diag,
+    history,
+    procs,
+    runhooks,
+    services,
+    sessionmode,
+    tickets,
+)
 from orch.errors import Refused
 from orch.procs import pid_started, same_start
 
@@ -438,6 +450,8 @@ def _drop_start_prompts_locked(root: Path, tid: str) -> None:
         _pending_write(root, tid, keep)
 
 
+START_TEXT_MAX = 40000  # the start prompt orch builds itself (a person's own text stays at 8000)
+
 PHONE_ID_RE = re.compile(r"ph_[A-Za-z0-9_-]{1,64}")
 
 
@@ -455,8 +469,11 @@ def _pending_add_locked(
     if kind not in PENDING_KINDS:
         raise Refused(f"Input kind must be one of: {', '.join(PENDING_KINDS)}.")
     text = (text or "").strip()
-    if not text or len(text) > 8000:
-        raise Refused("The text must be 1 to 8000 characters.")
+    # The start prompt is built by orch from the ticket (note, Done when, queued messages), each part already
+    # clipped; their sum may pass what a person may send (ORCH-1122), so it gets its own, larger limit.
+    limit = START_TEXT_MAX if via == "start" else 8000
+    if not text or len(text) > limit:
+        raise Refused(f"The text must be 1 to {limit} characters.")
     if pid is not None and not re.fullmatch(r"p_[a-z0-9]{6,32}", pid):
         raise Refused("An input id looks like p_ followed by 6 to 32 lowercase letters or digits.")
     items = _pending_read(root, tid)
@@ -1350,7 +1367,11 @@ def plan(
         ticket = tickets.load(root, tid)
     name = agent or adapters.chosen(root)
     a = adapters.load(name, root)
-    person = adapters.person_for(name, root)  # the person's own tool config, read once for this start
+    # ORCH-818: the Manager, Empty and Chat helper start in the mode chosen for their kind (sessionmode.py);
+    # every other ticket in the workspace setting (None)
+    perm = sessionmode.for_ticket(root, ticket)
+    perm = sessionmode.tool_mode(name, perm, root) if perm else None
+    person = adapters.person_for(name, root, perm)  # the person's own tool config, read once for this start
     adapters.check_start_folder(name, root)
     items = undelivered(root, tid) if items is None else items
     sid = None if fresh else tickets.sessions_for(root, tid, ticket, name, host())
@@ -1380,6 +1401,7 @@ def plan(
         "orch_hooks_file": hooks_file,
         "stream": mode == "oneshot",
         "person": person,
+        "permissions": perm,
         "workdir": str(workdir_for(root, read(root, tid), tid)),
     }
     argv = None
@@ -1432,7 +1454,7 @@ def plan(
         argv and binary and argv[0] == binary and not shutil.which(binary)
     ):  # not on the PATH of a clean start: use where it really is
         argv = [adapters.find_binary(binary) or binary, *argv[1:]]
-    perm_note = adapters.permission_note(name, root, None, person)
+    perm_note = adapters.permission_note(name, root, perm, person)
     return {
         "agent": name,
         "adapter": a["adapter"],
@@ -1448,6 +1470,7 @@ def plan(
         "fresh_why": cold_note,
         "note": " ".join(n for n in (cold_note, perm_note) if n) or None,
         "permission_note": perm_note,
+        "permissions": perm or config.permissions(root),
     }
 
 

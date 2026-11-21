@@ -162,6 +162,17 @@ def test_send_file_and_receive_download(proj, run, rel):
     assert run("relay", "download", "m_file000000000001")[0] == 2
 
 
+def test_send_file_as_a_reply(proj, run, rel):
+    """--reply-to goes with --file (ORCH-1026): the file answers the message; --update still does not."""
+    connect(run, rel)
+    (proj / "rows.csv").write_bytes(b"a,b\n")
+    code, _, err = run("relay", "send", PEER, "--file", "rows.csv", "--reply-to", "m_text000000000001")
+    assert code == 0, err
+    assert rel.sent[-1]["type"] == "file" and rel.sent[-1]["reply_to"] == "m_text000000000001"
+    code, _, err = run("relay", "send", PEER, "--file", "rows.csv", "--update", "result")
+    assert code == 2 and "--update and --speak go with a text, not a file." in err
+
+
 def test_answer_from_phone_updates_ticket(proj, run, new_ticket, rel):
     connect(run, rel)
     tid = new_ticket()
@@ -1952,6 +1963,28 @@ def test_view_not_connected_says_so(proj, run):
     assert v["blocks"][0]["empty"]["title"] == "Not connected"
 
 
+def test_view_not_connected_uses_the_menu_name_and_a_matching_button(proj, run):
+    """ORCH-969: the page says the add-on's menu name (Contacts), never the folder name.
+
+    Its button names the Settings tab it opens."""
+    import tomllib
+    from pathlib import Path
+
+    from conftest import turn_on
+
+    import orch
+
+    manifest = Path(orch.__file__).parent / "builtin" / "relay" / "orch-addon.toml"
+    label = tomllib.loads(manifest.read_text())["dashboard"]["label"]
+    turn_on(proj, "relay")
+    v = json.loads(run("relay", "view", "--json")[1])
+    words = [v["notice"]] + [str(b.get("empty", {}).get("text", "")) for b in v["blocks"]]
+    assert v["notice"].startswith(label + " ")
+    assert not any("relay" in w.lower() for w in words), words
+    button = v["blocks"][0]["empty"]["button"]
+    assert button == {"label": f"Open {label} settings", "to": "app:settings/phone"}
+
+
 def test_sent_log_is_private_untracked_and_refuses_links(proj, run, rel):
     connect(run, rel)
     run("relay", "send", "ws_reports001", "first")
@@ -1977,7 +2010,8 @@ def test_view_without_messages_names_a_workspace_to_try(proj, run, rel):
     v = json.loads(run("relay", "view", "--json")[1])
     assert v["blocks"][0]["items"] == []
     assert v["blocks"][0]["empty"]["text"] == "Send one from the phone or from another workspace."
-    assert v["blocks"][0]["empty"]["button"] == {"label": "Open phone settings", "to": "app:settings/phone"}
+    button = v["blocks"][0]["empty"]["button"]
+    assert button == {"label": "Open Contacts settings", "to": "app:settings/phone"}
 
 
 @pytest.mark.parametrize(
