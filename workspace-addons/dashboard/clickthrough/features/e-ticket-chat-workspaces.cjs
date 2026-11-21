@@ -64,12 +64,12 @@ module.exports = {
       'cg._history(Path(sys.argv[1]), sys.argv[2], "agent:Kitchen", "Group: Order numbers are on the list now.", chat=True)', workspace, tid);
     await until(s => (s.tickets || []).some(t => t.id === tid && (t.history || []).some(e => /Order numbers are on the list now/.test(e.text || ''))), 'the line from Kitchen');
     await reload();
-    const line = chat.locator('.chat-message', { hasText: 'Order numbers are on the list now.' }).first();
+    const line = chat.locator('.thread-line', { hasText: 'Order numbers are on the list now.' }).first();
     await line.waitFor({ timeout: 20000 });
-    const who = await line.locator('.chat-who').innerText();
+    const who = await line.locator('.thread-line-head').innerText();
     must(/Kitchen helper/.test(who) && /Kitchen/.test(await line.locator('.chat-ws-label').innerText()), 'the line from Kitchen does not name its helper and workspace: ' + who);
     must(!/Group: /.test(await line.innerText()), 'the line still shows the Group: mark');
-    must(/helper/.test(await chat.locator('.chat-message', { hasText: 'The draft price list is ready.' }).locator('.chat-who').innerText()), "your own helper's line has no name");
+    must(/helper/.test(await chat.locator('.thread-line', { hasText: 'The draft price list is ready.' }).locator('.thread-line-head').innerText()), "your own helper's line has no name");
 
     // the person writes to everyone in the chat
     const draft = chat.locator('.chat-draft');

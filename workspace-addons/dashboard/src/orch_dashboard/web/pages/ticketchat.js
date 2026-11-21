@@ -29,7 +29,7 @@ function tcRow(r) {
     'aria-current':chatUi.open === r.id ? 'true' : null},
     h('span', {className:'avatar chat-avatar', 'aria-hidden':'true'}, '#'),
     h('span', {className:'chat-row-text'}, chatText('strong', '', r.title || r.key),
-      chatText('small', 'chat-row-meta', [r.key, chatPreview(r.last?.text)].filter(Boolean).join(' · ')),
+      chatText('small', 'chat-row-meta', [r.key, chatPreview(tcPlain(r.last?.text))].filter(Boolean).join(' · ')),
       r.open_questions ? chip('Needs you', 'attn') : null),
     h('span', {className:'chat-row-time'}, tcWhen(r.last_at), unread ? h('span', {className:'count', 'aria-label':unread + ' unread'}, unread) : null));
 }
@@ -97,7 +97,7 @@ function tcLineShell(item, previous, g, ...body) {
       ...body));
 }
 function tcLine(item, previous, g = null) {
-  return tcLineShell(item, previous, g, chatText('div', 'thread-line-text chat-message-text', g ? tcPlain(item.e.text) : item.e.text));
+  return tcLineShell(item, previous, g, chatText('div', 'thread-line-text chat-message-text', tcPlain(item.e.text)));
 }
 function tcQuestion(t, item, previous, g = null) {
   const q = item.q;
