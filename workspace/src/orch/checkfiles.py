@@ -1,10 +1,11 @@
 """Checks a workspace sets for itself (ORCH-529): one file per check in `.orch/checks/<name>.json`.
 
 Each workspace says which tools, logins, connections and keys it depends on, how to test each one, how often,
-and what to tell the person when a test fails. Nothing is checked unless the workspace asks for it: while a
-workspace has this folder, the built-in list (known_checks.json) no longer runs by itself; it is a library
-of templates (`orch checks add databricks --profile X`). A workspace without the folder keeps the old
-behaviour for one release and is shown a notice pointing to `orch checks init`.
+and what to tell the person when a test fails. Nothing is checked unless the workspace asks for it: the
+built-in list (known_checks.json) never runs by itself; it is a library of templates (`orch checks add
+databricks --profile X`). A tool set up somewhere on this computer does not mean this workspace uses it
+(ORCH-833): the setup task asks the person which ones it uses, and a workspace without the folder is shown
+a notice naming the tools found here.
 
 A check file (every field except the command or script may be left out):
     {"label": "Databricks dev", "kind": "login",                 # login | connection | key | tool
@@ -536,8 +537,8 @@ TEMPLATE = {
 
 
 def init(root: Path) -> dict:
-    """Make the check folder with the documented template. From now on only this workspace's own checks
-    run (plus the helper tools' logins). Returns the templates that fit tools set up on this computer."""
+    """Make the check folder with the documented template (only this workspace's own checks run, plus the
+    login of the helper it uses). Returns the templates that fit tools set up on this computer."""
     path = folder(root) / TEMPLATE_FILE
     made = not folder(root).is_dir()
     if not path.exists():
@@ -547,14 +548,14 @@ def init(root: Path) -> dict:
 
 
 def notice(root: Path) -> str | None:
-    """For a workspace without a check folder whose computer still runs built-in checks (the old way, one
-    release): one line pointing to orch checks init."""
+    """For a workspace without a check folder on a computer with known tools set up: one line naming them
+    (not checked here) and how to add the ones this workspace uses."""
     if present(root):
         return None
-    labels = [r["label"] for r in health.known_recipes()]
-    if not labels:
+    found = health.known_recipes()
+    if not found:
         return None
     return (
-        f"orch still checks {', '.join(labels)} for every workspace on this computer. Choose what this "
-        "workspace needs: orch checks init"
+        f"Set up on this computer, not checked for this workspace: {', '.join(r['label'] for r in found)}. "
+        "Add the ones helpers use here: orch checks add <name> (none: orch checks init)"
     )
