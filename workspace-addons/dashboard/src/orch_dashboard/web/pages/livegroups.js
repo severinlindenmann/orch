@@ -157,6 +157,8 @@ function liveGroupKey(panes) {
 // as a picture thumbnail or a file chip that can be removed before Send. Send goes the ticket page's one way
 // (ticketTalkSend: ticket.attach for the files, then run.send naming them), so there is no second upload path.
 // The composer itself is kept per session, so what is typed and added stays across repaints of the dock.
+// With the relay on, a microphone puts spoken words into the box (pages/livevoice.js, ORCH-696): the strip while
+// listening above the composer, the microphone in its line before Send, the line after the words under it.
 const liveMsgDraft = new Map();
 const liveMsgBoxes = new Map();  // session id -> {root, composer}
 const LIVE_MSG_HINT = 'Paste a screenshot or drop files here · up to 10 files, 25 MB each';
@@ -173,7 +175,9 @@ function liveMsgComposer(sess) {
     draft:liveMsgDraft.get(sess.id) || '', onDraft:v => { if (v) liveMsgDraft.set(sess.id, v); else liveMsgDraft.delete(sess.id); },
     fieldAttrs:{'data-live-msg-text':sess.id}, sendAttrs:{'data-key':'live-msg-send'},
     onSend:async message => {
-      const r = await ticketTalkSend(sess.id, message);
+      // a session without a ticket (ORCH-817) takes words only: files are kept on a ticket
+      if (sess.kind && (message.files || []).length) return {ok:false, text:'Files go only to a ticket\'s helper. Remove them and send the words.'};
+      const r = sess.kind ? await act('run.send', {ticket:sess.id, text:String(message.text || '').trim()}) : await ticketTalkSend(sess.id, message);
       if (!r.ok) return r;
       if (typeof liveChatNote === 'function') { liveChatNote(sess.id, r.said || message.text); if (typeof liveLayerFill === 'function') liveLayerFill(); }  // shows in the chat at once
       window.orch?.toast?.('Sent to ' + who() + '.', 'ok');
@@ -184,10 +188,17 @@ function liveMsgComposer(sess) {
   return kept;
 }
 function liveMsgBox(sess) {
-  if (!sess || sess.kind || !sess.running || snapshot || !window.UI?.composer) return null;
+  // a helper without a ticket (Manager, empty or chat helper) gets one too (ORCH-817); a plain terminal has no helper
+  if (!sess || sess.kind === 'terminal' || !sess.running || snapshot || !window.UI?.composer) return null;
   const g = liveGroupOf(liveGroups(), sess.id), {root} = liveMsgComposer(sess);
+  const voice = what => typeof window[what] === 'function' ? window[what](sess) : null;
+  // the composer is kept per session, so its line gets the microphone of this paint (or none) each time
+  const line = root.querySelector('.composer-line'), mic = voice('liveVoiceMic');
+  line?.querySelector('[data-key="live-voice"]')?.remove();
+  if (line && mic) line.insertBefore(mic, line.querySelector('[data-key="live-msg-send"]'));
   return h('div', {className:'live-msg', 'data-live-msg':sess.id, 'data-key':'live-msg'},
-    h('label', {className:'live-to', for:root.id + '-message', 'data-key':'live-msg-to'}, liveMsgTo(sess, g)), root);
+    h('label', {className:'live-to', for:root.id + '-message', 'data-key':'live-msg-to'}, liveMsgTo(sess, g)),
+    voice('liveVoiceStrip'), root, voice('liveVoiceHint'));
 }
 if (typeof window === 'object' && typeof document === 'object' && !(typeof module === 'object' && module.exports)) {
   // Files dropped anywhere on a pane with a message box go into its box (the box itself takes its own drops).
