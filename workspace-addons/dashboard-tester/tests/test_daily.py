@@ -437,3 +437,34 @@ def test_unreachable_dashboard_is_one_line_and_no_page_is_reported(monkeypatch, 
     w = FakeWorld([SMALL1], error=daily.Refused(browser.UNREACHABLE.format(where="x:1")))
     s = daily.run_pass(w, state, None)
     assert w.sent == [] and "could not be reached" in s["error"]
+
+
+class _Frame:
+    def __init__(self, n):
+        self.n = n
+
+    def evaluate(self, _js):
+        if self.n is None:  # a frame that never gets a page: Playwright would wait without end
+            raise AssertionError("asked a frame although the page already showed its content")
+        return self.n
+
+
+class _Page:
+    def __init__(self, main, *frames):
+        self.main_frame = main
+        self.frames = [main, *frames]
+
+
+def test_shown_page_asks_no_frame():
+    """Report r-1121-1222-ws-2: phone #home 'took 164.8 s' while the page polled every few seconds; a frame was asked."""
+    assert browser._text_len(_Page(_Frame(500), _Frame(None))) == 500
+
+
+def test_empty_main_reads_the_add_on_frame():
+    assert browser._text_len(_Page(_Frame(0), _Frame(300), _Frame(40))) == 300
+
+
+def test_helper_lines_are_left_out_of_the_word_check():
+    """A Focus card holds the helper's last terminal lines ('Codex CLI is missing'): its words, not orch's."""
+    js = browser.PROBE_JS
+    assert "querySelectorAll('pre, code, samp, kbd, textarea')" in js and ".map(e => own(e).trim())" in js
