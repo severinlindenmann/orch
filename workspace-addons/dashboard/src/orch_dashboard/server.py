@@ -57,7 +57,6 @@ SETTINGS_OPS = (
     "release_merge.set",
     "diag.set",
     "typing.set",
-    "focus_preview.set",
     "update.auto",
     "copies.set",
     "mobile.set",
@@ -201,6 +200,9 @@ def _services_stamp():
 
 
 STATIC_EXT = (".css", ".js", ".svg", ".png", ".ico", ".woff", ".woff2")
+# /api/file with its version in the link (ORCH-524): fetched once, then served from the browser's cache
+FILE_KEPT = "private, max-age=31536000, immutable"
+FILE_STAMP_MAX = 64
 
 
 TYPING_OFF = (
@@ -556,7 +558,11 @@ class Handler(BaseHTTPRequestHandler):
         if passes is None:
             return self._send(503, b"Try again in a moment.", "text/plain")
         header, file = passes.issue(name, act, self._pass_tag())
-        self._send(200, json.dumps({"pass": header, "file": file, "act": act}).encode(), "application/json")
+        self._send(
+            200,
+            json.dumps({"pass": header, "file": file, "act": act, "life": framepass.LIFE}).encode(),
+            "application/json",
+        )
 
     def do_OPTIONS(self):
         """The preflight of a sandboxed add-on page's call (origin "null", the X-Orch-Frame header). It carries
@@ -770,6 +776,17 @@ class Handler(BaseHTTPRequestHandler):
             from . import update
 
             return self._send(200, json.dumps(update.update_info()).encode(), "application/json")
+        if (
+            path == "/api/session-state"
+        ):  # this browser: signed in, view only, or started by a helper (no secrets)
+            session = getattr(self, "session", None)
+            if session is None or not session.active:
+                st = "helper"
+            else:
+                st = "signed-in" if self._can_act() else "view-only"
+            return self._send(
+                200, json.dumps({"state": st}).encode(), "application/json", {"Cache-Control": "no-store"}
+            )
         if path == "/api/tool-updates":  # the tools' versions and notes: same-origin only, no secrets
             from . import update
 
@@ -944,12 +961,15 @@ class Handler(BaseHTTPRequestHandler):
                 # ORCH-517: the same pictures were sent again on every redraw (no-store). Now the browser keeps
                 # them and asks "still this?" by content hash; an unchanged file answers 304 with no body, and
                 # with the file's own sandbox rule (a 304's headers update the kept copy's headers).
+                # ORCH-524: a link that names its version (a reviewed copy's content folder, or `v`: the file's
+                # time and size, which the page adds) is kept a year without asking again: a new version of the
+                # file has a new link. A link without one keeps asking by content hash.
+                kept = one("dl") != "1" and (one("k") == "reviewed" or 0 < len(one("v")) <= FILE_STAMP_MAX)
+                cache = FILE_KEPT if kept else "private, no-cache"
                 tag = '"' + hashlib.blake2b(body, digest_size=12).hexdigest() + '"'
-                extra = {**extra, "ETag": tag, "Cache-Control": "private, no-cache"}
+                extra = {**extra, "ETag": tag, "Cache-Control": cache}
                 if tag in [t.strip() for t in (self.headers.get("If-None-Match") or "").split(",")]:
-                    return self._send(
-                        304, b"", ctype, {"ETag": tag, "Cache-Control": "private, no-cache"}, csp=csp
-                    )
+                    return self._send(304, b"", ctype, {"ETag": tag, "Cache-Control": cache}, csp=csp)
             if one("k") == "reviewed":
                 return self._send(code, body, ctype, extra, csp=csp)
             rng = re.fullmatch(r"bytes=(\d{0,15})-(\d{0,15})", self.headers.get("Range") or "")
@@ -1017,7 +1037,7 @@ class Handler(BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|live|soft|live-layer|live-history|live-start|live-model|livebar|livesessions|livegroups|livewall|livechat)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|live|soft|live-layer|live-history|live-start|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])

@@ -152,6 +152,16 @@ def test_all_at_limit_and_one_account(cli, fake_switcher, ws):
     assert m["one_account"] is False and {a["state"] for a in m["accounts"][1:]} == {"missing"}
 
 
+def test_every_account_at_limit_is_one_box_not_two(cli, fake_switcher, ws):
+    _seed(cli)
+    switching._write(
+        switching.memory_path(ws), {"all_at_limit": True, "alerts": [switching.ALL_AT_LIMIT_ALERT]}
+    )
+    m = page.build(usage_cli.gather(ws), ws)
+    assert m["all_at_limit"] is True
+    assert switching.ALL_AT_LIMIT_ALERT not in m["warnings"]
+
+
 def test_one_account_only(cli, fake_switcher, ws):
     data = switcher_data()
     data["accounts"] = data["accounts"][:1]
@@ -287,3 +297,17 @@ def test_until_on_a_week_limit_is_refused_with_a_hint_to_use_end(cli, fake_switc
         code, out, err = cli(*argv)
         assert code == 2 and "--end" in (out + err), argv
     assert f.read_text() == before
+
+
+def test_a_5_hour_window_without_its_own_limit_shows_the_default_early_switch(cli, fake_switcher, ws):
+    """ORCH-643: an account with only a weekly limit still switches early at 90 % of its 5 hours (ORCH-642); the
+    page says so on that bar. A window with its own limit shows that limit, never the default."""
+    assert jrun(cli, "list")[0] == 0
+    assert jrun(cli, "limit", "first", "98%", "--period", "week", "--by", "human:owner")[0] == 0
+    m = page.build(usage_cli.gather(ws), ws)
+    bars = {b["period"]: b for b in m["accounts"][0]["bars"]}
+    assert bars["5h"].get("early") == switching.DEFAULT_EARLY["5h"] == 90.0 and "limit" not in bars["5h"]
+    assert bars["week"]["limit"] == 98 and "early" not in bars["week"]
+    _seed(cli)  # first now has its own 5-hour limit (95 %)
+    bars = {b["period"]: b for b in page.build(usage_cli.gather(ws), ws)["accounts"][0]["bars"]}
+    assert bars["5h"]["limit"] == 95 and "early" not in bars["5h"] and "early" not in bars["week"]

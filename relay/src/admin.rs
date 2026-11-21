@@ -75,6 +75,7 @@ pub fn router(app: AppState) -> Router {
             axum::routing::patch(edit_ws).delete(del_ws),
         )
         .route("/admin/api/workspaces/:id/token", post(new_token))
+        .route("/admin/api/workspaces/:id/removal", get(ws_removal))
         .route(
             "/admin/api/workspaces/:id/profile/approve",
             post(approve_profile),
@@ -83,6 +84,7 @@ pub fn router(app: AppState) -> Router {
             "/admin/api/workspaces/:id/profile/reject",
             post(reject_profile),
         )
+        .route("/admin/api/cleanup", post(cleanup))
         .route("/admin/api/groups", get(list_groups).post(add_group))
         .route(
             "/admin/api/groups/:id",
@@ -386,13 +388,42 @@ async fn new_token(
     Ok(Json(json!({"token": token, "prompt": p})))
 }
 
+fn dry_run(q: &HashMap<String, String>) -> bool {
+    matches!(
+        q.get("dry_run").map(|s| s.as_str()),
+        Some("1" | "true" | "yes")
+    )
+}
+
+/// What deleting a workspace would remove (the admin page shows it before the person confirms). A separate GET
+/// route, so an older server answers 404 instead of deleting.
+async fn ws_removal(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Res<Json<Value>> {
+    guard(&app, &h)?;
+    let mut c = app.db.lock().unwrap();
+    if !store::ws_exists(&c, &id) {
+        return Err(not_found("No such workspace."));
+    }
+    let n = crate::wipe::preview(&mut c, crate::wipe::Scope::Workspace(&id))?;
+    let name: String = c.query_row("SELECT name FROM workspaces WHERE id=?1", [&id], |r| {
+        r.get(0)
+    })?;
+    Ok(Json(
+        json!({"id": id, "name": name, "dry_run": true, "removes": n.json()}),
+    ))
+}
+
+/// Delete a workspace with everything that belongs only to it (crate::wipe), in one transaction.
 async fn del_ws(
     State(app): State<AppState>,
     h: HeaderMap,
     Path(id): Path<String>,
 ) -> Res<StatusCode> {
     guard(&app, &h)?;
-    let c = app.db.lock().unwrap();
+    let mut c = app.db.lock().unwrap();
     if !store::ws_exists(&c, &id) {
         return Err(not_found("No such workspace."));
     }
@@ -400,6 +431,7 @@ async fn del_ws(
         .into_iter()
         .filter(|w| w != &id)
         .collect();
+    let tx = c.transaction()?;
     for sql in [
         "DELETE FROM workspaces WHERE id=?1",
         "DELETE FROM rules WHERE from_id=?1 OR to_id=?1",
@@ -407,10 +439,11 @@ async fn del_ws(
         "DELETE FROM ws_group WHERE ws=?1",
         "DELETE FROM webhooks WHERE workspace=?1",
         "DELETE FROM problem_readers WHERE ws=?1",
+        "DELETE FROM phone_mutes WHERE ws=?1",
     ] {
-        c.execute(sql, [&id])?;
+        tx.execute(sql, [&id])?;
     }
-    let phones: Vec<(String, String)> = c
+    let phones: Vec<(String, String)> = tx
         .prepare("SELECT id,workspaces FROM phones")?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<Result<_, _>>()?;
@@ -418,17 +451,41 @@ async fn del_ws(
         let mut l = store::parse_list(&ws);
         if l.contains(&id) {
             l.retain(|w| w != &id);
-            store::forget_group_mutes_of(&c, &pid, &id);
-            c.execute(
+            store::forget_group_mutes_of(&tx, &pid, &id);
+            tx.execute(
                 "UPDATE phones SET workspaces=?2 WHERE id=?1",
                 params![pid, serde_json::to_string(&l).unwrap()],
             )?;
         }
     }
-    store::bump_and_hint(&c, &app.key, &rel)?;
+    let (_, files) = crate::wipe::run(&tx, crate::wipe::Scope::Workspace(&id))?;
+    store::bump_and_hint(&tx, &app.key, &rel)?;
+    tx.commit()?;
     drop(c);
+    files.remove(&app.cfg.data_dir);
     app.notify.notify_waiters();
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// History (messages, files, problem reports, log lines) of workspaces that no longer exist.
+/// `?dry_run=1` only counts it.
+async fn cleanup(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+) -> Res<Json<Value>> {
+    guard(&app, &h)?;
+    let mut c = app.db.lock().unwrap();
+    if dry_run(&q) {
+        let n = crate::wipe::preview(&mut c, crate::wipe::Scope::Orphans)?;
+        return Ok(Json(json!({"dry_run": true, "removes": n.json()})));
+    }
+    let tx = c.transaction()?;
+    let (n, files) = crate::wipe::run(&tx, crate::wipe::Scope::Orphans)?;
+    tx.commit()?;
+    drop(c);
+    files.remove(&app.cfg.data_dir);
+    Ok(Json(json!({"dry_run": false, "removed": n.json()})))
 }
 
 // ---------- groups ----------

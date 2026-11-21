@@ -145,6 +145,10 @@ def _launchd(root: Path) -> tuple[list[dict], set[int]]:
     items, pids = [], set()
     if not folder.is_dir():
         return items, pids
+    from .drivers.launchd import disabled_labels
+
+    cp = _tool([tool, "print-disabled", domain])
+    off = disabled_labels(cp.stdout) if cp and cp.returncode == 0 else set()
     for p in sorted(folder.glob("*.plist")):
         if p.is_symlink() or not p.is_file():
             continue
@@ -184,7 +188,7 @@ def _launchd(root: Path) -> tuple[list[dict], set[int]]:
                 what,
                 how,
                 argv,
-                d.get("RunAtLoad"),
+                bool(d.get("RunAtLoad")) and label not in off,  # a switched-off label is not loaded at login
             )
         )
     return items, pids
@@ -388,8 +392,10 @@ def _processes(root: Path, skip: set[int]) -> list[dict]:
 # ---------------------------------------------------------------- the list
 
 
-def scan(root: Path) -> list[dict]:
-    """Every found item, sorted by name. Reads only; an item already managed by orch is left out."""
+def scan(root: Path, processes: bool = False) -> list[dict]:
+    """Every found job orch can take over (launchd / systemd), sorted by name. Reads only; an item already managed
+    by orch is left out. Plain programs (tail, hand-run scripts) cannot be taken over and are no items: they are
+    only counted by `others`, unless `processes` is set (adopt looks one up to explain why it cannot)."""
     if sys.platform == "darwin":
         units, pids = _launchd(root)
     elif sys.platform.startswith("linux"):
@@ -398,9 +404,17 @@ def scan(root: Path) -> list[dict]:
         return []
     done = _adopted(root)
     units = [u for u in units if u["id"] not in done]
-    items = units + _processes(root, pids | _record_pids(root))
+    items = units + (_processes(root, pids | _record_pids(root)) if processes else [])
     items.sort(key=lambda i: (i["name"].lower(), i["id"]))
     return items
+
+
+def others(root: Path) -> int:
+    """How many plain programs run in this workspace folder (shown as one line, never as items)."""
+    if not (sys.platform == "darwin" or sys.platform.startswith("linux")):
+        return 0
+    _units, pids = _launchd(root) if sys.platform == "darwin" else _systemd(root)
+    return len(_processes(root, pids | _record_pids(root)))
 
 
 def _record_pids(root: Path) -> set[int]:
@@ -436,7 +450,7 @@ def note() -> str | None:
 def get(root: Path, fid: str) -> dict:
     if not isinstance(fid, str) or not (ID_RE.fullmatch(fid) or HASHED_ID.fullmatch(fid)):
         raise Refused(f"'{fid}' is not a found service. Run orch services found to see them.")
-    for it in scan(root):
+    for it in scan(root, processes=fid.startswith("process:")):
         if it["id"] == fid or (HASHED_ID.fullmatch(fid) and page_id(it["id"]) == fid):
             return it
     raise Refused(f"There is no found service {fid} (any more). Run orch services found to see them.")

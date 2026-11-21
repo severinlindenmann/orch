@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-32 steps: 24 ready (the script clicks them), 8 pending (not built yet).
+33 steps: 26 ready (the script clicks them), 7 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -24,38 +24,35 @@ Must be seen:
 - Home shows its content, no loading shape stays.
 - At 390 wide nothing scrolls sideways.
 
-## 2. Today's Focus still works with Preview off
+## 2. Focus opens as the new Focus
 
 - Part: start
 - State: ready, clicked by the script
-- Pictures: `fd-02-focus-today-1280.png`, `fd-02-focus-today-1920.png`, `fd-02-focus-today-390.png`
+- Pictures: `fd-02-focus-new-1280.png`, `fd-02-focus-new-1920.png`, `fd-02-focus-new-390.png`
 
 Do:
 
-1. Leave the Preview switch off.
-2. Open Focus from the side bar.
+1. Open Focus from the side bar (at phone width from its address).
 
 Must be seen:
 
-- Today's Focus opens with its list of live helpers.
-- Nothing of the new Focus shows.
+- Focus opens as the new Focus (the wall of step 4 fills it), with no Preview mark.
+- No old Focus page shows.
+- At 390 wide nothing scrolls sideways.
 
-## 3. Turn the new Focus on with the Preview switch
+## 3. Focus has no Preview switch
 
 - Part: start
 - State: ready, clicked by the script
-- Pictures: `fd-03-preview-on-1280.png`, `fd-03-preview-on-1920.png`, `fd-03-preview-on-390.png`
+- Pictures: `fd-03-no-switch-1280.png`, `fd-03-no-switch-1920.png`, `fd-03-no-switch-390.png`
 
 Do:
 
-1. Open Settings and turn on the Preview switch for the new Focus.
-2. Open Focus from the side bar.
+1. Open Settings, Add-ons, Focus.
 
 Must be seen:
 
-- Focus opens as the new Focus, marked Preview (the wall of step 4 fills it).
-- The switch is marked Preview.
-- Turning it off again brings back today's Focus.
+- The Typing switch is there; there is no Preview switch and no word Preview.
 
 ## 4. The live wall in bands
 
@@ -323,18 +320,21 @@ Must be seen:
 ## 18. Files and screenshots in the message box, with a preview before sending
 
 - Part: message box (draft D feature 13)
-- State: pending, waits for: Chat (crew tasks of the Chat stage)
+- State: ready, clicked by the script
 - Pictures: `fd-18-message-box-1280.png`, `fd-18-message-box-1920.png`, `fd-18-message-box-390.png`
 
 Do:
 
 1. Attach a file, paste a screenshot, drop a second file.
 2. Remove one, then send.
+3. Reload the page.
 
 Must be seen:
 
 - Each one shows as a small preview before sending.
 - Removing one takes it out; the sent message carries the rest.
+- The box says its limits in plain words; a file over 25 MB is refused.
+- The sent message and its files stay after a reload.
 
 ## 19. Voice into the message box
 
@@ -564,4 +564,24 @@ Must be seen:
 
 - Its tile leaves Working and says No session.
 - Its pane offers the Start choice.
+
+## 33. Start the Manager in a chosen permission mode
+
+- Part: sessions (draft D feature 6)
+- State: ready, clicked by the script
+- Pictures: `fd-33-permissions-1280.png`, `fd-33-permissions-1920.png`, `fd-33-permissions-390.png`
+
+Do:
+
+1. Open the New menu in the bar and pick Bypass permissions in its Permissions row.
+2. Start the Manager.
+3. In its pane press "Permissions: Bypass permissions" and pick Auto.
+4. In a workspace that allows at most Auto, open the New menu.
+
+Must be seen:
+
+- The row shows the tool's modes: Default, Accept edits, Auto, Bypass permissions.
+- Bypass permissions shows one plain warning the first time; the Manager starts in it and its pane says "Permissions: Bypass permissions".
+- Auto ends the session and goes on with the same conversation; the pane says "Permissions: Auto".
+- Bypass permissions is off when the workspace does not allow it and says why.
 

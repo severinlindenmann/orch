@@ -36,6 +36,7 @@ from orch import (
     cli_shot,
     cli_status,
     cli_tools,
+    cli_workspace,
     diag,
     diag_incident,
     fields,
@@ -142,7 +143,8 @@ def _progress(t: dict) -> str:
 
 
 def _line(t: dict) -> str:
-    bits = [tickets.STATUS_WORDS[t["status"]]] + ([_progress(t)] if _progress(t) else [])
+    kind = ["Release"] if t.get("release") else ["Epic"] if t.get("epic") else []  # ORCH-906
+    bits = kind + [tickets.STATUS_WORDS[t["status"]]] + ([_progress(t)] if _progress(t) else [])
     if due := tickets.due_label(t.get("due"), t["status"]):
         bits.append(due)  # only a due with a time shows in the list; a day-only due stays as it was
     if quiet := tickets.quiet_label(t.get("quiet_since")):
@@ -256,7 +258,10 @@ def _show(t: dict, root: Path) -> str:
             if tickets.checks_split(t)[1] == 0
             else f"✓ All resolved · {_progress(t)}"
         )
-    out.append(f"Evidence: {tickets.proof_state(t, root)['line']}")
+    proof = tickets.proof_state(t, root)
+    failed = [c for c in t.get("checklist") or [] if proof["per_item"].get(c.get("id")) == "failed"]
+    named = "".join(f" ({c['id']}: {c.get('text', '')})" for c in failed[:3])
+    out.append(f"Evidence: {proof['line']}{named}")
     extra = [f"Owner: {t['owner']}"] if t.get("owner") else []
     if t.get("due"):
         extra.append(tickets.due_label(t["due"], t["status"]) or f"Due: {t['due']}")
@@ -272,12 +277,17 @@ def _show(t: dict, root: Path) -> str:
         out.append(f"Note: {t['note']}")
     if t.get("done_when"):
         out.append(f"Done when: {t['done_when']}")
+    if t.get("estimate"):
+        out.append(f"Estimate: {tickets.estimate_words(t['estimate'])}")
+    out.extend(tickets.prepare_lines(t, root))
     if t.get("status") == "done" and t.get("outcome"):
         for k, label in (("changed", "Changed"), ("why", "Why"), ("not_included", "Not included")):
             if t["outcome"].get(k):
                 out.append(f"{label}: {t['outcome'][k]}")
     if t.get("release"):
         out.append("Release: the epics and tickets under it ship together")
+    elif t.get("epic"):  # ORCH-906: an epic says so too, as a release does
+        out.append("Epic: its sub-tickets are the work; a run goes through them in order")
     if t.get("parent"):
         p = _lookup(root, t["parent"])
         out.append(
@@ -442,6 +452,9 @@ class _Parser(argparse.ArgumentParser):
 
         m = re.search(r"invalid choice: '([^']*)'", message)
         if m:
+            if self.prog == "orch ticket status":  # a status is a value, not a command
+                names = ", ".join(tickets.STATUSES)
+                self.exit(2, f'"{m.group(1)}" is not a ticket status. Choose one of: {names}.\n')
             what = self.prog + " command" if self.prog != "orch" else "orch command"
             self.exit(2, f'"{m.group(1)}" is not an {what}. Run {self.prog} --help.\n')
         if self.prog in _EXAMPLES:
@@ -534,6 +547,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_diag.add_parsers(sub, common)
     cli_report.add_parsers(sub, common)
     cli_leave.add_parsers(sub, common)
+    cli_workspace.add_parsers(sub, common)
     cli_health.add_parsers(sub, common)
     cli_checks.add_parsers(sub, common)
     cli_tools.add_parsers(sub, common)
@@ -657,8 +671,32 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--due", metavar="DAY[ HH:MM]|HH:MM")
     x.add_argument("--done-when", dest="done_when")
     x.add_argument("--description", help="what it is about and why, 1 to 3 sentences (the agent's own field)")
-    x.add_argument("--estimate-minutes", type=int, help="your estimate of the helper time, in whole minutes")
-    x.add_argument("--estimate-cost", type=float, help="your estimate of the cost in dollars at list price")
+    x.add_argument(
+        "--estimate-minutes", help="your estimate of the helper time in whole minutes: 45, or a range 30-60"
+    )
+    x.add_argument(
+        "--estimate-cost", help="your estimate of the cost in dollars at list price: 3, or a range 2-5"
+    )
+    x.add_argument("--asked-by", dest="asked_by", help="who asked for the work, e.g. the sender of the email")
+    x.add_argument(
+        "--maybe-same", dest="maybe_same", metavar="TICKET", help="a ticket that looks like the same work"
+    )
+    x.add_argument(
+        "--needs-ok",
+        dest="needs_ok",
+        help="what the plan will need the person's OK for (production, money...)",
+    )
+    x = t.add_parser(
+        "found",
+        parents=[common],
+        help="write the ticket's What I found part (JSON from stdin): the sources read, key facts and the "
+        "sources that could not be opened",
+    )
+    x.add_argument("id")
+    x = t.add_parser(
+        "prepared", parents=[common], help="end Prepare: one history line of what was read and filled"
+    )
+    x.add_argument("id")
     x = t.add_parser(
         "model",
         parents=[common],
@@ -1122,6 +1160,7 @@ def run(args: argparse.Namespace) -> None:
         or cli_diag.dispatch(args, root)
         or cli_report.dispatch(args, root)
         or cli_leave.dispatch(args, root)
+        or cli_workspace.dispatch(args, root)
         or cli_health.dispatch(args, root)
         or cli_checks.dispatch(args, root)
         or cli_tools.dispatch(args, root)
@@ -1166,7 +1205,7 @@ def run(args: argparse.Namespace) -> None:
             release=args.release,
             human_review=None if args.human_review is None else args.human_review == "yes",
         )
-        part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
+        part = f" (sub-ticket of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
             args,
             t,
@@ -1291,9 +1330,33 @@ def run(args: argparse.Namespace) -> None:
         _out(args, t, f'Title written: "{t["title"]}"')
     elif cmd == "ticket" and sub == "tidy":
         fields = {k: getattr(args, k) for k in ("owner", "due", "done_when") if getattr(args, k)}
-        est = {"minutes": args.estimate_minutes, "cost": args.estimate_cost}
-        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est)
+        est = {
+            "minutes": tickets.parse_range(args.estimate_minutes, "minutes"),
+            "cost": tickets.parse_range(args.estimate_cost, "cost"),
+        }
+        extra = {k: getattr(args, k) for k in tickets.PREPARE_FIELDS if getattr(args, k)}
+        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est, extra)
         _out(args, t, f'Tidied: "{t["title"]}"')
+    elif cmd == "ticket" and sub == "found":
+        raw = sys.stdin.read() if not term.is_terminal(sys.stdin) else ""
+        try:
+            data = json.loads(raw) if raw.strip() else None
+        except ValueError:
+            raise Refused(
+                'What I found is read as JSON from stdin: {"sources": [{"name": ..., "link": ..., '
+                '"lines": ...}], "facts": [...]}. This was not valid JSON.'
+            ) from None
+        if data is None:
+            raise Refused(f"Pipe the What I found JSON in: orch ticket found {args.id} < found.json")
+        t = tickets.set_found(root, args.id, data, by())
+        _out(
+            args,
+            t,
+            f"What I found: {tickets.sources_words(t['found'])}.",
+        )
+    elif cmd == "ticket" and sub == "prepared":
+        t = tickets.prepared(root, args.id, by())
+        _out(args, t, history.lines(root, t)[-1].get("text", "Prepared"))
     elif cmd == "ticket" and sub == "model" and args.name == "up":
         from orch import modelpick
         from orch import runs_live as _live
@@ -1439,13 +1502,14 @@ def run(args: argparse.Namespace) -> None:
                 )
                 shorthand.append(json.dumps(attached))
         t, c = tickets.check_done(root, args.id, args.check, args.evidence + shorthand, by(), args.proves)
-        ev = c["evidence"][-1]
-        copied = args.file and tickets.proof_present(root, ev)
+        kept = c["evidence"][-len(args.file) :] if args.file else []  # the files of this call, in order
+        shown = kept or c["evidence"][-1:]
+        copied = [e for e in kept if tickets.proof_present(root, e)]
         _out(
             args,
             history.shown_item(root, t, "checklist", c),
-            f"Done: {c['text']} (evidence: {ev['ref']})"
-            + (f"\nEvidence copied: {ev['ref']} ({ev['text']})" if copied else ""),
+            f"Done: {c['text']} (evidence: {', '.join(e['ref'] for e in shown)})"
+            + "".join(f"\nEvidence copied: {e['ref']} ({e['text']})" for e in copied),
         )
     elif cmd == "log":
         t = tickets.log(root, args.id, args.text, by())
@@ -1956,6 +2020,8 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
         ):
             if argv[0] in addons.active(root) or argv[0] in addons.discover():
                 return addons.dispatch(root, argv[0], argv[1:])
+            if argv[0] in addons.SHIPPED_ADDONS:  # a shipped add-on that is off here: say how to turn it on
+                raise Refused(addons.not_on_message(root, argv[0]))
         args = parser.parse_args(argv)
         _resolve_keys(args, root)
         with diag.span(

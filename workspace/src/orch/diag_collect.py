@@ -308,6 +308,12 @@ def env_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
         enabled = config.diag_enabled(root)
     except Exception:  # noqa: BLE001
         enabled = None
+    try:
+        from orch import home as orch_home
+
+        binding = orch_home.binding_state(root)  # read-only; the state only, never a folder name
+    except Exception:  # noqa: BLE001
+        binding = "unknown"
     return {
         "orch_version": __version__,
         "python": platform.python_version(),
@@ -317,6 +323,7 @@ def env_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
         "now": _iso(now),
         "config_keys": cfg,
         "diag_enabled": enabled,
+        "workspace_folder": binding,
     }, gaps
 
 

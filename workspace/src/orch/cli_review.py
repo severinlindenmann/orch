@@ -91,12 +91,21 @@ def add_parsers(sub, common) -> None:
     x = s.add_parser(
         "security",
         parents=[common],
-        help="the security review of one pull request records its verdict (ok or problems)",
+        help="the security review of one pull request records its verdict (ok or problems), or the pull "
+        "request that fixes its finding (fixed-by)",
     )
     x.add_argument("pr", type=int, help="the pull request number")
-    x.add_argument("word", choices=("ok", "problems"), help="ok: nothing High or Medium left; else problems")
-    x.add_argument("why", help="one line: the worst finding, or what was checked")
-    x.add_argument("--sha", required=True, metavar="COMMIT", help="the commit you reviewed (from the brief)")
+    x.add_argument(
+        "word",
+        choices=("ok", "problems", "fixed-by"),
+        help="ok: nothing High or Medium left; else problems; fixed-by <M>: pull request M fixes the finding",
+    )
+    x.add_argument(
+        "why", help="one line: the worst finding, or what was checked; for fixed-by the fix's number"
+    )
+    x.add_argument(
+        "--sha", metavar="COMMIT", help="the commit you reviewed (from the brief); needed for ok and problems"
+    )
     x = s.add_parser("accepted", parents=[common], help="what the Reviewer accepted for you")
     x.add_argument(
         "--since", default="today", metavar="WHEN", help="today (default), yesterday or YYYY-MM-DD"
@@ -304,6 +313,18 @@ def _with_workflow(pv: dict, wf: dict | None) -> dict:
     if not wf:
         return pv
     pv["paras"] = [ghmerge.workflow_words(wf), *(pv.get("paras") or [])]
+    # ORCH-429: the label a script check gives, and the changed lines themselves with the risky ones marked
+    if wf.get("safe"):
+        pv["chips"] = [{"text": "Safe to merge", "tone": "ok"}]
+    elif any(x.get("risk") for x in wf.get("lines") or []):
+        pv["chips"] = [{"text": "Look at the red lines", "tone": "bad"}]
+    if wf.get("lines"):
+        pv["diff"] = wf["lines"]
+        if wf.get("lines_more"):
+            n = wf["lines_more"]
+            pv["paras"].append(
+                f"And {n} more changed line{'' if n == 1 else 's'}: Workflow changes shows all."
+            )
     rows = [{"title": f"{f['name']} (+{f['add']} −{f['del']})"[:200]} for f in wf["files"][:5]]
     if len(wf["files"]) > 5:
         rows.append({"title": f"and {len(wf['files']) - 5} more workflow files"})
@@ -578,7 +599,7 @@ def _accepted(args, root: Path) -> None:
 
     rows = reviewer.accepted(root, reviewer.since_time(args.since))
     picks = ownerpick.waiting_rows(root)  # ORCH-582: drafts waiting for the owner, shown on their own
-    word = args.since if args.since in ("today", "yesterday") else "since " + args.since
+    word = "today" if args.since == "today" else "since " + args.since  # issue 1920: yesterday AND today
     text = reviewer.accepted_text(rows, word, picks)
     data: dict = {"since": args.since, "accepted": rows, "waiting_pick": picks}
     if args.phone:
@@ -609,9 +630,22 @@ def _verdict(args, root: Path) -> None:
 def _security(args, root: Path) -> None:
     from orch import secreview
 
-    res = _guard(
-        secreview.verdict, root, args.pr, args.word, args.why, tickets.current_actor(args.by), args.sha
-    )
+    by = tickets.current_actor(args.by)
+    if args.word == "fixed-by":
+        fix = str(args.why or "").strip().lstrip("#")
+        if not fix.isdigit():
+            raise ReviewError(
+                "refused", "Give the number of the pull request that fixes it, e.g. fixed-by 1566."
+            )
+        res = _guard(secreview.link_fix, root, args.pr, int(fix), by)
+        _out(
+            args,
+            res,
+            f"Pull request #{res['pr']}: its finding is fixed by #{res['fixed_by']}. The release waits until "
+            f"#{res['fixed_by']} is merged with a security OK.",
+        )
+        return
+    res = _guard(secreview.verdict, root, args.pr, args.word, args.why, by, args.sha or "")
     words = "OK: the release may include it" if res["verdict"] == "ok" else "problems: releases wait"
     _out(args, res, f"Pull request #{res['pr']}: security review {words}. {res['line']}")
 
