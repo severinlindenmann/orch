@@ -13,6 +13,10 @@ from orch import ghmerge, review, tickets
 PR = "https://github.com/acme/app/pull/12"
 HEAD = "a" * 40
 ME = "human:pat"
+# what gh printed on 22 Nov 00:25 when GitHub refused the connection (ORCH-1415)
+REFUSED_CONNECTION = (
+    'Post "https://api.github.com/graphql": dial tcp 140.82.121.6:443: connect: connection refused\n'
+)
 
 
 class FakeGh:
@@ -28,12 +32,21 @@ class FakeGh:
         self.summary = (
             None  # what `gh pr view --json title,...` answers when the card is made (None: refused)
         )
+        self.offline = 0  # ORCH-1415: this many next gh calls get no answer (GitHub refuses the connection)
+        self.lost = 0  # this many next merges land on GitHub but their answer gets lost on the way back
 
     def __call__(self, argv, env=None, **kw):
         args = argv[1:]
         self.calls.append(args)
         env = os.environ if env is None else env  # no env= given: the process environment
         self.envs.append({k: env[k] for k in ghmerge.TOKEN_VARS if k in env})
+        if self.offline:
+            self.offline -= 1
+            return subprocess.CompletedProcess(argv, 1, "", REFUSED_CONNECTION)
+        if self.lost and args[:2] == ["pr", "merge"]:
+            self.lost -= 1
+            self.state = "MERGED"
+            return subprocess.CompletedProcess(argv, 1, "", REFUSED_CONNECTION)
         if args[:2] == ["api", "user"]:
             return subprocess.CompletedProcess(argv, self.user_rc, self.login + "\n", "")
         if args[:2] == ["pr", "view"] and "title,baseRefName,headRefOid,commits,statusCheckRollup" in args:
@@ -742,3 +755,135 @@ def test_a_workflow_name_that_is_no_plain_path_is_not_read_whole(monkeypatch):
     assert len(calls) == 1
     many = [_wf_file("x")] + [{"filename": f"f{i}.py"} for i in range(ghmerge.COMPARE_MAX)]
     assert ghmerge._whole_texts(read, "gh", "acme/app", HEAD, many) == {}
+
+
+class FakeClock:
+    """ghmerge's time: sleeping only moves the clock, so the retries of a few minutes take no real time."""
+
+    def __init__(self):
+        self.now, self.slept = 1000.0, []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, s):
+        self.slept.append(s)
+        self.now += s
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    fake = FakeClock()
+    monkeypatch.setattr(ghmerge, "time", fake)
+    return fake
+
+
+def test_refused_connection_keeps_the_card_open_and_a_second_press_merges(tk, run, gh, clock):
+    """ORCH-1415: GitHub refuses the connection for the whole retry time: nothing is sent back, the card
+    stays open with one plain line, and the next press merges once GitHub answers again."""
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    gh.offline = 10_000
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 2 and ghmerge.UNREACHABLE in out + err
+    assert "Merge failed" not in out + err
+    q = _q(root, tid)
+    assert q["answer"] is None and "decision" not in q  # the card is still open, nothing went to the helper
+    assert sum(clock.slept) <= ghmerge.RETRY_FOR and len(clock.slept) >= 3  # tried again for a while
+    assert gh.state == "OPEN" and gh.merges == []
+    hist = " ".join(h["text"] for h in tickets.load(root, tid)["history"])
+    assert "send back" not in hist.lower() and "Merge failed" not in hist
+    code, out, _ = run("review", "list", "--json")
+    assert "q1" in [c["key"] for c in json.loads(out)["cards"] if c["ticket"] == tid]
+    gh.offline = 0  # GitHub answers again: the second press merges
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, out + err
+    assert gh.state == "MERGED" and len(gh.merges) == 1
+    q = _q(root, tid)
+    assert q["answer"] == "Merge" and q["decision"]["action"] == "approve"
+
+
+def test_short_blip_is_ridden_out_in_one_press(tk, run, gh, clock):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    calls_before = len(gh.calls)
+    gh.offline = 3  # the first three gh calls of the click get no answer, then GitHub is back
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, out + err
+    assert len(clock.slept) == 3 and gh.state == "MERGED" and len(gh.merges) == 1
+    assert len(gh.calls) > calls_before
+    assert _q(root, tid)["answer"] == "Merge"
+
+
+def test_merge_that_landed_before_the_answer_was_lost_counts_as_merged(tk, run, gh, clock):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    gh.lost = 1  # GitHub merged it, but its answer never came back
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, out + err
+    assert len(gh.merges) == 1 and len(clock.slept) == 1  # read MERGED on the next try: not merged twice
+    q = _q(root, tid)
+    assert q["answer"] == "Merge" and q["decision"]["action"] == "approve"
+    hist = [h["text"] for h in tickets.load(root, tid)["history"]]
+    assert f"The pull request was merged already on GitHub (pat-gh): {PR}" in hist
+
+
+def test_gh_timeout_on_merge_is_tried_again(tk, run, gh, clock, monkeypatch):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    first = {"left": 1}
+
+    def slow_then_fine(argv, **kw):
+        if argv[1:3] == ["pr", "merge"] and first["left"]:
+            first["left"] -= 1
+            raise subprocess.TimeoutExpired(argv, kw.get("timeout"))
+        return gh(argv, **kw)
+
+    monkeypatch.setattr(ghmerge.subprocess, "run", slow_then_fine)
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, out + err
+    assert gh.state == "MERGED" and len(clock.slept) == 1
+
+
+def test_a_real_refusal_is_not_retried(tk, run, gh, clock):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    gh.merge_rc = 1
+    gh.merge_err = "X Pull request acme/app#12 is not mergeable: the merge commit cannot be cleanly created."
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, out + err
+    assert clock.slept == [] and len(gh.merges) == 1
+    assert _q(root, tid)["decision"]["action"] == "send_back"
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        REFUSED_CONNECTION,
+        "error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com\n",
+        'Get "https://api.github.com/user": dial tcp: lookup api.github.com: no such host\n',
+        'Post "https://api.github.com/graphql": net/http: TLS handshake timeout\n',
+        "HTTP 502: Bad Gateway (https://api.github.com/graphql)\n",
+        "HTTP 503: Service Unavailable\n",
+        'Post "https://api.github.com/graphql": read tcp 10.0.0.2:5000->1.2.3.4:443: connection reset',
+        'Post "https://api.github.com/graphql": context deadline exceeded (Client.Timeout exceeded)\n',
+    ],
+)
+def test_no_answer_from_github_is_told_apart(stderr):
+    assert ghmerge.unreachable(subprocess.CompletedProcess([], 1, "", stderr))
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "X Pull request acme/app#12 is not mergeable: the base branch policy prohibits the merge.\n",
+        "X Pull request acme/app#502 is not mergeable: the merge commit cannot be cleanly created.",
+        "GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)\n",
+        'GraphQL: Required status check "tests" is expected. (mergePullRequest)\n',
+        "HTTP 422: Validation Failed\n",
+        "HTTP 403: Resource not accessible by integration\n",
+    ],
+)
+def test_a_refusal_by_github_is_not_a_network_error(stderr):
+    assert not ghmerge.unreachable(subprocess.CompletedProcess([], 1, "", stderr))
+    assert not ghmerge.unreachable(subprocess.CompletedProcess([], 0, "", REFUSED_CONNECTION))

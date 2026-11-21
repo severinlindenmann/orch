@@ -370,7 +370,8 @@ def _child(argv: list[str], root: Path, env: dict, fds: tuple[int, ...] = ()):
 
     return subprocess.run(
         [sys.executable, "-I", "-P", "-m", "orch", *argv],
-        cwd=root, env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL,
+        # 240: a Merge click keeps trying while GitHub gives no answer (ORCH-1415, ghmerge.RETRY_FOR)
+        cwd=root, env=env, capture_output=True, text=True, timeout=240, stdin=subprocess.DEVNULL,
         **({"pass_fds": fds} if fds else {}),
     )  # fmt: skip
 
