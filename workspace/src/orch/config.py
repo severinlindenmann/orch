@@ -729,6 +729,24 @@ def set_auto_reviewer(root: Path, value: bool, by: str | None = None) -> bool:
     return value
 
 
+def away_on(root: Path | None) -> bool:
+    """[workflow] away (default off, ORCH-425 from ORCH-428): Away mode, one switch for the night. While it
+    is on
+    the Auto Reviewer accepts or sends back finished work and answers a helper's plain question or card
+    with its
+    recommended option at once (no 30-minute wait), on tickets without Human review needed only, and never
+    what
+    the owner keeps (autoreview.AWAY_STAYS). Only a person turns it on."""
+    if root is None:
+        return False
+    return file_switch(root, "workflow", "away", False) is True
+
+
+def set_away(root: Path, value: bool, by: str | None = None) -> bool:
+    set_key(root, "workflow", "away", value)
+    return value
+
+
 def reviewer_answers_on(root: Path | None) -> bool:
     """[workflow] reviewer_answers (default off): the Reviewer answers small, routine questions for the owner
     with the helper's recommended option (reviewer.answer_routine). Only a person turns it on."""

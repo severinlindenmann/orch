@@ -650,6 +650,31 @@ def _ticket_kind(a):
     return ["ticket", "kind", _tid(a.get("ticket")), a["kind"]], [], []
 
 
+def _auto_reviewer_set(a):
+    """Review > Auto Reviewer (ORCH-425): `orch config set workflow.auto_reviewer` (only a person turns it on)."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "workflow.auto_reviewer", "on" if a["on"] else "off"], [], []
+
+
+def _away_set(a):
+    """Review > Away (ORCH-425): `orch config set workflow.away` (only a person turns it on)."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "workflow.away", "on" if a["on"] else "off"], [], []
+
+
+def _review_undo(a):
+    """Undo what the Reviewer, Auto Reviewer or Away mode did (ORCH-425): `orch review undo <ticket> [q3]`."""
+    _only(a, ("ticket", "question"))
+    q = a.get("question")
+    if q is not None and (not isinstance(q, str) or not re.fullmatch(r"q[0-9]{1,4}", q)):
+        raise BadRequest("Choose a question.")
+    return ["review", "undo"], [], [_tid(a.get("ticket")), *([q] if q else [])]
+
+
 def _release_merge_set(a):
     """Settings > Merge releases without my click: `orch config set workflow.release_merge` (only a person)."""
     _only(a, ("on",))
@@ -1307,6 +1332,9 @@ OPS = {
     "reviewer.kinds": _reviewer_kinds,
     "release_merge.set": _release_merge_set,
     "prepare.set": _prepare_set,
+    "auto_reviewer.set": _auto_reviewer_set,
+    "away.set": _away_set,
+    "review.undo": _review_undo,
     "live.set": _live_set,
     "diag.set": _diag_set,
     "typing.set": _typing_set,
@@ -1767,6 +1795,9 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             "reviewer.kinds",
             "release_merge.set",
             "prepare.set",
+            "auto_reviewer.set",
+            "away.set",
+            "review.undo",
             "live.set",
             "copies.set",
             "copies.clean",

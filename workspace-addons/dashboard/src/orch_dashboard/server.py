@@ -66,6 +66,8 @@ SETTINGS_OPS = (
     "reviewer.kinds",
     "release_merge.set",
     "prepare.set",
+    "auto_reviewer.set",
+    "away.set",
     "diag.set",
     "typing.set",
     "update.auto",

@@ -1133,6 +1133,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     from orch.config import (
         agents_may_finish,
         auto_reviewer_on,
+        away_on,
         copies_max,
         copies_mode,
         copy_setup,
@@ -1165,6 +1166,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "prepare_daily_limit": prepare_daily_limit(root),
         "auto_reviewer_on": auto_reviewer_on(root),  # ORCH-424: new tickets start without human review
         "reviewer_kinds": reviewer_kinds(root),  # ORCH-645: the kinds it accepts by itself
+        "away_on": away_on(root),  # ORCH-425: Away mode, the Review page's second switch
         "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)
         "copies": copies_mode(root),
         "copies_max": copies_max(root),
