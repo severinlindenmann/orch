@@ -375,6 +375,12 @@ def run(root: Path, tid: str, name: str, at: str, on_fail, member: bool = False)
         part = f"script-{name}" if member else "script"
         rel = f".orch/run/logs/{tid}-{part}-{datetime.now(UTC):%Y%m%dT%H%M%SZ}.log"
         t0 = time.time()
+        if (
+            not member
+        ):  # one script: its run gets a number now (a group's scripts run side by side, numbered in order)
+            from . import roles
+
+            roles.begin(root, tid, at)
         with runfiles.open_append(root / rel) as out:
             try:
                 code = subprocess.run(
