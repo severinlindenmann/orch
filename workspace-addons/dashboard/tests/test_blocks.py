@@ -737,7 +737,9 @@ def test_split_log_takes_as_many_lines_as_the_contract_and_no_more():
     """ORCH-639: the contract allowed 100 log lines, the dashboard still refused more than 20 ('Can't show Services')."""
     from orch_dashboard.views import check_view
 
-    schema = json.loads((Path(__file__).resolve().parents[3] / "contracts/addon-view.schema.json").read_text())
+    schema = json.loads(
+        (Path(__file__).resolve().parents[3] / "contracts/addon-view.schema.json").read_text()
+    )
     panel = schema["$defs"]["splitItem"]["properties"]["panel"]["properties"]
     most = panel["log"]["properties"]["lines"]["maxItems"]
     page = _services()
