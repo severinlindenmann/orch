@@ -233,7 +233,7 @@ def test_check_state_counts_only_the_member_s_own_newest_run():
         "conclusion": "success",
         "pull_requests": [{"number": 2}, {"number": 7}],
     }
-    rows.append(shared)  # a run tied to two pull requests with one head: left out, the older one counts
-    assert gh.check_state(REPO, "a" * 40, "banned-words", 2) == "pending"
+    rows.append(shared)  # the newest run is tied to two pull requests with one head: nothing is trusted
+    assert gh.check_state(REPO, "a" * 40, "banned-words", 2) is None
     gh._json = lambda *a: None  # GitHub did not answer
     assert gh.check_state(REPO, "a" * 40, "banned-words", 2) is None

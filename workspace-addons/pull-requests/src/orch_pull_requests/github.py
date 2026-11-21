@@ -181,15 +181,17 @@ class GitHub:
         it again; the newest one is the one that counts."""
         v = self._json("api", f"repos/{repo}/commits/{sha}/check-runs?check_name={quote(name)}&per_page=100")
         runs = [r for r in (v.get("check_runs") or []) if isinstance(r, dict)] if isinstance(v, dict) else []
-        # only runs GitHub ties to this one pull request alone: a head two pull requests share is never trusted
-        runs = [
-            r
-            for r in runs
-            if [p.get("number") for p in r.get("pull_requests") or [] if isinstance(p, dict)] == [number]
+        tied = [
+            (r, [p.get("number") for p in r.get("pull_requests") or [] if isinstance(p, dict)]) for r in runs
         ]
-        if not runs:
+        tied = [(r, nums) for r, nums in tied if number in nums]
+        if not tied:
             return None
-        newest = max(runs, key=lambda r: r.get("id") or 0)
+        newest, nums = max(tied, key=lambda t: t[0].get("id") or 0)
+        if nums != [
+            number
+        ]:  # the newest run is tied to other pull requests too (one shared head): never trusted
+            return None
         if newest.get("status") != "completed":
             return "pending"
         return newest.get("conclusion") or None
