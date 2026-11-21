@@ -61,7 +61,10 @@ def test_add_is_stopped_until_started_and_the_whole_cycle_works(cli, ws, fake):
     assert code == 0 and out["removed"] == "web"
     assert "web" not in fake.entries and not fake.entry_path(spec).exists()
     assert not (ws / ".orch/addons/services/services/web.json").exists()
-    assert not log.exists()  # the log goes with the service (ORCH-847)
+    assert not log.exists()  # r-1119-1255-ws-3: a new service with this id must not show the old lines
+    kept = list((ws / ".orch/addons/services/logs/removed").glob("web-*.log"))
+    assert len(kept) == 1 and kept[0].read_text(encoding="utf-8") == "serving\n"  # the log stays, aside
+    assert "logs/removed/web-" in out["next"]
     assert [c[0] for c in fake.calls] == ["install", "start", "stop", "restart", "auto", "auto", "uninstall"]
 
 
@@ -416,3 +419,12 @@ def test_the_log_of_an_adopted_job_without_a_log_file_says_orch_keeps_none(ws):
     rec = {"id": "j", "name": "Job", "adopted": {"kind": "launchd", "entry": "com.x.job", "path": None}}
     assert no_log_text(rec) == "orch keeps no log for this job."
     assert no_log_text({"id": "w", "name": "Web", "adopted": None}) == "Web has not written anything yet."
+
+
+def test_a_new_service_with_a_removed_ones_id_starts_with_an_empty_log(cli, ws, fake):
+    _add(cli)
+    log = ws / ".orch/addons/services/logs/web.log"
+    log.write_text("/bin/sh: old/run.sh: Operation not permitted\n", encoding="utf-8")
+    assert jrun(cli, "remove", "web")[0] == 0
+    _add(cli)
+    assert jrun(cli, "log", "web")[1]["lines"] == []

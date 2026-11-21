@@ -590,3 +590,49 @@ def test_a_program_started_by_a_managed_service_is_not_found_again(cli, mac, too
     out = jrun(cli, "found")[1]
     assert all(not i["id"].startswith("process:") for i in out["found"])
     assert out["others"] == 1  # only other-tool; the service's own children are not counted
+
+
+def test_orchs_add_on_servers_are_never_found_by_their_recorded_pid(
+    cli, mac, tools, ws, monkeypatch, tmp_path
+):
+    # r-1119-1255-ws-3: a program path with a space splits in `ps`, so the command line alone cannot tell orch's own
+    # servers; the pids orch recorded when it started them can.
+    from orch import services as core
+
+    p = (
+        tmp_path / "running.json"
+    )  # the core's record of running add-ons (its home is not set up in this test)
+    monkeypatch.setattr(core, "running_path", lambda: p)
+    p.write_text(
+        json.dumps([{"workspace": str(ws), "addon": "focus", "pid": 965, "url": None}]), encoding="utf-8"
+    )
+    py = "/Users/x/Library/Application Support/orch/bin/python3"
+    tools.set(
+        ps=[
+            {"pid": 965, "ppid": 1, "tty": "??", "argv": py.split(" ") + ["-P", "-m", "orch_focus", "serve"]},
+            {"pid": 966, "ppid": 965, "tty": "??", "argv": ["node", "helper.js"]},
+            {"pid": 967, "ppid": 1, "tty": "??", "argv": ["python3", "watcher.py"]},
+        ],
+        lsof={"965": str(ws), "966": str(ws), "967": str(ws)},
+    )
+    out = jrun(cli, "found")[1]
+    assert all(not i["id"].startswith("process:") for i in out["found"])
+    assert out["others"] == 1  # only watcher.py (967); the focus server and its child are not counted
+    # a recorded pid that another program took over after a restart hides nothing
+    p.write_text(
+        json.dumps([{"workspace": str(ws), "addon": "focus", "pid": 967, "url": None}]), encoding="utf-8"
+    )
+    assert jrun(cli, "found")[1]["others"] == 3  # 967 does not name orch: still counted (965 and its child too now)
+
+
+def test_what_a_managed_service_started_is_not_found_again(cli, mac, tools, ws, monkeypatch):
+    # r-1119-1255-ws-3: the kept service's main pid is a /bin/sh wrapper; its program runs as a child of it
+    monkeypatch.setattr("orch_services.found._record_pids", lambda root: {970})
+    tools.set(
+        ps=[
+            {"pid": 970, "ppid": 1, "tty": "??", "argv": ["/bin/sh", "run.sh"]},
+            {"pid": 971, "ppid": 970, "tty": "??", "argv": ["shadow-abacus", "--port", "8000"]},
+        ],
+        lsof={"970": str(ws), "971": str(ws)},
+    )
+    assert jrun(cli, "found")[1].get("others", 0) == 0

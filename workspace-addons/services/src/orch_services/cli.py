@@ -468,8 +468,9 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
         spec = _spec(root, rec, wid, strict=False)
         drv.uninstall(spec)
         store.delete(root, sid)
-        store.log_path(root, sid).unlink(missing_ok=True)  # the log goes with the service (ORCH-847)
-        nxt = f"Removed {rec['name']} and its log."
+        moved = store.retire_log(root, sid)
+        where = moved.relative_to(root).as_posix() if moved else f".orch/addons/services/logs/{sid}.log"
+        nxt = f"Removed {rec['name']}. Its log stays in {where}."
         return _emit(args, {"removed": sid, "next": nxt}, nxt)
     spec = _spec(root, rec, wid, strict=verb != "stop")
     was_stopped = verb == "stop" and _state(root, drv, rec, wid)["state"] == "stopped"
