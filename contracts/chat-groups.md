@@ -390,8 +390,12 @@ every `valid-v2-*` vector). So it:
 The old `chat-groups.schema.json` closed `group`, its member entries and `group_event`, so a receiver validating
 incoming messages against that old schema would refuse v2 messages. No orch receiver does (§2 `own_seq`); the
 schema is a contract check only, and this v2 schema allows the new fields.
-A phone text cannot carry `mentions` (the relay builds phone texts from a fixed field list, §2); how the app names a
-helper is decided in the app step (2.5), with a relay field or the host's own choice, and needs no change here.
+A phone text cannot carry `mentions` (the relay builds phone texts from a fixed field list, §2). Decided in the app step
+(2.5, ORCH-1175, owner's choice): the relay sets **`body.team = {add?, mentions?}`** on a phone's text to the ticket's
+workspace (relay-api.md `POST /v1/phone/send`; refused from workspaces). `team.add` = the person's Add: the host adds that
+workspace through the normal add (connected, ≤ 8, `added_by: "you"`), only for a phone paired to it, and says a refusal
+in the chat. `team.mentions` is reserved for the app's @ list (not used by the host yet). An older relay drops the field,
+so the text arrives as an ordinary host-only note.
 
 **Security rules (v2).**
 - **G13** `mentions` only on a group `text`; every id is a current member (the host checks its own list, never the copy the sender holds); the writer never
