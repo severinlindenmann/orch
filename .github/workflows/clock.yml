@@ -6,6 +6,11 @@ name: clock
 # fixture made "a few minutes ago" lands on yesterday. scripts/at-clock.sh moves only the wall clock (libfaketime).
 on:
   workflow_call:
+    inputs:
+      runs_on:
+        description: "where it runs, as a JSON list of runs-on values, one leg each: [\"ubuntu-latest\"], or the orch edge runner's labels, or both on a release pull request (ci.yml job route, ORCH-1126)"
+        type: string
+        default: '["ubuntu-latest"]'
 permissions:
   contents: read
 jobs:
@@ -14,15 +19,18 @@ jobs:
       fail-fast: false
       matrix:
         at: ["22:30:00", "23:59:40"]
-    name: at ${{ matrix.at }} UTC
-    runs-on: ubuntu-latest
+        machine: ${{ fromJSON(inputs.runs_on) }}
+    name: at ${{ matrix.at }} UTC${{ matrix.machine != 'ubuntu-latest' && ' (orch edge)' || '' }}
+    runs-on: ${{ matrix.machine }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/edge-job-home
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: sudo apt-get install -y -qq faketime
+      # the orch edge runner has it already (scripts/edge-runner/setup.sh) and no sudo
+      - run: command -v faketime >/dev/null || sudo apt-get install -y -qq faketime
       - name: Install every add-on and the workspace (real clock)
         run: |
           for d in workspace workspace-addons/*/; do

@@ -1,0 +1,41 @@
+name: edge-job-home
+description: >-
+  On the orch edge test server's own runner (ORCH-1126): give the job a throwaway home under the job's temp folder
+  (the runner wipes it after the job), an orch home inside it with ORCH_HOME_STRICT=1, download caches that survive
+  between jobs (uv, Python, Rust, browsers, npm) and a cap on test workers so 8 GB of memory holds. On GitHub's
+  machines it does nothing.
+runs:
+  using: composite
+  steps:
+    - name: Throwaway home (orch edge runner only)
+      if: runner.environment == 'self-hosted'
+      shell: bash
+      run: |
+        set -eu
+        real_home=$HOME
+        h="$RUNNER_TEMP/home"
+        mkdir -p "$h/orch" "$h/.config" "$h/.cache" "$RUNNER_TEMP/tmp"
+        cache="$real_home/ci-cache"   # downloads and toolchains only: content-addressed, safe to share
+        mkdir -p "$cache/uv" "$cache/uv-python" "$cache/ms-playwright" "$cache/npm" "$cache/cargo" "$cache/rustup"
+        {
+          echo "HOME=$h"
+          echo "XDG_CONFIG_HOME=$h/.config"
+          echo "XDG_CACHE_HOME=$h/.cache"
+          echo "ORCH_HOME=$h/orch"
+          echo "ORCH_HOME_STRICT=1"
+          # Debian 13 keeps /tmp in memory (half of it): a cargo build or a test's temp files there fill it and take
+          # the memory the tests need. The job's temp folder is on disk and wiped after the job.
+          echo "TMPDIR=$RUNNER_TEMP/tmp"
+          echo "UV_CACHE_DIR=$cache/uv"
+          echo "UV_PYTHON_INSTALL_DIR=$cache/uv-python"
+          echo "PLAYWRIGHT_BROWSERS_PATH=$cache/ms-playwright"
+          echo "npm_config_cache=$cache/npm"
+          echo "CARGO_HOME=$cache/cargo"
+          echo "RUSTUP_HOME=$cache/rustup"
+          # 8 cores / 8 GB, shared with the test copies of relay, publish and hub: half the cores for tests and builds
+          echo "PYTEST_XDIST_AUTO_NUM_WORKERS=4"
+          echo "CARGO_BUILD_JOBS=4"
+          echo "ORCH_EDGE_RUNNER=1"
+        } >> "$GITHUB_ENV"
+        echo "$cache/cargo/bin" >> "$GITHUB_PATH"
+        echo "Throwaway home: $h"
