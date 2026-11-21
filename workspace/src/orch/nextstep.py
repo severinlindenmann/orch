@@ -105,6 +105,9 @@ def _start_task(data, args) -> str:
 
 def _record(data, args) -> str:
     c = getattr(args, "check", "<task>")
+    if getattr(args, "exit_code", None):  # a failed run is not evidence to close on
+        again = f'orch check record {_tid(args)} {c} --cmd "<command>" --exit 0'
+        return f"that run failed: fix it, then run it again: {again}"
     return f'if that is the evidence, close the task: orch check done {_tid(args)} {c} --note "<evidence>"'
 
 
@@ -175,6 +178,35 @@ def _logins_renew(data, args) -> str:
 
 def _status_cmd(data, args) -> str:
     return "orch stop  (when you are done)" if data else "orch ticket list"
+
+
+def _expert(data, args) -> str:
+    """Only a pass that really opened a ticket for a red run points at the ticket list."""
+    d = data if isinstance(data, dict) else {}
+    if d.get("off"):
+        return "orch config set github.dev_expert <role ticket>  (turns the Development expert on)"
+    if d.get("paused"):
+        return "orch resume  (automation is paused)"
+    if getattr(args, "dry_run", False):
+        return "orch github expert  (do what the dry run said)" if d.get("changed") else "nothing to do now."
+    if any(str(c).startswith("opened top ticket") for c in d.get("changed") or []):
+        return "orch ticket list  (a red run opened a top ticket)"
+    return "nothing to do now; the next pass runs on its repeat."
+
+
+def _release(data, args) -> str:
+    """Only a pass that really opened a ticket points at the ticket list."""
+    d = data if isinstance(data, dict) else {}
+    if d.get("off"):
+        return "orch github release --help  (how to turn the release keeper on)"
+    if d.get("paused"):
+        return "orch resume  (automation is paused)"
+    did = [str(x) for x in d.get("did") or []]
+    if getattr(args, "dry_run", False):
+        return "orch github release  (do what the dry run said)" if did else "nothing to do now."
+    if any(x.startswith(("ticket:", "security-review:")) and not x.endswith("failed") for x in did):
+        return "orch ticket list  (the release keeper opened a ticket)"
+    return "orch review list  (what still waits for the owner)"
 
 
 def _ref_wait(data, args) -> str:
@@ -294,11 +326,15 @@ HINTS = {
     "review link": "orch needs",
     "review tend": "orch review accepted  (what was accepted for you today)",
     "review tend-releases": "orch review list  (what still waits for the owner)",
-    "review verdict": "orch ticket show <next ticket in the history>  (the next one to look at)",
+    "review verdict": lambda d, a: (
+        f"orch ticket show {d['next']['key']}  (the next one waiting for a second look)"
+        if isinstance(d, dict) and isinstance(d.get("next"), dict)
+        else "nothing else waits for a second look; finish your ticket."
+    ),
     "review security": "orch github release --dry-run  (what the release still waits for)",
     "review accepted": "orch needs",
-    "github expert": "orch ticket list  (a red run opened a top ticket)",
-    "github release": "orch ticket list  (a red run opened a top ticket)",
+    "github expert": _expert,
+    "github release": _release,
     "look *": "orch ticket list",
     "publish connect": 'describe this workspace: orch publish profile --description "..." --tags a,b',
     "publish new": lambda d, a: f"orch publish app {a.folder}",

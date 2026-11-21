@@ -117,3 +117,54 @@ def test_start_waits_for_old_listener_before_spawn(ws, monkeypatch):
     monkeypatch.setattr(service.subprocess, "Popen", spawn)
     with pytest.raises(RuntimeError, match="reached spawn after port freed"):
         service.start(ws, port=8430)
+
+
+def test_a_watch_only_restart_asks_for_the_old_port_and_may_move_on(ws, monkeypatch):
+    """The person's restart of a watch-only Focus tries its old port first but is not pinned to it: a port
+    another server took meanwhile (parallel CI workers share 8430) must not fail the start."""
+    from orch import procs
+
+    monkeypatch.setattr(service, "running", lambda root: {"pid": 4242, "port": 8555})
+    monkeypatch.setattr(
+        service.runfiles,
+        "read_json",
+        lambda path: {"watch_only": True} if path.name == "server.json" else None,
+    )
+    stopped = []
+    monkeypatch.setattr(service, "stop", lambda root: stopped.append(root) or "stopped")
+    monkeypatch.setattr(procs, "wait_port_free", lambda port, *a, **k: False)  # the old port is still taken
+    from orch import tickets
+
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    seen = []
+
+    def spawn(cmd, *args, **kwargs):
+        seen.append(cmd)
+        raise RuntimeError("reached spawn")
+
+    monkeypatch.setattr(service.subprocess, "Popen", spawn)
+    with pytest.raises(RuntimeError, match="reached spawn"):
+        service.start(ws)
+    assert stopped and seen
+    cmd = seen[0]
+    assert cmd[cmd.index("--port") + 1] == "8555" and "--auto-port" in cmd
+
+
+@pytest.mark.slow
+def test_a_persons_start_restarts_focus_a_helper_started(ws, monkeypatch):
+    """Watch-only (a helper started it): the person's start replaces it (its old port when free)."""
+    from orch import adapters
+
+    for k, v in list(os.environ.items()):
+        if adapters.detect_env({k: v}):
+            monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("ORCH_AGENT", "claude")
+    try:
+        cur = service.start(ws)
+        assert service.start(ws) == cur
+        monkeypatch.delenv("ORCH_AGENT")
+        new = service.start(ws)
+        assert new["pid"] != cur["pid"]  # its old port when free, else another (parallel tests share ports)
+        assert json.loads((service._dir(ws) / "server.json").read_text())["watch_only"] is False
+    finally:
+        assert service.stop(ws) in ("stopped", "not running")

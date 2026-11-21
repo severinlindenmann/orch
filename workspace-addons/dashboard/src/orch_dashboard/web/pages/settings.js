@@ -295,10 +295,14 @@ const syncNow = () => syncUi.draft || syncSaved(syncUi.card);
 const syncSame = (a, b) => a.where === b.where && (a.where !== 'remote' || (a.addr === b.addr && a.every === b.every));
 const syncHost = addr => { const text = String(addr || '').trim(); const scp = /^[^@\s/]+@([^:\s/]+):/.exec(text); if (scp) return scp[1]; try { return new URL(text).host || text; } catch (_) { return text; } };
 const syncEveryLabel = every => (SYNC_EVERY.find(([v]) => v === String(every)) || SYNC_EVERY[1])[1];
+// The shapes sync takes (https, ssh, git@host:path; a plain path or file: only for a test install): anything else is wrong before Save
+const syncAddrOk = addr => { const t = String(addr || '').trim(); return !/\s/.test(t) && (/^(https|ssh):\/\/[^/\s:@]+/i.test(t) || /^git@[A-Za-z0-9.-]+:\S+$/.test(t) || /^(\/|file:)/.test(t)); };
+const SYNC_BAD_ADDR = 'This is not a valid sync address. Use one that starts with https:// or ssh://, or looks like git@host:name.';
 function syncReviewText(s) {
   if (s.where === 'off') return 'Sync will stop. Your tickets stay on this computer as they are.';
   if (s.where === 'local') return 'Sync will keep a copy on this computer only.';
   if (!s.addr.trim()) return 'Enter a sync address first.';
+  if (!syncAddrOk(s.addr)) return SYNC_BAD_ADDR;
   return 'Sync will copy tickets to ' + syncHost(s.addr) + ' every ' + syncEveryLabel(s.every) + '.';
 }
 // One click on the sync add-on's own verb; its answer comes back as state.act_answer.
@@ -318,12 +322,15 @@ async function syncRead() {
   } catch (_) { return {ok:false, answer:null}; }
 }
 // The Sync card lives in Settings › General and on the Sync page itself (#addon/sync): both change settings in place.
+// The settings say Sync is installed but off (ORCH-960): the 15 s look stops instead of reading a status that is refused.
+const syncTurnedOff = () => array(state.settings?.addons).find(a => a.name === SYNC)?.active === false;
 const syncPageOpen = () => { const r = route(); return r.kind === 'settings' || (r.kind === 'addon' && r.id === SYNC); };
 async function syncLoad() {
   if (syncUi.loading || snapshot) return;
   clearTimeout(syncUi.timer); syncUi.timer = null;
   if (addonChanging()) { syncUi.timer = setTimeout(syncLoad, 3000); return; }  // the server is restarting: look again soon
   if (!syncPageOpen()) return;  // the page was left: it loads again when Settings or the Sync page opens
+  if (syncTurnedOff()) return;  // Sync was turned off: no status read (it would be refused); it loads again once it is on
   syncUi.loading = true;
   try {
     const result = await syncRead();
@@ -411,6 +418,7 @@ function syncCard(settings) {
   const wrap = body => h('div', {className:'stack sync-wrap', 'data-key':'settings-sync'}, h('div', {className:'card sync-card', id:'sync-card'}, body));
   if (!addon.active) {
     syncUi.wasOff = true; syncUi.card = null; syncUi.draft = null;
+    clearTimeout(syncUi.timer); syncUi.timer = null;  // turned off: the 15 s status look stops (ORCH-960)
     return wrap(h('div', {className:'card-row'}, h('span', {className:'grow sync-lbl'}, 'Keep a copy of my tickets'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':false, 'aria-label':'Keep a copy of my tickets', 'data-key':'settings-switch-sync-off', 'data-action':'settings-addon', 'data-name':addon.name, disabled:settingsBusy.has('addon-' + addon.name)})));
   }
@@ -456,7 +464,7 @@ function syncCard(settings) {
     h('div', {className:'row'}, button('Undo', 'quiet', () => { syncUi.draft = null; syncUi.check = null; render(); }), (() => {
       const save = button('Save', 'primary', syncSave);
       save.dataset.key = 'sync-review-save';
-      save.disabled = syncUi.busy || (cur.where === 'remote' && !cur.addr.trim());
+      save.disabled = syncUi.busy || (cur.where === 'remote' && (!cur.addr.trim() || !syncAddrOk(cur.addr)));
       return save;
     })())) : null;
   const warn = card?.public ? h('div', {className:'sync-warn', role:'alert', 'data-key':'sync-public'}, h('p', {}, SYNC_PUBLIC),
@@ -485,7 +493,7 @@ function syncCard(settings) {
 }
 async function syncSave() {
   const s = syncNow();
-  if (syncUi.busy || (s.where === 'remote' && !s.addr.trim())) return;
+  if (syncUi.busy || (s.where === 'remote' && (!s.addr.trim() || !syncAddrOk(s.addr)))) return;
   const saved = syncSaved(syncUi.card), sameAddr = s.where === 'remote' && saved.where === 'remote' && syncUi.card?.confirmed === true && s.addr.trim() === saved.addr;  // an unconfirmed address is never a 'same address' shortcut
   if (s.where === 'remote' && !sameAddr) {
     // choosing the sync address is the person's signed choice: the sign step shows the address the add-on returns
@@ -1042,13 +1050,21 @@ function pageStopped(r) {
 // the frame address's fragment (kit/frame.js takes it out at once); one orch did not ship gets no pass.
 const SHIPPED_SANDBOX = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
 const framePasses = new Map(), framePassAsks = new Map(), framePassFailed = new Map(), frameFresh = new Map();
+// The server ends a pass after its life (`life` seconds, framepass.py LIFE): one kept longer is asked for again
+// before a page opens with it, so its first call never answers 401 (ORCH-1004). The frame on screen keeps its pass
+// (a new one would load it again); when that one ends, its next call answers 401 and the frame asks for new ones.
 function framePass(name) {
-  if (framePasses.has(name)) return framePasses.get(name);
+  const kept = framePasses.get(name);
+  if (kept && (Date.now() < kept.until || frameShown()?.getAttribute('src')?.includes('#orch-frame=' + kept.pass + '&'))) return kept;
+  if (kept) framePasses.delete(name);
   if (framePassAsks.has(name) || Date.now() - (framePassFailed.get(name) || 0) < 10000) return null;
+  const asked = Date.now();  // the server's clock for the pass starts before its answer arrives
   framePassAsks.set(name, fetch('/api/frame-pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({addon:name})})
     .then(r => r.ok ? r.json() : null)
     .then(j => {
-      if (j && typeof j.pass === 'string' && typeof j.file === 'string') framePasses.set(name, {pass:j.pass, file:j.file, chan:frameChanNew()});
+      // used up to 60 s before the server ends it (half its life when that is short)
+      const life = Number.isFinite(j?.life) && j.life > 0 ? j.life : 900, keep = Math.max(life / 2, life - 60);
+      if (j && typeof j.pass === 'string' && typeof j.file === 'string') framePasses.set(name, {pass:j.pass, file:j.file, chan:frameChanNew(), until:asked + keep * 1000});
       else framePassFailed.set(name, Date.now());
     })
     .catch(() => framePassFailed.set(name, Date.now()))
@@ -1305,7 +1321,12 @@ async function addonAct(control) {
     locks.add('addon-act'); control.disabled = true;
     const result = await act('addon.act', {addon:id, verb:control.dataset.verb, target:control.dataset.target});
     locks.delete('addon-act'); if (control.isConnected) control.disabled = false;
-    if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
+    if (!result.ok && /^No helper is set yet/.test(result.text || '')) {   // one click to the place that fixes it
+      const {d, actions} = dialog('No helper is set yet', 'dialog');
+      d.append(el('p', '', 'Choose a helper first, then start again.'));
+      actions.append(button('Open Helper settings', 'primary', async () => { await window.orch.close(d); location.hash = '#settings/helper'; }));
+      d.append(actions); window.orch.open(d);
+    } else if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
     else if (control.closest('.blk-split')) {   // list and panel: say what happened, in the add-on's own words
       const said = result.state?.act_answer?.addon === id ? result.state.act_answer.answer?.next : null;
       if (typeof said === 'string' && said) window.orch.toast(clean(said.split(/(?<=\.)\s/)[0]).slice(0, 160), 'ok');   // the first sentence: no path, no command

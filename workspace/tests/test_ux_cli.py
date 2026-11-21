@@ -129,8 +129,19 @@ def _exit(run, capsys, *argv):
 def test_plain_usage_errors(proj, run, capsys):
     code, err = _exit(run, capsys, "nonsense")
     assert code == 2 and '"nonsense" is not an orch command' in err and "invalid choice" not in err
+    code, err = _exit(run, capsys, "ticket", "status", "t_x", "nonsense")
+    assert code == 2 and '"nonsense" is not a ticket status' in err and "command" not in err
     code, err = _exit(run, capsys, "ticket", "new")
     assert code == 2 and 'orch ticket new "Fix the login"' in err and "positional" not in err
+
+
+def test_a_shipped_addon_that_is_off_says_how_to_turn_it_on(proj, run, capsys, monkeypatch):
+    from orch import addons
+
+    monkeypatch.setattr(addons, "discover", lambda: {})  # not installed here (the clean e2e home)
+    assert "usage" in addons.SHIPPED_ADDONS
+    code, out, err = run("usage")
+    assert code == 2 and "Turn it on: orch addon add usage" in err and "not an orch command" not in err
 
 
 def test_not_connected_and_unknown_recipient_are_plain(proj, run):

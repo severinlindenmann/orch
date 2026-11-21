@@ -30,6 +30,8 @@ branch, in line order:
   proof before it counts. One a person merges (a Merge card, or a CI workflow change GitHub holds for the
   code owner) is only checked: on green its head gets the mark and the person merges it with the Merge card.
 - a pull request from a fork is never put on a branch of the repository: it leaves the queue, a person merges it.
+- fixes go first (`--first`, or a red-run ticket of the release keeper, ORCH-1023), on a green base branch too:
+  a red release waits for its fix, so the fix must not wait behind the whole line.
 - a red base branch (its last finished push run failed): the repair lane. No groups, one at a time, its fixes
   first (`--first`, or a red-run ticket of the release keeper), each still checked in its group of one on top of
   the base. Whatever is red only in the checks the base branch fails is not blamed: not split, no try used, it
@@ -293,8 +295,9 @@ class Runner:
             return []
         size = settings.max_group(self.root)
         most = 1 if red else size  # the base branch itself is red: no groups, one at a time
-        if red:  # its fixes first
-            rows = sorted(rows, key=lambda r: not self.is_fix(r))
+        # fixes first (--first, or a red-run ticket of the release keeper): also while the base branch is green, so a
+        # fix for a red release does not wait behind the whole line while develop moves on (ORCH-1023)
+        rows = sorted(rows, key=lambda r: not self.is_fix(r))
         for r in rows:
             if r["repo"] != repo or len(batch) >= most or (batch and batch[0].get("lone")):
                 continue
