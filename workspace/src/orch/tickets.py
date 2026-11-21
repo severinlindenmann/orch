@@ -1868,7 +1868,7 @@ def stuck_why(ticket: dict, now: datetime | None = None) -> str | None:
 
 
 def quiet_label(since: str | None, now: datetime | None = None) -> str | None:
-    """The words "No news since 09:20" (local time; "Mon 09:20" on another day). None when not quiet.
+    """The words "Quiet since 09:20" (local time; "Mon 09:20" on another day). None when not quiet.
     Same words as the dashboard helper `quietWords`."""
     if not since:
         return None
@@ -1876,7 +1876,7 @@ def quiet_label(since: str | None, now: datetime | None = None) -> str | None:
         at = datetime.fromisoformat(since.replace("Z", "+00:00")).astimezone().replace(tzinfo=None)
     except ValueError:
         return None
-    return f"No news since {_when_words(at, now or datetime.now())}"
+    return f"Quiet since {_when_words(at, now or datetime.now())}"
 
 
 def clean_field(key: str, value):

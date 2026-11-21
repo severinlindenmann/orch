@@ -145,7 +145,7 @@ def test_manifest_flags(field):
     from importlib import resources
 
     m = tomllib.loads((resources.files("orch_focus") / "orch-addon.toml").read_text())
-    assert m[field] is True and m["page"]["path"] == "/" and m["dashboard"]["label"] == "Focus"
+    assert m[field] is True and m["page"]["path"] == "/" and m["dashboard"]["label"] == "Live"
     assert (resources.files("orch_focus") / "skills" / "orch-focus" / "SKILL.md").is_file()
     assert (resources.files("orch_focus") / "skills" / "orch-focus" / "AGENTS-block.md").is_file()
 

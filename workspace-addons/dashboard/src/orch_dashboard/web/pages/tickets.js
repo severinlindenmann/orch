@@ -139,7 +139,7 @@ function waitsLine(t) {
 }
 function boardParentLine(t) {
   const parent = boardParent(tickets(), t);
-  return parent ? h('p', {className:'meta board-parent'}, h('a', {href:href(parent.id)}, (parent.release ? 'Part of the release ' : parent.epic ? 'Part of the epic ' : 'Sub-ticket of ') + clean(parent.title))) : null;
+  return parent ? h('p', {className:'meta board-parent'}, h('a', {href:href(parent.id)}, (parent.release ? 'Part of the release ' : parent.epic ? 'Part of ' : 'Sub-ticket of ') + clean(parent.title))) : null;
 }
 // `section`: the group or column the row sits in; its own status chip is left out there. Done shows when it finished.
 function ticketAttentionChip(t, section) {
@@ -282,7 +282,7 @@ function treeBranch(rows, index, section) {
 }
 const changesLine = t => changesPending(t) ? h('p', {className:'meta changes-pending', 'data-key':'changes-' + t.id}, 'Changes to add') : null;
 // A real relative time: when it finished, or when it last changed.
-// G2: "No news since 09:20" on a Working ticket quiet for 6 h (the core computes quiet_since).
+// G2: "Quiet since 09:20" on a Working ticket quiet for 6 h (the core computes quiet_since).
 function quietLine(t) {
   const text = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';
   return text ? h('span', {className:'meta quiet', 'data-key':'quiet-' + t.id}, text) : null;
@@ -306,7 +306,7 @@ function boardCard(t, nested = false, column = '', here = null) {
     ticketAttentionChip(t, column), waitsLine(t), replacedLine(t),
     !nested ? boardParentLine(t) : null,
     parts.length ? h('div', {className:'board-parts'},
-      h('p', {className:'meta'}, (t.release ? 'Release · ' : t.epic ? 'Epic · ' : 'Sub-tickets · ') + parts.filter(c => c.status === 'done').length + ' of ' + parts.length + ' done'),
+      h('p', {className:'meta'}, (t.release ? 'Release · ' : t.epic ? '' : 'Sub-tickets · ') + parts.filter(c => c.status === 'done').length + ' of ' + parts.length + (t.epic ? ' parts done' : ' done')),
       parts.filter(part => !(here && here.has(part.id))).map(part => h('a', {className:'board-part', href:href(part.id)}, h('span', {className:'part-title'}, window.DashHelpers.keyTag(part, h), clean(part.title)), ticketAttentionChip(part)))) : null,
     changesLine(t),
     tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done, 'aria-label':'Tasks done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, window.DashHelpers.stepsText(done, tasks.length))) : null,

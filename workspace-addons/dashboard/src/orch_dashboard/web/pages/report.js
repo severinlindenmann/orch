@@ -12,7 +12,7 @@ const REPORT_FILES = 10, REPORT_FILE_BYTES = 8 * 1024 * 1024, REPORT_FILES_BYTES
 function reportRelay() {
   const relay = array(state.settings?.addons).find(a => a.name === 'relay');  // the Settings rows carry the connection
   if (!relay?.active || !relay.detail?.connected) return '';
-  return clean(String(relay.detail.address || '').replace(/^https?:\/\//, '').split('/')[0]) || 'your relay';
+  return clean(String(relay.detail.address || '').replace(/^https?:\/\//, '').split('/')[0]) || 'your phone link';
 }
 const reportBase64 = file => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -77,7 +77,7 @@ function reportPageSnapshot() {
   return ('<!doctype html>\n' + clone.outerHTML).slice(0, 1500000);
 }
 // The checks' own names are ids; the good news line reads them as plain words.
-const REPORT_NAMES = {clock_skew:'Clock', dead_lock_holder:'Locks', diag_dropped:'Debug log', disk_low:'Disk space', hook_lines_missing:'Helper reminders',
+const REPORT_NAMES = {clock_skew:'Clock', dead_lock_holder:'Locks', diag_dropped:'Problem log', disk_low:'Disk space', hook_lines_missing:'Helper reminders',
   no_heartbeat:'Helper heartbeat', run_gone_ticket_working:'Running helper', ticket_op_refused:'Ticket changes', waiting_for_permission:'Permissions'};
 const reportName = id => REPORT_NAMES[id] || capitalise(String(id || '').replace(/_/g, ' '));
 function reportCheckRow(c) {

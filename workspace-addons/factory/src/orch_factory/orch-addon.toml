@@ -13,10 +13,10 @@ runs_agents = true                         # it starts the manager run (orch run
 
 [page]
 path = "/"
-label = "Open Factory"
+label = "Open Projects"
 
 [dashboard]
-label = "Factory"
+label = "Projects"
 icon = "hammer"
 order = 15
 
@@ -27,7 +27,7 @@ format = "text"
 
 [[ticket_view]]
 field = "eta"
-label = "ETA"
+label = "Ready around"
 format = "time"
 
 [acts.idea]

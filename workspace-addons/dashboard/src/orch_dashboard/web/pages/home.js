@@ -116,7 +116,7 @@ function factoryProposalHref(t) {
 function factoryStartRow(row, key, t, p, buttons) {
   const when = typeof age === 'function' ? age(row.since) : '';
   return h('div', {className:'card-row home-need' + (row.id === enterRowId ? ' row-new' : ''), 'data-key':key, 'data-need-row':row.id, 'data-factory-start':''},
-    h('p', {className:'meta'}, 'Factory proposal', typeof t.key === 'string' ? [' · ', h('span', {className:'key'}, t.key)] : null),
+    h('p', {className:'meta'}, 'Proposed project', typeof t.key === 'string' ? [' · ', h('span', {className:'key'}, t.key)] : null),
     h('h2', {className:'question-title'}, 'Start “' + clean(p.title) + '”?'),
     h('p', {className:'muted'}, clean(p.goal)),
     h('p', {className:'meta'}, p.meta),
@@ -228,9 +228,9 @@ function helperRow(row, key) {
   const t = ticketOf(row.ticket), alive = state.runs?.[row.ticket]?.running === true, pull = row.pull || {};
   const acts = row.kind === 'helper:unmerged'
     ? [['Merge', 'primary sm', () => act('pull.merge', {ticket:row.ticket, url:pull.url, head:pull.head}), 'Merged'],
-      [alive ? 'Nudge' : 'Start helper', 'outline sm', () => nudgeHelper(row.ticket, MERGE_ASK), alive ? 'Message sent' : 'Helper started']]
+      [alive ? 'Remind' : 'Start helper', 'outline sm', () => nudgeHelper(row.ticket, MERGE_ASK), alive ? 'Message sent' : 'Helper started']]
     : row.kind === 'helper:permission' || row.kind === 'reviewer:unsure' ? []  // the answer is on the ticket page: the Open link
-    : [['Nudge', 'outline sm', () => nudgeHelper(row.ticket, NUDGE), 'Message sent'],
+    : [['Remind', 'outline sm', () => nudgeHelper(row.ticket, NUDGE), 'Message sent'],
       ['Start fresh', 'outline sm', () => restartFresh(row.ticket), 'Helper started fresh']];
   // ORCH-475: the starts are the one Start button (pages/start.js): Starting… until it runs, the caret opens the Start choice.
   // Start helper sends the merge ask first; Start fresh stops the idle helper first, then starts fresh on the usual tool.
@@ -279,7 +279,7 @@ function workingRow(t) {
     h('span', {className:'grow'}, h('strong', {}, window.DashHelpers.keyTag(t, h), clean(t.title)), task ? h('span', {className:'meta'}, clean(task.text || task.title)) : null));
 }
 // Helpers (ORCH-61, owner pick A on ORCH-64): one row per running helper with ORCH-n, step, minutes and the core's
-// state word (Working, Waits for you, Waiting, Idle, Stuck); Nudge on an idle or stuck row, Stop on one whose ticket
+// state word (Working, Waits for you, Waiting, Idle, Stuck); Remind on an idle or stuck row, Stop on one whose ticket
 // is finished. The same kit widget (UI.helperList) draws the live list of the other add-on page.
 function helpersCard(rows) {
   const key = 'helpers';
@@ -297,10 +297,10 @@ function helpersCard(rows) {
     state:r.state, word:r.word, meta:window.UI.helperMeta(r), dataKey:key + '-' + r.ticket.id,
     actions:snapshot || !['idle', 'stuck'].includes(r.state) ? [] : r.finished
       ? [action(r, 'Stop', () => act('run.stop', {ticket:r.ticket.id}), 'Helper stopped')]
-      : [action(r, 'Nudge', () => nudgeHelper(r.ticket.id, NUDGE), 'Message sent')],
+      : [action(r, 'Remind', () => nudgeHelper(r.ticket.id, NUDGE), 'Message sent')],
   })), {dataKey:'helpers'});
 }
-// G2: a Working ticket with no news for 6 h is one quiet line ("No news since 09:20: title"), never a need.
+// G2: a Working ticket with no news for 6 h is one quiet line ("Quiet since 09:20: title"), never a need.
 function quietRow(t) {
   return h('a', {className:'card-row working-row quiet-row', href:href(t.id), 'data-key':'quiet-' + t.id},
     h('span', {className:'grow'}, h('span', {className:'meta'}, window.DashHelpers.quietWords(t.quiet_since, now()) + ': '), h('strong', {}, window.DashHelpers.keyTag(t, h), clean(t.title))));
@@ -393,7 +393,7 @@ function reviewAllButton() {
   const cards = typeof reviewCount === 'function' ? reviewCount() : 0, n = cards ? (typeof needsYouTotal === 'function' && needsYouTotal()) || cards : 0;
   return n && !snapshot ? h('a', {className:'btn primary sm', href:'#review', 'data-key':'review-all'}, 'Review all', h('span', {className:'count'}, String(n))) : null;
 }
-// "Clear old": the questions that have waited more than a week go in one click. Same path as a one-click answer:
+// "Hide old": the questions that have waited more than a week go in one click. Same path as a one-click answer:
 // the rows leave at once, the toast offers Undo, and only when the Undo window ends is each one answered.
 const OLD_QUESTION_MS = 7 * 24 * 3600 * 1000, OLD_QUESTION_ANSWER = 'Dismissed: older than a week';
 function oldQuestions() {
@@ -404,7 +404,7 @@ function clearOldButton() {
   const old = snapshot ? [] : oldQuestions();
   if (!old.length) return null;
   const label = 'Dismiss the ' + old.length + (old.length === 1 ? ' question' : ' questions') + ' older than a week';
-  const b = h('button', {type:'button', className:'btn quiet sm', title:label, 'aria-label':label, 'data-key':'clear-old'}, 'Clear old');
+  const b = h('button', {type:'button', className:'btn quiet sm', title:label, 'aria-label':label, 'data-key':'clear-old'}, 'Hide old');
   b.onclick = () => {
     if (changeUnavailable()) return;
     const rows = oldQuestions();
@@ -434,7 +434,7 @@ function clearOldButton() {
 }
 function attentionSummary(groups, failed, results, changes, stuck = [], hidden = 0, questions = null) {
   // the parts before "also" add up to the number in the title (questions + results); what is listed but not counted
-  // (failed starts, notes without a question, changes to add) follows "also", so title, subtitle and rows agree (ORCH-184)
+  // (failed starts, notes without a question, changes to put live) follows "also", so title, subtitle and rows agree (ORCH-184)
   // questions = every open question (also a same-worded one on two tickets)
   // stuck = the rows of work that stopped (listed first, counted on Home, said with their mark: Stuck or Idle); hidden =
   // results shown as one of them instead
@@ -442,7 +442,7 @@ function attentionSummary(groups, failed, results, changes, stuck = [], hidden =
   const part = (n, one, many) => n ? n + ' ' + (n === 1 ? one : many) : null;
   const idle = stuck.filter(r => r.kind === 'helper:idle').length;
   const counted = [part(stuck.length - idle, 'stuck ticket', 'stuck tickets'), part(idle, 'idle helper', 'idle helpers'), part(questionsAsked, 'question', 'questions'), part(results - hidden, 'result to check', 'results to check')].filter(Boolean).join(' · ');
-  const extra = [part(other, 'thing to look at', 'things to look at'), part(changes, 'change to add', 'changes to add')].filter(Boolean).join(' · ');
+  const extra = [part(other, 'thing to look at', 'things to look at'), part(changes, 'change to put live', 'changes to put live')].filter(Boolean).join(' · ');
   return counted && extra ? counted + ' · also ' + extra : counted || extra;
 }
 function homeSection(key, title, body, count = '', more = null) {
@@ -668,7 +668,7 @@ function lineBanner() {
     line.limit ? h('a', {className:'btn outline sm', href:'#settings/helper', 'data-key':'start-line-limit'}, 'Allow more helpers') : null);
 }
 // Home: what needs the person first, as ONE list: the oldest question with its answers, then one row per further
-// question, result to check and change to add (one button each); the notes that need no answer are one quiet line.
+// question, result to check and change to put live (one button each); the notes that need no answer are one quiet line.
 function home() {
   // Work that stopped (stuck tickets, a pull request left open, an idle helper) is listed first and is part of THE number
   const {needs, notices, failed, groups:groupedNeeds, review, changes, logins, stuck, unsure, hiddenResults, questions, count:needCount} = needsToday(), all = tickets();
@@ -682,7 +682,7 @@ function home() {
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
   const banner = [loginBanner(logins.stopped), lineBanner(), backgroundBanner(), autoUpdateNote()], changedCard = whatChangedCard(changedList(all));
   // The number counts open questions, results to check and work that stopped; the list below also holds failed starts,
-  // changes to add and add-on rows, so it shows whenever it has anything, with or without a number.
+  // changes to put live and add-on rows, so it shows whenever it has anything, with or without a number.
   const anyNeeds = groupedNeeds.length + failed.length + review.length + changes.length + logins.soon.length > 0;
   // a login that stopped working needs the person too: it counts in the title (never "Nothing needs you" / "All clear")
   const shownCount = needCount;
@@ -707,7 +707,7 @@ function home() {
       anyNeeds ? attentionCard('needs-you', needCount ? 'Needs you · ' + needCount : 'Needs you', 'needs', list, '', [clearOldButton(), reviewAllButton()]) : null),
     h('aside', {className:'stack', 'data-key':'right'},
       helpers.length && window.UI?.helperList ? helpersCard(helpers) : snapshot && working.length ? card('working-now', 'Working now', String(working.length), working.slice(0, 5).map(workingRow)) : null,
-      quiet.length ? card('quiet-now', 'No news', String(quiet.length), quiet.slice(0, 5).map(quietRow)) : null,
+      quiet.length ? card('quiet-now', 'Quiet', String(quiet.length), quiet.slice(0, 5).map(quietRow)) : null,
       card('finished-today', 'Finished', '', finishedBody(finished, all)))),
     changedCard);
 }
