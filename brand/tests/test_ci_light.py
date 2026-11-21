@@ -140,6 +140,33 @@ def test_addon_test_texts_reads_every_known_addon():
     assert texts["sync"] and all(k.startswith("test_") or "/test_" in k for k in texts["sync"])
 
 
+def test_an_addon_docs_change_runs_the_docs_test_not_its_suite():
+    files = [
+        "workspace-addons/sync/src/orch_sync/docs.json",
+        "workspace-addons/sync/src/orch_sync/orch-addon.toml",
+        "workspace-addons/focus/src/orch_focus/docs.json",
+    ]
+    steps = light.plan(files, TEXTS, ADDONS | {"focus"}, docs=frozenset(files))
+    assert "add-on sync" not in names(steps) and "add-on focus" not in names(steps)
+    assert "Focus and Insights pages load in a browser" not in names(steps)
+    docs = next(s for s in steps if s["name"] == "add-on documentation files (orch's docs test)")
+    assert docs["cwd"] == "workspace" and docs["cmd"].endswith("tests/test_docs.py")
+    assert "generated files are current (shipped_addons.json)" in names(steps)
+    # the same files without the docs marking, or next to a code change, still run the suite
+    assert "add-on sync" in names(light.plan(files, TEXTS, ADDONS))
+    mixed = light.plan([*files, "workspace-addons/sync/src/orch_sync/x.py"], TEXTS, ADDONS, docs=frozenset(files))
+    assert "add-on sync" in names(mixed)
+
+
+def test_only_a_toml_change_of_its_docs_line_counts_as_docs():
+    assert light.toml_docs_only("--- a/x\n+++ b/x\n@@ -7,0 +8 @@\n+docs = \"docs.json\"   # its pages\n")
+    assert not light.toml_docs_only("@@ -7,0 +8,2 @@\n+docs = \"docs.json\"\n+background = true\n")
+    assert not light.toml_docs_only("@@ -1 +1 @@\n-version = \"0.1.0\"\n+version = \"0.2.0\"\n")
+    assert not light.toml_docs_only("")
+    assert light.DOCS_FILE.match("workspace-addons/sync/src/orch_sync/docs.json")
+    assert not light.DOCS_FILE.match("workspace-addons/sync/tests/docs.json")
+
+
 def test_rule_tests_over_the_whole_tree_run_on_workspace_and_addon_changes():
     for f in ("workspace/src/orch/store.py", "workspace-addons/sync/src/orch_sync/x.py", "workspace/README.md"):
         steps = light.plan([f], TEXTS, ADDONS)
