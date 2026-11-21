@@ -851,6 +851,27 @@ class World:
             if (status.get(key) or "open") not in DONE and not (until and str(until) < today)
         }
 
+    def winvm_results(self) -> list[tuple[str, str]]:
+        """[(sha, state)] of the status 'windows (winvm)' on the newest develop commits, newest first, only
+        the commits that have one (ORCH-1127: e2e/winvm/dispatch.py posts it). One GraphQL call."""
+        if self.sim is not None:
+            return [tuple(x) for x in self.sim.get("winvm", [])]
+        owner, name = self.cfg.repo.split("/", 1)
+        q = (
+            'query($o:String!,$n:String!){repository(owner:$o,name:$n){ref(qualifiedName:"refs/heads/develop")'
+            "{target{... on Commit{commits:history(first:60){nodes{oid status{context(name:"
+            + json.dumps(WINVM_CONTEXT)
+            + "){state}}}}}}}}}"
+        )
+        d = self._gh_json(["api", "graphql", "-f", f"query={q}", "-F", f"o={owner}", "-F", f"n={name}"])
+        nodes = ((((d or {}).get("data") or {}).get("repository") or {}).get("ref") or {}).get("target") or {}
+        out = []
+        for n in (nodes.get("commits") or {}).get("nodes") or []:  # alias: GitHub's commit list
+            c = (n.get("status") or {}).get("context") if n.get("status") else None
+            if c and c.get("state"):
+                out.append((n["oid"], str(c["state"]).lower()))
+        return out
+
     def runs(self, workflow: str, event: str) -> list[dict]:
         """Runs of one event only: merge bursts push the nightly run far down an unfiltered list."""
         if self.sim is not None:
@@ -1876,6 +1897,33 @@ def _revert_if_due(
     return [f"{name} red on develop: opened revert pull request {url} for #{pr}"]
 
 
+WINVM_CONTEXT = "windows (winvm)"
+
+
+def winvm_red(w: World, st: dict, role: str) -> list[str]:
+    """The Windows checks on our own Windows VM (ORCH-1127) report as a commit status, not a workflow run:
+    the newest develop commit with a FINISHED result that failed (after the dispatcher's one re-run) opens
+    the same red-develop ticket as a red run, once per commit."""
+    for sha, state in w.winvm_results():
+        if state == "pending":
+            continue
+        if state == "success" or st.get("winvm_red_sha") == sha:
+            return []
+        st["winvm_red_sha"] = sha
+        return red(
+            w,
+            st,
+            role,
+            f"windows (winvm) is red on develop ({sha[:8]})",
+            "windows (winvm) is red on develop",
+            f"The Windows checks on our own Windows VM failed on develop {sha[:8]} (status "
+            f"'{WINVM_CONTEXT}', after one re-run; logs on the Mac under ~/.orch-test/winvm-runs). Fix it on "
+            "develop with a normal pull request (orch pull-requests queue add --first).",
+            "The next windows (winvm) result on develop is green",
+        )
+    return []
+
+
 def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
     out: list[str] = []
     h = w.heads()
@@ -1883,6 +1931,10 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         out += develop_red(w, st, role)
     except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
         out.append(f"the develop check could not run: {e}")
+    try:
+        out += winvm_red(w, st, role)
+    except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
+        out.append(f"the Windows VM check could not run: {e}")
     try:  # every pass, so a review starts while a pull request is still open
         sec_lines, sec_holds = secreview.tend(w, st, role)
     except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:

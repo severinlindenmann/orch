@@ -1610,6 +1610,22 @@ def test_a_dry_run_leaves_a_done_role_ticket_alone(proj, on):
     assert tickets.load(proj, tickets.resolve(proj, on))["status"] == "done"
 
 
+# ORCH-1127: the Windows checks on our own Windows VM report as the commit status 'windows (winvm)'.
+def test_red_winvm_status_on_develop_opens_the_red_develop_ticket_once(tmp_path, capsys):
+    winvm = [["p" * 40, "pending"], [DEV, "failure"], ["o" * 40, "success"]]
+    out = go(tmp_path, capsys, winvm=winvm)
+    assert "ticket:windows (winvm) is red on develop (dddddddd)" in out["did"]
+    assert out["state"]["winvm_red_sha"] == DEV
+    again = go(tmp_path, capsys, state=out["state"], winvm=winvm)
+    assert not any(d.startswith("ticket:") for d in again["did"])
+
+
+def test_green_newest_winvm_status_opens_nothing(tmp_path, capsys):
+    out = go(tmp_path, capsys, winvm=[[DEV, "success"], ["o" * 40, "failure"]])
+    assert not any(d.startswith("ticket:windows") for d in out["did"])
+    assert "winvm_red_sha" not in out["state"]
+
+
 # ---- ORCH-1128: a red after-merge run: one more try, the fix ticket, the revert rule, the full set
 RED_JOBS = {
     "7": [job("workspace / test (macos-latest, 2/5)", "failure"), job("workspace / test (ubuntu-latest)")]
