@@ -159,7 +159,7 @@ def _handle_mobile_off(root: Path, m: dict) -> str:
         ok = _mobile_off_ok(root, m)
         if ok:
             try:
-                _people_gate(root, m, "mobile_off")
+                _people_check(root, m, "mobile_off")
             except people.PhoneRefused:
                 ok = False
         since = mobile_mode.settle(root).get("since")
@@ -2012,7 +2012,7 @@ def _ask_again(root: Path, asked: dict | None) -> None:
             send_question(root, t, q)
 
 
-def _people_gate(root: Path, msg: dict, action: str):
+def _people_check(root: Path, msg: dict, action: str):
     """The people check for a message from a phone (who_sent): (person, device), None when the list is off
     (nothing changes), or raises people.PhoneRefused (noted, never applied)."""
     frm = str(msg.get("from", ""))
@@ -2032,7 +2032,7 @@ def _apply_answer(root: Path, msg: dict, final: bool = False) -> tuple[str, str 
         asked, _ = _answer_asked(root, msg)
         action = _phone_action(root, asked)
         try:
-            who = _people_gate(root, msg, action)
+            who = _people_check(root, msg, action)
         except people.PhoneRefused as e:
             _ask_again(root, asked)
             return f"refused: {e}", None
@@ -2668,7 +2668,7 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
     """With the people list on, a text is let in only from a tied phone whose person may write; whether it
     may also start a helper is checked when that run would start (runs.human_waiting, people may-start)."""
     try:
-        who = _people_gate(root, msg, "text")
+        who = _people_check(root, msg, "text")
     except people.PhoneRefused as e:
         return f"refused: {e}", ""
     with people.acting(who):
