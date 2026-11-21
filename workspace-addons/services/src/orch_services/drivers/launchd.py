@@ -24,6 +24,16 @@ def label(spec: Spec) -> str:
     return spec.external or f"ch.orch.svc.{spec.workspace_id}.{spec.sid}"
 
 
+def disabled_labels(text: str) -> set[str]:
+    """Labels `launchctl print-disabled <domain>` lists as switched off. Newer macOS writes `"x" => disabled`,
+    older `"x" => true`. A switched-off label is not loaded at login, whatever RunAtLoad says (ORCH-1003)."""
+    out = set()
+    for m in re.finditer(r'^\s*"([^"\n]+)"\s*=>\s*(\S+)', text, re.MULTILINE):
+        if m.group(2) in ("disabled", "true"):
+            out.add(m.group(1))
+    return out
+
+
 def render(spec: Spec) -> bytes:
     """The plist. XML escapes every path and word; nothing is passed through a shell."""
     data = {
@@ -146,6 +156,10 @@ class Launchd(Driver):
             return Status(running=False, starting=launching)
         n = int(pid.group(1))
         return Status(running=True, pid=n, since=_started(n))
+
+    def switched_off(self, spec: Spec) -> bool:
+        cp = self._run("print-disabled", self.domain)
+        return cp.returncode == 0 and label(spec) in disabled_labels(cp.stdout)
 
     def runs(self, spec: Spec) -> int | None:
         """`runs = N` of `launchctl print` (KeepAlive starts it again after every stop)."""

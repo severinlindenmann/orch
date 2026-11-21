@@ -164,6 +164,25 @@ def test_accept_marks_done_for_the_owner_with_the_points(proj, run, new_ticket, 
     assert [r["ticket"] for r in rows] == [tid]
     assert lookreview.read_state(proj)["line"] == {}
     assert reviewer.run(proj)["second_look"] == []  # its one ticket has a verdict: the helper ticket is free
+    assert "Next: nothing else waits for a second look" in out  # issue 1920: no placeholder
+    code, out, _ = run("review", "accepted", "--since", "yesterday")
+    assert code == 0 and "Accepted for you since yesterday: 1 ticket" in out  # not "yesterday"
+    code, out, _ = run("review", "accepted")
+    assert code == 0 and "Accepted for you today: 1 ticket" in out
+
+
+def test_the_verdict_names_the_next_ticket_waiting_for_a_second_look(proj, run, new_ticket, facts, on):
+    """Issue 1920: the Next hint after a verdict was a placeholder; it names the next ticket in line."""
+    a, b = (_finished(proj, run, new_ticket, title=f"Look change {i}") for i in range(2))
+    for tid in (a, b):
+        lookreview.queue(proj, tid, "changes how a page looks")
+    lookreview.tend(proj)
+    assert lookreview.read_state(proj)["open"]["items"] == [a, b]
+    code, out, _ = run("review", "verdict", a, "leave", "a new colour")
+    key_b = tickets.load(proj, b)["key"]
+    assert code == 0 and f"Next: orch ticket show {key_b}  (the next one waiting for a second look)" in out
+    res = lookreview.verdict(proj, b, "leave", "x")
+    assert res["next"] is None
 
 
 def test_back_goes_to_the_helper_once_then_it_is_left(proj, run, new_ticket, facts, on):
