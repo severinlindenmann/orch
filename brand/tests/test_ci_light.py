@@ -177,7 +177,9 @@ def test_a_focus_or_insights_change_loads_their_pages_in_their_own_job():
     assert cond == "needs.changes.outputs.light == 'true' && needs.changes.outputs.pagesmoke == 'true'"
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "run: node e2e/focus_insights_smoke.cjs" in ci and f"playwright@{light.PLAYWRIGHT}" in ci
-    assert "page-smoke" in ci[ci.index("\n  gate:"):].split("needs:", 1)[1].split("]", 1)[0]  # the gate counts it
+    req = ROOT / "workspace-addons" / "pull-requests" / "src" / "orch_pull_requests" / "required_checks.py"
+    rollup = re.search(r'^ROLLUP = "([^"]+)"', req.read_text(encoding="utf-8"), re.M).group(1)  # R4.1: name not here
+    assert "page-smoke" in ci[ci.index(f"\n  {rollup}:"):].split("needs:", 1)[1].split("]", 1)[0]  # roll-up counts it
     # the path filter names the same places as PAGE_SMOKE, with the workflow's glob rules (* stops at /, ** does not)
     line = next(x for x in ci.splitlines() if x.strip().startswith("pagesmoke: ["))
     globs = [
