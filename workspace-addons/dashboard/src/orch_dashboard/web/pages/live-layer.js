@@ -404,6 +404,7 @@ function liveShelfWrap(body, sess, label, n) {
 // empty while they load again (the paint gives the keyboard back to a widget that had it).
 function liveShelfKeep(old, host) {
   old.forEach(el => {
+    if (!el.dataset.key) return;
     const fresh = host.querySelector(`[data-results-host][data-key="${el.dataset.key.replace(/["\\]/g, '')}"]`);
     if (fresh && fresh !== el) fresh.replaceWith(el);
   });
@@ -574,7 +575,8 @@ function liveLayerPaint() {
     const shared = liveBarShared(), keepBar = shared ? document.getElementById('live-bar') : null;
     const typing = document.activeElement?.closest?.('#live-dock [data-live-msg-text]')?.dataset.liveMsgText;  // the message box keeps the keyboard
     const renaming = !!document.activeElement?.closest?.('#live-dock [data-live-ren]');
-    const shelves = [...host.querySelectorAll('.live-shelf [data-results-host]')];
+    // only real shelves: the leaving picture of a pane (motion.js) has no data-key and is never put back
+    const shelves = [...host.querySelectorAll('.live-shelf [data-results-host][data-key]')];
     const shelfFocus = shelves.some(el => el.contains(document.activeElement)) ? document.activeElement : null;
     // motion (draft D): where each pane and the panel were, so they can move from there (pages/live-layer.js liveLayerMove)
     const was = liveLayerMotionBefore(host, where);
