@@ -75,7 +75,7 @@ def _secrets(root: Path, text: str) -> None:
         raise Refused("Could not check the text for secrets. Update orch and try again.") from None
     found = secretscan.find(text, root)
     if found:
-        raise Refused(secretscan.refusal(found))
+        raise Refused(secretscan.refusal(found, root))
 
 
 def _next(root: Path, base: str) -> str:

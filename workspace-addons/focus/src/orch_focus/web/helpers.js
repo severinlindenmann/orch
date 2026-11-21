@@ -89,7 +89,7 @@
     return v && v.run && v.run.running === true && typeof v.hold === 'string' ? v.hold.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
   }
   /* The helper's state while one runs: the core's word (ORCH-61), or from the view when an older core sends none. */
-  const HELPER_STATES = ['working', 'starting', 'you', 'waiting', 'idle', 'stuck'];
+  const HELPER_STATES = ['working', 'starting', 'you', 'waiting', 'idle', 'stuck', 'limit'];
   function helperOf(v) {
     const run = (v && v.run) || {};
     if (run.running !== true) return null;

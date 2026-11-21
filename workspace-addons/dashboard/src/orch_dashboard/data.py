@@ -677,11 +677,54 @@ def load_sessions(root: Path) -> list[dict]:
                 "title": SESSION_TITLES[kind],
                 "closed": bool(t.get("closed_at")),
             }
+            if kind == "empty":
+                found[kind]["model"] = _next_model(t)
     return [found[k] for k in SESSION_TITLES if k in found]
 
 
+def load_session_modes(root: Path, sessions: list[dict]) -> dict | None:
+    """ORCH-818: {kind: {current, label, choices: [{mode, label, allowed}], full_warned, running, running_label}}
+    for the Manager, Empty helper and Chat helper: the Start choice's permission row and the pane header's mode
+    in words (core sessionmode.py). None when this orch has no such modes or no tool (the row is left out)."""
+    try:
+        from orch import adapters, sessionmode
+        from orch import runs as core_runs
+    except ImportError:
+        return None
+    try:
+        name = adapters.chosen(root)
+    except Exception:  # noqa: BLE001 - no tool here: nothing to choose
+        return None
+    ids = {s["kind"]: s["id"] for s in sessions}
+    out = {}
+    for kind in sessionmode.KINDS:
+        try:
+            row = sessionmode.offer(root, kind, name)
+            run = None
+            if kind in ids and core_runs.running(root, ids[kind]):
+                v = (core_runs.read(root, ids[kind]) or {}).get("permissions")
+                run = v if v in sessionmode.RANK else None
+            row["running"] = run
+            row["running_label"] = sessionmode.label(name, run, root) if run else None
+        except Exception:  # noqa: BLE001, S112 - one kind that cannot be read shows no row
+            continue
+        out[kind] = row
+    return out
+
+
+def _next_model(t: dict) -> str | None:
+    """The model the Empty helper starts on (or runs on): the New menu shows and preselects it (ORCH-710)."""
+    try:
+        from orch import tickets as core
+
+        return core.next_model(t)
+    except Exception:  # noqa: BLE001 - an older core: the page shows no model
+        return None
+
+
 def shape_sessions(sessions: list[dict], runs: dict) -> list[dict]:
-    """[{id, kind, title, open}] for the bar and the wall: a helper is open while its session runs."""
+    """[{id, kind, title, open, model?}] for the bar and the wall: a helper is open while its session runs; the
+    Empty helper says the model it starts on."""
     out = []
     for s in sessions:
         on = (runs.get(s["id"]) or {}).get("running") is True
@@ -691,6 +734,7 @@ def shape_sessions(sessions: list[dict], runs: dict) -> list[dict]:
                 "kind": s["kind"],
                 "title": s["title"],
                 "open": not s["closed"] if s["kind"] == "terminal" else on,
+                **({"model": s["model"]} if s.get("model") else {}),
             }
         )
     return out
@@ -1083,7 +1127,6 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         copies_mode,
         copy_setup,
         diag_enabled,
-        focus_preview_on,
         focus_session_typing,
         live_max,
         release_merge_on,
@@ -1113,7 +1156,6 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "ws_name": workspace_name(root) or "",
         "ws_description": workspace_description(root) or "",
         "ws_tags": _ws_tags(root),  # the workspace's own tags (Settings > Workspace profile)
-        "focus_preview_on": focus_preview_on(root),  # Settings > Add-ons: the Preview switch
         "typing_on": focus_session_typing(root),  # Settings > Add-ons: "Let me type into the helper's screen"
         "diag_enabled": diag_enabled(root),  # the debug log switch (Settings > Report a problem)
         "diag": _diag_stats(root),
@@ -1136,7 +1178,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
                 "consent": _consent(r),
                 "detail": _addon_detail(root, r["name"]),
                 "removable": r["name"] not in _core_addons(),  # core says: part of orch, only turned off
-                # the add-on page of a live-session add-on carries the Typing and Preview switches
+                # the add-on page of a live-session add-on carries the Typing switch
                 **(
                     {"page": {"live_session": True}}
                     if isinstance(r.get("page"), dict) and r["page"].get("live_session") is True
@@ -1460,6 +1502,8 @@ def load_state(
         "runs": runs,
         # Sessions without a ticket (ORCH-364): empty helper, chat helper, plain terminal, Manager; live page only
         "sessions": shape_sessions(sessions, runs),
+        # ORCH-818: the permission row of the Start choice and the pane header's mode; live page only
+        "session_modes": load_session_modes(root, sessions) if with_settings else None,
         "groups": groups,  # group chats; snapshots carry none
         "mobile_mode": mobile_mode,  # the live page only, never a snapshot
         "look": look_,  # the live page only, never a snapshot

@@ -155,10 +155,15 @@ def _glance(pv: dict, where: str) -> None:
     diff = pv.get("diff", [])
     if not isinstance(diff, list) or len(diff) > 30:
         raise Refused(f"{where}.diff is a list of at most 30 lines.")
-    for d in diff:
-        if not isinstance(d, dict) or set(d) != {"op", "text"} or d["op"] not in ("+", "-"):
-            raise Refused(f"{where}.diff: each line is {{op: + or -, text}}.")
+    for d in diff:  # ORCH-429: file (a name shown above its lines) and risk (why the line is marked red)
+        ok = isinstance(d, dict) and {"op", "text"} <= set(d) <= {"op", "text", "file", "risk"}
+        if not ok or d["op"] not in ("+", "-"):
+            raise Refused(f"{where}.diff: each line is {{op: + or -, text, file?, risk?}}.")
         _text(d["text"], "diff.text", 200, required=True)
+        if "file" in d:
+            _text(d["file"], "diff.file", 120, required=True)
+        if "risk" in d:
+            _text(d["risk"], "diff.risk", 60, required=True)
     det = pv.get("details", [])
     if not isinstance(det, list) or len(det) > 50:
         raise Refused(f"{where}.details is a list of at most 50 texts.")
@@ -208,7 +213,12 @@ def _plain_doc(p: dict) -> dict:
         f"{b['label']}: {b['value']}{(p['chart'].get('unit') or '')}"
         for b in (p.get("chart") or {}).get("bars", [])
     ]
-    rows += [f"{d['op']} {d['text']}" for d in p.get("diff") or []]
+    last = None
+    for d in p.get("diff") or []:  # the phone: a file's name before its lines, a marked line says why
+        if d.get("file") and d["file"] != last:
+            rows.append(d["file"])
+        last = d.get("file") or last
+        rows.append(f"{d['op']} {d['text']}" + (f"  (look: {d['risk']})" if d.get("risk") else ""))
     paras += [p["foot"]] if p.get("foot") else []
     paras += list(p.get("details") or [])
     if paras:
@@ -772,6 +782,32 @@ def _card_of(q: dict) -> dict:
     }
 
 
+def _with_plan(card: dict, q: dict, ticket: dict, all_tickets: list[dict]) -> dict:
+    """The "Plan ready" question of a Show-plan-first ticket is a plain options card; show the plan on it
+    (goal, what is not included, the steps) so the person can decide from the card alone. Render only: the
+    question and its digest stay as they are."""
+    from orch import runs  # runs imports review lazily; no cycle at call time
+
+    if not str(q.get("text", "")).startswith(runs.PLAN_READY):
+        return card
+    plan = ticket.get("plan") if isinstance(ticket.get("plan"), dict) else {}
+    steps = [
+        str(k.get("title", "")).strip()
+        for k in sorted(
+            (k for k in all_tickets if k.get("parent") == ticket.get("id")),
+            key=lambda k: (str(k.get("created_at", "")), str(k.get("key", ""))),
+        )
+    ]
+    parts = [f"What this is about: {ticket.get('title', '')}"]
+    if plan.get("goal"):
+        parts.append(f"Goal: {plan['goal']}")
+    if plan.get("not_included"):
+        parts.append(f"Not included: {plan['not_included']}")
+    if steps:
+        parts.append("Steps: " + "; ".join(f"{i}. {x}" for i, x in enumerate(steps, 1) if x))
+    return {**card, "why": _clip(" ".join(parts), _LIMITS["why"])}
+
+
 def _option_ids(q: dict, card: dict) -> list[str]:
     pv = card.get("preview") or {}
     if card.get("kind") == "choice" and pv.get("type") == "options":
@@ -1042,6 +1078,17 @@ def _accept_then(ticket: dict, root: Path | None, uncovered: bool) -> str:
     return done + (_CHECK_SEND_BACK_UNCOVERED if uncovered else _CHECK_SEND_BACK)
 
 
+def _review_problem(ticket: dict, root: Path | None) -> str:
+    """ORCH-826: the problem a review ticket orch made itself found ("" when none or not one): the card says
+    it first, so the owner checks what is not good instead of reading what is."""
+    if root is None:
+        return ""
+    from orch import reviewer  # here: it reads run files, not needed for every card
+
+    found = reviewer.review_result(root, ticket)
+    return str(found["line"]) if found and not found["ok"] else ""
+
+
 def check_card(ticket: dict, root: Path | None = None) -> dict:
     """A Check result as a card, glance first (ORCH-329): one headline sentence, a progress bar, chips and
     the short step titles. Everything long (the summary, Done when, the parent, each step's evidence) sits
@@ -1067,10 +1114,11 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
             "What to do: send it back and say which part is missing,"
             " or approve it if that part does not matter."
         )
+    problem = _review_problem(ticket, root)
     card = {
         "kind": "check",
         "title": ticket.get("title", ticket["id"]),
-        "why": "The helper says this is ready for your check.",
+        "why": f"Check this: {problem}" if problem else "The helper says this is ready for your check.",
         "then": _accept_then(ticket, root, bool(uncovered)),
         "ok_label": "Looks good",
     }
@@ -1088,11 +1136,15 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
         card["files"] = files
     if steps or paras:
         pv: dict = {"type": "doc"}
-        if summary_text:
+        if problem:  # ORCH-826: the problem first, not the good news
+            pv["headline"] = _short(f"Problem found: {problem}", 200)
+        elif summary_text:
             pv["headline"] = _short(summary_text, 200)
         if total:
             pv["progress"] = {"done": done, "total": total}
         chips = _checks_chips(ticket)
+        if problem:
+            chips.insert(0, {"text": "Problem found", "tone": "bad"})
         if uncovered:
             chips.append({"text": "Done when not fully covered", "tone": "warn"})
         if chips:
@@ -1442,7 +1494,8 @@ def stack(root: Path) -> list[dict]:
 
     out = []
     order = {}  # ticket id -> {task id: position in its checklist}
-    for t in history.shown_json(root, tickets.list_all(root)):
+    all_tickets = history.shown_json(root, tickets.list_all(root))
+    for t in all_tickets:
         if t.get("general") is True or not isinstance(t.get("id"), str):
             continue
         base = {"ticket": t["id"], "ticket_key": t.get("key"), "ticket_title": t.get("title", t["id"])}
@@ -1457,6 +1510,8 @@ def stack(root: Path) -> list[dict]:
                 if q.get("answer") is not None:
                     continue  # every open question is a card, an add-on's own too (Factory's Start?, ORCH-63)
                 card = q["card"] if isinstance(q.get("card"), dict) else _card_of(q)
+                if "card" not in q:
+                    card = _with_plan(card, q, t, all_tickets)
                 task = tasks.get(q.get("check"))
                 about = _clip(task[1], ABOUT_MAX) if task and isinstance(task[1], str) else ""
                 out.append(

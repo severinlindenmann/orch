@@ -326,6 +326,26 @@ def test_hidden_words_cannot_slip_past_the_scan(cli, ws, stored_keys):
     assert "gamma-part-55" not in lines and "delta-part-73" not in lines
 
 
+def test_add_says_why_even_when_a_word_also_looks_like_a_secret(cli, monkeypatch):
+    # ORCH-853: a moved workspace (keys bound to the old folder) plus one flagged word said "holds a secret"
+    from orch import keystore, phone_results
+
+    monkeypatch.setattr(phone_results, "value_hider", lambda root: None)
+
+    def refused(root):
+        raise keystore.Refused("Refused: this folder's saved keys still belong to /old/ws (moved).")
+
+    monkeypatch.setattr(keystore, "all_needles", refused)
+    code, out = jrun(
+        cli, "add", "Web", "--id", "web", "--", "python3", "app.py", "password: hunter2-long-value"
+    )
+    assert code == 2
+    assert out["error"] == (
+        "Could not compare the command with this workspace's stored keys, because "
+        "this folder's saved keys still belong to /old/ws (moved)."
+    )
+
+
 def test_add_says_why_when_the_stored_keys_cannot_be_read(cli, monkeypatch):
     # ORCH-371 bug 10: a harmless command was refused as "holds a secret" when the key store could not be read
     from orch import keystore, phone_results
@@ -339,5 +359,30 @@ def test_add_says_why_when_the_stored_keys_cannot_be_read(cli, monkeypatch):
     code, out = jrun(cli, "add", "Web", "--id", "web", "--", "python3", "-m", "http.server")
     assert code == 2
     assert out["error"] == (
-        "Could not compare the command with this workspace's stored keys: This is a test install outside the test folder."
+        "Could not compare the command with this workspace's stored keys, because This is a test install outside the test folder."
     )
+
+
+def test_workspace_on_external_disk_keeps_log_and_cwd_in_home(cli, ws, fake, monkeypatch, tmp_path):
+    """macOS: launchd cannot open a log or a working folder under /Volumes (exit 78 / getcwd hang)."""
+    from orch_services import store
+
+    monkeypatch.setattr(store, "on_external_volume", lambda p: True)
+    monkeypatch.setattr(store.Path, "home", classmethod(lambda cls: tmp_path))
+    code, out = _add(cli)
+    assert code == 0, out
+    spec = fake.entries["web"]["spec"]
+    assert spec.cwd == tmp_path
+    assert spec.log.parent.parent == tmp_path / "Library" / "Logs" / "orch" and spec.log.parent.is_dir()
+    assert "Local Network" in out["next"]
+    assert not str(spec.log).startswith(str(ws))
+
+
+def test_on_external_volume_only_for_volumes_paths_on_macos(monkeypatch):
+    from orch_services import store
+
+    monkeypatch.setattr(store.sys, "platform", "darwin")
+    assert store.on_external_volume(__import__("pathlib").Path("/Volumes/NoSuchDisk/ws")) is True
+    assert store.on_external_volume(__import__("pathlib").Path("/tmp")) is False
+    monkeypatch.setattr(store.sys, "platform", "linux")
+    assert store.on_external_volume(__import__("pathlib").Path("/Volumes/NoSuchDisk/ws")) is False

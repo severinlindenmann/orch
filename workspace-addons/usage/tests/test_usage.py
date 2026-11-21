@@ -189,6 +189,9 @@ def test_credit_account_by_hand_reads_its_spend(cli, fake_switcher, ws, tmp_path
     p.write_text(json.dumps(data))
     code, d = jrun(cli, "limit", "API key 1", "$200")
     assert code == 0 and d["account"]["rule"]["limits"] == [{"value": 200, "unit": "$", "period": "month"}]
+    code, d = jrun(cli, "limit", "API key 1", "50%")
+    assert code == 2 and "counts dollars" in d["error"] and "$25" in d["error"], d
+    assert d.get("account") is None
     code, d = jrun(cli, "list")
     api = next(x for x in d["accounts"] if x["label"] == "API key 1")
     assert api["use"]["month"]["spent"] == 3.5 and api["use"]["month"]["estimated"] is True
@@ -215,6 +218,28 @@ def test_history_command_and_unreadable_file(cli, fake_switcher, ws):
     code, d = jrun(cli, "limit", "first", "50", "--period", "week")
     assert code == 2 and "could not be read" in d["error"]
     assert (ws / ".orch/addons/usage/accounts.json").read_text() == "{broken"  # never rewritten
+
+
+def test_a_row_that_cannot_be_read_is_kept_through_a_change(cli, fake_switcher, ws):
+    """ORCH-926: a hand-edited row that cannot be read stays in the file untouched when another account changes."""
+    jrun(cli, "list")
+    p = ws / ".orch/addons/usage/accounts.json"
+    doc = json.loads(p.read_text())
+    bad = {**doc["accounts"][0], "id": "a_bad1", "label": "by hand"}
+    worse = "not even an account"
+    doc["accounts"] += [bad, worse]
+    p.write_text(json.dumps(doc))
+    assert store.load(ws)["unreadable"] == 2
+    code, out = jrun(cli, "limit", "second", "90%")
+    assert code == 0, out
+    rows = json.loads(p.read_text())["accounts"]
+    assert bad in rows and worse in rows  # kept as they were, byte for byte in content
+    assert [a["label"] for a in store.load(ws)["accounts"]] == ["first", "second", "TEAMCO"]
+    assert store.load(ws)["unreadable"] == 2
+    code, out = jrun(cli, "order", "TEAMCO", "1")
+    assert code == 0, out
+    rows = json.loads(p.read_text())["accounts"]
+    assert rows[-2:] == [bad, worse]
 
 
 def test_actor_comes_from_the_run(cli, fake_switcher, ws, monkeypatch):
@@ -280,7 +305,15 @@ def test_end_shows_local_time_with_zone_and_the_history_line_has_the_date(cli, f
     jrun(cli, "limit", "TEAMCO", "50", "--period", "week")
     jrun(cli, "end", "TEAMCO", "2099-01-01T10:00")
     ends = store.find(store.load(ws)["accounts"], "TEAMCO")["rule"]["ends"]
-    local = store.to_time(ends).astimezone().strftime("%Y-%m-%d %H:%M %Z").strip()
+    t = store.to_time(ends).astimezone()
+    local = f"{t.day} {t:%b %Y, %H:%M %Z}".strip()  # the kit's date format with the zone (ORCH-599)
     assert store.history(ws)[0]["what"] == f"rule ends {local}"
     _, text, _ = cli("history")
     assert f"rule ends {local}" in text
+
+
+def test_a_switcher_that_fails_is_not_called_missing(cli, fake_switcher, ws):
+    fake_switcher.answer("not json")  # installed, but its answer cannot be read
+    code, d = jrun(cli, "list")
+    assert code == 0 and d["switcher"] is True
+    assert d["warnings"] and "not installed" not in d["warnings"][0]

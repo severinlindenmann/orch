@@ -282,27 +282,31 @@ def test_reserved_config(proj, section, key, default, valid):
     assert getter(proj) == default
 
 
-def test_focus_preview_is_off_by_default_and_switches_both_ways(proj, run):
-    """The Preview switch for the new Focus: off by default (today's Focus), on and off with one setting."""
-    assert config.focus_preview_on(proj) is False
-    assert config.focus_preview_on(None) is False
-    assert run("config", "get", "focus.preview")[1].strip() == "False"
-    code, out, _ = run("config", "set", "focus.preview", "on")
-    assert code == 0 and "the new Focus (Preview)" in out
-    assert config.focus_preview_on(proj) is True
-    assert json.loads(run("config", "get", "focus.preview", "--json")[1]) == {"focus.preview": True}
-    code, out, _ = run("config", "set", "focus.preview", "off")
-    assert code == 0 and "today's Focus" in out
-    assert config.focus_preview_on(proj) is False
-    assert run("config", "set", "focus.preview", "maybe")[0] == 2
-
-
-def test_focus_preview_unreadable_or_wrong_value_counts_as_off(proj):
+def test_the_retired_focus_preview_key_reads_without_error_and_goes_on_the_next_save(proj, run):
+    """ORCH-816: the new Focus is the only Focus; the old switch is no setting any more. A config file that
+    still has it is read as before, `orch config` does not know the key, and the next save drops it (other
+    keys stay)."""
     (proj / ".orch").mkdir(exist_ok=True)
-    (proj / ".orch" / "config.toml").write_text('[focus]\npreview = "yes"\n')
-    assert config.focus_preview_on(proj) is False
-    (proj / ".orch" / "config.toml").write_text("[focus\npreview = true\n")
-    assert config.focus_preview_on(proj) is False
+    cfg = proj / ".orch" / "config.toml"
+    cfg.write_text("[focus]\npreview = true\nsession_typing = false\n\n[workflow]\nreviewer = true\n")
+    assert config.focus_session_typing(proj) is False and config.reviewer_on(proj) is True
+    for argv in (("get", "focus.preview"), ("set", "focus.preview", "on")):
+        with pytest.raises(SystemExit) as e:
+            run("config", *argv)
+        assert e.value.code == 2
+    assert "preview" in cfg.read_text()  # a refused set writes nothing
+    assert run("config", "set", "focus.session_typing", "on")[0] == 0
+    text = cfg.read_text()
+    assert "preview" not in text and "session_typing = true" in text and "reviewer = true" in text
+    config.set_key(proj, "workflow", "reviewer", False)  # a save in another table drops it too
+    cfg.write_text("[focus]\npreview = false\n[workflow]\nreviewer = true\n")
+    config.set_key(proj, "workflow", "reviewer", False)
+    assert "preview" not in cfg.read_text() and "[focus]" in cfg.read_text()
+    tricky = '[focus]\npreview = [\n  true,\n]\nnote = """\npreview = 1\n"""\n[workflow]\nreviewer = true\n'
+    # a value over several lines, or the words inside a text: left alone, the file stays valid
+    cfg.write_text(tricky)
+    config.set_key(proj, "workflow", "reviewer", False)
+    assert cfg.read_text() == tricky.replace("reviewer = true", "reviewer = false")
 
 
 def test_focus_session_typing_is_a_plain_setting(proj, run):
