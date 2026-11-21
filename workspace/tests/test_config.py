@@ -247,6 +247,7 @@ def test_agents_test_not_installed_and_unknown(proj, run, capsys, fake_path):
 RESERVED = [
     ("focus", "live_session", True, False),
     ("focus", "session_typing", False, True),
+    ("focus", "terminal_typing", False, True),
     ("record", "keep_days", 90, 30),  # an allowed value (others are snapped: test_insights_settings.py)
     ("record", "max_mb", 2048, 512),
     ("insights", "share_counts", True, False),
@@ -320,3 +321,16 @@ def test_focus_session_typing_is_a_plain_setting(proj, run):
     assert run("config", "set", "focus.session_typing", "off")[0] == 0
     assert config.focus_session_typing(proj) is False
     assert run("config", "set", "focus.session_typing", "maybe")[0] == 2
+
+
+def test_the_plain_terminal_has_its_own_typing_switch_off_by_default(proj, run):
+    """Owner, ORCH-261: the plain terminal is a shell; typing into it has its own switch."""
+    assert run("config", "get", "focus.terminal_typing")[1].strip() == "False"
+    assert run("config", "set", "focus.session_typing", "on")[0] == 0
+    assert config.focus_terminal_typing(proj) is False  # helper typing on leaves the shell closed
+    code, out, _ = run("config", "set", "focus.terminal_typing", "on")
+    assert code == 0 and "typing into the plain terminal is on" in out
+    assert config.focus_terminal_typing(proj) is True
+    assert run("config", "set", "focus.terminal_typing", "off")[0] == 0
+    assert config.focus_terminal_typing(proj) is False
+    assert run("config", "set", "focus.terminal_typing", "maybe")[0] == 2

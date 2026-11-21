@@ -55,7 +55,7 @@ PAGE_PATH_RE = re.compile(r"/[A-Za-z0-9_./-]{0,200}")
 TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
     "ticket_view recommended gitignore runs_agents requires needs page "
-    "ticket_links ticket_fields acts ticket_ext_inert".split()
+    "ticket_links ticket_fields acts ticket_ext_inert selfcheck".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
 # Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
@@ -203,14 +203,107 @@ _SWITCH_TO: str | None = (
 )
 
 
+_SWITCH_REPO: str | None = None  # set with _SWITCH_TO when going back to a release: stay on this source
+
+
 def switch_to(build: str) -> None:
-    """`orch update --to release|development`: this update installs from the official source at that build's
-    branch (never from ORCH_REPO / ORCH_REF or a folder). uv records the new source, so every later update and
-    add-on stays on it."""
-    global _SWITCH_TO
-    if build not in BUILDS:
-        raise Refused("Choose release or development.")
-    _SWITCH_TO = BUILDS[build]
+    """`orch update --to release|development|<N>`. A build: this update installs from the official
+    source at that build's branch (never from ORCH_REPO / ORCH_REF or a folder). uv records the new source, so
+    every later update and add-on stays on it. A release number: see go_back_to."""
+    global _SWITCH_TO, _SWITCH_REPO
+    if build in BUILDS:
+        _SWITCH_TO, _SWITCH_REPO = BUILDS[build], None
+        _unpin()
+        return
+    from orch import updateinfo
+
+    v = updateinfo.as_version(build)
+    if v is not None and isinstance(build, str) and not build.startswith("0"):
+        go_back_to(v)
+        return
+    raise Refused("Choose release, development or a release number (for example: orch update --to 32).")
+
+
+def _pin_path() -> Path:
+    return home() / "pinned.json"
+
+
+def _unpin() -> None:
+    try:
+        _pin_path().unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def pinned() -> dict | None:
+    """{"release", "sha", "left", "repo"} while this install is held at a release it went back to (the
+    install source's ref is that release's commit), else None. A pin whose commit is no longer the source's
+    ref is stale and does not count."""
+    try:
+        d = json.loads(_pin_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict):
+        return None
+    from orch import updateinfo
+
+    sha, rel, left = _sha_or_none(d.get("sha")), updateinfo.as_version(d.get("release")), d.get("left")
+    if not sha or rel is None or not isinstance(d.get("repo"), str):
+        return None
+    try:
+        if ref() != sha:
+            return None
+    except Refused:
+        return None
+    left = updateinfo.as_version(left)
+    return {"release": rel, "sha": sha, "left": left if left is not None else rel, "repo": d["repo"]}
+
+
+def go_back_to(number: int | str) -> None:
+    """`orch update --to <N>`: this update installs release N of the current install source (the commit of
+    its release merge) and holds it there: later updates stay on N until a release newer than the one left
+    is out (leave_pin_if_newer). A folder source has no releases to go back to."""
+    global _SWITCH_TO, _SWITCH_REPO
+    from orch import updateinfo
+
+    r = repo()
+    if _is_local(r):
+        raise Refused("This orch is installed from a folder: it has no releases to go back to.")
+    line = updateinfo.release_line()
+    if line is None:
+        raise Refused("Could not read the list of releases (no network?). Try again in a moment.")
+    sha = dict(line).get(updateinfo.as_version(number))
+    if not sha:
+        have = ", ".join(str(n) for n, _ in line[:5]) or "none"
+        raise Refused(f"Release {number} was not found. The newest releases are: {have}.")
+    current = updateinfo.installed()["release"]
+    held = pinned()
+    left = max((x for x in (current, held and held["left"], number) if x), key=updateinfo.vkey)
+    _SWITCH_TO, _SWITCH_REPO = sha, r
+    _write_atomic(_pin_path(), json.dumps({"release": number, "sha": sha, "left": left, "repo": r}))
+
+
+def leave_pin_if_newer() -> tuple[str, str | None]:
+    """Before a plain update: ('free', None) when nothing is held; ('leave', text) when a release newer than
+    the one this install went back from is out (this update takes the release branch again); ('stay', text)
+    when not (or unknown): the update then does nothing."""
+    global _SWITCH_TO, _SWITCH_REPO
+    from orch import updateinfo
+
+    held = pinned()
+    if not held:
+        return "free", None
+    line = updateinfo.release_line()
+    newest = line[0][0] if line else None
+    if newest is not None and updateinfo.vkey(newest) > updateinfo.vkey(held["left"]):
+        _SWITCH_TO, _SWITCH_REPO = RELEASE_REF, held["repo"]
+        _unpin()
+        return "leave", f"Release {newest} is out: leaving release {held['release']}."
+    why = "no newer release is out yet" if line is not None else "could not check for a newer release"
+    return "stay", (
+        f"Staying on orch {held['release']}: you went back from {held['left']} and {why}. "
+        f"Take the newest release again with: orch update --to release"
+    )
 
 
 def build() -> str:
@@ -227,12 +320,14 @@ def build() -> str:
             return "development"
     if _is_local(r) or r.removesuffix(".git").rstrip("/") != DEFAULT_REPO:
         return "development"
+    if f != RELEASE_REF and pinned():
+        return "release"  # held at an earlier release of the official source
     return "release" if f == RELEASE_REF else "development"
 
 
 def repo() -> str:
     if _SWITCH_TO is not None:
-        return DEFAULT_REPO
+        return _SWITCH_REPO or DEFAULT_REPO
     return _src_env("ORCH_REPO") or _install_origin().get("repo") or DEFAULT_REPO
 
 
@@ -1213,6 +1308,7 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
         if isinstance(order, bool) or not isinstance(order, int) or not 0 <= order <= 99:
             raise _bad("dashboard order is 0 to 99")
         d["order"] = order
+    _check_selfcheck(m)
     tv = m.get("ticket_view", [])
     if not isinstance(tv, list) or len(tv) > 8:
         raise _bad("ticket_view has at most 8 rows")
@@ -1748,6 +1844,30 @@ def _running_here(root: Path) -> set[str]:
     return out
 
 
+def _check_selfcheck(m: dict) -> None:
+    """[[selfcheck]] of a manifest: what orch runs after an update to see the add-on still works."""
+    sc = m.get("selfcheck", [])
+    if not isinstance(sc, list) or len(sc) > 3:
+        raise _bad("selfcheck has at most 3 entries")
+    for row in sc:
+        args = row.get("args") if isinstance(row, dict) else None
+        if (
+            not isinstance(row, dict)
+            or set(row) - {"label", "fails", "args"}
+            or not _text_ok(row.get("label"), 40)
+            or not _text_ok(row.get("fails"), 80)
+            or not isinstance(args, list)
+            or not 1 <= len(args) <= 6
+            or not all(
+                isinstance(a, str)
+                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,31}|--[a-z][a-z0-9-]{0,30}", a)
+                for a in args
+            )
+        ):
+            raise _bad("a [[selfcheck]] entry needs label, fails and args (the command after orch <name>)")
+    m["selfcheck"] = sc
+
+
 def _row(name: str, m: dict, source: str, installed: bool, active: bool, running: bool) -> dict:
     return {
         "name": name,
@@ -1761,6 +1881,7 @@ def _row(name: str, m: dict, source: str, installed: bool, active: bool, running
         "background": m["background"],
         "recommended": m["recommended"],
         "page": m.get("page"),
+        "selfcheck": [dict(x) for x in m.get("selfcheck") or []],
         "running": running,
         "ticket_links": [dict(x) for x in m["ticket_links"]],
         "ticket_fields": m["ticket_fields_section"] if "ticket_fields_section" in m else fields.section(m),
@@ -2333,11 +2454,41 @@ def _github_api() -> str | None:
     return f"https://api.github.com/repos/{match[1]}/{match[2]}" if match else None
 
 
+def file_repo(r: str) -> Path | None:
+    """A git source on this computer given as file:///path (a throwaway source for tests and trials): its
+    folder, else None. Unlike a folder install, uv installs it at a ref, so it has commits and releases."""
+    if not r.startswith("file://"):
+        return None
+    from urllib.parse import urlparse
+    from urllib.request import url2pathname
+
+    folder = Path(url2pathname(urlparse(r).path))
+    if not folder.is_absolute():
+        return None
+    for f in (folder, folder.with_name(folder.name + ".git")):  # uv records a bare repo's URL without .git
+        if f.is_dir():
+            return f
+    return None
+
+
 def _source_sha() -> str | None:
     from urllib.parse import quote
     from urllib.request import Request, urlopen
 
     try:
+        fr = file_repo(repo())
+        if fr is not None:
+            from orch import safegit
+
+            rc, out, _ = safegit.run(
+                ["rev-parse", "--verify", "-q", f"{ref()}^{{commit}}"],
+                fr,
+                5,
+                read_only=True,
+                filters=False,
+                root=fr,
+            )
+            return _sha_or_none(out) if rc == 0 else None
         if _is_local(repo()):
             from orch import safegit
 
@@ -2407,13 +2558,15 @@ def _stored_sha() -> str | None:
     return _sha_or_none(d.get("sha")) if isinstance(d, dict) else None
 
 
-def _save_installed(sha: str | None, release: int | None = None, pending: dict | None = None) -> None:
-    """The commit this install came from and, when known, its release number (what a person reads).
+def _save_installed(sha: str | None, release: int | str | None = None, pending: dict | None = None) -> None:
+    """The commit this install came from and, when known, its release (what a person reads: 33 or "33.1").
     pending: no commit was known at install time; the ref and time it was installed from, so the commit and
     release are looked up later (updateinfo.resolve_pending)."""
+    from orch import updateinfo
+
     data: dict = {"sha": _sha_or_none(sha)}
-    if isinstance(release, int) and not isinstance(release, bool) and release > 0:
-        data["release"] = release
+    if updateinfo.as_version(release) is not None:
+        data["release"] = updateinfo.as_version(release)
     if data["sha"] is None and pending:
         data["pending"] = pending
     _write_atomic(home() / "installed.json", json.dumps(data))
@@ -2714,8 +2867,9 @@ def _restart_locked(
     for n in sorted(names - stopped):
         why = services._printable(stops.get(n, {}).get("error") or "did not stop")
         lines.append(f"Restart {label(n)} to use the new version (stop failed: {why})")
-    # The environment: this terminal's, plus HOME from the system and ORCH_HOME (see launchenv). Nothing the
-    # service recorded is replayed (that file is writable by any process of this user); it is only compared.
+    # The environment: this terminal's, plus ORCH_HOME and (not in a test install) HOME from the system (see
+    # launchenv). Nothing the service recorded is replayed (that file is writable by any process of this
+    # user); it is only compared.
     from orch import launchenv
 
     over, env_notes = launchenv.overrides(home())
@@ -2727,7 +2881,8 @@ def _restart_locked(
         diff = launchenv.differs((recorded or {}).get(n), used)
         if diff:
             lines.append(
-                f"{label(n)} started with a different {'/'.join(diff)}; restarted with this terminal's "
+                f"{label(n)} started with a different {'/'.join(diff)}; restarted with "
+                f"{launchenv.home_said(over, used)} and this terminal's PATH "
                 f"(run orch stop, then orch start, in {root} if that is wrong)"
             )
     errors: dict[str, str] = {}
@@ -2856,6 +3011,13 @@ def update(
             report.extend(lines)
         if notes is not None:
             notes.extend(restart_lines)  # for --json: restarted, skipped and failed services
+        from orch import selfcheck
+
+        check_lines = selfcheck.after_update(root, before.get("release"), new_release)
+        if check_lines and not json_output:
+            _say("\n".join(check_lines))
+        if notes is not None:
+            notes.extend(check_lines)
         reg = registry()
         for entry in reg:
             if entry["name"] in found:

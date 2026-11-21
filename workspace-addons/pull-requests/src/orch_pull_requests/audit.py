@@ -8,7 +8,11 @@
   request in line and no merge, with the reasons the entries of that stretch gave;
 - check runs per merge (ORCH-545, from GitHub): rounds of checks (one per commit and event, all workflows
   together) on pull requests, on queue groups, on pushes and other, divided by the merges;
-- minutes from joining the queue to merged, for the pull requests the queue merged (from its own file).
+- minutes from joining the queue to merged, for the pull requests the queue merged (from its own file);
+- the busiest hour (ORCH-1129, from GitHub): the most pull requests the queue merged (in a group or alone) within
+  any 60 minutes, with their links; goal HOUR_GOAL;
+- group start to merged (ORCH-1129, from GitHub): minutes from opening a group pull request to its merge, the
+  middle over the last LAST_GROUPS merged groups; goal under GROUP_GOAL minutes.
 
 The night of 17/18 Nov 2026 (ORCH-446): 13 groups for 64 merges, 5 stand-stills, 3 of them avoidable.
 """
@@ -17,12 +21,16 @@ from __future__ import annotations
 
 import itertools
 import re
+import statistics
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from . import settings, store
 
 STILL_MINUTES = 30
+HOUR_GOAL = 20  # merges within one hour (ORCH-1120)
+GROUP_GOAL = 6  # minutes from group start to merged, at the middle
+LAST_GROUPS = 20
 QUEUE_BRANCH = "orch-queue/"
 _NUM = re.compile(r"#([0-9]{1,9})")
 
@@ -124,6 +132,39 @@ def runs(rows: list[dict] | None) -> dict | None:
     return got
 
 
+def busiest_hour(merged: list[dict]) -> dict:
+    """The most pull requests merged within any 60 minutes: {count, start, end, prs} (prs sorted by mergedAt)."""
+    rows = sorted(((t, r) for r in merged if (t := _iso(r.get("mergedAt")))), key=lambda x: x[0])
+    best, left = (0, 0), 0
+    for right, (t, _) in enumerate(rows):
+        while t - rows[left][0] > timedelta(hours=1):
+            left += 1
+        if right - left + 1 > best[1] - best[0]:
+            best = (left, right + 1)
+    inside = rows[best[0] : best[1]]
+    return {
+        "count": len(inside),
+        "start": inside[0][0] if inside else None,
+        "end": inside[-1][0] if inside else None,
+        "prs": [r for _, r in inside],
+    }
+
+
+def group_minutes(groups: list[dict], last: int = LAST_GROUPS) -> dict:
+    """Minutes from opening a group pull request to its merge, for the last `last` merged groups in the window:
+    {groups: [{number, url, createdAt, mergedAt, seconds, minutes}], middle} (middle in minutes from the exact
+    seconds, None without a group; minutes per group are rounded for display only)."""
+    got = []
+    for g in groups:
+        a, e = _iso(g.get("createdAt")), _iso(g.get("mergedAt"))
+        if a and e and e >= a:
+            secs = int((e - a).total_seconds())
+            row = {k: g.get(k) for k in ("number", "url", "createdAt", "mergedAt")}
+            got.append((e, {**row, "seconds": secs, "minutes": round(secs / 60, 1)}))
+    got = [r for _, r in sorted(got, key=lambda x: x[0])][-last:]
+    return {"groups": got, "middle": statistics.median(r["seconds"] for r in got) / 60 if got else None}
+
+
 def waited(rows: list[dict], since: datetime, until: datetime) -> list[int]:
     """Minutes from joining the queue to merged, for the entries the queue merged in the window (sorted)."""
     out = []
@@ -158,6 +199,8 @@ def run(root: Path, gh, hours: float, now: datetime | None = None) -> dict:
         window = (since.strftime("%Y-%m-%dT%H:%M:%SZ"), until.strftime("%Y-%m-%dT%H:%M:%SZ"))
         report["runs"][repo] = runs(look(repo, *window)) if look else None
     report["still"] = stood_still(rows, merged_at, since, until)
+    report["hour"] = busiest_hour([r for b in report["bases"] for r in b["through"] + b["alone"]])
+    report["group_minutes"] = group_minutes([g for b in report["bases"] for g in b["groups"]])
     return report
 
 
@@ -207,6 +250,25 @@ def text(report: dict) -> str:
             f"From joining the queue to merged: middle {w[len(w) // 2]} min, longest {w[-1]} min "
             f"({len(w)} merged by the queue)."
         )
+    h = report.get("hour")
+    if h and h["count"]:
+        lines.append(
+            f"Busiest hour: {h['count']} merged by the queue from {hm(h['start'])} to {hm(h['end'])} "
+            f"(goal {HOUR_GOAL}: {'reached' if h['count'] >= HOUR_GOAL else 'not reached'})."
+        )
+        lines += [f"    #{r['number']} {r.get('url', '')} merged {hm(_iso(r['mergedAt']))}" for r in h["prs"]]
+    g = report.get("group_minutes")
+    if g and g["groups"]:
+        n, mid = len(g["groups"]), g["middle"]
+        if n < LAST_GROUPS:
+            verdict = f"not known yet, {n} of {LAST_GROUPS} groups; ask for more hours"
+        else:
+            verdict = "reached" if mid < GROUP_GOAL else "not reached"
+        longest = max(r["seconds"] for r in g["groups"]) / 60
+        lines.append(
+            f"Group start to merged: middle {mid:.1f} min over the last {n} groups, longest {longest:.1f} min "
+            f"(goal under {GROUP_GOAL} min over {LAST_GROUPS} groups: {verdict})."
+        )
     still = report["still"]
     lines.append(
         f"The queue stood still {len(still)} times (at least {STILL_MINUTES} minutes with a pull request in "
@@ -254,4 +316,14 @@ def as_json(report: dict) -> dict:
         "unknown": report["unknown"],
         "runs": report.get("runs", {}),
         "waited_minutes": report.get("waited", []),
+        "hour": _hour_json(report.get("hour")),
+        "group_minutes": report.get("group_minutes"),
     }
+
+
+def _hour_json(h: dict | None) -> dict | None:
+    if h is None:
+        return None
+    t = lambda v: v.strftime("%Y-%m-%dT%H:%M:%SZ") if v else None
+    return {"count": h["count"], "goal": HOUR_GOAL, "start": t(h["start"]), "end": t(h["end"]),
+            "prs": [{k: r.get(k) for k in ("number", "url", "mergedAt")} for r in h["prs"]]}  # fmt: skip

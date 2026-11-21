@@ -26,6 +26,7 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | `background` | `true` = has a long-running process; must implement `orch <name> start\|stop\|status --json` (Background, below) |
 | `[dashboard]` | `label` (≤ 24 chars), `icon` (fixed set in the schema), `order`, optional `title` (page heading when it differs from the label, ≤ 40) and `subtitle` (one sentence, ≤ 120), optional `panel` (`repeats`, `links` or `phone`: an extra native card the dashboard draws on the tab), optional `place` (`nav`, default, or `settings`: no nav entry; the page opens from the add-on's row in Settings › Add-ons), optional `stage = "preview"` (not finished yet: the nav entry and the Settings row show a Preview tag): the add-on has a tab filled by `orch <name> view --json` |
 | `[[ticket_view]]` | Ticket detail rows from `ext.<name>`: `field`, `label`, `format` = `text` · `time` · `cron-human` · `chips` · `yes-no` · `open-page` (an "Open" button to `[page]` `path` + `/` + the value; needs `[page]`) |
+| `[[selfcheck]]` | At most 3. What orch runs after every update to see the add-on still works: `label`, `fails` (the plain words when it does not, shown on Home), `args` (the command after `orch <name>`, e.g. `["list", "--json"]`; with `--json` the answer must be JSON). A failure after moving to a newer release offers going back one release |
 | `recommended` | `true` = `orch init --recommended` turns it on (the core names no add-on; it reads this key) |
 | `gitignore` | Lines kept out of git (own block of `.git/info/exclude`, never the team `.gitignore`), added by `orch addon add`, removed by `orch addon remove`: relative paths inside the workspace, no leading `/`, no `..`, no `\`, no drive letter |
 | `runs_agents` | `true` = the add-on starts agent runs; it does so only through `orch run start` (one claim per ticket, the workspace's agent) |
@@ -259,6 +260,10 @@ most 3 lines. `workspace/tests/test_skills_lint.py` checks all of this for every
 
 `ext.<name>` is a free object for the core. When the add-on is active, every CLI write of `ext.<name>` is checked with its
 `ticket_ext` schema; a failing check refuses that write only. Inactive or unknown `ext` keys are kept unchanged and not shown.
+A boolean property may carry `"x-orch-off": true|false`: the value that switches the add-on's work off. On a done or
+dropped ticket a helper may still write those fields to that value (nothing else), so it can switch a repeat off there.
+It may also remove the planned next start (`next_run`, `each_run`), and the whole block unless a field whose off value is
+`true` is set (an absent `true`-off field reads as on, an absent `false`-off field as off).
 Waiting is core (`waiting_on {kind: time|ticket|question|external, until?, ref?}`): the core records it and never promises
 that something wakes the ticket; an add-on (the scheduler) may wake `kind: time` tickets.
 

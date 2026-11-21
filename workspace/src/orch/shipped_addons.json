@@ -19,6 +19,7 @@
   "run": "orch_automation",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-automation",
   "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": false,
@@ -57,6 +58,7 @@
   "run": "orch_dashboard",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-dashboard",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
@@ -83,6 +85,7 @@
   "run": "orch_dashboard_tester",
   "runs_agents": true,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-dashboard-tester",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
@@ -135,6 +138,16 @@
   "run": "orch_factory",
   "runs_agents": true,
   "schema": "orch.addon/1",
+  "selfcheck": [
+   {
+    "args": [
+     "list",
+     "--json"
+    ],
+    "fails": "the Factory list does not open",
+    "label": "Factory list"
+   }
+  ],
   "skill": "skills/orch-factory",
   "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": false,
@@ -212,6 +225,7 @@
   "run": "orch_focus",
   "runs_agents": true,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-focus",
   "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": false,
@@ -249,6 +263,7 @@
   "run": "orch_insights",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-insights",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
@@ -278,6 +293,7 @@
   "run": "orch_lessons",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-lessons",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
@@ -311,6 +327,7 @@
   "run": "orch_personal",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-personal",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
@@ -349,6 +366,16 @@
   "run": "orch_pull_requests",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [
+   {
+    "args": [
+     "queue",
+     "check"
+    ],
+    "fails": "the merge queue runner is not running while pull requests wait",
+    "label": "Merge queue runner"
+   }
+  ],
   "skill": "skills/orch-pull-requests",
   "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": false,
@@ -504,6 +531,7 @@
   "run": "orch_services",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-services",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
@@ -531,6 +559,7 @@
   "run": "orch_sync",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-sync",
   "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": true,
@@ -581,6 +610,11 @@
     "who": "people",
     "writes": []
    },
+   "switcher": {
+    "summary": "Follow the workspace that switches the accounts, or switch from here",
+    "who": "people",
+    "writes": []
+   },
    "switching": {
     "summary": "Switch accounts by itself, or only show and warn",
     "who": "people",
@@ -610,6 +644,7 @@
   "run": "orch_usage",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-usage",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
