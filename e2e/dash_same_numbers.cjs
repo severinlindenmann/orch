@@ -253,11 +253,12 @@ test('same numbers: every page shows the same count, date and state for the same
     if (needs.value !== open) problems.push(`needs you: the pages show ${needs.value}, the workspace has ${open} open questions and results`);
 
     // the same ticket: Tickets lane = Focus group = ticket page state word; Tickets Due = ticket page Due
-    const LANE_WORD = {'Needs you': 'Needs you', Check: 'Check', Working: 'Working'};
+    // Working lane: the ticket page says 'Working' while a helper runs, 'In progress' when none does (ORCH-415, owner approved)
+    const LANE_WORD = {'Needs you': ['Needs you'], Check: ['Check'], Working: ['Working', 'In progress']};
     for (const [key, row] of Object.entries(tickets.rows)) {
       const tp = ticketPage[key];
       if (!tp) continue;
-      if (LANE_WORD[row.lane] && tp.state !== LANE_WORD[row.lane]) problems.push(`${key}: Tickets says "${row.lane}", the ticket page says "${tp.state}"`);
+      if (LANE_WORD[row.lane] && !LANE_WORD[row.lane].includes(tp.state)) problems.push(`${key}: Tickets says "${row.lane}", the ticket page says "${tp.state}"`);
       const NONE = /^(–|-|Set a due date|)$/;           // no day: a dash in the list, the invitation on the ticket page
       if (!(NONE.test(row.due) && NONE.test(tp.due)) && row.due !== tp.due) problems.push(`${key}: Tickets shows due "${row.due}", the ticket page shows "${tp.due}"`);
     }

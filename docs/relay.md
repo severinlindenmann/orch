@@ -22,6 +22,10 @@ $ orch relay profile --description "Builds and tests the customer website" --tag
 
 The profile is a proposal; the admin approves it. Until then the old text stays.
 
+Connecting also makes the workspace's own signing key. The private key stays on this computer in orch's protected
+folder; it is never shown or sent. The relay keeps only the public key. `orch relay key` shows the fingerprint, eight
+groups of four characters, so another workspace or your phone can check they have the right one.
+
 Try it: connect your workspace to a demo workspace and try messages, tasks, groups and files ([demo-workspace-to-workspace.md](demo-workspace-to-workspace.md)).
 
 ## Texts from your phone

@@ -236,6 +236,10 @@ const NAV_ICON = {
   chat:'<path d="M4 4h16v12H9l-5 4z"/><path d="M8 8h8m-8 4h5"/>',
   addons:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
   settings:'<circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"/>',
+  pin:'<path d="M9 3h6l-1 6 4 4H6l4-4z"/><path d="M12 13v8"/>',
+  more:'<path d="m6 9 6 6 6-6"/>',
+  sideClose:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m7-11-3 3 3 3"/>',
+  sideOpen:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m4-11 3 3-3 3"/>',
 };
 function navIcon(name) {
   const node = document.createElement('span');
@@ -243,10 +247,29 @@ function navIcon(name) {
   node.innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">' + NAV_ICON[name] + '</svg>'; // ic-wrap: trusted static nav icons only.
   return node;
 }
-const ADDONS_OPEN = 'orch.nav.addons';
 const VIEWS_OPEN = 'orch.nav.views';
 const viewsOpen = () => { try { return localStorage.getItem(VIEWS_OPEN) === 'open'; } catch (_) { return false; } };
-const addonsOpen = () => { try { return localStorage.getItem(ADDONS_OPEN) !== 'closed'; } catch (_) { return true; } };
+// The menu's add-ons (ORCH-1184): the person pins the ones they use, the rest wait under Show more. Kept in this browser;
+// a browser that refuses storage still shows the menu with the first add-ons pinned.
+const NAV_PINS = 'orch.nav.pins', NAV_KNOWN = 'orch.nav.known', NAV_MORE = 'orch.nav.more', NAV_SIDE = 'orch.nav.side', PINNED_FIRST = 6;
+const navMemory = new Map();  // the same choices for this page view when the browser refuses storage
+const navRead = key => { try { const v = localStorage.getItem(key); if (v != null) return v; } catch (_) { /* no storage */ } return navMemory.has(key) ? navMemory.get(key) : null; };
+const navWrite = (key, value) => { navMemory.set(key, value); try { localStorage.setItem(key, value); } catch (_) { /* fine without storage */ } };
+const navList = key => { try { const v = JSON.parse(navRead(key) || 'null'); return Array.isArray(v) ? v : null; } catch (_) { return null; } };
+// The pinned add-ons, in the add-ons' own order. The first time: the first PINNED_FIRST. An add-on turned on later
+// arrives pinned (the person just chose it); only one the person unpinned waits under Show more.
+function navPinned(pages) {
+  const names = pages.map(a => a.name), known = navList(NAV_KNOWN);
+  let pins = navList(NAV_PINS) || names.slice(0, PINNED_FIRST);
+  const fresh = known ? names.filter(n => !known.includes(n)) : [];
+  if (!known || fresh.length) {
+    pins = pins.concat(fresh);
+    navWrite(NAV_PINS, JSON.stringify(pins));
+    navWrite(NAV_KNOWN, JSON.stringify([...new Set([...(known || []), ...names])]));
+  }
+  return pages.filter(a => pins.includes(a.name));
+}
+const navMoreOpen = () => navRead(NAV_MORE) === 'open';
 let lastOk = 0, lastFetch = 0;
 function paintUpdated() {
   const node = document.getElementById('updated');
@@ -374,6 +397,25 @@ function followAddress(hash) {
   history.replaceState(null, '', hash);
   renderedRoute = route().hash;
 }
+// Add-ons in the menu (ORCH-1184): the pinned ones, then Show more (n) that unfolds the rest in place. Every row has a
+// pin button (faint until pointed at or focused, always shown on a phone). The page that is open stays in the menu even
+// when it is not pinned and Show more is closed.
+function navAddons(pages, here, navLink) {
+  const pinned = navPinned(pages), rest = pages.filter(a => !pinned.includes(a)), more = navMoreOpen();
+  const url = a => '#addon/' + encodeURIComponent(a.name);
+  const row = a => {
+    const on = pinned.includes(a), label = addonLabel(a);
+    return h('div', {className:'nav-row', 'data-key':'nav-row-' + a.name}, navLink(url(a), label, a.dashboard.icon || a.icon),
+      h('button', {type:'button', className:'btn ghost icon xs nav-pin', 'data-pin':a.name, 'data-key':'nav-pin-' + a.name, 'aria-pressed':String(on), 'aria-label':(on ? 'Unpin ' : 'Pin ') + label, title:on ? 'Unpin' : 'Pin'}, navIcon('pin')));
+  };
+  const shownRest = more ? rest : rest.filter(a => here === url(a));
+  const word = more ? 'Show less' : 'Show more (' + rest.length + ')';
+  return h('div', {className:'nav-addons', 'data-key':'nav-addons'},
+    h('p', {className:'eyebrow'}, 'Add-ons'),
+    pinned.length ? h('nav', {'aria-label':'Pinned add-ons', 'data-key':'nav-pinned'}, pinned.map(row)) : null,
+    rest.length ? h('button', {type:'button', className:'nav-item nav-more', 'data-key':'nav-more', 'aria-expanded':String(more), 'aria-controls':more ? 'nav-rest' : null, 'aria-label':word}, navIcon('more'), h('span', {className:'nav-label'}, word)) : null,
+    shownRest.length ? h('nav', {id:'nav-rest', 'aria-label':'More add-ons', 'data-key':'nav-rest'}, shownRest.map(row)) : null);
+}
 function render(arrived = new Set()) {
   if (!state) return;
   const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash, first = !renderedRoute, was = renderedRoute;
@@ -437,9 +479,7 @@ function render(arrived = new Set()) {
   paintTabbar(here, needCount, needsWords);
   const pages = addons().filter(a => a.dashboard && a.dashboard.place !== 'settings' && a !== contactsAddon);  // place=settings: no nav entry, the page opens from Settings › Add-ons
   const sideAddons = document.getElementById('side-addons');
-  if (sideAddons) reconcile(sideAddons, fragment(pages.length ? h('details', {className:'nav-group', 'data-key':'nav-addons', open:addonsOpen() ? '' : null},
-    h('summary', {className:'nav-item', 'aria-label':'Add-ons'}, navIcon('addons'), h('span', {className:'nav-label'}, 'Add-ons')),
-    h('nav', {'aria-label':'Add-ons'}, pages.map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon)))) : null));
+  if (sideAddons) reconcile(sideAddons, fragment(pages.length ? navAddons(pages, here, navLink) : null));
   reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'settings') : null));
   if (changed) {
     for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
@@ -1173,10 +1213,45 @@ document.getElementById('side-nav')?.addEventListener('toggle', event => {
   if (!event.target.matches?.('details.nav-group')) return;
   try { localStorage.setItem(VIEWS_OPEN, event.target.open ? 'open' : 'closed'); } catch (_) { /* fine without storage */ }
 }, true);
-document.getElementById('side-addons')?.addEventListener('toggle', event => {
-  if (!event.target.matches?.('details.nav-group')) return;
-  try { localStorage.setItem(ADDONS_OPEN, event.target.open ? 'open' : 'closed'); } catch (_) { /* fine without storage */ }
-}, true);
+// Pin / Unpin and Show more in the menu (ORCH-1184). The keyboard stays on the button pressed; an add-on unpinned while
+// Show more is closed moves under it, so the keyboard lands on Show more.
+document.getElementById('side-addons')?.addEventListener('click', event => {
+  const pin = event.target.closest?.('[data-pin]'), more = event.target.closest?.('.nav-more');
+  if (!pin && !more) return;
+  const pages = addons().filter(a => a.dashboard && a.dashboard.place !== 'settings' && a.dashboard.panel !== 'phone');  // as render() lists them
+  if (pin) {
+    navPinned(pages);  // writes the first choice when there is none yet
+    const names = navList(NAV_PINS) || [], name = pin.dataset.pin, on = names.includes(name);  // keeps pins of add-ons turned off now
+    navWrite(NAV_PINS, JSON.stringify(on ? names.filter(n => n !== name) : names.concat(name)));
+    render();
+    const again = document.querySelector('#side-addons [data-pin="' + CSS.escape(name) + '"]');
+    (again || document.querySelector('#side-addons .nav-more'))?.focus({preventScroll:true});
+    return;
+  }
+  // Show more on the closed menu (icons only) opens the menu with the list unfolded
+  if (sideClosed()) { navWrite(NAV_MORE, 'open'); setSide(false); }
+  else navWrite(NAV_MORE, navMoreOpen() ? 'closed' : 'open');
+  render();
+  document.querySelector('#side-addons .nav-more')?.focus({preventScroll:true});
+});
+// Open / close the menu (ORCH-1184): from 1280 px a button beside the orch name closes the menu to its icons and opens it
+// again; the choice stays in this browser. Narrower screens keep their own icon rail and the phone its More.
+const sideToggle = document.getElementById('side-toggle');
+const sideClosed = () => document.querySelector('.shell')?.dataset.side === 'rail' && window.matchMedia('(min-width:1280px)').matches;  // the closed menu shows only from 1280 px
+function setSide(closed) {
+  const shell = document.querySelector('.shell');
+  if (!shell) return;
+  if (closed) shell.dataset.side = 'rail'; else delete shell.dataset.side;
+  navWrite(NAV_SIDE, closed ? 'rail' : 'wide');
+  if (!sideToggle) return;
+  const word = closed ? 'Open menu' : 'Close menu';
+  sideToggle.setAttribute('aria-expanded', String(!closed));
+  sideToggle.setAttribute('aria-label', word);
+  sideToggle.title = word;
+  sideToggle.replaceChildren(navIcon(closed ? 'sideOpen' : 'sideClose'));
+}
+setSide(navRead(NAV_SIDE) === 'rail');
+sideToggle?.addEventListener('click', () => setSide(document.querySelector('.shell')?.dataset.side !== 'rail'));
 // Prefetch: resting 65 ms on a nav link refreshes a state older than 5 s (never on Save-Data).
 let prefetchTimer;
 const prefetch = event => {
