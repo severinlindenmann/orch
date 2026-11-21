@@ -252,12 +252,24 @@ def test_the_full_suite_leaves_light_pull_requests_and_runs_on_every_queue_group
 
 
 def test_a_proven_develop_push_runs_no_suite():
-    for job in ("clock", "brand", "contracts", "publish", "relay", "mobile"):
+    for job in ("clock", "brand", "contracts", "publish", "relay"):  # mobile: see the phone build test below
         assert "outputs.proven != 'true'" in _job_if(job), job
     # for now (ORCH-1106) a proven push still calls these two for the click-throughs and the Windows parts only,
     # which queue groups skip; their other suites stay off (brand/tests/test_ci_queue_skip.py)
     for job in ("workspace", "addons"):
         assert _job_if(job).startswith("needs.changes.outputs.proven == 'true' ||"), job
+
+
+def test_the_phone_build_is_not_in_queue_groups_and_runs_on_develop_even_when_proven():
+    """ORCH-1118, owner yes on 20 Nov: 21 min in 47 percent of groups. A green group no longer proves the phone
+    app, so a develop push that changes it runs the full suite; nightly and release pull requests keep it."""
+    cond = _job_if("mobile")
+    assert "needs.changes.outputs.queue != 'true'" in cond and "proven" not in cond
+    assert "github.event_name == 'schedule'" in cond and "needs.changes.outputs.mobile == 'true'" in cond
+
+
+def test_queue_groups_take_no_dashboard_pictures():
+    assert "needs.changes.outputs.queue != 'true'" in _job_if("dash-shots")
 
 
 def test_the_light_job_runs_only_on_light_pull_requests_and_the_final_check_waits_for_it():
