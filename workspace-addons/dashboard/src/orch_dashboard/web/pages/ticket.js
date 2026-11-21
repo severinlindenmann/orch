@@ -1758,6 +1758,7 @@ function ticketProperties(t, parent) {
       show('due', hasValue(t, 'due')) ? field('Due', inlineField(t, 'due'), 'due') : null,
       show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when') : null,
       costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t),
+      show('priority', prioritySet(t)) ? field('Priority', priorityField(t), 'priority') : null,
       show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model') : null),
     propertiesAddMenu(t, parent),
     linksCard(t),
@@ -1777,7 +1778,7 @@ function propertiesAddMenu(t, parent) {
   const props = [
     [!parent, 'partOf', 'Part of'], [!hasValue(t, 'owner'), 'owner', 'Owner'], [!hasValue(t, 'due'), 'due', 'Due'],
     [!hasValue(t, 'done_when'), 'done_when', 'Done when'], [!t.release, 'release', 'Mark as a release'],
-    [!modelChoice(t), 'model', 'Helper strength'], [!referenceRows(t).length, 'links', 'Reference']]
+    [!prioritySet(t), 'priority', 'Priority'], [!modelChoice(t), 'model', 'Helper strength'], [!referenceRows(t).length, 'links', 'Reference']]
     .filter(([missing, key]) => missing && !adding(t, key)).map(([, key, label]) => item(key, label));
   const fromAddons = addons().filter(a => addonEditable(a) && !addonUsed(t, a) && !adding(t, 'addon:' + a.name))
     .map(a => item('addon:' + a.name, clean(a.ticket_fields.section) || addonLabel(a)));
@@ -1802,7 +1803,7 @@ async function propAdd(t, key, trigger) {
   render();
   const rail = document.getElementById('ticket-rail-' + t.id) || document;
   const at = key === 'links' ? '[data-action="link-add"]' : key.startsWith('addon:') ? '[data-action="field"][data-addon="' + CSS.escape(key.slice(6)) + '"]'
-    : key === 'partOf' ? 'select[aria-label="Part of"]' : key === 'model' ? 'select[aria-label="Helper strength"]' : '[data-action="inline"][data-field="' + key + '"]';
+    : key === 'partOf' ? 'select[aria-label="Part of"]' : key === 'model' ? 'select[aria-label="Helper strength"]' : key === 'priority' ? 'select[aria-label="Priority"]' : '[data-action="inline"][data-field="' + key + '"]';
   const target = rail.querySelector(at);
   if (target?.tagName === 'SELECT') target.focus(); else target?.click();
 }
@@ -2081,6 +2082,22 @@ function humanReviewField(t) {
     sw.disabled = false;
   };
   return sw;
+}
+// ORCH-813: the ticket's priority. When helpers wait for a free slot, high tickets start first, low ones last.
+// No field = normal. The same native select as Helper strength.
+const PRIORITY_NAMES = {high:'High, starts first', normal:'Normal', low:'Low, starts last'};
+function prioritySet(t) { return ['high', 'low'].includes(t.priority); }
+function priorityField(t) {
+  const was = ['high', 'low'].includes(t.priority) ? t.priority : 'normal';
+  if (snapshot) return el('span', 'ed-ro', PRIORITY_NAMES[was]);
+  const select = h('select', {'aria-label':'Priority', 'data-key':'priority-' + t.id, title:'When helpers wait for a free slot, higher priority starts first'},
+    ['high', 'normal', 'low'].map(p => h('option', {value:p}, PRIORITY_NAMES[p])));
+  select.value = was;
+  select.onchange = async () => {
+    const result = await act('ticket.edit', {ticket:t.id, priority:select.value, if_revision:(ticketOf(t.id) || t).revision});
+    if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = was; }
+  };
+  return select;
 }
 function modelField(t) {
   const m = modelChoice(t);

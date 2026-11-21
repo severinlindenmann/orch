@@ -2014,6 +2014,36 @@ def set_human_review(root: Path, tid: str, on: bool, by: str, if_revision: int |
     return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 
 
+PRIORITIES = ("high", "normal", "low")  # ORCH-813: the order waiting tickets start in (then the oldest first)
+
+
+def priority(ticket: dict) -> str:
+    """ORCH-813: the ticket's priority, high, normal or low. No field means normal (older tickets too)."""
+    p = ticket.get("priority")
+    return p if p in PRIORITIES else "normal"
+
+
+def set_priority(root: Path, tid: str, value: str, by: str, if_revision: int | None = None) -> dict:
+    """ORCH-813: set the ticket's priority. Higher priority tickets start first when helpers wait for a free
+    slot (runs_live.waiting_line). Normal is stored as no field."""
+    if value not in PRIORITIES:
+        raise Refused("The priority is high, normal or low.")
+    me = load(root, tid)
+    if priority(me) == value and (if_revision is None or me.get("revision") == if_revision):
+        return me  # nothing changes: no write, no history line (a stale revision is still refused below)
+
+    def op(ticket):
+        if priority(ticket) == value:
+            return
+        if value == "normal":
+            ticket.pop("priority", None)
+        else:
+            ticket["priority"] = value
+        add_history(ticket, by, f"Priority: {value}")
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+
+
 PARENT_DEPTH = 50  # a parent chain longer than this is broken data: never followed further
 
 
