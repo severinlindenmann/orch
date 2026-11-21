@@ -14,7 +14,7 @@
 (() => {
   const KEY = 'orch.places.v1';
   const MAX = 50, NAME_MAX = 40, URL_MAX = 300, LINK_MAX = 8000;
-  const KEEP_REMOVED = 90 * 24 * 3600 * 1000;
+  const KEEP_REMOVED = 90 * 24 * 3600 * 1000, SKEW = 5 * 60 * 1000;
   const KINDS = ['workspace', 'relay', 'publish'];
   const COLORS = ['teal', 'green', 'lime', 'amber', 'orange', 'red', 'pink', 'violet', 'indigo', 'blue', 'cyan', 'slate'];
   const ID = /^[a-z0-9]{8,32}$/, WSID = /^[A-Za-z0-9_-]{4,64}$/, ICON = /^[a-z0-9-]{1,32}$/;
@@ -155,10 +155,14 @@
     let data;
     try { data = JSON.parse(unb64(text)); } catch (_) { return []; }
     if (!Array.isArray(data)) return [];
-    return data.slice(0, MAX * 2).map(check).filter(p => p && !isLocal(p.url) && (!p.removed || now - p.removed <= KEEP_REMOVED));
+    // A time from the future would let a crafted entry win every later change: no time after now (plus 5 minutes of clock skew).
+    const cap = v => (v ? Math.min(v, now + SKEW) : v);
+    return data.slice(0, MAX * 2).map(check).filter(p => p && !isLocal(p.url) && (!p.removed || now - p.removed <= KEEP_REMOVED))
+      .map(p => Object.assign(p, {changed: cap(p.changed)}, p.removed ? {removed: cap(p.removed)} : {}));
   }
   // Split what arrived: removed marks newer than our copy apply at once (removing works everywhere); updates of a place
   // we keep may change its name and colour but never its address; anything new waits for the keep question.
+  // A removal or a new name needs the place's own random id, which only travels in links this person's dashboards made.
   function arrive(list, incoming, now) {
     const cur = tidy(list, now), byId = new Map(cur.map(p => [p.id, p]));
     const fresh = [];
@@ -189,8 +193,9 @@
     return {hash: rest === '#' ? '' : rest, packed: m[2]};
   }
   // The address to open a place with: a dashboard place gets the kept list after #; relay and publish never do.
+  // An http address that is not local never gets it either: anyone on that network could change the page and read it.
   function openUrl(place, list, now) {
-    if (place.kind !== 'workspace') return place.url;
+    if (place.kind !== 'workspace' || !isSecure(place.url)) return place.url;
     const packed = pack(list, now);
     return packed ? place.url + '/#home&places=' + packed : place.url;
   }

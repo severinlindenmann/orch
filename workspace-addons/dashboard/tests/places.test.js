@@ -175,3 +175,15 @@ test('the same link twice gives one keep question per place', () => {
   const twice = P.unpack(packed, NOW).concat(P.unpack(packed, NOW));
   assert.equal(P.arrive([], twice, NOW).fresh.length, 1);
 });
+
+test('a non-local http dashboard never gets the list; a time from the future is capped', () => {
+  let list = addOk([], {url: 'https://fs.office.example.ch', name: 'Fernscout'}).list;
+  const plain = addOk(list, {url: 'http://10.20.0.14:8790', name: 'Kunden'});
+  list = plain.list;
+  assert.equal(P.openUrl(plain.place, list, NOW), 'http://10.20.0.14:8790');
+  const nb = addOk(list, {url: 'http://127.0.0.1:64381', name: 'Notebook'});
+  assert.match(P.openUrl(nb.place, nb.list, NOW), /#home&places=/);  // a local one does
+  const future = [{id: 'aaaaaaaaaaaa', url: 'https://x.example', name: 'X', changed: NOW + 365 * DAY}];
+  const packed = Buffer.from(JSON.stringify(future)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  assert.ok(P.unpack(packed, NOW)[0].changed <= NOW + 5 * 60 * 1000);
+});
