@@ -36,6 +36,9 @@ lines, instead of after a 16 minute group run. The full set runs **once per merg
 files the group touches. A push to develop whose files equal a green queue group (`scripts/ci_proven.py`: a merge
 commit with the tree of its second parent, and a green `ci` run of that parent on an `orch-queue/` branch) runs no
 suite again. Contracts, publish, relay, mobile and the dashboard pictures still follow their paths on a pull request.
+With the queue setting `group_check = local` (ORCH-1124) the queue checks a group with the local check on this Mac
+instead: its group pull request carries `orch-group-check: local`, ci.yml and rules.yml skip it, and the push to
+develop runs the full set because a skipped group run proves nothing.
 
 Why: 18 Nov, nearly every pull request ran the full set: 365 `ci` runs for 62 merges (5.9 per merge), GitHub ran
 about two full runs at once, pull requests waited up to two hours and the queue merged about one an hour.
@@ -82,6 +85,20 @@ Both still run on every push to develop, also one a green group proved (then onl
 pull request; a red one on develop opens the red-develop ticket as before. Switch back when ORCH-555 and ORCH-1050
 are done and 20 groups in a row were green with them: the note at the top of `ci.yml`,
 `brand/tests/test_ci_queue_skip.py`.
+
+## Windows on our own Windows VM (ORCH-1127)
+
+The repository variable `WINDOWS_RUNNER=winvm` moves the Windows parts of develop pushes and of the nightly run
+off GitHub's machines. On this Mac, `e2e/winvm/dispatch.py` (an orch service) then runs the Windows test parts,
+the Windows CLI smoke (with the junction check) and the standard-user install in a fresh winvm clone of the golden image (4 CPUs, 8 GB) and removes the clone
+afterwards, even after a failed or stopped run. It runs one clone at a time, in this order: the head of every open
+release pull request, the develop head once a night after 01:00 UTC, then the newest develop commit. Commits
+pushed while the clone was busy are skipped. A failed run is run once more before it counts. The result goes on
+the commit as the status `windows (winvm)`, and a failed one on develop opens the red-develop ticket
+(`releasekeeper.winvm_red`).
+The VM is ARM64, so release checks and pull requests keep GitHub's x86-64 Windows run.
+**Switch back:** delete the variable or set it to `github`. GitHub runs the Windows parts again on the next push,
+and the dispatcher stays idle. Logs: `~/.orch-test/winvm-runs/` on the Mac.
 
 A draft pull request gets no CI run; marking it ready starts one.
 
