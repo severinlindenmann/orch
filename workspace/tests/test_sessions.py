@@ -3,6 +3,8 @@ start path."""
 
 import json
 import os
+import shutil
+import subprocess
 import time
 
 import pytest
@@ -14,6 +16,12 @@ from orch.errors import Refused
 @pytest.fixture
 def fake_start(monkeypatch):
     started = []
+    shells: set[str] = set()  # the plain terminal's shell without a real tmux
+    monkeypatch.setattr(sessions, "shell_on", lambda root, tid: tid in shells)
+    monkeypatch.setattr(sessions, "start_shell", lambda root, tid: shells.add(tid) is None)
+    monkeypatch.setattr(
+        sessions, "stop_shell", lambda root, tid: tid in shells and shells.discard(tid) is None
+    )
 
     def start(root, tid, by, fresh=False, mode=None, **kw):
         started.append((tid, mode))
@@ -71,17 +79,86 @@ def test_new_starts_each_helper_live_through_one_path(proj, fake_start, monkeypa
         sessions.new(proj, "ticket", "human:t")
 
 
-def test_the_plain_terminal_is_a_placeholder_open_until_closed(proj, fake_start):
-    d = sessions.new(proj, "terminal", "human:t")
+def test_the_empty_helper_says_its_model_and_starts_on_the_persons_pick(proj, fake_start, run):
+    """ORCH-710: the New menu shows the model the Empty helper starts on and the person can pick another."""
+    from orch import modelpick
+
+    tid = tickets.ensure_session(proj, "empty", "human:t")
+    first = sessions.one(proj, "empty")
     assert (
-        d["started"] and d["open"] and not d["running"] and fake_start == []
-    )  # no process before the terminal stage
+        first["model"]
+        == tickets.next_model(tickets.load(proj, tid))
+        == modelpick.pick(tickets.load(proj, tid))[0]
+    )
+    d = sessions.new(proj, "empty", "human:t", model="haiku")
+    assert d["started"] and d["model"] == "haiku"
+    m = tickets.load(proj, tid)["model"]
+    assert m["name"] == "haiku" and modelpick.by_person(tickets.load(proj, tid))
+    assert sessions.listing(proj)[0]["model"] == "haiku"
+    again = sessions.new(
+        proj, "empty", "human:t", model="opus"
+    )  # already running: goes to it, model unchanged
+    assert again["started"] is False and tickets.load(proj, tid)["model"]["name"] == "haiku"
+    with pytest.raises(Refused, match="Only the Empty helper takes a model"):
+        sessions.new(proj, "chat", "human:t", model="opus")
+
+
+def test_the_usual_pick_stays_orchs_choice(proj, fake_start):
+    tid = tickets.ensure_session(proj, "empty", "human:t")
+    usual = sessions.one(proj, "empty")["model"]
+    sessions.new(proj, "empty", "human:t", model=usual)
+    assert "model" not in tickets.load(proj, tid)  # same as orch's pick: no person's choice is written
+
+
+def test_cli_session_new_takes_a_model(proj, run, monkeypatch):
+    monkeypatch.setattr(runs, "start", lambda root, tid, by, **kw: {"run": "r_x", "notes": []})
+    code, out, _ = run("session", "new", "empty", "--model", "sonnet", "--json")
+    assert code == 0 and json.loads(out)["model"] == "sonnet"
+
+
+def test_the_plain_terminal_is_a_shell_open_until_closed(proj, fake_start):
+    d = sessions.new(proj, "terminal", "human:t")
+    assert d["started"] and d["open"] and not d["running"] and fake_start == []  # no helper, no slot
+    assert d["shell"] and d["tmux"] == {"socket": runs_live.socket_name(proj), "session": d["id"]}
     assert sessions.new(proj, "terminal", "human:t")["started"] is False
     shut = sessions.close(proj, "terminal", "human:t")
-    assert shut["closed"] and not shut["open"]
+    assert shut["closed"] and not shut["open"] and not shut["shell"] and "tmux" not in shut
     assert sessions.close(proj, "terminal", "human:t")["closed"] is False
     back = sessions.new(proj, "terminal", "human:t")
-    assert back["started"] and back["open"] and back["id"] == d["id"]
+    assert back["started"] and back["open"] and back["shell"] and back["id"] == d["id"]
+
+
+def test_a_plain_terminal_whose_shell_ended_starts_it_again(proj, fake_start):
+    d = sessions.new(proj, "terminal", "human:t")
+    sessions.stop_shell(proj, d["id"])  # the person typed exit, or this computer restarted
+    assert sessions.one(proj, "terminal")["open"] and not sessions.one(proj, "terminal")["shell"]
+    again = sessions.new(proj, "terminal", "human:t")
+    assert again["started"] and again["shell"]
+
+
+def test_without_tmux_the_plain_terminal_stays_a_placeholder(proj, monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    d = sessions.new(proj, "terminal", "human:t")
+    assert d["started"] and d["open"] and d["shell"] is False and "tmux" not in d
+
+
+@pytest.mark.skipif(os.name == "nt" or shutil.which("tmux") is None, reason="needs tmux")
+@pytest.mark.skipif(
+    "faketime" in os.environ.get("LD_PRELOAD", ""), reason="a real tmux hangs under libfaketime"
+)
+def test_the_plain_terminal_runs_a_real_shell_in_the_workspace(proj):
+    sock = runs_live.socket_name(proj)
+    try:
+        d = sessions.new(proj, "terminal", "human:t")
+        assert d["shell"] and runs_live.session_exists(proj, d["id"])
+        where = runs_live.tmux(
+            proj, "display-message", "-p", "-t", runs_live.target(d["id"]), "#{pane_current_path}"
+        )
+        assert os.path.realpath(where.stdout.strip()) == os.path.realpath(proj)
+        assert sessions.close(proj, "terminal", "human:t")["closed"]
+        assert not runs_live.session_exists(proj, d["id"])
+    finally:
+        subprocess.run(["tmux", "-L", sock, "kill-server"], capture_output=True, check=False)
 
 
 def test_listing_names_only_what_was_made_in_menu_order(proj, fake_start):
@@ -104,6 +181,21 @@ def test_the_empty_helper_works_in_the_workspace_and_says_its_role(proj, monkeyp
     text = sessions.empty_prompt(tickets.load(proj, tid), "- human:t: hello")
     assert tid in text and "without a task" in text
     assert "hello" in text and "never finish it" in text
+    assert f"orch ticket model {tid} up" in text  # ORCH-710: it starts small and moves up when it turns hard
+
+
+def test_the_empty_helper_starts_on_sonnet_and_moves_up_to_opus(proj):
+    """ORCH-710 (owner 19 Nov): Sonnet by default; moved up it stays on Opus for its next starts."""
+    from orch import modelpick
+
+    tid = tickets.ensure_session(proj, "empty", "human:t")
+    assert modelpick.pick(tickets.load(proj, tid)) == (
+        "sonnet",
+        "the Empty helper has no task yet; it moves up when the work turns hard",
+    )
+    assert tickets.pick_model(proj, tid, "orch") == "sonnet"
+    t, moved = tickets.move_up(proj, tid, "the person asked for a new page design", "agent:claude")
+    assert moved and sessions.one(proj, "empty")["model"] == "opus"
 
 
 def test_the_watcher_never_nudges_the_empty_helper(proj, monkeypatch):
@@ -116,6 +208,7 @@ def test_the_watcher_never_nudges_the_empty_helper(proj, monkeypatch):
 
 
 def test_cli_new_list_close(proj, run, monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda name: None)  # the CLI path, without a real shell
     code, out, _ = run("session", "list")
     assert code == 0 and "No session without a ticket" in out
     code, out, _ = run("session", "new", "terminal")

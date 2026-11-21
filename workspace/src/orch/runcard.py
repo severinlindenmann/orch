@@ -56,7 +56,7 @@ SAFE_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sb
 OK_LABEL = "I ran it"
 # the card's other answer: orch's own words, one of these (never a helper's, which could look like "I ran it")
 NO_LABELS = ("Not now", "Leave it off for now", "Leave it as it is", "Skip it", "Do it later")
-PHONE_RUN = False  # Run it now from a paired phone: on once the phone shows the card (ORCH-860)
+PHONE_RUN = True  # Run it now from a paired phone, orch's own operations only (the phone shows the card: ORCH-860)
 UNCHECKED = "orch did not check this command. Read it before you run it in your terminal."
 
 PERSON_REFUSAL = (

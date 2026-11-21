@@ -4,9 +4,21 @@
 window.SWIPE_KIT='../../../../workspace/src/orch_ui/static/';
 window.SWIPE_ITEMS=[
  /* Run it now (ORCH-848, owner picked draft A 19 Nov): the question is the title, the command box is the card, its two buttons are the answers. */
- {id:'r1',kind:'run',kindLabel:'Run',icon:'code',ticket:'DT-56',ticketId:'DT-56',ticketTitle:'Turn on the second look',when:'today 14:20',title:'Turn on the Reviewer's second look?',
-  text:'Turn on the Reviewer's second look?',okLabel:'I ran it',noLabel:'Leave it off for now',then:'The Reviewer gives bigger finished work a second look.',phoneRun:true,
+ {id:'r1',kind:'run',kindLabel:'Run',icon:'code',ticket:'DT-56',ticketId:'DT-56',ticketTitle:'Turn on the second look',when:'today 14:20',title:'Turn on the Reviewer\'s second look?',
+  text:'Turn on the Reviewer\'s second look?',okLabel:'I ran it',noLabel:'Leave it off for now',then:'The Reviewer gives bigger finished work a second look.',phoneRun:true,
   run:{v:1,command:'orch config set workflow.reviewer_look on',cwd:'~/workspace-orch',class:'orch',exe:'orch',changes:'The Reviewer gives bigger finished work a second look',undo:'orch config set workflow.reviewer_look off'}},
+ /* A CI workflow change the owner merges (ORCH-305, ORCH-429): the changed lines with the risky ones red, the check's words
+    first, and "Safe to merge" only when a script check found nothing. The click approves and merges this exact version. */
+ {id:'m1',kind:'link',kindLabel:'Merge',icon:'link',ticket:'ORCH-512',ticketId:'ORCH-512',ticketTitle:'Release builds upload the app',when:'today 11:40',title:'Merge the CI workflow change of ORCH-512?',
+  why:'It changes a CI workflow, so GitHub waits for you to approve it: your click approves this exact version and merges it with your own GitHub login.',okLabel:'Merge',
+  links:[{label:'Workflow changes',url:'https://github.com/'}],
+  then:'It is merged on GitHub with your own login.',
+  preview:{type:'doc',heading:'What goes out · 1 change',status:{tone:'done',text:'All 14 checks passed · checked 11:40'},chips:[{text:'Look at the red lines',tone:'bad'}],
+   paras:['Workflow check, look at this: reads a secret (DEPLOY_KEY); runs a download straight in a shell.'],
+   diff:[{op:'-',file:'.github/workflows/release.yml',text:'      - run: make dist'},{op:'+',file:'.github/workflows/release.yml',text:'      - run: make dist upload'},
+    {op:'+',file:'.github/workflows/release.yml',text:'          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}',risk:'secret'},
+    {op:'+',file:'.github/workflows/release.yml',text:'      - run: curl -fsSL https://get.example.dev/install.sh | bash',risk:'download run in a shell'}],
+   rows:[{title:'.github/workflows/release.yml (+3 −1)'},{title:'Release builds upload the app',key:'ORCH-512',n:1842}],foot:'Exact version: 3f9c2a1'}},
  /* A design review as one set of cards (16 Nov, ORCH-65): the question text on the card, full-page pictures that fit the
     pane on a dark ground with a zoom per side, a marked suggestion, a choice with how it is today. */
  {id:'g1',kind:'draft',kindLabel:'Draft',icon:'page',group:'Home look',ticket:'DT-50',ticketId:'DT-50',ticketTitle:'Home look',when:'today 11:02',title:'Home: one list of what needs you',

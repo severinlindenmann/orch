@@ -27,7 +27,8 @@ function load(snapshot) {
 }
 
 test('Properties lists the switch right after Release', () => {
-  assert.match(ticketSrc, /field\('Release', releaseField\(t\)\), field\('Human review needed', humanReviewField\(t\)\)/);
+  // ORCH-581: Properties shows only what is set, but this safety switch always shows, right after Release
+  assert.match(ticketSrc, /field\('Release', releaseField\(t\), 'release'\) : null,\s+field\('Human review needed', humanReviewField\(t\)\),/);
 });
 
 test('on by default, also for an older ticket without the field', () => {

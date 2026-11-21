@@ -4,12 +4,13 @@
 //   node e2e/focus_d/clickthrough.cjs [--out DIR]               ready steps in the real dashboard, pending ones listed
 //   node e2e/focus_d/clickthrough.cjs --target draft [--repo P] the reference pictures of every step in the draft D mockup
 //   node e2e/focus_d/clickthrough.cjs --only 1,2,9               only these step numbers
+//   node e2e/focus_d/clickthrough.cjs --only 18 --video          also a recording of each step: <out>/<picture>-<width>.webm
 //   node e2e/focus_d/clickthrough.cjs --list                     print the click-through, no browser
 //   node e2e/focus_d/clickthrough.cjs --write-md                 write e2e/focus_d/CLICKTHROUGH.md from the steps
 //
 // Dashboard target: the real dashboard server and today's Focus server, each on fake data in a throw-away home under
 // ~/.orch-test, started with `env -i` (HOME, USERPROFILE and ORCH_HOME in that folder, ORCH_HOME_STRICT=1), so the
-// orch of this computer is never touched. Chromium runs with its own profile and --use-mock-keychain
+// orch of this computer is never touched. Chromium runs in a fresh context (no profile folder) with --use-mock-keychain
 // --password-store=basic (no keychain window). Pictures: <out>/<step picture>-<width>.png (draft: <key>-<width>-draft.png),
 // plus <out>/report.md. Exit 0 = every ready step passed at every width; pending steps never fail the run.
 'use strict';
@@ -35,6 +36,7 @@ function args(argv) {
     else if (a === '--out') o.out = path.resolve(argv[++i].replace(/^~/, os.homedir()));
     else if (a === '--repo') o.repo = path.resolve(argv[++i].replace(/^~/, os.homedir()));
     else if (a === '--only') o.only = new Set(argv[++i].split(',').map(Number));
+    else if (a === '--video') o.video = true;
     else throw new Error(`unknown option ${a}`);
   }
   if (!['dashboard', 'draft'].includes(o.target)) throw new Error(`--target is dashboard or draft, not ${o.target}`);
@@ -132,13 +134,17 @@ async function runOne(ctx, step, [w, h], o, urls) {
       await page.waitForSelector('body[data-mw-boot], #mw-page *', { state: 'attached', timeout: 10000 });
       if (step.draft.act) await step.draft.act(page);
     } else {
-      await step.run({ page, dash: urls.dash, focus: urls.focus, width: w });
+      await step.run({ page, dash: urls.dash, width: w });
     }
     await page.waitForTimeout(400); // let any move end before the picture
     await page.screenshot({ path: path.join(o.out, shot(step, w, o.target === 'draft')), fullPage: false });
   } catch (e) {
     problems.push(String(e.message).split('\n')[0]);
-  } finally { await page.close(); }
+  } finally {
+    await page.close();
+    // --video: the page's recording lands beside its picture once the page is closed
+    if (o.video && page.video()) await page.video().saveAs(path.join(o.out, shot(step, w, o.target === 'draft').replace(/\.png$/, '.webm'))).catch(() => {});
+  }
   return problems;
 }
 
@@ -161,20 +167,17 @@ async function main() {
   }
   fs.mkdirSync(o.out, { recursive: true });
   const results = [];
-  let browser, profile;
+  let browser, chrome, profile;
   try {
     if (o.target === 'dashboard' && todo.length) {
-      const needFocus = todo.some(s => s.focus); // steps on today's Focus page need its own server
       servers.push(await serve('workspace-addons/dashboard', 'e2e/focus_insights/dashboard_server.py', 'focus-d-dash'));
       urls.dash = servers[0].base;
-      if (needFocus) {
-        servers.push(await serve('workspace-addons/focus', 'e2e/focus_insights/server.py', 'focus-d-focus'));
-        urls.focus = servers[1].base;
-      }
     }
     const { chromium } = playwright();
     profile = fs.mkdtempSync(path.join(os.tmpdir(), 'focus-d-prof-'));
-    browser = await headless.launchPersistent(chromium, profile);
+    // launch() + newContext(), never a profile folder: that asks the macOS keychain even with the mock flags
+    chrome = await headless.launch(chromium, { headless: true });
+    browser = await chrome.newContext(o.video ? { recordVideo: { dir: path.join(profile, 'video'), size: { width: 1280, height: 800 } } } : undefined);
     if (o.target !== 'draft') await browser.addInitScript(() => {
       const f = window.fetch;
       window.fetch = (u, opts) => f(typeof u === 'string' && u.startsWith('/api/state') ? u.replace(/([?&])have=[^&]*&?/, '$1').replace(/[?&]$/, '') : u, opts);
@@ -195,6 +198,7 @@ async function main() {
     }
   } finally {
     if (browser) await browser.close();
+    if (chrome) await chrome.close();
     servers.forEach(x => x.stop());
     if (profile) fs.rmSync(profile, { recursive: true, force: true });
   }

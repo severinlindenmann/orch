@@ -348,19 +348,18 @@ def test_two_runs_at_once_are_refused(tk, run):
 # ------------------------------------------------------------------ phone, output, timeout
 
 
-def test_the_phone_does_not_run_until_it_shows_the_card(tk, run):
+def test_the_phone_runs_orchs_own_settings(tk, run):
     root, tid = tk
     q = _card(run, tid, "orch config set workflow.reviewer_look on")
-    assert not runcard.phone_ok(_q(root, tid, q["id"]))  # ORCH-860 turns it on
-    with pytest.raises(Refused, match="phone runs only orch"):
-        runcard.run(Path(root), tid, q["id"], _digest(root, tid, q["id"]), by=ME, person=True, via="phone")
-    assert _q(root, tid, q["id"])["answer"] is None
+    assert runcard.phone_ok(_q(root, tid, q["id"]))
+    for cmd in ("gh auth login", "npm install left-pad"):  # a sign-in and a copy-only command
+        other = _card(run, tid, cmd, "--changes", "Something else")
+        assert not runcard.phone_ok(_q(root, tid, other["id"])), cmd
 
 
 @POSIX  # echo is a program only on POSIX
-def test_the_phone_runs_only_orchs_own_operations(tk, run, monkeypatch):
+def test_the_phone_runs_only_orchs_own_operations(tk, run):
     root, tid = tk
-    monkeypatch.setattr(runcard, "PHONE_RUN", True)
     q = _card(run, tid, "echo hello", "--changes", "Says hello")
     assert not runcard.phone_ok(_q(root, tid, q["id"]))
     with pytest.raises(Refused, match="phone runs only orch"):
@@ -421,10 +420,9 @@ def test_hand_edited_words_on_an_orch_card_are_refused(tk, run, person_grant):
 
 
 @POSIX  # echo is a program only on POSIX
-def test_relay_applies_a_phone_run_only_for_orchs_own_operations(tk, run, monkeypatch):
+def test_relay_applies_a_phone_run_only_for_orchs_own_operations(tk, run):
     from orch import relay
 
-    monkeypatch.setattr(runcard, "PHONE_RUN", True)
     root, tid = tk
     seen = []
 
@@ -587,3 +585,22 @@ def test_options_are_never_an_other_answer(tk, run):
     tickets.apply_op(Path(root), tid, add_option, by="agent:x")
     with pytest.raises(Refused):
         tickets.answer(Path(root), tid, q["id"], "I ran it \u2713", ME, "dashboard", person=True)
+
+
+def test_a_failed_phone_run_answers_the_phone_in_the_message_format(tk, run, monkeypatch):
+    """A run that did not work stays open on the computer (the error on the card) and tells the phone with a
+    review_result the relay passes on: refused / unavailable, no summary (message.schema.json)."""
+    import jsonschema
+
+    from orch import relay
+
+    root, tid = tk
+    q = _card(run, tid, "orch config set workflow.reviewer_look on")
+    monkeypatch.setattr(runcard, "run", lambda *a, **k: {"ok": False, "exit": 1, "error": "it broke\nbadly"})
+    seen = []
+    relay._apply_run(Path(root), tid, _q(root, tid, q["id"]), _digest(root, tid, q["id"]), ME, "phone",
+                     lambda body, note, applied=None: seen.append(body), lambda _t: None)  # fmt: skip
+    assert seen == [{"result": "refused", "reason": "unavailable"}]
+    schema = json.loads((Path(__file__).resolve().parents[2] / "contracts" / "message.schema.json").read_text())
+    jsonschema.Draft202012Validator({"$defs": schema["$defs"], "$ref": "#/$defs/review_result"}).validate(seen[0])
+    assert _q(root, tid, q["id"])["answer"] is None

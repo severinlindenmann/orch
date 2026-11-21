@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from orch import nextstep, sessions, tickets
+from orch import nextstep, ownerpick, sessionmode, sessions, tickets
 
 
 def add_parsers(sub, common) -> None:
@@ -16,6 +16,16 @@ def add_parsers(sub, common) -> None:
         "new", parents=[common], help="start a session without a ticket (or go to the one that is on)"
     )
     x.add_argument("kind", choices=sessions.KINDS)
+    x.add_argument(
+        "--permission-mode",
+        choices=sessionmode.MODES,
+        help="start in this permission mode (ask = Default, edits = Accept edits, auto, full = Bypass "
+        "permissions), remembered for this kind; a session that is on goes on in it. Raising it needs the "
+        "signed-in person on the dashboard",
+    )
+    x.add_argument(
+        "--model", choices=("haiku", "sonnet", "opus", "fable"), help="the model the Empty helper starts on"
+    )
     s.add_parser("list", parents=[common], help="the sessions without a ticket and whether they are open")
     x = s.add_parser(
         "close", parents=[common], help="end a session without a ticket (a helper's conversation is kept)"
@@ -28,12 +38,22 @@ def _out(args, data, text: str) -> None:
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 
+def _mode_words(row: dict) -> str:
+    pm = row.get("permissions") or {}
+    words = pm.get("running_label") or pm.get("label")
+    return f" ({words})" if words else ""
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "session":
         return False
     by = tickets.acting_by(args)
     if args.sub == "new":
-        d = sessions.new(root, args.kind, by)
+        mode = args.permission_mode
+        # ORCH-818: only the dashboard's signed-in page hands this call a person grant. Used up first, needed
+        # or not, so it never reaches the helper this call starts.
+        person = ownerpick.person_granted(root, by)
+        d = sessions.new(root, args.kind, by, model=getattr(args, "model", None), mode=mode, person=person)
         for note in d.get("notes") or []:
             print(note, file=sys.stderr)
         name = d.get("title", args.kind)
@@ -45,7 +65,7 @@ def dispatch(args, root: Path) -> bool:
     else:
         rows = sessions.listing(root)
         text = (
-            "\n".join(f"{r['title']}: {'open' if r['open'] else 'closed'}" for r in rows)
+            "\n".join(f"{r['title']}: {'open' if r['open'] else 'closed'}{_mode_words(r)}" for r in rows)
             or "No session without a ticket yet."
         )
         _out(args, {"sessions": rows}, text)

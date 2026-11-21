@@ -986,25 +986,36 @@ def _send_proposal(
         return {**local, "sent": True}
 
 
-def send_file(root: Path, target: str, path: Path, text: str | None, ticket: str | None = None) -> dict:
+def send_file(
+    root: Path,
+    target: str,
+    path: Path,
+    text: str | None,
+    ticket: str | None = None,
+    reply_to: str | None = None,
+) -> dict:
+    """A file (with an optional text). With reply_to it answers that message, and stays in the topic that
+    message started, as a text reply does."""
     if not path.is_file():
         raise Refused(f"{path} is not a file.")
     if path.stat().st_size > MAX_BLOB:
         raise Refused("The file is bigger than 100 MB.")
     to = resolve(root, target)
+    if not ticket and reply_to:
+        ticket = _topic_of_message(root, reply_to)  # answers a text that started a topic: stays in that topic
     data = path.read_bytes()
     if _DRY_RUN.get():  # nothing is uploaded: the body shows the file's name, size and fingerprint
         body = {"name": path.name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
         if text:
             body["text"] = text
-        return _message(root, to, "file", body, ticket)
+        return _message(root, to, "file", body, ticket, reply_to)
     blob = _api(root, "POST", "/v1/blobs", data, 300)[1]
     body = {"blob_id": blob["blob_id"], "name": path.name, "size": len(data), "sha256": blob["sha256"]}
     if blob["sha256"] != hashlib.sha256(data).hexdigest() or blob["size"] != len(data):
         raise Refused("The relay stored something different from the file. Not sent.")
     if text:
         body["text"] = text
-    return _message(root, to, "file", body, ticket)
+    return _message(root, to, "file", body, ticket, reply_to)
 
 
 def send_delegate(
@@ -1646,12 +1657,15 @@ def _verdict_summary(q: dict) -> str | None:
     return _one_line(dec["summary"]) if isinstance(dec, dict) and dec.get("summary") else None
 
 
-def _apply_verdict(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]:
+def _apply_verdict(root: Path, msg: dict, asked: dict, final: bool = False) -> tuple[str, str | None]:
     """A phone answer with a `verdict` on a card question (q<n>) or a review question. Checked in the
     contract's order, ticket / question / card only from the asked record and the ticket, never from the
     answer: only a paired phone, not group-routed (else nothing at all, no result); already decided ->
     decided; digest -> changed; then review.decide as the person (by = the stored phone name, via phone).
-    Never review.change. Exactly one review_result goes back to the answering phone."""
+    Never review.change. Exactly one review_result goes back to the answering phone.
+    Voice recordings and files the person added are saved on the ticket first and named in their words
+    (_verdict_files); a relay that cannot be reached raises Transient (the answer is tried again, `final` =
+    the last try, which goes on without the files it could not fetch)."""
     from orch import phone_view
 
     tid, qmid = asked["ticket"], str(msg.get("reply_to"))
@@ -1692,6 +1706,12 @@ def _apply_verdict(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]
     if not isinstance(asked_digest, str) or not asked_digest:
         return result({"result": "refused", "reason": "unavailable"}, f"not applied: {QUESTION_UNCHECKABLE}")
 
+    usable = v["digest"] == asked_digest and (
+        ticket.get("status") == "review" if is_review else q.get("answer") is None
+    )
+    if usable and (saved := _verdict_files(root, tid, answer_id, v, final)):
+        # before the round closes (a fetch that has to wait comes back to this answer) and before decide
+        note = _note_with_files(note, saved)
     if is_review:
         n = asked.get("round")
         # the round is closed by exactly one answer (compare and set); a closed, older or other round is stale
@@ -1762,15 +1782,73 @@ def _apply_run(root: Path, tid: str, q: dict, digest: str, by: str, via: str, re
         return result({"result": "refused", "reason": _refusal_reason(e)}, f"not run on {tid}: {e}")
     if not res["ok"]:
         line("Run it now from the phone did not work: " + str(res.get("error"))[:120])
-        return result({"result": "refused", "reason": "failed", "summary": str(res.get("error"))[:200]},
-                      f"run failed on {tid}")  # fmt: skip
+        # message.schema.json review_result: a refusal carries only needs_person / invalid / unavailable, no
+        # summary; the error stays on the computer card (run_last).
+        return result({"result": "refused", "reason": "unavailable"}, f"run failed on {tid}")
     with contextlib.suppress(Refused, OSError, StopIteration):
         done = next(x for x in tickets.load(root, tid)["questions"] if x["id"] == q["id"])
         _to_waiting_agent(root, tid, done, by)
     return result({"result": "applied", "summary": runcard.OK_LABEL}, f"ran the card's command on {tid}", tid)
 
 
-def _apply_review_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]:
+VERDICT_FILES_MAX = 5  # message.schema.json $defs/verdict note.files
+VERDICT_VOICE_MAX = 3  # note.words.voice
+NOTE_WORDS_MAX, NOTE_CHANGES_MAX, NOTE_CHANGE_MAX = 2000, 20, 500  # review._note limits
+
+
+def _verdict_files(root: Path, tid: str, answer_id: str, v: dict, final: bool) -> list[str]:
+    """Download every recording and file of a phone verdict into the ticket's files (once per answer, see
+    _save_phone_file) and return the lines the helper reads ("Photo: .orch/tickets/<tid>/files/x.jpg").
+    Names come from the phone and are cleaned; nothing in a file is read here."""
+    note = v.get("note") if isinstance(v.get("note"), dict) else {}
+    words = note.get("words") if isinstance(note.get("words"), dict) else {}
+    voice = words.get("voice") if isinstance(words.get("voice"), list) else []
+    files = note.get("files") if isinstance(note.get("files"), list) else []
+    atts = [
+        {"blob_id": x.get("blob_id"), "kind": "voice", "name": f"voice-{i}.m4a"}
+        for i, x in enumerate(voice[:VERDICT_VOICE_MAX], 1)
+        if isinstance(x, dict)
+    ]
+    atts += [
+        {k: x.get(k) for k in ("blob_id", "kind", "size")} | {"name": x.get("name") or "file"}
+        for x in files[:VERDICT_FILES_MAX]
+        if isinstance(x, dict)
+    ]
+    return [_save_phone_file(root, tid, answer_id, a, final) for a in atts]
+
+
+def _note_with_files(note, saved: list[str]) -> dict:
+    """The person's note with one line naming the files they added (as the dashboard's Send back does), at the
+    end of their words and, when they listed changes, as one more change: the helper reads it either way.
+    Their own words are kept whole: when the line with every file name does not fit the note's limits, a short
+    line without the names is used (the files are in the ticket's files folder). Only a note already at the
+    limits gives up its last characters for the short line."""
+    n = len(saved)
+    read = ". Read it first." if n == 1 else ". Read them first."
+    full = f"I added {'a file' if n == 1 else f'{n} files'} to this ticket from the phone: {'; '.join(saved)}"
+    full = full.rstrip(".") + read
+    short = f"I added {'a file' if n == 1 else f'{n} files'} from the phone to this ticket's files{read}"
+
+    def joined(own: str, limit: int, sep: str) -> str:
+        for line in (full, short):
+            if len(own) + len(sep) + len(line) <= limit or (not own and len(line) <= limit):
+                return f"{own}{sep}{line}" if own else line
+        return f"{own[: max(0, limit - len(short) - len(sep))].rstrip()}{sep}{short}"[:limit]
+
+    note = dict(note) if isinstance(note, dict) else {}
+    words = dict(note["words"]) if isinstance(note.get("words"), dict) else {}
+    words["text"] = joined(str(words.get("text") or "").strip(), NOTE_WORDS_MAX, "\n\n")
+    note["words"] = words
+    changes = note.get("changes")
+    if isinstance(changes, list) and changes:
+        if len(changes) < NOTE_CHANGES_MAX:
+            note["changes"] = [*changes, joined("", NOTE_CHANGE_MAX, "")]
+        else:  # no room for one more change: the line goes with the last one
+            note["changes"] = [*changes[:-1], joined(str(changes[-1]).strip(), NOTE_CHANGE_MAX, " ")]
+    return note
+
+
+def _apply_review_answer(root: Path, msg: dict, asked: dict, final: bool = False) -> tuple[str, str | None]:
     """An answer to a review question. It acts only when ALL hold: it comes from a phone paired with this
     workspace (the relay-authenticated `from`, not a group-routed message), it answers THIS question message
     (reply_to is the one the round was bound to), the round is still the open current one (closed by exactly
@@ -1782,7 +1860,7 @@ def _apply_review_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str |
     if "verdict" in msg.get(
         "body", {}
     ):  # a new phone's swipe: the contract's order (Review cards on the phone)
-        return _apply_verdict(root, msg, asked)
+        return _apply_verdict(root, msg, asked, final)
     tid, n = asked["ticket"], asked.get("round")
     frm = str(msg.get("from", ""))
     phone = _paired_phone(root, frm) if frm.startswith("ph_") else None
@@ -1923,18 +2001,19 @@ def _note_group_refusal(root: Path, msg: dict, why: str, asked: dict | None = No
     chat_groups.note_answer_refused(root, asked, msg, why)
 
 
-def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
-    """(note, ticket id when the answer was applied). Only for a question this workspace sent."""
+def _apply_answer(root: Path, msg: dict, final: bool = False) -> tuple[str, str | None]:
+    """(note, ticket id when the answer was applied). Only for a question this workspace sent. A phone
+    verdict whose files the relay cannot serve just now raises Transient (`final` = the last try)."""
     asked, why = _answer_asked(root, msg)
     if not asked:
         _note_group_refusal(root, msg, why)
         return why, None
     if asked.get("review") is True:
-        return _apply_review_answer(root, msg, asked)
+        return _apply_review_answer(root, msg, asked, final)
     if asked.get("proposal") is True:
         return _apply_proposal_answer(root, msg, asked)
     if "verdict" in msg.get("body", {}):
-        return _apply_verdict(root, msg, asked)
+        return _apply_verdict(root, msg, asked, final)
     if (card := _card_plain(root, msg, asked)) is not None:
         return card
     by, via = _answer_by(msg, asked, root)
@@ -2185,6 +2264,27 @@ PHONE_RETRY_SECONDS = 60  # then the last pull finishes the message without the 
 
 class Transient(Refused):
     """The relay could not be reached just now: the phone message is kept and tried again on the next pull."""
+
+
+def _phone_final(root: Path, mid: str) -> bool:
+    """The last try of a phone message whose files could not be fetched: PHONE_TRIES tries and at least
+    PHONE_RETRY_SECONDS since the first; it then goes on without those files."""
+    tr = _v3_state(root)["tries"].get(mid)
+    return (
+        isinstance(tr, dict)
+        and tr.get("n", 0) >= PHONE_TRIES
+        and time.time() - float(tr.get("first", 0)) >= PHONE_RETRY_SECONDS
+    )
+
+
+def _phone_try_again(root: Path, mid: str) -> None:
+    """Count one more try of a phone message (not marked seen, so the next pull takes it again)."""
+    st = _v3_state(root)
+    tr = st["tries"].get(mid)
+    tr = tr if isinstance(tr, dict) else {"n": 0, "first": time.time()}
+    st["tries"][mid] = {"n": int(tr.get("n", 0)) + 1, "first": tr.get("first")}
+    st["tries"] = dict(list(st["tries"].items())[-V3_STATE_KEEP:])
+    _v3_save(root, st)
 
 
 def _fetch_blob(root: Path, blob_id, size, sha256=None) -> bytes | None:
@@ -2952,7 +3052,11 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                             note = "a review answer waits for the workspace to apply it"
                         else:
                             if typ == "answer":
-                                note, applied = _apply_answer(root, m)
+                                try:
+                                    note, applied = _apply_answer(root, m, _phone_final(root, m["id"]))
+                                except Transient:  # a file of the phone's answer: the next pull tries again
+                                    _phone_try_again(root, m["id"])
+                                    continue
                                 if applied and msg_group(m):
                                     after = "answer"
                             else:
@@ -2969,21 +3073,10 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
             elif typ == "text" and str(m.get("from", "")).startswith("ph_"):
                 with locked(root):
                     if m["id"] not in seen(root):
-                        tr = _v3_state(root)["tries"].get(m["id"])
-                        final = (
-                            isinstance(tr, dict)
-                            and tr.get("n", 0) >= PHONE_TRIES
-                            and time.time() - float(tr.get("first", 0)) >= PHONE_RETRY_SECONDS
-                        )
                         try:
-                            note, applied = _phone_text(root, m, final)
+                            note, applied = _phone_text(root, m, _phone_final(root, m["id"]))
                         except Transient:
-                            st = _v3_state(root)
-                            tr = st["tries"].get(m["id"])
-                            tr = tr if isinstance(tr, dict) else {"n": 0, "first": time.time()}
-                            st["tries"][m["id"]] = {"n": int(tr.get("n", 0)) + 1, "first": tr.get("first")}
-                            st["tries"] = dict(list(st["tries"].items())[-V3_STATE_KEEP:])
-                            _v3_save(root, st)
+                            _phone_try_again(root, m["id"])
                             continue  # not marked seen: the next pull tries again (the last one finishes it)
                         except (Refused, OSError, ValueError, KeyError, TypeError) as e:
                             # one bad message never blocks the ones behind it: it is marked seen with a note

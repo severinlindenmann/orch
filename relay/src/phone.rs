@@ -618,10 +618,10 @@ async fn answer(
         }
         let (qb, qextra) = store::open_payload(&app.key, &q);
         // A verdict (relay-api.md "Review cards on the phone"): only on a question with a digest, naming exactly that
-        // digest, at most 8 KB, every voice file an upload of this phone (another's, a workspace's or an unknown blob
+        // digest, at most 8 KB, every voice file and added file an upload of this phone (another's, a workspace's or an unknown blob
         // answers the same 404).
         let verdict = &v["verdict"];
-        let mut voice: Vec<&str> = vec![];
+        let mut named: Vec<&str> = vec![];
         if !verdict.is_null() {
             if qb["digest"].as_str().is_none() || verdict["digest"] != qb["digest"] {
                 return Err(invalid(
@@ -645,7 +645,27 @@ async fn answer(
                 if !own {
                     return Err(not_found("Upload the file first (POST /v1/phone/blobs)."));
                 }
-                voice.push(b);
+                named.push(b);
+            }
+            // Pictures, files and recordings added to the answer: the same rule, and the size must be the upload's.
+            for fl in verdict["note"]["files"].as_array().into_iter().flatten() {
+                let b = fl["blob_id"].as_str().unwrap_or("");
+                let stored: Option<i64> = c
+                    .query_row(
+                        "SELECT size FROM blobs WHERE id=?1 AND uploader=?2",
+                        [b, &pid],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                match stored {
+                    None => return Err(not_found("Upload the file first (POST /v1/phone/blobs).")),
+                    Some(n) if Some(n) != fl["size"].as_i64() => {
+                        return Err(invalid(
+                            "An attachment's size does not match the uploaded file.",
+                        ))
+                    }
+                    _ => named.push(b),
+                }
             }
         }
         let tx = c.unchecked_transaction()?;
@@ -671,8 +691,8 @@ async fn answer(
         if let Some(cid) = &cid {
             remember_client_id(&c, &pid, cid, &id)?;
         }
-        // The workspace this answer goes to may read its voice files (GET /v1/blobs/<id>); they are used, not purged.
-        for b in &voice {
+        // The workspace this answer goes to may read its voice and added files (GET /v1/blobs/<id>); they are used, not purged.
+        for b in &named {
             c.execute(
                 "INSERT OR IGNORE INTO phone_blobs(blob_id,msg_id) VALUES(?1,?2)",
                 params![b, id],

@@ -588,10 +588,11 @@ final class AppModel {
     func verdictItem(for questionId: String) -> OutboxItem? { outbox.items.first { $0.kind == .answer && $0.questionMessageId == questionId && $0.verdict != nil } }
 
     /// Swipe result: queue (or, while still on this phone, change) the verdict, then try to send. Throws `Outbox.VerdictProblem`.
-    func submitVerdict(_ item: ReviewItem, _ verdict: ReviewVerdict) async throws {
-        let summary = ReviewStackRules.summary(item, verdict: verdict)
-        if verdictItem(for: item.id) != nil { try outbox.changeVerdict(question: item.question, answer: summary, verdict: verdict) }
-        else { try outbox.enqueueAnswer(question: item.question, answer: summary, verdict: verdict) }
+    /// `files`: voice recordings, pictures and files the person added to a talk (ORCH-444); the Outbox copies them.
+    func submitVerdict(_ item: ReviewItem, _ verdict: ReviewVerdict, files: [DraftFile] = []) async throws {
+        let summary = ReviewStackRules.summary(item, verdict: verdict, files: files.count)
+        if verdictItem(for: item.id) != nil { try outbox.changeVerdict(question: item.question, answer: summary, verdict: verdict, files: files) }
+        else { try outbox.enqueueAnswer(question: item.question, answer: summary, verdict: verdict, files: files) }
         await flushAnswers()
     }
 

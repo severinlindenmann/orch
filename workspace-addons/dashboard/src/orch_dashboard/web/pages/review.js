@@ -3,6 +3,15 @@
 // "All cards" list beside it on a wide screen. The cards and the decisions come with the state (state.review, from
 // `orch review list`); an answer is a plain click (op review.answer).
 const REVIEW_ID = /^core:(?:q:(t_[a-z0-9]{6,16}):(q[0-9]{1,4})|review:(t_[a-z0-9]{6,16}))$/;
+// ORCH-524: a Check result's file as the ticket lists it (its time and size, when known here), so its link names
+// its version and the browser keeps the picture; unknown: a plain link that asks again by content hash.
+function reviewFileStamp(tid, kind, name) {
+  const t = array(state?.tickets).find(x => x?.id === tid);
+  if (!t || !window.FileViewer?.stampOf || typeof evidenceFile !== 'function' || typeof allArtifactFiles !== 'function') return '';
+  const files = kind === 'evidence' ? array(t.checklist).flatMap(task => array(task.evidence).map(ev => evidenceFile(t, ev)).filter(Boolean)) : allArtifactFiles(t);
+  const stamp = window.FileViewer.stampOf(files.find(file => file.name === name));
+  return stamp ? '&v=' + encodeURIComponent(stamp) : '';
+}
 function reviewCards() { return array(state?.review?.cards).map(reviewPlainCard); }
 // A Factory proposal reads like Home's card (ORCH-183): its title as the question, the goal and the time in two short
 // lines, not the whole frozen proposal (that stays on the ticket). Any other card is left as it is.
@@ -117,7 +126,7 @@ function reviewApi() {
       if (!f || f[2].split('/').some(p => p === '..' || p === '.' || p.startsWith('.'))) return '';
       return /\.html?$/i.test(f[2])
         ? '/view/' + encodeURIComponent(c.ticket) + '/' + f[1] + '/' + f[2].split('/').map(encodeURIComponent).join('/')
-        : '/api/file?t=' + encodeURIComponent(c.ticket) + '&k=' + f[1] + '&n=' + encodeURIComponent(f[2]);
+        : '/api/file?t=' + encodeURIComponent(c.ticket) + '&k=' + f[1] + '&n=' + encodeURIComponent(f[2]) + reviewFileStamp(c.ticket, f[1], f[2]);
     },
     // The Comment sheet's box (ORCH-422): screenshots, files and voice notes land on the ticket before the answer or note.
     get box() { return snapshot || typeof FEEDBACK_BOX === 'undefined' ? null : FEEDBACK_BOX; },

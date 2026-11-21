@@ -57,7 +57,6 @@ SETTINGS_OPS = (
     "release_merge.set",
     "diag.set",
     "typing.set",
-    "focus_preview.set",
     "update.auto",
     "copies.set",
     "mobile.set",
@@ -201,6 +200,9 @@ def _services_stamp():
 
 
 STATIC_EXT = (".css", ".js", ".svg", ".png", ".ico", ".woff", ".woff2")
+# /api/file with its version in the link (ORCH-524): fetched once, then served from the browser's cache
+FILE_KEPT = "private, max-age=31536000, immutable"
+FILE_STAMP_MAX = 64
 
 
 TYPING_OFF = (
@@ -217,10 +219,12 @@ def _typing_allowed(root) -> bool:
 
 
 def _link_msg(session, name: str) -> bytes:
-    from orch.pagesession import REVOKED_MSG
+    from orch.pagesession import REVOKED_MSG, WATCH_ONLY_MSG
 
     if session.revoked:
         return REVOKED_MSG.encode()
+    if getattr(session, "active", True) is False:  # a helper started this server: watch-only
+        return WATCH_ONLY_MSG.encode()
     return f"This link was already used. Open the {name} again from orch.".encode()
 
 
@@ -305,11 +309,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _refused_text(self, text: str) -> str:
         """The words of a 403 for a missing page session: a sign-in link that was used twice, else sign in."""
-        from orch.pagesession import REVOKED_MSG
+        from orch.pagesession import REVOKED_MSG, WATCH_ONLY_MSG
 
         session = getattr(self, "session", None)
         if session is not None and session.revoked:
             return REVOKED_MSG
+        if session is not None and getattr(session, "active", True) is False:
+            return WATCH_ONLY_MSG
         return text
 
     def _act_log(self, text: str) -> None:
@@ -556,7 +562,11 @@ class Handler(BaseHTTPRequestHandler):
         if passes is None:
             return self._send(503, b"Try again in a moment.", "text/plain")
         header, file = passes.issue(name, act, self._pass_tag())
-        self._send(200, json.dumps({"pass": header, "file": file, "act": act}).encode(), "application/json")
+        self._send(
+            200,
+            json.dumps({"pass": header, "file": file, "act": act, "life": framepass.LIFE}).encode(),
+            "application/json",
+        )
 
     def do_OPTIONS(self):
         """The preflight of a sandboxed add-on page's call (origin "null", the X-Orch-Frame header). It carries
@@ -770,6 +780,17 @@ class Handler(BaseHTTPRequestHandler):
             from . import update
 
             return self._send(200, json.dumps(update.update_info()).encode(), "application/json")
+        if (
+            path == "/api/session-state"
+        ):  # this browser: signed in, view only, or started by a helper (no secrets)
+            session = getattr(self, "session", None)
+            if session is None or not session.active:
+                st = "helper"
+            else:
+                st = "signed-in" if self._can_act() else "view-only"
+            return self._send(
+                200, json.dumps({"state": st}).encode(), "application/json", {"Cache-Control": "no-store"}
+            )
         if path == "/api/tool-updates":  # the tools' versions and notes: same-origin only, no secrets
             from . import update
 
@@ -800,6 +821,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps(snap).encode(), "application/json", {"Cache-Control": "no-store"}
             )
+        if (
+            path == "/api/term/stream"
+        ):  # the terminal bridge (ORCH-743): the real screen, live, wherever the person is signed in
+            if not (self._frame or self._same_origin()):
+                return self._send(403, b"forbidden", "text/plain")
+            if not (self._frame or self._signed_in()):  # a helper's screen or a shell: the sign-in, always
+                from orch.pagesession import SIGNIN_MSG
+
+                return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+            return self._term_stream(query)
         if path == "/api/sessions":  # every session for the live page (ORCH-359): built from the cached state
             if not (self._frame or self._same_origin()):
                 return self._send(403, b"forbidden", "text/plain")
@@ -944,12 +975,15 @@ class Handler(BaseHTTPRequestHandler):
                 # ORCH-517: the same pictures were sent again on every redraw (no-store). Now the browser keeps
                 # them and asks "still this?" by content hash; an unchanged file answers 304 with no body, and
                 # with the file's own sandbox rule (a 304's headers update the kept copy's headers).
+                # ORCH-524: a link that names its version (a reviewed copy's content folder, or `v`: the file's
+                # time and size, which the page adds) is kept a year without asking again: a new version of the
+                # file has a new link. A link without one keeps asking by content hash.
+                kept = one("dl") != "1" and (one("k") == "reviewed" or 0 < len(one("v")) <= FILE_STAMP_MAX)
+                cache = FILE_KEPT if kept else "private, no-cache"
                 tag = '"' + hashlib.blake2b(body, digest_size=12).hexdigest() + '"'
-                extra = {**extra, "ETag": tag, "Cache-Control": "private, no-cache"}
+                extra = {**extra, "ETag": tag, "Cache-Control": cache}
                 if tag in [t.strip() for t in (self.headers.get("If-None-Match") or "").split(",")]:
-                    return self._send(
-                        304, b"", ctype, {"ETag": tag, "Cache-Control": "private, no-cache"}, csp=csp
-                    )
+                    return self._send(304, b"", ctype, {"ETag": tag, "Cache-Control": cache}, csp=csp)
             if one("k") == "reviewed":
                 return self._send(code, body, ctype, extra, csp=csp)
             rng = re.fullmatch(r"bytes=(\d{0,15})-(\d{0,15})", self.headers.get("Range") or "")
@@ -1017,7 +1051,7 @@ class Handler(BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|live|soft|live-layer|live-history|live-start|live-model|livebar|livesessions|livegroups|livewall|livechat)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|live|soft|live-layer|live-history|live-start|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
@@ -1175,6 +1209,76 @@ class Handler(BaseHTTPRequestHandler):
         code, text = termsession.keys(self.root, self.orch_bin, str(body["ticket"]), body["items"])
         self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
 
+    def _term_stream(self, query: str):
+        """GET /api/term/stream?ticket=<id>: server-sent events of the live session's screen (termbridge.stream),
+        after a `hello` that says whether typing is on. A session that is not there: `end` with why."""
+        from . import termbridge
+
+        tid = (parse_qs(query).get("ticket") or [""])[0]
+        w = termbridge.join(self.root, self.orch_bin, tid)
+        if w == "busy":
+            return self._send(503, b"Too many open terminals.", "text/plain")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Accel-Buffering", "no")
+        if getattr(self, "_frame_cors", False):
+            self.send_header("Access-Control-Allow-Origin", "null")
+            self.send_header("Vary", "Origin")
+        self.end_headers()
+
+        def write(b: bytes) -> None:
+            self.wfile.write(b)
+            self.wfile.flush()
+
+        try:
+            # the setting only, as /api/term says it: a stream cannot carry the page secret, typing checks it
+            write(
+                f"event: hello\ndata: {json.dumps({'typing_allowed': _typing_allowed(self.root)})}\n\n".encode()
+            )
+            if isinstance(w, str):
+                write(f"event: end\ndata: {json.dumps({'state': w})}\n\n".encode())
+                return
+            termbridge.stream(w, write, lambda: _client_gone(getattr(self, "connection", None)))
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            if not isinstance(w, str):
+                termbridge.leave(w)
+
+    def _term_post(self, path: str):
+        """POST /api/term/input {ticket, data} and /api/term/size {ticket, cols, rows}: the person's own dashboard
+        session (as /api/term/keys; the sign-in is the only check, R4.1a) and the typing setting on; only into a session a page
+        of this server watches now (termbridge)."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            return self._refuse_type()
+        from . import termbridge
+
+        want = {"ticket", "data"} if path.endswith("/input") else {"ticket", "cols", "rows"}
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= termbridge.MAX_INPUT * 6 + 1024:  # a long paste, every character escaped in JSON
+                raise ValueError
+            body = json.loads(self.rfile.read(n))
+            if not isinstance(body, dict) or set(body) != want or not isinstance(body["ticket"], str):
+                raise ValueError
+        except (ValueError, RecursionError, OSError):
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        if not _typing_allowed(self.root):  # the setting is checked here, not only hidden in the page
+            return self._send(403, TYPING_OFF.encode(), "text/plain; charset=utf-8")
+        if path.endswith("/input"):
+            code, text = termbridge.type_text(body["ticket"], body["data"])
+        else:
+            code, text = termbridge.resize(body["ticket"], body["cols"], body["rows"])
+        self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
+
     def _standing_link(self, sent: str):
         """GET /go/<secret>: the person's standing sign-in link (a bookmark, see pagelaunch). Right secret: a
         redirect to a fresh one-time launch link, which the page spends as with any sign-in link. Anything else
@@ -1233,6 +1337,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._session_post()
         if path == "/api/term/keys":
             return self._term_keys()
+        if path in ("/api/term/input", "/api/term/size"):
+            return self._term_post(path)
         if path in ("/api/diag", "/api/diag/report", "/api/diag/open", "/api/diag/share"):
             return self._diag_post(path)
         px = PROXY.fullmatch(path)
