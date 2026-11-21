@@ -152,7 +152,7 @@ def test_each_mac_job_takes_its_machine_from_the_route_and_gets_a_throwaway_home
 
 def test_the_macos_workspace_part_follows_the_route_as_one_part():
     ws = (WF / "workspace.yml").read_text()
-    assert "runs-on: ${{ matrix.runs_on }}" in ws and "timeout-minutes: ${{ matrix.minutes }}" in ws
+    assert "runs-on: ${{ matrix.runs_on }}" in ws and "timeout-minutes: ${{ matrix.limit }}" in ws
     assert 'parts["macos-latest"] = 1 if own_mac else 5' in ws
     assert "uses: ./.github/actions/mac-job-home" in _job(ws, "test")
 
