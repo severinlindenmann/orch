@@ -859,7 +859,7 @@ def main(argv=None) -> int:
         if name == "finished":
             s.add_argument("--spent", help="what the helper really spent, in dollars, or unknown")
     s = p("switching", "Turn switching accounts by itself on or off")
-    s.add_argument("state", choices=("on", "off"), help="on or off")
+    s.add_argument("state", help="on or off")
     s.add_argument("--by", help=BY)
     for name in ("follow", "take-over"):
         s = p(name, "another workspace switches the accounts: follow it, or switch from here (a person only)")
