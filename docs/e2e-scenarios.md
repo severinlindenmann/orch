@@ -45,6 +45,7 @@ Format: steps → expected result.
 - P7 Private app needs `?token=`; `public = true` refused without the `public` right, allowed with it.
 - P8 Workspace lists, restarts, stops, deletes its apps and files; cannot touch Home's items (403/404).
 - P9 Admin portal (Playwright): files show no names, apps show status; restart/stop work. Public `/admin` → 404; admin port without token → 401; admin port not reachable from the public IP.
+- P10 (local, Playwright) Shared-link and app pages at 1440 and 390: the file page decrypts a shared CSV and shows its rows; a cut-short key says so; a stopped link says the file is gone; a stopped app says it is paused. No sideways scrolling, no script error.
 
 ## Relay (R)
 - R1 Admin adds Pilatus, Home, Reports with description + tags; rules Pilatus→Reports text+files+delegate+start, Home→Pilatus text → `orch relay connect` prompts work; on a machine without orch the onboarding.sh/.ps1 line installs it first, then connects.
@@ -63,6 +64,7 @@ Format: steps → expected result.
 - R13 Admin reads Pilatus↔Reports messages in the portal (decrypted); DB file shows no plain bodies.
 - R15 Phone paired with Pilatus writes "can you answer my phone" → `orch relay refresh` lists the phone, inbox shows how to reply → `orch relay send ph_…` (and by phone name) and `orch ask --phone` reach the phone (`GET /v1/phone/messages`, questions); Home, not paired with it, is refused with what to do and lists no phone.
 - R16 (local) Admin creates a subscriber for Pilatus → pull (`/events`, also with `Bearer`) lists a result update; the live stream (SSE) gets a new event; push reaches a receiver inside the scenario (test switch `ORCH_RELAY_TEST_PUSH_LOOPBACK=1` allows `http://127.0.0.1:<port>`) and its `X-Orch-Signature` verifies; rotate → old token `401`, open stream ends, new token works; delete → token `401`, gone from the list.
+- R18 (local, Playwright) Relay admin page like a person: sign in with the token form, make a group with two workspaces, allow one way under Who can do what, make a phone code for one workspace → admin API shows group and rule, a phone pairs with the page's code and reaches only that workspace; every admin page at 390 without sideways scrolling.
 
 ## Mobile (M)
 - M1 Admin adds phone for Pilatus + Home → QR/link; Simulator opens `orch://pair…` → both workspaces shown with description, Reports not.
