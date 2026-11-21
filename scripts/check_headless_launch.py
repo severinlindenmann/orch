@@ -24,7 +24,6 @@ OPTIONS = ("--use-mock-keychain", "--password-store=basic")
 HELPERS = {"e2e/headless.cjs", "e2e/headless.py"}
 # Shipped with an add-on or the orch package: they keep their own copy of the two options (checked here).
 SHIPPED = {
-    "workspace-addons/dashboard-tester/src/orch_dashboard_tester/browser.py",
     "workspace-addons/dashboard/clickthrough/run.cjs",
 }
 # This check and its test name the patterns on purpose.
