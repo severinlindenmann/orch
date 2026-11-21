@@ -13,6 +13,7 @@ waiting at most `body_drain_wait` seconds), so the close is a normal one. Handle
 from __future__ import annotations
 
 import contextlib
+import time
 
 
 class _CountedBody:
@@ -84,9 +85,11 @@ class ReadsWholeBody:
         with contextlib.suppress(OSError, ValueError):
             old = self.connection.gettimeout()
             self.connection.settimeout(self.body_drain_wait)
+            deadline = time.monotonic() + self.body_drain_wait  # for the whole drain, not each wait
             try:
-                while left > 0:
-                    chunk = self.rfile.read(min(left, 65536))
+                while left > 0 and time.monotonic() < deadline:
+                    # read1: what has come, at most one wait; a trickle cannot hold the loop
+                    chunk = self.rfile.read1(min(left, 65536))
                     if not chunk:
                         break
                     left -= len(chunk)
