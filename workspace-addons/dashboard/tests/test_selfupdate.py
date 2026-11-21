@@ -310,6 +310,20 @@ def test_orch_dashboard_while_the_background_one_runs_prints_its_link(tmp_path, 
     monkeypatch.setattr(cli, "make_server", lambda *a, **k: pytest.fail("must not bind"))
     assert cli.main(["--dir", str(tmp_path)]) == 0
     assert "The dashboard already runs for" in capsys.readouterr().out
+    # an explicit --port is a second server on purpose (tests, e2e): it binds, the background one stays
+    import errno as _errno
+
+    bound = []
+
+    def bind(root, port, **k):
+        bound.append(port)
+        raise OSError(_errno.EACCES, "stop here")
+
+    monkeypatch.setattr(cli, "_listen", lambda root: (None, None))
+    monkeypatch.setattr(cli, "make_server", bind)
+    with pytest.raises(OSError):
+        cli.main(["--dir", str(tmp_path), "serve", "--port", "8555"])
+    assert bound == [8555]
     # a self-update restart is the same pid: it binds its port again, and its record is not even checked
     monkeypatch.setattr(cli.service, "_record", lambda root: {"pid": os.getpid()})
     monkeypatch.setattr(

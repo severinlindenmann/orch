@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = ap.add_subparsers(dest="cmd")
     sv = sub.add_parser("serve", help="serve on 127.0.0.1 (default command)")
-    sv.add_argument("--port", type=int, default=DEFAULT_PORT)
+    sv.add_argument("--port", type=int, default=None)  # None: 8420, and the background one is reused
     sv.add_argument("--auto-port", action="store_true", help=argparse.SUPPRESS)  # 8420, else any free port
     sv.add_argument(
         "--ready-file", help=argparse.SUPPRESS
@@ -102,8 +102,9 @@ def main(argv: list[str] | None = None) -> int:
             return publish_snapshot(root, with_addons=args.with_addons)
         print(write_snapshot(root, Path(args.out), args.with_addons))
         return 0
-    port = getattr(args, "port", DEFAULT_PORT)
-    if not getattr(args, "auto_port", False) and not getattr(args, "ready_file", None):
+    explicit = getattr(args, "port", None) is not None
+    port = args.port if explicit else DEFAULT_PORT
+    if not explicit and not getattr(args, "auto_port", False) and not getattr(args, "ready_file", None):
         cur = _running_elsewhere(root)
         if cur:  # a person typed `orch dashboard` while the background one runs: its link, no traceback
             print(f"The dashboard already runs for {root.name}: {service.url(cur['port'])}")
