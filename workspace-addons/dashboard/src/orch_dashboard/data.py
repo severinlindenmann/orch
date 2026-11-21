@@ -1588,9 +1588,16 @@ def _auto_update_note() -> dict | None:
 def hide_unset_sharing(addons: list[dict], root: Path, orch_bin: str | None) -> list[dict]:
     """No sharing set up: the Shared links tab is not there at all (the add-on stays in Settings > Add-ons)."""
     tabs = [a for a in addons if (a.get("dashboard") or {}).get("panel") == "links"]
-    if not tabs or publish_connected(root, orch_bin):
+    if not tabs or publish_set_up(root):
         return addons
     return [{**a, "dashboard": None} if a in tabs else a for a in addons]
+
+
+def publish_set_up(root: Path) -> bool:
+    """This folder holds the saved sharing connection (read from disk only). The tab follows this and never a
+    network call: a slow or unreachable sharing server must not make the left menu entry vanish and come back."""
+    cfg = _load(root / ".orch" / "secrets" / "publish.json")
+    return isinstance(cfg, dict) and all(isinstance(cfg.get(k), str) and cfg[k] for k in ("url", "workspace", "token"))
 
 
 def publish_connected(root: Path, orch_bin: str | None) -> bool:
