@@ -233,8 +233,9 @@ async function paneData(page, dash) {
 // Step 17 (ORCH-687): a ticket's pane opens in Chat: its done step, what the helper said about it with the pull
 // request inside, an earlier question with your answer, and the waiting question as an orange card above. Answering
 // it there sends the answer (the stand-in server marks it answered, as orch does) and it moves into the chat as yours;
-// a message from the box shows at once. Terminal shows the last lines; the choice stays after a reload.
+// a message from the box shows at once. Terminal shows the helper's screen; the choice stays after a reload.
 async function chatView(page, dash) {
+  await fakeTermStream(page);  // Terminal below shows the screen (ORCH-744)
   let answered = '';
   const sent = [];
   const tweak = st => {
@@ -294,7 +295,7 @@ async function chatView(page, dash) {
   await page.click(`${pane} [data-key="live-msg-send"]`);
   await page.waitForFunction(c => /You · [^]*Please also try a PDF\./.test(document.querySelector(c)?.textContent || ''), chat, { timeout: 10000 });
   if (sent.join() !== 'Please also try a PDF.') throw new Error('the message sent was ' + JSON.stringify(sent));
-  // Terminal: the last lines; the choice stays after a reload; back to Chat
+  // Terminal: the helper's screen; the choice stays after a reload; back to Chat
   const pick = async v => {
     if (await page.isVisible(`${pane} [data-key="live-view-${v}"]`)) return page.click(`${pane} [data-key="live-view-${v}"]`);
     await page.click(`${pane} [data-key="live-pane-more"]`);  // a narrow pane: the choice is in More
@@ -302,7 +303,8 @@ async function chatView(page, dash) {
   };
   await pick('term');
   await page.waitForFunction(p => document.querySelector(p + ' [data-live-body]')?.dataset.liveView === 'term', pane, { timeout: 5000 });
-  if (!(await page.isVisible(`${pane} [data-live-lines]`)) || await page.isVisible(chat)) throw new Error('Terminal does not show the last lines instead of the chat');
+  await page.waitForSelector(`${pane} .term`, { timeout: 5000 });  // the real screen (ORCH-744) where the last lines were
+  if (await page.isVisible(chat)) throw new Error('Terminal does not show the screen instead of the chat');
   await page.reload();
   await mainHasText(page);
   await page.waitForFunction(p => document.querySelector(p + ' [data-live-body]')?.dataset.liveView === 'term', pane, { timeout: 10000 });
@@ -480,10 +482,31 @@ async function barIsOneRow(page) {
   if (r.bottom > r.vh + 1) throw new Error('the bar is below the screen');
 }
 
+// The terminal bridge's stream (GET /api/term/stream) needs the sign-in, which the click-through does not have: a
+// pane that shows Terminal gets a stand-in stream with a fake screen, so no step reads a refusal (ORCH-880).
+async function fakeTermStream(page) {
+  const screen = { cols: 80, rows: 24, data: Buffer.from(TERM_SCREEN, 'utf8').toString('base64') };
+  // the stream stays open like the bridge's (a routed answer would end and make the page reconnect): a stand-in
+  // EventSource for this one address sends hello and the screen once
+  await page.addInitScript(sc => {
+    const Real = window.EventSource;
+    window.EventSource = function (url) {
+      if (!/\/api\/term\/stream\?/.test(String(url))) return new Real(url);
+      const on = {}, es = { readyState: 1, url: String(url), addEventListener: (t, f) => { on[t] = f; }, close() { es.readyState = 2; } };
+      window.termStreams = (window.termStreams || []).concat(es.url);
+      setTimeout(() => { on.hello?.({ data: '{"typing_allowed": true, "page": "pg-ct"}' }); on.screen?.({ data: JSON.stringify(sc) }); }, 50);
+      return es;
+    };
+  }, screen);
+  // one page types at a time (ORCH-883): Let me type claims it; the stand-in always says yes
+  await page.route('**/api/term/typing', route => route.fulfill({ json: {} }));
+}
+
 // Focus, for the steps after step 3: the same dressing of the page's state as focusIsNew
 // (the live-session add-on), plus the one ticket of the test workspace marked as having a working helper.
 async function liveFocus(page) {
   let one = null;
+  await fakeTermStream(page);
   const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
     description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
     dashboard: { label: 'Focus', icon: 'target', order: 20 } };
@@ -505,6 +528,103 @@ async function liveFocus(page) {
     last_at: null }] : [] } }));
   await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
     body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
+}
+
+// Step 22: the terminal view (ORCH-744) on the terminal bridge (ORCH-743). The stream (GET /api/term/stream) is fake
+// data here; what is typed and the sizes are only recorded. Watching only first: keys and a paste send nothing; Let me
+// type turns typing on; a paste with a line end asks first; Ctrl+C with a selection copies instead of stopping.
+const TERM_SCREEN = ['\x1b[1m⏺ \x1b[0mRunning the tests for the export.', '  \x1b[32m✔\x1b[0m counts skills per day \x1b[2m(41 ms)\x1b[0m',
+  '  \x1b[32m✔\x1b[0m empty workspace shows zero', '  \x1b[31m✖\x1b[0m week view adds up to the day view', '',
+  '\x1b[7m> \x1b[0m'].join('\r\n');
+async function terminalView(page, dash, width) {
+  const typed = [], sizes = [];
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await liveFocus(page);  // with the stand-in stream (fakeTermStream)
+  await page.route('**/api/term/input', route => { typed.push(route.request().postDataJSON().data); route.fulfill({ json: {} }); });
+  await page.route('**/api/term/size', route => { sizes.push(route.request().postDataJSON()); route.fulfill({ json: {} }); });
+  await page.addInitScript(() => { try { Object.keys(localStorage).filter(k => k.indexOf('orch.live.') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.click('[data-key="live-open"]');
+  await page.waitForSelector('[data-key="live-pane"]', { timeout: 5000 });
+  // a ticket's pane shows the terminal in Terminal view (Chat | Terminal: in the header, or in More when the pane is
+  // narrow); before that switch is on develop, the plain terminal session shows it (it has no chat view)
+  let pane = '.live-pane';
+  if (await page.$('[data-key="live-view-term"]')) await page.click('[data-key="live-view-term"]');
+  else if (await page.$('[data-key="live-pane-more"]') && await (async () => { await page.click('[data-key="live-pane-more"]'); return !!await page.$('[data-key="live-more-view"]'); })()) await page.click('[data-key="live-more-view"]');
+  else {
+    await page.keyboard.press('Escape').catch(() => {});
+    const id = 't_ntterm001', made = [];
+    let last = null;
+    const dress = st => { st.sessions = made.map(() => ({ id, kind: 'terminal', title: 'Plain terminal', open: true })); st.rev = 'pt-' + made.length; last = st; return st; };
+    await page.route(/\/api\/state(\?.*)?$/, async route => {
+      const res = await route.fetch();
+      if (res.status() !== 200) return route.fulfill({ response: res });
+      const st = await res.json();
+      st.addons = [...(st.addons || []).filter(a => a.name !== 'focus'), { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+        description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true }, dashboard: { label: 'Focus', icon: 'target', order: 20 } }];
+      st.settings = { ...(st.settings || {}), focus_preview_on: true };
+      route.fulfill({ response: res, json: st.unchanged && last ? dress({ ...last }) : dress(st) });
+    });
+    await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { lines: 8, age_ms: 0, sessions: made.map(() => ({ id, key: '', title: 'Plain terminal',
+      kind: 'terminal', status: 'idle', word: 'Open', detail: '', waiting_on: [], question: null, lines: [], tool: null, model: null, mode: null,
+      opened_at: null, open_seconds: null, idle_seconds: null, closes_in_seconds: null, last_at: null, pinned: true, name: null })) } }));
+    await page.route('**/api/act', async route => {
+      const body = route.request().postDataJSON();
+      if (body.op !== 'session.new' || body.args.kind !== 'terminal') return route.continue();
+      made.push(id);
+      route.fulfill({ json: dress({ ...last }) });
+    });
+    await page.reload();  // the page reads the dressed state from the start
+    await mainHasText(page);
+    await page.waitForSelector('#live-bar [data-lbar-new]', { timeout: 10000 });
+    await page.click('#live-bar [data-lbar-new]');
+    await page.click('#live-bar [data-lbar-kind="terminal"]');
+    pane = `#live-dock .live-pane[data-session="${id}"]`;
+    await page.waitForSelector(pane, { timeout: 10000 });
+  }
+  await page.waitForSelector(pane + ' .term[data-state="live"] .xterm canvas', { timeout: 5000 });
+  if (!(await page.evaluate(() => window.termStreams || [])).some(u => /\/api\/term\/stream\?ticket=t_/.test(u))) throw new Error('the pane did not open the bridge stream');
+  const term = pane + ' .term', box = pane + ' .term .xterm-screen';
+  if (await page.$eval(term, el => el.dataset.typing) !== 'off') throw new Error('the terminal did not start watching only');
+  // the screen text, read back through Copy (the screen is drawn on a canvas)
+  await page.click(term + ' [data-key="term-copy"]');
+  if (!/week view adds up/.test(await page.evaluate(() => navigator.clipboard.readText()))) throw new Error('Copy did not copy the helper\'s screen');
+  // watching only: a key and a paste send nothing
+  await page.click(box);
+  await page.keyboard.type('x');
+  await page.$eval(term + ' .xterm-helper-textarea', el => { const d = new DataTransfer(); d.setData('text/plain', 'ls'); el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: d, bubbles: true, cancelable: true })); });
+  await page.waitForTimeout(150);
+  if (typed.length) throw new Error('keys went out while watching only');
+  // Let me type, then a command
+  await page.click(term + ' [data-key="term-type"]');
+  if (await page.$eval(term, el => el.dataset.typing) !== 'on') throw new Error('Let me type did not turn typing on');
+  // the keys go where the screen has the keyboard: wait for it, then for what went out (a busy first width is slow)
+  await page.waitForFunction(t => document.activeElement?.matches(t + ' .xterm-helper-textarea'), term, { timeout: 3000 });
+  await page.keyboard.type('ls');
+  await page.keyboard.press('Enter');
+  for (let i = 0; i < 20 && typed.join('') !== 'ls\r'; i++) await page.waitForTimeout(100);
+  if (typed.join('') !== 'ls\r') throw new Error(`typing sent ${JSON.stringify(typed)}`);
+  // a paste with a line end asks first; Cancel sends nothing
+  await page.$eval(term + ' .xterm-helper-textarea', el => { const d = new DataTransfer(); d.setData('text/plain', 'echo one\necho two\n'); el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: d, bubbles: true, cancelable: true })); });
+  await page.waitForSelector(term + ' .term-ask:not([hidden])', { timeout: 2000 });
+  if (!/2 lines/.test(await page.textContent(term + ' .term-ask'))) throw new Error('the paste question does not say how many lines');
+  await page.click(term + ' [data-key="term-paste-no"]');
+  // select text with the mouse and press Ctrl+C: it copies, nothing goes to the helper
+  const r = await page.$eval(box, el => { const b = el.getBoundingClientRect(); return { x: b.x, y: b.y }; });
+  await page.mouse.move(r.x + 4, r.y + 4);
+  await page.mouse.down();
+  await page.mouse.move(r.x + 200, r.y + 30, { steps: 5 });
+  await page.mouse.up();
+  await page.keyboard.press('Control+c');
+  await page.waitForTimeout(150);
+  if (typed.join('') !== 'ls\r') throw new Error(`a cancelled paste or Ctrl+C with a selection went out: ${JSON.stringify(typed)}`);
+  // the screen follows its box while typing (desktop: the pane is a different size than 80 x 24)
+  await page.waitForTimeout(400);
+  if (width > 720 && !sizes.length) throw new Error('no new size went to the helper while typing');
+  if (sizes.some(z => !(z.cols >= 10 && z.cols <= 500 && z.rows >= 3 && z.rows <= 300))) throw new Error(`a size out of range: ${JSON.stringify(sizes)}`);
+  await page.click(box);
+  await noSideways(page);
 }
 
 // Step 10: the layer in every place, kept across a page change and a reload.
@@ -1066,6 +1186,9 @@ async function noTicket(page, dash, width) {
     detail: '', waiting_on: [], question: null, lines: [], tool: kind === 'terminal' ? null : 'Claude Code', model: null,
     mode: kind === 'terminal' ? null : 'live', opened_at: null, open_seconds: null, idle_seconds: null, closes_in_seconds: null, last_at: null,
     pinned: true, name: null })) } }));  // orch pins a session without a ticket until it is unpinned (ORCH-361)
+  // the plain terminal opens the bridge stream (ORCH-743/744); here it answers that the screen is not there
+  await page.route(/\/api\/term\/stream(\?.*)?$/, route => route.fulfill({ status: 200, contentType: 'text/event-stream',
+    body: 'retry: 600000\n\nevent: hello\ndata: {"typing_allowed": false}\n\nevent: end\ndata: {"state": "none"}\n\n' }));
   await page.route('**/api/act', async route => {
     const body = route.request().postDataJSON();
     if (body.op !== 'session.new') return route.continue();
@@ -1919,7 +2042,7 @@ const STEPS = [
       'Switch to Terminal, reload, switch back to Chat.'],
     see: ['Plain messages with time; done steps and other events as lines between them; the pull request inside the message.',
       'The waiting question is an orange card above the chat, not a message; once answered it moves into the chat as yours.',
-      'A sent message shows at once; Terminal shows the last lines and the choice stays after a reload.'],
+      'A sent message shows at once; Terminal shows the helper’s screen and the choice stays after a reload.'],
     run: ({ page, dash }) => chatView(page, dash),
     draft: { q: '?page=focus&cur=ORCH-228&view=zoom' },
   },
@@ -1958,10 +2081,14 @@ const STEPS = [
   },
   {
     n: 22, pic: 'fd-22-terminal', area: 'terminal', title: 'A real terminal: type, select, copy and paste', feature: [5],
-    waits: T.terminal,
-    do: ['Switch a session to Terminal.', 'Click in it and type a command, select text, copy it, paste it back.'],
-    see: ['It behaves like the Terminal app: typing, selection, copy and paste.', 'Copy all copies the screen text.',
-      'It can only be reached from this computer.'],
+    do: ['Switch a session to Terminal.', 'Press a key: nothing is sent (watching only).', 'Turn on Let me type, type a command and press Enter.',
+      'Paste two lines, then Cancel.', 'Select text and copy it.'],
+    see: ['The helper\'s real screen with its colours; it starts watching only.', 'Keys go to the helper only after Let me type.',
+      'A paste with a line end asks first.', 'Selecting and copying works like on any page; Copy copies the selection or the screen.',
+      'While typing the screen follows the size of its pane.', 'It can only be reached from this computer (the bridge, ORCH-743).'],
+    async run({ page, dash, width }) {
+      await terminalView(page, dash, width);
+    },
     draft: { q: '?page=focus&cur=ORCH-232&view=zoom&term=1' },
   },
   {
