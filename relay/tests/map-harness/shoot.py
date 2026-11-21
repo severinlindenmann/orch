@@ -1,4 +1,4 @@
-"""Screenshots of every harness scenario: `uv run --with playwright python shoot.py <harness-url> <out-dir> [tag]`.
+"""Screenshots of every harness scenario: `uv run --with playwright==1.64.1 python shoot.py <harness-url> <out-dir> [tag]`.
 
 Per scenario: the Overview page at 1440 and 720 wide (full page), one hover shot at 1440 on the busiest
 node, and the 390 px list for S2 and S3.

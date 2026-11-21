@@ -110,3 +110,15 @@ def test_merge_alone_is_on_by_default_and_reads_only_true_or_false(ws):
     (ws / ".orch").mkdir(exist_ok=True)
     (ws / ".orch" / "config.toml").write_text('[pull_requests]\nmerge_alone = "no"\n')
     assert settings.merge_alone(ws) is True
+
+
+def test_a_member_of_a_red_group_is_never_merged_alone_on_its_light_checks(ws):
+    """ORCH-909: merge_alone on (default): the one that broke the group is checked again in a group of its own."""
+    for n in (2, 3):
+        store.add(ws, url(n), None, "agent:t", login="bot")
+    gh = NamedChecks({n: {"fresh": True} for n in (2, 3)}, frozenset({"clock / suites"}))
+    r, calls = make(ws, gh, FakeGit(), red_on_base={3})
+    r.run()
+    assert gh.direct == []  # neither merged on its own light checks
+    assert [gh.groups[c] for c in calls][:3] == [[2, 3], [2], [3]]
+    assert states(ws) == {2: "merged", 3: "out"}
