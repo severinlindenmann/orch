@@ -118,6 +118,22 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+AGENT_RESTART_WARNING = (
+    "an agent restart of a dashboard that other computers open leaves them locked out. "
+    "Restart it yourself: orch stop, then orch start."
+)
+
+
+def _by_agent() -> bool:
+    from orch import tickets
+
+    return bool(tickets.agent_tool())
+
+
+def _remote_on(root: Path) -> bool:
+    return _listen(root)[0] is not None
+
+
 def _listen(root: Path) -> tuple[tuple[str, int] | None, str | None]:
     """(address, port) for other computers from the [dashboard] setting, or None; a broken setting says why."""
     try:
@@ -201,6 +217,11 @@ def _service(args, root: Path) -> int:
     def out(data: dict, text: str) -> None:
         print(json.dumps(data) if args.json else text)
 
+    warn = (
+        AGENT_RESTART_WARNING if args.cmd in ("start", "stop") and _remote_on(root) and _by_agent() else None
+    )
+    if warn and not args.json:
+        print(f"Warning: {warn}", file=sys.stderr)
     if args.cmd == "start":
         try:
             cur = service.start(root)
@@ -212,7 +233,7 @@ def _service(args, root: Path) -> int:
             return 2
         u = service.url(cur["port"])
         out(
-            {"running": True, "pid": cur["pid"], "url": u},
+            {"running": True, "pid": cur["pid"], "url": u, **({"warning": warn} if warn else {})},
             f"Dashboard for {root.name}: {u}  (stop: orch dashboard stop)",
         )
     elif args.cmd == "stop":
@@ -221,7 +242,7 @@ def _service(args, root: Path) -> int:
         except RuntimeError as e:
             res = "not verified: " + str(e)
         if res == "stopped":
-            out({"stopped": True}, "Dashboard stopped.")
+            out({"stopped": True, **({"warning": warn} if warn else {})}, "Dashboard stopped.")
         elif res == "not running":
             out({"stopped": False}, "The dashboard was not running.")
         else:
