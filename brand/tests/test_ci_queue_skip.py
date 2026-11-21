@@ -61,7 +61,8 @@ def test_windows_parts_skip_queue_groups_and_run_on_every_develop_push():
     windows = line(ws, "windows")
     assert "!startsWith(github.head_ref, 'orch-queue/')" in windows
     assert "(github.event_name == 'push' && github.ref == 'refs/heads/develop')" in windows
-    assert line(ws, "if").startswith("needs.changes.outputs.proven == 'true' ||")
+    # (unless the Windows parts run on our own Windows VM, ORCH-1127, test_winvm_windows.py)
+    assert line(ws, "if").startswith("(needs.changes.outputs.proven != 'true' || vars.WINDOWS_RUNNER != 'winvm') && (needs.changes.outputs.proven == 'true' ||")
     # on a proven push only the Windows parts run: no Linux, no macOS again
     assert line(ws, "linux") == "${{ needs.changes.outputs.proven != 'true' }}"
     assert "needs.changes.outputs.proven != 'true'" in line(ws, "full")

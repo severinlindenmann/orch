@@ -13,4 +13,13 @@ Set-Location $src
 bash -c 'export PATH="$HOME/.local/bin:$PATH"; bash e2e/ci/cli-smoke.sh focus'
 $rc = $LASTEXITCODE
 "STEP smoke $([int]$t.Elapsed.TotalSeconds)s rc=$rc" | Write-Host
+# The junction check of workspace.yml: .claude\skills holds one link per skill (a copy where links are refused, #215).
+$d = "C:\ci\junction"; New-Item -ItemType Directory -Force $d | Out-Null; Set-Location $d
+$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"; $env:ORCH_AGENT = "claude"
+orch init | Out-Null
+$item = Get-Item "$d\.claude\skills\orch" -Force -ErrorAction SilentlyContinue
+if (-not $item -or ($item.LinkType -ne "Junction" -and -not (Test-Path "$d\.claude\skills\orch\.orch-copy"))) {
+    "junction check: expected .claude\skills\orch to be a junction, got '$($item.LinkType)'" | Write-Host
+    if ($rc -eq 0) { $rc = 1 }
+} else { "junction check ok" | Write-Host }
 exit $rc

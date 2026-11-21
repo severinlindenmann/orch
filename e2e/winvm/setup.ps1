@@ -2,14 +2,25 @@
 # The golden image is a bare Windows 11 ARM64: no git, no uv, no Python. This installs Git for Windows (portable,
 # ARM64, with bash for the CLI smoke), uv and an x64 Python (packages without ARM64 wheels, e.g. cryptography),
 # then unpacks the source zip pushed to C:\ci\src.zip into C:\ci\src as a one-commit git repository.
+# Every download is pinned to one version and its SHA-256 (from the release page) and checked before it runs.
+# uv checks the hash of the Python it installs itself. To update: change a version and its hash together.
 param(
     [string]$GitVersion = "2.56.1",
+    [string]$GitSha256 = "0dca0d9f760924a7e6752235d7dd6eb1a9b508ee714b6ed15d89252e5a58c5c9",
+    [string]$UvVersion = "0.13.9",
+    [string]$UvSha256 = "72eed595983a4d7d22d79f21065b0f4479cc7e5c7a89104bb410c8f47559a878",
     [string]$Python = "cpython-3.13-windows-x86_64-none"
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $ci = "C:\ci"
 New-Item -ItemType Directory -Force $ci | Out-Null
+
+function Get-Checked($url, $out, $sha) {
+    Invoke-WebRequest -UseBasicParsing $url -OutFile $out
+    $got = (Get-FileHash -Algorithm SHA256 $out).Hash.ToLower()
+    if ($got -ne $sha.ToLower()) { Remove-Item -Force $out; throw "SHA-256 of $url is $got, expected $sha" }
+}
 
 function Step($name, [scriptblock]$body) {
     $t = [Diagnostics.Stopwatch]::StartNew()
@@ -20,7 +31,7 @@ function Step($name, [scriptblock]$body) {
 Step "git" {
     $exe = "$ci\PortableGit.7z.exe"
     $url = "https://github.com/git-for-windows/git/releases/download/v$GitVersion.windows.1/PortableGit-$GitVersion-arm64.7z.exe"
-    Invoke-WebRequest -UseBasicParsing $url -OutFile $exe
+    Get-Checked $url $exe $GitSha256
     & $exe "-o$ci\git" -y | Out-Null
     if (-not (Test-Path "$ci\git\cmd\git.exe")) { throw "PortableGit did not unpack" }
 }
@@ -30,7 +41,10 @@ $add = "$ci\git\cmd;$ci\git\bin;$ci\git\usr\bin;$env:USERPROFILE\.local\bin"
 $env:Path = "$add;$env:Path"
 
 Step "uv" {
-    Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
+    $zip = "$ci\uv.zip"
+    Get-Checked "https://github.com/astral-sh/uv/releases/download/$UvVersion/uv-aarch64-pc-windows-msvc.zip" $zip $UvSha256
+    New-Item -ItemType Directory -Force "$env:USERPROFILE\.local\bin" | Out-Null
+    Expand-Archive -Force $zip "$env:USERPROFILE\.local\bin"
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw "uv not on PATH" }
 }
 Step "python" {
