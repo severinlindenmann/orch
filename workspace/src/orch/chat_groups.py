@@ -1632,6 +1632,8 @@ def remove_member(root: Path, tid: str, ws: str, by: str = "human:owner", reason
         # the leaver still hears that it was removed (the event goes to it too)
         g["members"][ws]["left_at"] = tickets.now()
         g["members"][ws]["reason"] = reason
+        if reason == "removed":
+            g["members"][ws]["removed_by"] = _changed_by(by, g["host"])  # chat info: who removed it
         _persist(root)  # removed first: a crash before the sweep still sends it nothing new (stale_copy)
         dropped = _drop_queued(root, g, ws)
         notify = _active(g) + ([ws] if reason == "removed" else [])
@@ -3971,6 +3973,7 @@ def view(root: Path) -> dict:
                         "joined_at": m.get("joined_at"),
                         "left_at": m.get("left_at"),
                         "reason": m.get("reason"),
+                        "removed_by": m.get("removed_by"),
                         "seen": g["seen"].get(ws),
                         "host": ws == g["host"],
                         "added_by": m.get("added_by") if ws != g["host"] else None,

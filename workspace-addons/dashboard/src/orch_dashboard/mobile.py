@@ -289,6 +289,11 @@ def load_groups(root: Path, orch_bin: str | None) -> dict | None:
                 "host": bool(x.get("host")),
                 "joined_at": _short(x.get("joined_at"), 30),
                 "left_at": _short(x.get("left_at"), 30),
+                "reason": _short(x.get("reason"), 12),
+                "added_by": _short(x.get("added_by"), 20),
+                "removed_by": _short(x.get("removed_by"), 20),
+                "orch_version": _short(x.get("orch_version"), 40),
+                "chat_groups": x.get("chat_groups") if type(x.get("chat_groups")) is int else None,
                 "seen": x.get("seen") if isinstance(x.get("seen"), int) else None,
             }
             for x in rows

@@ -3079,3 +3079,15 @@ def test_version_2_fields_are_optional():
         for k in ("added_by", "removed_by"):
             (b.get("group_event") or {}).pop(k, None)
         assert cg.message_errors(m) == [], f.name
+
+
+def test_chat_info_says_who_added_and_removed_a_member(proj, run, rel, host, monkeypatch):
+    """Chat info on the dashboard (ORCH-1174): a person's add and remove read "you"; a helper cannot add (2.3)."""
+
+    assert run("relay", "group", "add", host, HOME)[0] == 0  # the test runs as a person (human:test)
+    with monkeypatch.context() as mp:
+        mp.setattr(tickets, "require_human", lambda *a, **k: None)
+        assert run("relay", "group", "remove", host, "Home")[0] == 0
+    members = {m["ws"]: m for m in cg.view(proj)["hosted"][0]["members"]}
+    assert members[HOME]["added_by"] == "you" and members[HOME]["removed_by"] == "you"
+    assert members[WS]["added_by"] is None  # the host's own entry

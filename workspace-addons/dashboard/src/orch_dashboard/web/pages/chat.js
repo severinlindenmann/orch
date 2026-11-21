@@ -35,7 +35,8 @@ function chatJoinedGroup(g) {
   return {id:g.id, host:g.host, title:g.title, key:'', closed:g.closed || g.left, done:g.closed || g.left, readOnly:true, members, messages, last:last?.text || '', last_at:last?.at, unread:0,
     shared_ticket:card && typeof card === 'object' ? card : null, started:times[0], finished:times.at(-1)};
 }
-const chatGroups = () => [...chatObjects(state?.groups?.hosted).map(chatHostedGroup), ...chatObjects(state?.groups?.joined).map(chatJoinedGroup)];
+// let: the Chats page's ticket chats (pages/ticketchat.js) show a ticket's own group inside its ticket chat.
+let chatGroups = () => [...chatObjects(state?.groups?.hosted).map(chatHostedGroup), ...chatObjects(state?.groups?.joined).map(chatJoinedGroup)];
 const chatGroup = () => chatGroups().find(g => g.id === chatUi.open);
 // One rule for both places: a finished group is only under Earlier → Finished groups, a live one only under Groups.
 const chatFinished = g => !!(g.done || g.closed);
