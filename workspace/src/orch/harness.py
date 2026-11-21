@@ -152,11 +152,25 @@ def combined(root: Path) -> str:
     files.sort(key=lambda p: (p.name.startswith("addon-"), p.name))  # core first, then add-ons by name
     parts = []
     for p in files:
+        if _skill_hidden(root, p.name):
+            continue  # a retired skill (or one not for this system) is not offered: its block goes too
         text = p.read_text(encoding="utf-8").rstrip("\n") + "\n"
         if p.name.startswith("addon-"):
             text += _addon_extra(root, p.name[len("addon-") : -len(".md")])
         parts.append(text)
     return "\n".join(parts)
+
+
+def _skill_hidden(root: Path, block_name: str) -> bool:
+    """The skill a block file belongs to (<name>.md -> skills/<name>, addon-<n>.md -> skills/orch-<n>) is hidden."""
+    from orch import skillstatus
+
+    stem = block_name[: -len(".md")]
+    skill = f"orch-{stem[len('addon-') :]}" if stem.startswith("addon-") else stem
+    d = harness_dir(root) / "skills" / skill
+    if not safe_skill_name(skill) or is_link(d) or not (d / "SKILL.md").is_file():
+        return False
+    return skillstatus.hidden_reason(d) is not None
 
 
 EXTRA_CAP = 3072  # bytes of live text one add-on may add under its block
