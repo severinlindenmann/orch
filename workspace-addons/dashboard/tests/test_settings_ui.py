@@ -405,10 +405,18 @@ def test_shared_links_tab_stays_when_the_sharing_server_is_unreachable(tmp_path,
 
     from orch_dashboard import data
 
-    rows = [{"name": "publish", "active": True, "dashboard": {"label": "Shared links", "icon": "link", "panel": "links"}}]
+    rows = [
+        {
+            "name": "publish",
+            "active": True,
+            "dashboard": {"label": "Shared links", "icon": "link", "panel": "links"},
+        }
+    ]
     sec = tmp_path / ".orch" / "secrets"
     sec.mkdir(parents=True)
-    (sec / "publish.json").write_text(json.dumps({"url": "https://x.example", "workspace": "w", "token": "t"}))
+    (sec / "publish.json").write_text(
+        json.dumps({"url": "https://x.example", "workspace": "w", "token": "t"})
+    )
     monkeypatch.setattr(data, "run_orch", lambda *a, **k: None)  # the server and the CLI both fail
     out = data.hide_unset_sharing(data.load_addons(tmp_path, "orch", rows), tmp_path, "orch")
     assert out[0]["dashboard"]

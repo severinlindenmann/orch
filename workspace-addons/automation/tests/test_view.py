@@ -391,7 +391,9 @@ def test_page_has_the_accepted_headings_and_footnote(ws, monkeypatch):
     v = build(ws, T(7))
     check(v)
     (table,) = blocks(v, "table")
-    assert table["title"] == "Repeating" and table["meta"] == "2"  # ORCH-537: titled since Once has its own table
+    assert (
+        table["title"] == "Repeating" and table["meta"] == "2"
+    )  # ORCH-537: titled since Once has its own table
     (week,) = blocks(v, "calendar")
     assert week["title"] == "Coming up" and "Workspace time" not in week["meta"]
     (runs,) = blocks(v, "list", "Recent starts")
@@ -600,7 +602,12 @@ def test_long_tables_show_five_rows_then_show_more(ws, monkeypatch):
 
     monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
     for n in range(8):
-        add_ticket(ws, f"t_wake{n:04d}", title=f"Wake {n}", waiting_on={"kind": "time", "until": "2026-11-04T10:00:00Z"})
+        add_ticket(
+            ws,
+            f"t_wake{n:04d}",
+            title=f"Wake {n}",
+            waiting_on={"kind": "time", "until": "2026-11-04T10:00:00Z"},
+        )
     v = build(ws, T(8))
     check(v)
     assert not blocks(v, "table", "Repeating")

@@ -589,7 +589,8 @@ def build(root: Path, now: datetime | None = None) -> dict:
                         {"key": "next", "label": "Starts", "type": "text"},
                     ],
                     "rows": [
-                        {**r, "cells": {k: r["cells"][k] for k in ("schedule", "next")}} for r in once_rows[:ROWS]
+                        {**r, "cells": {k: r["cells"][k] for k in ("schedule", "next")}}
+                        for r in once_rows[:ROWS]
                     ],
                     "more": max(0, len(once_rows) - ROWS),
                 }
@@ -663,7 +664,11 @@ def build(root: Path, now: datetime | None = None) -> dict:
         if started:
             recent.append(
                 {
-                    "cells": {"ticket": _name(started), "when": f"{_at.astimezone():%a %H:%M}", "result": "Started"},
+                    "cells": {
+                        "ticket": _name(started),
+                        "when": f"{_at.astimezone():%a %H:%M}",
+                        "result": "Started",
+                    },
                     "link": started["id"],
                 }
             )

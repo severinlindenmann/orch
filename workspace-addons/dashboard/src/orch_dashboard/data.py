@@ -1612,7 +1612,9 @@ def publish_set_up(root: Path) -> bool:
     """This folder holds the saved sharing connection (read from disk only). The tab follows this and never a
     network call: a slow or unreachable sharing server must not make the left menu entry vanish and come back."""
     cfg = _load(root / ".orch" / "secrets" / "publish.json")
-    return isinstance(cfg, dict) and all(isinstance(cfg.get(k), str) and cfg[k] for k in ("url", "workspace", "token"))
+    return isinstance(cfg, dict) and all(
+        isinstance(cfg.get(k), str) and cfg[k] for k in ("url", "workspace", "token")
+    )
 
 
 def publish_connected(root: Path, orch_bin: str | None) -> bool:

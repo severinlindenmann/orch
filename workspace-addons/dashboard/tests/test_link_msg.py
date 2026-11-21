@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 pytest.importorskip("orch")
-from orch.pagesession import WATCH_ONLY_MSG, REVOKED_MSG
+from orch.pagesession import REVOKED_MSG, WATCH_ONLY_MSG
 
 from orch_dashboard.server import _link_msg
 

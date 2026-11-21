@@ -265,7 +265,8 @@ def start(
     root: Path, by: str, at: datetime | None = None, lanes: tuple[str, ...] = DEFAULT_LANES, run: bool = True
 ) -> dict:
     """Open the dated Triage ticket with the list and start one helper on it. Refused while one is open.
-    run=False only opens the ticket: the dashboard opens it at once and starts the helper there (ORCH-1096)."""
+    run=False only opens the ticket: the dashboard opens it at once and starts the helper there
+    (ORCH-1096)."""
     if not lanes:
         raise Refused("Pick at least one lane to triage.")
     if cur := open_triage(root):

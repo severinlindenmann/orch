@@ -184,13 +184,17 @@ def page_asset(name: str) -> bytes:
 
 
 _PORTS: dict[tuple[str, str], tuple[float, int | None, object]] = {}
-STARTING_RETRY = 2  # seconds: the dashboard page opens a (re)starting add-on page again after this (pages/settings.js)
+STARTING_RETRY = (
+    2  # seconds: the dashboard page opens a (re)starting add-on page again after this (pages/settings.js)
+)
 # The page a frame gets while its add-on's service is (re)starting (ORCH-1055). Its one script tells the dashboard
 # page, which opens the frame again: a reload from inside the sandboxed frame would be cross-site and refused.
 STARTING_SCRIPT = b"parent.postMessage({orch:'frame-starting'},'*')"
 STARTING_PAGE = (
     b'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Starting</title></head>'
-    b"<body><script>" + STARTING_SCRIPT + b"</script></body></html>"  # no words: the dashboard shows its skeleton
+    b"<body><script>"
+    + STARTING_SCRIPT
+    + b"</script></body></html>"  # no words: the dashboard shows its skeleton
 )
 STARTING_CSP = (
     "default-src 'none'; script-src 'sha256-"
@@ -725,7 +729,9 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ValueError):
                 moved = _PORTS.pop((str(self.root), name), None)
                 if attempt or method != "GET" or moved is None:
-                    if self._opening_page(method):  # restarting right now (an add-on add/remove): try again soon
+                    if self._opening_page(
+                        method
+                    ):  # restarting right now (an add-on add/remove): try again soon
                         return self._send_starting()
                     return self._send(502, b"That page is not answering.", "text/plain; charset=utf-8")
                 port = self._upstream_port(name)  # the add-on may have restarted on another port: look once
