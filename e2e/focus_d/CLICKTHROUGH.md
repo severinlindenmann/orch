@@ -223,6 +223,7 @@ Must be seen:
 - The split stays while the page changes.
 - Closing a pane gives its room to the others.
 - On a phone one session shows at a time and there is no add beside.
+- A waiting question shows its orange card with answer buttons in every pane; the header is one row of icon buttons beside the title.
 
 ## 13. Focus stays open with typed text and split while you change pages
 
@@ -465,6 +466,7 @@ Must be seen:
 - The wall is one column.
 - The layer opens at the bottom and shows one session; right falls back to bottom.
 - Nothing scrolls sideways; every button can be reached.
+- The layer is a sheet over most of the screen with the question card and its buttons; the Focus bar under it stays one row.
 
 ## 26. Earlier sessions in the History tab, reopened with one click
 
