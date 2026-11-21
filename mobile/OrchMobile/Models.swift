@@ -741,6 +741,13 @@ struct SettingsPatch: Codable, Sendable, Equatable {
     var isValid: Bool { (speak != nil || swissGerman != nil || ttsCapUsd != nil) && (ttsCapUsd.map { $0 >= 0 && $0 <= 100 } ?? true) }
 }
 /// `POST /v1/phone/blobs`.
+/// The wire envelope of a signed message: `{sig_v, key_id, signed, sig}` (contracts/msgsig.md).
+struct SignedEnvelope: Codable, Sendable, Equatable {
+    let sigV: Int
+    let keyId: String
+    let signed: String
+    let sig: String
+}
 struct BlobUpload: Codable, Sendable, Equatable { let blobId: String; let size: Int; let sha256: String }
 /// `POST /v1/phone/send` and `/answer`: `duplicate` is true when the relay already had this client_id.
 struct SendReceipt: Codable, Sendable, Equatable { let id: String; var clientId: String? = nil; var duplicate: Bool? = nil }
@@ -771,6 +778,8 @@ struct SendRequest: Codable, Sendable, Equatable {
     var voice: VoiceMemo? = nil
     var location: LocationShare? = nil
     var feedback: Feedback? = nil
+    /// The phone's signature over the message it wrote (ORCH-1204, contracts/msgsig.md); nil = unsigned.
+    var envelope: SignedEnvelope? = nil
 
     enum Problem: Error, Equatable { case nothingToSend, badTarget, badLocation, generalWithTicket, feedbackNeedsTicket, badClientId, tooManyAttachments, attachmentTooBig, badFeedback }
     static let maxBlobBytes = 25 * 1024 * 1024

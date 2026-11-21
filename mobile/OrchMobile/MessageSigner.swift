@@ -86,4 +86,38 @@ enum MessageSigner {
         guard let e = try? MessageSignature.readEnvelope(envelope) else { return nil }
         return SHA256.hash(data: Data(e.signed)).map { String(format: "%02x", $0) }.joined()
     }
+
+    /// Body keys the relay copies from a send request into the message it stores (relay `phone.rs` send).
+    static let sendBodyKeys = ["client_id", "general", "text", "attachments", "voice", "location", "feedback"]
+
+    /// Sign a send request: the signed body is built from the request exactly as the relay builds its body, so the
+    /// workspace gets the person's own words. `fileFacts` gives size and SHA-256 of each named blob (from the
+    /// phone's local copy). Returns nil when the request cannot be signed in v1 (a number with a fraction, such as
+    /// a location or a recording length); it then goes as before, unsigned.
+    static func sign(_ r: SendRequest, phoneId: String, key: Curve25519.Signing.PrivateKey,
+                     fileFacts: (String) -> (size: Int64, sha256: String)?) -> SignedEnvelope? {
+        var plain = r
+        plain.envelope = nil
+        guard let data = try? JSONCoding.encoder.encode(plain),
+              let all = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        var body: [String: Any] = [:]
+        for k in sendBodyKeys { if let v = all[k], !(v is NSNull) { body[k] = v } }
+        var blobs: [String] = (r.attachments ?? []).map(\.blobId)
+        if let v = r.voice { blobs.append(v.blobId) }
+        blobs += (r.feedback?.pins ?? []).compactMap(\.voiceBlobId)
+        var files: [File] = []
+        for b in blobs {
+            guard let f = fileFacts(b) else { return nil }
+            files.append(File(blobId: b, size: f.size, sha256: f.sha256))
+        }
+        let d = Draft(from: phoneId, to: r.to, body: body, ticket: r.ticket, replyTo: r.replyTo, files: files)
+        guard let e = try? envelope(d, key: key) else { return nil }
+        return SignedEnvelope(sigV: 1, keyId: e["key_id"] as! String, signed: e["signed"] as! String, sig: e["sig"] as! String)
+    }
+
+    /// Size and SHA-256 hex of a local file.
+    static func facts(of url: URL) -> (size: Int64, sha256: String)? {
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+        return (Int64(data.count), SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined())
+    }
 }

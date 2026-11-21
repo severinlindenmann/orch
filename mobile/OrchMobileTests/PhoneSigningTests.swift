@@ -120,6 +120,62 @@ final class PhoneSigningTests: XCTestCase {
 
 }
 
+/// ORCH-1204: a send request is signed with exactly the body the relay builds from it.
+final class SendSigningTests: XCTestCase {
+    private let ws = "ws_abcdefghij"
+    private let ph = "ph_abcdefghij"
+    private let cid = "0b0c3f5e-6f3a-4d2b-9c41-2f0a8e7d6c5b"
+
+    private func check(_ e: SignedEnvelope, key: Curve25519.Signing.PrivateKey) throws -> [String: MessageSignature.JSON] {
+        let env: [String: Any] = ["sig_v": e.sigV, "key_id": e.keyId, "signed": e.signed, "sig": e.sig]
+        return try MessageSignature.receiverCheck(env, me: ws, accepted: [ph: [[UInt8](key.publicKey.rawRepresentation)]],
+                                                  nowMs: MessageSigner.nowMs())
+    }
+
+    func testATextIsSignedWithTheRelaysBody() throws {
+        let k = Curve25519.Signing.PrivateKey()
+        let r = SendRequest(to: ws, clientId: cid, text: "Bitte prüfen", ticket: "t_abc123", general: nil, replyTo: "m_aaaaaaaaaaaaaaaa")
+        let e = try XCTUnwrap(MessageSigner.sign(r, phoneId: ph, key: k) { _ in nil })
+        let m = try check(e, key: k)
+        XCTAssertEqual(m["body"], .object(["client_id": .string(cid), "text": .string("Bitte prüfen")]))
+        XCTAssertEqual(m["ticket"]?.string, "t_abc123")
+        XCTAssertEqual(m["reply_to"]?.string, "m_aaaaaaaaaaaaaaaa")
+        XCTAssertNil(m["files"])
+        // On the wire the envelope sits next to today's fields.
+        var wire = r
+        wire.envelope = e
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(wire)) as? [String: Any])
+        let env = try XCTUnwrap(json["envelope"] as? [String: Any])
+        XCTAssertEqual(Set(env.keys), ["sig_v", "key_id", "signed", "sig"])
+    }
+
+    func testFilesAreSignedBySizeAndHash() throws {
+        let k = Curve25519.Signing.PrivateKey()
+        var r = SendRequest(to: ws, clientId: cid, text: "Photo")
+        r.attachments = [MessageAttachment(blobId: "b_0123456789abcdef", kind: .image, name: "a.jpg", size: 3, mime: "image/jpeg")]
+        let sha = String(repeating: "a", count: 64)
+        let e = try XCTUnwrap(MessageSigner.sign(r, phoneId: ph, key: k) { $0 == "b_0123456789abcdef" ? (3, sha) : nil })
+        let m = try check(e, key: k)
+        XCTAssertEqual(m["files"], .array([.object(["blob_id": .string("b_0123456789abcdef"), "size": .int(3), "sha256": .string(sha)])]))
+        XCTAssertNil(MessageSigner.sign(r, phoneId: ph, key: k) { _ in nil }, "a file without its local copy is not signed")
+    }
+
+    func testALocationWithFractionsGoesUnsigned() {
+        var r = SendRequest(to: ws, clientId: cid)
+        r.location = LocationShare(lat: 47.37, lon: 8.54)
+        XCTAssertNil(MessageSigner.sign(r, phoneId: ph, key: Curve25519.Signing.PrivateKey()) { _ in nil })
+    }
+
+    func testLocalFileFacts() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("facts-\(UUID().uuidString)")
+        try Data("abc".utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let f = try XCTUnwrap(MessageSigner.facts(of: url))
+        XCTAssertEqual(f.size, 3)
+        XCTAssertEqual(f.sha256, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    }
+}
+
 /// Pairing sends the phone's own public key; signing out deletes the key (real keychain of the simulator).
 @MainActor
 final class PhonePairingKeyTests: XCTestCase {
