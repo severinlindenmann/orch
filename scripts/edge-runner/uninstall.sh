@@ -1,6 +1,6 @@
 #!/bin/bash
 # scripts/edge-runner/uninstall.sh : undo setup.sh on the orch edge test server (ORCH-1126). Run as root.
-# Stops the runner and removes its start-at-boot entry and the job hooks. The runner's sign-up on GitHub is removed
+# Stops the runner and removes its start-at-boot entry and the job hooks. The runner's registration on GitHub is removed
 # by hand (Settings > Actions > Runners > the runner > Remove); until then GitHub shows it offline and ci.yml sends
 # the Linux jobs to GitHub's machines by itself. The user orch-ci and its home stay unless you add --remove-user.
 # The packages (faketime, build tools, tmux, Node) stay.

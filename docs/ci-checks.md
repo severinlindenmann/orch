@@ -128,9 +128,11 @@ Runners.
 
 ## Linux jobs on the orch edge test server (ORCH-1126)
 
-The clock tests (fake wall clock), relay, publish, the short e2e set and the Services add-on with its real Linux run
+Relay, publish, the short e2e set and the Services add-on with its real Linux run
 can run on a GitHub runner on the orch edge test server (Debian, ARM64, 8 cores, 8 GB) instead of GitHub's machines.
-Never on a production server. The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
+Never on a production server. The clock tests (fake wall clock) stay on GitHub's machines for now: Debian 13's
+libfaketime on ARM64 does not fake file times, so tests that compare a file's time with the clock go red there.
+The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
 
 - **Only trusted runs**: a push to develop, the nightly run, a manual run and a release pull request. Pull requests
   into develop, queue groups and forks stay on GitHub's machines; the runner's job hook refuses them again.
@@ -151,11 +153,11 @@ Never on a production server. The same `route` job decides (`scripts/edge_route.
 
 Set up (done once; `sudo bash scripts/edge-runner/setup.sh` again is safe): packages (faketime, build tools, tmux,
 Chromium's libraries), the user, Rust in the runner's cache, the runner and its hooks.
-Before the sign-up, REQUIRED (the repository is public): Settings > Actions > General > "Fork pull request workflows
-from outside collaborators" on the strictest choice (approval for all outside contributors), as in the Mac step. A
+Before registering, REQUIRED (the repository is public): Settings > Actions > General > "Fork pull request workflows
+from outside collaborators" on the strictest choice (every outside contributor waits for a click), as in the Mac step. A
 fork's own workflow file can name the `orch-edge` label and set environment variables the runner's shell reads
 before the job hook can refuse it; only that setting stops such a run before it starts.
-Sign up the runner (manager, with the owner's login; the token is used once and never stored):
+Register the runner (manager, with the owner's login; the token is used once and never stored):
 
     gh api -X POST repos/severinlindenmann/orch/actions/runners/registration-token --jq .token \
       | ssh orch-edge 'sudo bash /opt/orch-edge-runner-src/setup.sh register'

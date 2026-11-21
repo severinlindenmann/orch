@@ -2,7 +2,7 @@
 # scripts/edge-runner/setup.sh : make the orch edge test server (Debian, ARM64) a GitHub runner for orch's Linux jobs
 # (ORCH-1126). Never on a production server. Two steps, both as root:
 #     sudo bash setup.sh            install everything (safe to run again; registers nothing, needs no token)
-#     sudo bash setup.sh register   sign the runner up once: reads the runner registration token from stdin
+#     sudo bash setup.sh register   register the runner once: reads the runner registration token from stdin
 # The registration token comes from GitHub (the repository > Settings > Actions > Runners > New self-hosted runner,
 # or `gh api -X POST repos/<repo>/actions/runners/registration-token --jq .token` with an admin login; valid one hour).
 # It is used once and never stored; the runner keeps only its own credentials, which can take jobs and nothing else.
@@ -26,7 +26,7 @@ set -euo pipefail
 
 REPO_URL=${ORCH_RUNNER_REPO_URL:-https://github.com/severinlindenmann/orch}
 REPO=${REPO_URL#https://github.com/}
-U=orch-ci; H=/home/$U; NAME=${ORCH_RUNNER_NAME:-orch-edge-$(hostname -s)}
+U=orch-ci; H=/home/$U; WORK=/srv/orch-ci/work; NAME=${ORCH_RUNNER_NAME:-orch-edge-$(hostname -s)}
 VER=2.338.2; SHA=670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945
 TAR=actions-runner-linux-arm64-$VER.tar.gz
 PW_VER=1.55.0   # e2e/walkthrough/package-lock.json
@@ -42,7 +42,7 @@ if [ "${1:-}" = register ]; then
     else IFS= read -r TOKEN || true; fi
     [ -n "${TOKEN:-}" ] || { echo "No token; stopped. Run it again with the token on stdin." >&2; exit 1; }
     ( cd "$R" && sudo -u "$U" -H ./config.sh --unattended --replace --url "$REPO_URL" \
-        --token "$TOKEN" --name "$NAME" --labels orch-edge --work "$H/_work" )
+        --token "$TOKEN" --name "$NAME" --labels orch-edge --work "$WORK" )
     unset TOKEN
   fi
   systemctl enable --now orch-edge-runner.service
@@ -55,12 +55,22 @@ fi
 echo "== 1/6 packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq faketime build-essential pkg-config git curl ca-certificates tmux nodejs npm jq >/dev/null
+apt-get install -y -qq faketime build-essential pkg-config git curl tmux nodejs npm jq >/dev/null
+
+# orch edge gets an IPv6 default route from its network but no public IPv6 address: a download from a host with
+# IPv6 addresses (pypi, raw.githubusercontent.com) then fails with "No route to host". Prefer IPv4 (RFC 6724 table).
+grep -q '^precedence ::ffff:0:0/96' /etc/gai.conf 2>/dev/null || echo 'precedence ::ffff:0:0/96  100   # orch edge runner: prefer IPv4' >> /etc/gai.conf
 
 echo "== 2/6 user $U"
 id "$U" >/dev/null 2>&1 || useradd --create-home --home-dir "$H" --shell /bin/bash --user-group "$U"
 chmod 700 "$H"
+# the jobs' work folder (with each job's throwaway home and temp files) lies OUTSIDE the runner user's home: orch's
+# tests check that a test home is never inside the real one
+install -d -o root -g root -m 0755 /srv/orch-ci; install -d -o "$U" -g "$U" -m 0750 "$WORK"
 loginctl enable-linger "$U"
+# no cron or at jobs for it: a job must not leave work that starts after it
+for f in /etc/cron.deny /etc/at.deny; do touch "$f"; grep -qx "$U" "$f" || echo "$U" >> "$f"; done
+crontab -r -u "$U" 2>/dev/null || true
 # user services a job starts (systemd --user) live outside the runner's own cap: give them one of their own, so the
 # runner (5 GB) and its user services (1.5 GB) together leave room for the test copies of relay, publish and hub
 mkdir -p "/etc/systemd/system/user-$(id -u "$U").slice.d"
@@ -94,7 +104,7 @@ if [ ! -x "$R/config.sh" ]; then
 fi
 mkdir -p "$HOOKS"
 install -m 0755 -o root -g root "$SRC/job-started.sh" "$SRC/job-completed.sh" "$HOOKS/"
-# a copy of these scripts for the sign-up and the undo (docs/ci-checks.md names this folder)
+# a copy of these scripts for registering and the undo (docs/ci-checks.md names this folder)
 KEEP=/opt/orch-edge-runner-src; mkdir -p "$KEEP"
 [ "$SRC" = "$KEEP" ] || install -m 0644 -o root -g root "$SRC/setup.sh" "$SRC/uninstall.sh" "$SRC/job-started.sh" "$SRC/job-completed.sh" "$KEEP/"
 printf '%s\n' "$REPO" > "$HOOKS/repo.new"; chmod 0644 "$HOOKS/repo.new"
@@ -121,6 +131,8 @@ Environment=LANG=C.UTF-8
 Restart=always
 RestartSec=10
 Nice=5
+# GitHub's machines use 022; the user's own default (002) makes folders group-writable and orch's tests refuse that
+UMask=0022
 CPUWeight=50
 MemoryMax=5G
 KillMode=process
@@ -133,4 +145,4 @@ EOF
 chmod 0644 "$UNIT.new"; mv -f "$UNIT.new" "$UNIT"
 systemctl daemon-reload
 if [ -f "$R/.runner" ]; then systemctl enable --now orch-edge-runner.service; systemctl restart orch-edge-runner.service
-else echo "Installed. Sign the runner up once: <token> | sudo bash $0 register"; fi
+else echo "Installed. Register the runner once: <token> | sudo bash $0 register"; fi

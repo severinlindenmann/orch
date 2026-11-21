@@ -23,11 +23,12 @@ if [ -d "$REAL_HOME/.config/systemd/user" ] && [ ! -L "$REAL_HOME/.config/system
   rm -rf "$REAL_HOME/.config/systemd/user"
   systemctl --user daemon-reload >/dev/null 2>&1
 fi
-# transient units too (systemd-run --user ..., Restart=always would bring a killed process back): every running user
-# service and scope except the session bus
-systemctl --user list-units --type=service,scope --state=active,activating,reloading --plain --no-legend 2>/dev/null \
+# transient units too (systemd-run --user ..., Restart=always would bring a killed process back) and timers, paths
+# and sockets that would start something later: every active user unit except the session bus
+rm -rf "$REAL_HOME/.local/share/systemd/user" 2>/dev/null
+systemctl --user list-units --type=timer,path,socket,service,scope --state=active,activating,reloading,listening,waiting --plain --no-legend 2>/dev/null \
   | awk '{print $1}' | while read -r u; do
-    case $u in (dbus.service|"") continue;; esac
+    case $u in (dbus.service|dbus.socket|init.scope|"") continue;; esac
     systemctl --user stop "$u" >/dev/null 2>&1
   done
 systemctl --user reset-failed >/dev/null 2>&1
@@ -44,7 +45,11 @@ leftovers() {
     case "$keep" in (*" $pid "*) continue;; esac
     exe=$(readlink "/proc/$pid/exe" 2>/dev/null)
     case $exe in ("$RBIN"/Runner.Listener|"$RBIN"/Runner.Worker) [ -n "$RBIN" ] && continue;; esac
-    case $exe in (/usr/lib/systemd/systemd|/lib/systemd/systemd) continue;; esac   # systemd --user and (sd-pam)
+    # the user service manager (systemd --user, (sd-pam)) and its session bus, by their control group (set by
+    # systemd, a job cannot change it; their program file is not readable for a non-dumpable process)
+    case $(cat "/proc/$pid/cgroup" 2>/dev/null) in
+      (*"/user@$ME.service/init.scope"|*"/user@$ME.service/app.slice/dbus.service"|*"/user@$ME.service/dbus.service") continue;;
+    esac
     [ "$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ')" = "$$" ] && continue   # this hook's own helpers
     echo "$pid"
   done

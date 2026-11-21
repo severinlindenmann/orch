@@ -97,7 +97,7 @@ def test_main_writes_outputs_and_never_fails(tmp_path):
     out = tmp_path / "out"
     env = {"GITHUB_OUTPUT": str(out), "PATH": os.environ.get("PATH", ""), "EDGE_RUNNER": "orch-edge", "EVENT": "push",
            "REF": "refs/heads/develop", "REPO": REPO}  # no token: falls back, exit 0
-    r = subprocess.run(["python3", str(ROOT / "scripts" / "edge_route.py")], env=env, capture_output=True, text=True)
+    r = subprocess.run(["python3", str(ROOT / "scripts" / "edge_route.py")], env=env, capture_output=True, text=True, check=False)
     assert r.returncode == 0, r.stderr
     lines = dict(line.split("=", 1) for line in out.read_text().splitlines())
     assert lines["edge_where"] == "github" and json.loads(lines["edge"]) == ["ubuntu-latest"]
@@ -127,7 +127,7 @@ def test_the_route_job_also_decides_for_orch_edge_and_never_fails():
     assert "head.repo.full_name == github.repository" in cond and cond.endswith("|| ''")
 
 
-@pytest.mark.parametrize("job,inp", [("clock", "runs_on"), ("relay", "runs_on"), ("publish", "runs_on"),
+@pytest.mark.parametrize("job,inp", [("relay", "runs_on"), ("publish", "runs_on"),
                                      ("e2e-smoke", "runs_on"), ("addons", "linux_runs_on")])
 def test_ci_passes_the_route_to_every_linux_job_and_runs_all_of_them_on_orch_edge(job, inp):
     body = _job(CI, job)
@@ -135,6 +135,11 @@ def test_ci_passes_the_route_to_every_linux_job_and_runs_all_of_them_on_orch_edg
     assert re.search(r"^    needs: \[changes, route\]$", body, re.MULTILINE)
     # a failed route job never skips them (they go to GitHub's machines), and on orch edge they run after each merge
     assert "if: ${{ !cancelled() && needs.changes.result == 'success' && (" in body and ON_EDGE in body
+
+
+def test_the_clock_tests_stay_on_github_until_file_times_are_faked_on_orch_edge():
+    body = _job(CI, "clock")
+    assert "runs_on: '[\"ubuntu-latest\"]'" in body and "needs.route" not in body.split("# NOT on orch edge")[0]
 
 
 @pytest.mark.parametrize("file,job", [("clock.yml", "suites"), ("relay.yml", "test"), ("publish.yml", "test"),
@@ -189,7 +194,7 @@ def _hook(tmp_path, event, ref, pr, repo):
     ev.write_text(json.dumps({"pull_request": pr} if pr else {}))
     env = {"PATH": os.environ.get("PATH", ""), "ORCH_RUNNER_REPO": REPO, "GITHUB_REPOSITORY": repo,
            "GITHUB_EVENT_NAME": event, "GITHUB_REF": ref, "GITHUB_EVENT_PATH": str(ev)}
-    return subprocess.run(["bash", str(RUNNER / "job-started.sh")], env=env, capture_output=True, text=True, timeout=30)
+    return subprocess.run(["bash", str(RUNNER / "job-started.sh")], env=env, capture_output=True, text=True, timeout=30, check=False)
 
 
 def _pr(base, head):
@@ -227,7 +232,7 @@ def test_installed_hook_reads_the_repository_from_its_root_owned_file_only():
 
 def test_the_clean_up_hook_never_acts_as_a_person(tmp_path):
     r = subprocess.run(["bash", str(RUNNER / "job-completed.sh")], env={"PATH": os.environ.get("PATH", "")},
-                       capture_output=True, text=True, timeout=30)
+                       capture_output=True, text=True, timeout=30, check=False)
     assert r.returncode == 0 and "did nothing" in r.stderr
 
 
@@ -236,10 +241,11 @@ def test_setup_refuses_anything_but_root_on_the_arm64_debian_test_server():
     assert '[ "$(id -u)" = 0 ]' in text and "aarch64" in text and "/etc/debian_version" in text
     assert "sha256sum -c" in text and "--labels orch-edge" in text
     unit = text[text.index("[Service]"):]
-    for line in ("User=$U", "MemoryMax=5G", "ACTIONS_RUNNER_HOOK_JOB_STARTED=$HOOKS/job-started.sh",
+    assert '--work "$WORK"' in text and "WORK=/srv/orch-ci/work" in text  # never inside the runner's home
+    for line in ("User=$U", "UMask=0022", "MemoryMax=5G", "ACTIONS_RUNNER_HOOK_JOB_STARTED=$HOOKS/job-started.sh",
                  "ACTIONS_RUNNER_HOOK_JOB_COMPLETED=$HOOKS/job-completed.sh"):
         assert line in unit, line
-    assert "TOKEN" not in text.split("unset TOKEN")[1]  # the token is never kept or printed after sign-up
+    assert "TOKEN" not in text.split("unset TOKEN")[1]  # the token is never kept or printed after registering
 
 
 def test_scripts_parse():
