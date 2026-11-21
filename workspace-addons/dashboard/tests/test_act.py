@@ -51,6 +51,7 @@ def acts(act_orch):
             ["review", "list"],
             ["review", "accepted"],
             ["chat", "status"],
+            ["chat", "list"],  # the ticket chats (Chats page) in every state build
         )
         and c[:2] != ["private", "--json"]
         and c[:2] != ["look", "shared-pages"]
@@ -722,7 +723,13 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
                 if c[:2] not in (["addon", "list"], ["run", "status"], ["ticket", "list"], ["ticket", "show"])
                 and c[0] not in ("needs", "status", "agents")
                 and c[:2]
-                not in (["config", "get"], ["chat", "status"], ["review", "list"], ["review", "accepted"])
+                not in (
+                    ["config", "get"],
+                    ["chat", "status"],
+                    ["chat", "list"],
+                    ["review", "list"],
+                    ["review", "accepted"],
+                )
                 and c[:3] not in (["relay", "mobile", "status"], ["relay", "group", "list"])
                 and c[0] != "look"
                 and c[:2] != ["private", "--json"]
