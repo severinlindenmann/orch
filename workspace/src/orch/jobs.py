@@ -28,7 +28,10 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from orch import lazyschema, record, record_hook, safefile
+from jsonschema import Draft202012Validator, FormatChecker
+from referencing import Registry, Resource
+
+from orch import record, record_hook, safefile
 from orch.errors import Refused
 
 EVENT_CAP = 2000  # stored events per job
@@ -73,19 +76,11 @@ def _load(name):
 
 
 _BLOCKS, _SCHEMA = _load("blocks.schema.json"), _load("job_event.schema.json")
-
-
-def _validator(schema):
-    """Built on first use (lazyschema): loading jsonschema costs every orch command about 20 ms."""
-    from jsonschema import Draft202012Validator, FormatChecker
-    from referencing import Registry, Resource
-
-    registry = Registry().with_resources([(s["$id"], Resource.from_contents(s)) for s in (_BLOCKS, _SCHEMA)])
-    return Draft202012Validator(schema, registry=registry, format_checker=FormatChecker())
-
-
-_STORED = lazyschema.checker(lambda: _validator(_SCHEMA))
-_INPUT = lazyschema.checker(lambda: _validator({"$ref": _SCHEMA["$id"] + "#/$defs/input"}))
+_REGISTRY = Registry().with_resources([(s["$id"], Resource.from_contents(s)) for s in (_BLOCKS, _SCHEMA)])
+_STORED = Draft202012Validator(_SCHEMA, registry=_REGISTRY, format_checker=FormatChecker())
+_INPUT = Draft202012Validator(
+    {"$ref": _SCHEMA["$id"] + "#/$defs/input"}, registry=_REGISTRY, format_checker=FormatChecker()
+)
 
 
 def _fields() -> dict[str, set[str]]:

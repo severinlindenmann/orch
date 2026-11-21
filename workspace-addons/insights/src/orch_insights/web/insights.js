@@ -219,15 +219,14 @@ async function loadModels() {
 }
 
 function stateBadge(row) {
-  const mark = row.ready ? MARKS.look : MARKS[row.health];  // not ready here (ORCH-534): a warning mark
-  const badge = node('span', `${mark || ''}${row.state.text}`, `badge ${BADGE[row.state.tone] || ''}`.trim());
+  const badge = node('span', `${MARKS[row.health] || ''}${row.state.text}`, `badge ${BADGE[row.state.tone] || ''}`.trim());
   return badge;
 }
 
 function nameCell(row) {
   const cell = node('td');
   cell.append(node('strong', row.name));
-  const facts = [row.ready, row.numbers === "Can't tell yet" ? '' : row.numbers, row.unseen, row.versions, row.also].filter(Boolean);
+  const facts = [row.numbers === "Can't tell yet" ? '' : row.numbers, row.unseen, row.versions, row.also].filter(Boolean);
   for (const fact of facts) cell.append(node('span', fact, 'subline'));
   return cell;
 }

@@ -29,12 +29,6 @@ MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", 
 CANT_TELL = "Can't tell yet"
 NOT_PROOF = "Errors alone do not mean this is bad."
 FILTERS = (("all", "All"), ("look", "Needs a look"), ("idle", "Not used"))
-NOT_READY = "Not ready here"
-
-
-def ready_line(lacks):
-    """The same words helpers read: "Not ready here: gh missing"."""
-    return f"{NOT_READY}: {', '.join(lacks)} missing"
 
 
 def _plural(n, word):
@@ -141,8 +135,6 @@ def _details(tab, item, inventory):
     details = [{"term": "Technical name", "value": item["name"]}]
     if tab == "skills":
         details.append({"term": "Versions seen", "value": str(len(item.get("versions") or []))})
-        if inventory and inventory.get("missing"):
-            details.append({"term": "On this computer", "value": ready_line(inventory["missing"])})
     elif tab == "keys":
         details.append({"term": "Value", "value": "Never shown or recorded"})
     elif inventory:
@@ -183,11 +175,6 @@ def _list_row(tab, counts, item, inventory, row):
         result["allowed"] = allowed_actions(inventory)
     else:
         result["versions"] = versions_line(item)
-        lacks = (inventory or {}).get("missing")
-        if lacks:  # ORCH-534: the skill needs something this computer lacks; shown, never hidden
-            result["state"] = {"text": NOT_READY, "tone": "warning"}
-            result["filter"] = "look"
-            result["ready"] = ready_line(lacks)
     if tab != "keys":
         result["also"] = also_line(counts, KINDS[tab], item["name"])
     result["panel"] = _panel(tab, item, inventory, row)

@@ -1556,9 +1556,6 @@ def start(
     from orch import health
 
     health.soon(root)  # ORCH-44: tool logins checked again in the background when the result is stale
-    from orch import skillready
-
-    skillready.refresh(root)  # ORCH-534: the helper reads which skills are not ready here; never raises
     name = agent or adapters.chosen(root)
     adapters.load(name, root)  # refuses a name nobody knows
     a = adapters.load(name, root)

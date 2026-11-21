@@ -186,9 +186,6 @@ def apply_agent_files(root: Path) -> list[str]:
             except Refused as e:
                 refused = refused or e
     harness.sync_copies(root, places)
-    from orch import skillready
-
-    skillready.refresh(root)  # ORCH-534: which skills are not ready here, before the local files point at it
     done, local = [], []
     for n in detected_agents(root):
         a = adapters.load(n)

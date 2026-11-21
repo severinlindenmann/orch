@@ -488,15 +488,3 @@ def test_overview_route_carries_the_retries(server, fake_orch, answer):
     with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/overview", timeout=5) as r:
         data = json.loads(r.read())
     assert data["retries"]["tone"] == "info" and "t was run again 2 times" in data["retries"]["text"]
-
-
-def test_not_ready_skill_gets_a_card(answer):
-    """ORCH-534: a skill that needs something this computer lacks is one of the things that need a look."""
-    before = len(build_overview(answer)["needs"])
-    answer["inventory"]["skills"][0]["missing"] = ["gh"]
-    needs = build_overview(answer)["needs"]
-    card = next(c for c in needs if c["target"] == "Newsletter writing")
-    assert card["title"] == "Newsletter writing is not ready here"
-    assert card["text"] == "gh missing on this computer."
-    assert card["kind"] == "skill" and card["button"] == "Look"
-    assert len(needs) == min(before + 1, 3)

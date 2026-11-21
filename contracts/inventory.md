@@ -65,12 +65,6 @@ skill starts a new line in Insights and a proposal can be rolled back to an exac
   escaping), after dropping `env` and `headers` (harness configs may have them; they are never hashed or shown).
 Reference: `inv_skill_version` / `inv_conn_version` in validate.py.
 
-**Ready here (ORCH-534).** A skill whose header lists `metadata.requires` (programs on PATH),
-`requires-logins` (names of stored logins) or `requires-addons` (add-ons that must be on) carries `missing` when this
-computer lacks one: plain words, `gh`, `login <name>`, `add-on <name>`. Absent = ready. Only plain names are checked
-or written. The skill is never hidden: helpers read the same words in the core block `skills-ready` of AGENTS.orch.md
-("- github: not ready here: gh missing"), refreshed at each run start, and Insights shows the row as *Not ready here*.
-
 ## The inventory document
 
 `{"schema": "orch.inventory/1", "generated_at", "skills": [...], "connections": [...], "keys": [...]}`, embedded in

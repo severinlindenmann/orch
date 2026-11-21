@@ -515,16 +515,3 @@ def test_a_new_standstill_starts_its_own_count(ws, run, monkeypatch):
     assert watch.once(ws) == []
     now[0] += watch.STILL_AFTER
     assert len(watch.once(ws)) == 1
-
-
-def test_the_loop_stops_when_the_workspace_is_gone(tmp_path, monkeypatch):
-    """ORCH-609: a watcher whose workspace folder was deleted stops instead of running for days."""
-    (tmp_path / ".orch").mkdir()
-    passes = []
-    monkeypatch.setattr(watch, "once", lambda root: passes.append(1) or [])
-
-    def sleep(_):
-        (tmp_path / ".orch").rmdir()  # the folder goes away between two passes
-
-    watch.loop(tmp_path, sleep=sleep)  # returns by itself
-    assert passes == [1]

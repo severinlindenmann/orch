@@ -351,8 +351,7 @@ def harness_skill_dirs(account_home: Path | None = None) -> list[Path]:
 def skills(root: Path, *, account_home: Path | None = None) -> list[dict]:
     """Schema `skill` objects: the workspace's .agents/skills (source workspace; unproven = workspace, P1) and
     the agent tools' own skill folders (source harness). Both entries of one name are listed; the harness one
-    is shadowed by the workspace one. Names and content hashes, plus `missing` (ORCH-534) when the skill's
-    header lists a program, login or add-on this computer lacks."""
+    is shadowed by the workspace one. Names and content hashes only."""
     root = Path(root)
     found: list[tuple[str, str, Path]] = []
     for name, folder in _skill_folders(root / ".agents" / "skills", inside=root).items():
@@ -360,18 +359,12 @@ def skills(root: Path, *, account_home: Path | None = None) -> list[dict]:
     for base in harness_skill_dirs(account_home):
         for name, folder in _skill_folders(base).items():
             found.append(("harness", name, folder))
-    from orch import skillready
-
-    items, first, ready_cache = [], set(), {}
+    items, first = [], set()
     for source, name, folder in found:  # workspace first, so the first of a name wins
         version = skill_version(folder)
         if version is None:
             continue
-        item = {"name": name, "source": source, "version": version, "shadowed": name in first}
-        lacks = skillready.missing(root, skillready.metadata(folder), _cache=ready_cache)
-        if lacks:
-            item["missing"] = lacks  # ORCH-534: not ready on this computer (never hidden)
-        items.append(item)
+        items.append({"name": name, "source": source, "version": version, "shadowed": name in first})
         first.add(name)
     return sorted(items, key=lambda i: (i["name"], i["source"] != "workspace"))
 

@@ -365,23 +365,3 @@ def test_frontend_lists_text_only_and_read_only():
     assert not re.search(r"\b(?:Remove|Allow)\b", js)
     css = PACKAGE.joinpath("web", "insights.css").read_text()
     assert "max-width:600px" in css  # the phone layout stays
-
-
-def test_not_ready_skill_is_shown_with_what_is_missing(answer):
-    """ORCH-534: a skill that needs something this computer lacks stays listed, marked Not ready here."""
-    answer["inventory"]["skills"][0]["missing"] = ["gh", "login github-login"]
-    view = build_list(answer, "skills")
-    row = next(row for row in view["rows"] if row["name"] == "Newsletter writing")
-    assert row["state"] == {"text": "Not ready here", "tone": "warning"}
-    assert row["ready"] == "Not ready here: gh, login github-login missing"
-    assert row["filter"] == "look"
-    assert {"term": "On this computer", "value": row["ready"]} in row["panel"]["details"]
-    assert next(f for f in view["filters"] if f["id"] == "look")["count"] >= 1
-    orch_row = rows(answer, "skills")["Orch"]
-    assert "ready" not in orch_row and orch_row["state"]["text"] != "Not ready here"
-
-
-def test_not_ready_words_must_be_plain(answer):
-    """A missing entry that is not a plain name fails the answer closed (it is written by the core, never raw text)."""
-    answer["inventory"]["skills"][0]["missing"] = ["gh; rm -rf /"]
-    assert "error" in build_list(answer, "skills")
