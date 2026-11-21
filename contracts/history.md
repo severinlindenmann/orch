@@ -75,7 +75,8 @@ A history line with `chat_message: true` is a real Chat or group message. Since 
 fields on every chat line (only in `tickets.add_history`, the one append point):
 
 - `id`: the line's stable id, `m_` + 16 lowercase letters or digits (the form of a relay message id). When the
-  message already has an id (a Chat text, a helper's Chat answer, a relay message) the line takes that one, so the
+  message already has an id (a Chat text, a helper's Chat answer, a phone text, a group message: its origin id)
+  the line takes that one, so the
   message has one id everywhere; otherwise core makes a new one. Set once, never changed; later steps (a chat list,
   other workspaces in one chat) refer to a message by it.
 - `by_name` (optional): the name the person typed for this message, one line, 1-60 characters after cleaning

@@ -2592,7 +2592,9 @@ def _continue(
         r["phone"] = (
             True  # the owner wrote to it from a phone: its questions go there too (mobile_mode.from_phone)
         )
-        tickets.add_history(t, by, plain, "phone", chat=general)
+        tickets.add_history(
+            t, by, plain, "phone", chat=general, mid=_line_mid({"id": mid}) if general else None
+        )
         t["waiting_on"] = None
         if general:
             return
