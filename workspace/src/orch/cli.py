@@ -840,6 +840,16 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     k.add_argument(
         "--choose", metavar="TITLE", help='options A/B/C to pick from (use --option "ID=Title[:file]")'
     )
+    k.add_argument(
+        "--run",
+        metavar="COMMAND",
+        help="one command the person runs with one click (Run it now); the card answers itself I ran it",
+    )
+    g.add_argument("--changes", metavar="LINE", help="with --run (not an orch command): what it changes")
+    g.add_argument("--undo", metavar="LINE", help="with --run (not an orch command): how to undo it")
+    g.add_argument(
+        "--login", action="store_true", help="with --run: a sign-in for the person (needs a terminal)"
+    )
     g.add_argument("--then", help="what happens after the answer (needed with a card)")
     g.add_argument("--why", help="why this is asked (one line)")
     g.add_argument("--need", help="what is needed, e.g. 'before Friday'")
