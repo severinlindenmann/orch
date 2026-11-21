@@ -80,6 +80,25 @@ pub fn resolve_with(
     Ok(SocketAddr::from((ip, port)).to_string())
 }
 
+/// Where a local admin client (the `admin` command) connects for `listen`: `0.0.0.0`/`::` become loopback and the
+/// interface form becomes that interface's private address. Never a host name: the admin token must not go to
+/// whatever a name like `wt0` happens to resolve to.
+pub fn client_addr(var: &str, listen: &str) -> Result<String, String> {
+    client_addr_with(var, listen, interface_ipv4)
+}
+
+pub fn client_addr_with(
+    var: &str,
+    listen: &str,
+    lookup: impl Fn(&str) -> Vec<Ipv4Addr>,
+) -> Result<String, String> {
+    let s = listen
+        .trim()
+        .replace("0.0.0.0:", "127.0.0.1:")
+        .replace("[::]:", "[::1]:");
+    resolve_with(var, &s, lookup)
+}
+
 /// IPv4 addresses of one network interface.
 #[cfg(unix)]
 pub fn interface_ipv4(name: &str) -> Vec<Ipv4Addr> {

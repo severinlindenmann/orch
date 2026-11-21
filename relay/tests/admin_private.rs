@@ -90,3 +90,55 @@ fn interface_form_reads_the_real_loopback() {
     assert_eq!(check_admin_listen(&format!("{lo}:8412")), Ok(()));
     assert!(check_admin_listen("no-such-if9:8412").is_err());
 }
+
+#[test]
+fn admin_command_never_sends_the_token_to_a_host_name() {
+    use orch_relay::listen::client_addr_with;
+    use std::net::Ipv4Addr;
+    let wt0 = |n: &str| match n {
+        "wt0" => vec![Ipv4Addr::new(100, 73, 196, 187)],
+        _ => vec![],
+    };
+    assert_eq!(
+        client_addr_with("V", "wt0:8412", wt0).unwrap(),
+        "100.73.196.187:8412"
+    );
+    assert_eq!(
+        client_addr_with("V", "0.0.0.0:8412", wt0).unwrap(),
+        "127.0.0.1:8412"
+    );
+    assert_eq!(
+        client_addr_with("V", "[::]:8412", wt0).unwrap(),
+        "[::1]:8412"
+    );
+    // private network down, or a host name: refuse instead of a name lookup
+    assert!(client_addr_with("V", "wt1:8412", wt0).is_err());
+    assert!(client_addr_with("V", "relay.severin.io:8412", wt0).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn admin_command_resolves_the_interface_form_from_its_env_file() {
+    use orch_relay::cli::{admin_target, Admin};
+    let lo = ["lo", "lo0"]
+        .into_iter()
+        .find(|n| !orch_relay::listen::interface_ipv4(n).is_empty())
+        .expect("a loopback interface");
+    let dir = tempfile::tempdir().unwrap();
+    let env = dir.path().join("env");
+    let target = |listen: &str| {
+        std::fs::write(
+            &env,
+            format!("ORCH_RELAY_ADMIN_LISTEN={listen}\nORCH_RELAY_ADMIN_TOKEN=t0k\n"),
+        )
+        .unwrap();
+        admin_target(&Admin {
+            env_file: Some(env.clone()),
+            ..Default::default()
+        })
+    };
+    let (url, _) = target(&format!("{lo}:8412")).unwrap();
+    assert_eq!(url, "http://127.0.0.1:8412");
+    let e = target("no-such-if9:8412").unwrap_err();
+    assert!(e.contains("no private IPv4 address"), "{e}");
+}
