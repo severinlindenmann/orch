@@ -97,12 +97,67 @@ _KV_VAL = re.compile(
     re.I,
 )  # a quote (\" escapes inside) to its closing quote, an unclosed one to the end of the line, else one token
 _TO_EOL = re.compile(r"(?i)cookie")
+# A count right before a bare `pass:` with words after it is a test result ("23 pass: upload then answer",
+# node --test and other runners), not a password label (ORCH-447). Tight, because the same scan guards relay
+# sends and publish (security review ORCH-493): only `:`, only the bare word, the count in ASCII digits and
+# only at the start of a line or right after `(`, `,` or `;`; a space after the colon and at least two words
+# on the label's own line. `pass: 12`, `db pass: x`, `user 42 pass: x y`, `5432 pass: x`, `3 pass:x y`,
+# a value on the next line and `23 pass=x` stay secret. Reads at most 32 characters before the name (linear).
+_COUNT_ALONE = re.compile(r"[ \t]*+[0-9]++[ \t]++")  # fullmatch: the count is all the line holds before
+_COUNT_AFTER = re.compile(r"[(,;][ \t]*+[0-9]++[ \t]++\Z")  # (23 pass: ... / a, 5 pass: ... / x; 2 pass: ...
+_COLON_SPACE = re.compile(r":[ \t]++\Z")  # the head's separator part: a space after the colon, no line break
+_TWO_WORDS = re.compile(r"[^\s]++[ \t]++[^\s]")  # possessive: a skipped head never rescans its line
+
+
+def _test_count(text: str, head) -> bool:
+    """Is this `pass:` head a test count (see _COUNT_ALONE, _COUNT_AFTER)?"""
+    if head.group("sep") != ":" or head.group(1).casefold() != "pass":
+        return False
+    if "\n" in head.group(2) or _COLON_SPACE.search(head.group(2)) is None:
+        return False
+    start = max(0, head.start() - 32)
+    before = text[start : head.start()]
+    nl = before.rfind("\n")
+    at_line_start = nl != -1 or start == 0  # the whole rest of the line is inside the window
+    before = before[nl + 1 :]
+    if not ((at_line_start and _COUNT_ALONE.fullmatch(before)) or _COUNT_AFTER.search(before)):
+        return False
+    return _TWO_WORDS.match(text, head.end()) is not None
 
 
 # A value that is exactly the placeholder (also in matching quotes) is already hidden, not a secret: the ONE
 # place that says so. The url-encoded one safe_url writes (?token=%5Bhidden%5D&a=1) ends at its `&`. Anything
 # else glued to it or after it is a value like any other and goes through the detector unchanged.
 _PLACEHOLDER = re.compile(r"(?P<q>[\"'`]?)\[hidden\](?P=q)\Z|%5[Bb]hidden%5[Dd](?=&|\Z)")
+
+
+# A value that names WHERE a key file is, not the key, is no secret (ORCH-1026: release_deploy_key =
+# ~/.ssh/deploy_rsa was refused). The whole value (optionally in matching quotes) must be a path under a home
+# folder (~/ $HOME/ ${HOME}/ /Users/ /home/ /root/, path characters only); the label must hold no password,
+# token or secret word; and the label must END in file, path or dir (key_file, ssh_key_path) or the value go
+# into a .ssh folder (deploy_key = ~/.ssh/x). Everything else path-shaped stays a secret (api_key=/home/AbCd,
+# password=~/.ssh/x, file_password=~/x): base64 and passwords can look like paths (outside review).
+# Anything around the path keeps the value a value.
+_HOME = r"(?:~|\$HOME|\$\{HOME\}|/Users|/home|/root)"
+_PATH_PART = r"[\w.@+-]++"
+_HOME_PATH = re.compile(rf"(?P<q>[\"']?){_HOME}(?:/{_PATH_PART})++/?(?P=q)[ \t\r]*+\Z")
+_NOT_KEY_FILE = frozenset(
+    {"pass", "password", "passwd", "passphrase", "pwd", "secret", "token", "pin", "otp", "totp", "cookie"}
+    | {"session", "sid", "sig", "credential", "credentials", "auth"}
+)
+_FILE_WORDS = frozenset(
+    {"file", "files", "path", "paths", "dir", "keyfile", "keypath", "certfile", "pemfile"}
+)
+
+
+def _names_key_file(name: str, text: str, pos: int, end: int) -> bool:
+    """Is the value text[pos:end] of label `name` only where a key file is (see _HOME_PATH)?"""
+    if _HOME_PATH.match(text, pos, end) is None:
+        return False
+    words = re.split(r"[_.-]+", re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).lower())  # keyFile: key, file
+    if not _NOT_KEY_FILE.isdisjoint(words):
+        return False
+    return words[-1] in _FILE_WORDS or "/.ssh/" in text[pos:end]
 
 
 class _Hit:
@@ -133,7 +188,10 @@ class _KV:
             pos = head.end()
             if not secret_name(head.group(1)):
                 continue
-            if head.group("sep") == ":" or _TO_EOL.search(head.group(1)):
+            if _test_count(text, head):
+                continue
+            cookie = _TO_EOL.search(head.group(1)) is not None
+            if head.group("sep") == ":" or cookie:
                 end = _line_end(text, pos)  # the rest of the line, scanned once: the scan goes on after it
                 if _PLACEHOLDER.fullmatch(text, pos, end):  # the value IS the placeholder: nothing to hide
                     pos = end
@@ -144,6 +202,11 @@ class _KV:
                 if (ph := _PLACEHOLDER.match(text, pos, end)) is not None:
                     pos = ph.end()  # only the placeholder is the value; the scan goes on right after it
                     continue
+            if not cookie and _names_key_file(
+                head.group(1), text, pos, end
+            ):  # where a key file is: no secret
+                pos = end
+                continue
             if end > pos:
                 yield _Hit(text, head, end)
                 pos = end
@@ -364,11 +427,24 @@ def _clean_full(t: str) -> str:
 def _has_secret(data: bytes) -> bool:
     """The file scan uses the SAME detection as redact (_scrub_text: patterns, key=value, spaced values, flag
     values and URL userinfo): a text hides something when the scrub changes it, in its raw, NFKC and cleaned
-    (invisible characters and comments gone) form. Over-hiding is accepted: such a file is not sent."""
+    (invisible characters and comments gone) form. Over-hiding is accepted: such a file is not sent. A PNG
+    whose compressed pixel runs are proven (secretscan.passes) gets the full scrub on its label_view and the
+    token patterns on every byte."""
+    return any(_scrubbed(blob, labels) for blob, labels in secretscan.passes(data))
+
+
+def _tokens_only(t: str) -> str:
+    for rx in _SECRET_PATTERNS:
+        t = rx.sub(HIDDEN, t)
+    return t
+
+
+def _scrubbed(data: bytes, labels: bool) -> bool:
     text = data.decode(errors="ignore")
     cleaned = _clean_full(text)
     forms = (text, cleaned, unicodedata.normalize("NFKC", text), unicodedata.normalize("NFKC", cleaned))
-    return any(_scrub_text(t) != t for t in dict.fromkeys(forms))
+    scrub = _scrub_text if labels else _tokens_only
+    return any(scrub(t) != t for t in dict.fromkeys(forms))
 
 
 def _holds_stored_value(root: Path, data: bytes, texts: list[str]) -> bool:
@@ -510,6 +586,9 @@ _SPACED_VALUES = (
 # - text drawn in pixels (a terminal screenshot) and bytes inside compressed image data (IDAT): only the raw
 #   bytes of an image are scanned; JPEG, GIF and WebP get no structural walk (_image_clean): they are
 #   "unknown" and not sent, never checked as clean;
+# - a PNG's proven Huffman-coded pixel bytes (pngpixels) skip the label rules (key=value, spaced and flag
+#   values; they match there by chance, #1022): a Huffman table chosen on purpose so the coded bytes spell a
+#   label and value gets through (an encoding, like base64); token patterns and stored values still apply;
 # - HTML and SVG artifacts are active content: entities (`&#112;assword=`) or script (atob) can build any
 #   text when the file is shown; the scan sees the source only;
 # - past TEXT_CUT redact shows nothing (the text ends in [hidden]); a file is scanned whole;

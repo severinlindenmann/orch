@@ -6,7 +6,7 @@ const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
 const marker = source.slice(source.indexOf('// A shipped add-on page'));
 const ORIGIN = 'http://127.0.0.1:8000';
-// Factory "Looks good, all": every collaborator of the handler is faked.
+// Factory stage review "Looks good": every collaborator of the handler is faked.
 function setup({shipped = true, kind = 'page', snapshot = false, statuses = {t_aaaaaa:'review', t_bbbbbb:'review', t_cccccc:'active'}, failFor = [], foreign = [], clicked = true} = {}) {
   const calls = {moves:[], posts:[], toasts:[], undo:null};
   const frameWindow = {postMessage:(m, o) => calls.posts.push([m, o])};
@@ -19,7 +19,7 @@ function setup({shipped = true, kind = 'page', snapshot = false, statuses = {t_a
     fetch:async () => ({ok:true, json:async () => ({})}),
     h:(tag, attrs, ...kids) => { const el = {tag, attrs, listeners:{}, addEventListener(n, f) { el.listeners[n] = f; }}; return el; },
     moveTicket:async (id, status, undoing, extra) => { calls.moves.push([id, status, !!undoing, {...extra}]); if (!failFor.includes(id)) tickets[id].status = status; },
-    window:{orch:{toast:(t, kind) => { calls.toasts.push([t, kind]); return toast; }}}, navigator:{userActivation:{isActive:clicked}}};
+    AbortSignal, window:{orch:{toast:(t, kind) => { calls.toasts.push([t, kind]); return toast; }}}, navigator:{userActivation:{isActive:clicked}}};
   vm.createContext(ctx); vm.runInContext(marker, ctx);
   return {ctx, calls, frameWindow};
 }
@@ -65,11 +65,23 @@ test('nothing in review, or every move refused, tells the page it failed; a part
   assert.equal(s.calls.posts[0][0].moved, 1); assert.equal(s.calls.toasts[1][1], 'error');
 });
 
-test('a second batch while one runs does nothing', async () => {
+test('a second batch while one runs moves nothing more and is told so, never left without an answer (ORCH-419)', async () => {
   const {ctx, calls, frameWindow} = setup();
   const req = ctx.embedLooksGoodRequest(msg(frameWindow));
   await Promise.all([ctx.looksGoodAll(req), ctx.looksGoodAll(req)]);
-  assert.equal(calls.posts.length, 1);
+  assert.equal(calls.moves.length, 2);
+  assert.deepEqual(plain(calls.posts.map(p => p[0].type).sort()), ['orch.looksgood.done', 'orch.looksgood.failed']);
+  assert.match(calls.posts.find(p => p[0].type === 'orch.looksgood.failed')[0].error, /Still saving/);
+});
+
+test('a fresh read that never answers is given up, so Looks good still saves (ORCH-419)', async () => {
+  const {ctx, calls, frameWindow} = setup();
+  let signal = null;
+  ctx.fetch = (_url, opts) => { signal = opts.signal; return new Promise((_, reject) => opts.signal.addEventListener('abort', () => reject(opts.signal.reason))); };
+  ctx.AbortSignal = {timeout:() => { const c = new AbortController(); setTimeout(() => c.abort(new Error('timeout')), 10); return c.signal; }};
+  await ctx.looksGoodAll(ctx.embedLooksGoodRequest(msg(frameWindow)));
+  assert.ok(signal);
+  assert.equal(calls.posts[0][0].type, 'orch.looksgood.done');
 });
 
 

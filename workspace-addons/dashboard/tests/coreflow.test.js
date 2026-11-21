@@ -8,7 +8,7 @@ const read = f => fs.readFileSync(require('node:path').join(WEB, f), 'utf8');
 const source = [read('app.js'), ...['home', 'tickets', 'ticket', 'newticket', 'settings'].map(p => read('pages/' + p + '.js'))].join('\n');
 const action = source.slice(source.indexOf('async function act('), source.indexOf('async function refresh('));
 function context(fetch, snapshot = false) {
-  const ctx = {snapshot, state:{tickets:[{id:'t_abcdef', status:'ready'}]}, starting:new Set(), writing:0, mutation:0, refreshAgain:false, fetch, renders:[], toasts:[]};
+  const ctx = {snapshot, state:{tickets:[{id:'t_abcdef', status:'ready'}]}, starting:new Set(), startedAt:new Map(), writing:0, mutation:0, refreshAgain:false, fetch, renders:[], toasts:[]};
   ctx.ticketOf = id => ctx.state.tickets.find(t => t.id === id);
   ctx.render = () => ctx.renders.push({status:ctx.state.tickets[0].status, starting:ctx.starting.has('t_abcdef')});
   ctx.accept = next => { ctx.state = next; };
@@ -69,7 +69,7 @@ test('push uses a 50 ms debounce and changes polling only while live', () => {
   const streams = [], intervals = [], timeouts = new Map();
   let refreshed = 0, nextTimer = 0;
   const ctx = {
-    main:{replaceChildren(node) { assert.equal(node, 'loading'); }}, skeletonFor:() => 'loading', hashKind:() => 'home', paintUpdated() {}, location:{hash:''}, document:{querySelector:() => null, getElementById:() => null, addEventListener() {}, visibilityState:'visible'}, navigator:{},
+    main:{replaceChildren(node) { assert.equal(node, 'loading'); }}, skeletonFor:() => 'loading', hashKind:() => 'home', startNav() {}, paintUpdated() {}, location:{hash:''}, document:{querySelector:() => null, getElementById:() => null, addEventListener() {}, visibilityState:'visible'}, navigator:{},
     snapshot:false, window:{addEventListener() {}, get EventSource() { return ctx.EventSource; }}, refresh:() => { refreshed++; },
     setInterval:(_, ms) => { intervals.push(ms); return intervals.length; }, clearInterval() {},
     setTimeout:(fn, ms) => { assert.equal(ms, 50); timeouts.set(++nextTimer, fn); return nextTimer; }, clearTimeout:id => timeouts.delete(id),
@@ -223,6 +223,23 @@ test('Undo moves the ticket back', async () => {
   await new Promise(r => setTimeout(r, 10));
   assert.equal(ctx.state.tickets[0].status, 'review');
 });
+// ORCH-248 (owner 17 Nov): a move to Working by hand offers Start instead of a silent fall back to To do.
+test('a move to Working offers Start helper, a move to Done does not', async () => {
+  const acts = [];
+  const ctx = moveContext(async () => ({ok:true}));
+  ctx.act = async (op, args) => { acts.push([op, args]); return {ok:true}; };
+  // ORCH-475: the offer is the one Start button (kit), built in the notice for that ticket
+  const built = [];
+  ctx.startButtonIn = (host, t, o) => { built.push([host.attrs['data-action'], t.id, o.style]); return {}; };
+  await ctx.moveTicket('t1', 'active');
+  const offer = ctx.toasts.find(t => t.text === 'No helper is working on it yet.');
+  assert.ok(offer, 'the offer is shown');
+  assert.equal(offer.undo.attrs['data-action'], 'offer-start');
+  assert.deepEqual(built, [['offer-start', 't1', 'ghost']]);
+  const done = moveContext(async () => ({ok:true}));
+  await done.moveTicket('t1', 'done');
+  assert.equal(done.toasts.some(t => /No helper/.test(t.text)), false);
+});
 // ORCH-152: a move to Waiting or Superseded writes its detail with the status; Undo puts the old wait back.
 test('a lane move sends the wait date or the replacing ticket, and Undo restores the wait', async () => {
   const sent = [];
@@ -243,4 +260,46 @@ test('a lane move sends the wait date or the replacing ticket, and Undo restores
   await new Promise(r => setTimeout(r, 10));
   assert.deepEqual(sent.at(-1).data, {status:'waiting', waiting_on:{kind:'time', until}});
   assert.deepEqual(JSON.parse(JSON.stringify(ctx.state.tickets[1].waiting_on)), {kind:'time', until});
+});
+// ORCH-235: Done on an epic whose sub-tickets are still open asks once ("Mark Done anyway" or Cancel); with all
+// sub-tickets finished it moves at once.
+function kidsContext(kidStatus) {
+  const sent = [], dialogs = [];
+  const ctx = moveContext(async (op, body) => { sent.push(JSON.parse(JSON.stringify(body()))); return {ok:true}; });
+  ctx.window.DashHelpers = require('../src/orch_dashboard/web/helpers.js');
+  ctx.state.tickets = [{id:'t1', status:'active', revision:3, title:'Spring catalogue', epic:true},
+    {id:'t2', key:'DM-2', status:kidStatus, parent:'t1', title:'Photos'}, {id:'t3', key:'DM-3', status:'done', parent:'t1', title:'Texts'}];
+  ctx.tickets = () => ctx.state.tickets;
+  ctx.activeTicket = t => !['done', 'dropped'].includes(t.status);
+  ctx.clean = v => String(v ?? '');
+  ctx.button = (label, cls, click) => ({label, click});
+  ctx.h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity), listeners:{}, addEventListener(t, f) { this.listeners[t] = f; }, remove() {}});
+  ctx.window.orch.close = d => d.listeners.close();
+  ctx.dialog = title => {
+    const d = {title, listeners:{}, parts:[], addEventListener(t, f) { d.listeners[t] = f; }, append(...p) { d.parts.push(...p); }, showModal() { d.open = true; }};
+    const actions = {buttons:[], append(b) { actions.buttons.push(b); }};
+    dialogs.push({d, actions}); return {d, actions};
+  };
+  return {ctx, sent, dialogs};
+}
+test('Done on an epic with an open sub-ticket asks first; Cancel keeps it, Mark Done anyway moves it', async () => {
+  let {ctx, sent, dialogs} = kidsContext('ready');
+  let run = ctx.moveTicket('t1', 'done');
+  assert.equal(dialogs.length, 1);
+  assert.match(dialogs[0].d.title, /open sub-tickets/);
+  assert.match(JSON.stringify(dialogs[0].d.parts), /1 sub-ticket is not done yet: DM-2/);
+  assert.equal(ctx.state.tickets[0].status, 'active', 'nothing moves before the answer');
+  ctx.window.orch.close(dialogs[0].d);  // Cancel
+  await run;
+  assert.equal(sent.length, 0); assert.equal(ctx.state.tickets[0].status, 'active');
+  ({ctx, sent, dialogs} = kidsContext('ready'));
+  run = ctx.moveTicket('t1', 'done');
+  dialogs[0].actions.buttons.find(b => b.label === 'Mark Done anyway').click();
+  await run;
+  assert.equal(sent.length, 1); assert.equal(sent[0].data.status, 'done');
+});
+test('Done on an epic whose sub-tickets are all finished moves at once', async () => {
+  const {ctx, sent, dialogs} = kidsContext('dropped');
+  await ctx.moveTicket('t1', 'done');
+  assert.equal(dialogs.length, 0); assert.equal(sent[0].data.status, 'done');
 });

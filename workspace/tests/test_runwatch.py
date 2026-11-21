@@ -1,7 +1,9 @@
 """orch run list, screen and status: spot a stuck helper through orch alone (ORCH-25)."""
 
 import json
+import shutil
 import subprocess
+import sys
 import time
 
 import pytest
@@ -35,7 +37,7 @@ def _key(proj, tid):
 def child():
     """A throwaway process to stand for the run's wrapper: never this test process, which orch's idle cleanup
     may stop (a session idle over the limit is closed with its process tree)."""
-    p = subprocess.Popen(["sleep", "120"])
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
     yield p.pid
     p.kill()
     p.wait()
@@ -159,6 +161,20 @@ def test_list_with_no_runs(proj, run):
     assert code == 0 and "No runs right now." in out
 
 
+def test_list_shows_the_tickets_waiting_for_a_helper_place(proj, new_ticket, run):
+    """ORCH-1026: during the server move the owner could not see which tickets waited for a slot."""
+    from orch import runs_live
+
+    a, b = new_ticket("A"), new_ticket("B")
+    runs_live._queue_for_slot(proj, a, "human:tester", "Start when a slot is free.", "normal")
+    runs_live._queue_for_slot(proj, b, "human:tester", "Start when a slot is free.", "high")
+    code, out, _ = run("run", "list")
+    assert code == 0 and "No runs right now." in out
+    assert f"Waiting for a free helper place, in this order: {_key(proj, b)} (high), {_key(proj, a)}." in out
+    line = json.loads(run("run", "list", "--json")[1])["line"]
+    assert [(q["ticket"], q["priority"]) for q in line] == [(b, "high"), (a, "normal")]
+
+
 def test_screen_refuses_without_a_live_session(proj, new_ticket, run):
     tid = new_ticket()
     code, _, err = run("run", "screen", _key(proj, tid))
@@ -197,7 +213,7 @@ def test_screen_returns_the_last_lines_read_only(proj, new_ticket, run, monkeypa
         ("ended", [], None, None),
         ("working", [], None, ("working", "Working", "")),
         ("working", [{"kind": "command", "label": "pytest", "what": "pytest (running 1 min)"}], None,
-         ("working", "Working", "Running pytest")),
+         ("working", "Working", "Running tests")),
         ("starting", [], None, ("starting", "Starting", "")),
         ("waiting", [{"kind": "person", "what": "an answer from the person", "ref": "q1"}], 60,
          ("you", "Waits for you", "Your answer")),
@@ -206,7 +222,9 @@ def test_screen_returns_the_last_lines_read_only(proj, new_ticket, run, monkeypa
         ("waiting", [{"kind": "person", "what": "x", "ref": "q1"}, {"kind": "person", "what": "y"}], None,
          ("you", "Waits for you", "Your answer and your OK on the screen")),
         ("waiting", [{"kind": "command", "label": "pr-green.sh", "seconds": 360, "what": "x"}], 60,
-         ("waiting", "On hold", "Waiting for pr-green.sh · 6 min")),
+         ("waiting", "On hold", "Running a script · 6 min")),
+        ("waiting", [{"kind": "command", "label": "sleep", "seconds": 240, "what": "x"}], 60,
+         ("waiting", "On hold", "Waiting · 4 min")),
         ("waiting", [{"kind": "command", "label": "the pull request checks", "seconds": 1080, "what": "x"}],
          60,
          ("waiting", "On hold", "Waiting for the pull request checks · 18 min")),
@@ -218,6 +236,39 @@ def test_screen_returns_the_last_lines_read_only(proj, new_ticket, run, monkeypa
 def test_helper_state_is_one_word_per_signal(sig, waits, idle, want):
     got = runwatch.helper_state(sig, waits, idle)
     assert (got if got is None else (got["state"], got["word"], got["detail"])) == want
+
+
+@pytest.mark.parametrize(
+    "cmd, want",
+    [
+        ("orch check done t_1 c1 --note x", "Updating the ticket"),
+        ("orch pull-requests queue add https://x/pull/1 --wait", "Waiting"),
+        ("orch ref wait t_1 --merge", "Waiting for the pull request checks"),
+        ("sleep 240", "Waiting"),
+        ("node /tmp/release/walk.cjs --port 8790", "Running a script"),
+        ("bash ~/x/pr-green.sh 12 repo", "Running a script"),
+        ("env -i HOME=/tmp/t uv run python -m pytest -q -n 2 tests/test_x.py", "Running tests"),
+        ("node --test tests/home.test.js", "Running tests"),
+        ("cargo test", "Running tests"),
+        ("cargo build --release", "Building"),
+        ("git push -u origin fix/x", "Working on the code"),
+        ("ls -la", "Running a command"),
+        ("pytest", "Running tests"),
+        ("the GitHub merge limit", "Waiting for the GitHub merge limit"),
+        ("helper: read the logs", "Working with its own helper"),
+        ("", "Running a command"),
+    ],
+)  # fmt: skip
+def test_doing_says_plain_words_never_a_program_name(cmd, want):
+    """Report r-1118-0544 (ORCH-407): Home said 'Running orch', 'Running sleep', 'Running walk.cjs'."""
+    assert runwatch.doing(cmd) == want
+
+
+def test_working_helper_with_several_commands_says_each_activity_once():
+    waits = [{"kind": "command", "label": "orch", "doing": "Updating the ticket"},
+             {"kind": "command", "label": "orch", "doing": "Updating the ticket"},
+             {"kind": "command", "label": "pytest", "doing": "Running tests"}]  # fmt: skip
+    assert runwatch.helper_state("working", waits, None)["detail"] == "Updating the ticket, Running tests"
 
 
 def test_status_carries_the_helper_state_and_last_activity(proj, new_ticket, run, monkeypatch, child):
@@ -233,6 +284,44 @@ def test_status_carries_the_helper_state_and_last_activity(proj, new_ticket, run
     assert rows[0]["helper"]["word"] == "Waits for you"  # orch run list says the same
     data = json.loads(run("run", "status", new_ticket("B"), "--json")[1])
     assert data["helper"] is None and data["last_activity"] is None
+
+
+def test_a_helper_noted_at_the_usage_limit_shows_stopped_with_the_time_it_continues(
+    proj, new_ticket, run, monkeypatch, child
+):
+    """ORCH-643 (report r-1118-1812-ws): a helper the watcher noted as stopped on the usage limit showed as
+    working or waiting for an OK on Home. Now every page reads 'Stopped: usage limit' and when it goes on."""
+    from orch import limitstop
+
+    tid, other = new_ticket(), new_ticket("B")
+    _live(proj, tid, "attention", child)
+    monkeypatch.setattr(runwatch, "_table", lambda: [])
+    at = time.time() + 3600
+    limitstop.note(proj, tid, {"until": at, "text": "Usage limit reached"})
+    data = json.loads(run("run", "status", tid, "--json")[1])
+    assert data["helper"] == {
+        "state": "limit",
+        "word": "Stopped: usage limit",
+        "detail": f"Continues at {limitstop.clock(at + limitstop.GRACE)}",
+    }
+    rows = json.loads(run("run", "list", "--json")[1])["runs"]
+    assert rows[0]["helper"]["word"] == "Stopped: usage limit"
+    # the reset passed but the watcher has not started it yet; a ticket that is not noted keeps its state
+    assert runwatch.limit_state(proj, tid, now=at + limitstop.GRACE + 1)["detail"] == "Continues shortly"
+    # a helper that works again after the note (a person's prompt) is no longer shown as stopped
+    rec = runs.read(proj, tid)
+    working = {**rec, "live": {"state": "working", "since": _since(-5)}}
+    assert runwatch.limit_state(proj, tid, working) is None
+    # still "working" from before the note (the tool ended the turn without its hook, ORCH-642): stopped
+    assert (
+        runwatch.limit_state(proj, tid, {**rec, "live": {"state": "working", "since": _since(600)}})["state"]
+        == "limit"
+    )
+    assert runwatch.limit_state(proj, other) is None
+    # no helper runs: no state at all, also when the ticket is still noted
+    assert json.loads(run("run", "status", other, "--json")[1])["helper"] is None
+    limitstop.forget(proj, [tid])
+    assert json.loads(run("run", "status", tid, "--json")[1])["helper"]["state"] == "you"
 
 
 def test_label_names_the_pull_request_wait_in_plain_words():
@@ -359,3 +448,183 @@ def test_the_idle_close_never_kills_a_wait_for_checks(proj, new_ticket, monkeypa
         for p in procs_:
             p.kill()
             p.wait()
+
+
+def _fake_chain(gone=()):
+    """A tmux that runs a chain of display-message / capture-pane like the real one: it stops at the first
+    session that is gone (ORCH-359)."""
+    calls = []
+
+    def fake(root, *args, **kw):
+        calls.append(args)
+        out, rc, cmds, cur = [], 0, [], []
+        for a in args:
+            if a == ";":
+                cmds.append(cur)
+                cur = []
+            else:
+                cur.append(a)
+        cmds.append(cur)
+        for c in cmds:
+            if c[0] == "display-message":
+                out.append(c[-1])
+            elif c[0] == "capture-pane":
+                tid = c[c.index("-t") + 1].strip("=:")
+                if tid in gone:
+                    rc = 1
+                    break
+                out.append(f"\x1b[32m{tid} first\nlast of {tid}  \n\n")
+            else:
+                raise AssertionError(f"not read-only: {c}")
+
+        class R:
+            returncode, stdout, stderr = rc, "\n".join(out) + "\n", ""
+
+        return R()
+
+    return fake, calls
+
+
+def _use_fake_tmux(monkeypatch, fake):
+    """Stand in for tmux, also where tails() looks for it: CI's macOS machines have no tmux at all."""
+    from orch import runs_live
+
+    which = shutil.which
+
+    def fake_which(name, *a, **kw):
+        return "/usr/bin/tmux" if name == "tmux" else which(name, *a, **kw)
+
+    monkeypatch.setattr(runwatch.shutil, "which", fake_which)
+    monkeypatch.setattr(runs_live, "tmux", fake)
+
+
+def test_tails_reads_every_session_in_one_tmux_call(proj, new_ticket, monkeypatch, child):
+    ids = [new_ticket() for _ in range(3)]
+    for t in ids:
+        _live(proj, t, "working", child)
+    fake, calls = _fake_chain()
+    _use_fake_tmux(monkeypatch, fake)
+    got = runwatch.tails(proj, ids, 1)
+    assert len(calls) == 1
+    assert got == {t: {"lines": [f"last of {t}"]} for t in ids}
+
+
+def test_tails_leaves_out_a_gone_session_and_reads_the_rest(proj, new_ticket, monkeypatch, child):
+    a, b, c = (new_ticket() for _ in range(3))
+    for t in (a, b, c):
+        _live(proj, t, "working", child)
+    none = new_ticket()  # no run: never asked
+    fake, calls = _fake_chain(gone={b})
+    _use_fake_tmux(monkeypatch, fake)
+    got = runwatch.tails(proj, [a, b, none, c], 5)
+    assert set(got) == {a, c} and got[c]["lines"] == [f"{c} first", f"last of {c}"]
+    assert len(calls) == 2 and none not in " ".join(calls[0])
+
+
+def test_run_screen_several_tickets_cli_and_in_process(proj, new_ticket, run, monkeypatch, child):
+    from orch import reads
+
+    a, b = new_ticket(), new_ticket()
+    for t in (a, b):
+        _live(proj, t, "working", child)
+    fake, _ = _fake_chain()
+    _use_fake_tmux(monkeypatch, fake)
+    code, out, err = run("run", "screen", _key(proj, a), b, "--lines", "1", "--json")
+    assert code == 0, err
+    want = {"screens": {a: {"lines": [f"last of {a}"]}, b: {"lines": [f"last of {b}"]}}}
+    assert json.loads(out) == want
+    assert reads.answer(proj, ["run", "screen", a, b, "--lines", "1", "--json"]) == want
+
+
+def test_rows_drop_the_prompt_frame():
+    rule = "\u2500" * 40
+    text = "\n".join(["did the work", "ran 3 tests", "", rule, "\u276f ", rule, "  ? for shortcuts", ""])
+    rows, hint = runwatch._rows(text, 40)
+    assert rows == ["did the work", "ran 3 tests"]
+    assert hint is None
+
+
+def test_rows_keep_typed_prompt_text():
+    rule = "\u2500" * 40
+    rows, _ = runwatch._rows("\n".join(["work", rule, "\u276f fix it", rule]), 40)
+    assert rows == ["work", "\u276f fix it"]
+
+
+def test_rows_drop_status_rows_under_the_prompt_box():
+    rule = "\u2500" * 40
+    text = "\n".join(
+        [
+            "did the work",
+            "",
+            "",
+            "",
+            rule,
+            "\u276f ",
+            rule,
+            "  Opus 5.5 \u00b7 week 21%",
+            "  \u23f5\u23f5 auto mode on",
+        ]
+    )
+    rows, _ = runwatch._rows(text, 8)
+    assert rows == ["did the work"]
+
+
+def test_rows_keep_rows_after_a_lone_rule():
+    rule = "\u2500" * 40
+    rows, _ = runwatch._rows("\n".join(["step one", rule, "step two", "", "", "step three"]), 8)
+    assert rows == ["step one", "step two", "", "step three"]
+
+
+def test_rows_drop_a_fresh_start_banner_notice_and_tips():
+    # ORCH-707: what a new helper's pane holds right after start (report r-1119-0537)
+    rule = "─" * 40
+    text = "\n".join(
+        [
+            " ▐▛███▜▌   Tool v2.1.328",
+            "▝▜█████▛▘  Opus 5.5 · API",
+            "  ▘▘ ▝▝    /Users/someone/ws/Walk",
+            "",
+            "  ⎿  tmux focus-events off · add set -g focus-events on to ~/.tmux.conf",
+            "",
+            "❯ Your task for orch ticket t_aeztli is ready. Read it with: orch run input t_aeztli",
+            "",
+            "✻ Cerebrating…",
+            "",
+            "❯ New input on orch ticket t_aeztli. Read it with: orch run input t_aeztli",
+            "  ※ Tip: Use /memory to keep notes",
+            rule,
+            "❯ ",
+            rule,
+        ]
+    )
+    rows, _ = runwatch._rows(text, 40)
+    assert rows == ["✻ Cerebrating…"]
+
+
+def test_rows_drop_a_boxed_banner_with_a_version():
+    text = "\n".join(
+        [
+            "╭" + "─" * 20 + "╮",
+            "│ >_ Tool (v0.9.1) │",
+            "│ dir: /Users/someone │",
+            "╰" + "─" * 20 + "╯",
+            "",
+            "working",
+        ]
+    )
+    rows, _ = runwatch._rows(text, 40)
+    assert rows == ["working"]
+
+
+def test_rows_keep_work_that_looks_a_little_like_frame():
+    rows = [
+        "\u2502 pkg \u2502 1.2.3 \u2502",
+        "\u2588\u2588\u2588\u2588\u2591\u2591 60.5%",
+        "edited tmux.conf: set -g focus-events on",
+    ]
+    assert runwatch._rows("\n".join(rows), 40)[0] == rows
+
+
+def test_rows_keep_a_progress_bar_and_typed_notice_like_text():
+    rows, _ = runwatch._rows("\n".join(["████░░ 60%", "❯ Your task for orch ticket is ready"]), 40)
+    assert rows == ["████░░ 60%", "❯ Your task for orch ticket is ready"]

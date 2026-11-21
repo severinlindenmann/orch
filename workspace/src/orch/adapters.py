@@ -269,13 +269,16 @@ def permission_args(
 ) -> list[str]:
     """The tool's flags for the workspace's permission mode (ask | auto | full), from the adapter's
     `permissions`. An agent without that data (a generic command) gets none: it ignores the mode.
-    Codex maps every mode to workspace-write + approval never (exec cannot ask): ask/auto/full never widen it
-    beyond that. orch only narrows: a personal config (CODEX_HOME or ~/.codex config.toml, active profile)
-    that sets read-only, or cannot be read safely, gets no flags; a personal approval_policy other than
-    never is kept. System/managed config and a project .codex/config.toml are not read: codex applies
-    them itself.
+    Codex (exec cannot ask: approval never) gets workspace-write at ask and auto: this folder and the ticket
+    store, no network. At full it runs without its sandbox (danger-full-access), like claude's full, so a dev
+    helper can make its worktree, write test homes and reach GitHub (ORCH-604, owner's choice); only a person
+    can raise the mode (config.set_permissions). orch only narrows: a personal config (CODEX_HOME or
+    ~/.codex config.toml, active profile) that sets read-only, or cannot be read safely, gets no flags; a
+    personal approval_policy other than never is kept. System/managed config and a project
+    .codex/config.toml are not read: codex applies them itself.
     person: the result of person_state (read once per start); read here when left out.
-    An entry may depend on the installed tool: `if_help_has` (its --help text), else `else`."""
+    An entry may depend on the installed tool: `if_help_has` (its --help text), else `else`; `with` adds
+    another mode's plain flag list after its args."""
     a = load(name, root)
     table = a.get("permissions")
     if not table:
@@ -285,6 +288,11 @@ def permission_args(
         return []
     if isinstance(entry, list):
         return list(entry)
+    if "with" in entry:  # args, then another mode's plain flag list (written once in the table)
+        base = table.get(entry["with"])
+        if not isinstance(base, list):  # fail closed: never start without the flags it was meant to carry
+            raise ValueError(f"{name}: permissions.{mode}.with must name a plain flag list")
+        return list(entry["args"]) + list(base)
     st = person if person is not None else person_state(entry.get("unless_config"))
     if st["strict"]:
         return []  # never lift a stricter personal setting
@@ -309,7 +317,11 @@ def person_state(rule) -> dict:
         return st
     closed = {"strict": True, "approval": True}
     home, file = str(rule["home"]), str(rule["file"])
-    if any(Path(x).is_absolute() or ".." in Path(x).parts or ":" in x or "\\" in x for x in (home, file)):
+    # "/etc" is not absolute on Windows (no drive) yet leaves the tool home: a rooted path is refused too
+    if any(
+        Path(x).is_absolute() or x[:1] == "/" or ".." in Path(x).parts or ":" in x or "\\" in x
+        for x in (home, file)
+    ):
         return closed
     base = Path(os.environ.get(rule.get("home_env") or "") or Path.home() / home)
     path = base / file
@@ -359,13 +371,16 @@ def person_state(rule) -> dict:
 def permission_note(
     name: str, root: Path | None = None, mode: str | None = None, person: Mapping | None = None
 ):
-    """One line for the run start when the person's own setting keeps the tool stricter than orch's mode."""
+    """One line for the run start: `say` when the person's own setting keeps the tool stricter than orch's
+    mode, else the entry's `note` (what the tool cannot reach at this mode: codex's sandbox), else None."""
     table = load(name, root).get("permissions") or {}
     entry = table.get(mode or config.permissions(root))
-    if not (isinstance(entry, dict) and entry.get("say")):
+    if not (isinstance(entry, dict) and (entry.get("say") or entry.get("note"))):
         return None
     st = person if person is not None else person_state(entry.get("unless_config"))
-    return entry["say"] if st["strict"] else None
+    if st["strict"] and entry.get("say"):
+        return entry["say"]
+    return entry.get("note") or None
 
 
 def person_for(name: str, root: Path | None = None, mode: str | None = None) -> dict | None:
@@ -456,21 +471,26 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
     passes it inline (oneshot.settings_args), live merges it into the per-run hooks file (hooks_doc): one
     --settings either way, so no second config can override this one. The data names the orch command; the
     command written is the ABSOLUTE one (reminder_settings: python -I, never `orch` found through a run's
-    PATH). Record hooks only make sense inside a run (ORCH_RUN/ORCH_TICKET), the only place this goes.
+    PATH). The step hooks (`step_hooks`, the same work-check command after every tool call) tell a one-step
+    run that a person's input waits (#1268); only here, never in the workspace's own settings file, so a
+    hand-started session does not pay for them. Record hooks only make sense inside a run
+    (ORCH_RUN/ORCH_TICKET), the only place this goes.
     On Windows (`_is_windows`) the record hooks are left out: the hook proves its caller by process ancestry
     and there is no Windows reader yet, so each tool call would only start two processes that conclude
     not_provable (#547); the reminder hooks stay."""
     a = load(name, root)
     rh, rec = a.get("reminder_hooks") or {}, a.get("record_hooks") or {}
+    guard = a.get("guard_hooks") or {}
     if _is_windows():
         rec = {}
-    if not rh and not rec:
+    if not rh and not rec and not guard:
         return None
     from orch import reminder_settings
 
     try:
         reminder = reminder_settings.hook_command(name)
         recorder = reminder_settings.record_hook_command() if rec else ""
+        combined = reminder_settings.record_hook_command(name) if rec else ""
     except ValueError:
         return None  # an interpreter path no shell can carry safely: no orch hooks, the run goes on
     if not reminder_settings.can_import_cached():
@@ -481,8 +501,19 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
         return {"matcher": matcher, **g} if matcher is not None else g
 
     hooks: dict[str, list] = {event: [group(reminder)] for event in rh}
+    steps = a.get("step_hooks") or {}
+    # One process per tool event (ORCH-634): where the record hook runs on an event, it also runs the tool's
+    # guard (before a call) and step notice (after one) itself (`orch record hook --with <tool>`); they were
+    # two more Python starts per tool call. Events without a record hook (Windows) keep their own commands.
     for event in rec:  # every tool ("*"); its own group next to any other on the same event
-        hooks.setdefault(event, []).append(group(recorder, "*"))
+        both = event in guard or event in steps
+        hooks.setdefault(event, []).append(group(combined if both else recorder, "*"))
+    for event, matcher in guard.items():  # the protected-machines guard: only the shell tool, before it runs
+        if event not in rec:
+            hooks.setdefault(event, []).append(group(reminder_settings.guard_hook_command(name), matcher))
+    for event in steps:  # after each tool step: a one-step run hears of waiting input
+        if event not in rec:
+            hooks.setdefault(event, []).append(group(reminder, "*"))
     return {"hooks": hooks}
 
 
@@ -726,6 +757,30 @@ def transcript_path(
     folder = re.sub(r"[^A-Za-z0-9]", "-", str((folder or root).resolve()))
     parts = [folder if k == "{folder}" else k.replace("{session}", sid) for k in t["path"]]
     return base.joinpath(*parts)
+
+
+def history_file(
+    name: str, sid: str, root: Path | None = None, environ: Mapping[str, str] | None = None
+) -> tuple[Path, str] | None:
+    """The saved conversation file of session `sid` and its line format ("chat" | "items"), read from the
+    adapter's session.chat_files (<home> + glob); None when none is declared or the file is not there."""
+    if not valid_session_id(sid):
+        return None
+    try:
+        h = (load(name, root).get("session") or {}).get("chat_files")
+    except Refused:
+        return None
+    if not h:
+        return None
+    env = os.environ if environ is None else environ
+    base = Path(env.get(h.get("dir_env") or "", "") or Path(env.get("HOME") or Path.home()) / h["home"])
+    try:
+        for f in base.glob(h["glob"].replace("{session}", sid)):
+            if f.is_file() and not f.is_symlink() and not f.parent.is_symlink():
+                return f, h["lines"]
+    except OSError:
+        return None
+    return None
 
 
 def session_missing(name: str, output: str, root: Path | None = None) -> bool:

@@ -31,10 +31,13 @@ one ticket when every account that has a reading is at cap_pct or more of its we
 One pass: clean up by exact path, run the checks, open one ticket per problem (never a second while the
 first is open, none when all is fine), and hold back automatic helper starts while the disk is almost full
 (`orch pause`, resumed only when this pass paused it). The last pass is kept in .orch/run/doctor.json.
+A login counts only when it failed on two passes in a row; when it works again, its ticket closes by itself
+while nobody took it up (ORCH-395).
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -67,6 +70,7 @@ LIST_KEYS = {"urls": "url", "processes": "match", "services": "launch_agent"}
 CLOSED = ("done", "dropped")
 REPEAT_OPEN = ("open", "ready", "active", "waiting", "review")  # and done: the next run opens it again
 LATE_MIN = 30
+LOGIN_BACK = "The login works again; the scheduled health checks closed this ticket."
 CAP_PCT = 95.0
 DAY = 86400
 
@@ -220,6 +224,20 @@ def remove_setup(root: Path) -> bool:
 # ------------------------------------------------------------------------------------------------ probes
 
 
+def drop_forks(rows: list[str]) -> list[str]:
+    """The command lines of `ps -o pid=,ppid=,command=` rows, without forked children.
+
+    A shell script forks child shells for pipes and $(...); they carry the parent's exact command line,
+    so a check that counts command lines would see one script as two. A process whose parent has the
+    same command line is that parent's fork and is left out."""
+    procs = {}
+    for row in rows:
+        parts = row.split(None, 2)
+        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit() and parts[2].strip():
+            procs[parts[0]] = (parts[1], parts[2].strip())
+    return [cmd for ppid, cmd in procs.values() if procs.get(ppid, (None, None))[1] != cmd]
+
+
 class Probes:
     """What the checks read from the machine. Tests pass `sim` ({"disk_free_gb", "load", "http": {url: code},
     "procs": [command lines], "launch_agents": {label: bool}, "logins": [rows], "repeats": [tickets],
@@ -262,8 +280,8 @@ class Probes:
             return list(self.sim["procs"])
         if os.name == "nt":
             return []
-        r = subprocess.run(["ps", "-axo", "command="], capture_output=True, text=True, timeout=30)
-        return [x for x in r.stdout.splitlines() if x.strip()]
+        r = subprocess.run(["ps", "-axo", "pid=,ppid=,command="], capture_output=True, text=True, timeout=30)
+        return drop_forks(r.stdout.splitlines())
 
     def launch_agent(self, label: str) -> bool | None:
         """True when the launch agent runs, False when it does not, None when it cannot be known here."""
@@ -325,13 +343,37 @@ class Probes:
             return None
 
 
+def _sched_of(t: dict) -> tuple[str, dict]:
+    """(add-on name, its ticket data) of the add-on that repeats this ticket: the first ext entry with a
+    next_run."""
+    ext = t.get("ext") if isinstance(t, dict) else None
+    for name, a in ext.items() if isinstance(ext, dict) else []:
+        if isinstance(a, dict) and a.get("next_run"):
+            return str(name), a
+    return "", {}
+
+
 def _sched(t: dict) -> dict:
     """The ticket data of the add-on that repeats this ticket: the first ext entry with a next_run."""
-    ext = t.get("ext") if isinstance(t, dict) else None
-    for a in ext.values() if isinstance(ext, dict) else []:
-        if isinstance(a, dict) and a.get("next_run"):
-            return a
-    return {}
+    return _sched_of(t)[1]
+
+
+def _acted_since(root: Path, t: dict, by: str, since: datetime) -> bool:
+    """The add-on wrote on the ticket at or after `since` (it started the run): the repeat did not stop, even
+    when its own last/next run write was lost (ORCH-395)."""
+    from orch import history
+
+    for h in reversed(history.lines(root, t)):  # as shown: a synced line cannot pass for the add-on
+        if not isinstance(h, dict):
+            continue
+        at = _when(h.get("at"))
+        if at is None:
+            continue
+        if at < since:
+            return False
+        if h.get("by") == by:
+            return True
+    return False
 
 
 def _when(ts) -> datetime | None:
@@ -348,14 +390,15 @@ def _utc(d: datetime) -> str:
     return d.strftime("%Y-%m-%d %H:%M UTC")
 
 
-def overdue_repeats(rows: list[dict], now: datetime, late_min: float) -> list[dict]:
+def overdue_repeats(rows: list[dict], now: datetime, late_min: float, root: Path | None = None) -> list[dict]:
     """Repeats that stopped: [{ticket, key, title, planned, last}]. A repeat is late when its planned next
     run lies more than max(late_min, one interval, at most a day) in the past. Paused repeats, closed
-    tickets and repeats without a planned time (set before orch saved one; they get it with their next
-    run) are left out."""
+    tickets, repeats without a planned time (set before orch saved one; they get it with their next
+    run) and, with the workspace root, repeats whose add-on wrote on the ticket after the planned time (it
+    ran) are left out."""
     out = []
     for t in rows:
-        a = _sched(t)
+        name, a = _sched_of(t)
         if not a or a.get("paused") is True:
             continue
         if t.get("status") not in (*REPEAT_OPEN, "done"):
@@ -365,7 +408,9 @@ def overdue_repeats(rows: list[dict], now: datetime, late_min: float) -> list[di
             continue
         gap = (planned - last_run).total_seconds() if last_run and last_run < planned else 0
         late = (now - planned).total_seconds()
-        if late >= max(late_min * 60, min(gap, DAY)):
+        if late >= max(late_min * 60, min(gap, DAY)) and not (
+            root and _acted_since(root, t, f"agent:{name}", planned)
+        ):
             out.append(
                 {
                     "ticket": str(t.get("id", "")),
@@ -438,8 +483,12 @@ def checks(cfg: dict, p: Probes, mem: dict) -> list[dict]:
         )
     mem["load_high"] = high
 
+    bad_logins = []  # a status command can fail once (network, a slow night): only two passes in a row count
     for it in p.logins():
         if it.get("state") in ("soon", "renew", "unreachable"):
+            bad_logins.append(f"login-{it.get('name')}")
+            if bad_logins[-1] not in (mem.get("logins_bad") or []):
+                continue
             name = it.get("label") or it.get("name") or "A tool"
             when = f" (ends {str(it['ends_at'])[:16].replace('T', ' ')} UTC)" if it.get("ends_at") else ""
             add(
@@ -448,6 +497,7 @@ def checks(cfg: dict, p: Probes, mem: dict) -> list[dict]:
                 f"orch logins says {it.get('state')} for {name}. Every helper on it stops when it lapses. "
                 "A person renews the login.",
             )
+    mem["logins_bad"] = bad_logins
 
     for u in cfg.get("urls") or []:
         code = p.http(u["url"])
@@ -478,7 +528,7 @@ def checks(cfg: dict, p: Probes, mem: dict) -> list[dict]:
             )
 
     late_min = (cfg.get("repeats") or {}).get("late_min", LATE_MIN)
-    for r in overdue_repeats(p.repeats(), p.now, late_min):
+    for r in overdue_repeats(p.repeats(), p.now, late_min, p.root):
         last_s = f"It last ran {_utc(r['last'])}." if r["last"] else "It has not run yet."
         add(
             f"repeat-{r['ticket']}",
@@ -538,11 +588,19 @@ def worktrees(repo: Path) -> list[Path]:
 
 
 def _du(path: Path) -> int:
-    r = subprocess.run(["du", "-sk", str(path)], capture_output=True, text=True, timeout=300)
+    """Size in bytes, for the report only. Windows has no `du`: a missing program must never stop a clean-up
+    (it raised FileNotFoundError, and clean() skipped every copy and test folder on Windows)."""
     try:
+        r = subprocess.run(["du", "-sk", str(path)], capture_output=True, text=True, timeout=300)
         return int(r.stdout.split()[0]) * 1024
-    except (ValueError, IndexError):
-        return 0
+    except (OSError, subprocess.TimeoutExpired, ValueError, IndexError):
+        pass
+    total = 0
+    for dp, _dns, fns in os.walk(path):  # does not follow links into other folders
+        for n in fns:
+            with contextlib.suppress(OSError):
+                total += os.lstat(os.path.join(dp, n)).st_size
+    return total
 
 
 def process_dirs() -> list[str] | None:
@@ -558,8 +616,13 @@ def process_dirs() -> list[str] | None:
 
 
 def _in_use(path: Path, cwds: list[str]) -> bool:
-    p = str(path)
-    return any(c == p or c.startswith(p + "/") for c in cwds)
+    """A process works in `path` or below; on Windows also with `\\` and in any letter case."""
+    p = os.path.normcase(os.path.normpath(str(path)))
+    for c in cwds:
+        c = os.path.normcase(os.path.normpath(c))
+        if c == p or c.startswith(p.rstrip(os.sep) + os.sep):
+            return True
+    return False
 
 
 def _own(path: Path) -> bool:
@@ -853,9 +916,18 @@ def run_pass(
         for key, rec in list(known.items()):
             if key in found_keys or not isinstance(rec, dict) or rec.get("cleared"):
                 continue
-            if _status(root, rec.get("ticket", "")) in (None, *CLOSED):
+            st = _status(root, rec.get("ticket", ""))
+            if st in (None, *CLOSED):
                 known.pop(key)
                 continue
+            if key.startswith("login-") and st == "open":  # nobody took it up: the login works, close it
+                try:
+                    tickets.log(root, rec["ticket"], LOGIN_BACK, BY)
+                    tickets.set_status(root, rec["ticket"], "dropped", BY)
+                    known.pop(key)
+                    continue
+                except (Refused, OSError):
+                    pass
             try:
                 tickets.log(
                     root, rec["ticket"], "The scheduled health checks no longer see this problem.", BY

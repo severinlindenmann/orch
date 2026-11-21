@@ -14,13 +14,16 @@ from pathlib import Path
 from . import actions, orchcli, plain, scripts, service
 from .cron import fmt, next_after, valid
 from .listen import NOT_LISTENING
-from .loop import Scheduler, scheduled
+from .loop import Scheduler, group_of, scheduled
 from .runner import load_state
 from .view import cron_human
 
 
 class Refused(Exception):
     pass
+
+
+SCRIPT_OR_AGENT = "A repeat runs either a script or an agent, and a script never gets its own sub-tickets."
 
 
 def find_workspace(start: Path) -> Path | None:
@@ -44,6 +47,8 @@ def list_line(x: dict) -> str:
     if x["kind"] == "wake":
         return f"{name}  Wakes {x.get('local') or x['at']}  {x['title']}"
     nxt = "switched off" if x.get("off") else f"next {x.get('local') or x['at'] or 'unknown'}"
+    if x["kind"] == "script":
+        return f"{name}  script {x['script']}: {x['when']}, {nxt}  {x['title']}"
     return f"{name}  {x['when']}, {nxt}  {x['title']}"
 
 
@@ -82,6 +87,22 @@ def describe(root: Path) -> list[dict]:
                     }
                 )
                 continue
+            for n, c in sorted(group_of(t).items()):  # each script of a group on its own plan
+                nx = next_after(c, datetime.now(UTC), plain.zone(s.get("tz")))
+                gat = fmt(nx) if nx else None
+                rows.append(
+                    {
+                        "ticket": t["id"],
+                        "key": t.get("key"),
+                        "title": t["title"],
+                        "kind": "script",
+                        "script": n,
+                        "cron": c,
+                        "at": gat,
+                        "when": cron_human(c, plain.zone(s.get("tz"))),
+                        "local": local_text(gat),
+                    }
+                )
             nxt = next_after(s["cron"], datetime.now(UTC), plain.zone(s.get("tz")))
             at = fmt(nxt) if nxt else state.get(t["id"], {}).get("next_run")
             rows.append(
@@ -108,7 +129,8 @@ def repeat(
     tz: str | None = None,
     each_run: bool = False,
     by: str | None = None,
-    script: str | None = None,
+    script: str | list[str] | None = None,
+    when_changed: str | None = None,
 ) -> dict:
     want = tid.strip().upper()  # the ticket id, or its key (DM1-12, any case)
     t = next(
@@ -146,11 +168,34 @@ def repeat(
     if each_run and not plain.daily_or_slower(plan.cron):
         raise Refused('Each run as its own ticket needs a repeat daily or slower, like "daily 07:30".')
     remove = [] if each_run else ["each_run"]
+    group = _group(root, script, zone_name, agent, each_run, plan.cron) if isinstance(script, list) else None
+    if group is not None:
+        if len(group) == 1 and next(iter(group.values())) == plan.cron:
+            script = next(iter(group))  # one script on the repeat's own plan: a plain script repeat
+        else:
+            changes["group"] = group
+            remove.append("script")
+            script = None
+    if group is None or "group" not in changes:
+        remove.append("group")
+    if when_changed is not None:
+        from .loop import CHANGE_RE, change_mark
+
+        if when_changed.strip().lower() in ("", "off", "none"):
+            remove.append("when_changed")
+        elif not CHANGE_RE.match(when_changed) or ".." in when_changed.split("@")[0].split("/"):
+            raise Refused(
+                "Say the folder in this workspace and the branch, for example: --when-changed orch@origin/develop"
+            )
+        elif change_mark(root, when_changed) is None:
+            raise Refused(
+                f"{when_changed} cannot be read: is the folder a git project here and the branch right?"
+            )
+        else:
+            changes["when_changed"] = when_changed
     if script is not None:
         if agent or each_run:
-            raise Refused(
-                "A repeat runs either a script or an agent, and a script never gets its own sub-tickets."
-            )
+            raise Refused(SCRIPT_OR_AGENT)
         if not scripts.NAME_RE.match(script):
             raise Refused(
                 "A script name may only have a-z, 0-9 and -. It names a script (orch automation script list)."
@@ -202,7 +247,17 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument(
         "--each-run", choices=("sub-ticket",), help="give every run its own sub-ticket (daily or slower)"
     )
-    rp.add_argument("--script", help="run this script (orch automation script list) instead of an agent")
+    rp.add_argument(
+        "--script",
+        action="append",
+        help="run this script (orch automation script list) instead of an agent; give it more than once for a group, "
+        'each as name or "name=every 15 minutes" (its own plan)',
+    )
+    rp.add_argument(
+        "--when-changed",
+        metavar="FOLDER@BRANCH",
+        help="start only when this git branch moved since the last run, e.g. orch@origin/develop (off: any time)",
+    )
     rp.add_argument("--off", action="store_true")
     sc = sub.add_parser(
         "script", parents=[common], help="commands a repeat can run instead of an agent (this computer only)"
@@ -223,6 +278,7 @@ def main(argv: list[str] | None = None) -> int:
         "run", parents=[common], help="run a ticket's script now and wait (what a repeat does)"
     )
     sx.add_argument("ticket")
+    sx.add_argument("--name", help="one script of the ticket's group")
     ac = sub.add_parser(
         "act",
         parents=[common],
@@ -247,6 +303,33 @@ def main(argv: list[str] | None = None) -> int:
             file=None if args.json else sys.stderr,
         )
         return 2
+
+
+def _group(root: Path, given: list[str], zone_name: str, agent, each_run, own: str) -> dict[str, str]:
+    """--script given once or more: "name" (on the repeat's own plan) or "name=<plan in plain words>".
+    Returns name -> cron rule; every script must be set up on this computer."""
+    if agent or each_run:
+        raise Refused(SCRIPT_OR_AGENT)
+    out: dict[str, str] = {}
+    for item in given:
+        name, _, words = item.partition("=")
+        name = name.strip()
+        if not scripts.NAME_RE.match(name):
+            raise Refused(
+                "A script name may only have a-z, 0-9 and -. It names a script (orch automation script list)."
+            )
+        if not scripts.defined(root, name):
+            why = scripts.missing(root, name)
+            raise Refused(why[0].upper() + why[1:] + ".")
+        words = words.strip()
+        try:
+            rule = own if not words else words if valid(words) else plain.parse(words, zone_name).cron
+        except plain.Plain as e:
+            raise Refused(f"{name}: {e}") from None
+        if not rule:
+            raise Refused(f'{name}: a script of a group repeats, for example "{name}=every 15 minutes".')
+        out[name] = rule
+    return out
 
 
 def _run(args, root: Path) -> int:
@@ -335,13 +418,18 @@ def _run(args, root: Path) -> int:
             args.tz,
             bool(args.each_run),
             script=args.script,
+            when_changed=args.when_changed,
         )
         if res.get("until"):
-            text = f"{args.ticket} wakes once at {res['until']}."
+            text = f"{args.ticket} wakes once at {local_text(res['until']) or res['until']}."
         elif res["recurring"]:
             text = f"{args.ticket} repeats: {cron_human(res['cron'], plain.zone(res['tz']), local=plain.zone(res['tz']))} ({res['tz']})."
             if res.get("script"):
                 text += f" Each time it runs the script {res['script']}, no agent."
+            for name, rule in sorted((res.get("group") or {}).items()):
+                text += f"\n  {name}: {cron_human(rule, plain.zone(res['tz']), local=plain.zone(res['tz']))}"
+            if res.get("when_changed"):
+                text += f"\nIt starts only when {res['when_changed']} changed since its last run."
         else:
             text = f"{args.ticket} no longer repeats."
         running = bool(service.running_pid(root))
@@ -424,26 +512,50 @@ def _script(args, root: Path, out) -> int:
         )
         if t is None:
             raise Refused(f"There is no ticket {args.ticket}.")
-        name = script_of(t)
-        if not name:
+        group = group_of(t)
+        if args.name and args.name not in group:
+            raise Refused(f"{args.name} is not one of the scripts of {args.ticket}.")
+        if args.name:
+            todo = [(args.name, True)]
+        elif script_of(t):
+            todo = [(script_of(t), False)]
+        elif group:
+            todo = [(n, True) for n in sorted(group)]  # what Start now does: the whole group
+        else:
             raise Refused(
                 f"{args.ticket} runs no script. Set one: orch automation repeat {args.ticket} <when> --script <name>"
             )
         refused = orchcli.sync_refusal(root, t["id"])
         if refused:
             raise Refused(refused)
-        code = scripts.run(
-            root,
-            t["id"],
-            name,
-            fmt(datetime.now(UTC)),
-            lambda why: ask_failure(root, t["id"], f"The script did not work: {why}"),
-        )
-        if code == 75:
-            out({"ticket": t["id"], "running": True}, "It is still running from before.")
-            return 0
-        out({"ticket": t["id"], "exit": code}, f"Script {name} ended with exit code {code}.")
-        return 0 if code == 0 else 1
+        results, worst = [], 0
+        for name, member in todo:
+            code = scripts.run(
+                root,
+                t["id"],
+                name,
+                fmt(datetime.now(UTC)),
+                lambda why: ask_failure(root, t["id"], f"The script did not work: {why}"),
+                member=member,
+            )
+            results.append((name, code))
+            if code not in (0, 75) and worst == 0:
+                worst = code
+        if len(results) == 1:
+            name, code = results[0]
+            if code == 75:
+                out({"ticket": t["id"], "running": True}, "It is still running from before.")
+                return 0
+            out({"ticket": t["id"], "exit": code}, f"Script {name} ended with exit code {code}.")
+            return 0 if code == 0 else 1
+        lines = [
+            f"Script {n} is still running from before."
+            if c == 75
+            else f"Script {n} ended with exit code {c}."
+            for n, c in results
+        ]
+        out({"ticket": t["id"], "exit": worst, "scripts": dict(results)}, "\n".join(lines))
+        return 0 if worst == 0 else 1
     return 0
 
 

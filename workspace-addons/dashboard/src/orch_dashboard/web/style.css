@@ -179,7 +179,7 @@ iframe.embed.embed-shell{width:100%;margin:0;height:calc(100vh - var(--topbar-he
 .kanban-col.drop-target{background:var(--brand-soft);box-shadow:inset 0 0 0 1px var(--brand)}
 .col-head{display:flex;align-items:center;gap:8px;padding:12px 10px;margin-bottom:10px;border:1px solid var(--border);border-radius:8px}
 .col-head h2{font-size:14px}
-.status-count{font:12px var(--font-mono);padding:1px 6px;border-radius:20px;color:var(--text-muted);background:var(--surface-2)}
+.status-count{font-size:12px;font-variant-numeric:tabular-nums;padding:1px 6px;border-radius:20px;color:var(--text-muted);background:var(--surface-2)}
 .col-head .dot{width:6px;height:6px}
 .board-none{padding:6px 10px}
 .ticket-card{position:relative;padding:12px;margin-bottom:8px;cursor:grab;overflow:visible;transition:border-color 160ms,transform 160ms}
@@ -194,7 +194,7 @@ iframe.embed.embed-shell{width:100%;margin:0;height:calc(100vh - var(--topbar-he
 .due{margin-left:auto;font-size:12px;white-space:nowrap}.due.bad{color:var(--warning)}
 .task-progress{display:flex;gap:10px;align-items:center;margin-top:12px}
 .task-progress .progress{flex:1;height:3px}
-.task-progress .meta{font:12px var(--font-mono)}
+.task-progress .meta{font-size:12px;font-variant-numeric:tabular-nums}
 .show-done{width:100%;font-size:12px}
 .status-jumps{display:none}
 .artifact-stack{gap:22px}

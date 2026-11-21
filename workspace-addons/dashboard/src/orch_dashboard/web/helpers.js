@@ -12,14 +12,19 @@
      work; "waiting" shows as "Needs you". ORCH-152 (owner, 17 Nov): Backlog, To do, Waiting, Won't do, Superseded. */
   const STATUS_ORDER = ['open', 'ready', 'active', 'waiting', 'review', 'done'];
   const statusWord = (status, started) => (status === 'open' || status === 'ready') && started === true ? 'Paused' : STATUS_WORD[status] || 'Backlog';
+  // A person's Send back that is not yet worked: Ready + a task made from their words (origin change_request) still open.
+  // Derived, like the core's changes_asked: Undo and finishing the task clear it. Same rule, same word.
+  const changesAsked = t => !!t && t.status === 'ready' && arr(t.checklist).some(c => c && c.origin === 'change_request' && !c.done && !c.wont_do);
   const columnOf = status => status;
   const STATUS_CHOICES = STATUS_ORDER.map(s => [s, STATUS_WORD[s]]);
-  // "Move to" offers these places; Needs you and Waiting are decided by the agent (or the board's Waiting lane).
-  const MOVE_CHOICES = [...STATUS_CHOICES.filter(([s]) => s !== 'waiting'), ['dropped', STATUS_WORD.dropped]];
   /* The board's lanes, left to right. "blocked" = Waiting: waits for a date, another ticket or the outside, with no
      open question. "superseded" = Won't do because another ticket replaces it (superseded_by). */
   const LANES = [['open', 'Backlog'], ['ready', 'To do'], ['active', 'Working'], ['waiting', 'Needs you'], ['blocked', 'Waiting'],
     ['review', 'Check'], ['done', 'Done'], ['dropped', "Won't do"], ['superseded', 'Superseded']];
+  /* "Move to" (ticket page, list, board card) offers every lane but Needs you, which only a helper's question makes.
+     Waiting asks for its date and reason, Superseded for the ticket that replaces it (ORCH-235: the same places
+     everywhere). */
+  const MOVE_CHOICES = LANES.filter(([lane]) => lane !== 'waiting');
   /* The lane of a ticket. `status` is the status as shown (a live helper that needs the person shows as waiting);
      `asks` is true while the ticket has an open question. */
   function laneOf(t, status, asks) {
@@ -39,11 +44,23 @@
     if (lane === 'dropped') return {status: 'dropped', superseded_by: null};
     return STATUS_WORD[lane] ? {status: lane} : null;
   }
+  /* ORCH-235: what a Waiting ticket waits for, in one line: "Waits until Mon 09:00 · The price list",
+     "Waits for ORCH-12", "Waits: the supplier". `all` finds the other ticket, `stamp(at)` says a time. '' = nothing known. */
+  function waitWords(t, all, stamp) {
+    const w = (t && t.waiting_on) || {}, ref = typeof w.ref === 'string' ? w.ref.trim() : '';
+    if (w.kind === 'ticket' && ref) {
+      const other = arr(all).find(o => o && (o.id === ref || (o.key && String(o.key).toLowerCase() === ref.toLowerCase())));
+      return 'Waits for ' + (other ? other.key || other.title : 'another ticket');
+    }
+    if (w.kind === 'time' && w.until) return 'Waits until ' + (stamp ? stamp(w.until) : w.until) + (ref ? ' · ' + ref : '');
+    if (w.kind === 'external' && ref) return 'Waits: ' + ref;
+    return '';
+  }
   const FIELD_WORD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary',
     status: 'the status', done_when: 'the Done when line'};
 
   /* Due dates (G1). `due` is "YYYY-MM-DD" (a day) or "YYYY-MM-DDTHH:MM" (local wall time, no zone). Only a due with a
-     time gets words here: "Due 18:30" (today), "Due Mon 18:30" (within a week), "Due 14 Nov 2026, 18:30" (further),
+     time gets words here: "Due 18:30" (today), "Due Mon 16 Nov, 18:30" (within a week), "Due 14 Nov 2026, 18:30" (further),
      and "Late since ..." once it has passed on an active ticket. A day-only due returns '' (callers keep their day
      wording). The same words as orch.tickets.due_label (the CLI). */
   const DUE_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -61,7 +78,10 @@
     const at = dueTime(due);
     if (!at) return '';
     now = now || new Date();
-    return (at < now && status !== 'done' && status !== 'dropped' ? 'Late since ' : 'Due ') + whenWords(at, now);
+    const gap = Math.round((new Date(at.getFullYear(), at.getMonth(), at.getDate()) - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5);
+    // ORCH-240: within a week the day of the month too ("Due Mon 16 Nov, 18:30"), never a bare weekday
+    const words = gap !== 0 && Math.abs(gap) < 7 ? DUE_DAYS[at.getDay()] + ' ' + at.getDate() + ' ' + DUE_MONTHS[at.getMonth()] + ', ' + dueClock(at) : whenWords(at, now);
+    return (at < now && status !== 'done' && status !== 'dropped' ? 'Late since ' : 'Due ') + words;
   }
   /* G2: "No news since 09:20" for a Working ticket quiet for 6 h. `since` is `quiet_since` (UTC ISO, computed once by
      orch.tickets.quiet_since); shown in local time. '' when the ticket is not quiet. The same words as
@@ -88,9 +108,11 @@
   /* A task finished by the agent is written twice (orch's own "Check c1 done" and the agent's own note): both read
      "Finished a task: ...". Within two minutes the longer of two equal-or-prefix lines stays, once. Original order kept. */
   /* ORCH-185: the old and new text of a note edit, when the line carries them ("Edited note (was: ... | now: ...)"). */
+  /* ORCH-240: also the title, owner, due day and a renamed task. */
   function historyChange(entry) {
-    const m = /^Edited (note|done_when) \(was: ([\s\S]*) \| now: ([\s\S]*)\)$/.exec(String((entry && entry.text) || '').trim());
-    return m ? {field: m[1], was: m[2], now: m[3]} : null;
+    const text = String((entry && entry.text) || '').trim();
+    const m = /^(?:Edited (note|done_when|owner|due)|(Title) changed|Renamed (c\d+)) \(was: ([\s\S]*) \| now: ([\s\S]*)\)$/.exec(text);
+    return m ? {field: m[1] || (m[2] ? 'title' : 'task'), was: m[4], now: m[5]} : null;
   }
   function dedupeHistory(entries, checklist) {
     const list = Array.isArray(entries) ? entries : [], drop = new Set(), last = [];
@@ -118,9 +140,15 @@
     // the lines orch writes itself (same words as the CLI): a task line names the task, add-on settings their add-on
     const task = id => { const c = (Array.isArray(checklist) ? checklist : []).find(x => x && x.id === id); return c && c.text ? ': ' + c.text : ''; };
     const addon = key => key.replace(/-/g, ' ').replace(/^./, c => c.toUpperCase());
-    if ((m = /^Added check (c\d+)$/.exec(text))) return 'Added a step' + task(m[1]);
+    if ((m = /^Added check (c\d+)$/.exec(text))) return 'Added a task' + task(m[1]);
     if ((m = /^Marked (c\d+) as won't do$/.exec(text))) return "Marked as won't do" + task(m[1]);
-    if ((m = /^Check (c\d+) done$/.exec(text))) return 'Finished a step' + task(m[1]);
+    if ((m = /^Check (c\d+) done$/.exec(text))) return 'Finished a task' + task(m[1]);
+    // ORCH-240: never a raw task id ("Reopened c1"); the old and new text show below the line (historyChange)
+    if ((m = /^Reopened (c\d+)(?: \(old evidence: [\s\S]*\))?$/.exec(text))) return 'Opened a task again' + task(m[1]);
+    if ((m = /^Renamed (c\d+)( \(was: [\s\S]* \| now: [\s\S]*\))?$/.exec(text))) return 'Renamed a task' + (m[2] ? '' : task(m[1]));
+    if ((m = /^Linked (c\d+) to Done when$/.exec(text))) return 'Linked a task to Done when' + task(m[1]);
+    if ((m = /^Removed step c\d+ '([\s\S]*)' \((?:was done|was open)(?:; evidence: [\s\S]*)?\)$/.exec(text))) return 'Removed a task: ' + m[1];
+    if (/^Title changed(?: \(was: [\s\S]* \| now: [\s\S]*\))?$/.test(text)) return 'Changed the title';
     if ((m = /^Set ext\.([a-z][a-z0-9-]*)$/.exec(text))) return 'Updated ' + addon(m[1]) + ' settings';
     if ((m = /^Removed ext\.([a-z][a-z0-9-]*)(\.[\w-]+)?$/.exec(text))) return 'Removed ' + addon(m[1]) + ' settings';
     if (/^Created under t_\w+$/.test(text)) return 'Created as a sub-ticket';
@@ -136,11 +164,11 @@
     if (/^Answered q\d+/.test(text)) return 'Answered a question';
     if ((m = /^(?:Patched status \(status|Status) \w+ -> (\w+)/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);
     if (/^Summary/.test(text)) return 'Updated the summary';
-    if ((m = /^Added (?:task|check)[:\s]+(.+)$/i.exec(text))) return 'Added a step: ' + m[1];
-    if ((m = /^Finished a (?:task|step)[:\s]+(.+)$/i.exec(text))) return 'Finished a step: ' + m[1];
+    if ((m = /^Added (?:task|check)[:\s]+(.+)$/i.exec(text))) return 'Added a task: ' + m[1];
+    if ((m = /^Finished a (?:task|step)[:\s]+(.+)$/i.exec(text))) return 'Finished a task: ' + m[1];
     if (/^(Updated|Removed) .+ settings$/.test(text)) return text;
-    if (/^Check c\d+ done/i.test(text) || /^(Checked|Done)\b.*\bc\d+/.test(text) || /^Task .* done/i.test(text)) return 'Finished a step';
-    if (/^Added task|^Added check/i.test(text)) return 'Added a step';
+    if (/^Check c\d+ done/i.test(text) || /^(Checked|Done)\b.*\bc\d+/.test(text) || /^Task .* done/i.test(text)) return 'Finished a task';
+    if (/^Added task|^Added check/i.test(text)) return 'Added a task';
     if (/^Linked|^Link added/i.test(text)) return 'Added a reference';
     return plainNames(text).replace(/ moved it to Review$/, ' sent it to Check');
   }
@@ -249,8 +277,8 @@
   }
   /* A helper's changes waiting to be added: shown as "Changes to add" from the ticket, not as a second row. */
   const isBringBack = row => !!row && row.kind === 'copies:bring-back';
-  /* The one "Needs you" number (Review menu entry, top bar, Home heading, Review page, Tickets pill, Focus): the open
-     questions plus the results to check, the same things the Review page shows as cards (owner, 16 Nov, ORCH-63).
+  /* The open questions plus the results to check, the same things the Review page shows as cards (owner, 16 Nov,
+     ORCH-63). The dashboard's one "Needs you" number (needsYouTotal) adds the rows of work that stopped (ORCH-705).
      One per question (a ticket with two open questions counts two); a ticket that only waits for another ticket, a
      failed start, a helper idle at its prompt and other rows without a question are shown on Home but not counted.
      results is a number or a list. */
@@ -273,6 +301,7 @@
     if (answerable && /^[a-z][a-z0-9-]*:/.test(String(r.kind || ''))) return {label: 'Review', kind: 'review'};
     if (answerable) return {label: 'Answer', kind: 'answer'};
     if (r.kind === 'addon:not-running' && !r.ticket) return {label: 'Start', kind: 'start'};  // a background add-on that stopped
+    if (r.kind === 'overdue-wait' && r.ticket) return {label: 'Continue', kind: 'run'};  // ORCH-255: a passed wake time with no helper
     if (r.tone === 'bad' && r.ticket) return {label: 'Run again', kind: 'run'};
     return {label: 'Open', kind: 'open'};
   }
@@ -303,9 +332,9 @@
   }
 
   /* ORCH-61: the ONE state of a running helper, as the core words it (orch run status "helper"):
-     {state: working|starting|you|waiting|idle|stuck, word, detail}; null when no helper runs. An older core without
+     {state: working|starting|you|waiting|idle|stuck|limit, word, detail}; null when no helper runs. An older core without
      the field: the same words from the claim, so the page never shows a second set. */
-  const HELPER_WORDS = {working: 'Working', starting: 'Starting', you: 'Waits for you', waiting: 'On hold', idle: 'Idle', stuck: 'Stuck'};
+  const HELPER_WORDS = {working: 'Working', starting: 'Starting', you: 'Waits for you', waiting: 'On hold', idle: 'Idle', stuck: 'Stuck', limit: 'Stopped: usage limit'};
   function helperState(run, ticket) {
     const r = run || null;
     if (!r || (r.running !== true && r.state !== 'maybe-stale')) return null;
@@ -317,15 +346,16 @@
     return {state: key, word: HELPER_WORDS[key], detail: key === 'you' ? (asks ? 'Your answer' : 'Your OK on the screen') : ''};
   }
   /* Rows of the Helpers list (Home side panel; the live add-on page draws the same widget): one per running helper, in the order
-     working, starting, waits for you, waiting, idle, stuck. Each: {ticket, state, word, detail, step, minutes, idle, finished}. */
-  const HELPER_ORDER = ['working', 'starting', 'you', 'waiting', 'idle', 'stuck'];
+     working, starting, waits for you, waiting, idle, stuck, stopped on the usage limit. Each: {ticket, state, word, detail, step, minutes, idle, finished}. */
+  const HELPER_ORDER = ['working', 'starting', 'you', 'waiting', 'idle', 'stuck', 'limit'];
   function helperRows(tickets, runs) {
     const out = [];
     for (const t of arr(tickets)) {
       const run = runs && runs[t.id], st = helperState(run, t);
       if (!st) continue;
-      const tasks = arr(t.checklist).filter(c => c && !c.wont_do), at = tasks.findIndex(c => c.state === 'doing');
-      const n = at >= 0 ? at : tasks.findIndex(c => !c.done);
+      // every task counts, a skipped one too, so "Step 3 of 4" matches the "3/4" of the Tickets list and the ticket
+      const tasks = arr(t.checklist).filter(Boolean), at = tasks.findIndex(c => !c.wont_do && c.state === 'doing');
+      const n = at >= 0 ? at : tasks.findIndex(c => !c.done && !c.wont_do);
       out.push({ticket: t, ...st, step: tasks.length && n >= 0 ? {n: n + 1, of: tasks.length} : null,
         minutes: Number.isFinite(run.age_seconds) ? Math.floor(run.age_seconds / 60) : null,
         idle: Number.isFinite(run.idle_seconds) ? Math.floor(run.idle_seconds / 60) : null,
@@ -451,7 +481,7 @@
       return {state: 'working', agent, status: 'working' + by + since, primary: live || stop, items: live ? [stop] : []};
     }
     const sf = startFailure(t, r, settings);
-    if (sf) return {state: 'failed', agent, status: sf.text, startFailed: true, primary: start('Retry'), items: []};
+    if (sf) return {state: 'failed', agent, status: sf.text, startFailed: true, primary: start('Try again'), items: []};
     if (r && r.state === 'dead') return {state: 'failed', agent, status: 'the last run ended without finishing',
       primary: start('Try again'), items: [fresh]};
     if (asks) return {state: 'needs', agent, status: 'needs your answer', primary: {label: 'Answer', op: 'answer'}, items: [fresh]};
@@ -591,6 +621,18 @@
       : s === 'renew' ? {word:'Needs renewing', tone:'error'} : {word:'Cannot be reached', tone:'error'};
   }
   const needStopsWord = n => n ? 'Stops ' + n + (n === 1 ? ' ticket' : ' tickets') : '';
+  /* Terminal commands a helper wrote in backticks in a question (ORCH-218: "Sign in again with `az login`"): at most two,
+     each a tool name and at least one more word in plain characters, so a quoted name or `c1` is never one. */
+  const questionCommands = text => [...new Set([...String(text || '').matchAll(/`([^`\n]{3,120})`/g)].map(m => m[1].trim())
+    .filter(c => /^[a-z][a-z0-9._-]{0,31}( [A-Za-z0-9._:=\/@,'"+-]+)+$/.test(c)))].slice(0, 2);
+  /* The question as shown: the backticks around those commands dropped (the command itself stays in the words). */
+  const questionWords = text => { const cmds = questionCommands(text); return cmds.reduce((t, c) => t.split('`' + c + '`').join(c), String(text ?? '')); };
+  const needOwnStep = item => item && item.state !== 'works' && !item.renew && !item.key;
+  /* The terminal command that signs in again (ORCH-218: 'az login'), shown with a Copy button under the words. */
+  const needSignIn = item => needOwnStep(item) && typeof item.sign_in === 'string' && /^[A-Za-z0-9][A-Za-z0-9 ._:=\/@,'"+-]{0,119}$/.test(item.sign_in) ? item.sign_in : '';
+  /* What the person does to renew when orch cannot start it (ORCH-48): the check's own plain step, else the lead line of
+     its sign-in command; none when a Renew or Replace button is there or it works. */
+  const needHow = item => !needOwnStep(item) ? '' : typeof item.how === 'string' && item.how ? item.how : needSignIn(item) ? 'Open a terminal on this computer and run:' : '';
   /* The rows of the last check, cleaned: [{name, label, kind, state, ends_at, chosen, stops:[{id, key, title}]}]. */
   function needItems(logins) {
     return arr(logins && logins.items).filter(i => i && ['works', 'soon', 'renew', 'unreachable'].includes(i.state))
@@ -715,8 +757,12 @@
   // `make` is the page's element maker h(); the result is [<span class="key">ORCH-58</span>, ' '] or null.
   const ticketKey = t => t && typeof t.key === 'string' ? t.key.trim() : '';
   const keyTag = (t, make) => { const k = ticketKey(t); return k ? [make('span', {className:'key'}, k), ' '] : null; };
-  // "x of y steps": one pattern for every step counter (always "steps").
-  const stepsText = (done, total) => (Number(done) || 0) + ' of ' + (Number(total) || 0) + (Number(total) === 1 ? ' step' : ' steps');
+  // ORCH-906 (owner picked it, 20 Nov): an epic or a release says so wherever the ticket shows, not only on its board
+  // card. `make` is the page's h(); the result is [' ', <span class="chip kind">Epic</span>] or null for a plain ticket.
+  const kindWord = t => t && t.release ? 'Release' : t && t.epic ? 'Epic' : '';
+  const kindTag = (t, make) => { const w = kindWord(t); return w ? [' ', make('span', {className:'chip kind', 'data-key':'kind-' + w.toLowerCase()}, w)] : null; };
+  // "x of y tasks": one pattern for every task counter (owner, 17 Nov: the to-do lines are "tasks" everywhere).
+  const stepsText = (done, total) => (Number(done) || 0) + ' of ' + (Number(total) || 0) + (Number(total) === 1 ? ' task' : ' tasks');
   // Topbar freshness: when /api/state last answered. Under a minute is "just now".
   function updatedText(at, nowMs) {
     const t = typeof at === 'number' ? at : Date.parse(at);
@@ -728,5 +774,112 @@
     return hours < 24 ? 'Updated ' + hours + (hours === 1 ? ' hour ago' : ' hours ago') : 'Updated ' + Math.floor(hours / 24) + (hours < 48 ? ' day ago' : ' days ago');
   }
 
-  return {historyChange, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
+  // ORCH-189 manager view. Helper time and money at list price: "1 h 40 min · $3.10"; "" without any.
+  function durationWords(seconds) {
+    const n = Number(seconds) || 0, m = Math.round(n / 60);
+    if (n <= 0) return '';
+    if (m < 1) return 'under 1 min';
+    return m >= 60 ? Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '') : m + ' min';
+  }
+  const moneyWords = cost => '$' + (Number(cost) || 0).toFixed(2);
+  function spendWords(spend) {
+    if (!spend || typeof spend !== 'object') return '';
+    const time = durationWords(spend.seconds), cost = Number(spend.cost) || 0;
+    return [time, cost > 0 ? moneyWords(cost) : ''].filter(Boolean).join(' · ');
+  }
+  function spendTotal(items) {
+    return (items || []).reduce((sum, t) => ({cost:sum.cost + (Number(t?.spend?.cost) || 0), seconds:sum.seconds + (Number(t?.spend?.seconds) || 0)}), {cost:0, seconds:0});
+  }
+  // The ticket page's Time · cost: the helper's first-run estimate beside what it took so far (ORCH-189).
+  function costLine(t) {
+    const est = t && t.estimate, parts = [];
+    if (est && typeof est === 'object') {
+      const m = Number.isInteger(est.minutes) && est.minutes > 0 ? durationWords(est.minutes * 60) : '';
+      const c = typeof est.cost === 'number' && est.cost >= 0 ? moneyWords(est.cost) : '';
+      if (m || c) parts.push('Estimate: about ' + [m, c].filter(Boolean).join(' · '));
+    }
+    if (!parts.length && t && !t.spend && typeof t.range === 'string' && t.range) parts.push('Before Start: ' + t.range);  // ORCH-297
+    const so = spendWords(t && t.spend);
+    if (so) parts.push('So far: ' + so);
+    return parts.join(' — ');
+  }
+  // The one line under a stuck ticket (the core's reason; a stuck helper says its own words).
+  function stuckWords(t, nowMs = Date.now()) {
+    const why = t && t.stuck;
+    if (why === 'question') {
+      const open = (t.questions || []).filter(q => q && q.answer == null && !q.taken_back).map(q => Date.parse(q.asked_at || q.sent_at || q.at)).filter(Number.isFinite);
+      const days = open.length ? Math.floor((nowMs - Math.min(...open)) / 86400000) : 1;
+      return 'Question waits ' + (days <= 1 ? '1 day' : days + ' days');
+    }
+    if (why === 'quiet') {
+      const at = Date.parse(t.quiet_since || '');
+      return Number.isFinite(at) ? 'No news for ' + Math.floor((nowMs - at) / 3600000) + ' h' : 'No news for a day';
+    }
+    if (why === 'overdue') return 'Past its due date';
+    return '';
+  }
+  // This week = Monday 00:00 to Sunday 23:59 local. A ticket is "this week" when it is due by Sunday and not
+  // finished, works now, or finished since Monday.
+  function weekStart(nowMs = Date.now()) {
+    const d = new Date(nowMs); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime();
+  }
+  function inThisWeek(t, status, nowMs = Date.now()) {
+    const start = weekStart(nowMs), end = start + 7 * 86400000;
+    if (status === 'active') return true;
+    if (status === 'done') { const at = Date.parse(t.done_at || t.updated_at); return Number.isFinite(at) && at >= start; }
+    if (status === 'dropped' || !t.due) return false;
+    const due = /T/.test(t.due) ? new Date(t.due).getTime() : new Date(t.due + 'T00:00').getTime();
+    return Number.isFinite(due) && due < end;
+  }
+  // ORCH-517: a poll that held a recent revision gets only what changed (state_delta.py). Returns the new state,
+  // or null when the delta does not fit the state held (the caller then fetches the whole state). Unchanged
+  // tickets stay the same objects.
+  function applyStateDelta(state, d) {
+    if (!state || !d || d.delta !== true || !state.rev || d.base !== state.rev || !Array.isArray(d.keys)) return null;
+    const next = {};
+    for (const k of d.keys) next[k] = Object.prototype.hasOwnProperty.call(d.set || {}, k) ? d.set[k] : state[k];
+    // ORCH-524: a top-level object (runs, settings) as only its changed entries and fields
+    for (const [k, p] of Object.entries(d.patch && typeof d.patch === 'object' ? d.patch : {})) {
+      const old = state[k];
+      if (!d.keys.includes(k) || !old || typeof old !== 'object' || Array.isArray(old) || !p || typeof p !== 'object') return null;
+      const v = {...old};
+      for (const sk of arr(p.drop)) delete v[sk];
+      Object.assign(v, p.set && typeof p.set === 'object' ? p.set : {});
+      for (const [sk, f] of Object.entries(p.fields && typeof p.fields === 'object' ? p.fields : {})) {
+        const o = v[sk];
+        if (!o || typeof o !== 'object' || Array.isArray(o) || !f || typeof f !== 'object') return null;
+        v[sk] = {...o, ...f};
+      }
+      next[k] = v;
+    }
+    const byId = new Map(arr(state.tickets).map(t => [t && t.id, t]));
+    for (const id of arr(d.remove)) byId.delete(id);
+    for (const row of arr(d.upsert)) {
+      if (!row || typeof row.id !== 'string') return null;
+      const old = byId.get(row.id);
+      const t = old ? {...old, ...row} : {...row};
+      const append = row['~append'] && typeof row['~append'] === 'object' ? row['~append'] : {};
+      for (const k of Object.keys(append)) {
+        if (!old || !Array.isArray(old[k])) return null;
+        t[k] = [...old[k], ...arr(append[k])];
+      }
+      for (const k of arr(row['~drop'])) delete t[k];
+      delete t['~drop']; delete t['~append'];
+      byId.set(row.id, t);
+    }
+    const held = arr(state.tickets).map(t => t && t.id);
+    let order = held.filter(id => byId.has(id));
+    if (Array.isArray(d.order)) {  // ORCH-524: pieces of the held order ([start, count]) and single ids
+      order = [];
+      for (const part of d.order) {
+        if (typeof part === 'string') { order.push(part); continue; }
+        if (!Array.isArray(part) || part.length !== 2 || !Number.isInteger(part[0]) || !Number.isInteger(part[1]) || part[0] < 0 || part[1] < 1 || part[0] + part[1] > held.length) return null;
+        for (let i = part[0]; i < part[0] + part[1]; i++) order.push(held[i]);
+      }
+    }
+    if (order.length !== byId.size || order.some(id => !byId.has(id))) return null;
+    next.tickets = order.map(id => byId.get(id));
+    return next;
+  }
+  return {historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
 });

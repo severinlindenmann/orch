@@ -33,6 +33,18 @@
       "additionalProperties": false,
       "properties": {
         "label": { "type": "string", "minLength": 1, "maxLength": 32, "description": "Shown to people. \"{name}\" = the user's entry name." },
+        "api_key": {
+          "type": "object", "additionalProperties": false,
+          "description": "How a start on an API key hands the key to this tool's process only (workspace/src/orch/keystart.py). Exactly one of fd_env (a pipe; this variable holds its number) or env (this variable of the tool's process). Never a key value.",
+          "oneOf": [{ "required": ["fd_env"] }, { "required": ["env"] }],
+          "properties": {
+            "fd_env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" },
+            "env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" },
+            "set": { "type": "object", "propertyNames": { "pattern": "^[A-Z][A-Z0-9_]{0,63}$" }, "additionalProperties": { "type": "string" }, "description": "Plain settings for the tool's process on a key start." },
+            "drop": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" }, "description": "Sign-in variables removed from the tool's process, so the picked key is the only one." },
+            "spend": { "enum": ["result-cost", "turn-tokens"], "description": "Where the tool's own output says what a step cost: result-cost = total_cost_usd of the last result line; turn-tokens = tokens of turn.completed lines (no dollars)." }
+          }
+        },
         "store_args": {
           "type": "object", "additionalProperties": false, "required": ["after", "args"],
           "description": "Optional, built-in adapters only (orch ignores it elsewhere). For a tool sandboxed to its working folder: when the agent works in a separate copy of the project, `--add-dir <workspace>/.orch` is inserted into the oneshot argv after the template word `after`, so the workspace's own store stays writable. Nothing else is allowed here: exactly `--add-dir` and `{store}` once.",
@@ -140,9 +152,14 @@
             }
           }
         },
+        "skill_dirs": {
+          "type": "array", "maxItems": 8,
+          "description": "Optional. The tool's own skill folders of the account, read only (inventory.md, source harness): one sub-folder per skill, names and content hashes only. {home} = the account's home folder.",
+          "items": { "type": "string", "pattern": "^\\{home\\}/[A-Za-z0-9_./-]{1,200}$" }
+        },
         "permissions": {
           "type": "object", "additionalProperties": false,
-          "propertyNames": { "enum": ["ask", "auto", "full"] },
+          "propertyNames": { "enum": ["ask", "edits", "auto", "full"] },
           "description": "Optional. Flags for the workspace's permission mode (kept per machine in the orch home (permissions.json), set by orch config set workspace.permissions, never read from .orch/config.toml: ask | auto (default) | full), added to every oneshot and live start. An adapter without this ignores the mode. A mode that is missing adds nothing.",
           "additionalProperties": {
             "oneOf": [
@@ -157,8 +174,16 @@
                 }
               }
               ,{
+                "type": "object", "required": ["args", "with"], "additionalProperties": false,
+                "description": "args followed by the flags of another mode of this table (that entry must be a plain list), so a shared flag list is written once.",
+                "properties": {
+                  "args": { "type": "array", "items": { "$ref": "#/$defs/arg" } },
+                  "with": { "enum": ["ask", "edits", "auto", "full"] }
+                }
+              }
+              ,{
                 "type": "object", "required": ["args"], "additionalProperties": false,
-                "description": "Flags kept narrower by the person's own tool config. unless_config names that TOML file (a relative name under the tool's home folder): when it sets `key` to `value`, or cannot be read safely (not a regular file, over 1 MiB, malformed), no flags are added and the run start says `say`; when it sets `approval_key` to anything but `approval_value`, approval_args are left out. A start whose flags include workspace-write is refused when the orch home is inside the start folder or a temporary folder.",
+                "description": "Flags kept narrower by the person's own tool config. unless_config names that TOML file (a relative name under the tool's home folder): when it sets `key` to `value`, or cannot be read safely (not a regular file, over 1 MiB, malformed), no flags are added and the run start says `say` (otherwise it says `note` when set: what the tool cannot reach at this mode); when it sets `approval_key` to anything but `approval_value`, approval_args are left out. A start whose flags include workspace-write is refused when the orch home is inside the start folder or a temporary folder.",
                 "properties": {
                   "args": { "type": "array", "items": { "$ref": "#/$defs/arg" } },
                   "approval_args": { "type": "array", "items": { "$ref": "#/$defs/arg" } },
@@ -173,10 +198,19 @@
                       "profile_key": { "type": "string", "maxLength": 100 }, "profiles": { "type": "string", "maxLength": 100 }
                     }
                   },
-                  "say": { "type": "string", "minLength": 1, "maxLength": 200 }
+                  "say": { "type": "string", "minLength": 1, "maxLength": 200 },
+                  "note": { "type": "string", "minLength": 1, "maxLength": 200 }
                 }
               }
             ]
+          }
+        },
+        "permission_choices": {
+          "type": "array", "maxItems": 4,
+          "description": "The modes the Start choice of a session without a ticket offers for this tool, lowest first (ORCH-818): each names a key of permissions and the words shown for it. A mode the workspace does not allow is shown off.",
+          "items": {
+            "type": "object", "required": ["mode", "label"], "additionalProperties": false,
+            "properties": { "mode": { "enum": ["ask", "edits", "auto", "full"] }, "label": { "type": "string", "minLength": 1, "maxLength": 40 } }
           }
         },
         "hooks": {
@@ -190,6 +224,16 @@
           "type": "object", "propertyNames": { "pattern": "^[A-Za-z]{1,32}$" },
           "additionalProperties": { "type": "string", "pattern": "^orch work-check --hook [a-z][a-z0-9-]{0,31}$" },
           "description": "Optional. Tool hook event -> `orch work-check --hook <tool>`: one plain line at the start of a turn when files changed and no ticket is active. Added to the per-run hooks file (live) and passed inline by oneshot.settings_args. The command always exits 0."
+        },
+        "guard_hooks": {
+          "type": "object", "propertyNames": { "pattern": "^[A-Za-z]{1,32}$" },
+          "additionalProperties": { "type": "string", "pattern": "^[A-Za-z]{1,32}$" },
+          "description": "Optional. Tool hook event (before a tool call) -> the tool name it applies to (e.g. PreToolUse -> Bash). Runs `orch protected-check --hook <tool>`: refuses an ssh, scp, sftp, rsync or mosh command to a protected machine (workspace.protected_machines) outside a release or deploy step. In the same settings blob as reminder_hooks. The command exits 0; the refusal is the tool's JSON on stdout."
+        },
+        "step_hooks": {
+          "type": "object", "propertyNames": { "pattern": "^[A-Za-z]{1,32}$" },
+          "additionalProperties": { "type": "string", "pattern": "^orch work-check --hook [a-z][a-z0-9-]{0,31}$" },
+          "description": "Optional. Tool hook event after a tool call -> `orch work-check --hook <tool>`: in a one-step (oneshot) run it says once, in the fixed notice line, that a person's input waits (read it with orch run input). Only in the run's own settings blob (like record_hooks), never in the workspace's settings file. The command always exits 0."
         },
         "record_hooks": {
           "type": "object", "propertyNames": { "pattern": "^[A-Za-z]{1,32}$" },
@@ -205,7 +249,8 @@
             "ends": { "type": "string", "pattern": "^[A-Za-z_]{1,32}$", "description": "Optional. Field with the end time (an ISO time, or seconds or milliseconds since 1970). Absent = the tool tells no end time: no early warning." },
             "renew": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^-{0,2}[a-z][a-z0-9-]{0,31}$" }, "description": "Optional (with links). The tool's own sign-in step, arguments after the detect binary. orch runs it in the background from the warning's Renew (renew.py): it hands the person only the sign-in link and passes a code the sign-in page shows to the tool's input. Nothing else of its output is kept." },
             "links": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^https://[a-z0-9.-]+/$" }, "description": "Required with renew. How the sign-in link starts; any other link the tool prints is never shown." },
-            "how": { "type": "string", "pattern": "^[^\\u0000-\\u001f<>]{1,160}$", "description": "Optional (ORCH-48). What the person does to renew when orch cannot start the sign-in itself; shown on the warning." }
+            "how": { "type": "string", "pattern": "^[^\\u0000-\\u001f<>]{1,160}$", "description": "Optional (ORCH-48). What the person does to renew when orch cannot start the sign-in itself; shown on the warning." },
+            "sign_in": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._:=/@,'\"+-]{0,119}$", "description": "Optional (ORCH-218). The exact terminal command that signs in again (e.g. '<tool> login'); the warning shows it with a Copy button. orch never runs it." }
           },
           "dependentRequired": { "renew": ["links"], "links": ["renew"], "ends": ["logged_in"] }
         },
@@ -235,6 +280,16 @@
             "hand_started": { "oneOf": [{ "$ref": "#/$defs/signal" }, { "type": "null" }], "description": "How a session started by hand reports its id, or null." },
             "parse": { "type": "string", "pattern": "^[a-z0-9:-]{1,40}/[0-9]{1,3}$", "description": "For from-output: name of the output parser." },
             "missing": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Optional. Case-insensitive regex for the tool's output when a resumed session does not exist. Only then does orch start fresh; any other failure is a failure. Absent = never falls back." },
+            "chat_files": {
+              "type": "object", "required": ["home", "glob", "lines"], "additionalProperties": false,
+              "description": "Optional. Where the tool keeps a session's conversation so a person can read it back (read-only) and what its lines look like: chat = one message per line, items = one response item per line.",
+              "properties": {
+                "dir_env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$", "description": "Environment variable naming the tool's folder; else home is used." },
+                "home": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$", "description": "The tool's folder in the person's home." },
+                "glob": { "type": "string", "pattern": "^[A-Za-z0-9_.*{}/-]{1,120}$", "description": "File pattern below that folder; {session} = the session id." },
+                "lines": { "enum": ["chat", "items"] }
+              }
+            },
             "transcript": {
               "type": "object", "required": ["home", "path"], "additionalProperties": false,
               "description": "Optional. Where the tool saves a session's conversation. A session whose folder exists but whose file does not is never resumed (it starts fresh), and a new session id is kept only once its file exists.",

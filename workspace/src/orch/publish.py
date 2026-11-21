@@ -27,6 +27,10 @@ NAME_RE = re.compile(r"^[a-z0-9-]{2,40}$")  # existing apps (stop, remove, ...)
 DEPLOY_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$")
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", ".DS_Store"}
 BROKEN = "wrong key or broken file"
+# The dashboard page (`publish view`) waits 10 s for the whole answer. One request that stalls (a lost
+# connection, the server busy) must not use that up: it is cut after VIEW_TIMEOUT and tried again (net retries
+# GETs), so a single stall costs about 4 s instead of the page falling back to its old copy (ORCH-403).
+VIEW_TIMEOUT = 3.0
 
 
 def b64u(raw: bytes) -> str:
@@ -97,9 +101,9 @@ def _cfg(root: Path) -> dict:
     return net.load_service(root, "publish")
 
 
-def _api(root: Path, method: str, path: str, body=None):
+def _api(root: Path, method: str, path: str, body=None, timeout: float = 120):
     cfg = _cfg(root)
-    return net.call_json(method, cfg["url"] + path, net.auth_headers(cfg), body)[1]
+    return net.call_json(method, cfg["url"] + path, net.auth_headers(cfg), body, timeout)[1]
 
 
 def whoami(root: Path) -> dict:
@@ -190,17 +194,18 @@ def scan_files(root: Path | None, items: list[tuple[str, bytes]]) -> None:
     bytes that are about to be encrypted and sent. Names the kind, the file and the line, never the value."""
     hits: dict[tuple[str, int, str], None] = {}
     for name, data in items:
-        for text in _texts_of(data):
-            # chunks with an overlap, so a big file is scanned in full and no token is cut in two
-            pos = 0
-            while True:
-                end = min(pos + CHUNK, len(text))
-                line0 = text.count("\n", 0, pos)
-                for f in secretscan.find(text[pos:end], root, strict=False):
-                    hits[(name, f["line"] + line0, f["kind"])] = None
-                if end >= len(text):
-                    break
-                pos = end - OVERLAP
+        for blob, labels in secretscan.passes(data):  # a PNG's proven pixel runs skip only the label rules
+            for text in _texts_of(blob):
+                # chunks with an overlap, so a big file is scanned in full and no token is cut in two
+                pos = 0
+                while True:
+                    end = min(pos + CHUNK, len(text))
+                    line0 = text.count("\n", 0, pos)
+                    for f in secretscan.find(text[pos:end], root, strict=False, labels=labels):
+                        hits[(name, f["line"] + line0, f["kind"])] = None
+                    if end >= len(text):
+                        break
+                    pos = end - OVERLAP
     if not hits:
         return
     name, line, kind = sorted(hits, key=lambda h: (h[0], h[1]))[0]
@@ -337,10 +342,11 @@ def extend(root: Path, ident: str, days: int) -> dict:
     return res
 
 
-def _all_files(root: Path) -> list:
+def _all_files(root: Path, timeout: float = 120) -> list:
     files, after = [], None
     for _ in range(1000):  # a hard stop: 100 000 files
-        page = _api(root, "GET", "/v1/files?limit=100" + (f"&after={after}" if after else ""))
+        q = "/v1/files?limit=100" + (f"&after={after}" if after else "")
+        page = _api(root, "GET", q, timeout=timeout)
         files += net.items(page)
         after = page.get("next") if isinstance(page, dict) else None
         if not after:
@@ -348,8 +354,8 @@ def _all_files(root: Path) -> list:
     return files
 
 
-def list_all(root: Path) -> dict:
-    files = _all_files(root)
+def list_all(root: Path, timeout: float = 120) -> dict:
+    files = _all_files(root, timeout)
     keys = net.read_json(_keys_path(root), {})
     names = net.read_json(_names_path(root), {})
     for f in files:
@@ -357,7 +363,7 @@ def list_all(root: Path) -> dict:
             f["key"] = keys[f["id"]]
         if f["id"] in names:
             f["name"] = names[f["id"]]
-    apps = net.items(_api(root, "GET", "/v1/apps"))
+    apps = net.items(_api(root, "GET", "/v1/apps", timeout=timeout))
     tokens = net.read_json(_tokens_path(root), {})
     for a in apps:
         if ("auth" in a and a["auth"] or "auth" not in a and not a.get("public")) and a["name"] in tokens:
@@ -410,7 +416,7 @@ def view(root: Path) -> dict:
                 }
             ],
         }
-    r = list_all(root)
+    r = list_all(root, VIEW_TIMEOUT)
     cap = 50
     files = [
         {
@@ -431,16 +437,25 @@ def view(root: Path) -> dict:
     apps = [
         {
             "title": _plain(a["name"]),
-            "subtitle": _plain(f"{a['status']}, {describe(a)}, {_exp(a['expires_at'])}"),
-            **({"link": a["url"]} if str(a.get("url", "")).startswith("https://") else {}),
+            "meta": [
+                _app_state(a),
+                _app_access(a),
+                _exp(a["expires_at"]) if a.get("expires_at") else "Kept until you delete it",
+            ],
+            **(
+                {"actions": [{"label": "Open", "link": a["url"]}]}
+                if str(a.get("url", "")).startswith("https://") and a.get("status") == "running"
+                else {}
+            ),
         }
         for a in r["apps"]
     ]
+    total = len(files) + len(apps)
     blocks: list = [
         {
             "type": "list",
             "title": "Shared",
-            **({"meta": f"{len(files)} link{'s' if len(files) != 1 else ''}"} if files else {}),
+            **({"meta": f"{total} link{'s' if total != 1 else ''}"} if total else {}),
             "compact": True,
             "items": files[:cap],
             "more": max(0, len(files) - cap),
@@ -448,11 +463,20 @@ def view(root: Path) -> dict:
         }
     ]
     if apps:
-        blocks.append({"type": "list", "title": "Apps", "items": apps[:cap], "more": max(0, len(apps) - cap)})
+        blocks.append(
+            {
+                "type": "list",
+                "title": "Apps",
+                "compact": True,
+                "items": apps[:cap],
+                "more": max(0, len(apps) - cap),
+            }
+        )
     blocks.append(
         {
             "type": "footnote",
-            "text": "Stopping sharing closes the link and keeps your original file.",
+            "text": "Stopping sharing closes the link and keeps your original file. "
+            "Apps are stopped, restarted or deleted on your publish portal.",
             "link": {"label": "Shared link settings", "to": "app:settings/addons"},
         }
     )
@@ -584,6 +608,21 @@ def manifest_auth(m: dict) -> bool:
     if "auth" in m:
         return bool(m["auth"])
     return not m["public"] if "public" in m else True
+
+
+def _app_state(a: dict) -> str:
+    return {"running": "Running", "stopped": "Stopped", "failed": "Failed"}.get(
+        str(a.get("status")), "Not running"
+    )
+
+
+def _app_access(a: dict) -> str:
+    """Who can open an app, in plain words (the reach and the link are one answer, not two)."""
+    private = a.get("reach") == "private"
+    auth = bool(a["auth"]) if "auth" in a else not a.get("public", False)
+    if private:
+        return "People on your private network" + (" with the link" if auth else "")
+    return "Anyone with the link" if auth else "Anyone"
 
 
 def describe(a: dict) -> str:

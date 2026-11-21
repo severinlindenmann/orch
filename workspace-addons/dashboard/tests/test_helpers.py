@@ -35,7 +35,7 @@ def call(fn, *args):
         ("Asked q1, waiting", "Asked a question"),
         ("Answered q1: Yes", "Answered a question"),
         ("Status open -> active", "Moved to Working"),
-        ("Check c2 done", "Finished a step"),
+        ("Check c2 done", "Finished a task"),
         ("Status active -> done", "Moved to Done"),
         ("Patched status (status done -> open)", "Moved to Backlog"),
         ("Created under ORCH-46 Quarter close", "Created under ORCH-46 Quarter close"),
@@ -81,7 +81,8 @@ def test_need_action_per_kind():
     a = lambda r: call("needAction", r)["label"]
     assert a({"kind": "question", "answer": {"options": []}}) == "Answer"
     assert a({"kind": "x-addon:ask", "answer": {"options": ["Yes"]}}) == "Review"
-    assert a({"kind": "overdue-wait", "ticket": "t_a"}) == "Open"
+    assert a({"kind": "overdue-wait", "ticket": "t_a"}) == "Continue"  # ORCH-255
+    assert a({"kind": "overdue-wait"}) == "Open"
     assert a({"kind": "x-addon:stopped", "tone": "bad", "ticket": "t_a"}) == "Run again"
 
 
@@ -337,8 +338,8 @@ def test_agent_line_with_the_status_shapes_core_really_returns():
 @node
 def test_history_lines_name_the_task_and_the_addon():
     tasks = [{"id": "c1", "text": "Ask about the currency"}]
-    assert call("historyLine", {"text": "Added check c1"}, tasks) == "Added a step: Ask about the currency"
-    assert call("historyLine", {"text": "Check c1 done"}, tasks) == "Finished a step: Ask about the currency"
+    assert call("historyLine", {"text": "Added check c1"}, tasks) == "Added a task: Ask about the currency"
+    assert call("historyLine", {"text": "Check c1 done"}, tasks) == "Finished a task: Ask about the currency"
     assert call("historyLine", {"text": "Set ext.automation"}) == "Updated Automation settings"
     assert call("historyLine", {"text": "Removed ext.automation.repeat"}) == "Removed Automation settings"
 
@@ -559,7 +560,7 @@ def test_one_chip_while_a_question_is_open(ticket, live, want):
 
 def test_the_move_to_control_is_a_visible_labelled_button():
     """6A: one visible "Move to" button; no chevron-only summary, no jargon in the choices. ORCH-152: Backlog and
-    Won't do join (owner's words)."""
+    Won't do join (owner's words); ORCH-235: Waiting and Superseded too, the same places as the board."""
     src = webjs.all_js()
     assert "status-sum-icon" not in src
     assert "'Move to'" in src
@@ -567,9 +568,11 @@ def test_the_move_to_control_is_a_visible_labelled_button():
         "Backlog",
         "To do",
         "Working",
+        "Waiting",
         "Check",
         "Done",
         "Won't do",
+        "Superseded",
     ]
 
 
@@ -894,7 +897,7 @@ def test_failed_agent_start_is_plain_with_a_retry():
     w = call("agentLine", t, None, now, None, settings)
     assert w["state"] == "failed" and w["startFailed"] is True
     assert w["status"] == "Claude could not start: the claude program was not found"
-    assert w["primary"] == {"label": "Retry", "op": "run.start", "args": {"ticket": "t_a"}}
+    assert w["primary"] == {"label": "Try again", "op": "run.start", "args": {"ticket": "t_a"}}
     assert "Errno" not in w["status"]
     assert call("startFailure", {**t, "status": "active"}, None, settings) is None
     t["waiting_on"] = {"kind": "question", "ref": "q1"}

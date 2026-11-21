@@ -5,6 +5,7 @@
  "from": "2026-10-18",
  "to": "2026-11-16",
  "runs": 27,
+ "started": 27,
  "tickets": 12,
  "coverage": {
   "full": 23,

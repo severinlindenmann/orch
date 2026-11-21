@@ -1,4 +1,4 @@
-"""orch pull-requests queue add|list|remove|run, tend, failed-checks, start|stop|status (contract: contracts/addons/pull-requests/README.md)."""
+"""orch pull-requests queue add|list|remove|run, tend, failed-checks, helper-stopped, start|stop|status (contract: contracts/addons/pull-requests/README.md)."""
 
 from __future__ import annotations
 
@@ -88,10 +88,8 @@ def start_runner(root: Path) -> None:
     d.mkdir(parents=True, exist_ok=True)
     argv = [sys.executable, "-I", "-P", "-m", "orch_pull_requests", "queue", "run", "--root", str(root)]
     with open(d / "runner.log", "a", encoding="utf-8") as log:
-        subprocess.Popen(
-            argv, cwd=root, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-            start_new_session=os.name != "nt", **procs.background_popen_kwargs(),
-        )  # fmt: skip
+        # background_popen_kwargs sets stdin and the own session (or the hidden Windows console): never pass them here too
+        subprocess.Popen(argv, cwd=root, stdout=log, stderr=log, **procs.background_popen_kwargs())
 
 
 def _github():
@@ -162,6 +160,47 @@ def _tend(root: Path) -> dict:
     return switch.tend(root, GitHub(), log=lambda s: print(s, flush=True), start=start_runner)
 
 
+def _round(root: Path) -> None:
+    """One round of the background watcher: read the linked pull requests (the Pull requests page and the live
+    state on tickets), then the Merge when green and failed-checks round. A failed read never stops that round."""
+    from . import poll
+
+    try:
+        got = poll.once(root)
+        if got["refreshed"] or got["errors"]:
+            print(f"Pull requests: {json.dumps(got)}", flush=True)
+    except Exception as e:  # noqa: BLE001 - one bad read never ends the round
+        print(f"Pull requests: {e.__class__.__name__}: {str(e)[:200]}", flush=True)
+    _watch_round(root)
+
+
+def _page_cmd(args, root: Path) -> int:
+    """poll, view, act refresh: the Pull requests page and the live pull request state on tickets."""
+    from . import poll
+
+    if args.cmd == "view":
+        from .view import build
+
+        print(json.dumps(build(root)))
+        return 0
+    if args.cmd == "poll":
+        got = poll.once(root)
+        text = f"Read {len(got['repos'])} repositories; {len(got['refreshed'])} tickets updated."
+        for repo, why in got["errors"].items():
+            text += f"\n{repo}: {why}"
+        print(json.dumps(got) if args.json else text)
+        return 0
+    want = args.target.upper()
+    t = next(
+        (x for x in poll.tickets(root) if x["id"] == args.target or str(x.get("key") or "").upper() == want),
+        None,
+    )
+    if t is None:
+        raise Refused(f"There is no ticket {args.target}.")
+    print(json.dumps(poll.refresh_one(root, t, os.environ.get(poll.CACHED_ENV) == "1")))
+    return 0
+
+
 def _checks_tend(root: Path) -> dict:
     from . import checks
     from .github import GitHub
@@ -214,6 +253,24 @@ def _checks_cmd(args, root: Path) -> int:
     return 0
 
 
+def _stopped_cmd(args, root: Path) -> int:
+    """helper-stopped on|off|status: a ready pull request a helper left open goes into the merge queue."""
+    from . import switch
+
+    if args.state in ("on", "off"):
+        on = switch.set_stopped(root, args.state == "on")
+    else:
+        on = switch.stopped_is_on(root)
+    text = (
+        "Helper stopped: on. When no helper works on a ticket, its pull requests that are ready to merge go into "
+        "the merge queue (the Merge when green watcher, every minute)."
+        if on
+        else "Helper stopped: off."
+    )
+    print(json.dumps({"on": on}) if args.json else text, flush=True)
+    return 0
+
+
 def _switch_cmd(args, root: Path) -> int:
     """tend, start, stop, status, watch: the Merge when green switch and its background watcher."""
     from . import service
@@ -222,7 +279,7 @@ def _switch_cmd(args, root: Path) -> int:
         print(json.dumps(data) if getattr(args, "json", False) else text, flush=True)
 
     if args.cmd == "watch":
-        return service.watch(root, lambda: _watch_round(root), log=lambda s: print(s, flush=True))
+        return service.watch(root, lambda: _round(root), log=lambda s: print(s, flush=True))
     if args.cmd == "tend":
         got = _tend(root)
         n = len(got["added"])
@@ -254,13 +311,32 @@ def main(argv: list[str] | None = None) -> int:
     a = q.add_parser("add", help="put a pull request in the merge queue")
     a.add_argument("url")
     a.add_argument("--ticket")
+    a.add_argument(
+        "--first", action="store_true",
+        help="it fixes the red base branch: ahead of the line, alone, also while the base branch is red",
+    )  # fmt: skip
     a.add_argument("--wait", action="store_true", help="wait until it is merged or left the queue")
     a.add_argument("--max-wait", type=float, default=240, help="minutes (with --wait)")
     a.add_argument("--json", action="store_true")
     ls = q.add_parser("list", help="what waits and what happened lately")
     ls.add_argument("--json", action="store_true")
+    au = q.add_parser(
+        "audit",
+        help="merges past the queue, times it stood still, check runs per merge, minutes to merged, the busiest hour and group start to merged, for the last hours",
+    )
+    au.add_argument("--hours", type=float, default=14, help="how far back (default 14: one night)")
+    au.add_argument("--json", action="store_true")
+    gt = q.add_parser(
+        "local-checks",
+        help="the local check: side by side with GitHub (same verdict?) and minutes from built to merged",
+    )
+    gt.add_argument("--last", type=int, default=20, help="local groups counted (default 20)")
+    gt.add_argument("--json", action="store_true")
     rm = q.add_parser("remove", help="take a waiting pull request out of the queue")
     rm.add_argument("url")
+    q.add_parser(
+        "check", help="exit 1 when pull requests wait and no runner is alive (the check after an update)"
+    )
     r = q.add_parser("run", help="the runner (add starts it by itself)")
     r.add_argument("--root", help=argparse.SUPPRESS)
     t = sub.add_parser("tend", help="Merge when green: one pass over the switched-on tickets")
@@ -271,30 +347,74 @@ def main(argv: list[str] | None = None) -> int:
         ("status", "is it running?"),
     ):
         sub.add_parser(name, help=text).add_argument("--json", action="store_true")
+    for name, text in (("poll", "read the linked pull requests now"), ("view", "the Pull requests page")):
+        sub.add_parser(name, help=text).add_argument("--json", action="store_true")
+    ac = sub.add_parser("act", help="what the ticket page's Refresh does (run through orch, which writes)")
+    ac.add_argument("verb", choices=["refresh"])
+    ac.add_argument("--by", help="who asked (recorded on the ticket by orch)")
+    ac.add_argument("--json", action="store_true")
+    ac.add_argument("target", help="ticket id or key")
     fc = sub.add_parser(
         "failed-checks", help="rerun a cancelled or timed-out job once, wake the helper on a failure"
     )
     fc.add_argument("state", nargs="?", choices=("on", "off", "status", "tend"), default="status")
     fc.add_argument("--json", action="store_true")
-    w = sub.add_parser("watch", help=argparse.SUPPRESS)
+    hs = sub.add_parser(
+        "helper-stopped", help="a ready pull request a helper left open goes into the merge queue by itself"
+    )
+    hs.add_argument("state", nargs="?", choices=("on", "off", "status"), default="status")
+    hs.add_argument("--json", action="store_true")
+    w = sub.add_parser("watch")  # hidden: no help= keeps it out of the --help list
     w.add_argument("--root", help=argparse.SUPPRESS)
     args = p.parse_args(argv)
     try:
         root = _root(getattr(args, "root", None))
+        if args.cmd in ("poll", "view", "act"):
+            return _page_cmd(args, root)
         if args.cmd == "failed-checks":
             return _checks_cmd(args, root)
+        if args.cmd == "helper-stopped":
+            return _stopped_cmd(args, root)
         if args.cmd != "queue":
             return _switch_cmd(args, root)
         if args.sub == "run":
             return _run(root)
+        if args.sub == "check":
+            waiting = [x for x in store.read(root) if x.get("state") in (store.WAITING, store.RUNNING)]
+            if waiting and not runner_alive(root):
+                print(f"{len(waiting)} pull requests wait and no merge queue runner is running.")
+                return 1
+            print("The merge queue runner is fine.")
+            return 0
         if args.sub == "list":
             rows = store.read(root)
             if args.json:
                 print(json.dumps({"entries": rows, "running": runner_alive(root)}, indent=1))
             elif not rows:
                 print("The merge queue is empty.")
-            else:
-                print("\n".join(_show(x) for x in rows))
+            else:  # what waits, and the last 50 that ended (the file keeps more for the audit)
+                done = [x for x in rows if x.get("state") in FINISHED]
+                shown = done[-50:] + [x for x in rows if x.get("state") not in FINISHED]
+                print("\n".join(_show(x) for x in rows if x in shown))
+            return 0
+        if args.sub == "audit":
+            from . import audit
+
+            if args.hours <= 0:
+                raise Refused("--hours is a number of hours above 0.")
+            report = audit.run(root, _github(), args.hours)
+            print(json.dumps(audit.as_json(report), indent=1) if args.json else audit.text(report))
+            return 0
+        if args.sub == "local-checks":
+            from . import localcheck, settings
+
+            got = localcheck.summary(root, max(1, args.last))
+            got["group_check"] = settings.group_check(root)
+            print(
+                json.dumps(got, indent=1)
+                if args.json
+                else f"Groups are checked: {got['group_check']}.\n" + localcheck.text(got)
+            )
             return 0
         if args.sub == "remove":
             if store.remove(root, args.url, _actor()):
@@ -302,13 +422,15 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             print(f"{args.url} does not wait in the merge queue.")
             return 1
-        from .runner import admit
+        from .runner import _release_fix, admit
 
         url = store.canonical(args.url)
         ticket = _ticket(root, args.ticket, url)
         old = store.find(store.read(root), url)
         seen = {} if old and old.get("state") not in FINISHED else admit(root, _github(), url)
-        row, new = store.add(root, url, ticket, _actor(), **seen)
+        # a release keeper's red-run fix goes first by itself (ORCH-1023)
+        first = args.first or _release_fix(root, ticket)
+        row, new = store.add(root, url, ticket, _actor(), first=first, **seen)
         start_runner(root)
         if not args.wait:
             ahead = [x for x in store.read(root) if x.get("state") not in FINISHED and x["url"] != url]
@@ -321,6 +443,8 @@ def main(argv: list[str] | None = None) -> int:
         return _wait(root, url, args.max_wait * 60, args.json)
     except Refused as e:
         print(str(e), file=sys.stderr)
+        if getattr(args, "json", False):  # the add-on CLI contract: with --json the refusal is on stdout too
+            print(json.dumps({"error": str(e)}))
         return 2
     except Exception as e:  # the core's Refused (ticket not found ...) is plain words too
         if e.__class__.__name__ == "Refused":

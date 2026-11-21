@@ -242,6 +242,24 @@ def prepare(counts):
     return {"counts": counts, "inventory": inventory, "entries": entries, "rows": rows}
 
 
+def lost_view(counts):
+    """ORCH-189: helper actions that were not recorded in the window; the page says the counts are too low."""
+    lost = counts.get("lost") if isinstance(counts, dict) else None
+    n = lost.get("lines") if isinstance(lost, dict) else 0
+    if not isinstance(n, int) or isinstance(n, bool) or n <= 0:
+        return None
+    return {
+        "lines": n,
+        "text": f"{n:,} helper actions in the last 30 days were not recorded, so the counts on this page are too low. They cannot be added back. If the number keeps growing, press Report a problem.",
+    }
+
+
+def _started(counts):
+    """Runs orch started (ORCH-966); 0 when the answer does not carry it (an older orch)."""
+    n = counts.get("started")
+    return n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else 0
+
+
 def build_overview(counts) -> dict:
     """Fail closed: unavailable and partial answers contain no apparent zero totals or rows."""
     ready = prepare(counts)
@@ -258,6 +276,7 @@ def build_overview(counts) -> dict:
     return {
         "window": "last 30 days",
         "runs": counts["runs"],
+        "started": _started(counts),
         "tickets": counts["tickets"],
         "complete": True,
         "since": counts["since"],
@@ -266,4 +285,36 @@ def build_overview(counts) -> dict:
         "empty_needs": "All good this month." if not cards else None,
         "tabs": tabs,
         "first_day": counts["runs"] == 0 and not any(item["uses"] for item in counts["items"]),
+        "lost": lost_view(counts),
+    }
+
+
+FLAKY_AT = 3  # one check run again this many times in the window: it keeps failing, so the page says so
+
+
+def retries_view(data):
+    """Checks orch ran once more after a timeout or network error (`orch github retries --json`), for the
+    page's banner; None when there is nothing to say or the answer is not the expected shape."""
+    if not isinstance(data, dict) or not isinstance(data.get("checks"), list):
+        return None
+    total = data.get("total")
+    if not isinstance(total, int) or isinstance(total, bool) or total <= 0:
+        return None
+    rows = [
+        c
+        for c in data["checks"]
+        if isinstance(c, dict) and isinstance(c.get("check"), str) and isinstance(c.get("count"), int)
+    ]
+    if not rows:
+        return None
+    top = rows[0]
+    flaky = top["count"] >= FLAKY_AT
+    times = "time" if top["count"] == 1 else "times"
+    return {
+        "title": f"{total} {'check was' if total == 1 else 'checks were'} run again this month",
+        "text": (
+            f"{top['check']} was run again {top['count']} {times} after a timeout or network error."
+            + (" It keeps failing: look at it." if flaky else "")
+        )[:300],
+        "tone": "warn" if flaky else "info",
     }

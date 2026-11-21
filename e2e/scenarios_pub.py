@@ -329,7 +329,7 @@ def p9(e):
         check(http("GET", e.pub.admin_url + "/admin/api/workspaces", {"X-Orch-Admin": "wrong"}).status == 401, "wrong admin token")
     else:
         try:
-            r = http("GET", "http://179.237.125.155:8411/admin/api/workspaces", timeout=5)
+            r = http("GET", "http://2.24.146.133:8411/admin/api/workspaces", timeout=5)
             raise Fail(f"admin port reachable from the public IP: {r.status}")
         except OSError:
             pass

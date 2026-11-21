@@ -97,6 +97,8 @@ def test_orch_agents_lists_found_and_chosen(proj, run, fake_path):
     code, out, _ = run("agents", "--json")
     rows = {r["name"]: r for r in json.loads(out)}
     assert rows["my-agent"]["chosen"] and rows["claude"]["found"] and not rows["claude"]["chosen"]
+    # ORCH-362: the Start choice offers a model only for a tool orch passes the ticket's model to
+    assert rows["claude"]["models"] is True and rows["my-agent"]["models"] is False
 
 
 def test_orch_agents_nothing_found_nothing_chosen(proj, run, fake_path):
@@ -245,6 +247,7 @@ def test_agents_test_not_installed_and_unknown(proj, run, capsys, fake_path):
 RESERVED = [
     ("focus", "live_session", True, False),
     ("focus", "session_typing", False, True),
+    ("focus", "terminal_typing", False, True),
     ("record", "keep_days", 90, 30),  # an allowed value (others are snapped: test_insights_settings.py)
     ("record", "max_mb", 2048, 512),
     ("insights", "share_counts", True, False),
@@ -280,6 +283,33 @@ def test_reserved_config(proj, section, key, default, valid):
     assert getter(proj) == default
 
 
+def test_the_retired_focus_preview_key_reads_without_error_and_goes_on_the_next_save(proj, run):
+    """ORCH-816: the new Focus is the only Focus; the old switch is no setting any more. A config file that
+    still has it is read as before, `orch config` does not know the key, and the next save drops it (other
+    keys stay)."""
+    (proj / ".orch").mkdir(exist_ok=True)
+    cfg = proj / ".orch" / "config.toml"
+    cfg.write_text("[focus]\npreview = true\nsession_typing = false\n\n[workflow]\nreviewer = true\n")
+    assert config.focus_session_typing(proj) is False and config.reviewer_on(proj) is True
+    for argv in (("get", "focus.preview"), ("set", "focus.preview", "on")):
+        with pytest.raises(SystemExit) as e:
+            run("config", *argv)
+        assert e.value.code == 2
+    assert "preview" in cfg.read_text()  # a refused set writes nothing
+    assert run("config", "set", "focus.session_typing", "on")[0] == 0
+    text = cfg.read_text()
+    assert "preview" not in text and "session_typing = true" in text and "reviewer = true" in text
+    config.set_key(proj, "workflow", "reviewer", False)  # a save in another table drops it too
+    cfg.write_text("[focus]\npreview = false\n[workflow]\nreviewer = true\n")
+    config.set_key(proj, "workflow", "reviewer", False)
+    assert "preview" not in cfg.read_text() and "[focus]" in cfg.read_text()
+    tricky = '[focus]\npreview = [\n  true,\n]\nnote = """\npreview = 1\n"""\n[workflow]\nreviewer = true\n'
+    # a value over several lines, or the words inside a text: left alone, the file stays valid
+    cfg.write_text(tricky)
+    config.set_key(proj, "workflow", "reviewer", False)
+    assert cfg.read_text() == tricky.replace("reviewer = true", "reviewer = false")
+
+
 def test_focus_session_typing_is_a_plain_setting(proj, run):
     assert run("config", "get", "focus.session_typing")[1].strip() == "False"
     code, out, _ = run("config", "set", "focus.session_typing", "on")
@@ -291,3 +321,16 @@ def test_focus_session_typing_is_a_plain_setting(proj, run):
     assert run("config", "set", "focus.session_typing", "off")[0] == 0
     assert config.focus_session_typing(proj) is False
     assert run("config", "set", "focus.session_typing", "maybe")[0] == 2
+
+
+def test_the_plain_terminal_has_its_own_typing_switch_off_by_default(proj, run):
+    """Owner, ORCH-261: the plain terminal is a shell; typing into it has its own switch."""
+    assert run("config", "get", "focus.terminal_typing")[1].strip() == "False"
+    assert run("config", "set", "focus.session_typing", "on")[0] == 0
+    assert config.focus_terminal_typing(proj) is False  # helper typing on leaves the shell closed
+    code, out, _ = run("config", "set", "focus.terminal_typing", "on")
+    assert code == 0 and "typing into the plain terminal is on" in out
+    assert config.focus_terminal_typing(proj) is True
+    assert run("config", "set", "focus.terminal_typing", "off")[0] == 0
+    assert config.focus_terminal_typing(proj) is False
+    assert run("config", "set", "focus.terminal_typing", "maybe")[0] == 2

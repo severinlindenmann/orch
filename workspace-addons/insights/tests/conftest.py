@@ -144,10 +144,12 @@ if args == ["record", "counts", "--days", "30", "--json"]:
     answer("answer")
 if args == ["record", "settings", "--json"]:
     answer("settings")
-if args == ["usage", "--days", "30", "--json"]:
+if args == ["tokens", "--days", "30", "--json"]:
     answer("usage")
 if args == ["ticket", "list", "--all", "--json"]:
     answer("tickets")
+if plain[:2] == ["github", "retries"] and (folder / "retries.json").exists():
+    answer("retries")
 if plain[:2] == ["config", "set"] and len(plain) >= 5:
     config_set()
 if plain[:2] == ["record", "delete-detail"]:

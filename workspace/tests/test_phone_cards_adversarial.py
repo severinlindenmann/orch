@@ -134,8 +134,8 @@ def test_an_old_verdict_does_not_answer_the_changed_follow_up(proj, run, new_tic
     tid = new_ticket()
     install(proj, tid)
     qmsg = send_card(proj, conn, tid, "q4")
-    review.decide(proj, tid, "q4", "ok", "A", None, by="human:me", via="page")
-    new = review.change(proj, tid, "q4", "ok", "B", None, by="human:me", via="page")
+    review.decide(proj, tid, "q4", "ok", "A", None, by="human:me", via="page", person=True)
+    new = review.change(proj, tid, "q4", "ok", "B", None, by="human:me", via="page", person=True)
     put_answer(conn, qmsg, _case("choice-ok-picked"), 1)
     run("relay", "inbox")
     assert question(proj, tid, new["id"])["decision"]["picked"] == "B"
@@ -234,7 +234,7 @@ def test_a_copy_outside_the_reviewed_folder_is_never_read(proj, new_ticket, conn
 def test_sync_cards_never_sends_an_answered_or_cardless_question(proj, new_ticket, conn):
     tid = new_ticket()
     install(proj, tid)
-    review.decide(proj, tid, "q4", "ok", "A", None, by="human:me", via="page")
+    review.decide(proj, tid, "q4", "ok", "A", None, by="human:me", via="page", person=True)
     tickets.ask(proj, tid, "Plain?", ["Yes"], None, "agent:claude")
     sent = phone_view.sync_cards(proj)
     assert f"{tid}:q4" not in sent
@@ -302,7 +302,8 @@ def test_check_card_shows_each_steps_evidence_and_no_empty_preview():
         ],
     }
     card = review.check_card(t)
-    (step,) = card["preview"]["steps"]
+    assert card["preview"]["steps"] == ["Done: Tests pass"]  # short on the card, proof behind Details
+    step = card["preview"]["details"][-1]
     assert step.startswith("Done: Tests pass — ")
     for bit in (
         "12 tests pass.",
@@ -312,7 +313,7 @@ def test_check_card_shows_each_steps_evidence_and_no_empty_preview():
         "PR #12",
     ):
         assert bit in step
-    assert card["preview"]["paras"] == [
+    assert card["preview"]["details"][:-1] == [
         "In short: Merged in PR 12 on green CI.",
         "Done when: Tests pass; the phone shows it",
         "No task covers: “the phone shows it”",
@@ -336,7 +337,7 @@ def test_check_card_of_a_sub_ticket_without_steps_names_done_when_and_parent(pro
     ):
         assert run(*argv, "--by", "human:tester")[0] == 0
     t = tickets.load(proj, tid)
-    paras = review.check_card(t, proj)["preview"]["paras"]
+    paras = review.check_card(t, proj)["preview"]["details"]
     assert paras[:2] == [
         "In short: Both comments now say helper.",
         "Done when: The two comments no longer name it",

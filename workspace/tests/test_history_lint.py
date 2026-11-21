@@ -48,6 +48,10 @@ ALLOW = {
         "workspace-addons/dashboard/src/orch_dashboard/mobile.py",
         "mark_chat_history",
     ): "shown ticket (data.shown)",
+    (
+        "workspace-addons/dashboard/src/orch_dashboard/ticketpages.py",
+        "slim",
+    ): "shown ticket (_shown -> data.shown); cuts the history, reads the done time",
 }
 # (file, function) -> why it may read a step/ref/plan `by` or another person field (answered_by, wont_by,
 # person, description_by) raw. History reads stay under ALLOW.
@@ -83,6 +87,7 @@ SHOWN = {
     ): "history.shown_json(root, tickets.list_all(root)) first",
     ("workspace/src/orch/cli_review.py", "_wait"): "history.shown_ticket(root, tickets.load(...)) each poll",
     ("workspace/src/orch/runs.py", "fresh_prompt"): "ticket = history.shown_ticket(...) first",
+    ("workspace/src/orch/tickets.py", "worked_since_prepare"): "history.shown_ticket(...) for the steps",
     ("workspace/src/orch/cli.py", "_show"): "t = history.shown_ticket(...) first",
     (
         "workspace/src/orch/review.py",
@@ -92,6 +97,10 @@ SHOWN = {
         "workspace/src/orch/relay.py",
         "apply_allow_answers",
     ): "t = history.shown_ticket(...); `raw` only for the proof (history.answer_proven)",
+    (
+        "workspace/src/orch/releasekeeper.py",
+        "deploy_answer",
+    ): "history.shown_ticket(root, ticket) when root is given (tests pass a recorded ticket)",
 }
 SHOWN_CALLS = ("shown_ticket", "shown_json", "shown_item")
 # The sync add-on is the merge authority: it reads and writes stored bytes by design (its readers of person

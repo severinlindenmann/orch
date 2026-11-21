@@ -114,10 +114,48 @@ def test_ids_and_text_are_checked(act_server, act_orch):
             {"ticket": "t_abcdef", "data": {"waiting_on": {"kind": "ticket", "ref": "x"}}, "if_revision": 1},
         ),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"waiting_on": {"kind": "time"}}, "if_revision": 1}),
+        (
+            "ticket.patch",
+            {
+                "ticket": "t_abcdef",
+                "data": {"waiting_on": {"kind": "time", "until": "x", "ref": 5}},
+                "if_revision": 1,
+            },
+        ),
+        (
+            "ticket.patch",
+            {
+                "ticket": "t_abcdef",
+                "data": {"waiting_on": {"kind": "time", "until": "x", "on": "y"}},
+                "if_revision": 1,
+            },
+        ),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"superseded_by": "--all"}, "if_revision": 1}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"superseded_by": 5}, "if_revision": 1}),
         ("run.start", {"ticket": "t_abcdef", "fresh": "yes"}),
-        ("run.start", {"ticket": "t_abcdef", "agent": "x"}),
+        ("run.start", {"ticket": "t_abcdef", "agent": "../x"}),
+        ("run.start", {"ticket": "t_abcdef", "agent": "--all"}),
+        ("run.start", {"ticket": "t_abcdef", "agent": 5}),
+        ("run.start", {"ticket": "t_abcdef", "model": "opus"}),
+        ("run.start", {"ticket": "t_abcdef", "prepare": "yes"}),
+        ("run.start", {"ticket": "t_abcdef", "prepare": True, "agent": "codex"}),  # ORCH-738: goes alone
+        ("run.start", {"ticket": "t_abcdef", "prepare": True, "fresh": True}),
+        ("session.reopen", {"ticket": "t_abcdef", "session": "../x"}),
+        ("session.reopen", {"ticket": "t_abcdef", "session": "-rf"}),
+        ("session.reopen", {"ticket": "t_abcdef", "session": "s-1", "fresh": True}),
+        ("session.new", {"kind": "ticket"}),
+        ("session.new", {"kind": "empty", "ticket": "t_abcdef"}),
+        ("session.new", {}),
+        ("session.new", {"kind": "manager", "permissions": "root"}),
+        ("session.new", {"kind": "manager", "permissions": "--fresh"}),
+        ("session.new", {"kind": "terminal", "permissions": "auto"}),
+        ("session.new", {"kind": "chat", "model": "opus"}),  # ORCH-710: only the Empty helper takes a model
+        ("session.new", {"kind": "empty", "model": "auto"}),
+        ("session.new", {"kind": "empty", "model": "gpt"}),
+        ("session.end", {"kind": "ticket"}),
+        ("session.end", {"kind": "chat", "ticket": "t_abcdef"}),
+        ("run.interrupt", {"ticket": "nope"}),
+        ("run.interrupt", {"ticket": "t_abcdef", "kind": "chat"}),
         ("addon.start", {"name": "x"}),
         (
             "pull.merge",
@@ -203,6 +241,35 @@ def test_argv_snapshot_per_op(act_server, act_orch):
                 '{"status": "dropped", "superseded_by": "ORCH-7"}',
             ],
         ),
+        (  # ORCH-235: a wait from the board or the ticket page has a date and may say what it waits for
+            {
+                "op": "ticket.patch",
+                "args": {
+                    "ticket": "t_abcdef",
+                    "data": {
+                        "status": "waiting",
+                        "waiting_on": {
+                            "kind": "time",
+                            "until": "2030-01-01T08:00:00Z",
+                            "ref": "The price list",
+                        },
+                    },
+                    "if_revision": 3,
+                },
+            },
+            [
+                "ticket",
+                "patch",
+                "t_abcdef",
+                "--if-revision=3",
+                *common,
+                "--",
+                (
+                    '{"status": "waiting", "waiting_on": {"kind": "time", "until": "2030-01-01T08:00:00Z", '
+                    '"ref": "The price list"}}'
+                ),
+            ],
+        ),
         (
             {
                 "op": "ticket.edit",
@@ -254,7 +321,40 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             {"op": "run.start", "args": {"ticket": "t_abcdef", "fresh": True, "take_over": True}},
             ["run", "start", "t_abcdef", "--fresh", "--take-over", *common],
         ),
+        (  # ORCH-738: Save without starting only prepares the ticket
+            {"op": "run.start", "args": {"ticket": "t_abcdef", "prepare": True}},
+            ["run", "start", "t_abcdef", "--prepare", *common],
+        ),
+        (  # ORCH-362: the Start choice's fresh start on the tool the person picked
+            {"op": "run.start", "args": {"ticket": "t_abcdef", "fresh": True, "agent": "codex"}},
+            ["run", "start", "t_abcdef", "--fresh", "--agent", "codex", *common],
+        ),
+        (  # ORCH-363: Reopen in the History tab continues that earlier session
+            {"op": "session.reopen", "args": {"ticket": "t_abcdef", "session": "s-1"}},
+            ["run", "start", "t_abcdef", "--session", "s-1", *common],
+        ),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
+        ({"op": "session.new", "args": {"kind": "empty"}}, ["session", "new", "empty", *common]),
+        ({"op": "run.interrupt", "args": {"ticket": "t_abcdef"}}, ["run", "interrupt", "t_abcdef", *common]),
+        ({"op": "session.end", "args": {"kind": "manager"}}, ["session", "end", "manager", *common]),
+        ({"op": "session.end", "args": {"kind": "terminal"}}, ["session", "end", "terminal", *common]),
+        ({"op": "session.new", "args": {"kind": "terminal"}}, ["session", "new", "terminal", *common]),
+        (  # ORCH-710: the Empty helper starts on the model the person picked in the New menu
+            {"op": "session.new", "args": {"kind": "empty", "model": "sonnet"}},
+            ["session", "new", "empty", "--model", "sonnet", *common],
+        ),
+        (  # ORCH-710 + ORCH-818: one start with both picks
+            {"op": "session.new", "args": {"kind": "empty", "model": "opus", "permissions": "auto"}},
+            ["session", "new", "empty", "--model", "opus", "--permission-mode", "auto", *common],
+        ),
+        (
+            {"op": "session.new", "args": {"kind": "manager", "permissions": "full"}},
+            ["session", "new", "manager", "--permission-mode", "full", *common],
+        ),
+        (
+            {"op": "session.new", "args": {"kind": "chat", "permissions": "edits"}},
+            ["session", "new", "chat", "--permission-mode", "edits", *common],
+        ),
         (
             {
                 "op": "pull.merge",
@@ -340,6 +440,22 @@ def test_refusal_comes_back_as_plain_text(act_server, act_orch):
     (act_orch.parent / "mode.txt").write_text("refuse")
     code, text, _ = post(act_server, {"op": "run.stop", "args": {"ticket": "t_abcdef"}})
     assert code == 422 and text == "Nope, not allowed."
+
+
+def test_every_click_leaves_one_act_event_in_the_debug_log(act_server, act_orch, monkeypatch):
+    """ORCH-341: a click that left the ticket where it was must show in a problem report: op, ticket and the
+    answer's status (no arguments)."""
+    from orch_dashboard import server
+
+    seen = []
+    monkeypatch.setattr(server.diag, "log", lambda ev, lvl="debug", **kv: seen.append((ev, kv)))
+    (act_orch.parent / "mode.txt").write_text("refuse")
+    code, _, _ = post(act_server, {"op": "run.stop", "args": {"ticket": "t_abcdef"}})
+    assert code == 422
+    acts_ = [kv for ev, kv in seen if ev == "dashboard.act"]
+    assert len(acts_) == 1
+    assert acts_[0]["op"] == "run.stop" and acts_[0]["ticket"] == "t_abcdef" and acts_[0]["status"] == 422
+    assert set(acts_[0]) <= {"root", "op", "ticket", "status", "ms"}
 
 
 def test_no_orch_command_is_a_plain_503(ws):
@@ -694,6 +810,7 @@ def test_settings_state_has_agents_and_every_addon(ws, act_orch):
             "can": "x",
             "status": "found 2.1",
             "chosen": True,
+            "models": None,  # an orch before ORCH-362 does not say whether the tool takes a model
         }
     ]
     assert [(a["name"], a["active"]) for a in s["addons"]] == [("alpha", True), ("beta", False)]
@@ -1404,11 +1521,11 @@ def test_check_wont_do_refuses_bad_args(extra):
 
 def test_ticket_model_argv_and_refusals():
     common = ["--by", actions.actor(), "--json"]
-    for m in ("sonnet", "opus", "auto"):
+    for m in ("haiku", "sonnet", "opus", "fable", "auto"):
         assert actions.build_argv("ticket.model", {"ticket": "t_abcdef", "model": m}) == [
             "ticket", "model", "t_abcdef", m, *common,
         ]  # fmt: skip
-    for bad in ({"model": "fable"}, {"model": "--x"}, {"model": None}, {"model": "opus", "extra": 1}):
+    for bad in ({"model": "gpt"}, {"model": "--x"}, {"model": None}, {"model": "opus", "extra": 1}):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("ticket.model", {"ticket": "t_abcdef", **bad})
     assert actions.needs_session("ticket.model")  # a person's choice: never from a script
@@ -1518,6 +1635,27 @@ def test_attach_files_to_an_existing_ticket():
     with pytest.raises(actions.BadRequest):  # a program file is refused before orch is asked
         actions.attachments(
             "ticket.attach", {"ticket": "t_abcdef12", "files": [{"name": "x.exe", "text": "x"}]}
+        )
+
+
+def test_a_voice_note_is_a_ticket_file_like_a_picture():
+    """ORCH-422: Send back and Add note bring a voice note recorded in the browser; the mirror of orch's list takes it."""
+    import base64
+
+    from orch import tickets
+
+    rec = b"\x1a\x45\xdf\xa3voice"
+    args = {
+        "ticket": "t_abcdef12",
+        "files": [{"name": "voice-note-0931.webm", "data": base64.b64encode(rec).decode()}],
+    }
+    assert actions.attachments("ticket.attach", args) == [("voice-note-0931.webm", rec)]
+    # the dashboard's early check names exactly what orch itself accepts
+    core = set(tickets.ATTACH_TEXT) | set(tickets.ATTACH_IMAGES) | set(tickets.ATTACH_AUDIO)
+    assert set(actions.ATTACH_EXT) == core
+    with pytest.raises(actions.BadRequest, match="voice recordings"):
+        actions.attachments(
+            "ticket.attach", {"ticket": "t_abcdef12", "files": [{"name": "clip.mov", "text": "x"}]}
         )
 
 
@@ -1744,3 +1882,15 @@ def test_check_move_argv_and_refusals():
     for bad in ({"after": "--x"}, {"after": None}, {"check": "bad"}, {"extra": 1}):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("check.move", {"ticket": "t_abcdef", "check": "c2", "after": "c3", **bad})
+
+
+def test_a_signed_in_start_hands_the_session_start_a_person_grant(tmp_path):
+    """ORCH-818: only a signed-in page session hands `session.new` the one-time grant that lets the core raise a
+    session's permission mode; without a session there is no grant (the core then refuses a raise)."""
+    from orch_dashboard import actions
+
+    assert "session.new" in actions.SESSION_GRANT_OPS
+    root = tmp_path / "ws"
+    (root / ".orch").mkdir(parents=True)
+    env, fds = actions._person_env(root, "orch", "session.new", False)
+    assert fds == () and not any(k.startswith("ORCH_PERSON_GRANT") for k in env)

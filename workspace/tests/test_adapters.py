@@ -69,17 +69,30 @@ _REMINDER_CMD = reminder_settings.hook_command("claude")  # absolute, quoted, ne
 # one too, W2b 1.7)
 _RECORD_CMD = reminder_settings.record_hook_command()
 _RECORD_EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure")
+_GUARD_CMD = reminder_settings.guard_hook_command("claude")  # before each Bash command (test_protected.py)
+# #1268: after each tool step the work-check command again, so a one-step run hears of waiting input
+_STEP_EVENTS = ("PostToolUse", "PostToolUseFailure")
+# ORCH-634: one process per tool event: the record hook runs the guard (before a call) and the step notice
+# (after one) itself (`orch record hook --with claude`), instead of two more Python starts per tool call
+_STEP_CMD = reminder_settings.record_hook_command("claude")
 _REMINDER = {
     **{
         e: [{"hooks": [{"type": "command", "command": _REMINDER_CMD, "timeout": 5}]}]
         for e in ("SessionStart", "UserPromptSubmit")
     },
     **{
-        e: [{"matcher": "*", "hooks": [{"type": "command", "command": _RECORD_CMD, "timeout": 5}]}]
+        e: [{"matcher": "*", "hooks": [{"type": "command", "command": _STEP_CMD, "timeout": 5}]}]
         for e in _RECORD_EVENTS
     },
 }
 SETTINGS = ["--settings", json.dumps({"hooks": _REMINDER}, separators=(",", ":"))]
+
+
+@pytest.fixture(autouse=True)
+def _record_hooks_wired(monkeypatch):
+    """The adapter leaves the record hooks out on Windows (#547, no process-tree reader there); these tests
+    check the wiring itself, so they run it as on POSIX; the Windows test below sets it back."""
+    monkeypatch.setattr(adapters, "_is_windows", lambda: False)
 
 
 def _claude_argvs(root):
@@ -149,6 +162,10 @@ def test_permission_modes_for_claude(claude_help, mode, proj):
         )
 
     assert flags("ask") == ()
+    assert flags("edits") == ("--permission-mode", "acceptEdits")
+    guard = adapters.permission_args("claude", proj, "ask")
+    edits = adapters.permission_args("claude", proj, "edits")
+    assert guard and edits == ["--permission-mode", "acceptEdits", *guard]
     assert flags("full") == ("--dangerously-skip-permissions",)
     assert flags("auto") == ("--permission-mode", "acceptEdits")  # this claude does not list auto
     claude_help.say('choices: "acceptEdits", "auto"')
@@ -213,28 +230,55 @@ BAD_CODEX = (
 SANDBOX = ["-c", 'sandbox_mode="workspace-write"', "-c", 'approval_policy="never"']
 
 
-def test_codex_gets_the_workspace_sandbox_in_every_mode(proj):
+FULL = ["-c", 'sandbox_mode="danger-full-access"', *SANDBOX[2:]]  # the same "never ask" pair as below full
+CODEX = {"ask": SANDBOX, "auto": SANDBOX, "full": FULL}
+REACH_NOTE = (
+    "Codex can change files only in this folder and has no network at this permission level: "
+    "no other folders, no GitHub. A person can allow it with: orch config set workspace.permissions full"
+)
+
+
+def test_codex_gets_the_workspace_sandbox_below_full(proj):
     # exec cannot ask; a read-only default (no ~/.codex config) left orch-started codex unable to edit
-    for perm in ("ask", "auto", "full"):  # `full` never widens codex
+    for perm in ("ask", "auto"):
         assert adapters.render("codex", "fresh", "oneshot", {"prompt": "p", "permissions": perm}) == [
             "codex", "exec", "--skip-git-repo-check", "--json", *SANDBOX, "--", "p",
         ]  # fmt: skip
         assert adapters.permission_args("codex", proj, perm) == SANDBOX
+        assert adapters.permission_note("codex", proj, perm) == REACH_NOTE  # Start says why: no reach
+
+
+def test_codex_full_runs_without_its_sandbox_like_claude(proj):
+    # ORCH-604 (owner's choice): a dev helper must make its worktree, write test homes and push to GitHub
+    assert adapters.render("codex", "fresh", "oneshot", {"prompt": "p", "permissions": "full"}) == [
+        "codex", "exec", "--skip-git-repo-check", "--json", *FULL, "--", "p",
+    ]  # fmt: skip
+    assert adapters.permission_args("codex", proj, "full") == FULL
+    assert adapters.permission_note("codex", proj, "full") is None
     config.set_permissions(proj, "full")
-    assert adapters.permission_args("codex", proj) == SANDBOX  # the workspace's own setting, same answer
+    assert adapters.permission_args("codex", proj) == FULL  # the workspace's own setting, same answer
+    config.set_permissions(proj, "auto")
+    assert adapters.permission_args("codex", proj) == SANDBOX
 
 
-def test_no_codex_argv_widens_the_sandbox():
+def test_only_a_person_unlocks_codex_full(proj):
+    config.set_permissions(proj, "auto")
+    with pytest.raises(Refused):
+        config.set_permissions(proj, "full", by="agent:codex")
+    assert adapters.permission_args("codex", proj) == SANDBOX
+
+
+def test_no_codex_argv_below_full_widens_the_sandbox():
     v = {"prompt": "p", "session": OLD, "new_session": NEW}
     for perm in ("ask", "auto", "full"):
         for kind in ("fresh", "resume"):
             argv = adapters.render("codex", kind, "oneshot", {**v, "permissions": perm})
-            text = " ".join(argv)
-            for bad in BAD_CODEX:
-                assert bad not in text, (kind, perm, bad)
-            assert (
-                argv.count("-c") == 2 and 'sandbox_mode="workspace-write"' in argv
-            )  # orch adds no root of its own (the person's own writable_roots/network settings still apply)
+            text = " ".join(argv[: argv.index("--")])
+            bad = BAD_CODEX if perm != "full" else tuple(b for b in BAD_CODEX if b != "danger-full-access")
+            for b in bad:
+                assert b not in text, (kind, perm, b)
+            want = 'sandbox_mode="danger-full-access"' if perm == "full" else 'sandbox_mode="workspace-write"'
+            assert argv.count("-c") == 2 and want in argv  # orch adds no root or network flag of its own
             assert argv[argv.index("--") - 1] == 'approval_policy="never"'  # nothing after it but the prompt
 
 
@@ -261,7 +305,7 @@ def test_flag_like_prompt_stays_after_the_separator(codex_home):
     [
         ('sandbox_mode = "read-only"\n', True),
         ('sandbox_mode = "workspace-write"\n', False),
-        ('sandbox_mode = "danger-full-access"\n', False),  # capped to workspace-write
+        ('sandbox_mode = "danger-full-access"\n', False),  # capped to workspace-write below full
         ("this is [not toml", True),  # fail closed
         ("\xff\xfe", True),
         ("", False),
@@ -276,9 +320,11 @@ def test_a_stricter_personal_codex_setting_is_not_lifted(codex_home, proj, toml,
     (codex_home / "config.toml").write_text(toml)
     for perm in ("ask", "auto", "full"):
         got = adapters.permission_args("codex", proj, perm)
-        assert got == ([] if stricter else SANDBOX), (toml, perm)
+        assert got == ([] if stricter else CODEX[perm]), (toml, perm)
     note = adapters.permission_note("codex", proj, "auto")
-    assert (note == "Codex is set to read-only on this computer: it can't change files.") is stricter
+    read_only = "Codex is set to read-only on this computer: it can't change files."
+    assert note == (read_only if stricter else REACH_NOTE)
+    assert adapters.permission_note("codex", proj, "full") == (read_only if stricter else None)
 
 
 SB = ["-c", 'sandbox_mode="workspace-write"']
@@ -325,7 +371,7 @@ def test_unreadable_oversized_or_special_config_fails_closed(codex_home, proj):
 def test_a_personal_approval_policy_is_kept(codex_home, proj, policy):
     (codex_home / "config.toml").write_text(f'approval_policy = "{policy}"\n')
     assert adapters.permission_args("codex", proj, "auto") == SB
-    assert adapters.permission_note("codex", proj, "auto") is None
+    assert adapters.permission_note("codex", proj, "auto") == REACH_NOTE  # not read-only: the reach line
     (codex_home / "config.toml").write_text('approval_policy = "never"\n')
     assert adapters.permission_args("codex", proj, "auto") == SB + APPROVAL
     (codex_home / "config.toml").write_text(f'profile = "p"\n[profiles.p]\napproval_policy = "{policy}"\n')
@@ -354,7 +400,7 @@ def test_adapter_data_cannot_point_the_config_outside_the_tool_home(codex_home, 
 def test_missing_codex_config_gets_the_sandbox(codex_home, proj):
     assert (
         adapters.permission_args("codex", proj, "ask") == SANDBOX
-        and adapters.permission_note("codex", proj) is None
+        and adapters.permission_note("codex", proj) == REACH_NOTE
     )
 
 
@@ -579,12 +625,12 @@ def test_hooks_doc_comes_from_data():
     d = adapters.hooks_doc("claude", "r_8k2m")
     cmds = {k: v[0]["hooks"][0]["command"] for k, v in d["hooks"].items()}
     assert cmds["Stop"] == "orch run event --run r_8k2m --kind idle"
-    run_events = {"SessionStart", "Stop", "Notification", "UserPromptSubmit"}
+    # ORCH-689: a turn ended by an error (usage limit, login changed) fires StopFailure, not Stop: idle too
+    assert cmds["StopFailure"] == "orch run event --run r_8k2m --kind idle"
+    run_events = {"SessionStart", "Stop", "StopFailure", "Notification", "UserPromptSubmit"}
     assert set(cmds) == run_events | set(_RECORD_EVENTS)
-    for event in _RECORD_EVENTS:  # the record hook: the only group there, every tool
-        assert d["hooks"][event] == [
-            {"matcher": "*", "hooks": [{"type": "command", "command": _RECORD_CMD, "timeout": 5}]}
-        ]
+    for event in _RECORD_EVENTS:  # the record hook first, every tool; after a step the input notice too
+        assert d["hooks"][event] == _REMINDER[event]
     for event in ("SessionStart", "UserPromptSubmit"):  # the reminder: a second command, with a timeout
         group = d["hooks"][event][1]  # its own group: the run-event group's matcher does not apply
         assert group == {
@@ -598,7 +644,12 @@ def test_hooks_doc_comes_from_data():
 
 
 def _orch_groups(doc, event):
-    return [h["command"] for g in doc["hooks"].get(event, []) for h in g["hooks"]]
+    return [
+        h["command"]
+        for g in doc["hooks"].get(event, [])
+        for h in g["hooks"]
+        if "protected-check" not in h["command"]  # the guard has its own test (test_protected.py)
+    ]
 
 
 def test_one_settings_blob_holds_the_work_check_and_the_record_hooks(proj):
@@ -616,9 +667,9 @@ def test_one_settings_blob_holds_the_work_check_and_the_record_hooks(proj):
     def both(doc):
         for event in ("SessionStart", "UserPromptSubmit"):
             assert _REMINDER_CMD in _orch_groups(doc, event)
-        for event in _RECORD_EVENTS:
-            assert _orch_groups(doc, event) == [_RECORD_CMD]
-        assert not any(_RECORD_CMD in _orch_groups(doc, e) for e in ("SessionStart", "UserPromptSubmit"))
+        for event in _RECORD_EVENTS:  # one command per tool event (ORCH-634)
+            assert _orch_groups(doc, event) == [_STEP_CMD]
+        assert not any(_STEP_CMD in _orch_groups(doc, e) for e in ("SessionStart", "UserPromptSubmit"))
 
     v = {"prompt": "p", "new_session": NEW, "session": OLD, "permissions": "ask", "stream": True}
     for kind in ("fresh", "resume"):
@@ -661,7 +712,7 @@ def test_record_hook_command_for_a_windows_interpreter(monkeypatch, exe, want):
     assert cmd_words == argv  # cmd: the quoted path is one word (adapters._split's rule)
     monkeypatch.setattr(reminder_settings, "can_import_cached", lambda: True)  # no such interpreter here
     doc = adapters.reminder_doc("claude")
-    assert all(_orch_groups(doc, e) == [cmd] for e in _RECORD_EVENTS)
+    assert all(_orch_groups(doc, e)[0] == f"{cmd} --with claude" for e in _RECORD_EVENTS)  # ORCH-634
     assert _orch_groups(doc, "SessionStart") == [f"{want} -I -P -m orch work-check --hook claude"]
 
 
@@ -715,7 +766,17 @@ def test_detect_finds_binaries_and_versions(tmp_path, monkeypatch):
 # ---------------------------------------------------------------- the tool-name rule
 
 NAME = re.compile(r"claude|codex", re.I)
-SKIP_DIRS = {"agents", "tests", ".venv", "node_modules", "__pycache__", ".pytest_cache", "templates"}
+# mockup: sample screens for the person (account names such as a provider's API key), not code that runs
+SKIP_DIRS = {
+    "agents",
+    "tests",
+    ".venv",
+    "node_modules",
+    "__pycache__",
+    ".pytest_cache",
+    "templates",
+    "mockup",
+}
 SKIP_FILES = {"adapters.py", "uv.lock"}
 
 
@@ -866,12 +927,14 @@ def test_windows_leaves_out_the_record_hooks_but_keeps_the_reminder_hooks(monkey
     monkeypatch.setattr(reminder_settings, "can_import_cached", lambda: True)
     monkeypatch.setattr(adapters, "_is_windows", lambda: True)
     doc = adapters.reminder_doc("claude")
-    assert set(doc["hooks"]) == {"SessionStart", "UserPromptSubmit"}
+    assert set(doc["hooks"]) == {"SessionStart", "UserPromptSubmit", "PreToolUse", *_STEP_EVENTS}
+    assert _orch_groups(doc, "PreToolUse") == []  # PreToolUse: the guard only; the step notice stays
     assert all("record hook" not in c for e in doc["hooks"] for c in _orch_groups(doc, e))
     monkeypatch.setattr(adapters, "_is_windows", lambda: False)
     assert set(_RECORD_EVENTS) <= set(adapters.reminder_doc("claude")["hooks"])
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="nvm (POSIX) layout and a ':' path list")
 def test_find_binary_looks_in_nvm_when_the_path_is_clean(tmp_path, monkeypatch):
     nvm = tmp_path / ".nvm" / "versions" / "node" / "v22.1.0" / "bin"
     nvm.mkdir(parents=True)
@@ -886,3 +949,16 @@ def test_find_binary_looks_in_nvm_when_the_path_is_clean(tmp_path, monkeypatch):
     env = adapters.with_binary_dir({"PATH": "/usr/bin"}, [str(exe), "x"])
     assert env["PATH"].split(":")[0] == str(nvm)
     assert adapters.with_binary_dir({"PATH": "/usr/bin"}, ["codex"]) == {"PATH": "/usr/bin"}
+
+
+def test_a_with_entry_that_names_no_flag_list_is_refused(monkeypatch):
+    table = {
+        "ask": {"args": ["--x"], "if_help_has": "x", "else": []},
+        "edits": {"args": ["--e"], "with": "ask"},
+    }
+    monkeypatch.setattr(adapters, "load", lambda name, root=None: {"permissions": table})
+    with pytest.raises(ValueError, match="plain flag list"):
+        adapters.permission_args("t", None, "edits")
+    table["edits"]["with"] = "full"  # missing
+    with pytest.raises(ValueError, match="plain flag list"):
+        adapters.permission_args("t", None, "edits")

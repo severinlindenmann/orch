@@ -1,26 +1,97 @@
 import contextlib
 import hashlib
+import http.server
 import json
 import os
 import re
+import socketserver
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
+import ci_parts
 import pytest
 
 from orch import addons, cli, winfinish
 
+
+def _own_new_files_as_this_user() -> None:
+    """Windows, elevated (the CI runner, an admin SSH session): Windows makes the Administrators group the
+    owner of every new file and folder, and orch rightly refuses an orch folder owned by another account. Make
+    this process (and the children that inherit its token) own what it creates, as in a normal session."""
+    if os.name != "nt":
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    adv = ctypes.WinDLL("advapi32", use_last_error=True)
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.GetCurrentProcess.restype = ctypes.c_void_p
+    k32.CloseHandle.argtypes = [ctypes.c_void_p]
+    adv.OpenProcessToken.argtypes = [ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p)]
+    adv.GetTokenInformation.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    adv.SetTokenInformation.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    tok = ctypes.c_void_p()
+    # TOKEN_QUERY | TOKEN_ADJUST_DEFAULT
+    if not adv.OpenProcessToken(k32.GetCurrentProcess(), 0x8 | 0x80, ctypes.byref(tok)):
+        return
+    try:
+        n = wintypes.DWORD(0)
+        adv.GetTokenInformation(tok, 1, None, 0, ctypes.byref(n))  # TokenUser: ask the size
+        buf = ctypes.create_string_buffer(n.value)
+        if not adv.GetTokenInformation(tok, 1, buf, n, ctypes.byref(n)):
+            return
+        owner = ctypes.c_void_p(ctypes.c_void_p.from_buffer(buf).value)  # TOKEN_OWNER {PSID} = the user's SID
+        adv.SetTokenInformation(tok, 4, ctypes.byref(owner), ctypes.sizeof(owner))  # TokenOwner
+    finally:
+        k32.CloseHandle(tok)
+
+
+_own_new_files_as_this_user()
 _REAL_HOME_FN = addons.real_home  # the true one, before any test fakes it
+
+
+def _bind_without_dns(self):
+    """http.server's bind looks the host name up in DNS for a field nothing reads; on the macOS CI runners the
+    first lookup in each process took 35 s (ORCH-260). Test servers skip it."""
+    socketserver.TCPServer.server_bind(self)
+    self.server_name, self.server_port = str(self.server_address[0]), self.server_address[1]
+
+
+http.server.HTTPServer.server_bind = _bind_without_dns
 _TRACE_LOG = addons._trace_log_path()  # the true fallback trace file (temp folder), before any test fakes it
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 
 
+def guard_only_home(real: Path) -> Path:
+    """The home whose orch folder the guard watches: the real account home, or ORCH_TEST_GUARD_ONLY's.
+    The local check of a merge queue group (scripts/check-commit.sh) runs the suites with a throwaway HOME and
+    ORCH_HOME_STRICT=1 on a Mac where the production orch keeps writing the real home (health.json,
+    github-writes.jsonl), so watching the real home there fails every green run (ORCH-1180). It sets
+    ORCH_TEST_GUARD_ONLY to its throwaway home; CI after the merge keeps watching the real home. Honoured
+    only with ORCH_HOME_STRICT=1 and a folder under <real home>/.orch-test; any other value is ignored."""
+    only = os.environ.get("ORCH_TEST_GUARD_ONLY")
+    if not only or os.environ.get("ORCH_HOME_STRICT") != "1":
+        return real
+    try:
+        p, top = Path(only).resolve(strict=True), (real / ".orch-test").resolve(strict=True)
+    except (OSError, RuntimeError):
+        return real
+    return p if p.is_dir() and p != top and p.is_relative_to(top) else real
+
+
 def _guard_bases() -> list[Path]:
-    """The orch homes the guard watches: ALWAYS the real account home (getpwuid), plus ORCH_TEST_GUARD_HOME's
-    when set (only tests/test_session_guard.py sets it). The override adds a location, never replaces."""
-    bases = [_REAL_HOME_FN() / ".orch-tool"]
+    """The orch homes the guard watches: the real account home (getpwuid; inside the local check its
+    throwaway home, guard_only_home), plus ORCH_TEST_GUARD_HOME's when set (only tests/test_session_guard.py
+    sets it). The override adds a location, never replaces."""
+    bases = [guard_only_home(_REAL_HOME_FN()) / ".orch-tool"]
     extra = os.environ.get("ORCH_TEST_GUARD_HOME")
     if extra:
         bases.append(Path(extra) / ".orch-tool")
@@ -130,7 +201,22 @@ def _ours(line: dict) -> bool:
     return line.get("pid") in pids or line.get("ppid") in pids
 
 
+def pytest_addoption(parser):
+    ci_parts.addoption(parser)
+
+
+def pytest_collection_modifyitems(config, items):
+    ci_parts.select_part(config, items)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    ci_parts.judge(item, outcome.get_result())
+
+
 def pytest_configure(config):
+    ci_parts.configure(config)
     reg = os.environ.get("ORCH_TEST_SESSION_PIDS")
     if not reg:  # the controller (or a plain run) makes the registry; xdist workers inherit the variable
         fd, reg = tempfile.mkstemp(prefix="orch-test-pids-")
@@ -148,6 +234,32 @@ def _no_bundled_catalogue(request, monkeypatch):
     if request.node.get_closest_marker("real_bundle"):
         return
     monkeypatch.setattr(addons, "bundled_manifests", lambda: {})
+
+
+@pytest.fixture(autouse=True)
+def _fresh_git_answers():
+    """harness keeps git's "is this a work tree" answers while the repository files are unchanged; a test that
+    fakes git must never meet an answer an earlier test left."""
+    from orch import harness
+
+    harness._REV_PARSE.clear()
+    yield
+    harness._REV_PARSE.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_secret_commands_on_windows(monkeypatch):
+    """Windows: orch secret commands that start programs refuse there by design (secretrun.WINDOWS, "not on
+    Windows yet"). A test that reaches that refusal is skipped with that reason instead of failing. A test of
+    the refusal itself sets secretrun._windows on its own and still runs."""
+    if os.name != "nt":
+        return
+    from orch import secretrun
+
+    def _skip():
+        pytest.skip("orch secret commands that start programs are not available on Windows yet")
+
+    monkeypatch.setattr(secretrun, "_windows", _skip)
 
 
 @pytest.fixture(autouse=True)
@@ -180,6 +292,11 @@ def pytest_sessionfinish(session, exitstatus):
         session.exitstatus = 1
     files, trace = _snapshot_real_tool_home()
     bad = False
+    # ORCH_TEST_GUARD=warn: a changed file only warns. For the merge queue's precheck
+    # (ORCH-545, scripts/ci_light.py --rules): it runs on the computer whose own orch
+    # writes ~/.orch-tool all the time, so a change there says nothing about the tests;
+    # their HOME and ORCH_HOME are a throw-away folder anyway. CI never sets it.
+    warn = os.environ.get("ORCH_TEST_GUARD") == "warn"
     for k in sorted(set(files) | set(_REAL_AT_START)):
         before, after = _REAL_AT_START.get(k), files.get(k)
         if before != after:
@@ -188,8 +305,11 @@ def pytest_sessionfinish(session, exitstatus):
                 if (before and after and before[:2] != after[:2])
                 else "only touched or (re)created/removed"
             )
-            print(f"\nREAL ~/.orch-tool CHANGED: {k}: {kind}", file=sys.stderr)
-            bad = True
+            print(
+                f"\nREAL ~/.orch-tool CHANGED: {k}: {kind}" + (" (warning only)" if warn else ""),
+                file=sys.stderr,
+            )
+            bad = bad or not warn
     new = [x for x in trace if x not in _TRACE_AT_START]
     for raw in new:
         try:
@@ -389,6 +509,7 @@ def _legacy_trust(request, monkeypatch):
     test workspace must live under ~/.orch-test). Their orch home is the ORCH_HOME the fixture set. The
     pairing check itself is tested by test_home.py."""
     from orch import home as orch_home
+    from orch import winacl
     from orch.errors import Refused
 
     def test_home(root):
@@ -397,6 +518,7 @@ def _legacy_trust(request, monkeypatch):
             raise Refused("no test home")
         home.mkdir(parents=True, exist_ok=True)
         os.chmod(home, 0o700)
+        winacl.allow_home(home)  # Windows: like the real guarded_home, rights may be written inside it
         return home
 
     if not request.module.__name__.split(".")[-1].startswith(REAL_HOME_MODULES):
@@ -407,7 +529,10 @@ _TMUX = re.compile(r"tmux -L (orch-[0-9a-f]+) new-session .* -c (\S+)")
 
 
 def stray_tmux(under: str) -> list[str]:
-    """Socket names of orch tmux servers whose working folder is `under` or below (reads `ps` only)."""
+    """Socket names of orch tmux servers whose working folder is `under` or below (reads `ps` only).
+    Windows has neither tmux nor /bin/ps: nothing can be left behind there."""
+    if sys.platform == "win32" or not os.path.exists("/bin/ps"):
+        return []
     out = subprocess.run(["/bin/ps", "-axo", "command="], check=False, capture_output=True, text=True).stdout
     return sorted(
         {
@@ -493,3 +618,26 @@ def _no_update_info_network(monkeypatch):
     from orch import updateinfo
 
     monkeypatch.setattr(updateinfo, "_fetch_messages", lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_selfcheck_after_update(request, monkeypatch):
+    """The check after an update runs the installed orch as child processes: tests of the update itself skip
+    it (test_selfcheck tests it on its own)."""
+    if request.module.__name__.rsplit(".", 1)[-1] == "test_selfcheck":
+        return
+    from orch import selfcheck
+
+    monkeypatch.setattr(selfcheck, "after_update", lambda *a, **k: [])
+
+
+@pytest.fixture
+def person_grant(monkeypatch):
+    """ORCH-582: hand the NEXT orch call a one-time person grant, as the signed-in dashboard does (the grant
+    is used up by the call that reads it). Call it with the workspace root right before the call."""
+    from orch import renew
+
+    def _grant(root):
+        monkeypatch.setenv(renew.GRANT_ENV, renew.grant(Path(root)))
+
+    return _grant

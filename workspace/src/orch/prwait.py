@@ -12,6 +12,15 @@ are the tests in tests/fixtures/prwait/):
 - FAILURE, CANCELLED, TIMED_OUT, NEUTRAL, ACTION_REQUIRED, no checks in time, or still pending at the timeout:
   never green. Anything unreadable keeps waiting or reads as not green, never as green.
 
+A check that failed only by timeout (TIMED_OUT) or by a network error in its log is run once more by orch
+(`gh run rerun --failed`, one retry per pull request and commit) before the verdict says red; each retry is
+counted (checkretry.py, shown on Insights). A real failure is red after that one retry.
+
+A merge queue group (queue=True, ORCH-1118) does not wait for the rest once a check failed: its unfinished
+workflow runs are cancelled at once, and the failed and cancelled jobs run once more whatever the reason (a
+flaky test must not split a group of ten). Green then: merged. Red again: the rest is cancelled and the queue
+splits the group.
+
 Merging (`--merge`) takes only the commit that was checked (`--match-head-commit`) and runs with the helper's
 own GitHub login; GitHub's branch rules decide the rest. When the base branch got commits since the branch
 last took it in and they touch a file the pull request changes (or a test file of the same module), the
@@ -29,13 +38,14 @@ import sys
 import time
 from dataclasses import dataclass, field
 
-from orch import ghlimit
+from orch import checkretry, ghlimit
 from orch.errors import Refused
 from orch.ghmerge import is_pr_url  # noqa: F401  (orch ref wait checks addresses with it)
 
 NO_CHECKS_SECS = 900  # a fresh push reports no checks for a while; after this long that is an answer
 TIMEOUT_SECS = 3600
 POLL_SECS = 60
+SAY_SECS = 60  # at most one progress line a minute while it waits
 FIRST_NAP = 30
 NET_TRIES = 7
 NET_SLEEP = 20
@@ -45,7 +55,17 @@ NET_ERROR = re.compile(
     r"|network is unreachable",
     re.I,
 )
+# lines of a failed job's log that mean the job could not reach something, not that the code is wrong
+LOG_NET_ERROR = re.compile(
+    r"connection reset|connection timed out|connection refused|temporary failure in name resolution"
+    r"|could not resolve host|network is unreachable|econnreset|etimedout|econnrefused|socket hang up"
+    r"|tls handshake timeout|read timed out|received request to deprovision|runner has received a shutdown",
+    re.I,
+)
 UNEXPANDED = "${{"  # a draft-time matrix job whose name was never expanded
+HARD = ("FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR")  # a check that is red for sure
+OLD = (*HARD, "CANCELLED")  # what a job just run once more still shows until it runs again
+CANCEL_WAIT_SECS = 180  # how long cancelled workflow runs may take to end before their jobs are run again
 
 
 @dataclass
@@ -56,6 +76,8 @@ class Verdict:
     # not green because GitHub did not answer in time (unreadable, no checks, timeout), not because a check
     # failed: a caller that can try again later does not count it as red
     unknown: bool = False
+    retried: list = field(default_factory=list)  # check names orch ran once more before this verdict
+    stopped: bool = False  # the caller's stop() said to stop waiting (the merge queue's group behind another)
 
     def line(self) -> str:
         return f"GREEN: {self.why}" if self.green else f"NOT green: {self.why}"
@@ -98,6 +120,33 @@ class Replay:
     def take(self, kind: str, what: str) -> bool:
         return True  # a recorded case writes nothing to GitHub
 
+    def count(self, kind: str, what: str) -> None:
+        self.counted = [*getattr(self, "counted", []), (kind, what)]  # a recorded case writes nothing
+
+    def retryable(self, names: list[str]) -> str:
+        """Why these failed checks may run again ('timeout', 'network'), or '' when one is a real failure."""
+        states = {c.get("name"): c.get("state") for c in self.polls_last()}
+        if names and all(states.get(n) == "TIMED_OUT" for n in names):
+            return "timeout"
+        net = set(self.data.get("networkFailed") or [])
+        return "network" if names and set(names) <= net else ""
+
+    def polls_last(self) -> list:
+        p = self.polls[min(max(self.n - 1, 0), len(self.polls) - 1)]
+        p = {"checks": p} if isinstance(p, list) else p
+        return [c for c in p.get("checks") or [] if isinstance(c, dict)]
+
+    def rerun(self, names: list[str], cancelled: bool = False) -> bool:
+        self.reran = list(names)
+        return True
+
+    def cancel_runs(self) -> bool:
+        self.cancels = getattr(self, "cancels", 0) + 1
+        return True
+
+    def say(self, text: str) -> None:
+        self.said = [*getattr(self, "said", []), (self.t, text)]  # a recorded case keeps its lines
+
 
 def _run(argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
     """One gh call with the helper's own environment; a connection-level failure is retried (the request
@@ -131,10 +180,22 @@ class Live:
         self.gh, self.url, self.repo, self.num = gh, url, m[1], m[2]
         self.start = time.monotonic()
         self.base = ""
+        self.last: list = []
 
     def take(self, kind: str, what: str) -> bool:
         """Wait for room in this computer's hourly GitHub write limit (orch github writes), then count it."""
-        return ghlimit.take(kind, what)
+        said = [0.0]
+
+        def on_wait(left: float, waited: float) -> None:
+            if waited - said[0] >= SAY_SECS or waited == 0:
+                said[0] = waited
+                self.say(_room_line(self.url, kind, left, waited))
+
+        return ghlimit.take(kind, what, on_wait=on_wait)
+
+    def count(self, kind: str, what: str) -> None:
+        """Count a write that did not wait for room (the merge queue's merges: one per run of the checks)."""
+        ghlimit.count(kind, what)
 
     def gh_json(self, *args: str):
         got = _run([self.gh, *args])
@@ -193,6 +254,7 @@ class Live:
             checks = json.loads(got.stdout) if got.stdout.strip() else []
         except ValueError:
             checks = []
+        self.last = [c for c in checks if isinstance(c, dict)] if isinstance(checks, list) else []
         if v is None:
             return checks if isinstance(checks, list) else [], "(pull request unreadable)"
         runs = self.gh_json("api", f"repos/{self.repo}/actions/runs?head_sha={v['headRefOid']}&per_page=100")
@@ -214,8 +276,12 @@ class Live:
             return None
         if got["ahead_by"] == 0:
             return []
+        if got.get("files") == []:
+            # commits whose sum changes no file: the empty merge commit of a queue group that this branch was
+            # built on top of (ORCH-1118: six green groups were never merged because this read as unknown)
+            return []
         files = [f.get("filename") for f in got.get("files") or [] if isinstance(f, dict)]
-        return [f for f in files if isinstance(f, str)] or None  # commits but no files listed: unknown
+        return [f for f in files if isinstance(f, str)] or None  # no file list at all: unknown
 
     def changed_files(self) -> list[str] | None:
         got = _run([self.gh, "pr", "diff", self.url, "--name-only"], 60)
@@ -232,7 +298,10 @@ class Live:
         )  # fmt: skip
         if got.returncode != 0:
             return None
-        for _ in range(20):  # GitHub makes the merge commit a moment later
+        for i in range(20):  # GitHub makes the merge commit a moment later
+            if i and i % 4 == 0:
+                base = self.base or "the base branch"
+                self.say(f"{i // 4} min: waiting for GitHub to take {base} into {self.url}.")
             time.sleep(15)
             v = self.view()
             if v and v.get("headRefOid") != head:
@@ -255,11 +324,132 @@ class Live:
         on_base = self.gh_json("api", f"repos/{self.repo}/compare/{self.base}...{parents[1]}")
         return isinstance(on_base, dict) and on_base.get("ahead_by") == 0
 
+    def head_runs(self, head: str) -> list[dict] | None:
+        """The head's pull-request workflow runs; None when GitHub did not answer."""
+        runs = self.gh_json("api", f"repos/{self.repo}/actions/runs?head_sha={head}&per_page=100")
+        rows = runs.get("workflow_runs") if isinstance(runs, dict) else None
+        if not isinstance(rows, list):
+            return None
+        return [
+            r for r in rows if isinstance(r, dict) and str(r.get("event") or "").startswith("pull_request")
+        ]
+
+    def failed_runs(self, head: str, cancelled: bool = False) -> list[dict]:
+        bad = ("failure", "timed_out", "cancelled") if cancelled else ("failure", "timed_out")
+        return [r for r in self.head_runs(head) or [] if r.get("conclusion") in bad]
+
+    def cancel_runs(self) -> bool:
+        """Cancel the head's unfinished workflow runs (a merge queue group that is red already) and wait until
+        they ended, so their jobs can run again. True when every run of the head has ended (nothing was left
+        running, or the cancels went through in time); False when one may still run or GitHub did not say."""
+        v = self.view()
+        rows = self.head_runs(v["headRefOid"]) if v is not None else None
+        if rows is None:
+            return False
+        open_ = [r for r in rows if r.get("status") != "completed"]
+        if not open_:
+            return True
+        if not self.take("other", f"{self.url} cancel the rest of a red run"):
+            return False
+        for r in open_:
+            _run([self.gh, "run", "cancel", str(r.get("id")), "--repo", self.repo], 60)
+        end = time.monotonic() + CANCEL_WAIT_SECS
+        while time.monotonic() < end:
+            time.sleep(10)
+            rows = self.head_runs(v["headRefOid"])
+            if rows is not None and all(r.get("status") == "completed" for r in rows):
+                _say(self, f"Cancelled the rest of the checks of {self.url}.")
+                return True
+        return False
+
+    def retryable(self, names: list[str]) -> str:
+        """'timeout' when every failed check timed out, 'network' when every other failed job's log shows a
+        network error, else '' (a real failure is never retried)."""
+        v = self.view()
+        if not names or v is None:
+            return ""
+        states = {c.get("name"): c.get("state") for c in self.last}
+        if all(states.get(n) == "TIMED_OUT" for n in names):
+            return "timeout"
+        runs = self.failed_runs(v["headRefOid"])
+        if not runs or len(runs) > 6:
+            return ""
+        for r in runs:
+            got = _run([self.gh, "run", "view", str(r.get("id")), "--repo", self.repo, "--log-failed"], 90)
+            log = got.stdout[-200_000:] if got.returncode == 0 else ""
+            if not LOG_NET_ERROR.search(log):
+                return ""
+        return "network"
+
+    def rerun(self, names: list[str], cancelled: bool = False) -> bool:
+        """Run the failed jobs of the head's failed workflow runs once more; False when GitHub would not.
+        cancelled: also the runs orch cancelled itself (GitHub runs their cancelled jobs again too)."""
+        v = self.view()
+        if v is None:
+            return False
+        runs = self.failed_runs(v["headRefOid"], cancelled)
+        if not runs or not self.take("other", f"{self.url} rerun failed checks"):
+            return False
+        ok = False
+        for r in runs:
+            got = _run([self.gh, "run", "rerun", str(r.get("id")), "--repo", self.repo, "--failed"], 60)
+            ok = ok or got.returncode == 0
+        if ok:
+            self.start = time.monotonic()  # the wait for the new checks starts now
+        return ok
+
     def sleep(self, secs: float) -> None:
         time.sleep(secs)
 
     def elapsed(self) -> float:
         return time.monotonic() - self.start
+
+    def say(self, text: str) -> None:
+        """One progress line while it waits (at most one a minute), so a helper or person watching sees what
+        it waits for (17 Nov: a silent wait for the hourly merge limit looked like a hang for 50 minutes)."""
+        print(f"{time.strftime('%H:%M')} {text}", file=sys.stderr, flush=True)
+
+
+def _say(src, text: str) -> None:
+    say = getattr(src, "say", None)
+    if callable(say):
+        say(text)
+
+
+def _mins(secs: float) -> str:
+    return f"{int(secs // 60)} min"
+
+
+def _waiting_line(src, el, checks, pending, required, names, open_runs) -> str:
+    """What the wait waits for right now, in one line."""
+    url = getattr(src, "url", "") or "the pull request"
+    if not checks:
+        return f"{_mins(el)}: waiting for the checks of {url} to start (none reported yet)."
+    running = [str(c.get("name")) for c in checks if c.get("bucket") == "pending"]
+    parts = []
+    if pending:
+        parts.append(f"{pending} of {len(checks)} still running (" + ", ".join(running[:3])
+                     + (" ..." if len(running) > 3 else "") + ")")  # fmt: skip
+    missing = [r for r in required if r not in names]
+    if missing:
+        parts.append("required not reported yet: " + ", ".join(missing))
+    if open_runs:
+        parts.append(f"workflow runs not finished: {open_runs}")
+    return f"{_mins(el)}: waiting for the checks of {url}: " + "; ".join(parts or ["reading them"]) + "."
+
+
+def _room_line(url: str, kind: str, left: float, waited: float) -> str:
+    """The wait for room in this computer's hourly GitHub write limit, in one line."""
+    try:
+        row = next((r for r in ghlimit.status() if r["kind"] == kind), None)
+    except (OSError, Refused):
+        row = None
+    used = f"{row['used']} of {row['per_hour']} this hour, " if row else ""
+    what = f"checks of {url} passed" if kind == "merge" else url
+    return (
+        f"{_mins(waited)}: {what}; waiting for room in this computer's GitHub limit for "
+        f"{ghlimit.WHAT[kind]} ({used}next fits in about {max(1, round(left / 60))} min; orch github writes)."
+    )
 
 
 def _sorted(checks: list) -> list[tuple[str, str]]:
@@ -268,9 +458,92 @@ def _sorted(checks: list) -> list[tuple[str, str]]:
     return sorted(rows, key=lambda r: rank.get(r[1], 2))
 
 
-def wait(src, no_checks: float = NO_CHECKS_SECS, timeout: float = TIMEOUT_SECS) -> Verdict:
+def wait(
+    src, no_checks: float = NO_CHECKS_SECS, timeout: float = TIMEOUT_SECS, queue: bool = False
+) -> Verdict:
+    """Wait for the checks; when they failed only by timeout or network error, run them once more (once per
+    call) and wait again before saying red. The retry is counted (checkretry). queue: a merge queue group,
+    see _queue_wait."""
+    if queue:
+        return _queue_wait(src, no_checks, timeout)
+    v = _wait_once(src, no_checks, timeout)
+    if v.green or v.unknown or not v.checks:
+        return v
+    bad = [n for n, s in v.checks if s not in ("SUCCESS", "SKIPPED")]
+    try:
+        reason = src.retryable(bad) if bad else ""
+        if not reason or not src.rerun(bad):
+            return v
+    except Refused:
+        return v
+    print(f"{', '.join(bad)} failed by {reason}: running it once more.", file=sys.stderr, flush=True)
+    for n in bad:
+        checkretry.record(getattr(src, "repo", ""), getattr(src, "num", ""), n, reason)
+    v2 = _wait_once(src, no_checks, timeout)
+    v2.retried = bad
+    if not v2.green:
+        v2.why += f" (run once more after a {reason}, still not green)"
+    return v2
+
+
+def _cancel(src) -> bool:
+    """Stop the rest of a red group's run; True when nothing of it runs any more."""
+    cancel = getattr(src, "cancel_runs", None)
+    try:
+        return bool(cancel()) if callable(cancel) else False
+    except Refused:
+        return False
+
+
+def _queue_wait(src, no_checks: float, timeout: float) -> Verdict:
+    """A merge queue group (ORCH-1118): red at the first failed check (the rest is cancelled, no runner waits
+    for an answer that is known), then the failed and cancelled jobs once more whatever the reason; red again:
+    red, the queue splits the group."""
+    v = _wait_once(src, no_checks, timeout, early=True)
+    if v.green or v.unknown or not v.checks:
+        return v
+    bad = [n for n, s in v.checks if s in HARD]
+    ended = _cancel(src)  # a run still going cannot run its jobs again: then red as it is
+    try:  # what is red or cancelled now (the final check too) runs again: its old result is void
+        now, _ = src.look()
+    except Refused:
+        now = []
+    stale = frozenset(bad) | {c.get("name") for c in now if isinstance(c, dict) and c.get("state") in OLD}
+    try:
+        again = ended and bool(bad) and src.rerun(bad, cancelled=True)
+    except Refused:
+        again = False
+    if not again:
+        return v
+    print(
+        f"{', '.join(bad)} failed in a merge queue group: running the failed jobs once more.", file=sys.stderr
+    )
+    for n in bad:
+        checkretry.record(getattr(src, "repo", ""), getattr(src, "num", ""), n, "flaky")
+    v2 = _wait_once(src, no_checks, timeout, early=True, stale=stale)
+    v2.retried = bad
+    if not v2.green:
+        if not v2.unknown:
+            _cancel(src)
+        v2.why += " (its failed jobs ran once more, still not green)"
+    return v2
+
+
+def _stopped(src) -> Verdict | None:
+    """src.stop() (set by run_one's stop) returns a reason to stop waiting, or None to go on."""
+    stop = getattr(src, "stop", None)
+    why = stop() if stop is not None else None
+    return Verdict(False, f"stopped: {why}", unknown=True, stopped=True) if why else None
+
+
+def _wait_once(
+    src, no_checks: float, timeout: float, early: bool = False, stale: frozenset = frozenset()
+) -> Verdict:
     """Wait until the checks have finished, then say GREEN or NOT green. Never raises for GitHub trouble:
-    what cannot be read keeps the wait going or ends NOT green."""
+    what cannot be read keeps the wait going or ends NOT green. early: NOT green as soon as one check failed
+    for sure, without waiting for the others. stale: checks just run once more; their old failed result
+    counts for nothing until they were seen running again (or no_checks went by)."""
+    fresh: set = set()
     draft = src.is_draft()
     if draft is not False:
         return Verdict(False, "the pull request is a draft (or unreadable)", unknown=draft is None)
@@ -279,7 +552,11 @@ def wait(src, no_checks: float = NO_CHECKS_SECS, timeout: float = TIMEOUT_SECS) 
     except Refused as e:
         return Verdict(False, str(e), unknown=True)
     src.sleep(FIRST_NAP)  # a fresh push reports "no checks" for a moment
+    idle_since = None  # since when nothing runs any more although a required check is missing
     while True:
+        halt = _stopped(src)
+        if halt is not None:
+            return halt
         raw, open_runs = src.look()
         checks = [
             c
@@ -289,9 +566,24 @@ def wait(src, no_checks: float = NO_CHECKS_SECS, timeout: float = TIMEOUT_SECS) 
         names = {c.get("name") for c in checks}
         pending = sum(1 for c in checks if c.get("bucket") == "pending")
         have_required = all(r in names for r in required)
-        if checks and not pending and have_required and not open_runs:
-            break
         el = src.elapsed()
+        fresh |= {c.get("name") for c in checks if c.get("name") in stale and c.get("state") not in OLD}
+        old = (stale - fresh) if el < no_checks else frozenset()  # still the result from before the re-run
+        if checks and not pending and have_required and not open_runs and not old:
+            break
+        if early and any(c.get("state") in HARD and c.get("name") not in old for c in checks):
+            break  # red for sure: the verdict below names it, whatever still runs
+        if checks and not pending and not open_runs and not have_required:
+            idle_since = el if idle_since is None else idle_since
+            if el - idle_since >= no_checks:  # every run finished without it (18 Nov: a cancelled group run)
+                gone = ", ".join(r for r in required if r not in names)
+                why = (
+                    f"required check(s) never reported: {gone}; every check and workflow run finished "
+                    f"without it for {int(el - idle_since)}s (a cancelled run? run it again)"
+                )
+                return Verdict(False, why, _sorted(checks), unknown=True)
+        else:
+            idle_since = None
         if not checks and el >= no_checks:
             return Verdict(False, f"no checks after {int(el)}s", unknown=True)
         if el >= timeout:
@@ -301,6 +593,7 @@ def wait(src, no_checks: float = NO_CHECKS_SECS, timeout: float = TIMEOUT_SECS) 
             if open_runs:
                 why += f"; unfinished workflow runs: {open_runs}"
             return Verdict(False, why + ")", _sorted(checks), unknown=True)
+        _say(src, _waiting_line(src, el, checks, pending, required, names, open_runs))
         src.sleep(POLL_SECS)
     rows = _sorted(checks)
     bad = [f"{n} {s}" for n, s in rows if s != "SUCCESS"]
@@ -384,14 +677,25 @@ def _no_room(url: str, kind: str) -> str:
 
 
 def run_one(
-    url: str, merge: bool, timeout: float = TIMEOUT_SECS, src: Live | None = None, before_merge=None
+    url: str,
+    merge: bool,
+    timeout: float = TIMEOUT_SECS,
+    src: Live | None = None,
+    before_merge=None,
+    queue: bool = False,
+    stop=None,
 ) -> Outcome:
     """Wait for one pull request's checks; with merge, merge it on green as GitHub's branch rules allow, only
     its checked commit. When the base branch got commits since the branch last took it in, and they touch a
     file the pull request changes (or a test file of the same module), the base branch is taken in first and
     the checks are waited for once more: two green pull requests on the same code must not break it
     together. before_merge(head) is asked right before the merge: a reason (text) stops it, status
-    "held"; None lets it go on."""
+    "held"; None lets it go on. stop() is asked before every look at the checks: a reason ends the wait
+    without a verdict, status "stopped" (the merge queue stops a group built on top of one that failed).
+
+    queue=True is the merge queue's call: the base branch is never taken into the branch (status "behind"
+    instead; the queue checks it once on top of the base branch itself), and the merge does not wait for the
+    hourly merge count (the queue merges one group per run of the checks); it is still counted."""
     src = src or Live(url)
     v = src.view()
     if v is None:
@@ -401,7 +705,11 @@ def run_one(
     if v.get("state") != "OPEN":
         return Outcome(url, False, "closed", f"{url} is closed; nothing was done.")
     head, base = v["headRefOid"], v.get("baseRefName") or ""
-    verdict = wait(src, timeout=timeout)
+    if stop is not None:  # asked before every look at the checks: a reason ends the wait (status "stopped")
+        src.stop = stop
+    verdict = wait(src, timeout=timeout, queue=queue)
+    if verdict.stopped:
+        return Outcome(url, False, "stopped", f"Checks of {url}: {verdict.line()}", verdict)
     if not verdict.green:
         return Outcome(url, False, "checks failed", f"Checks of {url}: {verdict.line()}", verdict)
     if not merge:
@@ -427,6 +735,9 @@ def run_one(
             case = f"{base} moved ({len(landed)} files changed there), none of them touch this pull request"
             break
         shown = ", ".join(hits[:3]) + (" ..." if len(hits) > 3 else "")
+        if queue:  # the queue checks it on top of the base branch itself: no take-in, no second run here
+            line = f"{base} changed files of {url} since it took {base} in ({shown}); not merged alone."
+            return Outcome(url, False, "behind", line, verdict)
         if rounds >= UPDATE_ROUNDS:
             line = (
                 f"{base} keeps changing files of {url} ({shown}); not merged. Take {base} in, push, "
@@ -450,24 +761,28 @@ def run_one(
         if not verdict.green:
             line = f"Checks of {url} after taking {base} in: {verdict.line()}"
             return Outcome(url, False, "checks failed", line, verdict)
-    if not src.take("merge", url):
+    if not queue and not src.take("merge", url):
         return Outcome(url, False, "checks passed", _no_room(url, "merge"), verdict)
     try:  # after the wait for room, not before
         held = before_merge(head) if before_merge is not None else None
     except Exception as e:  # noqa: BLE001 - a check that broke never lets the merge through
         held = f"the last check before the merge failed ({e.__class__.__name__})"
     if held:
-        ghlimit.give_back("merge", url)  # no merge happened: the place goes back
+        if not queue:
+            ghlimit.give_back("merge", url)  # no merge happened: the place goes back
         return Outcome(url, False, "held", f"Checks of {url} passed; not merged: {held}", verdict)
     done = _run([src.gh, "pr", "merge", url, "--merge", "--match-head-commit", head], 60)
     if done.returncode != 0:
         why = next((x.strip() for x in (done.stderr or done.stdout).splitlines() if x.strip()), "no reason")
-        ghlimit.give_back("merge", url)  # no merge happened: the place goes back
+        if not queue:
+            ghlimit.give_back("merge", url)  # no merge happened: the place goes back
         after = src.view()
         if after is not None and after.get("state") == "MERGED":  # someone else merged it meanwhile
             return Outcome(url, True, "merged", f"{url} was merged meanwhile (not by this wait).", verdict)
         line = f"Checks of {url} passed but GitHub did not merge it ({case}): {why[:200]}"
         return Outcome(url, False, "checks passed", line, verdict)
+    if queue:
+        src.count("merge", url)  # shown in orch github writes; it never waited for room
     took = f"; {base} taken in {rounds}x first" if rounds else ""
     return Outcome(
         url, True, "merged", f"Merged {url} on green checks ({verdict.why}); {case}{took}.", verdict

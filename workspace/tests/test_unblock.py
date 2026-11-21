@@ -321,7 +321,7 @@ def test_run_one_counts_a_merge_by_someone_else_as_merged(monkeypatch):
         def take(self, kind, what):
             return True
 
-    monkeypatch.setattr(prwait, "wait", lambda src, timeout=0: prwait.Verdict(True, "all passed"))
+    monkeypatch.setattr(prwait, "wait", lambda src, timeout=0, **_: prwait.Verdict(True, "all passed"))
     monkeypatch.setattr(
         prwait, "_run",
         lambda argv, timeout=30: type(

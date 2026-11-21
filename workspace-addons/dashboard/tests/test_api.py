@@ -59,6 +59,7 @@ def test_http_state_and_static(server):
         "/kit/tokens.css",
         "/logo.svg",
         "/favicon.svg",
+        "/favicon.ico",
         "/apple-touch-icon.png",
     ):
         assert get(server + p)[0] == 200, p
@@ -312,6 +313,8 @@ def art(ws, act_orch):
     (d / "artifacts" / "pic.svg").write_text("<svg onload=alert(1)/>")
     (d / "artifacts" / "sub" / "a.txt").write_text("deep")
     (d / "artifacts" / "big.txt").write_bytes(b"x" * (2 * 1024 * 1024 + 1))
+    # a 3 MB picture still shows
+    (d / "artifacts" / "bigpic.png").write_bytes(b"\x89PNG" + b"x" * (3 * 1024 * 1024))
     (d / "evidence" / "proof.txt").write_text("proof")
     (ws / "secret.txt").write_text("outside")
     (d / "artifacts" / "link.txt").symlink_to(ws / "secret.txt")
@@ -412,6 +415,8 @@ def test_files_are_shown_as_text_or_picture_only(art):
     assert _get(art, "/api/file?t=t_other000x&k=evidence&n=proof.txt")[1] == b"proof"
     assert _get(art, q + "pic.svg&dl=1")[2]["Content-Disposition"].startswith("attachment")
     assert _get(art, q + "big.txt")[0] == 413
+    # a picture over 2 MB is shown (up to the 25 MB upload limit)
+    assert _get(art, q + "bigpic.png")[0] == 200
 
 
 @pytest.mark.parametrize(
@@ -1054,3 +1059,60 @@ def test_framed_addon_pages_may_show_blob_images():
     from orch_dashboard import server
 
     assert "img-src 'self' data: blob:" in server.PROXY_CSP
+
+
+def test_events_give_back_the_place_of_a_closed_page_within_seconds(server):
+    """Twenty open pages fill the stream places; closed pages hand them back within about a second (ORCH-338: a
+    click-through that reloads often hit 'Too many open pages' while the server waited for its 15 s ping)."""
+    import http.client
+    import time
+
+    port = int(server.rsplit(":", 1)[1])
+
+    def status():  # the status only: a stream that is let in never ends
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        try:
+            c.request("GET", "/api/events")
+            return c.getresponse().status
+        finally:
+            c.close()
+
+    connections = []
+    for _ in range(20):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        c.request("GET", "/api/events")
+        r = c.getresponse()
+        assert r.status == 200
+        assert r.readline() == b"event: rev\n"
+        connections.append((c, r))
+    assert status() == 503
+    for c, r in connections:
+        r.close()
+        c.close()
+    deadline = time.monotonic() + 5
+    while status() == 503 and time.monotonic() < deadline:
+        time.sleep(0.2)
+    assert time.monotonic() < deadline, "the closed pages kept their places"
+
+
+def test_client_gone_reads_only_the_end_of_the_connection():
+    import socket
+
+    from orch_dashboard.server import _client_gone
+
+    a, b = socket.socketpair()
+    try:
+        assert _client_gone(None) is False
+        assert _client_gone(a) is False  # open, nothing sent
+        b.close()
+        assert _client_gone(a) is True  # the page closed
+    finally:
+        a.close()
+
+
+def test_session_list_route_answers_for_a_ticket_id_only(art):
+    """ORCH-363: Focus's History tab reads the earlier sessions here (orch lists them; the fake lists none)."""
+    code, body, _ = _get(art, "/api/sessions/t_other000x")
+    assert code == 200 and json.loads(body) == {"available": False, "sessions": []}
+    assert _get(art, "/api/sessions/..%2fx")[0] == 404 and _get(art, "/api/sessions/t_x")[0] == 404
+    assert _get(art, "/api/sessions/t_other000x", {"Sec-Fetch-Site": "cross-site"})[0] == 403

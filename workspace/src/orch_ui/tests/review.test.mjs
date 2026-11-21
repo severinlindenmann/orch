@@ -74,6 +74,14 @@ test('mapCard carries the round and the task so the card can say About', () => {
   assert.equal(it.ticketId, 't_abc');
   assert.equal(UI.review.mapCard(card('y'), fakeApi([[]]), NOW).about, undefined);
 });
+test('ORCH-1108: mapCard names a stuck card Stuck and keeps only a link inside the page as its Open', () => {
+  const {UI} = load();
+  const c = card('s', {href: '#ticket/t_abc123', answers: [{label: 'Nudge', picked: 'nudge'}]}); c.card = {kind: 'stuck', title: 'The helper is idle.'};
+  const it = UI.review.mapCard(c, fakeApi([[]]), NOW);
+  assert.equal(it.kindLabel, 'Stuck'); assert.equal(it.icon, 'pause'); assert.equal(it.href, '#ticket/t_abc123');
+  assert.deepEqual(JSON.parse(JSON.stringify(it.answers)), [{label: 'Nudge', picked: 'nudge'}]);
+  for (const bad of ['javascript:alert(1)', 'https://x.example/t', '//evil', '#ticket/<b>']) assert.equal(UI.review.mapCard(card('b', {href: bad}), fakeApi([[]]), NOW).href, undefined, bad);
+});
 test('mapCard keeps option previews and picks a kind label', () => {
   const {UI} = load();
   const c = card('o'); c.card = {kind: 'choice', title: 'Which?', preview: {type: 'options', options: [{id: 'A', title: 'As today', preview: {type: 'page', src: 'reviewed/aa/a.html'}}, {id: 'B', title: 'New', suggested: true}]}};
@@ -101,7 +109,7 @@ test('the deck is text only by default: voice is off', async () => {
   assert.equal(decks[0].o.voice, false);
   const w = read('widgets.js');
   assert.match(w, /if\(o\.voice\)voice\.append\(mic,wave\)/);
-  assert.match(w, /if\(o\.voice\)sh\.append\(voice,clips\)/);
+  assert.match(w, /if\(o\.voice&&!box\)sh\.append\(voice,clips\)/);  // the feedback box (o.attach) brings its own Record
   assert.match(w, /clips:o\.voice\?dr\.clips\.slice\(\):\[\]/);
 });
 
@@ -115,6 +123,38 @@ test('an answer is sent with id, digest, verdict, picked and the words', async (
   d.o.onDecide(d.items[0], 'ok', null);
   await flush();
   assert.equal(sent[1].verdict, 'ok'); assert.equal(sent[1].note, null);
+});
+
+test('ORCH-422: with api.attach the sheet gets the feedback box; files land on the ticket before the answer, named in the note', async () => {
+  const sent = [], attached = [];
+  const api = {...fakeApi([[card('a')]], async b => { sent.push(JSON.parse(JSON.stringify(b))); return {ok: true}; }),
+    box: {voice: true, accept: ['png', 'webm']},
+    attach: async ({ticket, files}) => { attached.push([ticket, files.map(f => f.name)]); return {ok: true, names: ['shot (2).png', 'voice-note-0931.webm']}; }};
+  const {decks} = await mount(api);
+  const d = decks[0];
+  assert.equal(d.o.attach.voice, true, 'the comment sheet gets the box with Record');
+  const files = [{name: 'shot.png', url: 'data:image/png;base64,iVBO'}, {name: 'voice-note-0931.webm', url: 'data:audio/webm;base64,GkXf'}];
+  d.o.onDecide(d.items[0], 'talk', {changes: {text: 'Bigger', clips: [], pins: [], files}});
+  await flush(); await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(attached)), [['T-1', ['shot.png', 'voice-note-0931.webm']]]);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].files, undefined, 'the files are never sent with the answer');
+  assert.match(sent[0].note.text, /^Bigger\n\nI added 2 files to this ticket: shot \(2\)\.png, voice-note-0931\.webm\. Read them first\.$/);
+  // files alone, no words: still a note naming them
+  d.o.onDecide(d.items[0], 'talk', {changes: {text: '', clips: [], pins: [], files: files.slice(0, 1)}});
+  await flush(); await flush();
+  assert.match(sent[1].note.text, /^I added 2 files to this ticket/);
+});
+
+test('ORCH-422: files that could not be added: no answer is saved, the card comes back', async () => {
+  const sent = [];
+  const api = {...fakeApi([[card('a')]], async b => { sent.push(b); return {ok: true}; }), box: {voice: true},
+    attach: async () => ({ok: false, error: {code: 'error', message: 'x.pdf: no'}})};
+  const {decks, toasts} = await mount(api);
+  decks[0].o.onDecide(decks[0].items[0], 'talk', {changes: {text: 'see', clips: [], pins: [], files: [{name: 'x.pdf', url: 'data:,x'}]}});
+  await flush(); await flush();
+  assert.equal(sent.length, 0);
+  assert.equal(toasts[0].m, 'x.pdf: no'); assert.equal(toasts[0].k, 'error');
 });
 
 test('changed: toast, reload the stack and show the new version', async () => {
@@ -133,6 +173,17 @@ test('needs_person: plain sign-in message, error toast, the card returns', async
   decks[0].o.onDecide(decks[0].items[0], 'ok', null);
   await flush(); await flush();
   assert.match(toasts[0].m, /Sign in to answer: run orch review in your terminal/); assert.equal(toasts[0].k, 'error');
+  assert.equal(decks.length, 2); assert.equal(decks[1].items.length, 1);
+});
+
+test('needs_person with the server sign-in words (dashboard): shows them, never the terminal (#1918)', async () => {
+  const words = 'Sign in to do this: open the dashboard with a sign-in link from orch.';
+  const api = fakeApi([[card('a')]], async () => ({ok: false, error: {code: 'needs_person', message: words}}));
+  const {decks, toasts} = await mount(api);
+  decks[0].o.onDecide(decks[0].items[0], 'ok', null);
+  await flush(); await flush();
+  assert.equal(toasts[0].m, words); assert.equal(toasts[0].k, 'error');
+  assert.doesNotMatch(toasts[0].m, /terminal/);
   assert.equal(decks.length, 2); assert.equal(decks[1].items.length, 1);
 });
 
@@ -171,6 +222,12 @@ const entry = (decision, extra = {}) => ({
   card: {kind: 'choice', title: 'Home: which layout?', preview: {type: 'options', options: [{id: 'A', title: 'As today', preview: {type: 'page', src: 'reviewed/aa/a.html'}}, {id: 'C', title: 'Questions first', preview: {type: 'page', src: 'reviewed/aa/c.html'}}]}},
   shown: {digest: 'x', copy: 'reviewed/aa/', files: {'c.html': 'h'}},
   decision, ...extra,
+});
+
+test('answerRecord: a sent-back Check says what happens next', () => {
+  const {UI} = load();
+  const t = UI.answerRecord(entry({action: 'send_back', changes: ['Add shipping']}, {card: {kind: 'check', title: 'Result'}}), {now: NOW}).textContent;
+  assert.match(t, /Your note went to the helper for a new version\./); assert.doesNotMatch(t, /Kept exactly/);
 });
 
 test('answerRecord: title, verdict words, by · via · time, taken option, pins and words', () => {

@@ -11,7 +11,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from lib import Fail, Skip, check, scenario
+from lib import Fail, Skip, check, scenario, wait_for
 
 
 def snapshot(d: Path) -> dict:
@@ -265,21 +265,6 @@ def a0(e):
     e._addons = True
 
 
-@scenario("A1")
-def a1(e):
-    raise Skip("dashboard browser scenario (another lane)")
-
-
-@scenario("A2")
-def a2(e):
-    raise Skip("dashboard browser scenario (another lane)")
-
-
-@scenario("A3")
-def a3(e):
-    raise Skip("dashboard snapshot publish needs browser check (another lane)")
-
-
 def _fake_agent(e, ws: Path, interval: int = 2) -> Path:
     """Fake agent: records start/end with the ticket id from the prompt, takes 3 s."""
     log = e.tmp / f"fake-agent-{ws.name}.log"
@@ -296,13 +281,7 @@ def _sched(e, ws: Path, *args):
 
 
 def _wait(fn, secs: float, step: float = 1.0):
-    end = time.time() + secs
-    while time.time() < end:
-        v = fn()
-        if v:
-            return v
-        time.sleep(step)
-    return None
+    return wait_for(fn, secs, step)
 
 
 @scenario("A4")
@@ -357,7 +336,8 @@ def a5(e):
 
         ok = _wait(finished, 170, 2)
         check(ok, f"fewer than 2 finished runs in 170 s: {log.read_text()!r}")
-        time.sleep(5)  # let the automation reap the finished runs (log footer)
+        # the automation reaps a finished run a moment later and keeps its log: wait for both logs, not a fixed time
+        _wait(lambda: len(list((ws / ".orch/run/logs").glob(f"{t}-*.log"))) >= 2, 30, 0.5)
     finally:
         _sched(e, ws, "stop")
         # end the recurrence: an open every-minute ticket left in Reports would start the agent in later

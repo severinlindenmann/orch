@@ -66,7 +66,7 @@ def test_a_run_that_ends_without_finishing_leaves_the_ticket_ready_not_working(p
     assert _status(proj, tid) == "active"
     _wait(proj, tid)
     assert _status_soon(proj, tid, "ready") == "ready"  # nobody works on it now: not "Working"
-    assert any("agent stopped" in t for t in _texts(proj, tid))
+    assert any("helper stopped" in t for t in _texts(proj, tid))
 
 
 def test_a_run_that_asked_a_question_stays_waiting(proj, run, gen, one_step):
@@ -121,6 +121,23 @@ def test_run_stop_with_waiting_input_holds_it_from_the_automation(proj, run):
     _stop_a_run(proj, run, tid)  # a second stop, nothing waiting: no hold
     assert not runs_live._held_path(proj, tid).exists()
     assert json.loads(run("run", "status", tid, "--json")[1])["stop_held_ids"] == []
+
+
+def test_run_status_keeps_the_persons_sent_messages_after_they_are_read(proj, run):
+    """ORCH-695: the chat of a session shows the person's own messages after a reload, read or not. An agent's
+    line, an answer and a run's start prompt are never among them."""
+    tid = _new(run)
+    mine = runs.pending_add(proj, tid, "human:owner", "message", "Please also try a PDF.")
+    runs.pending_add(proj, tid, "agent:manager", "message", "a manager's nudge")
+    runs.pending_add(proj, tid, "human:owner", "answer", "Below")
+    runs.pending_add(proj, tid, "human:owner", "message", "start prompt", via="start")
+    st = json.loads(run("run", "status", tid, "--json")[1])
+    assert [(m["id"], m["text"], m["by"], m["read"]) for m in st["sent_input"]] == [
+        (mine["id"], "Please also try a PDF.", "human:owner", False)
+    ]
+    runs.mark_delivered(proj, tid, [mine["id"]])  # the helper read it: it stays, marked read
+    st = json.loads(run("run", "status", tid, "--json")[1])
+    assert [(m["text"], m["read"]) for m in st["sent_input"]] == [("Please also try a PDF.", True)]
 
 
 def _held(run, tid):
@@ -615,6 +632,29 @@ def test_a_working_ticket_with_queued_input_and_no_run_is_ready_after_the_grace(
     runs.pending_add(proj, tid, "human:t", "message", "One more thing")
     assert runs.settle_orphan(proj, tid, at=time.time() + 600) is True
     assert _status(proj, tid) == "ready" and runs.undelivered(proj, tid)
+
+
+def test_a_ticket_moved_to_working_by_hand_says_no_helper_started_not_that_one_stopped(proj, run):
+    """ORCH-235: a person moves a ticket to Working and no helper ever starts. After the grace it is To do
+    again, and the history never claims a helper ran or stopped (nor says agent)."""
+    tid = _new(run)
+    tickets.set_status(proj, tid, "active", "human:t")
+    assert runs.settle_orphan(proj, tid, at=time.time() + 600) is True
+    last = _texts(proj, tid)[-1]
+    assert _status(proj, tid) == "ready" and last == tickets.NOT_STARTED_TEXT
+    assert "stopped" not in last and "agent" not in last.lower()
+
+
+def test_a_dead_run_on_a_working_ticket_still_says_the_helper_stopped(proj, run):
+    """A run record that went dead: a helper did run, so the stop line stays (helper, not agent)."""
+    from diag_fixtures import claim_dead
+
+    tid = _new(run)
+    tickets.set_status(proj, tid, "active", "human:t")
+    claim_dead(proj, tid)
+    assert runs.settle_orphan(proj, tid, at=time.time() + 600) is True
+    assert _texts(proj, tid)[-1] == tickets.STOPPED_TEXT
+    assert "agent" not in tickets.STOPPED_TEXT.lower()
 
 
 @pytest.mark.skipif(not hasattr(os, "waitid"), reason="os.waitid is not available here")

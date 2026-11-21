@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -56,6 +57,19 @@ def test_no_temp_files_left(proj, new_ticket, run):
     run("log", tid, "x")
     names = [p.name for p in (proj / ".orch" / "tickets").iterdir()]
     assert names == [f"{tid}.json"]
+
+
+def test_check_plain_number_is_the_task_at_that_place(proj, run, new_ticket):
+    """ORCH-864: `check done <id> 1` is c1; a wrong number says tasks are named c1, c2, ... and the range."""
+    tid = new_ticket()
+    for step in ("one", "two"):
+        assert run("check", "add", tid, step)[0] == 0
+    code, _, _ = run("check", "done", tid, "2", "--note", "ran it")
+    assert code == 0
+    t = read(proj, tid)
+    assert [c["done"] for c in t["checklist"]] == [False, True]
+    code, _, err = run("check", "done", tid, "99", "--note", "ran it")
+    assert code == 2 and "named c1, c2" in err and "c1..c2" in err
 
 
 def test_check_done_needs_evidence(proj, run, new_ticket, validate):
@@ -361,7 +375,7 @@ def test_new_with_bad_ext_makes_no_ticket(proj, run, bad):
         ("Patched owner, status (status open -> active)", "Changed the owner and status (now Working)"),
         ("Status open -> done", "Moved to Done"),
         ("Status done -> open", "Moved to Backlog"),
-        ("Added check c1", "Added a step"),
+        ("Added check c1", "Added a task"),
         ("Check c1 done", "Finished a task"),
         ("Set ext.focus", "Updated Focus settings"),
         ("Set ext.my-addon", "Updated My addon settings"),
@@ -376,7 +390,7 @@ def test_history_line_is_plain_words(stored, shown):
 
 def test_history_line_names_the_task():
     checks = [{"id": "c1", "text": "Write the test"}]
-    assert tickets.history_line("Added check c1", checks) == "Added a step: Write the test"
+    assert tickets.history_line("Added check c1", checks) == "Added a task: Write the test"
     assert tickets.history_line("Check c1 done", checks) == "Finished a task: Write the test"
     assert tickets.history_line("Check c9 done", checks) == "Finished a task"
 
@@ -385,7 +399,7 @@ def test_cli_shows_task_text_in_history_but_stores_machine_text(proj, run, new_t
     tid = new_ticket()
     run("check", "add", tid, "Write the test")
     out = run("ticket", "show", tid)[1]
-    assert "Added a step: Write the test" in out
+    assert "Added a task: Write the test" in out
     assert read(proj, tid)["history"][-1]["text"] == "Added check c1"
 
 
@@ -671,6 +685,9 @@ def test_closed_without_a_live_run_or_from_inside_its_own_run_stops_nothing(
     assert stopped == []  # a one-shot run ends by itself (its copy waits for it)
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="the process-tree reader of record_hook has no Windows version yet (#547)"
+)
 def test_closed_from_inside_the_runs_process_tree_stops_nothing(proj, new_ticket, stopped):
     """No ORCH_TICKET, but this process is the run's own (its pid is an ancestor): not stopped from within."""
     tid = new_ticket()
@@ -753,6 +770,109 @@ def test_closed_ticket_refuses_agent_ext_attach_and_attach_file_before_writing(p
     tickets.ext_unset(proj, tid, "demo.a", "human:t")
 
 
+REPEAT_SCHEMA = {
+    "properties": {
+        "recurring": {"type": "boolean", "x-orch-off": False},
+        "paused": {"type": "boolean", "x-orch-off": True},
+    }
+}
+OFF = {"recurring": False, "paused": True}
+
+
+@pytest.mark.parametrize("status", ["done", "dropped"])
+def test_closed_ticket_lets_an_agent_switch_a_repeat_off_and_nothing_else(proj, new_ticket, status):
+    """#2051: `orch automation repeat <t> --off` and `act off|delete` from a helper on a closed ticket:
+    switching
+    the repeat off (recurring false, paused true, removing it or its next start) goes through; switching it on
+    or changing anything else stays refused."""
+    tid = new_ticket()
+    rep = {"recurring": True, "cron": "0 * * * *", "next_run": "2026-11-20T17:00:00Z", "each_run": True}
+    tickets.ext_set(proj, tid, "automation", json.dumps(rep), "human:t", schema=REPEAT_SCHEMA)
+    tickets.ext_set(proj, tid, "demo", '{"a": 1}', "human:t")
+    tickets.set_status(proj, tid, status, "human:t")
+    msg = "This ticket is closed, so the agent can't change it."
+    for write in (
+        lambda: tickets.ext_set(
+            proj, tid, "automation", '{"cron": "*/5 * * * *"}', "agent:claude", schema=REPEAT_SCHEMA
+        ),
+        lambda: tickets.ext_set(
+            proj, tid, "automation", '{"recurring": false, "agent": "x"}', "agent:claude"
+        ),
+        lambda: tickets.ext_set(
+            proj, tid, "automation", '{"paused": false}', "agent:automation", schema=REPEAT_SCHEMA
+        ),
+        lambda: tickets.ext_set(proj, tid, "demo", '{"paused": true}', "agent:claude"),
+        lambda: tickets.ext_unset(proj, tid, "automation.cron", "agent:claude", schema=REPEAT_SCHEMA),
+        lambda: tickets.ext_unset(proj, tid, "demo", "agent:claude"),
+    ):
+        with pytest.raises(Refused, match=msg):
+            write()
+    off = {**rep, "recurring": False}
+    tickets.ext_set(proj, tid, "automation", json.dumps(off), "agent:automation", schema=REPEAT_SCHEMA)
+    tickets.ext_set(proj, tid, "automation", '{"paused": true}', "agent:claude", schema=REPEAT_SCHEMA)
+    tickets.ext_set(
+        proj, tid, "automation", '{"paused": true}', "agent:claude", schema=REPEAT_SCHEMA
+    )  # already off: fine
+    assert tickets.load(proj, tid)["ext"]["automation"]["recurring"] is False
+    tickets.ext_unset(proj, tid, "automation.next_run", "agent:claude", schema=REPEAT_SCHEMA)
+    assert "next_run" not in tickets.load(proj, tid)["ext"]["automation"]
+    other = new_ticket()  # a repeat that is not paused: its whole block may go
+    tickets.ext_set(proj, other, "automation", json.dumps(rep), "human:t", schema=REPEAT_SCHEMA)
+    tickets.set_status(proj, other, status, "human:t")
+    tickets.ext_unset(proj, other, "automation", "agent:automation", schema=REPEAT_SCHEMA)
+    t = tickets.load(proj, other)
+    assert "automation" not in t.get("ext", {}) and t["status"] == status
+
+
+def test_closed_ticket_keeps_a_paused_repeat_block_against_an_agent(proj, new_ticket):
+    """Removing the whole block of a paused repeat would undo its switch-off: refused for an agent on a
+    closed ticket; switching it further off still works, and a person may remove it."""
+    tid = new_ticket()
+    tickets.ext_set(
+        proj, tid, "automation", '{"recurring": true, "paused": true}', "human:t", schema=REPEAT_SCHEMA
+    )
+    tickets.set_status(proj, tid, "done", "human:t")
+    with pytest.raises(Refused, match="This ticket is closed"):
+        tickets.ext_unset(proj, tid, "automation", "agent:claude", schema=REPEAT_SCHEMA)
+    with pytest.raises(Refused, match="This ticket is closed"):  # removing the mark itself would switch it on
+        tickets.ext_unset(proj, tid, "automation.paused", "agent:claude", schema=REPEAT_SCHEMA)
+    tickets.ext_set(proj, tid, "automation", '{"recurring": false}', "agent:claude", schema=REPEAT_SCHEMA)
+    tickets.ext_unset(proj, tid, "automation", "human:t", schema=REPEAT_SCHEMA)
+
+
+def test_closed_ticket_repeat_off_needs_the_addon_to_declare_a_repeat(proj, new_ticket):
+    """Stored data with a recurring field is not enough (an agent could have written it while the ticket was
+    open): without the active add-on's schema declaring the repeat, a closed ticket refuses the agent."""
+    tid = new_ticket()
+    tickets.ext_set(proj, tid, "notes", '{"recurring": true, "text": "x"}', "agent:claude")
+    tickets.set_status(proj, tid, "done", "human:t")
+    for write in (
+        lambda: tickets.ext_unset(proj, tid, "notes", "agent:claude"),
+        lambda: tickets.ext_set(proj, tid, "notes", '{"recurring": false}', "agent:claude"),
+        lambda: tickets.ext_unset(proj, tid, "notes", "agent:claude", schema={"properties": {}}),
+        lambda: tickets.ext_set(  # declared fields without the switch-off mark are not enough
+            proj,
+            tid,
+            "notes",
+            '{"recurring": false}',
+            "agent:claude",
+            schema={"properties": {"recurring": {"type": "boolean"}}},
+        ),
+    ):
+        with pytest.raises(Refused, match="This ticket is closed"):
+            write()
+
+
+def test_repeat_off_only():
+    cur = {"recurring": True, "paused": False, "cron": "0 * * * *"}
+    assert tickets.repeat_off_only(cur, {**cur, "recurring": False}, OFF)
+    assert tickets.repeat_off_only(cur, {**cur, "paused": True, "recurring": False}, OFF)
+    assert tickets.repeat_off_only(cur, dict(cur), OFF)
+    assert not tickets.repeat_off_only(cur, {**cur, "recurring": False, "cron": "*/5 * * * *"}, OFF)
+    assert not tickets.repeat_off_only({**cur, "recurring": False}, {**cur, "recurring": True}, OFF)
+    assert not tickets.repeat_off_only(cur, {**cur, "paused": 1}, OFF)
+
+
 def test_agent_ext_attach_and_attach_file_work_on_an_open_ticket(proj, new_ticket):
     tid = new_ticket()
     (proj / "proof.txt").write_text("proof\n")
@@ -775,6 +895,7 @@ def test_no_agent_callable_op_writes_as_system():
         "wait_for_start",
         "resume_after_start_wait",
         "ask_for_changes",
+        "set_prepare",  # where a prepare run stands: written by orch's run code only (ORCH-738), no CLI
     }
     tree = ast.parse(Path(tickets.__file__).read_text(encoding="utf-8"))
     bad = []
@@ -831,3 +952,86 @@ def test_orch185_note_edit_history_carries_old_and_new_text(proj, new_ticket):
     assert lines[1].endswith("…)") and len(lines[1]) < 500
     assert tickets.history_line(lines[0]) == "Changed the note"
     assert tickets.history_line("Edited note") == "Changed the note"
+
+
+def test_history_line_never_shows_a_task_id():
+    """ORCH-240: Reopened / Renamed / Linked / Removed lines name the task, never 'c1'."""
+    checks = [{"id": "c1", "text": "Write the test"}]
+    for stored in (
+        "Reopened c1",
+        "Reopened c1 (old evidence: note)",
+        "Renamed c1 (was: a | now: b)",
+        "Linked c1 to Done when",
+        "Removed step c2 'Old one' (was done; evidence: note)",
+    ):
+        shown = tickets.history_line(stored, checks)
+        assert not re.search(r"\bc\d+\b", shown), shown
+    assert tickets.history_line("Removed step c2 'Old one' (was open)", checks).endswith("Old one")
+    assert tickets.history_line("Title changed (was: a | now: b)") == "Changed the title"
+
+
+def test_rename_title_owner_and_task_keep_old_and_new_text(proj, run, new_ticket):
+    """ORCH-240: the Activity can show what changed (was / now)."""
+    tid = new_ticket()
+    run("ticket", "edit", tid, "--owner", "Anna")
+    assert read(proj, tid)["history"][-1]["text"] == "Edited owner (was: (empty) | now: Anna)"
+    run("check", "add", tid, "Write the test")
+    run("check", "edit", tid, "c1", "Write two tests")
+    assert read(proj, tid)["history"][-1]["text"] == "Renamed c1 (was: Write the test | now: Write two tests)"
+
+
+def test_a_wait_until_a_date_keeps_what_it_waits_for(proj, new_ticket, validate):
+    """ORCH-235: Waiting has a date and, when a person gave one, a reason; a blank reason is left out."""
+    tid = new_ticket()
+    rev = read(proj, tid).get("revision", 0)
+    wait = {"kind": "time", "until": "2030-01-01T08:00:00Z", "ref": " The price list "}
+    data = {"status": "waiting", "waiting_on": wait}
+    tickets.patch(proj, tid, rev, json.dumps(data), "human:t")
+    t = read(proj, tid)
+    validate(t)
+    assert t["waiting_on"] == {"kind": "time", "until": "2030-01-01T08:00:00Z", "ref": "The price list"}
+    blank = tickets.waiting_value("time", "  ", "2030-01-01T08:00:00Z")
+    assert blank == {"kind": "time", "until": "2030-01-01T08:00:00Z"}
+    with pytest.raises(Refused):
+        tickets.waiting_value("time", "x" * 201, "2030-01-01T08:00:00Z")
+
+
+@pytest.mark.parametrize("actor,env_agent", [("agent:codex", None), ("human:me", "codex")])
+def test_agent_cannot_wait_on_nothing(proj, new_ticket, monkeypatch, actor, env_agent):
+    """ORCH-602: a helper blocked by its sandbox set Waiting with only a summary: no card, no reason shown."""
+    monkeypatch.setattr(tickets, "agent_tool", lambda: env_agent)
+    tid = new_ticket()
+    with pytest.raises(tickets.Refused, match="orch ask"):
+        tickets.set_status(proj, tid, "waiting", actor)
+    assert tickets.load(proj, tid)["status"] != "waiting"
+
+
+def test_agent_may_wait_on_a_question_and_a_person_on_nothing(proj, new_ticket, monkeypatch):
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    tid = new_ticket()
+    tickets.set_status(proj, tid, "waiting", "human:me")  # a person keeps it waiting by hand
+    assert tickets.load(proj, tid)["status"] == "waiting"
+    other = new_ticket()
+    tickets.ask(proj, other, "Which folder?", ["A", "B"], "A", "agent:codex")
+    tickets.set_status(proj, other, "waiting", "agent:codex")
+    assert tickets.load(proj, other)["status"] == "waiting"
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="time.tzset exists only on Unix; the zone cannot be set here"
+)
+def test_a_wait_time_without_a_zone_is_this_computers_local_time(monkeypatch):
+    import time
+
+    from orch import tickets
+
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    time.tzset()
+    try:
+        assert tickets.parse_time("2026-11-20 08:00") == "2026-11-20T07:00:00Z"
+        assert tickets.parse_time("2026-11-20T08:00:00") == "2026-11-20T07:00:00Z"
+        assert tickets.parse_time("2026-11-20T08:00:00Z") == "2026-11-20T08:00:00Z"
+        assert tickets.parse_time("2026-11-20T08:00:00+02:00") == "2026-11-20T06:00:00Z"
+    finally:
+        monkeypatch.undo()
+        time.tzset()

@@ -40,8 +40,23 @@ def join(segments, suffix, tail=""):
     return f"{text}. {tail} ({suffix})" if tail else f"{text} ({suffix})"
 
 
-def start_text(p, n):
+# The Start card's labels. authority compares a question with what Factory renders from its frozen file, so a
+# question asked under earlier words must still match: changing a label here, add the old set to
+# EARLIER_START_LABELS (never edit an old set). tests/test_wording.py pins every card's words.
+START_LABELS = {
+    "stops": "I will pause at",
+    "crew": "Who works on it",
+    "cap": "Time limit",
+    "ship": "What goes live",
+}
+EARLIER_START_LABELS = (
+    {"stops": "Stops", "crew": "Crew", "cap": "Cap", "ship": "Ship"},  # up to release 32
+)
+
+
+def start_text(p, n, labels=None):
     # A version in the text also prevents core's text/options dedup from returning an older proposal.
+    w = labels or START_LABELS
     head = [f"Start '{clean(p['title'])}'? ~{minutes(p['time']['active_min'])}"]
     if "api_usd_target" in p["budget"]:
         head.append(f"target ${p['budget']['api_usd_target']:g}")
@@ -51,12 +66,12 @@ def start_text(p, n):
         " · ".join(head),
         "Goal: " + clean(p["goal"]),
         "Done means: " + lines(p["done_means"]),
-        "I will pause at: " + ", ".join(clean(x["stage"], 40) for x in p["line"] if x["stop"]),
+        f"{w['stops']}: " + ", ".join(clean(x["stage"], 40) for x in p["line"] if x["stop"]),
         "Steps: "
         + "; ".join(f"{clean(t['title'])} ({clean(t['role'], 24)})" for t in p["tasks"][:MAX_TASKS]),
-        "Who works on it: " + ", ".join(f"{clean(x['role'], 40)} {clean(x['agent'], 40)}" for x in p["crew"]),
-        f"Time limit: {minutes(p['budget']['active_min_cap'])} active",
-        f"What goes live: {clean(p['ship']['does'])} (undo: {clean(p['ship']['undo'])})",
+        f"{w['crew']}: " + ", ".join(f"{clean(x['role'], 40)} {clean(x['agent'], 40)}" for x in p["crew"]),
+        f"{w['cap']}: {minutes(p['budget']['active_min_cap'])} active",
+        f"{w['ship']}: {clean(p['ship']['does'])} (undo: {clean(p['ship']['undo'])})",
     ]
     if p.get("wont_do"):
         segments.append("Won't do: " + lines(p["wont_do"]))
@@ -132,15 +147,40 @@ def stop_options(s):
     return SHIP_OPTIONS if s["stage"] == "ship" else STOP_OPTIONS
 
 
+# routine says nothing: it is the plain case
+TAG_WORDS = {"taste": "your call", "cant-undo": "can't be undone"}
+
+
 def stop_text(s, n):
-    # no image names (owners read this line); the agent's suggestion stays on routine items
+    # no image names, no internal tags (owners read this line); a suggestion shows only when it is one of the buttons
+    buttons = {o.casefold(): o for o in stop_options(s)}
+    items = []
+    for i in s["items"]:
+        notes = [TAG_WORDS[i["tag"]]] if i["tag"] in TAG_WORDS else []
+        pick = buttons.get(clean(i.get("recommend") or "", 40).casefold())
+        if pick:
+            notes.append(f"suggested: {pick}")
+        items.append(clean(i["title"]) + (f" ({', '.join(notes)})" if notes else ""))
+    segments = [f"Stop at {clean(s['stage'], 40)}. Decide", "; ".join(items)]
+    segments[0] += ": " + segments.pop(1)
+    for label, key in (
+        ("Checked", "checked"),
+        ("Not checked", "not_checked"),
+        ("Changed during run", "changed_during_run"),
+    ):
+        if s.get(key):
+            segments.append(f"{label}: {lines(s[key])}")
+    return join(segments, f"Stop {n}")
+
+
+def earlier_stop_text(s, n):
+    """The Stop card's words up to release 33 (internal tags, free-text suggestion): asked questions still match."""
     items = [
         f"{clean(i['title'])} ({i['tag']}"
         + (f", suggested: {clean(i['recommend'], 40)})" if i.get("recommend") else ")")
         for i in s["items"]
     ]
-    segments = [f"Stop at {clean(s['stage'], 40)}. Decide", "; ".join(items)]
-    segments[0] += ": " + segments.pop(1)
+    segments = [f"Stop at {clean(s['stage'], 40)}. Decide: " + "; ".join(items)]
     for label, key in (
         ("Checked", "checked"),
         ("Not checked", "not_checked"),
@@ -180,3 +220,12 @@ def render(kind, data, n):
     if kind == "factory:change":
         return change_text(data, n), list(CHANGE_OPTIONS)
     return stop_text(data, n), list(stop_options(data))
+
+
+def earlier_renders(kind, data, n):
+    """(text, options) Factory asked for this frozen file under earlier words."""
+    if kind == "factory:stop":
+        return [(earlier_stop_text(data, n), list(stop_options(data)))]
+    if kind != "factory:start":
+        return []
+    return [(start_text(data, n, labels), list(START_OPTIONS)) for labels in EARLIER_START_LABELS]

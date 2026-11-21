@@ -60,7 +60,9 @@ def _helpers(ws, n, stop):
     return threads
 
 
-def _measure(ws, helpers, seconds=3.0, tabs=3):
+def _measure(ws, helpers, seconds=3.0, tabs=3, window=None):
+    """The answer times, sorted. window (a list): gets (start, end) of the time the helpers worked, from the
+    end of the first build to the server's stop, on the clock the builds are stamped with."""
     from orch_dashboard.server import make_server
 
     srv = make_server(ws, 0)
@@ -71,6 +73,7 @@ def _measure(ws, helpers, seconds=3.0, tabs=3):
     try:
         _get(base)  # the first build: the only one a request may wait for
         assert srv.revisions.join()  # an open page's event stream: the watcher runs
+        start = time.monotonic()
         threads = _helpers(ws, helpers, stop)
 
         def tab():
@@ -95,21 +98,27 @@ def _measure(ws, helpers, seconds=3.0, tabs=3):
         srv.revisions.leave()
         srv.shutdown()
         srv.server_close()
+        if window is not None and "start" in locals():
+            window.append((start, time.monotonic()))
     assert not errors, errors
     return sorted(times)
 
 
 @pytest.mark.parametrize("helpers", [1, 6])
 def test_state_answers_stay_fast_while_helpers_work(ws, slow_builds, helpers):
-    times = _measure(ws, helpers)
-    builds_during = len(slow_builds) - 1
+    span: list = []
+    times = _measure(ws, helpers, window=span)
+    start, end = span[0]
+    builds_during = sum(1 for b in slow_builds if b >= start)
     assert len(times) >= 30, "the tabs asked often"
     assert times[-1] < ANSWER_LIMIT, (
         f"{helpers} helpers: slowest answer {times[-1]:.2f}s (builds take {SLOW_BUILD}s)"
     )
-    # builds are bounded by time (one at a time, a rest between them), never by the number of requests
-    most = int(3.0 / (SLOW_BUILD + state_cache.MIN_GAP)) + 2
-    assert builds_during <= most, f"{builds_during} builds for {len(times)} requests in 3 s"
+    # builds are bounded by time (one at a time, a rest between them), never by the number of requests. The
+    # bound is the time the helpers really worked, not the 3 s the tabs asked: on a busy CI machine the threads
+    # start and stop late, and a fixed 3 s once read 5 builds as too many (ORCH-1118, group #2199).
+    most = int((end - start) / (SLOW_BUILD + state_cache.MIN_GAP)) + 2
+    assert builds_during <= most, f"{builds_during} builds for {len(times)} requests in {end - start:.1f} s"
     assert builds_during >= 1, "the changes reached the copy"
 
 
@@ -140,6 +149,12 @@ if a[:2] == ["check", "add"]:  # the click: a task added to the ticket file
     t["revision"] = t.get("revision", 0) + 1
     f.write_text(json.dumps(t))
     print(json.dumps({{"ok": True}})); sys.exit(0)
+if a[:3] == ["config", "set", "workspace.permissions"]:  # a Settings choice
+    (root / ".orch" / "perm.txt").write_text(a[3])
+    print(json.dumps({{"ok": True}})); sys.exit(0)
+if a[:3] == ["config", "get", "workspace.permissions"]:
+    f = root / ".orch" / "perm.txt"
+    print(json.dumps({{"workspace.permissions": f.read_text() if f.exists() else "auto"}})); sys.exit(0)
 if a[:2] == ["ticket", "show"]:
     print((root / ".orch" / "tickets" / (a[2] + ".json")).read_text()); sys.exit(0)
 if a[:2] == ["review", "list"]:
@@ -221,6 +236,34 @@ def test_a_click_answers_at_once_with_its_change_while_helpers_work(ws, click_se
         stop.set()
         for t in helpers:
             t.join()
+
+
+def test_a_settings_choice_answers_at_once_with_the_new_choice(ws, click_server):
+    """Report r-1117-1256-ws (ORCH-227): 'Asks first' or '8 h' showed the old choice for 4 to 12 s, because every
+    Settings choice waited for a full build. Now the answer holds the Settings values read again, at once, and
+    the full build follows in the background."""
+    from .test_act import post
+
+    srv, base, _builds = click_server
+    urllib.request.urlopen(base + "/api/state", timeout=30).read()  # a warm server
+    assert srv.revisions.join()
+    times = []
+    for mode in ("ask", "auto", "ask"):
+        t = time.monotonic()
+        code, body, _ = post(base, {"op": "config.permissions", "args": {"mode": mode}})
+        times.append(time.monotonic() - t)
+        assert code == 200, body
+        assert json.loads(body)["settings"]["permissions"] == mode, "the answer holds the new choice"
+    assert max(times) < CLICK_LIMIT, (
+        f"choices took {[round(x, 2) for x in times]} s (a build takes {CLICK_BUILD} s)"
+    )
+    rev = srv.revisions.rev
+    end = time.monotonic() + 3 * CLICK_BUILD + 2
+    while srv.revisions.rev == rev and time.monotonic() < end:
+        time.sleep(0.05)
+    assert srv.revisions.rev != rev, "the background build was published"
+    served = json.loads(urllib.request.urlopen(base + "/api/state", timeout=30).read())
+    assert served["settings"]["permissions"] == "ask"
 
 
 def _assets(html):

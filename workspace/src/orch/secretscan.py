@@ -18,7 +18,7 @@ _RX = [
         r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----.*?(-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|\Z)",
         re.S,
     ),  # PEM and PGP (PRIVATE KEY BLOCK)
-    re.compile(r"\b(?:orn|orp|ora|whk|opk|apv)_[A-Za-z0-9_-]{16,}"),
+    re.compile(r"\b(?:orn|orp|ora|ors|whk|opk|apv)_[A-Za-z0-9_-]{16,}"),  # ors_: a signing key (signkey.py)
     re.compile(r"\b(?:sk|pk|rk)[-_](?:live|test|proj|ant)?[-_]?[A-Za-z0-9_-]{16,}"),
     re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}"),
     re.compile(r"\bglpat-[A-Za-z0-9_-]{16,}|\bxox[abprs]-[A-Za-z0-9-]{10,}"),
@@ -60,6 +60,7 @@ WORDS = {  # how a kind reads in the refusal sentence
     "webhook-token": "a webhook address",
     "secret-value": "a password or secret value",
     "stored-key": "one of this workspace's stored keys",
+    "keys-unreadable": "text orch could not compare with your saved keys",
 }
 
 
@@ -92,12 +93,34 @@ def stored_keys_readable(root: Path) -> bool:
     return phone_results.value_hider(root) is not None
 
 
-def find(text: str, root: Path | None = None, *, strict: bool = True) -> list[dict]:
+def keys_unreadable_reason(root: Path | None) -> str:
+    """Why the saved keys of `root` cannot be read, in the core's own words (e.g. "this folder's saved keys
+    still belong to <old folder> ... run orch workspace move-here"), for a refusal that would otherwise only
+    say "secret". Never a value: the reasons are orch's refusals, which name no key value."""
+    try:
+        from orch import keystore
+
+        keystore.all_needles(root)
+    except Exception as e:  # noqa: BLE001 - only to say why; the caller stays refused either way
+        text = " ".join(str(e).split()).removeprefix("Refused: ")[:1000]
+        if text:
+            return text
+    return "orch could not read them just now. Try again in a moment."
+
+
+def unreadable_refusal(root: Path | None) -> str:
+    why = keys_unreadable_reason(root)
+    return f"orch could not compare the text with your saved keys, so it stays refused: {why}"
+
+
+def find(text: str, root: Path | None = None, *, strict: bool = True, labels: bool = True) -> list[dict]:
     """[{kind, line}] (line from 1, one entry per kind and line), in text order. Pattern kinds first, then any
     other line the phone view's scrub would change (key=value, spaced values, flag values), then lines that
     hold a stored key value of the workspace (`root`). A stored-key check that cannot run reports `stored-key`
     on line 1 (fail closed) when `strict`. With strict=False (sends: relay, publish) only that comparison is
-    skipped, with a visible note (note_skipped); every other detector still runs and blocks."""
+    skipped, with a visible note (note_skipped); every other detector still runs and blocks. With labels=False
+    the line scrub (key=value, spaced values, flag values) is skipped: only for the raw bytes of a picture
+    whose pixel runs were proven (pngpixels), which then get the full rules in their label_view (passes)."""
     from orch import phone_view
 
     found: dict[tuple[int, str], None] = {}
@@ -109,11 +132,17 @@ def find(text: str, root: Path | None = None, *, strict: bool = True) -> list[di
         for m in rx.finditer(text):
             found[(line_of(m.start()), kind)] = None
     flagged = {ln for ln, _ in found}
-    for n, raw in enumerate(text.split("\n"), 1):
+    # A line's verdict depends only on its own text: each distinct line is checked once (a big file of
+    # repeated lines took minutes; ORCH-260).
+    scrubbed: dict[str, bool] = {}
+    for n, raw in enumerate(text.split("\n") if labels else (), 1):
         if n in flagged:
             continue
-        forms = (raw, phone_view._clean_full(raw), unicodedata.normalize("NFKC", raw))
-        if any(phone_view._scrub_text(f) != f for f in dict.fromkeys(forms)):
+        hit = scrubbed.get(raw)
+        if hit is None:
+            forms = (raw, phone_view._clean_full(raw), unicodedata.normalize("NFKC", raw))
+            hit = scrubbed[raw] = any(phone_view._scrub_text(f) != f for f in dict.fromkeys(forms))
+        if hit:
             found[(n, "secret-value")] = None
     if root is not None:
         from orch import phone_results
@@ -121,13 +150,18 @@ def find(text: str, root: Path | None = None, *, strict: bool = True) -> list[di
         h = phone_results.value_hider(root)
         if h is None:
             if strict:
-                found[(1, "stored-key")] = None
+                found[(1, "keys-unreadable")] = None  # fail closed, own kind: the reason, never "secret"
             else:
                 note_skipped(root)
         else:
             try:
+                hidden: dict[str, bool] = {}
                 for n, raw in enumerate(text.split("\n"), 1):
-                    if h.hide_text(raw) != raw or h.hide_text(raw.replace("\r", "")) != raw.replace("\r", ""):
+                    hit = hidden.get(raw)
+                    if hit is None:
+                        bare = raw.replace("\r", "")
+                        hit = hidden[raw] = h.hide_text(raw) != raw or h.hide_text(bare) != bare
+                    if hit:
                         found[(n, "stored-key")] = None
                 if not any(k == "stored-key" for _, k in found) and h.hide_text(text) != text:
                     found[(1, "stored-key")] = None  # a value that spans lines
@@ -136,7 +170,11 @@ def find(text: str, root: Path | None = None, *, strict: bool = True) -> list[di
     return [{"kind": k, "line": ln} for (ln, k) in sorted(found)]
 
 
-def refusal(found: list[dict]) -> str:
+def refusal(found: list[dict], root: Path | None = None) -> str:
+    """One sentence for the first hit. When the saved keys could not be compared, that comes first, with the
+    core's reason and the way out (a moved folder names its command), never "a secret" for harmless text."""
+    if any(f["kind"] == "keys-unreadable" for f in found):
+        return unreadable_refusal(root)
     first = found[0]
     more = f" (and {len(found) - 1} more)" if len(found) > 1 else ""
     return (
@@ -206,6 +244,17 @@ def refuse_if_secret_in(root: Path | None, body, what: str = "message", *, verb:
     )
 
 
+def passes(data: bytes) -> list[tuple[bytes, bool]]:
+    """(bytes, labels) to scan for a file: the file with every rule; or, for a PNG whose compressed pixel runs
+    are proven (pngpixels: only Huffman-coded deflate data, which spells a short label by chance in about half
+    of all screenshots, #1022), its label_view with every rule and the whole file with the token patterns and
+    the stored-key check (labels=False). Any doubt about the picture: every byte, every rule."""
+    from orch import pngpixels
+
+    view = pngpixels.label_view(data) if data.startswith(pngpixels.MAGIC) else None
+    return [(data, True)] if view is None else [(view, True), (data, False)]
+
+
 def _views(window: bytes):
     """Every reading of a window of bytes that could show a secret: UTF-8, Latin-1, and UTF-16 (either byte
     order, either alignment). No guessing which one the file "really" is: all of them are scanned."""
@@ -221,17 +270,21 @@ def refuse_if_secret(
     data: bytes, what: str = "file", root: Path | None = None, *, verb: str = "sent"
 ) -> None:
     """The same scanner over a file about to be uploaded: the whole file, in overlapping windows, each window
-    read in every encoding (_views) with the full find() including the stored-key check."""
+    read in every encoding (_views) with the full find() including the stored-key check. A PNG's proven pixel
+    runs are kept from the label rules only (passes)."""
     step, overlap = MAX_BYTES, 65536
     assert step > 2 * overlap and (step - overlap) % 2 == 0  # windows advance, and keep their alignment
     found: list[dict] = []
     try:
-        for start in range(0, max(len(data), 1), step - overlap):
-            for text in _views(data[start : start + step]):
-                found = find(text, root, strict=False)
-                if found:
+        for blob, labels in passes(data):
+            for start in range(0, max(len(blob), 1), step - overlap):
+                for text in _views(blob[start : start + step]):
+                    found = find(text, root, strict=False, labels=labels)
+                    if found:
+                        break
+                if found or start + step >= len(blob):
                     break
-            if found or start + step >= len(data):
+            if found:
                 break
     except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass
         raise Refused(

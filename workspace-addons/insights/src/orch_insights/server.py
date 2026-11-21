@@ -17,8 +17,8 @@ from pathlib import Path
 from . import actions
 from .checkup import build_checkup, build_show
 from .lists import KINDS, build_list
-from .models import build_models
-from .overview import build_overview
+from .models import build_models, build_week
+from .overview import build_overview, retries_view
 from .settings import build_settings
 
 DEFAULT_PORT = 8431
@@ -46,6 +46,20 @@ TYPES = {
 }
 PREFIX = re.compile(r"/addon/[a-z][a-z0-9-]{1,31}")
 CSP = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'"
+
+
+def chosen_person(root):
+    """The name picked as "You" in the dashboard (ORCH-410), kept in the orch home keyed by this workspace; None
+    when nobody is chosen or it cannot be read. Tickets without an owner are shown under it."""
+    try:
+        from orch import addons
+        from orch.config import _perm_key
+
+        d = json.loads((addons.home() / "people.json").read_text(encoding="utf-8"))
+        name = d.get(_perm_key(root)) if isinstance(d, dict) else None
+    except Exception:  # noqa: BLE001 - no usable orch home: nobody chosen
+        return None
+    return " ".join(name.split())[:40] if isinstance(name, str) and name.strip() else None
 
 
 def read_counts(root, orch_bin=None):
@@ -174,9 +188,18 @@ class Handler(BaseHTTPRequestHandler):
             mac = hmac.new(self.nonce.encode(), challenge.encode(), hashlib.sha256).hexdigest()
             return self._json({"pid": os.getpid(), "mac": mac})
         if path == "/api/overview":
-            return self._json(build_overview(read_counts(self.root, self.orch_bin)))
+            view = build_overview(read_counts(self.root, self.orch_bin))
+            if "error" not in view:
+                view["retries"] = retries_view(
+                    read_json(self.root, self.orch_bin, ["github", "retries", "--days", "30", "--json"])
+                )
+            return self._json(view)
+        if path == "/api/week":
+            return self._json({"week": build_week(self._read("usage", "list", "--json"))})
         if path == "/api/models":
-            return self._json(build_models(self._read("usage", "--days", "30", "--json")))
+            return self._json(
+                build_models(self._read("tokens", "--days", "30", "--json"), chosen_person(self.root))
+            )
         if path.startswith("/api/list/") and path[10:] in KINDS:
             return self._json(build_list(read_counts(self.root, self.orch_bin), path[10:]))
         if path == "/api/checkup":
@@ -242,6 +265,10 @@ class Handler(BaseHTTPRequestHandler):
         if not cookie:
             if getattr(self.session, "revoked", False):
                 self.server.page_secret = None  # a reused link ended the session: the secret goes with it
+            if getattr(self.session, "active", True) is False:  # a helper started this server: watch-only
+                from orch.pagesession import WATCH_ONLY_MSG
+
+                return self._send(403, WATCH_ONLY_MSG.encode())
             return self._send(403, RELINK.encode())
         secret = self.session.secret  # the core's page secret (PageSession); one rule, one place
         self.server.page_secret = secret

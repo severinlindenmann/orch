@@ -37,7 +37,19 @@ function context({runs = {}, results = {}, snapshot = false} = {}) {
     act:async (op, args) => { calls.push(JSON.parse(JSON.stringify([op, args]))); return results[op] || {ok:true}; },
   });
   vm.runInContext(fs.readFileSync(path.join(PAGES, 'home.js'), 'utf8'), c);
+  vm.runInContext(fs.readFileSync(path.join(PAGES, 'start.js'), 'utf8'), c);  // the one Start button (ORCH-475)
   return {c, calls, toasts};
+}
+// One click on the main half of a kit Start button (kit/start-choice.js) as the page set it up: the page's ops first
+// (before), then the start: plain, or fresh on the usual tool and model; it stops at the first refusal, as the kit does.
+async function kitClick(c, row, label) {
+  const host = all(row, x => x.attrs?.['data-start-host']).find(x => text(x) === label);
+  assert.ok(host, 'a Start button ' + label);
+  const o = vm.runInContext('startOpts', c).get(host.attrs['data-key']);
+  const ticket = host.attrs['data-start-host'], ops = o.fresh ? [['run.start', {ticket, fresh:true}]] : [['run.start', {ticket}]];
+  const first = o.before ? await o.before(ops) : [];
+  if (first === null) return;
+  for (const [op, args] of [...first, ...ops]) { const r = await c.act(op, args); if (!r.ok) break; }
 }
 
 test('pull request left open: Merge merges exactly the shown commit in one click', async () => {
@@ -60,13 +72,12 @@ test('pull request left open: a refused merge says why and nothing else runs', a
 });
 
 test('pull request left open: Start helper tells the helper what is left, then starts it', async () => {
-  const {c, calls, toasts} = context();
-  await click(buttons(c.needRow(UNMERGED, null))[1]);
+  const {c, calls} = context();
+  await kitClick(c, c.needRow(UNMERGED, null), 'Start helper');
   assert.deepEqual(calls.map(x => x[0]), ['run.send', 'run.start']);
   assert.equal(calls[0][1].ticket, TID);
   assert.match(calls[0][1].text, /passed its checks but is still open/);
   assert.deepEqual(calls[1][1], {ticket:TID});
-  assert.deepEqual(toasts, [['Helper started', 'ok']]);
 });
 
 test('pull request left open with a helper idle on it: the second button is Nudge and starts nothing', async () => {
@@ -85,16 +96,16 @@ test('idle helper: Nudge sends one fixed message, Start fresh stops it and start
   await click(buttons(row)[0]);
   assert.deepEqual(calls.map(x => x[0]), ['run.send']);
   assert.match(calls[0][1].text, /idle for a while/);
-  await click(buttons(row)[1]);
+  await kitClick(c, row, 'Start fresh');
   assert.deepEqual(calls.slice(1), [['run.stop', {ticket:TID}], ['run.start', {ticket:TID, fresh:true}]]);
-  assert.deepEqual(toasts, [['Message sent', 'ok'], ['Helper started fresh', 'ok']]);
+  assert.deepEqual(toasts, [['Message sent', 'ok']]);
 });
 
 test('idle helper: a stop that fails starts nothing', async () => {
   const {c, calls, toasts} = context({runs:{[TID]:{running:true}}, results:{'run.stop':{ok:false, text:'Could not stop it.'}}});
-  await click(buttons(c.needRow(IDLE, null))[1]);
-  assert.deepEqual(calls.map(x => x[0]), ['run.stop']);
-  assert.deepEqual(toasts, [['Could not stop it.', 'error']]);
+  await kitClick(c, c.needRow(IDLE, null), 'Start fresh');
+  assert.deepEqual(calls.map(x => x[0]), ['run.stop']);  // the kit shows the refusal's words and ends Starting
+  assert.deepEqual(toasts, []);
 });
 
 test('a shared read-only copy shows the rows without buttons; other rows are not helper rows', () => {
@@ -105,4 +116,51 @@ test('a shared read-only copy shows the rows without buttons; other rows are not
   assert.equal(isHelperRow({...IDLE, kind:'overdue-wait'}), false);
   assert.equal(helpers.needsYouCount([UNMERGED], []), 0);  // listed on Home, not in the number (no question, ORCH-63)
   assert.equal(helpers.isNotice(IDLE), false);
+});
+
+// ORCH-295: Changes asked is derived, same rule as the core (tickets.changes_asked)
+test('changesAsked: Ready with an open change_request task only', () => {
+  const ask = {origin:'change_request', done:false};
+  assert.equal(helpers.changesAsked({status:'ready', checklist:[ask]}), true);
+  assert.equal(helpers.changesAsked({status:'ready', checklist:[{...ask, done:true}]}), false);
+  assert.equal(helpers.changesAsked({status:'ready', checklist:[{...ask, wont_do:true}]}), false);
+  assert.equal(helpers.changesAsked({status:'review', checklist:[ask]}), false);
+  assert.equal(helpers.changesAsked({status:'ready', checklist:[{done:false}]}), false);
+});
+
+// ORCH-426: stuck tickets come first, whether or not the ticket needs a person's review.
+const stuckRow = (kind, text, tone = 'needs-you') => ({id:'core:' + kind.split(':')[1] + ':' + TID, source:'core', kind, ticket:TID, title:'Invoice export', tone, since:'2026-11-16T10:00:00Z', text});
+const PERMISSION = stuckRow('helper:permission', 'The helper has waited 5 min for your OK on its screen.');
+const FAILING = stuckRow('helper:failing', 'The check failed 2 times in a row on the step "Export works".', 'bad');
+const UNSURE = stuckRow('reviewer:unsure', 'The Reviewer was not sure and left it for you: no pull request to check.');
+
+test('stuck rows: Open goes to the ticket; a failing step also offers Nudge and Start fresh', () => {
+  const {c} = context({runs:{[TID]:{running:true}}});
+  for (const row of [PERMISSION, UNSURE]) {
+    const el = c.needRow(row, null);
+    assert.deepEqual(buttons(el), []);
+    const open = all(el, x => x.tag === 'a' && /btn/.test(x.attrs.className || ''));
+    assert.deepEqual(open.map(a => [text(a), a.attrs.href]), [['Open', '#ticket/' + TID]]);
+  }
+  const failing = c.needRow(FAILING, null);
+  assert.match(text(failing), /failed 2 times in a row/);
+  assert.deepEqual(buttons(failing).map(text), ['Nudge', 'Start fresh']);
+});
+
+test('stuck rows never merge with a question of the same ticket', () => {
+  const {c} = context();
+  const question = {id:'core:q:' + TID + ':q1', source:'core', kind:'question', ticket:TID, title:'Invoice export', tone:'needs-you', since:'2026-11-16T09:00:00Z', text:'Which format?', answer:{question:'q1', options:['CSV', 'PDF']}};
+  const groups = c.homeNeeds([question, PERMISSION, FAILING]);
+  assert.deepEqual([...groups.map(g => g.row.id)], [question.id, PERMISSION.id, FAILING.id]);
+});
+
+test('work that stopped carries the Helpers list word as a pill: Stuck, or Idle for an idle helper', () => {
+  const {c} = context();
+  c.window.UI = {helperPill:(state, word) => node('span', {className:'pill helper-pill', 'data-state':state}, [word])};
+  const pill = row => all(c.needRow(row, null), x => /helper-pill/.test(x.attrs.className || '')).map(text);
+  assert.deepEqual(pill(PERMISSION), ['Stuck']);
+  assert.deepEqual(pill(FAILING), ['Stuck']);
+  assert.deepEqual(pill(UNSURE), ['Stuck']);
+  assert.deepEqual(pill(UNMERGED), ['Stuck']);
+  assert.deepEqual(pill(IDLE), ['Idle']);
 });

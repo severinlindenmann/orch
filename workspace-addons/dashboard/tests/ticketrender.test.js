@@ -91,7 +91,7 @@ function page(first) {
   const ctx = {window, document:doc, Node, location:{hash:'#ticket/t_x'}, history:{replaceState() {}}, localStorage:{getItem:() => null, setItem() {}},
     CustomEvent:class { constructor(type, init) { this.type = type; this.detail = init?.detail; } }, MutationObserver:class { observe() {} disconnect() {} },
     setInterval:() => 0, clearInterval() {}, setTimeout:() => 0, clearTimeout() {}, addEventListener() {}, console,
-    fetch:url => ['/api/state', '/api/act'].includes(url) ? Promise.resolve(replies.shift()).then(body => ({ok:true, status:200, json:async () => body})) : new Promise(() => {})};
+    fetch:url => ['/api/state', '/api/act'].includes(String(url).split('?')[0]) ? Promise.resolve(replies.shift()).then(body => ({ok:true, status:200, json:async () => body})) : new Promise(() => {})};
   window.window = window;
   vm.createContext(ctx);
   vm.runInContext([...['home', 'tickets', 'ticket', 'newticket', 'settings', 'chat'].map(p => read('pages/' + p + '.js')), read('app.js')].join('\n'), ctx);
@@ -181,7 +181,60 @@ test('a working ticket: one header line, one Watch live, Stop and the commands i
   assert.ok(menu && menu.querySelector('[data-key="ticket-stop"]'), 'Stop sits in the menu');
   assert.equal(p.count('ticket-stop'), 1, 'Stop once, not next to Watch live');
   assert.ok(menu.querySelector('[data-key="live-copy-watch"]') && menu.querySelector('[data-key="live-copy-take"]'), 'the two commands too');
-  assert.doesNotMatch(p.text(), /Owner/, 'no empty Owner row while a helper works');
+  // ORCH-581: an empty Owner is no row at all (it waits in + Add), with or without a helper
+  assert.equal(p.count('prop-owner-t_x'), 0, 'no empty Owner row while a helper works');
   // the top bar paints outside this fake page: New ticket is always an outline (B2, one filled button per view)
   assert.match(read('app.js'), /newCls = 'btn outline sm'/);
+});
+
+// ORCH-581 (owner picked draft E): Properties shows only what is set; every empty property and every add-on the
+// ticket has not used waits in one + Add menu; below 1100 px the same rail is a sheet behind a Properties button.
+const PR_ADDON = {name:'pull-requests', ticket_fields:{section:'Pull requests', fields:[
+  {key:'merge_when_green', title:'Merge when green', type:'choice', options:[{value:'off', label:'Off'}, {value:'on', label:'On'}]},
+  {key:'pr', title:'Pull request', type:'text', read_only:true}]}};
+const node = (p, key) => p.main.querySelector('[data-key="' + key + '"]');
+test('Properties: only what is set shows; the empty ones wait in + Add (ORCH-581)', async () => {
+  const p = page(state(ticket()));
+  await tick(); await tick();
+  for (const k of ['owner', 'due', 'done-when', 'model', 'part-of', 'release']) assert.equal(p.count('prop-' + k + '-t_x'), 0, 'no empty ' + k + ' row');
+  assert.equal(p.count('human-review-t_x'), 1, 'the safety switch always shows');
+  for (const k of ['owner', 'due', 'done_when', 'model', 'partOf', 'release', 'links']) assert.equal(p.count('prop-add-' + k + '-t_x'), 1, k + ' is in + Add');
+  assert.doesNotMatch(p.text(), /No links yet/);
+  const set = page(state(ticket({owner:'Anna', due:'2026-11-20', done_when:'It is booked'})));
+  await tick(); await tick();
+  for (const k of ['owner', 'due', 'done-when']) assert.equal(set.count('prop-' + k + '-t_x'), 1, k + ' shows once set');
+  for (const k of ['owner', 'due', 'done_when']) assert.equal(set.count('prop-add-' + k + '-t_x'), 0, k + ' left + Add');
+});
+test('an add-on group shows only on a ticket that uses it; empty read-only fields stay hidden (ORCH-581)', async () => {
+  const unused = page(state(ticket(), {addons:[PR_ADDON]}));
+  await tick(); await tick();
+  assert.equal(unused.count('fields-pull-requests'), 0, 'no Pull requests box without a pull request');
+  assert.equal(unused.count('prop-add-addon:pull-requests-t_x'), 1, 'it waits in + Add');
+  const used = page(state(ticket({ext:{'pull-requests':{merge_when_green:'on'}}}), {addons:[PR_ADDON]}));
+  await tick(); await tick();
+  const group = node(used, 'fields-pull-requests');
+  assert.ok(group, 'the group shows once a field holds a value');
+  assert.equal(group.querySelectorAll('dt').length, 1, 'only Merge when green; the empty read-only Pull request row is hidden');
+  assert.equal(used.count('prop-add-addon:pull-requests-t_x'), 0);
+});
+test('below 1100 px: one Properties button opens the same rail as a sheet (ORCH-581)', async () => {
+  const p = page(state(ticket({done_when:'It is booked'})));
+  await tick(); await tick();
+  const button = node(p, 'props-open-t_x'), rail = node(p, 'ticket-rail-t_x');
+  assert.ok(button && /narrow-only/.test(button.className), 'a Properties button for small screens');
+  assert.equal(button.getAttribute('aria-controls'), 'ticket-rail-t_x');
+  assert.equal(button.getAttribute('aria-expanded'), 'false');
+  assert.match(button.textContent, /Properties1/, 'it counts what the rail holds besides owner and due');
+  assert.ok(rail && /rail-sheet/.test(rail.className) && rail.getAttribute('data-open') === 'false', 'one rail, closed');
+  const css = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8');
+  assert.match(css, /@media\(min-width:1100px\)\{\.narrow-only\{display:none!important\}\}/);
+  assert.match(css, /\.rail-sheet:not\(\[data-open=true\]\)\{display:none\}/, 'a closed sheet is out of the tab order');
+});
+test('the sheet: a read-only copy keeps its rail in the page; Esc and Tab are handled while it is open (ORCH-581)', () => {
+  const src = read('pages/ticket.js');
+  assert.match(src, /className:'stack ticket-side' \+ \(snapshot \? '' : ' rail-sheet'\)/, 'no sheet (and no hidden rail) in a read-only copy');
+  assert.match(src, /role:railOpen\.id === t\.id \? 'dialog' : null, 'aria-modal':railOpen\.id === t\.id \? 'true' : null/);
+  const keys = src.match(/function railKeys\(e\) \{[\s\S]*?\n\}/)[0];
+  assert.match(keys, /e\.key === 'Escape'/); assert.match(keys, /e\.key !== 'Tab'/); assert.match(keys, /railNarrow\(\)/, 'only while it is a sheet');
+  assert.match(src, /matchMedia\?\.\('\(min-width:1100px\)'\)/, 'a wider window closes the sheet');
 });

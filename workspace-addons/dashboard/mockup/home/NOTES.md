@@ -42,6 +42,7 @@ Home: the question is body text; answering moves the card out, the next one in, 
 ## Work that stopped short (16 Nov 2026, ORCH-26)
 
 - Needs-you block, `home.html?stuck=1`: two rows with two one-click buttons each, built from the existing need row, no new style.
+- Stuck tickets (ORCH-426), same `?stuck=1`: all work that stopped is one block at the very top of Needs you, each row marked with the Helpers list pill (Stuck; Idle for a helper idle under 20 min): a helper waiting on your OK on its screen, a step whose checks keep failing (Open, Nudge, Start fresh), the Reviewer not sure (Open), a pull request left open, an idle helper. Shown whether or not the ticket needs a person's review. The title and the Needs you pill count these rows ("4 stuck tickets · 1 idle helper" in the subtitle), and so do the top bar, Menu, the Focus bar and the wall: one number everywhere (ORCH-705); a ticket the Reviewer was not sure about is that row, not also a result to check. The same stuck rows reach a paired phone as one text each while the relay is on. `?shots=1` hides the Preview pill for pictures.
   "The pull request passed its checks but was not merged, and no helper is working on it." has `Merge` (the person's own GitHub login, exactly the commit shown) and `Start helper` (`Nudge` when a helper sits idle on it).
   "The helper has been idle for 14 min with nothing running." has `Nudge` and `Start fresh`.
   A click answers with a toast and the row leaves. Hidden without the flag, so the shared demo count (3) stays.
@@ -66,3 +67,11 @@ Home: the question is body text; answering moves the card out, the next one in, 
 - The `Renew` button is the renew step (ORCH-46). Until it is in the product, the same place shows `Check again`
   (word list #8; it runs every check once more and a toast says the new state), and `Try again` for a connection that
   cannot be reached; both outlined (one filled button per view).
+
+## Why no helper starts (17 Nov 2026, ORCH-266)
+
+- `home.html?line`: one amber banner at the top while tickets wait in line and orch names a reason: "No helper starts
+  right now: <why>." and "N tickets wait in line and start by themselves when that passes: <links>". Reasons: the
+  computer is very busy (with the command that runs many copies at once, when there is one), the usage limit, or the
+  helper limit (then `Allow more helpers`, Settings › Helper). Nothing shows for the short pause between two starts,
+  when nothing waits, or in a shared copy.

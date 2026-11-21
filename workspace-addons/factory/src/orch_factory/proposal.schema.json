@@ -7,7 +7,14 @@
     "line": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 240
+      "maxLength": 240,
+      "description": "A line kept in the frozen file (a reason, a need): at most 240 characters."
+    },
+    "shown": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "A line the owner sees on the card: at most 120 characters (the add-on refuses longer ones; the card never cuts)."
     },
     "slug": {
       "type": "string",
@@ -51,7 +58,7 @@
           "maxLength": 80
         },
         "goal": {
-          "$ref": "#/$defs/line"
+          "$ref": "#/$defs/shown"
         },
         "based_on_draft": {
           "type": "integer",
@@ -81,6 +88,15 @@
               "label": {
                 "type": "string",
                 "maxLength": 40
+              },
+              "after": {
+                "type": "array",
+                "maxItems": 11,
+                "uniqueItems": true,
+                "items": {
+                  "$ref": "#/$defs/stage"
+                },
+                "description": "The earlier stages this one waits for. Left out: the stage before it. [] = it can start right after Start. Stages that wait for nothing between them run at the same time. ship always waits for every other stage."
               },
               "stop": {
                 "type": "boolean",
@@ -272,14 +288,14 @@
           "minItems": 1,
           "maxItems": 6,
           "items": {
-            "$ref": "#/$defs/line"
+            "$ref": "#/$defs/shown"
           }
         },
         "wont_do": {
           "type": "array",
           "maxItems": 6,
           "items": {
-            "$ref": "#/$defs/line"
+            "$ref": "#/$defs/shown"
           }
         },
         "ship": {
@@ -291,10 +307,10 @@
           ],
           "properties": {
             "does": {
-              "$ref": "#/$defs/line"
+              "$ref": "#/$defs/shown"
             },
             "undo": {
-              "$ref": "#/$defs/line"
+              "$ref": "#/$defs/shown"
             }
           }
         },
@@ -309,7 +325,7 @@
             ],
             "properties": {
               "text": {
-                "$ref": "#/$defs/line"
+                "$ref": "#/$defs/shown"
               },
               "uncertain": {
                 "type": "boolean",
@@ -387,7 +403,7 @@
           "maxLength": 80
         },
         "goal": {
-          "$ref": "#/$defs/line"
+          "$ref": "#/$defs/shown"
         },
         "may_decide": {
           "type": "array",
@@ -404,7 +420,7 @@
           "type": "array",
           "maxItems": 6,
           "items": {
-            "$ref": "#/$defs/line"
+            "$ref": "#/$defs/shown"
           }
         },
         "limits": {
@@ -445,7 +461,7 @@
           "minItems": 1,
           "maxItems": 6,
           "items": {
-            "$ref": "#/$defs/line"
+            "$ref": "#/$defs/shown"
           }
         },
         "report_at": {
@@ -478,10 +494,10 @@
           "maxLength": 80
         },
         "what": {
-          "$ref": "#/$defs/line"
+          "$ref": "#/$defs/shown"
         },
         "asked_by_owner": {
-          "$ref": "#/$defs/line",
+          "$ref": "#/$defs/shown",
           "description": "The owner's words that led to it."
         },
         "adds_min": {
@@ -504,7 +520,7 @@
           "type": "array",
           "maxItems": 3,
           "items": {
-            "$ref": "#/$defs/line"
+            "$ref": "#/$defs/shown"
           }
         },
         "adds_tasks": {
@@ -552,7 +568,7 @@
             ],
             "properties": {
               "title": {
-                "$ref": "#/$defs/line"
+                "$ref": "#/$defs/shown"
               },
               "tag": {
                 "enum": [
@@ -588,21 +604,21 @@
           "type": "array",
           "maxItems": 12,
           "items": {
-            "$ref": "#/$defs/line"
+            "$ref": "#/$defs/shown"
           }
         },
         "not_checked": {
           "type": "array",
           "maxItems": 12,
           "items": {
-            "$ref": "#/$defs/line"
+            "$ref": "#/$defs/shown"
           }
         },
         "changed_during_run": {
           "type": "array",
           "maxItems": 20,
           "items": {
-            "$ref": "#/$defs/line"
+            "$ref": "#/$defs/shown"
           }
         }
       }
@@ -635,6 +651,7 @@
             "consumed",
             "started",
             "crew-added",
+            "crew-started",
             "tiny-change",
             "change-accepted",
             "stop-answered",

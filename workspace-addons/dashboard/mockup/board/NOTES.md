@@ -71,7 +71,7 @@ New ticket: 560 px, the box starts at 3 rows and grows, Start opens the new tick
 
 - A Working ticket with no news for 6 hours shows "No news since 09:20" (day first when not today) on its card and in the list, on its ticket page ("Your helper is working. No news since 09:20."), and as a quiet row on Home that is not counted as needing you. Open the ticket with `?quiet=1` to see it.
 ## Fix wave 15 Nov (b4)
-Save without starting shows "Saving…" on the button at once and then opens the new ticket, like Start. Viewer button is "Copy link for this computer" with the hint "Works only on this computer". Files show the title given when attached, the file name small underneath. Shared links row buttons are always visible (no hover rule).
+Save without starting shows "Saving…" on the button at once and then opens the new ticket, like Start. Viewer button is "Copy link" (no hint; ORCH-907). Files show the title given when attached, the file name small underneath. Shared links row buttons are always visible (no hover rule).
 
 ## ORCH-14 (16 Nov): several tickets at once (epic)
 
@@ -118,6 +118,7 @@ Save without starting shows "Saving…" on the button at once and then opens the
 
 - `list.html`: a release is its own group above the status groups ("Release 26 · 1 of 4 done", Open release), with its epic, the epic's tickets and its other tickets as one tree; each row carries its status chip. Finished releases start folded.
 - `../ticket/ticket-working.html`: Properties has a Release switch under Part of; Part of offers releases first, marked "(release)".
+- ORCH-906 (owner picked it, 20 Nov): an epic or a release carries a small "Epic" / "Release" chip (kit `.chip`, like the status chip) after its title in the list row and on a board card without sub-tickets, beside the ticket number in the ticket page header (in the line above the title while a helper runs), and first in the phone row's fact line ("Epic · 4 min ago") (a card with sub-tickets already says "Epic · n of m done"). A release with no tickets yet reads "Release 27 · No tickets yet", not "0 of 0 done". `orch ticket list` puts the kind first in the brackets; `orch ticket show` has an "Epic:" line as it has a "Release:" line.
 ## Triage button (ORCH-151, 17 Nov)
 
 - `board.html`, `list.html`: a Triage button beside the page title. It opens a small menu that says what happens and lists the lanes with their counts as tick boxes (Backlog to Check ticked, Done, Won't do and Superseded not); Start triage opens a dated Triage ticket and starts one
@@ -125,3 +126,27 @@ Save without starting shows "Saving…" on the button at once and then opens the
   needed). Owner (17 Nov): not only open tickets, also backlog, running and other lanes, by choice. Shown only while tickets exist, never on a shared copy; a second click while a Triage ticket is open
   says so in a notice.
 - Owner 17 Nov (more compact, draft B picked): count and Start triage on one line, the lanes as tick boxes in two columns, one short line under (master `.menu-pop-wide`).
+
+
+## Manager view (ORCH-189, owner approved 17 Nov)
+
+- `list.html`: Due column (red when past, amber today) and Time · cost column (helper time and money at list price);
+  quick views This week and Stuck; the Stuck pill also for an old question, no news for a day or past due.
+- `../insights/insights.html`: Helper time, Cost, Tickets finished, Stuck now and a By person table on top.
+- `../ticket/ticket-change.html`, `ticket-question.html`: Time · cost in Properties (the helper's first-run estimate
+  beside what it took so far).
+- ORCH-297: a ticket nobody started shows "Before Start: about 20-40 min · $2.00-$4.00" in the same Time · cost
+  line (the middle half of this workspace's finished tickets; none until 3 are finished). Insights gets one bar,
+  "This week against the budget" (`insights.html`, `#week`), read from the weekly limit set in Usage; no bar when
+  Usage has no weekly limit or reading.
+## ORCH-240 (17 Nov, owner's words)
+
+- The filter "Group" is now "Part of", with "Any ticket" for no choice; the list column "Steps" is "Tasks".
+- The to-do lines of a ticket are "tasks" everywhere ("+ Add task", "2 of 5 tasks", "Added a task"); the
+  sub-tickets of a plain ticket are headed "Sub-tickets".
+- The board fits at 1440: lanes shrink to 210 px, empty lanes to 76 px, empty Won't do and Superseded lanes
+  are hidden until they hold a card. A sub-ticket with its own card is not listed again in its parent's card.
+- On the phone the List/Board switch shows too; the Board is lanes side by side that you swipe.
+- Big workspaces (ORCH-523): every group and lane draws its first 50 rows (lanes 30) and ends with a quiet
+  "Loading more…" line; the next rows come when it scrolls into view. Done counts every finished ticket and
+  brings older ones from the server a page at a time. A typed search runs on the server over every ticket.

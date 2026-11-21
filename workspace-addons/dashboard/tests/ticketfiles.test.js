@@ -17,7 +17,7 @@ const FileViewer = {kindOf:name => EXT[String(name).split('.').pop()] || 'other'
   renderMd:src => h('article', {className:'fv-md'}, h('h2', {}, src.split('\n')[0].replace(/^#+\s*/, '')))};
 function ctx() {
   const c = {addEventListener(){}, document:{addEventListener(){}}, h, array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:String, window:{DashHelpers:helpers, UI:kit.UI, FileViewer, orch:{}}, snapshot:false,
-    route:() => ({kind:'ticket'}), render(){}, ticketTabs:new Map(), fetch:() => new Promise(() => {}), URL, TextDecoder, locks:new Set(),
+    route:() => ({kind:'ticket'}), state:{}, render(){}, ticketTabs:new Map(), fetch:() => new Promise(() => {}), URL, TextDecoder, locks:new Set(),
     ticketButton:(label, cls, click) => { const b = h('button', {className:'btn ' + cls}, label); b.onclick = click; return b; }, previewFile(){}};
   vm.createContext(c); vm.runInContext(source, c); return c;
 }
@@ -68,7 +68,7 @@ test('b4: a file attached with a title shows that title, the file name small und
   const row = nodes(vm.runInContext('ticketFileRow', c)(t, 'evidence', file));
   assert.ok(row.some(x => x.attrs.className === 'file-name' && text(x) === 'Poster draft'));
   const plain = vm.runInContext('fileEntry', c)(t, {kind:'artifacts'}, {name:'quote-Q-2026-114.pdf'});
-  assert.equal(plain.title, 'Quote Q 2026 114', 'without a title the readable file name stays');
+  assert.equal(plain.title, 'quote-Q-2026-114.pdf', 'ORCH-240: without a title the real file name, extension included');
 });
 test('b4: a PDF result shows a small inline preview from the same-origin file endpoint', () => {
   const c = ctx(), t = {id:'t_one'};
@@ -111,4 +111,13 @@ test('ORCH-185: a picture shows itself in its row; its viewer says it was attach
   assert.ok(row.some(n => /has-thumb/.test(n.attrs?.className || '')));
   assert.equal(vm.runInContext("fileEntry(t, {kind:'artifacts'}, {name:'hero.png', size:99}).role", c), 'Attached by you');
   assert.equal(vm.runInContext("fileEntry(t, {kind:'artifacts'}, {name:'report.md', size:9}).role", c), 'Result');
+});
+test('files the person attached count in the Files tab and are listed there (ORCH-901)', () => {
+  const c = ctx(), t = {id:'t_two', status:'todo', history:[{by:'human:you', text:'Attached a.png'}, {by:'human:you', text:'Attached b.txt'}]};
+  vm.runInContext("artifactData.set('t_two', {at:Date.now(), data:{files:[{name:'a.png', size:10, mtime:'2026-11-19T09:00:00Z'}, {name:'b.txt', size:5, mtime:'2026-11-19T09:00:00Z'}]}})", c);
+  assert.equal(vm.runInContext('ticketFileCount', c)(t), 2);
+  assert.equal(JSON.stringify(c.ticketFileEntries(t).map(f => f.name).sort()), '["a.png","b.txt"]');
+  assert.equal(c.ticketFileEntries(t)[0].role, 'Attached by you');
+  assert.equal(vm.runInContext('reviewFile', c)({...t, status:'review'}), null, 'the person\'s own file is never shown as the result');
+  assert.doesNotMatch(text(h('div', {}, c.artifactsPanel(t))), /No files attached yet/);
 });

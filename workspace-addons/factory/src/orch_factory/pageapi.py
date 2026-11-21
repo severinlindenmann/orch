@@ -6,10 +6,11 @@ from __future__ import annotations
 import os
 import re
 import stat
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import ask, authority, autopilot, flow, handover, orchcli, render, service
+from . import ask, authority, autopilot, flow, handover, orchcli, render, service, watch
 from .render import clean
 from .store import Refused, Store, clock, no_links
 
@@ -24,6 +25,17 @@ IMAGE_TYPES = {
     "webp": "image/webp",
     "gif": "image/gif",
 }
+# A built task's own proof files (core copies them into the ticket's evidence folder): pictures of the screens and a
+# short demo (an animated picture or a small video). Only these names are ever served, and only for the order's crew.
+RESULT_FILE = re.compile(
+    r"\.orch/tickets/(t_[a-z0-9]{6,16})/evidence/([A-Za-z0-9._-]{1,80}\.(png|jpg|jpeg|webp|gif|mp4|webm))"
+)
+RESULT_NAME = re.compile(r"[A-Za-z0-9._-]{1,80}\.(png|jpg|jpeg|webp|gif|mp4|webm)")
+PICTURES = ("png", "jpg", "jpeg", "webp")
+RESULT_TYPES = {**IMAGE_TYPES, "mp4": "video/mp4", "webm": "video/webm"}
+MAX_DEMO = 25 * 1024 * 1024
+PULL = re.compile(r"https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/pull/[0-9]+")
+TIME_Z = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z")
 CHANGE_STATES = {"Accept": "accepted", "Edit": "edit", "Save for later": "later"}
 ACTIVITY_MAX = 50
 DECISIONS_MAX = 100
@@ -85,6 +97,113 @@ def _results(d):
     return out[:10]
 
 
+def _evidence(t):
+    return [
+        ev
+        for c in t.get("checklist") or []
+        if isinstance(c, dict)
+        for ev in (c.get("evidence") if isinstance(c.get("evidence"), list) else [])
+        if isinstance(ev, dict)
+    ]
+
+
+def _proof_files(t):
+    """(pictures, demo) of one built task: its own evidence files, newest last; a gif/mp4/webm is the demo."""
+    pictures, demo, seen = [], None, set()
+    for ev in _evidence(t):
+        m = RESULT_FILE.fullmatch(ev.get("ref") or "") if ev.get("type") == "file" else None
+        if not m or m[1] != t.get("id") or m[2] in seen:
+            continue
+        seen.add(m[2])
+        row = {"ticket": t["id"], "name": m[2], "title": _text(ev.get("title"), 80) or None}
+        if m[3].lower() in PICTURES:
+            pictures.append(row)
+        else:
+            demo = row
+    return pictures, demo
+
+
+def _tests(t):
+    """Each step's newest recorded run: passed (exit 0) or failed. A step without a recorded run is not counted."""
+    passed, failing = 0, []
+    for c in t.get("checklist") or []:
+        if not isinstance(c, dict):
+            continue
+        runs = [
+            e
+            for e in (c.get("evidence") if isinstance(c.get("evidence"), list) else [])
+            if isinstance(e, dict) and e.get("type") == "command" and type(e.get("exit")) is int
+        ]
+        if not runs:
+            continue
+        if runs[-1]["exit"] == 0:
+            passed += 1
+        else:
+            failing.append(_text(c.get("text"), 120))
+    return passed, failing
+
+
+def _code(t):
+    """The task's pull requests: how many are merged and how many are not (yet). Core keeps each one's state on
+    the ticket's links; a pull request named only in the evidence counts as not merged. One closed without merging
+    (replaced by another) waits for nothing and is not counted (ORCH-419)."""
+    state = {}
+    for r in t.get("refs") or []:
+        url = r.get("url") if isinstance(r, dict) else None
+        if isinstance(url, str) and PULL.fullmatch(url):
+            state[url] = r.get("status")
+    for ev in _evidence(t):
+        url = ev.get("ref") if ev.get("type") == "pr" else None
+        if isinstance(url, str) and PULL.fullmatch(url):
+            state.setdefault(url, None)
+    merged = sum(1 for s in state.values() if s == "merged")
+    return merged, sum(1 for s in state.values() if s not in ("merged", "closed"))
+
+
+def _reviews(d):
+    """One review per stage over the crew's results that wait for your Looks good: pictures of the built screens, a
+    short demo, the tests (passed or failed) and whether the code is merged, summed over the stage's tasks."""
+    stages = {}
+    for slug, t in (d.get("crew") or {}).items():
+        if t.get("status") != "review" or slug not in d["tasks"]:
+            continue
+        stages.setdefault(d["tasks"][slug]["stage"], []).append((d["tasks"][slug], t))
+    order = [x["stage"] for x in d.get("line") or []]
+    out = []
+    for stage in sorted(stages, key=lambda s: order.index(s) if s in order else len(order)):
+        rows = stages[stage][:10]
+        tasks, pictures, demo, passed, failing, merged, waiting = [], [], None, 0, [], 0, 0
+        for task, t in rows:
+            pics, dem = _proof_files(t)
+            ok, bad = _tests(t)
+            m, w = _code(t)
+            tasks.append(
+                {
+                    "ticket": t["id"],
+                    "title": _text(task["title"]),
+                    "pictures": len(pics),
+                    "tests": {"passed": ok, "failed": len(bad)},
+                    "code": {"merged": m, "waiting": w},
+                }
+            )
+            pictures += [{**p, "task": _text(task["title"])} for p in pics]
+            demo = demo or dem
+            passed, merged, waiting = passed + ok, merged + m, waiting + w
+            failing += [{"task": _text(task["title"]), "step": s} for s in bad]
+        out.append(
+            {
+                "stage": stage,
+                "tickets": [t["ticket"] for t in tasks],
+                "tasks": tasks,
+                "pictures": pictures[:12],
+                "demo": demo,
+                "tests": {"passed": passed, "failed": len(failing), "failing": failing[:5]},
+                "code": {"merged": merged, "waiting": waiting},
+            }
+        )
+    return out
+
+
 def _starting(d):
     """The stage the run is about to start: nothing waits for you and none of its crew tickets has been started yet."""
     if d.get("open") or d.get("shipped") or not d.get("stage"):
@@ -95,8 +214,69 @@ def _starting(d):
     started = [d["crew"][slug] for slug in mine if slug in d["crew"]]
     if any(t.get("status") not in (None, "open") for t in started):
         return None
-    done_before = any(x["state"] == "done" for x in d["line"])
-    return d["stage"] if done_before else None
+    return d["stage"]  # also the first stage (ORCH-277): right after Start nothing else says what comes
+
+
+def _open_asks(t):
+    return any(
+        isinstance(q, dict) and q.get("answer") is None and not q.get("taken_back")
+        for q in t.get("questions") or []
+    )
+
+
+def _waits_on(t):
+    w = t.get("waiting_on") if t.get("status") == "waiting" else None
+    return w if isinstance(w, dict) else None
+
+
+TICKET_REF = re.compile(r"\b(?:t_[a-z0-9]{6,16}|[A-Z][A-Z0-9]{0,9}-[0-9]{1,6})\b")
+
+
+def _held_words(why):
+    """Core's refusal without ticket ids: "ORCH-9 waits in line: the computer is very busy. It starts ..." -> "the
+    computer is very busy. It starts ..."; any other id becomes "it"."""
+    text = _text(why, 200)
+    text = re.sub(r"^\S+ waits in line: ", "", text)
+    return TICKET_REF.sub("it", text)
+
+
+def _waiting(ticket, d, held=None, watcher=True, stuck=False):
+    """Why no helper works on a started run right now (ORCH-277), or None while one works (the order or a crew
+    ticket is Working) or when the order is no started run. {"kind", "task"?, "until"?, "why"?}; the page words it:
+    you (a question or a result waits for the person), time (a ticket waits until a time), ticket (a crew ticket waits
+    on something else), held (core did not start the manager: the computer is busy, the helper limit ...), watcher
+    (Factory's watcher is off, so nothing wakes the manager), starting (the next stage is about to start), idle."""
+    if d["phase"] != "started" or d["kind"] != "run" or d["shipped"] or ticket.get("status") == "dropped":
+        return None
+    crew = [(slug, t) for slug, t in d["crew"].items() if t.get("status") not in ("done", "dropped")]
+    if ticket.get("status") == "active" or any(t.get("status") == "active" for _, t in crew):
+        return None
+
+    def title(slug):
+        return _text(d["tasks"].get(slug, {}).get("title")) or None
+
+    if d["open"] or _results(d) or _plain_questions(ticket):  # Factory's own superseded asks do not count
+        return {"kind": "you"}
+    for slug, t in crew:
+        if _open_asks(t):
+            return {"kind": "you", "task": title(slug)}
+    for task, t in [(None, ticket), *crew]:
+        w = _waits_on(t)
+        if w is None:
+            continue
+        name = title(task) if task else None
+        if w.get("kind") == "time" and isinstance(w.get("until"), str):
+            return {"kind": "time", "task": name, "until": w["until"]}
+        return {"kind": "ticket", "task": name}
+    if held:
+        return {"kind": "held", "why": _held_words(held.get("why")), "since": held.get("at")}
+    if not watcher:
+        return {"kind": "watcher"}
+    if stuck:  # Factory started the manager again several times and nothing moved
+        return {"kind": "stuck"}
+    if _starting(d):
+        return {"kind": "starting"}
+    return {"kind": "idle"}
 
 
 def _labelled(line, proposal):
@@ -118,8 +298,9 @@ def _eta(d, proposal):
     return eta
 
 
-def _summary(ticket, d, root=None):
-    """One order summary from a derived state `d`."""
+def _summary(ticket, d, root=None, held=None, watcher=True, stuck=False):
+    """One order summary from a derived state `d`. `held`: the watcher's kept reason why core did not start the
+    manager; `watcher`: whether the Factory watcher runs."""
     leads = _lead(d)
     proposal = d.get("proposal") or (leads[-1]["data"] if leads else None)
     kind, phase = d["kind"], "draft"
@@ -166,11 +347,13 @@ def _summary(ticket, d, root=None):
         "open": open_,
         "owner_min": ((proposal or {}).get("time") or {}).get("owner_min"),
         "working": _working(root, ticket, phase),
-        "agent_draft": _agent_draft(ticket),
+        "agent_draft": _agent_draft(ticket, d.get("store")),
         "draft_v": _draft_v(ticket),
         "questions": _plain_questions(ticket),
         "results": _results(d) if started_run else [],
+        "reviews": _reviews(d) if started_run else [],
         "starting": _starting(d) if started_run else None,
+        "waiting": _waiting(ticket, d, held, watcher, stuck) if started_run else None,
     }
 
 
@@ -196,12 +379,24 @@ def _working(root, ticket, phase):
     return not (claim.get("mode") == "live" and (claim.get("live") or {}).get("state") in IDLE)
 
 
-def _agent_draft(ticket):
+def _agent_draft(ticket, store=None):
     """The newest draft is the agent's: an idea-box order starts with the person's own words as v1, so only v2 and later
-    count (an order an agent filed with `orch factory idea` has the agent's v1). Until then Plan the run is not offered."""
+    count (an order an agent filed with `orch factory idea` has the agent's v1). Until then Plan the run is not offered.
+    An empty draft file never counts (persona test 18 Nov: an order from before ORCH-231 kept an empty v1, so Factory
+    said it waited for you and offered Plan the run on "This draft is empty")."""
     x = (ticket.get("ext") or {}).get("factory") or {}
     v = _draft_v(ticket) or 0
-    return v >= (2 if x.get("idea_box") is True else 1)
+    if v < (2 if x.get("idea_box") is True else 1):
+        return False
+    return store is None or _written(store, ticket["id"], v)
+
+
+def _written(store, order_id, v):
+    """Whether draft v of an order has any text (an unreadable file counts as not written)."""
+    try:
+        return bool(_read_regular(store.path(f"drafts/{order_id}/v{v}.md"), 4096).strip())
+    except (OSError, Refused):
+        return False
 
 
 def _draft_v(ticket):
@@ -228,15 +423,37 @@ def _broken(ticket, error):
         "draft_v": None,
         "questions": [],
         "results": [],
+        "reviews": [],
         "starting": None,
+        "waiting": None,
         "problem": _text(str(error), 200),
     }
+
+
+MEASURE_TTL = 20  # seconds a page keeps an order's measured active time (the record is read per crew ticket)
+_measured: dict = {}
 
 
 def _derive(root, store, ticket, tickets):
     d = flow.derive(root, store, ticket, tickets)
     d["store"] = store
+    _show_measured(root, d)
     return d
+
+
+def _show_measured(root, d):
+    """The shown active time is measured from core's record, as `next` and the watcher do; the cached value is only
+    what is left when nobody measured (watcher off) or the record can't be read (never a made-up 0 %)."""
+    if d.get("phase") != "started" or d.get("kind") != "run":
+        return
+    key = (str(root), d["tid"])
+    seen = _measured.get(key)
+    if seen and time.monotonic() - seen[0] < MEASURE_TTL:
+        d["used"] = seen[1]
+        return
+    flow._measure(root, d)
+    if d.get("measured"):
+        _measured[key] = (time.monotonic(), d["used"])
 
 
 def _day(row):
@@ -269,21 +486,27 @@ def _grants(store, tickets, journal):
     ]
 
 
-def _all(root):
-    """(summaries, ok decided question ids, store, tickets, journal): one pass over every order."""
+def _all(root, own=False):
+    """(summaries, ok decided question ids, store, tickets, journal): one pass over every order. `own`: read
+    only the tickets with Factory's data (orders, crew), enough for orders, crew and grants (ORCH-603)."""
     store = Store(root)
-    tickets = orchcli.tickets(root)
+    tickets = orchcli.own_tickets(root) if own else orchcli.tickets(root)
     journal = store.journal_read()
     summaries, ok = [], set()
+    held, on, stuck = watch.held(store), _watcher_on(root), watch.stuck(store)
     for t in _order_tickets(tickets):
         try:
             d = _derive(root, store, t, tickets)
         except Refused as error:
             summaries.append(_broken(t, error))
             continue
-        summaries.append(_summary(t, d, root))
+        summaries.append(_summary(t, d, root, held.get(t["id"]), on, t["id"] in stuck))
         ok |= d["decided_ok"]
     return summaries, ok, store, tickets, journal
+
+
+def _watcher_on(root):
+    return service.running_pid(root, clean=False) is not None
 
 
 def _day_limit(root, store, tickets, journal):
@@ -311,8 +534,51 @@ def home(root):
         "orders": summaries,
         "autopilot": auto,
         "day_limit": _day_limit(root, store, tickets, journal),
-        "watcher": service.running_pid(root, clean=False) is not None,
+        "watcher": _watcher_on(root),
     }
+
+
+def needs(root):
+    """`orch factory needs`: one row per stage review that waits for the person's Looks good (contracts/needs.schema.json),
+    the same review the Factory page shows (ORCH-419). In a terminal the person answers it with core's own commands:
+    Looks good = each built task to done (`cli`), a change = words to the helper on the order."""
+    summaries, _ok, _store, tickets, _journal = _all(root, own=True)  # fast at 10,000 tickets (ORCH-603)
+    changed = {t["id"]: t.get("updated_at") for t in tickets}
+    now = _iso(clock())
+    out = []
+    for o in summaries:
+        for r in o.get("reviews") or []:
+            ids = [t for t in r.get("tickets") or [] if ORDER_ID.fullmatch(t)]
+            if not ids or not ORDER_ID.fullmatch(o["id"]):
+                continue
+            item = next((x for x in o.get("line") or [] if x.get("stage") == r["stage"]), {})
+            stage = _text(item.get("label"), 60) or (r["stage"][:1].upper() + r["stage"][1:])
+            n = len(ids)
+            text = (
+                f"{stage}: what your crew built. {n} {'task waits' if n == 1 else 'tasks wait'} for your Looks good. "
+                f'For a change: orch run send {o["id"]} "Change at {stage}: <what should change>"'
+            )
+            since = min(
+                (w for t in ids if isinstance(w := changed.get(t), str) and TIME_Z.fullmatch(w)), default=now
+            )
+            row = {
+                "id": f"factory:review:{o['id']}:{r['stage']}",
+                "source": "factory",
+                "kind": "factory:review",
+                "ticket": o["id"],
+                "title": _text(o["title"], 200) or "Untitled",
+                "text": text[:500],
+                "tone": "needs-you",
+                "since": since,
+                "order": o["id"],
+                "stage": r["stage"],
+                "tickets": ids,
+            }
+            cli = " && ".join(f"orch ticket status {t} done" for t in ids)
+            if len(cli) <= 300:
+                row["cli"] = cli
+            out.append(row)
+    return out
 
 
 def autopilot_view(root):
@@ -479,7 +745,14 @@ def order(root, order_id):
     leads = _lead(d)
     proposal = d.get("proposal") or (leads[-1]["data"] if leads else None)
     return {
-        **_summary(ticket, d, root),
+        **_summary(
+            ticket,
+            d,
+            root,
+            watch.held(store).get(order_id),
+            _watcher_on(root),
+            order_id in watch.stuck(store),
+        ),
         "proposal": proposal,
         "drafts": _drafts(store, order_id),
         "crew": _crew(d, root, store),
@@ -527,3 +800,43 @@ def image(root, order_id, name):
     if len(data) > MAX_IMAGE:
         return None
     return data, IMAGE_TYPES[name.rsplit(".", 1)[1].lower()]
+
+
+def result_file(root, order_id, ticket_id, name):
+    """(bytes, content type) of a picture or the demo of one of the order's built tasks, or None. Only a file the
+    task's own evidence names, inside that ticket's evidence folder; never another ticket's file."""
+    if (
+        not ORDER_ID.fullmatch(order_id)
+        or not ORDER_ID.fullmatch(ticket_id)
+        or not RESULT_NAME.fullmatch(name)
+    ):
+        return None
+    try:
+        tickets = orchcli.tickets(root)
+    except Refused:
+        return None
+    crew = next(
+        (
+            t
+            for t in tickets
+            if t.get("id") == ticket_id
+            and t.get("parent") == order_id
+            and (t.get("ext") or {}).get("factory", {}).get("role") == "crew"
+            and (t.get("ext") or {}).get("factory", {}).get("order") == order_id
+        ),
+        None,
+    )
+    if crew is None:
+        return None
+    pictures, demo = _proof_files(crew)
+    if not any(x["name"] == name for x in [*pictures, *([demo] if demo else [])]):
+        return None
+    ext = name.rsplit(".", 1)[1].lower()
+    cap = MAX_DEMO if ext in ("gif", "mp4", "webm") else MAX_IMAGE
+    try:
+        data = _read_regular(Path(root) / ".orch" / "tickets" / ticket_id / "evidence" / name, cap)
+    except (OSError, Refused):
+        return None
+    if len(data) > cap:
+        return None
+    return data, RESULT_TYPES[ext]

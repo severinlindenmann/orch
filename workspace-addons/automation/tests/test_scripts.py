@@ -26,9 +26,10 @@ def runner_in_a_thread(ws, monkeypatch):
 
     threads = []
 
-    def start(root, tid):
+    def start(root, tid, member=None):
+        extra = ["--name", member] if member else []
         th = threading.Thread(
-            target=cli.main, args=(["--dir", str(root), "script", "run", tid],), daemon=True
+            target=cli.main, args=(["--dir", str(root), "script", "run", tid, *extra],), daemon=True
         )
         th.start()
         threads.append(th)
@@ -54,8 +55,10 @@ def tk(ws, tid):
 
 
 def history_rows(ws):
+    """Finished lines only: a line still being appended (no newline yet) is not read (ORCH-489)."""
     p = ws / ".orch/addons/automation/runs.jsonl"
-    return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
+    text = p.read_text() if p.exists() else ""
+    return [json.loads(x) for x in text[: text.rfind("\n") + 1].splitlines()]
 
 
 def py(code: str) -> list[str]:
@@ -165,6 +168,8 @@ def test_a_failed_script_asks_once(ws, person):
     (q,) = tk(ws, "t_scr00002")["questions"]
     assert q["kind"] == "automation:failure" and "exit code 3" in q["text"]
     assert q["options"] == ["Try again", "Leave it"]
+    assert ".orch/" not in q["text"] and "boom-output.txt" in q["text"]
+    assert "broken" in (ws / "attached.txt").read_text()
     assert wait_for(lambda: history_rows(ws)) and history_rows(ws)[0]["exit"] == 3
 
 
@@ -356,3 +361,179 @@ def test_the_shown_command_maps_back_to_one_argv():
 
     for argv in (["rm -rf ~"], ["a", "b c", "it's"], ["python3", "-c", "print(1)"]):
         assert shlex.split(scripts.shown(argv)) == argv
+
+
+# ---- one repeat for a group of scripts, each on its own plan (ORCH-348) ------------------------------------
+
+
+def group_ticket(ws, tid, group, **kw):
+    return add_ticket(
+        ws, tid, ext={"automation": {"recurring": True, "cron": "*/5 * * * *", "group": group}}, **kw
+    )
+
+
+def test_a_group_runs_each_script_on_its_own_plan(ws, person):
+    for n in ("fast", "slow"):
+        scripts.add(ws, n, py(f"open({str(ws / n)!r}, 'a').write('x')"))
+    group_ticket(ws, "t_grp00001", {"fast": "*/5 * * * *", "slow": "0 * * * *"})
+    s = Scheduler(ws)
+    assert s.tick(T(8, 1)) == ["t_grp00001"]  # both due at 08:00
+    assert wait_for(lambda: len(history_rows(ws)) == 2)
+    assert {r["script"] for r in history_rows(ws)} == {"fast", "slow"}
+    assert runs_started(ws) == []
+    assert wait_for(lambda: not scripts.busy(ws, "t_grp00001", "fast"))
+    s.tick(T(8, 6))  # only fast is due again
+    assert wait_for(lambda: len(history_rows(ws)) == 3)
+    time.sleep(0.3)
+    assert [r["script"] for r in history_rows(ws)][-1] == "fast" and len(history_rows(ws)) == 3
+    assert (ws / "fast").read_text() == "xx" and (ws / "slow").read_text() == "x"
+    assert s.tick(T(8, 7)) == []  # nothing due
+    assert tk(ws, "t_grp00001")["ext"]["automation"]["last_run"] == "2026-11-04T08:06:00Z"
+    logs = list((ws / ".orch/run/logs").glob("t_grp00001-script-fast-*.log"))
+    assert logs
+
+
+def test_a_slow_script_of_a_group_never_holds_back_the_others(ws, person):
+    go_on = ws / "go_on"
+    slow = ws / "slow.py"
+    slow.write_text(f"import os, time\nwhile not os.path.exists({str(go_on)!r}):\n    time.sleep(0.05)\n")
+    scripts.add(ws, "slow", [sys.executable, str(slow)])
+    scripts.add(ws, "fast", py(f"open({str(ws / 'fast')!r}, 'a').write('x')"))
+    group_ticket(ws, "t_grp00002", {"fast": "*/5 * * * *", "slow": "*/5 * * * *"})
+    s = Scheduler(ws)
+    s.tick(T(8, 1))
+    assert wait_for(lambda: scripts.busy(ws, "t_grp00002", "slow"))
+    assert wait_for(lambda: (ws / "fast").exists() and not scripts.busy(ws, "t_grp00002", "fast"))
+    s.tick(T(8, 6))  # slow still runs: only fast starts again
+    assert wait_for(lambda: (ws / "fast").read_text() == "xx")
+    go_on.write_text("")
+    assert wait_for(lambda: not scripts.busy(ws, "t_grp00002", "slow"))
+    time.sleep(0.3)
+    assert [r["script"] for r in history_rows(ws)].count("slow") == 1
+
+
+def test_a_failing_script_of_a_group_asks_once_with_its_name(ws, person):
+    scripts.add(ws, "boom", py("import sys; sys.exit(4)"))
+    group_ticket(ws, "t_grp00003", {"boom": "*/5 * * * *"})
+    Scheduler(ws).tick(T(8, 0))
+    assert wait_for(lambda: tk(ws, "t_grp00003").get("questions"))
+    (q,) = tk(ws, "t_grp00003")["questions"]
+    assert "boom" in q["text"] and "exit code 4" in q["text"]
+
+
+def test_a_group_with_a_script_not_set_up_here_asks(ws, person):
+    group_ticket(ws, "t_grp00004", {"gone": "*/5 * * * *"})
+    Scheduler(ws).tick(T(8, 0))
+    (q,) = tk(ws, "t_grp00004")["questions"]
+    assert "gone" in q["text"] and "no script named gone" in q["text"]
+
+
+def test_a_group_entry_with_a_command_or_a_bad_rule_is_ignored(ws, person):
+    out = ws / "ran.txt"
+    scripts.add(ws, "watch", py(f"open({str(out)!r}, 'w')"))
+    group_ticket(ws, "t_grp00005", {"rm -rf ~": "*/5 * * * *", "watch": "not a rule"})
+    assert Scheduler(ws).tick(T(8, 0)) == []
+    time.sleep(0.3)
+    assert not out.exists()
+
+
+def test_cli_makes_a_group_and_lists_one_repeat(ws, person, capsys):
+    for n in ("watcher", "reviewer", "tester"):
+        assert cli.main(["--dir", str(ws), "script", "add", n, "--", "true"]) == 0
+    add_ticket(ws, "t_grp00006")
+    args = ["--dir", str(ws), "repeat", "t_grp00006", "every 5 minutes", "--script", "watcher"]
+    args += ["--script", "reviewer=every 15 minutes", "--script", "tester=daily 06:30", "--json"]
+    capsys.readouterr()
+    assert cli.main(args) == 0
+    res = json.loads(capsys.readouterr().out)
+    a = tk(ws, "t_grp00006")["ext"]["automation"]
+    assert a["group"] == {"watcher": "*/5 * * * *", "reviewer": "*/15 * * * *", "tester": "30 6 * * *"}
+    assert "script" not in a and res["group"] == a["group"]
+    rows = cli.describe(ws)
+    assert {r["ticket"] for r in rows} == {"t_grp00006"}
+    assert [r["kind"] for r in rows].count("repeat") == 1  # one repeat, plus a row per script (own plan)
+    bad = ["--dir", str(ws), "repeat", "t_grp00006", "every 5 minutes", "--script", "watcher"]
+    assert cli.main([*bad, "--script", "nope=every 15 minutes"]) == 2
+    assert cli.main([*bad, "--script", "reviewer=whenever"]) == 2
+    # one script on the repeat's own plan is a plain script repeat again
+    assert cli.main(bad) == 0
+    a = tk(ws, "t_grp00006")["ext"]["automation"]
+    assert a["script"] == "watcher" and "group" not in a
+
+
+def test_cli_script_run_name_runs_one_script_of_the_group(ws, person, capsys):
+    scripts.add(ws, "watch", py("print('done')"))
+    group_ticket(ws, "t_grp00007", {"watch": "*/5 * * * *"})
+    assert cli.main(["--dir", str(ws), "script", "run", "t_grp00007", "--name", "watch", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"ticket": "t_grp00007", "exit": 0}
+    assert history_rows(ws)[0]["script"] == "watch"
+    assert cli.main(["--dir", str(ws), "script", "run", "t_grp00007", "--name", "other"]) == 2
+
+
+def test_the_background_runner_command_of_a_group_script(ws):
+    argv = scripts.runner_argv(ws, "t_grp00008", "watch")
+    assert argv[4:] == ["--dir", str(ws), "script", "run", "t_grp00008", "--name", "watch"]
+
+
+def test_start_now_runs_every_script_of_the_group(ws, person):
+    for n in ("a", "b"):
+        scripts.add(ws, n, py(f"open({str(ws / n)!r}, 'w')"))
+    group_ticket(ws, "t_grp00009", {"a": "0 6 * * *", "b": "0 7 * * *"})
+    r = actions.act(ws, "run", "t_grp00009")
+    assert r["result"] == "started"
+    assert wait_for(lambda: (ws / "a").exists() and (ws / "b").exists())
+
+
+def test_the_tab_offers_allow_for_the_first_script_of_a_group_not_allowed(ws, agent, monkeypatch):
+    scripts.add(ws, "a", ["true"])
+    scripts.add(ws, "b", ["echo", "b"])
+    monkeypatch.setattr(scripts, "an_agent", lambda: None)
+    scripts.allow(ws, "a", scripts.key(ws, "a", ["true"]))
+    group_ticket(ws, "t_grp00010", {"a": "*/5 * * * *", "b": "*/5 * * * *"})
+    r = actions.review(ws, "allow-script", "t_grp00010")
+    assert r["review"]["value"] == "echo b"
+    key = r["target"].rsplit(":", 1)[1]
+    actions.act(ws, "allow-script", "t_grp00010", value=key)
+    assert scripts.command(ws, "b") == ["echo", "b"]
+
+
+def test_a_quiet_group_still_records_its_pass(ws, person):
+    scripts.add(ws, "daily", ["true"])
+    group_ticket(ws, "t_grp00011", {"daily": "30 6 * * *"})
+    s = Scheduler(ws)
+    s.tick(T(6, 31))  # first pass: the daily one is due once
+    assert s.tick(T(8, 1)) == []  # the repeat looks every 5 minutes; nothing due
+    assert tk(ws, "t_grp00011")["ext"]["automation"]["last_run"] == "2026-11-04T08:01:00Z"
+    assert s.tick(T(8, 2)) == []  # between two passes: not even looked at
+    assert tk(ws, "t_grp00011")["ext"]["automation"]["last_run"] == "2026-11-04T08:01:00Z"
+
+
+def test_cli_script_run_without_name_runs_the_whole_group(ws, person, capsys):
+    for n in ("a", "b"):
+        scripts.add(ws, n, py(f"open({str(ws / n)!r}, 'a').write('x')"))
+    group_ticket(ws, "t_grp00020", {"a": "*/5 * * * *", "b": "0 * * * *"})
+    assert cli.main(["--dir", str(ws), "script", "run", "t_grp00020", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "ticket": "t_grp00020",
+        "exit": 0,
+        "scripts": {"a": 0, "b": 0},
+    }
+    assert {r["script"] for r in history_rows(ws)} == {"a", "b"}
+
+
+def test_cli_script_run_of_a_group_fails_when_one_script_fails(ws, person, capsys):
+    scripts.add(ws, "ok", py("pass"))
+    scripts.add(ws, "bad", py("raise SystemExit(3)"))
+    group_ticket(ws, "t_grp00021", {"ok": "*/5 * * * *", "bad": "0 * * * *"})
+    assert cli.main(["--dir", str(ws), "script", "run", "t_grp00021", "--json"]) == 1
+    assert json.loads(capsys.readouterr().out)["scripts"] == {"bad": 3, "ok": 0}
+
+
+def test_list_shows_each_script_of_a_group_with_its_own_plan(ws, person, capsys):
+    group_ticket(ws, "t_grp00022", {"fast": "*/5 * * * *", "slow": "0 6 * * *"})
+    assert cli.main(["--dir", str(ws), "list", "--json"]) == 0
+    rows = json.loads(capsys.readouterr().out)
+    by = {r["script"]: r for r in rows if r["kind"] == "script"}
+    assert by["fast"]["cron"] == "*/5 * * * *" and by["slow"]["cron"] == "0 6 * * *"
+    assert cli.main(["--dir", str(ws), "list"]) == 0
+    assert "script slow" in capsys.readouterr().out

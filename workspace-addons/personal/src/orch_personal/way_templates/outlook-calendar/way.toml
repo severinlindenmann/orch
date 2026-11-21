@@ -1,0 +1,9 @@
+# Outlook calendar: the backup way in for Calendar (Personal). Off until you turn it on.
+# Set the command that reads Outlook in fetch.json first, then: orch personal ways on outlook-calendar
+# and choose it as the calendar source: orch personal calendar source way:outlook-calendar
+name = "Outlook calendar"
+part = "calendar"
+selfcheck = ["python3", "check.py"]
+
+[actions]
+read = ["python3", "read.py"]

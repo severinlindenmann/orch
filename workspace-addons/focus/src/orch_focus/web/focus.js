@@ -41,13 +41,23 @@
     els.stopIc.innerHTML = ic(running ? 'pause' : 'play');
     els.stopL.textContent = running ? 'Pause work' : 'Continue';
     els.stop.setAttribute('aria-label', running ? 'Pause work' : 'Continue');
-    els.compose.hidden = v.state === 'done' || S.state.tab >= 2 || (t.status === 'review' && !S.state.changesRequested);  /* a done ticket is a read-only board; Continue starts a run */
+    els.compose.hidden = S.state.tab >= 2 || (v.state === 'done' && !running);  /* a done ticket is a read-only board unless a helper runs on it; a ticket in Check takes messages (ORCH-247) */
     S.views.compose.renderWaiting(v);
     /* an open question: Answer is the main action; Continue and Start fresh wait until it is answered */
     const asking = v.ticket.questions.some(q => q.answer == null);
     els.answer.hidden = !asking;
-    els.stop.hidden = (asking && !running) || (!running && !hasStarted);
+    /* ORCH-255: a start shows in every state while no helper runs (Pause while it does). ORCH-487: it is the one Start
+       button (web/start.js): Continue or Start helper, the caret opens the Start choice. The Manager keeps its own. */
+    const kit = !t.manager && S.startButton && window.UI && window.UI.startButton;
+    if (kit) S.startButton.mount(els.startHost, v);
+    if (kit) S.startButton.update(v);
+    els.startHost.hidden = !kit || running;
+    els.stop.hidden = !!kit && !running;
     els.fresh.disabled = t.manager ? asking : running || asking || !hasStarted;  /* the Manager starts fresh any time (ORCH-147) */
+    /* a greyed row says why (ORCH-487) */
+    const freshWhy = !els.fresh.disabled ? '' : asking ? 'Answer the question first.' : running ? 'Pause the work first.' : 'Nothing to start over yet. Use Start helper.';
+    els.freshWhy.textContent = freshWhy;
+    els.freshWhy.hidden = !freshWhy;
     els.review.hidden = !window.FocusHelpers.reviewBarShown(v);
     els.complete.hidden = v.state !== 'done';
     els.attachBtn.disabled = !(running && v.live);
@@ -139,7 +149,7 @@
       if (!tab || tab.hidden) return;
       S.state.tab = onScreen ? 0 : i;
       els.review.hidden = !S.state.view || !window.FocusHelpers.reviewBarShown(S.state.view);
-      els.compose.hidden = S.state.view?.state === 'done' || S.state.tab >= 2 || (S.state.view?.ticket.status === 'review' && !S.state.changesRequested);
+      els.compose.hidden = S.state.tab >= 2 || (S.state.view?.state === 'done' && !S.state.view?.run.running);
       [...els.tabs, ...(els.screenTab ? [els.screenTab] : [])].forEach(b => { const on = b === tab; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; document.getElementById(b.getAttribute('aria-controls')).hidden = !on; });
       if (screen) screen.place(onScreen);
       try { localStorage.setItem('focus-tab', onScreen ? 'screen' : ''); } catch (e) { /* not kept */ }
@@ -158,7 +168,7 @@
         panel.style.transform = 'translateX(' + dx + 'px)';
       }
     };
-    const armFresh = on => { els.fresh.classList.toggle('fx-confirm', on); els.fresh.lastElementChild.textContent = on ? 'Click again to start fresh' : 'Start fresh instead'; };
+    const armFresh = on => { els.fresh.classList.toggle('fx-confirm', on); (els.freshLabel || els.fresh.lastElementChild).textContent = on ? 'Click again to start fresh' : 'Start fresh instead'; };
     const closePopovers = () => {
       armFresh(false);
       setPopover(els.menu, els.moreBtn, false);

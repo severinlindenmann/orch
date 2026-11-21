@@ -1,0 +1,504 @@
+{
+ "_note": "Made by workspace-addons/pull-requests/tests/dash_fixture.py; do not edit by hand.",
+ "addon": {
+  "acts": [
+   "refresh"
+  ],
+  "dashboard": {
+   "icon": "check",
+   "label": "Pull requests",
+   "order": 25,
+   "panel": null,
+   "place": "nav",
+   "subtitle": "What needs you, what is being checked and what waits to be merged.",
+   "title": null
+  },
+  "link_kinds": [
+   "github-pr"
+  ],
+  "name": "pull-requests",
+  "page": null,
+  "shipped": true,
+  "ticket_fields": {
+   "fields": [
+    {
+     "hidden": false,
+     "key": "merge_when_green",
+     "options": [
+      {
+       "label": "Off",
+       "value": "off"
+      },
+      {
+       "label": "On",
+       "value": "on"
+      }
+     ],
+     "read_only": false,
+     "title": "Merge when green",
+     "type": "choice"
+    },
+    {
+     "hidden": false,
+     "key": "pr",
+     "read_only": true,
+     "title": "Pull request",
+     "type": "text"
+    },
+    {
+     "hidden": false,
+     "key": "checks",
+     "options": [
+      {
+       "label": "Passed",
+       "value": "Passed"
+      },
+      {
+       "label": "Running",
+       "value": "Running"
+      },
+      {
+       "label": "Failed",
+       "value": "Failed"
+      },
+      {
+       "label": "No checks",
+       "value": "No checks"
+      }
+     ],
+     "read_only": true,
+     "title": "Checks",
+     "type": "choice"
+    },
+    {
+     "hidden": false,
+     "key": "merge",
+     "options": [
+      {
+       "label": "Ready to merge",
+       "value": "Ready to merge"
+      },
+      {
+       "label": "Blocked",
+       "value": "Blocked"
+      },
+      {
+       "label": "Behind its base",
+       "value": "Behind its base"
+      },
+      {
+       "label": "Has a conflict",
+       "value": "Has a conflict"
+      },
+      {
+       "label": "Draft",
+       "value": "Draft"
+      },
+      {
+       "label": "Not known yet",
+       "value": "Not known yet"
+      },
+      {
+       "label": "Merged",
+       "value": "Merged"
+      },
+      {
+       "label": "Closed",
+       "value": "Closed"
+      }
+     ],
+     "read_only": true,
+     "title": "Merge",
+     "type": "choice"
+    }
+   ],
+   "section": "Pull requests",
+   "show_on_card": [
+    "checks"
+   ]
+  },
+  "ticket_view": []
+ },
+ "ticket": {
+  "checklist": [],
+  "created_at": "2026-11-17T09:41:00Z",
+  "ext": {
+   "pull-requests": {
+    "checks": "Failed",
+    "merge": "Blocked",
+    "pr": "#418"
+   }
+  },
+  "history": [
+   {
+    "at": "2026-11-17T09:41:00Z",
+    "by": "human:anna",
+    "chat_message": false,
+    "text": "Created",
+    "via": "cli"
+   },
+   {
+    "at": "2026-11-17T09:41:00Z",
+    "by": "human:anna",
+    "chat_message": false,
+    "text": "Added reference https://github.com/acme/billing/pull/418",
+    "via": "cli"
+   },
+   {
+    "at": "2026-11-17T09:41:00Z",
+    "by": "human:anna",
+    "chat_message": false,
+    "text": "Added reference https://github.com/acme/billing/issues/402",
+    "via": "cli"
+   },
+   {
+    "at": "2026-11-17T09:41:00Z",
+    "by": "agent:pull-requests",
+    "chat_message": false,
+    "text": "pull-requests refresh: github.com/acme/billing/pull/418 title - -> Add CSV export for invoices",
+    "via": "cli"
+   },
+   {
+    "at": "2026-11-17T09:41:00Z",
+    "by": "agent:pull-requests",
+    "chat_message": false,
+    "text": "pull-requests refresh: github.com/acme/billing/pull/418 status - -> checks failed",
+    "via": "cli"
+   },
+   {
+    "at": "2026-11-17T09:41:00Z",
+    "by": "agent:pull-requests",
+    "chat_message": false,
+    "text": "pull-requests refresh: pr - -> #418",
+    "via": "cli"
+   },
+   {
+    "at": "2026-11-17T09:41:00Z",
+    "by": "agent:pull-requests",
+    "chat_message": false,
+    "text": "pull-requests refresh: checks - -> Failed",
+    "via": "cli"
+   },
+   {
+    "at": "2026-11-17T09:41:00Z",
+    "by": "agent:pull-requests",
+    "chat_message": false,
+    "text": "pull-requests refresh: merge - -> Blocked",
+    "via": "cli"
+   }
+  ],
+  "id": "t_inv012",
+  "key": "BIL-1",
+  "questions": [],
+  "refs": [
+   {
+    "at": "2026-11-17T09:41:00Z",
+    "by": "human:anna",
+    "kind": "url",
+    "status": "checks failed",
+    "title": "Add CSV export for invoices",
+    "url": "https://github.com/acme/billing/pull/418",
+    "view": {
+     "addon": null,
+     "group": "References",
+     "host": "github.com",
+     "icon": "github",
+     "kind": "url",
+     "label": "GitHub",
+     "mono": "GH",
+     "preview": null,
+     "short": "github.com/acme/billing/pull/418",
+     "status": "checks failed",
+     "title": "Add CSV export for invoices",
+     "type": "GitHub"
+    }
+   },
+   {
+    "at": "2026-11-17T09:41:00Z",
+    "by": "human:anna",
+    "kind": "url",
+    "url": "https://github.com/acme/billing/issues/402",
+    "view": {
+     "addon": null,
+     "group": "References",
+     "host": "github.com",
+     "icon": "github",
+     "kind": "url",
+     "label": "GitHub",
+     "mono": "GH",
+     "preview": null,
+     "short": "github.com/acme/billing/issues/402",
+     "status": null,
+     "title": "github.com/acme/billing/issues/402",
+     "type": "GitHub"
+    }
+   }
+  ],
+  "revision": 4,
+  "schema": "orch.ticket/1",
+  "status": "open",
+  "title": "Invoice CSV export",
+  "updated_at": "2026-11-17T09:41:00Z"
+ },
+ "views": {
+  "empty": {
+   "blocks": [
+    {
+     "empty": {
+      "text": "Link a pull request to a ticket and it shows up here with its checks.",
+      "title": "No pull requests yet"
+     },
+     "items": [],
+     "title": "Pull requests",
+     "type": "list"
+    },
+    {
+     "text": "The merge queue checks up to 5 pull requests together and merges them when the checks pass.",
+     "type": "footnote"
+    }
+   ],
+   "generated_at": "2026-11-17T09:41:00Z",
+   "schema": "orch.addon-view/1"
+  },
+  "loaded": {
+   "blocks": [
+    {
+     "items": [
+      {
+       "subtitle": "Show the invoice number on the PDF; Round tax per line, not per invoice",
+       "title": "Group of 2 · checks running 12 min",
+       "tone": "neutral"
+      }
+     ],
+     "meta": "into develop · groups of up to 5",
+     "title": "Merge queue: acme/billing",
+     "type": "list"
+    },
+    {
+     "items": [
+      {
+       "subtitle": "Next: New pricing page",
+       "title": "1 waiting in line · longest 49 min",
+       "tone": "neutral"
+      }
+     ],
+     "meta": "into develop · groups of up to 5",
+     "title": "Merge queue: acme/website",
+     "type": "list"
+    },
+    {
+     "columns": [
+      {
+       "key": "pr",
+       "label": "Pull request",
+       "type": "text"
+      },
+      {
+       "key": "ticket",
+       "label": "Ticket",
+       "type": "text"
+      },
+      {
+       "key": "state",
+       "label": "State",
+       "type": "text"
+      },
+      {
+       "key": "in_line",
+       "label": "In line for",
+       "type": "duration"
+      }
+     ],
+     "meta": "6 open · 2 repositories",
+     "rows": [
+      {
+       "cells": {
+        "in_line": null,
+        "pr": "Add CSV export for invoices",
+        "state": "Checks failed",
+        "ticket": "BIL-1"
+       },
+       "link": "t_inv012",
+       "subtitle": "Checks failed: lint. Waits for a helper place."
+      },
+      {
+       "cells": {
+        "in_line": null,
+        "pr": "Rename customer to client",
+        "state": "Has a conflict",
+        "ticket": "BIL-4"
+       },
+       "link": "t_ren009",
+       "subtitle": "Open the ticket to sort out the conflict."
+      },
+      {
+       "cells": {
+        "in_line": 1740,
+        "pr": "Show the invoice number on the PDF",
+        "state": "Being checked",
+        "ticket": "BIL-2"
+       },
+       "link": "t_pdf014",
+       "subtitle": "acme/billing"
+      },
+      {
+       "cells": {
+        "in_line": 1560,
+        "pr": "Round tax per line, not per invoice",
+        "state": "Being checked",
+        "ticket": "BIL-3"
+       },
+       "link": "t_tax015",
+       "subtitle": "acme/billing"
+      },
+      {
+       "cells": {
+        "in_line": 2940,
+        "pr": "New pricing page",
+        "state": "1st in line, paused",
+        "ticket": null
+       },
+       "link": "https://github.com/acme/website/pull/88",
+       "subtitle": "GitHub did not answer; tries again by itself in 6 min."
+      },
+      {
+       "cells": {
+        "in_line": null,
+        "pr": "Try a new PDF library",
+        "state": "Draft",
+        "ticket": null
+       },
+       "link": "https://github.com/acme/billing/pull/419",
+       "subtitle": "Not checked while it is a draft."
+      }
+     ],
+     "title": "Open pull requests",
+     "type": "table"
+    },
+    {
+     "text": "The merge queue checks up to 5 pull requests together and merges them when the checks pass.",
+     "type": "footnote"
+    }
+   ],
+   "generated_at": "2026-11-17T09:41:00Z",
+   "schema": "orch.addon-view/1"
+  },
+  "stopped": {
+   "blocks": [
+    {
+     "empty": {
+      "text": "A pull request put in the merge queue shows here with the group it is checked in.",
+      "title": "Nothing in the merge queue"
+     },
+     "items": [],
+     "meta": "groups of up to 5",
+     "title": "Merge queue",
+     "type": "list"
+    },
+    {
+     "columns": [
+      {
+       "key": "pr",
+       "label": "Pull request",
+       "type": "text"
+      },
+      {
+       "key": "ticket",
+       "label": "Ticket",
+       "type": "text"
+      },
+      {
+       "key": "state",
+       "label": "State",
+       "type": "text"
+      },
+      {
+       "key": "in_line",
+       "label": "In line for",
+       "type": "duration"
+      }
+     ],
+     "meta": "6 open · 2 repositories",
+     "rows": [
+      {
+       "cells": {
+        "in_line": null,
+        "pr": "Add CSV export for invoices",
+        "state": "Checks failed",
+        "ticket": "BIL-1"
+       },
+       "link": "t_inv012",
+       "subtitle": "Checks failed: lint. Waits for a helper place."
+      },
+      {
+       "cells": {
+        "in_line": null,
+        "pr": "Rename customer to client",
+        "state": "Has a conflict",
+        "ticket": "BIL-4"
+       },
+       "link": "t_ren009",
+       "subtitle": "Open the ticket to sort out the conflict."
+      },
+      {
+       "cells": {
+        "in_line": null,
+        "pr": "Round tax per line, not per invoice",
+        "state": "Checks running (2 left)",
+        "ticket": "BIL-3"
+       },
+       "link": "t_tax015",
+       "subtitle": "acme/billing"
+      },
+      {
+       "cells": {
+        "in_line": null,
+        "pr": "Show the invoice number on the PDF",
+        "state": "Ready to merge",
+        "ticket": "BIL-2"
+       },
+       "link": "t_pdf014",
+       "subtitle": "Not in the merge queue."
+      },
+      {
+       "cells": {
+        "in_line": null,
+        "pr": "New pricing page",
+        "state": "Ready to merge",
+        "ticket": null
+       },
+       "link": "https://github.com/acme/website/pull/88",
+       "subtitle": "Not in the merge queue."
+      },
+      {
+       "cells": {
+        "in_line": null,
+        "pr": "Try a new PDF library",
+        "state": "Draft",
+        "ticket": null
+       },
+       "link": "https://github.com/acme/billing/pull/419",
+       "subtitle": "Not checked while it is a draft."
+      }
+     ],
+     "title": "Open pull requests",
+     "type": "table"
+    },
+    {
+     "text": "The merge queue checks up to 5 pull requests together and merges them when the checks pass.",
+     "type": "footnote"
+    }
+   ],
+   "button": {
+    "action": {
+     "op": "addon.start"
+    },
+    "label": "Start reading"
+   },
+   "generated_at": "2026-11-17T09:41:00Z",
+   "notice": "Pull requests are not being read right now, so what you see may be old.",
+   "notice_tone": "warn",
+   "schema": "orch.addon-view/1"
+  }
+ }
+}

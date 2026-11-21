@@ -47,7 +47,7 @@ def test_wait_cleared_only_after_run_start_worked(ws):
     t = tk(ws, "t_wake002")
     assert t["waiting_on"] is not None
     (q,) = t["questions"]
-    assert q["kind"] == "automation:failure" and "orch config set workspace.agent <name>" in q["text"]
+    assert q["kind"] == "automation:failure" and "No helper is set yet" in q["text"]
     assert q["options"] == ["Try again", "Leave it"]
     s.tick(T(8, 1))  # asked once, not again
     assert len(tk(ws, "t_wake002")["questions"]) == 1
@@ -82,6 +82,22 @@ def test_recurring_cron_and_catch_up(ws):
     t = tk(ws, "t_rec00001")
     assert t["ext"]["automation"]["last_run"] == "2026-11-05T07:01:00Z"
     assert t["ext"]["automation"]["next_run"] == "2026-11-06T07:00:00Z"  # core's health checks read it
+
+
+def test_a_done_repeat_reopened_for_its_run_still_saves_its_next_run(ws):
+    """ORCH-395: the reopen and the start moved the ticket's revision on; the last/next run write used the old one,
+    was refused without a word, and core's health checks then called the repeat stopped."""
+    add_ticket(
+        ws,
+        "t_rec00010",
+        status="done",
+        created_at="2026-11-01T00:00:00Z",
+        ext={"automation": {"recurring": True, "cron": "0 7 * * *"}},
+    )
+    assert Scheduler(ws).tick(T(7, 1, d=4)) == ["t_rec00010"]
+    a = tk(ws, "t_rec00010")["ext"]["automation"]
+    assert a["last_run"] == "2026-11-04T07:01:00Z"
+    assert a["next_run"] == "2026-11-05T07:00:00Z"
 
 
 def test_next_run_is_saved_in_the_repeat_s_time_zone(ws):
@@ -696,3 +712,22 @@ def test_loop_asks_core_for_the_health_checks_once_a_minute_without_a_ticket(ws)
     assert len(asked) == 1 and asked[0]["by"] is None
     s.tick(T(10, 1))
     assert len([c for c in calls(ws) if c["args"][:2] == ["doctor", "soon"]]) == 2
+
+
+def test_failed_wake_start_is_retried_a_few_times_then_left(ws):
+    """ORCH-255: a passed wake time must not leave the ticket without a helper after one failed start."""
+    (ws / "noagent").write_text("")
+    add_ticket(
+        ws, "t_wake021", status="waiting", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"}
+    )
+    s = Scheduler(ws)
+    s.tick(T(8))
+    assert load_state(ws)["t_wake021"]["wake_tries"] == 0
+    s.tick(T(8, 3))  # too soon
+    assert load_state(ws)["t_wake021"]["wake_tries"] == 0
+    (ws / "ended-t_wake021").write_text("")  # no run holds the ticket
+    for minute in (6, 12, 18, 24, 30):
+        s.tick(T(8, minute))
+    assert load_state(ws)["t_wake021"]["wake_tries"] == 3  # three retries, then only Try again / Continue
+    (ws / "noagent").unlink()
+    assert s.tick(T(9)) == []  # left alone: a person presses Continue

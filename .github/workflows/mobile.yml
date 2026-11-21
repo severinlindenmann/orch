@@ -3,6 +3,9 @@ on: workflow_call
 jobs:
   test:
     runs-on: macos-latest
+    # The full suite with UI tests took 30-55 min in the green runs of 16-17 Nov (macOS runner speed varies up to 2x,
+    # ORCH-260); 50 min stopped a healthy run (ORCH-353). The PR smoke subset takes a few minutes.
+    timeout-minutes: 75
     defaults:
       run:
         working-directory: mobile

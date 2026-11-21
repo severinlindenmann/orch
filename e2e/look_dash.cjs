@@ -1,20 +1,26 @@
 // LOOK-2 browser half: drives the workspace dashboard (Settings > General, sidebar switcher) with Playwright.
-// usage: PW_DIR=<dir holding node_modules/playwright's parent> node look_dash.cjs <dashboard url> <shots dir or ''> <description>
+// usage: PW_DIR=<dir holding node_modules/playwright's parent> node look_dash.cjs <dashboard url> <shots dir or ''> <description> <sign-in link>
+// The sign-in link (orch start --print-launch-url) gives the 1280 page a session; without it every click is refused (watch-only).
 // prints one JSON line with what it saw; exit 1 on a failed step.
 const { chromium } = require(require('path').join(process.env.PW_DIR, 'playwright'));
-const [base, shots, desc] = process.argv.slice(2);
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+const headless = require('./headless.cjs'); // the keychain options (ORCH-615)
+const [base, shots, desc, launch] = process.argv.slice(2);
 (async () => {
   const out = {};
-  const b = await chromium.launch();
+  const b = await headless.launch(chromium);
   for (const [w, h] of [[1280, 800], [720, 900]]) {
     const p = await b.newPage({ viewport: { width: w, height: h } });
     const errs = []; p.on('pageerror', e => errs.push(e.message));
+    if (w === 1280 && launch) {  // sign in the way a person does: the page hands the one-time token over and reloads
+      await p.goto(launch);
+      await p.waitForFunction(() => !location.hash.includes('launch=') && !!localStorage.length, null, { timeout: 15000 });
+    }
     await p.goto(base + '/#settings');
     await p.waitForSelector('[data-testid=settings-profile]');
     if (w === 1280) {
       // pick Wallet / Amber from Money
       await p.click('[data-testid=look-change]');
+      await p.click('[data-key=lk-more]');  // the category chips show only after More icons
       await p.click('[data-key=lk-cat-money]');
       await p.click('[data-key=lk-icon-wallet]');
       await p.click('[data-key=lk-color-amber]');
@@ -28,11 +34,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await p.click('[data-key=pf-edit]');
       await p.fill('[data-key=pf-description]', desc);
       await p.click('[data-key=pf-save]');
-      await p.waitForSelector('[data-testid=profile-relay-state]', { timeout: 15000 });
+      await p.waitForFunction(() => /Waiting for relay/.test(document.querySelector('[data-testid=profile-relay-state]')?.textContent || ''), null, { timeout: 15000 });
       out.pending = await p.textContent('[data-testid=profile-relay-state]');
       // shared pages switch off
+      const sharedBefore = await p.getAttribute('[data-testid=look-shared-pages]', 'aria-checked');
       await p.click('[data-testid=look-shared-pages]');
-      await sleep(1500);
+      await p.waitForFunction(b => document.querySelector('[data-testid=look-shared-pages]')?.getAttribute('aria-checked') !== b,
+        sharedBefore, { timeout: 15000 });
       out.shared = await p.getAttribute('[data-testid=look-shared-pages]', 'aria-checked');
       // switcher
       await p.click('[data-testid=ws-switch]');

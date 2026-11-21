@@ -127,6 +127,14 @@ def _run_start(a):
     return ["run", "start", _t(a)], (["--fresh"] if _flag(a.get("fresh")) else []), []
 
 
+def _session_continue(a):
+    _only(a, ("ticket", "session"))
+    sid = a.get("session")
+    if not isinstance(sid, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", sid):
+        raise BadRequest("That is not a session id.")
+    return ["run", "history", _t(a)], ["--session", sid, "--continue"], []
+
+
 def _manager_start(a):
     """The workspace's always-on Manager (ORCH-147): made the first time, started live; fresh = an empty talk."""
     _only(a, ("fresh",))
@@ -287,6 +295,7 @@ OPS = {
     "run.start": _run_start,
     "manager.start": _manager_start,
     "run.stop": _run_stop,
+    "session.continue": _session_continue,
     "run.send": _run_send,
     "run.take_back": _run_take_back,
     "check.add": _check_add,
@@ -362,6 +371,36 @@ def orch(root: Path, orch_bin: str | None, argv: list[str], timeout: int = 60) -
     except OSError:
         raise Unavailable("The orch command could not be started.") from None
     return r.returncode, r.stdout, r.stderr
+
+
+READS = {
+    "here": 0,
+    "process": 0,
+}  # reads answered without a new process (ORCH-634), and reads that started one
+
+
+def read(root: Path, orch_bin: str | None, argv: list[str], timeout: int = 60) -> tuple[int, str, str]:
+    """`orch` for a READ (`... --json`, changes nothing), as `orch()` returns it. The real server (`orch:self`)
+    asks the core in this process or its one read worker (orch.reads.call) instead of starting Python for every
+    read; a test's fake orch, an older core or a read nobody could answer starts the command as before."""
+    if orch_bin == SELF and _run is subprocess.run:  # a test that replaced the process starter: as before
+        try:
+            from orch import reads
+        except ImportError:
+            reads = None
+        got = None
+        if reads is not None and hasattr(reads, "call"):
+            try:
+                got = reads.call(Path(root), list(argv), timeout=timeout, environ=human_env(root, orch_bin))
+            except Exception:  # noqa: BLE001 - the command gets its chance
+                got = None
+        if got is not None and (got[0] or got[1] is not None):
+            READS["here"] += 1
+            code, value = got
+            err = value.get("error", "") if code and isinstance(value, dict) else ""
+            return code, json.dumps(value, ensure_ascii=False), str(err)
+    READS["process"] += 1
+    return orch(root, orch_bin, argv, timeout)
 
 
 def _attach_all(root: Path, orch_bin: str | None, tid: str, files: list[tuple[str, bytes]]) -> dict:

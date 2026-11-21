@@ -1,28 +1,36 @@
 // Automation page: a schedule made here has "Run now"; a schedule that came by sync has "Allow on this computer",
 // which opens the sign step of sync's Allow for that ticket. Real dashboard web files in Chromium (own browser, mock
-// keychain), every request answered in memory. usage: VIEW=<view.json> [PW_DIR=..] [SHOTS_DIR=..] node --test e2e/dash_run_now.cjs
+// keychain), every request answered in memory. usage: [VIEW=<view.json>] [PW_DIR=..] [SHOTS_DIR=..] node --test e2e/dash_run_now.cjs
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const headless = require('./headless.cjs'); // the keychain options (ORCH-615)
 
 const PW = process.env.PW_DIR || path.join(os.homedir(), 'orch-dev', 'e2e', 'dashboard', 'node_modules');
 const OUT = process.env.SHOTS_DIR || path.join(os.tmpdir(), 'dash-run-now');
 const WEB = path.join(__dirname, '..', 'workspace-addons', 'dashboard', 'src', 'orch_dashboard', 'web');
 const FIX = path.join(__dirname, '..', 'workspace-addons', 'dashboard', 'tests', 'fixtures', 'state-chat-settings.json');
+const KIT = path.join(__dirname, '..', 'workspace', 'src', 'orch_ui', 'static');
 const BASE = 'http://dash.test';
 const TYPES = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json'};
 
 test('Run now for own schedule, Allow on this computer for a synced one', {timeout: 120_000}, async () => {
   const {chromium} = require(path.join(PW, 'playwright'));
   fs.mkdirSync(OUT, {recursive: true});
-  const view = JSON.parse(fs.readFileSync(process.env.VIEW, 'utf8'));
+  // VIEW=<view.json> shows another view; by default two schedules: one made here (Run now), one that came by sync (Allow).
+  const row = (id, title, action) => ({cells: {schedule: title, repeats: 'Every Monday 08:00'}, link: id, subtitle: 'Your helper',
+    toggle: {on: true, label: title + ' on or off', action: {op: 'addon.act', args: {verb: 'toggle', target: id}}}, actions: [action]});
+  const view = process.env.VIEW ? JSON.parse(fs.readFileSync(process.env.VIEW, 'utf8')) : {schema: 'orch.addon-view/1', generated_at: '2026-11-17T00:00:00Z',
+    blocks: [{type: 'table', columns: [{key: 'schedule', label: 'Ticket', type: 'text'}, {key: 'repeats', label: 'Repeats', type: 'text'}], rows: [
+      row('t_made0001', 'ORCH-101 · Weekly report', {label: 'Run now', action: {op: 'addon.act', args: {verb: 'run', target: 't_made0001'}}}),
+      row('t_sync0001', 'ORCH-102 · Month end', {label: 'Allow on this computer', action: {op: 'addon.allow', args: {target: 't_sync0001'}}})]}]};
   const state = JSON.parse(fs.readFileSync(FIX, 'utf8'));
   delete state._note; delete state.chat_activity; delete state.act_answer;
   state.settings.addons.find(a => a.name === 'automation').dashboard = {};
   const calls = [];
-  const browser = await chromium.launch({args: ['--use-mock-keychain', '--password-store=basic']});
+  const browser = await headless.launch(chromium);
   try {
     const context = await browser.newContext({viewport: {width: 1280, height: 800}});
     await context.route('**/*', async route => {
@@ -40,8 +48,10 @@ test('Run now for own schedule, Allow on this computer for a synced one', {timeo
       }
       if (url.pathname === '/api/events') return route.fulfill({status: 204, body: ''});
       if (url.pathname.startsWith('/api/')) return route.fulfill({status: 404, body: ''});
-      const file = path.join(WEB, url.pathname === '/' ? 'index.html' : path.normalize(url.pathname).replace(/^[/\\]+/, ''));
-      if (!file.startsWith(WEB) || !fs.existsSync(file)) return route.fulfill({status: 404, body: ''});
+      const rel = url.pathname === '/' ? 'index.html' : path.normalize(url.pathname).replace(/^[/\\]+/, '');
+      const kit = rel.startsWith('kit' + path.sep);
+      const file = kit ? path.join(KIT, rel.slice(4)) : path.join(WEB, rel);
+      if (!file.startsWith(kit ? KIT : WEB) || !fs.existsSync(file)) return route.fulfill({status: 404, body: ''});
       return route.fulfill({status: 200, contentType: TYPES[path.extname(file)] || 'application/octet-stream',
         headers: {'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self'"}, body: fs.readFileSync(file)});
     });

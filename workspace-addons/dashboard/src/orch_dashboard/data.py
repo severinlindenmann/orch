@@ -105,7 +105,7 @@ def _child_env(env, orch_bin):
 
 SELF = "orch:self"  # orch.pagesession.SELF: the real server, which runs in the core's own interpreter
 _MISS = object()
-READS = {"process": 0, "here": 0}  # how each read was answered (the timing test counts the processes)
+READS = {"process": 0, "here": 0, "worker": 0}  # how each read was answered (the tests count the processes)
 
 
 def _read_here(orch_bin: str, args: list[str], root: Path):
@@ -149,7 +149,56 @@ def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float =
     return _run_orch(orch_bin, args, root, timeout)
 
 
+# Reads the core allows a person only (workspace Chat). The page reads them for the person who is signed in, so they
+# run without an agent tool's variables: a dashboard started from a helper's shell (a test install, a click-through)
+# would otherwise read them as that helper, be refused and answer 404 (ORCH-383). Clicks do the same (actions).
+_PERSON_READS = (("chat", "sync"), ("chat", "contacts"), ("chat", "thread"))
+
+
+def _person_environ(environ) -> dict | None:
+    """environ without the agent tools' variables (orch.adapters.human_environ); None when that list can not be read
+    (fail closed: the read is not made rather than made as the agent)."""
+    try:
+        from orch.adapters import human_environ
+
+        return human_environ(environ)
+    except Exception:  # noqa: BLE001 - an old orch or a bad adapter file
+        return None
+
+
+def _by_worker(orch_bin: str, args: list[str], root: Path, timeout: float, env: dict):
+    """The real server only: a read orch.reads does not answer goes to this process's read worker (ORCH-634)
+    instead of a new `python -I -P -m orch` per read. _MISS = start the command (an older core, or no worker
+    could answer)."""
+    if orch_bin != SELF or _run is not subprocess.run:  # a test that replaced the process starter: no worker
+        return _MISS
+    try:
+        from orch import readworker
+    except ImportError:
+        return _MISS
+    try:
+        got = readworker.run(root, args, timeout=timeout, environ=env)
+    except Exception:  # noqa: BLE001 - the command gets its chance
+        return _MISS
+    if got is None:
+        return _MISS
+    READS["worker"] += 1
+    code, out = got
+    try:
+        return json.loads(out) if code == 0 else None
+    except ValueError:
+        return None
+
+
 def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
+    env = {**os.environ, "ORCH_ROOT": str(root)}
+    if tuple(args[:2]) in _PERSON_READS:
+        env = _person_environ(env)
+        if env is None:
+            return None
+    got = _by_worker(orch_bin, args, root, timeout, env)
+    if got is not _MISS:
+        return got
     READS["process"] += 1
     try:
         r = _run(
@@ -159,7 +208,7 @@ def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
             capture_output=True,
             text=True,
             timeout=timeout,
-            env=_child_env({**os.environ, "ORCH_ROOT": str(root)}, orch_bin),
+            env=_child_env(env, orch_bin),
         )
         return json.loads(r.stdout) if r.returncode == 0 else None
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -464,6 +513,7 @@ def _mark_tickets(root: Path, tickets: list[dict]) -> None:
     add_proof_state(tickets, root)
     add_artifact_marks(tickets)
     add_quiet(tickets)
+    add_stuck(tickets)
 
 
 def add_proof_state(tickets: list[dict], root: Path | None = None) -> None:
@@ -495,6 +545,56 @@ def add_quiet(tickets: list[dict]) -> None:
             since = None
         if since:
             t["quiet_since"] = since
+
+
+def add_stuck(tickets: list[dict]) -> None:
+    """`stuck` ("question" | "quiet" | "overdue") from the core's one rule (ORCH-189); a stuck helper is added by
+    the page from the run. Not stored."""
+    try:
+        from orch import tickets as core
+    except ImportError:
+        return
+    for t in tickets:
+        t.pop("stuck", None)
+        try:
+            why = core.stuck_why(t)
+        except (TypeError, ValueError, AttributeError):
+            why = None
+        if why:
+            t["stuck"] = why
+
+
+def add_spend(root: Path, tickets: list[dict]) -> None:
+    """`spend` {cost, seconds} on tickets a helper worked on: helper time and money at list price, read from the
+    helpers' conversation files by the core (cached per file). Left out of snapshots (ORCH-189)."""
+    try:
+        from orch import usage
+    except ImportError:
+        return
+    try:
+        got = usage.spend(root, tickets)
+    except (OSError, TypeError, ValueError):
+        return
+    for t in tickets:
+        t.pop("spend", None)
+        if t.get("id") in got:
+            t["spend"] = got[t["id"]]
+    add_range(root, tickets)
+
+
+def add_range(root: Path, tickets: list[dict]) -> None:
+    """`range` ("about 20-40 min · $2.00-$4.00") on tickets nobody has worked on yet: the time and cost range
+    before Start, from this workspace's own finished tickets (the core's usage.estimate_range; ORCH-297)."""
+    try:
+        from orch import usage
+
+        words = usage.range_words(usage.estimate_range(root))
+    except (ImportError, AttributeError, OSError, TypeError, ValueError):
+        words = ""
+    for t in tickets:
+        t.pop("range", None)
+        if words and t.get("status") in ("open", "ready") and not t.get("sessions") and "spend" not in t:
+            t["range"] = words
 
 
 def add_artifact_marks(tickets: list[dict]) -> None:
@@ -542,6 +642,102 @@ def load_general(root: Path) -> dict | None:
             hist = [h for h in hist if mobile.is_chat_entry(h)]  # messages only
             return {"id": t["id"], "history": hist[-200:]}
     return None
+
+
+# Sessions without a ticket (ORCH-364, core sessions.py): the hidden tickets that hold one, in the New menu's order.
+SESSION_TITLES = {
+    "empty": "Empty helper",
+    "chat": "Chat helper",
+    "terminal": "Plain terminal",
+    "manager": "Manager",
+}
+
+
+def _session_kind(t: dict) -> str | None:
+    if t.get("general") is True:
+        return "chat"
+    if t.get("manager") is True:
+        return "manager"
+    return t["session"] if t.get("session") in ("empty", "terminal") else None
+
+
+def load_sessions(root: Path) -> list[dict]:
+    """[{id, kind, title, closed}]: every session without a ticket this workspace made (read from the ticket
+    files, no orch call). Whether a helper's is on comes from its run; the plain terminal is open until closed."""
+    found: dict[str, dict] = {}
+    for f in _json_files(root / ".orch" / "tickets"):
+        t = _load(f)
+        if not (isinstance(t, dict) and isinstance(t.get("id"), str) and t["id"] == f.stem):
+            continue
+        kind = _session_kind(t)
+        if kind and kind not in found:
+            found[kind] = {
+                "id": t["id"],
+                "kind": kind,
+                "title": SESSION_TITLES[kind],
+                "closed": bool(t.get("closed_at")),
+            }
+            if kind == "empty":
+                found[kind]["model"] = _next_model(t)
+    return [found[k] for k in SESSION_TITLES if k in found]
+
+
+def load_session_modes(root: Path, sessions: list[dict]) -> dict | None:
+    """ORCH-818: {kind: {current, label, choices: [{mode, label, allowed}], full_warned, running, running_label}}
+    for the Manager, Empty helper and Chat helper: the Start choice's permission row and the pane header's mode
+    in words (core sessionmode.py). None when this orch has no such modes or no tool (the row is left out)."""
+    try:
+        from orch import adapters, sessionmode
+        from orch import runs as core_runs
+    except ImportError:
+        return None
+    try:
+        name = adapters.chosen(root)
+    except Exception:  # noqa: BLE001 - no tool here: nothing to choose
+        return None
+    ids = {s["kind"]: s["id"] for s in sessions}
+    out = {}
+    for kind in sessionmode.KINDS:
+        try:
+            row = sessionmode.offer(root, kind, name)
+            run = None
+            if kind in ids and core_runs.running(root, ids[kind]):
+                v = (core_runs.read(root, ids[kind]) or {}).get("permissions")
+                run = v if v in sessionmode.RANK else None
+            row["running"] = run
+            row["running_label"] = sessionmode.label(name, run, root) if run else None
+        except Exception:  # noqa: BLE001, S112 - one kind that cannot be read shows no row
+            continue
+        out[kind] = row
+    return out
+
+
+def _next_model(t: dict) -> str | None:
+    """The model the Empty helper starts on (or runs on): the New menu shows and preselects it (ORCH-710)."""
+    try:
+        from orch import tickets as core
+
+        return core.next_model(t)
+    except Exception:  # noqa: BLE001 - an older core: the page shows no model
+        return None
+
+
+def shape_sessions(sessions: list[dict], runs: dict) -> list[dict]:
+    """[{id, kind, title, open, model?}] for the bar and the wall: a helper is open while its session runs; the
+    Empty helper says the model it starts on."""
+    out = []
+    for s in sessions:
+        on = (runs.get(s["id"]) or {}).get("running") is True
+        out.append(
+            {
+                "id": s["id"],
+                "kind": s["kind"],
+                "title": s["title"],
+                "open": not s["closed"] if s["kind"] == "terminal" else on,
+                **({"model": s["model"]} if s.get("model") else {}),
+            }
+        )
+    return out
 
 
 def load_chat(root: Path, orch_bin: str | None) -> dict | None:
@@ -787,14 +983,14 @@ def _consent(r: dict) -> str:
     lines = [desc, head] if desc else [head]
     if r.get("source") == "local":
         lines.append("Source: local folder (not checked by orch). It runs code on this computer.")
-    lines.append(f"Adds the command: orch {name}")
-    lines.append(f"Adds a skill and an entry in the local orch instructions: orch-{name}")
+    lines.append(f"Lets helpers and you use it from the terminal: orch {name}")
+    lines.append("Teaches your helpers how to use it.")
     if r.get("ticket_view"):
-        lines.append(f"Stores data on tickets under: ext.{name}")
+        lines.append("Keeps some extra information on your tickets.")
     if d and isinstance(d.get("label"), str):
         lines.append(f"Adds a dashboard tab: {d['label']}")
     if r.get("background"):
-        lines.append("Runs a background process.")
+        lines.append("Keeps running in the background while it is on.")
     return "\n".join(lines)[:1200]
 
 
@@ -887,11 +1083,13 @@ def _ws_tags(root: Path) -> list[str]:
 
 def load_settings(root: Path, orch_bin: str | None) -> dict:
     """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
-    agents, rows = (
-        run_orch(orch_bin, ["agents", "--json"], root),
-        run_orch(orch_bin, ["addon", "list", "--json"], root),
-    )
-    private = run_orch(orch_bin, ["private", "--json"], root)
+    # the four `orch ... --json` reads side by side (one after the other they took seconds with helpers running)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        f_agents = pool.submit(run_orch, orch_bin, ["agents", "--json"], root)
+        f_rows = pool.submit(run_orch, orch_bin, ["addon", "list", "--json"], root)
+        f_private = pool.submit(run_orch, orch_bin, ["private", "--json"], root)
+        f_perm = pool.submit(run_orch, orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
+    agents, rows, private = f_agents.result(), f_rows.result(), f_private.result()
     private = private if isinstance(private, dict) else {}
     private_lines = private.get("lines")
     git_private = {
@@ -919,16 +1117,18 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
             and re.fullmatch(r"[0-9a-f]{64}", str(x.get("key")))
         ],
     }
-    keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")
-    perm = run_orch(orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
+    keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen", "models")
+    perm = f_perm.result()
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
     from orch.config import (
         agents_may_finish,
+        auto_reviewer_on,
         copies_max,
         copies_mode,
         copy_setup,
         diag_enabled,
         focus_session_typing,
+        focus_terminal_typing,
         live_max,
         release_merge_on,
         reviewer_on,
@@ -948,6 +1148,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     return {
         "agents_may_finish": agents_may_finish(root),
         "release_merge_on": release_merge_on(root),  # Settings: "Merge releases without my click"
+        "auto_reviewer_on": auto_reviewer_on(root),  # ORCH-424: new tickets start without human review
         "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)
         "copies": copies_mode(root),
         "copies_max": copies_max(root),
@@ -957,6 +1158,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "ws_description": workspace_description(root) or "",
         "ws_tags": _ws_tags(root),  # the workspace's own tags (Settings > Workspace profile)
         "typing_on": focus_session_typing(root),  # Settings > Add-ons: "Let me type into the helper's screen"
+        "terminal_typing_on": focus_terminal_typing(root),  # "Let me type into the plain terminal" (ORCH-261)
         "diag_enabled": diag_enabled(root),  # the debug log switch (Settings > Report a problem)
         "diag": _diag_stats(root),
         "copies_disk": copies_disk(root),
@@ -978,6 +1180,12 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
                 "consent": _consent(r),
                 "detail": _addon_detail(root, r["name"]),
                 "removable": r["name"] not in _core_addons(),  # core says: part of orch, only turned off
+                # the add-on page of a live-session add-on carries the Typing switch
+                **(
+                    {"page": {"live_session": True}}
+                    if isinstance(r.get("page"), dict) and r["page"].get("live_session") is True
+                    else {}
+                ),
             }
             for r in _addon_rows(rows)
             if r.get("installed") is not False
@@ -1040,7 +1248,12 @@ RUNS_MAX = 30
 
 
 def load_runs(
-    root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool = False, some: bool = False
+    root: Path,
+    orch_bin: str | None,
+    tickets: list[dict],
+    fresh: bool = False,
+    some: bool = False,
+    extra: list[str] | None = None,
 ) -> dict[str, dict]:
     """Run status for tickets that can have a run (not done or dropped, or with a claim file), from `orch run status <id> --json`.
     Cached for a few seconds so the 3 s page poll costs nothing; an action's reply passes fresh=True.
@@ -1056,11 +1269,9 @@ def load_runs(
             _RUN_SIGNATURES[str(root)] = signature
     claims = root / ".orch" / "run" / "tickets"  # a done ticket can still have its live session open
     ids = [t["id"] for t in tickets if t["status"] not in ("done", "dropped")][:RUNS_MAX]
-    ids += [
-        t["id"]
-        for t in tickets
-        if t["status"] in ("done", "dropped") and (claims / f"{t['id']}.json").exists()
-    ]
+    first = set(ids)  # every ticket with a run claim too: a live session past the first RUNS_MAX (ORCH-359)
+    ids += [t["id"] for t in tickets if t["id"] not in first and (claims / f"{t['id']}.json").exists()]
+    ids += [i for i in extra or [] if i not in ids]  # sessions without a ticket (their tickets are hidden)
     now = time.monotonic()
     todo = [
         i for i in ids if fresh or (str(root), i) not in _RUNS or now - _RUNS[(str(root), i)][0] > RUNS_TTL
@@ -1069,6 +1280,10 @@ def load_runs(
         # one process for all tickets (a process per ticket was most of the idle cost of an open page)
         batch = run_orch(orch_bin, ["run", "status", *todo, "--json"], root, timeout=5.0 + 0.5 * len(todo))
         rows = batch.get("runs") if isinstance(batch, dict) else None
+        if rows is None and len(todo) == 1 and isinstance(batch, dict) and batch:
+            rows = {
+                todo[0]: batch
+            }  # one ticket: the core answers its run itself, not {runs: {...}} (ORCH-884)
         rows = rows if isinstance(rows, dict) else {}
         got = [
             rows.get(i) if isinstance(rows.get(i), dict) and "error" not in rows[i] else None for i in todo
@@ -1201,11 +1416,40 @@ def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dic
             for x in tickets
         ]
     out["tickets"] = tickets
+    # ORCH-1047: a question of this ticket that is no longer open (answered, taken back) leaves the needs list at
+    # once; the cached list would bring an answered question back on Home until the background build runs, and a
+    # click on it is refused ("q1 is already answered.").
+    open_qs = {
+        q.get("id") for q in raw.get("questions") or [] if isinstance(q, dict) and q.get("answer") is None
+    }
+    mine = f"core:q:{tid}:"
+    out["needs"] = [
+        n
+        for n in state.get("needs") or []
+        if not (
+            isinstance(n, dict)
+            and str(n.get("id", "")).startswith(mine)
+            and n["id"][len(mine) :] not in open_qs
+        )
+    ]
     out["runs"] = {k: v for k, v in (state.get("runs") or {}).items() if k != tid}
     if runs.get(tid):
         out["runs"][tid] = runs[tid]
     add_warmth(root, [t], out["runs"])
     out["review"] = review
+    out["now"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    out["rev"] = state_rev(out)
+    return out
+
+
+def patch_settings(root: Path, orch_bin: str | None, state: dict, op: str) -> dict:
+    """A Settings click's answer (ORCH-227): the last full state with the Settings values read again (and Mobile
+    mode for a phone choice); everything else stays until the background build replaces it. Before, every choice
+    waited for a full build and the page showed the old choice for 4 to 12 s."""
+    out = dict(state)
+    out["settings"] = load_settings(root, orch_bin)
+    if op.startswith("mobile."):
+        out["mobile_mode"] = mobile.load_mobile(root, orch_bin)
     out["now"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     out["rev"] = state_rev(out)
     return out
@@ -1229,6 +1473,7 @@ def load_state(
         # the cards and decisions are for the live page only (a snapshot is shared and carries none)
         f_review = pool.submit(load_review, root, orch_bin) if with_settings else None
         f_general = pool.submit(load_general, root) if with_addons else None
+        f_sessions = pool.submit(load_sessions, root) if with_settings else None
         f_chat = pool.submit(load_chat, root, orch_bin) if with_addons else None
         f_services = pool.submit(load_services, root, orch_bin) if with_addons else None
         f_groups = pool.submit(mobile.load_groups, root, orch_bin) if with_addons else None
@@ -1241,6 +1486,8 @@ def load_state(
     if not with_addons:
         for t in tickets:
             t.pop("ext", None)
+    else:
+        add_spend(root, tickets)
     _shape_refs(root, tickets, with_settings)
     kinds = link_kinds(raw) if with_addons else []
     if with_settings:
@@ -1250,7 +1497,8 @@ def load_state(
     general = f_general.result() if f_general else None
     chat = f_chat.result() if f_chat else None
     services = f_services.result() if f_services else []
-    runs = load_runs(root, orch_bin, tickets, fresh) if with_addons else {}
+    sessions = f_sessions.result() if f_sessions else []
+    runs = load_runs(root, orch_bin, tickets, fresh, extra=[x["id"] for x in sessions]) if with_addons else {}
     groups = f_groups.result() if f_groups else None
     mobile_mode = f_mobile.result() if f_mobile else None
     look_ = f_look.result() if f_look else None
@@ -1274,16 +1522,23 @@ def load_state(
         "review": f_review.result() if f_review else {"cards": [], "answered": [], "accepted": []},
         "services": services,  # snapshots name no add-on
         "runs": runs,
+        # Sessions without a ticket (ORCH-364): empty helper, chat helper, plain terminal, Manager; live page only
+        "sessions": shape_sessions(sessions, runs),
+        # ORCH-818: the permission row of the Start choice and the pane header's mode; live page only
+        "session_modes": load_session_modes(root, sessions) if with_settings else None,
         "groups": groups,  # group chats; snapshots carry none
         "mobile_mode": mobile_mode,  # the live page only, never a snapshot
         "look": look_,  # the live page only, never a snapshot
         "settings": settings,  # only the live local server: it holds the folder path
         # Home: the note after an automatic update (new version and what changed, or why it failed); live page only
         "auto_update_note": _auto_update_note() if with_settings else None,
+        "update_check": _update_check() if with_settings else None,
         # Where this orch came from ('release' / 'development'): the top bar marks a development build; live page only
         "build": _build() if with_settings else None,
         # Home and Settings > Helper: what helpers need (tool logins, connections, keys); live page only
         "logins": load_logins(root) if with_settings else None,
+        # Home: tickets waiting in line for a helper and why none starts now (ORCH-266); live page only
+        "start_line": start_line(root) if with_settings else None,
     }
     add_warmth(root, tickets, state["runs"])
     state["rev"] = state_rev(state)
@@ -1318,6 +1573,10 @@ def load_logins(root: Path) -> dict | None:
         # ORCH-48: what the person does to renew when orch cannot start the sign-in (plain text, one line)
         if isinstance(r.get("how"), str) and re.fullmatch(r"[^\x00-\x1f\x7f<>]{1,160}", r["how"]):
             row["how"] = r["how"]
+        # ORCH-218: the terminal command that signs in again, shown with a Copy button (never run)
+        sign_in = r.get("sign_in")
+        if isinstance(sign_in, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._:=/@,'\"+-]{0,119}", sign_in):
+            row["sign_in"] = sign_in
         row["stops"] = [
             {"id": t.get("id"), "key": t.get("key"), "title": t.get("title")}
             for t in (r.get("stops") or [])
@@ -1333,10 +1592,26 @@ def _build() -> str | None:
     return update.build()
 
 
+def start_line(root: Path) -> dict | None:
+    """{"waiting": [ticket ids], "why": plain reason or None, "limit": n or None}, or None when nothing waits."""
+    try:
+        from orch import runs_live
+
+        return runs_live.line_status(root)
+    except Exception:  # noqa: BLE001 - an older orch or an unreadable line: Home simply shows no line
+        return None
+
+
 def _auto_update_note() -> dict | None:
     from . import update
 
     return update.auto_note()
+
+
+def _update_check() -> dict | None:
+    from . import update
+
+    return update.check_card()
 
 
 def hide_unset_sharing(addons: list[dict], root: Path, orch_bin: str | None) -> list[dict]:

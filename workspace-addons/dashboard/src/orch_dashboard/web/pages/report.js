@@ -6,7 +6,7 @@
 // Nothing leaves this computer unless the workspace is connected to a relay AND the person ticks "Send this report":
 // then the same report goes to that relay's admin. The hand-off to a helper puts one line into the helper chat's
 // message box; it never sends it by itself.
-const reportUi = {busy:false};
+const reportUi = {busy:false, draft:null};  // draft: what was typed when the dialog closed without a report (Escape), kept for the next open (ORCH-242)
 const REPORT_FILES = 10, REPORT_FILE_BYTES = 8 * 1024 * 1024, REPORT_FILES_BYTES = 25 * 1024 * 1024;
 // The connected relay's host name, or '' (no relay, not turned on, not connected: the dialog then never mentions it).
 function reportRelay() {
@@ -63,7 +63,9 @@ function reportScope() {
   return {label:'this workspace'};
 }
 // The page as it is now, for the helper: no scripts or styles, every typed value masked, add-on frames and pictures
-// left out. (A real screenshot needs a library; this snapshot needs none.)
+// left out. (A real screenshot needs a library; this snapshot needs none.) Taken when the dialog opens, so it is the
+// screen the person reports, not the one the page redrew to while they typed (ORCH-1117: the saved page held the
+// whole add-on list that their picture showed empty). The first line says when and how big the window was.
 function reportPageSnapshot() {
   const clone = document.documentElement.cloneNode(true);
   clone.querySelectorAll('script,style,link,dialog,iframe,img,video,audio,canvas').forEach(n => n.remove());
@@ -74,7 +76,9 @@ function reportPageSnapshot() {
   clone.querySelectorAll('[contenteditable]').forEach(n => { n.textContent = '[masked]'; });
   // the page's own data-* hooks (data-key="heading") say nothing to a helper and read like "key=value" to the secret check
   clone.querySelectorAll('*').forEach(n => { for (const name of n.getAttributeNames()) if (name.startsWith('data-')) n.removeAttribute(name); });
-  return ('<!doctype html>\n' + clone.outerHTML).slice(0, 1500000);
+  const seen = '<!-- orch: the page when Report a problem was opened, ' + new Date().toISOString() + '; window ' + window.innerWidth + 'x' + window.innerHeight +
+    ' px, scrolled ' + Math.round(window.scrollX) + ',' + Math.round(window.scrollY) + ', zoom ' + Math.round((window.devicePixelRatio || 1) * 100) + '% -->';
+  return ('<!doctype html>\n' + seen + '\n' + clone.outerHTML).slice(0, 1500000);
 }
 // The checks' own names are ids; the good news line reads them as plain words.
 const REPORT_NAMES = {clock_skew:'Clock', dead_lock_holder:'Locks', diag_dropped:'Debug log', disk_low:'Disk space', hook_lines_missing:'Helper reminders',
@@ -95,6 +99,7 @@ function reportChecks(checks) {
 function reportOpen() {
   if (snapshot || reportUi.busy) return;
   const scope = reportScope();
+  const seen = reportPageSnapshot();  // before the dialog: what the person is looking at
   const {d, actions} = dialog('Report a problem', 'dialog report-dialog', 'report');
   const body = h('div', {className:'stack-sm'});
   const happened = h('input', {type:'text', className:'input', maxLength:600, placeholder:'For example: stuck since 10:00, nothing happens', 'data-key':'report-happened'});
@@ -105,12 +110,19 @@ function reportOpen() {
   const added = reportFiles(d);
   const relay = reportRelay();
   const share = h('input', {type:'checkbox', 'data-key':'report-share'});
-  const field = (label, input) => h('label', {className:'field'}, h('span', {}, h('span', {}, label), ' ', h('span', {className:'meta'}, '(optional)')), input);
+  // Every limited field shows its limit and how much is used (ORCH-242: the box used to cut text without a word).
+  const counter = input => {
+    const note = h('span', {className:'meta', 'data-key':'report-count'});
+    const show = () => { note.textContent = input.value.length + ' / ' + input.maxLength; };
+    input.addEventListener('input', show); show();
+    return note;
+  };
+  const field = (label, input) => h('label', {className:'field'}, h('span', {}, h('span', {}, label), ' ', h('span', {className:'meta'}, '(optional)')), input, counter(input));
   const happenedField = field('What happened?', happened), expectedField = field('What did you expect?', expected);
-  const sent = relay ? 'Nothing is sent unless you tick the last box.' : 'Nothing is sent.';
+  const sent = relay ? 'It stays on this computer unless you tick the last box.' : 'It stays on this computer.';
   const intro = h('p', {className:'muted', 'data-key':'report-intro'});
   const pictureRow = h('label', {className:'check-label'}, picture, ' Add a picture of this page');
-  const pictureHint = h('p', {className:'meta'}, 'The picture can show ticket text.');
+  const pictureHint = h('p', {className:'meta'}, 'The picture can show ticket text. These two boxes only decide what goes into the saved report.');
   const contentRow = h('label', {className:'check-label'}, content, ' Include ticket text and helper conversation');
   let about = 'problem';
   const words = () => {  // the same dialog for both kinds; only the words and the defaults change
@@ -132,6 +144,15 @@ function reportOpen() {
       return h('label', {}, input, h('span', {}, label));
     }));
   words();
+  const draft = reportUi.draft;
+  if (draft) {  // the text from a closed dialog comes back
+    happened.value = draft.happened; expected.value = draft.expected; more.value = draft.more;
+    if (draft.about !== about) { about = draft.about; words(); for (const r of kind.querySelectorAll('input')) r.checked = r.value === about; }
+    for (const i of [happened, expected, more]) i.dispatchEvent(new Event('input'));
+  }
+  const keep = () => { reportUi.draft = {happened:happened.value, expected:expected.value, more:more.value, about}; };
+  for (const i of [happened, expected, more]) i.addEventListener('input', keep);
+  kind.addEventListener('change', keep);
   body.append(...[kind, intro,
     happenedField, expectedField, field('Anything else?', more), ...added.nodes,
     pictureRow, pictureHint, contentRow,
@@ -148,11 +169,12 @@ function reportOpen() {
     try {
       const payload = {ticket:scope.ticket, addon:scope.addon, note:happened.value.trim() || undefined, expected:expected.value.trim() || undefined,
         more:more.value.trim() || undefined, files:added.count() ? await added.read() : undefined, share:sharing || undefined,
-        content:content.checked, page:picture.checked && content.checked ? reportPageSnapshot() : undefined, about};
+        content:content.checked, page:picture.checked && content.checked ? seen : undefined, about};
       const res = await fetch('/api/diag/report', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
       if (res.ok) result = await res.json(); else failure = window.DashHelpers.scrubText(await res.text()) || failure;
     } catch (_) { /* the plain failure text stands */ }
     reportUi.busy = false;
+    if (result) reportUi.draft = null;  // made: the next dialog starts empty
     if (!d.isConnected) return;
     if (!result) { window.orch.toast(failure, 'error'); await window.orch.close(d); return; }
     reportReady(d, actions, body, result);

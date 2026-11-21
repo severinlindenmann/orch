@@ -131,30 +131,130 @@
       c.classList.add('f-attention'); return c;
     });
   }
-  // The crew's results that wait for your Looks good: one card, one link per result (each opens its own ticket, where
-  // the check is your own click). Nothing is checked from here.
-  const results = order => array(order.results).filter(r => validId(r?.ticket));
-  function resultsCard(order, withOrder) {
-    const rows = results(order);
-    const c = card(order.title, node('h3', plural(rows.length, 'result', 'results') + ' built, waiting for your Looks good'),
-      group('stack', ...rows.map((r, i) => link((rows.length > 1 ? 'Look at ' : 'Look at the result: ') + text(r.title), '/#ticket/' + r.ticket, i === 0))),
-      ...(withOrder ? [tail(orderLink(order, 'Review order'))] : []));
-    // Two or more results: one click is the same Looks good on each ticket (only inside the dashboard, which does it).
-    if (rows.length > 1 && embedded()) {
-      const all = node('button', 'Looks good, all', 'btn outline sm f-btn'); all.type = 'button';
-      const problem = meta(''); problem.setAttribute('role', 'alert'); problem.hidden = true;
-      all.addEventListener('click', async () => {
-        all.disabled = true; problem.hidden = true;
-        const result = await askDashboard({type: 'orch.looksgood', tickets: rows.map(r => r.ticket)});
-        if (result.error === undefined) return render();
-        problem.textContent = result.error || 'Looks good could not be saved. Try again.'; problem.hidden = false; all.disabled = false;
-      });
-      c.append(tail(all), problem);
+  // One review per stage (ORCH-335, owner 17 Nov): the stage's built result in a few lines (pictures of the built
+  // screens, a short demo, the tests, whether the code is merged) and ONE Looks good / Change for the whole stage.
+  // The pictures open big in the kit's result overlay; nothing here opens a ticket.
+  // Results you just said Looks good to stay away even when the page's next answer is a slow, older one (ORCH-419).
+  const answered = new Set();
+  const reviews = order => array(order.reviews).filter(r => array(r?.tickets).some(t => validId(t) && !answered.has(t)));
+  const RESULT_NAME = /^[A-Za-z0-9._-]{1,80}\.(png|jpg|jpeg|webp|gif|mp4|webm)$/;
+  function resultSrc(order, file) {
+    if (!file || !validId(order.id) || !validId(file.ticket) || !RESULT_NAME.test(String(file.name)) || String(file.name).includes('..')) return null;
+    const src = prefix + '/api/order/' + order.id + '/result/' + file.ticket + '/' + encodeURIComponent(file.name);
+    return window.OrchFrame ? window.OrchFrame.url(src) : src;  // the frame pass in the dashboard's sandboxed frame
+  }
+  function shown(order, review) {
+    const items = [];
+    const demo = review.demo, demoSrc = resultSrc(order, demo);
+    if (demoSrc) items.push(/\.gif$/i.test(demo.name)
+      ? {type: 'picture', name: 'Short demo', src: demoSrc, alt: 'Short demo of ' + text(demo.title || 'the built screens'), meta: 'Demo', demo: true}
+      : {type: 'video', name: 'Short demo', src: demoSrc, meta: 'Demo', demo: true});
+    for (const pic of array(review.pictures)) {
+      const src = resultSrc(order, pic);
+      if (src) items.push({type: 'picture', name: text(pic.title || pic.task), src, alt: text(pic.title || pic.task) + ' · ' + text(pic.task), meta: text(pic.task), ticket: pic.ticket});
     }
+    return items;
+  }
+  function factPill(kind, words) { const el = node('span', null, kind ? 'pill ' + kind : 'pill'); el.append(node('span', words)); return el; }
+  // A task's (or the stage's) facts as pills: tests passed / failed, merged / not merged yet (no code: no pill).
+  function facts(tests, code) {
+    const failed = Number(tests?.failed) || 0, passed = Number(tests?.passed) || 0;
+    const merged = Number(code?.merged) || 0, waiting = Number(code?.waiting) || 0;
+    const out = [failed ? factPill('failed', plural(failed, 'test failed', 'tests failed')) : passed ? factPill('done', 'Tests passed') : factPill('', 'No tests recorded')];
+    if (waiting) out.push(factPill('working', 'Not merged yet'));
+    else if (merged) out.push(factPill('done', 'Merged'));
+    return group('row', ...out);
+  }
+  // A small picture that opens the stage's pictures big (kit overlay, arrows through all of them).
+  function thumb(items, index, label) {
+    const b = node('button', null, 'btn ghost'); b.type = 'button'; b.setAttribute('aria-label', label);
+    const img = node('img', null, 'thumbnail'); img.alt = ''; img.loading = 'lazy'; img.src = items[index].src;
+    img.addEventListener('error', () => img.replaceWith(meta('No picture')), {once: true});
+    b.append(img);
+    b.addEventListener('click', () => { if (window.UI && UI.resultOverlay) UI.resultOverlay(items, index); });
+    return b;
+  }
+  // The stage's result in a few lines: the short demo, then one row per built task (a picture, what it is, its
+  // tests and whether it is merged), the stage together, and ONE Looks good / Change. No per-task ticket button.
+  function reviewCard(order, review, withOrder) {
+    const tickets = array(review.tickets).filter(validId), tasks = array(review.tasks);
+    const c = card(stageName(order, review.stage) + ': what your crew built',
+      meta(withOrder ? text(order.title) + ' · ' + plural(tasks.length, 'task', 'tasks') + ' built' : plural(tasks.length, 'task', 'tasks') + ' built'));
+    const items = shown(order, review), rows = group('card f-review-rows');
+    const demoAt = items.findIndex(x => x.demo);
+    if (demoAt >= 0) {
+      const posterAt = items.findIndex(x => !x.demo);
+      const play = node('button', 'Play the demo', 'btn outline sm'); play.type = 'button';
+      play.addEventListener('click', () => { if (window.UI && UI.resultOverlay) UI.resultOverlay(items, demoAt); });
+      rows.append(group('list-row', ...(posterAt >= 0 ? [thumb(items, posterAt, 'Open the short demo')] : []),
+        group('grow stack', node('strong', 'Short demo'), meta('A few seconds of the built screens in use.'), group('actions', play))));
+    }
+    for (const task of tasks) {
+      const at = items.findIndex(x => x.ticket === task.ticket && !x.demo);
+      const failing = array(review.tests?.failing).filter(f => f.task === task.title).map(f => text(f.step));
+      rows.append(group('list-row', at >= 0 ? thumb(items, at, 'Open the pictures of ' + text(task.title)) : meta('No picture'),
+        group('grow stack', node('strong', task.title), ...(failing.length ? [meta('Failed: ' + failing.join('; '))] : []),
+          facts(task.tests, task.code))));
+    }
+    c.append(rows);
+    if (!items.length) c.append(meta('Nothing to show: no pictures or demo were added to this stage.'));
+    if (tasks.length > 1) c.append(group('row', meta('Together:'), facts(review.tests, review.code)));
+    c.append(reviewActions(order, review, tickets, withOrder ? [orderLink(order, 'Review order')] : []));
     c.classList.add('f-attention'); return c;
   }
+  // Looks good = the same Looks good as on each ticket, for all of the stage's results at once (the dashboard does it).
+  // Change = your words to the helper on the order ("Change at <stage>: ..."), sent as your own message.
+  function reviewActions(order, review, tickets, more = []) {
+    const box = group('stack f-review-actions');
+    if (!embedded() || !validId(order.id)) { box.append(meta('Open Factory in the dashboard to say Looks good or ask for a change with one click.'), ...(more.length ? [tail(...more)] : [])); return box; }
+    const ok = node('button', 'Looks good', 'btn primary'); ok.type = 'button';
+    const change = node('button', 'Change', 'btn outline sm'); change.type = 'button';
+    const buttons = group('actions', ok, change, ...more);
+    const area = node('textarea', null, 'text-input'); area.rows = 3; area.maxLength = NOTE_MAX; area.style.width = '100%';
+    const label = node('label', 'What should change?'); label.append(area);
+    const send = node('button', 'Send', 'btn primary sm'); send.type = 'button';
+    const back = node('button', 'Cancel', 'btn ghost sm'); back.type = 'button';
+    const changeBox = group('stack', label, group('actions', send, back)); changeBox.hidden = true;
+    const status = meta(''); status.setAttribute('role', 'status'); status.hidden = true;
+    const say = words => { status.textContent = words; status.hidden = false; };
+    ok.addEventListener('click', async () => {
+      ok.disabled = change.disabled = true; say('Saving…');  // the click shows at once (ORCH-419)
+      const result = await askDashboard({type: 'orch.looksgood', tickets}, 20000);
+      if (result.error === undefined) { for (const t of tickets) answered.add(t); return render(); }
+      say(result.error || 'Looks good could not be saved. Reload the page and try again.'); ok.disabled = change.disabled = false;
+    });
+    change.addEventListener('click', () => { buttons.hidden = true; changeBox.hidden = false; area.focus(); });
+    back.addEventListener('click', () => { changeBox.hidden = true; buttons.hidden = false; change.focus(); });
+    send.addEventListener('click', async () => {
+      const words = area.value.trim();
+      if (!words) { area.focus(); return; }
+      send.disabled = true; status.hidden = true;
+      const result = await toAgent(order.id, 'Change at ' + stageName(order, review.stage) + ': ' + words);
+      send.disabled = false;
+      if (result.error !== undefined) { say((result.error || "That didn't work.") + ' Nothing was sent.'); return; }
+      area.value = ''; changeBox.hidden = true; buttons.hidden = false;
+      say('Sent. Your helper changes it and shows you the new result here.');
+    });
+    box.append(buttons, changeBox, status);
+    return box;
+  }
   // The run goes on by itself; until its next step has started, say so instead of showing nothing.
-  const startingNote = order => order.starting ? [meta('Starting the ' + stageName(order, order.starting) + ' stage…')] : [];
+  const startingNote = order => order.starting && !waitWords(order) ? [meta('Starting the ' + stageName(order, order.starting) + ' stage…')] : [];
+  // Why no helper works on a started run right now (ORCH-277): the server says what holds it, the page words it.
+  // "starting" is said by startingNote; null = a helper works on it.
+  function waitWords(order) {
+    const w = order.waiting, task = w && w.task ? ' · ' + text(w.task) : '';
+    if (!w || typeof w !== 'object' || w.kind === 'starting') return '';
+    // one line: why nothing moves, then what moves it on (owner, ORCH-277)
+    if (w.kind === 'you') return 'Nothing moves on until you answer' + task + '. Your answer moves it on.';
+    if (w.kind === 'time' && parseWhen(w.until)) return 'Waiting until ' + when(w.until) + task + '. It goes on by itself then.';
+    if (w.kind === 'time' || w.kind === 'ticket') return 'Waiting for another task to finish' + task + '. It goes on by itself then.';
+    if (w.kind === 'held') return 'Your helper has not started yet' + (w.why ? ': ' + noIso(w.why) : '.');
+    if (w.kind === 'watcher') return 'Nothing moves on: the Factory watcher is off. Start orch on this computer again to move it on.';
+    if (w.kind === 'stuck') return 'No helper is working on it, and starting it again did not help. Write to your helper on the order to move it on.';
+    return 'No helper is working on it right now. Factory starts your helper again in a few minutes.';
+  }
+  const waitNote = order => { const words = waitWords(order); return words ? [meta(words)] : []; };
   function answer(order) {
     return group('stack', group('actions', decide(order)), meta(embedded() && order.open ? 'Your answer opens in a card here, where orch confirms it\'s you.' : "You answer on the order's ticket, where orch confirms it's you."));
   }
@@ -241,7 +341,8 @@
     }
     else if (d.type === 'orch.ask.done' && ['delivered', 'queued', 'partial'].includes(d.state)) asked.get(d.id)({state: d.state, said: typeof d.said === 'string' ? d.said.slice(0, 300) : ''});
     else if (d.type === 'orch.looksgood.done') asked.get(d.id)({moved: Number.isInteger(d.moved) ? d.moved : 0});
-    else if (d.type === 'orch.idea.failed' || d.type === 'orch.send.failed' || d.type === 'orch.ask.failed' || d.type === 'orch.looksgood.failed') asked.get(d.id)({error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
+    else if (d.type === 'orch.start.done' && validQuestion(d.question)) asked.get(d.id)({question: d.question});
+    else if (d.type === 'orch.idea.failed' || d.type === 'orch.send.failed' || d.type === 'orch.ask.failed' || d.type === 'orch.looksgood.failed' || d.type === 'orch.start.failed') asked.get(d.id)({error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
   });
   function askDashboard(message, wait = 30000) {
     return new Promise(resolve => {
@@ -259,6 +360,23 @@
   // (its own proven "send to the agent" click, the same as typing on the ticket) and starts the agent when none works.
   const PLAN_TEXT = 'Now plan the run: propose the whole run for this order (orch factory propose).';
   const toAgent = (order, words) => askDashboard({type: 'orch.send', ticket: order, text: words});
+  // Start on a parked order (ORCH-277): one click asks the dashboard to run the add-on's start act as YOU; Factory asks
+  // the same proposal again and the dashboard opens that question in its own card, where you press Start.
+  function parkedCard(order) {
+    const c = card('Saved for later', meta('You said Not now to this run. Start it when you are ready.'));
+    if (!embedded() || !validId(order.id)) { c.append(meta('Open Factory in the dashboard to start it with one click.')); return c; }
+    const go = node('button', 'Start', 'btn primary'); go.type = 'button';
+    const status = node('p', null, 'meta'); status.setAttribute('role', 'status'); status.hidden = true;
+    go.addEventListener('click', async () => {
+      go.disabled = true; status.hidden = true;
+      const result = await askDashboard({type: 'orch.start', order: order.id});
+      go.disabled = false;
+      if (result.question) { render(); return; }
+      status.textContent = (result.error ? result.error + ' ' : "That didn't work. ") + 'Nothing was changed.'; status.hidden = false;
+    });
+    c.append(tail(go), status);
+    return c;
+  }
   function draftActions(order, onSent) {
     const box = group('stack f-draft-actions');
     if (!validId(order.id)) return box;
@@ -340,7 +458,7 @@
   }
   function home(data) {
     const orders = array(data.orders), auto = data.autopilot;
-    const needing = orders.filter(o => o.open || draftWaiting(o) || results(o).length);
+    const needing = orders.filter(o => o.open || draftWaiting(o) || reviews(o).length);
     const minutes = needing.reduce((sum, o) => sum + (o.open && Number.isFinite(Number(o.owner_min)) && o.owner_min !== null ? Number(o.owner_min) : 0), 0);
     view.append(heading('Factory', needing.length
       ? plural(needing.length, 'Factory item waits for you', 'Factory items wait for you') + (minutes ? ' · about ' + minutes + ' min of your time' : '')
@@ -363,9 +481,9 @@
           tail(decide(o, 'Answer', true), orderLink(o, 'Review order')));
         c.classList.add('f-attention'); return c;
       }],
-      ['results', orders.filter(o => results(o).length), o => resultsCard(o, true)],
+      ['results', orders.filter(o => reviews(o).length), o => reviews(o).map(r => reviewCard(o, r, true))],
     ];
-    const waiting = kinds.flatMap(([, rows, paint]) => rows.map(paint));
+    const waiting = kinds.flatMap(([, rows, paint]) => rows.flatMap(paint));
     if (waiting.length) {
       const block = node('section', null, 'f-section f-waits');
       const mark = badge('Waits for you'); mark.classList.add('attn');
@@ -388,7 +506,7 @@
     const running = orders.filter(o => o.phase === 'started');
     section(primary, 'Running', running, o => o.kind === 'autopilot'
       ? card(o.title, meta('Autopilot order'), p('Routine stops answered by your agent · Ship still asks you'), tail(link('What it decided', '#/autopilot')))
-      : card(o.title, stages(o), ...startingNote(o), budget(o), ...(o.eta ? [meta('ETA ' + when(o.eta))] : []), tail(orderLink(o))));
+      : card(o.title, stages(o), ...waitNote(o), ...startingNote(o), budget(o), ...(o.eta ? [meta('ETA ' + when(o.eta))] : []), tail(orderLink(o))));
     // The summary contract has no shipped timestamp. Do not infer a week from due dates.
     const shipped = orders.filter(o => o.phase === 'shipped');
     section(secondary, 'Shipped', shipped, o => card('✓ ' + text(o.title), badge('Shipped'), tail(orderLink(o))));
@@ -428,9 +546,25 @@
   }
   const mayDecide = {routine: 'Routine improvements', taste: 'Taste decisions within your house rules'};
   const alwaysAsks = ['Shipping: the final Ship stop.', 'Anything that cannot be undone.', 'Scope changes and budget beyond the limits.', 'New connections or credentials.', 'Anything touching another workspace.', 'Creating, renewing or widening Autopilot.'];
+  // The proposal's Time + budget card: only the rows that have a value (never "$—" or "Ready around —"). Your time is
+  // in the summary line above, so the card does not say it again (report r-1119-2059, ORCH-965).
+  function timeBudget(time, b) {
+    const has = v => v !== null && v !== undefined && v !== '';
+    const rows = [], first = [];
+    if (has(time.active_min)) first.push('~' + duration(time.active_min) + ' active');
+    if (has(b.api_usd_target)) first.push('AI cost about $' + text(b.api_usd_target));
+    if (first.length) rows.push(['p', first.join(' · ')]);
+    if (has(time.eta_from) || has(time.eta_to)) rows.push(['p', 'Ready around ' + whenRange(time.eta_from, time.eta_to)]);
+    if (has(b.preset)) rows.push(['meta', 'Budget · ' + capital(b.preset)]);
+    const limit = has(b.active_min_cap) ? 'Time limit (active time): ' + duration(b.active_min_cap) + '.' : '';
+    const target = has(b.api_usd_target) ? 'AI cost is a target, not a limit.' : '';
+    if (limit || target) rows.push(['meta', [limit, target].filter(Boolean).join(' ')]);
+    if (!rows.length) rows.push(['meta', 'Time and budget are not planned yet.']);
+    return rows;
+  }
   function proposal(order) {
     const data = order.proposal;
-    view.append(heading(data?.title || order.title, data?.kind === 'autopilot' ? 'Autopilot proposal · ' + text(data.goal) : 'Run proposal · review the whole run before answering', orderLink(order)));
+    view.append(heading(data?.title || order.title, data?.kind === 'autopilot' ? 'Autopilot proposal · ' + text(data.goal) : 'Run proposal · review the whole run before answering', orderLink(order, 'Run details')));
     if (!data) { view.append(card('No frozen proposal yet', p('Your agent is still planning this order.'), answer(order))); return; }
     if (data.kind === 'autopilot') {
       const l = data.limits || {};
@@ -445,16 +579,15 @@
     }
     const time = data.time || {}, b = data.budget || {};
     view.append(p(data.goal));
-    const summary = ['~' + duration(time.active_min)];
-    if (b.api_usd_target != null) summary.push('target $' + text(b.api_usd_target));
+    const summary = [];
+    if (time.active_min != null) summary.push('~' + duration(time.active_min));
+    if (b.api_usd_target != null) summary.push('AI cost about $' + text(b.api_usd_target));
     if (time.owner_min != null) summary.push("you're needed ~" + time.owner_min + ' min');
-    if (time.eta_from || time.eta_to) summary.push('ETA ' + whenRange(time.eta_from, time.eta_to));
-    view.append(node('p', summary.join(' · '), 'f-summary'));
-    view.append(group('f-three', card('The line', line(data.line)),
-      card('Time + budget', p('~' + duration(time.active_min) + ' active · API target $' + text(b.api_usd_target)),
-        p('ETA ' + whenRange(time.eta_from, time.eta_to)), meta('Budget preset · ' + capital(b.preset)),
-        meta('Active time cap: ' + duration(b.active_min_cap) + '. API spend is a target, not a cap.'), meta('Your time: about ' + text(time.owner_min) + ' min.')),
-      card('Crew + what it needs', crewPlan(data.crew), list(array(data.needs).map(n => (n.ready ? '✓ Ready · ' : 'Needs you · ') + text(n.what) + (!n.ready && n.fix ? ' — ' + n.fix : '')), 'No additional needs recorded.'))));
+    if (time.eta_from || time.eta_to) summary.push('ready around ' + whenRange(time.eta_from, time.eta_to));
+    if (summary.length) view.append(node('p', summary.join(' · '), 'f-summary'));
+    view.append(group('f-three', card('Stages', line(data.line)),
+      card('Time + budget', ...timeBudget(time, b).map(([kind, words]) => kind === 'p' ? p(words) : meta(words))),
+      card('Team + what it needs', crewPlan(data.crew), list(array(data.needs).map(n => (n.ready ? '✓ Ready · ' : 'Needs you · ') + text(n.what) + (!n.ready && n.fix ? ' — ' + n.fix : '')), 'No additional needs recorded.'))));
     for (const h of array(order.handover)) {
       const tiles = group('actions', ...array(h.files).map(f => badge(f.split('/').pop())));
       view.append(card(text(h.name) + ' does this', p(text(h.name) + ' makes ' + text(h.title) + (h.minutes ? ' · about ' + h.minutes + ' min' : '')), meta(h.why),
@@ -468,7 +601,7 @@
     assumptions.append(meta('Resolve unsure assumptions on the ticket before Start.'));
     view.append(assumptions, answer(order));
     const details = node('details', null, 'f-details');
-    details.append(node('summary', 'Details · full line, crew, plan & tasks'), group('stack', line(data.line), node('h3','Crew'), crewPlan(data.crew),
+    details.append(node('summary', 'Details · all stages, who works on it, plan & tasks'), group('stack', line(data.line), node('h3','Team'), crewPlan(data.crew),
       node('h3','Steps'), list(array(data.tasks).map(t => text(t.title) + ' · ' + text(t.slug) + ' · ' + roleName(t.role) + ' · ' + capital(t.stage) + (array(t.proves).length ? ' · proves: ' + t.proves.map(i => array(data.done_means)[i] || i).join('; ') : ''))),
       node('h3','Skipped stages'), list(array(data.skipped).map(s => capital(s.stage) + ' — ' + text(s.why))),
       node('h3','Handovers'), list(array(data.handovers).map(h => text(h.task) + ' → ' + text(h.workspace) + ' — ' + text(h.why)))));
@@ -489,16 +622,17 @@
     return group('actions', button, status);
   }
   function tiny(order) { return card('Changed during the run', list(array(order.tiny).map(t => text(t.what) + ' · +' + text(t.minutes) + ' min'), 'No tiny changes recorded.')); }
-  const statusWord = {open: 'open', todo: 'not started', doing: 'working', done: 'done', blocked: 'blocked'};
+  const statusWord = {open: 'open', todo: 'not started', doing: 'working', active: 'working', waiting: 'waiting', done: 'done', blocked: 'blocked'};
   function orderPage(order) {
-    const phase = order.phase === 'started' ? 'Running' : capital(order.phase);
+    const phase = order.phase === 'started' ? (waitWords(order) ? 'Waiting' : 'Running') : capital(order.phase);
     view.append(heading(order.title, [phase, order.stage ? 'Stage: ' + stageName(order, order.stage) : '', order.eta ? 'ETA ' + when(order.eta) : ''].filter(Boolean).join(' · '), orderLink(order, 'Read proposal', '/proposal')));
     if (order.kind === 'autopilot') {
       view.append(card('Autopilot order', p('Routine stops answered by your agent · Ship still asks you'),
         group('actions', link('What it decided', '#/autopilot'), ticket(order.id, 'Open order ticket', false))));
     }
-    const lineCard = card('The line', stages(order), ...startingNote(order), ...(order.kind === 'run' && order.phase === 'started' ? [nextStop(order)].filter(Boolean) : []));
-    const main = group('stack', lineCard, card('Time + budget', budget(order), ...(order.due ? [meta('Due ' + when(order.due))] : [])));
+    const lineCard = card('The line', stages(order), ...waitNote(order), ...startingNote(order), ...(order.kind === 'run' && order.phase === 'started' ? [nextStop(order)].filter(Boolean) : []));
+    // the stage review sits right under the line (ORCH-335): on a phone it comes before the long lists, not after them
+    const main = group('stack', lineCard, ...reviews(order).map(r => reviewCard(order, r, false)), card('Time + budget', budget(order), ...(order.due ? [meta('Due ' + when(order.due))] : [])));
     const crew = card('Crew now');
     for (const c of array(order.crew)) {
       const label = c.with ? [roleName(c.role), c.with.name, c.with.words].filter(Boolean).join(' · ') : [roleName(c.role), c.agent, statusWord[c.status] || c.status].filter(Boolean).join(' · ');
@@ -522,11 +656,11 @@
       if (draftWaiting(order)) c.classList.add('f-attention');
       aside.append(c);
     }
+    if (order.phase === 'parked') aside.append(parkedCard(order));
     if (order.open) {
       const question = card('Needs you', node('h3', openTitle(order, order.open)), ...openBody(order, order.open, true), rawDetails(order.open), answer(order));
       question.classList.add('f-attention'); aside.append(question);
     }
-    if (results(order).length) aside.append(resultsCard(order, false));
     aside.append(...questionCards(order));
     if (order.problem) aside.append(card('Record needs attention', p(order.problem), group('actions', ticket(order.id, 'Open order ticket', false))));
     const changes = card('Changes');

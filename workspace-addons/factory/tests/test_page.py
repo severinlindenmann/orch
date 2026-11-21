@@ -8,7 +8,9 @@ import sys
 import threading
 import time
 
+import jsonschema
 import pytest
+from conftest import CONTRACTS
 from test_flow import (
     ask_stop,
     autopilot_order,
@@ -240,6 +242,24 @@ def test_a_draft_says_whether_an_agent_works_on_it_and_its_newest_version(ws, ru
     (ws / "live-runs").write_text(order)  # a one-step run is on it
     row = next(x for x in get(srv, "/api/home")[1]["orders"] if x["id"] == order)
     assert row["working"] is True
+
+
+def test_an_empty_draft_never_waits_for_you(ws, run, srv):
+    """Persona test 18 Nov: an order from before ORCH-231 kept an empty v1, so Factory counted it as waiting and offered
+    Plan the run on "This draft is empty". An empty newest draft is not the agent's draft; a written one is."""
+    order = run("idea", "Idea", "--file", "-", data=b"v1")["order"]
+    put_file(ws, f"drafts/{order}/v1.md", b"  \n")  # the old empty file
+    assert _home_row(srv, order)["agent_draft"] is False
+    assert get(srv, f"/api/order/{order}")[1]["agent_draft"] is False
+    run("draft", order, "--file", "-", data=b"v2 written")
+    assert _home_row(srv, order)["agent_draft"] is True
+
+
+def test_an_empty_draft_is_refused(ws, run):
+    order = run("idea", "Idea", "--file", "-", data=b"v1")["order"]
+    r = run("draft", order, "--file", "-", data=b" \n", code=2)
+    assert r["code"] == "invalid", r
+    assert not (Store(ws).path(f"drafts/{order}/v2.md")).exists()
 
 
 def _set_status(ws, order, status):
@@ -857,19 +877,167 @@ def test_results_waiting_for_your_looks_good_are_one_card_on_factory(ws, run, sr
     edit(ws, tid, lambda t: t.update(status="review"))
     row = _home_row(srv, order)
     assert row["results"] == [{"ticket": tid, "title": "Booking form"}]
+    assert [r["tickets"] for r in row["reviews"]] == [[tid]]
     js = _page_js()
     assert (
-        "orders.filter(o => o.open || draftWaiting(o) || results(o).length)" in js
+        "orders.filter(o => o.open || draftWaiting(o) || reviews(o).length)" in js
     )  # not "nothing waits for you"
     assert (
-        "['results', orders.filter(o => results(o).length), o => resultsCard(o, true)]" in js
-    )  # in "Waits for you"
+        "['results', orders.filter(o => reviews(o).length), o => reviews(o).map(r => reviewCard(o, r, true))]"
+        in js
+    )  # in "Waits for you": one review per stage
 
 
-def test_the_next_stage_says_it_is_starting(ws, run, srv):
+def _built(ws, tid, *, picture=True, demo=True, exits=(0,), pulls=(("merged", 1),)):
+    """A built crew task in review with its proof: a screenshot, a demo, recorded runs and pull requests."""
+    from test_flow import edit
+
+    files = (["home.png"] if picture else []) + (["demo.gif"] if demo else [])
+    folder = ws / ".orch" / "tickets" / tid / "evidence"
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in files:
+        (folder / name).write_bytes(PNG)
+
+    def fill(t):
+        evidence = [
+            {"type": "file", "ref": f".orch/tickets/{tid}/evidence/{n}", "title": "Home at 1280"}
+            for n in files
+        ]
+        evidence += [{"type": "command", "ref": "pytest -q", "exit": x} for x in exits[:1]]
+        t["checklist"] = [{"id": "c1", "text": "Build the form", "done": True, "evidence": evidence}]
+        t["checklist"] += [
+            {
+                "id": f"c{i + 2}",
+                "text": f"Step {i + 2}",
+                "done": True,
+                "evidence": [{"type": "command", "ref": "t", "exit": x}],
+            }
+            for i, x in enumerate(exits[1:])
+        ]
+        t["refs"] = [
+            {"kind": "url", "url": f"https://github.com/o/r/pull/{n}", "status": state} for state, n in pulls
+        ]
+        t["status"] = "review"
+
+    edit(ws, tid, fill)
+
+
+def test_one_review_per_stage_shows_the_built_result(ws, run, srv):
     order, _ = started(ws, run)
     run("next", order)
-    assert _home_row(srv, order)["starting"] is None  # the first stage: nothing was finished yet
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    _built(ws, tid, exits=(0, 1), pulls=(("merged", 1), ("open", 2)))
+    o = get(srv, f"/api/order/{order}")[1]
+    (review,) = o["reviews"]
+    assert review["stage"] == "build" and review["tickets"] == [tid]
+    assert review["pictures"] == [
+        {"ticket": tid, "name": "home.png", "title": "Home at 1280", "task": "Booking form"}
+    ]
+    assert review["demo"] == {"ticket": tid, "name": "demo.gif", "title": "Home at 1280"}
+    assert review["tests"] == {
+        "passed": 1,
+        "failed": 1,
+        "failing": [{"task": "Booking form", "step": "Step 2"}],
+    }
+    assert review["code"] == {"merged": 1, "waiting": 1}
+    assert review["tasks"][0]["tests"] == {"passed": 1, "failed": 1}
+    assert _home_row(srv, order)["reviews"] == o["reviews"]  # Factory home shows the same review
+
+
+def test_a_pull_request_closed_without_merging_is_not_waiting(ws, run, srv):
+    """ORCH-419: a task with one merged and one closed (replaced) pull request reads Merged, not Not merged yet."""
+    order, _ = started(ws, run)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    _built(ws, tid, pulls=(("merged", 1), ("closed", 2)))
+    (review,) = get(srv, f"/api/order/{order}")[1]["reviews"]
+    assert review["code"] == {"merged": 1, "waiting": 0}
+    assert review["tasks"][0]["code"] == {"merged": 1, "waiting": 0}
+
+
+def test_needs_lists_the_stage_review_with_the_commands_that_answer_it(ws, run):
+    """ORCH-419: `orch factory needs` lists the same stage review the page shows (needs contract), answered in a
+    terminal by moving each built task to done; a change goes to the helper on the order."""
+    order, _ = started(ws, run)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    _built(ws, tid)
+    rows = run("needs")
+    jsonschema.validate(rows, json.loads((CONTRACTS / "needs.schema.json").read_text()))
+    (row,) = rows
+    assert row["id"] == f"factory:review:{order}:build" and row["kind"] == "factory:review"
+    assert row["ticket"] == order and row["tickets"] == [tid] and row["tone"] == "needs-you"
+    assert row["cli"] == f"orch ticket status {tid} done"
+    assert "1 task waits for your Looks good" in row["text"] and f"orch run send {order}" in row["text"]
+    from test_flow import edit
+
+    edit(ws, tid, lambda t: t.update(status="done"))  # Looks good given: nothing waits any more
+    assert run("needs") == []
+
+
+def test_needs_reads_only_the_factory_tickets(ws, run):
+    """ORCH-603: at 10,000 tickets a full ticket list took 43 s and needs gave no answer in its 2 s: needs asks
+    core only for the tickets with Factory's data (orders, crew); an older core without that falls back."""
+    order, _ = started(ws, run)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    _built(ws, tid)
+    (ws / "no-full-list").touch()
+    (row,) = run("needs")
+    assert row["id"] == f"factory:review:{order}:build" and row["tickets"] == [tid]
+    (ws / "no-full-list").unlink()
+    (ws / "old-core").touch()
+    (row,) = run("needs")
+    assert row["id"] == f"factory:review:{order}:build"
+
+
+def test_a_review_without_proof_says_nothing_was_recorded(ws, run, srv):
+    order, _ = started(ws, run)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    _built(ws, tid, picture=False, demo=False, exits=(), pulls=())
+    (review,) = get(srv, f"/api/order/{order}")[1]["reviews"]
+    assert review["pictures"] == [] and review["demo"] is None
+    assert review["tests"] == {"passed": 0, "failed": 0, "failing": []} and review["code"] == {
+        "merged": 0,
+        "waiting": 0,
+    }
+
+
+def test_a_built_task_picture_and_demo_are_served_only_for_the_order(ws, run, srv):
+    order, _ = started(ws, run)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    _built(ws, tid)
+    status, body, r = get(srv, f"/api/order/{order}/result/{tid}/home.png")
+    assert status == 200 and body == PNG and r.getheader("Content-Type") == "image/png"
+    assert get(srv, f"/api/order/{order}/result/{tid}/demo.gif")[0] == 200
+    (ws / ".orch" / "tickets" / tid / "evidence" / "other.png").write_bytes(PNG)  # not named in its evidence
+    assert get(srv, f"/api/order/{order}/result/{tid}/other.png")[0] == 404
+    assert get(srv, f"/api/order/t_zzzzzzz/result/{tid}/home.png")[0] == 404  # another order
+    assert get(srv, f"/api/order/{order}/result/{tid}/..%2Fx.png")[0] == 404
+    assert get(srv, f"/api/order/{order}/result/{tid}/notes.txt")[0] == 404
+
+
+def test_a_linked_result_file_is_never_served(ws, run, srv, tmp_path):
+    order, _ = started(ws, run)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    _built(ws, tid)
+    target = ws / ".orch" / "tickets" / tid / "evidence" / "home.png"
+    target.unlink()
+    outside = tmp_path / "secret.png"
+    outside.write_bytes(PNG)
+    target.symlink_to(outside)
+    assert get(srv, f"/api/order/{order}/result/{tid}/home.png")[0] == 404
+
+
+def test_the_next_stage_says_it_is_starting(ws, run, srv, monkeypatch):
+    monkeypatch.setattr(pageapi, "_watcher_on", lambda root: True)  # with the watcher off, that is the reason
+    order, _ = started(ws, run)
+    run("next", order)
+    row = _home_row(srv, order)  # the first stage too (ORCH-277): right after Start nothing else says it
+    assert row["starting"] == "build" and row["waiting"] == {"kind": "starting"}
     finish_crew(ws, run, order, "booking-form")
     q = ask_stop(ws, run, order, "build")
     core(ws, "answer", order, q, "Continue", "--by", "human:anna")
@@ -898,12 +1066,29 @@ def test_stop_page_carries_and_links_the_preview(ws, run, srv):
     assert "'Open the preview'" in js and "noopener noreferrer" in js and "/^https?:\\/\\/\\S+$/" in js
 
 
-def test_looks_good_all_button_only_with_two_results_inside_the_dashboard():
+def test_the_stage_review_has_one_looks_good_and_change_and_no_look_at_buttons():
+    """ORCH-335 (owner 17 Nov): one review per stage with the result itself; no per-task Look at button."""
     js = _page_js()
-    assert "if (rows.length > 1 && embedded())" in js and "'Looks good, all'" in js
-    assert "askDashboard({type: 'orch.looksgood', tickets: rows.map(r => r.ticket)})" in js
+    assert "Look at" not in js and "Looks good, all" not in js
+    assert "askDashboard({type: 'orch.looksgood', tickets}, 20000)" in js
+    assert "say('Saving…')" in js  # the click shows at once (ORCH-419)
+    assert "toAgent(order.id, 'Change at ' + stageName(order, review.stage) + ': ' + words)" in js
+    assert "'Looks good'" in js and "'Change'" in js and "'What should change?'" in js
+    assert (
+        "UI.resultOverlay(items, index)" in js and "'Play the demo'" in js
+    )  # pictures open big in the kit overlay
+    assert (
+        "'details'" not in js[js.index("function reviewCard") : js.index("function reviewActions")]
+    )  # no toggles
+    assert "'Nothing to show: no pictures or demo were added to this stage.'" in js
+    assert "'Tests passed'" in js and "'Not merged yet'" in js and "'Merged'" in js
     assert "d.type === 'orch.looksgood.done'" in js and "d.type === 'orch.looksgood.failed'" in js
-    assert "problem.setAttribute('role', 'alert')" in js
+
+
+def test_the_page_loads_the_kit_result_widget(srv):
+    html = get(srv, "/")[1].decode()
+    assert "/kit/results.js" in html and "/kit/results.css" in html and "/kit/icons.js" in html
+    assert {"results.js", "results.css", "icons.js"} <= set(server.KIT_FILES)  # served from the master kit
 
 
 def test_home_has_no_empty_sections():
@@ -942,3 +1127,210 @@ def test_home_has_no_empty_sections():
         check=True,
     ).stdout
     assert json.loads(words) == ["", "drafts", "drafts or stops", "drafts, stops or running orders"]
+
+
+# ORCH-277: a started order that says Running while nobody works says why instead
+
+
+def test_a_started_order_says_why_nothing_works(ws, run, srv, monkeypatch):
+    from test_flow import edit
+
+    monkeypatch.setattr(pageapi, "_watcher_on", lambda root: True)
+    order, _ = started(ws, run)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    edit(ws, tid, lambda t: t.update(status="active"))
+    assert _home_row(srv, order)["waiting"] is None  # a crew helper works on it
+    edit(ws, tid, lambda t: t.update(status="ready"))
+    assert _home_row(srv, order)["waiting"] == {"kind": "idle"}
+    until = "2026-11-17T20:25:00+01:00"
+    edit(ws, tid, lambda t: t.update(status="waiting", waiting_on={"kind": "time", "until": until}))
+    assert _home_row(srv, order)["waiting"] == {"kind": "time", "task": "Booking form", "until": until}
+    edit(ws, tid, lambda t: t.update(status="waiting", waiting_on={"kind": "external", "ref": "a reply"}))
+    assert _home_row(srv, order)["waiting"] == {"kind": "ticket", "task": "Booking form"}
+    edit(ws, tid, lambda t: t.update(questions=[{"id": "q1", "text": "Which colour?", "answer": None}]))
+    assert _home_row(srv, order)["waiting"] == {"kind": "you", "task": "Booking form"}
+    assert get(srv, f"/api/order/{order}")[1]["waiting"] == {"kind": "you", "task": "Booking form"}
+
+
+def test_a_start_core_refused_says_why_and_the_watcher_off_says_so(ws, run, srv, monkeypatch):
+    from orch_factory import watch
+
+    order, _ = started(ws, run)
+    (ws / "fail-run").write_text(
+        "t_x waits in line: the computer is very busy. It starts by itself when that passes."
+    )
+    assert watch.once(ws) == []
+    monkeypatch.setattr(pageapi, "_watcher_on", lambda root: True)
+    w = _home_row(srv, order)["waiting"]
+    assert w["kind"] == "held" and w["since"]
+    assert w["why"] == "the computer is very busy. It starts by itself when that passes."  # no ticket id
+    monkeypatch.setattr(pageapi, "_watcher_on", lambda root: False)
+    assert _home_row(srv, order)["waiting"]["kind"] == "held"  # the refusal is the better reason
+    (ws / "fail-run").unlink()
+    assert len(watch.once(ws)) == 1  # started now: the reason is gone
+    assert watch.held(Store(ws)) == {}
+    assert _home_row(srv, order)["waiting"] == {"kind": "watcher"}
+
+
+def test_the_page_words_why_nothing_works():
+    js = _page_js()
+    assert "function waitWords(order)" in js
+    assert "card(o.title, stages(o), ...waitNote(o), ...startingNote(o)" in js  # Factory home
+    assert "card('The line', stages(order), ...waitNote(order)" in js  # the order page
+    assert "(waitWords(order) ? 'Waiting' : 'Running')" in js
+    for words in (
+        "Nothing moves on until you answer",
+        "'Waiting until ' + when(w.until)",
+        "Your helper has not started yet",
+        "the Factory watcher is off",
+        "No helper is working on it right now",
+    ):
+        assert words in js
+
+
+# ORCH-277: a parked order can be started from its page
+
+
+def test_a_parked_order_is_asked_again_and_the_persons_start_starts_it(ws, run, srv, proposal):
+    parked = run("idea", "Parked")["order"]
+    q = run("propose", parked, "--file", "-", data=proposal)["question"]
+    core(ws, "answer", parked, q, "Not now", "--by", "human:anna")
+    assert _home_row(srv, parked)["phase"] == "parked"
+    out = run("act", "start", parked, "--by", "human:anna")
+    assert out["order"] == parked and out["question"] != q
+    row = _home_row(srv, parked)
+    assert row["phase"] == "proposed" and row["open"]["q"] == out["question"]
+    run("act", "start", parked, "--by", "human:anna", code=2)  # not parked any more
+    core(ws, "answer", parked, out["question"], "Start", "--by", "human:anna")
+    assert _home_row(srv, parked)["phase"] == "started"
+    assert run("next", parked)["step"] == "start-crew"
+
+
+def test_only_a_person_starts_a_parked_order_and_only_a_parked_one(ws, run, proposal):
+    parked = run("idea", "Parked")["order"]
+    q = run("propose", parked, "--file", "-", data=proposal)["question"]
+    assert (
+        run("act", "start", parked, "--by", "human:anna", code=2)["code"] == "conflict"
+    )  # still waits for you
+    core(ws, "answer", parked, q, "Not now", "--by", "human:anna")
+    assert run("act", "start", parked, "--by", "agent:worker", code=2)["code"] == "refused"
+    assert run("act", "start", parked, code=2)["code"] == "refused"
+
+
+def test_a_parked_order_page_has_a_start_button():
+    js = _page_js()
+    assert "if (order.phase === 'parked') aside.append(parkedCard(order));" in js
+    assert "askDashboard({type: 'orch.start', order: order.id})" in js
+    assert "card('Saved for later'" in js
+
+
+def test_manifest_declares_the_start_act():
+    import tomllib
+    from pathlib import Path
+
+    m = tomllib.loads((Path(pageapi.__file__).with_name("orch-addon.toml")).read_text())
+    assert m["acts"]["start"]["who"] == "people"
+
+
+def test_held_words_carry_no_ticket_ids():
+    assert pageapi._held_words("ORCH-12 waits in line: the disk is almost full. It starts by itself.") == (
+        "the disk is almost full. It starts by itself."
+    )
+    assert "ORCH-3" not in pageapi._held_words(
+        "3 helpers are working at once. ORCH-3 waits in line and starts."
+    )
+
+
+def test_the_line_also_says_what_moves_the_order_on():
+    js = _page_js()
+    for words in (
+        "Your answer moves it on.",
+        "It goes on by itself then.",
+        "Start orch on this computer again",
+        "Factory starts your helper again in a few minutes.",
+        "starting it again did not help",
+    ):
+        assert words in js
+
+
+def test_budget_health_is_measured_when_the_page_reads_it(ws, run, srv):
+    """ORCH-411: with no watcher and no `next`, a started order still shows the active minutes really used."""
+    from test_flow import record
+
+    order, _ = started(ws, run)
+    pageapi._measured.clear()
+    record(ws, order, minutes=12, gap=4)
+    code, home, _ = get(srv, "/api/home")
+    by = {o["id"]: o for o in home["orders"]}
+    assert code == 200 and by[order]["budget"]["used"] == 12
+
+
+# Report r-1119-2059 (ORCH-965): the proposal's Time + budget card showed "AI cost about $—", "Ready around —" and
+# repeated your time from the summary line above it.
+
+
+def test_proposal_time_and_budget_show_only_values_and_your_time_once():
+    import shutil
+
+    js = _page_js()
+    body = js[js.index("  function proposal(order) {") : js.index("  // A task handed to another workspace")]
+    assert "Your time" not in body and "'~' + duration(time.active_min)];" not in body
+    # the builder words of the report are gone from the proposal; its top button says Run details (owner, ORCH-965 q1)
+    for word in (
+        "API target",
+        "'ETA '",
+        "Budget preset",
+        "card('The line'",
+        "Crew + what it needs",
+        "Active time cap",
+    ):
+        assert word not in body, word
+    assert "orderLink(order, 'Run details')" in body
+    if not shutil.which("node"):
+        return
+    names = (
+        "const text",
+        "const capital",
+        "function parseWhen",
+        "function dayWord",
+        "function hhmm",
+        "function when(",
+        "function whenRange",
+        "function duration",
+        "function timeBudget",
+    )
+    src = []
+    for name in names:
+        if name not in js:
+            continue
+        start = js.index(name)
+        end = js.index("\n  }\n", start) + 4 if name.startswith("function") else js.index("\n", start)
+        src.append(js[start:end])
+    cases = (
+        "[[{}, {}], [{active_min: 45}, {preset: 'small', active_min_cap: 60}],"
+        " [{active_min: 90, owner_min: 5}, {api_usd_target: 12, preset: 'standard', active_min_cap: 120}]]"
+    )
+    out = subprocess.run(
+        [
+            "node",
+            "-e",
+            "\n".join(src) + f"\nconsole.log(JSON.stringify({cases}.map(([t, b]) => timeBudget(t, b))))",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    empty, no_cost, full = json.loads(out)
+    assert empty == [["meta", "Time and budget are not planned yet."]]
+    assert no_cost == [
+        ["p", "~45 min active"],
+        ["meta", "Budget · Small"],
+        ["meta", "Time limit (active time): 1 h."],
+    ]
+    assert full == [
+        ["p", "~1 h 30 min active · AI cost about $12"],
+        ["meta", "Budget · Standard"],
+        ["meta", "Time limit (active time): 2 h. AI cost is a target, not a limit."],
+    ]
+    assert "—" not in out and "Your time" not in out

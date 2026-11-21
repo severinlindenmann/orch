@@ -74,10 +74,15 @@ function servicesTile(view, small) {
 }
 
 // First day, nothing recorded yet: the same tiles as the overview, each saying when it fills.
-function emptyTiles(view) {
+function emptyTiles(view, team) {
   const note = 'Fills after the first helper run';
-  // No run is recorded: say so, never a 0 (the record can be empty although helpers worked, ORCH-139).
-  return [metric('Times helpers worked', null, 'No helper runs are recorded here yet'), servicesTile(view, note)];
+  // No run is recorded: say so, never a 0 (the record can be empty although helpers worked, ORCH-139). When the
+  // tickets show helper time, say where that comes from, so the page does not contradict itself (ORCH-410).
+  const worked = team && team.time && team.time !== '–';
+  // orch started runs but the helper wrote no record lines (a custom helper): say so, not "no runs" (ORCH-966).
+  const started = view.started || 0;
+  if (started) return [metric('Times helpers worked', null, `orch started ${plural(started, 'run')}; this helper does not report them, so they are not measured`), servicesTile(view, note)];
+  return [metric('Times helpers worked', null, worked ? 'Not counted here; the helper time above comes from the tickets' : 'No helper runs are recorded here yet'), servicesTile(view, note)];
 }
 
 function fillMetrics() {
@@ -161,8 +166,56 @@ function renderModels(view) {
   }
 }
 
+// ORCH-189 manager view: four numbers and one row per person, from the helpers' conversations (not the record,
+// so it shows on a first day too). Cost is at list price.
+function statTile(label, value, small) {
+  const tile = node('article', undefined, 'stat-tile');
+  tile.append(node('span', label, 'stat-label'), node('span', value, 'stat-value'), node('span', small, 'stat-delta'));
+  return tile;
+}
+function renderTeam(team) {
+  const host = byId('team');
+  if (!team) { host.hidden = true; return; }
+  host.hidden = false;
+  byId('team-stats').replaceChildren(
+    statTile('Helper time', team.time, 'Last 30 days'),
+    statTile('Cost', team.cost, team.note || 'at list price'),
+    statTile('Tickets finished', String(team.finished), team.each || 'Last 30 days'),
+    statTile('Stuck now', String(team.stuck), team.stuck ? 'See Stuck on the Tickets page' : 'Nothing is stuck'));
+  const rows = byId('people-rows');
+  rows.replaceChildren(...team.people.map(p => {
+    const tr = node('tr');
+    tr.append(node('td', p.name), node('td', String(p.finished), 'numeric'), node('td', String(p.open), 'numeric'),
+      node('td', p.time, 'numeric'), node('td', p.cost, 'numeric'));
+    return tr;
+  }));
+  byId('people').hidden = !team.people.length;
+}
+// ORCH-297: one bar for this week against the weekly budget set in Usage; no bar when there is none.
+function renderWeek(week) {
+  const host = byId('week');
+  if (!week) { host.hidden = true; return; }
+  host.hidden = false;
+  byId('week-label').textContent = week.label;
+  const bar = byId('week-bar');
+  bar.setAttribute('aria-valuenow', String(week.percent));
+  bar.setAttribute('aria-valuetext', week.label);
+  bar.firstElementChild.style.setProperty('--value', `${week.percent}%`);
+}
+function renderLost(view) {
+  const note = byId('lost-note');
+  note.hidden = !(view && view.lost);
+  note.textContent = view && view.lost ? view.lost.text : '';
+}
 async function loadModels() {
-  try { renderModels(await read('/api/models')); } catch { renderModels(null); }
+  let view = null;
+  try { view = await read('/api/models'); } catch { view = null; }
+  renderTeam(view && !view.error ? view.team : null);
+  let week = null;
+  try { week = (await read('/api/week')).week; } catch { week = null; }
+  renderWeek(view && !view.error && view.team ? week : null);
+  renderModels(view);
+  return view && !view.error ? view.team : null;
 }
 
 function stateBadge(row) {
@@ -260,7 +313,15 @@ function renderServices() {
 function renderNeeds() {
   const needs = byId('needs');
   needs.replaceChildren();
-  needs.hidden = !overview.needs.length;
+  const retry = overview.retries;
+  needs.hidden = !overview.needs.length && !retry;
+  if (retry) {
+    const banner = node('article', undefined, `banner ${retry.tone === 'warn' ? 'attn' : 'info'}`);
+    const text = node('div', undefined, 'grow');
+    text.append(node('strong', retry.title), node('p', retry.text));
+    banner.append(text);
+    needs.append(banner);
+  }
   for (const card of overview.needs) {
     const banner = node('article', undefined, `banner ${card.tone === 'warn' ? 'attn' : 'info'}`);
     const text = node('div', undefined, 'grow');
@@ -271,7 +332,7 @@ function renderNeeds() {
     banner.append(text, button);
     needs.append(banner);
   }
-  const n = overview.needs.length;
+  const n = overview.needs.length + (retry && retry.tone === 'warn' ? 1 : 0);
   const health = byId('health');
   health.className = n ? 'badge attn insights-health' : 'badge done insights-health';
   health.textContent = n ? `▲ ${n} ${n === 1 ? 'needs' : 'need'} a look` : 'All good · nothing needs a look';
@@ -323,10 +384,12 @@ async function refresh() {
     const answer = await read('/api/overview');
     if (answer.error) { showMessage(answer.error); return; }
     overview = answer;
+    renderLost(overview);
     if (overview.first_day) {
+      const team = await loadModels();
       showView('empty');
       const grid = node('div', undefined, 'metric-grid');
-      grid.append(...emptyTiles(overview));
+      grid.append(...emptyTiles(overview, team));
       byId('empty').replaceChildren(grid);
       return;
     }

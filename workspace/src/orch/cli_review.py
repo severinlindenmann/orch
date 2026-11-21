@@ -10,10 +10,21 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from orch import ghmerge, history, nextstep, review, review_server, runs_live, safefile, tickets
+from orch import (
+    dashshots,
+    ghmerge,
+    history,
+    nextstep,
+    ownerpick,
+    review,
+    review_server,
+    runs_live,
+    safefile,
+    tickets,
+)
 from orch.errors import Refused
 
-SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict")
+SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict", "security")
 CARD_KINDS = ("draft", "link", "plan", "choose")
 SUGGEST_VERDICTS = ("ok", "no")
 LINKS_MAX = 5  # what a card without options can suggest: approve or don't do
@@ -77,6 +88,24 @@ def add_parsers(sub, common) -> None:
     x.add_argument(
         "--point", action="append", default=[], metavar="TEXT", help="one point and what you saw (repeat)"
     )
+    x = s.add_parser(
+        "security",
+        parents=[common],
+        help="the security review of one pull request records its verdict (ok or problems), or the pull "
+        "request that fixes its finding (fixed-by)",
+    )
+    x.add_argument("pr", type=int, help="the pull request number")
+    x.add_argument(
+        "word",
+        choices=("ok", "problems", "fixed-by"),
+        help="ok: nothing High or Medium left; else problems; fixed-by <M>: pull request M fixes the finding",
+    )
+    x.add_argument(
+        "why", help="one line: the worst finding, or what was checked; for fixed-by the fix's number"
+    )
+    x.add_argument(
+        "--sha", metavar="COMMIT", help="the commit you reviewed (from the brief); needed for ok and problems"
+    )
     x = s.add_parser("accepted", parents=[common], help="what the Reviewer accepted for you")
     x.add_argument(
         "--since", default="today", metavar="WHEN", help="today (default), yesterday or YYYY-MM-DD"
@@ -129,7 +158,16 @@ def _file_preview(root: Path, src: str, where: str) -> dict:
         text = data.decode("utf-8", "replace")
         paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()][:50]
         return {"type": "doc", "heading": Path(src).name, "paras": [p[:2000] for p in paras]}
-    raise Refused(f"{where}: show an image, a page (.html) or a text file (.md, .txt).")
+    if ext == ".json":  # a glance card (ORCH-329): headline, progress, chips, flow, chart, diff, details
+        data = safefile.open_file_ref(root, src, 64 * 1024) if not src.startswith("artifacts/") else None
+        try:
+            pv = json.loads(data.decode("utf-8")) if data is not None else None
+        except ValueError:
+            pv = None
+        if not isinstance(pv, dict):
+            raise Refused(f"{where}: '{src}' was not found or is not a JSON object.")
+        return {"type": "doc", **pv}
+    raise Refused(f"{where}: show an image, a page (.html), a text file (.md, .txt) or a card (.json).")
 
 
 def _option(root: Path, spec: str) -> dict:
@@ -228,11 +266,17 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
             )
         head = args.merge_head = ghmerge.head_of(args.open)  # the click merges exactly this commit
         # what the person decides on, read for the pinned commit; never a helper's own file in its place
-        card["preview"] = merge_preview(root, args.open, head, ghmerge.summary(args.open, head))
+        wf = args.merge_workflow = ghmerge.workflow_check(args.open, head)  # ORCH-305: CI workflow files
+        card["preview"] = merge_preview(root, args.open, head, ghmerge.summary(args.open, head), wf)
         card["ok_label"] = "Merge"  # the button says what the click does (review.merge_url checks it)
         card.setdefault(
             "why",
-            "Your click merges it on GitHub with your own GitHub login."
+            (
+                "It changes a CI workflow, so GitHub waits for you to approve it: your click approves "
+                "this exact version and merges it with your own GitHub login."
+                if wf
+                else "Your click merges it on GitHub with your own GitHub login."
+            )
             + (
                 " When you allowed it in Settings, it merges by itself once every check is green."
                 if getattr(args, "release", False)
@@ -263,14 +307,40 @@ def _pr_tickets(root: Path, repo_url: str) -> dict[int, list[str]]:
     return out
 
 
-def merge_preview(root: Path, url: str, head: str, info: dict | None) -> dict:
+def _with_workflow(pv: dict, wf: dict | None) -> dict:
+    """ORCH-305: a pull request that changes a CI workflow says the check of those lines first (the reason
+    the owner is asked) and lists the workflow files before any other row."""
+    if not wf:
+        return pv
+    pv["paras"] = [ghmerge.workflow_words(wf), *(pv.get("paras") or [])]
+    # ORCH-429: the label a script check gives, and the changed lines themselves with the risky ones marked
+    if wf.get("safe"):
+        pv["chips"] = [{"text": "Safe to merge", "tone": "ok"}]
+    elif any(x.get("risk") for x in wf.get("lines") or []):
+        pv["chips"] = [{"text": "Look at the red lines", "tone": "bad"}]
+    if wf.get("lines"):
+        pv["diff"] = wf["lines"]
+        if wf.get("lines_more"):
+            n = wf["lines_more"]
+            pv["paras"].append(
+                f"And {n} more changed line{'' if n == 1 else 's'}: Workflow changes shows all."
+            )
+    rows = [{"title": f"{f['name']} (+{f['add']} −{f['del']})"[:200]} for f in wf["files"][:5]]
+    if len(wf["files"]) > 5:
+        rows.append({"title": f"and {len(wf['files']) - 5} more workflow files"})
+    pv["rows"] = rows + (pv.get("rows") or [])
+    return pv
+
+
+def merge_preview(root: Path, url: str, head: str, info: dict | None, wf: dict | None = None) -> dict:
     """A merge card's box (ORCH-183, owner 17 Nov, after a design challenge): the checks as a status line,
     "What goes out · N changes" with one row per pull request (GitHub's title first, its ticket key and
     number beside it), the commits that are no pull request merge, and the exact version as a small footer.
-    The address itself is the card's Open link, not its content. Without GitHub's answer only the version."""
+    The address itself is the card's Open link, not its content. Without GitHub's answer only the version.
+    `wf` (ghmerge.workflow_check): the CI workflow check goes first (_with_workflow)."""
     foot = f"Exact version: {head[:7]}"
     if not info:
-        return {"type": "doc", "heading": "Pull request", "foot": foot}
+        return _with_workflow({"type": "doc", "heading": "Pull request", "foot": foot}, wf)
     when = datetime.now().strftime("%H:%M")
     tone, words = info["checks"]
     names = _pr_tickets(root, url.rsplit("/pull/", 1)[0])
@@ -306,7 +376,7 @@ def merge_preview(root: Path, url: str, head: str, info: dict | None) -> dict:
         pv["paras"] = paras
     if rows:
         pv["rows"] = rows
-    return pv
+    return _with_workflow(pv, wf)
 
 
 def has_card_flags(args) -> bool:
@@ -317,8 +387,20 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
     """`orch ask TICKET TEXT --draft|--link|--plan|--choose TITLE ...`: the question with a card on it."""
     if not args.then:
         raise Refused("A card needs --then: what happens after the answer.")
+    if getattr(args, "ci_shots", None):  # ORCH-312: the pictures CI took, never the helper's own
+        if args.file or args.before or args.after or getattr(args, "choose", None) is not None:
+            raise Refused(
+                "--ci-shots shows the pictures by itself: leave out --file, --before, --after and --choose."
+            )
+        if getattr(args, "merge", False):
+            raise Refused("--ci-shots goes on its own card, not on a Merge card.")
+        args.file = _guard(dashshots.card_file, root, tid, args.ci_shots)
+        if not args.open:
+            args.open = args.ci_shots
     card, options, suggest, _title = _guard(build_card, root, args)
     links = _guard(links_of, getattr(args, "ref", None) or [])
+    if getattr(args, "merge_workflow", None) and len(links or []) < LINKS_MAX:  # ORCH-305: the diff itself
+        links = [*(links or []), {"label": "Workflow changes", "url": args.open + "/files"}]
     card, shown = _guard(review.prepare_card, root, tid, card)
     action = None
     if getattr(args, "merge", False):
@@ -409,6 +491,10 @@ def _answer(args, root: Path) -> None:
         raise ReviewError("too_large", "A note is at most 8 KB.")
     if key == "review":
         q = None
+        if (
+            t.get("status") != "review"
+        ):  # decided elsewhere (the Reviewer, the phone, another tab): say who and when
+            raise ReviewError("decided", review.not_in_review(root, t))
         current = review.check_digest(t, root)
     else:
         q = next((x for x in t.get("questions") or [] if x.get("id") == key), None)
@@ -429,9 +515,24 @@ def _answer(args, root: Path) -> None:
         args.by
     )  # the person chosen in orch (--by human:<name>), else the computer's user
     digest = given or current
+    # ORCH-582: a draft, or the Check of a ticket that carries one, needs the signed-in dashboard's one-time
+    # person grant (a paired phone answers through the relay); never a script or a helper's shell
+    granted = ownerpick.person_granted(root, who)  # always used up, so no child inherits it
+    needs = ownerpick.is_draft_card(q) if q is not None else ownerpick.carries_draft(t)
+    person = needs and granted
     fn = review.change if q is not None and q.get("answer") is not None else review.decide
     entry = _guard(
-        fn, root, tid, key, args.verdict, args.picked, args.note, by=who, via=args.via, digest=digest
+        fn,
+        root,
+        tid,
+        key,
+        args.verdict,
+        args.picked,
+        args.note,
+        by=who,
+        via=args.via,
+        digest=digest,
+        person=person,
     )
     import contextlib
 
@@ -497,12 +598,13 @@ def _accepted(args, root: Path) -> None:
     from orch import relay, reviewer
 
     rows = reviewer.accepted(root, reviewer.since_time(args.since))
-    word = args.since if args.since in ("today", "yesterday") else "since " + args.since
-    text = reviewer.accepted_text(rows, word)
-    data: dict = {"since": args.since, "accepted": rows}
+    picks = ownerpick.waiting_rows(root)  # ORCH-582: drafts waiting for the owner, shown on their own
+    word = "today" if args.since == "today" else "since " + args.since  # issue 1920: yesterday AND today
+    text = reviewer.accepted_text(rows, word, picks)
+    data: dict = {"since": args.since, "accepted": rows, "waiting_pick": picks}
     if args.phone:
         data["sent"] = False
-        if rows:  # nothing accepted: no message
+        if rows or picks:  # nothing accepted and no draft waiting: no message
             try:
                 relay.send_text(root, "phones", text, general=True)
                 data["sent"] = True
@@ -525,6 +627,29 @@ def _verdict(args, root: Path) -> None:
     _out(args, res, f"{res['key']}: {lookreview.VERDICT_TEXT[res['verdict']]}: {res['why']}")
 
 
+def _security(args, root: Path) -> None:
+    from orch import secreview
+
+    by = tickets.current_actor(args.by)
+    if args.word == "fixed-by":
+        fix = str(args.why or "").strip().lstrip("#")
+        if not fix.isdigit():
+            raise ReviewError(
+                "refused", "Give the number of the pull request that fixes it, e.g. fixed-by 1566."
+            )
+        res = _guard(secreview.link_fix, root, args.pr, int(fix), by)
+        _out(
+            args,
+            res,
+            f"Pull request #{res['pr']}: its finding is fixed by #{res['fixed_by']}. The release waits until "
+            f"#{res['fixed_by']} is merged with a security OK.",
+        )
+        return
+    res = _guard(secreview.verdict, root, args.pr, args.word, args.why, by, args.sha or "")
+    words = "OK: the release may include it" if res["verdict"] == "ok" else "problems: releases wait"
+    _out(args, res, f"Pull request #{res['pr']}: security review {words}. {res['line']}")
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "review":
         return False
@@ -542,5 +667,6 @@ def dispatch(args, root: Path) -> bool:
         "tend-releases": _tend_releases,
         "accepted": _accepted,
         "verdict": _verdict,
+        "security": _security,
     }[args.sub](args, root)
     return True

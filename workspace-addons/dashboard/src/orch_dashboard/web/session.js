@@ -40,7 +40,12 @@
   // plain words. Nothing restarted: this is never an update notice (those come from update.js after a real update).
   function signInNotice(r) {
     r.clone().text().then(function (t) {
-      if (t.indexOf("Sign in to ") !== 0 || document.getElementById("orch-signin")) return;
+      if (t.indexOf("Sign in to ") === 0) showSignIn(t);
+    }).catch(function () {});
+  }
+  function showSignIn(t) {
+    {
+      if (document.getElementById("orch-signin")) return;
       // never under an open dialog (a modal sits above the page): close it so the notice can be read
       Array.prototype.forEach.call(document.querySelectorAll("dialog[open]"), function (d) { try { d.close(); } catch (e) { /* gone */ } });
       var b = document.createElement("div");
@@ -51,24 +56,55 @@
       x.onclick = function () { b.remove(); };
       b.appendChild(x);
       (document.body || document.documentElement).insertBefore(b, (document.body || document.documentElement).firstChild);
-    }).catch(function () {});
+    }
   }
-  var m = /[#&]launch=([A-Za-z0-9_-]{20,64})/.exec(location.hash || "");
-  if (!m) return;
-  // The app must NOT start (and fetch, and read a one-time notice) while the page is only a bootstrap: stop loading the
-  // rest of the page, hand the token over, and reload; everything starts after the reload with the session.
-  if (window.stop) window.stop();
-  history.replaceState(null, "", location.pathname + location.search);
-  realFetch("/session", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token: m[1] }),
-  }).then(function (r) {
-    if (!r.ok) return;
-    return r.json().then(function (j) {
-      try { localStorage.setItem(KEY, j.secret || ""); } catch (e) { /* no storage: the page stays watch-only */ }
-      try { sessionStorage.removeItem(KEY); } catch (e) { /* none */ }
-      location.reload();
-    });
+  // A sign-in link pasted into a tab that is already open only changes the hash: no load happens, so the router would
+  // show "Page not found" for it. Treat it like a fresh load: this listener is added before the app's (session.js
+  // loads first), takes the token out of the address and stops the event, so the app never routes to it (#1918).
+  window.addEventListener("hashchange", function (e) {
+    if (!spend(false)) return;
+    if (e && e.stopImmediatePropagation) e.stopImmediatePropagation();
   });
+  spend(true);
+  function spend(loading) {
+    var m = /[#&]launch=([A-Za-z0-9_-]{20,64})/.exec(location.hash || "");
+    if (!m) return false;
+    // The app must NOT start (and fetch, and read a one-time notice) while the page is only a bootstrap: stop loading
+    // the rest of the page, hand the token over, and reload; everything starts after the reload with the session.
+    if (loading && window.stop) window.stop();
+    history.replaceState(null, "", location.pathname + location.search);
+    realFetch("/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: m[1] }),
+    }).then(function (r) {
+      if (!r.ok) {  // a used or ended link: say so (the stopped page would stay on empty boxes with no word why)
+        return r.text().then(function (t) { showSignIn(t || "This sign-in link did not work. Open the dashboard again from orch."); });
+      }
+      return r.json().then(function (j) {
+        try { localStorage.setItem(KEY, j.secret || ""); } catch (e) { /* no storage: the page stays watch-only */ }
+        try { sessionStorage.removeItem(KEY); } catch (e) { /* none */ }
+        location.reload();
+      });
+    });
+    return true;
+  }
+})();
+// A page loaded while an add-on change reinstalls orch can get its scripts missing or empty (the old server still
+// answers while the files are replaced) and then stays on the loading skeleton (ORCH-1034, seen in the walk). A
+// script of this page that fails to load: reload once a few seconds later, when the restarted server serves them,
+// at most every 20 s so a page that really lacks a file does not reload without end.
+(function () {
+  var KEY = "orch_reload_broken", armed = false;
+  window.addEventListener("error", function (event) {
+    var el = event && event.target;
+    if (armed || !el || el.tagName !== "SCRIPT" || !el.src) return;
+    try { if (new URL(el.src, location.href).origin !== location.origin) return; } catch (e) { return; }
+    var last = 0;
+    try { last = Number(sessionStorage.getItem(KEY)) || 0; } catch (e) { return; }  // no storage: never reload
+    if (Date.now() - last < 20000) return;
+    armed = true;
+    try { sessionStorage.setItem(KEY, String(Date.now())); } catch (e) { return; }
+    setTimeout(function () { location.reload(); }, 4000);
+  }, true);
 })();

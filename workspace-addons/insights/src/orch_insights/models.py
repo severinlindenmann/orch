@@ -1,4 +1,4 @@
-"""Tokens per model, how many tickets moved up to Opus, and the tickets with the most tokens (`orch usage`)."""
+"""Tokens per model, how many tickets moved up to Opus, and the tickets with the most tokens (`orch tokens`)."""
 
 from .overview import ERROR
 
@@ -40,7 +40,121 @@ def _parts(models):
     return parts
 
 
-def build_models(answer):
+NOT_RECORDED = "Not recorded: helper actions left no time or cost."
+
+
+def _seconds_words(seconds):
+    m = round(_count(seconds) / 60)
+    if not _count(seconds):
+        return "–"
+    if m < 1:
+        return "under 1 min"
+    return (f"{m // 60} h" + (f" {m % 60} min" if m % 60 else "")) if m >= 60 else f"{m} min"
+
+
+def _money(cost):
+    """Dollars at list price; "–" when nothing was recorded (never "$0.00", which reads as free)."""
+    v = cost if isinstance(cost, int | float) and not isinstance(cost, bool) and cost >= 0 else 0
+    return f"${v:,.2f}" if round(v, 2) > 0 else "–"
+
+
+def _person(owner, me=None):
+    owner = owner if isinstance(owner, str) else ""
+    if not owner:
+        return me or "No owner"
+    kind, _, rest = owner.partition(":")
+    if kind == "agent":
+        return "A helper"
+    return rest if kind == "human" and rest else owner
+
+
+def build_team(answer, me=None):
+    """ORCH-189 manager view: helper time, money at list price, tickets finished (with the average), stuck now,
+    and one row per person. None when the answer carries none of it (an older orch)."""
+    if not isinstance(answer, dict) or "seconds" not in answer:
+        return None
+    seconds, cost, finished = (
+        _count(answer.get("seconds")),
+        answer.get("cost") or 0,
+        _count(answer.get("finished")),
+    )
+    each = None
+    if finished and (seconds or cost):
+        each = f"about {_money(cost / finished)} and {_seconds_words(seconds // finished)} each"
+    # ORCH-410: tickets nobody owns count for the person chosen as "You" (me); the same name is one row.
+    merged: dict = {}
+    for row in answer.get("team") or []:
+        if not isinstance(row, dict):
+            continue
+        m = merged.setdefault(
+            _person(row.get("owner"), me), dict.fromkeys(("finished", "open", "seconds", "cost"), 0)
+        )
+        for k in ("finished", "open", "seconds"):
+            m[k] += _count(row.get(k))
+        c = row.get("cost")
+        m["cost"] += c if isinstance(c, int | float) and not isinstance(c, bool) and c > 0 else 0
+    people = [
+        {
+            "name": name,
+            "finished": m["finished"],
+            "open": m["open"],
+            "time": _seconds_words(m["seconds"]),
+            "cost": _money(m["cost"]),
+        }
+        for name, m in merged.items()
+    ]
+    return {
+        "time": _seconds_words(seconds),
+        "cost": _money(cost),
+        "note": "" if seconds or round(cost, 2) > 0 else NOT_RECORDED,
+        "finished": finished,
+        "each": each,
+        "stuck": _count(answer.get("stuck")),
+        "people": people,
+    }
+
+
+def _number(v):
+    return v if isinstance(v, int | float) and not isinstance(v, bool) else None
+
+
+def build_week(answer):
+    """ORCH-297: one bar, this week's use against the weekly budget the person set in Usage. The first account
+    that is on and has a weekly limit and a reading wins. None (no bar, never a fake zero) when Usage is off,
+    has no weekly limit, or has no reading yet. {"label", "percent", "over"}."""
+    if not isinstance(answer, dict):
+        return None
+    for acct in answer.get("accounts") or []:
+        if not isinstance(acct, dict) or acct.get("on") is not True:
+            continue
+        rule = acct.get("rule") if isinstance(acct.get("rule"), dict) else {}
+        limit = next(
+            (x for x in rule.get("limits") or [] if isinstance(x, dict) and x.get("period") == "week"), None
+        )
+        use = (acct.get("use") or {}).get("week") if isinstance(acct.get("use"), dict) else None
+        budget = _number(limit.get("value")) if limit else None
+        if not budget or budget <= 0 or not isinstance(use, dict):
+            continue
+        name = str(acct.get("label") or "")[:60]
+        if limit.get("unit") == "$":
+            used = _number(use.get("spent"))
+            if used is None:
+                continue
+            words = f"${used:,.2f} of ${budget:,.2f}" + (" (estimated)" if use.get("estimated") else "")
+        else:
+            used = _number(use.get("pct"))
+            if used is None:
+                continue
+            words = f"{used:g}% used" + ("" if budget == 100 else f" · budget {budget:g}%")
+        return {
+            "label": f"{words} this week" + (f" · {name}" if name else ""),
+            "percent": max(0, min(100, round(100 * used / budget))),
+            "over": used > budget,
+        }
+    return None
+
+
+def build_models(answer, me=None):
     """Fail closed: an unreadable answer is an error, never a row of zeros."""
     if not isinstance(answer, dict) or answer.get("schema") != "orch.usage/1":
         return {"error": ERROR}
@@ -53,11 +167,12 @@ def build_models(answer):
             if i + o:
                 models.append({"name": name, "label": LABELS[name], "tokens": i + o, "in": i, "out": o})
     if not models:
-        return {"empty": True, "text": EMPTY}
+        return {"empty": True, "text": EMPTY, "team": build_team(answer, me)}
     top = sorted(rows, key=lambda row: -_count(row.get("total")))[:TOP]
     moved, of = _count(answer.get("moved_up")), _count(answer.get("with_model"))
     return {
         "empty": False,
+        "team": build_team(answer, me),
         "models": models,
         "moved_up": moved,
         "of": of,

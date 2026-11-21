@@ -10,6 +10,12 @@
 - switch off: a pull request this switch put in line and still waiting leaves the queue (one being checked
   right now finishes its round).
 
+- helper stopped (ORCH-433, off unless `[pull_requests] queue_when_helper_stops = true`): a ticket without the
+  switch whose helper is not working on it (none, or idle at its prompt), with no open question, not in Backlog
+  and not finished, has each pull request the ticket records as "ready to merge" (checks passed, not a draft)
+  put in the queue the same way. The helper left it open; nobody had to press Merge. Only the recorded status
+  is read first, so drafts and red pull requests cost no GitHub call.
+
 What it put in line is remembered per commit in `switch.json`, so a pull request that left the queue (checks
 failed, a conflict, no room in the write limit) is not put back every minute: a new commit puts it back at once;
 the same commit only after RETRY_SECS, while none of its checks failed, at most TRIES times. Turning the switch
@@ -32,6 +38,10 @@ ADDON = "pull-requests"
 FIELD = "merge_when_green"
 ON = "on"
 BY = "agent:merge-when-green"
+BY_STOPPED = "agent:helper-stopped"
+SETTING_STOPPED = "queue_when_helper_stops"
+READY = "ready to merge"  # the ticket's recorded status of a pull request whose checks passed (prstate.py)
+NOT_STOPPED = ("open", "done", "dropped")  # open = Backlog: nobody planned work there yet
 RETRY_SECS = 600
 TRIES = 3
 
@@ -39,6 +49,43 @@ TRIES = 3
 def is_on(ticket: dict) -> bool:
     ext = (ticket.get("ext") or {}).get(ADDON) if isinstance(ticket, dict) else None
     return isinstance(ext, dict) and ext.get(FIELD) == ON
+
+
+def stopped_is_on(root: Path) -> bool:
+    """The workspace switch for pull requests a helper left open. Off unless the file says true."""
+    from orch import config
+
+    return config.file_switch(root, "pull_requests", SETTING_STOPPED, False) is True
+
+
+def set_stopped(root: Path, on: bool) -> bool:
+    from orch import config
+
+    config.set_key(root, "pull_requests", SETTING_STOPPED, bool(on))
+    return bool(on)
+
+
+def _ready_refs(ticket: dict) -> list[str]:
+    """The ticket's pull requests recorded as ready to merge (checks passed, not a draft)."""
+    return [
+        r["url"]
+        for r in ticket.get("refs") or []
+        if isinstance(r, dict) and isinstance(r.get("url"), str) and r.get("status") == READY
+    ]
+
+
+def _helper_stopped(root: Path, ticket: dict) -> bool:
+    """No helper works on the ticket (none, or idle at its prompt) and nothing waits for a person on it."""
+    from orch import stuck
+
+    if ticket.get("status") in NOT_STOPPED or ticket.get("general") is True or ticket.get("manager") is True:
+        return False
+    if any(isinstance(q, dict) and q.get("answer") is None for q in ticket.get("questions") or []):
+        return False  # it asked a person: that answer decides
+    try:
+        return stuck._helper(root, ticket)[0] != "busy"
+    except Exception:  # noqa: BLE001 - an unreadable run record: leave the pull request alone
+        return False
 
 
 def _seen_file(root: Path) -> Path:
@@ -80,7 +127,7 @@ def tend(root: Path, gh, clock=time.time, log=print, start=None) -> dict:
     "removed": [url], "skipped": [(url, why)]}. Refused when the tickets cannot be read (nothing is queued)."""
     from orch import stuck, tickets
 
-    from .runner import admit, merge_cards, pr_key
+    from .runner import _release_fix, admit, merge_cards, pr_key
 
     try:
         all_tickets = tickets.list_all(root)
@@ -95,14 +142,19 @@ def tend(root: Path, gh, clock=time.time, log=print, start=None) -> dict:
     queue = _newest_rows(store.read(root))
     out: dict = {"added": [], "removed": [], "skipped": []}
     keep: set[str] = set()
+    stopped_on = stopped_is_on(root)
     for t in all_tickets:
         on = is_on(t)
+        ready = set(_ready_refs(t)) if not on and stopped_on else set()
+        auto = bool(ready) and _helper_stopped(root, t)
         for url in stuck.open_pulls(t):
             k = pr_key(url)
             if not k:
                 continue
             row = queue.get(k)
-            if not on:
+            if auto and url in ready:
+                pass  # the helper stopped and left it open: put in line like the switch does
+            elif not on:
                 if (
                     row
                     and row.get("state") == WAITING
@@ -143,10 +195,18 @@ def tend(root: Path, gh, clock=time.time, log=print, start=None) -> dict:
                 continue
             head = v["headRefOid"]
             tries = prev.get("tries", 0) + 1 if prev.get("head") == head else 1
-            queue[k], _ = store.add(root, url, t["id"], BY, **got)  # linked on two tickets: queued once
+            by = BY if on else BY_STOPPED
+            fix = _release_fix(root, t["id"])  # a release keeper's red-run fix goes first (ORCH-1023)
+            # linked on two tickets: queued once
+            queue[k], _ = store.add(root, url, t["id"], by, first=fix, **got)
             seen[k] = {"head": head, "tries": tries, "at": now, "ticket": t["id"]}
             out["added"].append(url)
-            log(f"Merge when green on {t.get('key') or t['id']}: {url} is in the merge queue.")
+            if on:
+                log(f"Merge when green on {t.get('key') or t['id']}: {url} is in the merge queue.")
+            else:
+                log(
+                    f"The helper of {t.get('key') or t['id']} stopped with {url} ready: it is in the merge queue."
+                )
     _write_seen(root, {k: v for k, v in seen.items() if k in keep})
     if out["added"] and start is not None:
         start(root)

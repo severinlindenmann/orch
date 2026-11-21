@@ -57,6 +57,9 @@ test('helperRows: one row per running helper, working first, stuck last, with st
   assert.deepEqual(rows.map(r => r.ticket.key), ['ORCH-1', 'ORCH-3', 'ORCH-2']);
   assert.deepEqual({...rows[0].step}, {n:2, of:3});
   assert.equal(rows[0].minutes, 52);
+  // ORCH-288: a skipped task counts in the total, like the "3/4" of the Tickets list
+  const skip = helpers.helperRows([{id:'e', status:'active', checklist:[{done:true}, {done:true}, {wont_do:true}, {state:'doing'}]}], {e:{running:true, helper:{state:'working'}}});
+  assert.deepEqual({...skip[0].step}, {n:4, of:4});
   assert.equal(rows[2].finished, true);
 });
 
@@ -68,6 +71,20 @@ test('kit: the meta line and the summary use the same words on every page', () =
   assert.equal(UI.helperMeta({state:'idle', finished:true, detail:'Nothing running for 5 min'}), 'Finished · Nothing running for 5 min');
   assert.equal(UI.helperSummary([{state:'working'}, {state:'working'}, {state:'you'}, {state:'idle'}]), '2 working · 1 waits for you · 1 idle');
   assert.equal(UI.helperSummary([{state:'you'}, {state:'you'}]), '2 wait for you');
+});
+
+test('ORCH-643: a helper stopped on the usage limit shows Stopped: usage limit and when it continues, after stuck', () => {
+  const run = {running:true, helper:{state:'limit', word:'Stopped: usage limit', detail:'Continues at 19:10'}};
+  assert.deepEqual({...helpers.helperState(run, {})}, {state:'limit', word:'Stopped: usage limit', detail:'Continues at 19:10'});
+  const rows = helpers.helperRows([{id:'l', status:'active'}, {id:'s', status:'active'}],
+    {l:run, s:{running:true, helper:{state:'stuck', detail:'Nothing running for 25 min'}}});
+  assert.deepEqual(rows.map(r => r.state), ['stuck', 'limit']);
+  const UI = kit();
+  assert.equal(UI.helperMeta({state:'limit', minutes:52, detail:'Continues at 19:10'}), 'Continues at 19:10');
+  assert.equal(UI.helperSummary([{state:'working'}, {state:'limit'}, {state:'limit'}]), '1 working · 2 stopped on the usage limit');
+  assert.match(UI.helperPill('limit', 'Stopped: usage limit').className, /^pill helper-pill$/);
+  const s = UI.ticketState({status:'active'}, {state:'limit', word:'Stopped: usage limit', detail:'Continues at 19:10'});
+  assert.equal(s.word, 'Stopped: usage limit'); assert.equal(s.pill, 'check');
 });
 
 test('kit: the Helpers list shows ORCH-n, title, the worded pill and the row buttons; an empty list says so', () => {
@@ -84,14 +101,15 @@ test('kit: the Helpers list shows ORCH-n, title, the worded pill and the row but
   assert.match(UI.helperPill('stuck', 'Stuck').className, /pill helper-pill failed/);
 });
 
-test('Home: the Helpers side card replaces Working now, with Nudge on idle rows and Stop on finished idle ones', () => {
+test('Home: the Helpers side card replaces Working now, with Nudge on idle rows and Stop on finished idle ones, none for a ticket in Review', () => {
   const items = [
     {id:'w', key:'ORCH-56', title:'Fix flaky test', status:'active', checklist:[{state:'doing'}]},
     {id:'i', key:'ORCH-32', title:'Windows suite', status:'active'},
-    {id:'f', key:'ORCH-40', title:'Done but open', status:'review'},
+    {id:'f', key:'ORCH-40', title:'Done but open', status:'done'},
+    {id:'r', key:'ORCH-314', title:'Waits for review', status:'review'},
   ];
   const runs = {w:{running:true, helper:{state:'working'}, age_seconds:600}, i:{running:true, helper:{state:'idle', detail:'Nothing running for 8 min'}},
-    f:{running:true, helper:{state:'idle', detail:'Nothing running for 3 min'}}};
+    f:{running:true, helper:{state:'idle', detail:'Nothing running for 3 min'}}, r:{running:true, helper:{state:'idle', detail:'Nothing running for 55 s'}}};
   const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
   const UI = kit(), seen = [];
   const c = vm.createContext({window:{DashHelpers:helpers, UI:{...UI, helperList:(rows, o) => { seen.push(...rows); return h('section', {'data-key':o.dataKey}, 'Helpers'); }}},
@@ -108,7 +126,7 @@ test('Home: the Helpers side card replaces Working now, with Nudge on idle rows 
     ['ORCH-56', 'Working', 'Step 1 of 1 · 10 min', ''],
     ['ORCH-32', 'Idle', 'Nothing running for 8 min', 'Nudge'],
     ['ORCH-40', 'Idle', 'Finished · Nothing running for 3 min', 'Stop'],
-  ]);
+  ]);  // ORCH-407: ORCH-314 waits for review: it is the person's Check result, no Helpers row and no Stop
 });
 
 test('ticket page: the state pill, the last activity line and a Stop that says when the helper is idle', () => {
@@ -118,4 +136,17 @@ test('ticket page: the state pill, the last activity line and a Stop that says w
   assert.match(ticket, /idle \? 'Stop idle helper' : 'Stop'/);
   const app = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
   assert.match(app, /const helper = window\.DashHelpers\.helperState\(run, t\)/);  // the ticket chip reads the same state
+});
+
+// ORCH-218: the master widget for a terminal command to copy.
+test('commandCopy: the command as text, a lead line and one Copy button named for the command', () => {
+  const UI = kit();
+  const box = UI.commandCopy('az login', {lead: 'Open a terminal on this computer and run:', dataKey: 'k'});
+  assert.equal(box.className, 'cmd-copy');
+  assert.equal(box.dataset.key, 'k');
+  assert.deepEqual(texts(box), ['Open a terminal on this computer and run:', 'az login', 'Copy']);
+  const b = box.children[1].children[1];
+  assert.equal(b.tagName, 'button');
+  assert.equal(b.attrs['aria-label'], 'Copy az login');
+  assert.deepEqual(texts(UI.commandCopy('gh auth login')), ['gh auth login', 'Copy']);
 });

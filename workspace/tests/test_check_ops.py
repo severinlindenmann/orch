@@ -304,6 +304,8 @@ def test_record_and_proof_state_never_execute(repo, run, new_ticket, monkeypatch
     seen = []
 
     def only_git(argv, *a, **k):
+        if os.name == "nt" and os.path.basename(argv[0]).lower() == "taskkill.exe":
+            return real_popen(argv, *a, **k)  # safegit ends a git process tree this way on Windows
         assert (
             isinstance(argv, list) and os.path.basename(argv[0]) in ("git", "git.exe") and not k.get("shell")
         ), argv
@@ -338,8 +340,9 @@ def _hostile_repo(proj, marker):
     (proj / "a.txt").write_text("one\n", encoding="utf-8")
     _git(proj, "add", "a.txt")
     _git(proj, "commit", "-q", "-m", "first")
-    _git(proj, "config", "filter.evil.clean", f"touch {marker}; cat")
-    _git(proj, "config", "filter.evil.process", f"touch {marker}")
+    m = marker.as_posix()  # git runs the filter through sh: backslashes would be eaten
+    _git(proj, "config", "filter.evil.clean", f"touch {m}; cat")
+    _git(proj, "config", "filter.evil.process", f"touch {m}")
     (proj / ".gitattributes").write_text("* filter=evil\n", encoding="utf-8")
     (proj / ".git" / "info" / "attributes").write_text("* filter=evil\n", encoding="utf-8")
     (proj / "a.txt").write_text("edited so git must look at it\n", encoding="utf-8")
@@ -430,7 +433,11 @@ def test_git_env_is_dropped_by_prefix(proj, run, new_ticket, monkeypatch):
     assert not marker.exists()
     seen = []
     real = subprocess.Popen
-    monkeypatch.setattr(safegit.subprocess, "Popen", lambda a, **k: seen.append(k["env"]) or real(a, **k))
+    monkeypatch.setattr(
+        safegit.subprocess,
+        "Popen",
+        lambda a, **k: (seen.append(k["env"]) if "env" in k else None) or real(a, **k),
+    )
     filesig.files_sig(repo)
     assert seen and all(not any(k.startswith("GIT_") and k not in OURS for k in e) for e in seen)
 
@@ -554,6 +561,9 @@ def test_fallback_check_wants_the_path_itself_to_be_the_file(proj, tmp_path):
     os.close(got[0])
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Windows never takes this path: it opens through _open_windows"
+)
 def test_open_checked_closes_the_fd_when_a_stat_fails(proj, monkeypatch):
     f = proj / "f.txt"
     f.write_text("x", encoding="utf-8")
@@ -820,8 +830,150 @@ def test_fresh_prompt_summary_names_writer_and_proof(repo, run, new_ticket):
     assert len(prompt) <= 12000
 
 
+def test_a_yes_on_the_dashboard_counts_when_the_server_runs_under_a_helper(
+    proj, run, new_ticket, monkeypatch
+):
+    """#1354: the dashboard was started from a helper's session, so its environment shows an agent tool
+    and a person's click on yes did nothing. Through the dashboard or a phone the click is the person;
+    at the CLI the environment still decides."""
+    tid = with_checks(proj, run, new_ticket)
+    for c in ("c2", "c3"):
+        code, out, err = run(
+            "ask", tid, f"Mark step {c} as won't do?", "--option", "yes",
+            "--option", "No, run it in CI", "--check", c,
+        )  # fmt: skip
+        assert code == 0, (out, err)
+    q1, q2 = (q["id"] for q in read(proj, tid)["questions"])
+    monkeypatch.setenv("ORCH_AGENT", "claude")
+    root = proj
+    tickets.answer(root, tid, q1, "yes", "human:owner", "dashboard")
+    assert read(proj, tid)["checklist"][1]["wont_do"] is True
+    tickets.answer(root, tid, q2, "yes", "human:owner", "cli")  # a command in an agent's terminal: no
+    assert "wont_do" not in read(proj, tid)["checklist"][2]
+
+
 def test_ask_says_to_keep_working(proj, run, new_ticket):
     """R2.6 + R2.7: the ask output names the next step: go on with what does not need the answer."""
     tid = with_checks(proj, run, new_ticket)
     code, out, _ = run("ask", tid, "Which date format?", "--option", "A")
     assert code == 0 and "Next: keep working on the steps that do not need the answer." in out
+
+
+def test_a_persons_yes_to_the_wont_do_question_marks_the_step(proj, run, new_ticket, monkeypatch):
+    """ORCH-267: the owner answered yes to "Mark step c2 as won't do?" and the step stayed open until a
+    second click. The yes now marks it; a no, another question or an agent's answer does not. ORCH-332: the
+    no option says where the step would run."""
+    tid = with_checks(proj, run, new_ticket)
+    assert (
+        run(
+            "ask",
+            tid,
+            "Mark step c2 as won't do?",
+            "--option",
+            "yes",
+            "--option",
+            "No, run it in CI",
+            "--check",
+            "c2",
+        )[0]
+        == 0
+    )
+    assert run("answer", tid, "q1", "Yes", "--by", "human:tester")[0] == 0
+    c2 = read(proj, tid)["checklist"][1]
+    assert c2["wont_do"] is True and c2["wont_by"] == "human:tester" and c2["done"] is False
+    assert c2["reason"] == "Answered yes to q1"
+    # no, or a question not about won't do: the step stays as it is
+    run(
+        "ask",
+        tid,
+        "Mark step c3 as won't do?",
+        "--option",
+        "yes",
+        "--option",
+        "No, run it in CI",
+        "--check",
+        "c3",
+    )
+    run("answer", tid, "q2", "No, run it in CI", "--by", "human:tester")
+    run("ask", tid, "Is step c1 right?", "--option", "yes", "--option", "no", "--check", "c1")
+    run("answer", tid, "q3", "yes", "--by", "human:tester")
+    steps = read(proj, tid)["checklist"]
+    assert "wont_do" not in steps[0] and "wont_do" not in steps[2]
+    # only the exact question counts: other wording, another step's number, or no yes option
+    for i, (text, opts) in enumerate(
+        [
+            ("Is the layout fine? If yes I mark step c3 as won't do.", ("yes", "No, run it in CI")),
+            ("Mark step c1 as won't do?", ("yes", "No, run it in CI")),
+            ("Mark step c3 as won't do?", ("ok", "No, run it in CI")),
+        ],
+        start=4,
+    ):
+        run("ask", tid, text, *[x for o in opts for x in ("--option", o)], "--check", "c3")
+        run("answer", tid, f"q{i}", opts[0], "--by", "human:tester")
+    assert "wont_do" not in read(proj, tid)["checklist"][2]
+    # an answer written from inside an agent session never marks it
+    run(
+        "ask",
+        tid,
+        "mark step c3 as won\u2019t do?",
+        "--option",
+        "Yes",
+        "--option",
+        "No, run it in CI",
+        "--check",
+        "c3",
+    )
+    monkeypatch.setenv("CLAUDECODE", "1")
+    run("answer", tid, "q7", "yes", "--by", "human:tester")
+    assert "wont_do" not in read(proj, tid)["checklist"][2]
+    monkeypatch.delenv("CLAUDECODE")
+    run(
+        "ask",
+        tid,
+        "mark step c3 as won\u2019t do",
+        "--option",
+        "Yes",
+        "--option",
+        "No, run it in CI",
+        "--check",
+        "c3",
+    )
+    run("answer", tid, "q8", "yes", "--by", "human:tester")
+    assert read(proj, tid)["checklist"][2]["wont_do"] is True
+
+
+def test_an_answer_given_in_the_conversation_closes_the_card(proj, run, new_ticket):
+    """ORCH-267, owner 17 Nov: the person answered in the helper's window, not on the card; the helper writes
+    their words on the card and it closes, shown as answered in the conversation (never as their click)."""
+    tid = with_checks(proj, run, new_ticket)
+    run("ask", tid, "Which colour?", "--option", "red", "--option", "blue")
+    code, out, _ = run("ask", tid, "Blue, the darker one", "--in-conversation", "q1", "--by", "agent:claude")
+    assert code == 0 and "answered in the conversation" in out
+    t = read(proj, tid)
+    q = t["questions"][0]
+    assert q["answer"] == "Answered in the conversation: Blue, the darker one"
+    assert q["via"] == "conversation" and not q["answered_by"].startswith("human:")
+    assert t["status"] != "waiting"
+    assert run("ask", tid, "again", "--in-conversation", "q1")[0] == 2  # already answered
+    # a card that does something on its answer is answered on the card only
+    run("ask", tid, "Start it?", "--option", "yes", "--option", "no")
+    tickets.apply_op(proj, tid, lambda t: t["questions"][1].update(action={"merge": "x"}), by="agent:x")
+    code, _, err = run("ask", tid, "yes", "--in-conversation", "q2")
+    assert code == 2 and "on the card" in err and read(proj, tid)["questions"][1]["answer"] is None
+    assert run("ask", tid, "x", "--in-conversation", "q9")[0] == 2
+    # it is never written down as the person: that is their own click on the card
+    run("ask", tid, "Which size?", "--option", "S", "--option", "M")
+    code, _, err = run("ask", tid, "M", "--in-conversation", "q3", "--by", "human:owner")
+    assert code == 2 and read(proj, tid)["questions"][2]["answer"] is None
+    assert run("ask", tid, "x", "--in-conversation", "q1", "--option", "a")[0] == 2
+
+
+def test_failed_run_names_the_task_and_says_run_it_again(proj, run, new_ticket):
+    tid = new_ticket("Export")
+    run("check", "add", tid, "tests pass")
+    c = "c1"
+    run("check", "done", tid, c, "--note", "looked fine")
+    code, out = run("check", "record", tid, c, "--cmd", "pytest", "--exit", "1")[:2]
+    assert code == 0 and "that run failed: fix it, then run it again" in out and "close the task" not in out
+    shown = run("ticket", "show", tid)[1]
+    assert "1 check failed (c1: tests pass)" in shown

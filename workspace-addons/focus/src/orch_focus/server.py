@@ -47,6 +47,7 @@ def agent_label(claim: dict | None, agents: list[dict] | None) -> str:
 
 DEFAULT_PORT = 8430
 MAX_BODY = 16384
+FEED_IDLE = 120.0  # seconds without a view before a ticket's followed record command ends
 # a message with files (ticket.attach): up to 5 files of 25 MB as base64; one such body in memory at a time
 MAX_BIG_BODY = 5 * actions.ATTACH_MAX * 4 // 3 + MAX_BODY
 _BIG_READS = threading.BoundedSemaphore(1)
@@ -56,11 +57,12 @@ TYPES = {
     ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml",
 }  # fmt: skip
 KIT_FILES = ("frame.js", "tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
-             "question-card.js", "evidence.js", "widgets.css", "widgets.js")  # fmt: skip
+             "question-card.js", "evidence.js", "widgets.css", "widgets.js", "start-choice-state.js", "start-choice.js")  # fmt: skip
 WEB_FILES = (
     "index.html",
     "compose.js",
     "focus.js",
+    "start.js",
     "store.js",
     "jobs.js",
     "session.js",
@@ -98,6 +100,11 @@ def _kit(name: str) -> bytes | None:
     return None
 
 
+# The Focus page of one ticket: t/<ticket> (the dashboard's links), the short <ticket> a person may type after
+# #addon/focus/ (report r-1118-0544), and t/t/<ticket> when a surface joins the path twice.
+PAGE_PATH = re.compile(r"(?:/t){0,2}/t_[a-z0-9]{6,16}")
+
+
 class Tracker:
     """Per ticket: turns ticket changes into run events (written to the log) and folds the log into a Board."""
 
@@ -128,7 +135,7 @@ class Tracker:
             return hit[1]
         data = None
         try:
-            code, out, _ = actions.orch(self.root, self.orch_bin, argv, timeout=5)
+            code, out, _ = actions.read(self.root, self.orch_bin, argv, timeout=5)
             if code == 0:
                 data = json.loads(out)
         except (actions.Unavailable, ValueError, RecursionError):
@@ -365,7 +372,7 @@ class Tracker:
             return hit[1]
         doc = None
         try:
-            code, out, _ = actions.orch(
+            code, out, _ = actions.read(
                 self.root, self.orch_bin, ["ticket", "show", tid, "--json"], timeout=15
             )
             if code == 0:
@@ -376,13 +383,21 @@ class Tracker:
         self.ticket_cache[tid] = (time.time(), doc)
         return doc
 
+    def _rest_feeds(self) -> None:
+        """A ticket nobody looked at for FEED_IDLE seconds (gone from the lists) keeps no followed command."""
+        now = time.monotonic()
+        for other in self.tickets.values():
+            f = other.get("feed")
+            if f is not None and now - f.last_poll > FEED_IDLE:
+                f.rest()
+
     def run_status(self, tid: str) -> dict:
         hit = self.status_cache.get(tid)
         if hit and time.time() - hit[0] < 1.0:
             return hit[1]
         data: dict = {"running": False}
         try:
-            code, out, _ = actions.orch(
+            code, out, _ = actions.read(
                 self.root, self.orch_bin, ["run", "status", tid, "--json"], timeout=15
             )
             if code == 0:
@@ -420,7 +435,8 @@ class Tracker:
                     self.last_agent[tid] = (agent, mode)
                 if tr.get("feed") is None:
                     tr["feed"] = RecordFeed(self.root, self.orch_bin, run, tid)
-                steps = tr["feed"].poll()
+                self._rest_feeds()
+                steps = tr["feed"].poll(live=bool(status.get("running")))  # none for an ended run
                 new = tr["watcher"].feed(ticket)
                 if new:
                     try:
@@ -504,6 +520,8 @@ class Tracker:
                 "revision": ticket.get("revision", 0), "checklist": checks,
                 # ORCH-71: the ticket page's state rule reads changes waiting for the person
                 "bring_back": ticket.get("bring_back") if isinstance(ticket.get("bring_back"), dict) else None,
+                # ORCH-235: a wait for a date or the outside reads Waiting, a wait on a question Needs you
+                "waiting_on": ticket.get("waiting_on") if isinstance(ticket.get("waiting_on"), dict) else None,
                 "questions": [{**q, "digest": livecards.question_digest(q)} if isinstance(q, dict) else q for q in questions],
                 "history": (ticket.get("history") or [])[-80:],
             },
@@ -558,7 +576,7 @@ class Tracker:
         """The always-on Manager (ORCH-147): {ticket, running} from `orch manager status`; None when this orch
         has no Manager yet (an older core), so the start page shows no Manager row."""
         try:
-            code, out, _ = actions.orch(self.root, self.orch_bin, ["manager", "status", "--json"], timeout=15)
+            code, out, _ = actions.read(self.root, self.orch_bin, ["manager", "status", "--json"], timeout=15)
             d = json.loads(out) if code == 0 else None
         except (actions.Unavailable, ValueError, RecursionError):
             d = None
@@ -572,7 +590,7 @@ class Tracker:
 
     def tickets_list(self) -> list[dict]:
         try:
-            code, out, _ = actions.orch(
+            code, out, _ = actions.read(
                 self.root, self.orch_bin, ["ticket", "list", "--all", "--json"], timeout=15
             )
             rows = json.loads(out) if code == 0 else []
@@ -628,10 +646,12 @@ class Tracker:
 
 
 def _link_msg(session, name: str) -> bytes:
-    from orch.pagesession import REVOKED_MSG
+    from orch.pagesession import REVOKED_MSG, WATCH_ONLY_MSG
 
     if session.revoked:
         return REVOKED_MSG.encode()
+    if getattr(session, "active", True) is False:  # a helper started this server: watch-only
+        return WATCH_ONLY_MSG.encode()
     return f"This link was already used. Open {name} again from orch.".encode()
 
 
@@ -702,7 +722,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
-        if (path == "/" or re.fullmatch(r"(/t)?/t/t_[a-z0-9]{6,16}", path)) and selfupdate.answer(self):
+        if (path == "/" or PAGE_PATH.fullmatch(path)) and selfupdate.answer(self):
             return
         if (
             path == "/ready" and self.nonce
@@ -754,6 +774,17 @@ class Handler(BaseHTTPRequestHandler):
                     self.tracker.status_cache.clear()
             v = self.tracker.view(m.group(1))
             return self._json(200, v) if v else self._send(404, b"no such ticket", "text/plain")
+        m = re.fullmatch(r"/api/t/(t_[a-z0-9]{6,16})/sessions", path)
+        if m:  # earlier chat sessions of the ticket, or one session's history (?session=<id>): read-only
+            sid = parse_qs(self.path.partition("?")[2]).get("session", [None])[0]
+            args = ["run", "history", m.group(1), "--json"] + (["--session", sid] if sid else [])
+            try:
+                code, out, err = actions.read(self.root, self.orch_bin, args, timeout=15)
+            except actions.Unavailable as e:
+                return self._json(503, {"error": str(e)})
+            if code != 0:
+                return self._json(404, {"error": (err or out or "No earlier chat sessions.").strip()[:300]})
+            return self._send(200, out.encode() if isinstance(out, str) else out, "application/json")
         if path == "/api/file":  # one proof file of a ticket, read by orch.safefile only (proofs.py)
             q = parse_qs(self.path.partition("?")[2], keep_blank_values=True)
             one = lambda k: (q.get(k) or [""])[0]
@@ -767,7 +798,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.root, m.group(1), m.group(2), unquote(m.group(3))
             )
             return self._send(code, body, ctype, {"Cross-Origin-Resource-Policy": "same-origin", **extra})
-        if path == "/" or re.fullmatch(r"(/t)?/t/t_[a-z0-9]{6,16}", path):
+        if path == "/" or PAGE_PATH.fullmatch(path):
             pre = self.headers.get("X-Forwarded-Prefix") or ""
             pre = pre if PREFIX.fullmatch(pre) else ""
             return self._send(200, _web("index.html").replace(b"__P__", pre.encode()), TYPES[".html"])
@@ -928,9 +959,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.root, self.orch_bin, body.get("op"), args, session=session
             )
         except actions.NeedsPerson as e:
-            from orch.pagesession import REVOKED_MSG
+            from orch.pagesession import REVOKED_MSG, WATCH_ONLY_MSG
 
             msg = REVOKED_MSG if self.session is not None and self.session.revoked else str(e)
+            if self.session is not None and getattr(self.session, "active", True) is False:
+                msg = WATCH_ONLY_MSG  # a helper started this server: no click can act as the person here
             return self._send(403, msg.encode(), "text/plain; charset=utf-8")
         except actions.BadRequest as e:
             return self._send(400, str(e).encode(), "text/plain; charset=utf-8")

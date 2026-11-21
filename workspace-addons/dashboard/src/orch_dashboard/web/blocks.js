@@ -15,6 +15,7 @@ const OrchBlocks = (() => {
   const FILE = /^f_[a-z0-9]+$/;
   const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/;
   let opts = {};   // {addonUrl(name) -> local page address or null}, set per render()
+  const openLogs = new Set();   // ids whose whole log is open: kept when the page refreshes (ORCH-1130)
   const VERB = /^[a-z][a-z-]{0,20}$/;
   const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
   const ITEM = /^[a-z]_[a-z0-9]{6,16}$/;   // the id of one thing an add-on keeps (a ticket t_…, a lesson l_…)
@@ -35,7 +36,7 @@ const OrchBlocks = (() => {
     s.setAttribute('class', 'ic' + (cls ? ' ' + cls : '')); s.setAttribute('aria-hidden', 'true');
     return s;
   }
-  // Wrap `child` in a link when `link` is a ticket id or an https URL; otherwise return it as is.
+  // Wrap `child` in a link when `link` is a ticket id, an https URL or a local app address; otherwise return it as is.
   function linked(cls, link, child) {
     const l = typeof link === 'string' ? link : '';
     if (APP.test(l)) { const a = el('a', cls); a.href = '#' + l.slice(4); a.append(...child); return a; }  // a page of the dashboard itself
@@ -56,7 +57,7 @@ const OrchBlocks = (() => {
       return b;
     }
     if (TICKET.test(l)) { const a = el('a', cls); a.href = '#ticket/' + encodeURIComponent(l); a.append(...child); return a; }
-    if (HTTPS.test(l)) {
+    if (HTTPS.test(l) || LOCAL.test(l)) {  // an https page, or an app on this computer (http://127.0.0.1:<port>)
       const a = el('a', cls); a.href = l; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.append(...child);
       const sr = el('span', 'sr-only', ' (opens in a new tab)'); a.append(sr);
       return a;
@@ -132,7 +133,7 @@ const OrchBlocks = (() => {
     d.append(el('span', 'meta', quiet));
     return d;
   }
-  const shownLink = to => typeof to === 'string' && (APP.test(to) || TICKET.test(to) || HTTPS.test(to));
+  const shownLink = to => typeof to === 'string' && (APP.test(to) || TICKET.test(to) || HTTPS.test(to) || LOCAL.test(to));  // LOCAL: an app on this computer (ORCH-846)
   const MARKS = {arrow: '\u2197', repeat: '\u21ba', dash: '\u2014'};
   function emptyState(e) {
     // The one master empty state (UI.state); the buttons stay real links checked by shownLink.
@@ -196,7 +197,10 @@ const OrchBlocks = (() => {
       return actionAttrs(b, a.action, a.label) ? b : null;
     }).filter(Boolean);
     const expandable = arr(it.detail).length || arr(it.tickets).length || buttons.length;
-    const finish = () => { if (sendBtn) li.append(sendBtn); if (sw) li.append(sw); return li; };
+    // A switch says what it turns on: the add-on's short words sit beside it (bug hunt 17 Nov: a bare On/Off).
+    const swText = sw && it.toggle.text ? el('span', 'switch-text', it.toggle.text) : null;
+    if (swText) swText.setAttribute('aria-hidden', 'true');
+    const finish = () => { if (sendBtn) li.append(sendBtn); if (swText) li.append(swText); if (sw) li.append(sw); return li; };
     const main = el('span', 'li-main'); main.append(el('span', 'li-title', it.title));
     if (it.subtitle) main.append(el('small', 'li-sub', it.subtitle));
     if (arr(it.chips).length) { const c = el('span', 'tags'); c.append(...it.chips.map(chip)); main.append(c); }
@@ -221,6 +225,165 @@ const OrchBlocks = (() => {
     for (const a of arr(it.actions)) { const b = rowButton(a); if (b) box.append(...openFirst(b)); }
     row.append(box); li.append(row);
     return li;
+  }
+
+
+  // ---- List and panel (split, ORCH-326): a slim list on the left, the chosen item in full on the right; on a phone the
+  // list first, then the panel with a way back (kit .split-view). The chosen item has an address: #<page>?<param>=<id>.
+  // Every action of an item may only name that item's own id as its target; anything else is not drawn.
+  const SPLIT_ID = /^[a-z0-9][a-z0-9_.:-]{0,63}$/;
+  const PARAM = /^[a-z]{1,12}$/;
+  const splitParam = b => PARAM.test(String(b.param)) ? String(b.param) : 'item';
+  const hashBase = () => typeof location !== 'undefined' ? String(location.hash || '').split('?')[0] : '';
+  function splitChosen(param) {
+    if (typeof location === 'undefined') return null;
+    const q = String(location.hash || '').split('?')[1];
+    const v = q ? new URLSearchParams(q).get(param) : null;
+    return v && SPLIT_ID.test(v) ? v : null;
+  }
+  const STATE_DOT = {good: 'dot-ok', bad: 'dot-err', 'needs-you': 'dot-err', warn: 'dot-warn', neutral: 'dot-off'};
+  const stateDot = t => { const d = el('span', STATE_DOT[tone(t)]); d.setAttribute('aria-hidden', 'true'); return d; };
+  const STATE_PILL = {good: 'pill done', bad: 'pill failed', 'needs-you': 'pill failed', warn: 'pill needs', neutral: 'pill'};
+  const statePill = c => { const p = el('span', STATE_PILL[tone(c.tone)]); p.append(stateDot(c.tone), String(c.label)); return p; };
+  // One button of an item: its own add-on verb (target = this item) or a link. `cls` is the kit look.
+  function splitButton(x, it, cls) {
+    if (!x || typeof x.label !== 'string') return null;
+    const a = x.action, args = a && a.args || {};
+    if (a) {
+      if (!(a.op === 'addon.act' && VERB.test(String(args.verb)) && args.target === it.id)) return null;
+      const b = el('button', cls, x.label); b.type = 'button';
+      b.dataset.addonAct = 'true'; b.dataset.verb = String(args.verb); b.dataset.target = it.id; b.dataset.label = x.label;
+      b.setAttribute('aria-label', x.label + ' ' + it.title);
+      return b;
+    }
+    if (shownLink(x.link)) { const l = linked(cls, x.link, [x.label]); l.className = cls; return l; }
+    return null;
+  }
+  function splitRow(it, cur, param) {
+    const row = el('div', 'list-row' + (cur ? ' cur' : '')); row.dataset.splitRow = it.id;
+    const a = el('a', 'grow plain-link'); a.href = hashBase() + '?' + param + '=' + encodeURIComponent(it.id);
+    a.dataset.splitPick = it.id; if (cur) a.setAttribute('aria-current', 'true');
+    a.append(String(it.title), el('span', 'subline', it.state.label));
+    row.append(stateDot(it.state.tone), a);
+    if (!it.question) { const b = splitButton(it.action, it, 'btn outline sm'); if (b) row.append(b); }
+    return row;
+  }
+  function splitFacts(facts, it) {
+    const dl = el('dl', 'split-facts');
+    for (const f of arr(facts)) {
+      const d = el('div'), dd = el('dd');
+      if (f.switch && f.switch.action) {
+        const a = f.switch.action, args = a.args || {};
+        if (a.op === 'addon.act' && VERB.test(String(args.verb)) && args.target === it.id) {
+          const label = el('label', 'row'), sw = el('button', 'switch'); sw.type = 'button';
+          sw.setAttribute('role', 'switch'); sw.setAttribute('aria-checked', f.switch.on ? 'true' : 'false'); sw.setAttribute('aria-label', String(f.switch.label));
+          sw.dataset.addonAct = 'true'; sw.dataset.verb = String(args.verb); sw.dataset.target = it.id; sw.dataset.label = String(f.switch.label);
+          label.append(sw, el('span', '', f.value || '')); dd.append(label);
+        } else dd.append(String(f.value || ''));
+      } else {
+        if (f.tone) dd.append(stateDot(f.tone), ' ');
+        dd.append(f.link && shownLink(f.link) ? linked('', f.link, [String(f.value || f.link)]) : String(f.value || ''));
+      }
+      d.append(el('dt', '', f.label), dd); dl.append(d);
+    }
+    return dl;
+  }
+  function splitLog(log, it) {
+    const box = el('div', 'log-lines'); box.dataset.log = it.id; box.tabIndex = -1;
+    box.setAttribute('role', 'group'); box.setAttribute('aria-label', (log.title || 'Last log lines') + ' of ' + it.title);
+    box.append(el('div', 'log-lines-h', log.title || 'Last log lines'));
+    if (arr(log.lines).length) {
+      const ol = el('ol'); arr(log.lines).forEach(l => ol.append(el('li', '', l))); box.append(ol);
+      if (arr(log.lines).length > 6) { box.classList.add(openLogs.has(it.id) ? 'log-full' : 'log-short'); box.dataset.long = '1'; } // Open log shows every line
+      else if (openLogs.has(it.id)) box.classList.add('log-full');
+    }
+    else box.append(el('p', 'meta', log.empty || 'Nothing written yet.'));
+    return box;
+  }
+  function splitPanel(it, shown, label) {
+    const p = it.panel || {}, s = el('section', 'split-panel stack-lg'); s.dataset.splitPanel = it.id; s.tabIndex = -1;
+    s.setAttribute('aria-label', String(it.title)); if (!shown) s.hidden = true;
+    const back = el('div', 'phone-only'), bb = el('button', 'btn ghost sm', '← All ' + String(label || 'items').toLowerCase()); bb.type = 'button'; bb.dataset.splitPick = '';
+    back.append(bb); s.append(back);
+    const head = el('div'), top = el('div', 'row'); top.append(el('h2', 't-sect grow', it.title), statePill(it.state)); head.append(top);
+    if (p.text) head.append(el('p', 'muted', p.text));
+    s.append(head);
+    const row = el('div', 'row');
+    if (it.question) row.append(el('span', 'muted', 'The question above is about this one.'));
+    else arr(p.buttons).forEach((x, i) => { const b = splitButton(x, it, 'btn sm ' + (x.primary ? 'primary' : 'outline')); if (b) row.append(b); });
+    if (p.log) { const w = openLogs.has(it.id) ? 'Close log' : 'Open log', o = el('button', 'btn ghost sm', w); o.type = 'button'; o.dataset.splitLog = it.id; o.setAttribute('aria-label', w + ' of ' + it.title); row.append(o); }
+    if (row.childNodes.length) s.append(row);
+    if (arr(p.facts).length) s.append(splitFacts(p.facts, it));
+    if (p.note) s.append(el('p', 'muted', p.note));
+    if (p.log) s.append(splitLog(p.log, it));
+    const dg = p.danger, da = dg && dg.action, dargs = da && da.args || {};
+    if (dg && da && da.op === 'addon.act' && VERB.test(String(dargs.verb)) && dargs.target === it.id && dg.confirm && arr(dg.confirm.lines).length) {
+      const foot = el('div', 'row between quiet-note'), b = el('button', 'btn danger sm', dg.label); b.type = 'button';
+      b.dataset.addonAct = 'true'; b.dataset.verb = String(dargs.verb); b.dataset.target = it.id; b.dataset.label = dg.label;
+      b.dataset.confirm = String(dg.confirm.title); b.dataset.confirmLines = arr(dg.confirm.lines).join('\n'); b.dataset.keep = dg.confirm.keep || 'Keep it';
+      b.setAttribute('aria-label', dg.label + ' ' + it.title);
+      foot.append(el('span', 'meta', dg.note || ''), b); s.append(foot);
+    }
+    return s;
+  }
+  function splitQuestion(it) {
+    const q = it.question, box = el('div', 'banner attn'), g = el('div', 'grow stack');
+    g.setAttribute('role', 'group'); g.setAttribute('aria-label', 'Question about ' + it.title);
+    const words = el('div'); words.append(el('strong', '', q.title)); if (q.text) words.append(el('p', 'muted', q.text));
+    const row = el('div', 'row');
+    arr(q.buttons).forEach((x, i) => { const b = splitButton(x, it, 'btn sm ' + (i === 0 ? 'primary' : x.link ? 'ghost' : 'outline')); if (b) row.append(b); });
+    g.append(words, row); box.append(g);
+    return box;
+  }
+  function drawSplit(b) {
+    const s = el('section', 'blk blk-above blk-split'), param = splitParam(b);
+    s.dataset.splitParam = param;
+    const groups = arr(b.groups).map(g => ({...g, items: arr(g.items).filter(it => it && SPLIT_ID.test(String(it.id)) && it.state && typeof it.title === 'string')})).filter(g => g.items.length);
+    const all = groups.flatMap(g => g.items);
+    if (!all.length) { const c = el('div', 'card'); c.append(b.empty ? emptyState(b.empty) : el('p', 'blk-none', 'Nothing here.')); s.append(c); return s; }
+    const asked = all.filter(it => it.question && arr(it.question.buttons).length);
+    asked.forEach(it => s.append(splitQuestion(it)));
+    const want = splitChosen(param), picked = all.some(it => it.id === want) ? want : null, shown = picked || all[0].id;
+    const grid = el('div', 'split-view'); if (picked) grid.dataset.picked = 'true';
+    const nav = el('nav', 'split-list focus-list'); nav.setAttribute('aria-label', String(b.title || 'List'));
+    for (const g of groups) {
+      const h = el('div', 'card-h'); h.append(el('h2', '', g.title), el('span', 'grow'));
+      if (g.meta) { const m = el('span', 'meta', g.meta); m.setAttribute('role', 'status'); h.append(m); }
+      nav.append(h);
+      g.items.forEach(it => nav.append(splitRow(it, it.id === shown, param)));
+    }
+    grid.append(nav, ...all.map(it => splitPanel(it, it.id === shown, b.title)));
+    s.append(grid);
+    return s;
+  }
+  // The page calls this on a click on [data-split-pick]: show that item (or the list again on a phone, id ''), keep the
+  // address, move the focus. No re-render, no request.
+  function splitPick(section, id) {
+    if (!section) return;
+    const param = section.dataset.splitParam || 'item', grid = section.querySelector('.split-view');
+    const panels = [...section.querySelectorAll('[data-split-panel]')];
+    const target = id ? panels.find(p => p.dataset.splitPanel === id) : null;
+    if (id && !target) return;
+    const base = String(location.hash || '').split('?')[0];
+    history.replaceState(null, '', base + (id ? '?' + param + '=' + encodeURIComponent(id) : ''));
+    if (target) { panels.forEach(p => { p.hidden = p !== target; }); grid.dataset.picked = 'true'; }
+    else delete grid.dataset.picked;
+    const on = target ? id : (panels.find(p => !p.hidden) || {}).dataset?.splitPanel;
+    section.querySelectorAll('[data-split-row]').forEach(r => {
+      const cur = r.dataset.splitRow === on; r.classList.toggle('cur', cur);
+      const a = r.querySelector('[data-split-pick]'); if (a) { if (cur) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current'); }
+    });
+    if (target) target.focus({preventScroll: !matchMedia('(max-width:720px)').matches});
+    else section.querySelector('[data-split-row].cur [data-split-pick]')?.focus();
+  }
+  function splitLogShow(section, id) {
+    const l = section && [...section.querySelectorAll('[data-log]')].find(n => n.dataset.log === id);
+    if (!l) return;
+    const open = !l.classList.contains('log-full');
+    if (open) openLogs.add(id); else openLogs.delete(id);
+    l.classList.toggle('log-full', open); l.classList.toggle('log-short', !open && l.dataset.long === '1');
+    for (const b of section.querySelectorAll('[data-split-log]')) if (b.dataset.splitLog === id) { b.textContent = open ? 'Close log' : 'Open log'; b.setAttribute('aria-label', (open ? 'Close log of ' : 'Open log of ') + (b.getAttribute('aria-label') || '').replace(/^(Open|Close) log of /, '')); }
+    l.scrollIntoView({block: 'nearest'}); l.focus({preventScroll: true});
   }
 
   const draw = {
@@ -252,6 +415,7 @@ const OrchBlocks = (() => {
       if (b.more > 0) host.append(el('p', 'blk-more', `+${b.more} more`));
       return s;
     },
+    split: drawSplit,
     footnote(b) {
       const p = el('p', 'blk-footnote'); p.append(el('span', '', b.text));
       if (b.link && shownLink(b.link.to)) p.append(linked('', b.link.to, [b.link.label + ' \u2192']));
@@ -349,9 +513,12 @@ const OrchBlocks = (() => {
       const wrap = el('div', 'table-wrap'), t = el('table', 'blk-table data-table'), cols = arr(b.columns);
       const hr = el('tr');
       const rowsList = arr(b.rows), hasActions = rowsList.some(r => arr(r.actions).length), hasToggle = rowsList.some(r => r.toggle);
+      // The switch column is named by what it turns on (the add-on's `text`, e.g. Repeats); at phone width the same
+      // words sit beside each switch on its card.
+      const toggleText = String((rowsList.find(r => r.toggle && r.toggle.text) || {toggle:{}}).toggle.text || 'On');
       for (const c of cols) { const th = el('th', c.type === 'number' || c.type === 'duration' ? 'num' : '', c.label); th.scope = 'col'; hr.append(th); }
       if (hasActions) { const th = el('th', '', 'Actions'); th.scope = 'col'; hr.append(th); }
-      if (hasToggle) { const th = el('th', '', 'On'); th.scope = 'col'; hr.append(th); }
+      if (hasToggle) { const th = el('th', '', toggleText); th.scope = 'col'; hr.append(th); }
       const thead = el('thead'); thead.append(hr); t.append(thead);
       const tb = el('tbody');
       for (const r of arr(b.rows)) {
@@ -369,7 +536,11 @@ const OrchBlocks = (() => {
           for (const a of arr(r.actions)) { const btn = rowButton(a); if (btn) box.append(...openFirst(btn)); }
           td.append(box); tr.append(td);
         }
-        if (hasToggle) { const td = el('td', 'cell-toggle'), sw = r.toggle ? toggleEl(r.toggle) : null; if (sw) td.append(sw); tr.append(td); }
+        if (hasToggle) {
+          const td = el('td', 'cell-toggle'), sw = r.toggle ? toggleEl(r.toggle) : null;
+          if (sw) { td.dataset.label = toggleText; td.append(sw); }
+          tr.append(td);
+        }
         tb.append(tr);
       }
       t.append(tb); wrap.append(t); s.append(wrap);
@@ -401,6 +572,6 @@ const OrchBlocks = (() => {
     return root;
   }
   const appHash = to => typeof to === 'string' && APP.test(to) ? '#' + to.slice(4) : null;
-  return {render, duration, appHash};
+  return {render, duration, appHash, splitPick, splitLogShow};
 })();
 if (typeof module !== 'undefined') module.exports = OrchBlocks;

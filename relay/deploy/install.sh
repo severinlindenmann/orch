@@ -1,11 +1,11 @@
 #!/bin/sh
 # First install on the VPS (run as root): user, folders, master key, admin token, service.
-# Usage: ./install.sh <path-to-orch-relay-binary> [private-ip]
+# Usage: ./install.sh <path-to-orch-relay-binary> [private-ip or private-network interface, e.g. wt0]
 set -eu
 BIN="$1"; IP="${2:-127.0.0.1}"
 id orch-relay >/dev/null 2>&1 || useradd --system --home /var/lib/orch-relay --shell /usr/sbin/nologin orch-relay
 install -d -o orch-relay -g orch-relay -m 0750 /var/lib/orch-relay /etc/orch-relay
-install -m 0755 "$BIN" /usr/local/bin/orch-relay
+install -d -m 0755 /opt/orch/bin && install -m 0755 "$BIN" /opt/orch/bin/orch-relay
 [ -f /etc/orch-relay/master.key ] || { head -c 32 /dev/urandom > /etc/orch-relay/master.key; echo "Master key made: copy /etc/orch-relay/master.key to your password manager now."; }
 [ -f /etc/orch-relay/admin-token ] || head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n' > /etc/orch-relay/admin-token
 cat > /etc/orch-relay/env <<EOF
@@ -21,4 +21,4 @@ chown orch-relay:orch-relay /etc/orch-relay/master.key /etc/orch-relay/admin-tok
 chmod 0600 /etc/orch-relay/master.key /etc/orch-relay/admin-token
 install -m 0644 "$(dirname "$0")/orch-relay.service" /etc/systemd/system/orch-relay.service
 systemctl daemon-reload && systemctl enable --now orch-relay
-echo "Add the Caddyfile route (deploy/Caddyfile), then: curl -s localhost:8103/health"
+echo "Add the Caddy site (deploy/relay.caddy into /etc/caddy/sites/), then: curl -s localhost:8103/health"

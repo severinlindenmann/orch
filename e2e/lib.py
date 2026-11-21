@@ -125,6 +125,18 @@ def free_port(used: set[int]) -> int:
     raise RuntimeError("no free port in 18000-18999")
 
 
+def wait_for(fn, secs: float = 30, step: float = 0.1):
+    """Wait for a condition with a time limit: fn's first truthy value, or None after secs. Use this instead of a
+    fixed sleep (a fixed sleep is slow on a fast machine and too short on a loaded runner)."""
+    end = time.time() + secs
+    while time.time() < end:
+        v = fn()
+        if v:
+            return v
+        time.sleep(step)
+    return None
+
+
 def wait_http(url: str, secs: float = 30) -> bool:
     end = time.time() + secs
     while time.time() < end:
@@ -235,6 +247,41 @@ def start_local(e, tmp: Path, bins: dict, used: set[int]) -> tuple[Server, Serve
         if not wait_http(s.url + "/health"):
             raise Fail(f"{s.name} did not start; see {tmp}/{s.name}.log")
     return pub, rel
+
+
+EXTRA_ROOTS: list[Path] = []  # folders outside the run's temp root that a scenario made (the Factory workspaces); LEAK checks them too
+
+
+def orch_processes_under(roots) -> list[tuple[int, str]]:
+    """(pid, command) of every add-on process (`-m orch_...`) that belongs to one of the folders: its command line
+    names the folder (--dir), or its working folder is inside it (a folder already deleted still shows by the command)."""
+    roots = [str(Path(r)) for r in roots]
+    out = subprocess.run(["ps", "-axo", "pid,command"], capture_output=True, text=True).stdout
+    found = []
+    for ln in out.splitlines():
+        pid_s, _, cmd = ln.strip().partition(" ")
+        if " -m orch_" not in cmd or not pid_s.isdigit():
+            continue
+        if any(r in cmd for r in roots):
+            found.append((int(pid_s), cmd))
+            continue
+        lsof = subprocess.run([shutil.which("lsof") or "/usr/sbin/lsof", "-a", "-d", "cwd", "-p", pid_s, "-Fn"],
+                              capture_output=True, text=True).stdout
+        cwd = next((x[1:] for x in lsof.splitlines() if x.startswith("n")), "")
+        if cwd and any(cwd == r or cwd.startswith(r + os.sep) for r in roots):
+            found.append((int(pid_s), cmd))
+    return found
+
+
+def end_processes(pids) -> None:
+    import signal
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass
+        time.sleep(0.5)
 
 
 def kill_group(p: subprocess.Popen) -> None:

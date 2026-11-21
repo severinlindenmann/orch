@@ -26,3 +26,11 @@ The order page's Results to check card has `Looks good, all` (two or more result
 
 ## No empty walls (17 Nov, ORCH-72, owner card on ORCH-64)
 Factory home shows what waits for you first, in one block marked `Waits for you` (drafts, proposals, stops, results). A kind with nothing in it gets no section of its own; the missing kinds are named once in a quiet line at the end: "Nothing else in Factory right now: no drafts, stops, results or running orders. They show here when they come." Running, Shipped and Saved ideas appear only when they hold something. `factory.html` home and `../sweep/d-factory-empty.html` show this.
+
+## One review per stage (17 Nov, ORCH-335)
+The per-task `Look at ...` buttons and `Looks good, all` are gone. A stage whose results wait for the owner shows ONE
+card: "<Stage>: what your crew built", a Short demo row (Play the demo opens it big), one row per built task (a picture
+that opens big, the task, "Tests passed" / "1 test failed" with the failed step in plain words, "Merged" / "Not merged
+yet"), a Together line, and ONE `Looks good` (all of the stage's results) and `Change` (a text box, Send: the words go to
+the helper on the order as "Change at <stage>: ..."). Nothing to show: one quiet line. No Details toggle. `order.html`
+and `factory.html` home (booking idea) show it.

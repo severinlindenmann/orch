@@ -10,7 +10,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import orchcli, scripts
-from .loop import record_last_run, script_of, start_script
+from .cron import fmt, parse
+from .loop import group_of, record_last_run, script_of, start_group, start_script
+from .runner import update_state
 
 VERBS = ("on", "off", "toggle", "run", "delete", "repeat", "copy", "allow-script")
 KEY = re.compile(r"[0-9a-f]{64}")
@@ -19,6 +21,22 @@ TID = re.compile(r"t_[a-z0-9]{6,16}")
 
 class Bad(Exception):
     """The request is not allowed or could not be done (plain words)."""
+
+
+def _wake_up_used(root: Path, t: dict, result: str, by: str | None) -> None:
+    """Start now on a one-time wake-up (a ticket wait, no ext.automation) is the wake-up itself: it runs now, so
+    clear the wait (the planned time must not start it again), mark the ticket active like the loop does, log it,
+    and remember the start for the row and Recent starts. Same steps as Scheduler.tend for a reached wait."""
+    w = t.get("waiting_on") or {}
+    until = parse(w.get("until")) if w.get("kind") == "time" else None
+    if not until or result not in ("started", "pending"):
+        return
+    tid = t["id"]
+    update_state(root, tid, last_wake=w.get("until"), last_run=fmt(datetime.now(UTC)))
+    orchcli.call(root, "wait", tid, "--clear", by=by or True)
+    if not script_of(t):
+        orchcli.call(root, "ticket", "status", tid, "active", by=by or True)
+    orchcli.log(root, tid, "Automation started the helper (Start now on a wake-up).")
 
 
 def act(root: Path, verb: str, target: str, by: str | None = None, value: str | None = None) -> dict:
@@ -59,7 +77,7 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
         return {"ticket": new["id"], "text": "Copy created."}
     sched = (t.get("ext") or {}).get("automation") or {}
     if verb == "allow-script":
-        name = script_of(t)
+        name = _to_allow(root, t)
         if not name:
             raise Bad("This repeat runs no script.")
         if not isinstance(value, str) or not KEY.fullmatch(value):
@@ -70,13 +88,22 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
             raise Bad(str(e)) from None
         return {"ticket": target, "script": name, "allowed": True, "text": "Script allowed."}
     if verb == "run":
-        name = script_of(t)
-        r = start_script(root, t, name) if name else orchcli.run_start(root, target, by=by)
+        group = group_of(t)
+        name = script_of(t) or (", ".join(sorted(group)) if group else None)
+        r = (
+            start_group(root, t, sorted(group))
+            if group
+            else start_script(root, t, name)
+            if name
+            else orchcli.run_start(root, target, by=by)
+        )
         if r["result"] == "failed":
             raise Bad(r["reason"])
         if sched:  # a manual run counts as the last run (same writer as the schedule); re-read: the run bumped the revision
             fresh = next((x for x in orchcli.tickets(root) if x["id"] == target), t)
             record_last_run(root, fresh, datetime.now(UTC), by=by)
+        else:
+            _wake_up_used(root, t, r["result"], by)
         return {
             "ticket": target,
             "result": r["result"],
@@ -98,6 +125,13 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
     return {"ticket": target, "paused": paused, "text": "Switched off." if paused else "Switched on."}
 
 
+def _to_allow(root: Path, t: dict | None) -> str | None:
+    """The script an Allow click is about: the repeat's script, or the first script of its group not allowed yet."""
+    from .view import waiting_script
+
+    return (waiting_script(root, t) if group_of(t) else None) or script_of(t)
+
+
 def review(root: Path, verb: str, target: str) -> dict:
     """What the person reads before a confirming click (`act <verb> --proof-target -- <ticket>`; changes nothing).
     allow-script: the script's command in full and a target ending in the entry's key; the click sends that key back
@@ -107,7 +141,7 @@ def review(root: Path, verb: str, target: str) -> dict:
     if not isinstance(target, str) or not TID.fullmatch(target):
         raise Bad("That is not a ticket id.")
     t = next((x for x in orchcli.tickets(root) if x["id"] == target), None)
-    name = script_of(t)
+    name = _to_allow(root, t)
     argv = scripts.load(root).get(name) if name else None
     if not argv:
         raise Bad("This repeat runs no script that is set up on this computer.")

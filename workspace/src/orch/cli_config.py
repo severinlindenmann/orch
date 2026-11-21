@@ -23,6 +23,7 @@ from orch import (
     ghlimit,
     history,
     nextstep,
+    releasekeeper,
     report_tickets,
     tickets,
     unblock,
@@ -35,11 +36,13 @@ KEYS = (
     "workspace.name",
     "workspace.description",
     "workspace.tags",
+    "workspace.protected_machines",
     "workspace.permissions",
     "workspace.live_idle_minutes",
     "workspace.live_max",
     "workflow.agents_may_finish",
     "workflow.reviewer",
+    "workflow.auto_reviewer",
     "workflow.reviewer_answers",
     "workflow.reviewer_look",
     "workflow.release_merge",
@@ -49,6 +52,7 @@ KEYS = (
     "diag.enabled",
     "diag.report_tickets",
     "focus.session_typing",
+    "focus.terminal_typing",
     "update.auto",
     *config.INSIGHTS_KEYS,
     *ghlimit.SETTING_KEYS,
@@ -57,6 +61,7 @@ KEYS = (
     "github.unblock",
     "github.unblock_merge",
     "github.unblock_bases",
+    *releasekeeper.SETTING_KEYS,
 )
 GET_ALIASES = {"record.keep_days": "insights.keep_days", "record.max_mb": "insights.max_mb"}
 TEST_PROMPT = "Reply with the word ok"
@@ -147,6 +152,7 @@ def agents_rows(root: Path) -> list[dict]:
                 "can": adapters.describe(name, root) if status != "not found" else "",
                 "status": status,
                 "chosen": name == chosen,
+                "models": bool(a.get("model_args")),  # orch passes the ticket's model to this tool
             }
         )
     return rows
@@ -288,11 +294,13 @@ def _config(args, root: Path) -> None:
             "workspace.name": lambda: config.workspace_name(root),
             "workspace.description": lambda: config.workspace_description(root),
             "workspace.tags": lambda: config.workspace_tags(root),
+            "workspace.protected_machines": lambda: config.protected_machines(root),
             "workspace.permissions": lambda: config.permissions(root),
             "workspace.live_idle_minutes": lambda: config.live_idle_minutes(root),
             "workspace.live_max": lambda: config.live_max(root) or "none",
             "workflow.agents_may_finish": lambda: config.agents_may_finish(root),
             "workflow.reviewer": lambda: config.reviewer_on(root),
+            "workflow.auto_reviewer": lambda: config.auto_reviewer_on(root),
             "workflow.reviewer_answers": lambda: config.reviewer_answers_on(root),
             "workflow.reviewer_look": lambda: config.reviewer_look_on(root),
             "workflow.release_merge": lambda: config.release_merge_on(root),
@@ -302,6 +310,7 @@ def _config(args, root: Path) -> None:
             "diag.enabled": lambda: config.diag_enabled(root),
             "diag.report_tickets": lambda: report_tickets.enabled(root),
             "focus.session_typing": lambda: config.focus_session_typing(root),
+            "focus.terminal_typing": lambda: config.focus_terminal_typing(root),
             "update.auto": lambda: autoupdate.enabled(),
             "insights.share_counts": lambda: config.insights_share_counts(root),
             "insights.share_names": lambda: config.insights_share_names(root),
@@ -313,6 +322,7 @@ def _config(args, root: Path) -> None:
             "github.unblock": lambda: unblock.role(root),
             "github.unblock_merge": lambda: "on" if unblock.merge_on(root) else "off",
             "github.unblock_bases": lambda: ",".join(unblock.bases(root)),
+            **{key: (lambda k=key: releasekeeper.get(root, k)) for key in releasekeeper.SETTING_KEYS},
         }
         if args.key:
             key = args.key
@@ -363,6 +373,15 @@ def _config(args, root: Path) -> None:
     elif args.sub == "set" and args.key == "github.unblock_bases":
         v = unblock.set_bases(root, args.value)
         _out(args, {args.key: ",".join(v)}, "The Merge unblocker merges into: " + ", ".join(v) + ".")
+    elif args.sub == "set" and args.key in releasekeeper.SETTING_KEYS:
+        # the release keeper pushes, dispatches, sources github.release_env and reads production: only a
+        # person points it somewhere (turning a setting off is fine for anyone)
+        if args.value.strip().lower() not in ("off", "none", "") and not _actor(args).startswith("human:"):
+            raise Refused(
+                f"Only a person sets {args.key}. Ask the owner to run: orch config set {args.key} ..."
+            )
+        v = releasekeeper.set_setting(root, args.key, args.value)
+        _out(args, {args.key: v}, f"Saved: {args.key} = {v}." if v else f"Cleared: {args.key}.")
     elif args.sub == "set" and args.if_current is not None:
         raise Refused("--if-current is only for the insights.* settings.")
     elif args.sub == "set" and args.key == "workflow.agents_may_finish":
@@ -405,6 +424,19 @@ def _config(args, root: Path) -> None:
             f"The Reviewer gives bigger finished work a second look: {args.value}."
             + ("" if config.reviewer_on(root) else " It works once workflow.reviewer is on too."),
         )
+    elif args.sub == "set" and args.key == "workflow.auto_reviewer":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        who = _actor(args)
+        if args.value == "on" and not who.startswith("human:"):  # new tickets then start without human review
+            raise Refused("Only the owner turns this on: orch config set in their own terminal.")
+        value = config.set_auto_reviewer(root, args.value == "on", who)
+        _out(
+            args,
+            {"workflow.auto_reviewer": value},
+            "Saved: new tickets start with Human review needed "
+            + ("off (the Auto Reviewer checks them)." if value else "on."),
+        )
     elif args.sub == "set" and args.key == "workflow.release_merge":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")
@@ -439,6 +471,15 @@ def _config(args, root: Path) -> None:
             args,
             {"focus.session_typing": value},
             "Saved: typing into the helper's screen is " + ("on." if value else "off."),
+        )
+    elif args.sub == "set" and args.key == "focus.terminal_typing":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        value = config.set_focus_terminal_typing(root, args.value == "on")
+        _out(
+            args,
+            {"focus.terminal_typing": value},
+            "Saved: typing into the plain terminal is " + ("on." if value else "off."),
         )
     elif args.sub == "set" and args.key == "update.auto":
         if args.value not in ("on", "off"):
@@ -487,6 +528,17 @@ def _config(args, root: Path) -> None:
             text = f"Saved: the workspace tags are {', '.join(v)}." if v else "Saved: no tags."
         else:
             text = f"Saved: the workspace {what} is {v!r}." if v else f"Saved: no {what}."
+        _out(args, {args.key: v}, text)
+    elif args.sub == "set" and args.key == "workspace.protected_machines":
+        if _actor(args).startswith("agent:"):
+            raise Refused("Only a person changes the list of protected machines.")
+        v = config.set_protected_machines(root, args.value)
+        text = (
+            f"Saved: protected machines are {', '.join(v)}. "
+            "Helpers cannot connect to them outside a release or deploy step."
+            if v
+            else "Saved: no protected machines."
+        )
         _out(args, {args.key: v}, text)
     elif args.sub == "set" and args.key == "workspace.code":
         code = config.set_code(root, args.value)

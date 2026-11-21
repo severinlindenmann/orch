@@ -14,7 +14,7 @@
   "agent": 6
  },
  "workspace-addons/automation/src/orch_automation/orchcli.py": {
-  "agent": 2
+  "agent": 1
  },
  "workspace-addons/automation/src/orch_automation/scripts.py": {
   "agent": 1
@@ -100,12 +100,18 @@
  "workspace-addons/sync/src/orch_sync/visibility.py": {
   "Agent": 1
  },
+ "workspace-addons/usage/src/orch_usage/store.py": {
+  "agent": 1
+ },
  "workspace/src/orch/adapters.py": {
   "agent": 6,
   "agents": 5
  },
  "workspace/src/orch/addons.py": {
   "agents": 1
+ },
+ "workspace/src/orch/bgwork.py": {
+  "agent": 1
  },
  "workspace/src/orch/chat.py": {
   "agent": 1
@@ -189,7 +195,7 @@
   "agent": 1
  },
  "workspace/src/orch/tickets.py": {
-  "agent": 7,
+  "agent": 6,
   "agents": 1
  },
  "workspace/src/orch/worktrees.py": {

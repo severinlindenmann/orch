@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -15,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from . import orchcli, scripts
-from .cron import fmt, is_due, last_due, next_after, parse
+from .cron import fmt, is_due, last_due, next_after, parse, valid
 from .orchcli import tickets as read_tickets
 from .plain import daily_or_slower, workspace_tz, zone
 from .runner import history, load_config, load_state, sdir, update_state
@@ -31,6 +32,7 @@ def scheduled(t: dict) -> bool:
 
 
 FAST_FAIL_SECONDS = 10
+WAKE_RETRIES, WAKE_RETRY_MINUTES = 3, 5  # a wake-time start that failed: tries after the first, minutes apart
 QUEUED_TRIES = 3  # starts that failed for one waiting input before it is left for a person
 KIND = "automation:failure"
 KINDS = (KIND,)
@@ -78,13 +80,152 @@ def script_of(t: dict | None) -> str | None:
     return name if isinstance(name, str) and scripts.NAME_RE.match(name) else None
 
 
-def start_script(root: Path, t: dict, name: str) -> dict:
+def group_of(t: dict | None) -> dict[str, str]:
+    """A repeat that runs a group of scripts (ext.automation.group): script name -> its own plan (a cron rule).
+    Names only, never commands; an entry that is not a valid name and rule is left out."""
+    g = (((t or {}).get("ext") or {}).get("automation") or {}).get("group")
+    if not isinstance(g, dict):
+        return {}
+    return {
+        n: c
+        for n, c in g.items()
+        if isinstance(n, str) and scripts.NAME_RE.match(n) and isinstance(c, str) and valid(c)
+    }
+
+
+def start_script(root: Path, t: dict, name: str, member: bool = False) -> dict:
     """{"result": "started"|"pending"|"failed", "reason"?}: the same checks as an agent start (sync allow)."""
     refused = orchcli.sync_refusal(root, t["id"])
     if refused:
         return {"result": "failed", "reason": refused}
-    res, reason = scripts.launch(root, t["id"], name)
+    res, reason = scripts.launch(root, t["id"], name, member=member)
     return {"result": res, "reason": reason} if reason else {"result": res}
+
+
+def start_group(root: Path, t: dict, names) -> dict:
+    """Start these scripts of the ticket's group, each with its own lock. "started" when one started, "failed"
+    (with every reason) when one could not start, else "pending" (all still running from before)."""
+    out, why = "pending", []
+    for name in names:
+        res = start_script(root, t, name, member=True)
+        if res["result"] == "failed":
+            why.append(f"{name}: {res['reason']}")
+        elif res["result"] == "started" and out == "pending":
+            out = "started"
+    return {"result": "failed", "reason": "; ".join(why)} if why else {"result": out}
+
+
+CHANGE_RE = re.compile(r"^([A-Za-z0-9._][A-Za-z0-9._/-]{0,199})@([A-Za-z0-9._][A-Za-z0-9._/-]{0,199})$")
+
+
+def change_of(t: dict | None) -> str | None:
+    """The change a repeat waits for (ext.automation.when_changed, "<folder in the workspace>@<git ref>"), else None."""
+    w = (((t or {}).get("ext") or {}).get("automation") or {}).get("when_changed")
+    return w if isinstance(w, str) and CHANGE_RE.match(w) and ".." not in w.split("@")[0].split("/") else None
+
+
+HEX_RE = re.compile(r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")
+SMALL, PACKED = 4096, 16 * 1024 * 1024  # most bytes read from a ref file / from packed-refs
+
+
+def _read_small(f: Path, cap: int = SMALL) -> str | None:
+    """A regular file's text, at most `cap` bytes; never waits (a FIFO or device is refused, links are not followed)."""
+    import stat
+
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(f, flags)
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > cap:
+            return None
+        return os.read(fd, cap).decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+def _git_dir(folder: Path, root: Path) -> tuple[Path, Path] | None:
+    """(this checkout's git folder, the shared one holding refs) of a project folder; read from files only, and both
+    must lie inside the workspace."""
+    dot = folder / ".git"
+    try:
+        if dot.is_file():  # a worktree or submodule: "gitdir: <path>"
+            line = (_read_small(dot) or "").strip()
+            if not line.startswith("gitdir:"):
+                return None
+            gd = (folder / line[7:].strip()).resolve()
+        elif dot.is_dir():
+            gd = dot.resolve()
+        else:
+            return None
+        common = gd
+        cf = gd / "commondir"
+        if cf.exists():
+            text = _read_small(cf)
+            if text is None:
+                return None
+            common = (gd / text.strip()).resolve()
+        inside = all(d.is_dir() and d.is_relative_to(root) for d in (gd, common))
+        return (gd, common) if inside else None
+    except (OSError, ValueError):
+        return None
+
+
+def _read_ref(gd: Path, common: Path, ref: str, depth: int = 0) -> str | None:
+    """A full ref name to a commit id: the loose file (per-worktree for HEAD), else packed-refs; follows "ref: "."""
+    if depth > 5:
+        return None
+    for base in (gd, common) if ref == "HEAD" or not ref.startswith("refs/") else (common,):
+        f = base / ref
+        try:
+            if f.exists() and f.resolve().is_relative_to(base):
+                text = (_read_small(f) or "").strip()
+                if text.startswith("ref: "):
+                    return _read_ref(gd, common, text[5:].strip(), depth + 1)
+                return text if HEX_RE.match(text) else None
+        except (OSError, ValueError):
+            return None
+    for line in (_read_small(common / "packed-refs", PACKED) or "").splitlines():
+        parts = line.split(" ", 1)
+        if len(parts) == 2 and parts[1].strip() == ref and HEX_RE.match(parts[0]):
+            return parts[0]
+    return None
+
+
+def change_mark(root: Path, spec: str) -> str | None:
+    """The commit the ref names now, read from the git files themselves: no git program, no network, nothing
+    changed (a folder's git settings never run anything; ORCH-348 security review). None when the folder is not a
+    git project inside the workspace or the ref is unknown (then the repeat waits; nothing is started)."""
+    m = CHANGE_RE.match(spec)
+    if not m or ".." in m[2].split("/") or ".." in m[1].split("/"):
+        return None
+    folder = (root / m[1]).resolve()
+    if not folder.is_dir() or not folder.is_relative_to(root.resolve()):
+        return None
+    dirs = _git_dir(folder, root.resolve())
+    if not dirs:
+        return None
+    ref = m[2]
+    names = (
+        [ref]
+        if ref == "HEAD" or ref.startswith("refs/")
+        else [
+            f"refs/{ref}",
+            f"refs/tags/{ref}",
+            f"refs/heads/{ref}",
+            f"refs/remotes/{ref}",
+            f"refs/remotes/{ref}/HEAD",
+        ]
+    )  # git's own order for a short name
+    for name in names:
+        sha = _read_ref(*dirs, name)
+        if sha:
+            return sha
+    return None
 
 
 def record_last_run(root: Path, t: dict, now: datetime, by: str | None = None) -> None:
@@ -121,6 +262,7 @@ class Scheduler:
         self.last_doctor: datetime | None = None
         self.wake = threading.Event()  # the listener sets it when something arrived
         self.watch: dict[str, dict] = {}  # tid -> {t0, at, log, hist} for runs started in the last moments
+        self.last_start: dict = {}  # the last orchcli.run_start answer (its run id)
         sdir(root)
 
     # -- starting -----------------------------------------------------------
@@ -140,6 +282,7 @@ class Scheduler:
             self.agent_of(t),
             mode=None if phone else "oneshot",
         )
+        self.last_start = res
         if res["result"] == "started":
             orchcli.log(self.root, tid, f"Automation started an agent run ({reason}).")
             starts = (load_state(self.root).get(tid, {}).get("starts") or [])[-49:]
@@ -187,8 +330,15 @@ class Scheduler:
         ask_failure(self.root, tid, f"The agent run did not work: {reason}")
 
     def start_due(self, tid: str, reason: str, now: datetime) -> str:
-        """A planned start (wait over, cron due, Try again): the ticket's script when it names one, else an agent."""
+        """A planned start (wait over, cron due, Try again): the ticket's script when it names one, every script of
+        its group when it has one, else an agent."""
         t = orchcli.ticket(self.root, tid)
+        group = group_of(t)
+        if group or "group" in (((t or {}).get("ext") or {}).get("automation") or {}):
+            res = start_group(self.root, t, sorted(group))
+            if res["result"] == "failed":
+                ask_failure(self.root, tid, f"A script did not run: {res['reason']}")
+            return res["result"]
         name = script_of(t)
         if not name:
             return self.start_run(tid, reason, now)
@@ -367,6 +517,39 @@ class Scheduler:
         done = [i for i in mine.get("queued_started") or [] if i not in back]
         update_state(self.root, tid, queued_started=done, queued_held=[])
 
+    def group_due(self, t: dict, now: datetime) -> bool:
+        """One pass over a group repeat: every script whose own plan is due starts (its own lock, so a slow one
+        never holds back the others). Returns True when one started. Each script keeps its own last run here; the
+        repeat's own last run is the last pass, so core's health check sees a quiet group as alive."""
+        tid = t["id"]
+        sched = (t.get("ext") or {}).get("automation") or {}
+        tz = self.tz_of(sched)
+        mine = load_state(self.root).get(tid, {})
+        seen = mine.get("group_runs") if isinstance(mine.get("group_runs"), dict) else {}
+        start_at = parse(t.get("created_at")) or now
+        last_pass = max(
+            filter(None, [parse(sched.get("last_run")), parse(mine.get("last_run"))]), default=None
+        )
+        cron = sched.get("cron")
+        if not isinstance(cron, str) or not is_due(cron, last_pass or start_at, now, tz):
+            return False  # the repeat's own plan is how often the group is looked at
+        due = [
+            n
+            for n, rule in sorted(group_of(t).items())
+            if is_due(rule, parse(seen.get(n)) or parse(sched.get("last_run")) or start_at, now, tz)
+        ]
+        if not due:
+            record_last_run(self.root, t, now)  # looked at, nothing due: the health check still sees it alive
+            return False
+        # the pass is written down before the scripts start: they read the ticket while they begin
+        update_state(self.root, tid, group_runs={**seen, **{n: fmt(now) for n in due}})
+        record_last_run(self.root, t, now)  # the repeat's own line (last run, next planned pass)
+        fresh = orchcli.ticket(self.root, tid) or t
+        res = start_group(self.root, fresh, due)
+        if res["result"] == "failed":
+            ask_failure(self.root, tid, f"A script did not run: {res['reason']}")
+        return res["result"] == "started"
+
     def may_start(self, t: dict) -> bool:
         """The gates every start from this loop respects: a ticket switched off here is left alone."""
         return ((t.get("ext") or {}).get("automation") or {}).get("paused") is not True
@@ -386,11 +569,25 @@ class Scheduler:
                 continue
             w = t.get("waiting_on") or {}
             until = parse(w.get("until")) if w.get("kind") == "time" else None
-            if until and until <= now and state.get(tid, {}).get("last_wake") != w.get("until"):
+            mine = state.get(tid, {})
+            fresh = mine.get("last_wake") != w.get("until")
+            # ORCH-255: a start that failed left the wait standing; look again a few times (5 min apart) before the
+            # person's Try again / Continue is the only way, so a passed wake time never leaves a ticket without a helper
+            again = (
+                not fresh
+                and mine.get("wake_tries", 0) < WAKE_RETRIES
+                and (parse(mine.get("wake_at")) or now) + timedelta(minutes=WAKE_RETRY_MINUTES) <= now
+                and orchcli.run_running(self.root, tid) is not True
+            )
+            if until and until <= now and (fresh or again):
                 res = self.start_due(tid, "wait time reached", now)
                 update_state(
-                    self.root, tid, last_wake=w.get("until")
-                )  # also after a failure: only "Try again" retries
+                    self.root,
+                    tid,
+                    last_wake=w.get("until"),
+                    wake_at=fmt(now),
+                    wake_tries=0 if fresh else mine.get("wake_tries", 0) + 1,
+                )  # also after a failure: retried WAKE_RETRIES times, then only "Try again"
                 if res != "failed":  # clear the wait only after core took the run (SA-15)
                     orchcli.call(self.root, "wait", tid, "--clear")
                     if t["status"] != "active" and not script_of(t):  # a script leaves the status alone
@@ -400,6 +597,11 @@ class Scheduler:
                 continue
             sched = (t.get("ext") or {}).get("automation") or {}
             cron = sched.get("cron")
+            if sched.get("recurring") is True and sched.get("paused") is not True and "group" in sched:
+                # a group repeat never starts an agent, even when none of its entries can be read
+                if self.group_due(t, now):
+                    started.append(tid)
+                continue
             if sched.get("recurring") is True and sched.get("paused") is not True and isinstance(cron, str):
                 tz = self.tz_of(sched)
                 since = (
@@ -413,7 +615,26 @@ class Scheduler:
                     or now
                 )
                 upd: dict = {}
+                spec = change_of(t)
+                mark = change_mark(self.root, spec) if spec and is_due(cron, since, now, tz) else None
+                if (
+                    spec
+                    and is_due(cron, since, now, tz)
+                    and (mark is None or mark == mine.get("change_seen"))
+                ):
+                    # ORCH-348: due, but nothing changed since its last run (or the ref cannot be read): no run, no
+                    # tokens. last_run stays, so the next pass looks again and it starts as soon as the ref moves.
+                    update_state(self.root, tid, change_wait=fmt(now))
+                    if (
+                        parse(sched.get("next_run")) or now
+                    ) <= now:  # once per interval, not every pass: core's
+                        nxt = next_after(cron, now, tz)  # health check must not call a waiting repeat stopped
+                        if nxt:
+                            orchcli.set_ext(self.root, t, next_run=fmt(nxt))
+                    continue
                 if is_due(cron, since, now, tz):
+                    if spec:
+                        upd["change_seen"] = mark
                     run_tid: str | None = tid
                     if sched.get("each_run") == "sub-ticket" and daily_or_slower(cron):
                         run_tid = self.occurrence(t, last_due(cron, now, tz), tz)
@@ -424,9 +645,10 @@ class Scheduler:
                         orchcli.log(self.root, tid, "Opened again for the next run of this repeat.")
                     res = self.start_due(run_tid, repeat_words(cron, tz), now) if run_tid else "failed"
                     if run_tid:  # a sub-ticket that could not be made is tried again next pass
-                        record_last_run(
-                            self.root, t, now
-                        )  # also after a failure: the next planned time retries
+                        # also after a failure: the next planned time retries. Re-read first: the reopen, the start
+                        # and the sub-ticket moved the revision on, and a write against the old one is refused
+                        # without a word (ORCH-395: core's health checks then called the repeat stopped)
+                        record_last_run(self.root, orchcli.ticket(self.root, tid) or t, now)
                     if res == "started":
                         started.append(run_tid)
                 nxt = next_after(cron, now, tz)
@@ -439,6 +661,7 @@ class Scheduler:
             started += self.inbox(now)
             # a new phone text made its ticket in this inbox pass: start it now, not one interval later (fb6)
             started += [t for t in self.phone_tickets(now) if t not in started]
+            started += self.peer_pickups(now, skip=started)
         started += self.report_tickets(now, skip=started)
         return started
 
@@ -516,6 +739,53 @@ class Scheduler:
             if tid:
                 started.append(tid)
         return started
+
+    def peer_pickups(self, now: datetime, skip: list[str] | None = None) -> list[str]:
+        """#2051: a text from another workspace that core passed on to a ticket (or the General ticket) starts a
+        helper there, with no repeat, script or allow step. Core keeps the list (`orch relay pickups --waiting`,
+        also for texts an agent's `orch relay inbox` passed on); each one is recorded with the run that took it,
+        or why none could, so it is never started twice. A running helper reads the queued text itself."""
+        rows = orchcli.call(self.root, "relay", "pickups", "--waiting", by=False)
+        started: list[str] = []
+        runs_by_ticket: dict[str, str] = {}
+        for r in rows if isinstance(rows, list) else []:
+            if not isinstance(r, dict):
+                continue
+            mid, tid = r.get("id"), r.get("ticket")
+            if not (isinstance(mid, str) and isinstance(tid, str) and orchcli.ID_RE.match(tid)):
+                continue
+            if tid in runs_by_ticket:  # one run takes every message of this pass on its ticket
+                self._picked(mid, run=runs_by_ticket[tid])
+                continue
+            t = orchcli.ticket(self.root, tid) or {"id": tid}
+            if not self.may_start(t):
+                self._picked(mid, why="the ticket's automation is switched off here")
+                continue
+            st = orchcli.run_status(self.root, tid)
+            if not isinstance(st, dict):
+                continue  # could not find out: next pass
+            if st.get("running"):
+                run = str(((st.get("claim") or {}).get("run")) or "already running")
+                runs_by_ticket[tid] = run
+                self._picked(mid, run=run)
+                continue
+            if tid in (skip or []):
+                continue  # started a moment ago in this pass: its claim shows next pass
+            res = self.start_run(tid, f"a message from another workspace, {mid}", now)
+            if res in ("started", "pending"):
+                run = str(self.last_start.get("run") or "already running")
+                runs_by_ticket[tid] = run
+                self._picked(mid, run=run)
+                if res == "started":
+                    started.append(tid)
+            else:
+                self._picked(mid, why=str(self.last_start.get("reason") or "the helper could not be started"))
+        return started
+
+    def _picked(self, mid: str, run: str | None = None, why: str | None = None) -> None:
+        args = ["relay", "pickups", "--started", mid]
+        args += ["--run", run] if run else ["--not-started", (why or "")[:200] or "not started"]
+        orchcli.call(self.root, *args, by=False)
 
     def _handle(self, m: dict, now: datetime) -> str | None:
         kind, mid, body = m.get("type"), m["id"], m.get("body") or {}

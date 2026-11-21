@@ -3,7 +3,7 @@
   'use strict';
   const S = window.FocusStore;
   const {h, TID, toast, els, act, STATUS_WORD, plainNames, keyOf, hhmm, evText} = S;
-  /* the core's "The agent stopped … Continue goes on where it left off" line repeats at every stop: not shown here */
+  /* the core's "The helper stopped … Continue goes on where it left off" line repeats at every stop: not shown here */
   const NOISE = /Continue goes on where it left off|^(?:The )?helper started\b|^Updated .+ settings$/i;
 
   const FIELD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary', status: 'the status', done_when: 'the Done when line'};
@@ -360,11 +360,14 @@
   async function stopToggle() {
     if (!S.state.view) return;
     if (!S.state.view.run.running && S.state.view.ticket.questions.some(q => q.answer == null)) { focusQuestion(); return; }
+    /* not running: the one Start button starts (Starting… until it runs, one run for a double press, ORCH-487) */
+    if (!S.state.view.run.running && !S.state.view.ticket.manager && S.startButton && S.startButton.ready()) { S.startButton.start(); return; }
     const r = S.state.view.run.running ? await act('run.stop', {ticket: TID}) : await act('run.start', {ticket: TID});
     if (!r.ok) toast(r.message, 'error'); else toast(S.state.view.run.running ? 'Started. Same conversation.' : 'Stopped. The work done so far is kept.', 'ok');
   }
   async function startFresh() {
     const manager = !!(S.state.view && S.state.view.ticket.manager);  /* ORCH-147: an empty conversation, even while it runs */
+    if (!manager && S.startButton && S.startButton.ready()) { S.startButton.start('fresh'); return; }
     const r = manager ? await act('manager.start', {fresh: true}) : await act('run.start', {ticket: TID, fresh: true});
     if (!r.ok) toast(r.message, 'error'); else toast(manager ? 'Started a fresh conversation.' : 'Started fresh from the ticket.', 'ok');
   }

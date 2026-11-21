@@ -2,11 +2,12 @@ import json
 import os
 import re
 import subprocess
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from conftest import CONTRACTS
 
-from orch_factory import authority
+from orch_factory import authority, flow
 from orch_factory.store import Refused, Store
 
 
@@ -500,7 +501,13 @@ def test_decide_needs_a_grant(ws, run):
     assert run("next", order)["step"] == "wait"
 
 
-def test_decide_under_a_human_grant(ws, run):
+def test_decide_under_a_human_grant(ws, run, monkeypatch):
+    # A fixed noon tomorrow: run at 23:59 the decision and the view fell on two days and "decided today" read 0
+    # (ORCH-390). FACTORY_NOW only moves forward, so tomorrow is the earliest fixed day it takes.
+    noon = (datetime.now().astimezone() + timedelta(days=1)).replace(
+        hour=12, minute=0, second=0, microsecond=0
+    )
+    monkeypatch.setenv("FACTORY_NOW", noon.astimezone(UTC).isoformat())
     a, _ = autopilot_order(ws, run)
     assert run("next", a)["step"] == "resume"
     assert core(ws, "ticket", "show", a)["ext"]["factory"]["kind"] == "autopilot"
@@ -764,8 +771,9 @@ def test_stop_change_autopilot_texts(ws, run):
         {"title": "Hero\nimage “v2”", "tag": "taste", "before": "s1/before.png", "after": "s1/after.png"},
     )
     stop_text = next(x for x in core(ws, "ticket", "show", order)["questions"] if x["id"] == q)["text"]
-    assert "Hero image 'v2' (taste)" in stop_text and stop_text.endswith("(Stop 1)")
+    assert "Hero image 'v2' (your call)" in stop_text and stop_text.endswith("(Stop 1)")
     assert ".png" not in stop_text and "before" not in stop_text  # no image names in the owner's question
+    assert not any(t in stop_text for t in ("(taste", "routine", "cant-undo"))  # no internal tags
     edit(ws, order, lambda t: t["questions"][-1].update(options=["Continue", "Send back", "Ship it"]))
     assert run("next", order, code=2)["code"] == "tampered"
 
@@ -1055,3 +1063,117 @@ def test_start_text_keeps_the_shape_the_home_card_reads():
     assert m.group(1) == render.clean(p["title"])
     assert m.group(3) == render.clean(p["goal"]).rstrip(". ")
     assert re.search(r"\. Time limit: (.+?) active\. ", text)
+
+
+# ORCH-277: stages that do not wait for each other run at the same time
+
+
+def parallel_proposal():
+    return run_proposal(
+        line=[
+            {"stage": "build", "stop": True, "why": "You judge the look."},
+            {"stage": "docs", "stop": True, "why": "You read the help text.", "after": []},
+            {"stage": "ship", "stop": True, "why": "You decide whether it goes live."},
+        ],
+        tasks=[
+            {
+                "slug": "booking-form",
+                "title": "Booking form",
+                "role": "builder",
+                "stage": "build",
+                "proves": [0],
+            },
+            {"slug": "help-text", "title": "Help text", "role": "builder", "stage": "docs"},
+            {"slug": "release", "title": "Prepare the release", "role": "builder", "stage": "ship"},
+        ],
+    )
+
+
+def test_independent_stages_start_together_and_ship_waits_for_both(ws, run):
+    order, _ = started(ws, run, data=parallel_proposal())
+    step = run("next", order)
+    assert step["step"] == "start-crew" and step["stage"] == "build"
+    run("crew", "add", order, "booking-form")
+    run("crew", "start", order, "booking-form")
+    step = run("next", order)  # build's crew works: docs does not wait for it
+    assert step["step"] == "start-crew" and step["stage"] == "docs"
+    run("crew", "add", order, "help-text")
+    run("crew", "start", order, "help-text")
+    d = flow.derive(ws, Store(ws), core(ws, "ticket", "show", order))
+    assert d["stages"] == ["build", "docs"]
+    assert [x["state"] for x in d["line"]] == ["doing", "doing", "todo"]
+    # a stop of build waits for you; docs still goes on
+    edit(ws, run("crew", "add", order, "booking-form")["ticket"], lambda t: t.update(status="done"))
+    q = ask_stop(ws, run, order, "build")
+    edit(ws, run("crew", "add", order, "help-text")["ticket"], lambda t: t.update(status="done"))
+    refused = run("stop", order, "--file", "-", data=stop_file("docs"), code=2)
+    assert "One question at a time" in refused["error"]
+    core(ws, "answer", order, q, "Continue", "--by", "human:anna")
+    assert run("next", order)["stage"] == "docs"  # ship still waits for docs
+    q = ask_stop(ws, run, order, "docs")
+    core(ws, "answer", order, q, "Continue", "--by", "human:anna")
+    step = run("next", order)
+    assert step["step"] == "start-crew" and step["stage"] == "ship"
+
+
+def test_a_crew_of_another_stage_starts_while_a_stop_waits(ws, run):
+    order, _ = started(ws, run, data=parallel_proposal())
+    run("next", order)
+    finish_crew(ws, run, order, "booking-form")
+    ask_stop(ws, run, order, "build")
+    step = run("next", order)
+    assert step["step"] == "start-crew" and step["stage"] == "docs"
+    run("crew", "add", order, "help-text")
+    run("crew", "start", order, "help-text")
+    assert run("next", order)["step"] == "wait"
+
+
+def test_without_after_the_line_stays_one_stage_at_a_time(ws, run):
+    order, _ = started(ws, run)
+    d = flow.derive(ws, Store(ws), core(ws, "ticket", "show", order))
+    assert d["stages"] == ["build"] and [x["state"] for x in d["line"]] == ["doing", "todo"]
+
+
+def test_a_stage_can_only_wait_for_earlier_stages(ws, run):
+    order = run("idea", "Booking page")["order"]
+    bad = json.loads(parallel_proposal())
+    bad["line"][0]["after"] = ["docs"]
+    refused = run("propose", order, "--file", "-", data=json.dumps(bad).encode(), code=2)
+    assert "only wait for stages before it" in refused["error"]
+
+
+def test_a_sent_back_stage_is_not_hidden_by_another_running_stage(ws, run):
+    order, _ = started(ws, run, data=parallel_proposal())
+    run("next", order)
+    form = finish_crew(ws, run, order, "booking-form")
+    q = ask_stop(ws, run, order, "build")
+    run("crew", "add", order, "help-text")
+    run("crew", "start", order, "help-text")  # docs runs
+    core(ws, "answer", order, q, "Send back", "--by", "human:anna")
+    edit(ws, form, lambda t: t.update(status="open"))  # the manager reopened the form for the rework
+    step = run("next", order)
+    assert step["step"] == "start-crew" and step["stage"] == "build" and step["comments"]
+
+
+def test_stop_text_plain_words_and_suggestion_is_a_button():
+    from orch_factory import render
+
+    items = [
+        {"title": "Typo", "tag": "routine", "recommend": "Continue"},
+        {"title": "Colour", "tag": "routine", "recommend": "Looks good"},
+        {"title": "Send it", "tag": "cant-undo"},
+    ]
+    text = render.stop_text({"stage": "build", "items": items}, 1)
+    assert "Typo (suggested: Continue)" in text and "Colour;" in text  # a made-up button name is dropped
+    assert "Send it (can't be undone)" in text
+    assert not any(t in text for t in ("routine", "cant-undo", "Looks good"))
+
+
+def test_stop_question_asked_under_the_old_words_still_matches():
+    from orch_factory import authority, render
+
+    data = {"stage": "build", "items": [{"title": "Typo", "tag": "routine", "recommend": "Looks good"}]}
+    old = (render.earlier_stop_text(data, 1), list(render.STOP_OPTIONS))
+    new = render.render("factory:stop", data, 1)
+    assert "(routine, suggested: Looks good)" in old[0] and old != new
+    assert authority.asked_as_frozen({"text": old[0], "options": old[1]}, "factory:stop", data, 1, *new)

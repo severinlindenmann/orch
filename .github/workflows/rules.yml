@@ -8,8 +8,10 @@ permissions:
 jobs:
   banned-words:
     # release/* -> main only carries lines that already passed this check on develop: skip it there
-    if: ${{ !(startsWith(github.head_ref, 'release/') && github.base_ref == 'main') }}
+    # a merge queue group the local gate checked (ORCH-1124): the queue posted banned-words itself
+    if: "${{ !(startsWith(github.head_ref, 'release/') && github.base_ref == 'main') && !(startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')) }}"
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
@@ -19,3 +21,12 @@ jobs:
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
           BASE: origin/${{ github.base_ref }}
         run: python3 scripts/check_banned_words.py --base "$BASE" --labels "$LABELS"
+  headless-launch:
+    # ORCH-615: every browser start goes through e2e/headless.cjs / .py, which add the macOS keychain options.
+    # Whole-repo text scan (a few seconds), so it runs on every pull request with no path filter.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: no browser start without the keychain options
+        run: python3 scripts/check_headless_launch.py

@@ -177,7 +177,7 @@ def test_an_idle_helper_is_reminded_once_with_what_changed(proj, run, new_ticket
     sent = [i for i in runs.undelivered(proj, tid) if i["by"] == tend.BY]
     assert len(sent) == 1
     assert "Release 28 is out." in sent[0]["text"] and "Write the page" in sent[0]["text"]
-    assert "Reminded the helper" in _history(proj, tid)[0]
+    assert "Sent the helper on" in _history(proj, tid)[0]  # it has an open step (ORCH-318)
     for i in sent:  # it went in; the helper is still idle
         runs.mark_delivered(proj, tid, [i["id"]])
     assert tend.run(proj)["actions"] == []  # once
@@ -189,6 +189,24 @@ def test_waiting_on_something_outside_is_reminded_not_ended(proj, run, new_ticke
     _live(proj, tid, child(), idle_for=21 * 60)
     assert [a["action"] for a in tend.run(proj)["actions"]] == ["nudge"]
     assert runs.read(proj, tid) is not None
+
+
+def test_waiting_on_a_pull_request_in_the_merge_queue_is_not_nudged(proj, run, new_ticket, child):
+    url = "https://github.com/o/r/pull/7"
+    qfile = proj / ".orch" / "addons" / "pull-requests" / "queue.json"
+
+    def queue(state):
+        qfile.parent.mkdir(parents=True, exist_ok=True)
+        qfile.write_text(json.dumps({"entries": [{"url": url, "state": state, "ticket": tid}]}))
+
+    tid = new_ticket()
+    run("check", "add", tid, "Open the pull request")
+    assert run("wait", tid, "--on", f"external:{url}")[0] == 0
+    _live(proj, tid, child(), idle_for=21 * 60)
+    queue("waiting")
+    assert tend.run(proj)["actions"] == []
+    queue("out")  # the queue is done with it: the usual reminder
+    assert [a["action"] for a in tend.run(proj)["actions"]] == ["nudge"]
 
 
 def test_a_ticket_waiting_on_a_finished_ticket_is_started_again_once(proj, run, new_ticket, starts):
@@ -339,9 +357,23 @@ def test_free_slots_start_the_line_in_order_until_full(proj, new_ticket, monkeyp
     _queue(proj, c)
     started = []
     monkeypatch.setattr(runs_live, "_full", lambda root: 4 if len(started) >= 2 else None)
+    monkeypatch.setattr(runs_live, "_held", lambda root, by="agent:tend": None)  # busy CI runner
     monkeypatch.setattr(runs, "start", lambda root, tid, by, **kw: started.append(tid))
     assert runs_live.start_waiting(proj) == [b, c]
     assert started == [b, c]
+
+
+def test_a_done_ticket_is_never_started_from_the_line(proj, new_ticket, monkeypatch):
+    a, b = new_ticket("a"), new_ticket("b")
+    _queue(proj, a)
+    _queue(proj, b)
+    tickets.set_status(proj, a, "done", "test")
+    started = []
+    monkeypatch.setattr(runs_live, "_full", lambda root: None)
+    monkeypatch.setattr(runs_live, "_held", lambda root, by="agent:tend": None)  # busy CI runner
+    monkeypatch.setattr(runs, "start", lambda root, tid, by, **kw: started.append(tid))
+    assert runs_live.start_waiting(proj) == [b]
+    assert started == [b]
 
 
 def test_start_priority_queues_when_every_slot_is_taken(proj, run, new_ticket, monkeypatch):
@@ -389,9 +421,11 @@ def test_no_new_helper_while_load_or_disk_says_stop(proj, new_ticket, monkeypatc
     _queue(proj, a)
     started = []
     monkeypatch.setattr(runs, "start", lambda root, tid, by, **kw: started.append(tid))
-    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (45.0, 40.0, 30.0))
+    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (45.0, 40.0, 30.0), raising=False)
+    monkeypatch.setattr(runs_live.os, "cpu_count", lambda: 12)
+    monkeypatch.setattr(runs_live, "_processes", lambda: [(1200.0, "real work")])
     assert runs_live.start_waiting(proj) == []
-    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (1.0, 1.0, 1.0))
+    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (1.0, 1.0, 1.0), raising=False)
     monkeypatch.setattr(runs_live.shutil, "disk_usage", lambda p: type("U", (), {"free": 2 * 2**30})())
     assert runs_live.start_waiting(proj) == []
     assert started == []
@@ -399,7 +433,9 @@ def test_no_new_helper_while_load_or_disk_says_stop(proj, new_ticket, monkeypatc
 
 def test_a_start_handed_over_by_a_script_queues_under_load(proj, new_ticket, monkeypatch):
     tid = new_ticket()
-    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (45.0, 40.0, 30.0))
+    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (45.0, 40.0, 30.0), raising=False)
+    monkeypatch.setattr(runs_live.os, "cpu_count", lambda: 12)
+    monkeypatch.setattr(runs_live, "_processes", lambda: None)  # CPU use unknown: the load alone counts
     with pytest.raises(runs.Busy) as e:
         runs_live.start_live(proj, tid, "agent:x", "claude", fresh=False, take_over=False, busy_text="wait")
     assert e.value.extra["pending"] and "very busy" in str(e.value)
@@ -460,3 +496,79 @@ def test_an_early_helper_that_moved_after_the_reminder_is_not_restarted(proj, ne
     tickets.log(proj, tid, "Started on the first task.", "agent:generic")
     assert _actions(tend.run(proj, now=_later(6))) == []
     assert starts == []
+
+
+# ---------------------------------------------------------------- ORCH-266: Home says why nothing starts
+
+
+def test_line_status_says_why_tickets_wait(proj, new_ticket, monkeypatch):
+    assert runs_live.line_status(proj) is None  # nothing waits: Home shows nothing
+    a = new_ticket("a")
+    _queue(proj, a)
+    monkeypatch.setattr(
+        runs_live, "_pressure", lambda root: "the computer is very busy (54 'orch record tail' at once)"
+    )
+    st = runs_live.line_status(proj)
+    assert st == {
+        "waiting": [a],
+        "why": "the computer is very busy (54 'orch record tail' at once)",
+        "limit": None,
+    }
+    monkeypatch.setattr(runs_live, "_pressure", lambda root: None)
+    monkeypatch.setattr(runs_live, "_full", lambda root: 3)
+    assert runs_live.line_status(proj) == {
+        "waiting": [a], "why": "3 helpers are working at once, the most you allowed", "limit": 3,
+    }  # fmt: skip
+    monkeypatch.setattr(runs_live, "_full", lambda root: None)
+    assert runs_live.line_status(proj)["why"] is None  # only the short pause between starts: no reason shown
+
+
+# ---------------------------------------------------------------- ORCH-318: stopped with open steps
+
+
+def _stopped_with_open_step(proj, run, new_ticket, child, idle_for):
+    tid = new_ticket()
+    assert run("check", "add", tid, "Write the page")[0] == 0
+    _status(proj, tid, "active")
+    _live(proj, tid, child(), idle_for=idle_for, started=3 * 3600)
+    return tid
+
+
+def test_a_helper_that_stops_with_open_steps_is_sent_on_within_a_minute(proj, run, new_ticket, child):
+    tid = _stopped_with_open_step(proj, run, new_ticket, child, idle_for=50)
+    assert [a["action"] for a in tend.run(proj)["actions"]] == ["nudge"]
+    assert "Sent the helper on" in _history(proj, tid)[0]
+    assert tickets.load(proj, tid).get("model", {}).get("name") != "opus"  # first time: no move
+
+
+def test_a_helper_idle_under_the_open_steps_limit_is_left(proj, run, new_ticket, child):
+    _stopped_with_open_step(proj, run, new_ticket, child, idle_for=20)
+    assert tend.run(proj)["actions"] == []
+
+
+def test_without_open_steps_the_twenty_minute_reminder_still_rules(proj, new_ticket, child):
+    tid = new_ticket()
+    _status(proj, tid, "active")
+    _live(proj, tid, child(), idle_for=50, started=3 * 3600)
+    assert tend.run(proj)["actions"] == []
+
+
+def test_a_waiting_helper_with_open_steps_is_not_sent_on(proj, run, new_ticket, child):
+    tid = _stopped_with_open_step(proj, run, new_ticket, child, idle_for=50)
+    assert run("ask", tid, "Which one?", "--option", "A", "--option", "B")[0] == 0
+    assert "nudge" not in [a["action"] for a in tend.run(proj)["actions"]]
+
+
+def test_the_second_stop_moves_the_ticket_up_to_opus(proj, run, new_ticket, child):
+    tid = _stopped_with_open_step(proj, run, new_ticket, child, idle_for=50)
+    tend.run(proj)
+    for i in runs.undelivered(proj, tid):
+        runs.mark_delivered(proj, tid, [i["id"]])
+    st = tend._read_state(proj)
+    st.pop(tid)  # the helper moved after the first reminder: a new chance
+    tend._write_state(proj, st)
+    _live(proj, tid, child(), idle_for=50, started=3 * 3600)
+    assert [a["action"] for a in tend.run(proj)["actions"]] == ["nudge"]
+    t = tickets.load(proj, tid)
+    assert t["model"]["name"] == "opus"
+    assert "moved up to Opus" in " ".join(_history(proj, tid))

@@ -17,8 +17,8 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
         got = json.loads((agentsdata.agents_dir() / f"{name}.json").read_bytes())
         if name == "connections":  # W2b 1.10: only the settings locations (inventory.md)
             assert {a: set(v) for a, v in got["adapters"].items()} == {
-                "claude": {"mcp_settings", "connection_check"},  # ORCH-48: is each connection answering
-                "codex": {"mcp_settings"},
+                "claude": {"mcp_settings", "connection_check", "skill_dirs"},  # ORCH-48, ORCH-416
+                "codex": {"mcp_settings", "skill_dirs"},
             }
         elif name == "capabilities":  # W2b 1.8: what the record can learn from the tool's stream
             assert got == {
@@ -44,10 +44,11 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
     }
     for adapter in merged["adapters"].values():
         adapter.pop("mcp_settings", None)
+        adapter.pop("skill_dirs", None)  # ORCH-416: the tool's own skill folders for the inventory
         adapter.pop("connection_check", None)  # ORCH-48
         if adapter is not merged["adapters"]["claude"]:
             adapter.pop("login", None)  # ORCH-48: Codex has one too
-    for key in ("reminder_hooks", "record_hooks", "reminder", "login"):
+    for key in ("reminder_hooks", "step_hooks", "record_hooks", "guard_hooks", "reminder", "login"):
         merged["adapters"]["claude"].pop(key)
     merged["adapters"]["claude"]["oneshot"].pop("settings_args")
     merged["adapters"]["claude"]["oneshot"].pop("events")
@@ -60,6 +61,7 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
         "login.json",
         "readonly.json",
         "reminder.json",
+        "updates.json",  # ORCH-589: read by toolupdates.py, not a fragment
     }
 
 

@@ -3,8 +3,8 @@ name = "orch-workspace"
 version = "0.1.0"
 description = "orch: tickets with evidence, skills and add-ons for any agent tool"
 requires-python = ">=3.11"
-license = { text = "PolyForm-Noncommercial-1.0.0" }
-dependencies = ["cryptography>=42", "jsonschema>=4", "truststore>=0.10; sys_platform == 'win32'"]
+license = { text = "Apache-2.0" }
+dependencies = ["cryptography>=42", "jsonschema>=4", "truststore>=0.10; sys_platform == 'win32'", "tzdata>=2024.1; sys_platform == 'win32'"]
 
 [project.scripts]
 orch = "orch_entry:main"
@@ -21,7 +21,7 @@ packages = ["src/orch", "src/orch_ui"]
 "src/orch_entry.py" = "orch_entry.py"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-xdist>=3", "ruff>=0.6", "jsonschema>=4", "rfc3339-validator"]
+dev = ["pytest>=8", "pytest-xdist>=3", "pytest-timeout>=2.3", "ruff>=0.6", "jsonschema>=4", "rfc3339-validator"]
 
 [tool.ruff]
 extend-exclude = ["src/orch/templates"]
@@ -33,6 +33,11 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# One hanging test fails after 300 s with its stack instead of eating the 40-minute CI job (ORCH-260; the
+# slowest test takes ~95 s on a slow macOS runner); a test that needs longer sets @pytest.mark.timeout(N).
+# --durations names the slowest tests in every CI log.
+timeout = 300
+addopts = "--durations=30 --durations-min=2"
 markers = [
     "slow: starts a local server",
     "real_start_guard: keep the real adapters.check_start_folder (see conftest)",

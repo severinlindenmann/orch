@@ -4,7 +4,8 @@ Turn an idea into finished work without setting anything up. You tell your works
 photos or text, in the dashboard chat, Focus, the phone or any agent tool. The agent writes a small first draft, you polish
 it together, and when you say "now plan it" the agent proposes the whole run:
 
-- **the line**: the stages it picked and the stops where it will ask you, with a reason for each;
+- **the line**: the stages it picked and the stops where it will ask you, with a reason for each; stages that do not
+  depend on each other run at the same time;
 - **the crew**: who does what and with which tool (Claude, Codex, Copilot …), from what this project has connected;
 - **what it needs**: connections, skills, tools — "Everything ready ✓" or what to connect;
 - **time and budget**: about how long, by when, and when it needs you;

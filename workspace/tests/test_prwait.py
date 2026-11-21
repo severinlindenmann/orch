@@ -31,7 +31,7 @@ REPLAYS = [
     ("second-workflow-stuck", False, "unfinished workflow runs: rules"),
     ("draft", False, "draft"),
     ("no-checks", False, "no checks after"),
-    ("required-check-missing", False, "still waiting"),
+    ("required-check-missing", False, "required check(s) never reported"),
     ("other-repo-skipped", False, "b SKIPPED"),
     ("other-repo-green", True, "all 1 checks SUCCESS"),
     ("release-into-main", True, "the base branch has no required checks: the default branch's passed"),
@@ -217,6 +217,9 @@ def fake_gh(monkeypatch):
 
     monkeypatch.setattr(prwait, "Live", lambda url: pulls[url])
     monkeypatch.setattr(prwait, "_run", run)
+    from orch import ghmerge
+
+    monkeypatch.setattr(ghmerge, "workflow_check", lambda url, head: None)  # never the real GitHub
     return pulls, merges
 
 
@@ -318,6 +321,42 @@ def test_overlap_with_red_checks_after_taking_develop_in_is_not_merged(proj, tk,
     assert code == 1 and merges == [] and "after taking develop in: NOT green" in out
 
 
+def test_queue_mode_never_takes_develop_in_it_says_behind(fake_gh):
+    pulls, merges = fake_gh
+    pull = FakePull(PR, _case("pr978-second-run"), landed=[["workspace/src/orch/prwait.py"]])
+    o = prwait.run_one(PR, True, src=pull, queue=True)
+    assert o.status == "behind" and not o.ok and pull.updates == [] and merges == []
+    assert "develop changed files of" in o.line and "prwait.py" in o.line
+
+
+def test_queue_mode_merges_without_waiting_for_the_hourly_merge_count_but_counts_it(fake_gh):
+    pulls, merges = fake_gh
+    pull = FakePull(PR, _case("pr978-second-run"))
+    pull.take = lambda kind, what: False  # no room in the hour: ref wait --merge would stop here
+    assert prwait.run_one(PR, True, src=pull).status == "checks passed" and merges == []
+    pull = FakePull(PR, _case("pr978-second-run"))
+    pull.take = lambda kind, what: False
+    o = prwait.run_one(PR, True, src=pull, queue=True)
+    assert o.ok and o.status == "merged" and len(merges) == 1
+    assert pull.counted == [("merge", PR)]
+
+
+def test_stop_ends_the_wait_without_a_verdict_and_never_merges(fake_gh):
+    pulls, merges = fake_gh
+    asked: list[int] = []
+
+    def stop():
+        asked.append(1)
+        return "the group before it was not merged" if len(asked) > 1 else None
+
+    pull = FakePull(PR, _case("pr978-second-run"))
+    o = prwait.run_one(PR, True, src=pull, queue=True, stop=stop)
+    assert o.status == "stopped" and not o.ok and merges == []
+    assert o.verdict.unknown and "the group before it was not merged" in o.line
+    pull = FakePull(PR, _case("pr978-second-run"))  # a stop that never says stop changes nothing
+    assert prwait.run_one(PR, True, src=pull, queue=True, stop=lambda: None).status == "merged"
+
+
 def test_overlap_that_github_cannot_take_in_is_left_to_the_helper(proj, tk, run, fake_gh):
     pulls, merges = fake_gh
     pulls[PR] = FakePull(
@@ -372,6 +411,32 @@ def test_merged_and_closed_refs_are_skipped_by_default(proj, tk, run, fake_gh):
 def test_a_ticket_without_the_pull_request_is_refused(tk, run, fake_gh):
     code, _, err = run("ref", "wait", tk, "https://github.com/acme/app/pull/99")
     assert code == 2 and "orch ref add" in err
+
+
+def test_with_the_merge_queue_on_no_merge_into_its_base_goes_past_it(proj, tk, run, fake_gh, monkeypatch):
+    """ORCH-450: every merge into develop is checked in a queue group, so ref wait --merge refuses it."""
+    from orch import addons
+
+    pulls, merges = fake_gh
+    pulls[PR] = FakePull(PR, _case("pr978-second-run"))
+    monkeypatch.setattr(addons, "active", lambda root: {"pull-requests": {}})
+    code, _, err = run("ref", "wait", tk, "--merge")
+    assert code == 2 and merges == [] and "go through the merge queue" in err
+    assert f"orch pull-requests queue add {PR} --ticket" in err
+    code, _, _ = run("ref", "wait", tk)  # only waiting for the checks stays allowed
+    assert code == 0 and merges == []
+
+
+def test_the_queue_refusal_counts_only_for_the_queues_base_branches(proj, tk, run, fake_gh, monkeypatch):
+    from orch import addons
+
+    pulls, merges = fake_gh
+    pulls[PR] = FakePull(PR, _case("pr978-second-run"))
+    monkeypatch.setattr(addons, "active", lambda root: {"pull-requests": {}})
+    (proj / ".orch" / "config.toml").write_text('[pull_requests]\nbases = ["next"]\n', encoding="utf-8")
+    code, out, _ = run("ref", "wait", tk, "--merge")
+    assert code == 0, out
+    assert merges == [["/fake/gh", "pr", "merge", PR, "--merge", "--match-head-commit", HEAD]]
 
 
 def test_a_persons_merge_card_is_never_merged_here(proj, tk, run, fake_gh, monkeypatch):
@@ -459,7 +524,7 @@ def test_into_main_a_missing_required_check_is_waited_for():
     case = _case("release-into-main")
     case["polls"][0]["checks"] = [c for c in case["polls"][0]["checks"] if c["name"] != case["required"][0]]
     v = prwait.wait(prwait.Replay(case))
-    assert not v.green and "still waiting" in v.why
+    assert not v.green and v.unknown and "never reported: " + case["required"][0] in v.why
 
 
 def test_a_pull_request_moved_to_another_base_while_waiting_is_not_merged(monkeypatch):
@@ -488,3 +553,253 @@ def test_a_before_merge_check_that_breaks_never_lets_the_merge_through(monkeypat
 
     o = prwait.run_one(src.url, True, src=src, before_merge=broken)
     assert not o.ok and o.status == "held" and "TimeoutError" in o.line and merges == [] and back == ["merge"]
+
+
+def test_a_green_workflow_change_goes_to_the_owners_merge_card_and_is_not_merged_here(
+    proj, tk, run, fake_gh, monkeypatch
+):
+    """ORCH-305: GitHub holds it for the owner (CODEOWNERS): one Merge card, no merge, no hand push."""
+    from orch import cli_review, ghmerge
+
+    pulls, merges = fake_gh
+    pulls[PR] = FakePull(PR, _case("pr978-second-run"), changed=[".github/workflows/addons.yml"])
+    seen = []
+    monkeypatch.setattr(
+        ghmerge, "workflow_check", lambda url, head: seen.append((url, head)) or {"files": []}
+    )
+
+    def card(args, root, tid, by):
+        assert (
+            args.merge and args.open == PR and args.link == "CI workflow change" and by.startswith("agent:")
+        )
+        return {}, {"id": "q4"}
+
+    monkeypatch.setattr(cli_review, "ask_card", card)
+    code, out, _ = run("ref", "wait", tk, "--merge", "--by", "agent:x")
+    assert code == 1 and merges == [] and seen == [(PR, HEAD)]
+    lines = out.strip().splitlines()
+    assert "the owner merges it with the Merge card q4" in lines[-2]
+    assert lines[-1].startswith("Next: GREEN; it changes a CI workflow, so the owner merges it")
+    assert _ref_status(proj, tk, PR) == "owner merges"
+
+
+def test_without_a_workflow_file_the_merge_goes_on(proj, tk, run, fake_gh, monkeypatch):
+    from orch import ghmerge
+
+    pulls, merges = fake_gh
+    pulls[PR] = FakePull(PR, _case("pr978-second-run"))
+    monkeypatch.setattr(ghmerge, "workflow_check", lambda url, head: None)
+    code, _, _ = run("ref", "wait", tk, "--merge")
+    assert code == 0 and len(merges) == 1
+
+
+def _timed_out(retry_state):
+    bad = {"name": "lint", "state": "TIMED_OUT", "bucket": "fail"}
+    ok = {"name": "build", "state": "SUCCESS", "bucket": "pass"}
+    again = {"name": "lint", "state": retry_state, "bucket": "pass" if retry_state == "SUCCESS" else "fail"}
+    return {"repo": "acme/app", "isDraft": False, "required": [], "polls": [[ok, bad], [ok, again]]}
+
+
+def test_a_timed_out_check_is_run_once_more_and_counted():
+    src = prwait.Replay(_timed_out("SUCCESS"))
+    v = prwait.wait(src)
+    assert v.green and v.retried == ["lint"] and src.reran == ["lint"]
+    from orch import checkretry
+
+    s = checkretry.summary()
+    assert s["total"] == 1 and s["checks"][0]["check"] == "lint" and s["checks"][0]["timeout"] == 1
+
+
+def test_a_check_that_times_out_again_is_red_after_one_retry():
+    src = prwait.Replay(_timed_out("TIMED_OUT"))
+    v = prwait.wait(src)
+    assert not v.green and "lint TIMED_OUT" in v.why and "once more" in v.why
+    from orch import checkretry
+
+    assert checkretry.summary()["total"] == 1  # one retry, never a second
+
+
+def test_a_real_failure_is_never_retried():
+    src = prwait.Replay(_timed_out("SUCCESS"))
+    src.polls[0][1]["state"] = "FAILURE"
+    v = prwait.wait(src)
+    assert not v.green and not v.retried and not hasattr(src, "reran")
+
+
+def test_a_network_failure_named_by_the_source_is_retried():
+    case = _timed_out("SUCCESS")
+    case["polls"][0][1]["state"] = "FAILURE"
+    case["networkFailed"] = ["lint"]
+    v = prwait.wait(prwait.Replay(case))
+    assert v.green and v.retried == ["lint"]
+    from orch import checkretry
+
+    assert checkretry.summary()["checks"][0]["network"] == 1
+
+
+def test_a_timeout_and_a_real_failure_together_are_not_retried():
+    case = _timed_out("SUCCESS")
+    case["polls"][0].append({"name": "unit", "state": "FAILURE", "bucket": "fail"})
+    v = prwait.wait(prwait.Replay(case))
+    assert not v.green and not v.retried
+
+
+def test_retry_summary_keeps_only_the_window_and_orders_by_count():
+    from orch import checkretry
+
+    checkretry.record("a/b", "1", "old", "timeout", now=10_000_000.0 - 40 * 86400)
+    for _ in range(2):
+        checkretry.record("a/b", "2", "flaky", "network", now=10_000_000.0)
+    checkretry.record("a/b", "3", "other", "timeout", now=10_000_000.0)
+    s = checkretry.summary(30, now=10_000_100.0)
+    assert [c["check"] for c in s["checks"]] == ["flaky", "other"] and s["total"] == 3
+
+
+def test_the_wait_says_once_a_minute_what_it_waits_for():
+    """17 Nov: orch ref wait --merge sat 50 minutes without a word (it waited for the hourly merge limit)."""
+    running = [{"name": "build", "state": "PENDING", "bucket": "pending"},
+               {"name": "lint", "state": "SUCCESS", "bucket": "pass"}]  # fmt: skip
+    done = [{"name": "build", "state": "SUCCESS", "bucket": "pass"},
+            {"name": "lint", "state": "SUCCESS", "bucket": "pass"},
+            {"name": "needed", "state": "SUCCESS", "bucket": "pass"}]  # fmt: skip
+    src = prwait.Replay({"required": ["needed"], "polls": [[], running, running, done]})
+    src.url = PR
+    assert prwait.wait(src).green
+    lines = [text for _, text in src.said]
+    assert len(lines) == 3  # one per minute of waiting, none after the verdict
+    assert "to start (none reported yet)" in lines[0]
+    assert "1 of 2 still running (build)" in lines[1] and "required not reported yet: needed" in lines[1]
+    assert all(PR in x for x in lines)
+
+
+def test_a_wait_for_room_in_the_merge_limit_is_said_at_most_once_a_minute(monkeypatch, capsys):
+    from orch import ghlimit
+
+    monkeypatch.setattr(prwait.shutil, "which", lambda name: "/fake/gh")
+
+    def take(kind, what, on_wait=None, **kw):
+        for waited in (0, 20, 40, 60, 80, 100, 120):
+            on_wait(900 - waited, waited)
+        return True
+
+    monkeypatch.setattr(ghlimit, "take", take)
+    monkeypatch.setattr(ghlimit, "status", lambda: [{"kind": "merge", "used": 12, "per_hour": 12}])
+    assert prwait.Live(PR).take("merge", PR)
+    lines = [x for x in capsys.readouterr().err.splitlines() if x.strip()]
+    assert len(lines) == 3  # at 0, 60 and 120 seconds
+    assert f"checks of {PR} passed" in lines[0] and "GitHub limit for merges (12 of 12 this hour" in lines[0]
+    assert "next fits in about 15 min" in lines[0]
+
+
+def test_a_required_check_that_never_comes_is_not_waited_for_an_hour():
+    """18 Nov: a merge queue group's run was cancelled before its final check; nothing ran any more and the
+    wait sat the whole hour for a check that could not come. Then: NOT green, unknown."""
+    v = prwait.wait(prwait.Replay(_case("required-check-missing")))
+    assert not v.green and v.unknown and "never reported" in v.why
+    src = prwait.Replay(_case("required-check-missing"))
+    prwait.wait(src)
+    assert src.t < prwait.NO_CHECKS_SECS + 3 * prwait.POLL_SECS
+
+
+def test_a_missing_required_check_is_waited_for_while_a_run_is_still_open():
+    runs = {"checks": [{"name": "banned-words", "state": "SUCCESS", "bucket": "pass"}],
+            "runs": [{"name": "ci", "status": "queued"}]}  # fmt: skip
+    v = prwait.wait(prwait.Replay({"required": ["needed"], "polls": [runs]}), timeout=1800)
+    assert not v.green and "still waiting" in v.why and "unfinished workflow runs: ci" in v.why
+
+
+def test_an_empty_merge_commit_of_the_group_before_is_nothing_landed(monkeypatch):
+    """ORCH-1118: a queue group built on top of another sees only that group's merge commit land on develop;
+    GitHub's compare lists commits but no files. That is nothing landed, not unknown (six green groups were
+    closed without merge on 20 Nov)."""
+    monkeypatch.setattr(prwait.shutil, "which", lambda name: "/fake/gh")
+    src = prwait.Live(PR)
+    answers = {
+        "empty": {"ahead_by": 1, "files": []},
+        "nolist": {"ahead_by": 2},
+        "some": {"ahead_by": 1, "files": [{"filename": "a.py"}]},
+    }
+    for key, want in (("empty", []), ("nolist", None), ("some", ["a.py"])):
+        src.gh_json = lambda *args, k=key: answers[k]
+        assert src.landed(HEAD, "develop") == want
+
+
+def _c(name, state):
+    bucket = {"SUCCESS": "pass", "SKIPPED": "skipping", "PENDING": "pending", "CANCELLED": "cancel"}.get(
+        state, "fail"
+    )
+    return {"name": name, "state": state, "bucket": bucket}
+
+
+def _group(second):
+    """A merge queue group: lint fails while build still runs; build and the final check get cancelled
+    or red; the re-run first still shows the old results, then runs, then ends as `second` says."""
+    polls = [
+        [_c("build", "PENDING"), _c("lint", "FAILURE")],
+        [_c("build", "CANCELLED"), _c("lint", "FAILURE"), _c("final", "FAILURE")],
+        [_c("build", "CANCELLED"), _c("lint", "FAILURE"), _c("final", "FAILURE")],
+        [_c("build", "PENDING"), _c("lint", "PENDING"), _c("final", "PENDING")],
+        [
+            _c("build", "SUCCESS"),
+            _c("lint", second),
+            _c("final", "SUCCESS" if second == "SUCCESS" else "FAILURE"),
+        ],
+    ]
+    return {"repo": "acme/app", "isDraft": False, "required": [], "polls": polls}
+
+
+def test_a_queue_group_stops_at_the_first_red_and_runs_the_failed_jobs_once_more():
+    """ORCH-1118: a red job at minute 10 no longer waits for the rest; the run is cancelled, the failed and
+    cancelled jobs run once more (a flaky test does not split a group of ten), green then is green."""
+    src = prwait.Replay(_group("SUCCESS"))
+    v = prwait.wait(src, queue=True)
+    assert v.green and v.retried == ["lint"] and src.reran == ["lint"] and src.cancels == 1
+    from orch import checkretry
+
+    assert checkretry.summary()["checks"][0]["flaky"] == 1
+
+
+def test_a_queue_group_red_again_after_the_one_re_run_is_red_and_cancelled_again():
+    src = prwait.Replay(_group("FAILURE"))
+    v = prwait.wait(src, queue=True)
+    assert not v.green and not v.unknown and "lint FAILURE" in v.why and "once more" in v.why
+    assert src.cancels == 2 and src.n == 5  # one re-run only, never a second
+
+
+def test_outside_the_queue_a_red_check_still_waits_for_the_rest_and_is_not_re_run():
+    src = prwait.Replay(_group("SUCCESS"))
+    v = prwait.wait(src)
+    assert not v.green and not hasattr(src, "reran") and not hasattr(src, "cancels")
+
+
+def test_a_job_still_shown_cancelled_after_the_re_run_is_not_taken_for_its_new_result():
+    """Codex review: build stays CANCELLED for a poll after the re-run while lint is green already; that is
+    the old result, not a red one."""
+    polls = [
+        [_c("lint", "FAILURE"), _c("build", "PENDING")],
+        [_c("lint", "FAILURE"), _c("build", "CANCELLED")],
+        [_c("lint", "SUCCESS"), _c("build", "CANCELLED")],
+        [_c("lint", "SUCCESS"), _c("build", "PENDING")],
+        [_c("lint", "SUCCESS"), _c("build", "SUCCESS")],
+    ]
+    src = prwait.Replay({"repo": "acme/app", "isDraft": False, "required": [], "polls": polls})
+    assert prwait.wait(src, queue=True).green
+
+
+def test_a_red_group_whose_run_did_not_stop_is_red_without_a_re_run():
+    src = prwait.Replay(_group("SUCCESS"))
+    src.cancel_runs = lambda: False
+    v = prwait.wait(src, queue=True)
+    assert not v.green and not v.retried and not hasattr(src, "reran")
+
+
+def test_counting_a_retry_never_breaks_the_wait_when_the_orch_folder_is_refused(monkeypatch):
+    """ORCH-1118: a refused orch folder (Refused, not OSError) made the queue's one re-run break the wait."""
+    from orch import addons, checkretry
+    from orch.errors import Refused
+
+    def refused():
+        raise Refused("ORCH_HOME is not a trusted folder")
+
+    monkeypatch.setattr(addons, "home", refused)
+    checkretry.record("acme/app", "1", "test", "flaky")  # no exception

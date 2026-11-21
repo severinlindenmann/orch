@@ -3,40 +3,117 @@ on:
   workflow_call:
     inputs:
       full:
-        description: "also run macOS (push to develop/main, PRs into main, manual runs)"
+        description: "also run macOS (push to develop/main, PRs into main, nightly, manual runs; not merge queue groups)"
         type: boolean
         default: false
       windows:
-        description: "also run Windows (unit tests + standard-user install); manual runs only, Windows is tested locally on winvm"
+        description: "also run Windows (push to develop, PRs that change file, process or path code, nightly, manual)"
         type: boolean
         default: false
+      linux:
+        description: "the Linux parts (off only on a push to develop that a green queue group proved, ORCH-1106)"
+        type: boolean
+        default: true
 jobs:
+  # Which systems and how many parts each (ORCH-315). Every part has a 15-minute limit (Windows 20); the full
+  # suite takes about 12 min on Ubuntu, 22-40 min on macOS and ~140 min on Windows (ORCH-32), so the slow systems
+  # get more parts (measured 18 Nov: Ubuntu parts 7-9 min, macOS parts 6-9 min).
+  # Each part runs every N-th test by a hash of its name (workspace/tests/ci_parts.py, --part K/N). Windows is
+  # split by measured time instead (--part-times, ORCH-1050): by hash, part 12 of 16 got most of the 60-110 s
+  # bring-back tests and was killed at 15m0s with every test passed (releases 35 and 38) while part 1 took 3 min.
+  # Time-split 20 parts take ~9 min of their 20; the "Time used" step warns once a part passes 70 percent.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        env:
+          FULL: ${{ inputs.full }}
+          WINDOWS: ${{ inputs.windows }}
+          LINUX: ${{ inputs.linux }}
+        run: |
+          python3 - <<'PY2'
+          import json, os
+          # Systems whose failures do not block a merge (the mechanism is kept for the next time a system is red).
+          # Windows was in it until ORCH-32 (pull request 1045): its parts now block again.
+          # Known red works per STEP (continue-on-error on the test steps below), never on the job: a job-level
+          # continue-on-error still reports a FAILURE check on the pull request, and the merge queue drops every
+          # group with a failed check (18 Nov, after PR 1428). brand/tests/test_ci_known_red.py keeps it so.
+          KNOWN_RED = set()
+          parts = {"ubuntu-latest": 2} if os.environ["LINUX"] == "true" else {}
+          if os.environ["FULL"] == "true":
+              parts["macos-latest"] = 5
+          if os.environ["WINDOWS"] == "true":
+              parts["windows-latest"] = 20
+          LIMIT = {"windows-latest": 20}  # minutes per part; 15 elsewhere (the Time used step reads it too)
+          rows = [
+              {"os": o, "part": k, "parts": n, "known_red": o in KNOWN_RED, "limit": LIMIT.get(o, 15)}
+              for o, n in parts.items()
+              for k in range(1, n + 1)
+          ]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("matrix=" + json.dumps({"include": rows}) + "\n")
+          print(json.dumps(rows, indent=1))
+          PY2
   test:
+    needs: plan
+    name: test (${{ matrix.os }}, ${{ matrix.part }}/${{ matrix.parts }})
     strategy:
       fail-fast: false
-      matrix:
-        os: ${{ fromJSON(inputs.windows && (inputs.full && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest","windows-latest"]') || (inputs.full && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]')) }}
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
-    # The suite takes 3-6 min; a hung test must not hold the runner for GitHub's 6 h default.
-    timeout-minutes: 40  # the full suite (6000+ tests) outgrew 20 min on macOS
+    # One part: under its limit (15 minutes, Windows 20) set-up included. A hanging test stops after 300 s
+    # (pytest-timeout in workspace/pyproject.toml); a test over its time budget fails (--budget below).
+    timeout-minutes: ${{ matrix.limit }}
     defaults:
       run:
         working-directory: workspace
     steps:
+      - name: Start time
+        shell: bash
+        working-directory: ${{ github.workspace }}  # before the checkout: workspace/ is not there yet
+        run: echo "PART_START=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+      # Windows: orch's safe git runs the python of the virtual environment as its `true` and refuses a python
+      # inside the project folder, so every git test failed. Keep the environment outside the project (ORCH-32).
+      - name: Virtual environment outside the project (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "UV_PROJECT_ENVIRONMENT=$RUNNER_TEMP/orch-venv" >> "$GITHUB_ENV"
       - run: uv sync
       - run: uv run ruff check .
+        if: matrix.part == 1
       - run: uv run ruff format --check .
-      # -n auto: the runners have 4 vCPU (pytest-xdist is a dev dependency; the suite is xdist-safe, #237)
-      - run: uv run pytest -q -n auto
-        if: runner.os != 'Windows'
-      # Windows: a test that hangs is stopped after 120 s with every thread's stack, so the log names it.
-      - run: uv run --with pytest-timeout pytest -q -n auto --timeout 120 --timeout-method thread
+        if: matrix.part == 1
+      # -n auto: the runners have 3-4 vCPU (pytest-xdist is a dev dependency; the suite is xdist-safe, #237).
+      # --durations=30 (pyproject.toml) lists the 30 slowest tests of every part at the end of its log.
+      # Time budget per test: 90 s on Ubuntu (slowest ~34 s, but up to 60 s on a slow runner), 180 s on the slower macOS and Windows runners
+      # (slowest today ~102 s on macOS); a test that needs longer says why with @pytest.mark.budget(N).
+      - id: tests-linux
+        run: uv run pytest -q -n auto --part ${{ matrix.part }}/${{ matrix.parts }} --budget 90
+        if: runner.os == 'Linux'
+        continue-on-error: ${{ matrix.known_red }}
+      - id: tests-macos
+        run: uv run pytest -q -n auto --part ${{ matrix.part }}/${{ matrix.parts }} --budget 180
+        if: runner.os == 'macOS'
+        continue-on-error: ${{ matrix.known_red }}
+      # Windows: a hung test stops at the 300 s of pyproject.toml, with every thread's stack. Not 120 s: the thread method
+      # then kills the whole worker, and the 100 s bring-back tests crossed it on a loaded runner (ORCH-32).
+      # Split by measured time (tests/ci_times_windows.json); --times-out keeps this part's seconds as an artifact
+      # so the file can be refreshed: python tests/ci_parts.py merge tests/ci_times_windows.json <files...>
+      - id: tests-windows
+        run: uv run pytest -q -n auto --part ${{ matrix.part }}/${{ matrix.parts }} --part-times tests/ci_times_windows.json --times-out "${{ runner.temp }}/ci-times.json" --budget 180 --timeout-method thread
         if: runner.os == 'Windows'
+        continue-on-error: ${{ matrix.known_red }}
       - name: Installed wheel smoke (orch init, junction on Windows)
+        id: smoke
+        if: matrix.part == 1
+        continue-on-error: ${{ matrix.known_red }}
         shell: bash
         run: |
           uv build --wheel -o "$RUNNER_TEMP/dist"
@@ -48,7 +125,9 @@ jobs:
           test -f .claude/skills/orch/SKILL.md
           orch ticket list
       - name: Junction check (Windows)
-        if: runner.os == 'Windows'
+        id: junction
+        if: runner.os == 'Windows' && matrix.part == 1
+        continue-on-error: ${{ matrix.known_red }}
         shell: pwsh
         run: |
           # Since #215 .claude\skills is a plain folder with one link per skill (a copy where links are refused)
@@ -56,11 +135,42 @@ jobs:
           if ($item.LinkType -ne "Junction" -and -not (Test-Path "$env:RUNNER_TEMP\smoke\.claude\skills\orch\.orch-copy")) {
             throw "expected .claude\skills\orch to be a junction, got '$($item.LinkType)'"
           }
+      - name: Test times (Windows)
+        if: always() && runner.os == 'Windows' && steps.tests-windows.outcome != 'skipped'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-times-windows-${{ matrix.part }}
+          path: ${{ runner.temp }}/ci-times.json
+          retention-days: 14
+          if-no-files-found: ignore
+      # A part near its limit is the next one to be killed with every test passed (ORCH-1050): warn at 70 percent.
+      # Counted from the first step (GitHub's own set-up before it, ~10-30 s, is not in it).
+      - name: Time used
+        if: always() && env.PART_START != ''
+        continue-on-error: true
+        shell: bash
+        env:
+          LIMIT_MIN: ${{ matrix.limit }}
+          PART: ${{ matrix.os }} part ${{ matrix.part }}/${{ matrix.parts }}
+        run: |
+          used=$(( $(date +%s) - PART_START )); pct=$(( used * 100 / (LIMIT_MIN * 60) ))
+          line="$PART used $((used / 60))m$((used % 60))s of its ${LIMIT_MIN}-minute limit (${pct}%)"
+          echo "$line"
+          echo "$line" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$pct" -gt 70 ]; then
+            echo "::warning title=Near the time limit::$line. Over 70 percent: rebalance the parts (Windows: refresh tests/ci_times_windows.json from the ci-times artifacts) or add parts (ORCH-1050)"
+          fi
+      - name: Known red (the check stays green, the failure is only a warning)
+        if: matrix.known_red && (contains(steps.*.outcome, 'failure'))
+        shell: bash
+        run: echo "::warning title=Known red::${{ matrix.os }} part ${{ matrix.part }}/${{ matrix.parts }} failed; it does not block while ${{ matrix.os }} is in KNOWN_RED (ORCH-32)"
   windows-standard-user:
     if: inputs.windows
     # The README's Windows install as a standard user (no admin), no git, default execution
     # policy, from this commit's GitHub zip; then init, a ticket, an add-on and an update (e2e/windows/).
     runs-on: windows-latest
+    timeout-minutes: 15  # ~6 min
     steps:
       - uses: actions/checkout@v4
       - name: Install and first steps as a standard user

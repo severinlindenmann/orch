@@ -415,7 +415,7 @@ def test_reading_the_input_ends_the_check(proj, run, monkeypatch):
 def test_only_the_run_holding_the_ticket_may_read_and_mark(proj, run, monkeypatch, who):
     tid, rn, _, _, _ = _stuck(proj, run, monkeypatch)
     before = runs.read(proj, tid)
-    with pytest.raises(Exception, match="Only the live run"):
+    with pytest.raises(Exception, match="Only the run working on"):
         runs_live.read_input(proj, tid, who, True)
     assert runs.read(proj, tid) == before and len(runs.undelivered(proj, tid)) == 1  # nothing changed
 
@@ -423,7 +423,7 @@ def test_only_the_run_holding_the_ticket_may_read_and_mark(proj, run, monkeypatc
 def test_an_agent_gets_nothing_from_a_ticket_without_a_run(proj, run):
     tid = _ticket(run)
     runs.pending_add(proj, tid, "human:lume", "message", "for the next start")
-    with pytest.raises(Exception, match="Only the live run"):
+    with pytest.raises(Exception, match="Only the run working on"):
         runs_live.read_input(proj, tid, "r_abcdefgh", True)
     assert len(runs.undelivered(proj, tid)) == 1
 
@@ -1271,6 +1271,17 @@ def test_send_into_an_idle_session_types_only_the_notice_and_says_sent(proj, run
     assert res["delivered"] >= 1 and res["queued"] is False and runs_live.send_text(res, tid) == "Sent."
     assert sent[n:] == [runs_live.notice_line(tid, False), "Enter"]
     assert "rain" not in "".join(sent)
+
+
+def test_send_to_an_idle_session_whose_notice_went_stale_says_queued(proj, run, monkeypatch):
+    """ORCH-247: a stale notice (taken by nobody twice) is not a delivery: the answer must not say Sent."""
+    tid, rn, sent, screen = _idle_with_input(proj, run, monkeypatch, pane=_screen(""))
+    rec = runs.read(proj, tid)
+    rec["submit"] = {"at": tickets.now(), "nudges": runs_live.NUDGES, "stale": True}
+    runs._write(proj, rec)
+    res = runs_live.send(proj, tid, "human:t", "Please add the rain plan.")
+    assert res["delivered"] == 0 and res["queued"] is True
+    assert runs_live.send_text(res, tid).startswith("Queued.")
 
 
 def test_claude_2_1_325_placeholder_with_the_cursor_block_is_an_empty_prompt(proj, run, monkeypatch):

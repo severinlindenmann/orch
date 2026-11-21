@@ -82,12 +82,25 @@ def _run(folder: Path, data: Path):
     return proc, f"http://127.0.0.1:{port}"
 
 
+def _node_has_sqlite() -> bool:
+    """Whether the node on PATH can load node:sqlite as the sqlite template's store does (no extra flag)."""
+    r = subprocess.run(
+        ["node", "--input-type=module", "-e", "import 'node:sqlite'"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=30,
+    )
+    return r.returncode == 0
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("stack", ["python", "node", "docker"])
 @pytest.mark.parametrize("store", templates.STORES)
 def test_server_answers(tmp_path, stack, store):
     if stack == "node" and not shutil.which("node"):
         pytest.skip("node not on PATH")
+    if stack == "node" and store == "sqlite" and not _node_has_sqlite():
+        pytest.skip("this node has no node:sqlite (it came in Node 22.5; CI's light job runs Node 20)")
     folder, data = tmp_path / "app-x", tmp_path / "data"
     data.mkdir()
     templates.create(stack, store, folder)
@@ -113,6 +126,50 @@ def test_python_template_commands_use_python3(tmp_path):
     templates.create("python", "sqlite", folder)
     m = publish.read_manifest(folder)
     assert m["start"].startswith("python3 ") and m["test"].startswith("python3 ")
+
+
+def _evaluated_union_hints(src: str) -> list[int]:
+    """Lines whose hint uses `X | Y` and is evaluated at import (no `from __future__ import annotations`)."""
+    import ast
+
+    tree = ast.parse(src)
+    if any(
+        isinstance(n, ast.ImportFrom)
+        and n.module == "__future__"
+        and any(a.name == "annotations" for a in n.names)
+        for n in tree.body
+    ):
+        return []
+    hints = [n.annotation for n in ast.walk(tree) if isinstance(n, (ast.arg, ast.AnnAssign)) and n.annotation]
+    hints += [
+        n.returns
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.returns
+    ]
+    return sorted(
+        {
+            h.lineno
+            for h in hints
+            for b in ast.walk(h)
+            if isinstance(b, ast.BinOp) and isinstance(b.op, ast.BitOr)
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("stack", "store"), [(s, st) for s in ("python", "docker") for st in templates.STORES]
+)
+def test_python_templates_import_on_python_3_9(tmp_path, stack, store):
+    # a host without containers runs the app and its test with the system python3 (macOS: 3.9);
+    # `dict | None` in a hint is a TypeError there unless the hints stay unevaluated
+    folder = tmp_path / "py-app"
+    templates.create(stack, store, folder)
+    bad = {
+        str(p.relative_to(folder)): ln
+        for p in folder.rglob("*.py")
+        if (ln := _evaluated_union_hints(p.read_text()))
+    }
+    assert not bad, f"add `from __future__ import annotations`: {bad}"
 
 
 def test_docker_template_files(tmp_path):

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from orch import adapters, safegit, skills
+from orch import adapters, harness, safegit, skills
 
 
 @pytest.fixture(autouse=True)
@@ -154,6 +154,32 @@ def test_does_not_replace_a_users_own_orch_folder(proj, run):
     assert (proj / ".agents/skills/orch/SKILL.md").read_text(encoding="utf-8") == "mine"
 
 
+def test_replaces_a_marker_less_copy_of_an_older_orch(proj, run):
+    assert run("init")[0] == 0
+    d = proj / ".agents/skills/orch-dashboard"
+    d.mkdir(parents=True)
+    old_text = "---\nname: orch-dashboard\ndescription: older\n---\nolder text"
+    (d / "SKILL.md").write_text(old_text, encoding="utf-8")
+    target = proj / ".orch/harness/skills/orch-dashboard"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("---\nname: orch-dashboard\n---\nnew", encoding="utf-8")
+    harness.link_skill(proj, ".agents/skills", "orch-dashboard")
+    assert (d / "SKILL.md").read_text(encoding="utf-8").endswith("new")
+    kept = list((proj / ".orch/harness/replaced-skills").glob("orch-dashboard-*/SKILL.md"))
+    assert kept and "older text" in kept[0].read_text(encoding="utf-8")
+
+
+def test_users_own_orch_dash_folder_is_still_refused(proj, run):
+    assert run("init")[0] == 0
+    d = proj / ".agents/skills/orch-mine"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text("mine", encoding="utf-8")
+    (proj / ".orch/harness/skills/orch-mine").mkdir(parents=True)
+    with pytest.raises(harness.Refused):
+        harness.link_skill(proj, ".agents/skills", "orch-mine")
+    assert (d / "SKILL.md").read_text(encoding="utf-8") == "mine"
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="symlink setup")
 def test_harness_folder_linked_outside_is_refused(proj, run, tmp_path_factory):
     outside = tmp_path_factory.mktemp("outside2")
@@ -192,8 +218,10 @@ def test_existing_claude_skills_folder_gets_per_skill_links(proj, run):
     assert run("init")[0] == 0
     assert (proj / ".claude/skills/mine/SKILL.md").is_file()
     assert (proj / ".claude/skills/orch/SKILL.md").is_file()
-    link = proj / ".claude/skills/orch"  # a symlink; on Windows a junction (no privileges needed)
-    is_link = link.is_symlink() or getattr(link, "is_junction", lambda: False)()
+    link = (
+        proj / ".claude/skills/orch"
+    )  # a symlink; on Windows a copy marked as orch's (no links there, #438)
+    is_link = link.is_symlink() or (os.name == "nt" and (link / ".orch-copy").is_file())
     assert not (proj / ".claude/skills").is_symlink() and is_link
 
 
@@ -750,7 +778,7 @@ def test_a_git_failure_inside_a_repo_refuses_and_no_repo_is_fine(proj, monkeypat
     real = subprocess.Popen
 
     def broken(cmd, *a, **k):
-        if "check-ignore" in cmd and os.path.basename(cmd[0]) == "git":
+        if "check-ignore" in cmd and os.path.splitext(os.path.basename(cmd[0]))[0] == "git":
             return _FakeProc(128, b"fatal: detected dubious ownership")
         return real(cmd, *a, **k)
 
@@ -936,7 +964,10 @@ def test_reminder_settings_created_with_both_hooks(proj, run):
     for event in ("SessionStart", "UserPromptSubmit"):
         (h,) = _ours(doc, event)
         assert h["type"] == "command" and h["timeout"] == 5
-        assert h["command"].startswith(sys.executable.replace(" ", "\\ ")) or sys.executable in h["command"]
+        exe = (
+            sys.executable.replace("\\", "/") if os.name == "nt" else sys.executable
+        )  # the hook line uses "/"
+        assert h["command"].startswith(exe.replace(" ", "\\ ")) or exe in h["command"]
     if sys.platform != "win32":
         assert ((proj / ".claude/settings.local.json").stat().st_mode & 0o777) == 0o600
 
@@ -1406,3 +1437,18 @@ def test_github_skill_in_a_folder_with_spaces_and_umlauts(proj, run, fake_gh, mo
     _git(folder, "remote", "add", "origin", "ssh://git@github.com/acme/billing.git")
     assert run("init")[0] == 0
     assert _github_skill_is_on(folder)
+
+
+def test_init_warns_by_name_when_git_would_commit_an_orch_file(proj, run):
+    _git_repo(proj)
+    run("init")
+    assert harness.git_visible_warning(proj) is None  # tickets and private files stay ignored
+    (proj / ".orch" / "ask-when.md").write_text("x\n", encoding="utf-8")
+    warn = harness.git_visible_warning(proj)
+    assert warn and ".orch/ask-when.md" in warn
+    assert "tickets" not in warn
+
+
+def test_no_git_no_warning(proj, run):
+    run("init")
+    assert harness.git_visible_warning(proj) is None

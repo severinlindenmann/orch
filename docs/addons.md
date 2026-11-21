@@ -9,7 +9,6 @@ publish and relay are built into orch (no separate package) but are also off unt
 | automation | Starts your agent at a time, on a repeat, or when the phone or another workspace sends work |
 | focus | A live page for one ticket: watch the helper work, answer, send a message |
 | dashboard | One page with every ticket and what needs you |
-| dashboard-tester | Looks at every dashboard page once a day and reports what is broken, without clicking anything |
 | publish (built in) | Share a file or a small app by private link ([publish.md](publish.md)) |
 | relay (built in) | Messages and tasks between workspaces and phones ([relay.md](relay.md)) |
 
@@ -64,34 +63,6 @@ $ orch stop
 Leave out `--no-open` and your browser opens. With Claude you also see each step as it happens. With a generic agent you see
 the tasks it ticks off and its questions. When an agent waits for your OK, it shows as a card in Needs you.
 
-## Dashboard tester
-
-Once a day a program opens every dashboard page at 1280, 1920 and 390 px wide (plus the newest working and the
-newest Review ticket) and reads it. It never clicks, types or presses anything. It finds page errors, failed
-requests, empty or slow pages (over 6 seconds), sideways scrolling at phone width, buttons cut off at the right
-edge, words from the never-list of [wording.md](wording.md) and program values such as null or NaN on screen.
-
-New findings become problem reports kept on this computer (`orch report problem --no-send`, never shared): each
-big one alone, the small ones together, at most 3 a day. A finding that an open ticket already names is not
-reported. When the ticket of a report is finished, the next look checks the finding again and reports it once more
-if it is still there. A quiet day costs no tokens. It needs the dashboard and automation add-ons, and downloads a
-browser of about 100 MB once (not when Chrome is already on this computer).
-
-```sh
-$ orch addon add dashboard --yes
-$ orch addon add dashboard-tester --yes
-$ orch dashboard-tester setup --at 06:30  # skip
-$ orch dashboard-tester status
-$ orch dashboard-tester run --dry-run  # skip
-```
-
-`setup` makes a ticket with a daily repeat (default 06:30); it runs once a person presses Allow this script on the
-repeat. `status` says what the last look found; `run --dry-run` looks once and reports and keeps nothing.
-The look signs in with a one-time link that orch makes only for a run a person started (the daily repeat), never
-for a helper. `--helper-each-release` on `setup` also starts one helper per new orch release (low priority, the
-small model) that reads the pictures and page texts of the look and reports what a person would stumble over.
-Files: `.orch/addons/dashboard-tester/` (gitignored; the newest pictures and texts in `last/`).
-
 ## Lessons
 
 Helpers write down what they learned in this workspace, one plain line each (for example "Run the web tests with
@@ -118,13 +89,19 @@ good ones still get merged. A program does the waiting and merging; it needs `gh
 
 ```sh
 $ orch addon add pull-requests --yes
-$ orch pull-requests queue add <pull request url> --ticket <id> --wait   # exit 0 = merged
+$ orch pull-requests queue add <pull request url> --ticket <id>          # in line; the verdict goes on the ticket
+$ orch pull-requests queue add <pull request url> --ticket <id> --wait   # the same, and wait: exit 0 = merged
 $ orch pull-requests queue list
 $ orch pull-requests queue remove <pull request url>
 ```
 
-`queue add` starts the runner in the background; it stops when the queue is empty. Every GitHub write counts toward
-this computer's write limit (`orch github writes`). A pull request a person merges with a Merge card is never queued.
+`queue add` starts the runner in the background; it stops when the queue is empty. A helper does not wait: it puts
+its ready pull request in line and finishes; the verdict (merged, or why it left the queue) goes on the ticket, and
+when it left the queue the ticket's helper is woken with the reason. A
+pull request whose files changed on the base branch since it took the base in is checked once on top of the base
+branch; the queue never merges the base into it and runs its checks again. Every GitHub write counts toward this
+computer's write limit (`orch github writes`); the queue's own merges are counted but never wait for the hourly
+merge count, since it merges one group per run of the checks. A pull request a person merges with a Merge card is never queued.
 Files: `.orch/addons/pull-requests/` (gitignored).
 
 **Merge when green.** A switch on each ticket (Details, Pull requests; off until you turn it on). When it is on, the
@@ -176,4 +153,12 @@ service recorded when it started is replayed. If you run the update under a diff
 example `sudo -E`, or in a container where the password database has no entry for your user), the service
 gets your terminal's `HOME` instead and the update says so; if a service then misbehaves, run `orch stop` and
 `orch start` in the shell you want it to use.
+
+## Go back one release
+
+`orch update --to <N>` goes back to release N of the source orch was installed from (for example `orch update
+--to 32` after release 33 broke something). It is the same update as any other, so orch, every add-on and the
+running services come back on release N. orch then stays on N: a plain `orch update` (and automatic updates)
+waits until a release newer than the one you left is out, then takes it. `orch update --to release` takes the
+newest release at once. A folder install has no releases to go back to.
 

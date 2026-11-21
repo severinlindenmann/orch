@@ -13,6 +13,7 @@ from . import listen, needs, orchcli, scripts, service
 from .cron import fmt, next_after, parse
 from .loop import scheduled
 from .plain import zone
+from .runner import load_state
 from .syncapproval import allowed
 
 DAYS = (
@@ -308,13 +309,39 @@ _STATUS = {
 }
 
 
-def _script_waits(root: Path, sched: dict) -> bool:
+def _what_runs(t: dict, sched: dict) -> str:
+    """What a repeat runs, in a few words: a script, a group of scripts or a helper, and when it waits for a change."""
+    from .loop import change_of, group_of
+
+    group = group_of(t)
+    what = (
+        f"Runs {len(group)} scripts, each on its own plan"
+        if group
+        else f"Runs {sched['script']}"
+        if sched.get("script")
+        else sched.get("agent") or "Your helper"
+    )
+    spec = change_of(t)
+    return f"{what}, only when {spec.split('@')[1]} changed" if spec else what
+
+
+def waiting_script(root: Path, t: dict) -> str | None:
+    """The first script of this repeat (its script or one of its group) set up here but not allowed yet."""
+    from .loop import group_of
+
+    sched = (t.get("ext") or {}).get("automation") or {}
+    names = sorted(group_of(t)) or [sched.get("script")]
+    for name in names:
+        if isinstance(name, str) and scripts.NAME_RE.match(name):
+            argv = scripts.load(root).get(name)
+            if argv and not scripts.approved(root, name, argv):
+                return name
+    return None
+
+
+def _script_waits(root: Path, t: dict) -> bool:
     """The repeat names a script that is set up here but not allowed on this computer yet."""
-    name = sched.get("script")
-    if not isinstance(name, str) or not scripts.NAME_RE.match(name):
-        return False
-    argv = scripts.load(root).get(name)
-    return bool(argv) and not scripts.approved(root, name, argv)
+    return waiting_script(root, t) is not None
 
 
 def _act(verb: str, tid: str) -> dict:
@@ -337,17 +364,22 @@ def _last_result(runs: list[dict], tid: str) -> str | None:
         return None
     r = mine[-1]
     when = parse(r["at"]).astimezone().strftime("%a %H:%M")
+    newest = {x["script"]: x for x in mine if x.get("script")}  # a group: each script's own newest run
+    if len(newest) > 1 and any(x["exit"] != 0 for x in newest.values()):
+        return f"A script failed · {when}"
     return f"{'Done' if r['exit'] == 0 else 'Stopped'} · {when}"
 
 
-def _started(tickets: list[dict], runs: list[dict]) -> list[tuple[datetime, dict]]:
+def _started(tickets: list[dict], runs: list[dict], state: dict | None = None) -> list[tuple[datetime, dict]]:
     """Scheduled tickets whose newest run started after the newest finished run: nothing recorded it yet, but it
     did start ("Last result" shows it, so "Recent starts" must too)."""
     out = []
     for t in tickets:
         if not scheduled(t):
             continue
-        last = parse(((t.get("ext") or {}).get("automation") or {}).get("last_run"))
+        last = parse(((t.get("ext") or {}).get("automation") or {}).get("last_run")) or parse(
+            ((state or {}).get(t["id"]) or {}).get("last_run")  # a wake-up started with Start now has no ext
+        )
         done = [parse(r["at"]) for r in runs if r.get("ticket") == t["id"]]
         if last and not any(d >= last for d in done):
             out.append((last, t))
@@ -391,15 +423,11 @@ def _schedules(
                         or (f"Started \u00b7 {last.astimezone():%a %H:%M}" if last else "Not yet"),
                     },
                     "link": t["id"],
-                    "subtitle": clean(
-                        f"Runs {sched['script']}"
-                        if sched.get("script")
-                        else sched.get("agent") or "Your helper",
-                        60,
-                    ),
+                    "subtitle": clean(_what_runs(t, sched), 80),
                     "toggle": {
                         "on": not paused,
                         "label": clean(t["title"], 40) + " on or off",
+                        "text": "Repeats",
                         "action": _act("toggle", t["id"]),
                     },
                     "actions": [
@@ -520,11 +548,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
     blocks: list[dict] = []
 
     waiting = frozenset(t["id"] for t in tickets if scheduled(t) and not allowed(root, t))
-    scripts_waiting = frozenset(
-        t["id"]
-        for t in tickets
-        if scheduled(t) and _script_waits(root, (t.get("ext") or {}).get("automation") or {})
-    )
+    scripts_waiting = frozenset(t["id"] for t in tickets if scheduled(t) and _script_waits(root, t))
     sched_rows = _schedules(tickets, now, bool(pid), runs, waiting, scripts_waiting)
     if sched_rows:
         table = {
@@ -600,7 +624,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
 
     recent = []
     events_ = [(parse(r["at"]), r, None) for r in runs[-5:]] + [
-        (at, None, t) for at, t in _started(tickets, runs)
+        (at, None, t) for at, t in _started(tickets, runs, load_state(root))
     ]
     for _at, r, started in sorted(events_, key=lambda e: e[0], reverse=True)[:5]:
         if started:
