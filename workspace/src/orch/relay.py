@@ -24,6 +24,7 @@ from orch import (
     history,
     keystore,
     net,
+    people,
     review,
     runs,
     secretscan,
@@ -156,6 +157,11 @@ def _handle_mobile_off(root: Path, m: dict) -> str:
         if m["id"] in seen(root):
             return "already handled"
         ok = _mobile_off_ok(root, m)
+        if ok:
+            try:
+                _people_gate(root, m, "mobile_off")
+            except people.PhoneRefused:
+                ok = False
         since = mobile_mode.settle(root).get("since")
         _mark_seen(root, m["id"])
     if ok:
@@ -1321,7 +1327,7 @@ def _apply_proposal_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str
     if ans not in PROPOSAL_OPTIONS:
         return "ignored: not an answer to a ticket proposal", None
     name = re.sub(r"[^A-Za-z0-9_.@ -]", "_", str(phone.get("name") or "")).strip()[:64]
-    by, via = f"human:{name or frm}", "phone"
+    by, via = people.phone_actor(frm) or f"human:{name or frm}", "phone"
     mid = str(msg.get("reply_to"))
     title = str(asked.get("title") or "a proposal")
 
@@ -1607,6 +1613,8 @@ def _send_closed(root: Path, qmid: str, tid: str, reason: str | None, at: float 
 
 
 def _phone_by(phone: dict, frm: str) -> str:
+    if actor := people.phone_actor(frm):  # the people list is on: the phone's person, never its name
+        return actor
     name = re.sub(r"[^A-Za-z0-9_.@ -]", "_", str(phone.get("name") or "")).strip()[:64]
     return f"human:{name or frm}"
 
@@ -1845,7 +1853,7 @@ def _apply_review_answer(root: Path, msg: dict, asked: dict, final: bool = False
     if not ans:
         return "ignored: an empty review answer", None
     name = re.sub(r"[^A-Za-z0-9_.@ -]", "_", str(phone.get("name") or "")).strip()[:64]
-    by, via = f"human:{name or frm}", "phone"
+    by, via = people.phone_actor(frm) or f"human:{name or frm}", "phone"
     if ans.casefold() == "changes":  # the option word alone says nothing to change
         with contextlib.suppress(Refused):
             tickets.note_history(root, tid, by, "Asked for changes from the phone, but without a note", via)
@@ -1920,6 +1928,8 @@ def msg_group(msg: dict) -> bool:
 
 def _answer_by(msg: dict, asked: dict | None = None, root: Path | None = None) -> tuple[str, str]:
     frm, b = str(msg.get("from", "")), msg.get("body", {})
+    if frm.startswith("ph_") and (actor := people.phone_actor(frm)):
+        return actor, "phone"  # the people list is on: the phone's person; body.answered_by is ignored
     by = b.get("answered_by")
     if isinstance(by, str):  # untrusted: it is pasted to the agent as "From <by>: ..."
         by = " ".join(clean_untrusted(by, 100).split())
@@ -1976,9 +1986,47 @@ def _note_group_refusal(root: Path, msg: dict, why: str, asked: dict | None = No
     chat_groups.note_answer_refused(root, asked, msg, why)
 
 
+def _phone_action(root: Path, asked: dict | None) -> str:
+    """What answering this question does, for the rights check: a relay:allow lets another workspace start
+    work here, a Merge card merges; every other answer only decides."""
+    try:
+        t = tickets.load(root, str((asked or {}).get("ticket")))
+        q = next(x for x in t["questions"] if x.get("id") == (asked or {}).get("question_id"))
+    except (Refused, StopIteration, ValueError, KeyError, TypeError, OSError):
+        return "answer"
+    if q.get("kind") == "relay:allow":
+        return "allow"
+    return "merge" if review.merge_url(q) else "answer"
+
+
+def _people_gate(root: Path, msg: dict, action: str):
+    """The people check for a message from a phone (who_sent): (person, device), None when the list is off
+    (nothing changes), or raises people.PhoneRefused (noted, never applied)."""
+    frm = str(msg.get("from", ""))
+    try:
+        return people.who_sent(root, frm, action, paired=_paired_phone(root, frm) is not None)
+    except people.PhoneRefused as e:
+        people.note_refused(root, frm, str(e))
+        raise
+
+
 def _apply_answer(root: Path, msg: dict, final: bool = False) -> tuple[str, str | None]:
     """(note, ticket id when the answer was applied). Only for a question this workspace sent. A phone
-    verdict whose files the relay cannot serve just now raises Transient (`final` = the last try)."""
+    verdict whose files the relay cannot serve just now raises Transient (`final` = the last try).
+    With the people list on, a phone's answer is let in only for a tied phone whose person may decide (and
+    start work, for a Merge card or an allow), before anything is written or the question is used up."""
+    if str(msg.get("from", "")).startswith("ph_"):
+        asked, _ = _answer_asked(root, msg)
+        try:
+            who = _people_gate(root, msg, _phone_action(root, asked))
+        except people.PhoneRefused as e:
+            return f"refused: {e}", None
+        with people.acting(who):
+            return _apply_answer_checked(root, msg, final)
+    return _apply_answer_checked(root, msg, final)
+
+
+def _apply_answer_checked(root: Path, msg: dict, final: bool = False) -> tuple[str, str | None]:
     asked, why = _answer_asked(root, msg)
     if not asked:
         _note_group_refusal(root, msg, why)
@@ -2600,6 +2648,17 @@ def _continue(
 
 
 def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
+    """With the people list on, a text is let in only from a tied phone whose person may write; whether it
+    may also start a helper is checked when that run would start (runs.human_waiting, people may-start)."""
+    try:
+        who = _people_gate(root, msg, "text")
+    except people.PhoneRefused as e:
+        return f"refused: {e}", ""
+    with people.acting(who):
+        return _phone_text_checked(root, msg, final)
+
+
+def _phone_text_checked(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
     """Act on a text from a phone (under relay.lock). General (body.general) goes to the hidden General
     ticket, a text naming a local ticket continues it, any other makes a new ticket. Every phone text gets
     an ack (reply_to = its id) and later a "working" update. Idempotent by message id.
@@ -2871,6 +2930,11 @@ def apply_allow_answers(root: Path) -> list[str]:
                 q.get("via") or "cli",
                 q.get("answered_by") or "unknown",
             )
+            if choice != "ignore" and not people.person_may(root, by, "decide", "start"):
+                # ORCH-1161: an allow answered by a person of the list is checked again when it takes effect
+                # (removed, or a right taken away since): not applied, said once
+                skip(f"Not applied: {people.show(root, by)} may not decide and start work here any more")
+                continue
             # applied once: recorded in the binding FIRST (the synced allow_applied below is shown, never
             # trusted); what cannot be recorded is not applied (else it would be applied again each pass).
             # Sync-free: no binding is written (allow_applied decides, as before).

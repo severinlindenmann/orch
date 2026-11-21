@@ -23,6 +23,7 @@ Rules:
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import json
 import os
 import re
@@ -245,6 +246,10 @@ def stamp(root: Path, line: dict) -> None:
         if not isinstance(line, dict) or "person" in line:
             return
         by, via = line.get("by"), line.get("via")
+        acting = _ACTING.get()
+        if via == "phone" and acting is not None:  # a phone the people check let in (who_sent): its person
+            line["person"], line["device"] = acting
+            return
         if not isinstance(by, str) or not by.startswith("human:") or via not in LOCAL_VIA:
             return
         if by.startswith(("human:ph_", "human:br_")):
@@ -438,3 +443,211 @@ def remove(root: Path, who: str, *, expect: int | None = None) -> dict:
 
 def _words(rights) -> str:
     return ", ".join(RIGHT_WORDS[r] for r in rights)
+
+
+# ------------------------------------------------------------------ phones (step 4) and rights (step 5)
+# Owner, 21 Nov: the ticks are enforced in the same pull request as the list (steps 3 to 5 together).
+# A phone is paired on the relay admin page (never here). Once the list is on, the owner ties each paired
+# phone to one person in Settings, at this computer; a phone that is not tied, is cut, or whose person was
+# removed is refused on EVERY phone path (relay.py calls who_sent first). Rights are checked on the workspace,
+# never on the relay or the phone: when a message arrives (write, decide) and again when queued work really
+# starts (start).
+
+PHONE_RE = re.compile(r"ph_[A-Za-z0-9_-]{1,64}")
+ACTIONS = {  # what each phone action needs (build plan ORCH-1160 section 2)
+    "text": ("write",),
+    "answer": ("decide",),
+    "merge": ("decide", "start"),
+    "allow": ("decide", "start"),
+    "mobile_off": ("decide",),
+    "start": ("start",),
+}
+ACTION_WORDS = {
+    "text": "write",
+    "answer": "decide",
+    "merge": "decide and start work",
+    "allow": "decide and start work",
+    "mobile_off": "decide",
+    "start": "start work",
+}
+_ACTING: contextvars.ContextVar = contextvars.ContextVar("orch_people_acting", default=None)
+
+
+class PhoneRefused(Refused):
+    """A phone may not do this (not tied, cut, its person removed, or a right missing). `why` is plain."""
+
+
+def _device(doc: dict, phone: str) -> dict | None:
+    for d in doc.get("devices") or []:
+        if isinstance(d, dict) and d.get("id") == phone:
+            return d
+    return None
+
+
+def _person_by_id(doc: dict, pid: str) -> dict | None:
+    return next((p for p in doc.get("people") or [] if p["id"] == pid), None)
+
+
+def may(doc: dict, pid: str, *rights: str) -> bool:
+    """The person has every one of `rights` (the owner has all); a removed person has none."""
+    p = _person_by_id(doc, pid)
+    if p is None or p.get("removed_at"):
+        return False
+    return bool(p.get("owner")) or all(r in p["rights"] for r in rights)
+
+
+def who_sent(root: Path, phone: str, action: str, *, paired: bool = True) -> tuple[str, str] | None:
+    """The person and device for a message from `phone` that wants to do `action`. None: the list is off, so
+    nothing changes (as before). Raises PhoneRefused when the list is on (or damaged: fail closed) and the
+    phone is unknown, not paired any more, not tied, cut, its person removed, or the person lacks a right."""
+    try:
+        doc = load(root)
+    except Broken:
+        raise PhoneRefused("the people list is damaged, so no phone is let in") from None
+    if doc is None:
+        return None
+    if not isinstance(phone, str) or not PHONE_RE.fullmatch(phone):
+        raise PhoneRefused("not a phone")
+    if not paired:
+        raise PhoneRefused("this phone is not paired with this workspace any more")
+    d = _device(doc, phone)
+    if d is None or not d.get("person"):
+        raise PhoneRefused("this phone is not tied to a person yet; the owner ties it in Settings, People")
+    p = _person_by_id(doc, d["person"])
+    if p is None or p.get("removed_at"):
+        raise PhoneRefused("the person of this phone was removed")
+    if d.get("cut_at"):
+        raise PhoneRefused("this phone was cut off")
+    need = ACTIONS.get(action)
+    if need is None:
+        raise PhoneRefused("unknown action")
+    if not may(doc, p["id"], *need):
+        raise PhoneRefused(f"{p['name']} may not {ACTION_WORDS[action]} here")
+    return p["id"], phone
+
+
+@contextlib.contextmanager
+def acting(who: tuple[str, str] | None):
+    """While a checked phone's message is handled: its person is the actor (phone_actor) and its new history
+    lines carry person and device (stamp). None (list off): nothing changes."""
+    token = _ACTING.set(who)
+    try:
+        yield
+    finally:
+        _ACTING.reset(token)
+
+
+def phone_actor(phone: str) -> str | None:
+    """`human:pr_...` while the people check let this phone in (inside acting), else None."""
+    who = _ACTING.get()
+    return f"human:{who[0]}" if who is not None and who[1] == phone else None
+
+
+def note_refused(root: Path, phone: str, why: str) -> None:
+    """One line per refused phone message in .orch/local/people-refused.jsonl (newest 200 kept; no message
+    content). Written from any process (also a helper's inbox read), so not in people.json."""
+    p = Path(root) / ".orch" / "local" / "people-refused.jsonl"
+    with contextlib.suppress(OSError):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        lines = p.read_text(encoding="utf-8").splitlines()[-199:] if p.exists() else []
+        lines.append(json.dumps({"at": now(), "device": phone[:70], "why": why[:200]}, ensure_ascii=False))
+        tmp = p.with_name(p.name + f".{os.getpid()}.tmp")
+        tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        os.replace(tmp, p)
+
+
+def refused(root: Path, limit: int = 20) -> list[dict]:
+    p = Path(root) / ".orch" / "local" / "people-refused.jsonl"
+    out = []
+    with contextlib.suppress(OSError):
+        for line in p.read_text(encoding="utf-8").splitlines()[-limit:]:
+            with contextlib.suppress(ValueError):
+                x = json.loads(line)
+                if isinstance(x, dict):
+                    out.append(x)
+    return out
+
+
+def phone_may_start(root: Path, phone: str, queued_at: str | None = None) -> bool:
+    """For queued work at the moment it would start: True when the list is off (as before), else only a tied,
+    uncut phone of a person who may start work, and only for work queued after the phone's latest tie (tying a
+    cut phone again never revives what it queued before). Never raises."""
+    try:
+        if who_sent(root, phone, "start") is None:
+            return True  # list off
+        d = _device(load(root), phone) or {}
+        # same second as the tie counts as before it (times have 1 s steps): fail closed
+        return not (queued_at and d.get("tied_at") and str(queued_at) <= str(d["tied_at"]))
+    except PhoneRefused:
+        return False
+    except Exception:  # noqa: BLE001 - anything unexpected: no start (fail closed)
+        return False
+
+
+def tie(root: Path, phone: str, who: str, *, expect: int | None = None) -> dict:
+    """Tie a paired phone to a person (at this computer only). A phone tied before keeps its id; work it
+    queued before is never revived by tying it again (each queued item is checked when it starts)."""
+    if not isinstance(phone, str) or not PHONE_RE.fullmatch(phone):
+        raise Refused("That is not a phone id (ph_...).")
+    out = {}
+
+    def tie_to(doc):
+        p = find(doc, who)
+        d = _device(doc, phone)
+        if d is None:
+            d = {"id": phone, "kind": "phone", "person": None, "tied_at": None, "cut_at": None}
+            doc.setdefault("devices", []).append(d)
+        d.update(person=p["id"], tied_at=now(), cut_at=None)
+        out.update(d)
+        return f"Tied phone {phone} to {p['name']}"
+
+    _change(root, tie_to, expect=expect)
+    return out
+
+
+def cut(root: Path, phone: str, *, expect: int | None = None) -> dict:
+    """Cut one phone (a lost phone): every message from it is refused from now on; its person keeps the
+    others. The relay admin page still lists it until it is removed there."""
+    out = {}
+
+    def cut_it(doc):
+        d = _device(doc, phone)
+        if d is None:
+            raise Refused("That phone is not in the list.")
+        if d.get("cut_at"):
+            raise Refused("That phone is already cut off.")
+        d["cut_at"] = now()
+        out.update(d)
+        return f"Cut phone {phone}"
+
+    _change(root, cut_it, expect=expect)
+    return out
+
+
+def ticket_may_start(root: Path, tid: str) -> tuple[bool, str | None]:
+    """The run for a ticket a phone text made (ext.relay.origin = phone) starts only when that phone's person
+    may start work now. Any other ticket, or the list off: yes."""
+    from orch import tickets
+
+    relay = ((tickets.load(root, tid).get("ext") or {}).get("relay")) or {}
+    phone = relay.get("from") if relay.get("origin") == "phone" else None
+    if not isinstance(phone, str):
+        return True, None
+    try:
+        who_sent(root, phone, "start")
+    except PhoneRefused as e:
+        return False, str(e)
+    return True, None
+
+
+def person_may(root: Path, by: str, *rights: str) -> bool:
+    """For work checked again when it takes effect: True unless `by` is a person of the list (human:pr_...)
+    who is removed or lacks a right now. A damaged list: False for a person id (fail closed)."""
+    pid = by[6:] if isinstance(by, str) and by.startswith("human:") else None
+    if pid is None or not _ID_RE.fullmatch(pid):
+        return True
+    try:
+        doc = load(root)
+    except Broken:
+        return False
+    return doc is not None and may(doc, pid, *rights)

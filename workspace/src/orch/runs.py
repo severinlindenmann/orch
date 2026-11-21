@@ -36,6 +36,7 @@ from orch import (
     config,
     diag,
     history,
+    people,
     procs,
     runhooks,
     services,
@@ -420,6 +421,8 @@ def human_waiting(root: Path, tid: str) -> list[dict]:
         if i.get("via") in ("start", "slots"):
             continue
         rule = _human_author(i.get("by", ""), i.get("via"), i.get("kind"), i.get("phone"))
+        if rule and i.get("phone") and not people.phone_may_start(root, str(i["phone"]), i.get("at")):
+            continue  # people list on: this phone's person may not start work (now); the text stays queued
         if rule and i.get("human") in (True, None):
             out.append(i)
     return out

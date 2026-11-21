@@ -68,6 +68,9 @@ elif args[:2] == ["ticket", "new"]:
     for i, a in enumerate(args):
         if a == "--ext": k, _, v = args[i + 1].partition("="); t.setdefault("ext", {{}})[k] = json.loads(v)
     save(t); print(json.dumps(t))
+elif args[:2] == ["people", "may-start"]:  # ORCH-1161: may-start.json says no when a test writes it
+    p = root / "may-start.json"
+    print(p.read_text() if p.exists() else json.dumps({{"ok": True, "why": None}}))
 elif args[:2] == ["ticket", "attach"]:
     (root / "attached.txt").write_text(args[args.index("--name") + 1] + chr(10) + sys.stdin.read())
     print("{{}}")

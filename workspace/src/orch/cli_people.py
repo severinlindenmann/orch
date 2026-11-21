@@ -28,6 +28,15 @@ def add_parsers(sub, common) -> None:
     q.add_argument("who", help="the person's id or name")
     q.add_argument("rights", help="write, decide, start (comma separated); 'none' for no rights")
     q.add_argument("--expect", type=int, help=argparse_hidden())
+    q = ps.add_parser("tie", parents=[common], help="tie a paired phone to a person")
+    q.add_argument("phone", help="the phone's id (ph_...)")
+    q.add_argument("who", help="the person's id or name")
+    q.add_argument("--expect", type=int, help=argparse_hidden())
+    q = ps.add_parser("cut", parents=[common], help="cut off one phone (a lost phone)")
+    q.add_argument("phone", help="the phone's id (ph_...)")
+    q.add_argument("--expect", type=int, help=argparse_hidden())
+    q = ps.add_parser("may-start", parents=[common], help=argparse_hidden())
+    q.add_argument("ticket")
     q = ps.add_parser("remove", parents=[common], help="remove a person (old history keeps their name)")
     q.add_argument("who", help="the person's id or name")
     q.add_argument("--expect", type=int, help=argparse_hidden())
@@ -99,5 +108,17 @@ def dispatch(args, root: Path) -> bool:
     if cmd == "remove":
         p = people.remove(root, args.who, expect=expect)
         _out(args, {"ok": True, "person": p}, f"Removed {p['name']}. Old history keeps the name.")
+        return True
+    if cmd == "tie":
+        d = people.tie(root, args.phone, args.who, expect=expect)
+        _out(args, {"ok": True, "device": d}, f"Tied {d['id']} to the person [{d['person']}]")
+        return True
+    if cmd == "cut":
+        d = people.cut(root, args.phone, expect=expect)
+        _out(args, {"ok": True, "device": d}, f"Cut off {d['id']}. Also remove it on the relay admin page.")
+        return True
+    if cmd == "may-start":  # the automation host, before the one run for a ticket a phone text made
+        ok, why = people.ticket_may_start(root, args.ticket)
+        _out(args, {"ok": ok, "why": why}, "yes" if ok else f"no: {why}")
         return True
     raise Refused(f"Unknown: orch people {cmd}")

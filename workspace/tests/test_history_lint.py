@@ -54,6 +54,8 @@ ALLOW = {
 # person, description_by) raw. History reads stay under ALLOW.
 PERSON_OK = {
     ("workspace/src/orch/people.py", "remove_from"): "a device record of the people list, not a ticket",
+    ("workspace/src/orch/people.py", "who_sent"): "a device record of the people list, not a ticket",
+    ("workspace/src/orch/cli_people.py", "dispatch"): "a device record of the people list, not a ticket",
     (
         "workspace/src/orch/adapters.py",
         "render",
