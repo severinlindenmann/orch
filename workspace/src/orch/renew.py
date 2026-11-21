@@ -236,6 +236,24 @@ def _alive(doc: dict | None) -> bool:
 
 # ---------------------------------------------------------------------------------------- what can renew
 
+TEST_INSTALL = (
+    "This is a test install: orch never starts a real sign-in here, it would open the sign-in page on the "
+    "person's screen."
+)
+
+
+def _real_tool_in_test(binary: str) -> bool:
+    """A test install (ORCH_HOME_STRICT) never runs the real tool's sign-in (ORCH-1101): it opens the sign-in
+    page in the browser of the person at the computer. Only a stand-in in the system temp folder (a test's own
+    fake) may run there; the real tool, also when linked into the test home, may not."""
+    from orch import launchenv
+
+    if not launchenv.strict():
+        return False
+    tmp = os.path.realpath(tempfile.gettempdir())
+    real = os.path.realpath(binary)
+    return not (real == tmp or real.startswith(tmp.rstrip(os.sep) + os.sep))
+
 
 def spec(root: Path, name: str) -> dict | None:
     """{binary, argv, links, helper, label} for a helper tool whose sign-in orch can start, else None."""
@@ -290,8 +308,11 @@ def start(root: Path, name: str, by: str | None = None) -> dict:
     s = spec(root, name)
     if not s:
         raise Refused("orch cannot start this sign-in. Sign in again with the tool itself, then check again.")
-    if not shutil.which(s["binary"]):
+    found = shutil.which(s["binary"])
+    if not found:
         raise Refused(f"{s['label']} is not installed on this computer.")
+    if _real_tool_in_test(found):
+        raise Refused(TEST_INSTALL)
     with _start_lock(root, name):
         d = _dir(root, name)
         _reap(root, name, locked=True)
@@ -525,7 +546,7 @@ def work(root: Path, name: str) -> int:
     s = spec(root, name)
     binary = shutil.which(s["binary"]) if s else None
     started = _now()
-    if not binary:
+    if not binary or _real_tool_in_test(binary):
         _write(root, name, {"state": "failed", "started_at": started, "beat_at": _now()})
         return 1
     d = _dir(root, name)
