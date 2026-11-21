@@ -604,3 +604,85 @@ async fn self_hosted_client_speaks_the_contract() {
         Err(OwnError::Unavailable)
     );
 }
+
+#[tokio::test]
+async fn an_unreadable_service_setting_never_falls_back_to_deepgram() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    set_key(&t).await;
+    // a stored setting that does not open (e.g. damaged): set, but unreadable
+    t.app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO settings(k,v) VALUES('transcription_service',?1)",
+            [vec![
+                1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+                23, 24, 25, 26, 27, 28, 29,
+            ]],
+        )
+        .unwrap();
+    let (s, v) = post_audio(
+        &t,
+        "/v1/phone/transcribe",
+        &ph(&p),
+        "audio/m4a",
+        vec![1; 100],
+    )
+    .await;
+    assert_eq!(
+        (s, v["error"].as_str()),
+        (502, Some("transcription_failed"))
+    );
+    assert!(
+        t.dg.calls.lock().unwrap().is_empty(),
+        "no Deepgram fallback"
+    );
+    let (_, st) = t.admin_json("GET", "/admin/api/voice/service", None).await;
+    assert_eq!(
+        (st["set"].as_bool(), st["broken"].as_bool()),
+        (Some(true), Some(true))
+    );
+}
+
+/// A redirect from the service is a failure: the recording is never sent on to another address.
+#[tokio::test]
+async fn self_hosted_client_never_follows_a_redirect() {
+    use orch_relay::transcribe::{OwnError, OwnService, SelfHosted};
+    use std::future::IntoFuture;
+    let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let h2 = hits.clone();
+    let outside = axum::Router::new().route(
+        "/steal",
+        axum::routing::post(move || {
+            h2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async { "got it" }
+        }),
+    );
+    let lo = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let outside_url = format!("http://{}/steal", lo.local_addr().unwrap());
+    tokio::spawn(axum::serve(lo, outside).into_future());
+    let target = outside_url.clone();
+    let svc = axum::Router::new().route(
+        "/v1/transcribe",
+        axum::routing::post(move || {
+            let target = target.clone();
+            async move {
+                (
+                    axum::http::StatusCode::TEMPORARY_REDIRECT,
+                    [("location", target)],
+                )
+            }
+        }),
+    );
+    let ls = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", ls.local_addr().unwrap());
+    tokio::spawn(axum::serve(ls, svc).into_future());
+    let r = SelfHosted::default()
+        .transcribe(&url, SVC_TOKEN, vec![1u8; 10].into(), "audio/m4a", None)
+        .await;
+    assert_eq!(r, Err(OwnError::Unavailable));
+    assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0);
+}

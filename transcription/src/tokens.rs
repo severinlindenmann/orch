@@ -15,6 +15,9 @@ pub const DEFAULT_PER_MINUTE: u32 = 30;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Entry {
+    /// Random per token made: jobs belong to it, so a token made later under the same name never sees
+    /// an older token's jobs. The name is only a label.
+    pub id: String,
     pub name: String,
     /// SHA-256 of the whole token, hex.
     pub hash: String,
@@ -87,7 +90,7 @@ fn write(path: &Path, tokens: &[Entry]) -> Result<(), String> {
         tokens: tokens.to_vec(),
     })
     .map_err(|e| e.to_string())?;
-    let tmp = path.with_extension("json.tmp");
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
     std::fs::write(&tmp, body).map_err(|e| format!("{}: {e}", tmp.display()))?;
     #[cfg(unix)]
     {
@@ -106,12 +109,34 @@ impl Tokens {
     }
 
     /// The current list, read from the file on every call (a few hundred bytes): a removed token can never
-    /// stay valid through a cache. A broken file refuses everyone.
+    /// stay valid through a cache. Err when the file cannot be read: sign-in then refuses everyone, and the
+    /// job cleanup keeps the jobs (it must not read "no tokens" into a broken file).
+    pub fn read(&self) -> Result<Vec<Entry>, String> {
+        read(&self.path)
+    }
+
+    /// The list for showing and sign-in; a broken file gives an empty list (refuses everyone).
     pub fn list(&self) -> Vec<Entry> {
-        read(&self.path).unwrap_or_else(|e| {
+        self.read().unwrap_or_else(|e| {
             tracing::error!("{e}");
             vec![]
         })
+    }
+
+    /// Serialise read-change-write across processes (two `token` commands at once).
+    fn locked(&self) -> Result<std::fs::File, String> {
+        if let Some(d) = self.path.parent() {
+            std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
+        }
+        let lp = self.path.with_extension("lock");
+        let f = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lp)
+            .map_err(|e| format!("{}: {e}", lp.display()))?;
+        f.lock().map_err(|e| format!("{}: {e}", lp.display()))?;
+        Ok(f)
     }
 
     /// The entry for an `Authorization` header value, or None.
@@ -128,7 +153,7 @@ impl Tokens {
     pub fn take(&self, e: &Entry) -> bool {
         let t = now();
         let mut m = self.rate.lock().unwrap();
-        let r = m.entry(e.name.clone()).or_insert((t, 0));
+        let r = m.entry(e.id.clone()).or_insert((t, 0));
         if t - r.0 >= 60 {
             *r = (t, 0);
         }
@@ -147,6 +172,7 @@ impl Tokens {
         if per_minute == 0 {
             return Err("--per-minute must be 1 or more".into());
         }
+        let _lock = self.locked()?;
         let mut all = read(&self.path)?;
         if all.iter().any(|e| e.name == name) {
             return Err(format!(
@@ -159,7 +185,10 @@ impl Tokens {
             "{PREFIX}{}",
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw)
         );
+        let mut idb = [0u8; 8];
+        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut idb);
         all.push(Entry {
+            id: idb.iter().map(|b| format!("{b:02x}")).collect(),
             name: name.into(),
             hash: hash(&token),
             per_minute,
@@ -171,6 +200,7 @@ impl Tokens {
 
     /// Remove a token by name. True when it existed.
     pub fn remove(&self, name: &str) -> Result<bool, String> {
+        let _lock = self.locked()?;
         let mut all = read(&self.path)?;
         let n = all.len();
         all.retain(|e| e.name != name);

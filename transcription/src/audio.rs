@@ -37,7 +37,8 @@ fn codecs() -> &'static CodecRegistry {
 /// The container hint for a Content-Type (the probe also sniffs the bytes, so a wrong hint is not fatal).
 pub fn hint_for(content_type: &str) -> Option<&'static str> {
     Some(match content_type {
-        "audio/m4a" | "audio/x-m4a" | "audio/mp4" | "audio/aac" => "m4a",
+        "audio/m4a" | "audio/x-m4a" | "audio/mp4" => "m4a",
+        "audio/aac" | "audio/aacp" => "aac",
         "audio/wav" | "audio/x-wav" | "audio/wave" => "wav",
         "audio/webm" => "webm",
         "audio/ogg" | "audio/opus" => "ogg",

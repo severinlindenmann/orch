@@ -141,10 +141,27 @@ impl Jobs {
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(&j.dir, std::fs::Permissions::from_mode(0o700));
         }
+        // Reconcile what the old process left: a result on disk = done (it stopped between writing the
+        // result and the status); no recording and no result = failed; else the key is gone: needs_key.
         for mut m in j.all() {
-            if matches!(m.status, Status::Waiting | Status::Running) {
-                m.status = Status::NeedsKey;
+            if matches!(
+                m.status,
+                Status::Waiting | Status::Running | Status::NeedsKey
+            ) {
+                let has_in = j.path(&m.id, "in").exists();
+                let has_out = j.path(&m.id, "out").exists();
+                m.status = match (has_in, has_out) {
+                    (_, true) => Status::Done,
+                    (false, false) => {
+                        m.error = Some("transcription_failed".into());
+                        Status::Failed
+                    }
+                    (true, false) => Status::NeedsKey,
+                };
                 let _ = j.save(&m);
+                if m.status == Status::Done {
+                    let _ = std::fs::remove_file(j.path(&m.id, "in"));
+                }
             }
         }
         j
@@ -183,8 +200,13 @@ impl Jobs {
     /// The job if it belongs to `owner` (others get NotFound, as for an id that does not exist).
     pub fn get(&self, owner: &str, id: &str) -> Result<Meta, JobError> {
         self.load(id)
-            .filter(|m| m.owner == owner)
+            .filter(|m| m.owner == owner && m.expires_at > now())
             .ok_or(JobError::NotFound)
+    }
+
+    /// Whether the job still exists (not deleted, token not removed): checked between pieces.
+    fn still_there(&self, id: &str) -> bool {
+        self.load(id).is_some_and(|m| m.expires_at > now())
     }
 
     fn remove_files(&self, id: &str) {
@@ -285,12 +307,14 @@ impl Jobs {
         Ok(())
     }
 
-    /// Delete expired jobs and the jobs of removed tokens; also stray files without a status file.
-    pub fn sweep(&self, owners: &[String], at: i64) -> usize {
+    /// Delete expired jobs and, when `owners` is known, the jobs of removed tokens; also stray files without a
+    /// status file.
+    pub fn sweep(&self, owners: Option<&[String]>, at: i64) -> usize {
         let _g = self.lock.lock().unwrap();
         let mut n = 0;
         for m in self.all() {
-            if m.expires_at <= at || !owners.contains(&m.owner) {
+            let orphan = owners.is_some_and(|o| !o.contains(&m.owner));
+            if m.expires_at <= at || orphan {
                 self.remove_files(&m.id);
                 n += 1;
             }
@@ -345,9 +369,13 @@ impl Jobs {
                 m.error = Some(code.into());
             }
         }
-        let _ = std::fs::remove_file(self.path(&m.id, "in"));
         self.keys.lock().unwrap().remove(&m.id);
-        let _ = self.save(&m);
+        // status first, then drop the recording: a stop in between leaves a job that open() can reconcile
+        if let Err(e) = self.save(&m) {
+            tracing::error!("job {}: cannot save its status: {e}", m.id);
+            return;
+        }
+        let _ = std::fs::remove_file(self.path(&m.id, "in"));
     }
 }
 
@@ -407,6 +435,10 @@ async fn run_one(app: &Arc<App>, m: &Meta, key: [u8; 32]) -> Result<(Vec<u8>, f6
     let mut text = String::new();
     let mut segments = vec![];
     for (a, b) in pieces(&samples) {
+        // deleted or its token removed meanwhile: stop, do not spend more time on it
+        if !app.jobs.still_there(&m.id) {
+            return Err("deleted");
+        }
         // Fair line: a short call waiting for the slot gets it before our next piece.
         let slot = app
             .run
@@ -464,19 +496,32 @@ async fn run_one(app: &Arc<App>, m: &Meta, key: [u8; 32]) -> Result<(Vec<u8>, f6
     ))
 }
 
-/// The job worker: runs waiting jobs one by one; sweeps expired jobs and removed tokens' jobs every minute.
-pub async fn worker(app: Arc<App>) {
-    let mut last_sweep = 0;
+/// The cleanup, on its own timer (a long job never holds it up): every minute, delete expired jobs and the
+/// jobs of removed tokens. With an unreadable token file it deletes only expired jobs (never "no tokens").
+pub async fn sweeper(app: Arc<App>) {
+    let mut tick = tokio::time::interval(Duration::from_secs(60));
     loop {
-        let t = now();
-        if t - last_sweep >= 60 {
-            let owners: Vec<String> = app.tokens.list().into_iter().map(|e| e.name).collect();
-            let n = app.jobs.sweep(&owners, t);
-            if n > 0 {
-                tracing::info!("deleted {n} expired or orphaned jobs");
+        tick.tick().await;
+        let owners: Option<Vec<String>> = match app.tokens.read() {
+            Ok(t) => Some(t.into_iter().map(|e| e.id).collect()),
+            Err(e) => {
+                tracing::error!("{e}; jobs of removed tokens are kept until it is fixed");
+                None
             }
-            last_sweep = t;
+        };
+        let jobs = app.clone();
+        let n = tokio::task::spawn_blocking(move || jobs.jobs.sweep(owners.as_deref(), now()))
+            .await
+            .unwrap_or(0);
+        if n > 0 {
+            tracing::info!("deleted {n} expired or orphaned jobs");
         }
+    }
+}
+
+/// The job worker: runs waiting jobs one by one.
+pub async fn worker(app: Arc<App>) {
+    loop {
         match app.jobs.next() {
             Some((m, key)) => {
                 let started = std::time::Instant::now();

@@ -164,6 +164,7 @@ async fn serve() -> Result<(), String> {
     .map_err(|e| e.to_string())??;
     let app = orch_transcription::App::new(engine, &cfg.data_dir);
     tokio::spawn(orch_transcription::jobs::worker(app.clone()));
+    tokio::spawn(orch_transcription::jobs::sweeper(app.clone()));
     tracing::info!("listening on {}", cfg.listen);
     axum::serve(listener, orch_transcription::router(app))
         .with_graceful_shutdown(async {

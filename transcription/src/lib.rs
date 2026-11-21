@@ -17,7 +17,7 @@ use axum::Router;
 
 pub use api::{App, AppState};
 
-/// The signed-in caller: the token's name. Jobs belong to it.
+/// The caller: its token's id (jobs belong to it, not to the name).
 #[derive(Clone, Debug)]
 pub struct Caller(pub String);
 
@@ -34,7 +34,7 @@ async fn require_token(
     if !app.tokens.take(&e) {
         return Err(error::rate_limited());
     }
-    req.extensions_mut().insert(Caller(e.name));
+    req.extensions_mut().insert(Caller(e.id));
     Ok(next.run(req).await)
 }
 

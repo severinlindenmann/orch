@@ -21,6 +21,9 @@ pub const MAX_AUDIO: usize = 10 * 1024 * 1024;
 pub const MAX_SECONDS: f64 = 120.0;
 /// Calls that may wait while one runs; more get `busy` at once instead of hanging.
 pub const MAX_WAITING: usize = 4;
+/// Time to send a short clip (10 MB) / a job recording (200 MB); a slower upload is cut off.
+const SHORT_UPLOAD_SECS: u64 = 60;
+const JOB_UPLOAD_SECS: u64 = 600;
 /// Below this loudness (RMS) the clip is silence: empty text, the engine is not asked (it would make text up).
 const SILENCE_RMS: f32 = 1e-4;
 
@@ -31,7 +34,7 @@ pub struct App {
     /// One transcription at a time: the engine uses all its threads for one clip.
     pub run: Arc<Semaphore>,
     /// Job uploads being read; more get `busy` before their body is read.
-    pub uploads: Semaphore,
+    pub uploads: Arc<Semaphore>,
     waiting: AtomicUsize,
 }
 
@@ -44,7 +47,7 @@ impl App {
             tokens: crate::tokens::Tokens::open(data_dir),
             jobs: crate::jobs::Jobs::open(data_dir),
             run: Arc::new(Semaphore::new(1)),
-            uploads: Semaphore::new(crate::jobs::MAX_UPLOADS),
+            uploads: Arc::new(Semaphore::new(crate::jobs::MAX_UPLOADS)),
             waiting: AtomicUsize::new(0),
         })
     }
@@ -88,6 +91,21 @@ pub fn content_type(h: &HeaderMap) -> String {
         .unwrap_or("")
         .trim()
         .to_ascii_lowercase()
+}
+
+/// Read a body of at most `max` bytes within `secs` seconds.
+async fn read_body(body: Body, max: usize, secs: u64, too_big: &str) -> Res<axum::body::Bytes> {
+    let data = tokio::time::timeout(
+        std::time::Duration::from_secs(secs),
+        axum::body::to_bytes(body, max + 1),
+    )
+    .await
+    .map_err(|_| invalid("The upload took too long. Send it again on a better connection."))?
+    .map_err(|_| too_large(too_big))?;
+    if data.len() > max {
+        return Err(too_large(too_big));
+    }
+    Ok(data)
 }
 
 fn rms(x: &[f32]) -> f32 {
@@ -134,20 +152,22 @@ pub async fn transcribe(
         return Err(unsupported_audio());
     };
     let lang = language_code(q.get("language").map(String::as_str), app.engine.as_ref())?;
-    let data = axum::body::to_bytes(body, MAX_AUDIO + 1)
-        .await
-        .map_err(|_| too_large("The audio is larger than 10 MB."))?;
-    if data.is_empty() {
-        return Err(invalid("The audio is empty."));
-    }
-    if data.len() > MAX_AUDIO {
-        return Err(too_large("The audio is larger than 10 MB."));
-    }
+    // In line before the body is read: at most 1 + MAX_WAITING bodies in memory, however many callers.
     if app.waiting.fetch_add(1, Ordering::SeqCst) >= MAX_WAITING {
         app.waiting.fetch_sub(1, Ordering::SeqCst);
         return Err(busy());
     }
     let line = InLine(&app.waiting);
+    let data = read_body(
+        body,
+        MAX_AUDIO,
+        SHORT_UPLOAD_SECS,
+        "The audio is larger than 10 MB.",
+    )
+    .await?;
+    if data.is_empty() {
+        return Err(invalid("The audio is empty."));
+    }
     let permit = app.run.clone().acquire_owned().await.map_err(|_| busy())?;
     drop(line);
     let engine = app.engine.clone();
@@ -207,18 +227,29 @@ pub async fn job_create(
 ) -> Res<Response> {
     let lang = language_code(q.get("language").map(String::as_str), app.engine.as_ref())?;
     // Room first, then read: a full store or too many uploads never get a body into memory.
-    let _upload = app.uploads.try_acquire().map_err(|_| busy())?;
+    let upload = app
+        .uploads
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| busy())?;
     app.jobs.room_for(&who.0).map_err(job_err)?;
-    let blob = axum::body::to_bytes(body, crate::jobs::MAX_BLOB + 1)
-        .await
-        .map_err(|_| too_large("The recording is larger than 200 MB."))?;
+    let blob = read_body(
+        body,
+        crate::jobs::MAX_BLOB,
+        JOB_UPLOAD_SECS,
+        "The recording is larger than 200 MB.",
+    )
+    .await?;
     let key = job_key_header(&h);
     let app2 = app.clone();
-    let m =
-        tokio::task::spawn_blocking(move || app2.jobs.create(&who.0, key.as_deref(), &blob, lang))
-            .await
-            .map_err(|_| failed())?
-            .map_err(job_err)?;
+    // The upload slot goes with the work: a caller who hangs up does not free it while it still runs.
+    let m = tokio::task::spawn_blocking(move || {
+        let _upload = upload;
+        app2.jobs.create(&who.0, key.as_deref(), &blob, lang)
+    })
+    .await
+    .map_err(|_| failed())?
+    .map_err(job_err)?;
     Ok((StatusCode::ACCEPTED, Json(m.public())).into_response())
 }
 

@@ -63,7 +63,7 @@ async fn status(h: &H, token: &str, id: &str) -> (StatusCode, Value) {
 }
 
 async fn wait_for(h: &H, id: &str, want: &str) -> Value {
-    for _ in 0..200 {
+    for _ in 0..2400 {
         let (_, v) = status(h, &h.token, id).await;
         if v["status"] == want {
             return v;
@@ -320,14 +320,25 @@ async fn expired_jobs_and_jobs_of_removed_tokens_are_deleted() {
     let gone = h.token_for("ws_gone");
     let (_, a) = create(&h, &h.token, Some(&b64(&KEY)), blob("audio/wav", &wav(1.0))).await;
     let (_, b) = create(&h, &gone, Some(&b64(&KEY)), blob("audio/wav", &wav(1.0))).await;
-    let owners = vec!["tester".to_string()];
+    // the token ids after ws_gone is removed: only tester's
+    let tester_id = h
+        .app
+        .tokens
+        .list()
+        .into_iter()
+        .find(|e| e.name == "tester")
+        .unwrap()
+        .id;
+    let owners = vec![tester_id];
     let now = orch_transcription::tokens::now();
-    assert_eq!(h.app.jobs.sweep(&owners, now), 1); // ws_gone is not among the tokens
+    // an unreadable token file (None): only expiry counts, nobody's jobs are taken as orphans
+    assert_eq!(h.app.jobs.sweep(None, now), 0);
+    assert_eq!(h.app.jobs.sweep(Some(&owners), now), 1); // ws_gone is not among the tokens
     assert_eq!(
         status(&h, &gone, b["id"].as_str().unwrap()).await.0,
         StatusCode::NOT_FOUND
     );
-    assert_eq!(h.app.jobs.sweep(&owners, now + 7 * 24 * 3600 + 1), 1);
+    assert_eq!(h.app.jobs.sweep(Some(&owners), now + 7 * 24 * 3600 + 1), 1);
     assert_eq!(
         status(&h, &h.token, a["id"].as_str().unwrap()).await.0,
         StatusCode::NOT_FOUND
@@ -393,7 +404,8 @@ async fn a_voice_memo_goes_between_two_pieces_of_a_long_job() {
     .await;
     let id = v["id"].as_str().unwrap().to_string();
     start_worker(&h);
-    for _ in 0..400 {
+    // decoding 9 minutes takes seconds in a debug build on a busy machine: wait up to 30 s for piece 1
+    for _ in 0..3000 {
         if !slow.0.lock().unwrap().is_empty() {
             break;
         }
@@ -432,4 +444,111 @@ async fn a_voice_memo_goes_between_two_pieces_of_a_long_job() {
     assert_eq!(starts[0], 1.0);
     assert!(starts[1] > 290.0, "{starts:?}");
     assert_eq!(r["text"], "x x");
+}
+
+#[tokio::test]
+async fn a_token_made_again_under_the_same_name_sees_none_of_the_old_jobs() {
+    let h = harness(Arc::new(FakeEngine::default()));
+    let old = h.token_for("ws_a");
+    let (_, v) = create(&h, &old, Some(&b64(&KEY)), blob("audio/wav", &wav(1.0))).await;
+    let id = v["id"].as_str().unwrap().to_string();
+    assert!(h.app.tokens.remove("ws_a").unwrap());
+    let new = h.token_for("ws_a");
+    assert_eq!(status(&h, &new, &id).await.0, StatusCode::NOT_FOUND);
+    let (s, _) = h
+        .call("DELETE", &format!("/v1/jobs/{id}"), Some(&new), &[], vec![])
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    // and the cleanup deletes the old token's job although the name exists again
+    let ids: Vec<String> = h.app.tokens.list().into_iter().map(|e| e.id).collect();
+    assert_eq!(
+        h.app
+            .jobs
+            .sweep(Some(&ids), orch_transcription::tokens::now()),
+        1
+    );
+}
+
+#[tokio::test]
+async fn an_expired_job_is_gone_at_once_even_before_the_cleanup() {
+    let h = harness(Arc::new(FakeEngine::default()));
+    let (_, v) = create(&h, &h.token, Some(&b64(&KEY)), blob("audio/wav", &wav(1.0))).await;
+    let id = v["id"].as_str().unwrap().to_string();
+    let p = h.dir.path().join(format!("jobs/{id}.json"));
+    let mut m: Value = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
+    m["expires_at"] = (orch_transcription::tokens::now() - 1).into();
+    std::fs::write(&p, serde_json::to_vec(&m).unwrap()).unwrap();
+    assert_eq!(status(&h, &h.token, &id).await.0, StatusCode::NOT_FOUND);
+}
+
+/// What a stopped process left: a result on disk = done; neither recording nor result = failed.
+#[tokio::test]
+async fn a_restart_reconciles_half_finished_jobs() {
+    let h = harness(Arc::new(FakeEngine::default()));
+    let (_, a) = create(&h, &h.token, Some(&b64(&KEY)), blob("audio/wav", &wav(1.0))).await;
+    let (_, b) = create(&h, &h.token, Some(&b64(&KEY)), blob("audio/wav", &wav(1.0))).await;
+    let (a, b) = (
+        a["id"].as_str().unwrap().to_string(),
+        b["id"].as_str().unwrap().to_string(),
+    );
+    let jobs = h.dir.path().join("jobs");
+    // a: result written, stopped before its status; b: recording gone, no result
+    std::fs::write(jobs.join(format!("{a}.out")), b"OPF1 sealed result").unwrap();
+    std::fs::remove_file(jobs.join(format!("{b}.in"))).unwrap();
+    let app2 = orch_transcription::App::new(Arc::new(FakeEngine::default()), h.dir.path());
+    let h2 = H {
+        router: orch_transcription::router(app2.clone()),
+        app: app2,
+        dir: tempfile::tempdir().unwrap(),
+        token: h.token.clone(),
+    };
+    assert_eq!(status(&h2, &h.token, &a).await.1["status"], "done");
+    assert!(!jobs.join(format!("{a}.in")).exists());
+    let v = status(&h2, &h.token, &b).await.1;
+    assert_eq!(
+        (v["status"].as_str(), v["error"].as_str()),
+        (Some("failed"), Some("transcription_failed"))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn deleting_a_running_job_stops_it_after_the_current_piece() {
+    let slow = Arc::new(Slow(Mutex::new(vec![])));
+    let h = harness(slow.clone());
+    let (_, v) = create(
+        &h,
+        &h.token,
+        Some(&b64(&KEY)),
+        blob("audio/wav", &wav(540.0)),
+    )
+    .await;
+    let id = v["id"].as_str().unwrap().to_string();
+    start_worker(&h);
+    // decoding 9 minutes takes seconds in a debug build on a busy machine: wait up to 30 s for piece 1
+    for _ in 0..3000 {
+        if !slow.0.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let (s, _) = h
+        .call(
+            "DELETE",
+            &format!("/v1/jobs/{id}"),
+            Some(&h.token),
+            &[],
+            vec![],
+        )
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert_eq!(
+        slow.0.lock().unwrap().len(),
+        1,
+        "the second piece must not run"
+    );
+    assert!(std::fs::read_dir(h.dir.path().join("jobs"))
+        .unwrap()
+        .next()
+        .is_none());
 }

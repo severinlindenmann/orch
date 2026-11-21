@@ -53,6 +53,7 @@ async fn each_format_decodes_to_16k_mono() {
         ("jfk.m4a", "audio/m4a"),
         ("jfk.webm", "audio/webm"),
         ("jfk.ogg", "audio/ogg"),
+        ("jfk.aac", "audio/aac"),
     ] {
         let fake = Arc::new(FakeEngine::default());
         let (s, v) = post(fake.clone(), "/v1/transcribe", ct, fixture(f)).await;

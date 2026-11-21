@@ -177,6 +177,8 @@ impl Default for SelfHosted {
         SelfHosted {
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(90))
+                // never follow a redirect: it could send the recording out of our network
+                .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .expect("http client"),
         }
@@ -309,28 +311,58 @@ pub fn remove_service(c: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-/// (url, token) when the admin set up our service.
-pub fn get_service(c: &Connection, key: &crypto::Key) -> Option<(String, String)> {
-    let blob: Vec<u8> = c
+/// The admin's choice for our service.
+#[derive(Debug, PartialEq)]
+pub enum ServiceSetting {
+    NotSet,
+    Set(String, String),
+    /// Stored but cannot be read (database, key or content): treated as set and down, never as "use Deepgram".
+    Unreadable,
+}
+
+pub fn service_setting(c: &Connection, key: &crypto::Key) -> ServiceSetting {
+    let blob: Option<Vec<u8>> = match c
         .query_row(
             "SELECT v FROM settings WHERE k='transcription_service'",
             [],
             |r| r.get(0),
         )
         .optional()
-        .ok()??;
-    let v: Value = serde_json::from_slice(&crypto::open(key, AAD_SERVICE, &blob)?).ok()?;
-    Some((
-        v["url"].as_str()?.to_string(),
-        v["token"].as_str()?.to_string(),
-    ))
+    {
+        Ok(b) => b,
+        Err(_) => return ServiceSetting::Unreadable,
+    };
+    let Some(blob) = blob else {
+        return ServiceSetting::NotSet;
+    };
+    let parsed = crypto::open(key, AAD_SERVICE, &blob)
+        .and_then(|p| serde_json::from_slice::<Value>(&p).ok())
+        .and_then(|v| {
+            Some((
+                v["url"].as_str()?.to_string(),
+                v["token"].as_str()?.to_string(),
+            ))
+        });
+    match parsed {
+        Some((u, t)) => ServiceSetting::Set(u, t),
+        None => ServiceSetting::Unreadable,
+    }
+}
+
+/// (url, token) when the admin set up our service and it can be read.
+pub fn get_service(c: &Connection, key: &crypto::Key) -> Option<(String, String)> {
+    match service_setting(c, key) {
+        ServiceSetting::Set(u, t) => Some((u, t)),
+        _ => None,
+    }
 }
 
 /// What the admin may see: whether it is set and its address (never the token).
 pub fn service_status(c: &Connection, key: &crypto::Key) -> Value {
-    match get_service(c, key) {
-        Some((url, _)) => json!({"set": true, "url": url}),
-        None => json!({"set": false, "url": null}),
+    match service_setting(c, key) {
+        ServiceSetting::Set(url, _) => json!({"set": true, "url": url}),
+        ServiceSetting::Unreadable => json!({"set": true, "url": null, "broken": true}),
+        ServiceSetting::NotSet => json!({"set": false, "url": null}),
     }
 }
 
@@ -453,9 +485,13 @@ async fn run(
     }
     let (service, api_key) = {
         let c = app.db.lock().unwrap();
-        (get_service(&c, &app.key), get_key(&c, &app.key))
+        (service_setting(&c, &app.key), get_key(&c, &app.key))
     };
-    if let Some((url, token)) = service {
+    if service == ServiceSetting::Unreadable {
+        tracing::error!("the transcription service setting cannot be read; set it again");
+        return Err(service_unavailable());
+    }
+    if let ServiceSetting::Set(url, token) = service {
         if !rate_ok(app, who) {
             return Err(rate_limited());
         }
