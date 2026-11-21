@@ -326,6 +326,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     au.add_argument("--hours", type=float, default=14, help="how far back (default 14: one night)")
     au.add_argument("--json", action="store_true")
+    gt = q.add_parser(
+        "local-checks",
+        help="the local check: side by side with GitHub (same verdict?) and minutes from built to merged",
+    )
+    gt.add_argument("--last", type=int, default=20, help="local groups counted (default 20)")
+    gt.add_argument("--json", action="store_true")
     rm = q.add_parser("remove", help="take a waiting pull request out of the queue")
     rm.add_argument("url")
     q.add_parser(
@@ -398,6 +404,17 @@ def main(argv: list[str] | None = None) -> int:
                 raise Refused("--hours is a number of hours above 0.")
             report = audit.run(root, _github(), args.hours)
             print(json.dumps(audit.as_json(report), indent=1) if args.json else audit.text(report))
+            return 0
+        if args.sub == "local-checks":
+            from . import localcheck, settings
+
+            got = localcheck.summary(root, max(1, args.last))
+            got["group_check"] = settings.group_check(root)
+            print(
+                json.dumps(got, indent=1)
+                if args.json
+                else f"Groups are checked: {got['group_check']}.\n" + localcheck.text(got)
+            )
             return 0
         if args.sub == "remove":
             if store.remove(root, args.url, _actor()):
