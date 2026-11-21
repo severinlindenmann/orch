@@ -64,6 +64,7 @@ module.exports = {
     await page.waitForTimeout(1500);
     must(/Running[\s\S]*Opening hours page/.test(await page.frameLocator('iframe.embed').locator('body').innerText()),
       'Factory does not show the order as Running after a reload');
+    await open('#home');   // leave the Factory tab first: an open tab asks for the page again once Factory is off (a 404)
     orchAsPerson('stop');
     await addonOff('factory');   // off again for the next click-through
   },

@@ -8,6 +8,7 @@ import json
 import os
 import re
 import sys
+import threading
 from pathlib import Path
 
 from . import api, store
@@ -135,6 +136,8 @@ def run(args) -> int:
         return _emit(args, r, f"Attached “{r['title']}” to the ticket.", f"orch ticket show {args.ticket}")
     if cmd == "notes":
         return _notes(root, who, args)
+    if cmd == "ways":
+        return _ways(root, who, args)
     if cmd == "view":
         from .view import build
 
@@ -167,11 +170,16 @@ def _serve(args, root: Path) -> int:
 
     signal.signal(signal.SIGTERM, term)
     print(f"Personal: {service.url(server.server_address[1])}", flush=True)
+    from . import ways
+
+    stop = threading.Event()
+    ways.daily(root, stop)  # the daily self-check of each way in that is on
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        stop.set()
         server.server_close()
     return 0
 
@@ -201,6 +209,56 @@ def _manage(args, root: Path) -> int:
         msg = f"Personal: {data['url']}" if cur else "Personal is not running."
     print(json.dumps(data) if args.json else msg)
     return 1 if args.cmd == "status" and not data["running"] else 0
+
+
+def _way_line(w: dict) -> str:
+    line = f"{w['name']} ({w['way']}): {w['words']}"
+    if w.get("last_worked"):
+        line += f" · last worked {_when(w['last_worked'])}"
+    if w.get("problem"):
+        line += f"\n  {w['problem']}"
+    if w["on"] and w["actions"]:
+        line += f"\n  Actions: {', '.join(w['actions'])}"
+    return line
+
+
+def _ways(root: Path, who: api.Who, args) -> int:
+    from . import ways
+
+    sub = getattr(args, "sub", None) or "list"
+    if sub == "list":
+        rows = ways.status(root)
+        if who.helper:
+            rows = [w for w in rows if w["on"]]
+        text = "\n".join(_way_line(w) for w in rows) or "No ways in yet."
+        nxt = (
+            "orch personal ways ask <way> <action>"
+            if any(w["on"] for w in rows)
+            else ("the person puts a way in into .orch/addons/personal/ways/<name>/way.toml and turns it on")
+        )
+        return _emit(args, {"ways": rows}, text, nxt)
+    if sub == "check":
+        rows = api.way_check(root, who, args.way)
+        return _emit(
+            args,
+            {"ways": rows},
+            "\n".join(_way_line(w) for w in rows) or "No way in is on.",
+            "orch personal ways",
+        )
+    if sub in ("on", "off"):
+        w = api.way_turn(root, who, args.way, sub == "on")
+        return _emit(args, w, _way_line(w), "orch personal ways")
+    if sub == "ask":
+        try:
+            values = json.loads(args.values) if args.values else {}
+        except ValueError:
+            raise Refused("--values must be one JSON object, for example '{\"days\": 7}'.") from None
+        r = api.way_ask(root, who, args.way, args.action, values)
+        if args.json:
+            return _emit(args, r, "", "orch personal ways")
+        print(f"({r['note']})\n{r['text']}", end="" if r["text"].endswith("\n") else "\n")
+        return 0
+    raise Refused(f"Unknown command ways {sub}.")
 
 
 def _notes(root: Path, who: api.Who, args) -> int:
@@ -293,6 +351,16 @@ def main(argv=None) -> int:
     s.add_argument("title")
     s.add_argument("--text")
     s.add_argument("--change", action="store_true", help="change a note in From helpers")
+    w = p(sub, "ways", help="ways in: your own scripts that reach a source on this computer")
+    ws = w.add_subparsers(dest="sub")
+    p(ws, "list", help="each way in: off, needs your permission, stopped or works")
+    p(ws, "check", help="run the self-check now (Try again)").add_argument("way", nargs="?")
+    p(ws, "on", help="turn a way in on (person)").add_argument("way")
+    p(ws, "off", help="turn a way in off (person)").add_argument("way")
+    s = p(ws, "ask", help="run one action of a way in that is on; text comes back")
+    s.add_argument("way")
+    s.add_argument("action")
+    s.add_argument("--values", help="one JSON object the script gets on stdin")
     args = ap.parse_args(argv)
     args.json = bool(getattr(args, "json", False))
     try:

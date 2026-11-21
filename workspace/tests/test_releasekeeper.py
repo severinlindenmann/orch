@@ -3,6 +3,7 @@ read and write of a pass simulated. The pass-level tests are the script's 52 tes
 
 import json
 import subprocess
+from datetime import timedelta
 
 import pytest
 
@@ -41,7 +42,9 @@ def go(tmp_path, capsys=None, **sim):
     return json.loads(json.dumps({"state": st, "did": w.did, "lines": lines}, default=str))
 
 
-def run(sha, event, conclusion="success", status="completed", at="2026-11-17T01:00:00Z", rid=None):
+def run(
+    sha, event, conclusion="success", status="completed", at="2026-11-17T01:00:00Z", rid=None, attempt=None
+):
     r = {
         "headSha": sha,
         "event": event,
@@ -52,6 +55,8 @@ def run(sha, event, conclusion="success", status="completed", at="2026-11-17T01:
     }
     if rid is not None:
         r["databaseId"] = rid
+    if attempt is not None:
+        r["attempt"] = attempt
     return r
 
 
@@ -1169,7 +1174,7 @@ def test_ci_never_cancels_a_develop_push_run():
 # macOS and Windows run only on develop, not in the merge queue (ORCH-315): a red develop run opens the
 # red-develop ticket by itself, once per commit.
 def test_red_develop_push_run_opens_the_red_develop_ticket_once(tmp_path, capsys):
-    runs = {"ci.yml": [run(DEV, "push", "failure", rid=7)], "e2e.yml": []}
+    runs = {"ci.yml": [run(DEV, "push", "failure", rid=7, attempt=2)], "e2e.yml": []}
     jobs = {
         "7": [
             job("workspace / test (macos-latest, 2/5)", "failure"),
@@ -1603,6 +1608,316 @@ def test_a_dry_run_leaves_a_done_role_ticket_alone(proj, on):
     tickets.set_status(proj, tickets.resolve(proj, on), "done", tickets.SYSTEM)
     rk.run(proj, dry_run=True, world=sim_world(proj))
     assert tickets.load(proj, tickets.resolve(proj, on))["status"] == "done"
+
+
+# ---- ORCH-1128: a red after-merge run: one more try, the fix ticket, the revert rule, the full set
+RED_JOBS = {
+    "7": [job("workspace / test (macos-latest, 2/5)", "failure"), job("workspace / test (ubuntu-latest)")]
+}
+GREEN_JOBS = {"6": CI_JOBS}
+RED_T = [{"id": "t_red", "key": "ORCH-500", "status": "open", "title": "ci run is red on develop (dddddddd)"}]
+
+
+def red_runs(attempt=1):
+    return {
+        "ci.yml": [
+            run(DEV, "push", "failure", at="2026-11-17T02:00:00Z", rid=7, attempt=attempt),
+            run(G1, "push", at="2026-11-17T01:00:00Z", rid=6),
+        ],
+        "e2e.yml": [],
+    }
+
+
+def tickets_of(out):
+    return [d for d in out["did"] if d.startswith("ticket:")]
+
+
+def test_a_red_after_merge_run_is_run_once_more_before_a_ticket(tmp_path, capsys):
+    jobs = {**RED_JOBS, **GREEN_JOBS}
+    out = go(tmp_path, capsys, runs=red_runs(), jobs=jobs)
+    assert "rerun:7" in out["did"] and not tickets_of(out)
+    assert out["state"]["after_merge"]["ci.yml"]["rerun"] == 7
+    again = go(tmp_path, capsys, state=out["state"], runs=red_runs(), jobs=jobs)  # GitHub not started it yet
+    assert not any(d.startswith(("rerun:", "ticket:")) for d in again["did"])
+    assert "waits for its failed jobs" in again["lines"][0]
+    red2 = go(tmp_path, capsys, state=again["state"], runs=red_runs(attempt=2), jobs=jobs)  # red once more
+    assert tickets_of(red2) == ["ticket:ci run is red on develop (dddddddd)"]
+    assert not any(d.startswith("rerun:") for d in red2["did"])
+    rec = red2["state"]["after_merge"]["ci.yml"]
+    assert rec["ticket"] == "t_sim" and rec["first_red"] == DEV and rec["opened_at"] and "rerun" not in rec
+
+
+def test_green_after_the_one_more_try_opens_nothing(tmp_path, capsys):
+    out = go(tmp_path, capsys, runs=red_runs(), jobs={**RED_JOBS, **GREEN_JOBS})
+    ok = go(tmp_path, capsys, state=out["state"], runs=red_runs(attempt=2), jobs={"7": CI_JOBS, **GREEN_JOBS})
+    assert not tickets_of(ok) and "ci.yml" not in ok["state"]["after_merge"]
+
+
+def test_a_refused_rerun_opens_the_ticket_at_once(tmp_path, capsys):
+    out = go(tmp_path, capsys, runs=red_runs(), jobs={**RED_JOBS, **GREEN_JOBS}, results={"rerun": False})
+    assert "rerun:7" in out["did"] and tickets_of(out) == ["ticket:ci run is red on develop (dddddddd)"]
+
+
+def test_a_closed_ticket_while_develop_is_still_red_starts_a_fresh_round(tmp_path, capsys):
+    rec = {"red_sha": G2, "first_red": G2, "ticket": "ORCH-500", "opened_at": "2026-11-17T00:00:00+00:00"}
+    out = go(
+        tmp_path,
+        capsys,
+        state={"after_merge": {"ci.yml": rec}},
+        runs=red_runs(),
+        jobs={**RED_JOBS, **GREEN_JOBS},
+        ticket={"ORCH-500": {"status": "done"}},
+    )
+    assert "rerun:7" in out["did"] and not any(d.startswith("revert:") for d in out["did"])
+
+
+def test_develop_already_known_red_gets_no_reruns(tmp_path, capsys):
+    out = go(tmp_path, capsys, runs=red_runs(), jobs={**RED_JOBS, **GREEN_JOBS}, tickets=RED_T)
+    assert not any(d.startswith(("rerun:", "ticket:")) for d in out["did"])
+    assert out["state"]["after_merge"]["ci.yml"]["ticket"] == "ORCH-500"
+
+
+def revert_go(tmp_path, capsys, hours_ago=3.0, queue=(), members=None, tests=(), **over):
+    opened = (rk.now() - timedelta(hours=hours_ago)).isoformat()
+    rec = {"red_sha": DEV, "first_red": DEV, "rid": 7, "ticket": "ORCH-500", "opened_at": opened}
+    members = members if members is not None else [{"pr": 41, "sha": "c" * 40, "files": ["workspace/x.py"]}]
+    sim = dict(
+        state={"after_merge": {"ci.yml": rec}},
+        runs=red_runs(attempt=2),
+        jobs={**RED_JOBS, **GREEN_JOBS},
+        tickets=RED_T,
+        ticket={"ORCH-500": {"id": "t_red", "key": "ORCH-500", "status": "open"}},
+        queue=list(queue),
+        merged_between=members,
+        failed_tests={"7": list(tests)},
+    )
+    sim.update(over)
+    return go(tmp_path, capsys, **sim)
+
+
+def test_no_fix_in_the_queue_after_two_hours_opens_a_revert_pull_request(tmp_path, capsys):
+    out = revert_go(tmp_path, capsys)
+    assert "revert:#41" in out["did"] and not tickets_of(out)
+    assert any("opened revert pull request" in x and "#41" in x for x in out["lines"])
+    assert out["state"]["after_merge"]["ci.yml"]["revert"].endswith("/pull/8041")
+    again = revert_go(tmp_path, capsys, state=out["state"])  # once per red streak, never a second
+    assert not any(d.startswith("revert:") for d in again["did"])
+
+
+def test_no_revert_before_two_hours(tmp_path, capsys):
+    assert not any(d.startswith("revert:") for d in revert_go(tmp_path, capsys, hours_ago=1.5)["did"])
+
+
+def test_no_revert_while_a_fix_of_the_ticket_is_in_the_queue(tmp_path, capsys):
+    for state in ("waiting", "running", "merged"):
+        q = [{"url": "https://github.com/x/y/pull/9", "ticket": "t_red", "state": state}]
+        assert not any(d.startswith("revert:") for d in revert_go(tmp_path, capsys, queue=q)["did"]), state
+    gone = [{"url": "https://github.com/x/y/pull/9", "ticket": "t_red", "state": "out"}]  # left the queue
+    assert "revert:#41" in revert_go(tmp_path, capsys, queue=gone)["did"]
+
+
+def test_no_revert_when_the_setting_says_never(tmp_path, capsys, monkeypatch):
+    real = rk.Cfg.__init__
+    monkeypatch.setattr(
+        rk.Cfg, "__init__", lambda self, root=None, **o: real(self, root, revert_hours="never", **o)
+    )
+    assert not any(d.startswith("revert:") for d in revert_go(tmp_path, capsys)["did"])
+
+
+def test_no_revert_without_one_clear_suspect(tmp_path, capsys):
+    two = [{"pr": 41, "sha": "c" * 40, "files": ["a/b.py"]}, {"pr": 42, "sha": "e" * 40, "files": ["c/d.py"]}]
+    out = revert_go(tmp_path, capsys, members=two)
+    assert not any(d.startswith("revert:") for d in out["did"])
+    assert any(d.startswith("note:Release keeper: no fix in the merge queue") for d in out["did"])
+    assert any("not one clear suspect among #41, #42" in x for x in out["lines"])
+
+
+def test_the_failed_test_names_the_suspect_among_several(tmp_path, capsys):
+    two = [
+        {"pr": 41, "sha": "c" * 40, "files": ["workspace/src/orch/relay.py"]},
+        {"pr": 42, "sha": "e" * 40, "files": ["workspace/src/orch/sessions.py"]},
+    ]
+    out = revert_go(tmp_path, capsys, members=two, tests=["test_sessions.py"])
+    assert "revert:#42" in out["did"]
+
+
+def test_suspect_rules():
+    a = {"pr": 1, "files": ["workspace/tests/test_sessions.py"]}
+    b = {"pr": 2, "files": ["workspace/src/orch/sessions.py"]}
+    c = {"pr": 3, "files": ["relay/src/main.rs"]}
+    assert rk.suspect([c], []) is c  # the only merge since green
+    assert rk.suspect([a, b, c], ["test_sessions.py"]) is a  # it changed the failed test itself
+    assert rk.suspect([b, c], ["test_sessions.py"]) is b  # words: sessions
+    assert rk.suspect([b, c], []) is None and rk.suspect([], ["x.py"]) is None
+    assert rk.suspect([b, {"pr": 4, "files": ["x/sessions.py"]}], ["test_sessions.py"]) is None  # a tie
+
+
+def test_only_the_repositorys_own_queue_branch_is_a_group_merge():
+    repo = "acme/app"
+    assert rk.queue_merge("Merge pull request #10 from acme/orch-queue/develop-1-ab", repo)
+    assert not rk.queue_merge("Merge pull request #10 from evil/orch-queue/develop-1", repo)  # a fork
+    assert not rk.queue_merge("Merge pull request #10 from acme/feat/orch-queue/x", repo)
+    assert not rk.queue_merge("Merge pull request #10 from acme/orch-queue/x extra", repo)
+
+
+def test_failed_test_files_reads_pytest_and_node_lines():
+    log = (
+        "workspace / test\tRun tests\t2026-11-21T01:00:00Z FAILED tests/test_sessions.py::test_x - assert\n"
+        "addons\tnode\t2026-11-21T01:00:00Z not ok 3 - m-relay-chat.cjs\n"
+        "ok 4 - passing.cjs\n"
+    )
+    assert rk.failed_test_files(log) == ["test_sessions.py", "m-relay-chat.cjs"]
+
+
+def test_a_commit_is_green_only_when_the_full_after_merge_set_is(tmp_path):
+    runs = {
+        "ci.yml": [run(G2, "push", at="2026-11-17T02:00:00Z", rid=2), run(G1, "push", rid=1)],
+        "after.yml": [run(G2, "push", "failure", at="2026-11-17T02:00:00Z", rid=12), run(G1, "push", rid=11)],
+    }
+    jobs = {"1": CI_JOBS, "2": CI_JOBS, "11": CI_JOBS, "12": [job("dashboard-clickthroughs", "failure")]}
+    w = rk.World(
+        None, cfg(tmp_path, after_merge="ci.yml,after.yml"), {"runs": runs, "jobs": jobs}, known=KNOWN
+    )
+    assert w.green_develop() == G1  # G2: ci green but the after-merge clicks red
+    del runs["after.yml"][1]  # G1 has no after-merge run at all: not a candidate either
+    w = rk.World(
+        None, cfg(tmp_path, after_merge="ci.yml,after.yml"), {"runs": runs, "jobs": jobs}, known=KNOWN
+    )
+    assert w.green_develop() is None
+    assert rk.World(None, cfg(tmp_path), {"runs": runs, "jobs": jobs}, known=KNOWN).green_develop() == G2
+
+
+def test_a_red_second_after_merge_workflow_gets_its_own_ticket(tmp_path, capsys):
+    runs = {
+        "ci.yml": [run(DEV, "push", rid=6)],
+        "after.yml": [run(DEV, "push", "failure", rid=12, attempt=2)],
+    }
+    jobs = {"6": CI_JOBS, "12": [job("dashboard-clickthroughs", "failure")]}
+    sim = {
+        "heads": {"develop": DEV, "main": MAIN, "unreleased": UN3},
+        "last_release": 30,
+        "runs": runs,
+        "jobs": jobs,
+    }
+    w = rk.World(None, cfg(tmp_path, after_merge="ci.yml,after.yml"), sim, known=KNOWN)
+    st: dict = {}
+    rk.develop_red(w, st, "ORCH-79")
+    assert [d for d in w.did if d.startswith("ticket:")] == ["ticket:after run is red on develop (dddddddd)"]
+
+
+def test_after_merge_and_revert_settings_are_checked(proj):
+    assert (
+        rk.set_setting(proj, "github.release_after_merge", " ci.yml , after-merge.yml ")
+        == "ci.yml,after-merge.yml"
+    )
+    assert rk.Cfg(proj).after_merge == ["ci.yml", "after-merge.yml"]
+    with pytest.raises(Refused):
+        rk.set_setting(proj, "github.release_after_merge", "ci.yml:windows=true")
+    assert rk.Cfg(proj).revert_hours == 2
+    assert rk.set_setting(proj, "github.release_revert_hours", "Never") == "never"
+    assert rk.Cfg(proj).revert_hours is None
+    assert rk.set_setting(proj, "github.release_revert_hours", "1.5") == "1.5"
+    assert rk.Cfg(proj).revert_hours == 1.5
+    for bad in ("0", "abc", "100"):
+        with pytest.raises(Refused):
+            rk.set_setting(proj, "github.release_revert_hours", bad)
+
+
+def _git(cwd, *a):
+    return subprocess.run(
+        ["git", "-C", str(cwd), *a], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def test_merged_between_names_queue_group_members_and_plain_merges(tmp_path):
+    repo = tmp_path / "clone"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "develop")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    (repo / "base.txt").write_text("0\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "base")
+    good = _git(repo, "rev-parse", "HEAD")
+
+    def branch(name, path):
+        _git(repo, "checkout", "-q", "-b", name, good)
+        (repo / path).parent.mkdir(parents=True, exist_ok=True)
+        (repo / path).write_text(name + "\n")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-qm", name)
+
+    branch("pr1", "a/one.py")
+    branch("pr2", "b/two.py")
+    _git(repo, "checkout", "-q", "-b", "orch-queue/develop-1", good)  # a queue group of #1 and #2
+    _git(repo, "merge", "-q", "--no-ff", "pr1", "-m", "Merge queue: take in #1")
+    _git(repo, "merge", "-q", "--no-ff", "pr2", "-m", "Merge queue: take in #2")
+    _git(repo, "checkout", "-q", "develop")
+    _git(
+        repo,
+        "merge",
+        "-q",
+        "--no-ff",
+        "orch-queue/develop-1",
+        "-m",
+        "Merge pull request #10 from severinlindenmann/orch-queue/develop-1",
+    )
+    branch("pr3", "c/three.py")
+    (repo / "c/four.py").write_text("x\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "Merge queue: take in #1")  # a look-alike line in a plain pull request
+    _git(repo, "checkout", "-q", "develop")
+    _git(repo, "merge", "-q", "--no-ff", "pr3", "-m", "Merge pull request #3 from x/pr3")
+    bad = _git(repo, "rev-parse", "HEAD")
+    w = rk.World(None, cfg(tmp_path))
+    got = w.merged_between(good, bad)
+    assert [(m["pr"], m["files"]) for m in got] == [
+        (3, ["c/four.py", "c/three.py"]),
+        (2, ["b/two.py"]),
+        (1, ["a/one.py"]),
+    ]
+    two = next(m for m in got if m["pr"] == 2)
+    _git(repo, "revert", "--no-edit", "-m", "1", two["sha"])  # the sha reverts exactly that member
+    assert not (repo / "b/two.py").exists() and (repo / "a/one.py").exists()
+    assert w.merged_between(bad, good) is None  # not before: no guessing
+
+
+def test_the_red_develop_ticket_is_one_the_merge_queue_puts_first(proj, on, monkeypatch):
+    from orch import runs
+
+    monkeypatch.setattr(runs, "start", lambda root, tid, by, **kw: None)
+    w = sim_world(proj, runs=red_runs(attempt=2), jobs={**RED_JOBS, **GREEN_JOBS})
+    w.act = lambda what, fn=None: (w.did.append(what), fn() if fn else None)[1]  # writes for real
+    st: dict = {}
+    rk.develop_red(w, st, on)
+    made = [t for t in tickets.list_all(proj) if t["title"].startswith("ci run is red on develop")]
+    assert len(made) == 1 and made[0]["parent"] == on and "green" in made[0]["done_when"]
+    assert st["after_merge"]["ci.yml"]["ticket"] == made[0]["key"]
+    pr_runner = pytest.importorskip("orch_pull_requests.runner")  # the merge queue's own rule (fix first)
+    assert pr_runner._release_fix(proj, made[0]["id"])
+
+
+def test_a_merged_fix_that_left_develop_red_does_not_hold_the_revert(tmp_path, capsys):
+    # the red run (02:00) started after the fix merged (01:30): the fix did not fix it
+    q = [
+        {
+            "url": "https://github.com/x/y/pull/9",
+            "ticket": "t_red",
+            "state": "merged",
+            "ended": "2026-11-17T01:30:00Z",
+        }
+    ]
+    assert "revert:#41" in revert_go(tmp_path, capsys, queue=q)["did"]
+    q[0]["ended"] = "2026-11-17T02:30:00Z"  # merged after the red run: its own run decides first
+    assert not any(d.startswith("revert:") for d in revert_go(tmp_path, capsys, queue=q)["did"])
+
+
+def test_a_refused_red_ticket_is_tried_again_next_pass(tmp_path, capsys):
+    jobs = {**RED_JOBS, **GREEN_JOBS}
+    out = go(tmp_path, capsys, runs=red_runs(attempt=2), jobs=jobs, results={"ticket": "not opened (busy)"})
+    assert tickets_of(out) and "ci.yml" not in out["state"]["after_merge"]
+    again = go(tmp_path, capsys, state=out["state"], runs=red_runs(attempt=2), jobs=jobs)
+    assert tickets_of(again) and again["state"]["after_merge"]["ci.yml"]["ticket"] == "t_sim"
 
 
 # ---- a job that only hit its time limit runs once more (ORCH-1050)
