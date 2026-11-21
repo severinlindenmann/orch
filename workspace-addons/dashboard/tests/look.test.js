@@ -64,7 +64,7 @@ test('the icon picker names places in plain words, not relay or publish', () => 
 });
 
 test('look.js and switcher.js never use innerHTML or insertAdjacentHTML', () => {
-  for (const f of ['look.js', 'switcher.js']) {
+  for (const f of ['look.js', 'switcher.js', 'places.js']) {
     const s = fs.readFileSync(path.join(WEB, f), 'utf8');
     assert.equal(/innerHTML|insertAdjacentHTML|outerHTML|document\.write/.test(s), false, f);
   }
