@@ -130,6 +130,7 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n 2
   skills:
+    if: inputs.suites
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:
