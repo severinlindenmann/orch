@@ -1,0 +1,121 @@
+@testable import OrchMobile
+import CryptoKit
+import XCTest
+
+/// ORCH-1204: the phone checks what a workspace sends and refuses a changed message; Accept once per workspace.
+final class IncomingCheckTests: XCTestCase {
+    private let ws = "ws_abcdefghij"
+    private let ph = "ph_abcdefghij"
+    private let wsKey = Curve25519.Signing.PrivateKey()
+    private var raw: [UInt8] { [UInt8](wsKey.publicKey.rawRepresentation) }
+    private var keyText: String { MessageSignature.b64urlEncode(raw) }
+
+    /// A text the workspace signed, as the relay hands it to the phone; `relayText` lets the relay change its copy.
+    private func message(_ text: String = "Build is green", relayText: String? = nil, key: Curve25519.Signing.PrivateKey? = nil) throws -> TextMessage {
+        let d = MessageSigner.Draft(from: ws, to: ph, body: ["text": text], ticket: "t_abc123")
+        let e = try MessageSigner.envelope(d, key: key ?? wsKey)
+        let outer: [String: Any] = ["id": d.id, "from": ws, "to": ph, "type": "text", "created_at": "2026-11-21T10:00:00Z",
+                                    "ticket": "t_abc123", "body": ["text": relayText ?? text], "envelope": e]
+        return try JSONCoding.decoder.decode(TextMessage.self, from: JSONSerialization.data(withJSONObject: outer))
+    }
+
+    func testAcceptedAndUnchangedIsShown() throws {
+        let m = try message()
+        XCTAssertNotNil(m.envelope)
+        XCTAssertEqual(IncomingCheck.check(m, me: ph, accepted: [ws: [raw]], hints: [ws: raw]), .ok)
+    }
+
+    func testTextTheRelayChangedIsRefused() throws {
+        let m = try message("Do not deploy", relayText: "Deploy now")
+        XCTAssertEqual(IncomingCheck.check(m, me: ph, accepted: [ws: [raw]], hints: [:]), .refused("signed_mismatch"))
+    }
+
+    func testChangedSignedBytesAreRefused() throws {
+        var m = try message()
+        let e = try XCTUnwrap(m.envelope)
+        var signed = try XCTUnwrap(MessageSignature.b64urlDecodeStrict(e.signed))
+        signed[signed.firstIndex(of: UInt8(ascii: "B"))!] = UInt8(ascii: "G")
+        m.envelope = SignedEnvelope(sigV: 1, keyId: e.keyId, signed: MessageSignature.b64urlEncode(signed), sig: e.sig)
+        XCTAssertEqual(IncomingCheck.check(m, me: ph, accepted: [ws: [raw]], hints: [ws: raw]), .refused("bad_signature"))
+    }
+
+    func testNotAcceptedYetIsHeldAndAForgeryIsRefused() throws {
+        let m = try message()
+        XCTAssertEqual(IncomingCheck.check(m, me: ph, accepted: [:], hints: [ws: raw]), .held)
+        let forged = try message(key: Curve25519.Signing.PrivateKey())
+        XCTAssertEqual(IncomingCheck.check(forged, me: ph, accepted: [:], hints: [ws: raw]), .refused("unknown_key"))
+        XCTAssertEqual(IncomingCheck.check(forged, me: ph, accepted: [ws: [raw]], hints: [ws: raw]), .refused("unknown_key"))
+    }
+
+    func testUnsignedStaysUnsigned() throws {
+        var m = try message()
+        m.envelope = nil
+        XCTAssertEqual(IncomingCheck.check(m, me: ph, accepted: [:], hints: [ws: raw]), .unsigned, "until the hard cut")
+        XCTAssertEqual(IncomingCheck.check(m, me: ph, accepted: [ws: [raw]], hints: [:]), .refused("missing_signature"),
+                       "an accepted workspace's message without its signature is refused")
+    }
+
+    func testAcceptOnceThenAcceptedAndAChangedKeyAsksAgain() throws {
+        let store = TrustStore.memory()
+        let w = Workspace(id: ws, name: "W", description: nil, tags: [], online: true, lastSeen: nil, openQuestions: 0,
+                          signingKey: WorkspaceKey(alg: "ed25519", publicKey: keyText, keyId: MessageSignature.keyId(raw)))
+        XCTAssertEqual(IncomingCheck.senderState(w, accepted: store.accepted()), .notAcceptedYet)
+        XCTAssertTrue(store.accept(ws, key: keyText))
+        XCTAssertEqual(IncomingCheck.senderState(w, accepted: store.accepted()), .accepted)
+        XCTAssertEqual(IncomingCheck.check(try message(), me: ph, accepted: store.accepted(), hints: [:]), .ok)
+        var moved = w
+        let newRaw = [UInt8](Curve25519.Signing.PrivateKey().publicKey.rawRepresentation)
+        moved.signingKey = WorkspaceKey(alg: "ed25519", publicKey: MessageSignature.b64urlEncode(newRaw), keyId: MessageSignature.keyId(newRaw))
+        XCTAssertEqual(IncomingCheck.senderState(moved, accepted: store.accepted()), .changed)
+        store.withdraw(ws)
+        XCTAssertEqual(IncomingCheck.senderState(w, accepted: store.accepted()), .notAcceptedYet)
+    }
+
+    func testAWeakKeyIsNeverAccepted() {
+        let store = TrustStore.memory()
+        XCTAssertFalse(store.accept(ws, key: MessageSignature.b64urlEncode([UInt8](repeating: 0, count: 32))))
+        XCTAssertTrue(store.accepted().isEmpty)
+    }
+
+    func testTheKeychainStoreKeepsWhatWasAccepted() {
+        let store = TrustStore.keychain
+        store.clear()
+        defer { store.clear() }
+        XCTAssertTrue(store.accept(ws, key: keyText))
+        XCTAssertEqual(TrustStore.keychain.accepted()[ws], [raw])
+    }
+}
+
+/// The phone holds a workspace's messages until the person accepts it, then shows them; a changed one never shows.
+@MainActor
+final class AcceptOnPhoneTests: XCTestCase {
+    func testHeldUntilAcceptThenShownAndChangedNeverShown() async throws {
+        let model = AppModel(useMock: true)
+        let wsKey = Curve25519.Signing.PrivateKey()
+        let raw = [UInt8](wsKey.publicKey.rawRepresentation)
+        let ws = "ws_abcdefghij"
+        model.testSetWorkspaces([Workspace(id: ws, name: "Dev", description: nil, tags: [], online: true, lastSeen: nil, openQuestions: 0,
+                                           signingKey: WorkspaceKey(alg: "ed25519", publicKey: MessageSignature.b64urlEncode(raw), keyId: MessageSignature.keyId(raw)))])
+        func incoming(_ text: String, relayText: String? = nil) throws -> PhoneMessage {
+            let d = MessageSigner.Draft(from: ws, to: "phones", body: ["text": text])
+            let e = try MessageSigner.envelope(d, key: wsKey)
+            let outer: [String: Any] = ["message": ["id": d.id, "from": ws, "to": "phones", "type": "text", "created_at": "2026-11-21T10:00:00Z",
+                                                    "body": ["text": relayText ?? text], "envelope": e], "workspace_name": "Dev"]
+            return try JSONCoding.decoder.decode(PhoneMessage.self, from: JSONSerialization.data(withJSONObject: outer))
+        }
+        XCTAssertEqual(model.senderState(ws), .notAcceptedYet)
+        XCTAssertEqual(model.fingerprint(of: ws), MessageSignature.fingerprint(raw))
+        let good = try incoming("Hello")
+        let changed = try incoming("Stop", relayText: "Go")
+        model.testMerge([good, changed])
+        XCTAssertFalse(model.messages.contains { $0.id == good.id }, "held before Accept")
+        XCTAssertEqual(model.held[ws]?.map(\.id), [good.id])
+        XCTAssertEqual(model.notValid[ws], [changed.id])
+        model.acceptWorkspace(ws)
+        XCTAssertEqual(model.senderState(ws), .accepted)
+        XCTAssertTrue(model.messages.contains { $0.id == good.id }, "shown after Accept")
+        XCTAssertFalse(model.messages.contains { $0.id == changed.id })
+        model.testMerge([good])
+        XCTAssertNil(model.held[ws], "accepted once: not held again")
+    }
+}

@@ -31,6 +31,9 @@ workspace/tests/test_msgsig_vectors.py
 mobile/OrchMobile/PhoneKey.swift
 mobile/OrchMobile/MessageSigner.swift
 mobile/OrchMobileTests/PhoneSigningTests.swift
+mobile/OrchMobile/IncomingCheck.swift
+mobile/OrchMobileTests/IncomingCheckTests.swift
+mobile/OrchMobile/Views/AcceptWorkspaceCard.swift
 relay/src/phonekeys.rs
 relay/src/phonegate.rs
 relay/tests/phone_signed_send.rs

@@ -100,6 +100,12 @@ final class AppModel {
     let useMock: Bool
     /// Face ID before an allow answer (ORCH-1204). The mock relay (demo, UI tests) skips it.
     var personCheck: PersonCheck
+    /// Workspaces the person accepted on this phone (ORCH-1204); the mock relay keeps them in memory.
+    let trust: TrustStore
+    /// Validly signed messages from a workspace not accepted yet: shown only after Accept (never acted on).
+    private(set) var held: [String: [PhoneMessage]] = [:]
+    /// Ids of messages refused per workspace (a wrong, missing or changed signature, or the relay's copy differs).
+    private(set) var notValid: [String: Set<String>] = [:]
     /// The in-process fake when `useMock` (tests flip its offline/delivery switches).
     let mock: MockRelay?
     private let session: URLSession
@@ -126,6 +132,7 @@ final class AppModel {
          defaults: UserDefaults = .standard) {
         self.useMock = useMock
         self.personCheck = useMock ? .always : .device
+        self.trust = useMock ? .memory() : .keychain
         let mock = useMock ? MockRelay() : nil
         self.mock = mock
         self.session = session
@@ -136,7 +143,7 @@ final class AppModel {
         // The keychain outlives deleting the app. No marker in this app container = a fresh install: drop the stale pairing
         // quietly and show the welcome screen (the red "signed out" message is only for a real sign-out/revoke while installed).
         if !defaults.bool(forKey: AppModel.installedMarkerKey) {
-            Keychain.delete(); PhoneKey.delete()
+            Keychain.delete(); PhoneKey.delete(); trust.clear()
             defaults.removeObject(forKey: "pairedPhoneId")
             defaults.set(true, forKey: AppModel.installedMarkerKey)
         }
@@ -511,8 +518,59 @@ final class AppModel {
         }
     }
 
+    /// Each workspace's listed key (a hint for Accept and for holding), raw bytes.
+    private var keyHints: [String: [UInt8]] {
+        Dictionary(workspaces.compactMap { w in w.signingKey.flatMap { MessageSignature.b64urlDecodeStrict($0.publicKey) }.map { (w.id, $0) } },
+                   uniquingKeysWith: { a, _ in a })
+    }
+
+    /// The phone's own check of what workspaces send (contracts/msgsig.md): only accepted, unchanged (or, until the
+    /// hard cut, unsigned) messages are shown; validly signed ones from a workspace not accepted yet wait in `held`.
+    private func checked(_ items: [PhoneMessage]) -> [PhoneMessage] {
+        guard let me = credentials?.phoneId ?? (useMock ? "ph_mock000000" : nil) else { return items.filter(\.fromPhone) }
+        let accepted = trust.accepted(), hints = keyHints
+        return items.filter { m in
+            if m.fromPhone { return true }
+            switch IncomingCheck.check(m.message, me: me, accepted: accepted, hints: hints) {
+            case .ok, .unsigned: return true
+            case .held:
+                if !(held[m.workspaceId]?.contains { $0.id == m.id } ?? false) { held[m.workspaceId, default: []].append(m) }
+                return false
+            case .refused:
+                notValid[m.workspaceId, default: []].insert(m.id)
+                return false
+            }
+        }
+    }
+
+    /// The workspace's state for the Accept card in its chat.
+    func senderState(_ workspaceId: String) -> IncomingCheck.SenderState {
+        guard let w = workspaces.first(where: { $0.id == workspaceId }) else { return .noKey }
+        return IncomingCheck.senderState(w, accepted: trust.accepted())
+    }
+
+    /// The fingerprint the Accept card shows: from the key the relay lists, computed here.
+    func fingerprint(of workspaceId: String) -> String? {
+        keyHints[workspaceId].map(MessageSignature.fingerprint)
+    }
+
+    /// The person accepts the workspace's listed key (a tap in its chat). Held messages are checked again and shown.
+    func acceptWorkspace(_ workspaceId: String) {
+        guard let w = workspaces.first(where: { $0.id == workspaceId }), let k = w.signingKey,
+              trust.accept(workspaceId, key: k.publicKey) else { return }
+        let waiting = held.removeValue(forKey: workspaceId) ?? []
+        revision &+= 1
+        merge(waiting)
+    }
+
+    #if DEBUG
+    func testSetWorkspaces(_ w: [Workspace]) { workspaces = w }
+    func testMerge(_ items: [PhoneMessage]) { merge(items) }
+    #endif
+
     private func merge(_ items: [PhoneMessage]) {
         let sp = PerfSignpost.begin("AppModel.merge"); defer { PerfSignpost.end(sp) }
+        let items = checked(items)
         for m in items.reversed() where arrival[m.id] == nil {
             arrival[m.id] = arrivalCounter
             arrivalCounter += 1
@@ -940,7 +998,7 @@ final class AppModel {
 
     func signOut() async {
         try? await client.signOut()
-        Keychain.delete(); PhoneKey.delete()
+        Keychain.delete(); PhoneKey.delete(); trust.clear()
         reset()
     }
 
@@ -955,13 +1013,13 @@ final class AppModel {
         readState = ReadState(); blobCache = [:]; verifiedCardFiles = [:]
         archive = ArchiveStore(); UserDefaults.standard.removeObject(forKey: ArchiveStore.defaultsKey)
         UserDefaults.standard.removeObject(forKey: HiddenQuestions.defaultsKey); NotificationCenter.default.post(name: .orchPhoneReset, object: nil)
-        credentials = nil; invite = nil; inviteState = .none; inviteNeedsReplacement = false; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; answeredElsewhereAt = [:]; takenBackRefused = []; hasLoaded = false
+        held = [:]; notValid = [:]; credentials = nil; invite = nil; inviteState = .none; inviteNeedsReplacement = false; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; answeredElsewhereAt = [:]; takenBackRefused = []; hasLoaded = false
         pairedWorkspaces = []; lastUpdated = nil; message = nil; transportDown = false; tab = .chats; phase = .onboarding
     }
 
     private func handle(_ error: Error) {
         if Self.isOffline(error) { transportDown = true }
-        if case RelayError.unauthorized = error { Keychain.delete(); PhoneKey.delete(); reset(); message = error.localizedDescription }
+        if case RelayError.unauthorized = error { Keychain.delete(); PhoneKey.delete(); trust.clear(); reset(); message = error.localizedDescription }
         else if error is URLError { message = "Can't reach the server. Check your connection, then try again." }
         else if error is RelayError { message = error.localizedDescription }
         else { message = "Something went wrong. Try again in a moment." }
@@ -972,7 +1030,7 @@ final class AppModel {
     func seedIfRequested() async {
         let d = UserDefaults.standard
         path = []   // a cold start always lands on the Chats list; only a push or `-open` below opens something
-        if d.bool(forKey: "resetState") { Keychain.delete(); PhoneKey.delete(); reset() }
+        if d.bool(forKey: "resetState") { Keychain.delete(); PhoneKey.delete(); trust.clear(); reset() }
         if d.bool(forKey: "seedPaired"), credentials == nil, useMock {
             openSampleInvite(); await connect(phoneName: "Severin's iPhone"); await finishSetup(allowNotifications: false)
         }

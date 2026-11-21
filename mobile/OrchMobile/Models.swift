@@ -50,6 +50,8 @@ struct Workspace: Codable, Sendable, Equatable, Identifiable {
     /// Look chosen in the workspace (contracts/look.md); nil = letter + Automatic colour. Unknown values fall back in `Look.shown`.
     var icon: String? = nil
     var color: String? = nil
+    /// The workspace's registered key, a hint only (ORCH-1204): trusted after the person accepted its fingerprint.
+    var signingKey: WorkspaceKey? = nil
     var can: WorkspaceCan? = nil
     var displayName: String { OrchMobile.displayName(name) }
     func isMuted(now: Date = Date()) -> Bool {
@@ -75,6 +77,7 @@ extension Workspace {
         icon = try c.decodeIfPresent(String.self, forKey: .icon)
         color = try c.decodeIfPresent(String.self, forKey: .color)
         can = try? c.decodeIfPresent(WorkspaceCan.self, forKey: .can)
+        signingKey = try? c.decodeIfPresent(WorkspaceKey.self, forKey: .signingKey)
     }
 }
 
@@ -425,6 +428,13 @@ struct Anchor: Codable, Sendable, Equatable {
     var y: Double? = nil
 }
 
+/// `{alg, public_key, key_id}` the relay lists for a workspace (a hint, never trust).
+struct WorkspaceKey: Codable, Sendable, Equatable {
+    let alg: String
+    let publicKey: String
+    let keyId: String
+}
+
 struct TextMessage: Codable, Sendable, Equatable {
     let id: String
     let from: String
@@ -436,6 +446,8 @@ struct TextMessage: Codable, Sendable, Equatable {
     var key: String? = nil
     /// The text this one answers or acknowledges (an ack/working update names the phone text it started).
     var replyTo: String? = nil
+    /// The sender's signature (ORCH-1204), passed through by the relay unchanged; nil = unsigned.
+    var envelope: SignedEnvelope? = nil
 }
 struct PhoneMessage: Codable, Sendable, Equatable, Identifiable {
     let message: TextMessage
