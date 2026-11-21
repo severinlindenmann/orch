@@ -834,6 +834,8 @@ def test_closed_ticket_keeps_a_paused_repeat_block_against_an_agent(proj, new_ti
     tickets.set_status(proj, tid, "done", "human:t")
     with pytest.raises(Refused, match="This ticket is closed"):
         tickets.ext_unset(proj, tid, "automation", "agent:claude", schema=REPEAT_SCHEMA)
+    with pytest.raises(Refused, match="This ticket is closed"):  # removing the mark itself would switch it on
+        tickets.ext_unset(proj, tid, "automation.paused", "agent:claude", schema=REPEAT_SCHEMA)
     tickets.ext_set(proj, tid, "automation", '{"recurring": false}', "agent:claude", schema=REPEAT_SCHEMA)
     tickets.ext_unset(proj, tid, "automation", "human:t", schema=REPEAT_SCHEMA)
 
