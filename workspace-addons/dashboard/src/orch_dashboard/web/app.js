@@ -899,7 +899,8 @@ main.addEventListener('change', event => {
 });
 main.addEventListener('click', async event => {
   const menu = event.target.closest('details.menu');
-  if (menu && event.target.closest('button,a')) menu.open = false;
+  // data-keep-open: a button that shows its own progress in the menu and closes it itself (Start triage, ORCH-1096)
+  if (menu && event.target.closest('button,a') && !event.target.closest('[data-keep-open]')) menu.open = false;
   const sendControl = event.target.closest('[data-send-to]');
   if (sendControl) { messageSend(sendControl); return; }
   // List and panel (split block): choosing an item and Open log stay on the page (no request).
