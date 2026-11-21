@@ -2224,7 +2224,11 @@ def _host_receive(root: Path, st: dict, g: dict, m: dict) -> dict:
         via=tickets.PERSON_VIA if b.get("via") == tickets.PERSON_VIA else "helper",
         update=update,
         task=task,
-        extra=ev_extra or None,
+        # the member's own signed envelope rides along unchanged: every other member checks the author's
+        # signature itself, not only the host's (ORCH-1202)
+        extra={**(ev_extra or {}), "author": m["envelope"]}
+        if isinstance(m.get("envelope"), dict)
+        else ev_extra or None,
         errors=errors,
     )
     if task and task["status"] == "waiting_approval" and task.get("question_message"):
