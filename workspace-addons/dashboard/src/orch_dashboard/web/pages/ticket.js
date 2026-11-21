@@ -420,7 +420,7 @@ function agentBar(t) {
     helper && window.UI?.helperPill ? window.UI.helperPill(helper.state, helper.word) : null, line.startFailed ? null : ticketWarmth(t, run, session),
     snapshot ? null : h('div', {className:'ab-actions'}, liveLink && alive ? h('a', {className:'btn primary sm', href:liveLink.url, 'data-key':'watch-live'}, 'Watch live') : null,
       alive ? ticketButton(idle ? 'Stop idle helper' : 'Stop', 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'})
-        // a plain start (Start, Continue, Retry, Try again) is the header's one Start button (ORCH-475), never a second one
+        // a plain start (Start, Continue, Try again) is the header's one Start button (ORCH-475), never a second one
         // here; Start anyway takes over a stuck run
         : line.primary?.op === 'run.start' && !line.primary.args?.take_over ? null
         : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
