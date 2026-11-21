@@ -1452,7 +1452,8 @@ def test_github_skill_in_a_folder_with_spaces_and_umlauts(proj, run, fake_gh, mo
 def test_init_warns_by_name_when_git_would_commit_an_orch_file(proj, run):
     _git_repo(proj)
     run("init")
-    assert harness.git_visible_warning(proj) is None  # tickets and private files stay ignored
+    first = harness.git_visible_warning(proj)  # tickets and private files stay ignored; the new workspace's
+    assert first is None or (".orch/checks/" in first and "tickets" not in first)  # own check folder is a team file
     (proj / ".orch" / "ask-when.md").write_text("x\n", encoding="utf-8")
     warn = harness.git_visible_warning(proj)
     assert warn and ".orch/ask-when.md" in warn
