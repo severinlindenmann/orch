@@ -443,3 +443,29 @@ def test_stopping_the_regular_check_says_the_running_services_keep_running(cli, 
     ]
     code, out, _err = cli("stop", "--json")
     assert json.loads(out)["still_running"] == 1
+
+
+def test_important_marks_the_record_only_and_the_act_verbs_take_it(cli, ws, fake):
+    # ORCH-641: a job the person relies on; only the record changes, the job keeps running as it is
+    code, out = jrun(
+        cli,
+        "add",
+        "Private network forwarder",
+        "--id",
+        "fwd",
+        "--start",
+        "--",
+        "python3",
+        "-m",
+        "http.server",
+        "8000",
+    )
+    assert code == 0, out
+    code, out = jrun(cli, "important", "fwd", "on")
+    assert code == 0 and out["service"]["important"] is True and "asks once" in out["next"]
+    assert _record(ws, "fwd")["important"] is True and out["service"]["state"] == "running"
+    code, out = jrun(cli, "act", "important-off", "--", "fwd")
+    assert code == 0 and out["service"]["important"] is False
+    assert _record(ws, "fwd")["important"] is False
+    code, out = jrun(cli, "list")
+    assert out["services"][0]["important"] is False

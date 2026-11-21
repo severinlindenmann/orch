@@ -51,17 +51,18 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 ## Commands (every one takes `--json`; exit 2 = refused, `{"error": "<one sentence with the next step>"}`)
 | Command | Answer (`--json`) |
 |---|---|
-| `list` | `{"services": [row], "unreadable": n, "note"?}`; row = `id, name, state ("running" \| "stopped" \| "failing"), since (RFC 3339 UTC), auto, made_by, port, command, cwd, pid?, health, failing, question`; `health` = `{"ok", "how": "process alive" \| "answers on its address", "text"}`, `question` = `{ticket, id, title, text}` while one is open, else `null`. Reads only |
+| `list` | `{"services": [row], "unreadable": n, "note"?}`; row = `id, name, state ("running" \| "stopped" \| "failing"), since (RFC 3339 UTC), auto, important, made_by, port, command, cwd, pid?, health, failing, question`; `health` = `{"ok", "how": "process alive" \| "answers on its address", "text"}`, `question` = `{ticket, id, title, text}` while one is open, else `null`. Reads only |
 | `check` | `{"checked": [{id, name, health, failing, did?, error?}], "unreadable": n}`: one pass, no loop (see Health check) |
 | `add <name> --id <slug> [--port N] [--ticket ID \| --addon NAME] [--cwd DIR] [--auto] [--start] -- <command...>` | `{"service": row, "next"}`; installed stopped unless `--start` |
 | `start \| stop \| restart <id>` | `{"service": row, "next"}` |
 | `start \| stop \| status` (no id) | the regular check (see Health check): `{"running": true, "pid"}` \| `{"stopped": bool}` \| `{"running": bool, "pid"?}` (status exits 1 when it does not run); `orch start` / `orch stop` call these |
 | `auto <id> on \| off` | `{"service": row, "next"}` |
+| `important <id> on \| off` | `{"service": row, "next"}`; only the record changes (the job keeps running). On the page, Stop on a job marked important asks once first (ORCH-641) |
 | `remove <id>` | `{"removed": id, "next"}`: stops it, removes the platform entry and the record, moves the log to `logs/removed/` |
 | `log <id> [--lines N]` (default 20, max 1000) | `{"id", "lines": [...]}`; every line goes through the core secret scan, a hit shows `••••••` in place of the value (the whole line when the value cannot be told apart) |
 | `found` | `{"found": [item]}`; item = `id` (`launchd:<label>` \| `systemd:<unit>`; plain programs are no items), `name`, `running`, `since`, `what` (one plain line), `how` (`kind`, `label`/`unit`, `path`, `pid`?), `command` (secret scan hits as `••••••`), `auto`. Nothing found = `[]` and one plain sentence; `others`? = number of plain programs running in the workspace folder (shown as one line "N other programs run here", only when > 0); Windows: `[]` and `"note"`. Reads only |
 | `adopt <found-id> [--name X] [--id SLUG] [--ticket ID]` | `{"service": row, "next"}`: Manage with orch (see below) |
-| `act <verb> [--by X] -- <id>` | verbs `start, stop, restart, auto-on, auto-off, remove, adopt` (adopt takes a found id); same answers as the commands |
+| `act <verb> [--by X] -- <id>` | verbs `start, stop, restart, auto-on, auto-off, important-on, important-off, remove, adopt` (adopt takes a found id); same answers as the commands |
 | `view` | `orch.addon-view/1`: one `split` block (list and panel: every service with its state, starts by itself, made by, last 20 log lines masked, Remove with what happens; "Found on this computer" when there are found items) and a footnote to Automation |
 
 ## Found on this computer and Manage with orch
