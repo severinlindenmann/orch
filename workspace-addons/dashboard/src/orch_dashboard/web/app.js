@@ -355,6 +355,8 @@ function pageRoute() {
   const settingsHash = /^#settings(?:\/(general|agent|helper|phone|contacts|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
   if (settingsHash && !snapshot && state?.settings) { const [named, addon] = (settingsHash[1] || 'general').split('/'), tab = {helper:'agent', contacts:'phone'}[named] || named; return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
   if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
+  // a ticket's chat on the Chats page (pages/ticketchat.js, ORCH-1168)
+  if (/^#chat\/t_[a-z0-9]{6,16}$/.test(hash) && !snapshot && (state?.chat || state?.general || Array.isArray(state?.ticket_chats))) return {kind:'chat', hash};
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
   try {
     if (hash.startsWith('#ticket/')) return {kind:'ticket', id:decodeURIComponent(hash.slice(8)), hash};
@@ -1029,6 +1031,8 @@ main.addEventListener('click', async event => {
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
   if (action === 'reviewer-set') { await reviewerSwitch(); return; }
   if (action === 'release-merge-set') { await releaseMergeSwitch(); return; }
+  if (action === 'auto-reviewer-set') { await reviewSwitch('auto'); return; }
+  if (action === 'away-set') { await reviewSwitch('away'); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
   if (action === 'update-check-ok') { const r = await act('update.check.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }

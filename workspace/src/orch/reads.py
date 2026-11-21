@@ -144,6 +144,10 @@ def answer(root: Path, argv: list[str]):
         from orch import needs
 
         return json.loads(json.dumps(needs.needs(root), ensure_ascii=False))
+    if a[:2] == ["chat", "list"] and (len(a) == 2 or (len(a) == 4 and a[2] == "--reader")):
+        from orch import ticketchats
+
+        return _plain(root, ticketchats.chats(root, a[3] if len(a) == 4 else None))
     if a == ["review", "list"]:
         return _plain(root, review_cards(root))
     if a == ["review", "list", "--answered"]:

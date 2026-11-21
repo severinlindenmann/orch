@@ -9,7 +9,7 @@ import urllib.request
 import pytest
 
 from orch_dashboard import actions
-from orch_dashboard.data import load_chat, load_chat_day, load_chat_days, load_state
+from orch_dashboard.data import load_chat, load_chat_day, load_chat_days, load_state, load_ticket_chats
 from orch_dashboard.server import make_server
 
 STATUS = {
@@ -31,6 +31,20 @@ STATUS = {
     "days": [{"day": "2026-11-07", "count": 4, "last": "bye"}],
 }
 
+CHATS = [
+    {
+        "id": "t_abc123",
+        "key": "DM-2",
+        "title": "Logo",
+        "status": "active",
+        "last_at": "2026-11-10T09:10:00Z",
+        "last": {"kind": "line", "by": "agent:claude", "text": "Done."},
+        "lines": 2,
+        "open_questions": 0,
+        "unread": 1,
+    }
+]
+
 
 @pytest.fixture
 def orch(tmp_path):
@@ -39,6 +53,7 @@ def orch(tmp_path):
 import json, sys
 a = sys.argv[1:]
 if a[:2] == ["chat", "status"]: print(json.dumps({STATUS!r}))
+elif a == ["chat", "list", "--reader", "dashboard", "--json"]: print(json.dumps({json.dumps(CHATS)}))
 elif a[:2] == ["chat", "days"]: print(json.dumps({json.dumps(STATUS["days"])}))
 elif a[:2] == ["chat", "day"]: print(json.dumps({{"day": a[2], "today": False, "messages": [{{"id": "m_o", "text": "old"}}]}}))
 else: sys.exit(2)
@@ -58,6 +73,13 @@ def test_chat_data_is_read_through_the_orch_command(ws, orch):
 
 def test_state_carries_chat_with_addons_only(ws, orch):
     assert load_state(ws, orch_bin=orch)["chat"]["helper"] == "Pilatus helper"
+
+
+def test_state_carries_ticket_chats_with_the_dashboard_unread(ws, orch):
+    assert load_ticket_chats(ws, orch) == CHATS
+    assert load_state(ws, orch_bin=orch)["ticket_chats"] == CHATS
+    assert load_state(ws, orch_bin=orch, with_addons=False)["ticket_chats"] is None  # a snapshot carries none
+    assert load_ticket_chats(ws, None) is None  # no orch command (or an older core): no list, no crash
 
 
 def test_history_endpoints_are_read_only(ws, orch):

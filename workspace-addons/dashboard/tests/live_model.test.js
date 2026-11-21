@@ -59,5 +59,5 @@ test('Undo of a model choice goes back to the model a person chose, else orch pi
   assert.equal(M.liveModelUndo(null), 'auto');
   assert.equal(M.liveModelUndo({model:{name:'gpt'}}), 'auto');
   const src = require('node:fs').readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/live-model.js'), 'utf8');
-  assert.match(src, /'Model ' \+ liveModelLabel\(v\) \+ ' chosen for ' \+ key \+ '\.', 'ok', async \(\) =>/, 'the toast offers Undo');
+  assert.match(src, /'Model ' \+ liveModelLabel\(v\) \+ ' chosen for ' \+ key \+ '\.', 'ok', undo\)/, 'the toast offers Undo');
 });
