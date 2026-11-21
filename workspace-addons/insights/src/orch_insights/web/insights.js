@@ -15,7 +15,6 @@ const MARKS = {working: '✓ ', look: '▲ ', new: '◇ ', idle: '', unknown: ''
 const CANT_TELL = "Can't tell yet";
 const BADGE = {success: 'done', warning: 'attn', info: 'working', '': ''};
 let overview = null, lists = {}, active = 'skills', loading = false;
-let stuckNow = 0;  // ORCH-476: the core's Stuck count (Stuck now): the health line never says All good beside it
 
 function node(tag, text, className) {
   const element = document.createElement(tag);
@@ -175,8 +174,6 @@ function statTile(label, value, small) {
   return tile;
 }
 function renderTeam(team) {
-  stuckNow = team && Number(team.stuck) > 0 ? Number(team.stuck) : 0;
-  if (overview) renderNeeds();
   const host = byId('team');
   if (!team) { host.hidden = true; return; }
   host.hidden = false;
@@ -335,8 +332,7 @@ function renderNeeds() {
     banner.append(text, button);
     needs.append(banner);
   }
-  // a stuck ticket needs a look too: the same count as the Stuck now tile (the core's one Stuck rule)
-  const n = overview.needs.length + (retry && retry.tone === 'warn' ? 1 : 0) + stuckNow;
+  const n = overview.needs.length + (retry && retry.tone === 'warn' ? 1 : 0);
   const health = byId('health');
   health.className = n ? 'badge attn insights-health' : 'badge done insights-health';
   health.textContent = n ? `▲ ${n} ${n === 1 ? 'needs' : 'need'} a look` : 'All good · nothing needs a look';

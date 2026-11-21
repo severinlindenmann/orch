@@ -35,7 +35,7 @@
       procBox.hidden = !rows.length;
       const waiting = rows.filter(x => x.state === 'needs').length;
       procBox.replaceChildren(...(rows.length ? [
-        h('div', {class: 'row fx-procs-h'}, h('h2', {class: 'grow'}, 'Started from Focus ', h('span', {class: 'meta', text: '(' + rows.length + (waiting ? ', ' + waiting + ' waiting for you' : '') + ')'})),
+        h('div', {class: 'row fx-procs-h'}, h('h2', {class: 'grow'}, 'Running now ', h('span', {class: 'meta', text: '(' + rows.length + (waiting ? ', ' + waiting + ' waiting for you' : '') + ')'})),
           h('button', {class: 'btn outline sm', 'data-act': 'stop-all', text: 'Stop all', onclick: () => confirmAll(rows.length)})),
         h('div', {class: 'card'}, rows.map(x => {
           const [word, tone] = CHIP[x.state] || CHIP.working;

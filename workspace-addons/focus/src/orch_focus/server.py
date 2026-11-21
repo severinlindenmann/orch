@@ -25,26 +25,6 @@ from .record import RecordFeed
 from .revisions import Revisions
 
 
-def _progress(ticket: dict) -> dict:
-    """The core's task count (orch/counts.py, ORCH-476); the same rule here for an older core."""
-    try:
-        from orch import counts
-
-        return counts.progress(ticket)
-    except ImportError:
-        checks = [c for c in ticket.get("checklist") or [] if isinstance(c, dict)]
-        return {"finished": sum(1 for c in checks if c.get("done") or c.get("wont_do")), "total": len(checks)}
-
-
-def _step_of(ticket: dict) -> dict | None:
-    """The core's "Step n of total" (every task counts, a won't-do one too); None with an older core."""
-    try:
-        from orch import counts
-    except ImportError:
-        return None
-    return counts.step(ticket)
-
-
 def agent_label(claim: dict | None, agents: list[dict] | None) -> str:
     """Resolve the adapter's display label, including tickets without a claim."""
     claim, agents = claim or {}, agents or []
@@ -562,10 +542,8 @@ class Tracker:
             "hold": " ".join(str(status["hold"]).split())[:200] if running and isinstance(status.get("hold"), str) else "",
             "board": board,
             "events": for_display(events[-60:]),
-            # ORCH-476: the core's one count (orch/counts.py), the same "3 of 4" and "Step 4 of 4" as every page
-            "done": _progress(ticket)["finished"],
-            "total": _progress(ticket)["total"],
-            "step": _step_of(ticket),
+            "done": sum(1 for c in checks if c.get("done") or c.get("wont_do")),
+            "total": len(checks),
         }  # fmt: skip
 
     def session(self, tid: str, agent: str) -> str | None:
