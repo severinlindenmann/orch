@@ -915,6 +915,18 @@ class Handler(BaseHTTPRequestHandler):
                 hdr["Content-Encoding"] = "gzip"
                 hdr["Vary"] = "Accept-Encoding"
             return self._send(200, body, "application/json", hdr)
+        if path == "/api/tickets":  # one page of tickets, searched and filtered here (ORCH-523)
+            from . import ticketpages
+            from .data import _me
+
+            body = ticketpages.answer(self.root, parse_qs(query), _me(self.root).removeprefix("human:"))
+            hdr = {}
+            if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+                import gzip
+
+                body = gzip.compress(body, 3)
+                hdr = {"Content-Encoding": "gzip", "Vary": "Accept-Encoding"}
+            return self._send(200, body, "application/json", hdr)
         if path == "/api/chat/contacts" or re.fullmatch(r"/api/chat/thread/ws_[a-z0-9]{10}", path):
             from .data import load_chat_contacts, load_chat_thread
 
@@ -1745,6 +1757,11 @@ def make_server(
     srv.revisions = Revisions(root)
     srv.state_cache = StateCache(root, orch_bin, srv.revisions)
     srv.act_ids = actids.ActIds()
+    from . import ticketpages
+
+    ticketpages.warm(
+        root
+    )  # the first /api/tickets page answers at once, not after reading every ticket (ORCH-523)
     srv.remote_server, srv.remote_error = None, None
     if remote is not None:
         try:
