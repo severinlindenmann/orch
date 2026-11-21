@@ -241,3 +241,34 @@ test('the debug log keeps its events while the page is quiet and sends them once
   assert.deepEqual(sent, ['/api/diag']);
   assert.equal(t.queue.length, 0);
 });
+
+test('a page script that fails to load (reinstall under way) reloads the page once, at most every 20 s', () => {
+  const js = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/session.js'), 'utf8');
+  const guard = js.slice(js.indexOf('(function () {\n  var KEY = "orch_reload_broken"'));
+  const run = (store, now) => {
+    let handler = null, reloads = 0;
+    const timers = [];
+    const c = vm.createContext({
+      window: {addEventListener: (type, f) => { if (type === 'error') handler = f; }},
+      location: {href: 'http://127.0.0.1:8000/', origin: 'http://127.0.0.1:8000', reload: () => { reloads++; }},
+      sessionStorage: {getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = v; }},
+      setTimeout: f => timers.push(f), URL, Date: {now: () => now}, Number, String,
+    });
+    vm.runInContext(guard, c);
+    return {fire: target => handler({target}), flush: () => { timers.splice(0).forEach(f => f()); return reloads; }};
+  };
+  const store = {};
+  const p = run(store, 100000);
+  p.fire({tagName: 'IMG', src: 'http://127.0.0.1:8000/logo.svg'});
+  p.fire({tagName: 'SCRIPT', src: 'https://cdn.example/x.js'});
+  assert.equal(p.flush(), 0);  // a picture or another site's script: nothing
+  p.fire({tagName: 'SCRIPT', src: 'http://127.0.0.1:8000/kit/diagtrail.js'});
+  p.fire({tagName: 'SCRIPT', src: 'http://127.0.0.1:8000/pages/live.js'});
+  assert.equal(p.flush(), 1);  // one reload for any number of broken scripts
+  const again = run(store, 110000);  // the reloaded page breaks again within 20 s: no loop
+  again.fire({tagName: 'SCRIPT', src: 'http://127.0.0.1:8000/pages/live.js'});
+  assert.equal(again.flush(), 0);
+  const later = run(store, 130001);
+  later.fire({tagName: 'SCRIPT', src: 'http://127.0.0.1:8000/pages/live.js'});
+  assert.equal(later.flush(), 1);
+});
