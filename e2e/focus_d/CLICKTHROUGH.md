@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-33 steps: 32 ready (the script clicks them), 1 pending (not built yet).
+34 steps: 33 ready (the script clicks them), 1 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -68,7 +68,7 @@ Do:
 Must be seen:
 
 - Bands in this order: Pinned, Needs you and working, In line, Idle and no session.
-- One summary line on top.
+- One summary line on top, with the number of sessions and of helper places in use.
 - Each tile says in one plain sentence what its helper does.
 - A working tile adds its newest last line by itself.
 
@@ -105,7 +105,7 @@ Do:
 
 Must be seen:
 
-- Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.
+- Every ticket row has the button; it says Watch, Answer, Open or Start to fit the ticket. A ticket page with a helper working has Watch in Focus; with no helper, Open in Focus is in its ⋯ menu (one start button, ORCH-1466).
 - The session opens in the layer and the page stays.
 - After the answer the keyboard stays in the session; Esc steps back to the bar.
 - Open ticket goes back to the same ticket page; the session stays open.
@@ -224,6 +224,7 @@ Must be seen:
 - The split stays while the page changes.
 - Closing a pane gives its room to the others.
 - On a phone one session shows at a time and there is no add beside.
+- A waiting question shows its orange card with answer buttons in every pane; the header is one row of icon buttons beside the title.
 
 ## 13. Focus stays open with typed text and split while you change pages
 
@@ -294,7 +295,7 @@ Do:
 
 Must be seen:
 
-- The open question, the last lines of its screen, then tool and model (for example "Helper · Opus").
+- The open question, the last lines of its screen, then tool and model (for example "Claude Code · Opus").
 - How long it is open and how long it stays (warm while it works, or when it closes for being idle).
 - All of it stays current while you look; the keyboard place does not jump.
 - Stop in the pane stops its helper; an idle helper's button says Stop idle helper.
@@ -467,6 +468,7 @@ Must be seen:
 - The wall is one column.
 - The layer opens at the bottom and shows one session; right falls back to bottom.
 - Nothing scrolls sideways; every button can be reached.
+- The layer is a sheet over most of the screen with the question card and its buttons; the Focus bar under it stays one row.
 
 ## 26. Earlier sessions in the History tab, reopened with one click
 
@@ -579,6 +581,7 @@ Do:
 Must be seen:
 
 - Its tile leaves Working and says No session.
+- Its pane header no longer says Working.
 - Its pane offers the Start choice.
 
 ## 33. Start the Manager in a chosen permission mode
@@ -600,4 +603,21 @@ Must be seen:
 - Bypass permissions shows one plain warning the first time; the Manager starts in it and its pane says "Permissions: Bypass permissions".
 - Auto ends the session and goes on with the same conversation; the pane says "Permissions: Auto".
 - Bypass permissions is off when the workspace does not allow it and says why.
+
+## 34. Results shelf beside or above the chat
+
+- Part: chat (draft D feature 10)
+- State: ready, clicked by the script
+- Pictures: `fd-34-shelf-1280.png`, `fd-34-shelf-1920.png`, `fd-34-shelf-390.png`
+
+Do:
+
+1. Open a session whose ticket has no results, then one with a pull request.
+2. Place Focus at the bottom, on the right, in full screen; then on a phone.
+
+Must be seen:
+
+- Without results the shelf says "Nothing yet. Pictures, pages and tables show up here."
+- The results sit on a shelf called Results, the same widgets as on the ticket page; a click opens them big.
+- At the bottom (from 900 px wide) a 360 px column beside the chat; in full screen a 320 px column; on the right and on a phone a one-row strip above the chat.
 

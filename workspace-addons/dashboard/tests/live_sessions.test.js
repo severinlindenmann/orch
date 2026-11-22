@@ -24,7 +24,7 @@ test('what a session does now: the question, the detail, what it waits on', () =
   assert.equal(ls.liveNow({status:'needs-you', question:'Keep the old name?', detail:'Your answer'}), 'Keep the old name?');
   assert.equal(ls.liveNow({status:'needs-you', detail:'Your OK on the screen'}), 'Your OK on the screen');
   assert.equal(ls.liveNow({status:'working', detail:'Running pytest'}), 'Running pytest');
-  assert.equal(ls.liveNow({status:'working', word:'On hold', waiting_on:[{kind:'time', what:'until 18:00'}]}), 'Waiting for until 18:00');
+  assert.equal(ls.liveNow({status:'working', word:'On hold', waiting_on:[{kind:'time', what:'until 18:00'}]}), 'Waiting until 18:00');
   assert.equal(ls.liveNow({status:'working', word:'Working', waiting_on:[]}), 'Working');
   // ORCH-463: no detail and nothing waited on: the step it works on, else the plain word
   assert.equal(ls.liveNow({status:'working', word:'Working', waiting_on:[], step:'Put words on the buttons'}), 'Working on: Put words on the buttons');

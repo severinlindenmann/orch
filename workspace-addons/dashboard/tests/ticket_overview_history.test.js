@@ -129,8 +129,11 @@ test('a read-only copy shows 50 entries and says where the rest are; no buttons'
 test('the request block: note, the helper-written description and the request files; nothing when there is none', () => {
   const c = context();
   assert.equal(run(c, 'overviewRequest(t, null, [])', {t:{id:'t'}}), null);
-  const node = run(c, 'overviewRequest(t, "NOTE", [])', {t:{id:'t', description:'What this is about', description_by:'agent:claude', created_at:T0}});
+  const node = run(c, 'overviewRequest(t, "NOTE", [])', {t:{id:'t', note:'NOTE', description:'What this is about', description_by:'agent:claude', created_at:T0}});
   assert.match(text(node), /What was asked.*NOTE.*What this is about.*Written by/);
+  // an empty note under a helper's description is not an empty row (report r-1122-0538); with no description it stays to be filled in
+  assert.doesNotMatch(text(run(c, 'overviewRequest(t, "EMPTY NOTE", [])', {t:{id:'t', description:'What this is about', created_at:T0}})), /EMPTY NOTE/);
+  assert.match(text(run(c, 'overviewRequest(t, "EMPTY NOTE", [])', {t:{id:'t', created_at:T0}})), /EMPTY NOTE/);
 });
 
 test('the Overview order in detail(): write box, history, then the request last; the old cards are gone', () => {

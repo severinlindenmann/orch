@@ -199,6 +199,9 @@ struct ConversationView: View {
         VStack(spacing: 0) {
             if model.speech.isActive { MiniPlayer() }
             OfflineBanner()
+            if let t = resolved.ticket, historyDay == nil {
+                TeamChatStrip(workspace: resolved.workspace, ticket: t, workspaceName: workspaceName)
+            }
             if let ticket {
                 if ConversationRules.showsStepsRow(total: ticket.view?.totalCount ?? 0, wontDo: ticket.view?.wontDoCount ?? 0) {
                     summary(ticket)
@@ -557,11 +560,22 @@ struct ConversationView: View {
     }
     /// "Claude · Marketing" / "Nina Weber · not signed in" above an incoming bubble, with the workspace mark.
     private func senderCaption(_ item: ConvItem) -> some View {
-        let text = ChatNames.caption(item, workspaceName: workspaceName)
+        // Another workspace in the ticket chat (team chat step 2): its name and mark as the ticket's group lists them.
+        let member = item.senderWs.flatMap { sw in
+            resolved.ticket.flatMap { TeamChatRules.group(in: model.groups.groups, workspace: resolved.workspace, ticket: $0) }?
+                .members.first { $0.ws == sw }
+        }
+        let text = ChatNames.caption(item, workspaceName: workspaceName, memberName: member?.name)
         let ws = model.workspace(resolved.workspace)
         return HStack(spacing: 6) {
-            WorkspaceBadge(name: item.typedName ? (item.sender ?? workspaceName) : workspaceName, icon: item.typedName ? nil : ws?.icon,
-                           color: item.typedName ? nil : ws?.color, size: 18)
+            Group {
+                if item.senderWs != nil {
+                    WorkspaceBadge(name: member?.name ?? "Workspace", icon: member?.look?.icon, color: member?.look?.color, size: 18)
+                } else {
+                    WorkspaceBadge(name: item.typedName ? (item.sender ?? workspaceName) : workspaceName, icon: item.typedName ? nil : ws?.icon,
+                                   color: item.typedName ? nil : ws?.color, size: 18)
+                }
+            }
                 .accessibilityHidden(true)
             Text(text).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.tail)
         }.padding(.leading, 4).frame(maxWidth: .infinity, alignment: .leading)

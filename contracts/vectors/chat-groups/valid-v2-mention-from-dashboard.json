@@ -1,0 +1,69 @@
+{
+  "why": "v2 mentions: the person writes from the host's dashboard and picks Home from the @ list. The host's copy to Home keeps mentions; only Home's helper acts on it.",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_cd6cfd6b62b179e8",
+    "from": "ws_fin0000001",
+    "to": "ws_hom0000001",
+    "type": "text",
+    "created_at": "2026-11-08T10:06:02Z",
+    "ticket": "t_fin14a",
+    "key": "FIN-14",
+    "body": {
+      "text": "@Home can you find the 2025 letter?",
+      "group": {
+        "id": "grp_t_fin14a",
+        "host": "ws_fin0000001",
+        "title": "Pay car tax 2027",
+        "members": [
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            },
+            "joined_at": "2026-11-08T10:00:00Z",
+            "orch_version": "0.9.4",
+            "chat_groups": 2
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            },
+            "added_by": "you",
+            "joined_at": "2026-11-08T10:01:00Z",
+            "orch_version": "0.9.4",
+            "chat_groups": 2
+          },
+          {
+            "ws": "ws_ban0000001",
+            "name": "Bank",
+            "look": {
+              "icon": "wallet",
+              "color": "blue"
+            },
+            "added_by": "ws_fin0000001",
+            "joined_at": "2026-11-08T10:05:00Z",
+            "orch_version": "0.8.2",
+            "chat_groups": 1
+          }
+        ],
+        "seq": 8
+      },
+      "by": "you",
+      "via": "dashboard",
+      "origin": {
+        "id": "m_v2mention0000000",
+        "from": "dashboard",
+        "at": "2026-11-21T09:00:00Z"
+      },
+      "mentions": [
+        "ws_hom0000001"
+      ]
+    }
+  }
+}

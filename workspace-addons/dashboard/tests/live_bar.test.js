@@ -119,7 +119,10 @@ test('the Focus button word: Answer, Watch, Open, In line, Start; none on a fini
 test('the ticket page and every ticket row use the one Focus button; a pane has Open ticket, also in More', () => {
   const read = f => fs.readFileSync(path.join(WEB, 'pages', f), 'utf8');
   const ticket = read('ticket.js'), list = read('tickets.js'), layer = read('live-layer.js');
-  assert.equal((ticket.match(/liveFocusButton\(t, true\)/g) || []).length, 2, 'both ticket page headers (working and not)');
+  assert.equal((ticket.match(/liveFocusButton\(t, true\)/g) || []).length, 1, 'the working header (Watch in Focus)');
+  // with no helper there is one start button; Focus opens from the ⋯ menu (ORCH-1466)
+  assert.match(ticket, /function ticketFocusMenuItem[^]*?liveFocusButton\(t\)[^]*?'Open in ' \+ liveLayerName\(\)/);
+  assert.match(ticket, /'menu-pop', role:'menu'\}, ticketFocusMenuItem\(t, run\)/);
   assert.match(list, /function ticketRowFocus/);
   assert.match(list, /ticketRowFocus\(t, nextAction\)/, 'the table row');
   assert.match(list, /function shortSide[^]*?liveFocusButton\(t\)/, 'the phone row');
