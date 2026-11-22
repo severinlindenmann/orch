@@ -242,6 +242,19 @@ REVIEW_VERDICTS = ("ok", "no", "talk")
 MAX_REVIEW_NOTE = 8 * 1024  # the same cap as `orch review answer --note`
 
 
+def _card_run(a):
+    """Run it now on a run card (ORCH-848): `orch review run <ticket> <q> --digest D [--confirmed] --via dashboard`.
+    A person-grant op: only the signed-in page session gets the one-time grant the core asks for."""
+    _only(a, ("ticket", "key", "digest", "confirmed"))
+    key = a.get("key")
+    if not (isinstance(key, str) and REVIEW_KEY.fullmatch(key)) or key == "review":
+        raise BadRequest("That is not a card.")
+    flags = ["--digest", _question_digest(a), "--via", "dashboard"]
+    if a.get("confirmed") is True:
+        flags.append("--confirmed")
+    return ["review", "run", _tid(a.get("ticket")), key], flags, []
+
+
 def _review_answer(a):
     """`orch review answer <ticket> <key> --verdict v [--picked ID] [--note JSON] --digest D --via dashboard`.
     The core re-checks the digest and the size of the note; this only keeps the argv plain."""
@@ -1261,6 +1274,7 @@ OPS = {
     "link.stop": _link,
     "answer": _answer,
     "review.answer": _review_answer,
+    "card.run": _card_run,
     "ticket.new": _ticket_new,
     "ticket.paste": _ticket_paste,
     "ticket.attach": _ticket_attach,
@@ -1589,6 +1603,8 @@ def _op_timeout(op, args) -> int:
     """Seconds one op may run. Adding an add-on installs it (a download), so it gets longer than a setting."""
     if (op == "addon.set" and args.get("on") is True) or op == "addon.uninstall":
         return 180
+    if op == "card.run":  # the command may run 2 minutes (runcard.TIMEOUT) before it is stopped
+        return 150
     return 75 if op == "config.agent.test" else 60
 
 
@@ -1759,6 +1775,14 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         out = json.loads(r.stdout)
     except ValueError:
         pass
+    if (
+        op == "card.run"
+        and r.returncode in (0, 1)
+        and isinstance(out, dict)
+        and isinstance(out.get("ok"), bool)
+    ):
+        forget_static()  # it ran (or ran and failed: exit 1): the page shows what it printed either way
+        return 200, "", out
     if op == "config.agent.test" and isinstance(out, dict) and isinstance(out.get("ok"), bool):
         return (
             200,
@@ -1885,7 +1909,7 @@ def _logins_cancel(a):
 
 
 PERSON_GRANT_OPS = frozenset(
-    {"logins.renew", "logins.status", "logins.cancel", "logins.code", "logins.replace"}
+    {"logins.renew", "logins.status", "logins.cancel", "logins.code", "logins.replace", "card.run"}
 )
 # a signed-in answer may pick a draft, and a signed-in Done may finish a ticket that carries one (ORCH-582)
 DRAFT_GRANT_OPS = frozenset({"answer", "review.answer", "ticket.patch"})

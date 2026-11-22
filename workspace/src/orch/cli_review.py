@@ -25,7 +25,7 @@ from orch import (
 from orch.errors import Refused
 
 SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict", "security", "undo")
-CARD_KINDS = ("draft", "link", "plan", "choose")
+CARD_KINDS = ("draft", "link", "plan", "choose", "run")
 SUGGEST_VERDICTS = ("ok", "no")
 LINKS_MAX = 5  # what a card without options can suggest: approve or don't do
 KEY_RE = re.compile(r"review|q[0-9]+")
@@ -61,6 +61,13 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--note", metavar="JSON", help="changes, words, pins (JSON, at most 8 KB)")
     x.add_argument("--digest", metavar="D", help="the card as it was shown")
     x.add_argument("--via", default="cli", metavar="WORD")
+
+    x = s.add_parser("run", parents=[common], help="run a run card's command (the signed-in person's click)")
+    x.add_argument("ticket")
+    x.add_argument("key", help="the question (q3)")
+    x.add_argument("--digest", metavar="D", required=True, help="the card as it was shown")
+    x.add_argument("--confirmed", action="store_true", help="the person confirmed a command not orch's")
+    x.add_argument("--via", default="cli", metavar="WORD", help="where the click comes from")
 
     x = s.add_parser("wait", parents=[common], help="wait until a card is answered")
     x.add_argument("ticket")
@@ -221,7 +228,37 @@ def links_of(specs: list[str]) -> list[dict] | None:
     return out
 
 
+def build_run_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
+    """`orch ask TICKET TEXT --run "<command>" [--changes L] [--undo L] [--login] [--option "Leave it off"]`
+    (ORCH-848): the person runs the command with one click. The question text is the card's title."""
+    from orch import runcard
+
+    for flag in ("after", "file", "before", "open", "ci_shots", "ok"):
+        if getattr(args, flag, None):
+            raise Refused("A run card shows its command; it takes no files, address or --ok.")
+    if getattr(args, "merge", False) or getattr(args, "describe", None):
+        raise Refused("A run card takes no --merge or --describe.")
+    spec = runcard.parse(root, args.run, getattr(args, "changes", None), getattr(args, "undo", None),
+                         login=bool(getattr(args, "login", False)))  # fmt: skip
+    if len(args.option) > 1:
+        raise Refused('A run card has one other answer besides I ran it: --option "Leave it off for now".')
+    given = " ".join((args.option[0] if args.option else "Not now").split()).casefold()
+    no_label = next((x for x in runcard.NO_LABELS if x.casefold() == given), None)
+    if no_label is None:
+        raise Refused("The other answer is one of: " + ", ".join(runcard.NO_LABELS) + ".")
+    if args.suggest is not None and args.suggest not in SUGGEST_VERDICTS:
+        raise Refused("On this card --suggest is ok (run it) or no (the other answer).")
+    title = args.text.strip().splitlines()[0][:200] if args.text.strip() else "Run this command"
+    card = {"kind": "run", "title": title, "then": args.then or "The helper goes on once it ran.",
+            "ok_label": runcard.OK_LABEL, "no_label": no_label, "run": spec}  # fmt: skip
+    if args.why:
+        card["why"] = args.why
+    return card, [no_label], args.suggest, title
+
+
 def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
+    if getattr(args, "run", None) is not None:
+        return build_run_card(root, args)
     kind, title = next((k, getattr(args, k)) for k in CARD_KINDS if getattr(args, k, None) is not None)
     kind = "choice" if kind == "choose" else kind
     card: dict = {"kind": kind, "title": title, "then": args.then}
@@ -390,7 +427,7 @@ def has_card_flags(args) -> bool:
 
 def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
     """`orch ask TICKET TEXT --draft|--link|--plan|--choose TITLE ...`: the question with a card on it."""
-    if not args.then:
+    if not args.then and getattr(args, "run", None) is None:
         raise Refused("A card needs --then: what happens after the answer.")
     if getattr(args, "ci_shots", None):  # ORCH-312: the pictures CI took, never the helper's own
         if args.file or args.before or args.after or getattr(args, "choose", None) is not None:
@@ -546,6 +583,36 @@ def _answer(args, root: Path) -> None:
     _out(args, entry, f"Answered {entry['id']}: {entry.get('answer')}")
 
 
+def _run(args, root: Path) -> None:
+    """`orch review run TICKET q3 --digest D [--confirmed] [--via WORD]` (ORCH-848): runs the card's
+    command for the signed-in person (the page's one-time grant) and answers it on success."""
+    from orch import runcard
+
+    t = _ticket(root, args)
+    if not KEY_RE.fullmatch(args.key) or args.key == "review":
+        raise ReviewError("not_found", f"'{args.key[:20]}' is not a question of {t['id']}.")
+    if not re.fullmatch(r"[0-9a-f]{64}", args.digest or ""):
+        raise ReviewError("changed", runcard.CHANGED)
+    who = tickets.current_actor(args.by)
+    granted = ownerpick.person_granted(root, who)  # always used up, so no child inherits it
+    via = args.via if re.fullmatch(r"[a-z][a-z0-9-]{0,19}", args.via or "") else "cli"
+    if via == "phone":  # a phone runs it through the relay (relay._apply_run), never this command
+        raise ReviewError("needs_person", runcard.PERSON_REFUSAL)
+    res = _guard(runcard.run, root, t["id"], args.key, args.digest, by=who, person=granted, via=via,
+                 confirmed=args.confirmed)  # fmt: skip
+    if res["answered"]:
+        import contextlib
+
+        with contextlib.suppress(Refused, KeyError):
+            q = next(x for x in tickets.load(root, t["id"])["questions"] if x["id"] == args.key)
+            runs_live.pass_answer(root, t["id"], {"id": args.key, "answer": q.get("answer"),
+                                                  "decision": q.get("decision")}, who)  # fmt: skip
+    words = res.get("error") or res["output"][-300:]
+    _out(args, res, ("Ran it: " if res["ok"] else "It did not work: ") + words)
+    if not res["ok"]:
+        args._exit = 1  # it ran and failed: the card stays open (2 = refused, nothing ran)
+
+
 # ------------------------------------------------------------------ show, wait, link
 
 
@@ -684,6 +751,7 @@ def dispatch(args, root: Path) -> bool:
     {
         "list": _list,
         "answer": _answer,
+        "run": _run,
         "wait": _wait,
         "link": _link,
         "tend": _tend,
