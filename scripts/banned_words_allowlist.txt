@@ -31,3 +31,4 @@ workspace/src/orch/msgsig.py
 workspace/tests/test_msgsig_vectors.py
 relay/Cargo.lock                     # crate names of the Ed25519 library (ed25519, signature)
 scripts/mac-runner/setup.sh          # reads GitHub's fork setting; its API path and field name contain the word
+companion/mac/*                      # Apple code signing and notarization of the Mac app (Developer ID, ORCH-1497); "gate" = the agreement check
