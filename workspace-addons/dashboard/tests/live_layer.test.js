@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerCompact, liveLayerSort, liveAskModel, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerCompact, liveLayerSort, liveAskModel, liveLayerHelper, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -411,4 +411,23 @@ test('Add beside stays a button; its menu says why nothing can go beside and wha
   const more = source.slice(source.indexOf('function liveMoreEnd('), source.indexOf('// ORCH-817: Stop (the current step)'));
   assert.doesNotMatch(more, /disabled/, 'Stop in More is never greyed');
   assert.match(more, /'Nothing is running right now\.'/, 'and says next to it when nothing runs');
+});
+
+// ORCH-1358: the pane header follows the live sessions API, as the bar and the wall do.
+test('the pane header follows the live session: ended is no helper, needs you says Needs you', () => {
+  const own = {state:'working', word:'Working', detail:''};
+  assert.equal(L.liveLayerHelper({status:'closed'}, own), null, 'an ended session never says Working');
+  assert.equal(L.liveLayerHelper({status:'in-line'}, own), null);
+  const you = L.liveLayerHelper({status:'needs-you', detail:'Your answer'}, {state:'idle', word:'Idle', detail:''});
+  assert.equal(you.state, 'you'); assert.equal(you.word, 'Needs you'); assert.equal(you.detail, 'Your answer');
+  assert.equal(L.liveLayerHelper({status:'idle'}, own).state, 'idle');
+  const hold = {state:'waiting', word:'On hold', detail:'Waits on a script'};
+  assert.equal(L.liveLayerHelper({status:'working'}, hold), hold, 'the page keeps its finer word for a working session');
+  assert.equal(L.liveLayerHelper(null, own), own, 'before the first answer the page state stays');
+});
+
+test('before the page state arrives a working session keeps the API word (Stuck, On hold)', () => {
+  const x = L.liveLayerHelper({status:'working', word:'Stuck', detail:'No update for a while'}, null);
+  assert.equal(x.state, 'stuck'); assert.equal(x.word, 'Stuck');
+  assert.equal(L.liveLayerHelper({status:'working', word:'Working'}, null).word, 'Working');
 });
