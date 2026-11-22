@@ -40,50 +40,80 @@ def logs_dir(root: Path) -> Path:
     return base_dir(root) / "logs"
 
 
-def on_external_volume(root: Path) -> bool:
-    """macOS: the workspace sits on an external disk (/Volumes/<disk>). launchd jobs may not open files or a working
-    folder there (job exits 78, or hangs in getcwd), so their log and folder live in the home folder."""
-    if sys.platform != "darwin":
-        return False
-    try:
-        return Path(root).resolve().parts[:2] == ("/", "Volumes")
-    except OSError:
-        return False
+def _platform() -> str:
+    return sys.platform  # a function, so tests on Linux can pretend to be a Mac
 
 
-def home_logs_dir(root: Path) -> Path:
-    r = Path(root).resolve()
-    tag = hashlib.sha1(str(r).encode()).hexdigest()[:8]
-    return Path.home() / "Library" / "Logs" / "orch" / f"{re.sub(r'[^A-Za-z0-9._-]', '-', r.name)}-{tag}"
-
-
-def log_path(root: Path, sid: str) -> Path:
-    if on_external_volume(root):
-        return home_logs_dir(root) / f"{sid}.log"
+def log_path(root: Path, sid: str, wid: str | None = None) -> Path:
+    """Where a job writes its log. macOS (with the workspace id): ~/Library/Logs/orch/<workspace id>/, because
+    launchd cannot open a log in a folder macOS protects, such as an external disk (it ends the job with 78 before it
+    starts; report r-1120-0610-services). Elsewhere: in the workspace."""
+    if wid and _platform() == "darwin":
+        return Path.home() / "Library" / "Logs" / "orch" / wid / f"{sid}.log"
     return logs_dir(root) / f"{sid}.log"
 
 
-def set_aside_old_log(root: Path, sid: str) -> Path | None:
+def _earlier_log_paths(root: Path, sid: str, wid: str | None) -> tuple[Path, ...]:
+    """Every place a job may still write its log: the current one, the workspace (before the logs moved) and, on
+    macOS, the per-folder home log an earlier build gave a workspace on /Volumes (<folder name>-<sha1 8>/)."""
+    places = [log_path(root, sid, wid), logs_dir(root) / f"{sid}.log"]
+    if wid and _platform() == "darwin":
+        try:
+            r = Path(root).resolve()
+        except OSError:
+            r = Path(root).absolute()
+        tag = hashlib.sha1(str(r).encode()).hexdigest()[:8]
+        name = re.sub(r"[^A-Za-z0-9._-]", "-", r.name)
+        places.append(Path.home() / "Library" / "Logs" / "orch" / f"{name}-{tag}" / f"{sid}.log")
+    return tuple(dict.fromkeys(places))
+
+
+def read_log_path(root: Path, sid: str, wid: str | None = None) -> Path:
+    """The log to read: the newest of the places a job may write it (a job loaded before the logs moved keeps
+    writing the old one until it is started again)."""
+
+    def mtime(p: Path) -> float:
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return -1.0
+
+    places = _earlier_log_paths(root, sid, wid)
+    best = max(places, key=mtime)
+    return best if mtime(best) > mtime(places[0]) else places[0]
+
+
+def home_dir(wid: str) -> Path:
+    """macOS: the folder a job of a workspace on an external disk runs from (launchd cannot start it there)."""
+    return Path.home() / "Library" / "Application Support" / "orch" / wid
+
+
+def set_aside_old_log(root: Path, sid: str, wid: str | None = None) -> Path | None:
     """A new service must not show the lines of a removed one with the same id (ORCH-1131): move the old log into
-    removed/<sid>-<time>.log next to it, so the new service starts with an empty log. Returns where it went."""
-    log = log_path(root, sid)
-    if not log.is_file():
-        return None
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    dest = log.parent / "removed" / f"{sid}-{stamp}.log"
-    n = 1
-    while dest.exists():
-        n += 1
-        dest = log.parent / "removed" / f"{sid}-{stamp}-{n}.log"
-    try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(log, dest)
-    except OSError as e:
-        raise Refused(
-            f"The old log of an earlier service {sid} could not be moved aside ({e.strerror or e}). "
-            "Close what has it open and try again, or pick another id."
-        ) from e
-    return dest
+    removed/<sid>-<time>.log next to it (both places on macOS), so the new service starts with an empty log. Returns
+    where the log to read went; refused when one could not be moved."""
+    shown = read_log_path(root, sid, wid)
+    moved: Path | None = None
+    for log in _earlier_log_paths(root, sid, wid):
+        if not log.is_file():
+            continue
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        dest = log.parent / "removed" / f"{sid}-{stamp}.log"
+        n = 1
+        while dest.exists():
+            n += 1
+            dest = log.parent / "removed" / f"{sid}-{stamp}-{n}.log"
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(log, dest)
+        except OSError as e:
+            raise Refused(
+                f"The old log of an earlier service {sid} could not be moved aside ({e.strerror or e}). "
+                "Close what has it open and try again, or pick another id."
+            ) from e
+        if log == shown:
+            moved = dest
+    return moved
 
 
 def state_path(root: Path, sid: str) -> Path:
@@ -175,6 +205,7 @@ def _valid(d: object, sid: str) -> bool:
         and bool(d["command"])
         and all(isinstance(a, str) and a for a in d["command"])
         and isinstance(d.get("auto", False), bool)
+        and isinstance(d.get("important", False), bool)
     )
 
 
