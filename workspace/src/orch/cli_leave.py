@@ -196,6 +196,15 @@ def doctor(root: Path) -> dict:
     late = doctorpass.overdue_row(root)  # once, after the run checks (it sat inside their loop: ORCH-104)
     if late:
         rows.append(late)
+    from orch import macfolders
+
+    try:
+        services_on = "services" in addons.active(root)
+    except (Refused, OSError, ValueError):
+        services_on = False
+    mac = macfolders.doctor_row(root, services_on)  # report r-1119-1255-ws-6: launchd jobs die in Documents
+    if mac:
+        rows.append(mac)
     problems = [r for r in rows if not r["ok"]]
     return {"ok": not problems, "problems": len(problems), "checks": rows}
 
@@ -326,6 +335,10 @@ def uninstall(root: Path) -> dict:
         if p.is_dir() and not harness.is_link(p):
             shutil.rmtree(p)
             removed.append(f".orch/{rel}/")
+    from orch import checkfiles
+
+    if checkfiles.drop_untouched_template(root):  # the template `orch init` wrote, unchanged
+        removed.append(".orch/checks/_template.json")
     gi = orch / ".gitignore"
     # R5.2: whatever stays in .orch (tickets, chat, local files, config, secrets) keeps its ignore rules, so a
     # later `git add -A` commits nothing private; the file goes only when nothing else is left (or never when

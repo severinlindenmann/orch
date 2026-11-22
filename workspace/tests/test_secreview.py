@@ -138,7 +138,8 @@ def test_a_running_review_is_not_started_twice(tmp_path):
 def test_every_ok_lets_the_release_go_on(tmp_path):
     out = go(tmp_path, state=entry(), security_verdicts={"2": {"sha": "h2", "verdict": "ok"}})
     assert not any("security" in x for x in out["lines"])
-    assert out["did"] and out["did"][0].startswith("dispatch:")  # the normal cut path starts
+    assert out["did"] and out["did"][0].startswith("test-branch:")  # the normal cut path starts (ORCH-1475)
+    assert out["did"][1].startswith("dispatch:")
 
 
 def test_no_matched_pull_request_changes_nothing(tmp_path):

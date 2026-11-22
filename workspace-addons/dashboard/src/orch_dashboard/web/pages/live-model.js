@@ -25,13 +25,18 @@ function liveModelSessionTicket(sessions, id) {
   const s = (Array.isArray(sessions) ? sessions : []).find(x => x && x.id === id && x.kind === 'empty');
   return s ? {id, model:s.model ? {name:s.model} : null, title:s.title} : null;
 }
+// What Undo of a model choice goes back to: the model a person had chosen, else orch picks again ('auto').
+function liveModelUndo(t) {
+  const m = t?.model;
+  return m && liveModelLabel(m.name) && m.by !== 'orch' ? m.name : 'auto';
+}
 function liveModelPick(line) {
   if (!line.canPick) return '';
   return 'Model: ' + (line.model || 'the usual one') + (line.next ? ' → ' + line.next + ' after this step' : '');
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {LIVE_MODEL_NAMES, liveModelLine, liveModelPick, liveModelSessionTicket};
+  module.exports = {LIVE_MODEL_NAMES, liveModelLine, liveModelPick, liveModelSessionTicket, liveModelUndo};
 } else {
   const ticketOfId = id => (Array.isArray(state?.tickets) ? state.tickets : []).find(t => t.id === id) || liveModelSessionTicket(state?.sessions, id);
   const lineOf = id => liveModelLine(state?.runs?.[id], ticketOfId(id), state?.settings?.agents, window.LiveSessions?.get?.(id) || null);
@@ -59,7 +64,18 @@ if (typeof module === 'object' && module.exports) {
     const key = t && !t.status && t.title ? 'the ' + t.title : t && window.DashHelpers?.ticketKey ? window.DashHelpers.ticketKey(t) : 'the ticket';
     if (typeof liveLayerDo === 'function') liveLayerDo({type:'menu', menu:'model:' + id}, `.live-pane[data-session="${id.replace(/["\\]/g, '')}"] [data-key="live-model"]`);
     if (t?.model?.name === v && t.model.by !== 'orch') return;
-    const r = await act('ticket.model', {ticket:id, model:v});
-    window.orch?.toast?.(r.ok ? 'Model ' + liveModelLabel(v) + ' chosen for ' + key + '.' : r.text || 'Could not change the model.', r.ok ? 'ok' : 'error');
+    const back = liveModelUndo(t);
+    const pick = async () => {
+      const r = await act('ticket.model', {ticket:id, model:v});
+      if (!r.ok) { (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(r.text, 'Could not change the model.', pick); return; }
+      // Undo puts the model back as it was, or lets orch pick again (ORCH-1359)
+      const undo = async () => {
+        const u = await act('ticket.model', {ticket:id, model:back});
+        if (u.ok) window.orch?.toast?.(back === 'auto' ? 'orch picks the model again.' : 'Model back to ' + liveModelLabel(back) + '.', 'ok');
+        else (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(u.text, 'Could not put the model back.', undo);
+      };
+      window.orch?.toast?.('Model ' + liveModelLabel(v) + ' chosen for ' + key + '.', 'ok', undo);
+    };
+    await pick();
   });
 }

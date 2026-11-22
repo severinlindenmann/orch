@@ -208,8 +208,33 @@ def test_dead_pids_are_pruned(proj):
     assert len(json.loads(services.running_path().read_text(encoding="utf-8"))) == 1
 
 
-def test_start_stop_status_are_reserved_names():
-    assert {"start", "stop", "status"} <= addons.RESERVED
+def test_start_stop_restart_status_are_reserved_names():
+    assert {"start", "stop", "restart", "status"} <= addons.RESERVED
+
+
+def test_restart_stops_then_starts_this_workspace_only(svc, proj, run, tmp_path, monkeypatch):
+    run("start")
+    ws2 = _second(run, monkeypatch, tmp_path, svc)
+    run("start")
+    monkeypatch.chdir(proj)
+    seen = []
+    real_stop = services.stop
+    monkeypatch.setattr(services, "stop", lambda root, only=None: seen.append(root) or real_stop(root, only))
+    code, out, err = run("restart")
+    assert code == 0, err
+    assert f"Stopped in {proj.name}: hello" in out and f"Started in {proj.name}:" in out
+    assert seen == [proj.resolve()]  # the other workspace is left alone
+    assert (proj / "svc.txt").exists() and (ws2 / "svc.txt").exists()
+    code, out, _ = run("restart", "--json")
+    assert code == 0 and json.loads(out)["addons"][0]["addon"] == "hello"
+
+
+def test_restart_outside_a_workspace_is_refused(proj, run, tmp_path, monkeypatch):
+    out = tmp_path.parent / f"{tmp_path.name}-plain2"
+    out.mkdir()
+    monkeypatch.chdir(out)
+    code, _, err = run("restart")
+    assert code == 2 and "No orch workspace here" in err
 
 
 @pytest.mark.parametrize(
@@ -386,3 +411,20 @@ def test_status_lists_known_workspaces_that_run_nothing(svc, proj, run, tmp_path
     assert "NoOrch" not in by and "Gone" not in by
     assert rows == sorted(rows, key=lambda r: (r["name"].lower(), r["workspace"]))
     assert "Known" in run("status")[1] and "nothing running" in run("status")[1]
+
+
+def test_only_the_stop_of_a_restart_tells_the_addon_it_comes_back(tmp_path, monkeypatch):
+    """ORCH-1443: an add-on install restarts the services; Focus keeps the runs it started on such a stop."""
+    seen = []
+
+    def run(argv, **kw):
+        seen.append((argv[-2], kw["env"].get(services.RESTART_ENV)))
+        return subprocess.CompletedProcess(argv, 0, '{"stopped": true}', "")
+
+    monkeypatch.setattr(services.subprocess, "run", run)
+    monkeypatch.setenv(services.RESTART_ENV, "1")  # never inherited from the caller
+    m = {"run": "x_addon"}
+    services._call(tmp_path, "focus", m, "stop")
+    services._call(tmp_path, "focus", m, "stop", restart=True)
+    services._call(tmp_path, "focus", m, "start", restart=True)
+    assert seen == [("stop", None), ("stop", "1"), ("start", None)]

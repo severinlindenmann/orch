@@ -93,6 +93,53 @@ def test_a_changed_addon_runs_its_own_suite_only():
     assert not any("workspace:" in n for n in names(steps))
 
 
+SKILL = "workspace-addons/sync/src/orch_sync/skills/orch-sync/SKILL.md"
+ADDON_TEXTS = {
+    "sync": {"test_package.py": "x = 'skills/orch-sync/SKILL.md'\n", "test_cli.py": "from orch_sync import cli\n"},
+    "dashboard": {"test_views.py": "pass\n"},
+}
+
+
+def test_an_addon_skill_text_change_runs_only_its_tests_that_read_skills():
+    steps = light.plan([SKILL], TEXTS, ADDONS, ADDON_TEXTS)
+    step = steps[-1]
+    assert step["cwd"] == "workspace-addons/sync"
+    assert step["name"].startswith("add-on sync: 1 test file(s) that read the skills")
+    assert "tests/test_package.py" in step["cmd"] and "test_cli.py" not in step["cmd"]
+
+
+def test_an_addon_skill_change_with_no_test_reading_skills_runs_no_addon_step():
+    f = "workspace-addons/dashboard/src/orch_dashboard/skills/orch-dashboard/SKILL.md"
+    assert not any(n.startswith("add-on") for n in names(light.plan([f], TEXTS, ADDONS, ADDON_TEXTS)))
+
+
+def test_an_addon_skill_and_code_change_runs_the_whole_suite():
+    steps = light.plan([SKILL, "workspace-addons/sync/src/orch_sync/x.py"], TEXTS, ADDONS, ADDON_TEXTS)
+    assert names(steps)[-1] == "add-on sync"
+
+
+def test_a_page_library_change_with_a_dashboard_skill_change_runs_the_whole_dashboard_suite():
+    f = "workspace-addons/dashboard/src/orch_dashboard/skills/orch-dashboard/SKILL.md"
+    steps = light.plan([f, "workspace/src/orch_ui/static/x.js"], TEXTS, ADDONS, ADDON_TEXTS)
+    assert "add-on dashboard" in names(steps)
+
+
+def test_a_focus_or_insights_skill_change_starts_no_browser():
+    for name in ("focus", "insights"):
+        f = f"workspace-addons/{name}/src/orch_{name}/skills/orch-{name}/SKILL.md"
+        assert not any("browser" in n or "Chromium" in n for n in names(light.plan([f], TEXTS, ADDONS, ADDON_TEXTS)))
+    # A Focus or Insights page change runs its browser smoke as the ci.yml page-smoke job, not here (ORCH-1333).
+
+
+def test_without_addon_texts_a_skill_change_runs_the_whole_suite():
+    assert names(light.plan([SKILL], TEXTS, ADDONS))[-1] == "add-on sync"
+
+
+def test_addon_test_texts_reads_every_known_addon():
+    texts = light.addon_test_texts({"sync"})
+    assert texts["sync"] and all(k.startswith("test_") or "/test_" in k for k in texts["sync"])
+
+
 def test_rule_tests_over_the_whole_tree_run_on_workspace_and_addon_changes():
     for f in ("workspace/src/orch/store.py", "workspace-addons/sync/src/orch_sync/x.py", "workspace/README.md"):
         steps = light.plan([f], TEXTS, ADDONS)
@@ -140,6 +187,39 @@ def test_a_new_rule_test_runs_by_its_name_alone():
     assert "tests/test_spawn_argv.py" in rules["cmd"] and f"tests/{light.RULE_NODES[0]}" in rules["cmd"]
 
 
+def test_a_tree_walking_test_inside_any_file_runs_with_the_rule_tests():
+    """ORCH-1124: the local check passed group 2402 of 21 Nov; GitHub failed it on a tree scan in a normal file."""
+    walks = (
+        "import os, subprocess\n"
+        "def test_no_old_words_in_the_product():\n    for f in REPO.rglob('*'):\n        pass\n\n"
+        "def test_every_module_by_git():\n    subprocess.run(['git', 'ls-files'])\n\n"
+        "def test_walked():\n    for _ in os.walk('.'):\n        pass\n\n"
+        "def test_one_piece(tmp_path):\n    list(tmp_path.rglob('*'))\n\n"
+        "def test_plain():\n    assert 1\n\n"
+        "class TestX:\n    def test_in_class(self):\n        list(REPO.rglob('*'))\n\n"
+        "async def test_async_walk():\n    list(REPO.rglob('*'))\n"
+    )
+    broken = "def test_x(:\n    REPO.rglob('*')"  # passes the quick text look, fails to parse
+    texts = {**TEXTS, "test_store.py": walks, "test_broken.py": broken, "test_no_scan.py": walks}
+    got = light.rule_tests(texts)
+    assert "test_store.py::test_no_old_words_in_the_product" in got
+    assert "test_store.py::test_every_module_by_git" in got and "test_store.py::test_walked" in got
+    assert "test_store.py::test_async_walk" in got
+    assert not [n for n in got if n.endswith(("test_one_piece", "test_plain", "test_in_class"))]
+    assert "test_no_scan.py" in got and not [n for n in got if n.startswith("test_no_scan.py::")]  # whole file
+    assert not [n for n in got if n.startswith("test_broken.py")]
+    assert len(got) == len(set(got))
+
+
+def test_the_real_tree_runs_the_tree_scan_that_missed_group_2402():
+    got = light.rule_tests(light.test_texts())
+    assert "test_pagesession_remote.py::test_no_same_computer_limit_is_left_in_the_product" in got
+    for node in got:
+        if "::" in node:
+            f, name = node.split("::")
+            assert f"def {name}(" in (ROOT / "workspace" / "tests" / f).read_text(encoding="utf-8"), node
+
+
 def test_the_real_tree_runs_spawn_argv_and_history_lint():
     got = light.rule_tests(light.test_texts())
     assert {
@@ -161,13 +241,35 @@ def test_a_changed_click_through_runs_itself_in_a_browser():
     assert not any(n.startswith("dashboard: the") for n in names(light.plan([gone], TEXTS, ADDONS)))
 
 
-def test_a_focus_or_insights_change_loads_their_pages():
+def test_a_focus_or_insights_change_loads_their_pages_in_their_own_job():
+    """ORCH-1333 (owner 21 Nov): the page smoke runs the whole Focus click-through (about 6 minutes); next to the core
+    and dashboard steps it did not fit in the light job, so the pull request runs it as ci.yml page-smoke."""
     for f in (
         "workspace-addons/focus/src/x.py",
         "workspace-addons/insights/web/a.js",
         "e2e/focus_insights_smoke.cjs",
     ):
-        assert "Focus and Insights pages load in a browser" in names(light.plan([f], TEXTS, ADDONS)), f
+        steps = names(light.plan([f], TEXTS, ADDONS))
+        assert not any("pages load" in n for n in steps), f
+        assert "headless Chromium for the page tests" not in steps, f  # no click-through changed: no browser
+        assert light.PAGE_SMOKE.match(f), f
+    cond = _job_if("page-smoke")
+    assert cond == "needs.changes.outputs.light == 'true' && needs.changes.outputs.pagesmoke == 'true'"
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "run: node e2e/focus_insights_smoke.cjs" in ci and f"playwright@{light.PLAYWRIGHT}" in ci
+    req = ROOT / "workspace-addons" / "pull-requests" / "src" / "orch_pull_requests" / "required_checks.py"
+    rollup = re.search(r'^ROLLUP = "([^"]+)"', req.read_text(encoding="utf-8"), re.M).group(1)  # R4.1: name not here
+    assert "page-smoke" in ci[ci.index(f"\n  {rollup}:"):].split("needs:", 1)[1].split("]", 1)[0]  # roll-up counts it
+    # the path filter names the same places as PAGE_SMOKE, with the workflow's glob rules (* stops at /, ** does not)
+    line = next(x for x in ci.splitlines() if x.strip().startswith("pagesmoke: ["))
+    globs = [
+        re.compile("^" + re.escape(g).replace(r"\*\*", ".*").replace(r"\*", "[^/]*") + "$")
+        for g in re.findall(r"'([^']+)'", line)
+    ]
+    for f in ("workspace-addons/focus/a.py", "workspace-addons/insights/web/b.js", "e2e/focus_insights_smoke.cjs",
+              "e2e/focus_insights/server.py", "e2e/focus_insights_extra/x.py", "e2e/other.cjs",
+              "workspace-addons/focusx/a.py"):  # fmt: skip
+        assert bool(light.PAGE_SMOKE.match(f)) == any(g.match(f) for g in globs), f
     steps = light.plan(["workspace/src/orch/store.py"], TEXTS, ADDONS)
     assert "headless Chromium for the page tests" not in names(steps)
 
@@ -215,6 +317,7 @@ GREEN = {
     "head_branch": "orch-queue/develop-1-abc",
     "status": "completed",
     "conclusion": "success",
+    "rollup": "success",
 }
 
 
@@ -231,6 +334,21 @@ def test_not_proven_without_a_merge_commit_same_files_or_a_green_group_run():
     assert not proven.decide(["p1", "p2"], "T", "T", [dict(GREEN, name="rules")])[0]
     assert not proven.decide(["p1", "p2"], "T", "T", [dict(GREEN, event="workflow_dispatch")])[0]
     assert not proven.decide(["p1", "p2"], "T", "T", [])[0]
+
+
+def test_a_queue_group_the_local_check_checked_proves_nothing():
+    """ORCH-1124: ci.yml skips every job of such a group, the run still ends 'success'; the push runs the suite."""
+    assert not proven.decide(["p1", "p2"], "T", "T", [dict(GREEN, rollup="skipped")])[0]
+    assert not proven.decide(["p1", "p2"], "T", "T", [dict(GREEN, rollup="")])[0]  # GitHub did not say
+
+
+def test_ci_and_rules_skip_only_a_local_check_queue_group():
+    rules = (ROOT / ".github" / "workflows" / "rules.yml").read_text(encoding="utf-8")
+    skip = (
+        "startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == "
+        "github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')"
+    )
+    assert CI.count(skip) == 2 and rules.count(skip) == 1
 
 
 # -- ci.yml wiring ---------------------------------------------------------------------------------------------
@@ -256,8 +374,17 @@ def test_a_proven_develop_push_runs_no_suite():
         assert "outputs.proven != 'true'" in _job_if(job), job
     # for now (ORCH-1106) a proven push still calls these two for the click-throughs and the Windows parts only,
     # which queue groups skip; their other suites stay off (brand/tests/test_ci_queue_skip.py)
-    for job in ("workspace", "addons"):
-        assert _job_if(job).startswith("needs.changes.outputs.proven == 'true' ||"), job
+    assert _job_if("addons").startswith("needs.changes.outputs.proven == 'true' ||") or _job_if("addons").startswith(
+        "${{ !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.proven == 'true' ||"
+    )
+    # workspace: not when the Windows parts run on our own Windows VM (ORCH-1127, test_winvm_windows.py); wrapped so a
+    # failed Mac route still runs it (ORCH-1125)
+    cond = _job_if("workspace")
+    wrap = "${{ !cancelled() && needs.changes.result == 'success' && ("
+    cond = cond[len(wrap) :] if cond.startswith(wrap) else cond
+    assert cond.startswith(
+        "(needs.changes.outputs.proven != 'true' || vars.WINDOWS_RUNNER != 'winvm') && (needs.changes.outputs.proven == 'true' ||"
+    )
 
 
 def test_the_phone_build_is_not_in_queue_groups_and_runs_on_develop_even_when_proven():

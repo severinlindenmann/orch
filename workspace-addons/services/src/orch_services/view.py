@@ -14,10 +14,14 @@ from pathlib import Path
 
 from . import store
 
-LOG_LINES = 20
+LOG_LINES = 100  # the page shows the last 6 and Open log shows all of these (ORCH-639)
 WORD = {"running": "Running", "stopped": "Stopped", "failing": "Failing"}
 TONE = {"running": "good", "stopped": "neutral", "failing": "bad"}
-AUTO_WORDS = {True: "Yes, after this computer restarts", False: "No, you start it by hand"}
+AUTO_WORDS = {
+    True: "Yes, after this computer restarts",
+    False: "Only after a crash, not after this computer restarts",
+}
+IMPORTANT_WORDS = {True: "Yes, Stop asks first", False: "No"}
 TICKET_ID = re.compile(r"t_[a-z0-9]{6,16}")
 
 
@@ -50,6 +54,18 @@ def _act(verb: str, sid: str) -> dict:
 
 def _btn(label: str, verb: str, sid: str) -> dict:
     return {"label": label, "action": _act(verb, sid)}
+
+
+def _stop(r: dict, name: str, depends: list[str]) -> dict:
+    """Stop, and for a job marked important the one question before it stops (ORCH-641): no typed word."""
+    b = _btn("Stop", "stop", r["id"])
+    if r.get("important"):
+        lines = ["It is marked important: you rely on it."]
+        if depends:
+            lines.append(_plain("These stop working: " + ", ".join(depends) + "."))
+        lines.append("It stays stopped until you start it again.")
+        b["confirm"] = {"title": _plain(f"Stop {name}?", 80), "lines": lines, "keep": "Keep it running"}
+    return b
 
 
 def _ticket_id(root: Path, key: str) -> str | None:
@@ -87,16 +103,26 @@ def _adopted(r: dict) -> bool:
 
 def _log(root: Path, r: dict) -> list[str]:
     """The last log lines, masked; an adopted job's own log (its plist log or journal), as orch services log shows."""
-    from .cli import _log_lines, tail_masked
+    from .cli import _log_lines, _workspace_id_or_none, tail_masked
 
     try:
         if _adopted(r):
             lines = _log_lines(root, store.get(root, r["id"]), LOG_LINES * 2)  # blank lines are dropped below
         else:
-            lines = tail_masked(root, store.log_path(root, r["id"]), LOG_LINES * 2)
+            log = store.read_log_path(root, r["id"], _workspace_id_or_none(root))
+            lines = tail_masked(root, log, LOG_LINES * 2)
     except store.Refused:
         return []
     return [_plain(ln) for ln in lines if ln.strip()][-LOG_LINES:]
+
+
+def _empty_log(root: Path, r: dict) -> str:
+    from .cli import no_log_text
+
+    try:
+        return no_log_text(store.get(root, r["id"]))
+    except store.Refused:
+        return f"{r['name']} has not written anything yet."
 
 
 def _remove_lines(r: dict, depends: list[str]) -> list[str]:
@@ -132,14 +158,17 @@ def _address(r: dict) -> str | None:
 def _service_item(root: Path, r: dict) -> dict:
     sid, name, state = r["id"], _plain(r["name"], 80), r["state"]
     word, tone = WORD.get(state, "Stopped"), TONE.get(state, "neutral")
+    if state == "running" and isinstance(r.get("health"), dict) and r["health"].get("starting"):
+        word, tone = "Starting…", "neutral"  # just started and not answering yet: not a failure (ORCH-639)
     since = _when(r.get("since"))
     stopped = state == "stopped"
     h = r.get("health")
     # alive but not answering on its address: a hung job must not look healthy in the list (ORCH-641)
     hung = state == "running" and isinstance(h, dict) and h.get("ok") is False
     list_state = {"label": "Not answering", "tone": "warn"} if hung else {"label": word, "tone": tone}
-    main = _btn("Start", "start", sid) if stopped else _btn("Stop", "stop", sid)
-    auto = bool(r.get("auto"))
+    depends = [_plain(d, 80) for d in r.get("depends") or [] if isinstance(d, str) and d.strip()][:6]
+    main = _btn("Start", "start", sid) if stopped else _stop(r, name, depends)
+    auto, important = bool(r.get("auto")), bool(r.get("important"))
     facts: list[dict] = [
         {"label": "State", "value": f"{word} since {since}" if since else word, "tone": tone},
         {
@@ -149,6 +178,15 @@ def _service_item(root: Path, r: dict) -> dict:
                 "on": auto,
                 "label": _plain(f"Starts by itself: {name}", 60),
                 "action": _act("auto-off" if auto else "auto-on", sid),
+            },
+        },
+        {
+            "label": "Important",
+            "value": IMPORTANT_WORDS[important],
+            "switch": {
+                "on": important,
+                "label": _plain(f"Important: {name}", 60),
+                "action": _act("important-off" if important else "important-on", sid),
             },
         },
         _made_by(root, r.get("made_by")),
@@ -165,10 +203,11 @@ def _service_item(root: Path, r: dict) -> dict:
             {
                 "label": "Health check",
                 "value": _plain(health["text"]),
-                "tone": "neutral" if stopped else ("good" if health.get("ok") else "bad"),
+                "tone": "neutral"
+                if stopped or health.get("starting")
+                else ("good" if health.get("ok") else "bad"),
             }
         )
-    depends = [_plain(d, 80) for d in r.get("depends") or [] if isinstance(d, str) and d.strip()][:6]
     if depends:
         facts.append({"label": "Depends on it", "value": _plain(", ".join(depends))})
     item: dict = {
@@ -179,7 +218,7 @@ def _service_item(root: Path, r: dict) -> dict:
         "panel": {
             "buttons": [main] if stopped else [main, _btn("Restart", "restart", sid)],
             "facts": facts,
-            "log": {"lines": _log(root, r), "empty": _plain(f"{name} has not written anything yet.")},
+            "log": {"lines": _log(root, r), "empty": _plain(_empty_log(root, r))},
             "danger": {
                 "label": "Remove",
                 "note": "Remove takes it off this list for good.",
@@ -205,7 +244,8 @@ def _question(root: Path, r: dict) -> dict | None:
     if r.get("state") != "failing" or not isinstance(q, dict) or not isinstance(q.get("title"), str):
         return None
     sid = r["id"]
-    buttons = [_btn("Restart", "restart", sid), _btn("Stop", "stop", sid)]
+    depends = [_plain(d, 80) for d in r.get("depends") or [] if isinstance(d, str) and d.strip()][:6]
+    buttons = [_btn("Restart", "restart", sid), _stop(r, _plain(r["name"], 80), depends)]
     tid = _ticket_id(root, q["ticket"]) if isinstance(q.get("ticket"), str) else None
     if tid:
         buttons.append({"label": "Look into it", "link": tid})

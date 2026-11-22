@@ -296,6 +296,9 @@ ORCH_IGNORE = [
     "ticket-counter.json",
     "config.toml",
     "addons.json",
+    # the reference template `orch init` writes (#1867): orch's own file, rewritten when missing; the checks a
+    # workspace adds next to it stay visible to git
+    "checks/_template.json",
 ]
 
 
@@ -991,13 +994,13 @@ def unlink_skill(root: Path, where: str, name: str) -> None:
             skip_note(f"{dest} (it has files of yours)")
 
 
-def sync_copies(root: Path, wheres: list[str]) -> None:
-    """Refresh the copies (Windows without links) from the harness."""
+def sync_copies(root: Path, wheres: list[str], skip: frozenset[str] | set[str] = frozenset()) -> None:
+    """Refresh the copies (Windows without links) from the harness; names in skip are turned off (no copy)."""
     sk = harness_dir(root) / "skills"
     if not sk.is_dir():
         return
     for where in wheres:
-        for s in sorted(p for p in sk.iterdir() if p.is_dir()):
+        for s in sorted(p for p in sk.iterdir() if p.is_dir() and p.name not in skip):
             dest = root / where / s.name
             if is_link(root / where) or not _inside(root, root / where):
                 continue

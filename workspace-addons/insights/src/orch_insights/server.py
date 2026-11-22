@@ -367,6 +367,8 @@ class InsightsServer(ThreadingHTTPServer):
     reset when a reused link ends the session."""
 
     page_secret = None
+    # the page loads a dozen files at once; the default queue of 5 resets connections on macOS (as the dashboard)
+    request_queue_size = 128
 
 
 def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin=None, session=None) -> ThreadingHTTPServer:

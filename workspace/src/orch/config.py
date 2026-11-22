@@ -682,6 +682,24 @@ def set_auto_reviewer(root: Path, value: bool, by: str | None = None) -> bool:
     return value
 
 
+def away_on(root: Path | None) -> bool:
+    """[workflow] away (default off, ORCH-425 from ORCH-428): Away mode, one switch for the night. While it
+    is on
+    the Auto Reviewer accepts or sends back finished work and answers a helper's plain question or card
+    with its
+    recommended option at once (no 30-minute wait), on tickets without Human review needed only, and never
+    what
+    the owner keeps (autoreview.AWAY_STAYS). Only a person turns it on."""
+    if root is None:
+        return False
+    return file_switch(root, "workflow", "away", False) is True
+
+
+def set_away(root: Path, value: bool, by: str | None = None) -> bool:
+    set_key(root, "workflow", "away", value)
+    return value
+
+
 def reviewer_answers_on(root: Path | None) -> bool:
     """[workflow] reviewer_answers (default off): the Reviewer answers small, routine questions for the owner
     with the helper's recommended option (reviewer.answer_routine). Only a person turns it on."""
@@ -719,6 +737,44 @@ def release_merge_on(root: Path | None) -> bool:
 def set_release_merge(root: Path, value: bool, by: str | None = None) -> bool:
     set_key(root, "workflow", "release_merge", value)
     return value
+
+
+DISPATCHER_HELPERS_DEFAULT = 3
+DISPATCHER_HELPERS_CHOICES = range(1, 11)
+
+
+def dispatcher_on(root: Path | None) -> bool:
+    """[workflow] dispatcher (default off): `orch run tend` starts Ready and Backlog tickets up to a target
+    that follows the weekly budget pace and the machine load (orch.dispatcher). Only the owner turns it on."""
+    if root is None:
+        return False
+    return file_switch(root, "workflow", "dispatcher", False) is True
+
+
+def set_dispatcher(root: Path, value: bool, by: str | None = None) -> bool:
+    set_key(root, "workflow", "dispatcher", value)
+    return value
+
+
+def dispatcher_helpers(root: Path | None) -> int:
+    """[workflow] dispatcher_helpers: how many helpers the dispatcher keeps working while the budget is
+    exactly on pace (1 to 10, default 3). Behind pace it aims higher (at most twice this), ahead lower."""
+    if root is None:
+        return DISPATCHER_HELPERS_DEFAULT
+    try:
+        v = (read(root).get("workflow") or {}).get("dispatcher_helpers")
+    except Refused:
+        return DISPATCHER_HELPERS_DEFAULT
+    ok = isinstance(v, int) and not isinstance(v, bool) and v in DISPATCHER_HELPERS_CHOICES
+    return v if ok else DISPATCHER_HELPERS_DEFAULT
+
+
+def set_dispatcher_helpers(root: Path, value: str) -> int:
+    v = value.strip()
+    if not (v.isascii() and v.isdigit()) or int(v) not in DISPATCHER_HELPERS_CHOICES:
+        raise Refused("Give a number of helpers from 1 to 10.")
+    set_key(root, "workflow", "dispatcher_helpers", int(v))
+    return int(v)
 
 
 def set_live_idle_minutes(root: Path, value: str) -> int:
@@ -794,7 +850,9 @@ def workspace_name(root: Path | None) -> str | None:
         v = (read(root).get("workspace") or {}).get("name")
     except Refused:
         return None
-    return v if isinstance(v, str) and 1 <= len(v) <= MAX_WS_NAME and v == v.strip() else None
+    if not isinstance(v, str) or any(unicodedata.category(c)[0] == "C" for c in v):
+        return None  # a hand edit with control characters is never printed (the setter refuses them)
+    return v if 1 <= len(v) <= MAX_WS_NAME and v == v.strip() else None
 
 
 def workspace_description(root: Path | None) -> str | None:

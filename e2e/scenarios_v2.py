@@ -359,7 +359,8 @@ def r2(e):
     for tool in ("claude", "codex"):
         check(not shutil.which(tool, path=w.env["PATH"]), f"{tool} is on the test PATH")
     py, ag = shlex.quote(sys.executable), shlex.quote(str(AGENT))
-    rc, out = pty_run(["orch", "init"], w.root, {**e.env, **w.env}, ["fake", f"{py} {ag} {{prompt}}"])
+    # agent name, its command, then Enter at "Your name" (init asks a person's name since r-1119-1255-ws-8)
+    rc, out = pty_run(["orch", "init"], w.root, {**e.env, **w.env}, ["fake", f"{py} {ag} {{prompt}}", ""])
     check(rc == 0 and "fake" in out, f"orch init with Other: rc={rc} {out[-300:]!r}")
     got = w.o("config", "get", "workspace.agent", by=None)[1].strip()
     check(got == "fake", f"fake is not the chosen agent: {got!r}; init said {out[:900]!r}")
@@ -831,6 +832,7 @@ def f1_focus(e):
     qrow = [r for r in rows if r["ticket"] == tid and r["kind"] == "question"]
     check(len(qrow) == 1 and qrow[0]["text"] == "Use CHF?", f"question not in orch needs: {rows}")
     # The dashboard accepts the Focus view while a run is active (its links are `addon:t/<ticket>`).
+    # Adding it restarts the running services; the run Focus started keeps going (owner, ORCH-1443).
     rc, out, err = w.sh(["orch", "addon", "add", "dashboard", "--yes"], timeout=600)
     check(rc == 0, f"addon add dashboard: {(err or out)[-300:]}")
     w.o("start", by=None)  # core starts the new background add-on too

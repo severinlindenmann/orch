@@ -8,8 +8,15 @@ Pace: how fast the work uses a subscription (percent per minute per window), mea
 the last minutes and applied to every candidate (the same work moves with the switch). It is remembered across a
 switch, so an account left early is not taken back until its use drops (a reset) or the work slows down.
 
-Files in .orch/addons/usage/: `settings.json` {"switching": bool} (written by the command; off until the person turns
-it on) and `switching.json` (the loop's own memory: samples, pace, the last choice). Only labels, numbers and times.
+Files in the Usage folder of this computer (computer.py): `settings.json` {"switching": bool} (written by the command; off until the person turns
+it on) and `switching.json` (the loop's own memory: samples, pace, the last choice). Each look also writes `budget.json`
+in this workspace's .orch/addons/usage/ (the week and 5-hour use of every subscription that is on, read by orch's
+dispatcher, ORCH-507). Only labels, numbers and times.
+
+Another program that switches accounts (ORCH-612): Usage remembers the account it put in use. When the account in
+use changes without Usage, it writes that in the history and switches away once more; when the other program
+switches back again, Usage stops switching away from that account and asks the person once which rule should win
+(`orch usage needs`: Usage's limits win = `switching on`, the other program wins = `switching off`).
 """
 
 from __future__ import annotations
@@ -22,7 +29,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import store, when
+from . import computer, store, when
 from .readers import SubscriptionUse, cswap
 
 EVERY_SECONDS = 30
@@ -41,9 +48,8 @@ WINDOW_OF = {"5h": "5h", "week": "week"}  # rule period -> switcher window
 # 5 hours, after every helper had stopped on it.
 DEFAULT_EARLY = {"5h": 90.0, "week": 100.0}
 SWITCH_TIMEOUT = 30
-BACK_MINUTES = (
-    10  # an account switched away from and active again within this is "another program switched back"
-)
+FIGHT_MINUTES = 60  # outside switches back to the same account this close together count as one fight
+FIGHT_TRIES = 1  # after an outside switch Usage switches away this many times more, then stops and asks
 
 
 CLEAR_MINUTES = 10  # a warning counts as cleared only after it was gone this long (no new card per flicker)
@@ -76,11 +82,40 @@ def _write(p: Path, data: dict) -> None:
 
 
 def settings_path(root: Path) -> Path:
-    return store.usage_dir(root) / "settings.json"
+    return store.ensure(root) / "settings.json"
+
+
+def budget_path(root: Path) -> Path:
+    """`budget.json`: the use of every subscription that is on, for orch's dispatcher (schema orch.budget/1)."""
+    from . import computer
+
+    return computer.local_dir(root) / "budget.json"  # the dispatcher reads .orch/addons/*/budget.json
+
+
+def budget(cands: list[Candidate], at: datetime) -> dict:
+    """The orch.budget/1 document: per subscription that is on, its week and 5-hour use and limits. Only
+    numbers and times; an account whose week use is unknown is left out."""
+    rows = []
+    for c in cands:
+        if c.use.disabled:
+            continue
+        caps = {w: full for w, _, full in _limits(c.account)}  # the full mark (rule value, else 100 %)
+        week, short = c.use.windows.get("week"), c.use.windows.get("5h")
+        if week is None or week.pct is None:
+            continue
+        row = {
+            "week_used": float(week.pct),
+            "week_cap": caps.get("week", 100.0),
+            "week_resets_at": week.resets_at,
+        }
+        if short is not None and short.pct is not None:
+            row.update(short_used=float(short.pct), short_cap=caps.get("5h", 100.0))
+        rows.append(row)
+    return {"schema": "orch.budget/1", "at": _iso(at), "accounts": rows}
 
 
 def memory_path(root: Path) -> Path:
-    return store.usage_dir(root) / "switching.json"
+    return store.ensure(root) / "switching.json"
 
 
 def switching_on(root: Path) -> bool:
@@ -88,29 +123,57 @@ def switching_on(root: Path) -> bool:
 
 
 def set_switching(root: Path, who: str, on: bool) -> bool:
-    """Turn switching on or off; True when it changed. Written in the history."""
+    """Turn switching on or off; True when it changed. Written in the history.
+
+    `on` while Usage holds still because another program kept switching back (see held()) is the person's answer
+    "Usage's limits win": Usage switches by itself again (True). Any answer settles the hold: it counts up `answers`
+    in settings.json, which the loop reads (the loop alone writes its memory, so this never races with a look)."""
     with store._lock(root):
         cur = switching_on(root)
-        if cur == on:
+        hold = held(root) if on else None
+        if cur == on and not hold:
             return False
         s = _read(settings_path(root))
         s["switching"] = on
+        s["answers"] = answers(root) + 1
         _write(settings_path(root), s)
-        store._append_history(
-            root,
-            [
-                {
-                    "at": store.now(),
-                    "who": who,
-                    "what": "switching turned on" if on else "switching turned off",
-                    "account": None,
-                    "label": "Usage",
-                    "before": cur,
-                    "after": on,
-                }
-            ],
-        )
+        if cur == on:
+            row = {
+                "what": "switching again: Usage's limits win",
+                "account": hold.get("account"),
+                "label": hold.get("label") or "Usage",
+                "before": "stopped",
+                "after": True,
+            }
+        else:
+            row = {
+                "what": "switching turned on" if on else "switching turned off",
+                "account": None,
+                "label": "Usage",
+                "before": cur,
+                "after": on,
+            }
+        store._append_history(root, [{"at": store.now(), "who": who, **row}])
     return True
+
+
+def answers(root: Path) -> int:
+    n = _read(settings_path(root)).get("answers")
+    return n if isinstance(n, int) and not isinstance(n, bool) else 0
+
+
+def _live_hold(memory: dict, root: Path) -> dict | None:
+    hold = memory.get("hold")
+    if not isinstance(hold, dict) or hold.get("answers") != answers(root):
+        return None  # answered since (or a broken entry)
+    return hold
+
+
+def held(root: Path) -> dict | None:
+    """Usage stopped switching because another program keeps switching back, and nobody answered yet."""
+    if not switching_on(root):
+        return None
+    return _live_hold(_read(memory_path(root)), root)
 
 
 WARNING_WORDS = {
@@ -445,9 +508,45 @@ def _use_words(c: Candidate) -> str:
     return f"{c.account['label']}: " + ", ".join(bits) if bits else c.account["label"]
 
 
+def following(root: Path, shared: Path) -> str | None:
+    """The name of the workspace whose Usage loop switches the accounts now, when it is not this one."""
+    o = computer.owner(shared)
+    if o.get("workspace") in (None, computer.key(root)):
+        return None
+    if o.get("running") or computer.just_taken(o, shared):  # a person just moved it there: never in between
+        return o.get("name") or "another workspace"
+    return None
+
+
+def _switch_once(root: Path, shared: Path | None, switch, t: Candidate, before: str | None) -> str:
+    """One switch under the computer's switch lock, with the switcher checked again inside it (a take-over waits
+    for it). Returns "switched", "failed" or "follow" (another workspace switches now: nothing was done)."""
+    if shared is None:
+        return "switched" if switch(t.use.slot) and _stuck(t.use.key) else "failed"
+    with computer.held(shared / "switch.lock", wait=90, busy="Another switch is running."):
+        if following(root, shared):
+            return "follow"
+        if not (switch(t.use.slot) and _stuck(t.use.key)):
+            return "failed"
+        computer.note_switch(shared, root, before, t.account["label"])
+    return "switched"
+
+
 def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     """One pass: read, choose, switch (or say what it would do), write the history. Returns what happened."""
     at = at or datetime.now(UTC)
+    shared = computer.shared_dir(root)
+    if shared is not None:
+        computer.note_workspace(root, shared)
+        other = following(root, shared)
+        if other:
+            return {
+                "at": _iso(at),
+                "switcher": True,
+                "switching": switching_on(root),
+                "did": "follow",
+                "owner": other,
+            }
     cfg = config(root)
     ahead = float(cfg["ahead_minutes"])
     try:
@@ -498,6 +597,45 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
 
     t = ch.target
     why = ch.why
+    wants = bool(t and (ch.active is None or t.use.key != ch.active.use.key))
+    label_of = {a["id"]: a["label"] for a in accounts}
+
+    # another program changed the account in use (ORCH-612): say so once per change
+    outside_row = None
+    mine = memory.get("mine")
+    if not on:
+        for k in ("mine", "outside", "hold"):
+            memory.pop(k, None)  # switching off: Usage only shows; it fights nothing
+    elif isinstance(mine, dict) and ch.active and ch.active.account["id"] != mine.get("to"):
+        now_id, now_label = ch.active.account["id"], ch.active.account["label"]
+        mine_label = label_of.get(mine.get("to"), "another account")
+        prev = memory.get("outside") or {}
+        same = (
+            prev.get("to") == now_id
+            and isinstance(prev.get("at"), str)
+            and at - store.to_time(prev["at"]) < timedelta(minutes=FIGHT_MINUTES)
+        )
+        count = int(prev.get("count", 0)) + 1 if same else 1
+        memory["outside"] = {"to": now_id, "at": _iso(at), "count": count}
+        memory.pop("mine", None)
+        outside_row = _row(
+            f"another program switched to {now_label}",
+            ch.active.account,
+            mine_label,
+            now_label,
+            f"Usage switched to {mine_label} at {mine.get('at')}; the account in use changed without Usage",
+            at,
+        )
+    memory.pop("switched", None)  # ORCH-591's memory, replaced by mine / outside
+
+    hold = _live_hold(memory, root) if on else None
+    answered = on and isinstance(memory.get("hold"), dict) and hold is None  # the person answered: start anew
+    if answered or (hold and not (wants and ch.active and ch.active.account["id"] == hold.get("account"))):
+        hold = None  # answered, or nothing to fight about any more (a reset, a new rule, the person switched)
+        memory.pop("outside", None)
+    if not hold:
+        memory.pop("hold", None)
+
     while t and (ch.active is None or t.use.key != ch.active.use.key):
         before = ch.active.account["label"] if ch.active else None
         if ch.active and not ch.active.good and ch.active.why:
@@ -505,6 +643,12 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
         else:
             why = ch.why
         plan = {"to": t.account["id"], "from": ch.active.account["id"] if ch.active else None}
+        outside = memory.get("outside") or {}
+        fights = (
+            ch.active is not None
+            and outside.get("to") == ch.active.account["id"]
+            and int(outside.get("count", 0)) > FIGHT_TRIES
+        )
         if not on:
             did = "would switch"
             if memory.get("would") != plan:  # once per choice, not every 30 seconds
@@ -520,46 +664,54 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
                 )
             memory["would"] = plan
             break
+        elif hold:
+            did = "held"  # asked the person once (orch usage needs); quiet until they answer
+            break
+        elif fights:
+            did = "held"
+            memory["hold"] = {
+                "account": ch.active.account["id"],
+                "label": before,
+                "target": t.account["id"],
+                "target_label": t.account["label"],
+                "since": _iso(at),
+                "why": why,
+                "answers": answers(root),
+            }
+            outside_row = None  # this row says it
+            hist.append(
+                _row(
+                    f"stopped switching: another program keeps switching back to {before}",
+                    ch.active.account,
+                    t.account["label"],
+                    before,
+                    f"Usage would leave {why}; it switched away and was switched back {outside.get('count')} "
+                    "times. Which rule should win? Usage asks once and waits for the answer",
+                    at,
+                )
+            )
+            break
         else:
             memory.pop("would", None)
-            if switch(t.use.slot) and _stuck(t.use.key):
+            done = _switch_once(root, shared, switch, t, before)
+            if done == "follow":
+                did = "follow"
+                break
+            if done == "switched":
                 did = "switched"
                 memory.pop("failed", None)
                 failed = {}
-                prev = memory.get("switched") or {}
-                again = (
-                    prev.get("to") == t.account["id"]
-                    and isinstance(prev.get("at"), str)
-                    and at - store.to_time(prev["at"]) < timedelta(minutes=BACK_MINUTES)
+                memory["mine"] = {"to": t.account["id"], "at": _iso(at)}
+                hist.append(
+                    _row(
+                        f"switched to {t.account['label']}",
+                        t.account,
+                        before,
+                        t.account["label"],
+                        why,
+                        at,
+                    )
                 )
-                if not again:  # a switch is written once
-                    hist.append(
-                        _row(
-                            f"switched to {t.account['label']}",
-                            t.account,
-                            before,
-                            t.account["label"],
-                            why,
-                            at,
-                        )
-                    )
-                elif not prev.get("back_noted"):  # something moved the account back: one row, not one per try
-                    hist.append(
-                        _row(
-                            f"another program switched back to {before or 'the first account'}",
-                            ch.active.account if ch.active else None,
-                            t.account["label"],
-                            before,
-                            f"Usage switched to {t.account['label']} at {prev['at']} and the account in use "
-                            "changed again without Usage; it is switching again",
-                            at,
-                        )
-                    )
-                memory["switched"] = {
-                    "to": t.account["id"],
-                    "at": prev["at"] if again else _iso(at),
-                    "back_noted": bool(again),
-                }
                 break
             else:
                 did = "switch failed"
@@ -582,6 +734,11 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
         memory.pop("would", None)
         if did == "stay" and failed and ch.active and not ch.active.good:
             did = "waiting to try again"  # the accounts to go to just failed; tried again after RETRY_MINUTES
+        if on and ch.active:
+            memory["mine"] = {"to": ch.active.account["id"], "at": _iso(at)}  # staying is a choice too
+            memory.pop("outside", None)  # an outside change Usage is happy with ends that fight
+    if outside_row:
+        hist.insert(0, outside_row)
 
     # the warnings `orch usage needs` tells the person about, once each (ORCH-644)
     # at a limit = by the limits alone: an account left out only because a switch to it failed still has room
@@ -608,6 +765,7 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     with store._lock(root):
         _write(memory_path(root), memory)
         store._append_history(root, hist)
+        _write(budget_path(root), budget(ch.candidates, at))
     return {
         "at": _iso(at),
         "switcher": True,
@@ -621,8 +779,50 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
 
 
 def needs_rows(root: Path, at: datetime | None = None) -> list[dict]:
-    """`orch usage needs --json` (needs.schema.json): one row per Usage warning (ORCH-644)."""
-    return warning_rows(root, at)
+    """`orch usage needs --json` (needs.schema.json): the outside-switch question (ORCH-612), then one row per Usage
+    warning (ORCH-644)."""
+    return hold_rows(root) + warning_rows(root, at)
+
+
+def hold_rows(root: Path) -> list[dict]:
+    """`orch usage needs --json` (needs.schema.json): one question while Usage holds still because another program
+    keeps switching back. The two buttons are the two answers; either one settles it (set_switching)."""
+    hold = held(root)
+    if not hold:
+        return []
+    acc, target = hold.get("label") or "an account", hold.get("target_label") or "another account"
+    text = (
+        f"Another program keeps switching back to {acc}, which Usage counts as at its limit "
+        f"({hold.get('why') or 'its limit'}). Usage stopped switching to {target} and waits for you. "
+        "Which rule should win?"
+    )
+    return [
+        {
+            "id": f"usage:outside-switch:{hold['since']}",
+            "source": "usage",
+            "kind": "usage:outside-switch",
+            "ticket": None,
+            "title": "Usage: which rule should win?",
+            "text": text[:500],
+            "tone": "needs-you",
+            "since": hold["since"],
+            "cli": "orch usage switching on   (Usage's limits win)   or   orch usage switching off",
+            "actions": [
+                {
+                    "label": "Usage's limits win",
+                    "verb": "switching",
+                    "target": "on",
+                    "review": {"done": "Usage switches by itself again. Stop the other program first."},
+                },
+                {
+                    "label": "The other program wins",
+                    "verb": "switching",
+                    "target": "off",
+                    "review": {"done": "Usage only shows and warns; it does not switch."},
+                },
+            ],
+        }
+    ]
 
 
 def warning_rows(root: Path, at: datetime | None = None) -> list[dict]:
@@ -698,23 +898,49 @@ def addon_on(root: Path) -> bool | None:
 
 
 def run_forever(root: Path, once: bool = False, clock=None, sleep=None, log=print, active=addon_on) -> None:
-    """Look every `every_seconds` until Usage is turned off here (or once). clock/sleep: tests pass fakes."""
+    """Look every `every_seconds` until Usage is turned off here (or once). clock/sleep: tests pass fakes.
+    One loop per computer looks and switches (computer.Switcher); the others follow it."""
     import time
 
     clock = clock or (lambda: datetime.now(UTC))
     sleep = sleep or time.sleep
-    while True:
-        if active(root) is False:
-            log("Usage is turned off in this workspace; stopping.")
-            return
-        try:
-            r = look(root, clock())
-            if r["did"] not in ("stay", "nothing"):
-                log(f"{r['at']} {r['did']}: {r.get('active')} -> {r.get('target')}")
-        except store.Refused as e:
-            log(f"skipped: {e}")
-        except Exception as e:  # noqa: BLE001 - one bad look must not end the loop
-            log(f"skipped: {type(e).__name__}: {e}")
-        if once:
-            return
-        sleep(config(root)["every_seconds"])
+    shared = computer.shared_dir(root)
+    lease = computer.Switcher(root, shared) if shared is not None else None
+    was: bool | None = None
+    try:
+        while True:
+            if active(root) is False:
+                log("Usage is turned off in this workspace; stopping.")
+                return
+            try:
+                if lease is not None:
+                    mine = lease.hold()
+                    if mine != was:
+                        who = following(root, shared)
+                        log(
+                            "This workspace switches the accounts."
+                            if mine
+                            else f"{who or 'Another workspace'} switches the accounts; following."
+                        )
+                    was = mine
+                    if (
+                        not mine
+                    ):  # only the switcher's loop looks and switches; a follower only says it is here
+                        computer.note_workspace(root, shared)
+                        if once:
+                            return
+                        sleep(config(root)["every_seconds"])
+                        continue
+                r = look(root, clock())
+                if r["did"] not in ("stay", "nothing", "follow", "held"):  # held: said once in the history
+                    log(f"{r['at']} {r['did']}: {r.get('active')} -> {r.get('target')}")
+            except store.Refused as e:
+                log(f"skipped: {e}")
+            except Exception as e:  # noqa: BLE001 - one bad look must not end the loop
+                log(f"skipped: {type(e).__name__}: {e}")
+            if once:
+                return
+            sleep(config(root)["every_seconds"])
+    finally:
+        if lease is not None:
+            lease.release()

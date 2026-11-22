@@ -519,6 +519,9 @@
     const none = [...kinds.filter(([, rows]) => !rows.length).map(([name]) => name), ...(running.length ? [] : ['running orders'])];
     if (none.length) view.append(meta((waiting.length || filled.length ? 'Nothing else in Factory right now: no ' : 'Nothing in Factory right now: no ')
       + listWords(none) + '. They show here when they come.'));
+    // Budget health lives on the cards of running orders; with none running, one quiet line says where it will show,
+    // so the page never hides it without a word (owner 18 Nov, ORCH-480).
+    if (!running.length) view.append(meta('Budget health: shows here once an order runs.'));
   }
   // ["drafts", "stops", "results"] -> "drafts, stops or results"
   const listWords = words => words.length < 2 ? words.join('') : words.slice(0, -1).join(', ') + ' or ' + words[words.length - 1];
@@ -532,8 +535,10 @@
   }
   const roles = {manager: 'Manager', builder: 'Builder', reviewer: 'Reviewer'};
   const roleName = role => roles[role] || capital(role);
+  // the tool by its name as people write it, capitalised, not the lower-case command (report r-1118-0907)
+  const toolName = agent => capital(text(agent));
   function crewPlan(crew) {
-    return list(array(crew).map(c => roleName(c.role) + ' · ' + text(c.agent) + ' — ' + text(c.why)));
+    return list(array(crew).map(c => roleName(c.role) + ' · ' + toolName(c.agent) + ' — ' + text(c.why)));
   }
   function limits(data) {
     data = data || {};
@@ -594,7 +599,7 @@
         p('They get: this brief' + (array(h.files).length ? ' and ' + plural(array(h.files).length, 'file', 'files') + ':' : '')), ...(array(h.files).length ? [tiles] : []),
         meta(text(h.name) + '’s time is not counted here. Everything else stays here, and ' + text(h.name) + ' allows it on their side.')));
     }
-    view.append(group('grid-2', card('Done means', list(data.done_means)), card('Won’t do', list(data.wont_do), node('h3','What Ship does'), p(data.ship?.does), meta('Undo: ' + text(data.ship?.undo)))));
+    view.append(group('grid-2', card('Done means', list(data.done_means)), card('Won’t do', list(data.wont_do), node('h3','What putting it live does'), p(data.ship?.does), meta('Undo: ' + text(data.ship?.undo)))));
     const assumptions = card('Assumptions');
     for (const a of array(data.assumptions)) assumptions.append(group('row', ...(a.uncertain ? [badge('Unsure')] : []), p(a.text)));
     if (!array(data.assumptions).length) assumptions.append(meta('No assumptions recorded.'));
@@ -839,7 +844,7 @@
     const skeletons = names => names.map(c => { const el = node('div', null, 'skeleton ' + c); el.setAttribute('aria-hidden','true'); return el; });
     if (location.hash === '' || location.hash === '#/' || location.hash === '#content') {
       // the page frame and the idea box at once; the order list follows (skeleton) when it has been read
-      view.replaceChildren(heading('Factory', 'Reading your orders…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
+      view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
     } else view.replaceChildren(group('f-loading', node('p', 'Reading the Factory record…'), ...skeletons(['title','thumb','thumb'])));
     try {
       // Always begin with home, including deep links, to get watcher/stale status.

@@ -36,7 +36,7 @@ import time
 import unicodedata
 from pathlib import Path
 
-from orch import adapters, brake, diag, history, modelpick, procs, runhooks, runs, tickets
+from orch import adapters, brake, diag, history, modelpick, people, procs, runhooks, runs, tickets
 from orch.errors import Refused
 
 CROWDED_AT = 4  # with no limit set: this many open sessions make idle ones on finished tickets close early
@@ -179,7 +179,7 @@ def _waits_on_time_or_work(root: Path, rec: dict) -> bool:
         w = t.get("waiting_on") or {}
         return (
             t.get("status") == "waiting"
-            and w.get("kind") in ("time", "ticket", "external")
+            and w.get("kind") in ("time", "ticket", "pr", "external")
             and not w.get("start")
         )
     return False
@@ -286,7 +286,11 @@ def _storm(procs: list[tuple[float, str]]) -> tuple[str, int] | None:
 
 def _load_words() -> str | None:
     """'the computer is very busy' while the load is high AND the programs really use the cores; a high load
-    from a stream of short commands is not work and holds nothing. Unknown CPU use: the load alone counts."""
+    from a stream of short commands is not work and holds nothing. Unknown CPU use: the load alone counts.
+    ORCH_NO_LOAD_HOLD=1 (set by the end-to-end runners only): never held by the machine's load, so a busy
+    computer does not fail a test that has nothing to do with load."""
+    if os.environ.get("ORCH_NO_LOAD_HOLD") == "1":
+        return None
     try:
         load = os.getloadavg()[0]
     except (OSError, AttributeError):
@@ -356,24 +360,39 @@ def busy_words(n: int, ticket: str) -> str:
 # ---------------------------------------------------------------- start
 
 
-PRIORITIES = ("high", "normal", "low")  # the order tickets waiting in line start in (then oldest first)
+PRIORITIES = tickets.PRIORITIES  # the order tickets waiting in line start in (then oldest first)
 
 
-def _queue_for_slot(root: Path, tid: str, by: str, text: str, priority: str = "normal") -> None:
-    """Put the ticket in line for a free slot. Queued again: the line keeps one place, the higher priority."""
+def _queue_for_slot(
+    root: Path, tid: str, by: str, text: str, priority: str = "normal", prepare: bool = False
+) -> None:
+    """Put the ticket in line for a free slot. Queued again: the line keeps one place, the higher priority.
+    prepare: the place is for a prepare-only run (ORCH-738); a real start queued meanwhile makes it one for
+    the work (a person's Start always wins over Prepare)."""
     with runs.locked(root, tid):
         items = runs._pending_read(root, tid)
         mine = [i for i in items if i.get("via") == "slots" and not i.get("delivered_at")]
         want = PRIORITIES.index(priority)
+        made = False
         if mine:
             want = min([_rank(i) for i in mine] + [want])  # queued again: never lower
         else:
-            item = runs._pending_add_locked(root, tid, by, "event", text, "slots", None)
+            # a start for a phone's answer (people list on) keeps that phone: checked again when it starts
+            phone = people.acting_phone()
+            item = runs._pending_add_locked(root, tid, by, "event", text, "slots", None, phone=phone)
             items = runs._pending_read(root, tid)
             mine = [i for i in items if i["id"] == item["id"]]
-        if any(_rank(i) != want or (want != 1 and "priority" not in i) for i in mine):
-            for i in mine:
-                i["priority"] = PRIORITIES[want]
+            made = True
+        changed = False
+        for i in mine:
+            if made and prepare and not i.get("prepare"):
+                i["prepare"], changed = True, True
+            elif not prepare and i.get("prepare"):
+                i.pop("prepare")
+                changed = True
+            if _rank(i) != want or (want != 1 and "priority" not in i):
+                i["priority"], changed = PRIORITIES[want], True
+        if changed:
             runs._pending_write(root, tid, items)
 
 
@@ -1639,6 +1658,37 @@ def stop_closed(root: Path, tid: str, by: str | None) -> bool:
     return False
 
 
+def stop_not_allowed(root: Path, people_ids=(), phones=()) -> list[str]:
+    """After the owner removed a person or cut a phone (ORCH-1162): stop the running helpers that this change
+    concerns and that could not be started now (people.start_allowed with the run's own `by`): one a removed
+    person (`people_ids`) started, and one for a ticket a cut phone (`phones`) made. Other runs are left
+    alone. The run this command runs inside is never stopped from within; stop() is the identity-checked path.
+    Returns the tickets stopped; never raises."""
+    done: list[str] = []
+    try:
+        mine = {f"human:{p}" for p in people_ids}
+        for rec in records(root):
+            tid = rec.get("ticket")
+            try:
+                if not isinstance(tid, str) or runs.state(rec) == "dead":
+                    continue
+                by = str(rec.get("by") or "")
+                origin = ((tickets.load(root, tid).get("ext") or {}).get("relay")) or {}
+                from_cut = origin.get("origin") == "phone" and origin.get("from") in phones
+                if by not in mine and not from_cut:
+                    continue
+                ok, _ = people.start_allowed(root, tid, by)
+                if ok or os.environ.get("ORCH_TICKET") == tid or _inside_run(rec):
+                    continue
+                if stop(root, tid):
+                    done.append(tid)
+            except Exception:  # noqa: BLE001 - one stuck run never keeps the others running
+                continue
+    except Exception:  # noqa: BLE001 - unreadable run folder: nothing stopped, the cut holds
+        pass
+    return done
+
+
 def cleanup(root: Path) -> list[str]:
     """Close live sessions that have waited (idle, or for a person) for more than the limit, or whose ticket
     has been Done that long (no daemon: this runs on every `orch run` call), and remove tmux sessions whose
@@ -1848,9 +1898,30 @@ def restart_after_give_up(root: Path, tid: str, name: str) -> dict | None:
     return result
 
 
+def _own_rank(root: Path, tid: str) -> int:
+    """ORCH-813: the priority a person set on the ticket as 0 (high), 1 (normal) or 2 (low)."""
+    with contextlib.suppress(Exception):
+        return PRIORITIES.index(tickets.priority(tickets.load(root, tid)))
+    return PRIORITIES.index("normal")
+
+
+def _line_rank(root: Path, tid: str, items: list[dict]) -> int:
+    """ORCH-813: a waiting ticket's place in line. The priority a person set on the ticket, raised by a start
+    that asked for a higher one (orch run start --priority, a red develop, a repair of a pull request the
+    merge queue dropped). Without one set by a person, the starts decide as before (the highest asked, normal
+    when none asked)."""
+    asked = [_rank(i) for i in items]
+    with contextlib.suppress(Exception):
+        t = tickets.load(root, tid)
+        if t.get("priority") in PRIORITIES:
+            return min([PRIORITIES.index(t["priority"])] + [r for r in asked if r < 1])
+    return min(asked)
+
+
 def waiting_line(root: Path) -> list[tuple[str, str]]:
     """Tickets whose live start waits for a free slot, in the order they start: priority (high, normal,
-    low), then the oldest first. [(ticket id, priority)]"""
+    low; _line_rank), then the ticket's own priority (two repairs at high: the more important ticket first),
+    then the oldest first. [(ticket id, priority)]"""
     d = runs.run_dir(root) / "pending"
     waiting = []
     for f in sorted(d.glob("t_*.jsonl")) if d.is_dir() else []:
@@ -1859,9 +1930,9 @@ def waiting_line(root: Path) -> list[tuple[str, str]]:
             continue
         items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]
         if items:
-            rank = min(_rank(i) for i in items)
+            rank = _line_rank(root, tid, items)
             with contextlib.suppress(OSError):
-                waiting.append((rank, items[0]["at"], f.stat().st_mtime_ns, tid))
+                waiting.append((rank, _own_rank(root, tid), items[0]["at"], f.stat().st_mtime_ns, tid))
     return [(w[-1], PRIORITIES[w[0]]) for w in sorted(waiting)]
 
 
@@ -1876,8 +1947,15 @@ def start_waiting(root: Path) -> list[str]:
             continue
         if _status(root, tid) in ("done", "dropped"):
             continue  # a Done ticket never gets a run by itself (ORCH-247); the person starts it by hand
+        phone = items[0].get("phone")
+        if phone and not people.phone_may_start(root, str(phone), items[0].get("at")):
+            continue  # ORCH-1161: the phone that asked for it was cut, unpaired or tied again meanwhile
+        prepare = all(i.get("prepare") for i in items)  # Save without starting (ORCH-738)
         with contextlib.suppress(Exception):
-            runs.start(root, tid, items[0]["by"], mode="live")
+            if prepare:
+                runs.start(root, tid, items[0]["by"], prepare=True)
+            else:
+                runs.start(root, tid, items[0]["by"], mode="live")
             started.append(tid)
     return started
 

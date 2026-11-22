@@ -2,11 +2,16 @@
 
 Every browser gets '--use-mock-keychain' and '--password-store=basic'. Without them macOS shows the person at the
 computer a keychain password window ("headless_shell wants to use ... Chromium Safe Storage"). The CI check
-scripts/check_headless_launch.py fails any file that calls launch() / launch_persistent_context() itself.
+scripts/check_headless_launch.py fails any file that calls launch() itself.
+
+Never a profile folder (launch_persistent_context, user_data_dir, --user-data-dir; ORCH-1101): the headless shell
+ignores '--use-mock-keychain' once it keeps a profile on disk, fetches the cookie key from the login keychain and
+macOS asks the owner for his password. A context from launch() + new_context() keeps cookies in memory and never
+asks. A sign-in that must survive between runs goes in a storage_state file: new_context(storage_state=file).
 
     sys.path.insert(0, "<repo>/e2e"); import headless
     browser = headless.launch(p.chromium, headless=True)
-    ctx = headless.launch_persistent(p.chromium, profile_dir, viewport={...})
+    ctx = browser.new_context(viewport={...}, accept_downloads=True)
 
 JavaScript twin: e2e/headless.cjs.
 """
@@ -22,7 +27,3 @@ def with_args(opts: dict) -> dict:
 
 def launch(browser_type, **opts):
     return browser_type.launch(**with_args(opts))
-
-
-def launch_persistent(browser_type, user_data_dir, **opts):
-    return browser_type.launch_persistent_context(user_data_dir, **with_args(opts))

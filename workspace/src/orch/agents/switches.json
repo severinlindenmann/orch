@@ -1,0 +1,60 @@
+{
+  "adapters": {
+    "claude": {
+      "folder_switches": {
+        "file": ".claude/settings.local.json",
+        "format": "json",
+        "default": true,
+        "skill": {
+          "path": [
+            "skillOverrides"
+          ],
+          "map_value": "off"
+        },
+        "service": {
+          "path": [
+            "permissions",
+            "deny"
+          ],
+          "entry": "mcp__{server_id}__*"
+        },
+        "rules": {
+          "path": [
+            "claudeMdExcludes"
+          ],
+          "file": "{home}/.claude/CLAUDE.md",
+          "shown": "~/.claude/CLAUDE.md",
+          "words": "Your own rules for {label}, read in every folder on this computer."
+        }
+      }
+    },
+    "codex": {
+      "folder_switches": {
+        "file": ".codex/config.toml",
+        "format": "toml",
+        "user_file": "{tool_home}/config.toml",
+        "tool_home": {
+          "env": "CODEX_HOME",
+          "default": "{home}/.codex"
+        },
+        "trust": {
+          "path": [
+            "projects",
+            "{folder}",
+            "trust_level"
+          ],
+          "value": "trusted"
+        },
+        "service": {
+          "path": [
+            "mcp_servers"
+          ],
+          "table_set": {
+            "enabled": false
+          }
+        },
+        "skill_limit": "has no switch for one folder's skills (only for every folder at once)"
+      }
+    }
+  }
+}

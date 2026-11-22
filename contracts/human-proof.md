@@ -6,6 +6,14 @@
 > vouches for the person to an add-on page behind it (`X-Orch-Person`, a private key in the key folder). A person prints a
 > sign-in link for another computer with `orch start --print-launch-url` (never under an agent tool). See `pagesession.py`.
 
+> **Token login (ORCH-1035, owner request 20 Nov):** a person makes a login token on the command line
+> (`orch dashboard token new`, 30 days, refused under an agent tool like the printed link). The dashboard keeps only
+> its hash and, per browser, only hashes of the cookie and page key (`orch/dashlogin.py`). A token session (cookie +
+> page key) is a page session like the sign-in link's, and it is accepted on every dashboard server, also one an agent
+> started (no `active` check): the token is the person's proof. It is a bearer key (whoever holds it can act); the
+> profile a browser picks is attribution, not a verified identity. Revoking or the end of the token ends its sessions
+> on the next request.
+
 **Threat-model boundary (owner decision R1: Level 1, no OS sandbox).** An agent runs as the same OS user and can always read
 or write anything that user can. **Goal:** no agent can act as the person *through orch's own interfaces*: flags,
 environment, workspace files, the local page, the relay client. **Non-goal:** an agent that patches the orch install, edits

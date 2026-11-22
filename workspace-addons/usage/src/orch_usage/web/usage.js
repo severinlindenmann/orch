@@ -10,13 +10,13 @@
   const embedded = window.parent !== window;
   const PERIOD = {'5h': 'per 5 hours', week: 'per week', month: 'per month', until: 'until a date'};
   const TYPE = {subscription: 'Subscription', 'api-key': 'API key', 'helper-tool': 'Helper tool'};
-  const STATE = {'in-use': ['In use now', 'pill done'], ready: ['Ready', 'pill'], full: ['Full', 'pill needs'], off: ['Off', 'pill'], missing: ['Not found', 'pill needs']};
+  const STATE = {'in-use': ['In use now', 'pill done'], ready: ['Ready', 'pill'], full: ['Full', 'pill needs'], limit: ['Over its limit', 'pill needs'], off: ['Off', 'pill'], missing: ['Not found', 'pill needs']};
   let model = null, busy = false;
   // The toast names what was saved: the account's name and the kind of change.
   const nameOf = target => model?.accounts.find(a => a.id === target.split(':')[0])?.label || 'Account';
   const WHAT = {limit: t => nameOf(t) + ': limit', period: t => nameOf(t) + ': what the limit counts', order: t => nameOf(t) + ': order',
     on: t => nameOf(t) + ': on', off: t => nameOf(t) + ': off', end: t => nameOf(t) + ': end', switching: () => 'Switching by itself',
-    share: () => 'How work is spread'};
+    share: () => 'How work is spread', switcher: t => t === 'follow' ? 'Follow' : 'Take over'};
 
   function h(tag, props, ...kids) {
     const n = document.createElement(tag);
@@ -222,7 +222,10 @@
       t.append(h('span', {className: 'stat-value', text: String(s.starts)}),
         h('span', {className: 'stat-delta', text: s.pct + ' % of today · ' + (s.dollars == null ? 'in the subscription' : money(s.dollars))}));
     }
-    if (s.skipped) t.append(h('span', {className: 'pill', text: 'Skipped'}), h('span', {className: 'stat-delta', text: s.skipped}));
+    // ORCH-1468: one word per account on the page: the tile says what the account's own pill says (Over its limit, Off ...)
+    const st = STATE[model.accounts.find(a => a.id === s.id)?.state];
+    const word = st && st[0] !== 'Ready' && st[0] !== 'In use now' ? st : ['Skipped', 'pill'];
+    if (s.skipped) t.append(h('span', {className: word[1], text: word[0]}), h('span', {className: 'stat-delta', text: s.skipped}));
     if (s.kinds && s.kinds.length) t.append(h('span', {className: 'meta', text: s.kinds.join(', ')}));
     if (s.week_starts) {
       const days = (model.spread.days || []).map(d => stamp(d + 'T12:00:00Z', {time: false}));
@@ -235,7 +238,9 @@
     const head = sp.starts ? startsWord(sp.starts).replace('start', 'helper start') + ' · ' + money(sp.dollars) : 'No helper starts yet today';
     return h('section', {className: 'stack', 'aria-label': 'Today'},
       h('div', {className: 'row between'}, h('h2', {text: 'Today'}), h('span', {className: 'meta', text: head + (sp.sources.some(s => s.week_starts) ? ' · the line shows the last 7 days' : '')})),
-      h('div', {className: 'stat-row four', role: 'list'}, sp.sources.map(todayTile)));
+      h('div', {className: 'stat-row four', role: 'list'}, sp.sources.map(todayTile)),
+      // ORCH-943: every workspace on this computer counts toward the same limits
+      (sp.workspaces || []).length ? h('p', {className: 'meta', text: 'By workspace: ' + sp.workspaces.map(w => w.name + ' ' + startsWord(w.starts) + (w.dollars ? ' · ' + money(w.dollars) : '')).join('; ')}) : null);
   }
 
   // ---- how work is spread (ORCH-657): three ready-made spreads, the share as one sentence, Adjust for the rest ----
@@ -298,17 +303,23 @@
           h('span', {className: 'row'}, h('strong', {text: p.name}), on ? h('span', {className: 'pill done', text: 'In use'}) : null),
           h('span', {className: 'meta muted', text: p.what})));
     }));
+    // ORCH-1468: a spread set by hand is its own chosen card; a click opens the choices it was made with
     const own = v.share && !v.preset;
+    if (own) presets.append(h('button', {type: 'button', className: 'live-opt tall', 'aria-pressed': 'true', 'aria-controls': 'share-adjust',
+      onclick: () => { adjustOpen = true; draw(model); }},
+      h('span', {className: 'live-opt-t'},
+        h('span', {className: 'row'}, h('strong', {text: 'Your own spread'}), h('span', {className: 'pill done', text: 'In use'})),
+        h('span', {className: 'meta muted', text: 'Set with Adjust. It is written out below.'}))));
     const toggle = h('button', {type: 'button', className: 'btn outline sm', 'aria-controls': 'share-adjust', 'aria-expanded': String(adjustOpen),
       onclick: () => { adjustOpen = !adjustOpen; draw(model); }}, adjustOpen ? 'Hide the choices' : 'Adjust');
     return h('section', {className: 'stack', id: 'spread'},
-      h('div', {className: 'row between'}, h('h2', {}, 'How work is spread ', h('span', {className: 'badge', text: 'Preview'})), h('span', {className: 'meta', text: 'Saved now; helper starts follow it once Usage picks the account for each start.'})),
+      h('div', {className: 'row between'}, h('h2', {}, 'How work is spread ', h('span', {className: 'badge', text: 'Preview'})), h('span', {className: 'meta', text: 'Preview: saved, but helpers do not follow it yet. Until then they use the accounts in their order.'})),
       h('div', {className: 'card pad stack'},
         presets,
-        h('p', {className: 't-row', id: 'share-sentence', text: v.sentence}),
+        h('p', {className: 't-body', id: 'share-sentence', text: v.sentence}),
         v.counts.map(c => h('p', {className: 'meta muted', text: c})),
         v.warnings.map(w => h('div', {className: 'banner info', role: 'status'}, h('p', {className: 'grow', text: w}))),
-        h('div', {className: 'row'}, toggle, own ? h('span', {className: 'meta', text: 'Your own spread'}) : null)),
+        h('div', {className: 'row'}, toggle)),
       adjustOpen ? adjustPanel(v) : null);
   }
 
@@ -329,6 +340,18 @@
     note.textContent = m.switcher ? '' : 'Switching needs the account switcher on this computer. Usage shows and warns.';
     const subs = m.accounts.filter(a => a.type === 'subscription'), other = m.accounts.filter(a => a.type !== 'subscription');
     const parts = [];
+    // ORCH-943: another workspace on this computer switches the accounts; this one follows it, or a person takes over
+    const own = m.switcher_owner, elsewhere = !!(own && !own.mine && own.running && own.words);
+    $('auto-row').hidden = elsewhere;
+    $('owner-tag').hidden = !elsewhere;
+    $('owner-tag').textContent = elsewhere ? own.words.tag : '';
+    if (elsewhere && !own.followed) {
+      parts.push(h('div', {className: 'banner', role: 'status'}, h('div', {className: 'grow'},
+        h('h3', {text: own.words.title}), h('p', {text: own.words.text}),
+        h('div', {className: 'row space-top'},
+          h('button', {className: 'btn primary sm', type: 'button', text: own.words.follow, onclick: e => act('switcher', 'follow', e.currentTarget)}),
+          h('button', {className: 'btn outline sm', type: 'button', text: own.words.take, onclick: e => act('switcher', 'take-over', e.currentTarget)})))));
+    }
     if (m.all_at_limit) {
       parts.push(h('div', {className: 'banner attn', role: 'alert'}, h('div', {className: 'grow'},
         h('h3', {text: 'Every account is at or near its limit'}),

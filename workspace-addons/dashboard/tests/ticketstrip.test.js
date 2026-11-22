@@ -94,6 +94,49 @@ test('G2: a quiet ticket shows one line, "No news since" replaces "Updated"', ()
   assert.doesNotMatch(text(sentence), /Updated/);
 });
 
+test('ORCH-415: In progress with no helper says so in the pill and the line; the start is outlined with its cost; one start button (ORCH-1466)', () => {
+  const c = ctx({state:{runs:{}}});
+  const tree = c.detail({...base, status:'active', model:{name:'opus', by:'orch'}, estimate:{minutes:30, cost:1.2}});
+  const all = nodes(tree), sentence = all.find(n => n.attrs?.['data-key'] === 'ticket-sentence');
+  assert.equal(text(sentence), 'No helper is working on it right now.');
+  assert.match(text(all.find(n => /^status-/.test(n.attrs?.['data-key'] || ''))), /In progress/);
+  const go = nodes(all.find(n => n.attrs?.['data-key'] === 'ticket-start')).find(n => n.attrs?.['data-start'] === 'main');
+  assert.match(go.attrs.className, /\boutline\b/);
+  // the cheaper model is picked in the Start choice behind the caret, never a second start button beside it
+  assert.ok(!all.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper'));
+  const again = nodes(c.detail({...base, status:'active', sessions:[{id:'s1'}], model:{name:'opus', by:'orch'}}));
+  assert.ok(!again.some(n => n.tag === 'button' && /on Sonnet/.test(text(n))), 'no Continue on Sonnet');
+  assert.equal(text(all.find(n => n.attrs?.['data-key'] === 'ticket-start-cost')), 'On Opus · estimate about $1.20');
+  assert.ok(!all.some(n => n.tag === 'button' && /\bprimary\b/.test(n.attrs?.className || '') && /Continue|Start|Resume/.test(text(n))), 'no filled start');
+});
+
+test('ORCH-415: a helper that may be stuck never reads "No helper"; no plain start beside Start anyway', () => {
+  const c = ctx({state:{runs:{t_one:{running:false, state:'maybe-stale', claim:{agent:'claude'}}}}});
+  const all = nodes(c.detail({...base, status:'active', model:{name:'opus', by:'orch'}}));
+  assert.doesNotMatch(text(all.find(n => n.attrs?.['data-key'] === 'ticket-sentence')), /No helper/);
+  assert.ok(!all.find(n => n.attrs?.['data-key'] === 'ticket-start'), 'no plain Continue while it may be stuck');
+});
+
+test('ORCH-415: next to Reopen the Continue is plain, with no cost line or cheaper choice; Sonnet has no cheaper choice', () => {
+  const c = ctx({state:{runs:{}}});
+  const done = nodes(c.detail({...base, status:'done', model:{name:'opus', by:'orch'}}));
+  assert.ok(done.find(n => n.attrs?.['data-key'] === 'ticket-start'));
+  assert.ok(!done.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper'));
+  assert.ok(!done.find(n => n.attrs?.['data-key'] === 'ticket-start-cost'));
+  const sonnet = nodes(c.detail({...base, status:'active', model:{name:'sonnet', by:'orch'}}));
+  assert.ok(sonnet.find(n => n.attrs?.['data-key'] === 'ticket-start-cost'));
+  assert.ok(!sonnet.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper'));
+});
+
+test('ORCH-415: the cost line is read with the start choice for screen readers', () => {
+  const c = ctx({state:{runs:{}}});
+  const all = nodes(c.detail({...base, status:'active', model:{name:'opus', by:'orch'}}));
+  const cost = all.find(n => n.attrs?.['data-key'] === 'ticket-start-cost');
+  const pick = all.find(n => n.attrs?.['data-key'] === 'ticket-start-pick');
+  assert.equal(pick.attrs.role, 'group');
+  assert.equal(pick.children[0], cost, 'the cost line comes first in the group');
+});
+
 test('Needs you: the strip names the agent that asked (as Home does), not always "Helper" (ORCH-65)', () => {
   const c = ctx({state:{runs:{t_one:{claim:{agent:'manager', label:'Manager'}}}}});
   const tree = c.detail({...base, status:'waiting', questions:[{id:'q1', text:'Build the new card look?'}]});
@@ -160,6 +203,8 @@ test('ORCH-255/475: a start (Continue, or Start helper with no earlier session) 
   assert.ok(label({status:'waiting', questions:[{id:'q', text:'?'}]}).includes('Start helper'), 'Needs you');
   assert.ok(label({status:'review', sessions:[{id:'s'}]}).includes('Continue'), 'Check');
   assert.ok(label({status:'done', sessions:[{id:'s'}]}).includes('Continue'), 'Done');
+  assert.ok(label({status:'waiting', sessions:[{id:'s'}], waiting_on:{kind:'time', until:'2030-01-07T08:00:00Z'}}).includes('Continue'), 'Waiting on a time (ORCH-435)');
+  assert.ok(label({status:'waiting', sessions:[{id:'s'}], waiting_on:null}).includes('Continue'), 'Waiting on nothing (ORCH-435)');
   assert.ok(label({status:'active', sessions:[{id:'s'}]}).includes('Continue'), 'active, helper not running');
   const todo = label({status:'open'});
   assert.ok(todo.includes('Start helper') && !todo.includes('Continue'), 'To do keeps Start helper only');
@@ -168,4 +213,16 @@ test('ORCH-255/475: a start (Continue, or Start helper with no earlier session) 
 test('ORCH-255: a passed wake time on Home has a Continue button, not a command', () => {
   assert.deepEqual(helpers.needAction({kind:'overdue-wait', ticket:'t_one', tone:'warn'}), {label:'Continue', kind:'run'});
   assert.equal(helpers.needAction({kind:'overdue-wait'}).label, 'Open');
+});
+
+test('one start button (ORCH-1466): with Focus on, Open in Focus is in the ⋯ menu, never a second start in the header', () => {
+  const focus = t => h('button', {'data-key':'live-session-btn'}, 'Start in Focus');
+  const all = nodes(ctx({state:{runs:{}}, liveFocusButton:focus, liveLayerName:() => 'Focus'}).detail({...base, status:'active', model:{name:'opus', by:'orch'}}));
+  const actions = all.find(n => /ticket-strip-actions/.test(n.attrs?.className || ''));
+  assert.ok(!nodes(actions).some(n => n.attrs?.['data-key'] === 'live-session-btn'), 'no Start in Focus beside the start');
+  assert.equal(nodes(actions).filter(n => n.attrs?.['data-start'] === 'main').length, 1, 'one start button');
+  const menu = all.find(n => n.attrs?.['data-key'] === 'ticket-menu-t_one');
+  assert.equal(text(nodes(menu).find(n => n.attrs?.['data-key'] === 'ticket-open-layer')), 'Open in Focus');
+  const off = nodes(ctx({state:{runs:{}}}).detail({...base, status:'active'}));
+  assert.ok(!off.find(n => n.attrs?.['data-key'] === 'ticket-open-layer'), 'no Focus item while Focus is off');
 });

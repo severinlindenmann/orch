@@ -2,8 +2,6 @@
 names a fake (or a missing one) through ORCH_USAGE_SWITCHER."""
 
 import json
-import sys
-import textwrap
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -19,78 +17,6 @@ T0 = datetime(2026, 11, 16, 18, 0, 0, tzinfo=UTC)
 @pytest.fixture(autouse=True)
 def never_the_real_switcher(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_USAGE_SWITCHER", str(tmp_path / "no-switcher-here"))
-
-
-@pytest.fixture
-def switcher(tmp_path, monkeypatch):
-    """A fake `cswap` that lists from a file and really moves `active` on `switch N` (and logs every call)."""
-    d = tmp_path / "bin"
-    d.mkdir()
-    answer = tmp_path / "switcher.json"
-    calls = tmp_path / "switcher-calls.txt"
-    fail = tmp_path / "switcher-fails"
-    answer.write_text(json.dumps(switcher_data()), encoding="utf-8")
-    exe = d / "cswap"
-    exe.write_text(
-        textwrap.dedent(f"""\
-            #!{sys.executable}
-            import json, os, sys
-            a = sys.argv[1:]
-            open({str(calls)!r}, "a").write(" ".join(a) + "\\n")
-            if a == ["list", "--json"]:
-                sys.stdout.write(open({str(answer)!r}).read()); sys.exit(0)
-            if len(a) == 2 and a[0] in ("enable", "switch"):
-                if os.path.exists({str(fail)!r}):
-                    sys.exit(1)
-                if a[0] == "switch":
-                    d = json.load(open({str(answer)!r}))
-                    n = int(a[1])
-                    d["activeAccountNumber"] = n
-                    for x in d["accounts"]:
-                        x["active"] = x["number"] == n
-                    json.dump(d, open({str(answer)!r}, "w"))
-                sys.exit(0)
-            sys.exit(3)
-            """),
-        encoding="utf-8",
-    )
-    exe.chmod(0o755)
-    monkeypatch.setenv("ORCH_USAGE_SWITCHER", str(exe))
-
-    class Fake:
-        @staticmethod
-        def use(active=None, **acc):
-            """Set use per account: first=(5h, week), second=..., third=...; keeps the active one unless given."""
-            cur = json.loads(answer.read_text())
-            act = active if active is not None else cur["activeAccountNumber"]
-            data = switcher_data(active=act, **acc)
-            answer.write_text(json.dumps(data), encoding="utf-8")
-
-        @staticmethod
-        def reset_5h(n, at="2026-11-16T23:00:00+00:00"):
-            cur = json.loads(answer.read_text())
-            for x in cur["accounts"]:
-                if x["number"] == n:
-                    x["usage"]["fiveHour"]["resetsAt"] = at
-            answer.write_text(json.dumps(cur), encoding="utf-8")
-
-        @staticmethod
-        def active():
-            return json.loads(answer.read_text())["activeAccountNumber"]
-
-        @staticmethod
-        def calls():
-            return calls.read_text().splitlines() if calls.exists() else []
-
-        @staticmethod
-        def changes():
-            return [c for c in Fake.calls() if not c.startswith("list")]
-
-        @staticmethod
-        def failing(on=True):
-            fail.write_text("x") if on else fail.unlink(missing_ok=True)
-
-    return Fake
 
 
 def seed(cli):
@@ -447,18 +373,89 @@ def test_a_failed_switch_and_a_full_house_show_in_list_and_status(cli, switcher,
     assert any("Could not switch to TEAMCO" in w for w in out["warnings"])
 
 
-def test_a_switch_another_program_undoes_is_written_once_and_says_so(cli, switcher, ws):
-    """ORCH-591: three 'switched to' rows in a row hid that a second switcher kept moving the account back."""
+def test_a_second_switcher_is_noted_tried_once_more_then_usage_stops_and_asks(cli, switcher, ws):
+    """ORCH-591 / ORCH-612: another program switched back after every Usage switch (12 switches in 20 minutes).
+    Usage writes the outside switch, switches away once more, then stops and asks once which rule should win."""
     seed(cli)
     jrun(cli, "switching", "on", "--by", "human:owner")
     assert switching.look(ws, at(0))["did"] == "switched"
-    for n in (1, 2, 3):
-        switcher.use(active=1)  # the other program switches back to the first account
-        assert switching.look(ws, at(120 * n))["did"] == "switched"  # Usage switches again, quietly
+    assert switching.needs_rows(ws) == []
+    switcher.use(active=1)  # the other program switches back to the first account
+    assert switching.look(ws, at(120))["did"] == "switched"  # the one more try
+    switcher.use(active=1)  # and again
+    for n in range(2, 10):  # every later look stays: no fight
+        assert switching.look(ws, at(120 * n))["did"] == "held"
+    assert switcher.active() == 1
+    assert [c for c in switcher.changes() if c.startswith("switch")] == ["switch 3", "switch 3"]
     assert [h["what"] for h in usage_rows(ws)] == [
         "switched to TEAMCO",
-        "another program switched back to first",
+        "another program switched to first",
+        "switched to TEAMCO",
+        "stopped switching: another program keeps switching back to first",
     ]
+    rows = switching.needs_rows(ws)
+    assert len(rows) == 1  # asked once, not once per look
+    r = rows[0]
+    assert r["source"] == "usage" and r["tone"] == "needs-you" and "Which rule should win?" in r["text"]
+    assert [(x["verb"], x["target"]) for x in r["actions"]] == [("switching", "on"), ("switching", "off")]
+    code, out = jrun(cli, "needs")
+    assert code == 0 and out == rows
+
+
+def test_answer_usage_wins_switches_again_and_asks_again_only_after_a_new_fight(cli, switcher, ws):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switching.look(ws, at(0))
+    for n in (1, 2):
+        switcher.use(active=1)
+        switching.look(ws, at(120 * n))
+    assert switching.held(ws)
+    code, out = jrun(cli, "act", "switching", "on", "--by", "human:owner")  # the button "Usage's limits win"
+    assert code == 0 and out["changed"] is True
+    assert switching.needs_rows(ws) == []
+    assert switching.look(ws, at(400))["did"] == "switched"
+    assert "switching again: Usage's limits win" in [h["what"] for h in store.history(ws)]
+    switcher.use(active=1)  # the other program still runs: one more try, then ask again
+    assert switching.look(ws, at(500))["did"] == "switched"
+    switcher.use(active=1)
+    assert switching.look(ws, at(600))["did"] == "held"
+    assert len(switching.needs_rows(ws)) == 1
+
+
+def test_answer_the_other_program_wins_turns_switching_off(cli, switcher, ws):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switching.look(ws, at(0))
+    for n in (1, 2):
+        switcher.use(active=1)
+        switching.look(ws, at(120 * n))
+    code, _ = jrun(cli, "act", "switching", "off", "--by", "human:owner")
+    assert code == 0
+    assert switching.needs_rows(ws) == []
+    assert switching.look(ws, at(400))["did"] == "would switch"
+    assert switcher.active() == 1
+
+
+def test_a_held_account_is_let_go_when_there_is_nothing_to_fight_about(cli, switcher, ws):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switching.look(ws, at(0))
+    for n in (1, 2):
+        switcher.use(active=1)
+        switching.look(ws, at(120 * n))
+    assert switching.held(ws)
+    switcher.use(active=1, first=(10, 10))  # first's use dropped (a reset): staying is right
+    assert switching.look(ws, at(400))["did"] == "stay"
+    assert switching.needs_rows(ws) == []
+
+
+def test_without_a_second_switcher_nothing_is_noted(cli, switcher, ws):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    assert switching.look(ws, at(0))["did"] == "switched"
+    for n in range(1, 5):
+        assert switching.look(ws, at(60 * n))["did"] == "stay"
+    assert [h["what"] for h in usage_rows(ws)] == ["switched to TEAMCO"]
 
 
 def test_a_switch_that_did_not_change_the_account_in_use_is_not_written_as_done(
@@ -483,7 +480,7 @@ def test_nothing_secret_is_written(cli, switcher, ws):
     seed(cli)
     jrun(cli, "switching", "on", "--by", "human:owner")
     switching.look(ws, at(0))
-    d = ws / ".orch/addons/usage"
+    d = store.usage_dir(ws)
     text = "".join(p.read_text() for p in d.iterdir() if p.is_file())
     assert "@" not in text and "example.test" not in text
 
@@ -500,7 +497,7 @@ def test_loop_looks_every_30_seconds_and_stops_when_usage_is_turned_off(cli, swi
     )
     assert slept == [30, 30, 30]
     assert (
-        json.loads((ws / ".orch/addons/usage/switching.json").read_text())["last"]["at"]
+        json.loads((store.usage_dir(ws) / "switching.json").read_text())["last"]["at"]
         == "2026-11-16T18:01:00Z"
     )
 
@@ -517,7 +514,10 @@ def test_loop_reads_its_pace_from_config_and_survives_a_bad_look(cli, ws, monkey
     switching.run_forever(
         ws, clock=lambda: T0, sleep=slept.append, log=logs.append, active=lambda r: next(on)
     )
-    assert slept == [45, 45] and logs[0] == "skipped: OSError: disk"
+    assert slept == [45, 45] and logs[:2] == [
+        "This workspace switches the accounts.",
+        "skipped: OSError: disk",
+    ]
 
 
 def test_start_status_stop(ws, cli):
@@ -593,7 +593,6 @@ def test_an_account_turned_off_in_the_switcher_is_never_a_target():
 
 
 def test_reader_keeps_the_switchers_disabled_flag():
-    from conftest import switcher_data
 
     from orch_usage.readers import cswap
 
@@ -645,3 +644,34 @@ def test_a_look_with_a_failing_switcher_says_it_did_not_answer(cli, fake_switche
     assert code == 0 and d["switcher"] is True and d["did"] == "nothing"
     code, out, _ = cli("run", "--once")
     assert "not installed" not in out and "looks again" in out
+
+
+def test_an_outside_change_usage_stays_on_ends_that_fight(cli, switcher, ws):
+    """ORCH-612 review: a fight count left behind made the next, new fight stop without the one more try."""
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    assert switching.look(ws, at(0))["did"] == "switched"
+    mem = switching._read(switching.memory_path(ws))
+    mem["outside"] = {"to": mem["mine"]["to"], "at": switching._iso(at(0)), "count": 1}
+    switching._write(switching.memory_path(ws), mem)
+    assert switching.look(ws, at(60))["did"] == "stay"  # Usage is happy on this account
+    assert "outside" not in switching._read(switching.memory_path(ws))
+
+
+# ---------------------------------------------------------------- budget for orch's dispatcher (ORCH-507)
+
+
+def test_each_look_writes_the_budget_of_the_accounts_that_are_on(cli, switcher, ws):
+    seed(cli)
+    assert jrun(cli, "off", "second", "--by", "human:owner")[0] == 0
+    switching.look(ws, at(0))
+    b = json.loads(switching.budget_path(ws).read_text())
+    assert b["schema"] == "orch.budget/1" and b["at"] == "2026-11-16T18:00:00Z"
+    rows = sorted(b["accounts"], key=lambda r: r["week_cap"])
+    # TEAMCO (week limit 70 %) and first (100 %); second is off and left out. Only numbers and times.
+    assert [(r["week_used"], r["week_cap"], r["short_used"], r["short_cap"]) for r in rows] == [
+        (44.0, 70.0, 23.0, 92.0),
+        (80.0, 100.0, 97.0, 95.0),
+    ]
+    assert all(r["week_resets_at"].startswith("2026-11-18T19:59:59") for r in rows)
+    assert "example.test" not in switching.budget_path(ws).read_text()

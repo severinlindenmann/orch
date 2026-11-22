@@ -46,6 +46,21 @@ test('a finished ticket outside the live state is found once read; an unknown on
   assert.equal(await c.loadFullTicket('t_nope'), null);
   assert.equal(c.fullMissing.has('t_nope'), true);
 });
+test('the server answers an unknown ticket with ticket null (no 404): marked missing too', async () => {
+  const c = setup([], {'/api/ticket/t_gone': {ticket:null}});
+  assert.equal(await c.loadFullTicket('t_gone'), null);
+  assert.equal(c.fullMissing.has('t_gone'), true);
+});
+test('a Looks good still being saved on the live row shows Done on the whole copy, which stays as read', async () => {
+  const c = setup([{id:'t_a', slim:true, status:'review', updated_at:'2026-11-18T10:00:00Z'}],
+    {'/api/ticket/t_a': {ticket:{id:'t_a', status:'review', updated_at:'2026-11-18T10:00:00Z', history:[1, 2]}}});
+  await c.loadFullTicket('t_a');
+  c.state.tickets = [{id:'t_a', slim:true, status:'done', accept_saving:true, accept_was:'review', updated_at:'2026-11-18T10:00:00Z'}];
+  const t = c.ticketOf('t_a');
+  assert.equal(t.status, 'done'); assert.equal(t.accept_saving, true); assert.equal(t.history.length, 2);
+  c.state.tickets = [{id:'t_a', slim:true, status:'review', updated_at:'2026-11-18T10:00:00Z'}];  // Undo: the server's row again
+  assert.equal(c.ticketOf('t_a').status, 'review');
+});
 test('a shared copy never reads', () => {
   const c = setup([], {}); c.snapshot = true;
   assert.equal(c.loadFullTicket('t_a'), null);

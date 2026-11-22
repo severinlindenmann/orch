@@ -103,6 +103,14 @@
         { "if": { "properties": { "type": { "const": "image" } } }, "then": { "required": ["x", "y"], "not": { "required": ["page"] } } }
       ]
     },
+    "team": {
+      "type": "object", "additionalProperties": false, "minProperties": 1,
+      "description": "Phone texts only (team chat step 2, ORCH-1175; relay-api.md Phone app v3): the person's choice in a ticket chat, set by the relay from POST /v1/phone/send. add = a workspace to add to the ticket chat; mentions = the members asked with @ (ws ids picked from the @ list, never parsed text). The relay refuses it on a workspace's message. The ticket's workspace adds only a workspace it may add and keeps only current members in mentions; an older orch ignores it (the text is then an ordinary message).",
+      "properties": {
+        "add": { "type": "string", "pattern": "^ws_[a-z0-9]{10}$" },
+        "mentions": { "type": "array", "minItems": 1, "maxItems": 7, "uniqueItems": true, "items": { "type": "string", "pattern": "^ws_[a-z0-9]{10}$" } }
+      }
+    },
     "address": {
       "type": "string",
       "pattern": "^(ws_[a-z0-9]{10}|ph_[a-z0-9]{10}|sub_[a-z0-9]{10}|phones|admin|webhook:wh_[a-z0-9]{10})$",
@@ -116,6 +124,7 @@
         "text": { "type": "string", "minLength": 1, "maxLength": 20000 },
         "client_id": { "$ref": "#/$defs/client_id" },
         "human_review": { "type": "boolean", "description": "Optional, phone texts only (ORCH-424). The person's Human review needed choice for the ticket this text starts: read only on a new topic (no ticket, no general); a text that continues a ticket or goes to General ignores it. No field = the workspace default (on; off while the Auto Reviewer is on)." },
+        "team": { "$ref": "#/$defs/team" },
         "general": { "type": "boolean", "description": "true = the workspace's General conversation (no ticket; a text with general true must not carry ticket). Its only update kinds are ack and working, with reply_to = the phone's General text (the Started / Working receipt, relay-api.md). Rule (relay-api.md, General vs topics): a workspace text without ticket is General whether or not general is set; a phone text without ticket and without general is a pending new topic until an ack with reply_to = its id names the ticket. The relay never rewrites stored texts." },
         "speak": {
           "type": "object", "additionalProperties": false, "required": ["lang"],
@@ -395,8 +404,12 @@
               "at": { "type": "string", "format": "date-time", "pattern": "Z$" },
               "who": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Display name: the person's name or the agent's (e.g. Claude)." },
               "role": { "enum": ["agent", "person"] },
-              "text": { "type": "string", "minLength": 1, "maxLength": 1000 }
-            }
+              "text": { "type": "string", "minLength": 1, "maxLength": 1000 },
+              "chat": { "const": true, "description": "Optional. The line is a real chat message (history chat_message): the phone's ticket chat shows it as a bubble. Absent = an ordinary history line." },
+              "id": { "type": "string", "pattern": "^m_[a-z0-9]{16}$", "description": "Optional, chat lines only. The line's stable id (contracts/history.md Chat lines); equal to the relay message id when the message also came as one, so the phone shows it once." },
+              "name": { "type": "string", "minLength": 1, "maxLength": 60, "description": "Optional, chat lines only. The name the person typed (by_name), shown as typed and marked not signed in. Never an identity." }
+            },
+            "dependentRequired": { "id": ["chat"], "name": ["chat"] }
           }
         },
         "refs": {

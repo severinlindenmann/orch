@@ -129,7 +129,7 @@ def test_live_state_holds_open_and_recent_with_counts_and_parts(tmp_path):
     s = data.load_state(tmp_path, with_settings=True)
     by = {t["id"]: t for t in s["tickets"]}
     assert set(by) == {"t_epic01", "t_part02", "t_recent"}
-    assert s["counts"] == {"total": 5, "by_status": {"active": 1, "open": 1, "dropped": 3}}
+    assert s["ticket_counts"] == {"total": 5, "by_status": {"active": 1, "open": 1, "dropped": 3}}
     assert by["t_epic01"]["parts_total"] == 2 and by["t_epic01"]["children"] == ["t_part02", "t_part01"]
     assert by["t_part02"]["slim"] is True and len(by["t_part02"]["history"]) == data.HISTORY_TAIL
     assert "slim" not in by["t_recent"]
@@ -164,7 +164,7 @@ def _get(url):
 def test_http_ticket_route(server, ws):
     code, body = _get(server + "/api/ticket/t_7k3f9q")
     assert code == 200 and json.loads(body)["ticket"]["id"] == "t_7k3f9q"
-    assert _get(server + "/api/ticket/t_nothere1")[0] == 404
+    assert _get(server + "/api/ticket/t_nothere1") == (200, b'{"ticket":null}')  # no 404: no console error
     assert _get(server + "/api/ticket/..%2F..%2Fetc")[0] in (403, 404)
 
 
@@ -198,6 +198,11 @@ def test_index_rows_are_kept_until_a_ticket_file_changes(tmp_path, monkeypatch):
     mod = types.ModuleType("orch.ticketindex")
     mod.rows = rows
     monkeypatch.setitem(sys.modules, "orch.ticketindex", mod)
+    import orch
+
+    # `from orch import ticketindex` takes the package attribute once the real module was imported (another
+    # import on the way in does that), not sys.modules
+    monkeypatch.setattr(orch, "ticketindex", mod, raising=False)
     monkeypatch.setattr(data, "_ROWS", {})
     _write(tmp_path, "t_aaaaaa", "open", 0)
     first = data._index_rows(tmp_path)
