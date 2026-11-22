@@ -320,3 +320,49 @@ async fn shared_skill_needs_take_the_shortest_path() {
     added.sort();
     assert_eq!(added, vec!["b", "c", "d", "x", "y", "z"]);
 }
+
+#[tokio::test]
+async fn needed_skills_stop_at_a_loop_and_after_four_levels() {
+    let t = start().await;
+    let b = t.add_ws("Home").await;
+    // a loop: loop-a needs loop-b, loop-b needs loop-a
+    put_skill(
+        &t,
+        "loop-a",
+        "---\nname: loop-a\ndescription: d\nmetadata:\n  requires-skills: \"loop-b\"\n---\n",
+    )
+    .await;
+    put_skill(
+        &t,
+        "loop-b",
+        "---\nname: loop-b\ndescription: d\nmetadata:\n  requires-skills: \"loop-a\"\n---\n",
+    )
+    .await;
+    // a chain s0 -> s1 -> ... -> s5: only four levels come along
+    for i in 0..6 {
+        let need = if i < 5 {
+            format!("metadata:\n  requires-skills: \"s{}\"\n", i + 1)
+        } else {
+            String::new()
+        };
+        put_skill(
+            &t,
+            &format!("s{i}"),
+            &format!("---\nname: s{i}\ndescription: d\n{need}---\n"),
+        )
+        .await;
+    }
+    let path = format!("/admin/api/shared/assign/{}", b.id);
+    let (s, v) = t
+        .admin_json(
+            "PUT",
+            &path,
+            Some(json!({"skills": ["loop-a", "s0"], "mcp": [], "credentials": []})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    let mut added: Vec<String> = serde_json::from_value(v["added"].clone()).unwrap();
+    added.sort();
+    assert_eq!(added, vec!["loop-b", "s1", "s2", "s3", "s4"]);
+    assert_eq!(v["missing"], json!([]));
+}
