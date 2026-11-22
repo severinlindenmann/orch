@@ -127,7 +127,11 @@ def _pr_state(r: dict, repair: str = "", has_ticket: bool = True) -> tuple[int, 
         return NEEDS, "Checks failed", f"{what} {repair or 'Open the ticket to fix it.'}"
     if status == "conflict" or merge == "conflict":
         if not has_ticket:
-            return NEEDS, "Has a conflict", "No ticket is linked: make a ticket for it so a helper can sort out the conflict."
+            return (
+                NEEDS,
+                "Has a conflict",
+                "No ticket is linked: make a ticket for it so a helper can sort out the conflict.",
+            )
         return NEEDS, "Has a conflict", "Open the ticket to sort out the conflict."
     if status == "checks running":
         return OTHER, checks_text(checks).replace("Running", "Checks running"), ""
