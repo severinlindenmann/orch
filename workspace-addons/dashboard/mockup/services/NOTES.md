@@ -22,8 +22,9 @@ the panel with "All services" to go back.
 
 - No "Details" toggles (owner rule kept). The panel shows it all.
 - The panel shows, top to bottom: state and since when, Starts by itself with its words ("Yes, after
-  this computer restarts" / "No, you start it by hand"), made by, health check, Depends on it, last log lines,
-  and Remove at the bottom, set apart, in the danger style. Open log jumps to the log lines in the panel.
+  this computer restarts" / "Only after a crash, not after this computer restarts"), made by, health check, Depends on it, last log lines,
+  and Remove at the bottom, set apart, in the danger style. Open log shows only up to 720 px, where it jumps to the log lines further down the panel; on a wide screen the
+  log lines are already in view, so there is no Open log button there (ORCH-935).
 - A found service'spanel shows what was found and only Manage with orch. Once managed it reads "Found,
   now managed".
 - Button order: Start or Stop, then Restart, then Open log.

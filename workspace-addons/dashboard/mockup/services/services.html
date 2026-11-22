@@ -15,10 +15,10 @@
 (()=>{const S=servicesDemo,h=S.h,view=document.querySelector('[data-view="loaded"]'),phone=matchMedia('(max-width:720px)');
 let chosen=new URLSearchParams(location.search).get('svc');
 const choose=(id,focusPanel)=>{chosen=id;S.param('svc',id);draw();if(focusPanel)document.querySelector(id?'#svc-panel':'.focus-list a')?.focus({preventScroll:!phone.matches})};
-const dot=s=>s.state==='failing'?h('span',{class:'dot-err','aria-hidden':'true'}):s.state==='stopped'?window.UI.statusIcon('todo'):h('span',{class:'dot-ok','aria-hidden':'true'});
+const dot=s=>s.state==='failing'?h('span',{class:'dot-err','aria-hidden':'true'}):S.hung(s)?h('span',{class:'dot-warn','aria-hidden':'true'}):s.state==='stopped'?window.UI.statusIcon('todo'):h('span',{class:'dot-ok','aria-hidden':'true'});
 const item=s=>{const cur=chosen===s.id;return h('div',{class:'list-row'+(cur?' cur':'')},dot(s),
  h('a',{class:'grow plain-link',href:'?svc='+s.id,'aria-current':cur?'true':null,'data-k':s.id+':pick',onclick:e=>{e.preventDefault();choose(s.id,true)}},
-  s.name,h('span',{class:'subline'},s.state?S.WORD[s.state]:'Running, not managed')),
+  s.name,h('span',{class:'subline'},S.listWord(s))),
  s.state&&!s.question?S.mainButton(s):null)};
 const list=()=>h('nav',{class:'focus-list','aria-label':'Services'},
  h('div',{class:'card-h'},h('h2',null,'Managed with orch'),h('span',{class:'grow'}),h('span',{class:'meta',role:'status'},S.summary().split(' · ').slice(1).join(' · '))),
