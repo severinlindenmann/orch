@@ -188,8 +188,15 @@ The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
 - **Only trusted runs**: a push to develop, the nightly run, a manual run and a release pull request. Pull requests
   into develop, queue groups and forks stay on GitHub's machines; the runner's job hook refuses them again.
 - **One setting moves them back**: repository variable `EDGE_RUNNER`. `orch-edge` = orch edge; anything else or
-  unset = GitHub's machines (the default), with every job exactly as before. `orch-edge-manual` sends only manual
-  runs (Actions > CI > Run workflow) there: to measure a run on orch edge before develop pushes go there too.
+  unset = GitHub's machines (the default), with every job exactly as before. `orch-edge-long` (the setting in use)
+  sends only the long runs that wait for nobody there: the nightly runs (ci.yml and the full e2e.yml) and manual
+  runs (stress tests, measurements); develop pushes and pull requests stay on GitHub's machines. The release
+  keeper's test runs (`release-test/...` branches) always run on GitHub's machines, whatever the setting: they
+  decide a release (22 Nov one failed on orch edge and blocked release 42). Clock jobs get twice their time limits
+  on orch edge (2 test workers per job there).
+  Measured 22 Nov with 3 runners: a develop run takes 26 min on orch edge against about 10 on GitHub's machines,
+  so every develop verdict would be 2.5x slower (manager for the owner: keep develop on GitHub; the repository is
+  public, GitHub's machines cost nothing). `orch-edge-manual` sends only manual runs (Actions > CI > Run workflow).
 - **Offline = GitHub by itself**: the route reads the runner list with the same secret `MAC_RUNNER_STATUS_TOKEN`.
   No secret, no answer or no online runner with the label `orch-edge`: GitHub's machines.
 - **Several runners, a develop push only when all are idle**: orch edge runs 3 runners side by side (each one job at

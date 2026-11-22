@@ -41,6 +41,7 @@ NAME=${ORCH_RUNNER_NAME:-orch-edge-$(hostname -s)}
 VER=2.338.2; SHA=670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945
 TAR=actions-runner-linux-arm64-$VER.tar.gz
 PW_VER=1.55.0   # e2e/walkthrough/package-lock.json
+PW_E2E_VER=1.64.1   # .github/workflows/e2e.yml
 B=/usr/local/orch-edge-runner; HOOKS=$B
 UNIT=/etc/systemd/system/orch-edge-runner.service; LOOP=/etc/systemd/system/orch-edge-runner-loop.service
 SRC=$(cd "$(dirname "$0")" && pwd)
@@ -91,6 +92,13 @@ if [ "${1:-}" = register ]; then
 fi
 [ -z "${1:-}" ] || { echo "usage: sudo bash $0 [register]" >&2; exit 2; }
 
+# a running job is never killed by a re-install: stopping the runners would fail it in the middle (22 Nov: a re-install
+# failed three jobs of the release keeper's test run). ORCH_SETUP_FORCE=1 stops them anyway. A job GitHub hands a
+# runner in the seconds between this check and the stop below is still lost: re-install when no run is due.
+if [ "${ORCH_SETUP_FORCE:-}" != 1 ] && pgrep -x Runner.Worker >/dev/null 2>&1; then
+  echo "A CI job is running on orch edge right now; run setup again when every runner is idle (or ORCH_SETUP_FORCE=1)." >&2
+  exit 1
+fi
 # nothing of the runners runs while setup changes them (each loop also holds a lock, runner-loop.sh)
 stop_all
 
@@ -144,6 +152,8 @@ rm -rf /srv/orch-ci
 
 echo "== 3/6 Chromium's system libraries (Playwright $PW_VER)"
 npx -y "playwright@$PW_VER" install-deps chromium >/dev/null 2>&1 || echo "  note: Playwright could not install Chromium's libraries; the Services click-through may fail here"
+# the full e2e run (e2e.yml, the nightly run on orch edge with EDGE_RUNNER=orch-edge-long) pins its own version
+npx -y "playwright@$PW_E2E_VER" install-deps chromium >/dev/null 2>&1 || echo "  note: Playwright $PW_E2E_VER could not install Chromium's libraries; the full e2e run may fail here"
 
 echo "== 4/6 hooks, bash, network rule and loop in $B (owned by root)"
 [ -L "$B" ] && { echo "$B is a symlink; stopped." >&2; exit 1; }
