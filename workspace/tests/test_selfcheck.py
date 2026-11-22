@@ -99,12 +99,12 @@ def test_each_running_page_server_is_signed_in_to(tmp_path):
 
     def signs_in(root, server, base):
         seen.append((server, base))
-        return None if server == "alpha" else f"{server} sign-in failed (answer 403)"
+        return None if server == "alpha" else f"{server} could not sign in"
 
     two = [("alpha", "http://127.0.0.1:1"), ("beta", "http://127.0.0.1:2")]
     got = {r["name"]: r for r in selfcheck.run_checks(tmp_path, Fake(), lambda r: two, signs_in)}
     assert seen == two
-    assert got["Alpha sign-in"]["ok"] and got["Beta sign-in"]["why"] == "beta sign-in failed (answer 403)"
+    assert got["Alpha sign-in"]["ok"] and got["Beta sign-in"]["why"] == "beta could not sign in"
 
 
 def test_failure_after_a_newer_release_keeps_the_go_back_card(tmp_path):
@@ -165,7 +165,7 @@ def test_a_page_server_lets_a_person_in(monkeypatch, tmp_path):
     assert calls[-1] == (f"{base}/session", {"token": "t"}, base)
     assert (
         selfcheck._signs_in(tmp_path, "alpha", base, http, lambda *a: 403)
-        == "alpha sign-in failed (answer 403)"
+        == "alpha could not sign in"
     )
     assert (
         selfcheck._signs_in(tmp_path, "alpha", base, http, lambda *a: -1) is None

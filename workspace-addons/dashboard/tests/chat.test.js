@@ -376,3 +376,17 @@ test('the Contacts link shows only while the add-on with the phone panel is on, 
   assert.equal(link.attrs.href, '#addon/relay');
   assert.doesNotMatch(JSON.stringify(c.chatHeader(null, false)), /#settings/);
 });
+
+test('beside the list of chats the helper conversation says its name at its top (report r-1122-0539)', () => {
+  const c = context();
+  c.state.addons = [{name:'relay', dashboard:{label:'Contacts', panel:'phone'}}];
+  c.state.chat = {day:'2026-11-11', activity:{running:2}, messages:[]};
+  vm.runInContext('chatRich = () => true', c);
+  const head = c.chatHeader(null, false);
+  const top = nodes(head, n => n.attrs?.className === 'chat-head-top');
+  assert.equal(top.length, 1);
+  assert.equal(nodes(top[0], n => n.attrs?.['data-key'] === 'chat-title')[0].textContent, 'Your helper');
+  assert.equal(nodes(top[0], n => /chat-back/.test(n.attrs?.className || '')).length, 1, 'one way back to the list on a phone');
+  assert.equal(nodes(head, n => /chat-back/.test(n.attrs?.className || '')).length, 1, 'never a second back button');
+  assert.match(nodes(head, n => n.attrs?.className === 'chat-head-row')[0].textContent, /Contacts/);
+});

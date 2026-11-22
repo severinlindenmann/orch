@@ -15,7 +15,8 @@
 @keyframes orch-spin{to{transform:rotate(360deg)}}
 .pill{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:none;padding:2px 10px 2px 6px;border:1px solid var(--border);border-radius:99px;font-size:13px;line-height:18px;background:var(--surface-2);color:var(--text)}
 .pill.needs{color:var(--warning)}.pill.working{color:var(--working)}.pill.done{color:var(--success)}
-.dot-ok,.dot-warn,.dot-work,.dot-err{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.dot-ok,.dot-warn,.dot-work,.dot-err,.dot-off{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.dot-off{box-sizing:border-box;border:1.5px solid var(--text-faint);background:none}
 .dot-ok{background:var(--success)}.dot-warn{background:var(--warning)}.dot-work{background:var(--working)}.dot-err{background:var(--danger)}
 
 /* Select trigger look for static mockups and non-native pickers (the real <select> is enhanced by select.js) */

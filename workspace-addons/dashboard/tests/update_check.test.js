@@ -62,3 +62,12 @@ test('Go back starts the normal update with that release number; Not now dismiss
   assert.match(between(settings, 'async function updStart', 'window.addEventListener'), /\^\[1-9\]\[0-9\]\{0,5\}\(\\\.\[1-9\]\[0-9\]\{0,3\}\)\?\$/);
   assert.match(home, /backgroundBanner\(\), updateCheckCard\(\), autoUpdateNote\(\)/);
 });
+
+test('a sign-in that failed names the page and what to do, never an answer code (report r-1122-0539)', () => {
+  for (const why of ['insights sign-in failed (answer 403)', 'insights could not sign in']) {
+    const view = card({at:1, release:40, back_to:null, failed:[{name:'Insights sign-in', why}, {why:'the usage page does not answer'}]});
+    assert.match(text(view), /these do not work: Insights could not sign in; the usage page does not answer\. Restart orch to fix it\./);
+    assert.doesNotMatch(text(view), /answer \d|403/);
+  }
+  assert.doesNotMatch(text(card({at:1, failed:[{why:'the usage page does not answer'}]})), /Restart/);
+});

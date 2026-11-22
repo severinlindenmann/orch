@@ -109,7 +109,7 @@ def _signs_in(root: Path, server: str, base: str, http=_http, sign_in=_sign_in) 
     code = sign_in(root, server, base, http)
     if code in (-1, 200):  # -1: a helper ran the update, the page answering is what can be checked
         return None
-    return f"{server} sign-in failed (answer {code or 'none'})"
+    return f"{server} could not sign in"
 
 
 def _active(root: Path, run: Runner) -> list[dict] | None:

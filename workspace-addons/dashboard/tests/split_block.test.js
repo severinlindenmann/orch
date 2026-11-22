@@ -131,3 +131,15 @@ test("a service's address opens the app in a new tab (ORCH-846)", () => {
   assert.equal(a.getAttribute('target') ?? a.target, '_blank');
   assert.match(a.getAttribute('rel') ?? a.rel, /noopener/);
 });
+
+test('every state dot a split row draws has its size in the kit, so names line up running or stopped (report r-1122-0539)', () => {
+  const kit = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8');
+  const map = web('blocks.js').match(/const STATE_DOT = (\{[^}]*\})/);
+  assert.ok(map, 'STATE_DOT is where the test expects it');
+  const classes = [...new Set(Object.values(Function('return ' + map[1])()))];
+  const sized = kit.split('}').find(r => /width:8px;height:8px/.test(r) && /\.dot-ok\b/.test(r)) || '';
+  for (const c of classes) {
+    assert.match(sized, new RegExp('\\.' + c + '(?![\\w-])'), c + ' has the 8 px size of the other dots');
+  }
+  assert.match(kit, /\.dot-off\{[^}]*border:[^}]*\}/, 'stopped is a hollow dot');
+});
