@@ -218,11 +218,20 @@ def _default_signals() -> None:
             signal.signal(getattr(signal, sig), signal.SIG_DFL)
 
 
-def _call(root: Path, name: str, m: dict, sub: str, launch: dict[str, str] | None = None) -> dict:
+RESTART_ENV = "ORCH_SERVICE_RESTART"  # set to "1" on the stop of a restart: the add-on comes straight back
+
+
+def _call(
+    root: Path, name: str, m: dict, sub: str, launch: dict[str, str] | None = None, restart: bool = False
+) -> dict:
     """`launch`: overrides over the caller's environment (a restart: the system's HOME and ORCH_HOME, see
-    launchenv). Nothing recorded is replayed."""
+    launchenv). Nothing recorded is replayed. `restart`: this stop is half of a restart (an add-on was added,
+    removed or updated); the add-on may keep what a real stop would end (Focus keeps the runs it started)."""
     base = launchenv.apply(dict(os.environ), launch) if launch else dict(os.environ)
     env = {**base, "ORCH_ADDON": name, "ORCH_ROOT": str(root.resolve()), "ORCH_BIN": addons.orch_bin()}
+    env.pop(RESTART_ENV, None)
+    if restart and sub == "stop":
+        env[RESTART_ENV] = "1"
     env.pop("ORCH_PREFERRED_PORT", None)
     if sub == "start" and (pref := last_port(root, name)):
         env["ORCH_PREFERRED_PORT"] = str(pref)  # sticky ports: the add-on tries this one first
@@ -327,21 +336,21 @@ def _start(root: Path, only: set[str] | None, envs: dict[str, dict[str, str]]) -
     return rows
 
 
-def stop(root: Path, only: set[str] | None = None) -> list[dict]:
+def stop(root: Path, only: set[str] | None = None, restart: bool = False) -> list[dict]:
     with locked():
-        return _stop(root, only)
+        return _stop(root, only, restart)
 
 
-def _stop(root: Path, only: set[str] | None = None) -> list[dict]:
+def _stop(root: Path, only: set[str] | None = None, restart: bool = False) -> list[dict]:
     """Stop every background process of this workspace. An add-on that is no longer on here is not run:
-    its process sees that and ends by itself."""
+    its process sees that and ends by itself. `restart`: they are started again right after (see _call)."""
     root = root.resolve()
     workspace_rows(root)  # notes that they were running now
     rows = []
     for name, m in _services(root).items():
         if only is not None and name not in only:
             continue
-        res = _call(root, name, m, "stop")
+        res = _call(root, name, m, "stop", restart=restart)
         row = {"addon": name, "stopped": bool(res.get("stopped"))}
         if "error" in res:
             row["error"] = _printable(res["error"])

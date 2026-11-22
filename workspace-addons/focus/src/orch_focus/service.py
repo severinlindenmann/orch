@@ -182,18 +182,48 @@ def start(root: Path, port: int | None = None) -> dict:
     return {"pid": pid, "port": bound}
 
 
-def stop(root: Path) -> str:
-    """ "stopped", "not running", or "not verified" (a pid file that is not our Focus: nothing is signalled)."""
+RESTART_ENV = "ORCH_SERVICE_RESTART"  # core sets "1" when this stop is half of a restart (an add-on changed)
+RESTART_MARK_SECONDS = 120  # an older mark is left over from a stop that never reached the server
+
+
+def _restart_mark(root: Path) -> Path:
+    return _dir(root) / "restarting.json"
+
+
+def take_restart_mark(root: Path, now: float | None = None, pid: int | None = None) -> bool:
+    """True when the server ends because core restarts it (owner, ORCH-1443: a restart keeps the runs Focus
+    started; only Ctrl+C or a real stop ends them). The mark is used once and removed."""
+    p = _restart_mark(root)
+    rec = runfiles.read_json(p)
+    runfiles.remove(p)
+    at = (rec or {}).get("at")
+    now = time.time() if now is None else now
+    pid = os.getpid() if pid is None else pid
+    fresh = isinstance(at, (int, float)) and not isinstance(at, bool) and 0 <= now - at <= RESTART_MARK_SECONDS
+    return fresh and (rec or {}).get("pid") == pid  # a mark for another server is not this one's restart
+
+
+def stop(root: Path, restart: bool | None = None) -> str:
+    """ "stopped", "not running", or "not verified" (a pid file that is not our Focus: nothing is signalled).
+    restart (default: core's RESTART_ENV): the server is started again right after; it keeps the runs it
+    started instead of ending them."""
     from orch.procs import stop_tree
 
+    if restart is None:
+        restart = os.environ.get(RESTART_ENV) == "1"
     rec = _record(root)
     if not rec:
         return "not running"
+    if restart:
+        runfiles.write_json(_restart_mark(root), {"at": time.time(), "pid": rec["pid"]})
+    else:
+        runfiles.remove(_restart_mark(root))
     if not stop_tree(
         rec["pid"],
         verified=lambda: _is_ours(root, rec["pid"], rec["port"], rec["nonce"], rec["started"]),
     ):
         runfiles.remove(_dir(root) / "server.json")
+        runfiles.remove(_restart_mark(root))
         return "not verified"
     runfiles.remove(_dir(root) / "server.json")
     return "stopped"
