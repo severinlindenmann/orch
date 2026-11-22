@@ -98,7 +98,7 @@ test('ORCH-14/576: an epic tile has the Epic tag and "1/2 done"; a ticket inside
   const c = context(items);
   const epic = c.boardCard(items[0], 'open');
   assert.equal(nodes(epic, n => n.attrs?.className === 'kind-tag')[0].children[0], 'Epic');
-  assert.match(JSON.stringify(epic), /1\/2 done/);
+  assert.match(JSON.stringify(epic), /1\/2 parts done/);
   assert.match(JSON.stringify(c.boardCard(items[2], 'open')), /Part of: Dashboard fixes/);
   assert.doesNotMatch(JSON.stringify(c.boardCard(items[2], 'open')), /Sub-ticket of/);
 });
@@ -176,7 +176,7 @@ test('Helpers at once (Settings > Helper): No limit by default, then 2 to 10, a 
   assert.equal(all(four, n => n.attrs?.['data-key'] === 'settings-live-max')[0].value, '4');
   assert.match(text(four), /When 4 helpers are working, the next one waits in line/);
   assert.equal(all(vm.runInContext('helpersAtOnceCard', c)({live_max:99}), n => n.tag === 'select')[0].value, 'none');
-  assert.ok(src.includes("permissionsCard(settings), helpersAtOnceCard(settings)]"), 'sits on the Helper tab');
+  assert.ok(src.includes("permissionsCard(settings), moreSettings('agent', helpersAtOnceCard(settings))]"), 'sits on the Helper tab');
 });
 
 test('ORCH-227: a Settings choice shows at once with Saving…, a second click while it saves is sent after it', async () => {
@@ -243,8 +243,8 @@ test('Separate copies card: one plain row with a switch; when, cap, setup and th
   assert.deepEqual(choices.map(n => n.attrs['data-mode']), ['together', 'always']);
   assert.deepEqual(choices.map(n => n.attrs['aria-checked']), [false, true]);
   assert.equal(all(details, n => n.tag === 'select')[0].value, '5');
-  assert.match(text(details), /Needs version history in this folder\./);
-  assert.match(text(details), /Prepare a copy with/);
+  assert.match(text(details), /Needs saved earlier versions in this folder\./);
+  assert.match(text(details), /Get each working copy ready with/);
   // the setup field follows the page's one editing pattern: the value and Edit, then the field with Save / Cancel
   assert.match(text(details), /npm ci/);
   assert.equal(all(card, n => n.attrs?.['data-key'] === 'settings-copy-setup').length, 0);
@@ -417,7 +417,8 @@ test('settings: the folder is shown plainly with Copy path and the quiet full pa
       assert.ok(row.textContent.length <= 48 && row.textContent.includes('…'));
       assert.ok(row.textContent.startsWith('/Users/someone') && row.textContent.endsWith('pilatus-workspace'));
     } else assert.equal(row.textContent, folder);
-    assert.equal(nodes(page, n => n.tag === 'details').length, 0, 'Settings has no Details toggles');
+    // The only fold is "More" (owner's word list, ORCH-300 item 14); no Details toggles.
+    assert.equal(nodes(page, n => n.tag === 'details' && !String(n.attrs?.['data-key'] || '').startsWith('settings-more-')).length, 0, 'Settings has no Details toggles');
   }
 });
 
@@ -625,7 +626,7 @@ test('ticket saved views filter by status and the board shows Changes to add', (
   const c = context(items);
   const ids = (view, person = '') => c.filterTickets(items, '', false, '', person, view).map(t => t.id).join();
   assert.equal(ids('working'), 'w');
-  assert.equal(ids('needs-you'), 'r', 'ORCH-236: a Done ticket with changes to add is not counted in Needs you, so it is not in the view either');
+  assert.equal(ids('needs-you'), 'r', 'ORCH-236: a Done ticket with changes to put live is not counted in Needs you, so it is not in the view either');
   assert.equal(ids('done-week'), 'd');
   assert.equal(ids('done-today'), 'd');
   assert.equal(ids('waiting'), 'k', 'the Waiting chip shows what waits for a time, a ticket or the outside (ORCH-248)');
@@ -633,7 +634,7 @@ test('ticket saved views filter by status and the board shows Changes to add', (
   assert.match(JSON.stringify(c.boardCard(items[2])), /Changes to add/);
   assert.doesNotMatch(JSON.stringify(c.boardCard(items[3])), /Changes to add/);
 });
-test('home: headline and badge are one number (questions + results); changes to add are listed, not counted', () => {
+test('home: headline and badge are one number (questions + results); changes to put live are listed, not counted', () => {
   const items = [{id:'a', title:'T a', status:'active'}, {id:'r1', title:'R one', status:'review'}, {id:'r2', title:'R two', status:'review'},
     {id:'c1', title:'C one', status:'done', bring_back:{state:'waiting'}}];
   const needs = [{id:'a1', ticket:'a', title:'Q?', answer:{question:'a1'}}];
@@ -641,7 +642,7 @@ test('home: headline and badge are one number (questions + results); changes to 
   const text = JSON.stringify(c.home());
   assert.equal(c.needsToday().count, 3);
   assert.match(text, /3 things need you/);
-  assert.match(text, /1 question · 2 results to check · also 1 change to add/);
+  assert.match(text, /1 question · 2 results to check · also 1 change to put live/);
 });
 test('toasts: successes leave after 5 s even under the pointer, sit bottom-right and do not centre over the page', () => {
   for (const dir of ['../../../workspace/src/orch_ui/static']) {
@@ -714,7 +715,7 @@ test('Settings: "Accept small finished work for me" is one switch that saves at 
   const card = c.reviewerCard(c.state.settings), sw = nodes(card, n => n.attrs?.role === 'switch')[0];
   assert.equal(sw.attrs['aria-label'], 'Accept small finished work for me'); assert.equal(sw.attrs['aria-checked'], false);
   assert.equal(sw.attrs['data-action'], 'reviewer-set');
-  assert.match(text(card), /Merged bug fixes with green checks and no change to looks, words or rules are marked Done for you\. You see them on Review and can send any back\./);
+  assert.match(text(card), /Merged bug fixes where all tests passed and no change to looks, words or rules are marked Done for you\. You see them on Review and can send any back\./);
   await c.reviewerSwitch();
   assert.deepEqual(calls, [JSON.stringify(['reviewer.set', {on:true}])]);
   c.state.settings.reviewer_on = true;
@@ -724,7 +725,7 @@ test('Settings: "Accept small finished work for me" is one switch that saves at 
 });
 
 // ORCH-58: the number goes before every title in the list and on the board; a search opens a folded group that holds a hit.
-test('Settings: "Merge releases without my click" is one switch that saves at once through release_merge.set (ORCH-79)', async () => {
+test('Settings: "Put new versions live without my click" is one switch that saves at once through release_merge.set (ORCH-79)', async () => {
   const calls = [];
   const c = context([], {snapshot:false, addons:() => [], render:() => {}, document:{querySelector:() => null},
     act:async (op, args) => { calls.push(JSON.stringify([op, args])); return {ok:true}; }});
@@ -733,9 +734,10 @@ test('Settings: "Merge releases without my click" is one switch that saves at on
   c.state.settings = {release_merge_on:false};
   const text = n => typeof n === 'string' ? n : n.textContent != null ? String(n.textContent) : (n.children || []).map(text).join(' ');
   const card = c.releaseMergeCard(c.state.settings), sw = nodes(card, n => n.attrs?.role === 'switch')[0];
-  assert.equal(sw.attrs['aria-label'], 'Merge releases without my click'); assert.equal(sw.attrs['aria-checked'], false);
+  assert.equal(sw.attrs['aria-label'], 'Put new versions live without my click'); assert.equal(sw.attrs['aria-checked'], false);
   assert.equal(sw.attrs['data-action'], 'release-merge-set');
-  assert.match(text(card), /A release whose checks are all green goes in by itself with your GitHub login\. You get the short highlights afterwards\. Off: you click Merge on the card\./);
+  assert.match(text(card), /A release where all tests passed goes live by itself with your GitHub login\. You get the short highlights afterwards\. Off: you decide on the card\./);
+  assert.doesNotMatch(text(card), /green|Merge/);
   await c.releaseMergeSwitch();
   assert.deepEqual(calls, [JSON.stringify(['release_merge.set', {on:true}])]);
   c.state.settings.release_merge_on = true;

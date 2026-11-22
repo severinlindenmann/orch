@@ -57,7 +57,7 @@
         state: card.state, word: card.word, detail: text(card.detail), step: card.step, finished: card.finished,
         minutes: card.age_minutes, idle: card.idle_minutes, dataKey: 'helper-' + card.ticket,
         actions: !idle ? [] : card.finished ? [action(card, 'Stop', 'run.stop', {ticket: card.ticket}, 'Helper stopped')]
-          : [action(card, 'Nudge', 'run.send', {ticket: card.ticket, text: NUDGE}, 'Message sent')],
+          : [action(card, 'Remind', 'run.send', {ticket: card.ticket, text: NUDGE}, 'Message sent')],
       };
     }
 

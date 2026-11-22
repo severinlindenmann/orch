@@ -83,12 +83,12 @@
     const words = gap !== 0 && Math.abs(gap) < 7 ? DUE_DAYS[at.getDay()] + ' ' + at.getDate() + ' ' + DUE_MONTHS[at.getMonth()] + ', ' + dueClock(at) : whenWords(at, now);
     return (at < now && status !== 'done' && status !== 'dropped' ? 'Late since ' : 'Due ') + words;
   }
-  /* G2: "No news since 09:20" for a Working ticket quiet for 6 h. `since` is `quiet_since` (UTC ISO, computed once by
+  /* G2: "Quiet since 09:20" for a Working ticket quiet for 6 h. `since` is `quiet_since` (UTC ISO, computed once by
      orch.tickets.quiet_since); shown in local time. '' when the ticket is not quiet. The same words as
      orch.tickets.quiet_label (the CLI). */
   function quietWords(since, now) {
     const at = since ? new Date(since) : null;
-    return at && !isNaN(at) ? 'No news since ' + whenWords(at, now || new Date()) : '';
+    return at && !isNaN(at) ? 'Quiet since ' + whenWords(at, now || new Date()) : '';
   }
   /* Past its day (day-only) or its time (with a time), on a ticket that is not closed. */
   function dueLate(due, status, now) {
@@ -496,14 +496,14 @@
   }
 
   /* A Factory start question (kind factory:start) in a few lines for Home (ORCH-60). The question's text is the frozen
-     proposal Factory wrote ("Start '<title>'? ~10 h · target $5 · you're needed for ~15 min. Goal: … . Done means: …
+     proposal Factory wrote ("Start '<title>'? ~10 h · AI cost about $5 · you're needed for ~15 min. Goal: … . Done means: …
      Time limit: 13 h active. …"); Home shows its title, goal and time only and links to the whole proposal. Null when the
      text is not in that shape (the card then shows the question as it always did). */
   function factoryStart(text) {
     const m = /^Start '(.+?)'\? ~([^.]+?)\. Goal: (.+?)\. Done means: /s.exec(String(text || ''));
     if (!m) return null;
     const head = m[2].split(' · '), cap = /\. Time limit: (.+?) active\. /.exec(String(text))?.[1];
-    const usd = head.map(x => /^target \$([0-9.]+)$/.exec(x)?.[1]).find(Boolean);
+    const usd = head.map(x => /^(?:target|AI cost about) \$([0-9.]+)$/.exec(x)?.[1]).find(Boolean);
     const owner = head.map(x => /^you're needed for ~(.+)$/.exec(x)?.[1]).find(Boolean);
     const meta = ['Runs about ' + head[0], owner ? 'needs you for about ' + owner : '', usd ? 'about $' + usd : '', cap ? 'up to ' + cap + ' of helper time' : ''];
     return {title: m[1], goal: /[.!?…]$/.test(m[3]) ? m[3] : m[3] + '.', meta: meta.filter(Boolean).join(' · ')};
@@ -823,7 +823,7 @@
     }
     if (why === 'quiet') {
       const at = Date.parse(t.quiet_since || '');
-      return Number.isFinite(at) ? 'No news for ' + Math.floor((nowMs - at) / 3600000) + ' h' : 'No news for a day';
+      return Number.isFinite(at) ? 'Quiet for ' + Math.floor((nowMs - at) / 3600000) + ' h' : 'Quiet for a day';
     }
     if (why === 'overdue') return 'Past its due date';
     return '';

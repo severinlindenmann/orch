@@ -4,7 +4,7 @@ from .overview import ERROR
 
 LABELS = {"sonnet": "Sonnet", "opus": "Opus", "other": "Other"}
 ORDER = ("sonnet", "opus", "other")  # no new model names on the page (owner): any other model counts as Other
-EMPTY = "No model use in the last 30 days."
+EMPTY = "No helper work in the last 30 days."
 TOP = 5
 
 
@@ -176,7 +176,7 @@ def build_models(answer, me=None):
         "models": models,
         "moved_up": moved,
         "of": of,
-        "moved_text": f"{moved} of {of} tickets moved up to Opus",
+        "moved_text": f"{moved} of {of} tickets needed the stronger helper",
         "tickets": [
             {
                 "key": str(row.get("key") or ""),
