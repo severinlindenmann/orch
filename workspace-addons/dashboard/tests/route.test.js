@@ -27,6 +27,7 @@ const LIVE = {name:'focus', page:{path:'/', live_session:true}, dashboard:{label
 test('the live-session add-on\'s addresses are Focus; other pages stay as they are', () => {
   const ctxOf = on => ({liveFocusOn: () => on, livePageOf: id => [LIVE].find(a => a.name === id) || null});
   const on = ctxOf(true);
+  assert.equal(route('#addon/focus', [LIVE], {...ctxOf(false), snapshot:true}).kind, 'live', 'a shared copy too: there is no old page to embed');
   assert.deepEqual({...route('#addon/focus', [LIVE, OTHER], on)}, {kind:'live', id:'focus', path:'', hash:'#addon/focus'});
   assert.deepEqual({...route('#open/focus/t/t_abc12345', [LIVE], on)}, {kind:'live', id:'focus', path:'t/t_abc12345', hash:'#addon/focus/t/t_abc12345'});
   const PAGE = {name:'factory', page:{path:'/'}, dashboard:{label:'Factory'}};
@@ -43,7 +44,7 @@ test('liveFocusOn: always, with no setting, never in a shared copy', () => {
 });
 test('the live page is the wall under the add-on\'s own name, with no Preview tag and no way back', () => {
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, kids:kids.flat(Infinity).filter(Boolean)});
-  const ctx = {h, fragment:(...k) => h('frag', {}, ...k), heading:(t, sub, o) => h('header', {}, h('h1', {}, t), o?.actions), addonLabel:a => a?.dashboard?.label, addons:() => [LIVE], encodeURIComponent,
+  const ctx = {snapshot:false, h, fragment:(...k) => h('frag', {}, ...k), heading:(t, sub, o) => h('header', {}, h('h1', {}, t), o?.actions), addonLabel:a => a?.dashboard?.label, addons:() => [LIVE], encodeURIComponent,
     window:{}, liveWall:() => h('div', {'data-key':'live-wall'})};
   vm.createContext(ctx); vm.runInContext(liveSource, ctx);
   const all = n => [n, ...(n.kids || []).flatMap(k => typeof k === 'object' ? all(k) : [])];
@@ -57,6 +58,10 @@ test('the live page is the wall under the add-on\'s own name, with no Preview ta
   assert.equal(key('live-next-off'), undefined);
   assert.ok(all(key('live-next')).some(x => x.attrs?.['data-key'] === 'live-wall'), 'the wall fills the page (pages/livewall.js)');
   assert.equal(all(page).filter(x => x.tag === 'iframe').length, 0);
+  ctx.snapshot = true;  // a shared copy: the name and one plain line, no wall
+  const copy = ctx.liveNextPage({kind:'live', id:'focus', path:''});
+  assert.match(text(copy), /^Focus Live sessions show only on the computer the helpers work on\.$/);
+  assert.equal(all(copy).some(x => x.attrs?.['data-key'] === 'live-wall'), false);
 });
 test('an add-on without a page keeps its own tab; path tricks fall back', () => {
   assert.equal(route('#addon/automation', [FOCUS, OTHER]).kind, 'addon');

@@ -4,7 +4,7 @@ The core knows no add-on by name. An add-on is a Python package with an `orch-ad
 workspace it looks and works like part of orch: same commands style, same `--json` and errors, same config file,
 same skill tone, a dashboard tab that cannot be told apart from a built-in one.
 Schemas: `addon-manifest.schema.json`, `addon-view.schema.json`, add-on schemas in `addons/` (`addons/scheduler.ext.schema.json`,
-`addons/automation/ext.schema.json`, `addons/focus/run-event.schema.json`); add-on question kinds: `addons/question-kinds.md`.
+`addons/automation/ext.schema.json`, `addons/focus/ext.schema.json`); add-on question kinds: `addons/question-kinds.md`.
 Examples: `review/scheduler.orch-addon.toml`, `review/scheduler.view.example.json`, `examples/addon-*/`.
 
 ## Manifest `orch-addon.toml`
@@ -33,7 +33,7 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | `checks_own_stop` | `true` = `orch <name> stop` is not always a service stop (Factory: `stop <order> --file` is a stop review); core then skips its helper-shell guard for that stop and the add-on calls `service_guard.require_change` itself before it stops a service |
 | `requires` | Add-on names that must be active first; `orch addon add` refuses and names the missing ones (nothing is turned on by itself) |
 | `needs` | `true` = implements `orch <name> needs --json` → rows of `needs.schema.json` for `orch needs` (only rows that are not ticket questions: those come from the tickets) |
-| `[page]` | `path` (starts with `/`), optional `label`, optional `live_session = true` (its page shows one ticket's live session: the dashboard's Watch live opens it): the add-on serves its own local page; needs `background = true`. Its base url is the checked `url` from `orch <name> status --json` (`http://127.0.0.1:<port>`) |
+| `[page]` | `path` (starts with `/`), optional `label`, optional `live_session = true` (its page shows one ticket's live session: the dashboard's Watch live opens it): the add-on serves its own local page; needs `background = true`, unless `live_session = true` (then the dashboard draws the page and there is no server). Its base url is the checked `url` from `orch <name> status --json` (`http://127.0.0.1:<port>`) |
 | `[[ticket_links]]` | Link types the add-on knows: `kind` (letters, digits, dashes and an optional add-on prefix, e.g. `github:pr`; not `url`, `ticket`, `artifact` or `file`), `label` (≤ 24), `icon` (a key), `match` (one or a list of `https://` patterns; `*` = one part of the address, a `*` at the end takes the rest), optional `statuses`, `preview = "thumb"`. Ticket references, below |
 | `[ticket_fields]` | `section` (heading under the ticket's Details), `schema` (JSON Schema of `ext.<name>`; the same file as `ticket_ext` when both are set), `show_on_card` (≤ 3 field keys shown as a chip on board cards). Ticket references, below |
 | `[acts.<verb>]` | What `orch <name> act <verb> [--by X] --json -- <ticket>` offers: `summary`, `who` (`anyone` · `people`), `writes` (`refs`, `ext.<name>`). Core knows `refresh` (Act: refresh, below) |

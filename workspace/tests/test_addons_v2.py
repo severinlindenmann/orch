@@ -27,6 +27,7 @@ def _gi(proj):
         'requires = ["Bad Name"]',
         'requires = ["a", "a"]',
         "[page]\npath = '/x'",  # page without background
+        "[page]\npath = '/x'\nlive_session = false",  # only a page the dashboard draws needs no background
     ],
 )
 def test_bad_values_refused(tmp_path, extra):
@@ -43,6 +44,12 @@ def test_page_needs_background_and_valid_path(tmp_path):
         f = make_addon(tmp_path / bad.replace('"', "").replace("/", "_"), bg=True, extra=f"[page]\n{bad}\n")
         with pytest.raises(Refused):
             addons.folder_manifest(f)
+
+
+def test_a_live_session_page_is_drawn_by_the_dashboard_and_needs_no_background(tmp_path):
+    """ORCH-816: Focus has no server of its own; the dashboard draws the page of the live_session add-on."""
+    m = addons.folder_manifest(make_addon(tmp_path, extra='[page]\npath = "/"\nlive_session = true\n'))
+    assert m["background"] is False and m["page"]["live_session"] is True
 
 
 def test_open_page_row_needs_page(tmp_path):

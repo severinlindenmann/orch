@@ -23,12 +23,12 @@ test('every draft D feature (1 to 13) is in a step, and all 16 widget kinds are 
   for (const w of WIDGETS) assert.ok(widgetStep.includes(w), `widget ${w} is not in the widget step`);
 });
 
-test('steps are numbered 1..n with unique picture names and three widths', () => {
+test('steps are numbered 1..n with unique picture names and four widths (1440 and 390 for the owner)', () => {
   STEPS.forEach((s, i) => assert.equal(s.n, i + 1, `step ${s.pic} is numbered ${s.n}`));
   const pics = STEPS.map(s => s.pic);
   assert.equal(new Set(pics).size, pics.length, 'picture names repeat');
   for (const k of pics) assert.match(k, /^fd-\d\d-[a-z0-9-]+$/);
-  assert.deepEqual(SIZES.map(([w]) => w), [1280, 1920, 390]);
+  assert.deepEqual(SIZES.map(([w]) => w), [1280, 1440, 1920, 390]);
 });
 
 test('every step says what to do and what must be seen; a step is either clickable or waits for a named task', () => {
