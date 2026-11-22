@@ -1517,7 +1517,7 @@
   "background": true,
   "dashboard": {
    "icon": "cloud",
-   "label": "Sync",
+   "label": "Backup",
    "order": 50,
    "subtitle": "Keep another copy of tickets and their files."
   },
