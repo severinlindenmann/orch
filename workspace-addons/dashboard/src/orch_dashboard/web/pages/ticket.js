@@ -824,7 +824,10 @@ function artifactsPanel(t) {
   const who = filesWhoFilter(all);
   return [who ? h('div', {className:'tab-head', 'data-key':'files-head'}, who) : null, all.length >= FILES_TOOLBAR_FROM ? filesToolbar(all.length) : null, filesPanelBody(t, all)];
 }
-function ticketActor(by) {
+function ticketActor(by, person) {
+  // a line stamped with a person of the list (a phone's line, ORCH-1164) reads as that person, as on the Activity tab
+  const listed = window.DashHelpers.listedName && window.DashHelpers.listedName(person || by);
+  if (listed) return listed;
   if (typeof chatDmName === 'function' && chatDmName(by)) return chatDmName(by);  // another workspace answered: its contact name
   return /^agent:/.test(by || '') || array(state.settings?.agents).some(a => a.name === by) ? window.DashHelpers.agentLabel(state.settings, {agent:String(by).replace(/^agent:/, '')}) : name(window.DashHelpers.personName(by, state));
 }
@@ -1288,8 +1291,8 @@ const overviewTime = entry => entry.at == null ? null : h('time', {className:'me
   (iso => entry.at > Date.now() + 86400000 || !window.UI?.clock ? time(iso) : window.UI.clock(iso))(new Date(entry.at).toISOString()));
 // "lume · <tool> started" reads as a sentence: "lume started the helper (<tool>)"
 const overviewSentence = (e, view) => view.sentence ? clean(view.sentence)
-  : (m => m && isPerson(e) ? (ticketActor(e.by) || 'Someone') + ' started the helper (' + clean(m[1]) + ')' : null)(/^(\S+) started$/.exec(String(e.text || '').trim()))
-  || [ticketActor(e.by), clean(view.line)].filter(Boolean).join(' · ');
+  : (m => m && isPerson(e) ? (ticketActor(e.by, e.person) || 'Someone') + ' started the helper (' + clean(m[1]) + ')' : null)(/^(\S+) started$/.exec(String(e.text || '').trim()))
+  || [ticketActor(e.by, e.person), clean(view.line)].filter(Boolean).join(' · ');
 const overviewPhone = via => via === 'phone' ? h('span', {className:'tag'}, 'Phone') : null;
 function overviewFiles(t, files, max = 3) {
   return [files.slice(0, max).map(f => ticketFileRow(t, f.kind, f.file)),
@@ -1302,7 +1305,8 @@ function overviewEntry(t, x) {
       const record = ticketReviewAnswers(t).find(r => r.key === q.id);
       if (record) return h('div', {className:'history-msg', 'data-key':'history-answer-' + q.id}, window.UI.answerRecord(record, {fileUrl:api ? api.fileUrl : () => '', now:new Date(), showTicket:false}));
     }
-    const who = (typeof chatDmName === 'function' && chatDmName(q.answered_by)) || name(q.answered_by);
+    const who = (window.DashHelpers.listedName && window.DashHelpers.listedName(q.answered_by))  // a person of the list (ORCH-1164)
+      || (typeof chatDmName === 'function' && chatDmName(q.answered_by)) || name(q.answered_by);
     return h('article', {className:'history-msg history-answer', 'data-key':'history-answer-' + q.id},
       h('div', {className:'history-msg-h'}, h('b', {}, 'Helper asked'), overviewPhone(q.via), h('span', {className:'grow'}), overviewTime(x)),
       h('p', {}, clean(q.text)),
@@ -1958,7 +1962,7 @@ function ticketSelectedTab(t) {
 // shape of the kit's answer record. They show under the ticket's questions, not on a tab of their own.
 function ticketReviewAnswers(t) {
   return array(t.questions).filter(q => q.answer != null && q.decision && typeof q.decision === 'object')
-    .map(q => ({id:'core:q:' + t.id + ':' + q.id, ticket:t.id, key:q.id, text:q.text, by:q.answered_by, via:q.via, at:q.at, card:q.card || {}, shown:q.shown, decision:q.decision}))
+    .map(q => ({id:'core:q:' + t.id + ':' + q.id, ticket:t.id, key:q.id, text:q.text, by:(window.DashHelpers.listedName && window.DashHelpers.listedName(q.answered_by)) || q.answered_by, via:q.via, at:q.at, card:q.card || {}, shown:q.shown, decision:q.decision}))
     .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
 }
 const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Tasks', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t, 'All').length]];

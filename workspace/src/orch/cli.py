@@ -47,6 +47,7 @@ from orch import (
     net,
     nextstep,
     ownerpick,
+    people,
     refs,
     relay,
     review,
@@ -338,11 +339,13 @@ def _show(t: dict, root: Path) -> str:
             out += _check_lines(root, t, c, open_q)
     if block := review.applies_now_block(t, root):
         out.append("\n" + block.rstrip("\n"))
+    names_ = people.names(root)  # person ids -> names (people list on); empty otherwise
     for q in (x for x in t["questions"] if x["answer"] is not None):
         if (gone := tickets.taken_back_text(q)) is not None:
             out.append(f"  Taken back {q['id']}: {q['text']} - {gone[len(tickets.TAKEN_BACK) :]}")
         else:
-            out.append(f"  Answered {q['id']}: {q['text']} - {q['answer']} ({q['answered_by']})")
+            who = people.line_who(names_, q["answered_by"])
+            out.append(f"  Answered {q['id']}: {q['text']} - {q['answer']} ({who})")
     rows = refs.all_refs(root, t)
     if rows:
         kinds = refs.active_kinds(root)
@@ -354,7 +357,8 @@ def _show(t: dict, root: Path) -> str:
     if shown_lines := history.lines(root, t):
         out.append("\nRecent:")
         out += [
-            f"  {net.when(h['at'])}  {h['by']}: {tickets.history_line(h['text'], t['checklist'])}"
+            f"  {net.when(h['at'])}  {people.line_who(names_, h['by'], h.get('person'))}: "
+            f"{tickets.history_line(h['text'], t['checklist'])}"
             for h in shown_lines[-3:]
         ]
     return "\n".join(out)
