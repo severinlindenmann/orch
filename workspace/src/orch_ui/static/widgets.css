@@ -1081,7 +1081,7 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
    Panes (1 to 3, ORCH-339) sit side by side in .live-panel, stacked in the right panel; with more than one, the selected
    pane ([data-on]) has a brand line on top and the others a quiet header whose title selects them. Opening, moving and
    a new pane ([data-new]) animate; reduced motion is still through the global rule in motion.css. */
-.live-dock{position:fixed;left:var(--sidebar-width);right:0;bottom:0;z-index:40;display:flex;flex-direction:column;min-width:0;--live-h:45vh;--live-w:min(42vw,760px)}
+.live-dock{position:fixed;left:var(--sidebar-width);right:0;bottom:0;z-index:40;display:flex;flex-direction:column;min-width:0;--live-h:45vh;--live-w:clamp(320px,min(42vw,760px),calc(100vw - var(--sidebar-width) - 600px))}  /* the page beside keeps 600 px (ORCH-1616) */
 .live-dock[data-mode=side]{left:auto;right:0;top:50%;bottom:auto;transform:translateY(-50%)}
 .live-dock[data-mode=right]{right:var(--live-w)}
 .live-dock[data-mode=full]{inset:0;z-index:70;flex-direction:column-reverse;background:var(--bg)}

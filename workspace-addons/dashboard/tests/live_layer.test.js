@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerCrowded, liveLayerSort, liveAskModel, liveLayerHelper, liveFoldRead, LIVE_FOLD_KEY, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerCrowded, liveLayerSort, liveAskModel, liveLayerHelper, liveFoldRead, LIVE_FOLD_KEY, LIVE_LAYER_KEY, LIVE_MAX, liveLayerFit, liveLayerRightMax};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -475,4 +475,20 @@ test('ORCH-1600: one wide pane under 1500 px is crowded (Pin, Add beside, Minimi
   assert.equal(L.liveLayerCrowded('bottom', 1, 1040, false), false, 'compact already');
   assert.equal(L.liveLayerCrowded('full', 2, 1280, false), false, 'a split is compact');
   assert.equal(L.liveLayerCrowded('full', 1, 390, true), false, 'a phone');
+});
+
+test('ORCH-1616: a split shows as many panes as fit (2 at 1280, 3 at 1920), the selected one always; the page beside keeps 600 px', () => {
+  const fit = (...a) => [...L.liveLayerFit(...a)];
+  const three = ['a', 'b', 'c'];
+  assert.deepEqual(fit(three, 'a', 'bottom', 1060, false), ['a', 'b']);   // 1280 wide minus the side menu
+  assert.deepEqual(fit(three, 'c', 'bottom', 1060, false), ['a', 'c']);   // the selected one is never left out
+  assert.deepEqual(fit(three, 'b', 'bottom', 1700, false), three);        // 1920 wide
+  assert.deepEqual(fit(three, 'c', 'full', 1280, false), ['a', 'c']);
+  assert.deepEqual(fit(three, 'c', 'right', 460, false), ['a', 'c']);     // stacked on the right: two at most
+  assert.deepEqual(fit(three, 'b', 'bottom', 1700, true), ['b']);         // a phone: only the selected one
+  assert.deepEqual(fit(['a'], 'a', 'bottom', 300, false), ['a']);
+  assert.equal(L.liveLayerRightMax(1280, 220), 460);
+  assert.equal(L.liveLayerRightMax(900, 220), 320, 'never under the smallest panel');
+  const css = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8');
+  assert.match(css, /--live-w:clamp\(320px,min\(42vw,760px\),calc\(100vw - var\(--sidebar-width\) - 600px\)\)/);
 });

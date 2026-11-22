@@ -88,9 +88,11 @@ function resultsLinkItem(url, ref = {}, ev = {}) {
 }
 // Every result of one ticket as widget items, oldest first (the order they were made); files is the answer of
 // /api/artifacts/<id> ({files: [{name, size, mtime}]}) or null while it is not read yet.
-function resultsItems(t, files) {
+// withOwn: the files the person sent are results too (a Focus pane's Results show what was sent from its message box,
+// ORCH-1616); elsewhere they stay out.
+function resultsItems(t, files, withOwn = false) {
   if (!t || typeof t !== 'object' || !t.id) return [];
-  const tid = t.id, out = [], seen = new Set(), own = resultsOwnFiles(t);
+  const tid = t.id, out = [], seen = new Set(), own = withOwn ? new Set() : resultsOwnFiles(t);
   const add = (it, step) => {
     if (!it) return;
     if (seen.has(it.key)) {  // a result file a step also proved: the step and its words join the one widget
@@ -232,6 +234,8 @@ function resultsFiles(tid) {
   if (!/^t_[a-z0-9]{6,16}$/.test(String(tid))) return Promise.resolve({files:[]});  // only an id the server lists files for
   return resultsGet('/api/artifacts/' + encodeURIComponent(tid), 'json').then(d => (d && !d.error ? d : {files:[]}));
 }
+// Files were just added to a ticket (sent from a Focus pane): its file list is read again at the next fill.
+function resultsForgetFiles(tid) { resultsCache.delete('/api/artifacts/' + encodeURIComponent(tid)); }
 function resultsFill(item) {
   if (item.state !== 'loading' || !item.src0) return Promise.resolve(item);
   const {tid, kind, name} = item.src0, v = typeof item.size === 'number' && item.at ? item.size + '|' + item.at : '';
@@ -243,10 +247,10 @@ function resultsFill(item) {
   return resultsGet(resultsUrl(tid, kind, name), 'text', v).then(d => resultsWith(item, d));
 }
 // All results of a ticket, read: the list draws at once (text kinds loading) and again when each one is read
-function resultsLoad(t, onItems) {
+function resultsLoad(t, onItems, withOwn = false) {
   if (!t?.id) { onItems([]); return; }
   resultsFiles(t.id).then(files => {
-    const list = resultsItems(t, files);
+    const list = resultsItems(t, files, withOwn);
     onItems(list);
     const pending = list.filter(it => it.state === 'loading');
     if (!pending.length) return;
@@ -326,7 +330,7 @@ function resultsForget(item) {
 function resultsHost(tid, o = {}) {
   return h('div', {className:'results-host' + (o.cls ? ' ' + o.cls : ''), 'data-results-host':tid, 'data-key':o.key || 'results-' + tid,
     'data-results-size':o.size || 'sm', 'data-results-max':o.max ? String(o.max) : null, 'data-results-step':o.step || null,
-'data-results-empty':o.empty || null, 'aria-label':o.label || null, role:o.label ? 'group' : null});
+'data-results-empty':o.empty || null, 'data-results-own':o.own ? '1' : null, 'aria-label':o.label || null, role:o.label ? 'group' : null});
 }
 function resultsRefill(host) {
   const tid = host.dataset.resultsHost, t = typeof ticketOf === 'function' ? ticketOf(tid) : null;
@@ -339,7 +343,7 @@ function resultsRefill(host) {
     if (!host.isConnected || host.resultsGen !== gen) return;
     const wide = list.filter(it => !it.stepOnly);
     resultsDraw(host, step ? list.filter(it => it.step === step) : wide, step ? {...o, all:wide} : o);
-  });
+  }, host.dataset.resultsOwn === '1');
 }
 // Fills every host under root; called after each redraw. A host fills again only when its ticket changed.
 function resultsFillAll(root) {

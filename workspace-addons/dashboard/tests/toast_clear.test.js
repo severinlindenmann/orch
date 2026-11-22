@@ -31,8 +31,9 @@ test('the toast moves up above the Focus bar at the bottom', () => {
   assert.equal(place([rect(VH - 44, 44)]), 44 + 8 + 'px');
 });
 
-test('with the bottom panel open it moves above the whole panel', () => {
-  assert.equal(place([rect(VH - 44, 44), rect(VH - 44 - 360, 360), rect(VH - 44 - 90, 80)]), 44 + 360 + 8 + 'px');
+test('with the bottom panel open it sits just above the message box, over the panel, never over the page (ORCH-1616)', () => {
+  assert.equal(place([rect(VH - 44, 44), rect(VH - 44 - 360, 360), rect(VH - 44 - 90, 80)]), 44 + 90 + 8 + 'px');
+  assert.equal(place([rect(VH - 44, 44), rect(VH - 44 - 150, 150)]), 44 + 150 + 8 + 'px', 'a small panel is still cleared');
 });
 
 test('a full-height panel is left out: the toast goes just above the message box', () => {

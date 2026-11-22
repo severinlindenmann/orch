@@ -185,6 +185,7 @@ function liveMsgComposer(sess) {
       if (sess.kind && (message.files || []).length) return {ok:false, text:'Files go only to a ticket\'s helper. Remove them and send the words.'};
       const r = sess.kind ? await act('run.send', {ticket:sess.id, text:String(message.text || '').trim()}) : await ticketTalkSend(sess.id, message);
       if (!r.ok) return r;
+      if ((message.files || []).length && typeof resultsForgetFiles === 'function') resultsForgetFiles(sess.id);  // the sent files show in Results (ORCH-1616)
       if (typeof liveChatNote === 'function') { liveChatNote(sess.id, r.said || message.text); if (typeof liveLayerFill === 'function') liveLayerFill(); }  // shows in the chat at once
       window.orch?.toast?.('Sent to ' + who() + '.', 'ok');
       return {ok:true, text:''};
