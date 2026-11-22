@@ -164,7 +164,7 @@
     const to = t ? 'your helper' : w.name;
     return `<form class="x-composer" data-composer><div class="x-staged" data-staged>${V.staged ? fileChip(V.staged) : ''}</div><div class="x-composer-line">
       <label class="btn icon ghost" aria-label="Add a file">${ic('clip', 18)}<input type="file" class="sr-only" data-attach></label>
-      <input class="input" name="text" autocomplete="off" maxlength="20000" aria-label="Message ${esc(to)}" placeholder="Message ${esc(to)}…">
+      <input class="input" name="text" autocomplete="off" maxlength="20000" aria-label="Message ${esc(to)}" placeholder="Message ${esc(to)}…"${V.sending ? ' readonly' : ''}>
       <button class="btn primary" type="submit"${V.sending ? ' disabled aria-busy="true"' : ''}>${ic('send', 16)}<span class="x-send-word">Send</span></button></div><p class="meta" data-note>${esc(note)}</p></form>`;
   }
 
@@ -255,17 +255,20 @@
   const useCode = () => { CODE = null; keepCode(null); };
 
   // Already signed in and a new invitation link was opened: its workspaces are added to this browser.
+  // The code sent is the one cleared afterwards: a newer link opened meanwhile stays and is shown next.
+  const useSent = (c) => { if (CODE === c) { useCode(); return false; } return true; };
   async function redeem() {
     setState('signing');
+    const sent = CODE;
     try {
-      const r = await api('POST', '/v1/phone/invitations/redeem', { code: CODE });
-      useCode();
+      const r = await api('POST', '/v1/phone/invitations/redeem', { code: sent });
+      if (useSent(sent)) return setState('invite');
       await startApp(false);
       const names = (r.workspaces || []).map((w) => w.name).join(', ');
       toast(names ? 'You can now reach ' + names + '.' : 'The invitation was added.');
     } catch (x) {
       if (x instanceof Cut) return cut();
-      if (x.status === 404 || x.status === 410) { useCode(); await startApp(false); return toast('This invitation no longer works. Ask for a new link.', true); }
+      if (x.status === 404 || x.status === 410) { if (useSent(sent)) return setState('invite'); await startApp(false); return toast('This invitation no longer works. Ask for a new link.', true); }
       setState('invite');
       const err = $('[data-signin-error]'); err.textContent = 'Signing in did not work. Check the connection and press Sign in again.'; err.hidden = false;
     }
@@ -275,14 +278,16 @@
     if (DEV) return redeem();
     setState('signing');
     const err = $('[data-signin-error]'); err.hidden = true;
+    const sent = CODE;
     try {
-      const r = await fetch('/v1/phone/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: CODE, name: 'Browser' }), credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' });
-      if (r.status === 401 || r.status === 404 || r.status === 410) { useCode(); return setState('used'); }
+      const r = await fetch('/v1/phone/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: sent, name: 'Browser' }), credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' });
+      if (r.status === 401 || r.status === 404 || r.status === 410) { return setState(useSent(sent) ? 'invite' : 'used'); }
       if (!r.ok) throw new Error('pair ' + r.status);
       const j = await r.json();
-      useCode();
+      const newer = useSent(sent);
       DEV = { id: j.phone_id, token: j.token, name: j.name || '' };
       saveDev(DEV);
+      if (newer) return setState('invite'); // signed in; the newer link adds its workspaces on Sign in
       startApp(true);
     } catch (_) {
       setState('invite');
@@ -346,6 +351,7 @@
     V.sendId = V.sendId || cid(); // kept for a retry of this same message, so a lost answer never makes a second one
     const sendId = V.sendId;
     V.sending = true; f.querySelector('[type=submit]').disabled = true;
+    f.elements.text.readOnly = true; // the text sent and a retry of it stay the same; nothing typed meanwhile is lost
     try {
       const body = { to, client_id: sendId };
       if (text) body.text = text;
@@ -358,14 +364,14 @@
       await api('POST', '/v1/phone/send', body);
       V.sendId = null;
       if (V.staged === staged) V.staged = null;
-      const box = V.id === convo ? $('[data-composer] [name=text]') : null; if (box) box.value = '';
+      const box = V.id === convo ? $('[data-composer] [name=text]') : null; if (box) { box.value = ''; box.readOnly = false; }
       V.sending = false;
       await refresh();
       const inp = $('[data-composer] [name=text]'); if (inp) inp.focus();
     } catch (x) {
       V.sending = false;
       if (x instanceof Cut) return cut();
-      f.querySelector('[type=submit]').disabled = false;
+      for (const form of new Set([f, $('[data-composer]')])) if (form) { form.querySelector('[type=submit]').disabled = false; form.elements.text.readOnly = false; }
       toast(x.message, true);
     }
   });
