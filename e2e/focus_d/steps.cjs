@@ -43,6 +43,56 @@ async function noSideways(page) {
   if (over > 1) throw new Error(`the page scrolls sideways by ${over} px`);
 }
 
+// ORCH-1328: every pane of a session that waits on a question shows the orange card with its answer buttons (a split
+// pane and the phone sheet showed only the bold words); nothing in a pane is cut by another part or runs out of it.
+async function askCardsInPanes(page) {
+  const waits = BAR_SESSIONS.filter(([s]) => s === 'wait').map(([, key]) => 't_bar' + key.slice(5));
+  await page.waitForFunction(ids => [...document.querySelectorAll('#live-dock .live-pane')].filter(p => ids.includes(p.dataset.session))
+    .every(p => p.querySelector('[data-live-ask]:not([hidden]) [data-key="live-ask-option-0"]')), waits, { timeout: 8000 })
+    .catch(() => { throw new Error('a pane that waits on a question has no question card with answer buttons'); });
+  const bad = await page.evaluate(ids => {
+    const out = [], t = document.createElement('span');
+    t.style.color = 'var(--needs-you)'; document.body.append(t);
+    const orange = getComputedStyle(t).color; t.remove();
+    const shown = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 ? r : null; };
+    for (const p of document.querySelectorAll('#live-dock .live-pane')) {
+      const name = p.dataset.session, card = p.querySelector('[data-live-ask]:not([hidden])');
+      if (ids.includes(name) && card && getComputedStyle(card).borderTopColor !== orange) out.push(name + ': the question card is not orange');
+      // the header is one row of icon buttons beside the title where it fits
+      const head = p.querySelector('.live-ph'), title = head && shown(head.querySelector('.live-pt'));
+      if (head?.dataset.compact !== undefined) for (const b of head.querySelectorAll('.live-ctl > .btn')) {
+        const r = shown(b);
+        if (r && b.querySelector('.live-word:not(.sr-only)')) out.push(name + ': a header button of a narrow pane shows its word');
+        if (r && !(b.getAttribute('aria-label') || b.textContent.trim())) out.push(name + ': a header button has no name');
+        if (r && !b.title) out.push(name + ': a header button has no tooltip');
+        if (r && window.innerWidth > 720 && title && r.top >= title.bottom - 1) out.push(name + ': the header buttons wrap under the title');
+      }
+      // the empty-chat line and the chat are not covered by the message box
+      const msg = p.querySelector('.live-msg'), chat = p.querySelector('[data-live-chat]:not([hidden])');
+      const m = msg && shown(msg), c = chat && shown(chat);
+      if (m && c && c.bottom > m.top + 1) out.push(name + `: the chat runs under the message box by ${Math.round(c.bottom - m.top)} px`);
+      const empty = chat?.querySelector('.live-chat-empty'), e = empty && shown(empty);
+      if (e && c && (e.bottom > c.bottom + 1 || e.top < c.top - 1)) out.push(name + ': the line "No messages yet" is cut');
+    }
+    return out;
+  }, waits);
+  if (bad.length) throw new Error(bad.join('; '));
+}
+
+// At phone width the layer is a sheet over most of the screen (ORCH-1328): to tap something of the page under it a
+// person minimises the sheet to the bar first, so the test does the same when the sheet covers the target.
+async function tapAbove(page, sel) {
+  await page.waitForSelector(sel, { timeout: 10000 });
+  await page.$eval(sel, el => el.scrollIntoView({ block: 'center' }));
+  const covered = await page.$eval(sel, el => { const r = el.getBoundingClientRect(), top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!top && !el.contains(top) && !!top.closest('#live-dock'); });
+  if (covered) {
+    await page.click('#live-dock [data-key="live-min"], #live-dock [data-key="live-pane-more"]');
+    if (await page.$('[data-key="live-more-menu"] [data-key="live-more-min"]')) await page.click('[data-key="live-more-menu"] [data-key="live-more-min"]');
+    await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
+  }
+  await page.click(sel);
+}
+
 async function mainHasText(page) {
   await page.waitForFunction(() => {
     const m = document.querySelector('main');
@@ -1199,6 +1249,7 @@ async function split(page, dash, width) {
   };
   const sideBySide = (list, stacked) => list.every((p, i) => !i || (stacked ? p.y > list[i - 1].y && p.x === list[0].x : p.x > list[i - 1].x && p.y === list[0].y));
   await liveBarState(page);
+  barAsk = true;  // the waiting tickets carry their open question, as orch's state does
   await page.goto(dash + '/#home');
   await page.evaluate(() => { try { Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
   await page.reload();
@@ -1231,6 +1282,7 @@ async function split(page, dash, width) {
     await page.keyboard.press('Escape');
     await page.waitForSelector('[data-key="live-beside-menu"]', { state: 'detached', timeout: 5000 });
     await controls();
+    await askCardsInPanes(page);
   }
   // the split stays while the page changes (the same element, never painted again)
   await page.$eval('[data-key="live-panel"]', el => { el.dataset.kept = '1'; });
@@ -1558,7 +1610,7 @@ async function focusButton(page, dash, width) {
   if (!await page.evaluate(() => !!document.activeElement?.closest('#live-dock'))) throw new Error('the keyboard did not move into the session');
   // ORCH-709: the waiting question answered with the keyboard in its pane; the keyboard stays in the pane (never by
   // hand here) and Esc steps the layer back to the bar
-  await page.click(`${rowSel('ORCH-190')} [data-key="live-session-btn"]`);
+  await tapAbove(page, `${rowSel('ORCH-190')} [data-key="live-session-btn"]`);
   const waitPane = `#live-dock .live-pane[data-session="${id('ORCH-190')}"]`;
   await page.waitForSelector(`${waitPane} [data-live-ask] [data-key="live-ask-option-0"]`, { timeout: 5000 });
   await page.focus(`${waitPane} [data-key="live-ask-option-0"]`);
@@ -1931,7 +1983,7 @@ async function groups(page, dash, width) {
   for (const w of ['Autumn newsletter', '3 helpers', '2 small helpers', '1 needs you', 'Build the mail page']) if (!t.includes(w)) throw new Error(`the group tile misses "${w}": ${t}`);
   if (await page.getAttribute(tile, 'data-s') !== 'needs-you') throw new Error('one helper needs you, but the group tile is not orange');
   for (const k of ['ORCH-301', 'ORCH-302', 'ORCH-304']) if (await page.$(`[data-key="live-wall"] [data-tile="${gid(k)}"]`)) throw new Error(`${k} has its own tile beside its group`);
-  await page.click(`${tile} [data-wall-open]`);
+  await tapAbove(page, `${tile} [data-wall-open]`);
   const pane = `#live-dock .live-pane[data-session="${gid('ORCH-302')}"]`;
   await page.waitForSelector(`${pane} [data-key="live-group"]`, { timeout: 10000 });
   const rows = await page.textContent(`${pane} [data-key="live-group"]`);
@@ -1970,7 +2022,7 @@ function watchTab(p) {
 
 // Step 25: at phone width one session shows at a time, right falls back to bottom, Add beside opens instead of splitting.
 async function phone(page, dash, width) {
-  await wallPage(page, dash, 'fd25');
+  await wallPage(page, dash, 'fd25', null, { ask: true });
   await page.click(`${tileOf('t_bar238')} [data-wall-open]`);
   await page.waitForSelector('[data-key="live-panel"]', { timeout: 5000 });
   if (width > 720) {
@@ -1987,6 +2039,15 @@ async function phone(page, dash, width) {
   if (st.n !== '1') throw new Error(`on a phone ${st.n} sessions show at once, not one`);
   if (st.shown.length !== 1 || st.shown[0] !== 't_bar201') throw new Error(`Add beside on a phone should show ORCH-201 instead, it shows ${st.shown.join(', ')}`);
   if (await page.$('#live-dock [data-key="live-pane-place"]')) throw new Error('on a phone a pane still offers Place');
+  // ORCH-1328: the layer is a sheet over most of the screen, the bar under it stays one row
+  const sheet = await page.evaluate(() => {
+    const p = document.querySelector('[data-key="live-panel"]').getBoundingClientRect(), bar = document.querySelector('#live-bar');
+    const rows = new Set([...bar.querySelectorAll('button, a')].filter(b => b.getBoundingClientRect().height > 0).map(b => Math.round(b.getBoundingClientRect().top / 8)));
+    return { share: p.height / window.innerHeight, rows: rows.size, barH: bar.getBoundingClientRect().height };
+  });
+  if (sheet.share < 0.55) throw new Error(`on a phone the layer covers only ${Math.round(sheet.share * 100)}% of the screen, not a sheet`);
+  if (sheet.rows > 1 || sheet.barH > 64) throw new Error(`on a phone the Focus bar takes ${sheet.rows} rows`);
+  await askCardsInPanes(page);
   await noSideways(page);
 }
 
@@ -2371,7 +2432,8 @@ const STEPS = [
     see: ['Two, then three panes sit next to each other; on the right they are stacked.', 'Every pane has pin, add beside, place, minimise and close.',
       'With three panes Add beside is not greyed: its menu says three is the most and to close one first.',
       'The split stays while the page changes.', 'Closing a pane gives its room to the others.',
-      'On a phone one session shows at a time and there is no add beside.'],
+      'On a phone one session shows at a time and there is no add beside.',
+      'A waiting question shows its orange card with answer buttons in every pane; the header is one row of icon buttons beside the title.'],
     async run({ page, dash, width }) {
       await split(page, dash, width);
     },
@@ -2517,7 +2579,8 @@ const STEPS = [
     n: 25, pic: 'fd-25-phone', area: 'phone width', title: 'Phone width: one session at a time', feature: [7],
     do: ['At 390 wide open Focus, open a session, then try to put the layer on the right.'],
     see: ['The wall is one column.', 'The layer opens at the bottom and shows one session; right falls back to bottom.',
-      'Nothing scrolls sideways; every button can be reached.'],
+      'Nothing scrolls sideways; every button can be reached.',
+      'The layer is a sheet over most of the screen with the question card and its buttons; the Focus bar under it stays one row.'],
     async run({ page, dash, width }) {
       await phone(page, dash, width);
     },
